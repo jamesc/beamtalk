@@ -508,8 +508,8 @@ Object subclass: Actor
   /// ```
   class secretState -> List(Symbol) => #()
 
-  /// Messages whose arguments and replies never appear in status, sys logs
-  /// or crash reports.
+  /// Messages whose arguments and replies are redacted in the formatted
+  /// status, sys log and crash report.
   ///
   /// Override with a literal list of selectors. The compiler reads the list
   /// at compile time. A send of a listed selector keeps its selector in

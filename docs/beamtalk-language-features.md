@@ -267,10 +267,10 @@ An actor holding secrets (tokens, PKCE verifiers, passwords) can keep them out o
 Actor subclass: SessionStore
   state: verifier :: String | Nil = nil
 
-  /// State slots whose values never appear in status or crash reports.
+  /// State slots redacted in the formatted state of status and crash reports.
   class secretState -> List(Symbol) => #(#verifier)
 
-  /// Messages whose arguments and replies never appear in status, sys logs or crash reports.
+  /// Messages whose arguments and replies are redacted in formatted status, sys logs and crash reports.
   class secretSelectors -> List(Symbol) => #(#create:boundTo:, #consume:boundTo:)
 ```
 
@@ -285,6 +285,7 @@ Every actor has a compiled `format_status/1` that applies the declarations:
 - Both methods default to `#()` on `Actor`, which leaves status output exactly as before. A subclass's lists **add to** its superclass's.
 - The body must be a **literal list of symbols**: the compiler reads it at compile time and bakes it into the actor module, so no user code runs while OTP formats a status or crash report. Anything else is a compile error. A `secretState` name that is not a state slot, or a `secretSelectors` name the class does not understand, is a compile warning. Calling `SessionStore secretState` still answers the class's own list.
 - The crash **reason** is not redacted. Don't raise an error whose message or value carries a secret.
+- Native actors (`native:`, ADR 0056) are not covered: their backing gen_server is hand-written, so declaring either method on one is a warning. Implement `format_status/1` in the backing module instead.
 - Declare both methods in the class's own file. A `SessionStore class >> secretState` extension in another file still answers at runtime, but the compiler cannot bake it in, so it is a warning and nothing is redacted.
 - Only output that OTP passes through `format_status/1` is redacted. A crashing actor writes two reports: the `gen_server` report is redacted, but the separate `proc_lib` crash report is not, and it lists the process's mailbox (`messages`) and process dictionary (`dictionary`). A secret send still queued when the actor crashes, or a pending `continueWith:` argument, appears there raw. `sys:get_state`, `sys:log(Pid, get)`, `sys:log(Pid, print)`, `sys:trace`, and the raw process dictionary and debug terms `sys:get_status` returns beside the formatted status also show raw values; they are debugging tools with full access to the process. Beamtalk's own `inspect` and `actor_stats` are not covered either.
 

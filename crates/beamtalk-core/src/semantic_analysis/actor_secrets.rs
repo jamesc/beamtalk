@@ -169,31 +169,7 @@ pub(crate) fn check_actor_secret_declarations(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    // A declaration outside its class's own file still answers at runtime,
-    // but codegen only bakes declarations it sees while compiling the class,
-    // so it would redact nothing. Say so rather than fail open silently.
-    for standalone in &module.method_definitions {
-        let selector = standalone.method.selector.name();
-        let target = standalone.class_name.name.as_str();
-        if standalone.is_class_method
-            && (selector == SECRET_STATE_SELECTOR || selector == SECRET_SELECTORS_SELECTOR)
-            && !module.classes.iter().any(|c| c.name.name == target)
-            && hierarchy.is_actor_subclass(target)
-        {
-            diagnostics.push(
-                Diagnostic::warning(
-                    format!(
-                        "`{target} class >> {selector}` is outside `{target}`'s own file, \
-                         so it is not applied: nothing is redacted"
-                    ),
-                    standalone.span,
-                )
-                .with_hint(format!(
-                    "Declare `class {selector}` in the file that defines `{target}`"
-                )),
-            );
-        }
-    }
+    check_out_of_file_declarations(module, hierarchy, diagnostics);
 
     for class in &module.classes {
         let class_name = class.name.name.as_str();
@@ -201,6 +177,31 @@ pub(crate) fn check_actor_secret_declarations(
             continue;
         }
         let secrets = declared_secrets(module, class);
+        // A native actor's process is its hand-written backing gen_server,
+        // which codegen does not touch, so the declarations would redact
+        // nothing.
+        if hierarchy.is_native(class_name) {
+            for (list, selector) in [
+                (&secrets.state, SECRET_STATE_SELECTOR),
+                (&secrets.selectors, SECRET_SELECTORS_SELECTOR),
+            ] {
+                if *list != SecretList::Undeclared {
+                    let span = find_class_method(module, class, selector)
+                        .map_or(class.name.span, |m| m.span);
+                    diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "`class {selector}` has no effect on native actor `{class_name}`: \
+                                 its backing gen_server is not generated, so nothing is redacted"
+                            ),
+                            span,
+                        )
+                        .with_hint("Implement `format_status/1` in the backing Erlang module"),
+                    );
+                }
+            }
+            continue;
+        }
         for (list, selector) in [
             (&secrets.state, SECRET_STATE_SELECTOR),
             (&secrets.selectors, SECRET_SELECTORS_SELECTOR),
@@ -254,6 +255,38 @@ pub(crate) fn check_actor_secret_declarations(
                     .with_hint("Name an instance-side method of this class or a superclass"),
                 );
             }
+        }
+    }
+}
+
+/// A declaration outside its class's own file still answers at runtime, but
+/// codegen only bakes declarations it sees while compiling the class, so it
+/// would redact nothing. Say so rather than fail open silently.
+fn check_out_of_file_declarations(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for standalone in &module.method_definitions {
+        let selector = standalone.method.selector.name();
+        let target = standalone.class_name.name.as_str();
+        if standalone.is_class_method
+            && (selector == SECRET_STATE_SELECTOR || selector == SECRET_SELECTORS_SELECTOR)
+            && !module.classes.iter().any(|c| c.name.name == target)
+            && hierarchy.is_actor_subclass(target)
+        {
+            diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "`{target} class >> {selector}` is outside `{target}`'s own file, \
+                         so it is not applied: nothing is redacted"
+                    ),
+                    standalone.span,
+                )
+                .with_hint(format!(
+                    "Declare `class {selector}` in the file that defines `{target}`"
+                )),
+            );
         }
     }
 }
@@ -363,6 +396,16 @@ mod tests {
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(diagnostics[0].severity, Severity::Warning);
         assert!(diagnostics[0].message.contains("nothing is redacted"));
+    }
+
+    #[test]
+    fn native_actor_declaration_warns() {
+        let src = "Actor subclass: Store native: store_mod\n  \
+                   class secretSelectors => #(#login:)\n  login: x => self delegate";
+        let (_, diagnostics) = check(src);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(diagnostics[0].message.contains("native actor"));
     }
 
     #[test]
