@@ -965,8 +965,11 @@ forget_class_pids(Pid, ClassName) ->
     end.
 
 -doc """
-Move every reverse-index row naming `OldName` to `NewName`, for a class
-renamed in place (`beamtalk_object_class` rename). The dead incarnations
+Move the dead local reverse-index rows naming `OldName` to `NewName`, for a
+class renamed in place (`beamtalk_object_class` rename; the renaming process
+records its own row under `NewName` first). A live pid is never relabelled, so
+a process restarted as `OldName` during the rename keeps its name. The dead
+incarnations
 `restart_class/1` kept for crash recovery (BT-4552) then recover to the
 renamed class, are pruned and reclaimed under its new name, and never name a
 later, unrelated class that reuses `OldName`.
@@ -976,7 +979,9 @@ rename_class_pids(OldName, NewName) ->
     try
         _ = [
             ets:insert(beamtalk_class_pids, {P, NewName})
-         || [P] <- ets:match(beamtalk_class_pids, {'$1', OldName})
+         || [P] <- ets:match(beamtalk_class_pids, {'$1', OldName}),
+            node(P) =:= node(),
+            not is_process_alive(P)
         ],
         ok
     catch

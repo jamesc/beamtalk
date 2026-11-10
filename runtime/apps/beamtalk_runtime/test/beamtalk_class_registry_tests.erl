@@ -2124,10 +2124,14 @@ bt4552_rename_class_pids_moves_rows_test() ->
         {'DOWN', MRef, process, DeadPid, _} -> ok
     end,
     beamtalk_class_registry:record_class_pid(DeadPid, Old),
+    %% A live pid naming OldName (restarted mid-rename) keeps its name.
+    Live = self(),
+    beamtalk_class_registry:record_class_pid(Live, Old),
     try
         ok = beamtalk_class_registry:rename_class_pids(Old, New),
         ?assertEqual({ok, New}, beamtalk_class_registry:class_name_for_pid(DeadPid)),
-        ?assertEqual([], ets:match(beamtalk_class_pids, {'$1', Old}))
+        ?assertEqual({ok, Old}, beamtalk_class_registry:class_name_for_pid(Live))
     after
-        ets:delete(beamtalk_class_pids, DeadPid)
+        ets:delete(beamtalk_class_pids, DeadPid),
+        ets:delete(beamtalk_class_pids, Live)
     end.
