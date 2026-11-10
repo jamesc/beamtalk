@@ -294,7 +294,7 @@ tagged_class_dispatch_memo() ->
     %% memo tagged with the derived-cache generation.
     Memo = {beamtalk_primitive, tagged_class_dispatch, ?CLASS},
     Pid = start_class(?CLASS, ?MOD),
-    Self = #{'$beamtalk_class' => ?CLASS, x => 7},
+    Self = #{'$beamtalk_class' => ?CLASS, x => 7, y => 2},
     try
         erase(Memo),
         ?assertEqual(7, beamtalk_primitive:send(Self, getX, [])),
@@ -311,15 +311,14 @@ tagged_class_dispatch_memo() ->
         %% Moving the class to another module is re-resolved in this process.
         ok = beamtalk_class_metadata:merge_identity(?CLASS, ?MOD2, [], none, false),
         ?assertEqual(?MOD2, beamtalk_primitive:class_name_to_module(?CLASS)),
+        ?assertEqual({value, ?MOD2}, beamtalk_primitive:tagged_class_dispatch(?CLASS)),
         ?assertEqual(
             {beamtalk_class_derived_cache:generation(), {value, ?MOD2}}, get(Memo)
         ),
         %% Reparenting into Exception re-resolves an already-memoised class.
         ok = beamtalk_class_metadata:merge_identity(?CLASS, ?MOD2, [], 'Exception', false),
-        ?assertMatch({_, exception}, begin
-            _ = beamtalk_primitive:responds_to(Self, getX),
-            get(Memo)
-        end),
+        ?assertEqual(exception, beamtalk_primitive:tagged_class_dispatch(?CLASS)),
+        ?assertMatch({_, exception}, get(Memo)),
         ok = beamtalk_class_metadata:merge_identity(?CLASS, ?MOD2, [], none, false),
         ?assertEqual(2, beamtalk_primitive:send(Self, getX, [])),
         %% A purged module whose class is still registered is re-derived.

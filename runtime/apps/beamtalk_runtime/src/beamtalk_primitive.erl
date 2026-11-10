@@ -45,6 +45,7 @@ See also: docs/internal/design-self-as-object.md Section 3.3
 -ifdef(TEST).
 -export([
     tagged_map_dispatch/1,
+    tagged_class_dispatch/1,
     proxy_routes/0,
     future_selectors/0,
     is_string_binary_shared_selector/1
@@ -1086,7 +1087,6 @@ tagged_map_dispatch(X) ->
     end.
 
 -ifdef(TEST).
--export([tagged_class_dispatch/1]).
 -spec proxy_routes() -> #{atom() => module()}.
 proxy_routes() -> ?PROXY_ROUTES.
 -endif.
