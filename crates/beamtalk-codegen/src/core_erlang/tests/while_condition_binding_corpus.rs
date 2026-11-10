@@ -38,10 +38,12 @@
 //! reads (`block_facts::while_condition_threads`): a condition with no state
 //! effect that writes a local, in every compiled method context (class methods
 //! included) and with any literal body, the unary form's empty one included.
-//! [`compiled_pure_condition_writes_are_carried`] lowers those rows with a
-//! silent verifier and through `erlc`;
+//! [`compiled_pure_condition_writes_are_carried`] lowers those rows, as a
+//! method statement and nested in an arm, a `do:`, an outer loop or an
+//! assignment, with a silent verifier and through `erlc`;
 //! [`compiled_pure_condition_rows_report_the_pre_fix_lowering`] shows the
-//! verifier catches the dropped write.
+//! verifier catches the dropped write on every row, the plain lowering's
+//! included.
 
 use super::{assert_compiles_through_erlc, codegen};
 use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
@@ -335,25 +337,41 @@ const PURE_CONTEXTS: &[(&str, &str, &str)] = &[
     ("class", "Object subclass: WhileBindingProbe\n", "class "),
 ];
 
-/// The BT-4602 rows: context x condition x body x loop, each with whether its
-/// body writes a local (so the loop is a `ConditionalLoop` the verifier sees
-/// whatever the condition's gate answers).
-fn pure_condition_rows() -> Vec<(String, String, bool)> {
+/// BT-4602: where the loop sits (`W`): a method statement, and the nested and
+/// value positions Phase 0 accepts a condition-writing loop in (a conditional
+/// arm, a `do:` body, an outer loop's body, an assignment's value).
+const TOP: &[&str] = &["W"];
+const NESTED: &[&str] = &[
+    "(s >= 0) ifTrue: [W]",
+    "#(1, 2) do: [:e | W]",
+    "k := 0. [k < 2] whileTrue: [k := k + 1. W]",
+    "r := W",
+];
+
+/// The BT-4602 rows: context x position x condition x body x loop, as
+/// `(label, source)`.
+fn condition_rows(
+    positions: &[&str],
+    conditions: &[&str],
+    bodies: &[Option<&str>],
+) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for (name, header, kw) in PURE_CONTEXTS {
-        for (c, cond) in PURE_CONDITIONS.iter().enumerate() {
-            for (b, body) in PURE_BODIES.iter().enumerate() {
-                for (selector, cmp) in LOOPS {
-                    let cond = cond.replace("CMP", cmp);
-                    let send = match body {
-                        None => selector.trim_end_matches(':').to_string(),
-                        Some(body) => format!("{selector} [{body}]"),
-                    };
-                    let src = format!(
-                        "{header}  {kw}take: v => v\n  {kw}probe =>\n    s := 0\n    t := 0\n    u := 0\n    w := 0\n    x := 0\n    [{cond}] {send}\n    #(s, t, u, w, x)\n"
-                    );
-                    let body_writes = body.is_some_and(|b| b.contains(":="));
-                    out.push((format!("{name} cond{c} body{b} {send}"), src, body_writes));
+        for (p, position) in positions.iter().enumerate() {
+            for (c, cond) in conditions.iter().enumerate() {
+                for (b, body) in bodies.iter().enumerate() {
+                    for (selector, cmp) in LOOPS {
+                        let cond = cond.replace("CMP", cmp);
+                        let send = match body {
+                            None => selector.trim_end_matches(':').to_string(),
+                            Some(body) => format!("{selector} [{body}]"),
+                        };
+                        let stmt = position.replace('W', &format!("[{cond}] {send}"));
+                        let src = format!(
+                            "{header}  {kw}take: v => v\n  {kw}probe =>\n    r := nil\n    s := 0\n    t := 0\n    u := 0\n    w := 0\n    x := 0\n    {stmt}\n    #(r, s, t, u, w, x)\n"
+                        );
+                        out.push((format!("{name} pos{p} cond{c} body{b} {send}"), src));
+                    }
                 }
             }
         }
@@ -361,19 +379,33 @@ fn pure_condition_rows() -> Vec<(String, String, bool)> {
     out
 }
 
+/// Every BT-4602 row: the full condition x body grid as a method statement,
+/// and a smaller grid (a direct write, a value-position write, a write in an
+/// arm; the unary form, an empty and a writing body) in each nested position.
+fn pure_condition_rows() -> Vec<(String, String)> {
+    let mut rows = condition_rows(TOP, PURE_CONDITIONS, PURE_BODIES);
+    let conditions = [PURE_CONDITIONS[0], PURE_CONDITIONS[1], PURE_CONDITIONS[4]];
+    let bodies = [None, Some(""), Some("s := s + 1")];
+    rows.extend(condition_rows(NESTED, &conditions, &bodies));
+    rows
+}
+
 /// BT-4602: a condition that writes an outer local is carried in every
-/// compiled method context whatever its body, with no state effect: every row
-/// lowers with a silent verifier (`ConditionFamilyNotCarried` names every local
-/// the condition writes) and compiles through `erlc`. The Phase 0 check
-/// accepts each (`block_facts::while_condition_writes_thread`);
-/// `stdlib/test/bt4313unary_while_test.bt` runs them.
+/// compiled method context, in every position Phase 0 accepts the loop in and
+/// whatever its literal body, with no state effect: every row lowers with a
+/// silent verifier and compiles through `erlc`. The verifier sees both
+/// lowerings: a `ConditionalLoop` must hand back every local its condition
+/// writes, and a plain loop (the one that builds no node) must have a
+/// condition that writes none (both `ConditionFamilyNotCarried`). The Phase 0
+/// check accepts each row (`block_facts::while_condition_threads`);
+/// `stdlib/test/bt4313unary_while_test.bt` runs representative ones.
 #[test]
 fn compiled_pure_condition_writes_are_carried() {
     let rows = pure_condition_rows();
-    assert!(rows.len() >= 400, "the corpus has thinned out");
+    assert!(rows.len() >= 900, "the corpus has thinned out");
     let failures: Vec<String> = rows
         .iter()
-        .filter_map(|(label, src, _)| match super::verifier_report(src, None) {
+        .filter_map(|(label, src)| match super::verifier_report(src, None) {
             Some(r) => Some(format!("{label}: {r}\n{src}")),
             None => catch_unwind(AssertUnwindSafe(|| {
                 assert_compiles_through_erlc("test", &codegen(src));
@@ -391,13 +423,19 @@ fn compiled_pure_condition_writes_are_carried() {
 }
 
 /// BT-4602: with the pre-BT-4015 gate
-/// ([`LocalRebindFault::ConditionWritesNotCarried`]) every row whose loop the
-/// verifier sees (its body writes a local) fails `verify()`, mostly as
-/// `ConditionFamilyNotCarried` (a condition write in value position can surface
-/// first as `UnthreadedLocalAssignment`), unless the gate decides nothing for
-/// it: a row whose lowering the fault leaves unchanged (an actor condition
-/// holding a `^` is carried by its NLR frame either way). The verifier, not the
-/// `BUnit` rows, is what catches a dropped condition write.
+/// ([`LocalRebindFault::ConditionWritesNotCarried`]) every row fails
+/// `verify()`: as `ConditionFamilyNotCarried` (a `ConditionalLoop` that does not
+/// hand the write back, or a plain loop whose condition writes a local), or
+/// first as `UnthreadedLocalAssignment` for a write in value position. The
+/// exceptions are the rows the gate decides nothing for, whose lowering the
+/// fault leaves unchanged, both in an actor method where another carrier
+/// threads the condition either way: a condition holding a `^` (its NLR frame)
+/// and a body that sends to `self` (the synced `State` bracket, ADR 0137).
+///
+/// This is also the agreement check between the Phase 0 rule and codegen's
+/// own recognizer: a condition write codegen's `loop_condition_written_locals`
+/// did not see would neither be carried nor reported, so its row would compile
+/// unchanged here and fail the test.
 #[cfg(debug_assertions)]
 #[test]
 fn compiled_pure_condition_rows_report_the_pre_fix_lowering() {
@@ -405,30 +443,34 @@ fn compiled_pure_condition_rows_report_the_pre_fix_lowering() {
     let mut caught = 0;
     let missed: Vec<String> = pure_condition_rows()
         .into_iter()
-        .filter(|(_, _, body_writes)| *body_writes)
         .filter_map(
-            |(label, src, _)| match super::verifier_report(&src, Some(fault)) {
+            |(label, src)| match super::verifier_report(&src, Some(fault)) {
                 Some(r) if r.contains("ThreadedIr verify") => {
                     caught += 1;
                     None
                 }
                 Some(r) => Some(format!("{label}: {r}")),
-                None => {
+                None if label.starts_with("actor")
+                    && (src.contains('^') || src.contains("self take:")) =>
+                {
                     let faulted = fault::with(fault, || codegen(&src));
                     (faulted != codegen(&src))
                         .then(|| format!("{label}: the fault changed the lowering unreported"))
                 }
+                None => Some(format!(
+                    "{label}: the dropped condition write went unreported"
+                )),
             },
         )
         .collect();
-    assert!(
-        caught >= 150,
-        "only {caught} rows caught; the corpus has thinned out"
-    );
     assert!(
         missed.is_empty(),
         "{} row(s) where the verifier missed the dropped condition write:\n{}",
         missed.len(),
         missed.join("\n")
+    );
+    assert!(
+        caught >= 900,
+        "only {caught} rows caught; the corpus has thinned out"
     );
 }

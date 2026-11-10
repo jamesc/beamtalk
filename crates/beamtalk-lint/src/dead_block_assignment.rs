@@ -90,10 +90,6 @@ impl LintPass for DeadBlockAssignmentPass {
             reported: HashSet::new(),
             diagnostics,
         };
-        // The tree analysis and codegen read (BT-4602): a unary
-        // `[...] whileTrue` is the keyword loop with an empty body there
-        // (BT-4313), whose condition threads its writes.
-        let module = &*beamtalk_core::ast::normalize::normalised(module);
 
         // Top-level expressions (script context — always value type semantics)
         let mut scope = LintScope::new();
