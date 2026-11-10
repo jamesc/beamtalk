@@ -27,7 +27,7 @@ scattered dispatch logic with a single domain service.
 2. **Hierarchy walking**: Check current class → extensions → superclass → recurse
 3. **Super semantics**: Skip current class, start at immediate superclass
 4. **Method combinations**: Collect before/after from full chain, primary from defining class
-5. **Structured errors**: Always return `#beamtalk_error{}`, never bare tuples
+5. **Structured errors**: Always return `#beamtalk_error{}` (a miss) or a wrapped exception map (a raise), never bare tuples
 
 ## Integration with Other Modules (DDD Separation)
 
@@ -42,7 +42,7 @@ scattered dispatch logic with a single domain service.
 Core dispatch entry point. Walks hierarchy from CurrentClass upward.
 ```erlang
 lookup(Selector, Args, Self, State, CurrentClass)
-    -> {reply, Result, NewState} | {error, #beamtalk_error{}}
+    -> {reply, Result, NewState} | {error, #beamtalk_error{} | map()}
 ```
 
 ### super/5
@@ -60,6 +60,22 @@ Called by a method-root actor `super` send and by a block's `super` send
 super_reply(Selector, Args, Self, State, CurrentClass)
     -> {reply, Result, NewState}
 ```
+
+### Error results
+
+`{error, E}` means one of two things, and its shape says which (BT-4593):
+
+- `E` is a `#beamtalk_error{}` record: the walk itself failed — the selector
+  was not found anywhere in the chain (`does_not_understand`) or a class in
+  it is not registered (`class_not_found`).
+- `E` is a wrapped exception map: the method was found and invoked, and it
+  raised. This holds even when the raised error is itself a
+  `does_not_understand` from inside the method body, so a consumer must apply
+  its "not found" check (`beamtalk_error:is_does_not_understand/1`) to records
+  only, and re-raise a map with `beamtalk_exception_handler:reraise/1`.
+
+A `^` non-local return or a `Program exit:` throw from an invoked method is
+never an `{error, _}` result: it propagates unchanged.
 
 ## References
 
@@ -94,9 +110,9 @@ super_reply(Selector, Args, Self, State, CurrentClass)
 -type bt_self() :: term().
 -type state() :: map().
 -type class_name() :: atom().
-%% `{error, _}` carries a `#beamtalk_error{}` (a walk miss, or a raise the
-%% walk itself caught and unwrapped) or the already-wrapped exception map an
-%% invoked value-class owner's `dispatch/4` adapter answers (BT-4173, BT-4208).
+%% `{error, _}` carries a `#beamtalk_error{}` record for a walk miss, or the
+%% wrapped exception map for a raise from an invoked method (BT-4593; see the
+%% module doc's "Error results").
 -type dispatch_result() ::
     {reply, term(), state()} | {error, #beamtalk_error{} | map()}.
 
@@ -346,10 +362,9 @@ super_value(Selector, Args, Self, CurrentClass) ->
 `{reply, Result, NewState}` triple the generated code unpacks, and re-raises
 an `{error, E}` answer instead of handing the caller a 2-tuple.
 
-`E` is either a `#beamtalk_error{}` (a walk miss, or a raise the walk caught
-and unwrapped) or the already-wrapped exception map an invoked value-class
-owner answers (BT-4173, BT-4208); `beamtalk_exception_handler:reraise/1`
-raises both shapes.
+`E` is a `#beamtalk_error{}` for a walk miss or the wrapped exception map for
+a raise from an invoked method (BT-4593; see the module doc's "Error
+results"); `beamtalk_exception_handler:reraise/1` raises both shapes.
 """.
 -spec super_reply(selector(), args(), bt_self(), state(), class_name()) ->
     {reply, term(), state()}.
@@ -669,7 +684,12 @@ invoke_runtime_fun(MethodOwner, ClassPid, Selector, Args, Self, State) ->
                 throw:Nlr:NlrStack when ?IS_NLR(Nlr) ->
                     erlang:raise(throw, Nlr, NlrStack);
                 Type:Reason:Stack ->
-                    wrap_dispatch_error(Type, Reason, Stack, Selector, Self, State, MethodOwner)
+                    raised(
+                        Type,
+                        Reason,
+                        Stack,
+                        dispatch_context(Selector, Self, State, MethodOwner)
+                    )
             end;
         _ ->
             {continue, beamtalk_object_class:superclass_safe(ClassPid)}
@@ -794,7 +814,7 @@ invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State) ->
             %% always receive a canonical {reply,_,_} | {error,_} tuple.
             try beamtalk_object_ops:dispatch(Selector, Args, Self, State) of
                 {reply, _, _} = Reply -> Reply;
-                {error, Error, _State} -> {error, Error}
+                {error, Error, _State} -> {error, beamtalk_exception_handler:ensure_wrapped(Error)}
             catch
                 Type:Reason:Stack ->
                     ?LOG_DEBUG("Erlang error in beamtalk_object_ops:dispatch", #{
@@ -802,7 +822,12 @@ invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State) ->
                         reason => beamtalk_error:format_reason(Type, Reason),
                         domain => [beamtalk, runtime]
                     }),
-                    wrap_dispatch_error(Type, Reason, Stack, Selector, Self, State, MethodOwner)
+                    raised(
+                        Type,
+                        Reason,
+                        Stack,
+                        dispatch_context(Selector, Self, State, MethodOwner)
+                    )
             end;
         false ->
             %% Normalize the return value: dispatch/4 returns either
@@ -813,9 +838,16 @@ invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State) ->
             %% by every in-tree caller (or replied by an actor)
             try
                 case ModuleName:dispatch(Selector, Args, Self, State) of
-                    {reply, _, _} = Reply -> Reply;
-                    {error, Error, _State} -> {error, Error};
-                    Other -> Other
+                    {reply, _, _} = Reply ->
+                        Reply;
+                    %% BT-4593: the walk already resolved Selector to this
+                    %% owner, so an error the owner answers is a raise, never
+                    %% a miss — wrap it so a `does_not_understand` record it
+                    %% returns cannot read as the walk's own miss.
+                    {error, Error, _State} ->
+                        {error, beamtalk_exception_handler:ensure_wrapped(Error)};
+                    Other ->
+                        Other
                 end
             catch
                 Type:Reason:Stack ->
@@ -825,21 +857,14 @@ invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State) ->
                         reason => beamtalk_error:format_reason(Type, Reason),
                         domain => [beamtalk, runtime]
                     }),
-                    wrap_dispatch_error(Type, Reason, Stack, Selector, Self, State, MethodOwner)
+                    raised(
+                        Type,
+                        Reason,
+                        Stack,
+                        dispatch_context(Selector, Self, State, MethodOwner)
+                    )
             end
     end.
-
-%% Wrap a raw Erlang error escaping a method into a structured
-%% `{error, #beamtalk_error{}}`, located by `dispatch_context/4`.
--spec wrap_dispatch_error(
-    error | exit | throw, term(), list(), selector(), bt_self(), state(), class_name()
-) -> {error, term()}.
-wrap_dispatch_error(Type, Reason, Stack, Selector, Self, State, MethodOwner) ->
-    Wrapped = beamtalk_exception_handler:ensure_wrapped(
-        Type, Reason, Stack, dispatch_context(Selector, Self, State, MethodOwner)
-    ),
-    #{error := BtError} = Wrapped,
-    {error, BtError}.
 
 %% Build the dispatch breadcrumb handed to the error-wrap boundary so
 %% raw Erlang errors escaping a compiled method are classified *and* located.
@@ -863,9 +888,8 @@ Supports two signatures based on the target class type:
 The arity is checked at call time to support both signatures
 from a single dispatch path.
 
-A crashing extension body is caught and converted to a structured
-`#beamtalk_error{}` via `beamtalk_exception_handler:ensure_wrapped/4` +
-`dispatch_context/4` — the exact same pattern `invoke_method/6` already uses
+A crashing extension body is caught and converted to a wrapped exception map
+via `raised/4` + `dispatch_context/4` — the exact same pattern `invoke_method/6` already uses
 for a crash inside a compiled/runtime-installed method reached via this same
 hierarchy walk. Without this catch, a crashing extension would be the one
 dispatch path in this module that instead re-raises the bare Erlang
@@ -884,12 +908,12 @@ breadcrumb context, same role `MethodOwner` plays for `invoke_method/6`).
 A connected `Program exit: N` (ADR 0099 §3) and a `^` non-local return in
 flight (ADR 0041, thrown as `{'$bt_nlr', ...}` — see
 `beamtalk_result:'tryDo:'/1` for the same two tuple shapes) must pass through
-this frame untouched rather than be caught by the generic clause below: for a
+this frame untouched rather than be wrapped (`raised/4` re-raises them): for a
 value-type extension (arity-2), `apply_extension_by_arity/4` runs the fun
 inline in the caller's own process, so the throw is a control-flow signal
 aimed at a catch further up that *same* call stack, not a crash to report —
 catching and wrapping it here would turn a non-local return into a spurious
-`#beamtalk_error{}` instead of letting it unwind. Mirrors the passthrough
+error instead of letting it unwind. Mirrors the passthrough
 `beamtalk_class_dispatch:apply_class_extension_fun/5` already has for the
 class-side extension path (that sibling also relays the NLR outward via a
 tagged `{nlr_relay, ...}` return, since a class method crosses its
@@ -904,25 +928,35 @@ invoke_extension(Fun, Selector, ClassName, Args, Self, State) ->
         {Result, NewState} = apply_extension_by_arity(Fun, Args, Self, State),
         {reply, Result, NewState}
     catch
-        throw:{beamtalk_script_exit, _} = ScriptExit:ScriptStack ->
-            erlang:raise(throw, ScriptExit, ScriptStack);
-        throw:Nlr:NlrStack when ?IS_NLR(Nlr) ->
-            erlang:raise(throw, Nlr, NlrStack);
         Type:Reason:Stack ->
             ?LOG_DEBUG("Erlang error in extension method", #{
                 selector => Selector,
                 reason => beamtalk_error:format_reason(Type, Reason),
                 domain => [beamtalk, runtime]
             }),
-            Wrapped = beamtalk_exception_handler:ensure_wrapped(
-                Type,
-                Reason,
-                Stack,
-                dispatch_context(Selector, Self, State, ClassName)
-            ),
-            #{error := BtError} = Wrapped,
-            {error, BtError}
+            raised(Type, Reason, Stack, dispatch_context(Selector, Self, State, ClassName))
     end.
+
+-doc """
+The `dispatch_result()` for an exception an invoked method raised: always
+the wrapped exception map (never unwrapped back to a `#beamtalk_error{}`),
+so a consumer can tell it from the walk's own miss (BT-4593) — a
+`does_not_understand` raised inside the method body must surface as itself,
+not read as "the selector was not found". Wrapping here (not at the
+consumer) also keeps `raw_stacktrace`, the selector/class breadcrumb and an
+exception subclass's own fields.
+
+A connected `Program exit: N` (ADR 0099 §3) and a `^` non-local return in
+flight (ADR 0041) are control flow aimed at a frame further up this same
+call stack, not errors: they are re-raised unchanged.
+""".
+-spec raised(error | exit | throw, term(), list(), map()) -> {error, map()}.
+raised(throw, {beamtalk_script_exit, _} = ScriptExit, Stack, _Context) ->
+    erlang:raise(throw, ScriptExit, Stack);
+raised(throw, Nlr, Stack, _Context) when ?IS_NLR(Nlr) ->
+    erlang:raise(throw, Nlr, Stack);
+raised(Type, Reason, Stack, Context) ->
+    {error, beamtalk_exception_handler:ensure_wrapped(Type, Reason, Stack, Context)}.
 
 -doc """
 Apply an extension fun given its registered arity, unifying both signatures

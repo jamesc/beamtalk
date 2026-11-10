@@ -644,7 +644,8 @@ instance_side_extension_crash_test() ->
         %% The caller gets a clean structured error, not a raw exit.
         Result2 = gen_server:call(Counter, {bt3199CrashExt, []}),
         ?assertMatch(
-            {error, #beamtalk_error{kind = runtime_error, selector = bt3199CrashExt}}, Result2
+            {error, #{error := #beamtalk_error{kind = runtime_error, selector = bt3199CrashExt}}},
+            Result2
         ),
 
         %% The actor survives and keeps processing messages normally.

@@ -333,29 +333,30 @@ Predicate: does this error represent a genuine "selector not found anywhere
 in the hierarchy" (`does_not_understand`)?
 
 `beamtalk_dispatch:super/5` (and the `lookup/5` path it shares via
-`lookup_in_class_chain/5`) returns `{error, #beamtalk_error{}}` for two
+`lookup_in_class_chain/5`) returns `{error, E}` for two
 semantically different situations — the selector was never found, or the
 selector was found and invoked but the method itself raised. Generated
 dispatch code uses this predicate to tell them apart instead of pattern
 matching the record's raw tuple layout, so it can re-raise real errors
 instead of masking them as a fabricated `does_not_understand`.
 
-A method that was invoked and raised can also answer an already-wrapped
-exception map (BT-4173 / BT-4208: a value-class owner's `dispatch/4` adapter
-returns the raised term as is). That is never a lookup miss, so it answers
-`false` — even when the raised error is itself a `does_not_understand` from
-inside the method body. The converse does not hold: the walk's own catch
-around a compiled `dispatch/4` unwraps a raise back to a record, so a DNU
-raised inside an invoked method can still read as a miss (BT-4593).
+A method that was invoked and raised answers the wrapped exception map
+(BT-4593: the walk never unwraps a raise back to a record). That is never a
+lookup miss, so it answers `false` — even when the raised error is itself a
+`does_not_understand` from inside the method body.
+
+Total: any other term answers `false` too, like `is_unknown_field/1`. A `^`
+non-local return or a `Program exit:` throw never reaches here as an
+`{error, _}` result (the walk and the value-class `dispatch/4` adapter
+re-raise them), so a non-record is always a real error to re-raise.
 
 Example:
   beamtalk_error:is_does_not_understand(beamtalk_error:new(does_not_understand, 'Integer'))
   % => true
 """.
--spec is_does_not_understand(#beamtalk_error{} | map()) -> boolean().
+-spec is_does_not_understand(term()) -> boolean().
 is_does_not_understand(#beamtalk_error{kind = does_not_understand}) -> true;
-is_does_not_understand(#beamtalk_error{}) -> false;
-is_does_not_understand(#{'$beamtalk_class' := _}) -> false.
+is_does_not_understand(_) -> false.
 
 -doc """
 Predicate: is this error an `unknown_field` initialiser rejection?

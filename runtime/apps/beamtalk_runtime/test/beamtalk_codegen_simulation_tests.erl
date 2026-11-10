@@ -1725,11 +1725,13 @@ extension_error_propagation_test() ->
     try
         Result = gen_server:call(Pid, {crashMethod, []}),
         ?assertMatch(
-            {error, #beamtalk_error{
-                kind = runtime_error,
-                class = 'Counter',
-                selector = crashMethod,
-                details = #{reason := extension_crash}
+            {error, #{
+                error := #beamtalk_error{
+                    kind = runtime_error,
+                    class = 'Counter',
+                    selector = crashMethod,
+                    details = #{reason := extension_crash}
+                }
             }},
             Result
         ),

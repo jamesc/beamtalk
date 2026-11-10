@@ -4320,6 +4320,12 @@ dispatch_via_hierarchy(Selector, Args, Self, State) ->
         {error, Error} ->
             {error, Error, State}
     catch
+        throw:Nlr when ?IS_NLR(Nlr) ->
+            %% BT-4593: the walk re-raises a `^` from an invoked method
+            %% instead of wrapping it. Relay it as the reply, exactly as
+            %% dispatch_user_method/4 does for an own method, so a `^` aimed
+            %% at a caller in another process never escapes handle_call.
+            {error, Nlr, State};
         exit:{noproc, _} ->
             %% Class registry not available (e.g., in unit tests without bootstrap)
             object_fallback(Selector, Args, Self, State, ClassName);
