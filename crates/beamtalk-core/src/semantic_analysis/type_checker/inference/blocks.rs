@@ -249,7 +249,10 @@ impl TypeChecker {
     /// as a superclass may at run time be an instance of a known subclass
     /// that overrides `then:` (`TimeoutProxy` under `Actor`, say). So the
     /// rule also requires every known subclass to resolve `then:` to
-    /// `Object`.
+    /// `Object`. "Known" means visible in this compilation's hierarchy: a
+    /// downstream package's subclass that overrides `then:` is not seen.
+    /// That only affects advisory types and warnings, never codegen, since
+    /// `then:` is never inlined.
     pub(in crate::semantic_analysis::type_checker) fn then_resolves_to_object(
         receiver_ty: &InferredType,
         hierarchy: &ClassHierarchy,
