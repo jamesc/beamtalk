@@ -160,7 +160,7 @@ fn union_member_protocol_selector_responds() {
 #[test]
 fn union_member_protocol_unknown_selector_is_missing() {
     // Neither member answers `frobnicate`: the protocol member is reported
-    // missing like any closed class, not skipped as uncertain.
+    // missing (not silently skipped), though it caps the severity at `Hint`.
     let msgs = checker_messages(&source_with(
         r"
   class f: h :: Callable | Integer -> Object => h frobnicate
