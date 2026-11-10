@@ -2583,6 +2583,8 @@ printAll: items :: Collection(Object) =>
   items do: [:each | Transcript show: each asString]
 ```
 
+A protocol-typed value is still an object. A send to it resolves against the protocol's own selectors (required and provided, including those of protocols it extends) first, then against the methods every object answers (`printString`, `respondsTo:`, `class`, …), whose return types flow through — `thing printString` infers `String`. Any other selector is a does-not-understand (`Printable does not understand 'frobnicate'`).
+
 ### Automatic Conformance
 
 Conformance is structural and automatic — no `implements:` declaration needed:
