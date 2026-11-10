@@ -27,7 +27,9 @@
 //! ## Coverage
 //!
 //! Reported ([`CoreErlangGenerator::report_dynamic_site`]): every written
-//! send that falls through to the generic dispatch, each cascade message,
+//! send that falls through to the generic dispatch, each cascade message
+//! (always reason `cascade`, with the receiver's gate as detail — removing
+//! the gate would not make it static),
 //! each string-interpolation segment's `displayString` without a guarded
 //! route, and the block `value`/`value:`…/`valueWithArguments:` intrinsics'
 //! non-fun fallback unless the receiver is typed `Block`
@@ -131,9 +133,9 @@ impl CoreErlangGenerator {
 
     /// BT-4596: the report entry for one cascade message, located at the
     /// message (`span`) rather than the shared receiver, so each message
-    /// reports its own line (BT-4392). A cascade always sends dynamically, so
-    /// a receiver a guarded direct call would cover reads `cascade`, not as
-    /// a send that bypassed the `typed_guarded` handler.
+    /// reports its own line (BT-4392). A cascade always sends dynamically,
+    /// whatever its receiver's type, so its reason is always `cascade`, with
+    /// the receiver's gate (if any) as detail.
     pub(in crate::core_erlang) fn report_cascade_send(
         &mut self,
         receiver: &Expression,
@@ -205,14 +207,21 @@ impl CoreErlangGenerator {
                 .filter(|h| h.get_class(class).is_some())
                 .map(|h| h.resolve_class_kind(class))
         });
-        let reason = match self.typed_send_target(receiver, selector) {
+        let gate = self.typed_send_target(receiver, selector).err();
+        let reason = match (site, gate) {
+            // A cascade stays dynamic whatever its receiver's gate, so the
+            // token is `cascade`; the gate is only detail.
+            (SiteKind::Cascade, None) => {
+                "cascade — every cascade message dispatches dynamically".to_string()
+            }
+            (SiteKind::Cascade, Some(gate)) => format!(
+                "cascade — every cascade message dispatches dynamically (receiver gate: {})",
+                self.describe_gate(&gate, class_name)
+            ),
             // The `typed_guarded` handler would have claimed this send had it
             // reached `HANDLERS`; a dynamic send here came another way.
-            Ok(_) => match site {
-                SiteKind::Send => "eligible — a guarded direct call applies, but this send site bypassed the typed_guarded handler".to_string(),
-                SiteKind::Cascade => "cascade — every cascade message dispatches dynamically".to_string(),
-            },
-            Err(gate) => self.describe_gate(&gate, class_name),
+            (SiteKind::Send, None) => "eligible — a guarded direct call applies, but this send site bypassed the typed_guarded handler".to_string(),
+            (SiteKind::Send, Some(gate)) => self.describe_gate(&gate, class_name),
         };
         format!("receiver: {}; reason: {reason}", describe_type(ty, kind))
     }

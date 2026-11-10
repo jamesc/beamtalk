@@ -457,7 +457,8 @@ fn cascade_messages_are_reported() {
             hints
                 .iter()
                 .any(|h| h.starts_with(&format!("Send '{selector}'"))
-                    && h.contains("reason: untyped")),
+                    && h.contains("reason: cascade")
+                    && h.contains("(receiver gate: untyped)")),
             "{selector}: {hints:?}"
         );
     }
