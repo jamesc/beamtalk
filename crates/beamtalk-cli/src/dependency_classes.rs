@@ -108,24 +108,45 @@ use tracing::warn;
 pub fn resolve_dependency_class_infos(
     project_root: &Utf8Path,
 ) -> (bool, Vec<ClassInfo>, Vec<ProtocolDefinition>) {
-    let (has_package_dependencies, class_infos, protocol_defs, _sources) =
-        resolve_dependency_class_infos_with_sources(project_root);
-    (has_package_dependencies, class_infos, protocol_defs)
+    let scan = resolve_dependency_class_infos_with_sources(project_root);
+    (
+        scan.has_package_dependencies,
+        scan.class_infos,
+        scan.protocol_defs,
+    )
+}
+
+/// Everything [`resolve_dependency_class_infos_with_sources`] reads from the
+/// dependency checkouts on disk.
+#[derive(Debug, Default)]
+pub struct DependencyScan {
+    /// Whether the manifest declares `[dependencies]` — see
+    /// [`resolve_dependency_class_infos`].
+    pub has_package_dependencies: bool,
+    /// Every class defined in a dependency whose checkout is on disk.
+    pub class_infos: Vec<ClassInfo>,
+    /// Every provision-bearing protocol AST from those dependencies.
+    pub protocol_defs: Vec<ProtocolDefinition>,
+    /// The source identity of each protocol in `protocol_defs`.
+    pub protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
+    /// Every dependency's extension methods, merged (ADR 0070 WS3, BT-4608).
+    pub extensions: beamtalk_core::compilation::extension_index::ExtensionIndex,
+    /// Whether `extensions` holds all of them: every transitive dependency
+    /// was found on disk and scanned completely
+    /// ([`crate::dependency_extensions`]). A dependency that has not been
+    /// fetched yet, whose path is not UTF-8, whose manifest cannot be read
+    /// (its own dependencies are then unknown), or whose source could not be
+    /// read or parsed cleanly leaves this `false`.
+    pub extensions_complete: bool,
 }
 
 /// [`resolve_dependency_class_infos`], also returning the source identity
 /// (path and text) of every carried dependency protocol, first definition
 /// wins — so a diagnostic raised in a flattened provision of a dependency's
-/// trait is reported against that trait's file and line (ADR 0127 §3).
+/// trait is reported against that trait's file and line (ADR 0127 §3) — and
+/// the dependencies' extension methods (ADR 0070 WS3, BT-4608).
 #[must_use]
-pub fn resolve_dependency_class_infos_with_sources(
-    project_root: &Utf8Path,
-) -> (
-    bool,
-    Vec<ClassInfo>,
-    Vec<ProtocolDefinition>,
-    beamtalk_core::semantic_analysis::ProtocolSourceMap,
-) {
+pub fn resolve_dependency_class_infos_with_sources(project_root: &Utf8Path) -> DependencyScan {
     // The dependency flag follows the rule `build`/`lint`/`test` share
     // (a malformed manifest conservatively assumes dependencies).
     let read = manifest::find_manifest_full(project_root);
@@ -133,17 +154,18 @@ pub fn resolve_dependency_class_infos_with_sources(
         manifest::PackageCheckerScope::from_manifest_read(&read).has_package_dependencies;
     let mut protocol_sources = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
     let Ok(Some(parsed)) = read else {
-        return (
+        return DependencyScan {
             has_package_dependencies,
-            Vec::new(),
-            Vec::new(),
             protocol_sources,
-        );
+            ..DependencyScan::default()
+        };
     };
     let layout = BuildLayout::new(project_root);
     let mut class_infos = Vec::new();
     let mut protocol_defs = Vec::new();
     let mut scanned: Vec<DiscoveredDep> = Vec::new();
+    // Cleared by any dependency the walk below cannot fully see.
+    let mut every_dependency_found = true;
 
     // BFS over the transitive dependency graph, matching
     // `discover_all_dep_roots`'s reachability: a queue of
@@ -172,6 +194,7 @@ pub fn resolve_dependency_class_infos_with_sources(
                 Ok(root) => root,
                 Err(path) => {
                     warn!(dep = %name, path = %path.display(), "Dependency path is not valid UTF-8; skipping");
+                    every_dependency_found = false;
                     continue;
                 }
             };
@@ -180,6 +203,7 @@ pub fn resolve_dependency_class_infos_with_sources(
                 // Not yet fetched/built — best-effort, skip silently. Its own
                 // dependencies (if any) can't be discovered either, since
                 // there's no checkout to read a `beamtalk.toml` from.
+                every_dependency_found = false;
                 continue;
             }
 
@@ -195,6 +219,9 @@ pub fn resolve_dependency_class_infos_with_sources(
                 if !dep_parsed.dependencies.is_empty() {
                     queue.push_back((dep_root, dep_parsed.dependencies));
                 }
+            } else {
+                // Its own dependencies — and their extensions — are unknown.
+                every_dependency_found = false;
             }
 
             if let Some(scan) = scan {
@@ -203,6 +230,8 @@ pub fn resolve_dependency_class_infos_with_sources(
                     dependencies,
                     scan,
                 });
+            } else {
+                every_dependency_found = false;
             }
         }
     }
@@ -239,12 +268,20 @@ pub fn resolve_dependency_class_infos_with_sources(
         flattened.push((dep.name.clone(), own_protocol_defs));
     }
 
-    (
+    let mut extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
+    let extensions_complete = crate::dependency_extensions::merge_dependency_extensions(
+        ordered.iter().map(|dep| &dep.scan.extensions),
+        &mut extensions,
+    ) && every_dependency_found;
+
+    DependencyScan {
         has_package_dependencies,
         class_infos,
         protocol_defs,
         protocol_sources,
-    )
+        extensions,
+        extensions_complete,
+    }
 }
 
 /// A dependency found on disk by [`resolve_dependency_class_infos`]'s walk.
@@ -314,6 +351,8 @@ impl DepFingerprint {
 struct ScannedDep {
     class_infos: Vec<ClassInfo>,
     trait_users: beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
+    /// The dependency's extension methods (ADR 0070 WS3, BT-4608).
+    extensions: crate::dependency_extensions::DependencyExtensions,
 }
 
 /// A [`ScannedDep`] tagged with the [`DepFingerprint`] it was scanned under.
@@ -381,6 +420,7 @@ fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<Scanne
         beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::for_package(
             dep_name,
         );
+    let mut extensions = crate::dependency_extensions::DependencyExtensions::scanning();
     let mut all_read = true;
     for file in files {
         let source = match std::fs::read_to_string(&file) {
@@ -388,20 +428,23 @@ fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<Scanne
             Err(e) => {
                 warn!(dep = %dep_name, file = %file, error = %e, "Failed to read dependency source file");
                 all_read = false;
+                extensions.mark_unreadable();
                 continue;
             }
         };
 
         let tokens = lex_with_eof(&source);
-        let (module, _parse_diags) = parse(tokens);
+        let (module, parse_diags) = parse(tokens);
         class_infos
             .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
         trait_users.add_source_file(&module, file.as_str(), &source, Some(dep_name));
+        extensions.add_file(&module, file.as_std_path(), &parse_diags);
     }
 
     let scanned = std::sync::Arc::new(ScannedDep {
         class_infos,
         trait_users,
+        extensions,
     });
     // Only cache a result derived from every file being read successfully —
     // caching a partial result under this fingerprint would make a transient read failure
@@ -481,6 +524,127 @@ mod tests {
             infos.iter().any(|c| c.name == "HTTPServer"),
             "expected HTTPServer in resolved class infos, got {infos:?}"
         );
+    }
+
+    /// ADR 0070 WS3 (BT-4608): the offline scan carries every fetched
+    /// dependency's extension methods, complete when every declared
+    /// dependency was on disk (with a readable manifest, so its own
+    /// dependencies are known) and parsed cleanly.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn dependency_extensions_are_collected_and_complete() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+        );
+        write(
+            tmp.path().join("_build/deps/http/beamtalk.toml").as_path(),
+            "[package]\nname = \"http\"\nversion = \"1.0.0\"\n",
+        );
+        write(
+            tmp.path().join("_build/deps/http/src/ext.bt").as_path(),
+            "Object >> shout -> Integer => 1\nString class >> fromShout => 2\n",
+        );
+
+        let scan = resolve_dependency_class_infos_with_sources(root);
+        assert!(scan.has_package_dependencies);
+        assert!(scan.extensions_complete);
+        assert_eq!(scan.extensions.len(), 2, "{:?}", scan.extensions);
+    }
+
+    /// A transitive dependency's extensions count too: `app` → `http` →
+    /// `json`, where only `json` extends `Object`.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn transitive_dependency_extensions_are_collected() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+        );
+        write(
+            tmp.path().join("_build/deps/http/beamtalk.toml").as_path(),
+            "[package]\nname = \"http\"\nversion = \"1.0.0\"\n\n\
+             [dependencies]\njson = { git = \"https://example.com/json.git\", tag = \"v1.0.0\" }\n",
+        );
+        write(
+            tmp.path().join("_build/deps/http/src/server.bt").as_path(),
+            "Object subclass: Server\n",
+        );
+        write(
+            tmp.path().join("_build/deps/json/beamtalk.toml").as_path(),
+            "[package]\nname = \"json\"\nversion = \"1.0.0\"\n",
+        );
+        write(
+            tmp.path().join("_build/deps/json/src/ext.bt").as_path(),
+            "Object >> toJson -> String => \"json\"\n",
+        );
+
+        let scan = resolve_dependency_class_infos_with_sources(root);
+        assert!(scan.extensions_complete);
+        assert!(
+            scan.extensions
+                .entries()
+                .keys()
+                .any(|key| key.selector == "toJson"),
+            "{:?}",
+            scan.extensions
+        );
+    }
+
+    /// A declared dependency that has not been fetched hides whatever it
+    /// extends, so the extensions are incomplete.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn unfetched_dependency_leaves_extensions_incomplete() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\n\
+             http = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n\
+             json = { git = \"https://example.com/json.git\", tag = \"v1.0.0\" }\n",
+        );
+        // `http` is complete on its own (manifest and clean source), so only
+        // the missing `json` checkout can make the scan incomplete.
+        write(
+            tmp.path().join("_build/deps/http/beamtalk.toml").as_path(),
+            "[package]\nname = \"http\"\nversion = \"1.0.0\"\n",
+        );
+        write(
+            tmp.path().join("_build/deps/http/src/ext.bt").as_path(),
+            "Object >> shout -> Integer => 1\n",
+        );
+
+        let scan = resolve_dependency_class_infos_with_sources(root);
+        assert!(!scan.extensions_complete, "`json` is not on disk");
+        assert_eq!(scan.extensions.len(), 1, "what is on disk is still merged");
+    }
+
+    /// A dependency file with a parse error may have lost an extension.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn dependency_parse_error_leaves_extensions_incomplete() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+        );
+        write(
+            tmp.path().join("_build/deps/http/src/broken.bt").as_path(),
+            "Object >> ((( =>\n",
+        );
+
+        let scan = resolve_dependency_class_infos_with_sources(root);
+        assert!(!scan.extensions_complete);
     }
 
     /// BT-3673: the offline dependency scan flattens a trait declared in one

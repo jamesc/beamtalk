@@ -51,11 +51,28 @@ pub fn search_path_var(path_var: &str, exe_name: &str) -> Vec<PathBuf> {
         .collect()
 }
 
+/// System-wide directories [`candidate_paths`] checks after the home-relative
+/// ones: the common Unix install location, then Homebrew on Apple Silicon.
+pub const SYSTEM_BIN_DIRS: &[&str] = &["/usr/local/bin", "/opt/homebrew/bin"];
+
 /// Standard install locations to check after `PATH`, given a home directory
 /// (injectable for tests; [`resolve_cli_path`] passes the real one). Order
 /// matters: more specific / more likely locations first.
 #[must_use]
 pub fn candidate_paths(home: Option<&Path>) -> Vec<PathBuf> {
+    candidate_paths_in(home, &system_bin_dirs())
+}
+
+/// [`SYSTEM_BIN_DIRS`] as paths — the real system directories
+/// [`resolve_cli_path`] and [`candidate_paths`] search.
+fn system_bin_dirs() -> Vec<PathBuf> {
+    SYSTEM_BIN_DIRS.iter().map(PathBuf::from).collect()
+}
+
+/// [`candidate_paths`] with the system-wide directories injected rather than
+/// fixed to [`SYSTEM_BIN_DIRS`], so tests control every location searched
+/// and don't depend on what happens to be installed on the test machine.
+fn candidate_paths_in(home: Option<&Path>, system_dirs: &[PathBuf]) -> Vec<PathBuf> {
     let name = exe_name();
     let mut candidates = Vec::new();
     if let Some(home) = home {
@@ -64,10 +81,7 @@ pub fn candidate_paths(home: Option<&Path>) -> Vec<PathBuf> {
         // A user-local install some packaging paths might use.
         candidates.push(home.join(".local").join("bin").join(name));
     }
-    // Common system-wide Unix install locations.
-    candidates.push(PathBuf::from("/usr/local/bin").join(name));
-    // Homebrew on Apple Silicon.
-    candidates.push(PathBuf::from("/opt/homebrew/bin").join(name));
+    candidates.extend(system_dirs.iter().map(|dir| dir.join(name)));
     candidates
 }
 
@@ -93,12 +107,15 @@ pub fn resolve_cli_path() -> Result<PathBuf> {
         std::env::var(CLI_PATH_OVERRIDE_ENV).ok(),
         std::env::var("PATH").ok(),
         dirs::home_dir().as_deref(),
+        &system_bin_dirs(),
     )
 }
 
 /// Core resolution logic behind [`resolve_cli_path`], with every environment
-/// input ([`CLI_PATH_OVERRIDE_ENV`], `PATH`, the home directory) taken as a
-/// parameter instead of read from the real process environment.
+/// input ([`CLI_PATH_OVERRIDE_ENV`], `PATH`, the home directory, and the
+/// system-wide directories — [`SYSTEM_BIN_DIRS`] in production) taken as a
+/// parameter instead of read from the real process environment or fixed
+/// filesystem locations.
 ///
 /// This is what makes `resolve_cli_path`'s edge-case tests (an executable
 /// found via a synthetic `PATH`, and none found at all) possible without
@@ -118,6 +135,7 @@ fn resolve_cli_path_with(
     override_path: Option<String>,
     path_var: Option<String>,
     home: Option<&Path>,
+    system_dirs: &[PathBuf],
 ) -> Result<PathBuf> {
     if let Some(override_path) = override_path {
         if !override_path.is_empty() {
@@ -133,7 +151,7 @@ fn resolve_cli_path_with(
         }
     }
 
-    for candidate in candidate_paths(home) {
+    for candidate in candidate_paths_in(home, system_dirs) {
         if candidate.is_file() {
             return Ok(candidate);
         }
@@ -286,8 +304,12 @@ mod tests {
     fn resolve_cli_path_prefers_the_override_env_var() {
         // No process-global env touched — the override is injected
         // directly into resolve_cli_path_with.
-        let result =
-            resolve_cli_path_with(Some("/custom/path/to/beamtalk".to_string()), None, None);
+        let result = resolve_cli_path_with(
+            Some("/custom/path/to/beamtalk".to_string()),
+            None,
+            None,
+            &[],
+        );
 
         assert_eq!(result.unwrap(), PathBuf::from("/custom/path/to/beamtalk"));
     }
@@ -301,17 +323,42 @@ mod tests {
         // The synthetic PATH is injected, not written to the real
         // process environment — no ENV_LOCK, no restore-on-drop guard, no
         // risk of leaking a clobbered PATH to any other test in this binary.
-        let result = resolve_cli_path_with(None, Some(tmp.path().display().to_string()), None);
+        let result = resolve_cli_path_with(None, Some(tmp.path().display().to_string()), None, &[]);
 
         assert_eq!(result.unwrap(), fake_cli);
     }
 
     #[test]
     fn resolve_cli_path_errors_when_nothing_found() {
+        // Every searched location is injected and empty: a real
+        // `/usr/local/bin/beamtalk` on the test machine must not leak in.
         let tmp = tempfile::TempDir::new().unwrap(); // empty directory
-        let result = resolve_cli_path_with(None, Some(tmp.path().display().to_string()), None);
+        let system_dir = tempfile::TempDir::new().unwrap(); // empty directory
+        let result = resolve_cli_path_with(
+            None,
+            Some(tmp.path().display().to_string()),
+            None,
+            &[system_dir.path().to_path_buf()],
+        );
 
         assert!(matches!(result, Err(BrokerError::CliNotFound)));
+    }
+
+    #[test]
+    fn resolve_cli_path_finds_an_executable_in_a_system_dir() {
+        let path_dir = tempfile::TempDir::new().unwrap(); // empty directory
+        let system_dir = tempfile::TempDir::new().unwrap();
+        let fake_cli = system_dir.path().join(exe_name());
+        std::fs::write(&fake_cli, b"#!/bin/sh\n").unwrap();
+
+        let result = resolve_cli_path_with(
+            None,
+            Some(path_dir.path().display().to_string()),
+            None,
+            &[system_dir.path().to_path_buf()],
+        );
+
+        assert_eq!(result.unwrap(), fake_cli);
     }
 
     /// Smoke test for the thin `resolve_cli_path()` wrapper itself —

@@ -1398,7 +1398,9 @@ impl CoreErlangGenerator {
     }
 
     /// Generates the fallback method body for `whileTrue`/`whileFalse`
-    /// — Block's `whileTrue:`/`whileFalse:`. Reached only when something
+    /// — Block's `whileTrue:`/`whileFalse:` — and, with `body == false`,
+    /// for `unaryWhileTrue`/`unaryWhileFalse` — Block's unary
+    /// `whileTrue`/`whileFalse` (BT-4313). Reached only when something
     /// bypasses the call-site interception these selectors normally get (e.g.
     /// `perform:`/`perform:withArguments:`) — the same gap already closed for
     /// Block's `value*` family. See
@@ -1417,6 +1419,7 @@ impl CoreErlangGenerator {
         intrinsic_name: &str,
         negate: bool,
         real_selector: &str,
+        body: bool,
         class_name: &str,
     ) -> Document<'static> {
         let self_var = if self.in_class_method() {
@@ -1424,23 +1427,30 @@ impl CoreErlangGenerator {
         } else {
             "Self"
         };
-        let body_param = self
-            .current_method_params
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "BodyBlock".to_string());
+        // BT-4313: the unary `whileTrue`/`whileFalse` (`body == false`) take
+        // no body block: the receiver is the body too.
+        let body_param = body.then(|| {
+            self.current_method_params
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "BodyBlock".to_string())
+        });
 
         let runtime_module =
             super::super::primitive_bindings::PrimitiveBindingTable::runtime_module_for_class(
                 class_name,
             );
+        let placeholder_args = match &body_param {
+            Some(param) => leaf::var(param.clone()),
+            None => Document::Str(""),
+        };
         let placeholder_branch = docvec![
             "call ",
             leaf::atom(runtime_module),
             ":'dispatch'(",
             leaf::atom(intrinsic_name),
             ", [",
-            leaf::var(body_param.clone()),
+            placeholder_args,
             "], ",
             Document::Str(self_var),
             ")",
@@ -1452,6 +1462,14 @@ impl CoreErlangGenerator {
             ("'true'", "'false'")
         };
         let loop_fn = self.fresh_temp_var(threaded_ir::LOOP_FN_STEM);
+        let body_step = match &body_param {
+            Some(param) => docvec![
+                "let _ = ",
+                self.annotate_current_send_call(docvec!["apply ", leaf::var(param.clone()), " ()"]),
+                " in ",
+            ],
+            None => Document::Str(""),
+        };
         let tier1_loop = docvec![
             "letrec ",
             leaf::fname(loop_fn.clone(), 0),
@@ -1459,13 +1477,9 @@ impl CoreErlangGenerator {
             self.annotate_current_send_call(docvec!["apply ", Document::Str(self_var), " ()"]),
             " of <",
             continue_atom,
-            "> when 'true' -> let _ = ",
-            self.annotate_current_send_call(docvec![
-                "apply ",
-                leaf::var(body_param.clone()),
-                " ()"
-            ]),
-            " in apply ",
+            "> when 'true' -> ",
+            body_step,
+            "apply ",
             leaf::fname(loop_fn.clone(), 0),
             " () <",
             exit_atom,
@@ -1475,24 +1489,16 @@ impl CoreErlangGenerator {
             self.annotate_current_send_call(docvec!["apply ", leaf::fname(loop_fn, 0), " ()"]),
         ];
 
-        let body_stateful_error = self.generate_stateful_block_dispatch_error(
-            real_selector,
-            class_name,
-            STATEFUL_BLOCK_DISPATCH_HINT,
-        );
-        let body_tier_check = docvec![
-            "case call 'erlang':'is_function'(",
-            leaf::var(body_param.clone()),
-            ", 0) of <'true'> when 'true' -> ",
-            tier1_loop,
-            " <'false'> when 'true' -> case call 'erlang':'is_function'(",
-            leaf::var(body_param),
-            ", 1) of <'true'> when 'true' -> ",
-            body_stateful_error,
-            " <'false'> when 'true' -> ",
-            placeholder_branch.clone(),
-            " end end",
-        ];
+        let body_tier_check = match body_param {
+            None => tier1_loop,
+            Some(body_param) => self.while_fallback_body_tier_check(
+                &body_param,
+                tier1_loop,
+                placeholder_branch.clone(),
+                real_selector,
+                class_name,
+            ),
+        };
 
         let self_stateful_error = self.generate_stateful_block_dispatch_error(
             real_selector,
@@ -1508,6 +1514,38 @@ impl CoreErlangGenerator {
             Document::Str(self_var),
             ", 1) of <'true'> when 'true' -> ",
             self_stateful_error,
+            " <'false'> when 'true' -> ",
+            placeholder_branch,
+            " end end",
+        ]
+    }
+
+    /// The body half of [`Self::generate_while_structural_fallback`]'s tier
+    /// check: `tier1_loop` when the body block `body_param` is Tier 1, the
+    /// `stateful_block_dispatch` error when it is Tier 2, `placeholder_branch`
+    /// for a non-block body.
+    fn while_fallback_body_tier_check(
+        &mut self,
+        body_param: &str,
+        tier1_loop: Document<'static>,
+        placeholder_branch: Document<'static>,
+        real_selector: &str,
+        class_name: &str,
+    ) -> Document<'static> {
+        let body_stateful_error = self.generate_stateful_block_dispatch_error(
+            real_selector,
+            class_name,
+            STATEFUL_BLOCK_DISPATCH_HINT,
+        );
+        docvec![
+            "case call 'erlang':'is_function'(",
+            leaf::var(body_param.to_string()),
+            ", 0) of <'true'> when 'true' -> ",
+            tier1_loop,
+            " <'false'> when 'true' -> case call 'erlang':'is_function'(",
+            leaf::var(body_param.to_string()),
+            ", 1) of <'true'> when 'true' -> ",
+            body_stateful_error,
             " <'false'> when 'true' -> ",
             placeholder_branch,
             " end end",

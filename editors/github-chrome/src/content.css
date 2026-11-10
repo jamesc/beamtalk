@@ -1,0 +1,23 @@
+/* GitHub's own syntax colours, so highlighting follows the user's theme.
+   Fallbacks are GitHub's light-theme values. */
+::highlight(beamtalk-comment) {
+  color: var(--color-prettylights-syntax-comment, #59636e);
+}
+::highlight(beamtalk-string) {
+  color: var(--color-prettylights-syntax-string, #0a3069);
+}
+::highlight(beamtalk-constant) {
+  color: var(--color-prettylights-syntax-constant, #0550ae);
+}
+::highlight(beamtalk-keyword) {
+  color: var(--color-prettylights-syntax-keyword, #cf222e);
+}
+::highlight(beamtalk-type) {
+  color: var(--color-prettylights-syntax-variable, #953800);
+}
+::highlight(beamtalk-entity) {
+  color: var(--color-prettylights-syntax-entity, #6639ba);
+}
+::highlight(beamtalk-heading) {
+  color: var(--color-prettylights-syntax-markup-heading, #0550ae);
+}

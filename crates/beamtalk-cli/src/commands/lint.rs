@@ -92,7 +92,7 @@ fn collect_diagnostics(
     >,
     knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope,
     cross_file_extensions: &beamtalk_core::compilation::extension_index::ExtensionIndex,
-    has_package_dependencies: bool,
+    dependency_extensions_unknown: bool,
     current_package: Option<&str>,
     is_stub_file: bool,
     file_stem: Option<&str>,
@@ -130,7 +130,7 @@ fn collect_diagnostics(
     // `current_package: Some(_)` (see `check_class_visibility`).
     let options = beamtalk_core::CompilerOptions {
         knowledge_scope,
-        has_package_dependencies,
+        dependency_extensions_unknown,
         current_package: current_package.map(str::to_string),
         stdlib_mode,
         // BT-4022: project-known Erlang modules so the `unresolved_ffi`
@@ -233,7 +233,7 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
     // `stamp_package_on_infos` call).
     let (
         mut all_class_infos,
-        extension_index,
+        mut extension_index,
         mut all_protocol_infos,
         mut all_protocol_defs,
         mut all_protocol_sources,
@@ -251,18 +251,28 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
     // suppress real cross-package diagnostics would be reported as stale.
     // The resolved deps are also needed below for their `stubs_dir`s (ADR
     // 0075 layer 2).
-    let resolved_deps = if let Some(ref project_root) = package_root {
-        merge_dependency_infos(
-            project_root,
-            &mut all_class_infos,
-            &mut all_protocol_infos,
-            &mut all_protocol_defs,
-            &mut all_protocol_sources,
-            &mut all_alias_infos,
-        )
-    } else {
-        Vec::new()
-    };
+    let (resolved_deps, dependency_extensions_complete) =
+        if let Some(ref project_root) = package_root {
+            merge_dependency_infos(
+                project_root,
+                &mut all_class_infos,
+                &mut all_protocol_infos,
+                &mut all_protocol_defs,
+                &mut all_protocol_sources,
+                &mut all_alias_infos,
+                &mut extension_index,
+            )
+        } else {
+            (Vec::new(), false)
+        };
+    // The pre-WS3 dependency guard, by the rule `build`/`check`/`test`
+    // share: on unless every dependency's extensions were loaded.
+    let dependency_extensions_unknown =
+        beamtalk_cli::dependency_extensions::dependency_extensions_unknown(
+            has_package_dependencies,
+            package_root.is_some(),
+            dependency_extensions_complete,
+        );
 
     // Flatten cross-file trait provisions into the same-package infos, as
     // `build` does (BT-3673) — after the dependency merge so a `uses:` of a
@@ -402,7 +412,7 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
             native_type_registry.clone(),
             knowledge_scope,
             &extension_index,
-            has_package_dependencies,
+            dependency_extensions_unknown,
             current_package.as_deref(),
             is_stub_file,
             file.file_stem(),
@@ -864,16 +874,19 @@ pub(crate) fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
 /// dep), lint continues without dep metadata rather than failing entirely.
 ///
 /// `has_package_dependencies` is derived, together with `current_package`,
-/// from `run_lint`'s single manifest read; this function's only remaining
-/// job is the dependency-metadata side effect on the three `all_*` lists.
+/// from `run_lint`'s single manifest read; this function's job is the
+/// dependency-metadata side effect on the `all_*` lists, plus reporting
+/// whether the dependencies' extensions are known completely.
 ///
 /// Merges `dep.protocol_infos`/`dep.alias_infos` as well as class infos, giving `beamtalk lint` the same
 /// cross-package protocol/alias resolution `beamtalk build` has.
 /// Resolves the project's dependencies, merges their class/protocol/alias
-/// metadata into the running lists, and returns the resolved dependencies
-/// (empty on resolution failure) so callers can also use their
-/// `stubs_dir`s (ADR 0075 layer 2) — see [`run_lint`]'s
-/// `native_type_registry` construction.
+/// metadata and extension methods (ADR 0070 WS3, BT-4608) into the running
+/// lists, and returns the resolved dependencies (empty on resolution
+/// failure) so callers can also use their `stubs_dir`s (ADR 0075 layer 2) —
+/// see [`run_lint`]'s `native_type_registry` construction — together with
+/// whether every dependency's extensions are now known completely: `false`
+/// when resolution failed, which keeps the pre-WS3 dependency guard on.
 fn merge_dependency_infos(
     project_root: &Utf8Path,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
@@ -881,10 +894,16 @@ fn merge_dependency_infos(
     all_protocol_defs: &mut Vec<beamtalk_core::ast::ProtocolDefinition>,
     all_protocol_sources: &mut beamtalk_core::semantic_analysis::ProtocolSourceMap,
     all_alias_infos: &mut Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
-) -> Vec<super::deps::path::ResolvedDependency> {
+    all_extensions: &mut beamtalk_core::compilation::extension_index::ExtensionIndex,
+) -> (Vec<super::deps::path::ResolvedDependency>, bool) {
     let options = beamtalk_core::CompilerOptions::default();
     match super::deps::ensure_deps_resolved(project_root, &options) {
         Ok(resolved_deps) => {
+            let extensions_complete =
+                beamtalk_cli::dependency_extensions::merge_dependency_extensions(
+                    resolved_deps.iter().map(|dep| &dep.extensions),
+                    all_extensions,
+                );
             for dep in &resolved_deps {
                 all_class_infos.extend(dep.class_infos.clone());
                 all_protocol_infos.extend(dep.protocol_infos.clone());
@@ -896,7 +915,7 @@ fn merge_dependency_infos(
                 );
                 all_alias_infos.extend(dep.alias_infos.clone());
             }
-            resolved_deps
+            (resolved_deps, extensions_complete)
         }
         Err(e) => {
             warn!(
@@ -904,7 +923,7 @@ fn merge_dependency_infos(
                 "Failed to resolve dependencies for lint; \
                  dependency classes/protocols/aliases may not be available"
             );
-            Vec::new()
+            (Vec::new(), false)
         }
     }
 }
@@ -1640,14 +1659,18 @@ mod tests {
             _trait_user_modules,
         ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
             .unwrap();
-        merge_dependency_infos(
+        let (_, dependency_extensions_complete) = merge_dependency_infos(
             &consumer_root,
             &mut all_class_infos,
             &mut all_protocol_infos,
             &mut all_protocol_defs,
             &mut all_protocol_sources,
             &mut all_alias_infos,
+            &mut beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
         );
+        // ADR 0070 WS3 (BT-4608): every dependency was loaded, so `lint`
+        // lifts the pre-WS3 dependency guard as `build` does.
+        assert!(dependency_extensions_complete);
 
         assert!(
             all_protocol_infos.iter().any(|p| p.name == "Greetable"),
@@ -1741,7 +1764,7 @@ mod tests {
             None,
             beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
             &extension_index,
-            true, // has_package_dependencies
+            true, // dependency_extensions_unknown
             Some("consumer"),
             false,
             None,
@@ -1948,6 +1971,7 @@ mod tests {
             &mut all_protocol_defs,
             &mut all_protocol_sources,
             &mut all_alias_infos,
+            &mut beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
         );
         assert_eq!(
             all_alias_infos
@@ -2076,6 +2100,7 @@ mod tests {
             &mut all_protocol_defs,
             &mut all_protocol_sources,
             &mut all_alias_infos,
+            &mut beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
         );
         assert_eq!(
             all_alias_infos

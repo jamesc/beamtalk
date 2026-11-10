@@ -279,6 +279,7 @@ pub(crate) fn handle_compile_expression_with_options(
         .collect();
     match beamtalk_repl::codegen::generate_repl_expressions_surfacing_verifier(
         &expressions,
+        &module.pipeline_sends,
         &module_name,
         class_module_index,
         Some(&analysis.class_hierarchy),
@@ -376,6 +377,7 @@ pub(crate) fn handle_compile_expression_trace_with_options(
         .collect();
     match beamtalk_repl::codegen::generate_repl_expressions_traced_surfacing_verifier(
         &expressions,
+        &module.pipeline_sends,
         &source,
         &module_name,
         class_module_index,

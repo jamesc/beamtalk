@@ -3768,7 +3768,12 @@ with_child_capacity(SupClass, Selector, SupPid, ExtraArgs, StartFun) ->
                     %% A dead pool's table is already gone; the
                     %% `supervisor:start_child/2` below then exits and
                     %% `with_live_supervisor/3` reports `stale_handle`.
-                    _ = catch ets:insert(Tid, {{manual, Token}}),
+                    _ =
+                        try
+                            ets:insert(Tid, {{manual, Token}})
+                        catch
+                            _:_ -> ok
+                        end,
                     case StartFun([Token | ExtraArgs]) of
                         {error, {?MAX_CHILDREN_REFUSED, Limit}} ->
                             max_children_error(SupClass, Selector, Limit);
@@ -3924,7 +3929,12 @@ spawn_monitor_for_capacity(Tid) ->
 
 -spec stop_child_capacity_monitor(term()) -> ok.
 stop_child_capacity_monitor(MonPid) when is_pid(MonPid) ->
-    _ = catch exit(MonPid, kill),
+    _ =
+        try
+            exit(MonPid, kill)
+        catch
+            _:_ -> ok
+        end,
     ok;
 stop_child_capacity_monitor(_) ->
     ok.
@@ -3980,9 +3990,20 @@ out) could never wedge the counter negative and fail the pool open.
 """.
 -spec release_child_slot(ets:tid(), pid()) -> ok.
 release_child_slot(Tid, Pid) ->
-    case catch ets:take(Tid, {child, Pid}) of
+    Taken =
+        try
+            ets:take(Tid, {child, Pid})
+        catch
+            _:_ -> []
+        end,
+    case Taken of
         [_] ->
-            _ = catch ets:update_counter(Tid, count, {2, -1, 0, 0}),
+            _ =
+                try
+                    ets:update_counter(Tid, count, {2, -1, 0, 0})
+                catch
+                    _:_ -> ok
+                end,
             ok;
         _ ->
             ok

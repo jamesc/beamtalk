@@ -114,6 +114,7 @@ struct BuildPassesResult {
 pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) -> Result<()> {
     info!("Starting build");
 
+    crate::commands::build_stamp::require_supported_otp()?;
     warn_if_otp_out_of_window();
 
     let env = setup_build_environment(path)?;
@@ -126,13 +127,16 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     // a manifest-less directory build skips Pass 1 entirely — both keep the
     // conservative `ModuleOnly` default.
     let mut options = options.clone();
-    // Pre-WS3 guard (`has_package_dependencies`): dependency extension
-    // contributions are not loaded until WS3 (ADR 0070 amendment), so
-    // declaring dependencies means no receiver's method surface is provably
-    // complete. Both flags come from the rule `lint`/`test` share.
+    // Pre-WS3 dependency guard: until dependency extensions are loaded, a
+    // package with dependencies has no receiver whose method surface is
+    // provably complete. Start conservative (on whenever there are
+    // dependencies); analysis lifts it once Pass 1 has loaded every
+    // dependency's extensions (`ClassHierarchyContext::
+    // dependency_extensions_complete`; ADR 0070 WS3, BT-4608).
+    // Both flags come from the rule `lint`/`test` share.
     let scope =
         beamtalk_cli::manifest::PackageCheckerScope::for_manifest(env.full_manifest.as_ref());
-    options.has_package_dependencies = scope.has_package_dependencies;
+    options.dependency_extensions_unknown = scope.has_package_dependencies;
     if Utf8Path::new(path).is_dir() {
         options.knowledge_scope = scope.knowledge_scope;
     }
@@ -338,6 +342,7 @@ fn execute_build_passes(
             pre_loaded_protocol_sources: index.all_protocol_sources.clone(),
             pre_loaded_aliases: index.all_alias_infos.clone(),
             extension_index: index.extension_index.clone(),
+            dependency_extensions_complete: index.dependency_extensions_complete,
         },
         dep_registry: registry_ref,
         strict_deps,

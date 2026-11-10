@@ -594,7 +594,19 @@ impl Parser {
         );
     }
 
-    /// Parses `( '|>' stage )+` after `head`, building the left-nested sends
+    /// Parses a full keyword expression: a keyword message, optionally
+    /// followed by `|>` pipeline stages (ADR 0145 § Precedence and layout).
+    ///
+    /// This is the base for every site that must not read `;` as a cascade:
+    /// string interpolation, `match:` arm bodies (where `;` ends the arm), map
+    /// values and list, array and tuple elements. The `;`/`|>` mixing rule
+    /// does not apply here, since `;` is not a cascade at these sites.
+    fn parse_keyword_expression(&mut self) -> Expression {
+        let head = self.parse_keyword_message();
+        self.parse_pipeline(head)
+    }
+
+    /// Parses `( '|>' stage )*` after `head`, building the left-nested sends
     /// it means: `recv m1 |> m2 |> m3` is `((recv m1) m2) m3` (ADR 0145).
     ///
     /// There is no pipeline node. Each stage is parsed as an ordinary keyword
@@ -676,10 +688,18 @@ impl Parser {
                 send
             }
             TokenKind::BinarySelector(_) | TokenKind::Arrow | TokenKind::GtGt => {
-                let span = self.current_token().span();
+                let token = self.current_token();
+                let span = token.span();
+                let operator = token.kind().to_string();
                 self.diagnostics.push(
-                    Diagnostic::error("a pipeline stage cannot start with a binary message", span)
-                        .with_hint("parenthesise the left side: `(…) + 1`"),
+                    Diagnostic::error(
+                        format!(
+                            "a pipeline stage cannot start with a binary message; \
+                             write `(…) {operator} …`"
+                        ),
+                        span,
+                    )
+                    .with_hint(format!("parenthesise the left side: `(…) {operator} …`")),
                 );
                 // Recover: parse the binary tail so its operand does not
                 // surface as a stray statement.
@@ -690,6 +710,32 @@ impl Parser {
                 self.report_missing_pipeline_stage();
                 receiver
             }
+        }
+    }
+
+    /// Reports a `|>` where an expression must start, then consumes the
+    /// stages that follow so they do not surface as stray statements.
+    fn parse_leading_pipe(&mut self) -> Expression {
+        let span = self.current_token().span();
+        let message: EcoString = "a statement cannot start with `|>`".into();
+        self.diagnostics
+            .push(Diagnostic::error(message.clone(), span).with_hint(
+                "`|>` continues the expression before it. In a source file, a line \
+             starting with `|>` continues the line above; in the REPL that line \
+             was already run, so wrap the whole pipeline in `( … )` or end the \
+             line above with `|>`",
+            ));
+        // Recover: parse the stages onto an error receiver, and drop their
+        // re-sugaring entries, since the program is in error.
+        let mark = self.pipeline_sends.len();
+        let recovered = self.parse_pipeline(Expression::Error {
+            message: message.clone(),
+            span,
+        });
+        self.pipeline_sends.truncate(mark);
+        Expression::Error {
+            message,
+            span: span.merge(recovered.span()),
         }
     }
 
@@ -1254,6 +1300,12 @@ impl Parser {
                 Expression::Error { message, span }
             }
 
+            // `|>` continues the expression before it, so it cannot start
+            // one (ADR 0145). In a source file a line starting with `|>`
+            // continues the line above; in the REPL that line was already
+            // submitted, which is the usual way to get here.
+            TokenKind::PipeGt => self.parse_leading_pipe(),
+
             // Unexpected token - consume it to avoid getting stuck
             _ => {
                 let bad_token = self.advance();
@@ -1359,7 +1411,7 @@ impl Parser {
                 self.current_kind(),
                 TokenKind::StringSegment(_) | TokenKind::StringEnd(_) | TokenKind::Eof
             ) {
-                let expr = self.parse_keyword_message();
+                let expr = self.parse_keyword_expression();
                 segments.push(StringSegment::Interpolation(expr));
             }
 
@@ -1615,14 +1667,7 @@ impl Parser {
             } else if self.match_token(&TokenKind::Bang) {
                 // Cast terminator — mark the last expression as a cast if it's a MessageSend.
                 // If the expression is not a MessageSend (e.g. `x := foo bar!`), emit an error.
-                match body.last_mut().map(|s| &mut s.expression) {
-                    Some(Expression::MessageSend { is_cast, .. }) => *is_cast = true,
-                    Some(last) => {
-                        let span = last.span();
-                        self.cast_in_expression_error(span);
-                    }
-                    None => {}
-                }
+                self.apply_cast_terminator(body.last_mut().map(|s| &mut s.expression));
                 // Continue (same as period)
             } else if !self.is_at_end()
                 && !self.check(&TokenKind::RightBracket)
@@ -1639,6 +1684,9 @@ impl Parser {
             .map_or(start, |t: Token| t.span());
 
         let span = start.merge(end);
+        // A parsed block is never zero-width (its span covers at least `[`):
+        // `ast::normalize::written_unary_loop` reads a zero-width empty block as
+        // the body it added to a unary `whileTrue`/`whileFalse` (BT-4313).
         let block = Block::new(parameters, body, span);
         Expression::Block(block)
     }
@@ -1728,14 +1776,14 @@ impl Parser {
             // Build a Return node using keyword-message level for the value
             // (not parse_return which goes through parse_assignment/cascade).
             let start = self.tokens[self.current - 1].span();
-            let value = Box::new(self.parse_keyword_message());
+            let value = Box::new(self.parse_keyword_expression());
             let end = value.span();
             Expression::Return {
                 value,
                 span: start.merge(end),
             }
         } else {
-            let expr = self.parse_keyword_message();
+            let expr = self.parse_keyword_expression();
             if self.match_token(&TokenKind::Assign) {
                 // Build assignment inline using keyword-message level for
                 // the RHS — parse_assign_rhs would go through parse_cascade
@@ -1744,7 +1792,7 @@ impl Parser {
                     expr,
                     Expression::Identifier(_) | Expression::FieldAccess { .. }
                 ) {
-                    let value = Box::new(self.parse_keyword_message());
+                    let value = Box::new(self.parse_keyword_expression());
                     let span = expr.span().merge(value.span());
                     Expression::Assignment {
                         target: Box::new(expr),
@@ -3942,7 +3990,7 @@ impl Parser {
             // the nested keyword send as the map value.  The `,` and `}` delimiters
             // terminate parsing naturally: `,` has no binding power (so binary
             // parsing stops) and `}` cannot start a message send.
-            let value = self.parse_keyword_message();
+            let value = self.parse_keyword_expression();
 
             let pair_span = pair_start.merge(value.span());
             pairs.push(MapPair::new(key, value, pair_span));
@@ -4026,7 +4074,8 @@ impl Parser {
                 // Parse element as a full keyword message (lowest message precedence), so
                 // `#(obj kw: arg)` is a single-element list containing the keyword send.
                 // `,`, `|`, and `)` are not keyword or binary selectors so they terminate naturally.
-                self.parse_keyword_message()
+                // A `|>` pipeline is a keyword expression too (ADR 0145).
+                self.parse_keyword_expression()
             };
             let elem_span = elem.span();
             elements.push(elem);
@@ -4128,8 +4177,9 @@ impl Parser {
                 let span = ellipsis_span.merge(name.span);
                 Expression::Spread { name, span }
             } else {
-                // Parse element as a full keyword message so `#[obj kw: arg]` works.
-                self.parse_keyword_message()
+                // Parse element as a full keyword expression (a keyword
+                // message or `|>` pipeline) so `#[obj kw: arg]` works.
+                self.parse_keyword_expression()
             };
             let elem_span = elem.span();
             elements.push(elem);
@@ -4197,7 +4247,7 @@ impl Parser {
         }
 
         loop {
-            elements.push(self.parse_keyword_message());
+            elements.push(self.parse_keyword_expression());
 
             if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",") {
                 self.advance(); // consume comma

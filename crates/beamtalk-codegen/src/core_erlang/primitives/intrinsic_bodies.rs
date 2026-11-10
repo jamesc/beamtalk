@@ -40,10 +40,13 @@ enum IntrinsicBody {
         arity: usize,
         real_selector: &'static str,
     },
-    /// `whileTrue`/`whileFalse` — Block's `whileTrue:`/`whileFalse:`.
+    /// `whileTrue`/`whileFalse` — Block's `whileTrue:`/`whileFalse:`;
+    /// `unaryWhileTrue`/`unaryWhileFalse` — Block's unary `whileTrue`/
+    /// `whileFalse` (BT-4313), whose receiver is the body too (`body: false`).
     While {
         negate: bool,
         real_selector: &'static str,
+        body: bool,
     },
     /// `repeat` — Block's `repeat`.
     Repeat,
@@ -146,6 +149,7 @@ static INTRINSIC_BODIES: &[(&str, IntrinsicBody)] = &[
         IntrinsicBody::While {
             negate: false,
             real_selector: "whileTrue:",
+            body: true,
         },
     ),
     (
@@ -153,6 +157,23 @@ static INTRINSIC_BODIES: &[(&str, IntrinsicBody)] = &[
         IntrinsicBody::While {
             negate: true,
             real_selector: "whileFalse:",
+            body: true,
+        },
+    ),
+    (
+        "unaryWhileTrue",
+        IntrinsicBody::While {
+            negate: false,
+            real_selector: "whileTrue",
+            body: false,
+        },
+    ),
+    (
+        "unaryWhileFalse",
+        IntrinsicBody::While {
+            negate: true,
+            real_selector: "whileFalse",
+            body: false,
         },
     ),
     ("repeat", IntrinsicBody::Repeat),
@@ -432,7 +453,14 @@ impl CoreErlangGenerator {
             IntrinsicBody::While {
                 negate,
                 real_selector,
-            } => self.generate_while_structural_fallback(name, *negate, real_selector, class_name),
+                body,
+            } => self.generate_while_structural_fallback(
+                name,
+                *negate,
+                real_selector,
+                *body,
+                class_name,
+            ),
             IntrinsicBody::Repeat => self.generate_repeat_structural_fallback(class_name),
             IntrinsicBody::OnDo => self.generate_on_do_structural_fallback(class_name),
             IntrinsicBody::Ensure => self.generate_ensure_structural_fallback(class_name),

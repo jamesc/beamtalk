@@ -182,7 +182,7 @@ fn temps_and_user_names_are_disjoint() {
 /// (`_H`, `_T`, `_Value`, `_Reason`), as parameters read only in the
 /// prologue before user code (`_ExtArgs`, `_ClassSelf`,
 /// `_InitArgs`, `_Selector`), or as tail bindings whose body is generated
-/// code only (`_SuperTuple`, `_Result`, `_NewState`, `_ReturnValue`).
+/// code only (`_Result`, `_NewState`, `_ReturnValue`).
 ///
 /// A name added here must be hand-written (never derived from a user
 /// identifier) and must not contain [`TEMP_MARKER`].
@@ -276,7 +276,6 @@ const HAND_WRITTEN: &[&str] = &[
     "_StartOk",
     "_State",
     "_StateChanged",
-    "_SuperTuple",
     "_T",
     "_TelPid",
     "_TelStart",

@@ -101,6 +101,7 @@ module 'value_type_multi_expr_method' ['new'/0, 'new'/1, 'addAndDouble:'/2, 'tri
                 <'show:'> when 'true' -> 'slow'
                 <'showCr:'> when 'true' -> 'slow'
                 <'subclassResponsibility'> when 'true' -> 'slow'
+                <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
                 <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('MultiExprTest', Selector)
             end of

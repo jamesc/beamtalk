@@ -129,6 +129,7 @@ call 'beamtalk_primitive':'string_from_binary'(call 'beamtalk_tuple':'as_string'
                 <'show:'> when 'true' -> 'slow'
                 <'showCr:'> when 'true' -> 'slow'
                 <'subclassResponsibility'> when 'true' -> 'slow'
+                <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
                 <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('Tuple', Selector)
             end of

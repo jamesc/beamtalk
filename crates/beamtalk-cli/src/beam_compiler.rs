@@ -189,6 +189,10 @@ impl BeamCompiler {
             backend,
         );
 
+        // ADR 0125 §3.1: both backends boot `erl` on the toolchain's `.beam`
+        // files, which do not load below the support window's floor.
+        crate::commands::build_stamp::require_supported_otp()?;
+
         // Ensure output directory exists before dispatching to either backend.
         std::fs::create_dir_all(&self.output_dir)
             .into_diagnostic()
@@ -695,6 +699,18 @@ pub struct ClassHierarchyContext {
     /// same-project cross-file extensions resolve instead of producing
     /// false `Dnu` hints (ADR 0066 / ADR 0100 Rule 2 WS1).
     pub extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
+    /// Whether `extension_index` holds every dependency's extension methods
+    /// (ADR 0070 WS3, BT-4608) — loaded completely by a dependency resolution
+    /// that succeeded. Analysis lifts the pre-WS3 dependency guard
+    /// (`CompilerOptions::dependency_extensions_unknown`, which callers set
+    /// conservatively to "the package has dependencies") only when this
+    /// holds; the default `false` keeps it on.
+    ///
+    /// **Precondition:** set it `true` only after dependency resolution
+    /// *succeeded* and every dependency's `DependencyExtensions` was complete
+    /// — `analyse_source_with_bindings` passes `resolved = true` to the
+    /// shared rule on the strength of this field alone.
+    pub dependency_extensions_complete: bool,
 }
 
 /// Compilation context bundling hierarchy data with dependency resolution settings.
@@ -1023,7 +1039,18 @@ pub(crate) fn analyse_source_with_bindings(
         );
     let diag_ctx =
         beamtalk_language_service::queries::diagnostic_provider::ProjectDiagnosticContext {
-            options: options.clone(),
+            // The pre-WS3 dependency guard: `options` says whether the
+            // package has dependencies; the hierarchy says whether all their
+            // extensions are in `extension_index` (ADR 0070 WS3, BT-4608).
+            options: beamtalk_core::CompilerOptions {
+                dependency_extensions_unknown:
+                    beamtalk_cli::dependency_extensions::dependency_extensions_unknown(
+                        options.dependency_extensions_unknown,
+                        true,
+                        ctx.hierarchy.dependency_extensions_complete,
+                    ),
+                ..options.clone()
+            },
             cross_file_classes,
             pre_loaded_protocols: ctx.hierarchy.pre_loaded_protocols.clone(),
             pre_loaded_protocol_defs: ctx.hierarchy.pre_loaded_protocol_defs.clone(),

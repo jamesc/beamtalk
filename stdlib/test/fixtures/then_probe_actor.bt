@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4515 (ADR 0145 § 2): an actor receiver for `then:`. `then:` is an
+// ordinary message, so its block runs in this actor's process.
+// See then_test.bt.
+
+Actor subclass: ThenProbeActor
+  state: total = 0
+
+  add: n =>
+    self.total := self.total + n
+    self
+
+  total => self.total

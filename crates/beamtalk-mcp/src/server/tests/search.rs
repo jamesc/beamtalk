@@ -8,15 +8,6 @@ use super::*;
 // --- search_examples ---
 
 #[test]
-fn search_examples_returns_results_for_known_query() {
-    let results = beamtalk_examples::search("closures", None);
-    assert!(
-        !results.is_empty(),
-        "searching 'closures' should return results from the bundled corpus"
-    );
-}
-
-#[test]
 fn search_examples_respects_limit() {
     let results = beamtalk_examples::search("a", Some(2));
     assert!(

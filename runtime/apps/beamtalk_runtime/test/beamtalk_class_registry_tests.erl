@@ -1105,7 +1105,23 @@ restart_class_recovery_test_() ->
                 ?assert(is_pid(NewPid)),
                 ?assertNotEqual(OldPid, NewPid),
                 %% Should be registered again
-                ?assertEqual(NewPid, beamtalk_class_registry:whereis_class('RestartTest1888'))
+                ?assertEqual(NewPid, beamtalk_class_registry:whereis_class('RestartTest1888')),
+                %% BT-4552: the dead incarnation still names its class, so a
+                %% class object holding OldPid recovers instead of raising
+                %% `Class 'unknown' not found`.
+                ?assertEqual(
+                    {ok, 'RestartTest1888'},
+                    beamtalk_class_registry:class_name_for_pid(OldPid)
+                ),
+                ?assertEqual(
+                    {ok, 'RestartTest1888'},
+                    beamtalk_class_registry:class_name_for_pid(NewPid)
+                ),
+                %% A graceful stop (removeFromSystem) reclaims the kept dead
+                %% incarnation's row along with its own.
+                ok = gen_server:stop(NewPid),
+                ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(OldPid)),
+                ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(NewPid))
             end}
         ]}.
 
@@ -2041,3 +2057,81 @@ bt3832_hierarchy_docs_no_cross_class_deadlock_test_() ->
             Results
         )
     end}.
+
+%% BT-4552: restart keeps only the newest dead incarnations' reverse-index
+%% rows (8), and never touches a live pid's row.
+bt4552_prune_dead_class_pids_caps_dead_rows_test() ->
+    beamtalk_class_registry:ensure_pid_table(),
+    Name = 'BT4552PruneCap',
+    Dead = [
+        begin
+            P = spawn(fun() -> ok end),
+            MRef = monitor(process, P),
+            receive
+                {'DOWN', MRef, process, P, _} -> ok
+            end,
+            beamtalk_class_registry:record_class_pid(P, Name),
+            P
+        end
+     || _ <- lists:seq(1, 11)
+    ],
+    Live = self(),
+    beamtalk_class_registry:record_class_pid(Live, Name),
+    try
+        ok = beamtalk_class_registry:prune_dead_class_pids(Name),
+        Kept = [P || P <- Dead, beamtalk_class_registry:class_name_for_pid(P) =:= {ok, Name}],
+        ?assertEqual(lists:nthtail(3, lists:sort(Dead)), lists:sort(Kept)),
+        ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(Live))
+    after
+        ets:match_delete(beamtalk_class_pids, {'_', Name})
+    end.
+
+%% BT-4552: a callback exception runs terminate/2, which deletes the class's
+%% metadata, so the class cannot be restarted; its reverse-index row must go
+%% too, or the class would look live (`liveClassName/1`) while gone.
+bt4552_callback_crash_forgets_pid_row_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_registry:ensure_pid_table(),
+    Name = 'BT4552CallbackCrash',
+    {ok, Pid} = beamtalk_object_class:start(Name, #{
+        name => Name,
+        module => beamtalk_class_bt,
+        superclass => none,
+        instance_methods => #{},
+        class_methods => #{}
+    }),
+    ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(Pid)),
+    MRef = monitor(process, Pid),
+    %% No handle_call clause matches: function_clause, then terminate/2.
+    ?assertExit(_, gen_server:call(Pid, bt4552_no_such_call)),
+    receive
+        {'DOWN', MRef, process, Pid, _} -> ok
+    after 5000 -> ?assert(false)
+    end,
+    ?assertMatch({error, _}, beamtalk_class_registry:restart_class(Name)),
+    ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(Pid)).
+
+%% BT-4552: a rename moves the kept dead incarnations to the new name.
+bt4552_rename_class_pids_moves_rows_test() ->
+    beamtalk_class_registry:ensure_pid_table(),
+    Old = 'BT4552RenameOld',
+    New = 'BT4552RenameNew',
+    DeadPid = spawn(fun() -> ok end),
+    MRef = monitor(process, DeadPid),
+    receive
+        {'DOWN', MRef, process, DeadPid, _} -> ok
+    end,
+    beamtalk_class_registry:record_class_pid(DeadPid, Old),
+    %% A live pid naming OldName (restarted mid-rename) keeps its name.
+    Live = self(),
+    beamtalk_class_registry:record_class_pid(Live, Old),
+    try
+        ok = beamtalk_class_registry:rename_class_pids(Old, New),
+        ?assertEqual({ok, New}, beamtalk_class_registry:class_name_for_pid(DeadPid)),
+        ?assertEqual({ok, Old}, beamtalk_class_registry:class_name_for_pid(Live))
+    after
+        ets:delete(beamtalk_class_pids, DeadPid),
+        ets:delete(beamtalk_class_pids, Live)
+    end.

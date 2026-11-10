@@ -1419,6 +1419,11 @@ enum Escape {
     /// The condition of a `whileTrue:`/`whileFalse:` whose loop does not
     /// thread a condition write here (BT-3782).
     Condition(EcoString),
+    /// The receiver of a unary `whileTrue`/`whileFalse` (BT-4313): the same
+    /// condition as [`Self::Condition`], named as written. The flag is whether
+    /// the method can write a field to keep the state in
+    /// ([`Walker::method_can_write_field`]).
+    UnaryLoop(EcoString, bool),
     /// The condition of a `whileTrue:`/`whileFalse:` whose body is not a block
     /// literal: the loop runs its condition as a closure in every context
     /// (BT-4062, `block_facts::while_body_block`).
@@ -1464,6 +1469,10 @@ impl Escape {
             Self::Condition(selector) => format!(
                 "used as the condition of `{selector}`, which does not thread an assignment in \
                  its condition here"
+            ),
+            Self::UnaryLoop(selector, _) => format!(
+                "sent `{selector}`, which runs it as the loop's condition and does not thread an \
+                 assignment in its condition here"
             ),
             Self::ConditionBodyNotLiteral(selector) => format!(
                 "used as the condition of a `{selector}` whose body is not a block literal, \
@@ -1521,6 +1530,18 @@ impl Escape {
                 "assign `{name}` in the loop body instead: `[{name} < limit] {selector} [{name} := \
                  {name} + 1]`"
             ),
+            Self::UnaryLoop(selector, has_fields) => {
+                let field = if *has_fields {
+                    format!("keep `{name}` in a field (`self.{name} := self.{name} + 1`), or ")
+                } else {
+                    String::new()
+                };
+                format!(
+                    "{field}write the loop with a body that assigns `{name}`: \
+                     `[{name} := {name} + 1. {name} < limit] {selector}` runs as \
+                     `{name} := {name} + 1. [{name} < limit] {selector}: [{name} := {name} + 1]`"
+                )
+            }
             Self::ConditionBodyNotLiteral(selector) => format!(
                 "write the loop body directly, wrapping a block value in a literal \
                  (`[...] {selector} [body value]`), or assign `{name}` in a literal loop body"
@@ -2776,7 +2797,16 @@ impl<'d> Walker<'d> {
                     if matches!(sel.as_str(), "whileTrue:" | "whileFalse:")
                         && !self.while_condition_threads(block, arguments) =>
                 {
-                    self.report_literal(block, &Escape::Condition(sel.clone()));
+                    // BT-4313: a unary `[...] whileTrue` reaches here as the
+                    // `whileTrue: []` it is canonicalised to; name it as written.
+                    let escape =
+                        match crate::ast::normalize::written_unary_loop(selector, arguments) {
+                            Some(unary) => {
+                                Escape::UnaryLoop(unary.into(), self.method_can_write_field())
+                            }
+                            None => Escape::Condition(sel.clone()),
+                        };
+                    self.report_literal(block, &escape);
                 }
                 // BT-3884: a block literal sent a `value`-family selector of
                 // another arity (`[t := t + 1] value: 1`) is applied, never
@@ -2942,6 +2972,20 @@ impl<'d> Walker<'d> {
                 .with_category(DiagnosticCategory::UnthreadedLocalWrite),
             );
         }
+    }
+
+    /// Whether `self.f := ...` is legal in this method, so a diagnostic may
+    /// suggest keeping state in a field: an instance method of an actor or a
+    /// `TestCase` subclass. Not a class-side method, an `Object` subclass
+    /// (which cannot declare instance data) or a `Value` subclass
+    /// ([`ClassHierarchy::rejects_slot_assignment`]).
+    fn method_can_write_field(&self) -> bool {
+        self.context != Class
+            && self.receivers.as_ref().is_some_and(|facts| {
+                let class = facts.class_name.as_str();
+                facts.hierarchy.resolve_class_kind(class) != crate::ast::ClassKind::Object
+                    && !facts.hierarchy.rejects_slot_assignment(class)
+            })
     }
 
     /// Whether codegen threads an outer-local write in the condition block of

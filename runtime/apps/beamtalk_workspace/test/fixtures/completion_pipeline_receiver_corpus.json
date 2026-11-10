@@ -1,0 +1,56 @@
+[
+  {
+    "line": "\"hello\" size |> ",
+    "receiver": "\"hello\" size",
+    "prefix": "",
+    "why": "right after `|>`: the stage receives the value before it"
+  },
+  {
+    "line": "\"hello\" size |>",
+    "receiver": "\"hello\" size",
+    "prefix": "",
+    "why": "no space after `|>`"
+  },
+  {
+    "line": "\"hello\" size |> ab",
+    "receiver": "\"hello\" size",
+    "prefix": "ab",
+    "why": "a partial selector in a stage completes against the value before `|>`"
+  },
+  {
+    "line": "\"hello\" size |>ab",
+    "receiver": "\"hello\" size",
+    "prefix": "ab",
+    "why": "a partial selector written straight after `|>`"
+  },
+  {
+    "line": "\"hello\" |> tri",
+    "receiver": "\"hello\"",
+    "prefix": "tri",
+    "why": "a single-token value before `|>`"
+  },
+  {
+    "line": "  \"hello\" |> tri",
+    "receiver": "\"hello\"",
+    "prefix": "tri",
+    "why": "leading indentation is not part of the value"
+  },
+  {
+    "line": "\"hello\" size |> abs |> ",
+    "receiver": "\"hello\" size |> abs",
+    "prefix": "",
+    "why": "only the last `|>` starts the stage being completed"
+  },
+  {
+    "line": "\"hello\" |> size abs |> neg",
+    "receiver": "\"hello\" |> size abs",
+    "prefix": "neg",
+    "why": "a multi-message stage is one value"
+  },
+  {
+    "line": "\"hello\" take: 2 |> ",
+    "receiver": "\"hello\" take: 2",
+    "prefix": "",
+    "why": "`|>` binds looser than a keyword message: the stage receives the whole send, not its last argument"
+  }
+]

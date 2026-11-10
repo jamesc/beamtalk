@@ -101,6 +101,11 @@ fn class_prefix(method: &MethodDefinition) -> Document<'static> {
 }
 
 /// Unparses a [`ClassDefinition`] to source text.
+///
+/// Its methods keep `|>` as written, since each carries its own record, but
+/// `state:` and `classState:` initialisers record theirs on the [`Module`]
+/// (ADR 0145), which a class alone does not reach: they print as the
+/// equivalent nested sends. Use [`unparse_module`] for a class as written.
 #[must_use]
 pub fn unparse_class(class: &ClassDefinition) -> String {
     unparse_class_definition(class).to_pretty_string()
@@ -381,6 +386,7 @@ enum TopLevelDecl<'a> {
     Protocol(&'a ProtocolDefinition),
     TypeAlias(&'a TypeAliasDefinition),
     Native(&'a NativeDeclaration),
+    Method(&'a StandaloneMethodDefinition),
 }
 
 impl TopLevelDecl<'_> {
@@ -391,6 +397,18 @@ impl TopLevelDecl<'_> {
             Self::Protocol(protocol) => protocol.comments.leading_blank_line,
             Self::TypeAlias(type_alias) => type_alias.comments.leading_blank_line,
             Self::Native(native) => native.comments.leading_blank_line,
+            Self::Method(smd) => smd.method.comments.leading_blank_line,
+        }
+    }
+
+    /// Source offset where this declaration starts.
+    fn start(&self) -> u32 {
+        match self {
+            Self::Class(class) => class.span.start(),
+            Self::Protocol(protocol) => protocol.span.start(),
+            Self::TypeAlias(type_alias) => type_alias.span.start(),
+            Self::Native(native) => native.span.start(),
+            Self::Method(smd) => smd.span.start(),
         }
     }
 }
@@ -409,33 +427,29 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
         docs.push(line());
     }
 
-    // Classes, protocols, type aliases, and native declarations
-    // (ADR 0068 Phase 2a, ADR 0108 Phase 1) are interleaved back into their
-    // original source order rather than grouped by kind — a `type` alias
-    // declared after a class must stay after that class on a format
-    // round-trip. `sort_by_key` is a stable sort, so declarations that
+    // Classes, protocols, type aliases, native declarations (ADR 0068
+    // Phase 2a, ADR 0108 Phase 1) and standalone/extension methods are
+    // interleaved back into their original source order rather than grouped
+    // by kind — a `type` alias declared after a class must stay after that
+    // class, and a leading `Port >> foo` extension (with the license header
+    // attached to it) must stay ahead of the class that follows it
+    // (BT-4488). `sort_by_key` is a stable sort, so declarations that
     // legitimately share a start offset (shouldn't happen for top-level
-    // decls) keep this append order: classes, then protocols, then type
-    // aliases, then native declarations.
+    // decls) keep this append order.
     let mut top_level_decls: Vec<TopLevelDecl<'_>> = Vec::new();
     top_level_decls.extend(module.classes.iter().map(TopLevelDecl::Class));
     top_level_decls.extend(module.protocols.iter().map(TopLevelDecl::Protocol));
     top_level_decls.extend(module.type_aliases.iter().map(TopLevelDecl::TypeAlias));
     top_level_decls.extend(module.native_declarations.iter().map(TopLevelDecl::Native));
-    top_level_decls.sort_by_key(|decl| match decl {
-        TopLevelDecl::Class(class) => class.span.start(),
-        TopLevelDecl::Protocol(protocol) => protocol.span.start(),
-        TopLevelDecl::TypeAlias(type_alias) => type_alias.span.start(),
-        TopLevelDecl::Native(native) => native.span.start(),
-    });
+    top_level_decls.extend(module.method_definitions.iter().map(TopLevelDecl::Method));
+    top_level_decls.sort_by_key(TopLevelDecl::start);
 
-    for (i, decl) in top_level_decls.into_iter().enumerate() {
+    for decl in top_level_decls {
         // Re-emit the blank line the author placed between this
-        // declaration and the previous one. Skipped for the first
-        // declaration in the section — a blank line there (before the very
-        // first top-level declaration) is dropped, same as pre-existing
-        // behaviour; we only preserve inter-declaration gaps.
-        if i > 0 && decl.preceding_blank_line() {
+        // declaration and whatever precedes it. Dropped when nothing
+        // precedes it — a blank line before the very first top-level
+        // declaration is not preserved; we only preserve inter-item gaps.
+        if !docs.is_empty() && decl.preceding_blank_line() {
             docs.push(line());
         }
         match decl {
@@ -447,23 +461,10 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
             TopLevelDecl::Native(native) => {
                 docs.push(unparse_native_declaration(native));
             }
+            TopLevelDecl::Method(smd) => {
+                docs.push(unparse_standalone_method_definition(smd));
+            }
         }
-        docs.push(line());
-    }
-
-    // Standalone method definitions
-    for (i, smd) in module.method_definitions.iter().enumerate() {
-        // Re-emit the blank line the author placed before this
-        // standalone method — either separating it from the previous
-        // standalone method (i > 0), or separating the whole
-        // standalone-methods section from the class/protocol/type-alias
-        // declarations above it (i == 0, but `docs` already has content).
-        // Dropped when nothing precedes it (same first-item convention as
-        // the declarations loop above).
-        if (i > 0 || !docs.is_empty()) && smd.method.comments.leading_blank_line {
-            docs.push(line());
-        }
-        docs.push(unparse_standalone_method_definition(smd));
         docs.push(line());
     }
 
@@ -730,7 +731,15 @@ pub(crate) fn unparse_standalone_method_definition(
     };
     // The target goes on the signature line, after the method's leading
     // comments and doc comment — not in front of them (BT-4253).
-    unparse_method_definition_with_prefix(&smd.method, docvec![class, separator])
+    // A standalone method is a top-level declaration, so — like a class,
+    // protocol, type alias or native declaration — it keeps the blank line
+    // the author left between its leading comments (e.g. a license header)
+    // and the method itself (BT-4488).
+    unparse_method_definition_inner(
+        &smd.method,
+        docvec![class, separator],
+        EmitLeadingComments::YesKeepingTrailingGap,
+    )
 }
 
 /// Builds a [`Document`] for a [`TypeAliasDefinition`] (ADR 0108 Phase 1).
@@ -1071,6 +1080,11 @@ fn unparse_method_definition_with_prefix(
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EmitLeadingComments {
     Yes,
+    /// Like [`Self::Yes`], and also re-emit a blank line the source had
+    /// between the leading comments and the method (its
+    /// `blank_line_after_comments`). Used for top-level standalone methods,
+    /// matching the other top-level declarations.
+    YesKeepingTrailingGap,
     No,
 }
 
@@ -1085,7 +1099,8 @@ fn unparse_method_definition_inner(
 
     // Non-doc leading comments (section dividers etc.) — emitted only on the
     // whole-file path; the per-method edit unit excludes them.
-    let emit_leading = emit_leading == EmitLeadingComments::Yes;
+    let keep_trailing_gap = emit_leading == EmitLeadingComments::YesKeepingTrailingGap;
+    let emit_leading = emit_leading != EmitLeadingComments::No;
     if emit_leading {
         docs.extend(unparse_comment_attachment_leading(&method.comments));
     }
@@ -1100,7 +1115,8 @@ fn unparse_method_definition_inner(
     // or the separator doubles up.
     if method.doc_comment.is_none()
         && emit_leading
-        && leading_ends_with_orphaned_doc_comment(&method.comments)
+        && (leading_ends_with_orphaned_doc_comment(&method.comments)
+            || (keep_trailing_gap && method.comments.blank_line_after_comments))
     {
         docs.push(line());
     }
@@ -1425,11 +1441,10 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             selector,
             arguments,
             is_cast,
-            span,
+            ..
         } => {
-            if let Some(comments) = pipeline_comments(*span) {
-                let prefix = unparse_pipeline_prefix(receiver, &comments);
-                return unparse_message(prefix, selector, arguments, *is_cast);
+            if let Some(pipeline) = Pipeline::of(expr) {
+                return pipeline.unparse();
             }
             // Flatten ++ chains for width-aware line breaking
             if matches!(selector, MessageSelector::Binary(op) if op.as_str() == "++") && !*is_cast {
@@ -1472,14 +1487,13 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             value,
             arms,
             exhaustive,
-            span,
+            ..
         } => {
             // `x |> match: [...]`: the stage's keyword message is `match:`.
-            let value_doc = match pipeline_comments(*span) {
-                Some(comments) => unparse_pipeline_prefix(value, &comments),
-                None => unparse_expression(value),
-            };
-            unparse_match(value_doc, arms, *exhaustive)
+            if let Some(pipeline) = Pipeline::of(expr) {
+                return pipeline.unparse();
+            }
+            unparse_match(unparse_expression(value), arms, *exhaustive)
         }
         Expression::MapLiteral { pairs, .. } => unparse_map_literal(pairs),
         Expression::ListLiteral { elements, tail, .. } => {
@@ -1765,6 +1779,35 @@ fn unparse_message(
     arguments: &[Expression],
     is_cast: bool,
 ) -> Document<'static> {
+    unparse_message_laid_out(
+        recv_doc,
+        selector,
+        arguments,
+        is_cast,
+        BrokenKeywords::UnderReceiver,
+    )
+}
+
+/// Where a keyword message that breaks puts its keywords.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BrokenKeywords {
+    /// Every keyword on its own line, indented under the receiver:
+    /// `recv` / `  at: 1` / `  put: 2`.
+    UnderReceiver,
+    /// The first keyword on the receiver's line and the rest aligned under
+    /// it, for a pipeline stage whose "receiver" is its `|>`:
+    /// `|> at: 1` / `   put: 2`.
+    AfterPipe,
+}
+
+/// [`unparse_message`] with the layout of a keyword message that breaks.
+fn unparse_message_laid_out(
+    recv_doc: Document<'static>,
+    selector: &MessageSelector,
+    arguments: &[Expression],
+    is_cast: bool,
+    broken_keywords: BrokenKeywords,
+) -> Document<'static> {
     let cast_suffix = if is_cast { Document::Str("!") } else { nil() };
     let arg_doc = |arg: &Expression| unparse_operand(arg, OperandSlot::argument_of(selector));
 
@@ -1807,7 +1850,21 @@ fn unparse_message(
                         kw_docs.push(part_doc);
                     }
                 }
-                docvec![recv_doc, nest(2, concat(kw_docs))]
+                match broken_keywords {
+                    BrokenKeywords::UnderReceiver => docvec![recv_doc, nest(2, concat(kw_docs))],
+                    // Drop the first keyword's line break and align the rest
+                    // under it, past the `|> `.
+                    BrokenKeywords::AfterPipe => {
+                        let mut kw_docs = kw_docs.into_iter().skip(1);
+                        let first = kw_docs.next().unwrap_or_else(nil);
+                        docvec![
+                            recv_doc,
+                            " ",
+                            first,
+                            nest(3, concat(kw_docs.collect::<Vec<_>>()))
+                        ]
+                    }
+                }
             } else {
                 let mut docs: Vec<Document<'static>> = vec![recv_doc];
                 for part in parts {
@@ -1864,56 +1921,251 @@ impl Drop for PipelineScope {
     }
 }
 
-/// Whether the send spanning `span` was written with `|>`.
-fn is_pipeline_send(span: Span) -> bool {
-    PIPELINE_SENDS.with(|current| current.borrow().contains(span))
-}
-
-/// The comments written before the `|>` of the send spanning `span`, or
-/// `None` if that send was not written with `|>`.
-fn pipeline_comments(span: Span) -> Option<CommentAttachment> {
-    PIPELINE_SENDS.with(|current| current.borrow().comments(span).cloned())
-}
-
-/// Whether `expr` prints as a pipeline: whether a send on its receiver
-/// spine (itself, its receiver, that one's receiver, …) was written with
-/// `|>`. A parenthesised receiver ends the spine: it is self-delimiting.
+/// Whether `expr` prints as a pipeline (see [`Pipeline::of`]).
 fn starts_with_pipeline(expr: &Expression) -> bool {
-    let mut current = expr;
-    loop {
-        match current {
-            Expression::MessageSend { receiver, span, .. } => {
-                if is_pipeline_send(*span) {
-                    return true;
-                }
-                current = receiver;
-            }
-            Expression::Match { value, span, .. } => {
-                if is_pipeline_send(*span) {
-                    return true;
-                }
-                current = value;
-            }
-            _ => return false,
+    Pipeline::of(expr).is_some()
+}
+
+/// Whether `expr`, in the definition whose `|>` record is `sends`, prints as
+/// a pipeline: `head |> stage …`, which parentheses around it delimit.
+///
+/// The same recogniser the unparser prints pipelines with
+/// ([`Pipeline::recognise`]), for callers that hold the record rather than
+/// unparsing: the `unnecessary_parens` lint, which must not report
+/// parentheses a pipeline needs.
+#[must_use]
+pub fn prints_as_pipeline(expr: &Expression, sends: &PipelineSends) -> bool {
+    Pipeline::recognise(expr, sends).is_some()
+}
+
+/// One message on a pipeline's receiver spine: a send, or a `match:` (whose
+/// tree node is [`Expression::Match`], not a send).
+#[derive(Clone, Copy)]
+enum SpineMessage<'e> {
+    Send {
+        selector: &'e MessageSelector,
+        arguments: &'e [Expression],
+        is_cast: bool,
+    },
+    Match {
+        arms: &'e [MatchArm],
+        exhaustive: bool,
+    },
+}
+
+impl<'e> SpineMessage<'e> {
+    /// Splits `expr` into its receiver, its span and its message, if it is a
+    /// send or a `match:`.
+    fn of(expr: &'e Expression) -> Option<(&'e Expression, Span, Self)> {
+        match expr {
+            Expression::MessageSend {
+                receiver,
+                selector,
+                arguments,
+                is_cast,
+                span,
+            } => Some((
+                receiver,
+                *span,
+                Self::Send {
+                    selector,
+                    arguments,
+                    is_cast: *is_cast,
+                },
+            )),
+            Expression::Match {
+                value,
+                arms,
+                exhaustive,
+                span,
+            } => Some((
+                value,
+                *span,
+                Self::Match {
+                    arms,
+                    exhaustive: *exhaustive,
+                },
+            )),
+            _ => None,
+        }
+    }
+
+    /// Whether `receiver`, printed bare before this message, would re-parse
+    /// as something else: the parentheses it needs in this message's
+    /// receiver slot.
+    fn receiver_needs_parens(self, receiver: &Expression) -> bool {
+        let slot = match self {
+            Self::Send { selector, .. } => OperandSlot::receiver_of(selector),
+            Self::Match { .. } => OperandSlot::KeywordOperand,
+        };
+        slot.needs_parens(receiver)
+    }
+
+    /// Appends this message to `receiver_doc`, breaking a keyword message
+    /// per `layout`.
+    fn unparse_onto(
+        self,
+        receiver_doc: Document<'static>,
+        layout: BrokenKeywords,
+    ) -> Document<'static> {
+        match self {
+            Self::Send {
+                selector,
+                arguments,
+                is_cast,
+            } => unparse_message_laid_out(receiver_doc, selector, arguments, is_cast, layout),
+            Self::Match { arms, exhaustive } => unparse_match(receiver_doc, arms, exhaustive),
         }
     }
 }
 
-/// The receiver half of a send written with `|>`: the previous stage as
-/// written, any comments written before the `|>`, then `|>` itself. The
-/// message follows it as for any send.
+/// One pipeline stage: the comments written before its `|>`, then its
+/// messages in send order (the first is the recorded send).
+struct PipelineStage<'e> {
+    comments: CommentAttachment,
+    messages: Vec<SpineMessage<'e>>,
+}
+
+/// A send chain that prints as a pipeline (ADR 0145): a head expression and
+/// the stages piped through it, `head |> stage |> stage`.
 ///
-/// The previous stage needs no parentheses: `|>` binds looser than every
-/// message, so a keyword send (`a withX: 1 |> withY: 2`) or a `match:`
-/// prints bare. Only a statement-shaped node, which a stage can never be,
-/// would need them.
-fn unparse_pipeline_prefix(
-    receiver: &Expression,
-    comments: &CommentAttachment,
-) -> Document<'static> {
-    let receiver_doc = unparse_expression(receiver);
-    let receiver_doc = if matches!(
-        receiver,
+/// Recognised from the tree and a `|>` record by [`Self::recognise`], the one
+/// place that decides where a pipeline starts and ends, so printing
+/// ([`Self::unparse`]), the "does this need parentheses" checks and the
+/// `unnecessary_parens` lint ([`prints_as_pipeline`]) agree.
+struct Pipeline<'e> {
+    head: &'e Expression,
+    stages: Vec<PipelineStage<'e>>,
+}
+
+impl<'e> Pipeline<'e> {
+    /// The pipeline `expr` prints as under the installed `|>` record (see
+    /// [`PipelineScope`]), or `None` if it prints as plain sends.
+    fn of(expr: &'e Expression) -> Option<Self> {
+        PIPELINE_SENDS.with(|current| Self::recognise(expr, &current.borrow()))
+    }
+
+    /// The pipeline `expr` prints as in the definition whose `|>` record is
+    /// `sends`, or `None` if it prints as plain sends.
+    ///
+    /// Walks `expr`'s receiver spine (the send, its receiver, that one's
+    /// receiver, …) for as long as each receiver prints bare before its
+    /// message, and ends the pipeline at the deepest send written with
+    /// `|>`: that send's receiver is the head, and every recorded send
+    /// above it starts a stage. The walk stops at a receiver that needs
+    /// parentheses, so `(a |> foo: 1) bar` is a send to a parenthesised
+    /// pipeline, not a pipeline: its `bar` does not extend the last stage.
+    fn recognise(expr: &'e Expression, sends: &PipelineSends) -> Option<Self> {
+        // Every send asks, so code without `|>` (nearly all of it) must not
+        // pay for a spine walk.
+        if sends.is_empty() {
+            return None;
+        }
+        // The spine's messages, outermost first, each with its receiver and
+        // whether it was written with `|>`.
+        let mut spine: Vec<(&'e Expression, Span, SpineMessage<'e>, bool)> = Vec::new();
+        let mut current = expr;
+        while let Some((receiver, span, message)) = SpineMessage::of(current) {
+            let piped = sends.contains(span);
+            if !piped && message.receiver_needs_parens(receiver) {
+                break;
+            }
+            spine.push((receiver, span, message, piped));
+            if piped && needs_parens_as_pipeline_head(receiver) {
+                break;
+            }
+            current = receiver;
+        }
+        let deepest = spine.iter().rposition(|&(.., piped)| piped)?;
+        spine.truncate(deepest + 1);
+        let head = spine[deepest].0;
+
+        let mut stages: Vec<PipelineStage<'e>> = Vec::new();
+        for &(_, span, message, piped) in spine.iter().rev() {
+            match stages.last_mut() {
+                Some(stage) if !piped => stage.messages.push(message),
+                _ => stages.push(PipelineStage {
+                    comments: sends.comments(span).cloned().unwrap_or_default(),
+                    messages: vec![message],
+                }),
+            }
+        }
+        Some(Self { head, stages })
+    }
+
+    /// Prints the pipeline: on one line when it fits, otherwise one stage
+    /// per line, each starting with `|>` and indented under the head.
+    ///
+    /// ```text
+    /// orders select: [:o | o isPaid] |> collect: [:o | o amount] |> sum
+    ///
+    /// total := orders select: [:o | o isPaid]  // paid only
+    ///   // sum the amounts
+    ///   |> collect: [:o | o amount]
+    ///   |> inject: 0 into: [:sum :each | sum + each]
+    /// ```
+    ///
+    /// A comment between stages, or a head or stage that spans lines,
+    /// always breaks it. A comment is printed before the `|>` it was written
+    /// before: an end-of-line comment after the previous stage, then
+    /// comments on their own lines.
+    fn unparse(self) -> Document<'static> {
+        let head_doc = unparse_expression(self.head);
+        let head_doc = if needs_parens_as_pipeline_head(self.head) {
+            docvec!["(", head_doc, ")"]
+        } else {
+            head_doc
+        };
+        let stage_docs: Vec<Document<'static>> = self
+            .stages
+            .iter()
+            .map(|stage| {
+                // Only the stage's first message follows the `|>` directly;
+                // a later keyword message has a real receiver before it.
+                let mut layout = BrokenKeywords::AfterPipe;
+                stage
+                    .messages
+                    .iter()
+                    .fold(Document::Str("|>"), |doc, message| {
+                        let doc = message.unparse_onto(doc, layout);
+                        layout = BrokenKeywords::UnderReceiver;
+                        doc
+                    })
+            })
+            .collect();
+        let spans_lines = |doc: &Document<'static>| doc.to_pretty_string().contains('\n');
+        let always_break =
+            self.stages.iter().any(|stage| {
+                !stage.comments.leading.is_empty() || stage.comments.trailing.is_some()
+            }) || spans_lines(&head_doc)
+                || stage_docs.iter().any(spans_lines);
+
+        let mut rest: Vec<Document<'static>> = Vec::new();
+        for (stage, stage_doc) in self.stages.iter().zip(stage_docs) {
+            if let Some(trail) = &stage.comments.trailing {
+                rest.push(docvec!["  ", unparse_comment(trail)]);
+            }
+            rest.push(if always_break {
+                line()
+            } else {
+                break_("", " ")
+            });
+            rest.extend(unparse_comment_attachment_leading(&stage.comments));
+            rest.push(stage_doc);
+        }
+        group(docvec![head_doc, nest(2, concat(rest))])
+    }
+}
+
+/// Whether a pipeline's head must be parenthesised before its first `|>`.
+///
+/// `|>` binds looser than every message, so a keyword send
+/// (`a withX: 1 |> withY: 2`) or a `match:` prints bare. Only a
+/// statement-shaped node, which the parser never builds as a head, or a cast
+/// send needs them.
+fn needs_parens_as_pipeline_head(head: &Expression) -> bool {
+    matches!(
+        head,
         Expression::Cascade { .. }
             | Expression::Assignment { .. }
             | Expression::DestructureAssignment { .. }
@@ -1921,24 +2173,7 @@ fn unparse_pipeline_prefix(
             | Expression::Primitive { .. }
             | Expression::ExpectDirective { .. }
             | Expression::MessageSend { is_cast: true, .. }
-    ) {
-        docvec!["(", receiver_doc, ")"]
-    } else {
-        receiver_doc
-    };
-    if comments.leading.is_empty() && comments.trailing.is_none() {
-        return docvec![receiver_doc, " |>"];
-    }
-    // A comment between stages puts the `|>` on its own line, indented
-    // under the pipeline's head (the full layout is BT-4517's).
-    let trailing = comments
-        .trailing
-        .as_ref()
-        .map_or_else(nil, |trail| docvec!["  ", unparse_comment(trail)]);
-    let mut before_pipe: Vec<Document<'static>> = vec![line()];
-    before_pipe.extend(unparse_comment_attachment_leading(comments));
-    before_pipe.push(Document::Str("|>"));
-    docvec![receiver_doc, trailing, nest(2, concat(before_pipe))]
+    )
 }
 
 // --- String concatenation chain (++) ---

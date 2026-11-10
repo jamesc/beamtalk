@@ -311,6 +311,7 @@ call 'erlang':'++'(Self, [_item@78|[]])
                 <'show:'> when 'true' -> 'slow'
                 <'showCr:'> when 'true' -> 'slow'
                 <'subclassResponsibility'> when 'true' -> 'slow'
+                <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
                 <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('List', Selector)
             end of

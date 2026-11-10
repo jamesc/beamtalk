@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4515 (ADR 0145 § 2): an actor that defines its own `then:`, as a
+// promise actor would. Its block gets the resolved value, not the actor.
+// Used to check that `TimeoutProxy` forwards `then:`. See then_test.bt.
+
+Actor subclass: ThenPromiseActor
+  state: resolved = 0
+
+  resolve: n =>
+    self.resolved := n
+    self
+
+  then: aBlock => aBlock value: self.resolved

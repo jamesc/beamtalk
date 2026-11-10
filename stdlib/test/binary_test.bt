@@ -45,7 +45,7 @@ TestCase subclass: BinaryTest
 
   testSerializeProducesBinary =>
     bin := Binary serialize: 42
-    self assert: bin size > 0
+    self assert: bin size equals: 3
 
   // testDeserializeTypeError: removed — type checker now prevents Binary deserialize: 42
   // at compile time (BT-1828 tightened :: Object → :: Binary)
@@ -91,7 +91,7 @@ TestCase subclass: BinaryTest
 
   testSizeOfSerializedValue =>
     bin := Binary serialize: 42
-    self assert: bin size > 0
+    self assert: bin size equals: 3
 
   testIsEmpty => self assert: (Binary fromBytes: #()) isEmpty
 

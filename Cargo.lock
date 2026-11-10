@@ -340,6 +340,7 @@ dependencies = [
 name = "beamtalk-examples"
 version = "0.4.0"
 dependencies = [
+ "beamtalk-sysroot",
  "serde",
  "serde_json",
 ]

@@ -85,3 +85,33 @@ fn pipeline_compiles_as_the_hand_nested_form_and_reflects_as_written() {
         );
     }
 }
+
+/// BT-4517: a `ClassBuilder` block method (`#sel => [:self | …]`) is rebuilt
+/// as a fresh method definition, but its `|>` sends were recorded on the
+/// enclosing method. Its reflected source still shows them as written,
+/// through both codegen paths, including a comment between stages and a
+/// pipeline next to a peeled parenthesis.
+#[test]
+fn a_class_builder_block_method_reflects_its_pipeline_as_written() {
+    let reflected = [
+        "m => self foo |> bar baz |> qux: 1",
+        "n: x => (x |> size) + 1",
+        "o: x =>\n  x foo  // why\n    |> bar",
+    ];
+    let source = "Object subclass: Maker\n  class make =>\n    Object classBuilder name: #Made; \
+         methods: #{#m => [:self | self foo |> bar baz |> qux: 1], \
+         #n: => [:self :x | (x |> size) + 1], \
+         #o: => [:self :x |\n      x foo  // why\n        |> bar\n    ]}; register\n";
+    for (path, code) in both_paths(&parse_clean(source)) {
+        for text in reflected {
+            let entry = format!(
+                "#{{{}}}#",
+                beamtalk_cerl_doc::binary::binary_byte_segments(text)
+            );
+            assert!(
+                code.contains(&entry),
+                "{path}: the block method should reflect `{text}` as written. Got:\n{code}"
+            );
+        }
+    }
+}

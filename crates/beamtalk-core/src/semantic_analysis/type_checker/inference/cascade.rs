@@ -122,8 +122,9 @@ impl TypeChecker {
     /// The `cascade-drops-update` warning (ADR 0145 § 3, BT-4512): one
     /// warning at each **non-final** cascade message that
     /// [`cascade_drops_update`] says answers an updated copy the cascade
-    /// then discards. The help suggests the nested form; it switches to the
-    /// `|>` pipeline once that operator ships (ADR 0145 § 2).
+    /// then discards. The help suggests a `|>` pipeline (ADR 0145 § 2), or
+    /// the nested form when the next message is binary, since a pipeline
+    /// stage cannot start with one.
     fn check_cascade_drops_update(
         &mut self,
         cascade_target: &Expression,
@@ -165,11 +166,7 @@ impl TypeChecker {
                     ),
                     None,
                 )
-                .with_hint(format!(
-                    "to send `{next_name}` to the result, nest the sends: `({receiver_text} {}) {}`",
-                    send_shape(dropped),
-                    send_shape(next),
-                ))
+                .with_hint(drops_update_hint(&receiver_text, dropped, next))
                 .with_category(DiagnosticCategory::CascadeDropsUpdate),
             );
         }
@@ -214,7 +211,32 @@ pub fn cascade_drops_update(
     }
 }
 
-/// The cascade's shared receiver as written, for the nested-form help text:
+/// The `cascade-drops-update` help: send `next` to the result of `dropped`
+/// with a pipeline, `p withX: … |> withY: …`. A pipeline stage cannot start
+/// with a binary message (ADR 0145 § 2), so a binary `next` gets the nested
+/// form, `(p withX: …) + …`, instead.
+fn drops_update_hint(
+    receiver_text: &str,
+    dropped: &MessageSelector,
+    next: &MessageSelector,
+) -> String {
+    let next_name = next.name();
+    let dropped_shape = send_shape(dropped);
+    let next_shape = send_shape(next);
+    if matches!(next, MessageSelector::Binary(_)) {
+        format!(
+            "to send `{next_name}` to the result, nest the sends: \
+             `({receiver_text} {dropped_shape}) {next_shape}`"
+        )
+    } else {
+        format!(
+            "to send `{next_name}` to the result, use a pipeline: \
+             `{receiver_text} {dropped_shape} |> {next_shape}`"
+        )
+    }
+}
+
+/// The cascade's shared receiver as written, for the help text:
 /// an identifier, `super`, a class reference, or a simple literal (integer,
 /// symbol, string) renders through the shared unparser; any other receiver
 /// expression is elided as `…`.
@@ -231,7 +253,7 @@ fn receiver_display(receiver: &Expression) -> String {
 }
 
 /// A selector rendered as a send with its arguments elided (`withX: …`,
-/// `+ …`, `negated`), for the nested-form help text.
+/// `+ …`, `negated`), for the help text.
 fn send_shape(selector: &MessageSelector) -> String {
     match selector {
         MessageSelector::Unary(name) => name.to_string(),

@@ -102,9 +102,8 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
 /// 0111 Addendum 4: `gen_server/methods.rs`'s
 /// `lower_body_exprs_with_reply` output — real `Bind`s interleaved with
 /// opaque [`ThreadedStmt::Statement`]s) whose opaque statements may have
-/// advanced the `State` version counter invisibly: a `super` send or
-/// Tier-2 helper (`emit_super_send_open`,
-/// `generate_field_assignment_open`, …) calls `next_state_var` inside its
+/// advanced the `State` version counter invisibly: a Tier-2 helper
+/// (`generate_field_assignment_open`, …) calls `next_state_var` inside its
 /// own shared, multi-module `Document` builder, so the version step it
 /// produces has no `Bind` node in this body's IR.
 ///

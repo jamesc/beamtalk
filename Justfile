@@ -64,7 +64,7 @@ corpus_tests := "package(/^beamtalk-(core|codegen|repl)$/) & (test(/agreement|_c
 #        + just test-integration test-mcp test-repl-protocol (test job extras)
 #        + dialyzer if Erlang changed (skipped on Windows - known PATH issue)
 [unix]
-ci: build lint test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-corpus check-generated-builtins check-codegen-boundary check-surface-drift test-grammar
+ci: build lint test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-generated-builtins check-codegen-boundary check-surface-drift test-grammar test-github-extension
 
 [windows]
 ci: build clippy fmt-check-rust test test-corpus verify-threaded-ir test-integration test-mcp test-parity test-repl-protocol check-surface-drift
@@ -92,7 +92,6 @@ ci-changed:
     # doubly here, since (unlike that job) `test` isn't even scoped by the
     # changed-files check below.
     just test
-    just check-corpus
     just check-generated-builtins
     just check-codegen-boundary
     just check-surface-drift
@@ -179,8 +178,8 @@ clean: clean-rust clean-erlang clean-vscode
 # Build Tasks
 # ═══════════════════════════════════════════════════════════════════════════
 
-# Build all targets (Rust + Erlang + stdlib)
-build: build-stdlib
+# Build all targets (Rust + Erlang + stdlib + the MCP example corpus)
+build: build-stdlib build-corpus
 
 # Build Rust workspace
 build-rust:
@@ -682,23 +681,13 @@ test-examples: build-stdlib
     fi
     echo "✅ All example tests passed (${passed} packages)"
 
-# Generate the example corpus for the MCP search tool (ADR 0062)
+# Generate the example corpus for the MCP search tool (ADR 0062) into
+# target/share/beamtalk/corpus.json, where dev binaries find it and `install`
+# copies it from. A build output, not a checked-in file (BT-4614).
 build-corpus: build-rust
     @echo "📚 Building example corpus..."
     @cargo run --bin build-corpus --quiet
     @echo "✅ Corpus build complete"
-
-# Check that the checked-in corpus.json is up to date (CI freshness check)
-[unix]
-check-corpus: build-rust
-    #!/usr/bin/env bash
-    set -euo pipefail
-    cargo run --bin build-corpus --quiet
-    if ! git diff --exit-code crates/beamtalk-examples/corpus.json > /dev/null 2>&1; then
-        echo "❌ corpus.json is out of date — run 'just build-corpus' and commit"
-        exit 1
-    fi
-    echo "✅ corpus.json is up to date"
 
 # Check that the checked-in generated artifacts (generated_builtins.rs,
 # beamtalk_generated_builtins.hrl and, ADR 0130, beamtalk_class_vars_keys.hrl, the
@@ -771,7 +760,7 @@ check-surface-drift:
     @cargo run -p beamtalk-surface-drift --quiet
 
 # Print the declared OTP support window (ADR 0125 §3.1, otp-support.toml)
-# as a JSON array of majors, e.g. ["27","28"]. Consumed by ci.yml's
+# as a JSON array of majors, e.g. ["28","29"]. Consumed by ci.yml's
 # matrix.otp so the workflow never hardcodes the window itself; a drift
 # test (crates/beamtalk-cli/tests/cli/cli_otp_matrix.rs) asserts this output
 # equals the declared window.
@@ -1021,18 +1010,38 @@ lint-js: fmt-check-js
 # fixture crates/beamtalk-core/tests/fixtures/section_divider_grammar_cases.json
 # — the same fixture crates/beamtalk-core/tests/section_divider_grammar_conformance.rs
 # checks against parse_divider_name directly, so the two recognizers can't
-# silently drift apart again.
+# silently drift apart again. Also runs the pipeline-operator `|>` scope test
+# (BT-4517, pipelineGrammar.test.ts) over the same grammar file.
 [unix]
 [working-directory: 'editors/vscode']
 test-grammar:
-    @echo "🔍 Running TextMate section-divider grammar conformance test..."
+    @echo "🔍 Running TextMate grammar tests (section divider, pipeline operator)..."
     npm ci --quiet
     npm run test:grammar
-    @echo "✅ TextMate section-divider grammar conformance test passed"
+    @echo "✅ TextMate grammar tests passed"
 
 [windows]
 test-grammar:
     @echo "test-grammar: skipped on Windows (covered by Linux CI)"
+
+# Build the "Beamtalk for GitHub" Chrome extension (load editors/github-chrome/dist unpacked)
+[working-directory: 'editors/github-chrome']
+build-github-extension:
+    npm ci --quiet
+    npm run build
+
+# Tokenizer tests for the Chrome extension, run against the VS Code grammar
+[unix]
+[working-directory: 'editors/github-chrome']
+test-github-extension:
+    @echo "🔍 Running GitHub Chrome extension tokenizer tests..."
+    npm ci --quiet
+    npm test
+    @echo "✅ GitHub Chrome extension tokenizer tests passed"
+
+[windows]
+test-github-extension:
+    @echo "test-github-extension: skipped on Windows (covered by Linux CI)"
 
 # Run clippy (Rust linter) - warnings are errors
 clippy:
@@ -1402,6 +1411,12 @@ test-install: build-release build-stdlib
     test -d "$STDLIB_DIR"
     test -d "$RUNTIME_DIR"
     echo "✅ Stdlib and runtime directories present"
+
+    # 2a. The MCP example corpus is a build output (BT-4614), not embedded in
+    # the binary: the installed beamtalk-mcp reads it from
+    # share/beamtalk/corpus.json (beamtalk_examples::BUNDLED_CORPUS_RELPATH).
+    test -s "$TMPDIR/share/beamtalk/corpus.json"
+    echo "✅ MCP example corpus installed"
 
     # 2b. Verify the installed stdlib class beams (bt@*.beam) are exactly the
     # modules the installed beamtalk_stdlib.app activates. Both come from
@@ -2406,7 +2421,7 @@ check-tools:
 # Unix-only: uses Unix install command with -d/-m flags
 # Install beamtalk to PREFIX (default: /usr/local)
 [unix]
-install PREFIX="/usr/local": build-release build-stdlib
+install PREFIX="/usr/local": build-release build-stdlib build-corpus
     #!/usr/bin/env bash
     set -euo pipefail
     PREFIX="{{PREFIX}}"
@@ -2489,6 +2504,12 @@ install PREFIX="/usr/local": build-release build-stdlib
             install -m 644 "${bt}" "${PREFIX}/share/beamtalk/stubs/${rel}"
         done
     fi
+
+    # Generated share/ data (the MCP example corpus, BT-4614): build-corpus
+    # stages it under target/ in the installed layout, so the tree is copied
+    # as is and its file names are defined in one place (the Rust side).
+    install -d "${PREFIX}/share"
+    cp -R target/share/. "${PREFIX}/share/"
 
     echo "✅ Installed beamtalk to ${PREFIX}"
     echo "   Binary:  ${PREFIX}/bin/beamtalk"
@@ -2577,7 +2598,7 @@ dist: build-release build-stdlib
 # Needs Git for Windows' `bash` on PATH (as the Windows release job has) for
 # scripts/install-otp-apps.sh, the one shared copy of the OTP-app install rule.
 [windows]
-dist: build-release build-stdlib
+dist: build-release build-stdlib build-corpus
     @echo "📦 Creating distribution in dist/..."
     if (Test-Path dist) { Remove-Item -Recurse -Force dist }
     New-Item -ItemType Directory -Force -Path dist/bin | Out-Null
@@ -2589,6 +2610,7 @@ dist: build-release build-stdlib
     bash scripts/install-otp-apps.sh dist/lib/beamtalk/lib; if ($LASTEXITCODE -ne 0) { Write-Error "Installing OTP apps into dist/ failed."; exit 1 }
     if (!(Test-Path "runtime/tools/rebar3")) { Write-Error "Bundled rebar3 not found at runtime/tools/rebar3."; exit 1 }; New-Item -ItemType Directory -Force -Path "dist/lib/beamtalk/tools" | Out-Null; Copy-Item "runtime/tools/rebar3" "dist/lib/beamtalk/tools/rebar3"
     if (Test-Path "stdlib/src") { $stdlibRoot = (Resolve-Path "stdlib/src").Path; foreach ($bt in (Get-ChildItem -Path "stdlib/src" -Recurse -File -Filter *.bt)) { $rel = $bt.FullName.Substring($stdlibRoot.Length).TrimStart('\', '/'); $dest = Join-Path "dist/share/beamtalk/stdlib/src" $rel; New-Item -ItemType Directory -Force -Path (Split-Path $dest -Parent) | Out-Null; Copy-Item $bt.FullName $dest } }
+    New-Item -ItemType Directory -Force -Path "dist/share" | Out-Null; Copy-Item -Path "target/share/*" -Destination "dist/share" -Recurse -Force
     just dist-vscode
     @echo "✅ Distribution ready in dist/"
     @echo "   Run: dist\bin\beamtalk.exe repl"

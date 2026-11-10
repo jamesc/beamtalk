@@ -140,6 +140,7 @@ pub(crate) fn handle_inline_class_definition(
         // to `class_send` (correct, just not the direct-call fast path).
         let trailing_result = beamtalk_repl::codegen::generate_repl_expressions_surfacing_verifier(
             &trailing_exprs,
+            &module.pipeline_sends,
             expr_module_name,
             class_module_index.clone(),
             analysis.as_ref().map(|a| &a.class_hierarchy),

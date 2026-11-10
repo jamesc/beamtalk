@@ -72,12 +72,27 @@
 //! position lookups, the `unnecessary_parens` lint, the raw parse and the
 //! module a driver hands to codegen keep the parenthesised tree.
 //! It is idempotent.
+//!
+//! # Unary loops (BT-4313)
+//!
+//! The same pass gives the unary loops one canonical form: `[c] whileTrue`
+//! and `[c] whileFalse`, whose literal block receiver is both condition and
+//! body, become `[c] whileTrue: []` and `[c] whileFalse: []` — the keyword loop
+//! with an empty body ([`desugar_unary_loops`]). Analysis and codegen then
+//! classify, thread and lower one loop shape, not two that must agree. The
+//! body block the pass adds has a zero-width span at the end of the send,
+//! which no parsed block has (a `[]` literal spans its brackets), so
+//! [`restore_operand_parens`] recognises it ([`written_unary_loop`]) and puts
+//! the unary send back without a record, and diagnostics name the selector as
+//! written. Only a parameterless literal block receiver is rewritten: any
+//! other receiver is an ordinary send of `whileTrue`/`whileFalse` (`Block`
+//! defines both for those).
 
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
-use super::{Expression, MethodDefinition, Module};
+use super::{Block, Expression, KeywordPart, MessageSelector, MethodDefinition, Module};
 use crate::ast_walker::{walk_expression, walk_expression_mut};
 use crate::span::Span;
 
@@ -194,7 +209,8 @@ fn visit_operands_mut(expr: &mut Expression, visit: &mut dyn FnMut(&mut Expressi
     visit_operands_with!(walk_expression_mut, expr, visit, mut);
 }
 
-/// Strips redundant parentheses from every send operand in `module`.
+/// Strips redundant parentheses from every send operand in `module`, and
+/// canonicalises its unary loops ([`desugar_unary_loops`]).
 ///
 /// See the module documentation for exactly which positions are peeled.
 /// Idempotent: a second run changes nothing.
@@ -203,7 +219,7 @@ pub fn peel_operand_parens(module: &mut Module) {
 }
 
 /// `module` with every redundant send-operand wrapper removed: borrowed as it
-/// is when it is already canonical (one [`has_parenthesised_operand`] scan),
+/// is when it is already canonical (one [`needs_normalising`] scan),
 /// otherwise a peeled clone.
 ///
 /// The one entry for a reader that holds a parsed module by shared reference
@@ -212,7 +228,7 @@ pub fn peel_operand_parens(module: &mut Module) {
 /// from the result names the same source text in the parsed module.
 #[must_use]
 pub fn normalised(module: &Module) -> Cow<'_, Module> {
-    if has_parenthesised_operand(module) {
+    if needs_normalising(module) {
         let mut owned = module.clone();
         peel_operand_parens(&mut owned);
         Cow::Owned(owned)
@@ -232,8 +248,9 @@ pub fn peel_operand_parens_recording(module: &mut Module) -> PeeledParens {
 }
 
 /// Strips redundant parentheses from every send operand in `expr`'s tree
-/// (including nested blocks), leaving `expr` itself as it is, and adds what
-/// it removed to `record`.
+/// (including nested blocks; a wrapper around `expr` itself is kept), adds
+/// what it removed to `record`, and canonicalises every unary loop in the
+/// tree, `expr` itself included ([`desugar_unary_loops`]).
 ///
 /// The expression-level entry of [`peel_operand_parens_recording`], for
 /// callers that hold module-level expressions rather than a module (the
@@ -244,12 +261,185 @@ pub fn peel_operand_parens_expr_recording(expr: &mut Expression, record: &mut Pe
 
 fn peel_in_scope(expr: &mut Expression, scope: PeelScope, record: &mut PeeledParens) {
     visit_operands_mut(expr, &mut |operand| peel_operand(operand, scope, record));
+    // After the peel, so `([c]) whileTrue` has its literal receiver.
+    desugar_unary_loops(expr);
+}
+
+/// The unary loop selectors and the keyword loop each one is
+/// (see the module documentation's "Unary loops").
+const UNARY_LOOPS: [(&str, &str); 2] = [("whileTrue", "whileTrue:"), ("whileFalse", "whileFalse:")];
+
+/// The keyword selector `node` canonicalises to when it is a unary loop send
+/// with a literal block receiver (parentheses around it included, which the
+/// peel removes first), or `None`.
+fn unary_loop_keyword(node: &Expression) -> Option<&'static str> {
+    let Expression::MessageSend {
+        receiver,
+        selector: MessageSelector::Unary(name),
+        arguments,
+        is_cast: false,
+        ..
+    } = node
+    else {
+        return None;
+    };
+    // A receiver with parameters is no loop condition (the keyword loop never
+    // checks the condition's arity): it stays an ordinary send, which
+    // `Block>>whileTrue` rejects.
+    if !arguments.is_empty()
+        || !matches!(receiver.unwrap_parens(), Expression::Block(b) if b.parameters.is_empty())
+    {
+        return None;
+    }
+    UNARY_LOOPS
+        .iter()
+        .find(|(unary, _)| name == unary)
+        .map(|&(_, keyword)| keyword)
+}
+
+/// The span of the empty body block [`desugar_unary_loops`] gives the unary
+/// loop send spanning `send`: zero-width, at the send's end.
+fn desugared_body_span(send: Span) -> Span {
+    Span::new(send.end(), send.end())
+}
+
+/// Rewrites every unary loop send in `expr`'s tree (`[c] whileTrue`) as its
+/// keyword loop with an empty body (`[c] whileTrue: []`), the body's span
+/// marking it as added ([`desugared_body_span`]). Idempotent.
+pub fn desugar_unary_loops(expr: &mut Expression) {
+    walk_expression_mut(expr, &mut |node| {
+        let Some(keyword) = unary_loop_keyword(node) else {
+            return;
+        };
+        if let Expression::MessageSend {
+            selector,
+            arguments,
+            span,
+            ..
+        } = node
+        {
+            let body = desugared_body_span(*span);
+            *selector = MessageSelector::Keyword(vec![KeywordPart::new(keyword, body)]);
+            arguments.push(Expression::Block(Block::new(Vec::new(), Vec::new(), body)));
+        }
+    });
+}
+
+/// The unary selector a send of `selector` with `arguments` was written as,
+/// when it is a keyword loop [`desugar_unary_loops`] produced: its one
+/// argument is the empty, parameterless, zero-width block the pass adds (no
+/// parsed block is zero-width: a `[]` literal spans its brackets). `None` for
+/// any other send, a written `[c] whileTrue: []` included.
+///
+/// The one test for "this loop was written unary": the restore below and the
+/// diagnostics that name the selector as written read it.
+#[must_use]
+pub fn written_unary_loop(
+    selector: &MessageSelector,
+    arguments: &[Expression],
+) -> Option<&'static str> {
+    let MessageSelector::Keyword(parts) = selector else {
+        return None;
+    };
+    let [part] = parts.as_slice() else {
+        return None;
+    };
+    let &(unary, _) = UNARY_LOOPS.iter().find(|(_, k)| part.keyword == *k)?;
+    matches!(
+        arguments,
+        [Expression::Block(b)] if b.body.is_empty() && b.parameters.is_empty() && b.span.is_empty()
+    )
+    .then_some(unary)
+}
+
+/// Whether `method`'s body holds a loop [`desugar_unary_loops`] produced
+/// ([`written_unary_loop`]): the cheap scan that lets a reflection caller
+/// with nothing peeled skip the restoring clone.
+#[must_use]
+pub fn method_has_desugared_unary_loop(method: &MethodDefinition) -> bool {
+    let mut found = false;
+    for stmt in &method.body {
+        if found {
+            break;
+        }
+        walk_expression(&stmt.expression, &mut |node| {
+            if found {
+                return;
+            }
+            if let Expression::MessageSend {
+                selector,
+                arguments,
+                ..
+            } = node
+            {
+                found = found || written_unary_loop(selector, arguments).is_some();
+            }
+        });
+    }
+    found
+}
+
+/// The inverse of [`desugar_unary_loops`] on `expr`'s tree: a keyword loop
+/// whose body is the empty block the pass added ([`written_unary_loop`])
+/// becomes the unary send again.
+fn restore_unary_loops(expr: &mut Expression) {
+    walk_expression_mut(expr, &mut |node| {
+        let Expression::MessageSend {
+            selector,
+            arguments,
+            ..
+        } = node
+        else {
+            return;
+        };
+        if let Some(unary) = written_unary_loop(selector, arguments) {
+            arguments.clear();
+            *selector = MessageSelector::Unary(unary.into());
+        }
+    });
+}
+
+/// [`restore_unary_loops`] over every root of `module`: the normalised tree
+/// with only its operand parentheses peeled, for a reader that indexes sends
+/// by the selector as written (the send index, `method_source_walker`).
+pub fn restore_unary_loops_in_module(module: &mut Module) {
+    for_each_root_mut(module, &mut |_, root| restore_unary_loops(root));
+}
+
+/// The span of the first unary loop send in `expr`'s tree that
+/// [`desugar_unary_loops`] would rewrite, or `None`.
+fn expr_first_unary_loop(expr: &Expression) -> Option<Span> {
+    let mut found = None;
+    walk_expression(expr, &mut |node| {
+        if found.is_none() && unary_loop_keyword(node).is_some() {
+            found = Some(node.span());
+        }
+    });
+    found
+}
+
+/// `true` if the canonicalising pass ([`peel_operand_parens`]) would change
+/// `module`: a parenthesised send operand or a unary loop. The cheap scan a
+/// caller holding a shared reference runs before cloning.
+#[must_use]
+pub fn needs_normalising(module: &Module) -> bool {
+    let mut found = false;
+    for_each_root(module, &mut |_, root| {
+        found = found || expr_needs_normalising(root);
+    });
+    found
+}
+
+/// [`needs_normalising`] for one expression tree (the REPL entries).
+#[must_use]
+pub fn expr_needs_normalising(expr: &Expression) -> bool {
+    expr_has_parenthesised_operand(expr) || expr_first_unary_loop(expr).is_some()
 }
 
 /// Puts back, in `method`'s body, the operand parentheses `peeled` recorded
 /// removing from it (its own [`PeelScope::of_method`] scope): the inverse of
 /// the peel on the method's tree, so `unparse_method` of the result is the
-/// method's text as written. A no-op when nothing was recorded. Idempotent.
+/// method's text as written, unary loops included. Idempotent.
 pub fn restore_operand_parens(method: &mut MethodDefinition, peeled: &PeeledParens) {
     restore_operand_parens_in_scope(method, peeled, PeelScope::of_method(method));
 }
@@ -262,6 +452,11 @@ pub fn restore_operand_parens_in_scope(
     peeled: &PeeledParens,
     scope: PeelScope,
 ) {
+    // The inverse of the peel, in reverse order: the unary loops (which need
+    // no record), then the operand parentheses.
+    for stmt in &mut method.body {
+        restore_unary_loops(&mut stmt.expression);
+    }
     if peeled.is_empty() {
         return;
     }
@@ -272,15 +467,16 @@ pub fn restore_operand_parens_in_scope(
     }
 }
 
-/// `true` if [`peel_operand_parens`] would change `module`: a cheap scan so
-/// callers holding a shared reference can skip cloning a module that is
-/// already canonical.
+/// `true` if `module` has a send operand [`peel_operand_parens`] would
+/// unwrap. Not the whole pass: it ignores the unary loops the pass also
+/// canonicalises. To decide whether to clone, use [`needs_normalising`].
 #[must_use]
 pub fn has_parenthesised_operand(module: &Module) -> bool {
     first_parenthesised_operand(module).is_some()
 }
 
-/// `true` if [`peel_operand_parens_expr_recording`] would change `expr`.
+/// `true` if `expr` has a send operand [`peel_operand_parens_expr_recording`]
+/// would unwrap (unary loops not included: see [`expr_needs_normalising`]).
 #[must_use]
 pub fn expr_has_parenthesised_operand(expr: &Expression) -> bool {
     expr_first_parenthesised_operand(expr).is_some()
@@ -315,7 +511,8 @@ pub fn expr_first_parenthesised_operand(expr: &Expression) -> Option<Span> {
 /// The normalisation invariant (BT-4232), for tests: panics unless every send
 /// operand of `module` is canonical — no `Parenthesized` wrapper other than
 /// the ones [`peel_operand_parens`] deliberately keeps (`(super)`, and the
-/// cascade's folded first send, which is not an operand).
+/// cascade's folded first send, which is not an operand) — and no unary loop
+/// the pass canonicalises is left (`[c] whileTrue`, BT-4313).
 ///
 /// Codegen and analysis match send operands directly, without peeling, on
 /// the strength of this invariant. Codegen's module entry and the REPL
@@ -326,9 +523,15 @@ pub fn expr_first_parenthesised_operand(expr: &Expression) -> Option<Span> {
 ///
 /// # Panics
 ///
-/// When a send operand of `module` is still parenthesised; the message names
-/// `context` (the entry that broke the invariant) and the operand's span.
+/// When a send operand of `module` is still parenthesised, or a unary loop
+/// was not canonicalised; the message names `context` (the entry that broke
+/// the invariant) and the node's span.
 pub fn assert_operands_normalised(module: &Module, context: &str) {
+    let mut unary_loop = None;
+    for_each_root(module, &mut |_, root| {
+        unary_loop = unary_loop.or_else(|| expr_first_unary_loop(root));
+    });
+    assert_no_unary_loop(unary_loop, context);
     if let Some(span) = first_parenthesised_operand(module) {
         panic!(
             "{context}: send operand at {}..{} is still `Parenthesized`; \
@@ -343,8 +546,10 @@ pub fn assert_operands_normalised(module: &Module, context: &str) {
 ///
 /// # Panics
 ///
-/// When a send operand in `expressions` is still parenthesised.
+/// When a send operand in `expressions` is still parenthesised, or a unary
+/// loop was not canonicalised.
 pub fn assert_expr_operands_normalised(expressions: &[Expression], context: &str) {
+    assert_no_unary_loop(expressions.iter().find_map(expr_first_unary_loop), context);
     if let Some(span) = expressions
         .iter()
         .find_map(expr_first_parenthesised_operand)
@@ -352,6 +557,18 @@ pub fn assert_expr_operands_normalised(expressions: &[Expression], context: &str
         panic!(
             "{context}: send operand at {}..{} is still `Parenthesized`; \
              run `ast::normalize::peel_operand_parens_expr` before this point (BT-4059)",
+            span.start(),
+            span.end()
+        );
+    }
+}
+
+/// Panics naming `context` when `unary_loop` (a unary loop send's span) is set.
+fn assert_no_unary_loop(unary_loop: Option<Span>, context: &str) {
+    if let Some(span) = unary_loop {
+        panic!(
+            "{context}: unary loop send at {}..{} was not canonicalised; \
+             run `ast::normalize::peel_operand_parens` before this point (BT-4313)",
             span.start(),
             span.end()
         );
@@ -858,5 +1075,68 @@ Protocol define: P
         other.record(key, vec![Span::new(3, 8)]);
         record.extend(other);
         assert_eq!(record.layers_of(key.0, key.1), Some(&vec![Span::new(4, 7)]));
+    }
+
+    // --- BT-4313: unary loops ---
+
+    const UNARY_LOOP_SOURCE: &str = "Object subclass: A
+  t => [x := x + 1. x < 3] whileTrue
+  f => ([x foo]) whileFalse
+  n => [[y bar] whileTrue. y < 2] whileFalse. z := [false] whileTrue
+  k => [x < 3] whileTrue: []
+  o => b whileTrue
+  p => [:x | x] whileTrue
+";
+
+    #[test]
+    fn unary_loops_become_the_keyword_loop_with_an_empty_body() {
+        let module = peeled(UNARY_LOOP_SOURCE);
+        assert!(!needs_normalising(&module));
+        let methods = &module.classes[0].methods;
+        let text = |i: usize| crate::unparse::unparse_method(&methods[i]);
+        assert!(text(0).contains("whileTrue: []"), "{}", text(0));
+        assert!(text(1).contains("[x foo] whileFalse: []"), "{}", text(1));
+        assert_eq!(text(2).matches(": []").count(), 3, "{}", text(2));
+        // A non-literal receiver is an ordinary send.
+        assert!(text(4).trim_end().ends_with("b whileTrue"), "{}", text(4));
+        // So is a receiver with parameters: it is no loop condition.
+        assert!(
+            text(5).trim_end().ends_with("[:x | x] whileTrue"),
+            "{}",
+            text(5)
+        );
+        let mut unary = 0;
+        walk_expression(&methods[0].body[0].expression, &mut |node| {
+            if let Expression::MessageSend {
+                arguments, span, ..
+            } = node
+            {
+                if let [Expression::Block(body)] = arguments.as_slice() {
+                    assert_eq!(body.span, desugared_body_span(*span));
+                    unary += 1;
+                }
+            }
+        });
+        assert_eq!(unary, 1);
+    }
+
+    #[test]
+    fn unary_loops_are_detected_and_the_pass_is_idempotent() {
+        assert!(needs_normalising(&parse_bt("[x] whileTrue")));
+        assert!(needs_normalising(&parse_bt("[x] whileFalse")));
+        assert!(!needs_normalising(&parse_bt(
+            "[x] whileTrue: []\nb whileTrue"
+        )));
+        let once = peeled(UNARY_LOOP_SOURCE);
+        let mut twice = once.clone();
+        peel_operand_parens(&mut twice);
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn restore_gives_back_unary_loops_as_written() {
+        for (restored, raw) in restored_and_raw(UNARY_LOOP_SOURCE) {
+            assert_eq!(restored, raw);
+        }
     }
 }

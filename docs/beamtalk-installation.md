@@ -5,11 +5,14 @@ plus a VS Code extension for the integrated development experience.
 
 ## Requirements
 
-- **Erlang/OTP 27+** — the BEAM runtime that Beamtalk compiles to.
+- **Erlang/OTP 28+** — the BEAM runtime that Beamtalk compiles to. The supported
+  window is OTP 28–29 ([`otp-support.toml`](https://github.com/jamesc/beamtalk/blob/main/otp-support.toml));
+  newer majors run but are untested, and OTP 27 or older cannot load Beamtalk's
+  compiled runtime.
   - macOS: `brew install erlang`
   - Ubuntu/Debian: `sudo apt install erlang`
   - Windows: download from [erlang.org/downloads](https://www.erlang.org/downloads)
-  - Any platform via [asdf](https://asdf-vm.com/): `asdf plugin add erlang && asdf install erlang 27.0`
+  - Any platform via [asdf](https://asdf-vm.com/): `asdf plugin add erlang && asdf install erlang 29.0`
 - **VS Code 1.85+** — required for the extension (optional for CLI-only use).
 
 ## Quick install (Linux and macOS)
@@ -141,7 +144,9 @@ beamtalk doctor
 This checks your environment and reports any issues with clear instructions
 on how to fix them. Common problems:
 
-- **Wrong OTP version** — Beamtalk requires Erlang/OTP 27 or later.
+- **Wrong OTP version** — Beamtalk requires Erlang/OTP 28 or later. On an older
+  OTP, `beamtalk doctor` reports `Erlang/OTP 27 is unsupported — Beamtalk needs OTP 28+`,
+  and `beamtalk build`, `repl` and `run` stop with the same message. Upgrade Erlang.
 - **Missing `erlc`** — usually installed alongside `erl`; reinstall Erlang if missing.
 - **Missing stdlib (development)** — run `just build` from the repository root.
 - **Missing stdlib (installed)** — reinstall Beamtalk via the install script or set `BEAMTALK_RUNTIME_DIR` to point to a valid sysroot.
