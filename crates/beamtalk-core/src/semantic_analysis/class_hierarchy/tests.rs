@@ -4615,3 +4615,25 @@ fn runs_class_method_in_caller_follows_published_explicit_new1_verdict() {
     assert!(h.runs_class_method_in_caller("Fwd", "withAll:"));
     assert!(!h.runs_class_method_in_caller("Fwd", "new"));
 }
+
+/// BT-4625: a forwarding `new:` whose superclass lives in a sibling file
+/// answers `false` right after `build` (unknown ancestor), and `true` once the
+/// parent is injected via `add_from_beam_meta` and the verdict re-published.
+#[test]
+fn explicit_new1_verdict_republished_after_cross_file_injection() {
+    let parse = |src: &str| {
+        let tokens = crate::source_analysis::lex_with_eof(src);
+        crate::source_analysis::parse(tokens).0
+    };
+    let base = parse("Object subclass: Base\n");
+    let fwd = parse(
+        "Base subclass: Fwd\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: xs\n",
+    );
+    let (h, _) = ClassHierarchy::build(&fwd);
+    let mut h = h.expect("hierarchy");
+    assert!(!h.runs_class_method_in_caller("Fwd", "new:"));
+    assert!(h.add_from_beam_meta(ClassHierarchy::extract_class_infos(&base)));
+    h.publish_explicit_new1_verdicts(&fwd);
+    assert!(h.get_class("Fwd").unwrap().in_caller_new1);
+    assert!(h.runs_class_method_in_caller("Fwd", "new:"));
+}
