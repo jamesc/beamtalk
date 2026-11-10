@@ -364,6 +364,12 @@ pub fn desugar_unary_loops(expr: &mut Expression) {
 /// Rewrites the literal `[b] repeat` send `node` ([`is_literal_repeat`]) as
 /// `[true] whileTrue: [b]`. The added condition block and its keyword are
 /// zero-width at the start of the send ([`written_repeat`] reads that).
+///
+/// The block and its `true` share that one span. Span-keyed maps hold the
+/// block's entry: the type checker records a node after its children, so the
+/// block's type replaces its statement's (pinned by
+/// `repeat_condition_block_keeps_its_block_type`), and no reader looks up the
+/// added `true` itself (codegen lowers it as the literal atom).
 fn desugar_repeat(node: &mut Expression) {
     let Expression::MessageSend {
         receiver,
@@ -1329,6 +1335,32 @@ Protocol define: P
         let mut twice = once.clone();
         peel_operand_parens(&mut twice);
         assert_eq!(once, twice);
+    }
+
+    /// The added condition block and its `true` share one zero-width span;
+    /// the type map holds the block's type there, the same type a written
+    /// `[true]` condition gets.
+    #[test]
+    fn repeat_condition_block_keeps_its_block_type() {
+        use crate::semantic_analysis::ClassHierarchy;
+        use crate::semantic_analysis::type_checker::infer_types;
+        let condition_type = |source: &str| {
+            let module = peeled(source);
+            let types = infer_types(&module, &ClassHierarchy::with_builtins(), None);
+            let Expression::MessageSend { receiver, .. } = first_expr(&module) else {
+                panic!("expected a send: {source}");
+            };
+            types.get(receiver.span()).cloned()
+        };
+        let canonical = condition_type("[3 printString] repeat");
+        assert!(
+            canonical.is_some(),
+            "no type recorded for the condition block"
+        );
+        assert_eq!(
+            canonical,
+            condition_type("[true] whileTrue: [3 printString]")
+        );
     }
 
     #[test]

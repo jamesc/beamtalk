@@ -1926,7 +1926,9 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
             }
         }
         MessageSelector::Unary(_) => {
-            if is_state_threading_unary_selector(&sel) || sel == "repeat" {
+            // A literal `[b] repeat` reaches analysis as the
+            // `[true] whileTrue: [b]` it is canonicalised to (BT-4589).
+            if is_state_threading_unary_selector(&sel) {
                 blocks.extend(receiver_block);
                 LocalThreadingFamily::Loop
             } else if is_state_threaded_block_receiver(&sel) {
@@ -5468,8 +5470,10 @@ mod tests {
         use LocalThreadingFamily::{BlockValue, Conditional, Exception, Fold, Lookup, Loop, TryDo};
         for (src, family, blocks) in [
             ("[i < 3] whileTrue: [i := i + 1]", Loop, 2),
-            ("[i < 3] whileTrue", Loop, 1),
-            ("[i := i + 1] repeat", Loop, 1),
+            // Analysis sees the canonical loop shapes (`ast::normalize`): the
+            // unary loop gains an empty body, `repeat` a `[true]` condition.
+            ("[i < 3] whileTrue", Loop, 2),
+            ("[i := i + 1] repeat", Loop, 2),
             ("3 timesRepeat: [i := i + 1]", Loop, 1),
             ("1 to: 3 do: [:k | i := k]", Loop, 1),
             ("1 to: 9 by: 2 do: [:k | i := k]", Loop, 1),
@@ -5489,7 +5493,8 @@ mod tests {
             ("d at: #k ifAbsentPut: [i := 1]", Lookup, 1),
             ("Result tryDo: [i := 1]", TryDo, 1),
         ] {
-            let expr = parse_first_expr(src);
+            let mut expr = parse_first_expr(src);
+            crate::ast::normalize::desugar_unary_loops(&mut expr);
             let construct =
                 local_threading_construct(&expr).unwrap_or_else(|| panic!("{src}: not recognized"));
             assert_eq!(construct.family, family, "{src}");

@@ -118,8 +118,8 @@ impl fmt::Display for MethodContext {
 /// places.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConstructKind {
-    /// `whileTrue:`, `whileFalse:`, `repeat` and the unary `whileTrue`/
-    /// `whileFalse`.
+    /// `whileTrue:`, `whileFalse:` and the unary `whileTrue`/`whileFalse`
+    /// (a literal `repeat` is canonicalised to `whileTrue:`, BT-4589).
     Loop,
     /// `to:do:`, `to:by:do:`, `timesRepeat:` and the unary `timesRepeat`.
     CountedLoop,
@@ -167,7 +167,7 @@ impl ConstructKind {
     fn of(selector: &str, handler_writes: bool) -> Self {
         use crate::state_threading_selectors::{is_exception_selector, is_try_do_selector};
         match selector {
-            "whileTrue:" | "whileFalse:" | "whileTrue" | "whileFalse" | "repeat" => Self::Loop,
+            "whileTrue:" | "whileFalse:" | "whileTrue" | "whileFalse" => Self::Loop,
             "to:do:" | "to:by:do:" | "timesRepeat:" | "timesRepeat" => Self::CountedLoop,
             "do:" => Self::Do,
             "keysAndValuesDo:" | "doWithKey:" => Self::KeyedDo,
