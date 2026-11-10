@@ -67,7 +67,8 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     ensure_pending_errors_table/0,
     record_class_pid/2,
     class_name_for_pid/1,
-    forget_class_pids/2,
+    forget_class_pids/3,
+    is_graceful_stop/1,
     ensure_loaded_classes_table/0,
     record_loaded_class/2,
     forget_loaded_class/2,
@@ -914,7 +915,10 @@ class_name_for_pid(Pid) ->
 %% Keep only the newest `?MAX_DEAD_CLASS_PIDS` dead local rows of `ClassName`,
 %% so a class that keeps crashing on a long-running node does not grow
 %% `beamtalk_class_pids` without bound. Local pids order by creation in Erlang
-%% term order, so the smallest are the oldest.
+%% term order in practice (the pid counter only grows and does not wrap on
+%% 64-bit OTP), so the smallest are the oldest. The language does not promise
+%% that order, so the pruning is best-effort: a wrong order only keeps an older
+%% row in place of a newer one.
 -spec prune_dead_class_pids(class_name()) -> ok.
 prune_dead_class_pids(ClassName) ->
     try
@@ -933,14 +937,36 @@ prune_dead_class_pids(ClassName) ->
     end.
 
 -doc """
-Drop the reverse-index rows of a class that is shutting down gracefully:
-`Pid`'s own row and every dead local incarnation of `ClassName` that
-`restart_class/1` kept for crash recovery (BT-4552).
-
-Called from `beamtalk_object_class:terminate/2`. Rows of live pids are left
-alone, so a replacement process already recorded under the same name is not
-clobbered (the reason `forget_loaded_class/2` guards on `self()`).
+Is `Reason` a deliberate stop of a class process (`removeFromSystem`'s
+`gen_server:stop/1`, a supervisor shutdown) rather than a crash? The one
+definition shared by `forget_class_pids/3` and `beamtalk_class_monitor`'s
+no-restart decision.
 """.
+-spec is_graceful_stop(term()) -> boolean().
+is_graceful_stop(normal) -> true;
+is_graceful_stop(shutdown) -> true;
+is_graceful_stop({shutdown, _}) -> true;
+is_graceful_stop(_) -> false.
+
+-doc """
+Drop the reverse-index rows of a class process terminating with `Reason`, when
+that is a graceful stop (`is_graceful_stop/1`): `Pid`'s own row and every dead
+local incarnation of `ClassName` that `restart_class/1` kept for crash recovery
+(BT-4552).
+
+Called from `beamtalk_object_class:terminate/2`, which gen_server also runs
+when a callback raises. That is a crash the monitor restarts, so every row is
+kept for recovery, exactly as for an untrappable kill. Rows of live pids are
+left alone, so a replacement process already recorded under the same name is
+not clobbered (the reason `forget_loaded_class/2` guards on `self()`).
+""".
+-spec forget_class_pids(pid(), class_name(), term()) -> ok.
+forget_class_pids(Pid, ClassName, Reason) ->
+    case is_graceful_stop(Reason) of
+        true -> forget_class_pids(Pid, ClassName);
+        false -> ok
+    end.
+
 -spec forget_class_pids(pid(), class_name()) -> ok.
 forget_class_pids(Pid, ClassName) ->
     try
@@ -1409,7 +1435,7 @@ restart_class(ClassName) ->
             %% `Class 'unknown' not found`. Only the newest
             %% `?MAX_DEAD_CLASS_PIDS` dead rows are kept
             %% (`prune_dead_class_pids/1`), and a graceful stop reclaims the
-            %% rest (`forget_class_pids/2`).
+            %% rest (`forget_class_pids/3`).
             prune_dead_class_pids(ClassName),
             case beamtalk_object_class:start(ClassName, ClassInfo) of
                 {ok, NewPid} ->

@@ -2085,3 +2085,34 @@ bt4552_prune_dead_class_pids_caps_dead_rows_test() ->
     after
         ets:match_delete(beamtalk_class_pids, {'_', Name})
     end.
+
+%% BT-4552: terminate/2 also runs on a callback exception (a crash the monitor
+%% restarts), so only a graceful stop reason reclaims the reverse-index rows.
+bt4552_forget_class_pids_only_on_graceful_stop_test() ->
+    beamtalk_class_registry:ensure_pid_table(),
+    Name = 'BT4552ForgetGraceful',
+    DeadPid = spawn(fun() -> ok end),
+    MRef = monitor(process, DeadPid),
+    receive
+        {'DOWN', MRef, process, DeadPid, _} -> ok
+    end,
+    Self = self(),
+    beamtalk_class_registry:record_class_pid(DeadPid, Name),
+    beamtalk_class_registry:record_class_pid(Self, Name),
+    try
+        ok = beamtalk_class_registry:forget_class_pids(Self, Name, {badarg, []}),
+        ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(DeadPid)),
+        ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(Self)),
+        ok = beamtalk_class_registry:forget_class_pids(Self, Name, {shutdown, removed}),
+        ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(DeadPid)),
+        ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(Self))
+    after
+        ets:match_delete(beamtalk_class_pids, {'_', Name})
+    end.
+
+bt4552_is_graceful_stop_test() ->
+    ?assert(beamtalk_class_registry:is_graceful_stop(normal)),
+    ?assert(beamtalk_class_registry:is_graceful_stop(shutdown)),
+    ?assert(beamtalk_class_registry:is_graceful_stop({shutdown, x})),
+    ?assertNot(beamtalk_class_registry:is_graceful_stop(killed)),
+    ?assertNot(beamtalk_class_registry:is_graceful_stop(noproc)).

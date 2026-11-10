@@ -227,16 +227,13 @@ do_watch(ClassName, Pid, #state{watched = Watched, refs = Refs} = State) ->
             }
     end.
 
-is_deliberate_stop(normal) -> true;
-is_deliberate_stop(shutdown) -> true;
-is_deliberate_stop({shutdown, _}) -> true;
 %% The pid was already dead when the watch cast was processed (e.g. defined
 %% and immediately removed in the REPL). We never saw it alive, so this is
 %% not a crash to recover from — resurrecting here would defeat a deliberate
 %% stop that raced the cast. A genuine crash in that window is still covered
 %% by lazy class_send_with_recovery on the next send.
 is_deliberate_stop(noproc) -> true;
-is_deliberate_stop(_) -> false.
+is_deliberate_stop(Reason) -> beamtalk_class_registry:is_graceful_stop(Reason).
 
 restart_within_budget(
     ClassName,
