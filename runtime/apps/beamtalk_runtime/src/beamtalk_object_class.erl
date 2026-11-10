@@ -1166,10 +1166,9 @@ init({ClassName, ClassInfo}) ->
     %% previous incarnation of this class process — a crash keeps the class's
     %% metadata (an untrappable kill skips terminate/2, and terminate/2 keeps
     %% it for a callback exception; see module_name_safe/1's doc), so the funs
-    %% table rows
-    %% from before the crash can otherwise survive into the restarted process
-    %% even though sync_identity/6 above just created a fresh row with the gate
-    %% off. Mirrors the reload path in apply_class_info/2. A no-op for a class
+    %% table rows from before the crash can otherwise survive into the
+    %% restarted process even though sync_identity/6 above just created a
+    %% fresh row with the gate off. Mirrors the reload path in apply_class_info/2. A no-op for a class
     %% that never crashed (nothing to clear).
     beamtalk_class_metadata:delete_class_method_funs(ClassName),
 

@@ -1373,8 +1373,9 @@ Called from `beamtalk_object_class:terminate/2`, mirroring
 `forget_loaded_class/2`: only rows still pointing at `Pid` are removed, so a
 dying old process cannot clobber a row a replacement process already recorded
 for the same class name. On a crash (an untrappable kill, or a callback
-exception: BT-4622) this is not called, so a stale row can linger — harmless, since `classes_backing_module/1`'s caller
-re-verifies each class name via a live process lookup before use, and
+exception: BT-4622) this is not called, so a stale row can linger — harmless,
+since `classes_backing_module/1`'s caller re-verifies each class name via a
+live process lookup before use, and
 `record_backing_module_entry/3` clears any stale row unconditionally the next
 time the class (re)registers.
 """.
