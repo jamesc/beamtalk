@@ -86,5 +86,24 @@ jobs:
           key: profile-${{ hashFiles('Cargo.toml') }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # BT-4634: fold_acc_shape_agreement executes its programs (and compares
+      # them with the ForceStateAccFold oracle) only when the Erlang runtime
+      # and compiled stdlib exist; without them it silently degrades to
+      # compile-only. Build them so the agreement check really runs.
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
+            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
+
+      - name: Build Erlang runtime and stdlib
+        run: just build-stdlib
+
       - name: Rust corpus tier (state-threading agreement and corpus proofs)
         run: just test-corpus count:${{ matrix.shard }}/2
