@@ -184,6 +184,23 @@ Object subclass: Parser
 }
 
 #[test]
+fn a_supertyped_receiver_with_an_overriding_subclass_keeps_the_generic_path() {
+    // `b :: Base` may hold a `Sub`, whose own `then:` answers a `Sub`, not
+    // the block's result. So `Object`'s rule must not type this send.
+    let source = "\
+Object subclass: Base
+
+Base subclass: Sub
+  then: aBlock => self
+
+Object subclass: Probe
+  run: b :: Base => b then: [:x | 42]
+";
+    let (ty, diags) = probe_return(source, "run:");
+    assert_ne!(known_name(ty.as_ref()), Some("Integer"), "{ty:?} {diags:?}");
+}
+
+#[test]
 fn a_dynamic_receiver_keeps_the_generic_path() {
     // An untyped parameter may be a class with its own `then:`, so neither
     // the block parameter nor the result is typed from `Object`'s method.

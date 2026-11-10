@@ -244,14 +244,30 @@ impl TypeChecker {
     /// so it applies only when every member of the receiver's type resolves
     /// `then:` to `Object`. A `Dynamic` receiver, a protocol type, or a
     /// class that overrides `then:` keeps the generic send path.
+    ///
+    /// The receiver's static class is not enough on its own: a value typed
+    /// as a superclass may at run time be an instance of a known subclass
+    /// that overrides `then:` (`TimeoutProxy` under `Actor`, say). So the
+    /// rule also requires every known subclass to resolve `then:` to
+    /// `Object`.
     pub(in crate::semantic_analysis::type_checker) fn then_resolves_to_object(
         receiver_ty: &InferredType,
         hierarchy: &ClassHierarchy,
     ) -> bool {
         match receiver_ty {
-            InferredType::Known { class_name, .. } => hierarchy
-                .find_method(super::method_resolution_class(class_name), THEN_SELECTOR)
-                .is_some_and(|m| m.defined_in.as_str() == WellKnownClass::Object.as_str()),
+            InferredType::Known { class_name, .. } => {
+                let resolves_to_object = |class: &str| {
+                    hierarchy
+                        .find_method(class, THEN_SELECTOR)
+                        .is_some_and(|m| m.defined_in.as_str() == WellKnownClass::Object.as_str())
+                };
+                let class = super::method_resolution_class(class_name);
+                resolves_to_object(class)
+                    && hierarchy
+                        .all_subclasses(class)
+                        .iter()
+                        .all(|sub| resolves_to_object(sub))
+            }
             InferredType::Union { members, .. } => {
                 !members.is_empty()
                     && members

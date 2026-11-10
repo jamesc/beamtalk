@@ -139,11 +139,12 @@ ProtoObject subclass: Object
   /// `then:` (a promise, say) keeps it. Because it is a message, on an actor
   /// receiver the block runs in the actor's process, so a block that sends
   /// back to the calling actor (or, through `TimeoutProxy`, to the proxy)
-  /// fails with `deadlock_detected` or a call timeout; on a class receiver whose class declares class variables it
-  /// runs in the class process (ADR 0142). A block passed to it that assigns
-  /// a captured local is an escaping block (ADR 0133), a compile error: bind
-  /// the value to a temp local instead. `TimeoutProxy` forwards `then:` to
-  /// its target, so the target's own `then:` runs if it has one.
+  /// fails with `deadlock_detected` or a call timeout; on a class receiver
+  /// whose class declares class variables it runs in the class process
+  /// (ADR 0142). A block passed to it that assigns a captured local is an
+  /// escaping block (ADR 0133), a compile error: bind the value to a temp
+  /// local instead. `TimeoutProxy` forwards `then:` to its target, so the
+  /// target's own `then:` runs if it has one.
   ///
   /// ## Examples
   /// ```beamtalk
