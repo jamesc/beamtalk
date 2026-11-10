@@ -270,11 +270,10 @@ fn awkward_operands_round_trip() {
 // by, so `a |> foo bar` and `a foo |> bar` compare equal); comparing the
 // text byte for byte can. Each fixture is canonical: fmt and every method's
 // reflected source must reproduce it exactly. Multi-message stages and heads
-// make sure a `|>` printed before the wrong send of a stage fails.
-//
-// Not yet covered: an unparenthesised pipeline as a string-interpolation
-// segment, a `match:` arm body or a collection element. Those sites do not
-// parse `|>` yet (BT-4516); the parenthesised forms are covered.
+// make sure a `|>` printed before the wrong send of a stage fails. The sites
+// that take a bare pipeline (BT-4516: string interpolation, `match:` arm
+// bodies, map values, list/array/tuple elements) are covered both bare and
+// parenthesised.
 
 /// Methods written with `|>`, in canonical layout.
 const PIPELINE_CLASS: &str = "\
@@ -351,6 +350,19 @@ Object subclass: Piper
   interpolated: x => \"a {(x |> foo)} b\"
 
   inCollections: x => #[(x |> foo), {(x foo |> bar), #{#a => (x |> baz)}}]
+
+  bareInterpolated: x => \"a {x foo |> bar baz} b {x |> size}\"
+
+  bareInMatchArms: x =>
+    x match: [
+      1 -> x |> foo bar;
+      2 -> x foo |> bar: 1 |> baz;
+      _ -> x
+    ]
+
+  bareInCollections: x => #[x |> foo, {x foo |> bar baz, #{#a => x |> at: 1}}]
+
+  bareInLists: x => #(x foo |> bar, x |> baz qux | x)
 
   asArgument: x => x at: (x foo |> bar) put: (x |> baz: 1)
 
