@@ -28,34 +28,11 @@ fn verify_tuple_acc_unpack_invariant(
         "StateAcc",
         mode_gate_slots,
         node_gate_slots,
+        FoldAccShape::Tuple,
         threaded_locals,
         span,
     );
     verify(std::slice::from_ref(&stmt))
-}
-
-/// Invariant class 2: `select_tuple_acc`'s `ValueType`-context exclusion.
-/// Compares `use_tuple_acc` against a direct re-check of the same `context`
-/// value `select_tuple_acc` itself already guards on.
-///
-/// No production call site — `select_tuple_acc`'s own early return
-/// on `matches!(context, CodeGenContext::ValueType)` already makes
-/// `use_tuple_acc && context_is_value_type` unconditionally unreachable by
-/// inspection of that one function (`control_flow/mod.rs`), the same
-/// already-structural shape found for `ThreadingModeUnpackMismatch`
-/// — see `threaded_ir`'s module docs §Status. Kept as a regression pin,
-/// exercised directly by hand-built-IR unit tests below (mirrors
-/// `ThreadingModeUnpackMismatch`'s own kept-but-uncalled precedent).
-fn verify_tuple_acc_value_type_exclusion(
-    use_tuple_acc: bool,
-    context_is_value_type: bool,
-    span: Span,
-) -> Vec<VerifyError> {
-    if use_tuple_acc && context_is_value_type {
-        vec![VerifyError::TupleAccInValueTypeContext { at: span }]
-    } else {
-        Vec::new()
-    }
 }
 
 /// Invariant class 3: the recursive inter-construct `StateAcc`-fallback
@@ -68,7 +45,7 @@ fn verify_tuple_acc_value_type_exclusion(
 /// `!effects.has_non_tuple_safe_list_op` conjunct already makes
 /// `direct_params_selected && inner_needs_stateacc_fallback` unconditionally
 /// unreachable by inspection of that one function (`control_flow/mod.rs`) —
-/// see `verify_tuple_acc_value_type_exclusion`'s doc comment for the full
+/// see the module docs for the full
 /// rationale, shared verbatim. Kept as a regression pin.
 fn verify_nested_list_op_stateacc_compat(
     direct_params_selected: bool,
@@ -118,6 +95,7 @@ fn verify_tuple_acc_unpack_mode_mismatch_fires_in_stateacc_fallback_context() {
         frame,
         threads: Vec::new(),
         body: vec![ThreadedStmt::TupleAccUnpack {
+            shape: FoldAccShape::Tuple,
             param,
             gate_slots: 0,
             targets: vec![target.clone()],
@@ -149,6 +127,7 @@ fn verify_tuple_acc_unpack_mode_mismatch_fires_outside_any_tuple_acc_context() {
         frame,
         threads: Vec::new(),
         body: vec![ThreadedStmt::TupleAccUnpack {
+            shape: FoldAccShape::Tuple,
             param,
             gate_slots: 0,
             targets: vec![target.clone()],
@@ -223,10 +202,11 @@ fn verify_early_exit_gate_slot_mismatch_fires_when_node_disagrees_with_mode() {
     let param = AccParam::new("AccSt0");
     let target = local("item_var", 1, frame);
     let ir = vec![ThreadedStmt::Threaded {
-        mode: ThreadingMode::TupleAcc(1),
+        mode: ThreadingMode::TupleAcc(1, FoldAccShape::Tuple),
         frame,
         threads: Vec::new(),
         body: vec![ThreadedStmt::TupleAccUnpack {
+            shape: FoldAccShape::Tuple,
             param,
             gate_slots: 2,
             targets: vec![target.clone()],
@@ -265,33 +245,19 @@ fn verify_tuple_acc_unpack_invariant_distinguishes_gate_slot_shapes() {
     }
 }
 
-// ── Invariant class 2 — select_tuple_acc's ValueType-context exclusion ─
+// ── BT-4116: tuple-acc plans thread no family ─────────────────────────
 
 #[test]
-fn verify_tuple_acc_value_type_exclusion_silent_when_tuple_acc_not_selected() {
+fn verify_tuple_acc_no_family_fires_for_tuple_acc_with_family() {
+    let mode = ThreadingMode::TupleAcc(0, FoldAccShape::Tuple);
     assert_eq!(
-        verify_tuple_acc_value_type_exclusion(false, true, span()),
-        Vec::new()
+        verify_tuple_acc_no_family(&mode, false, span()),
+        vec![VerifyError::TupleAccWithFamily { at: span() }]
     );
-}
-
-#[test]
-fn verify_tuple_acc_value_type_exclusion_silent_in_actor_context() {
+    assert_eq!(verify_tuple_acc_no_family(&mode, true, span()), Vec::new());
     assert_eq!(
-        verify_tuple_acc_value_type_exclusion(true, false, span()),
+        verify_tuple_acc_no_family(&ThreadingMode::DirectParams, false, span()),
         Vec::new()
-    );
-}
-
-#[test]
-fn verify_tuple_acc_value_type_exclusion_fires_when_both_true() {
-    // Simulates the regression `select_tuple_acc`'s own ValueType guard
-    // prevents today: `use_tuple_acc: true` selected in a `ValueType`
-    // context, which would reference an unbound `State`.
-    let errors = verify_tuple_acc_value_type_exclusion(true, true, span());
-    assert_eq!(
-        errors,
-        vec![VerifyError::TupleAccInValueTypeContext { at: span() }]
     );
 }
 
@@ -333,6 +299,7 @@ fn verify_nested_list_op_stateacc_compat_fires_when_both_true() {
 fn lower_and_render_tuple_acc_unpack_renders_element_chain() {
     let frame = FrameId::new(1);
     let ir = vec![ThreadedStmt::TupleAccUnpack {
+        shape: FoldAccShape::Tuple,
         param: AccParam::new("StateAcc"),
         gate_slots: 0,
         targets: vec![local("sum", 1, frame), local("count", 1, frame)],
@@ -353,6 +320,7 @@ fn lower_and_render_tuple_acc_unpack_respects_gate_slots_offset() {
     // at tuple position 3, not 1.
     let frame = FrameId::new(1);
     let ir = vec![ThreadedStmt::TupleAccUnpack {
+        shape: FoldAccShape::Tuple,
         param: AccParam::new("AccSt0"),
         gate_slots: 2,
         targets: vec![local("n", 1, frame)],
@@ -361,4 +329,63 @@ fn lower_and_render_tuple_acc_unpack_respects_gate_slots_offset() {
     }];
     let rendered = lower_and_render(&ir).to_pretty_string();
     assert_eq!(rendered, "let N@1 = call 'erlang':'element'(3, AccSt0) in ");
+}
+
+#[test]
+fn bare_unpack_of_several_targets_is_reported() {
+    let frame = FrameId::new(1);
+    let targets: Vec<VersionedVar> = ["a", "b"]
+        .iter()
+        .enumerate()
+        .map(|(i, n)| VersionedVar::new(VersionPrefix::Gensym((*n).to_string()), i + 1, frame))
+        .collect();
+    let stmt = ThreadedStmt::Threaded {
+        mode: ThreadingMode::TupleAcc(0, FoldAccShape::Bare),
+        frame,
+        threads: vec!["a".into(), "b".into()],
+        body: vec![ThreadedStmt::TupleAccUnpack {
+            param: AccParam::new("AccSt"),
+            gate_slots: 0,
+            shape: FoldAccShape::Bare,
+            targets: targets.clone(),
+            frame,
+            span: span(),
+        }],
+        produces: targets,
+        span: span(),
+    };
+    assert!(
+        verify(std::slice::from_ref(&stmt)).contains(&VerifyError::BareAccTargets {
+            targets: 2,
+            at: span()
+        })
+    );
+}
+
+#[test]
+fn unpack_shape_disagreeing_with_the_mode_is_reported() {
+    let frame = FrameId::new(1);
+    let target = VersionedVar::new(VersionPrefix::Gensym("a".into()), 1, frame);
+    let stmt = ThreadedStmt::Threaded {
+        mode: ThreadingMode::TupleAcc(0, FoldAccShape::Bare),
+        frame,
+        threads: vec!["a".into()],
+        body: vec![ThreadedStmt::TupleAccUnpack {
+            param: AccParam::new("AccSt"),
+            gate_slots: 0,
+            shape: FoldAccShape::Tuple,
+            targets: vec![target.clone()],
+            frame,
+            span: span(),
+        }],
+        produces: vec![target],
+        span: span(),
+    };
+    assert!(
+        verify(std::slice::from_ref(&stmt)).contains(&VerifyError::UnpackShapeMismatch {
+            mode: FoldAccShape::Bare,
+            node: FoldAccShape::Tuple,
+            at: span()
+        })
+    );
 }

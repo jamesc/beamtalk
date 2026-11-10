@@ -125,7 +125,7 @@ collection rows (6b-6e, 11a) one operation is a whole pass over 100 elements.
 | 5b | self-send to inherited: s viaSelf / local call | 457 | 61.2 | 59.0 | 1.95 | 4.00 | 0.00 | 234.7 | 15.3 | - | 57.2 | 59.0 | send(S, viaSelf, []), then `self base` is a second full send |
 | 5c | runtime-resolved method: s hasField: #v / Map.has_key? | 166 | 29.1 | 28.0 | 12.2 | 0.00 | 0.00 | 13.6 | - | - | 29.0 | 28.0 | send(S, 'hasField:', [v]) -> beamtalk_reflection:has_field/2 |
 | 6a | block value: x / fun.(x) | 1.09 | 2.00 | 0.00 | 0.71 | 2.00 | 0.00 | 1.5 | 1.0 | - | 0.00 | 0.00 | is_function(Blk, 1) guard, then apply Blk(41) |
-| 6b | do: summing 100 elements / Enum.reduce | 2348 | 303 | 404 | 278 | 303 | 0.00 | 8.4 | 1.0 | - | 0.07 | 404 | lists:foldl over a fun that maps:get/maps:put `sum` in a state map; + with coercion try |
+| 6b | do: summing 100 elements / Enum.reduce | 2348 | 303 | 404 | 278 | 303 | 0.00 | 8.4 | 1.0 | - | 0.07 | 404 | lists:foldl over a fun whose accumulator is the bare `sum` (BT-4116, was a state map: 404 words per pass); + with coercion try |
 | 6c | do: over 100, no assignment / Enum.each | 342 | 303 | 0.00 | 314 | 303 | 0.00 | 1.1 | 1.0 | - | 0.00 | 0.00 | is_list guard, lists:foreach(fun) |
 | 6d | collect: 100 elements / Enum.map | 1345 | 403 | 200 | 1544 | 404 | 200 | 0.9 | 1.0 | 1.0 | -1.00 | 0.00 | is_list guard, lists:map(fun); * with is_number guard |
 | 6e | inject:into: 100 elements / Enum.reduce | 230 | 302 | 0.00 | 261 | 303 | 0.00 | 0.9 | 1.0 | - | -1.00 | 0.00 | is_list guard, lists:foldl(fun); + with coercion try |
@@ -248,10 +248,10 @@ over Elixir from the table.
 
 - **The send path itself allocates 28 words** (1a) on every send, for a getter
   that allocates nothing in Elixir.
-- **Local-state threading through maps (6b)**: a `do:` whose block assigns
-  `sum` runs `lists:foldl` over a fun that `maps:get`s and `maps:put`s `sum` in
-  a state map: 4 words per element (404 per pass) and 8x the time, where
-  `inject:into:` (6e) threads the accumulator directly and matches Elixir.
+- **Local-state threading through maps (6b)**: fixed by BT-4116. A `do:`
+  whose block assigns one local now folds it as a bare accumulator: 0 words per
+  pass (was 4 per element, 404 per pass) and the same time as `inject:into:`
+  (6e). Results: `results/bench-bt4116-{before,after}.md`.
 - **Functional update (2a)**: `p withX: 3` is the 28-word send plus the 6-word
   map, against 6.
 - **String `++` (10e)** converts both binaries to lists and back
@@ -325,7 +325,7 @@ weighted by how often each appears on the path:
 | 2 | Class-side sends through the class process (non-`class sealed` class methods, Value keyword constructors, `Result ok:`, class objects in `on:do:` and `isKindOf:`) | +143 to +415 red, +444 to +1,358 words, 1-7 µs, and a node-wide serialization point | 3b, 3c, 2b, 9a, 8a, 12b | dispatch + machinery | Yes for sealed stateless classes and constructors (direct call); BT-4065 covers class objects, `isKindOf:` and `Result`. Classes with `classState:` structurally need their process for writes. |
 | 3 | Dynamic sends to Value instances, regardless of static type | +27 to +29 red, +28 words, about 160 ns per send; a self-send is a second one | 1a-1c, 4a-4c, 5a, 5b, 9b, 10a, 10b | dispatch + allocation | Yes for sealed receivers (BT-4069). For open classes, late binding is structural, but its cost is not: a guarded direct call costs a map-key match. |
 | 4 | Non-inlined conditionals and loops | +14 red, +4 words per conditional; +26 red, +10 words per loop step | 11d, 0b | dispatch + allocation | Yes: compile to `case` and `letrec` with a fallback send for non-Booleans. |
-| 5 | Map-threaded locals in iteration blocks | +4 words per element, 8x time | 6b | allocation | Yes: thread as a fold accumulator, as `inject:into:` already does. |
+| 5 | Map-threaded locals in iteration blocks | +4 words per element, 8x time | 6b | allocation | Done (BT-4116): a bare fold accumulator. |
 
 Rarer on a message path but very expensive when hit: a raise (+2,645 red,
 +22,347 words before BT-4115, about +110 red and +135 words after),

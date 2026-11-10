@@ -23,7 +23,9 @@
 
 use super::{codegen, verifier_report};
 use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
-use crate::core_erlang::threaded_ir::{ThreadingMode, VerifyError, verify_tuple_acc_state_reads};
+use crate::core_erlang::threaded_ir::{
+    FoldAccShape, ThreadingMode, VerifyError, verify_tuple_acc_state_reads,
+};
 use beamtalk_core::source_analysis::Span;
 
 const HEADER: &str = "Actor subclass: Probe\n  state: n = 7\n\n";
@@ -72,8 +74,20 @@ const CONTEXTS: [(&str, bool); 9] = [
     ("1 to: 2 do: [:q | acc := acc + q. FOLD]", true),
 ];
 
+/// BT-4116: object and value-type headers — their folds now take the tuple
+/// or bare accumulator too, and a field read there must stay on `Self`
+/// (they have no `State`).
+const NON_ACTOR_HEADERS: [&str; 2] = [
+    "Object subclass: Probe\n  state: n = 7\n\n",
+    "Value subclass: Probe\n  state: n = 7\n\n",
+];
+
 /// `(context index, fold index, program)` for the whole corpus.
 fn programs() -> Vec<(usize, usize, String)> {
+    programs_with(HEADER)
+}
+
+fn programs_with(header: &str) -> Vec<(usize, usize, String)> {
     let mut out = Vec::new();
     for (c, (context, _)) in CONTEXTS.iter().enumerate() {
         for (f, fold) in FOLDS.iter().enumerate() {
@@ -83,7 +97,7 @@ fn programs() -> Vec<(usize, usize, String)> {
                     c,
                     f,
                     format!(
-                        "{HEADER}  run =>\n    acc := 0.\n    i := 0.\n    k := 0.\n    {stmt}.\n    acc + k\n"
+                        "{header}  run =>\n    acc := 0.\n    i := 0.\n    k := 0.\n    {stmt}.\n    acc + k\n"
                     ),
                 ));
             }
@@ -150,7 +164,7 @@ fn skipping_the_entry_capture_is_reported() {
 
 #[test]
 fn verifier_rejects_reads_off_the_entry_state_or_of_the_accumulator() {
-    let mode = ThreadingMode::TupleAcc(0);
+    let mode = ThreadingMode::TupleAcc(0, FoldAccShape::Tuple);
     let at = Span::new(0, 1);
     let reads = |names: &[&str]| names.iter().map(ToString::to_string).collect::<Vec<_>>();
     assert!(
@@ -182,4 +196,23 @@ fn verifier_rejects_reads_off_the_entry_state_or_of_the_accumulator() {
         )
         .is_empty()
     );
+}
+
+#[test]
+fn object_and_value_folds_read_fields_from_self() {
+    for header in NON_ACTOR_HEADERS {
+        for (_, _, src) in programs_with(header) {
+            if let Some(report) = verifier_report(&src, None) {
+                panic!("{report}\n{src}");
+            }
+            let out = codegen(&src);
+            for read in out.split("call 'maps':'get'('n', ").skip(1) {
+                let var = read.split(')').next().unwrap_or_default();
+                assert!(
+                    !var.starts_with("_AccSt") && !var.starts_with("State"),
+                    "field read from `{var}`, not Self:\n{src}\n{out}"
+                );
+            }
+        }
+    }
 }

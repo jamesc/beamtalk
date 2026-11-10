@@ -10,9 +10,10 @@ use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     AccParam, BindOp, CallSiteLine, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary,
-    EnsureCatchVars, EnsureForeignNlr, EnsureNlrRelay, FastPath, ForeignCleanupBody, FrameId,
-    LOOP_FN_STEM, LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars, RebindLowering, RethrowSlot,
-    ThreadedStmt, ThreadingMode, TokenId, TryRegion, ValueRef, VersionPrefix, VersionedVar,
+    EnsureCatchVars, EnsureForeignNlr, EnsureNlrRelay, FastPath, FoldAccShape, ForeignCleanupBody,
+    FrameId, LOOP_FN_STEM, LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars, RebindLowering,
+    RethrowSlot, ThreadedStmt, ThreadingMode, TokenId, TryRegion, ValueRef, VersionPrefix,
+    VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -203,9 +204,10 @@ pub(in crate::core_erlang) fn render(
             ThreadedStmt::TupleAccUnpack {
                 param,
                 gate_slots,
+                shape,
                 targets,
                 ..
-            } => docs.push(render_tuple_acc_unpack(param, *gate_slots, targets)),
+            } => docs.push(render_tuple_acc_unpack(param, *gate_slots, *shape, targets)),
             ThreadedStmt::ConditionalLoop {
                 fn_name,
                 mode,
@@ -1143,7 +1145,7 @@ fn render_threaded(
                 None,
             )
         }
-        ThreadingMode::TupleAcc(_) | ThreadingMode::StateAcc(_) => render(body, ctx),
+        ThreadingMode::TupleAcc(..) | ThreadingMode::StateAcc(_) => render(body, ctx),
     }
 }
 
@@ -1533,7 +1535,7 @@ fn render_conditional_loop(
             in_loop_body: true,
             in_hybrid_loop: false,
         }),
-        ThreadingMode::DirectParams | ThreadingMode::TupleAcc(_) => None,
+        ThreadingMode::DirectParams | ThreadingMode::TupleAcc(..) => None,
     };
     render_loop_skeleton(
         fn_name,
@@ -1564,9 +1566,23 @@ fn render_conditional_loop(
 fn render_tuple_acc_unpack(
     param: &AccParam,
     gate_slots: usize,
+    shape: FoldAccShape,
     targets: &[VersionedVar],
 ) -> Document<'static> {
     let mut docs: Vec<Document<'static>> = Vec::new();
+    if shape == FoldAccShape::Bare {
+        // BT-4116: the accumulator IS the one threaded local.
+        for target in targets {
+            docs.push(docvec![
+                "let ",
+                leaf::var(target.render_name()),
+                " = ",
+                leaf::var(param.0.clone()),
+                " in ",
+            ]);
+        }
+        return Document::Vec(docs);
+    }
     for (i, target) in targets.iter().enumerate() {
         let idx = gate_slots + 1 + i;
         docs.push(docvec![

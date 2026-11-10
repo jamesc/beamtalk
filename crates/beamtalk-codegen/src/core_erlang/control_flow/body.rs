@@ -80,6 +80,7 @@ impl CoreErlangGenerator {
                 acc_param_name,
                 plan.tuple_acc_gate_slots,
                 node_gate_slots,
+                plan.fold_acc_shape,
                 &plan.threaded_locals,
                 span,
             );
@@ -191,8 +192,13 @@ impl CoreErlangGenerator {
             stmts.extend(this.lower_foldl_body(body, plan, kind, frame)?);
             // BT-3863: checked before `carry_fold_families` wraps the
             // accumulator in the `Self` family's `Return`.
-            let locals_errors =
+            let mut locals_errors =
                 threaded_ir::verify_fold_locals_carried(&stmts, &mode, &plan.threaded_locals, span);
+            locals_errors.extend(threaded_ir::verify_tuple_acc_no_family(
+                &mode,
+                plan.threaded_families().as_slice().is_empty(),
+                span,
+            ));
             Self::carry_fold_families(&mut stmts, family_params, frame)?;
             let final_state_version = this.state_version();
             let node = ThreadedStmt::Threaded {
@@ -1226,7 +1232,7 @@ impl CoreErlangGenerator {
                     // Tuple mode — repack current var bindings into the result tuple.
                     let vars_doc = plan.current_vars_doc(self);
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             "case ",
                             condition_doc,
@@ -1274,7 +1280,7 @@ impl CoreErlangGenerator {
                     if *is_all {
                         // allSatisfy: pred=false → set BoolAcc to false; pred=true → keep
                         stmts.push(Self::fold_accumulator(
-                            FoldCarry::Locals(plan.threaded_locals.clone()),
+                            plan.fold_carry(),
                             docvec![
                                 "case ",
                                 leaf::var(pv.clone()),
@@ -1289,7 +1295,7 @@ impl CoreErlangGenerator {
                     } else {
                         // anySatisfy: pred=true → set BoolAcc to true; pred=false → keep
                         stmts.push(Self::fold_accumulator(
-                            FoldCarry::Locals(plan.threaded_locals.clone()),
+                            plan.fold_carry(),
                             docvec![
                                 "case ",
                                 leaf::var(pv.clone()),
@@ -1350,7 +1356,7 @@ impl CoreErlangGenerator {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             "case ",
                             leaf::var(pv.clone()),
@@ -1396,7 +1402,7 @@ impl CoreErlangGenerator {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             "case ",
                             leaf::var(pv.clone()),
@@ -1439,7 +1445,7 @@ impl CoreErlangGenerator {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             "case StillTaking of \
                              <'false'> when 'true' -> {AccList, 'false', ",
@@ -1492,7 +1498,7 @@ impl CoreErlangGenerator {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             "case StillDropping of \
                              <'false'> when 'true' -> {[",
@@ -1548,7 +1554,7 @@ impl CoreErlangGenerator {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             "case ",
                             leaf::var(pv.clone()),
@@ -1604,7 +1610,7 @@ impl CoreErlangGenerator {
                     let new_list_var = self.fresh_temp_var("NewList");
                     let new_map_var = self.fresh_temp_var("NewMap");
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             "let ",
                             leaf::var(existing_var.clone()),
@@ -1984,14 +1990,14 @@ impl CoreErlangGenerator {
             match kind {
                 BodyKind::FoldlDo => {
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
-                        docvec![" {", vars_doc, "}"],
+                        plan.fold_carry(),
+                        plan.acc_repack_doc(self),
                         span,
                     ));
                 }
                 BodyKind::FoldlCollect => {
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             " {[",
                             leaf::var(val.to_string()),
@@ -2026,7 +2032,7 @@ impl CoreErlangGenerator {
                 }
                 BodyKind::FoldlInject => {
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![" {", leaf::var(val.to_string()), ", ", vars_doc, "}",],
                         span,
                     ));
@@ -2280,8 +2286,8 @@ impl CoreErlangGenerator {
                         if plan.use_tuple_acc {
                             // Repack threaded locals as tuple.
                             stmts.push(Self::fold_accumulator(
-                                FoldCarry::Locals(plan.threaded_locals.clone()),
-                                docvec!["{", plan.current_vars_doc(self), "}"],
+                                plan.fold_carry(),
+                                plan.acc_repack_doc(self),
                                 span,
                             ));
                         } else {
@@ -2315,7 +2321,7 @@ impl CoreErlangGenerator {
                         // Tuple mode — repack current vars.
                         let vars_doc = plan.current_vars_doc(self);
                         stmts.push(Self::fold_accumulator(
-                            FoldCarry::Locals(plan.threaded_locals.clone()),
+                            plan.fold_carry(),
                             docvec!["{[", leaf::var(result_var), " | AccList], ", vars_doc, "}",],
                             span,
                         ));
@@ -2381,7 +2387,7 @@ impl CoreErlangGenerator {
                         // Tuple mode — repack current vars.
                         let vars_doc = plan.current_vars_doc(self);
                         stmts.push(Self::fold_accumulator(
-                            FoldCarry::Locals(plan.threaded_locals.clone()),
+                            plan.fold_carry(),
                             docvec!["{", leaf::var(acc_var), ", ", vars_doc, "}",],
                             span,
                         ));

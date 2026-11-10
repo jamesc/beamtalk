@@ -323,6 +323,7 @@ mod ffi_conditional_selector_corpus;
 mod ffi_direct_call;
 mod field_assignment_value_position;
 mod field_write_sites;
+mod fold_acc_shape_agreement;
 mod fold_locals_carried_corpus;
 mod fresh_temp_namespace;
 mod gen_server;

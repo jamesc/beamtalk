@@ -1,0 +1,258 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: core_erlang
+---
+module 'foldl_bare_accumulator' ['new'/0, 'new'/1, 'oneLocal:'/2, 'twoLocals:'/2, 'keyed:'/2, 'collecting:'/2, 'dispatch'/3, 'dispatch'/4, 'has_method'/1, 'has_method_local'/1, 'superclass'/0, 'register_class'/0, '__beamtalk_meta'/0, 'module_info'/0, 'module_info'/1]
+  attributes ['on_load' = [{'register_class', 0}],
+     'beamtalk_class' = [{'BareObj', 'Object'}],
+     'spec' =
+        [{{'oneLocal:', 2}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'map', 'any'}, {'type', 0, 'any', []}]}, {'type', 0, 'integer', []}]}]}],
+     'spec' =
+        [{{'twoLocals:', 2}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'map', 'any'}, {'type', 0, 'any', []}]}, {'type', 0, 'integer', []}]}]}],
+     'spec' =
+        [{{'keyed:', 2}, [{'type', 0, 'fun', [{'type', 0, 'product', [{'type', 0, 'map', 'any'}, {'type', 0, 'any', []}]}, {'type', 0, 'integer', []}]}]}]]
+
+'new'/0 = fun () ->
+    ~{'$beamtalk_class' => 'BareObj'}~
+
+
+'new'/1 = fun (InitArgs) ->
+    let DefaultState = call 'foldl_bare_accumulator':'new'() in
+    let CheckedArgs = call 'beamtalk_class_instantiation':'check_init_args'('BareObj', 'new:', DefaultState, InitArgs, []) in
+    call 'maps':'merge'(DefaultState, CheckedArgs)
+
+
+'oneLocal:'/2 = fun (Self, _coll@1) ->
+    let Sum@ = 0 in
+let _temp@3 = _coll@1 in let _temp@4 = case call 'erlang':'is_list'(_temp@3) of <'true'> when 'true' -> _temp@3 <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(_temp@3) end in let _temp@5 = fun (Each@, _AccSt@2) -> let Sum@ = _AccSt@2 in let _Sum@15 = let _BinLeft@6 = Sum@ in let _BinRight@7 = Each@ in case call 'erlang':'is_number'(_BinLeft@6) of <'true'> when 'true' -> try call 'erlang':'+'(_BinLeft@6, _BinRight@7) of <_BinCoerceTry@8> -> _BinCoerceTry@8 catch <_BinCoerceType@9, _BinCoerceError@10, _BinCoerceStack@11> -> case {_BinCoerceType@9, _BinCoerceError@10} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight@7) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType@9, _BinCoerceError@10, _BinCoerceStack@11) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight@7, 'plusFromNumber:', [_BinLeft@6], '+') <_BinCoerceNoMatch@13> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch@13}) end <_BinCoerceOther@12> when 'true' -> primop 'raw_raise'(_BinCoerceType@9, _BinCoerceError@10, _BinCoerceStack@11) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@6, '+', [_BinRight@7]) <_BinOpNoMatch@14> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@14}) end in _Sum@15 in let _FoldResult@16 = call 'lists':'foldl'(_temp@5, Sum@, _temp@4) in let Sum@ = _FoldResult@16 in     Sum@
+
+'twoLocals:'/2 = fun (Self, _coll@17) ->
+    let Sum@ = 0 in
+    let Count@ = 0 in
+let _temp@19 = _coll@17 in let _temp@20 = case call 'erlang':'is_list'(_temp@19) of <'true'> when 'true' -> _temp@19 <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(_temp@19) end in let _temp@21 = fun (Each@, _AccSt@18) -> let Count@ = call 'erlang':'element'(1, _AccSt@18) in let Sum@ = call 'erlang':'element'(2, _AccSt@18) in let _Sum@31 = let _BinLeft@22 = Sum@ in let _BinRight@23 = Each@ in case call 'erlang':'is_number'(_BinLeft@22) of <'true'> when 'true' -> try call 'erlang':'+'(_BinLeft@22, _BinRight@23) of <_BinCoerceTry@24> -> _BinCoerceTry@24 catch <_BinCoerceType@25, _BinCoerceError@26, _BinCoerceStack@27> -> case {_BinCoerceType@25, _BinCoerceError@26} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight@23) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType@25, _BinCoerceError@26, _BinCoerceStack@27) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight@23, 'plusFromNumber:', [_BinLeft@22], '+') <_BinCoerceNoMatch@29> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch@29}) end <_BinCoerceOther@28> when 'true' -> primop 'raw_raise'(_BinCoerceType@25, _BinCoerceError@26, _BinCoerceStack@27) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@22, '+', [_BinRight@23]) <_BinOpNoMatch@30> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@30}) end in let _Count@35 = let _BinLeft@32 = Count@ in let _BinRight@33 = 1 in case call 'erlang':'is_number'(_BinLeft@32) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@32, _BinRight@33) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@32, '+', [_BinRight@33]) <_BinOpNoMatch@34> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@34}) end in {_Count@35, _Sum@31} in let _FoldResult@36 = call 'lists':'foldl'(_temp@21, {Count@, Sum@}, _temp@20) in let Count@ = call 'erlang':'element'(1, _FoldResult@36) in let Sum@ = call 'erlang':'element'(2, _FoldResult@36) in     let _BinLeft@37 = Sum@ in let _BinRight@38 = Count@ in case call 'erlang':'is_number'(_BinLeft@37) of <'true'> when 'true' -> try call 'erlang':'+'(_BinLeft@37, _BinRight@38) of <_BinCoerceTry@39> -> _BinCoerceTry@39 catch <_BinCoerceType@40, _BinCoerceError@41, _BinCoerceStack@42> -> case {_BinCoerceType@40, _BinCoerceError@41} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight@38) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType@40, _BinCoerceError@41, _BinCoerceStack@42) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight@38, 'plusFromNumber:', [_BinLeft@37], '+') <_BinCoerceNoMatch@44> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch@44}) end <_BinCoerceOther@43> when 'true' -> primop 'raw_raise'(_BinCoerceType@40, _BinCoerceError@41, _BinCoerceStack@42) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@37, '+', [_BinRight@38]) <_BinOpNoMatch@45> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@45}) end
+
+'keyed:'/2 = fun (Self, _dict@46) ->
+    let Total@ = 0 in
+    let _FoldlListOpResult@65 = let _temp@47 = _dict@46 in let _temp@48 = call 'beamtalk_map':'pairs_for_threading'(_temp@47, 'keysAndValuesDo:') in let _temp@49 = fun (_Pair@50, _AccSt@51) -> let K@ = call 'erlang':'element'(1, _Pair@50) in let V@ = call 'erlang':'element'(2, _Pair@50) in let Total@ = _AccSt@51 in let _Total@61 = let _BinLeft@52 = Total@ in let _BinRight@53 = V@ in case call 'erlang':'is_number'(_BinLeft@52) of <'true'> when 'true' -> try call 'erlang':'+'(_BinLeft@52, _BinRight@53) of <_BinCoerceTry@54> -> _BinCoerceTry@54 catch <_BinCoerceType@55, _BinCoerceError@56, _BinCoerceStack@57> -> case {_BinCoerceType@55, _BinCoerceError@56} of <{'error', 'badarith'}> when 'true' -> case call 'erlang':'is_number'(_BinRight@53) of <'true'> when 'true' -> primop 'raw_raise'(_BinCoerceType@55, _BinCoerceError@56, _BinCoerceStack@57) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send_number_coercion'(_BinRight@53, 'plusFromNumber:', [_BinLeft@52], '+') <_BinCoerceNoMatch@59> when 'true' -> call 'erlang':'error'({'case_clause', _BinCoerceNoMatch@59}) end <_BinCoerceOther@58> when 'true' -> primop 'raw_raise'(_BinCoerceType@55, _BinCoerceError@56, _BinCoerceStack@57) end <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@52, '+', [_BinRight@53]) <_BinOpNoMatch@60> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@60}) end in _Total@61 in let _FoldResult@62 = call 'lists':'foldl'(_temp@49, Total@, _temp@48) in let Total@ = _FoldResult@62 in let _InitMap@63 = call 'maps':'new'() in let _PkSt@64 = call 'maps':'put'('__local__total', Total@, _InitMap@63) in {'nil', _PkSt@64} in
+    let _FoldlListOpState@66 = call 'erlang':'element'(2, _FoldlListOpResult@65) in
+    let _total@67 = call 'maps':'get'('__local__total', _FoldlListOpState@66) in
+    _total@67
+
+'collecting:'/2 = fun (Self, _coll@68) ->
+    let N@ = 0 in
+    let _ThreadedResult@87 = let _temp@69 = _coll@68 in let _temp@70 = case call 'erlang':'is_list'(_temp@69) of <'true'> when 'true' -> _temp@69 <'false'> when 'true' -> call 'beamtalk_collection':'to_list_for_threading'(_temp@69, 'collect:') end in let _temp@71 = fun (Each@, _AccSt@72) -> let AccList = call 'erlang':'element'(1, _AccSt@72) in let N@ = call 'erlang':'element'(2, _AccSt@72) in let _N@76 = let _BinLeft@73 = N@ in let _BinRight@74 = 1 in case call 'erlang':'is_number'(_BinLeft@73) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@73, _BinRight@74) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@73, '+', [_BinRight@74]) <_BinOpNoMatch@75> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@75}) end in let _CollectItem@77 = let _BinLeft@78 = Each@ in let _BinRight@79 = 2 in case call 'erlang':'is_number'(_BinLeft@78) of <'true'> when 'true' -> call 'erlang':'*'(_BinLeft@78, _BinRight@79) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@78, '*', [_BinRight@79]) <_BinOpNoMatch@80> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@80}) end in {[_CollectItem@77 | AccList], _N@76} in let _FoldResult@81 = call 'lists':'foldl'(_temp@71, { [], N@}, _temp@70) in let _RevList@82 = call 'erlang':'element'(1, _FoldResult@81) in let _FinalList@83 = call 'lists':'reverse'(_RevList@82) in let _ListLikeResult@84 = call 'beamtalk_collection':'from_list_like'(_temp@69, _FinalList@83) in let N@ = call 'erlang':'element'(2, _FoldResult@81) in let _InitMap@85 = call 'maps':'new'() in let _PkSt@86 = call 'maps':'put'('__local__n', N@, _InitMap@85) in {_ListLikeResult@84, _PkSt@86} in let _ThreadedValue@88 = call 'erlang':'element'(1, _ThreadedResult@87) in
+    _ThreadedValue@88
+
+
+'dispatch'/3 = fun (Selector, Args, Self) ->
+    case Selector of
+        <'class'> when 'true' ->
+            'BareObj'
+        <'respondsTo:'> when 'true' ->
+            case Args of
+                <[RtSelector | _]> when 'true' -> call 'foldl_bare_accumulator':'has_method'(RtSelector)
+                <_> when 'true' -> 'false'
+            end
+        <'fieldNames'> when 'true' ->
+            []
+        <'fieldAt:'> when 'true' ->
+            let <IvaErr0> = call 'beamtalk_error':'new'('immutable_value', 'BareObj') in
+            let <IvaErr1> = call 'beamtalk_error':'with_selector'(IvaErr0, 'fieldAt:') in
+            let <IvaErr2> = call 'beamtalk_error':'with_hint'(IvaErr1, #{#<66>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<79>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<106>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<46>(8,1,'integer',['unsigned'|['big']])}#) in
+            call 'beamtalk_error':'raise'(IvaErr2)
+        <'hasField:'> when 'true' ->
+            let <HfName> = call 'erlang':'hd'(Args) in
+            case call 'erlang':'is_map'(Self) of
+                <'true'> when 'true' -> call 'beamtalk_reflection':'has_field'(HfName, Self)
+                <'false'> when 'true' -> 'false'
+            end
+        <'fieldAt:put:'> when 'true' ->
+            let <ImmErr0> = call 'beamtalk_error':'new'('immutable_value', 'BareObj') in
+            let <ImmErr1> = call 'beamtalk_error':'with_selector'(ImmErr0, 'fieldAt:put:') in
+            let <ImmErr2> = call 'beamtalk_error':'with_hint'(ImmErr1, #{#<66>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<79>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<106>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<46>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<85>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<40>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<86>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<41>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<46>(8,1,'integer',['unsigned'|['big']])}#) in
+            call 'beamtalk_error':'raise'(ImmErr2)
+        <'clearField:'> when 'true' ->
+            let <ClrErr0> = call 'beamtalk_error':'new'('immutable_value', 'BareObj') in
+            let <ClrErr1> = call 'beamtalk_error':'with_selector'(ClrErr0, 'clearField:') in
+            let <ClrErr2> = call 'beamtalk_error':'with_hint'(ClrErr1, #{#<66>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<79>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<106>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<46>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<85>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<40>(8,1,'integer',['unsigned'|['big']]),#<120>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<86>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<41>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<46>(8,1,'integer',['unsigned'|['big']])}#) in
+            call 'beamtalk_error':'raise'(ClrErr2)
+        <'perform:'> when 'true' ->
+            let <PerfSel> = call 'erlang':'hd'(Args) in
+            call 'foldl_bare_accumulator':'dispatch'(PerfSel, [], Self)
+        <'perform:withArguments:'> when 'true' ->
+            let <PwaSel> = call 'erlang':'hd'(Args) in
+            let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in
+            call 'foldl_bare_accumulator':'dispatch'(PwaSel, PwaArgs, Self)
+        <'oneLocal:'> when 'true' ->
+            let <DispArg0> = call 'erlang':'hd'(Args) in
+            call 'foldl_bare_accumulator':'oneLocal:'(Self, DispArg0)
+        <'twoLocals:'> when 'true' ->
+            let <DispArg0> = call 'erlang':'hd'(Args) in
+            call 'foldl_bare_accumulator':'twoLocals:'(Self, DispArg0)
+        <'keyed:'> when 'true' ->
+            let <DispArg0> = call 'erlang':'hd'(Args) in
+            call 'foldl_bare_accumulator':'keyed:'(Self, DispArg0)
+        <'collecting:'> when 'true' ->
+            let <DispArg0> = call 'erlang':'hd'(Args) in
+            call 'foldl_bare_accumulator':'collecting:'(Self, DispArg0)
+        <_Other> when 'true' ->
+            %% BT-4260: a memoised verdict picks the direct inherited call.
+            case case Selector of
+                <'class'> when 'true' -> 'slow'
+                <'clearField:'> when 'true' -> 'slow'
+                <'delegate'> when 'true' -> 'slow'
+                <'displayString'> when 'true' -> 'slow'
+                <'equals:'> when 'true' -> 'slow'
+                <'error:'> when 'true' -> 'slow'
+                <'fieldAt:'> when 'true' -> 'slow'
+                <'fieldAt:put:'> when 'true' -> 'slow'
+                <'fieldNames'> when 'true' -> 'slow'
+                <'hasField:'> when 'true' -> 'slow'
+                <'hash'> when 'true' -> 'slow'
+                <'ifNil:'> when 'true' -> 'slow'
+                <'ifNil:ifNotNil:'> when 'true' -> 'slow'
+                <'ifNotNil:'> when 'true' -> 'slow'
+                <'ifNotNil:ifNil:'> when 'true' -> 'slow'
+                <'inspect'> when 'true' -> 'slow'
+                <'isKindOf:'> when 'true' -> 'slow'
+                <'isNil'> when 'true' -> 'slow'
+                <'notImplemented'> when 'true' -> 'slow'
+                <'notNil'> when 'true' -> 'slow'
+                <'perform:'> when 'true' -> 'slow'
+                <'perform:withArguments:'> when 'true' -> 'slow'
+                <'printString'> when 'true' -> 'slow'
+                <'respondsTo:'> when 'true' -> 'slow'
+                <'show:'> when 'true' -> 'slow'
+                <'showCr:'> when 'true' -> 'slow'
+                <'subclassResponsibility'> when 'true' -> 'slow'
+                <'then:'> when 'true' -> 'slow'
+                <'yourself'> when 'true' -> 'slow'
+                <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('BareObj', Selector)
+            end of
+                <{'value', _InhOwner, InhModule}> when 'true' ->
+                    call InhModule:'dispatch'(Selector, Args, Self)
+                <_InhSlow> when 'true' ->
+                    case call 'beamtalk_extensions':'lookup'('BareObj', Selector) of
+                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->
+                            apply ExtFun(Args, Self)
+                        <'not_found'> when 'true' ->
+                            call 'bt@stdlib@object':'dispatch'(Selector, Args, Self)
+                    end
+            end
+    end
+
+
+'dispatch'/4 = fun (Selector, Args, Self, State) ->
+    try call 'foldl_bare_accumulator':'dispatch'(Selector, Args, Self)
+    of <D4Result> -> {'reply', D4Result, State}
+    catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}
+
+
+'has_method'/1 = fun (Selector) ->
+    case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'oneLocal:', 'twoLocals:', 'keyed:', 'collecting:']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('BareObj', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> call 'bt@stdlib@object':'has_method'(Selector)
+            end
+    end
+
+'has_method_local'/1 = fun (Selector) ->
+    case call 'lists':'member'(Selector, ['class', 'respondsTo:', 'fieldNames', 'fieldAt:', 'fieldAt:put:', 'hasField:', 'clearField:', 'perform:', 'perform:withArguments:', 'oneLocal:', 'twoLocals:', 'keyed:', 'collecting:']) of
+        <'true'> when 'true' -> 'true'
+        <'false'> when 'true' ->
+            case call 'beamtalk_extensions':'has'('BareObj', Selector) of
+                <'true'> when 'true' -> 'true'
+                <'false'> when 'true' -> 'false'
+            end
+    end
+
+
+'superclass'/0 = fun () -> 'Object'
+
+'register_class'/0 = fun () ->
+    try
+        let _BuilderState0 = ~{
+            'className' => 'BareObj',
+            'superclassRef' => 'Object',
+            'moduleName' => 'foldl_bare_accumulator',
+            'methodSource' => ~{'oneLocal:' => #{#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<76>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<48>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<91>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<124>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<43>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<93>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']])}#, 'twoLocals:' => #{#<116>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<76>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<48>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<48>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<91>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<124>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<43>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<43>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<49>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<93>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<43>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']])}#, 'keyed:' => #{#<107>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<48>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<65>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<86>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<68>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<91>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<124>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<43>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<93>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']])}#, 'collecting:' => #{#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<48>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<91>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<124>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<61>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<43>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<49>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<42>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<50>(8,1,'integer',['unsigned'|['big']]),#<10>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<93>(8,1,'integer',['unsigned'|['big']])}#}~,
+            'classMethodSource' => ~{}~,
+            'methodSignatures' => ~{'oneLocal:' => #{#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<76>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}#, 'twoLocals:' => #{#<116>(8,1,'integer',['unsigned'|['big']]),#<119>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<76>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}#, 'keyed:' => #{#<107>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<45>(8,1,'integer',['unsigned'|['big']]),#<62>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<73>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']])}#, 'collecting:' => #{#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']])}#}~,
+            'classMethodSignatures' => ~{}~,
+            'methodXref' => [~{'class_side' => 'false', 'selector' => 'oneLocal:', 'line' => 1, 'sends' => [~{'selector' => 'do:', 'line' => 3, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => '+', 'line' => 3, 'recv_kind' => 'other', 'recv_type' => 'Integer'}~], 'references' => [~{'class' => 'Integer', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'twoLocals:', 'line' => 1, 'sends' => [~{'selector' => 'do:', 'line' => 5, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => '+', 'line' => 6, 'recv_kind' => 'other', 'recv_type' => 'Integer'}~, ~{'selector' => '+', 'line' => 7, 'recv_kind' => 'other', 'recv_type' => 'Integer'}~, ~{'selector' => '+', 'line' => 9, 'recv_kind' => 'other', 'recv_type' => 'Integer'}~], 'references' => [~{'class' => 'Integer', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'keyed:', 'line' => 1, 'sends' => [~{'selector' => 'keysAndValuesDo:', 'line' => 3, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => '+', 'line' => 3, 'recv_kind' => 'other', 'recv_type' => 'Integer'}~], 'references' => [~{'class' => 'Integer', 'line' => 1}~], 'source_status' => 'indexed'}~, ~{'class_side' => 'false', 'selector' => 'collecting:', 'line' => 1, 'sends' => [~{'selector' => 'collect:', 'line' => 4, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~, ~{'selector' => '+', 'line' => 5, 'recv_kind' => 'other', 'recv_type' => 'Integer'}~, ~{'selector' => '*', 'line' => 6, 'recv_kind' => 'other', 'recv_type' => 'dynamic'}~], 'references' => [], 'source_status' => 'indexed'}~],
+            'stateVarXref' => [],
+            'classState' => ~{}~,
+            'classDoc' => 'none',
+            'methodDocs' => ~{}~,
+            'classMethodDocs' => ~{}~,
+            'meta' => ~{'class' => 'BareObj',
+      'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
+      'fields' => [],
+      'class_fields' => [],
+      'is_sealed' => 'false',
+      'is_abstract' => 'false',
+      'is_value' => 'false',
+      'is_typed' => 'false',
+      'is_internal' => 'false',
+      'visibility' => 'public',
+      'type_params' => [],
+      'uses' => [],
+      'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
+      'field_kinds' => ~{}~,
+      'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
+      'method_info' => ~{'oneLocal:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'twoLocals:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'keyed:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'collecting:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_method_info' => ~{}~,
+      'class_var_abi' => 3,
+      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
+      'defines_user_class_new1' => 'false'
+    }~
+        }~
+        in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
+            <{'ok', _Pid0}> when 'true' -> 'ok'
+            <{'error', _Err0}> when 'true' -> {'error', _Err0}
+        end
+
+        in _Reg0
+
+    of _ClassRegResult -> _ClassRegResult
+    catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)
+
+
+'__beamtalk_meta'/0 = fun () ->
+    ~{'class' => 'BareObj',
+      'superclass' => 'Object',
+      'package' => 'none',
+      'kind' => 'object',
+      'fields' => [],
+      'class_fields' => [],
+      'is_sealed' => 'false',
+      'is_abstract' => 'false',
+      'is_value' => 'false',
+      'is_typed' => 'false',
+      'is_internal' => 'false',
+      'visibility' => 'public',
+      'type_params' => [],
+      'uses' => [],
+      'field_types' => ~{}~,
+      'field_has_default' => ~{}~,
+      'field_kinds' => ~{}~,
+      'class_field_kinds' => ~{}~,
+      'initialize_assigns' => [],
+      'method_info' => ~{'oneLocal:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'twoLocals:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'keyed:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'collecting:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_method_info' => ~{}~,
+      'class_var_abi' => 3,
+      'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
+      'defines_user_class_new1' => 'false'
+    }~
+
+'module_info'/0 = fun () ->
+    call 'erlang':'get_module_info'('foldl_bare_accumulator')
+'module_info'/1 = fun (Key) ->
+    call 'erlang':'get_module_info'('foldl_bare_accumulator', Key)
+end

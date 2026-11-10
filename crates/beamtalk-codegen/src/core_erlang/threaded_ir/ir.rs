@@ -453,7 +453,7 @@ pub(in crate::core_erlang) enum ThreadingMode {
     /// [`VersionedVar`]. See `control_flow::ListOpKind` for the
     /// canonical per-op table this classification is independently
     /// cross-checked against.
-    TupleAcc(usize),
+    TupleAcc(usize, FoldAccShape),
     /// `fun (Var1, ..., VarN, RField1, ..., MField1, ...)` — locals plus
     /// pre-extracted read-only/mutated fields as direct params.
     Hybrid,
@@ -570,6 +570,18 @@ pub(in crate::core_erlang) enum BindOp {
 
 // ─── Statements ─────────────────────────────────────────────────────────────
 
+/// BT-4116: the representation of a `TupleAcc` fold's accumulator over its
+/// threaded locals. Decided once on `ThreadingPlan` and carried by
+/// [`ThreadingMode::TupleAcc`], the per-iteration unpack, and every repack.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum FoldAccShape {
+    /// `{Var1, ..., VarN}` (after any gate slots).
+    Tuple,
+    /// The single threaded local's value itself, no tuple (a `do:` fold with
+    /// no gate slots and exactly one threaded local).
+    Bare,
+}
+
 /// What a [`ThreadedStmt::FoldAccumulator`] threads to the next iteration
 /// besides the fold kind's own result channel(s) (BT-3863).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -577,6 +589,9 @@ pub(in crate::core_erlang) enum FoldCarry {
     /// A tuple accumulator's repack of the current binding of each named
     /// local, in tuple order (`ThreadingPlan::current_vars_doc`).
     Locals(Vec<String>),
+    /// BT-4116: the bare accumulator — the one threaded local's current
+    /// binding itself, not a tuple of it.
+    BareLocal(String),
     /// A map accumulator's `StateAcc` (the current version, or the incoming
     /// map when the body advanced nothing).
     StateMap,
@@ -654,6 +669,9 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     TupleAccUnpack {
         param: AccParam,
         gate_slots: usize,
+        /// BT-4116: how `param` holds `targets` — `Bare` binds the one
+        /// target to `param` itself, `Tuple` reads `element(idx, param)`.
+        shape: FoldAccShape,
         targets: Vec<VersionedVar>,
         frame: FrameId,
         span: Span,
@@ -1384,7 +1402,7 @@ impl RebindFrameKind {
             Self::MethodBody | Self::BranchArm => true,
             Self::Loop(mode) => !matches!(
                 mode,
-                ThreadingMode::DirectParams | ThreadingMode::TupleAcc(_)
+                ThreadingMode::DirectParams | ThreadingMode::TupleAcc(..)
             ),
         }
     }
@@ -1426,7 +1444,7 @@ impl RebindShape {
             | RebindFrameKind::BranchArm
             | RebindFrameKind::Loop(ThreadingMode::StateAcc(_)) => Self::MapPut,
             RebindFrameKind::Loop(
-                ThreadingMode::DirectParams | ThreadingMode::Hybrid | ThreadingMode::TupleAcc(_),
+                ThreadingMode::DirectParams | ThreadingMode::Hybrid | ThreadingMode::TupleAcc(..),
             ) => Self::LoopParam,
         }
     }
