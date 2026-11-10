@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4588: a third level under GcBase, so an ancestor's class-side `new:`
+// extension is reached past an intermediate class (GcLeaf) with its own
+// synthesized `new:`. See guarded_constructor_test.bt.
+
+GcLeaf subclass: GcGrandLeaf
+  field: z = 0

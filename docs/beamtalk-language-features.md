@@ -6169,10 +6169,13 @@ methods, so `Sub banner` answers an extension registered on `Base class`, with
 `Sub` as `self`, and an extension on `Base class` shadows a compiled class
 method of `Base` for `Sub` too (unless `Sub` itself defines the method). An
 outside send, a dynamic send, a class-side `self` send, `super`,
-`respondsTo:` and protocol conformance all agree (BT-4307). Two exceptions
-remain: `performLocally:withArguments:` applies compiled class methods only, and
-the instance-creation sends `new` and `new:` do not yet see an ancestor's
-class-side extension of them ([BT-4588](https://linear.app/beamtalk/issue/BT-4588)).
+`respondsTo:` and protocol conformance all agree (BT-4307). So does `Sub new:
+aDictionary`: an extension of `new:` on `Base class` answers it, exactly as a
+compiled `class new:` on `Base` would (BT-4588). `new` follows the same rule
+with one consequence: every class has its own synthesized `new`, and a class's
+own method is found before an ancestor's extension, so an extension of `new` on
+`Base class` answers `Base new` but not `Sub new`. One exception remains:
+`performLocally:withArguments:` applies compiled class methods only.
 
 ---
 
