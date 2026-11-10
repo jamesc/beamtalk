@@ -84,9 +84,9 @@
 //! which no parsed block has (a `[]` literal spans its brackets), so
 //! [`restore_operand_parens`] recognises it ([`written_unary_loop`]) and puts
 //! the unary send back without a record, and diagnostics name the selector as
-//! written. Only a literal block receiver is rewritten: any other
-//! receiver is an ordinary send of `whileTrue`/`whileFalse` (`Block` defines
-//! both for those).
+//! written. Only a parameterless literal block receiver is rewritten: any
+//! other receiver is an ordinary send of `whileTrue`/`whileFalse` (`Block`
+//! defines both for those).
 
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -283,7 +283,12 @@ fn unary_loop_keyword(node: &Expression) -> Option<&'static str> {
     else {
         return None;
     };
-    if !arguments.is_empty() || !matches!(receiver.unwrap_parens(), Expression::Block(_)) {
+    // A receiver with parameters is no loop condition (the keyword loop never
+    // checks the condition's arity): it stays an ordinary send, which
+    // `Block>>whileTrue` rejects.
+    if !arguments.is_empty()
+        || !matches!(receiver.unwrap_parens(), Expression::Block(b) if b.parameters.is_empty())
+    {
         return None;
     }
     UNARY_LOOPS
@@ -1080,6 +1085,7 @@ Protocol define: P
   n => [[y bar] whileTrue. y < 2] whileFalse. z := [false] whileTrue
   k => [x < 3] whileTrue: []
   o => b whileTrue
+  p => [:x | x] whileTrue
 ";
 
     #[test]
@@ -1093,6 +1099,12 @@ Protocol define: P
         assert_eq!(text(2).matches(": []").count(), 3, "{}", text(2));
         // A non-literal receiver is an ordinary send.
         assert!(text(4).trim_end().ends_with("b whileTrue"), "{}", text(4));
+        // So is a receiver with parameters: it is no loop condition.
+        assert!(
+            text(5).trim_end().ends_with("[:x | x] whileTrue"),
+            "{}",
+            text(5)
+        );
         let mut unary = 0;
         walk_expression(&methods[0].body[0].expression, &mut |node| {
             if let Expression::MessageSend {
