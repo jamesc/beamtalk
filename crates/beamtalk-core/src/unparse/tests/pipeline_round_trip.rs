@@ -130,4 +130,11 @@ fn a_comment_after_a_trailing_pipe_is_kept() {
     assert!(text.contains("// why"), "comment dropped:\n{text}");
     assert!(text.contains("|> bar"), "pipeline lost:\n{text}");
     assert_idempotent(source);
+
+    // A comment on its own line between a trailing `|>` and the stage.
+    let own_line = "x foo |>\n  // why\n  bar\n";
+    let text = unparse_module(&parse_bt(own_line));
+    assert!(text.contains("// why"), "comment dropped:\n{text}");
+    assert!(text.contains("|> bar"), "pipeline lost:\n{text}");
+    assert_idempotent(own_line);
 }
