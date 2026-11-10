@@ -263,7 +263,15 @@ impl CoreErlangGenerator {
         let Ok(class) = self.trusted_static_class(receiver) else {
             return false;
         };
-        class.as_str() != "Block" && self.typed_send_target(receiver, selector).is_ok()
+        class.as_str() != "Block"
+            && self
+                .typed_send_target(receiver, selector)
+                .is_ok_and(|target| {
+                    !matches!(
+                        target,
+                        super::dispatch_codegen::TypedSendTarget::Conformers(_)
+                    )
+                })
     }
 
     /// Generates code for unary `value` message on a block receiver.

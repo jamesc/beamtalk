@@ -230,7 +230,18 @@ pub(in crate::core_erlang) enum StaysDynamic {
     /// An ancestor is declared in another file, so the chain is not fully
     /// known.
     CrossFileParent,
+    /// A protocol-typed receiver none of whose known conformers is a
+    /// guardable tagged class (BT-4486).
+    ProtocolNoConformers,
+    /// A protocol-typed receiver with more than [`MAX_PROTOCOL_ARMS`]
+    /// guardable conformers: a guard that long costs more than it saves
+    /// (BT-4486).
+    ProtocolTooManyConformers,
 }
+
+/// BT-4486: the most conformer arms a protocol-typed send's class-tag guard
+/// emits. Past this the send stays dynamic.
+pub(in crate::core_erlang) const MAX_PROTOCOL_ARMS: usize = 4;
 
 /// Whether `class` is `Exception` or one of its subclasses — instances route
 /// to `bt@stdlib@exception:dispatch`, so a guarded direct call never applies.
@@ -303,6 +314,13 @@ pub(in crate::core_erlang) enum TypedSendTarget {
     /// A representation-routed built-in: guard on the representation test
     /// the dynamic path routes on, call the module it would call.
     Builtin(routing::BuiltinRoute),
+    /// BT-4486: a protocol-typed receiver (two to [`MAX_PROTOCOL_ARMS`]
+    /// guardable conformers, sorted by class name): one tag arm per
+    /// conformer. Protocols are structural, so the conformer list is only a
+    /// heuristic; the guard is the contract — a value tagged with none of
+    /// them takes the dynamic send. A protocol with exactly one conformer
+    /// resolves to [`Self::Tagged`].
+    Conformers(Vec<TypedTaggedTarget>),
 }
 
 impl CoreErlangGenerator {
@@ -1009,8 +1027,31 @@ impl CoreErlangGenerator {
                 )),
             };
         }
+        if let Some(conformers) = self.protocol_conformers.get(class_name.as_str()) {
+            return self.protocol_send_target(conformers);
+        }
         self.typed_tagged_target(class_name)
             .map(TypedSendTarget::Tagged)
+    }
+
+    /// BT-4486: the guarded target for a receiver typed by a protocol —
+    /// each known conformer through [`Self::typed_tagged_target`] (so the
+    /// shadowing, module-less, exception, abstract and built-in exclusions
+    /// apply per arm), keeping those that resolve.
+    fn protocol_send_target(
+        &self,
+        conformers: &[ecow::EcoString],
+    ) -> std::result::Result<TypedSendTarget, StaysDynamic> {
+        let mut targets: Vec<TypedTaggedTarget> = conformers
+            .iter()
+            .filter_map(|class| self.typed_tagged_target(class).ok())
+            .collect();
+        match targets.len() {
+            0 => Err(StaysDynamic::ProtocolNoConformers),
+            1 => Ok(TypedSendTarget::Tagged(targets.remove(0))),
+            n if n > MAX_PROTOCOL_ARMS => Err(StaysDynamic::ProtocolTooManyConformers),
+            _ => Ok(TypedSendTarget::Conformers(targets)),
+        }
     }
 
     /// BT-4069: `HANDLERS`' last entry. Converts a send to a receiver
@@ -1150,29 +1191,6 @@ impl CoreErlangGenerator {
         let args_list_doc = Self::join_docs_with_commas(
             arg_vars.iter().map(|var| leaf::var(var.clone())).collect(),
         );
-        let module_name = match target {
-            TypedSendTarget::Tagged(tagged) => tagged.module_name.clone(),
-            TypedSendTarget::Builtin(route) => route.target_module.to_string(),
-        };
-        // BT-4473: a send to an instance of this unit's own class whose
-        // selector one of its `dispatch/3` method arms answers calls that
-        // arm's function directly; every other tagged target, and every
-        // built-in route, calls `dispatch/3`.
-        let own_arm = match target {
-            TypedSendTarget::Tagged(tagged) => {
-                self.own_dispatch_arm(&tagged.class_name, selector_atom, arg_vars.len())
-            }
-            TypedSendTarget::Builtin(_) => None,
-        };
-        let direct_call = match own_arm {
-            Some(arm) => Self::own_arm_call_doc(selector_atom, arm, receiver_var, arg_vars),
-            None => {
-                Self::dispatch3_call_doc(module_name, selector_atom, &args_list_doc, receiver_var)
-            }
-        };
-        // BT-4366: both calls sit inside the type-test `case`, so each carries
-        // the send's line itself.
-        let direct_doc = self.annotate_current_send_call(direct_call);
         let fallback_doc = self.annotate_current_send_call(docvec![
             "call 'beamtalk_message_dispatch':'send'(",
             leaf::var(receiver_var.to_string()),
@@ -1182,6 +1200,44 @@ impl CoreErlangGenerator {
             args_list_doc.clone(),
             "])",
         ]);
+        if let TypedSendTarget::Conformers(conformers) = target {
+            // BT-4486: one tag arm per conformer, each a direct call.
+            let arms: Vec<(String, Document<'static>)> = conformers
+                .iter()
+                .map(|tagged| {
+                    let call = self.tagged_direct_call(
+                        tagged,
+                        selector_atom,
+                        receiver_var,
+                        arg_vars,
+                        &args_list_doc,
+                    );
+                    (
+                        tagged.class_name.clone(),
+                        self.annotate_current_send_call(call),
+                    )
+                })
+                .collect();
+            return self.class_tags_guarded_doc(receiver_var, arms, fallback_doc);
+        }
+        let module_name = match target {
+            TypedSendTarget::Tagged(tagged) => tagged.module_name.clone(),
+            TypedSendTarget::Builtin(route) => route.target_module.to_string(),
+            TypedSendTarget::Conformers(_) => unreachable!("handled above"),
+        };
+        let direct_call = match target {
+            TypedSendTarget::Tagged(tagged) => self.tagged_direct_call(
+                tagged,
+                selector_atom,
+                receiver_var,
+                arg_vars,
+                &args_list_doc,
+            ),
+            _ => Self::dispatch3_call_doc(module_name, selector_atom, &args_list_doc, receiver_var),
+        };
+        // BT-4366: both calls sit inside the type-test `case`, so each carries
+        // the send's line itself.
+        let direct_doc = self.annotate_current_send_call(direct_call);
 
         match target {
             TypedSendTarget::Tagged(tagged) => self.class_tag_guarded_doc(
@@ -1190,6 +1246,7 @@ impl CoreErlangGenerator {
                 direct_doc,
                 fallback_doc,
             ),
+            TypedSendTarget::Conformers(_) => unreachable!("handled above"),
             TypedSendTarget::Builtin(route) => {
                 // BT-4510: a `Binary` receiver that is a `String` at run time
                 // misses the bare-binary guard and tries the `String` route
@@ -1214,6 +1271,28 @@ impl CoreErlangGenerator {
                 };
                 self.render_send_guard(route.guard, receiver_var, direct_doc, &miss_doc)
             }
+        }
+    }
+
+    /// BT-4473: the direct call for a receiver known to be tagged `tagged`:
+    /// the own-class method arm when this unit's own class answers the
+    /// selector, else the class module's `dispatch/3`.
+    fn tagged_direct_call(
+        &self,
+        tagged: &TypedTaggedTarget,
+        selector_atom: &str,
+        receiver_var: &str,
+        arg_vars: &[String],
+        args_list_doc: &Document<'static>,
+    ) -> Document<'static> {
+        match self.own_dispatch_arm(&tagged.class_name, selector_atom, arg_vars.len()) {
+            Some(arm) => Self::own_arm_call_doc(selector_atom, arm, receiver_var, arg_vars),
+            None => Self::dispatch3_call_doc(
+                tagged.module_name.clone(),
+                selector_atom,
+                args_list_doc,
+                receiver_var,
+            ),
         }
     }
 
@@ -1345,8 +1424,36 @@ impl CoreErlangGenerator {
         direct_doc: Document<'static>,
         fallback_doc: Document<'static>,
     ) -> Document<'static> {
+        self.class_tags_guarded_doc(
+            receiver_var,
+            vec![(class_name.to_string(), direct_doc)],
+            fallback_doc,
+        )
+    }
+
+    /// BT-4486: [`Self::class_tag_guarded_doc`] over several classes — one
+    /// atom clause per `(class, direct_doc)` arm in the inner `case` (a
+    /// `select_val`), `fallback_doc` for any other tag or a non-map.
+    fn class_tags_guarded_doc(
+        &mut self,
+        receiver_var: &str,
+        arms: Vec<(String, Document<'static>)>,
+        fallback_doc: Document<'static>,
+    ) -> Document<'static> {
         let no_match_inner = self.fresh_temp_var("TTaggedNoMatch");
         let no_match_outer = self.case_clause_fallback("TTaggedOuterNoMatch");
+        let arm_docs: Vec<Document<'static>> = arms
+            .into_iter()
+            .map(|(class_name, direct_doc)| {
+                docvec![
+                    "<",
+                    leaf::atom(class_name),
+                    "> when 'true' -> ",
+                    direct_doc,
+                    " "
+                ]
+            })
+            .collect();
         docvec![
             "case call 'erlang':'is_map'(",
             leaf::var(receiver_var.to_string()),
@@ -1355,11 +1462,8 @@ impl CoreErlangGenerator {
             "case call 'maps':'get'('$beamtalk_class', ",
             leaf::var(receiver_var.to_string()),
             ", 'undefined') of ",
+            Document::Vec(arm_docs),
             "<",
-            leaf::atom(class_name.to_string()),
-            "> when 'true' -> ",
-            direct_doc,
-            " <",
             leaf::var(no_match_inner),
             "> when 'true' -> ",
             fallback_doc.clone(),

@@ -309,6 +309,37 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
 
   // BT-4412: an alias-typed receiver hits and misses its guard exactly like
   // the aliased type.
+  // BT-4486: protocol-typed receivers (fixtures/guarded_diff_summable.bt). `GuardedDiffPoint`, its subclass and
+  // `GuardedDiffImpostor` all answer `sum`, so each is a guarded arm; a
+  // tagged value that answers nothing, a primitive and a missing selector
+  // take the dynamic send and must agree with it.
+  testProtocolTypedReceivers =>
+    self
+      send: #protoPoint
+      typed: [:r :: GuardedDiffSummable | r sum]
+      dynamic: [:r | r sum]
+      on: self point
+    self
+      send: #protoPointSub
+      typed: [:r :: GuardedDiffSummable | r sum]
+      dynamic: [:r | r sum]
+      on: self pointSub
+    self
+      send: #protoImpostor
+      typed: [:r :: GuardedDiffSummable | r sum]
+      dynamic: [:r | r sum]
+      on: self impostor
+    self
+      send: #protoNonConformingTagged
+      typed: [:r :: GuardedDiffSummable | r sum]
+      dynamic: [:r | r sum]
+      on: GuardedDiffBase new
+    self
+      send: #protoPrimitive
+      typed: [:r :: GuardedDiffSummable | r sum]
+      dynamic: [:r | r sum]
+      on: 42
+
   testAliasTypedReceivers =>
     self
       send: #aliasTuple

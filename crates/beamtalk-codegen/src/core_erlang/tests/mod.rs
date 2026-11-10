@@ -23,6 +23,8 @@
 //! - [`value_immutable_slot_hint_conformance`] — BT-4273: the Value
 //!   `immutable_value` slot hint fixture, asserted against
 //!   `beamtalk_primitive_tests.erl`
+//! - [`typed_protocol`] — BT-4486: sends to protocol-typed receivers become
+//!   multi-arm class-tag guards over the protocol's known conformers
 //! - [`typed_sealed`] — BT-4069: sends to sealed-Value-typed receivers
 //!   compiling to a guarded direct `Module:dispatch/3` call
 
@@ -369,6 +371,7 @@ mod tier2_block_local_inner_loop;
 mod tier2_merge;
 mod trait_flattening;
 mod tuple_acc_state_read_corpus;
+mod typed_protocol;
 mod typed_sealed;
 mod value_immutable_slot_hint_conformance;
 mod value_inherited_target;

@@ -479,6 +479,12 @@ pub struct CoreErlangGenerator {
     /// check to collect inherited typed-no-default fields.
     pub(in crate::core_erlang) class_hierarchy:
         Option<beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy>,
+    /// BT-4486: for each protocol in scope, its known conformers (non-protocol
+    /// classes whose known surface satisfies it), sorted by name. Filled only
+    /// on the pre-analysed path; empty otherwise, so protocol-typed sends stay
+    /// dynamic.
+    pub(in crate::core_erlang) protocol_conformers:
+        std::collections::HashMap<EcoString, Vec<EcoString>>,
     /// ADR 0098 Phase 3: producing `BEAMTALK_VERSION`, baked into `__beamtalk_meta`.
     /// Supplied by the CLI; `None` for REPL/test codegen (key omitted).
     pub(in crate::core_erlang) beamtalk_version: Option<EcoString>,
@@ -729,6 +735,7 @@ impl CoreErlangGenerator {
             class_context: Some(ClassContext::new()),
             value_type_context: Some(ValueTypeContext::new()),
             class_hierarchy: None,
+            protocol_conformers: std::collections::HashMap::new(),
             beamtalk_version: None,
             otp_release: None,
             alias_registry: beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::new(),
