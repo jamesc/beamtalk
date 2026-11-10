@@ -93,6 +93,8 @@ instantiation_test_() ->
             %% Supervisor-restart follow-up
             {"class_self_spawn_as stays linked when the supervisor-spawn context is set",
                 fun test_class_self_spawn_as_stays_linked_in_supervisor_context/0},
+            {"class_self_spawn_as/with return Result error for a non-spawnable class",
+                fun test_class_self_named_spawn_not_spawnable/0},
             {"class_self_spawn_as returns Result error for abstract class",
                 fun test_class_self_spawn_as_abstract/0},
             {"class_self_spawn_with returns Result ok with init args applied",
@@ -833,6 +835,45 @@ test_class_self_spawn_as_reserved() ->
         },
         Result
     ).
+
+test_class_self_named_spawn_not_spawnable() ->
+    with_spawn_kind_classes(fun() ->
+        lists:foreach(
+            fun({Class, Mod}) ->
+                ?assertMatch(
+                    #{
+                        'isOk' := false,
+                        'errReason' :=
+                            #{
+                                error := #beamtalk_error{
+                                    kind = does_not_understand,
+                                    class = Class,
+                                    selector = 'spawnAs:'
+                                }
+                            }
+                    },
+                    beamtalk_class_instantiation:class_self_spawn_as(Class, Mod, false, nm)
+                ),
+                ?assertMatch(
+                    #{
+                        'isOk' := false,
+                        'errReason' :=
+                            #{
+                                error := #beamtalk_error{
+                                    kind = does_not_understand,
+                                    class = Class,
+                                    selector = 'spawnWith:as:'
+                                }
+                            }
+                    },
+                    beamtalk_class_instantiation:class_self_spawn_with(
+                        Class, Mod, true, #{}, nm
+                    )
+                )
+            end,
+            [{'Bt4404Value', bt4404_value_mod}, {'Bt4404Object', bt4404_object_mod}]
+        )
+    end).
 
 test_class_self_spawn_as_abstract() ->
     Result = beamtalk_class_instantiation:class_self_spawn_as(
