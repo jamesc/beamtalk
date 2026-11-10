@@ -1512,8 +1512,9 @@ impl InferredType {
     ///
     /// The reflexive `sub == sup` short-circuit is unreachable from `intersect`
     /// (its match arm guards on differing names) but kept so the predicate is
-    /// correct standalone for future callers.
-    fn is_nominal_subtype(hierarchy: &ClassHierarchy, sub: &str, sup: &str) -> bool {
+    /// correct standalone for future callers (e.g. `check_argument_types`'s
+    /// `:: Class` guard, BT-4599).
+    pub(crate) fn is_nominal_subtype(hierarchy: &ClassHierarchy, sub: &str, sup: &str) -> bool {
         sub == sup || hierarchy.superclass_chain(sub).iter().any(|c| c == sup)
     }
 

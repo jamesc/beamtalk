@@ -1693,11 +1693,7 @@ impl TypeChecker {
                     let class_shortcut_applies =
                         expected_structural.as_str() == "Class" && !is_class_ref_arg;
                     let instance_compat = if class_shortcut_applies {
-                        actual_ty.as_str() == "Class"
-                            || hierarchy
-                                .superclass_chain(actual_ty)
-                                .iter()
-                                .any(|ancestor| ancestor.as_str() == "Class")
+                        InferredType::is_nominal_subtype(hierarchy, actual_ty, "Class")
                     } else {
                         Self::is_type_compatible(actual_ty, &expected_structural, hierarchy)
                     };
