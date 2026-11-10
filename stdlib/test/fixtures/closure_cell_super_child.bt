@@ -43,3 +43,9 @@ ClosureCellSuperBase subclass: ClosureCellSuperChild
   runSuperApplyOnOwnWrite: superBlk => superBlk value: [self.n := 99]
 
   runSuperApplyOnOwnSelfSend: superBlk => superBlk value: [self n]
+
+  // BT-4536: blocks whose `super` send reaches a method that returns through
+  // its own `ensure:`.
+  writingEnsureBlock => [super returnThroughWritingEnsure]
+
+  quietEnsureBlock => [super returnThroughQuietEnsure]

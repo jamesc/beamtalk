@@ -190,7 +190,7 @@ fn arm_return_corpus() -> Vec<(String, String)> {
 
 /// Every `$bt_nlr` throw of a method's own `^` in `code` (its token is the
 /// method's `_NlrToken`; a self-dispatch relay re-throws another's) either
-/// carries the cell (a closure: `nlr_state/2`, a loop's `take/0`) or is
+/// carries the cell (a closure: `view/2`, a loop's `take/0`) or is
 /// preceded by the store of the state it carries: the cell is current
 /// whenever a `^` starts.
 fn every_throw_stores_its_state(code: &str) -> std::result::Result<usize, String> {
@@ -217,7 +217,7 @@ fn every_throw_stores_its_state(code: &str) -> std::result::Result<usize, String
             }
         }
         let slot = parts.get(2).map_or("", |s| s.trim());
-        if slot.contains("'nlr_state'(") || slot.contains("'take'()") {
+        if slot.contains("'view'(") || slot.contains("'take'()") {
             continue;
         }
         let before = code[..at].trim_end();

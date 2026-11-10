@@ -627,9 +627,11 @@ pub(in crate::core_erlang) enum VerifyError {
     /// `w := 0. [^5] ensure: [w := 9]` at the REPL left `w` at 0 once
     /// BT-4312 made that `^` a throw (BT-4288's loop-body `^` had the same
     /// gap); an actor method's `[^1] ensure: [self.n := 9]` never kept `n`,
-    /// nor did `c := [self.n := 9]. [^1] ensure: c`, nor (BT-4429) the same
-    /// sent with `perform:`, whose `Block>>ensure:` fallback relays every
-    /// foreign throw ([`NlrCarry::Foreign`]).
+    /// nor did `c := [self.n := 9]. [^1] ensure: c`. A `^` foreign to the
+    /// `ensure:` (no `token`), such as every one through `Block>>ensure:`
+    /// reached with `perform:`, owes no relay: a closure cleanup writes only
+    /// the actor-state cell, which the `^`'s method commits (ADR 0146;
+    /// [`VerifyError::ActorNlrCommitBypassesCell`]).
     EnsureCleanupLostOnNlr { defect: EnsureRelayDefect, at: Span },
 
     /// ADR 0146 R1: where the actor-state cell is live (an actor instance
@@ -714,7 +716,7 @@ pub(in crate::core_erlang) enum VerifyError {
     /// for a call (`selector`) that stores nothing to the cell first: the
     /// send was classified `UserCodeCall::No` outside every bracket window,
     /// and no conditional-fallback pre-store or `on:do:` entry store covers
-    /// it. The closure's `^` carries the cell (`nlr_state`), which then holds
+    /// it. The closure's `^` carries the cell (`view`), which then holds
     /// an older version than the method's `State`, so the method's earlier
     /// field writes are lost (`self.n := 6. [^2] ensure: [nil]` left `n` at
     /// 0; so did `timesRepeat:`, `to:do:`, `whileTrue:`, `[^2] value` and a
@@ -2360,25 +2362,18 @@ impl VerifyWalk<'_> {
 /// where the state lives in the cell, any cleanup that may write the cell
 /// writes it. A result in the cell is the carried state with the cell's
 /// fields over it, never one rebuilt from the `ensure:` site's bindings.
-/// A foreign throw (BT-4429, `Block>>ensure:` reached dynamically) has no
-/// token of the scope to match and a state kind known only at run time: a
-/// cleanup that may write the cell resumes it with the cell over the carried
-/// state when that state is the cell's.
+/// A foreign throw is not the scope's to relay: an inlined cleanup's writes
+/// reach the cell through the foreign clause
+/// ([`check_ensure_foreign_store`]) and a closure's are made in the cell, which
+/// the throw's own method commits (ADR 0146).
 fn check_ensure_relay(
     has_token: bool,
     carry: Option<NlrCarry>,
     cleanup: EnsureCleanup,
     relay: Option<&EnsureNlrRelay>,
 ) -> Option<EnsureRelayDefect> {
-    let carry = carry.filter(|carry| has_token || *carry == NlrCarry::Foreign)?;
+    let carry = carry.filter(|_| has_token)?;
     let expected = match (carry, cleanup) {
-        (
-            NlrCarry::Foreign,
-            EnsureCleanup::Inlined {
-                writes_cell: true, ..
-            }
-            | EnsureCleanup::Closure { writes_cell: true },
-        ) => RethrowSlot::CellIfCarried,
         (
             NlrCarry::Live,
             EnsureCleanup::Inlined {

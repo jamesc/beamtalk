@@ -181,8 +181,8 @@ Returns only user-visible field keys from a tagged map state.
 
 Filters out all internal fields (class, class_mod, methods, registry_pid) and
 the codegen-internal `__local__` scratch keys (`is_local_temp_key/1`), so
-`printString`, `fieldNames` and the inspector never show a threaded local or
-the BT-4448 owner stamp a state map can carry (BT-4459).
+`printString`, `fieldNames` and the inspector never show a threaded local a
+state map can carry (BT-4459).
 """.
 -spec user_field_keys(map()) -> [atom()].
 user_field_keys(State) when is_map(State) ->
@@ -195,8 +195,7 @@ user_field_keys(State) when is_map(State) ->
 -doc """
 Whether `Key` is a codegen-internal `__local__`-prefixed scratch key: an outer
 local an actor method packs into its `State` map while threading it through a
-desugared construct (`__local__<name>`), or the BT-4448 owner stamp
-(`'__local__$nlr_away_owner'`). Never a user-visible field: the committed actor
+desugared construct (`__local__<name>`). Never a user-visible field: the committed actor
 state never keeps one (`beamtalk_actor:strip_local_temps/1`), and reflection
 skips them (`user_field_keys/1`).
 """.
