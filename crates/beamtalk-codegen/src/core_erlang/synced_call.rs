@@ -166,13 +166,13 @@ thread_local! {
     /// `StalePrestore` rule can be shown to fire.
     pub(in crate::core_erlang) static FAULT_PRESTORE_READS_BEFORE_OPERANDS: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
+    /// Every send [`CoreErlangGenerator::note_dispatch_nlr_literals`] logged.
+    pub(in crate::core_erlang) static DISPATCH_NLR_LITERALS:
+        std::cell::RefCell<Vec<(String, SendUserCode)>> = const { std::cell::RefCell::new(Vec::new()) };
     /// The reads the fault stores instead, by the conditional's first block
     /// argument (the pre-store's `at`)
     /// ([`CoreErlangGenerator::publish_fault_prestore_read`]); cleared with
     /// the fault.
-    /// Every send [`CoreErlangGenerator::note_dispatch_nlr_literals`] logged.
-    pub(in crate::core_erlang) static DISPATCH_NLR_LITERALS:
-        std::cell::RefCell<Vec<(String, SendUserCode)>> = const { std::cell::RefCell::new(Vec::new()) };
     pub(in crate::core_erlang) static PRESTORE_EARLY_READ: std::cell::RefCell<
         std::collections::HashMap<Span, Option<PrestoreRead>>,
     > = std::cell::RefCell::new(std::collections::HashMap::new());
