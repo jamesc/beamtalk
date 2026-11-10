@@ -139,9 +139,8 @@ ProtoObject subclass: Object
   /// whose class declares class variables it runs in the class process
   /// (ADR 0142). A block passed to it that assigns a captured local is an
   /// escaping block (ADR 0133), a compile error: bind the value to a temp
-  /// local instead. A forwarding proxy (`TimeoutProxy`) answers `then:`
-  /// itself, with the proxy as the block's argument, rather than forwarding
-  /// it to its target.
+  /// local instead. `TimeoutProxy` forwards `then:` to its target, so the
+  /// target's own `then:` runs if it has one.
   ///
   /// ## Examples
   /// ```beamtalk

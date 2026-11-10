@@ -13,8 +13,9 @@
 //   compile; bind a temp local instead). A test file cannot hold a program
 //   that does not compile, so that case is pinned in beamtalk-core
 //   (`a_writing_block_passed_to_then_is_an_escaping_block`);
-// - a forwarding proxy (`TimeoutProxy`) answers it itself, with the proxy as
-//   the block's argument, rather than forwarding it to its target.
+// - `TimeoutProxy` forwards it to its target, so the target's own `then:`
+//   runs if it has one (the type checker treats `withTimeout:` as
+//   transparent, ADR 0104).
 //
 // Fixtures: fixtures/then_probe_actor.bt, fixtures/then_promise.bt,
 // fixtures/in_caller_probe.bt, fixtures/in_caller_stateful.bt,
@@ -94,14 +95,24 @@ TestCase subclass: ThenTest
     self assert: p class equals: ThenPromise
     self assert: p resolved equals: 3
 
-  // --- Forwarding proxies answer `then:` themselves ---
-  testTimeoutProxyAnswersThenItself =>
+  // --- TimeoutProxy forwards `then:` to its target ---
+  testTimeoutProxyForwardsThenToTarget =>
     target := SlowActor spawn
     proxy := target withTimeout: 30000
     [
-      self assert: (proxy then: [:p | p class]) equals: TimeoutProxy
-      self assert: (proxy then: [:p | p == proxy]) equals: true
+      self assert: (proxy then: [:p | p class]) equals: SlowActor
+      self assert: (proxy then: [:p | p == target]) equals: true
     ]
+      ensure: [
+        proxy stop
+        target stop
+      ]
+
+  testTimeoutProxyRunsTheTargetsOwnThen =>
+    target := ThenPromiseActor spawn
+    target resolve: 41
+    proxy := target withTimeout: 30000
+    [ self assert: (proxy then: [:v | v + 1]) equals: 42 ]
       ensure: [
         proxy stop
         target stop
