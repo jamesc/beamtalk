@@ -14,7 +14,8 @@ writes without message-passing overhead. `private:` and `protected:` (BT-4576)
 make unnamed tables for one actor's internal state: no node-global name, and
 other processes cannot read (`private`) or write (`protected`) them. The
 owning process holds the table; when the owner terminates, the table is
-deleted automatically. Only the owner process may call `deleteTable/1`.
+deleted automatically. Any process may call `deleteTable/1` on a public
+(named) table; only the owner may delete a private/protected one.
 
 Ets objects are represented as tagged maps:
 ```
@@ -414,8 +415,8 @@ deleteTable(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
         nil
     catch
         error:badarg ->
-            %% Only the owner may delete, whatever the protection, so the
-            %% failure means the table is gone or the caller is not its owner.
+            %% The table is gone, or it is protected/private and the caller
+            %% is not its owner.
             case delete_fault(TableName) of
                 stale -> stale_table_error('delete', TableName);
                 access_denied -> access_denied_error('delete', TableName)
@@ -854,25 +855,34 @@ table_fault(TableName, Kind) ->
 
 -doc """
 Classify a failed `ets:delete/1`: `stale` (gone) or `access_denied` (the
-caller is not the owner). Only the owner may delete, whatever the protection.
+caller may not delete it). ETS lets any process delete a `public` table; a
+`protected` or `private` one only its owner.
 
 An unnamed table's id is never reused, so its probe is unambiguous. A named
-table's name can be reused between the failed delete and this probe:
+table's name can be reused between the failed delete and this probe, so the
+probe may see a replacement. Each outcome is classified as follows:
 - No table under the name: `stale`.
-- The caller owns the table under the name: the table it tried to delete
-  cannot have been its own (that delete would have succeeded), so the
-  original is gone and the name was reused: `stale`.
-- Another process owns the table under the name: either the original or a
-  replacement. The two cannot be told apart, so the stated default is
-  `access_denied`, which is also what deleting the current table would raise.
+- The caller owns it, or it is `public`: the caller could have deleted it,
+  so the table whose delete failed is gone and the name was reused: `stale`.
+- Another process owns a `protected`/`private` table under the name: either
+  the original or a replacement. They cannot be told apart, so the stated
+  default is `access_denied`, which is what deleting the current table raises.
 """.
 -spec delete_fault(table()) -> stale | access_denied.
 delete_fault(TableName) ->
     Self = self(),
     case ets:info(TableName, owner) of
-        undefined -> stale;
-        Self -> stale;
-        _Other -> access_denied
+        undefined ->
+            stale;
+        Self ->
+            stale;
+        _Other ->
+            case ets:info(TableName, protection) of
+                Protection when Protection =:= protected; Protection =:= private ->
+                    access_denied;
+                _PublicOrGone ->
+                    stale
+            end
     end.
 
 -doc "A table's name for error messages; unnamed tables do not expose their tid.".
