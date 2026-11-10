@@ -2112,3 +2112,22 @@ bt4552_callback_crash_forgets_pid_row_test() ->
     end,
     ?assertMatch({error, _}, beamtalk_class_registry:restart_class(Name)),
     ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(Pid)).
+
+%% BT-4552: a rename moves the kept dead incarnations to the new name.
+bt4552_rename_class_pids_moves_rows_test() ->
+    beamtalk_class_registry:ensure_pid_table(),
+    Old = 'BT4552RenameOld',
+    New = 'BT4552RenameNew',
+    DeadPid = spawn(fun() -> ok end),
+    MRef = monitor(process, DeadPid),
+    receive
+        {'DOWN', MRef, process, DeadPid, _} -> ok
+    end,
+    beamtalk_class_registry:record_class_pid(DeadPid, Old),
+    try
+        ok = beamtalk_class_registry:rename_class_pids(Old, New),
+        ?assertEqual({ok, New}, beamtalk_class_registry:class_name_for_pid(DeadPid)),
+        ?assertEqual([], ets:match(beamtalk_class_pids, {'$1', Old}))
+    after
+        ets:delete(beamtalk_class_pids, DeadPid)
+    end.

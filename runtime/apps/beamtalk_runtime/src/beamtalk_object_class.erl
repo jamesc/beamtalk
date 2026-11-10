@@ -1582,6 +1582,10 @@ handle_call(
                 end
             ),
             beamtalk_class_registry:record_class_pid(self(), NewName),
+            %% BT-4552: kept dead incarnations follow the rename, so a class
+            %% object taken before both recovers to this class, and none is
+            %% left naming `OldName` for a later, unrelated class of that name.
+            beamtalk_class_registry:rename_class_pids(OldName, NewName),
             beamtalk_class_registry:record_loaded_class(NewName, self()),
             beamtalk_class_metadata:delete(OldName),
             _ = beamtalk_class_registry:forget_loaded_class(OldName, self()),

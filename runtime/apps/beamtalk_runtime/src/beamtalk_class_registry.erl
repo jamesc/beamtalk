@@ -68,6 +68,7 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     record_class_pid/2,
     class_name_for_pid/1,
     forget_class_pids/2,
+    rename_class_pids/2,
     ensure_loaded_classes_table/0,
     record_loaded_class/2,
     forget_loaded_class/2,
@@ -957,6 +958,25 @@ forget_class_pids(Pid, ClassName) ->
          || [P] <- ets:match(beamtalk_class_pids, {'$1', ClassName}),
             node(P) =:= node(),
             not is_process_alive(P)
+        ],
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-doc """
+Move every reverse-index row naming `OldName` to `NewName`, for a class
+renamed in place (`beamtalk_object_class` rename). The dead incarnations
+`restart_class/1` kept for crash recovery (BT-4552) then recover to the
+renamed class, are pruned and reclaimed under its new name, and never name a
+later, unrelated class that reuses `OldName`.
+""".
+-spec rename_class_pids(class_name(), class_name()) -> ok.
+rename_class_pids(OldName, NewName) ->
+    try
+        _ = [
+            ets:insert(beamtalk_class_pids, {P, NewName})
+         || [P] <- ets:match(beamtalk_class_pids, {'$1', OldName})
         ],
         ok
     catch
