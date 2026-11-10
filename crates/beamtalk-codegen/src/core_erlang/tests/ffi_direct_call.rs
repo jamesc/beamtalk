@@ -51,6 +51,7 @@ fn registry() -> NativeTypeRegistry {
         ],
     );
     registry.register_module("beamtalk_process_ops", vec![sig("current", &[], "Pid")]);
+    registry.trust_all_modules();
     registry
 }
 
@@ -242,4 +243,22 @@ fn stub_declared_result_stays_on_proxy() {
     )
     .expect("codegen should succeed");
     assert_proxied(&code, "native_mod", "answer");
+}
+
+#[test]
+fn untrusted_dependency_spec_stays_on_proxy() {
+    // BT-4507: dialyzer specs are not enforced, so an extracted spec from a
+    // hex/path dependency must not remove the result coercion.
+    let mut registry = NativeTypeRegistry::new();
+    registry.register_module("dep_mod", vec![sig("answer", &[], "Integer")]);
+    let src = "Object subclass: Probe\n  class run =>\n    Erlang dep_mod answer\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let code = crate::core_erlang::generate_module(
+        &module,
+        crate::core_erlang::CodegenOptions::new("probe")
+            .with_native_type_registry(Some(std::sync::Arc::new(registry))),
+    )
+    .expect("codegen should succeed");
+    assert_proxied(&code, "dep_mod", "answer");
 }

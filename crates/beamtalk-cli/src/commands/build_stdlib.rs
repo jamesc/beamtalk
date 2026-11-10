@@ -771,7 +771,10 @@ pub(crate) fn extract_stdlib_type_specs() -> Option<NativeTypeRegistry> {
         .unwrap_or_else(|p| Utf8PathBuf::from(p.to_string_lossy().as_ref()));
 
     match beam_compiler::extract_beam_specs(&beam_files, &cache_dir) {
-        Ok(registry) => {
+        Ok(mut registry) => {
+            // Runtime `beamtalk_*` specs are first-party: they may prove
+            // direct FFI calls (BT-4507).
+            registry.trust_all_modules();
             if registry.module_count() > 0 {
                 info!(
                     modules = registry.module_count(),
