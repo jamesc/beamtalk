@@ -610,7 +610,8 @@ dispatchable_module(ClassPid) ->
             %% BEAM lazy-loads modules, and function_exported/3 only checks
             %% loaded modules.
             _ = beamtalk_primitive:ensure_class_module_loaded(
-                fun() -> beamtalk_object_class:class_name_safe(ClassPid) end, ModuleName
+                fun() -> beamtalk_object_class:class_name_or_undefined(ClassPid) end,
+                ModuleName
             ),
             %% Verify the module exports dispatch/4 before calling it.
             %% This avoids catching error:undef broadly, which could mask
