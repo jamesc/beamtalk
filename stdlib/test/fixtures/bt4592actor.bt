@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4592 fixture: method-root `super` sends whose inherited method raises —
+// `Object>>error:` (a value-class owner, answering a wrapped map) and
+// Bt4592Base>>boom (a compiled actor method, answering a record).
+// See stdlib/test/actor_root_super_error_test.bt.
+
+Bt4592Base subclass: Bt4592Actor
+
+  rootSuper => super error: "x"
+
+  rootSuperNotLast =>
+    super error: "x"
+    42
+
+  boom => super boom

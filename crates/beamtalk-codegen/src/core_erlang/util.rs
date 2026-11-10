@@ -967,7 +967,7 @@ impl CoreErlangGenerator {
     /// BT-4318: the one lowering of a `State`-threading `super` send
     /// ([`Self::is_super_send_producer`]), in statement and value position
     /// alike. Its arguments are sequenced ahead (BT-3814), the
-    /// `beamtalk_dispatch:super/5` call is bound to a `_SuperReply` temp
+    /// `beamtalk_dispatch:super_reply/5` call is bound to a `_SuperReply` temp
     /// (bracketed by `generate_super_send` when it may reach the default
     /// arm), and a `State` `Bind` takes the callee's state from the reply
     /// tuple; the value is the reply's result.
