@@ -3809,7 +3809,16 @@ fn unary_while_rejection_names_the_written_selector() {
             help.contains(&format!("t := t + 1. [t < limit] {selector}: [t := t + 1]")),
             "{help}"
         );
+        // A class method has no fields to keep the state in.
+        assert!(!help.contains("self.t"), "{help}");
     }
+    // A value-type method does: the help offers one.
+    let source = in_value("[t := t + 1. t < 3] whileTrue\nt");
+    let diags = adr0131_diagnostics(&source);
+    let errors = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+    assert_eq!(errors.len(), 1, "{source}: {diags:?}");
+    let help = errors[0].hint.as_deref().unwrap_or_default();
+    assert!(help.contains("self.t := self.t + 1"), "{help}");
 }
 
 /// BT-3782: a condition that only reads outer locals, and a loop body that

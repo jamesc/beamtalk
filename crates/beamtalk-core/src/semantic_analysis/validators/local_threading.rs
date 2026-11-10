@@ -1420,8 +1420,9 @@ enum Escape {
     /// thread a condition write here (BT-3782).
     Condition(EcoString),
     /// The receiver of a unary `whileTrue`/`whileFalse` (BT-4313): the same
-    /// condition as [`Self::Condition`], named as written.
-    UnaryLoop(EcoString),
+    /// condition as [`Self::Condition`], named as written. The flag is whether
+    /// the method has fields to keep the state in (not a class method).
+    UnaryLoop(EcoString, bool),
     /// The condition of a `whileTrue:`/`whileFalse:` whose body is not a block
     /// literal: the loop runs its condition as a closure in every context
     /// (BT-4062, `block_facts::while_body_block`).
@@ -1468,7 +1469,7 @@ impl Escape {
                 "used as the condition of `{selector}`, which does not thread an assignment in \
                  its condition here"
             ),
-            Self::UnaryLoop(selector) => format!(
+            Self::UnaryLoop(selector, _) => format!(
                 "sent `{selector}`, which runs it as the loop's condition and does not thread an \
                  assignment in its condition here"
             ),
@@ -1528,11 +1529,18 @@ impl Escape {
                 "assign `{name}` in the loop body instead: `[{name} < limit] {selector} [{name} := \
                  {name} + 1]`"
             ),
-            Self::UnaryLoop(selector) => format!(
-                "keep `{name}` in a field (`self.{name} := self.{name} + 1`), or write the loop \
-                 with a body that assigns it: `[{name} := {name} + 1. {name} < limit] {selector}` \
-                 runs as `{name} := {name} + 1. [{name} < limit] {selector}: [{name} := {name} + 1]`"
-            ),
+            Self::UnaryLoop(selector, has_fields) => {
+                let field = if *has_fields {
+                    format!("keep `{name}` in a field (`self.{name} := self.{name} + 1`), or ")
+                } else {
+                    String::new()
+                };
+                format!(
+                    "{field}write the loop with a body that assigns `{name}`: \
+                     `[{name} := {name} + 1. {name} < limit] {selector}` runs as \
+                     `{name} := {name} + 1. [{name} < limit] {selector}: [{name} := {name} + 1]`"
+                )
+            }
             Self::ConditionBodyNotLiteral(selector) => format!(
                 "write the loop body directly, wrapping a block value in a literal \
                  (`[...] {selector} [body value]`), or assign `{name}` in a literal loop body"
@@ -2792,7 +2800,7 @@ impl<'d> Walker<'d> {
                     // `whileTrue: []` it is canonicalised to; name it as written.
                     let escape =
                         match crate::ast::normalize::written_unary_loop(selector, arguments) {
-                            Some(unary) => Escape::UnaryLoop(unary.into()),
+                            Some(unary) => Escape::UnaryLoop(unary.into(), self.context != Class),
                             None => Escape::Condition(sel.clone()),
                         };
                     self.report_literal(block, &escape);
