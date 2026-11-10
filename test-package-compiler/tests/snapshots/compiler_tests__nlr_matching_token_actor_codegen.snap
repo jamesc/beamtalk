@@ -426,7 +426,7 @@ module 'nlr_matching_token_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'ha
                         of _NlrResult@18 -> _NlrResult@18
                         catch <_NlrCls@19, _NlrErr@20, _NlrStk@21> ->
                           case {_NlrCls@19, _NlrErr@20} of
-                            <{'throw', {'$bt_nlr', _CatchTok@22, _NlrVal@23, _NlrState@24}}> when call 'erlang':'=:='(_CatchTok@22, _NlrToken@6) -> {'reply', _NlrVal@23, _NlrState@24}
+                            <{'throw', {'$bt_nlr', _CatchTok@22, _NlrVal@23, _NlrState@24}}> when call 'erlang':'=:='(_CatchTok@22, _NlrToken@6) -> {'reply', _NlrVal@23, call 'beamtalk_actor_state':'commit'(Self, _NlrState@24)}
                             <_OtherPair@25> when 'true' -> primop 'raw_raise'(_NlrCls@19, _NlrErr@20, _NlrStk@21)
                           end
                     in apply '__nlr_body'/0 () in case _ExitReply@26 of <{'reply', _, _ExitState@27}> when 'true' -> let _ = call 'beamtalk_actor_state':'store'(_ExitState@27) in _ExitReply@26 <_> when 'true' -> _ExitReply@26 end

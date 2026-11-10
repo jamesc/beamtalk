@@ -134,6 +134,12 @@ pub(super) fn build_detached_node_command(
             cmd.env(var, val);
         }
     }
+    // ADR 0146 (BT-4535): the test-build check in
+    // `beamtalk_actor_state:commit/2`, which the project's own test tooling
+    // switches on; not sensitive, and a no-op unless set.
+    if let Ok(check) = std::env::var("BEAMTALK_CHECK_NLR_COMMIT") {
+        cmd.env("BEAMTALK_CHECK_NLR_COMMIT", check);
+    }
     // Terminal type (for erl console compatibility)
     if let Ok(term) = std::env::var("TERM") {
         cmd.env("TERM", term);

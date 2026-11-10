@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0146 (BT-4535, BT-4459): the method a `^` returns from commits the
+// actor's cell, not the copy the throw carries. Each method here creates a
+// `^` block, writes a field after creating it, and has another actor (or
+// another method of this one) run the block.
+
+Actor subclass: ClosureCellOwner
+  state: n = 0
+
+  n => self.n
+
+  // BT-4459: the block is run by `peer`, away from home, so its `^` carries
+  // the block's creation-time capture (`n = 0`). The write after the block's
+  // creation is in this actor's cell and must survive the `^`.
+  run: peer =>
+    blk := [^1]
+    self.n := 5
+    peer call: blk
+    0
+
+  // The same, with a `perform:`ed `ensure:` in this method on the way back:
+  // its cleanup runs from the cell (`n = 5`) and its write is kept too.
+  runThroughPerformedEnsure: peer =>
+    c := [self.n := self.n + 1]
+    blk := [^1]
+    self.n := 5
+    [peer call: blk] perform: #ensure: withArguments: #(c)
+    0
+
+  // ADR 0146 R1: a `^` of this method from a block it passes to another
+  // method of this actor unwinds through that method's inlined `ensure:`,
+  // whose cleanup stores its write to the cell. This method commits it.
+  foreignReturnThroughEnsure =>
+    self runEnsure: [^3]
+    0
+
+  runEnsure: blk =>
+    [blk value] ensure: [self.n := 40]
+    0
+
+  // As a peer: writes its own field, then runs the block. The `^` leaves this
+  // actor's callback by a throw, so this actor keeps its entry state (ADR
+  // 0137's callback contract, ADR 0146 R2).
+  call: blk =>
+    self.n := 7
+    blk value
+    0
