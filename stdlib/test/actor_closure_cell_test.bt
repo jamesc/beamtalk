@@ -195,6 +195,15 @@ TestCase subclass: ActorClosureCellTest
     self assert: a foreignReturnThroughEnsure equals: 3
     self assert: a n equals: 40
 
+  // BT-4598: an `ensure:` whose relay and foreign clause share one compiled
+  // cleanup keeps the cleanup's write for its own `^` and a foreign one.
+  testOwnAndForeignReturnsThroughOneEnsureKeepTheCleanupsWrite =>
+    a := ClosureCellOwner spawn
+    self assert: a ownReturnThroughSharedEnsure equals: 5
+    self assert: a n equals: 10
+    self assert: a foreignReturnThroughSharedEnsure equals: 3
+    self assert: a n equals: 20
+
   // ADR 0146 R1 (BT-4534): a `^` from a block passed to another method of
   // the same actor unwinds through that method's inlined `ensure:`; the
   // cleanup's write is in the cell while the `^` is in flight, so the
