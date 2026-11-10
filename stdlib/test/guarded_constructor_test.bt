@@ -89,10 +89,11 @@ TestCase subclass: GuardedConstructorTest
       selector: #new:
       fun: [:args :receiver | #fromAncestorNewInitExtension]
       owner: #test
+    expected := #fromAncestorNewInitExtension
     [
-      self assert: (GcLeaf new: #{#x => 1}) equals: #fromAncestorNewInitExtension
-      self assert: (leaf new: #{#x => 1}) equals: #fromAncestorNewInitExtension
-      self assert: (GcBase new: #{#x => 1}) equals: #fromAncestorNewInitExtension
+      self assert: (GcLeaf new: #{#x => 1}) equals: expected
+      self assert: (leaf new: #{#x => 1}) equals: expected
+      self assert: (GcBase new: #{#x => 1}) equals: expected
     ]
       ensure: [
         Erlang beamtalk_extensions
