@@ -19,18 +19,31 @@
 //! invisible to the binary crate, producing a confusing "private item"
 //! error far from this file.
 
-use beamtalk_core::compilation::{
-    DependencyMap, DependencySource, DependencySpec, GitReference, parse_diagnostics_table,
-};
+use beamtalk_core::compilation::{DependencyMap, GitReference, parse_diagnostics_table};
+#[cfg(test)]
+use beamtalk_core::compilation::{DependencySource, DependencySpec};
 #[cfg(test)]
 use beamtalk_core::source_analysis::DiagnosticCategory;
+#[cfg(test)]
+use std::path::PathBuf;
+// `[dependencies]` parsing and package-name validation live in
+// `beamtalk-project` so the LSP shares them (BT-4611); re-exported so
+// existing `manifest::…` call sites are unchanged.
+pub use beamtalk_project::dependencies::{
+    TomlDependency, git_reference_from_fields, parse_dependencies, read_manifest_dependencies,
+    validate_exact_version, validate_registry_dependency, value_type_name,
+};
+#[cfg(test)]
+use beamtalk_project::package_name::{ERLANG_APPS, RESERVED_NAMES};
+pub use beamtalk_project::package_name::{
+    PackageNameError, format_name_error, suggest_package_name, validate_package_name,
+};
 use camino::Utf8Path;
 use miette::{Context, IntoDiagnostic, Result};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
-use std::path::PathBuf;
 
 /// A map of native dependency names to their declarations.
 pub type NativeDependencyMap = BTreeMap<String, NativeDependency>;
@@ -202,28 +215,6 @@ pub struct RegistryConfig {
 pub struct StubsConfig {
     /// Path to the package's stub directory, relative to the package root.
     pub path: String,
-}
-
-/// A dependency entry as it appears in `beamtalk.toml`.
-///
-/// Supports three forms:
-/// - `name = "1.2.3"` — registry dependency at an exact version
-/// - `name = { path = "..." }` — local path dependency
-/// - `name = { git = "...", tag/branch/rev = "..." }` — git dependency
-#[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
-#[allow(dead_code)] // Constructed by serde deserialization
-pub struct TomlDependency {
-    /// Local filesystem path to the dependency.
-    pub path: Option<String>,
-    /// Git repository URL.
-    pub git: Option<String>,
-    /// Git tag to check out.
-    pub tag: Option<String>,
-    /// Git branch to check out.
-    pub branch: Option<String>,
-    /// Git commit SHA to check out.
-    pub rev: Option<String>,
 }
 
 /// OTP application configuration from the `[application]` section of `beamtalk.toml`.
@@ -481,236 +472,6 @@ pub struct PackageManifest {
     /// Defaults to `false` (warning only).
     #[serde(default, rename = "strict-deps")]
     pub strict_deps: bool,
-}
-
-/// Validate and convert a single TOML dependency entry into a [`DependencySpec`].
-///
-/// Returns a helpful error message if the entry is malformed.
-fn validate_dependency(name: &str, dep: &TomlDependency) -> Result<DependencySpec> {
-    // Validate the dependency name uses package naming rules
-    if let Err(e) = validate_package_name(name) {
-        miette::bail!(
-            "Invalid dependency name '{name}': {}",
-            format_name_error(name, &e)
-        );
-    }
-
-    let has_path = dep.path.is_some();
-    let has_git = dep.git.is_some();
-    let has_git_ref = dep.tag.is_some() || dep.branch.is_some() || dep.rev.is_some();
-
-    // Must have exactly one source type
-    if has_path && has_git {
-        miette::bail!("Dependency '{name}' specifies both 'path' and 'git' — use one or the other");
-    }
-
-    if !has_path && !has_git {
-        miette::bail!("Dependency '{name}' must specify either 'path' or 'git' as a source");
-    }
-
-    // Path deps must not have git ref fields
-    if has_path && has_git_ref {
-        miette::bail!(
-            "Dependency '{name}' is a path dependency — 'tag', 'branch', and 'rev' are only valid for git dependencies"
-        );
-    }
-
-    let source = if let Some(path) = &dep.path {
-        DependencySource::Path {
-            path: PathBuf::from(path),
-        }
-    } else {
-        let url = dep.git.as_ref().unwrap().clone();
-
-        let reference = git_reference_from_fields(
-            &format!("Dependency '{name}'"),
-            dep.tag.as_ref(),
-            dep.branch.as_ref(),
-            dep.rev.as_ref(),
-        )?;
-
-        DependencySource::Git { url, reference }
-    };
-
-    Ok(DependencySpec {
-        name: name.to_string(),
-        source,
-    })
-}
-
-/// Build a [`GitReference`] from a git dependency's `tag`/`branch`/`rev`
-/// fields, requiring exactly one of them. Shared by `[dependencies]` and
-/// `[native.dependencies]`; `subject` names the entry in error messages
-/// (e.g. `"Dependency 'json'"`).
-fn git_reference_from_fields(
-    subject: &str,
-    tag: Option<&String>,
-    branch: Option<&String>,
-    rev: Option<&String>,
-) -> Result<GitReference> {
-    match (tag, branch, rev) {
-        (Some(tag), None, None) => Ok(GitReference::Tag(tag.clone())),
-        (None, Some(branch), None) => Ok(GitReference::Branch(branch.clone())),
-        (None, None, Some(rev)) => Ok(GitReference::Rev(rev.clone())),
-        (None, None, None) => miette::bail!(
-            "{subject} is a git dependency but has no ref — specify 'tag', 'branch', or 'rev'"
-        ),
-        _ => miette::bail!(
-            "{subject} specifies multiple git references — use exactly one of 'tag', 'branch', or 'rev'"
-        ),
-    }
-}
-
-/// Validate a bare-string registry dependency (`name = "1.2.3"`).
-///
-/// Registry dependencies pin an exact `major.minor.patch` version — version
-/// ranges are deliberately not supported, so the resolved graph is always
-/// reproducible without a constraint solver.
-///
-/// `pub` (rather than crate-private) so `deps add --version` (in the
-/// `beamtalk` binary crate that depends on this lib crate) can validate a
-/// user-supplied version up front, with the identical error a manual
-/// `beamtalk.toml` edit would get, before touching the registry index.
-///
-/// # Errors
-///
-/// Returns an error if `name` is not a valid package name, or `version` is
-/// not an exact `major.minor.patch` version.
-pub fn validate_registry_dependency(name: &str, version: &str) -> Result<DependencySpec> {
-    if let Err(e) = validate_package_name(name) {
-        miette::bail!(
-            "Invalid dependency name '{name}': {}",
-            format_name_error(name, &e)
-        );
-    }
-
-    if let Err(reason) = validate_exact_version(version) {
-        miette::bail!(
-            "Dependency '{name}' has an invalid version '{version}' — {reason}\n\n  \
-             Registry dependencies must pin an exact version, e.g.\n    \
-             {name} = \"1.2.3\"\n\n  \
-             For version ranges or a specific branch, use a git dependency instead:\n    \
-             {name} = {{ git = \"https://...\", tag = \"v1.2.3\" }}"
-        );
-    }
-
-    Ok(DependencySpec {
-        name: name.to_string(),
-        source: DependencySource::Registry {
-            version: version.to_string(),
-        },
-    })
-}
-
-/// Validate an exact `major.minor.patch` version string.
-///
-/// Every segment must be a non-empty run of ASCII digits. Returns a short
-/// human-readable reason on failure (the caller adds the surrounding context).
-///
-/// `pub` so `commands::version` (`beamtalk version X.Y.Z`) can apply
-/// the same exact-version rule a registry dependency's version is held to,
-/// rather than duplicating it.
-///
-/// # Errors
-///
-/// Returns `Err` with a short human-readable reason if `version` is not a
-/// valid `major.minor.patch` string (empty, has surrounding whitespace, uses
-/// a range operator, has the wrong number of segments, a non-numeric
-/// segment, or a segment with a leading zero).
-pub fn validate_exact_version(version: &str) -> Result<(), String> {
-    if version.is_empty() {
-        return Err("the version is empty".to_string());
-    }
-
-    if version.trim() != version {
-        return Err("the version has leading or trailing whitespace".to_string());
-    }
-
-    // Reject range/constraint operators with a targeted message rather than
-    // the generic "not major.minor.patch" one.
-    for op in ["~>", ">=", "<=", ">", "<", "=", "^", "*"] {
-        if version.starts_with(op) {
-            return Err(format!(
-                "version ranges are not supported (found '{op}'), only exact versions"
-            ));
-        }
-    }
-
-    let segments: Vec<&str> = version.split('.').collect();
-    if segments.len() != 3 {
-        return Err(format!(
-            "expected exactly three segments (major.minor.patch), found {}",
-            segments.len()
-        ));
-    }
-
-    for segment in &segments {
-        if segment.is_empty() {
-            return Err("a version segment is empty".to_string());
-        }
-        if !segment.bytes().all(|b| b.is_ascii_digit()) {
-            return Err(format!(
-                "version segment '{segment}' is not a non-negative integer"
-            ));
-        }
-        // `01.0.0` and `1.0.0` name the same release but would be pinned as two
-        // different strings in the lockfile, so only the canonical spelling is
-        // accepted.
-        if segment.len() > 1 && segment.starts_with('0') {
-            return Err(format!(
-                "version segment '{segment}' has a leading zero — write it as '{}'",
-                segment.trim_start_matches('0')
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-/// Parse and validate the `[dependencies]` section of a manifest.
-///
-/// Returns an empty map if the section is missing or empty.
-fn parse_dependencies(deps: Option<&toml::Value>) -> Result<DependencyMap> {
-    let Some(raw_value) = deps else {
-        return Ok(BTreeMap::new());
-    };
-
-    // The [dependencies] section must be a TOML table
-    let table = raw_value.as_table().ok_or_else(|| {
-        miette::miette!(
-            "[dependencies] must be a table, not a {}",
-            value_type_name(raw_value)
-        )
-    })?;
-
-    if table.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-
-    let mut result = DependencyMap::new();
-    for (name, value) in table {
-        // A bare string is a registry dependency: `name = "1.2.3"`.
-        let spec = if let Some(version) = value.as_str() {
-            validate_registry_dependency(name, version)?
-        } else {
-            // Otherwise the entry must be an inline table like { path = "..." }
-            let dep: TomlDependency =
-                value
-                    .clone()
-                    .try_into()
-                    .into_diagnostic()
-                    .wrap_err_with(|| {
-                        format!(
-                            "Dependency '{name}' has an invalid format — expected a version string \
-                         like \"1.2.3\", or a table with 'path' or 'git' keys"
-                        )
-                    })?;
-
-            validate_dependency(name, &dep)?
-        };
-        result.insert(name.clone(), spec);
-    }
-    Ok(result)
 }
 
 /// Validate a hex.pm version constraint string.
@@ -1147,19 +908,6 @@ fn is_plain_erlang_atom(s: &str) -> bool {
 pub use beamtalk_core::compilation::DiagnosticSeverityOverride;
 pub use beamtalk_core::compilation::DiagnosticsTable;
 
-/// Return a human-readable TOML type name for error messages.
-fn value_type_name(value: &toml::Value) -> &'static str {
-    match value {
-        toml::Value::String(_) => "string",
-        toml::Value::Integer(_) => "integer",
-        toml::Value::Float(_) => "float",
-        toml::Value::Boolean(_) => "boolean",
-        toml::Value::Datetime(_) => "datetime",
-        toml::Value::Array(_) => "array",
-        toml::Value::Table(_) => "table",
-    }
-}
-
 /// Read and deserialize a `beamtalk.toml` file into a raw [`Manifest`].
 ///
 /// Does **not** validate the package name — use [`parse_manifest`] for that.
@@ -1428,196 +1176,6 @@ pub fn find_application_config(project_root: &Utf8Path) -> Result<Option<Applica
         miette::bail!("{}", format_name_error(&manifest.package.name, &e));
     }
     Ok(manifest.application)
-}
-
-/// Format a package name validation error with an optional suggestion.
-pub fn format_name_error(name: &str, error: &PackageNameError) -> String {
-    let msg = format!("Invalid package name '{name}': {error}");
-    match suggest_package_name(name) {
-        Some(s) => format!("{msg} (try '{s}')"),
-        None => msg,
-    }
-}
-
-/// Reserved beamtalk package names that conflict with core components.
-const RESERVED_NAMES: &[&str] = &[
-    "beamtalk",
-    "stdlib",
-    "kernel",
-    "runtime",
-    "workspace",
-    "compiler",
-];
-
-/// Erlang standard application names that would conflict with OTP.
-const ERLANG_APPS: &[&str] = &[
-    "common_test",
-    "crypto",
-    "dialyzer",
-    "eunit",
-    "inets",
-    "mnesia",
-    "observer",
-    "public_key",
-    "sasl",
-    "ssh",
-    "ssl",
-    "tools",
-    "xmerl",
-];
-
-/// Error returned when a package name is invalid.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PackageNameError {
-    Empty,
-    TooLong(usize),
-    StartsWithNonLetter(char),
-    InvalidCharacter(char),
-    ReservedName,
-    ErlangAppConflict,
-}
-
-impl fmt::Display for PackageNameError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => write!(f, "package name must not be empty"),
-            Self::TooLong(len) => {
-                write!(f, "package name is too long ({len} chars, max 64)")
-            }
-            Self::StartsWithNonLetter(c) => {
-                write!(
-                    f,
-                    "package name must start with a lowercase letter, found '{c}'"
-                )
-            }
-            Self::InvalidCharacter(c) => {
-                write!(
-                    f,
-                    "package name must contain only lowercase letters, digits, and underscores — found '{c}'"
-                )
-            }
-            Self::ReservedName => {
-                write!(
-                    f,
-                    "is a reserved package name (conflicts with Beamtalk core)"
-                )
-            }
-            Self::ErlangAppConflict => {
-                write!(f, "conflicts with an Erlang/OTP standard application")
-            }
-        }
-    }
-}
-
-/// Validate a package name according to ADR 0026 §8.
-///
-/// Package names must be:
-/// - Lowercase ASCII letters, digits, and underscores only
-/// - Start with a letter
-/// - 1–64 characters
-/// - Not a reserved Beamtalk name
-/// - Not an Erlang standard application name
-///
-/// # Errors
-///
-/// Returns a [`PackageNameError`] describing which rule `name` violates.
-///
-/// # Panics
-///
-/// Never panics: the internal `.unwrap()` on the first character is only
-/// reached after the preceding empty-name check has already returned.
-pub fn validate_package_name(name: &str) -> Result<(), PackageNameError> {
-    if name.is_empty() {
-        return Err(PackageNameError::Empty);
-    }
-
-    if name.len() > 64 {
-        return Err(PackageNameError::TooLong(name.len()));
-    }
-
-    let first = name.chars().next().unwrap();
-    if !first.is_ascii_lowercase() {
-        return Err(PackageNameError::StartsWithNonLetter(first));
-    }
-
-    for c in name.chars() {
-        if !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
-            return Err(PackageNameError::InvalidCharacter(c));
-        }
-    }
-
-    if RESERVED_NAMES.contains(&name) {
-        return Err(PackageNameError::ReservedName);
-    }
-
-    if ERLANG_APPS.contains(&name) {
-        return Err(PackageNameError::ErlangAppConflict);
-    }
-
-    Ok(())
-}
-
-/// Suggest a corrected package name from an invalid one.
-///
-/// Converts CamelCase to `snake_case`, replaces non-alphanumeric chars with
-/// underscores, strips leading non-letter chars, and collapses consecutive
-/// underscores. Returns `None` if no reasonable suggestion can be made.
-pub fn suggest_package_name(name: &str) -> Option<String> {
-    // Insert underscores before uppercase letters (CamelCase → snake_case)
-    let mut expanded = String::new();
-    let mut prev_char: Option<char> = None;
-    for c in name.chars() {
-        if c.is_ascii_uppercase() {
-            if let Some(p) = prev_char {
-                if p.is_ascii_lowercase() || p.is_ascii_digit() {
-                    expanded.push('_');
-                }
-            }
-        }
-        expanded.push(c);
-        prev_char = Some(c);
-    }
-
-    let suggested: String = expanded
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '_'
-            }
-        })
-        .collect();
-
-    // Strip leading non-letter characters
-    let suggested = suggested.trim_start_matches(|c: char| !c.is_ascii_lowercase());
-
-    // Collapse consecutive underscores and trim trailing ones
-    let mut result = String::new();
-    let mut prev_underscore = false;
-    for c in suggested.chars() {
-        if c == '_' {
-            if !prev_underscore {
-                result.push(c);
-            }
-            prev_underscore = true;
-        } else {
-            result.push(c);
-            prev_underscore = false;
-        }
-    }
-    let result = result.trim_end_matches('_').to_string();
-
-    if result.is_empty() || result == name {
-        return None;
-    }
-
-    // Only suggest if the suggestion is actually valid
-    if validate_package_name(&result).is_ok() {
-        Some(result)
-    } else {
-        None
-    }
 }
 
 #[cfg(test)]

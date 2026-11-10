@@ -52,6 +52,7 @@ impl Backend {
             type_cache: Mutex::new(LoadedTypeCache::default()),
             preload_budget_remaining: Mutex::new(PRELOAD_MAX_FILES),
             preload_coverage_partial: std::sync::atomic::AtomicBool::new(false),
+            dependency_extensions_unknown: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             fail_next_root_walk: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
@@ -679,7 +680,7 @@ impl Backend {
     /// open files regardless. Non-`NotFound` I/O errors and parse failures are
     /// logged as `WARN` so the mismatch is discoverable. A multi-root workspace merges
     /// every root's table into one (later roots win on category collisions);
-    /// like `set_has_package_dependencies`, this is a whole-session
+    /// like the dependency guard (`dependency_extensions_unknown`), this is a whole-session
     /// simplification, not a per-file lookup.
     ///
     /// Loaded once at startup (mirrors [`Self::load_type_cache`]) —
@@ -790,8 +791,14 @@ impl Backend {
                     // Nothing was indexed: that is partial coverage, never a
                     // licence to claim completeness.
                     tracing::warn!(%e, "startup preload walk task failed");
+                    // Nor of dependency loading: keep the guard on.
                     PreloadedFiles {
                         budget_exhausted: true,
+                        dependencies: super::config::DependencyLoad {
+                            declared: true,
+                            loaded: false,
+                            src_dirs: Vec::new(),
+                        },
                         ..PreloadedFiles::default()
                     }
                 }
@@ -814,11 +821,6 @@ impl Backend {
             }
         }
 
-        // Also count package roots `did_open` registered before this ran
-        // (BT-4158) — they are not in `config.roots`, and this whole-session
-        // setter must not clear the flag their own load already set.
-        let deps_present = loaded.deps_present
-            || super::config::any_dependency_src_dirs(&self.workspace_roots_snapshot());
         let mut svc = self.service.lock().expect("service lock poisoned");
         for (path, content) in loaded.user_files {
             let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
@@ -845,7 +847,7 @@ impl Backend {
         // and must keep the conservative ModuleOnly default.
         //
         // "Complete" here means the conventional source layout (`src/`,
-        // `test/`, fetched dep sources, stdlib) was fully walked. Files
+        // `test/`, dependency sources, stdlib) was fully walked. Files
         // outside those directories are not preloaded and are only indexed
         // when opened — same coverage the ProjectIndex has always had for
         // classes. Scope claims must stay tied to this walk; do not claim
@@ -855,12 +857,30 @@ impl Backend {
         // ran first and exhausted the budget must not be overwritten to
         // complete by this walk over `config.roots` alone.
         svc.set_project_complete(!self.preload_coverage_is_partial());
-        // Fetched deps mean dependency extensions may exist that the checker
-        // cannot see. (Declared-but-unfetched deps are
-        // invisible here — the LSP deliberately avoids parsing beamtalk.toml —
-        // but such a workspace cannot resolve dep classes at all, so hint
-        // noise is the lesser concern.)
-        svc.set_has_package_dependencies(deps_present);
+        // ADR 0100's pre-WS3 guard (BT-4611): on unless every declared
+        // dependency was loaded completely. Sticky, so a package root
+        // `did_open` loaded before this ran keeps its own verdict.
+        self.record_dependency_load(&mut svc, &loaded.dependencies);
+    }
+
+    /// Folds one preload walk's dependency loading into the session's sticky
+    /// pre-WS3 guard verdict and installs it (BT-4611). Called with the
+    /// walk's files already indexed, so a dependency file's parse errors are
+    /// known — the CLI's per-file completeness rule.
+    fn record_dependency_load(
+        &self,
+        svc: &mut beamtalk_language_service::SimpleLanguageService,
+        dependencies: &super::config::DependencyLoad,
+    ) {
+        let any_incomplete_file = svc.any_incomplete_file_under(&dependencies.src_dirs);
+        if dependencies.extensions_unknown(any_incomplete_file) {
+            self.dependency_extensions_unknown
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        svc.set_dependency_extensions_unknown(
+            self.dependency_extensions_unknown
+                .load(std::sync::atomic::Ordering::SeqCst),
+        );
     }
 
     /// Per-open-file package root discovery (BT-4158).
@@ -873,7 +893,7 @@ impl Backend {
     /// `beamtalk.toml` ancestor) and, when it is not yet a known root,
     /// registers it in `workspace_roots` and runs the same per-root loading
     /// the startup sequence does: `[package]` name, the root's `src/`,
-    /// `test/` and fetched-dependency sources, type cache and
+    /// `test/` and dependency sources, type cache and
     /// `[diagnostics]` table. Open diagnostics are republished afterwards.
     ///
     /// A no-op (beyond the ancestor walk) when `path` already lies under a
@@ -894,7 +914,7 @@ impl Backend {
     ///   load already holding `root_load_lock`). The elapsed time is logged
     ///   at debug level.
     pub(in crate::server) async fn ensure_package_root_loaded(&self, path: &Utf8PathBuf) {
-        use super::config::{any_dependency_src_dirs, package_root_for_file, preload_covers};
+        use super::config::{package_root_for_file, preload_covers};
 
         let known_roots = self.workspace_roots_snapshot();
         if preload_covers(path.as_std_path(), &known_roots) {
@@ -987,7 +1007,7 @@ impl Backend {
             if loaded.budget_exhausted {
                 svc.set_project_complete(false);
             }
-            svc.set_has_package_dependencies(any_dependency_src_dirs(&all_roots));
+            self.record_dependency_load(&mut svc, &loaded.dependencies);
         }
         self.load_type_cache(&all_roots).await;
         self.load_diagnostics_table(&all_roots).await;
@@ -1005,7 +1025,7 @@ impl Backend {
         self.republish_open_diagnostics().await;
     }
 
-    /// Walks one package root's `src/`, `test/` and fetched-dependency
+    /// Walks one package root's `src/`, `test/` and dependency
     /// sources on a blocking task, within the session's remaining preload
     /// budget. `Err` when the task fails (panics or is cancelled).
     async fn walk_package_root(

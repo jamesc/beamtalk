@@ -43,19 +43,18 @@
 //!
 //! **Transitive dependencies:** [`resolve_dependency_class_infos`]
 //! walks the full transitive dependency graph — not just the project's own
-//! direct `[dependencies]` table — by recursively reading each discovered
-//! dependency's own `beamtalk.toml` (when its checkout is already present on
-//! disk) and queuing its dependencies in turn. The BFS structure is similar
-//! to `discover_all_dep_roots` in `crate::commands::deps` (the CLI's own
-//! transitive-walk logic for `ensure_deps_resolved`'s freshness checks), but
-//! the two walkers produce different outputs (`ClassInfo` vs `DiscoveredDep`)
-//! and use different error strategies (warn-and-skip vs. return an error), so
-//! their BFS loops remain independent. The *checkout-path resolution* step
-//! (path vs. git/registry dispatch) is the shared primitive and lives in
-//! [`crate::path_util::dep_root_for_source`] — both walkers call it, so that
-//! piece cannot drift. As with direct dependencies, a checkout that hasn't
-//! been fetched yet (missing `_build/deps/<name>/`) is silently skipped
-//! rather than fetched — no network I/O.
+//! direct `[dependencies]` table — with
+//! [`beamtalk_project::dependency_graph::discover_dependency_graph`], which
+//! reads each discovered dependency's own `beamtalk.toml` (when its checkout
+//! is already present on disk) and queues its dependencies in turn. The LSP
+//! uses the same walk (BT-4611), so both see the same graph. The CLI's own
+//! transitive walk for `ensure_deps_resolved` (`discover_all_dep_roots` in
+//! `crate::commands::deps`) reports errors rather than skipping, so it stays
+//! separate, but shares the checkout-path step
+//! ([`beamtalk_project::dependency_graph::dep_root_for_source`]). As with
+//! direct dependencies, a checkout that hasn't been fetched yet (missing
+//! `_build/deps/<name>/`) is silently skipped rather than fetched — no
+//! network I/O.
 //!
 //! **Caching:** the MCP server's `lint`/`diagnostic_summary` tools
 //! call [`resolve_dependency_class_infos`] on *every* request. Without
@@ -68,16 +67,14 @@
 //! replaced by a later `beamtalk build`/re-fetch is detected and
 //! re-resolved. This adds no network I/O or persistent state.
 
-use crate::build_layout::BuildLayout;
 use crate::manifest;
-use crate::path_util::dep_root_for_source;
 use beamtalk_core::ast::ProtocolDefinition;
-use beamtalk_core::compilation::DependencyMap;
 use beamtalk_core::file_walker::FileWalker;
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
+use beamtalk_project::dependency_graph::{dependency_source_dir, discover_dependency_graph};
 use camino::{Utf8Path, Utf8PathBuf};
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::SystemTime;
 use tracing::warn;
@@ -160,79 +157,24 @@ pub fn resolve_dependency_class_infos_with_sources(project_root: &Utf8Path) -> D
             ..DependencyScan::default()
         };
     };
-    let layout = BuildLayout::new(project_root);
     let mut class_infos = Vec::new();
     let mut protocol_defs = Vec::new();
     let mut scanned: Vec<DiscoveredDep> = Vec::new();
-    // Cleared by any dependency the walk below cannot fully see.
-    let mut every_dependency_found = true;
 
-    // BFS over the transitive dependency graph, matching
-    // `discover_all_dep_roots`'s reachability: a queue of
-    // `(declaring_root, deps_to_visit)` pairs, seeded with the project's own
-    // direct `[dependencies]` table. `visited` dedups by name only (not
-    // path), matching the CLI's single-version policy — a diamond dependency
-    // (reached via two different parents) is resolved once.
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut queue: VecDeque<(Utf8PathBuf, DependencyMap)> =
-        VecDeque::from([(project_root.to_path_buf(), parsed.dependencies)]);
-
-    while let Some((declaring_root, deps)) = queue.pop_front() {
-        for (name, spec) in deps {
-            if !visited.insert(name.clone()) {
-                continue; // Already discovered via another path (diamond dep).
-            }
-
-            // Not sandboxed: a `..`-containing or absolute path dep can point
-            // outside `project_root`, matching the trust model of `beamtalk
-            // build`'s own path-dependency resolution — `beamtalk.toml` is
-            // authored by the project owner, not untrusted input. Path deps
-            // are relative to `declaring_root` (the package whose manifest
-            // declared them), not necessarily `project_root`.
-            let dep_root = match dep_root_for_source(&declaring_root, &name, &spec.source, &layout)
-            {
-                Ok(root) => root,
-                Err(path) => {
-                    warn!(dep = %name, path = %path.display(), "Dependency path is not valid UTF-8; skipping");
-                    every_dependency_found = false;
-                    continue;
-                }
-            };
-
-            if !dep_root.is_dir() {
-                // Not yet fetched/built — best-effort, skip silently. Its own
-                // dependencies (if any) can't be discovered either, since
-                // there's no checkout to read a `beamtalk.toml` from.
-                every_dependency_found = false;
-                continue;
-            }
-
-            let scan = scan_dep(&dep_root, &name);
-
-            // Queue this dependency's own dependencies for discovery,
-            // reading whatever checkout is already on disk — still no
-            // network I/O.
-            let dep_manifest_path = dep_root.join("beamtalk.toml");
-            let mut dependencies = Vec::new();
-            if let Ok(dep_parsed) = manifest::parse_manifest_full(&dep_manifest_path) {
-                dependencies = dep_parsed.dependencies.keys().cloned().collect();
-                if !dep_parsed.dependencies.is_empty() {
-                    queue.push_back((dep_root, dep_parsed.dependencies));
-                }
-            } else {
-                // Its own dependencies — and their extensions — are unknown.
-                every_dependency_found = false;
-            }
-
-            if let Some(scan) = scan {
-                scanned.push(DiscoveredDep {
-                    name,
-                    dependencies,
-                    scan,
-                });
-            } else {
-                every_dependency_found = false;
-            }
+    // The transitive walk over whatever checkouts are on disk — no network
+    // I/O — shared with the LSP (BT-4611). `all_found` is cleared by any
+    // dependency it cannot fully see.
+    let graph = discover_dependency_graph(project_root, parsed.dependencies);
+    let mut every_dependency_found = graph.all_found;
+    for dep in graph.found {
+        if let Some(scan) = scan_dep(&dep.root, &dep.name) {
+            scanned.push(DiscoveredDep {
+                name: dep.name,
+                dependencies: dep.dependencies,
+                scan,
+            });
+        } else {
+            every_dependency_found = false;
         }
     }
 
@@ -377,14 +319,9 @@ static PARSE_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUs
 /// cached result when the dependency's [`DepFingerprint`] hasn't changed
 /// since the last call. `None` if its source directory can't be walked.
 fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<ScannedDep>> {
-    let src_dir = dep_root.join("src");
-    let search_dir = if src_dir.is_dir() {
-        src_dir.as_path()
-    } else {
-        dep_root
-    };
+    let search_dir = dependency_source_dir(dep_root);
 
-    let files = match FileWalker::source_files().walk(search_dir) {
+    let files = match FileWalker::source_files().walk(&search_dir) {
         Ok(files) => files,
         Err(e) => {
             warn!(dep = %dep_name, error = %e, "Failed to walk dependency source directory");
@@ -404,7 +341,7 @@ fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<Scanne
     let cached = cache
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .get(search_dir)
+        .get(&search_dir)
         .filter(|(cached_fingerprint, _)| *cached_fingerprint == fingerprint)
         .map(|(_, scanned)| std::sync::Arc::clone(scanned));
     if cached.is_some() {

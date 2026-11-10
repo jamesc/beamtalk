@@ -90,7 +90,7 @@ async fn load_diagnostics_table_multi_root_collision_later_root_wins() {
     // [diagnostics] category to different severities, the collision is
     // now logged (see load_diagnostics_table's per-key merge loop), but
     // the resulting behavior is unchanged — the later root's value wins
-    // for the whole session, matching set_has_package_dependencies.
+    // for the whole session, matching the sticky dependency guard.
     use beamtalk_core::source_analysis::DiagnosticCategory;
 
     let temp = unique_temp_dir("beamtalk_lsp_diagnostics_table_collision");

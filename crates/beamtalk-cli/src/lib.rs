@@ -14,7 +14,7 @@
 //!   `beamtalk-mcp`
 //! - [`otp_support`] — OTP version support window (ADR 0125 §3.1), the
 //!   single reader of `otp-support.toml`
-//! - [`path_util`] — shared `normalize_path` utility (filesystem-free `.`/`..` resolution)
+//! - [`path_util`] — CLI path helpers (forward-slash rendering, symlink checks)
 //! - [`pid_liveness`] — cross-platform "is this PID alive?" check, shared
 //!   with `tests/cli_common`
 //! - [`repl_meta_exprs`] — REPL meta-command → Beamtalk-expression builders,
@@ -22,7 +22,8 @@
 
 pub mod build_layout;
 pub mod dependency_classes;
-pub mod dependency_extensions;
+// Moved to `beamtalk-project` so the LSP applies the same rule (BT-4611).
+pub use beamtalk_project::dependency_extensions;
 pub mod erlc;
 pub mod manifest;
 pub mod native_type_specs;
