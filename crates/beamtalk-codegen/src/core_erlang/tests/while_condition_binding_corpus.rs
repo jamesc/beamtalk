@@ -349,10 +349,9 @@ const NESTED: &[&str] = &[
     "r := W",
 ];
 
-/// BT-4602 review: the other block roles a loop can sit in. Phase 0 rejects
-/// some of them in some contexts (an actor fold's value-bearing site,
-/// BT-3797; a class-method arm), so a row here is kept only where the semantic
-/// checks accept it ([`rejection`]); the rows above must all be accepted.
+/// BT-4602 review: the other block roles a loop can sit in, with a smaller
+/// grid. Phase 0 accepts every row in every context, as it does the rows
+/// above (checked in [`pure_condition_rows`]).
 const MORE_NESTED: &[&str] = &[
     "[W] on: Error do: [:err | nil]",
     "[Error signal] on: Error do: [:err | W]",
@@ -416,6 +415,13 @@ fn pure_condition_rows() -> Vec<(String, String)> {
     let conditions = [PURE_CONDITIONS[0], PURE_CONDITIONS[1], PURE_CONDITIONS[4]];
     let bodies = [None, Some(""), Some("s := s + 1")];
     rows.extend(condition_rows(NESTED, &conditions, &bodies));
+    rows.extend(condition_rows(
+        MORE_NESTED,
+        &[PURE_CONDITIONS[0], PURE_CONDITIONS[4]],
+        &[None, Some("s := s + 1")],
+    ));
+    // Every row is one Phase 0 accepts: a correct position it starts
+    // rejecting fails here rather than silently leaving the corpus.
     let rejected: Vec<String> = rows
         .iter()
         .filter_map(|(label, src)| rejection(src).map(|r| format!("{label}: {r}\n{src}")))
@@ -425,17 +431,6 @@ fn pure_condition_rows() -> Vec<(String, String)> {
         "Phase 0 rejects {} BT-4602 row(s) it should accept:\n{}",
         rejected.len(),
         rejected.join("\n")
-    );
-    let more = condition_rows(
-        MORE_NESTED,
-        &[PURE_CONDITIONS[0], PURE_CONDITIONS[4]],
-        &[None, Some("s := s + 1")],
-    );
-    let total = more.len();
-    rows.extend(more.into_iter().filter(|(_, src)| rejection(src).is_none()));
-    assert!(
-        rows.len() >= 960 + total * 3 / 4,
-        "Phase 0 rejects more than a quarter of the extra nested rows"
     );
     rows
 }
