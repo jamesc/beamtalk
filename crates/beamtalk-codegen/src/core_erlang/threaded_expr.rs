@@ -1855,7 +1855,7 @@ impl CoreErlangGenerator {
             selector,
             arguments,
             ..
-        } = expr.unwrap_parens()
+        } = expr
         else {
             return None;
         };
