@@ -82,6 +82,8 @@ value_module_resolution_test_() ->
             fun inherited_object_send_makes_no_xref_call/0},
         {"fun-backed methods added or replaced at runtime are seen by the next send (BT-4071)",
             fun runtime_method_changes_are_seen_by_next_send/0},
+        {"BT-4624: perform: finds fun-backed methods of a module-less class",
+            fun perform_finds_runtime_fun_methods/0},
         {"method_origin/3 copies no generation table (BT-4071)",
             fun method_origin_copies_no_generation_table/0}
     ]}.
@@ -357,6 +359,47 @@ runtime_method_changes_are_seen_by_next_send() ->
     ?assertEqual(
         unpublished, beamtalk_method_resolver:instance_method_info(?MODULE_LESS, answer)
     ).
+
+perform_finds_runtime_fun_methods() ->
+    %% BT-4624: the reflective path (beamtalk_dispatch:lookup/5) must resolve
+    %% fun-backed methods of module-less classes, including inherited ones,
+    %% exactly as the direct send does.
+    Parent = start_class(?MODULE_LESS, undefined, 'Object'),
+    Child = start_class('PkgHotModuleLessChild', undefined, ?MODULE_LESS),
+    Self = #{'$beamtalk_class' => 'PkgHotModuleLessChild'},
+    try
+        ok = beamtalk_object_class:put_method(Parent, answer, fun(_S) -> 42 end),
+        ok = beamtalk_object_class:put_method(Parent, 'plus:', fun(_S, N) -> N + 1 end),
+        ?assertEqual(42, beamtalk_primitive:send(Self, answer, [])),
+        ?assertEqual(42, beamtalk_primitive:send(Self, 'perform:', [answer])),
+        ?assertEqual(
+            8, beamtalk_primitive:send(Self, 'perform:withArguments:', ['plus:', [7]])
+        ),
+        ?assertEqual(
+            8,
+            beamtalk_primitive:send(
+                Self, 'perform:withArguments:timeout:', ['plus:', [7], 1000]
+            )
+        ),
+        ?assertEqual(
+            {reply, 42, #{}},
+            beamtalk_dispatch:lookup(answer, [], Self, #{}, 'PkgHotModuleLessChild')
+        ),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = does_not_understand}},
+            beamtalk_dispatch:lookup(nope, [], Self, #{}, 'PkgHotModuleLessChild')
+        ),
+        %% A fun overriding a selector a compiled ancestor (Object) defines must
+        %% win under perform: exactly as under a direct send.
+        ok = beamtalk_object_class:put_method(Parent, 'printString', fun(_S) -> <<"foo">> end),
+        ?assertEqual(<<"foo">>, beamtalk_primitive:send(Self, 'printString', [])),
+        ?assertEqual(
+            <<"foo">>, beamtalk_primitive:send(Self, 'perform:', ['printString'])
+        )
+    after
+        stop_class(Child),
+        stop_class(Parent)
+    end.
 
 method_origin_copies_no_generation_table() ->
     %% Reflection (`CompiledMethod origin`) still reads xref, but a one-class
