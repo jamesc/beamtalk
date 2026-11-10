@@ -17,7 +17,7 @@
 //! corpus) and is **returned** or **stored** by that method:
 //!
 //! | [`EscapeShape`]        | Source shape                                       |
-//! |------------------------|----------------------------------------------------||
+//! |------------------------|----------------------------------------------------|  
 //! | `Returned`             | last statement of the method, or `^ [...]`         |
 //! | `StoredLocal`          | `name := [...]`                                    |
 //! | `StoredClassVar`       | `self.name := [...]`                               |
