@@ -271,3 +271,35 @@ fn a_package_without_dependencies_has_the_guard_off() {
     assert!(!loaded.dependencies.extensions_unknown(false));
     let _ = fs::remove_dir_all(&temp);
 }
+
+/// A path dependency lives outside `_build/deps/<name>/`, so its package is
+/// registered from its own manifest: its files are stamped as `producer`,
+/// not as the consumer's own package (so its `internal` aliases stay
+/// internal).
+#[tokio::test]
+async fn path_dependency_files_are_stamped_with_their_own_package() {
+    let temp = unique_temp_dir("beamtalk_lsp_dep_guard_stamping");
+    let app = consumer_with_dependency(&temp, DepKind::Path, &[("codec.bt", PRODUCER_CLASS)]);
+    let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+    let backend: &Backend = service.inner();
+    backend.load_root_packages(std::slice::from_ref(&app)).await;
+    let dep_file = Utf8PathBuf::from_path_buf(temp.join("producer").join("src").join("codec.bt"))
+        .expect("temp path is UTF-8");
+    let app_file =
+        Utf8PathBuf::from_path_buf(app.join("src").join("main.bt")).expect("temp path is UTF-8");
+    let svc = backend.service.lock().expect("service lock poisoned");
+    assert_eq!(
+        svc.project_index()
+            .alias_package_for_file(&dep_file)
+            .as_str(),
+        "producer"
+    );
+    assert_eq!(
+        svc.project_index()
+            .alias_package_for_file(&app_file)
+            .as_str(),
+        "app"
+    );
+    drop(svc);
+    let _ = fs::remove_dir_all(&temp);
+}

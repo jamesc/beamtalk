@@ -257,7 +257,9 @@ pub(in crate::server) fn root_dependencies(root: &Path) -> RootDependencies {
         beamtalk_project::dependencies::read_manifest_dependencies(&utf8_root.join("beamtalk.toml"))
             .map(|deps| (utf8_root, deps))
             .map_err(|e| {
-                tracing::warn!(root = %root.display(), error = %e, "Cannot read [dependencies]; keeping the dependency guard on");
+                // `debug`, not `warn`: this runs on every `did_open` (via
+                // `preload_covers`), and `beamtalk build` reports the error.
+                tracing::debug!(root = %root.display(), error = %e, "Cannot read [dependencies]; keeping the dependency guard on");
             })
     });
     let Ok((utf8_root, direct)) = read else {

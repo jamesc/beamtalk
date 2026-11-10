@@ -726,8 +726,9 @@ impl Backend {
         svc.set_diagnostics_overrides(table);
     }
 
-    /// Reads each workspace root's real `beamtalk.toml` `[package] name` and
-    /// registers it with the `ProjectIndex`, so two distinct real
+    /// Reads each workspace root's real `beamtalk.toml` `[package] name` —
+    /// and each of its dependencies' (BT-4611) — and registers it with the
+    /// `ProjectIndex`, so two distinct real
     /// packages opened as sibling workspace roots get distinct alias-package
     /// stamps instead of colliding on the same-project marker.
     ///
@@ -749,7 +750,22 @@ impl Backend {
 
         let roots_owned: Vec<PathBuf> = roots.to_vec();
         let root_packages: Vec<(Utf8PathBuf, EcoString)> = tokio::task::spawn_blocking(move || {
-            roots_owned
+            // Each root's dependency checkouts too (BT-4611): a path
+            // dependency lives outside `_build/deps/<name>/`, so the path
+            // convention cannot name its package and its files would
+            // otherwise be stamped as the consumer's own.
+            let with_dependencies: Vec<PathBuf> = roots_owned
+                .iter()
+                .flat_map(|root| {
+                    std::iter::once(root.clone()).chain(
+                        super::config::root_dependencies(root)
+                            .found
+                            .into_iter()
+                            .map(|dep| dep.root),
+                    )
+                })
+                .collect();
+            with_dependencies
                 .into_iter()
                 .filter_map(|root| {
                     let manifest_path = root.join("beamtalk.toml");
