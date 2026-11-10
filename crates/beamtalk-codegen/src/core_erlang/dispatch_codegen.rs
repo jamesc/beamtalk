@@ -1200,54 +1200,52 @@ impl CoreErlangGenerator {
             args_list_doc.clone(),
             "])",
         ]);
-        if let TypedSendTarget::Conformers(conformers) = target {
-            // BT-4486: one tag arm per conformer, each a direct call.
-            let arms: Vec<(String, Document<'static>)> = conformers
-                .iter()
-                .map(|tagged| {
-                    let call = self.tagged_direct_call(
-                        tagged,
-                        selector_atom,
-                        receiver_var,
-                        arg_vars,
-                        &args_list_doc,
-                    );
-                    (
-                        tagged.class_name.clone(),
-                        self.annotate_current_send_call(call),
-                    )
-                })
-                .collect();
-            return self.class_tags_guarded_doc(receiver_var, arms, fallback_doc);
-        }
-        let module_name = match target {
-            TypedSendTarget::Tagged(tagged) => tagged.module_name.clone(),
-            TypedSendTarget::Builtin(route) => route.target_module.to_string(),
-            TypedSendTarget::Conformers(_) => unreachable!("handled above"),
-        };
-        let direct_call = match target {
-            TypedSendTarget::Tagged(tagged) => self.tagged_direct_call(
-                tagged,
-                selector_atom,
-                receiver_var,
-                arg_vars,
-                &args_list_doc,
-            ),
-            _ => Self::dispatch3_call_doc(module_name, selector_atom, &args_list_doc, receiver_var),
-        };
-        // BT-4366: both calls sit inside the type-test `case`, so each carries
-        // the send's line itself.
-        let direct_doc = self.annotate_current_send_call(direct_call);
-
         match target {
-            TypedSendTarget::Tagged(tagged) => self.class_tag_guarded_doc(
-                receiver_var,
-                &tagged.class_name,
-                direct_doc,
-                fallback_doc,
-            ),
-            TypedSendTarget::Conformers(_) => unreachable!("handled above"),
+            TypedSendTarget::Conformers(conformers) => {
+                // BT-4486: one tag arm per conformer, each a direct call.
+                let arms: Vec<(String, Document<'static>)> = conformers
+                    .iter()
+                    .map(|tagged| {
+                        let call = self.tagged_direct_call(
+                            tagged,
+                            selector_atom,
+                            receiver_var,
+                            arg_vars,
+                            &args_list_doc,
+                        );
+                        (
+                            tagged.class_name.clone(),
+                            self.annotate_current_send_call(call),
+                        )
+                    })
+                    .collect();
+                self.class_tags_guarded_doc(receiver_var, arms, fallback_doc)
+            }
+            TypedSendTarget::Tagged(tagged) => {
+                let call = self.tagged_direct_call(
+                    tagged,
+                    selector_atom,
+                    receiver_var,
+                    arg_vars,
+                    &args_list_doc,
+                );
+                // BT-4366: both calls sit inside the type-test `case`, so each
+                // carries the send's line itself.
+                let direct_doc = self.annotate_current_send_call(call);
+                self.class_tag_guarded_doc(
+                    receiver_var,
+                    &tagged.class_name,
+                    direct_doc,
+                    fallback_doc,
+                )
+            }
             TypedSendTarget::Builtin(route) => {
+                let direct_doc = self.annotate_current_send_call(Self::dispatch3_call_doc(
+                    route.target_module.to_string(),
+                    selector_atom,
+                    &args_list_doc,
+                    receiver_var,
+                ));
                 // BT-4510: a `Binary` receiver that is a `String` at run time
                 // misses the bare-binary guard and tries the `String` route
                 // before the dynamic send.
