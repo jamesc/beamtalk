@@ -211,6 +211,22 @@ pub(in crate::core_erlang) fn block_returns_from_scope(block: &beamtalk_core::as
     nlr_closures_store_first() && beamtalk_core::semantic_analysis::facts::block_has_nlr(block)
 }
 
+/// The block-literal operands (receiver, then arguments) of the send
+/// `receiver ... arguments`: the blocks the send itself may run. A
+/// parenthesised block operand is already bare here (`ast::normalize`,
+/// BT-4059).
+fn block_literal_operands<'a>(
+    receiver: &'a Expression,
+    arguments: &'a [Expression],
+) -> impl Iterator<Item = &'a beamtalk_core::ast::Block> {
+    std::iter::once(receiver)
+        .chain(arguments)
+        .filter_map(|operand| match operand {
+            Expression::Block(block) => Some(block),
+            _ => None,
+        })
+}
+
 #[cfg(test)]
 thread_local! {
     /// Count-only mode (the invariant probe): gaps and other verifier findings
@@ -373,16 +389,20 @@ pub(in crate::core_erlang) struct SyncedCallState {
     /// attach to the bracket it builds: the fast path and the call without
     /// its operand bindings.
     pub(in crate::core_erlang) pending_fast_path: Option<(usize, PendingFastPath)>,
-    /// BT-4524: the block-literal operands holding a `^` of sends compiled
-    /// outside every window and classified [`UserCodeCall::No`], by block
-    /// span, with the send's selector. A block among them that is then
+    /// BT-4524: the block-literal operands holding a `^` of sends classified
+    /// [`UserCodeCall::No`], by block span, with the send's selector (BT-4632:
+    /// inside a window too, which covers only its bracketed call's own
+    /// blocks). A block among them that is then
     /// compiled as a closure ([`CoreErlangGenerator::with_actor_closure`])
     /// with no cover runs with a stale cell, and is a
     /// [`VerifyError::UnbracketedNlrClosure`].
     pub(in crate::core_erlang) nlr_operands: std::collections::HashMap<Span, String>,
     /// BT-4524: the block literals (by span) whose call stores the threaded
     /// state before it runs them, for the lowerings that enclose the code
-    /// being compiled ([`CoreErlangGenerator::with_nlr_closure_cover`]).
+    /// being compiled ([`CoreErlangGenerator::with_nlr_closure_cover`]) and,
+    /// BT-4632, for each open bracket window: its bracketed call's own block
+    /// literals ([`CoreErlangGenerator::open_sync_window`]), not the blocks
+    /// of sends nested in its operands.
     pub(in crate::core_erlang) nlr_cover: Vec<Span>,
     /// BT-4524: `^`-holding closures compiled with no store before the call
     /// that runs them, reported as [`VerifyError::UnbracketedNlrClosure`].
@@ -1012,7 +1032,10 @@ impl CoreErlangGenerator {
             return;
         }
         let class = self.classify_send(receiver, selector, arguments, is_cast);
-        if class == UserCodeCall::No && !is_cast && self.synced.window_depth == 0 {
+        // BT-4632: inside a window too. The window's store covers only the
+        // bracketed call's own closures ([`Self::open_sync_window`]); this
+        // send is one of its operands and runs its `^`-closures before it.
+        if class == UserCodeCall::No && !is_cast {
             self.note_nlr_operands(receiver, selector, arguments, at);
         }
         if matches!(class, UserCodeCall::No | UserCodeCall::CompiledSelfSend) {
@@ -1037,7 +1060,7 @@ impl CoreErlangGenerator {
     }
 
     /// BT-4524: records the block-literal operands of an unbracketed send
-    /// (class [`UserCodeCall::No`], outside every window) that hold a `^`
+    /// (class [`UserCodeCall::No`]) that hold a `^`
     /// ([`SyncedCallState::nlr_operands`]). Independent of the classifier's
     /// `^` rule: what decides a finding is whether the lowering then compiles
     /// such a block as a closure ([`Self::check_nlr_closure`]). A cast runs
@@ -1076,29 +1099,28 @@ impl CoreErlangGenerator {
             let gap = self.make_unbracketed_send(selector.name().to_string(), at);
             self.synced.nlr_closure_gaps.push(gap);
         }
-        let blocks =
-            std::iter::once(receiver)
-                .chain(arguments)
-                .filter_map(|operand| match operand {
-                    Expression::Block(block) => Some(block),
-                    _ => None,
-                });
+        let blocks = block_literal_operands(receiver, arguments);
         self.note_nlr_blocks(blocks, selector.name().as_str());
     }
 
     /// BT-4524: records the `^`-holding blocks among `blocks`, which a send
-    /// of `selector` outside every bracket window may run as closures
+    /// of `selector` no bracket covers may run as closures
     /// ([`SyncedCallState::nlr_operands`]). [`Self::note_nlr_operands`] calls
     /// it for an unbracketed generic send; a conditional's non-Boolean
     /// fallback send ([`Self::boolean_fallback_send`]) calls it for its
     /// arms, since a conditional lowered on the mutation path is never a
     /// generic send ([`Self::note_send`] does not see it).
+    ///
+    /// BT-4632: recorded inside a bracket window too. The window's store
+    /// covers only the bracketed call's own block literals
+    /// ([`Self::open_sync_window`]); a send compiled inside the window is one
+    /// of that call's operands, which run before its store.
     pub(in crate::core_erlang) fn note_nlr_blocks<'b>(
         &mut self,
         blocks: impl IntoIterator<Item = &'b beamtalk_core::ast::Block>,
         selector: &str,
     ) {
-        if !self.synced_calls_active() || self.in_cell_closure() || self.synced.window_depth > 0 {
+        if !self.synced_calls_active() || self.in_cell_closure() {
             return;
         }
         for block in blocks {
@@ -1140,12 +1162,13 @@ impl CoreErlangGenerator {
     /// a `^`-holding operand of an unbracketed send
     /// ([`Self::note_nlr_operands`]) and no store covers the call that runs
     /// it, the closure's `^` would carry a cell older than the method's
-    /// `State`: a [`VerifyError::UnbracketedNlrClosure`].
+    /// `State`: a [`VerifyError::UnbracketedNlrClosure`]. An enclosing bracket
+    /// window is a cover only for its own call's block literals (BT-4632).
     pub(in crate::core_erlang) fn check_nlr_closure(&mut self, at: Span) {
         let Some(selector) = self.synced.nlr_operands.remove(&at) else {
             return;
         };
-        if self.synced.window_depth > 0 || self.synced.nlr_cover.contains(&at) {
+        if self.synced.nlr_cover.contains(&at) {
             return;
         }
         let gap = self.make_unbracketed_send(selector, at);
@@ -1178,7 +1201,7 @@ impl CoreErlangGenerator {
     /// protocol does not apply.
     ///
     /// BT-4612: the one pre-store. A generic send reaches the runtime
-    /// dispatch outside every window only when it is classified
+    /// dispatch unbracketed only when it is classified
     /// [`UserCodeCall::No`]; with a block literal among its operands that is
     /// a [`SendUserCode::Never`] send (`p spawnWith: [^1]`), which runs none
     /// of them ([`Self::note_nlr_operands`]), so the dispatch has nothing to
@@ -1277,13 +1300,18 @@ impl CoreErlangGenerator {
     }
 
     /// BT-4612 (test-only): logs a send that reaches the runtime dispatch
-    /// (or, BT-4633, the typed guarded send) outside every bracket window
-    /// with a `^`-holding block literal among its operands, where the cell
-    /// protocol applies, with whether it runs none of its operands
+    /// (or, BT-4633, the typed guarded send) with a `^`-holding block literal
+    /// among its operands that no store covers, where the cell protocol
+    /// applies, with whether it runs none of its operands
     /// ([`DISPATCH_NLR_LITERALS`]). Neither dispatch has a pre-store, so
     /// every logged send must be one that runs none
     /// ([`Self::send_runs_no_operand`]: a [`SendUserCode::Never`] send, or a
     /// `no_user_code` primitive, BT-4633).
+    ///
+    /// BT-4632: a bracketed send's own block literals are covered by its
+    /// window ([`Self::open_sync_window`]); a send nested in its operands is
+    /// logged like one outside every window, since the window's store
+    /// covers none of its closures.
     #[cfg(test)]
     pub(in crate::core_erlang) fn note_dispatch_nlr_literals(
         &self,
@@ -1291,14 +1319,10 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) {
-        let blocks: Vec<&beamtalk_core::ast::Block> = std::iter::once(receiver)
-            .chain(arguments)
-            .filter_map(|operand| match operand {
-                Expression::Block(block) => Some(block),
-                _ => None,
-            })
+        let blocks: Vec<&beamtalk_core::ast::Block> = block_literal_operands(receiver, arguments)
+            .filter(|block| !self.synced.nlr_cover.contains(&block.span))
             .collect();
-        if self.synced.window_depth > 0 || !self.nlr_closure_prestore_applies(&blocks) {
+        if !self.nlr_closure_prestore_applies(&blocks) {
             return;
         }
         let runs_no_operand = self.send_runs_no_operand(receiver, selector, arguments);
@@ -1732,16 +1756,29 @@ impl CoreErlangGenerator {
 }
 
 /// Proof that a bracket window was opened for an expression
-/// ([`CoreErlangGenerator::open_sync_window`]).
+/// ([`CoreErlangGenerator::open_sync_window`]), holding the length
+/// [`SyncedCallState::nlr_cover`] had before the window added the bracketed
+/// call's own block literals to it.
 #[derive(Debug, Clone, Copy)]
 #[must_use]
-pub(in crate::core_erlang) struct SyncWindow(());
+pub(in crate::core_erlang) struct SyncWindow {
+    nlr_cover_depth: usize,
+}
 
 impl CoreErlangGenerator {
     /// Opens a bracket window around `expr` when it is a call that may run
     /// user code and nothing already brackets it. Calls compiled inside the
     /// window (its operands) run between the store and the reload, so they
     /// are not gaps.
+    ///
+    /// BT-4632: for the `^` rule ([`VerifyError::UnbracketedNlrClosure`]) the
+    /// window's store vouches only for the closures the bracketed call itself
+    /// runs, its block-literal operands ([`Self::bracketed_call_blocks`]),
+    /// which go into [`SyncedCallState::nlr_cover`] for the window. A
+    /// `^`-closure of a send nested in its operands is run by that send while
+    /// the operands are evaluated, not by the bracketed call after its store,
+    /// so it is checked like any outside every window: that send has to store
+    /// for itself.
     pub(in crate::core_erlang) fn open_sync_window(
         &mut self,
         expr: &Expression,
@@ -1760,7 +1797,31 @@ impl CoreErlangGenerator {
         // after their operand windows have closed, so one still pending here
         // came from a lowering that failed before `synced_call_value`.
         self.synced.pending_fast_path = None;
-        Some(SyncWindow(()))
+        let nlr_cover_depth = self.synced.nlr_cover.len();
+        let own_blocks = Self::bracketed_call_blocks(inner);
+        self.synced.nlr_cover.extend(own_blocks);
+        Some(SyncWindow { nlr_cover_depth })
+    }
+
+    /// BT-4632: the spans of the block literals the bracketed call `inner`
+    /// (paren-unwrapped) runs itself: the block-literal operands
+    /// ([`block_literal_operands`]) of the send, or of every send of a
+    /// cascade ([`beamtalk_core::ast_walker::cascade_sends`]).
+    fn bracketed_call_blocks(inner: &Expression) -> Vec<Span> {
+        match inner {
+            Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } => block_literal_operands(receiver, arguments)
+                .map(|block| block.span)
+                .collect(),
+            Expression::Cascade { .. } => beamtalk_core::ast_walker::cascade_sends(inner)
+                .flat_map(|send| block_literal_operands(send.receiver, send.arguments))
+                .map(|block| block.span)
+                .collect(),
+            _ => Vec::new(),
+        }
     }
 
     /// The address that identifies a send by its receiver node (BT-4279).
@@ -1862,9 +1923,10 @@ impl CoreErlangGenerator {
 
     /// Closes a window opened by [`Self::open_sync_window`].
     pub(in crate::core_erlang) fn close_sync_window(&mut self, window: SyncWindow) {
-        let SyncWindow(()) = window;
+        let SyncWindow { nlr_cover_depth } = window;
         self.synced.window_depth -= 1;
         self.synced.window_receivers.pop();
+        self.synced.nlr_cover.truncate(nlr_cover_depth);
     }
 
     /// Core-var rebinds for a merged Tier 2 call's captured locals
