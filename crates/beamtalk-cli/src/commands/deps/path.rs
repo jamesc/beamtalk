@@ -955,27 +955,16 @@ fn extract_dep_protocol_alias_metadata(
                 },
             );
         }
-        // Stamped with this dependency so the registry applies the `uses:`
-        // shadowing rule to a bare type annotation too (BT-3941).
-        let mut infos =
-            beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
-                module,
-            );
-        for info in &mut infos {
-            info.package = Some(dep_name.into());
-        }
-        protocol_infos.extend(infos);
+        // Shared with the offline scan MCP lint uses (BT-4585).
+        let (module_protocols, module_aliases) =
+            beamtalk_cli::dependency_classes::dependency_protocol_alias_infos(module, dep_name);
+        protocol_infos.extend(module_protocols);
+        alias_infos.extend(module_aliases);
         // Full ASTs of carried protocols only (ADR 0127 §10a;
         // BT-3591) — see `ResolvedDependency::protocol_defs`'s doc — stamped
         // with this dependency so `uses: dep@Name` resolves to them (BT-3684).
         protocol_defs.extend(
             beamtalk_core::semantic_analysis::trait_expansion::carried_protocols(
-                module,
-                Some(dep_name),
-            ),
-        );
-        alias_infos.extend(
-            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_package_alias_infos(
                 module,
                 Some(dep_name),
             ),

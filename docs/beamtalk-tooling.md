@@ -143,11 +143,12 @@ same scope as `build`.
   to your own project's CI to get the REPL verdict there. The MCP `lint`
   tool applies the same table and takes the same gate as an optional
   `warnings_as_errors` flag, classified by the same shared rule
-  (`diagnostics_policy::is_live_recheck_failure`; BT-4336). MCP's analysis
-  pipeline is still separate (no cross-file extensions, pre-loaded
-  aliases/protocols, project-complete scope or `.erl` linting), so on
-  packages that rely on those its verdict can differ from the CLI's
-  (BT-4585).
+  (`diagnostics_policy::is_live_recheck_failure`; BT-4336). Both surfaces
+  run the same analysis pipeline (`beamtalk_cli::lint_pipeline`, BT-4585),
+  `.erl` linting included, so they report the same diagnostics and
+  verdict. Two inputs stay surface-specific: MCP reads dependencies only
+  from checkouts already on disk (it never fetches), and its FFI type
+  registry does not yet include ADR 0075 stub files (BT-4643).
 - `beamtalk build` re-checks a byte-identical file when a signature it
   type-checks against changes elsewhere (BT-4336): every pre-loaded class
   (project and dependency, trait provisions flattened in), protocol and

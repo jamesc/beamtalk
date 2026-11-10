@@ -75,7 +75,7 @@ pub fn find_package_root(start: &Path) -> Option<PathBuf> {
 /// particular `root` need not have been canonicalized by the caller first,
 /// even though [`find_package_root`] already returns a canonical path.
 ///
-/// Shared by the MCP server's `run_module_analysis` (which derives
+/// Shared by the `beamtalk lint`/MCP `lint` pipeline (`beamtalk_cli::lint_pipeline`, which derives
 /// `root` from [`find_package_root`] once per call, since it has no
 /// long-lived workspace-root registry) so it doesn't reimplement this
 /// root-containment check independently of
