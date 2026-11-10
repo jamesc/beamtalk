@@ -36,11 +36,14 @@ by `gen_server`'s crash report (keys `state`, `message`, `reason`, `log`).
   redacted, since it may have answered a secret call.
 - `reason` is left as is.
 
-`sys:get_state/1`, `sys:replace_state/2`, `sys:log(Pid, get)`,
+A crashing actor also gets a `proc_lib` crash report, which does not go
+through `format_status/1`: its `messages` (the mailbox, so any secret send
+still queued) and `dictionary` (including pending `continueWith:` arguments)
+are raw. `sys:get_state/1`, `sys:replace_state/2`, `sys:log(Pid, get)`,
 `sys:log(Pid, print)` and `sys:trace/2` do not go through `format_status/1`
-(OTP gives them no hook), so they show raw values. Neither does the raw
-`Debug` term `sys:get_status/1` returns next to the formatted status: with
-`sys:log` on, it holds the raw log. Only the formatted part (the "State" and
+(OTP gives them no hook), so they show raw values. Neither do the raw
+process dictionary and `Debug` terms `sys:get_status/1` returns next to the
+formatted status: with `sys:log` on, the debug term holds the raw log. Only the formatted part (the "State" and
 "Logged events" data) is redacted. These are debugging tools with full
 access to the process.
 

@@ -169,6 +169,32 @@ pub(crate) fn check_actor_secret_declarations(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    // A declaration outside its class's own file still answers at runtime,
+    // but codegen only bakes declarations it sees while compiling the class,
+    // so it would redact nothing. Say so rather than fail open silently.
+    for standalone in &module.method_definitions {
+        let selector = standalone.method.selector.name();
+        let target = standalone.class_name.name.as_str();
+        if standalone.is_class_method
+            && (selector == SECRET_STATE_SELECTOR || selector == SECRET_SELECTORS_SELECTOR)
+            && !module.classes.iter().any(|c| c.name.name == target)
+            && hierarchy.is_actor_subclass(target)
+        {
+            diagnostics.push(
+                Diagnostic::warning(
+                    format!(
+                        "`{target} class >> {selector}` is outside `{target}`'s own file, \
+                         so it is not applied: nothing is redacted"
+                    ),
+                    standalone.span,
+                )
+                .with_hint(format!(
+                    "Declare `class {selector}` in the file that defines `{target}`"
+                )),
+            );
+        }
+    }
+
     for class in &module.classes {
         let class_name = class.name.name.as_str();
         if !hierarchy.is_actor_subclass(class_name) {
@@ -327,6 +353,16 @@ mod tests {
         let (_, diagnostics) = check(src);
         assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
         assert_eq!(diagnostics[0].severity, Severity::Error);
+    }
+
+    #[test]
+    fn declaration_outside_the_class_file_warns() {
+        // `Server` is an actor class defined elsewhere (the stdlib).
+        let src = "Server class >> secretSelectors => #(#handleInfo:)";
+        let (_, diagnostics) = check(src);
+        assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+        assert_eq!(diagnostics[0].severity, Severity::Warning);
+        assert!(diagnostics[0].message.contains("nothing is redacted"));
     }
 
     #[test]
