@@ -418,6 +418,25 @@ pub fn written_repeat(
         )
 }
 
+/// The selector a send of `selector` to `receiver` with `arguments` was
+/// written as: `repeat` for a loop [`written_repeat`] reads, the unary loop
+/// for one [`written_unary_loop`] reads, else `selector` itself. The one
+/// helper diagnostics use to name a canonicalised loop as written.
+#[must_use]
+pub fn selector_as_written(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    arguments: &[Expression],
+) -> ecow::EcoString {
+    if written_repeat(receiver, selector, arguments) {
+        return "repeat".into();
+    }
+    match written_unary_loop(selector, arguments) {
+        Some(unary) => unary.into(),
+        None => selector.name(),
+    }
+}
+
 /// The unary selector a send of `selector` with `arguments` was written as,
 /// when it is a keyword loop [`desugar_unary_loops`] produced: its one
 /// argument is the empty, parameterless, zero-width block the pass adds (no

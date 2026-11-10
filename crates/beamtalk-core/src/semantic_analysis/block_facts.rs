@@ -1771,6 +1771,11 @@ pub enum LocalThreadingFamily {
 pub struct LocalThreadingConstruct<'a> {
     /// The send's selector.
     pub selector: String,
+    /// The selector as written (`ast::normalize::selector_as_written`):
+    /// `repeat` or a unary `whileTrue`/`whileFalse` for a loop the
+    /// normalising pass canonicalised (BT-4589), else [`Self::selector`]. For
+    /// diagnostics only.
+    pub written_selector: EcoString,
     /// Which construct it is.
     pub family: LocalThreadingFamily,
     /// The construct's block literals, receiver first.
@@ -1937,6 +1942,9 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
         None
     } else {
         Some(LocalThreadingConstruct {
+            written_selector: crate::ast::normalize::selector_as_written(
+                receiver, selector, arguments,
+            ),
             selector: sel,
             family,
             blocks,

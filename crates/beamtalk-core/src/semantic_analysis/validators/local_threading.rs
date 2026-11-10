@@ -2630,11 +2630,14 @@ impl<'d> Walker<'d> {
         {
             return;
         }
-        let hint = Self::construct_hint(&selector, position, &first.name);
+        // A canonicalised loop (`repeat`, a unary `whileTrue`) is named as
+        // written (BT-4589).
+        let written = construct.written_selector.clone();
+        let hint = Self::construct_hint(&written, position, &first.name);
         self.diagnostics.push(
             Diagnostic::error(
                 format!(
-                    "`{selector}` writes outer local `{name}`, but as {position} in {context} \
+                    "`{written}` writes outer local `{name}`, but as {position} in {context} \
                      the write is not threaded back (BT-3913)",
                     name = first.name,
                     context = self.context,
@@ -2856,7 +2859,10 @@ impl<'d> Walker<'d> {
         } else if inlined {
             self.passed_escape(receiver, &sel)
         } else {
-            Escape::Cascade(sel.clone())
+            // A canonicalised loop is named as written (BT-4589).
+            Escape::Cascade(crate::ast::normalize::selector_as_written(
+                receiver, selector, arguments,
+            ))
         };
         for (index, arg) in arguments.iter().enumerate() {
             if matches!(arg, Expression::Block(_))
