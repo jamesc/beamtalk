@@ -39,8 +39,9 @@
 //! effect that writes a local, in every compiled method context (class methods
 //! included) and with any literal body, the unary form's empty one included.
 //! [`compiled_pure_condition_writes_are_carried`] lowers those rows, as a
-//! method statement and nested in an arm, a `do:`, an outer loop or an
-//! assignment, with a silent verifier and through `erlc`;
+//! method statement and nested in an arm, a `do:`, an outer loop, an
+//! assignment and every other block role Phase 0 accepts the loop in, with a
+//! silent verifier and through `erlc`;
 //! [`compiled_pure_condition_rows_report_the_pre_fix_lowering`] shows the
 //! verifier catches the dropped write on every row, the plain lowering's
 //! included.
@@ -348,6 +349,34 @@ const NESTED: &[&str] = &[
     "r := W",
 ];
 
+/// BT-4602 review: the other block roles a loop can sit in. Phase 0 rejects
+/// some of them in some contexts (an actor fold's value-bearing site,
+/// BT-3797; a class-method arm), so a row here is kept only where the semantic
+/// checks accept it ([`rejection`]); the rows above must all be accepted.
+const MORE_NESTED: &[&str] = &[
+    "[W] on: Error do: [:err | nil]",
+    "[Error signal] on: Error do: [:err | W]",
+    "[W] ensure: [nil]",
+    "#(1, 2) inject: 0 into: [:a :e | W. a + e]",
+    "#(1, 2) collect: [:e | W. e]",
+    "(s >= 0) and: [W. true]",
+    "(s < 0) or: [W. true]",
+    "2 timesRepeat: [W]",
+    "1 to: 2 do: [:i | W]",
+    "[W] value",
+    "0 match: [0 -> (W); _ -> nil]",
+];
+
+/// The first error the semantic checks report for `src`, if any.
+fn rejection(src: &str) -> Option<String> {
+    let (module, _) = parse(lex_with_eof(src));
+    beamtalk_core::semantic_analysis::analyse(&module)
+        .diagnostics
+        .into_iter()
+        .find(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
+        .map(|d| d.message.to_string())
+}
+
 /// The BT-4602 rows: context x position x condition x body x loop, as
 /// `(label, source)`.
 fn condition_rows(
@@ -387,6 +416,27 @@ fn pure_condition_rows() -> Vec<(String, String)> {
     let conditions = [PURE_CONDITIONS[0], PURE_CONDITIONS[1], PURE_CONDITIONS[4]];
     let bodies = [None, Some(""), Some("s := s + 1")];
     rows.extend(condition_rows(NESTED, &conditions, &bodies));
+    let rejected: Vec<String> = rows
+        .iter()
+        .filter_map(|(label, src)| rejection(src).map(|r| format!("{label}: {r}\n{src}")))
+        .collect();
+    assert!(
+        rejected.is_empty(),
+        "Phase 0 rejects {} BT-4602 row(s) it should accept:\n{}",
+        rejected.len(),
+        rejected.join("\n")
+    );
+    let more = condition_rows(
+        MORE_NESTED,
+        &[PURE_CONDITIONS[0], PURE_CONDITIONS[4]],
+        &[None, Some("s := s + 1")],
+    );
+    let total = more.len();
+    rows.extend(more.into_iter().filter(|(_, src)| rejection(src).is_none()));
+    assert!(
+        rows.len() >= 960 + total * 3 / 4,
+        "Phase 0 rejects more than a quarter of the extra nested rows"
+    );
     rows
 }
 
@@ -402,7 +452,7 @@ fn pure_condition_rows() -> Vec<(String, String)> {
 #[test]
 fn compiled_pure_condition_writes_are_carried() {
     let rows = pure_condition_rows();
-    assert!(rows.len() >= 900, "the corpus has thinned out");
+    assert!(rows.len() >= 1200, "the corpus has thinned out");
     let failures: Vec<String> = rows
         .iter()
         .filter_map(|(label, src)| match super::verifier_report(src, None) {
@@ -470,7 +520,7 @@ fn compiled_pure_condition_rows_report_the_pre_fix_lowering() {
         missed.join("\n")
     );
     assert!(
-        caught >= 900,
+        caught >= 1200,
         "only {caught} rows caught; the corpus has thinned out"
     );
 }

@@ -17,11 +17,11 @@
 //
 // NOT pinned here, deliberately: a keyword `whileTrue:`/`whileFalse:`
 // CONDITION block that writes an outer local (`[i := i + 1. i < 3]
-// whileTrue: [nil]`) is compiled as a Tier 2 closure in this context and
-// crashes at runtime ("function expects 1 arguments but was called with
-// 0"), so that receiver position stays OUT of the table. ADR 0131 §6 now
-// rejects it at compile time (BT-3782), so it cannot be written here — see
-// `is_state_threaded_block_receiver`'s doc.
+// whileTrue: [nil]`) threads only when the loop body is a block literal
+// (BT-4602, `block_facts::while_condition_threads`), a rule of the send rather
+// than of the selector, so it is not a row of this table; its runtime rows
+// are in `bt4313unary_while_test.bt` — see `is_state_threaded_block_receiver`'s
+// doc.
 
 TestCase subclass: DeadAssignmentReceiverThreadingTest
 
