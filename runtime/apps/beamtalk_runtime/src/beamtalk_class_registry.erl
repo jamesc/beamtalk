@@ -1415,8 +1415,8 @@ restart_class(ClassName) ->
             %% crash) turned every such send into
             %% `Class 'unknown' not found`. Only the newest
             %% `?MAX_DEAD_CLASS_PIDS` dead rows are kept
-            %% (`prune_dead_class_pids/1`), and a graceful stop reclaims the
-            %% rest (`forget_class_pids/2`).
+            %% (`prune_dead_class_pids/1`), and any `terminate/2` (removal or a
+            %% callback exception) reclaims the rest (`forget_class_pids/2`).
             prune_dead_class_pids(ClassName),
             case beamtalk_object_class:start(ClassName, ClassInfo) of
                 {ok, NewPid} ->
