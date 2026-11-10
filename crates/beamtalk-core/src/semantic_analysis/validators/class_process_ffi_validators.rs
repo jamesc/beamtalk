@@ -18,9 +18,10 @@
 //!   process, `gen_tcp:controlling_process/2` and `file:sendfile/5` fail with
 //!   `not_owner` (the caller owns the socket), and `erlang:self/0`, the
 //!   process dictionary, `link` and `monitor` all see the class process.
-//!   A table from `ets:new/2` or the `Ets` constructors (`new:type:`,
-//!   `newOrExisting:type:`, `private:`, `protected:`) is owned by the class
-//!   process, so a private one refuses every caller (BT-4587).
+//!   A table from the `Ets` constructors (`new:type:`, `newOrExisting:type:`,
+//!   `private:`, `protected:`) is owned by the class process, so a private or
+//!   protected one refuses callers (BT-4587). Only an unqualified `Ets`
+//!   reference is matched, not a package-qualified one.
 //!   Suppress deliberate serialisation with `@expect class_process_ffi`.
 //! - **`class-method-process-resource`** — no class in the chain declares
 //!   class variables, so the method runs in the caller, and it creates a resource tied to the calling
@@ -81,10 +82,14 @@ enum Sensitivity {
     /// The call depends on the identity or ownership of the calling process
     /// (socket owner, mailbox, process dictionary, links, monitors).
     Ownership,
-    /// The call creates a resource owned by the calling process (an ETS
-    /// table), so the class process owns it: it lives as long as the class
-    /// process, and an access-restricted one refuses every caller.
-    OwnedResource,
+    /// The call creates a named ETS table owned by the calling process, so the
+    /// class process owns it and it lives as long as the class process, not
+    /// the caller.
+    OwnedTable,
+    /// The call creates an access-restricted (`private`/`protected`) ETS
+    /// table owned by the calling process, so the class process owns it and
+    /// callers are refused with `access_denied`.
+    OwnedRestrictedTable,
 }
 
 /// Why a call is surprising in the **caller**
@@ -171,7 +176,8 @@ const fn class_row(
 
 const BLOCKING: Option<Sensitivity> = Some(Sensitivity::Blocking);
 const OWNERSHIP: Option<Sensitivity> = Some(Sensitivity::Ownership);
-const OWNED_RESOURCE: Option<Sensitivity> = Some(Sensitivity::OwnedResource);
+const OWNED_TABLE: Option<Sensitivity> = Some(Sensitivity::OwnedTable);
+const OWNED_RESTRICTED_TABLE: Option<Sensitivity> = Some(Sensitivity::OwnedRestrictedTable);
 const RESOURCE: Option<CallerEffect> = Some(CallerEffect::Resource);
 const IDENTITY: Option<CallerEffect> = Some(CallerEffect::Identity);
 
@@ -185,6 +191,9 @@ const IDENTITY: Option<CallerEffect> = Some(CallerEffect::Identity);
 /// The `Ets` constructor rows fire only in the class process: in the caller
 /// they make a table the caller owns, which is what they are for, whereas
 /// a direct `ets:new` there is flagged as an FFI resource escape hatch.
+/// `ets:new` itself stays caller-only: the `class-method-process-resource`
+/// hint offers `classState:` as a fix, so flagging it in the class process
+/// too would leave no lint-clean home for the call.
 const CLASS_METHOD_FFI: &[ClassMethodFfi] = &[
     row("erlang", "self", OWNERSHIP, IDENTITY),
     row("erlang", "send", OWNERSHIP, None),
@@ -201,11 +210,11 @@ const CLASS_METHOD_FFI: &[ClassMethodFfi] = &[
     row("erlang", "register", None, RESOURCE),
     row("erlang", "send_after", None, RESOURCE),
     row("erlang", "start_timer", None, RESOURCE),
-    row("ets", "new", OWNED_RESOURCE, RESOURCE),
-    class_row("Ets", "new:type:", OWNED_RESOURCE, None),
-    class_row("Ets", "newOrExisting:type:", OWNED_RESOURCE, None),
-    class_row("Ets", "private:", OWNED_RESOURCE, None),
-    class_row("Ets", "protected:", OWNED_RESOURCE, None),
+    row("ets", "new", None, RESOURCE),
+    class_row("Ets", "new:type:", OWNED_TABLE, None),
+    class_row("Ets", "newOrExisting:type:", OWNED_TABLE, None),
+    class_row("Ets", "private:", OWNED_RESTRICTED_TABLE, None),
+    class_row("Ets", "protected:", OWNED_RESTRICTED_TABLE, None),
     row("timer", "apply_interval", None, RESOURCE),
     row("timer", "apply_repeatedly", None, RESOURCE),
     row("timer", "send_after", None, RESOURCE),
@@ -434,10 +443,15 @@ impl Site<'_> {
                 "which depends on the identity or ownership of the calling process",
                 "so it acts on the class process instead of the caller",
             ),
-            Sensitivity::OwnedResource => (
-                "which creates a resource owned by the calling process",
-                "so the class process owns it: it lives as long as the class process, and a \
-                 private or protected table refuses callers with `access_denied`",
+            Sensitivity::OwnedTable => (
+                "which creates an ETS table owned by the calling process",
+                "so the class process owns the table and it lives as long as the class process, \
+                 not the caller",
+            ),
+            Sensitivity::OwnedRestrictedTable => (
+                "which creates an access-restricted ETS table owned by the calling process",
+                "so the class process owns the table and callers are refused with \
+                 `access_denied`",
             ),
         };
         Diagnostic::warning(
@@ -695,13 +709,35 @@ mod tests {
         let msg = &diags[0].message;
         assert!(msg.contains("`Secrets table`"), "{msg}");
         assert!(msg.contains("`Ets private:`"), "{msg}");
-        assert!(
-            msg.contains("creates a resource owned by the calling process"),
-            "{msg}"
-        );
+        assert!(msg.contains("access-restricted ETS table"), "{msg}");
         assert!(msg.contains("`access_denied`"), "{msg}");
         assert!(hint(&diags[0]).contains("`Secrets` declares class variables"));
         assert!(in_caller(src).is_empty());
+    }
+
+    #[test]
+    fn named_ets_table_in_the_class_process_does_not_claim_access_denied() {
+        let src = "Object subclass: Registry
+  classState: count = 0
+
+  class cache => Ets newOrExisting: #cache type: #set
+";
+        let diags = in_class_process(src);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        let msg = &diags[0].message;
+        assert!(msg.contains("lives as long as the class process"), "{msg}");
+        assert!(!msg.contains("access_denied"), "{msg}");
+    }
+
+    #[test]
+    fn following_the_classstate_hint_for_ets_new_silences_both_lints() {
+        let caller = "Object subclass: T\n  class make => (Erlang ets) new: #t with: #()\n";
+        let diags = in_caller(caller);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(hint(&diags[0]).contains("`classState:`"));
+        let stateful = "Object subclass: T\n  classState: n = 0\n\n  class make => (Erlang ets) new: #t with: #()\n";
+        assert!(in_caller(stateful).is_empty());
+        assert!(in_class_process(stateful).is_empty());
     }
 
     #[test]
