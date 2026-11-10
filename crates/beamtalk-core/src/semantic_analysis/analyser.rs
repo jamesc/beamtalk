@@ -186,6 +186,9 @@ impl Analyser {
                     let receiver_type = self.type_map.get(receiver.span());
                     let diagnostics = validator.validate(selector, arguments, receiver_type, *span);
                     self.result.diagnostics.extend(diagnostics);
+                    self.result
+                        .diagnostics
+                        .extend(validator.validate_receiver(selector, receiver));
                 }
 
                 // Run receiver-based validators
@@ -235,6 +238,9 @@ impl Analyser {
                             msg.span,
                         );
                         self.result.diagnostics.extend(diagnostics);
+                        self.result
+                            .diagnostics
+                            .extend(validator.validate_receiver(&msg.selector, receiver));
                     }
 
                     // Run receiver-based validators for cascade messages
