@@ -441,7 +441,8 @@ test_extension_error_propagation() ->
 
     try
         Result = beamtalk_dispatch:lookup(crashExt, [], Self, State, 'Counter'),
-        ?assertMatch({error, #beamtalk_error{}}, Result)
+        %% BT-4593: a raise from an invoked method answers the wrapped map.
+        ?assertMatch({error, #{error := #beamtalk_error{}}}, Result)
     after
         (try
             ets:delete(beamtalk_extensions, {'Counter', crashExt}),
@@ -1012,9 +1013,9 @@ test_dispatch_throws_wrapped() ->
         State = #{'$beamtalk_class' => 'ThrowingDispatchClass'},
         Self = make_ref(),
 
-        %% dispatch/4 throws → caught → wrapped as #beamtalk_error{}
+        %% dispatch/4 raises → caught → wrapped exception map (BT-4593)
         Result = beamtalk_dispatch:lookup(throwMethod, [], Self, State, 'ThrowingDispatchClass'),
-        ?assertMatch({error, #beamtalk_error{}}, Result)
+        ?assertMatch({error, #{error := #beamtalk_error{}}}, Result)
     after
         gen_server:stop(Pid),
         code:purge(bt_test_dispatch_throws_stub),
@@ -1072,7 +1073,7 @@ test_actor_instance_bypass_throwing_module() ->
         Result = beamtalk_dispatch:lookup(
             'displayString', [], ActorSelf, State, 'ActorDispatchThrowsClass'
         ),
-        ?assertMatch({error, #beamtalk_error{}}, Result)
+        ?assertMatch({error, #{error := #beamtalk_error{}}}, Result)
     after
         gen_server:stop(Pid),
         code:purge(bt_test_actor_dispatch_throws_stub),
@@ -1116,7 +1117,7 @@ test_extension_bad_arity() ->
         %% Caught and wrapped like any other extension-body crash, rather
         %% than raising the raw {bad_extension_arity, 1} tuple.
         Result = beamtalk_dispatch:lookup(badArityExt, [], Self, State, 'Counter'),
-        ?assertMatch({error, #beamtalk_error{selector = badArityExt}}, Result)
+        ?assertMatch({error, #{error := #beamtalk_error{selector = badArityExt}}}, Result)
     after
         (try
             ets:delete(beamtalk_extensions, {'Counter', badArityExt}),
@@ -1235,7 +1236,7 @@ test_extension_raises_reraised() ->
     Self = make_ref(),
     try
         Result = beamtalk_dispatch:lookup(throwingExt, [], Self, State, 'Counter'),
-        ?assertMatch({error, #beamtalk_error{}}, Result)
+        ?assertMatch({error, #{error := #beamtalk_error{}}}, Result)
     after
         (try
             ets:delete(beamtalk_extensions, {'Counter', throwingExt}),
