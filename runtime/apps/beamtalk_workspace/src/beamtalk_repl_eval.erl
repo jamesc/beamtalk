@@ -809,7 +809,7 @@ repopulate_class_sources(Path, ClassNames) ->
 
 -spec class_name_binaries([map()]) -> [binary()].
 class_name_binaries(ClassNames) ->
-    [Bin || Entry <- ClassNames, (Bin = class_name_binary(Entry)) =/= undefined].
+    [Bin || Entry <- ClassNames, Bin <- [class_name_binary(Entry)], Bin =/= undefined].
 
 %% Extract a class name as a binary from a reload payload entry, mirroring the
 %% defensive shape-matching in `handle_load_after_native/1` (atom | binary |

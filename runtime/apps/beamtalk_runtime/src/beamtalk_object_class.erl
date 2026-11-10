@@ -1550,7 +1550,13 @@ handle_call(
     %% unreachable under either name. Caught and rolled back here instead,
     %% so the caller gets the same clean `{error, {already_registered, _}}`
     %% `rename/2`'s pre-check is meant to produce.
-    case catch erlang:register(NewRegName, self()) of
+    Registered =
+        try
+            erlang:register(NewRegName, self())
+        catch
+            _:_ -> false
+        end,
+    case Registered of
         true ->
             put(beamtalk_class_name, NewName),
             sync_identity(
@@ -1588,7 +1594,7 @@ handle_call(
             beamtalk_class_monitor:unwatch(OldName),
             beamtalk_class_monitor:watch(NewName, self()),
             {reply, ok, State#class_state{name = NewName}};
-        {'EXIT', _Reason} ->
+        false ->
             %% Residual gap, not closed here (review feedback on PR #3523):
             %% this rollback assumes `OldRegName` is still free. Another
             %% process registering under `OldRegName` in the narrow window

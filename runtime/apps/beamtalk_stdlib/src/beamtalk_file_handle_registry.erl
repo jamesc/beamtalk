@@ -357,7 +357,11 @@ close_owned_handles_async(Handles) ->
 close_owned_handle(Handle) ->
     %% close_handle/1 is idempotent (atomics exchange) and does not
     %% raise on I/O failure — best-effort reclamation on owner death.
-    catch beamtalk_file_handle:close_handle(Handle),
+    try
+        beamtalk_file_handle:close_handle(Handle)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 -spec do_open_handles(#state{}) -> [{binary(), beamtalk_file_handle:mode(), owner()}].

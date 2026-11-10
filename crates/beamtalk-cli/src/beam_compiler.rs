@@ -189,6 +189,10 @@ impl BeamCompiler {
             backend,
         );
 
+        // ADR 0125 §3.1: both backends boot `erl` on the toolchain's `.beam`
+        // files, which do not load below the support window's floor.
+        crate::commands::build_stamp::require_supported_otp()?;
+
         // Ensure output directory exists before dispatching to either backend.
         std::fs::create_dir_all(&self.output_dir)
             .into_diagnostic()

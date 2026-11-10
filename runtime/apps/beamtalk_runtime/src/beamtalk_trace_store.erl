@@ -792,7 +792,13 @@ reset_aggregates_after_upgrade() ->
         true ->
             ?LOG_INFO("Resetting pre-BT-4103 aggregate tables", #{}),
             lists:foreach(
-                fun(T) -> catch ets:delete(T) end,
+                fun(T) ->
+                    try
+                        ets:delete(T)
+                    catch
+                        _:_ -> ok
+                    end
+                end,
                 ?RETIRED_AGG_TABLES ++
                     [?AGG_CLASS_STATS, ?AGG_PID, ?AGG_PID_KEYS, ?AGG_FREE_SLOTS]
             ),
@@ -816,7 +822,12 @@ reset_free_slots_after_upgrade() ->
                 ordered_set ->
                     ok;
                 _ ->
-                    _ = catch ets:delete(?AGG_FREE_SLOTS),
+                    _ =
+                        try
+                            ets:delete(?AGG_FREE_SLOTS)
+                        catch
+                            _:_ -> ok
+                        end,
                     ok
             end
     end.

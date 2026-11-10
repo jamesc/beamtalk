@@ -46,6 +46,7 @@ use crate::commands::build::{
 pub fn run_check(path: &str) -> Result<()> {
     info!("Starting check");
 
+    crate::commands::build_stamp::require_supported_otp()?;
     warn_if_otp_out_of_window();
 
     let env = setup_build_environment(path)?;

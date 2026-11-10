@@ -636,7 +636,7 @@ there instead of migrating it a second time.
 -spec trigger_hot_reload(atom(), [map()]) -> ok.
 trigger_hot_reload(ModuleName, Classes) ->
     ReloadedNames = sets:from_list(
-        [N || ClassMap <- Classes, (N = resolve_class_name(ClassMap)) =/= undefined],
+        [N || ClassMap <- Classes, N <- [resolve_class_name(ClassMap)], N =/= undefined],
         [{version, 2}]
     ),
     lists:foreach(
