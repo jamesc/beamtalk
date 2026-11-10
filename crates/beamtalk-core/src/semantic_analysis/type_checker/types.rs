@@ -1511,9 +1511,9 @@ impl InferredType {
     /// [`intersect`](Self::intersect)).
     ///
     /// The reflexive `sub == sup` short-circuit is unreachable from `intersect`
-    /// (its match arm guards on differing names) but kept so the predicate is
-    /// correct standalone for future callers (e.g. `check_argument_types`'s
-    /// `:: Class` guard, BT-4599).
+    /// (its match arm guards on differing names) but is load-bearing for the
+    /// `:: Class` argument guard in `check_argument_types_impl` (BT-4599), where
+    /// an argument typed exactly `Class` must match.
     pub(crate) fn is_nominal_subtype(hierarchy: &ClassHierarchy, sub: &str, sup: &str) -> bool {
         sub == sup || hierarchy.superclass_chain(sub).iter().any(|c| c == sup)
     }
