@@ -1795,3 +1795,86 @@ no_subscribers_no_superclass_walk_test_() ->
             end)
         ]
     end}.
+
+%%====================================================================
+%% BT-4631: unrelated subscriptions do not trigger a class-chain walk
+%%====================================================================
+
+unrelated_subscription_no_superclass_walk_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            beamtalk_class_metadata:new(),
+            build_hierarchy(),
+            beamtalk_class_metadata:insert('ClassLoaded', undefined, undefined, none, undefined),
+            Sub = spawn_subscriber(self()),
+            try
+                {ok, _} = beamtalk_announcements:subscribe('ClassLoaded', Sub, h, false),
+                %% Warm the derived cache.
+                ok = beamtalk_announcements:announce('ButtonClicked', warm),
+                ok = beamtalk_announcements:system_announce('ButtonClicked', #{}),
+                refute_received(),
+                ok = meck:new(beamtalk_class_metadata, [passthrough]),
+                try
+                    ok = beamtalk_announcements:announce('ButtonClicked', x),
+                    ok = beamtalk_announcements:system_announce('ButtonClicked', #{}),
+                    ?assertEqual(
+                        0, meck:num_calls(beamtalk_class_metadata, lookup_superclass, '_')
+                    ),
+                    refute_received()
+                after
+                    meck:unload(beamtalk_class_metadata)
+                end
+            after
+                catch beamtalk_class_metadata:delete('ClassLoaded'),
+                stop_subscriber(Sub)
+            end
+        end)
+    end}.
+
+reparent_respected_after_precheck_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            beamtalk_class_metadata:new(),
+            build_hierarchy(),
+            beamtalk_class_metadata:insert(
+                'OtherEvent', undefined, undefined, 'DomainEvent', undefined
+            ),
+            Sub = spawn_subscriber(self()),
+            try
+                %% ButtonClicked starts under OtherEvent, not UIEvent.
+                beamtalk_class_metadata:insert(
+                    'ButtonClicked', undefined, undefined, 'OtherEvent', undefined
+                ),
+                {ok, SubRef} = beamtalk_announcements:subscribe('UIEvent', Sub, h, false),
+                ok = beamtalk_announcements:announce('ButtonClicked', a),
+                refute_received(),
+                beamtalk_class_metadata:insert(
+                    'ButtonClicked', undefined, undefined, 'UIEvent', undefined
+                ),
+                ok = beamtalk_announcements:announce('ButtonClicked', b),
+                ?assertMatch({SubRef, 'ButtonClicked', h, b}, expect_received()),
+                beamtalk_class_metadata:insert(
+                    'ButtonClicked', undefined, undefined, 'OtherEvent', undefined
+                ),
+                ok = beamtalk_announcements:announce('ButtonClicked', c),
+                refute_received()
+            after
+                stop_subscriber(Sub)
+            end
+        end)
+    end}.
+
+unregistered_exact_class_still_matches_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            beamtalk_class_metadata:new(),
+            Sub = spawn_subscriber(self()),
+            try
+                {ok, SubRef} = beamtalk_announcements:subscribe('NoSuchEvent', Sub, h, false),
+                ok = beamtalk_announcements:announce('NoSuchEvent', e),
+                ?assertMatch({SubRef, 'NoSuchEvent', h, e}, expect_received())
+            after
+                stop_subscriber(Sub)
+            end
+        end)
+    end}.
