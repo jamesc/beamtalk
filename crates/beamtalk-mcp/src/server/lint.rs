@@ -263,15 +263,15 @@ fn push_lint_diagnostic(
     }
 }
 
-/// Appends the stub tiers' own diagnostics (skipped signatures, version
-/// drift, collisions) as `beamtalk lint` streams them: outside the gate,
-/// Lint-severity ones omitted. A stub file's are reported against that file;
-/// a collision, which has no one source, against the winning package.
-fn push_stub_reports(
-    reports: &[StubReport],
-    warnings: &mut Vec<LintDiagnostic>,
-    errors: &mut Vec<LintDiagnostic>,
-) {
+/// Appends the stub tiers' own diagnostics (parse errors, skipped
+/// signatures, version drift, collisions) as `beamtalk lint` streams them:
+/// outside the gate, Lint-severity ones omitted. They all go to `warnings`,
+/// even an `error`-severity one (a broken stub file), because `errors` fails
+/// the tool and CLI `beamtalk lint` never counts a stub diagnostic toward
+/// its exit code, with or without `--warnings-as-errors`. A stub file's are
+/// reported against that file; a collision, which has no one source, against
+/// the winning package.
+fn push_stub_reports(reports: &[StubReport], warnings: &mut Vec<LintDiagnostic>) {
     for report in reports {
         let (path, source) = match report {
             StubReport::File(file) => (file.path.to_string(), Some(file.source.as_str())),
@@ -282,7 +282,9 @@ fn push_stub_reports(
                 continue;
             }
             let line = source.map(|source| diag.span.line_number(source));
-            push_lint_diagnostic(diag, path.clone(), line, warnings, errors);
+            let mut errors = Vec::new();
+            push_lint_diagnostic(diag, path.clone(), line, warnings, &mut errors);
+            warnings.append(&mut errors);
         }
     }
 }
@@ -329,7 +331,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
         },
     );
     let (dependencies, resolved_registry) = offline_inputs(&sources, &source_files);
-    push_stub_reports(&resolved_registry.reports, &mut warnings, &mut errors);
+    push_stub_reports(&resolved_registry.reports, &mut warnings);
     let native_type_registry = resolved_registry.registry.map(std::sync::Arc::new);
 
     // Pass 2.

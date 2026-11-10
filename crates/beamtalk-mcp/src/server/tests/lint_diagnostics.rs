@@ -1018,6 +1018,19 @@ fn run_lint_structured_types_stdlib_ffi_with_runtime_specs() {
     )
     .unwrap();
 
+    // Non-vacuous: the runtime specs this path uses do type the call.
+    let registry = beamtalk_cli::ffi_type_registry::lint_type_registry(
+        None,
+        &[Utf8PathBuf::from_path_buf(stdlib_src.join("FfiTypeSpecStdlib.bt")).unwrap()],
+        &[],
+    )
+    .registry
+    .expect("a stdlib/src target gets the runtime specs");
+    assert!(
+        registry.module_functions("beamtalk_uuid").is_some(),
+        "the runtime specs must cover beamtalk_uuid"
+    );
+
     let result = run_lint_structured(stdlib_src.to_str().unwrap());
     let dynamic: Vec<_> = result
         .warnings
@@ -1029,4 +1042,37 @@ fn run_lint_structured_types_stdlib_ffi_with_runtime_specs() {
         dynamic.is_empty(),
         "stdlib FFI calls must type against the runtime specs; got: {result:?}"
     );
+}
+
+/// BT-4643: a broken stub file's diagnostics are reported, but outside the
+/// gate, as CLI `beamtalk lint` streams them: neither verdict fails on them.
+#[test]
+fn run_lint_structured_broken_stub_file_reports_without_failing() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::create_dir_all(dir.join("stubs")).unwrap();
+    std::fs::write(
+        dir.join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("stubs").join("broken.bt"),
+        "class Foo { @@@@invalid syntax }",
+    )
+    .unwrap();
+    std::fs::write(dir.join("src").join("plain.bt"), "Object subclass: Plain\n").unwrap();
+
+    let result = run_lint_structured(dir.to_str().unwrap());
+    assert!(
+        result
+            .warnings
+            .iter()
+            .any(|d| d.file.ends_with("broken.bt")),
+        "the broken stub's diagnostics must be reported; got: {result:?}"
+    );
+    assert!(result.errors.is_empty(), "{result:?}");
+    assert!(!result.fails(false), "{result:?}");
+    assert!(!result.fails(true), "{result:?}");
 }
