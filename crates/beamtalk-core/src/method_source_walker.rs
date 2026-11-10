@@ -126,7 +126,10 @@ pub struct SendHit {
 /// ([`crate::ast::normalize`]) before it is walked, so `(self) foo` records a
 /// [`ReceiverKind::SelfReceiver`] send exactly like `self foo`, while
 /// `(super) foo` — not a super send — stays [`ReceiverKind::Other`]. Peeling
-/// keeps every span, so line numbers are those of the source as written.
+/// keeps every span, so line numbers are those of the source as written. The
+/// unary loops the same pass canonicalises (`[c] whileTrue` to
+/// `[c] whileTrue: []`, BT-4313) are put back, so a send is indexed under the
+/// selector as written.
 ///
 /// Returns an empty vector if the source contains no sends or cannot be parsed
 /// at all.
@@ -136,6 +139,7 @@ pub fn find_all_sends_in_source(method_source: &str) -> Vec<SendHit> {
     let tokens = lex_with_eof(&wrapped);
     let (mut module, _diags) = parse(tokens);
     crate::ast::normalize::peel_operand_parens(&mut module);
+    crate::ast::normalize::restore_unary_loops_in_module(&mut module);
 
     let mut hits = Vec::new();
 
@@ -1440,6 +1444,22 @@ mod tests {
         );
         assert_eq!(kinds("m => (self) foo")[0].2, ReceiverKind::SelfReceiver);
         assert_eq!(kinds("m => (super) foo")[0].2, ReceiverKind::Other);
+    }
+
+    /// BT-4313: the unary loops the normalising pass canonicalises are indexed
+    /// under the selector as written, not their keyword form.
+    #[test]
+    fn unary_loop_sends_keep_their_written_selector() {
+        let selectors = |src: &str| {
+            find_all_sends_in_source(src)
+                .into_iter()
+                .map(|hit| hit.selector)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            selectors("m => [x foo] whileTrue. [y] whileFalse. [z] whileTrue: []"),
+            ["whileTrue", "foo", "whileFalse", "whileTrue:"]
+        );
     }
 
     // ---- find_selector_send_spans ----

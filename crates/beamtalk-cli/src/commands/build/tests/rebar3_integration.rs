@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::commands::build_layout::BuildLayout;
+use crate::commands::deps::lockfile::{NativeLockSource, NativePackageLock};
 use crate::commands::manifest::{self, NativeDependencyMap, NativeOverrideMap};
 use beamtalk_core::compilation::GitReference;
 
@@ -36,7 +37,7 @@ fn test_generate_rebar_config_basic() {
     );
 
     let config_path =
-        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new(), None).unwrap();
+        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new()).unwrap();
 
     assert!(config_path.exists(), "rebar.config should be created");
     let content = fs::read_to_string(&config_path).unwrap();
@@ -88,7 +89,7 @@ fn test_generate_rebar_config_with_native_dir() {
     );
 
     let config_path =
-        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new(), None).unwrap();
+        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new()).unwrap();
     let content = fs::read_to_string(&config_path).unwrap();
 
     // rebar3 only handles hex deps — native/*.erl compiled separately via erlc
@@ -125,7 +126,7 @@ fn test_generate_rebar_config_with_native_include() {
     );
 
     let config_path =
-        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new(), None).unwrap();
+        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new()).unwrap();
     let content = fs::read_to_string(&config_path).unwrap();
 
     // rebar3 only handles hex deps — native/*.erl compiled separately via erlc
@@ -224,7 +225,7 @@ fn test_generate_rebar_config_path_lives_in_build_tree() {
     );
 
     let config_path =
-        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new(), None).unwrap();
+        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new()).unwrap();
 
     // Config should be in _build/dev/native/
     let expected_suffix = Utf8PathBuf::from("_build/dev/native/rebar.config");
@@ -234,124 +235,6 @@ fn test_generate_rebar_config_path_lives_in_build_tree() {
     );
 }
 
-#[test]
-fn test_generate_rebar_config_with_locked_versions() {
-    use crate::commands::deps::lockfile::NativePackageLock;
-
-    let temp = TempDir::new().unwrap();
-    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-
-    let mut deps = NativeDependencyMap::new();
-    deps.insert(
-        "gun".to_string(),
-        manifest::NativeDependency {
-            name: "gun".to_string(),
-            source: manifest::NativeSource::Hex {
-                constraint: "~> 2.1".to_string(),
-            },
-        },
-    );
-    deps.insert(
-        "cowboy".to_string(),
-        manifest::NativeDependency {
-            name: "cowboy".to_string(),
-            source: manifest::NativeSource::Hex {
-                constraint: "~> 2.12".to_string(),
-            },
-        },
-    );
-
-    // Provide locked versions — should use exact versions instead of constraints
-    let mut locked = std::collections::BTreeMap::new();
-    locked.insert(
-        "gun".to_string(),
-        NativePackageLock::hex("gun", "2.1.3", "abc123"),
-    );
-    locked.insert(
-        "cowboy".to_string(),
-        NativePackageLock::hex("cowboy", "2.12.0", "def456"),
-    );
-
-    let config_path = generate_rebar_config(
-        &project_path,
-        &deps,
-        &NativeOverrideMap::new(),
-        Some(&locked),
-    )
-    .unwrap();
-    let content = fs::read_to_string(&config_path).unwrap();
-
-    // Should use exact locked versions, not constraints
-    assert!(
-        content.contains("{gun, \"2.1.3\"}"),
-        "Should use locked version for gun, got: {content}"
-    );
-    assert!(
-        content.contains("{cowboy, \"2.12.0\"}"),
-        "Should use locked version for cowboy, got: {content}"
-    );
-    // Should NOT contain constraint strings
-    assert!(
-        !content.contains("~>"),
-        "Should not contain constraint operators when locked"
-    );
-}
-
-#[test]
-fn test_generate_rebar_config_partial_lock() {
-    use crate::commands::deps::lockfile::NativePackageLock;
-
-    let temp = TempDir::new().unwrap();
-    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-
-    let mut deps = NativeDependencyMap::new();
-    deps.insert(
-        "gun".to_string(),
-        manifest::NativeDependency {
-            name: "gun".to_string(),
-            source: manifest::NativeSource::Hex {
-                constraint: "~> 2.1".to_string(),
-            },
-        },
-    );
-    deps.insert(
-        "cowboy".to_string(),
-        manifest::NativeDependency {
-            name: "cowboy".to_string(),
-            source: manifest::NativeSource::Hex {
-                constraint: "~> 2.12".to_string(),
-            },
-        },
-    );
-
-    // Only lock gun — cowboy should use constraint
-    let mut locked = std::collections::BTreeMap::new();
-    locked.insert(
-        "gun".to_string(),
-        NativePackageLock::hex("gun", "2.1.3", "abc123"),
-    );
-
-    let config_path = generate_rebar_config(
-        &project_path,
-        &deps,
-        &NativeOverrideMap::new(),
-        Some(&locked),
-    )
-    .unwrap();
-    let content = fs::read_to_string(&config_path).unwrap();
-
-    assert!(
-        content.contains("{gun, \"2.1.3\"}"),
-        "Should use locked version for gun"
-    );
-    assert!(
-        content.contains("{cowboy, \"~> 2.12\"}"),
-        "Should use constraint for unlocked cowboy"
-    );
-}
-
-/// Verify that `generate_package_corpus` produces `class_corpus.json`
-/// and `corpus.json` in the output directory.
 #[test]
 fn test_generate_package_corpus_creates_files() {
     let temp = TempDir::new().unwrap();
@@ -488,7 +371,7 @@ fn test_generate_rebar_config_git_deps() {
     }
 
     let config_path =
-        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new(), None).unwrap();
+        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new()).unwrap();
     let content = fs::read_to_string(&config_path).unwrap();
 
     assert!(
@@ -506,129 +389,6 @@ fn test_generate_rebar_config_git_deps() {
         "{content}"
     );
     assert!(!content.contains("overrides"), "{content}");
-}
-
-#[test]
-fn test_generate_rebar_config_git_dep_pinned_to_locked_sha() {
-    use crate::commands::deps::lockfile::{NativeLockSource, NativePackageLock};
-
-    let temp = TempDir::new().unwrap();
-    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-
-    let mut deps = NativeDependencyMap::new();
-    deps.insert(
-        "oidcc".to_string(),
-        git_dep(
-            "oidcc",
-            "https://github.com/jamesc/oidcc",
-            GitReference::Branch("main".to_string()),
-        ),
-    );
-    deps.insert(
-        "jose".to_string(),
-        git_dep(
-            "jose",
-            "https://x/jose-fork",
-            GitReference::Branch("main".to_string()),
-        ),
-    );
-
-    deps.insert(
-        "yamerl".to_string(),
-        git_dep(
-            "yamerl",
-            "https://x/yamerl",
-            GitReference::Branch("next".to_string()),
-        ),
-    );
-
-    let locked_git = |name: &str, url: &str, branch: &str, sha: &str| NativePackageLock {
-        name: name.to_string(),
-        source: NativeLockSource::Git {
-            url: url.to_string(),
-            reference: Some(GitReference::Branch(branch.to_string())),
-            sha: sha.to_string(),
-        },
-    };
-    let mut locked = std::collections::BTreeMap::new();
-    locked.insert(
-        "oidcc".to_string(),
-        locked_git(
-            "oidcc",
-            "https://github.com/jamesc/oidcc",
-            "main",
-            "deadbeef",
-        ),
-    );
-    // Same URL, but the manifest moved from branch "main" to "next" — stale.
-    locked.insert(
-        "yamerl".to_string(),
-        locked_git("yamerl", "https://x/yamerl", "main", "0badf00d"),
-    );
-    // Locked from a different URL — the manifest moved, so the lock is stale.
-    locked.insert(
-        "jose".to_string(),
-        locked_git("jose", "https://x/jose", "main", "cafebabe"),
-    );
-
-    let config_path = generate_rebar_config(
-        &project_path,
-        &deps,
-        &NativeOverrideMap::new(),
-        Some(&locked),
-    )
-    .unwrap();
-    let content = fs::read_to_string(&config_path).unwrap();
-
-    assert!(
-        content.contains(r#"{oidcc, {git, "https://github.com/jamesc/oidcc", {ref, "deadbeef"}}}"#),
-        "{content}"
-    );
-    assert!(
-        content.contains(r#"{jose, {git, "https://x/jose-fork", {branch, "main"}}}"#),
-        "{content}"
-    );
-    assert!(
-        content.contains(r#"{yamerl, {git, "https://x/yamerl", {branch, "next"}}}"#),
-        "{content}"
-    );
-    assert!(!content.contains("cafebabe"), "{content}");
-    assert!(!content.contains("0badf00d"), "{content}");
-}
-
-#[test]
-fn test_generate_rebar_config_hex_dep_ignores_git_lock() {
-    use crate::commands::deps::lockfile::NativePackageLock;
-
-    let temp = TempDir::new().unwrap();
-    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
-
-    // Switched from a git fork back to hex — the old git lock must not apply.
-    let mut deps = NativeDependencyMap::new();
-    deps.insert(
-        "oidcc".to_string(),
-        manifest::NativeDependency {
-            name: "oidcc".to_string(),
-            source: manifest::NativeSource::Hex {
-                constraint: "~> 3.6".to_string(),
-            },
-        },
-    );
-    let mut locked = std::collections::BTreeMap::new();
-    locked.insert(
-        "oidcc".to_string(),
-        NativePackageLock::git("oidcc", "https://github.com/jamesc/oidcc", "deadbeef"),
-    );
-
-    let config_path = generate_rebar_config(
-        &project_path,
-        &deps,
-        &NativeOverrideMap::new(),
-        Some(&locked),
-    )
-    .unwrap();
-    let content = fs::read_to_string(&config_path).unwrap();
-    assert!(content.contains(r#"{oidcc, "~> 3.6"}"#), "{content}");
 }
 
 #[test]
@@ -660,7 +420,7 @@ fn test_generate_rebar_config_overrides() {
         },
     );
 
-    let config_path = generate_rebar_config(&project_path, &deps, &overrides, None).unwrap();
+    let config_path = generate_rebar_config(&project_path, &deps, &overrides).unwrap();
     let content = fs::read_to_string(&config_path).unwrap();
 
     assert!(
@@ -669,4 +429,269 @@ fn test_generate_rebar_config_overrides() {
         ),
         "{content}"
     );
+}
+
+// ---- BT-4566: rebar.lock owned by beamtalk.lock ----
+
+fn hex_dep(name: &str, constraint: &str) -> manifest::NativeDependency {
+    manifest::NativeDependency {
+        name: name.to_string(),
+        source: manifest::NativeSource::Hex {
+            constraint: constraint.to_string(),
+        },
+    }
+}
+
+fn dep_map(deps: Vec<manifest::NativeDependency>) -> NativeDependencyMap {
+    deps.into_iter().map(|d| (d.name.clone(), d)).collect()
+}
+
+fn lock_map(
+    locks: Vec<NativePackageLock>,
+) -> std::collections::BTreeMap<String, NativePackageLock> {
+    locks.into_iter().map(|l| (l.name.clone(), l)).collect()
+}
+
+fn locked_hex(name: &str, version: &str, level: u32) -> NativePackageLock {
+    NativePackageLock::hex(name, version, "ABC").at_level(level)
+}
+
+fn locked_git(
+    name: &str,
+    url: &str,
+    reference: GitReference,
+    sha: &str,
+    level: u32,
+) -> NativePackageLock {
+    NativePackageLock {
+        name: name.to_string(),
+        level: Some(level),
+        source: NativeLockSource::Git {
+            url: url.to_string(),
+            reference: Some(reference),
+            sha: sha.to_string(),
+        },
+    }
+}
+
+#[test]
+fn test_generate_rebar_config_uses_manifest_sources_only() {
+    let temp = TempDir::new().unwrap();
+    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let deps = dep_map(vec![hex_dep("gun", "~> 2.1")]);
+
+    let config_path =
+        generate_rebar_config(&project_path, &deps, &NativeOverrideMap::new()).unwrap();
+    let content = fs::read_to_string(&config_path).unwrap();
+    assert!(content.contains(r#"{gun, "~> 2.1"}"#), "{content}");
+}
+
+#[test]
+fn test_native_lock_state() {
+    let main = || GitReference::Branch("main".to_string());
+    let deps = dep_map(vec![
+        hex_dep("gun", "~> 2.1"),
+        git_dep("oidcc", "https://x/oidcc", main()),
+    ]);
+    let current = || {
+        vec![
+            locked_hex("gun", "2.1.3", 0),
+            locked_git("oidcc", "https://x/oidcc", main(), "deadbeef", 0),
+            // Transitive entries don't affect the state.
+            locked_hex("cowlib", "2.13.0", 1),
+        ]
+    };
+    assert_eq!(
+        native_lock_state(&deps, &lock_map(current())),
+        NativeLockState::Current
+    );
+
+    // A legacy entry without a level is still judged by its version.
+    let mut legacy = current();
+    legacy[0] = NativePackageLock::hex("gun", "2.1.3", "ABC");
+    assert_eq!(
+        native_lock_state(&deps, &lock_map(legacy)),
+        NativeLockState::Current
+    );
+
+    let only_oidcc = NativeLockState::Partial(vec!["oidcc".to_string()]);
+    let only_gun = NativeLockState::Partial(vec!["gun".to_string()]);
+    let cases: Vec<(&str, Vec<NativePackageLock>, NativeLockState)> = vec![
+        (
+            "locked hex version outside the constraint",
+            {
+                let mut l = current();
+                l[0] = locked_hex("gun", "2.0.9", 0);
+                l
+            },
+            only_oidcc.clone(),
+        ),
+        (
+            "transitive dep promoted to direct with a newer constraint",
+            {
+                let mut l = current();
+                l[0] = locked_hex("gun", "2.0.9", 1);
+                l
+            },
+            only_oidcc.clone(),
+        ),
+        (
+            "git branch changed",
+            {
+                let mut l = current();
+                l[1] = locked_git(
+                    "oidcc",
+                    "https://x/oidcc",
+                    GitReference::Branch("next".to_string()),
+                    "deadbeef",
+                    0,
+                );
+                l
+            },
+            only_gun.clone(),
+        ),
+        (
+            "git url changed",
+            {
+                let mut l = current();
+                l[1] = locked_git("oidcc", "https://x/oidcc-fork", main(), "deadbeef", 0);
+                l
+            },
+            only_gun.clone(),
+        ),
+        (
+            "git dep locked as hex",
+            {
+                let mut l = current();
+                l[1] = locked_hex("oidcc", "3.6.0", 0);
+                l
+            },
+            only_gun.clone(),
+        ),
+        ("direct dep missing", current()[1..].to_vec(), only_oidcc),
+        (
+            "direct dep removed from the manifest",
+            {
+                let mut l = current();
+                l.push(locked_hex("jsx", "3.1.0", 0));
+                l
+            },
+            NativeLockState::Partial(vec!["gun".to_string(), "oidcc".to_string()]),
+        ),
+    ];
+    for (case, locks, expected) in cases {
+        assert_eq!(
+            native_lock_state(&deps, &lock_map(locks)),
+            expected,
+            "{case}"
+        );
+    }
+}
+
+/// A current lock writes rebar.lock with every locked package at its level
+/// and leaves existing checkouts alone.
+#[test]
+fn test_prepare_rebar_lock_current_writes_rebar_lock() {
+    let temp = TempDir::new().unwrap();
+    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let layout = BuildLayout::new(&project_path);
+    let checkout = layout.rebar_lib_dir().join("gun");
+    fs::create_dir_all(&checkout).unwrap();
+
+    let deps = dep_map(vec![hex_dep("gun", "~> 2.1")]);
+    let locks = lock_map(vec![
+        locked_hex("gun", "2.1.3", 0),
+        locked_git(
+            "cowlib",
+            "https://x/cowlib",
+            GitReference::Rev("abc".to_string()),
+            "cafe",
+            2,
+        ),
+    ]);
+
+    let re_resolve = prepare_rebar_lock(&layout, &deps, Some(&locks), false).unwrap();
+    assert!(!re_resolve);
+    let rebar_lock = fs::read_to_string(layout.native_dir().join("rebar.lock")).unwrap();
+    assert!(
+        rebar_lock.contains(r#"{<<"gun">>,{pkg,<<"gun">>,<<"2.1.3">>},0}"#),
+        "{rebar_lock}"
+    );
+    assert!(
+        rebar_lock.contains(r#"{<<"cowlib">>,{git,"https://x/cowlib",{ref,"cafe"}},2}"#),
+        "{rebar_lock}"
+    );
+    assert!(checkout.exists(), "current lock must keep checkouts");
+}
+
+/// A changed dep unlocks only itself (and transitive deps): unchanged direct
+/// deps stay pinned with their checkouts; every other checkout is removed.
+#[test]
+fn test_prepare_rebar_lock_partial_keeps_unchanged_direct_deps() {
+    let temp = TempDir::new().unwrap();
+    let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let layout = BuildLayout::new(&project_path);
+    for name in ["gun", "oidcc", "cowlib", "removed"] {
+        fs::create_dir_all(layout.rebar_lib_dir().join(name)).unwrap();
+    }
+
+    let deps = dep_map(vec![
+        hex_dep("gun", "~> 2.1"),
+        git_dep(
+            "oidcc",
+            "https://x/oidcc",
+            GitReference::Branch("next".to_string()),
+        ),
+    ]);
+    let locks = lock_map(vec![
+        locked_hex("gun", "2.1.3", 0),
+        locked_git(
+            "oidcc",
+            "https://x/oidcc",
+            GitReference::Branch("main".to_string()),
+            "deadbeef",
+            0,
+        ),
+        locked_hex("cowlib", "2.13.0", 1),
+        locked_hex("removed", "1.0.0", 0),
+    ]);
+
+    let re_resolve = prepare_rebar_lock(&layout, &deps, Some(&locks), false).unwrap();
+    assert!(re_resolve);
+    let rebar_lock = fs::read_to_string(layout.native_dir().join("rebar.lock")).unwrap();
+    assert!(rebar_lock.contains(r#"<<"gun">>"#), "{rebar_lock}");
+    for unpinned in ["oidcc", "cowlib", "removed"] {
+        assert!(
+            !rebar_lock.contains(&format!("<<\"{unpinned}\">>")),
+            "{unpinned} must not be pinned: {rebar_lock}"
+        );
+        assert!(
+            !layout.rebar_lib_dir().join(unpinned).exists(),
+            "{unpinned} checkout must be removed"
+        );
+    }
+    assert!(layout.rebar_lib_dir().join("gun").exists());
+}
+
+/// No lock, or `force_resolve`, pins nothing and removes every checkout.
+#[test]
+fn test_prepare_rebar_lock_unlocked_removes_all_checkouts() {
+    let deps = dep_map(vec![hex_dep("gun", "~> 2.1")]);
+    let current = lock_map(vec![locked_hex("gun", "2.1.3", 0)]);
+
+    for (case, locks, force) in [("missing", None, false), ("forced", Some(&current), true)] {
+        let temp = TempDir::new().unwrap();
+        let project_path = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        let layout = BuildLayout::new(&project_path);
+        fs::create_dir_all(layout.rebar_lib_dir().join("gun")).unwrap();
+
+        let re_resolve = prepare_rebar_lock(&layout, &deps, locks, force).unwrap();
+        assert!(re_resolve, "{case}");
+        let rebar_lock = fs::read_to_string(layout.native_dir().join("rebar.lock")).unwrap();
+        assert!(!rebar_lock.contains("gun"), "{case}: {rebar_lock}");
+        assert!(
+            !layout.rebar_lib_dir().join("gun").exists(),
+            "{case}: checkout must be removed"
+        );
+    }
 }

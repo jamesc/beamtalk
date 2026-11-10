@@ -545,12 +545,21 @@ fn redundant_super_initialize_diagnostic(span: Span) -> Diagnostic {
 ///   assignment, a `self with<Field>: value` send, or a cascade on `self`
 ///   whose *only* `with<Field>:` message is its last — all reliably yield the
 ///   fully updated self already.
+/// - The last statement is a cascade on a self-producing receiver that ends
+///   in a `with<Field>:` message but holds **more than one** of them (`self
+///   withA: 1; withB: 2`), or a local bound once to such a cascade, AND the
+///   type checker already reported `cascade-drops-update` inside that
+///   cascade. Such a cascade is NOT self-producing — every message goes to
+///   the *original* receiver, so each `with*:` returns its own copy and only
+///   the last one survives (ADR 0145) — but `cascade-drops-update` already
+///   names each dropped message with the nested-form fix, and a second,
+///   `setUp`-specific warning would duplicate it (BT-4573). When the type
+///   checker could not prove the drop (e.g. a hand-written `with*:` method
+///   with no `-> Self` return annotation), the generic warning still fires.
 ///
-/// A trailing cascade on `self` with **more than one** `with<Field>:` message
-/// (`self withA: 1; withB: 2`) gets its own, more specific diagnostic: every
-/// cascade message goes to the *original* receiver, so each `with*:` returns
-/// its own copy and only the last one survives as the cascade's value (ADR
-/// 0145). The fix is the nested form `(self withA: 1) withB: 2`.
+/// `diagnostics` must already hold the type checker's diagnostics for
+/// `module` (as `analyse_full` arranges): that is where this check looks for
+/// `cascade-drops-update`.
 pub(crate) fn check_testcase_setup_drops_field_assignments(
     module: &Module,
     hierarchy: &ClassHierarchy,
@@ -667,9 +676,9 @@ struct SelfWithStarCascade {
     /// Whether the cascade's *last* message is a `with<Field>:` send, i.e.
     /// whether the cascade's value is a `with<Field>:` result at all.
     ends_in_with_star: bool,
-    /// Whether the shared receiver is the bare `self` (rather than a
-    /// `with*:` chain), which the suggested nested form starts from.
-    receiver_is_bare_self: bool,
+    /// The spans of the dropped `with<Field>:` messages, i.e. every one but
+    /// the cascade's last message (see [`dropped_with_star_spans`]).
+    dropped_with_star_spans: Vec<Span>,
 }
 
 /// Returns `true` if a send is a `with<Field>:` copy-setter send.
@@ -709,7 +718,7 @@ fn self_with_star_cascade(expr: &Expression) -> Option<SelfWithStarCascade> {
     Some(SelfWithStarCascade {
         with_star_selectors,
         ends_in_with_star,
-        receiver_is_bare_self: is_bare_self(shared_receiver),
+        dropped_with_star_spans: dropped_with_star_spans(cascade),
     })
 }
 
@@ -741,12 +750,63 @@ fn cascade_value_is_self_producing(expr: &Expression) -> bool {
         .is_some_and(|c| c.ends_in_with_star && c.with_star_selectors.len() == 1)
 }
 
-/// Returns the cascade description when `expr` is a cascade on a
-/// self-producing receiver that ends in a `with<Field>:` message but holds
-/// more than one of them — `self withA: 1; withB: 2`, where every `with*:`
-/// but the last is dropped. `None` for every other expression.
+/// The cascade description when `expr` is a cascade on a self-producing
+/// receiver that ends in a `with<Field>:` message but holds more than one of
+/// them — `self withA: 1; withB: 2`, where every `with*:` but the last is
+/// dropped. NOT self-producing (see [`cascade_value_is_self_producing`]).
+/// `None` for every other expression.
 fn multi_with_star_self_cascade(expr: &Expression) -> Option<SelfWithStarCascade> {
     self_with_star_cascade(expr).filter(|c| c.ends_in_with_star && c.with_star_selectors.len() > 1)
+}
+
+/// Returns `true` if `setUp`'s check has nothing of its own to report about
+/// a trailing value `expr`: either it reliably evaluates to the fully
+/// updated `self` ([`is_self_producing`]), or it is a multi-`with*:` cascade
+/// ([`multi_with_star_self_cascade`]) whose **every** dropped `with*:`
+/// message already carries a `cascade-drops-update` warning at its own span
+/// in `reported` (the type checker's diagnostics). That warning names the
+/// dropped message and the nested-form fix, so a second warning would
+/// duplicate it (BT-4573).
+///
+/// Every dropped send must be covered, not just one somewhere inside the
+/// cascade: if the type checker proved only some drops (say `withB:` is a
+/// hand-written method with no `-> Self` annotation), or the only warning
+/// belongs to a cascade nested in an argument, the `setUp` warning still
+/// fires, so a lost field is never left unreported.
+///
+/// The check sees the warning before the `[diagnostics]` table is applied.
+/// So with `cascade-drops-update = "off"` this case gets no diagnostic at
+/// all: the project has opted into fan-out cascades on values.
+fn is_setup_trailing_value_accounted_for(expr: &Expression, reported: &[Diagnostic]) -> bool {
+    if is_self_producing(expr) {
+        return true;
+    }
+    let Some(cascade) = multi_with_star_self_cascade(expr) else {
+        return false;
+    };
+    !cascade.dropped_with_star_spans.is_empty()
+        && cascade.dropped_with_star_spans.iter().all(|span| {
+            reported.iter().any(|d| {
+                d.category == Some(DiagnosticCategory::CascadeDropsUpdate) && d.span == *span
+            })
+        })
+}
+
+/// The spans at which the type checker reports `cascade-drops-update` for
+/// the dropped `with<Field>:` messages of `cascade`: every `with*:` message
+/// except the cascade's last message, each at its [`SendRef::span`]. That is
+/// the same span definition `check_cascade_drops_update` reports at, so the
+/// two cannot drift apart. Empty when `cascade` is not a cascade.
+fn dropped_with_star_spans(cascade: &Expression) -> Vec<Span> {
+    let sends: Vec<_> = cascade_sends(cascade).collect();
+    let Some((_, non_final)) = sends.split_last() else {
+        return Vec::new();
+    };
+    non_final
+        .iter()
+        .filter(|send| is_with_star_send(send))
+        .map(|send| send.span)
+        .collect()
 }
 
 /// Returns `true` if `expr` contains a self-reconstructing send anywhere in
@@ -786,15 +846,9 @@ fn check_setup_body_returns_self(
         return;
     }
     let last_expr = last_stmt.expression.unwrap_parens();
-    if let Some(cascade) = multi_with_star_self_cascade(last_expr) {
-        diagnostics.push(setup_cascade_drops_with_star_diagnostic(
-            last_expr.span(),
-            cascade.receiver_is_bare_self,
-            &cascade.with_star_selectors,
-        ));
-        return;
-    }
-    if is_self_producing(last_expr) || is_local_holding_updated_self(body, last_expr) {
+    if is_setup_trailing_value_accounted_for(last_expr, diagnostics)
+        || is_local_holding_accounted_for_value(body, last_expr, diagnostics)
+    {
         return;
     }
     diagnostics.push(setup_drops_field_assignments_diagnostic(last_expr.span()));
@@ -802,13 +856,17 @@ fn check_setup_body_returns_self(
 
 /// Returns `true` if `last_expr` is a bare local identifier (e.g. `updated`)
 /// whose *only* assignment anywhere in `body` is a top-level statement of the
-/// form `name := <self-producing expression>` — so the local provably holds
-/// the fully updated self. Any other assignment to the same name (reassigned
-/// to a non-self value, or assigned inside a nested block) makes the value
-/// unprovable, so this answers `false` and the lint still fires.
-fn is_local_holding_updated_self(
+/// form `name := <value>` where `value` satisfies
+/// [`is_setup_trailing_value_accounted_for`] — so the local provably holds
+/// the fully updated self, or a multi-`with*:` cascade that
+/// `cascade-drops-update` already reported (`reported`). Any other
+/// assignment to the same name (reassigned to a non-self value, or assigned
+/// inside a nested block) makes the value unprovable, so this answers
+/// `false` and the lint still fires.
+fn is_local_holding_accounted_for_value(
     body: &[crate::ast::ExpressionStatement],
     last_expr: &Expression,
+    reported: &[Diagnostic],
 ) -> bool {
     let Expression::Identifier(id) = last_expr else {
         return false;
@@ -839,7 +897,8 @@ fn is_local_holding_updated_self(
         matches!(
             stmt.expression.unwrap_parens(),
             Expression::Assignment { value, .. }
-                if assigns_name(stmt.expression.unwrap_parens()) && is_self_producing(value)
+                if assigns_name(stmt.expression.unwrap_parens())
+                    && is_setup_trailing_value_accounted_for(value, reported)
         )
     })
 }
@@ -861,54 +920,6 @@ fn setup_drops_field_assignments_diagnostic(span: Span) -> Diagnostic {
          send (nest several as `(self withA: 1) withB: 2`) — or a local \
          bound once to such a send — so the updated fields carry forward",
     )
-    .with_category(DiagnosticCategory::Lint)
-}
-
-/// Builds the diagnostic for a `setUp` that ends in a cascade on `self` with
-/// more than one `with<Field>:` message (ADR 0145). `selectors` are the
-/// cascade's `with<Field>:` selectors in source order (at least two); the
-/// hint spells out the nested form built from them, starting from `self`
-/// when that is the cascade's receiver and from `…` (the receiver chain)
-/// otherwise.
-fn setup_cascade_drops_with_star_diagnostic(
-    span: Span,
-    receiver_is_bare_self: bool,
-    selectors: &[EcoString],
-) -> Diagnostic {
-    let Some((last, dropped)) = selectors.split_last() else {
-        return setup_drops_field_assignments_diagnostic(span);
-    };
-    let dropped_list = dropped
-        .iter()
-        .map(|sel| format!("`{sel}`"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let receiver = if receiver_is_bare_self { "self" } else { "…" };
-    let nested = selectors
-        .iter()
-        .enumerate()
-        .fold(String::new(), |acc, (index, sel)| {
-            if index == 0 {
-                format!("{receiver} {sel} …")
-            } else {
-                format!("({acc}) {sel} …")
-            }
-        });
-    Diagnostic::warning(
-        format!(
-            "`setUp` ends in a cascade of {count} `with<Field>:` messages, \
-             but a cascade sends every message to the same original receiver \
-             — each `with*:` returns its own copy and only the last one \
-             (`{last}`) is returned, so every `with*:` before it \
-             ({dropped_list}) is silently dropped for the test method",
-            count = selectors.len(),
-        ),
-        span,
-    )
-    .with_hint(format!(
-        "Nest the sends so each applies to the previous result: `{nested}` \
-         (e.g. `(self withA: 1) withB: 2`)"
-    ))
     .with_category(DiagnosticCategory::Lint)
 }
 
@@ -1888,116 +1899,146 @@ mod tests {
         );
     }
 
+    /// Runs the type checker over `src`, then the `setUp` check over its
+    /// diagnostics, as `analyse_full` does. Returns the `setUp` check's own
+    /// diagnostics and the type checker's `cascade-drops-update` warnings.
+    fn setup_lint_after_type_check(src: &str) -> (Vec<Diagnostic>, Vec<Diagnostic>) {
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut checker = crate::semantic_analysis::TypeChecker::new();
+        checker.check_module(&module, &hierarchy);
+        let mut diagnostics = checker.take_diagnostics();
+        let before = diagnostics.len();
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        let lint = diagnostics.split_off(before);
+        let drops = diagnostics
+            .into_iter()
+            .filter(|d| d.category == Some(DiagnosticCategory::CascadeDropsUpdate))
+            .collect();
+        (lint, drops)
+    }
+
+    /// Asserts the `setUp` check stays silent on `src` because the type
+    /// checker already reported `cascade-drops-update` there (BT-4573).
+    fn assert_left_to_cascade_drops_update(src: &str) {
+        let (lint, drops) = setup_lint_after_type_check(src);
+        assert!(!drops.is_empty(), "expected cascade-drops-update to fire");
+        assert!(lint.is_empty(), "expected no setUp warning, got: {lint:?}");
+    }
+
     /// The verified ADR 0145 case: a cascade of two `with*:` messages to
     /// `self` as the sole statement. Every cascade message goes to the
     /// original `self`, so the cascade's value is `self withDb: 2` alone and
-    /// `counter` is dropped (a probe on `main` ran the tests with `counter`
-    /// at its default). Warns with the cascade-specific message, naming the
-    /// dropped selector, and the hint suggests the nested form.
+    /// `counter` is dropped. BT-4573: the type checker's
+    /// `cascade-drops-update` warning reports this at `withCounter:`, so the
+    /// `setUp` check stays silent rather than duplicate it.
     #[test]
-    fn setup_two_with_field_cascade_drops_first_warns() {
-        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
-                   TestCase subclass: CounterDbTest\n  field: counter = 0\n  field: db = nil\n\
-                   \n  setUp =>\n    self withCounter: 1; withDb: 2";
-        let (module, hierarchy) = build_module_and_hierarchy(src);
-        let mut diagnostics = Vec::new();
-        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
-        assert_eq!(
-            diagnostics.len(),
-            1,
-            "Expected 1 warning for a two-with*: cascade, got: {diagnostics:?}"
+    fn setup_two_with_field_cascade_left_to_cascade_drops_update() {
+        assert_left_to_cascade_drops_update(
+            "Value subclass: TestCase\n  field: name = \"\"\n\n\
+             TestCase subclass: CounterDbTest\n  field: counter = 0\n  field: db = nil\n\
+             \n  setUp =>\n    self withCounter: 1; withDb: 2",
         );
-        let diag = &diagnostics[0];
-        assert_eq!(diag.severity, Severity::Warning);
-        assert_eq!(diag.category, Some(DiagnosticCategory::Lint));
-        assert!(
-            diag.message.contains("cascade")
-                && diag.message.contains("(`withCounter:`)")
-                && diag.message.contains("silently dropped"),
-            "Expected the message to name the dropped `withCounter:`, got: {}",
-            diag.message
-        );
-        let hint = diag.hint.as_deref().unwrap_or_default();
-        assert!(
-            hint.contains("(self withCounter: …) withDb: …")
-                && hint.contains("(self withA: 1) withB: 2"),
-            "Expected the hint to suggest the nested form, got: {hint}"
-        );
-        assert!(!hint.contains("|>"), "Hint must not mention `|>`: {hint}");
     }
 
-    /// Three `with*:` messages in one cascade: the message lists both
-    /// dropped selectors and the hint nests all three.
+    /// Three `with*:` messages in one cascade — likewise left to
+    /// `cascade-drops-update`.
     #[test]
-    fn setup_three_with_field_cascade_warns_naming_all_dropped() {
-        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
-                   TestCase subclass: AbcTest\n  field: a = 0\n  field: b = 0\n  field: c = 0\n\
-                   \n  setUp =>\n    self withA: 1; withB: 2; withC: 3";
-        let (module, hierarchy) = build_module_and_hierarchy(src);
-        let mut diagnostics = Vec::new();
-        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
-        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
-        let diag = &diagnostics[0];
-        assert!(
-            diag.message.contains("3 `with<Field>:` messages")
-                && diag.message.contains("(`withA:`, `withB:`)")
-                && diag.message.contains("(`withC:`)"),
-            "got: {}",
-            diag.message
-        );
-        assert!(
-            diag.hint
-                .as_deref()
-                .unwrap_or_default()
-                .contains("((self withA: …) withB: …) withC: …"),
-            "got: {:?}",
-            diag.hint
+    fn setup_three_with_field_cascade_left_to_cascade_drops_update() {
+        assert_left_to_cascade_drops_update(
+            "Value subclass: TestCase\n  field: name = \"\"\n\n\
+             TestCase subclass: AbcTest\n  field: a = 0\n  field: b = 0\n  field: c = 0\n\
+             \n  setUp =>\n    self withA: 1; withB: 2; withC: 3",
         );
     }
 
     /// Two `with*:` messages separated by an unrelated cascade message, the
-    /// last being a `with*:` — the first is still dropped. Warns.
+    /// last being a `with*:` — the first is still dropped, and
+    /// `cascade-drops-update` reports it.
     #[test]
-    fn setup_with_field_cascade_with_interleaved_message_warns() {
-        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
-                   TestCase subclass: AbTest\n  field: a = 0\n  field: b = 0\n\
-                   \n  setUp =>\n    self withA: 1; reset; withB: 2";
-        let (module, hierarchy) = build_module_and_hierarchy(src);
-        let mut diagnostics = Vec::new();
-        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
-        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
-        assert!(
-            diagnostics[0].message.contains("(`withA:`)"),
-            "got: {}",
-            diagnostics[0].message
+    fn setup_with_field_cascade_with_interleaved_message_left_to_cascade_drops_update() {
+        assert_left_to_cascade_drops_update(
+            "Value subclass: TestCase\n  field: name = \"\"\n\n\
+             TestCase subclass: AbTest\n  field: a = 0\n  field: b = 0\n\
+             \n  setUp =>\n    self withA: 1; yourself; withB: 2",
         );
     }
 
     /// A cascade on a `with*:` chain receiver: `(self withA: 1) withB: 2;
     /// withC: 3` sends `withB:` and `withC:` to `self withA: 1`, so `b` is
-    /// dropped. Warns.
+    /// dropped — reported by `cascade-drops-update`.
     #[test]
-    fn setup_with_field_cascade_on_chain_receiver_warns() {
+    fn setup_with_field_cascade_on_chain_receiver_left_to_cascade_drops_update() {
+        assert_left_to_cascade_drops_update(
+            "Value subclass: TestCase\n  field: name = \"\"\n\n\
+             TestCase subclass: AbcTest\n  field: a = 0\n  field: b = 0\n  field: c = 0\n\
+             \n  setUp =>\n    (self withA: 1) withB: 2; withC: 3",
+        );
+    }
+
+    /// BT-4573: a trailing local bound once to a multi-`with*:` cascade is
+    /// also left to `cascade-drops-update` (previously it drew the generic
+    /// "last statement doesn't return the updated self" warning).
+    #[test]
+    fn setup_trailing_local_holding_multi_with_cascade_left_to_cascade_drops_update() {
+        assert_left_to_cascade_drops_update(
+            "Value subclass: TestCase\n  field: name = \"\"\n\n\
+             TestCase subclass: AbTest\n  field: a = 0\n  field: b = 0\n\
+             \n  setUp =>\n    updated := self withA: 1; withB: 2\n    updated",
+        );
+    }
+
+    /// When the type checker did NOT report `cascade-drops-update` for a
+    /// trailing multi-`with*:` cascade (it could not prove the drop — e.g. a
+    /// hand-written `with*:` method with no `-> Self` annotation), the
+    /// cascade is still not self-producing, so the generic warning fires.
+    #[test]
+    fn setup_multi_with_field_cascade_unreported_by_type_checker_warns() {
         let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
-                   TestCase subclass: AbcTest\n  field: a = 0\n  field: b = 0\n  field: c = 0\n\
-                   \n  setUp =>\n    (self withA: 1) withB: 2; withC: 3";
+                   TestCase subclass: AbTest\n  field: a = 0\n  field: b = 0\n\
+                   \n  setUp =>\n    self withA: 1; withB: 2";
         let (module, hierarchy) = build_module_and_hierarchy(src);
         let mut diagnostics = Vec::new();
         check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
         assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
         assert!(
-            diagnostics[0].message.contains("(`withB:`)"),
+            diagnostics[0].message.contains("silently dropped"),
             "got: {}",
             diagnostics[0].message
         );
+    }
+
+    /// A `cascade-drops-update` warning elsewhere in the method does not
+    /// silence the check for a trailing multi-`with*:` cascade it does not
+    /// sit inside.
+    #[test]
+    fn setup_cascade_drops_update_outside_trailing_cascade_does_not_silence() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: AbTest\n  field: a = 0\n  field: b = 0\n\
+                   \n  setUp =>\n    self withA: 1; withB: 2";
+        let (module, hierarchy) = build_module_and_hierarchy(src);
+        let mut diagnostics = vec![
+            Diagnostic::warning("elsewhere", Span::new(0, 1))
+                .with_category(DiagnosticCategory::CascadeDropsUpdate),
+        ];
+        check_testcase_setup_drops_field_assignments(&module, &hierarchy, &mut diagnostics);
+        assert_eq!(diagnostics.len(), 2, "got: {diagnostics:?}");
+    }
+
+    /// A multi-`with*:` cascade followed by an unrelated trailing statement
+    /// still warns: the trailing statement is the check's own trap,
+    /// independent of the cascade.
+    #[test]
+    fn setup_multi_with_field_cascade_then_unrelated_statement_warns() {
+        let src = "Value subclass: TestCase\n  field: name = \"\"\n\n\
+                   TestCase subclass: AbTest\n  field: a = 0\n  field: b = 0\n\
+                   \n  setUp =>\n    self withA: 1; withB: 2\n    Transcript show: \"ready\"";
+        let (lint, drops) = setup_lint_after_type_check(src);
+        assert!(!drops.is_empty(), "expected cascade-drops-update to fire");
+        assert_eq!(lint.len(), 1, "got: {lint:?}");
         assert!(
-            diagnostics[0]
-                .hint
-                .as_deref()
-                .unwrap_or_default()
-                .contains("`(… withB: …) withC: …`"),
-            "Expected the nested form to start from the receiver chain, got: {:?}",
-            diagnostics[0].hint
+            lint[0].message.contains("silently dropped"),
+            "got: {}",
+            lint[0].message
         );
     }
 

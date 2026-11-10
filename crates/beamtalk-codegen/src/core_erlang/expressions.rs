@@ -139,7 +139,8 @@ impl CoreErlangGenerator {
                 }
                 StringSegment::Interpolation(expr) => {
                     let expr_doc = self.expression_doc(expr)?;
-                    let (chain_prefix, reference) = self.interpolation_segment_chain(expr_doc);
+                    let (chain_prefix, reference) =
+                        self.interpolation_segment_chain(expr_doc, expr);
                     let_bindings.push(chain_prefix);
                     binary_parts.push(reference);
                 }
@@ -179,19 +180,30 @@ impl CoreErlangGenerator {
     /// like every other opaque `Statement`/preamble fragment this
     /// generator builds) so callers concatenate it directly ahead of
     /// whatever comes next.
+    ///
+    /// BT-4510: the `displayString` send is the same decision as a
+    /// user-written `expr displayString` ([`Self::typed_send_target`]): a
+    /// segment whose static type has a guarded direct route (`String`,
+    /// `Integer`, a tagged Value class, …) calls that class's `dispatch/3`
+    /// behind its guard; any other segment sends dynamically.
     fn interpolation_segment_chain(
         &mut self,
         value_doc: Document<'static>,
+        expr: &Expression,
     ) -> (Document<'static>, Document<'static>) {
         let interp_var = self.fresh_temp_var("interpExpr");
         let raw_str_var = self.fresh_temp_var("interpRaw");
         let str_var = self.fresh_temp_var("interpStr");
 
-        let display_string_call = self.annotate_current_send_call(docvec![
-            "call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(interp_var.clone()),
-            ", 'displayString', [])"
-        ]);
+        let display_string = MessageSelector::Unary("displayString".into());
+        let display_string_call = match self.typed_send_target(expr, &display_string) {
+            Ok(target) => self.guarded_send_on_vars(&target, "displayString", &interp_var, &[]),
+            Err(_) => self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(interp_var.clone()),
+                ", 'displayString', [])"
+            ]),
+        };
         // Evaluate the expression
         let prefix = docvec![
             "let ",
@@ -280,7 +292,8 @@ impl CoreErlangGenerator {
                     } else {
                         self.expression_doc(expr)?
                     };
-                    let (chain_prefix, reference) = self.interpolation_segment_chain(value_doc);
+                    let (chain_prefix, reference) =
+                        self.interpolation_segment_chain(value_doc, expr);
                     if i <= k {
                         prelude.push(ThreadedStmt::Statement(chain_prefix, span));
                     } else {
@@ -1091,6 +1104,7 @@ impl CoreErlangGenerator {
             messages,
             &self.peeled_parens,
             self.current_peel_scope(),
+            &self.current_pipeline_sends,
         );
         let messages: &[CascadeMessage] = augmented.as_deref().unwrap_or(messages);
 
@@ -1285,7 +1299,9 @@ impl CoreErlangGenerator {
             || beamtalk_core::source_analysis::Span::new(0, 0),
             beamtalk_core::ast::Expression::span,
         );
-        Ok(self.hoist_cascade_splits(splits, docs, span))
+        let exprs: Vec<&Expression> = arguments.iter().collect();
+        let racing = self.last_racing_operand(&exprs).is_some();
+        Ok(self.hoist_cascade_splits(splits, docs, span, racing))
     }
 
     /// Splits one cascade argument into its `(prelude, value)` pair through
@@ -1309,13 +1325,18 @@ impl CoreErlangGenerator {
     /// over already-split arguments: when any carries a prelude, every
     /// prelude is spliced into `docs` (plain values bound to fresh temps) so
     /// a `StateN` rebind stays in scope for later cascade messages.
+    ///
+    /// BT-4296: `racing` ([`Self::last_racing_operand`]) hoists them all too
+    /// when two or more operands may run code, since the list (or map) the
+    /// docs land in would otherwise evaluate them last-first.
     pub(super) fn hoist_cascade_splits(
         &mut self,
         splits: Vec<(Vec<ThreadedStmt>, Document<'static>)>,
         docs: &mut Vec<ThreadedStmt>,
         span: beamtalk_core::source_analysis::Span,
+        racing: bool,
     ) -> Vec<Document<'static>> {
-        let any_hoisted = splits.iter().any(|(prelude, _)| !prelude.is_empty());
+        let any_hoisted = racing || splits.iter().any(|(prelude, _)| !prelude.is_empty());
         if !any_hoisted {
             return splits.into_iter().map(|(_, doc)| doc).collect();
         }

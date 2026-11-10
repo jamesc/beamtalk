@@ -198,6 +198,25 @@ map_type_tuple_positional_test() ->
         beamtalk_spec_reader:map_type({type, 0, tuple, Elements})
     ).
 
+%% BT-4510: `{beamtalk_string, binary()}` (`beamtalk_string:t()`) is a
+%% String's representation, so it maps to String, not Tuple — in a union
+%% too, so `{ok, beamtalk_string:t()}` reads as `Result(String, …)`.
+map_type_string_tag_tuple_is_string_test() ->
+    StringTag = {type, 0, tuple, [{atom, 0, beamtalk_string}, {type, 0, binary, []}]},
+    ?assertEqual(<<"String">>, beamtalk_spec_reader:map_type(StringTag)),
+    Ok = {type, 0, tuple, [{atom, 0, ok}, StringTag]},
+    ?assertEqual(
+        <<"Result(String, Exception) | Symbol">>,
+        beamtalk_spec_reader:map_type({type, 0, union, [Ok, {atom, 0, not_found}]})
+    ),
+    %% Any other 2-tuple headed by an atom stays a Tuple.
+    ?assertEqual(
+        <<"Tuple(Symbol, String | Binary)">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, tuple, [{atom, 0, other_tag}, {type, 0, binary, []}]}
+        )
+    ).
+
 %% A tuple whose every element is uninformative collapses to bare Tuple.
 map_type_tuple_all_uninformative_collapses_test() ->
     Elements = [{type, 0, term, []}, {type, 0, any, []}],

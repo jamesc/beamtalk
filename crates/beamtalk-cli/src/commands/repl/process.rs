@@ -28,6 +28,10 @@ pub(crate) fn start_beam_node(
     project_root: &Path,
     config: &crate::commands::workspace::WorkspaceConfig<'_>,
 ) -> Result<Child> {
+    // ADR 0125 §3.1: the foreground REPL node loads the toolchain's `.beam`
+    // files, which do not load below the support window's floor.
+    crate::commands::build_stamp::require_supported_otp()?;
+
     // Find runtime directory - try multiple locations
     let (runtime_dir, layout) = repl_startup::find_runtime_dir_with_layout()?;
     info!("Using runtime at: {}", runtime_dir.display());

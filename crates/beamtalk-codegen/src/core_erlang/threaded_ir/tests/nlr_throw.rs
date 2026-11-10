@@ -16,6 +16,8 @@ fn nlr_throw(slot: Vec<VersionedVar>) -> ThreadedStmt {
         value: ValueRef::Var("Val".to_string()),
         slot,
         result_var: "_NlrThrow1".to_string(),
+        cell_live: false,
+        cell_store: false,
         span: span(),
     }
 }
@@ -52,5 +54,49 @@ fn nlr_throw_renders_its_slot_bare_or_as_a_tuple() {
         lower_and_render(&[nlr_throw(vec![state(1, frame), self_var(2, frame)])])
             .to_pretty_string(),
         "let _NlrThrow1 = call 'erlang':'throw'({'$bt_nlr', NlrTok, Val, {State1, Self2}}) in "
+    );
+}
+
+/// BT-4535: where the actor-state cell is live a throw stores its slot to the
+/// cell before it throws (`NlrThrowWithoutCellStore` otherwise).
+#[test]
+fn a_cell_live_throw_without_its_cell_store_is_rejected() {
+    let with = |cell_live, cell_store| {
+        let ThreadedStmt::NlrThrow {
+            token,
+            value,
+            slot,
+            result_var,
+            span,
+            ..
+        } = nlr_throw(vec![state(0, FrameId::ROOT)])
+        else {
+            unreachable!()
+        };
+        vec![ThreadedStmt::NlrThrow {
+            token,
+            value,
+            slot,
+            result_var,
+            cell_live,
+            cell_store,
+            span,
+        }]
+    };
+    assert_eq!(
+        verify_in_scope(&with(true, false), ScopeKind::Instance),
+        vec![VerifyError::NlrThrowWithoutCellStore { at: span() }]
+    );
+    assert_eq!(
+        verify_in_scope(&with(true, true), ScopeKind::Instance),
+        Vec::new()
+    );
+    assert_eq!(
+        verify_in_scope(&with(false, false), ScopeKind::Instance),
+        Vec::new()
+    );
+    assert_eq!(
+        lower_and_render(&with(true, true)).to_pretty_string(),
+        "let _ = call 'beamtalk_actor_state':'store'(State) in let _NlrThrow1 = call 'erlang':'throw'({'$bt_nlr', NlrTok, Val, State}) in "
     );
 }

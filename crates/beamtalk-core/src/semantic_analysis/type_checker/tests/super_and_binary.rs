@@ -24,6 +24,7 @@ fn test_super_infers_parent_class_type() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("reset".into()),
             parameters: vec![],
             body: vec![bare(int_lit(0))],
@@ -64,6 +65,7 @@ fn test_super_infers_parent_class_type() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("reset".into()),
             parameters: vec![],
             body: vec![bare(Expression::MessageSend {
@@ -125,6 +127,7 @@ fn test_super_unknown_selector_warns() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("reset".into()),
             parameters: vec![],
             body: vec![bare(int_lit(0))],
@@ -163,6 +166,7 @@ fn test_super_unknown_selector_warns() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("test".into()),
             parameters: vec![],
             body: vec![bare(msg_send(

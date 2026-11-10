@@ -420,8 +420,7 @@ impl CoreErlangGenerator {
                     // `ensure:` cleanup) sees every write made before it.
                     // BT-4122: a merged Tier 2 fun stores its merged map too
                     // (it holds no versions, so the active check misses it).
-                    let throw_doc = if self.synced_calls_active() || self.tier2_merged_fun.is_some()
-                    {
+                    let throw_doc = if self.nlr_throw_stores_cell() {
                         docvec![
                             "let _ = ",
                             threaded_ir::cell_put_call(state_doc),

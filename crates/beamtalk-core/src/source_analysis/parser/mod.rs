@@ -300,8 +300,8 @@ pub fn parse_method(tokens: Vec<Token>) -> (Option<crate::ast::MethodDefinition>
 /// - Delimiters are unclosed: `[`, `(`, `{`, `#{`, `#(`, `#[`
 /// - A string or block comment is unterminated
 /// - The last token is a keyword (`at:`), binary operator (`+`), assignment
-///   (`:=`), cascade (`;`), or return (`^`) — all of which expect a following
-///   expression
+///   (`:=`), cascade (`;`), return (`^`), or pipeline (`|>`) — all of which
+///   expect a following expression
 ///
 /// Extra closing delimiters (e.g., `]` alone) are treated as complete so
 /// the evaluator can report the syntax error rather than waiting forever.
@@ -395,30 +395,9 @@ pub fn is_input_complete(source: &str) -> bool {
         return false;
     }
 
-    // Trailing keyword missing its argument (e.g., "array at:" or "x ifTrue:")
-    if let Some(TokenKind::Keyword(_)) = last_meaningful_kind {
-        return false;
-    }
-
-    // Trailing binary operator missing its right operand (e.g., "1 +" or "3 *" or "x ->")
-    // GtGt trailing: "Counter >>" is incomplete (method lookup or binary op)
-    if matches!(
-        last_meaningful_kind,
-        Some(TokenKind::BinarySelector(_) | TokenKind::Arrow | TokenKind::GtGt)
-    ) {
-        return false;
-    }
-
-    // Trailing assignment missing its value (e.g., "x :=")
-    if let Some(TokenKind::Assign) = last_meaningful_kind {
-        return false;
-    }
-
-    // Trailing cascade separator or return operator (e.g., "x foo;" or "^")
-    if matches!(
-        last_meaningful_kind,
-        Some(TokenKind::Semicolon | TokenKind::Caret)
-    ) {
+    // A trailing token that expects a following expression (e.g. "array at:",
+    // "1 +", "x :=", "x foo;", "^" or "x foo |>").
+    if last_meaningful_kind.is_some_and(expects_following_expression) {
         return false;
     }
 
@@ -442,6 +421,26 @@ pub fn is_input_complete(source: &str) -> bool {
     }
 
     true
+}
+
+/// `true` if input whose last token is `kind` is mid-expression: the token
+/// expects an expression after it, so a line ending in it continues. These
+/// are a keyword (`at:`), a binary operator (`+`, `->`, `>>`), an assignment
+/// (`:=`), a cascade (`;`), a return (`^`) and a pipeline (`|>`, ADR 0145).
+/// The one list both [`is_input_complete`] and
+/// [`needs_blank_line_to_complete`] read.
+fn expects_following_expression(kind: &TokenKind) -> bool {
+    matches!(
+        kind,
+        TokenKind::Keyword(_)
+            | TokenKind::BinarySelector(_)
+            | TokenKind::Arrow
+            | TokenKind::GtGt
+            | TokenKind::Assign
+            | TokenKind::Semicolon
+            | TokenKind::Caret
+            | TokenKind::PipeGt
+    )
 }
 
 /// Checks whether the given source text is only incomplete because it contains
@@ -540,18 +539,7 @@ pub fn needs_blank_line_to_complete(source: &str) -> bool {
     }
 
     // If there's a trailing operator/keyword, user is mid-expression — don't submit.
-    if matches!(
-        last_meaningful_kind,
-        Some(
-            TokenKind::Keyword(_)
-                | TokenKind::BinarySelector(_)
-                | TokenKind::Arrow
-                | TokenKind::GtGt
-                | TokenKind::Assign
-                | TokenKind::Semicolon
-                | TokenKind::Caret
-        )
-    ) {
+    if last_meaningful_kind.is_some_and(expects_following_expression) {
         return false;
     }
 
@@ -704,6 +692,15 @@ pub enum DiagnosticCategory {
     /// `maps:get/2`) silently misses. A hint, silent on `Dynamic` element
     /// types (ADR 0100 Rule 1). Suppressible with `@expect ffi_nested_string`.
     FfiNestedString,
+    /// A value that is provably a raw `Binary` (built by a Binary-only
+    /// producer such as `Binary fromBytes:`) compared with `==`/`/=`/`=`
+    /// against a statically-`String` value, or used as the key of a
+    /// `Dictionary(String, V)` / element of a `Set(String)` (BT-4257). A
+    /// String and a Binary with the same bytes are never equal, so the
+    /// comparison is always false and the lookup always misses. A hint,
+    /// silent on `Dynamic` types and on a declared `Binary` that may hold a
+    /// String (ADR 0086). Suppressible with `@expect binary_string_compare`.
+    BinaryStringCompare,
     /// A non-final cascade message on a value receiver answers an updated
     /// copy that the cascade discards (ADR 0145 § 3, BT-4512): `p withX: 5;
     /// withY: 10` sends `withY:` to `p`, not to the copy `withX:` answered.
@@ -1088,6 +1085,10 @@ pub(super) struct Parser {
     /// treated as unattached and preserved as a plain comment, matching the
     /// pre-existing fallback behavior.
     attached_doc_comment_positions: Option<(usize, HashSet<usize>)>,
+    /// The sends written after a `|>` so far, each with the comments written
+    /// before its `|>` (ADR 0145). A method definition takes the entries its
+    /// body added (`parse_method_definition`); the module takes the rest.
+    pub(super) pipeline_sends: Vec<(Span, CommentAttachment)>,
 }
 
 impl Parser {
@@ -1115,6 +1116,7 @@ impl Parser {
             nesting_depth: 0,
             unattached_doc_comment_indices,
             attached_doc_comment_positions: None,
+            pipeline_sends: Vec::new(),
         }
     }
 
@@ -1509,12 +1511,54 @@ impl Parser {
         self.diagnostics.push(Diagnostic::error(message, span));
     }
 
-    /// Reports a "cast in expression" error when `!` is used on a non-MessageSend.
-    pub(super) fn cast_in_expression_error(&mut self, span: Span) {
-        self.diagnostics.push(Diagnostic::error(
+    /// Applies a `!` statement terminator to the statement it ends, `last`
+    /// (the one rule for every statement list: module, method body, block).
+    ///
+    /// The statement's send becomes a cast only when the statement is a
+    /// plain `MessageSend`. Anything else, including a pipeline (ADR 0145:
+    /// a pipeline cannot end in `!`, just as a cascade cannot), gets the
+    /// "cast in expression" error.
+    pub(super) fn apply_cast_terminator(&mut self, last: Option<&mut Expression>) {
+        match last {
+            Some(expr) if self.is_pipeline_send(expr) => {
+                let span = expr.span();
+                self.diagnostics
+                    .push(Self::cast_in_expression_diagnostic(span).with_hint(
+                        "bind the pipeline's result to a local, then cast to it on the next line",
+                    ));
+            }
+            Some(Expression::MessageSend { is_cast, .. }) => *is_cast = true,
+            Some(last) => {
+                let span = last.span();
+                self.diagnostics
+                    .push(Self::cast_in_expression_diagnostic(span));
+            }
+            None => {}
+        }
+    }
+
+    /// `true` if `expr` is a send written with `|>`, or one whose receiver
+    /// chain (not looking inside parentheses) reaches such a send: the whole
+    /// of `x |> foo bar` or `x |> size + 1` is a pipeline, while
+    /// `(x |> foo) bar` is an ordinary send.
+    fn is_pipeline_send(&self, expr: &Expression) -> bool {
+        let mut current = expr;
+        while let Expression::MessageSend { receiver, span, .. } = current {
+            if self.pipeline_sends.iter().any(|(sent, _)| sent == span) {
+                return true;
+            }
+            current = receiver;
+        }
+        false
+    }
+
+    /// The "cast in expression" error for `!` after a statement that is not a
+    /// plain `MessageSend`.
+    fn cast_in_expression_diagnostic(span: Span) -> Diagnostic {
+        Diagnostic::error(
             "Cast (!) has no return value and cannot be used in an expression. Use . for a synchronous call.",
             span,
-        ));
+        )
     }
 
     /// Increments the nesting depth and returns `Err(Expression::Error)` if
@@ -1683,14 +1727,9 @@ impl Parser {
                         // period consumed — nothing else to do
                     } else if self.match_token(&TokenKind::Bang) {
                         // Cast terminator — annotate the last expression as a cast
-                        match expressions.last_mut().map(|s| &mut s.expression) {
-                            Some(Expression::MessageSend { is_cast, .. }) => *is_cast = true,
-                            Some(last) => {
-                                let span = last.span();
-                                self.cast_in_expression_error(span);
-                            }
-                            None => {}
-                        }
+                        self.apply_cast_terminator(
+                            expressions.last_mut().map(|s| &mut s.expression),
+                        );
                     }
                 }
             }
@@ -1732,6 +1771,9 @@ impl Parser {
             span,
             file_leading_comments,
             file_trailing_comments,
+            pipeline_sends: std::mem::take(&mut self.pipeline_sends)
+                .into_iter()
+                .collect(),
         }
     }
 

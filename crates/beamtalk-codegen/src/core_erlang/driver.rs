@@ -102,7 +102,7 @@ pub fn generate_module_with_warnings(
     // the generator, so reflected method source keeps them as written.
     let peeled_storage;
     let mut peeled_parens = normalize::PeeledParens::default();
-    let module: &Module = if normalize::has_parenthesised_operand(module) {
+    let module: &Module = if normalize::needs_normalising(module) {
         let mut owned = module.clone();
         peeled_parens = normalize::peel_operand_parens_recording(&mut owned);
         peeled_storage = owned;
@@ -116,6 +116,7 @@ pub fn generate_module_with_warnings(
         CoreErlangGenerator::new(&options.module_name)
     };
     generator.peeled_parens = peeled_parens;
+    generator.current_pipeline_sends = module.pipeline_sends.clone();
     generator.source_text = options.source_text;
     generator.set_stdlib_mode(options.stdlib_mode);
     generator.protocol_sources = options.protocol_sources;
@@ -460,7 +461,7 @@ fn flatten_uses_self_sufficient(
     // BT-4059: `module` was peeled at codegen's entry, but the provisions just
     // spliced in were not; peel them too, adding what is removed to the
     // generator's record.
-    if normalize::has_parenthesised_operand(&owned) {
+    if normalize::needs_normalising(&owned) {
         let spliced = normalize::peel_operand_parens_recording(&mut owned);
         generator.peeled_parens.extend(spliced);
     }

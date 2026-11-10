@@ -17,10 +17,10 @@ use super::super::nlr::NlrArmShape;
 use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCleanup,
-    EnsureNlrRelay, FoldCarry, FrameId, LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape,
-    OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering, RebindShape, RethrowSlot,
-    StateAccFallbackReason, ThreadedStmt, ThreadingMode, UserCodeRegion, ValueRef, VersionPrefix,
-    VersionedVar,
+    EnsureForeignNlr, EnsureNlrRelay, FoldCarry, FrameId, LOCAL_STATE_KEY_PREFIX, NlrCarry,
+    NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering, RebindShape,
+    RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadingMode, UserCodeRegion, ValueRef,
+    VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -505,6 +505,19 @@ pub(in crate::core_erlang) enum VerifyError {
     /// scope's own single state).
     NlrThrowWithoutSlot { at: Span },
 
+    /// ADR 0146 (BT-4535): an [`ThreadedStmt::NlrThrow`] where the
+    /// actor-state cell is live (`cell_live`, an actor instance method's
+    /// threaded body) that does not store its state to the cell before it
+    /// throws. Invariant, in every scope kind whose state lives in the cell:
+    /// the cell is current whenever a `^` starts, because the method's NLR
+    /// boundary commits the cell, not the copy the throw carries, and a
+    /// cleanup the throw runs reads the cell. The repro: `flag ifTrue:
+    /// [^(self.count := self.count + 10)]` (BT-3495's arm lowering) threw
+    /// the written `State` without storing it, so the boundary committed
+    /// the cell from before the write; found by the test-build check in
+    /// `beamtalk_actor_state:commit/2` over `BUnit`.
+    NlrThrowWithoutCellStore { at: Span },
+
     /// BT-4288 / BT-4312: a REPL `^` run in place (`beamtalk-core`'s
     /// `block_facts::repl_eval_returns`: at the root, in a conditional arm,
     /// an evaluated or protected block, a loop or fold body; not the input's
@@ -540,6 +553,21 @@ pub(in crate::core_erlang) enum VerifyError {
     /// extension with a block `^` answered the pair to the sender.
     MethodNlrAnswersPair { boundary: NlrBoundary, at: Span },
 
+    /// ADR 0146 (BT-4535): an [`ThreadedStmt::NlrCatch`] whose actor reply
+    /// commits the state the throw carries (`{'reply', Value, State}`)
+    /// instead of the actor's cell (`{'reply', Value,
+    /// beamtalk_actor_state:commit(Self, State)}`,
+    /// [`NlrArmShape::Reply`]). Invariant, in every scope kind: a `^` that
+    /// reaches an actor method's boundary commits the cell, the one place the
+    /// actor's fields live; the throw's copy is not the state of record. The
+    /// copy misses whatever was written to the cell after the `^` started (an
+    /// `ensure:` cleanup of another method it unwound through, ADR 0146 R1)
+    /// and, for a block the actor created and another actor ran, is the
+    /// block's creation-time capture, so the actor lost every write it made
+    /// after creating the block. The repro was BT-4459: `blk := [^1]. self.n
+    /// := 5. peer call: blk` left `n` at its value before the write.
+    ActorNlrCommitBypassesCell { at: Span },
+
     /// BT-4312: an [`ThreadedStmt::EnsureCatch`] whose cleanup a `^` of the
     /// scope runs drops the cleanup's writes. Invariant, in every scope kind:
     /// an `ensure:` is not a boundary, so a write its cleanup makes reaches
@@ -569,6 +597,28 @@ pub(in crate::core_erlang) enum VerifyError {
     /// sent with `perform:`, whose `Block>>ensure:` fallback relays every
     /// foreign throw ([`NlrCarry::Foreign`]).
     EnsureCleanupLostOnNlr { defect: EnsureRelayDefect, at: Span },
+
+    /// ADR 0146 R1: where the actor-state cell is live (an actor instance
+    /// method's threaded body), the clause a foreign `$bt_nlr` takes through
+    /// an [`ThreadedStmt::EnsureCatch`] does not store the cleanup's final
+    /// `StateAcc` to the cell. Invariant, for every scope kind: a `^` is
+    /// never an error for its owner, so every unwinding exit of a scope that
+    /// threads actor `State` leaves the cell holding that scope's final
+    /// version. `EnsureCatch` is the only node that runs user code while
+    /// unwinding, so the rule is its: a `^` of another method of the same
+    /// actor (from a block it passed in) that unwinds through an inlined
+    /// cleanup which advanced `StateAcc` must find the cleanup's final
+    /// version in the cell. Scopes with no actor `State` (a class method
+    /// running in its caller, ADR 0142; a value type; the REPL) and a
+    /// closure, whose state already is the cell, have no obligation
+    /// (`cell_live` is false). The repro: a method calls `self run: [^3]`,
+    /// where `run:` does `[blk value] ensure: [self.n := 40]`; the `^` took
+    /// the error path, whose cleanup runs with write-through off, so `n`
+    /// kept its old value.
+    EnsureForeignCleanupNotStored {
+        defect: ForeignStoreDefect,
+        at: Span,
+    },
 
     /// BT-4002: a [`ThreadedStmt::ConditionalLoop`]'s condition advanced
     /// `family` (its `condition_families`), but no `Bind` of that family in
@@ -623,7 +673,15 @@ pub(in crate::core_erlang) enum VerifyError {
     /// a block holding a `^` of the current scope stores the threaded state
     /// first. Recorded by the send emitter (`note_send`, the operands) and
     /// checked where the block becomes a closure (`with_actor_closure`), so
-    /// an operand the lowering inlines is never a finding.
+    /// an operand the lowering inlines is never a finding. A store covers
+    /// only the block literals it stores for (`with_nlr_closure_cover`,
+    /// BT-4532), never a closure of another send nested in an operand.
+    ///
+    /// BT-4532 (ADR 0146): the same rule for every operand that may be a
+    /// block. A send that runs as a closure something other than a block
+    /// literal (a block variable or parameter, any expression:
+    /// `SendUserCode::ClosureOperand`) and is left unbracketed is itself the
+    /// finding, at the send: the value may hold a `^` of this method.
     UnbracketedNlrClosure {
         selector: String,
         region: UserCodeRegion,
@@ -889,6 +947,19 @@ pub(in crate::core_erlang) enum EnsureRelayDefect {
     /// Test builds only, with the one node shape that has it.
     #[cfg(any(test, feature = "test"))]
     RebuildsCarriedStateAtSite,
+}
+
+/// What is wrong with an [`ThreadedStmt::EnsureCatch`]'s foreign `$bt_nlr`
+/// clause ([`VerifyError::EnsureForeignCleanupNotStored`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum ForeignStoreDefect {
+    /// There is no foreign clause: the throw takes the error path.
+    NoClause,
+    /// The clause stores nothing to the cell.
+    NoStore,
+    /// The clause stores a `StateAcc` version other than the cleanup's final
+    /// one.
+    StoresStaleVersion { stored: usize, expected: usize },
 }
 
 /// What is wrong with an [`ThreadedStmt::OnDoCatch`] node
@@ -1878,6 +1949,11 @@ impl VerifyWalk<'_> {
                         at: *span,
                     });
                 }
+                // ADR 0146: an actor method's boundary commits the cell.
+                if boundary.arm_shape() == NlrArmShape::CarriedReply {
+                    self.errors
+                        .push(VerifyError::ActorNlrCommitBypassesCell { at: *span });
+                }
             }
             ThreadedStmt::Statement(..)
             | ThreadedStmt::FoldAccumulator { .. }
@@ -1928,11 +2004,20 @@ impl VerifyWalk<'_> {
             // ADR 0041 §State-Carrying NLR: a `^` throw reads its slot
             // versions and value like a `Return` reads its own.
             ThreadedStmt::NlrThrow {
-                value, slot, span, ..
+                value,
+                slot,
+                cell_live,
+                cell_store,
+                span,
+                ..
             } => {
                 if slot.is_empty() {
                     self.errors
                         .push(VerifyError::NlrThrowWithoutSlot { at: *span });
+                }
+                if *cell_live && !*cell_store {
+                    self.errors
+                        .push(VerifyError::NlrThrowWithoutCellStore { at: *span });
                 }
                 for v in slot {
                     self.check_use(v, *span);
@@ -2012,6 +2097,8 @@ impl VerifyWalk<'_> {
                 private_scratch,
                 cleanup,
                 relay,
+                cell_live,
+                foreign,
                 span,
                 ..
             } => {
@@ -2021,6 +2108,12 @@ impl VerifyWalk<'_> {
                 {
                     self.errors
                         .push(VerifyError::EnsureCleanupLostOnNlr { defect, at: *span });
+                }
+                if let Some(defect) =
+                    check_ensure_foreign_store(*cell_live, *cleanup, foreign.as_ref())
+                {
+                    self.errors
+                        .push(VerifyError::EnsureForeignCleanupNotStored { defect, at: *span });
                 }
             }
             ThreadedStmt::Return(value, state, span) => {
@@ -2122,6 +2215,35 @@ fn check_ensure_relay(
             Some(EnsureRelayDefect::RebuildsCarriedStateAtSite)
         }
         _ => Some(EnsureRelayDefect::RethrowsStaleState),
+    }
+}
+
+/// ADR 0146 R1 obligation of one [`ThreadedStmt::EnsureCatch`]: where the
+/// actor-state cell is live and the cleanup is inlined and advances
+/// `StateAcc` (`final_version`), the clause a foreign `$bt_nlr` takes stores
+/// that final version to the cell. A cleanup applied as a closure writes the
+/// cell in place and owes nothing; one that threads no write has nothing to
+/// store.
+fn check_ensure_foreign_store(
+    cell_live: bool,
+    cleanup: EnsureCleanup,
+    foreign: Option<&EnsureForeignNlr>,
+) -> Option<ForeignStoreDefect> {
+    let EnsureCleanup::Inlined {
+        final_version: Some(expected),
+        ..
+    } = cleanup
+    else {
+        return None;
+    };
+    if !cell_live {
+        return None;
+    }
+    match foreign.map(|foreign| foreign.store) {
+        None => Some(ForeignStoreDefect::NoClause),
+        Some(None) => Some(ForeignStoreDefect::NoStore),
+        Some(Some(stored)) if stored == expected => None,
+        Some(Some(stored)) => Some(ForeignStoreDefect::StoresStaleVersion { stored, expected }),
     }
 }
 

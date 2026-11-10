@@ -973,6 +973,12 @@ map_type({type, _, nonempty_list, _}) ->
 %% Untyped `tuple()` (unknown arity) — abstract form is `{type, _, tuple, any}`.
 map_type({type, _, tuple, any}) ->
     <<"Tuple">>;
+%% `{beamtalk_string, binary()}` (`beamtalk_string:t()`) is how a String is
+%% represented (the routing fixture's reserved `beamtalk_string` 2-tuple tag,
+%% BT-4173): a String, not a Tuple, as a tagged map is its class rather than
+%% a Dictionary (BT-4510).
+map_type({type, _, tuple, [{atom, _, beamtalk_string}, {type, _, binary, _}]}) ->
+    <<"String">>;
 %% Typed tuple `{T1, ..., Tn}` — carry positional element types so
 %% `aTuple at: <literal int>` can infer the element type at that index
 %% (ADR 0075 amendment). All-Dynamic elements collapse to bare `Tuple`.

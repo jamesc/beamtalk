@@ -452,6 +452,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
     };
 
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         type_aliases: Vec::new(),
         native_declarations: Vec::new(),
@@ -2462,9 +2463,13 @@ fn has_sync_send_for_selector(code: &str, selector: &str) -> bool {
 }
 
 #[test]
-fn test_field_names_actor_uses_sync_send() {
-    // fieldNames on an actor receiver must use sync_send, not async_send + future.
-    // Assertion is selector-specific: checks sync_send includes the 'fieldNames' atom.
+fn test_field_names_routes_through_message_dispatch() {
+    // fieldNames on a non-self receiver must go through
+    // beamtalk_message_dispatch:send/3, which sync_sends actors (never
+    // async_send + future), class_sends class objects, and answers primitive
+    // values in-process. It must never pull `element(4, R)` from a receiver
+    // it merely assumed to be an actor (BT-4264: badarg on Integer, Binary,
+    // Bitstring, List, ...).
     let src = concat!(
         "Actor subclass: Srv\n",
         "  state: x = 0\n\n",
@@ -2473,8 +2478,12 @@ fn test_field_names_actor_uses_sync_send() {
     );
     let code = codegen_source(src);
     assert!(
-        has_sync_send_for_selector(&code, "'fieldNames'"),
-        "fieldNames on actor must call sync_send with 'fieldNames' selector. Got:\n{code}"
+        has_message_dispatch_send_for_selector(&code, "'fieldNames'"),
+        "fieldNames must delegate to beamtalk_message_dispatch:send. Got:\n{code}"
+    );
+    assert!(
+        !has_sync_send_for_selector(&code, "'fieldNames'"),
+        "fieldNames must not sync_send an unclassified receiver. Got:\n{code}"
     );
     assert!(
         !code.contains("'async_send'"),
@@ -4013,6 +4022,7 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
         span: Span::new(0, 0),
     };
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         type_aliases: Vec::new(),
         native_declarations: Vec::new(),
@@ -4113,6 +4123,7 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
         span: Span::new(0, 0),
     };
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -4194,6 +4205,7 @@ fn test_spawn_with_args_validates_map_argument() {
         span: Span::new(0, 0),
     };
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),

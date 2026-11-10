@@ -179,32 +179,114 @@ pub(crate) fn protocol_hashes<'a>(
         })
 }
 
-/// Hash of the cross-file class surface contributed by trait flattening
-/// (BT-3674): the `ClassInfo` of each class in `flattened_names` (the classes
-/// declared in files with `uses:` lines) within `pkg_name`, sorted by name.
+/// Hash of the cross-file analysis surface every Pass 2 file type-checks
+/// against (BT-3674, generalised in BT-4336): every pre-loaded `ClassInfo`
+/// (the project's own — trait provisions already flattened in — and every
+/// dependency's), every pre-loaded `ProtocolInfo` and `AliasInfo`, and
+/// every standalone extension method (`String >> shout`) in the
+/// project-wide extension index.
 ///
-/// A caller's type-check depends on these flattened surfaces, but its own
-/// source and the protocols *it* uses do not change when a provision in some
-/// other file is renamed — so `detect_changes` folds this into every file's
-/// cache key. `serde_json::to_value` yields key-sorted maps (the workspace
-/// does not enable `preserve_order`), so the `HashMap` fields of `ClassInfo`
-/// hash deterministically. Empty string when no class uses a protocol, which
-/// leaves every file's key untouched.
+/// A file's diagnostics depend on these signatures, but its own source does
+/// not change when a class it calls changes a return type, drops a method,
+/// or stops conforming to a protocol in another file or package — so
+/// `detect_changes` folds this into every file's cache key, and a
+/// byte-identical dependent is re-checked instead of replaying the
+/// diagnostics it had against the old signature. Method doc comments and
+/// source spans are left out, so a doc edit or a line shift above a
+/// declaration rebuilds just its own file. The body-derived `ClassInfo`
+/// summaries (`initialize_assigns`, `has_dynamic_field_writer`, a method's
+/// `primitive`/`constant_value`) stay in: other files' diagnostics and
+/// codegen read them, so an edit that changes one is a signature change.
+///
+/// `serde_json::to_value` yields key-sorted maps (the workspace does not
+/// enable `preserve_order`), so the `HashMap` fields of `ClassInfo` hash
+/// deterministically; each list is sorted by `(package, name)` so input
+/// order does not matter either. Empty string when there is nothing
+/// cross-file to check against, which leaves every file's key untouched.
 #[must_use]
-pub(crate) fn class_surface_hash(
-    all_class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
-    flattened_names: &[ecow::EcoString],
-    pkg_name: &str,
+pub(crate) fn analysis_surface_hash(
+    class_infos: &[beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
+    protocol_infos: &[beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo],
+    alias_infos: &[beamtalk_core::semantic_analysis::AliasInfo],
+    extension_index: &beamtalk_core::compilation::extension_index::ExtensionIndex,
 ) -> String {
-    if flattened_names.is_empty() {
+    if class_infos.is_empty()
+        && protocol_infos.is_empty()
+        && alias_infos.is_empty()
+        && extension_index.is_empty()
+    {
         return String::new();
     }
-    let mut infos: Vec<_> = all_class_infos
+    let mut classes: Vec<_> = class_infos
         .iter()
-        .filter(|c| c.package.as_deref() == Some(pkg_name) && flattened_names.contains(&c.name))
+        .map(|info| {
+            let mut info = info.clone();
+            for method in info.methods.iter_mut().chain(info.class_methods.iter_mut()) {
+                method.doc = None;
+            }
+            info
+        })
         .collect();
-    infos.sort_by(|a, b| a.name.cmp(&b.name));
-    surface_hash_of(serde_json::to_value(&infos))
+    classes.sort_by(|a, b| (&a.package, &a.name).cmp(&(&b.package, &b.name)));
+    let requirements = |reqs: &[beamtalk_core::semantic_analysis::protocol_registry::ProtocolMethodRequirement]| {
+        reqs.iter()
+            .map(|r| serde_json::json!([r.selector.as_str(), r.arity, r.return_type.as_deref(), r.param_types]))
+            .collect::<Vec<_>>()
+    };
+    let mut protocols: Vec<_> = protocol_infos
+        .iter()
+        .map(|p| {
+            serde_json::json!({
+                "package": p.package.as_deref(),
+                "name": p.name.as_str(),
+                "type_params": p.type_params,
+                "type_param_bounds": p.type_param_bounds,
+                "extending": p.extending.as_deref(),
+                "methods": requirements(&p.methods),
+                "class_methods": requirements(&p.class_methods),
+                "provided_selectors": p.provided_selectors,
+            })
+        })
+        .collect();
+    protocols.sort_by_key(|p| (p["package"].to_string(), p["name"].to_string()));
+    let mut aliases: Vec<_> = alias_infos
+        .iter()
+        .map(|a| {
+            serde_json::json!([
+                a.package.as_deref(),
+                a.name.as_str(),
+                a.annotation.type_name().as_str(),
+                a.is_internal,
+            ])
+        })
+        .collect();
+    aliases.sort_by_key(ToString::to_string);
+    let mut extensions: Vec<_> = extension_index
+        .entries()
+        .iter()
+        .flat_map(|(key, locations)| {
+            locations.iter().map(move |loc| {
+                serde_json::json!([
+                    key.class_name.as_str(),
+                    format!("{:?}", key.side),
+                    key.selector.as_str(),
+                    loc.file_path,
+                    loc.type_info.arity,
+                    loc.type_info.param_types,
+                    loc.type_info.return_type.as_deref(),
+                ])
+            })
+        })
+        .collect();
+    extensions.sort_by_key(ToString::to_string);
+    surface_hash_of(serde_json::to_value(&classes).map(|classes| {
+        serde_json::json!({
+            "classes": classes,
+            "protocols": protocols,
+            "aliases": aliases,
+            "extensions": extensions,
+        })
+    }))
 }
 
 /// Hash a serialized class surface. A serialization failure must not collapse
@@ -215,7 +297,7 @@ fn surface_hash_of(value: serde_json::Result<serde_json::Value>) -> String {
         Ok(v) => sha256_hex(v.to_string().as_bytes()),
         Err(e) => {
             tracing::warn!(
-                "could not serialize trait-provided class surfaces ({e}); \
+                "could not serialize the cross-file analysis surface ({e}); \
                  rebuilding all files this build"
             );
             let nanos = SystemTime::now()
@@ -781,5 +863,110 @@ mod tests {
         let line = "x greet: \"hi // => bye\"  // => ok";
         let pos = find_assertion_marker_pos(line).expect("marker should be found");
         assert_eq!(&line[pos..], "// => ok");
+    }
+
+    /// BT-4336: the analysis surface hash moves with every signature a
+    /// dependent file type-checks against — a class method's return type,
+    /// a protocol requirement, a type alias — and stays put for edits that
+    /// cannot change a dependent's diagnostics: doc comments, and line
+    /// shifts that move the declarations' source spans.
+    #[test]
+    fn analysis_surface_hash_tracks_signatures_not_docs_or_spans() {
+        use beamtalk_core::compilation::extension_index::ExtensionIndex;
+        use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
+        use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+        use beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry;
+        use beamtalk_core::source_analysis::{lex_with_eof, parse};
+
+        let hash = |source: &str| {
+            let (module, diags) = parse(lex_with_eof(source));
+            assert!(diags.is_empty(), "{diags:?}");
+            let mut extensions = ExtensionIndex::new();
+            extensions.add_module(&module, std::path::Path::new("src/lib.bt"));
+            analysis_surface_hash(
+                &ClassHierarchy::extract_class_infos(&module),
+                &ProtocolRegistry::extract_protocol_infos(&module),
+                &AliasRegistry::extract_alias_infos(&module),
+                &extensions,
+            )
+        };
+        let source = |pad: &str, doc: &str, ret: &str, req: &str, alias: &str, ext: &str| {
+            format!(
+                "{pad}type Mode = {alias}\n\n\
+                 Protocol define: Labelled\n  label -> {req}\n\n\
+                 Value subclass: Lib\n\n  /// {doc}\n  label -> {ret} => \"x\"\n\n\
+                 String >> shout -> {ext} => 1\n"
+            )
+        };
+        let base = hash(&source(
+            "", "Doc.", "String", "String", "#a | #b", "Integer",
+        ));
+        assert!(!base.is_empty());
+        assert_eq!(
+            base,
+            hash(&source(
+                "", "Doc.", "String", "String", "#a | #b", "Integer"
+            ))
+        );
+        assert_eq!(
+            base,
+            hash(&source(
+                "",
+                "Reworded doc.",
+                "String",
+                "String",
+                "#a | #b",
+                "Integer"
+            )),
+            "a doc-comment edit must not move the hash"
+        );
+        assert_eq!(
+            base,
+            hash(&source(
+                "\n\n", "Doc.", "String", "String", "#a | #b", "Integer"
+            )),
+            "shifted spans must not move the hash"
+        );
+        for (what, changed) in [
+            (
+                "class method return type",
+                source("", "Doc.", "Object", "String", "#a | #b", "Integer"),
+            ),
+            (
+                "protocol requirement",
+                source("", "Doc.", "String", "Object", "#a | #b", "Integer"),
+            ),
+            (
+                "type alias",
+                source("", "Doc.", "String", "String", "#a | #c", "Integer"),
+            ),
+            (
+                "extension method",
+                source("", "Doc.", "String", "String", "#a | #b", "Object"),
+            ),
+        ] {
+            assert_ne!(base, hash(&changed), "a {what} change must move the hash");
+        }
+        assert_eq!(
+            analysis_surface_hash(&[], &[], &[], &ExtensionIndex::new()),
+            ""
+        );
+    }
+
+    /// The analysis surface hash serializes `ClassInfo`'s `HashMap` fields
+    /// through `serde_json`, and is only deterministic while its objects are
+    /// key-sorted (no `preserve_order` feature unified into the build). If a
+    /// dependency ever enables it, every build would silently rebuild every
+    /// file — fail here instead.
+    #[test]
+    fn serde_json_objects_serialize_key_sorted() {
+        let forward: std::collections::HashMap<String, u32> =
+            (0..64).map(|i| (format!("k{i:02}"), i)).collect();
+        let backward: std::collections::HashMap<String, u32> =
+            (0..64).rev().map(|i| (format!("k{i:02}"), i)).collect();
+        let a = serde_json::to_value(&forward).unwrap().to_string();
+        let b = serde_json::to_value(&backward).unwrap().to_string();
+        assert_eq!(a, b);
+        assert!(a.starts_with("{\"k00\":0,\"k01\":1"), "{a}");
     }
 }

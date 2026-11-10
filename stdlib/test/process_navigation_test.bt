@@ -105,9 +105,13 @@ TestCase subclass: ProcessNavigationTest
     ] ifNone: [nil]
     self assert: found equals: nil
 
-  testDoReturnsTree =>
-    result := self sampleTree do: [:n | n kind]
-    self assert: (result isKindOf: SupervisionTree)
+  // BT-4515: `do:` is declared `-> Nil` like every other stdlib `do:`; the walk
+  // visits every node in the snapshot.
+  testDoVisitsEveryNode =>
+    visited := 0
+    self sampleTree do: [:n | visited := visited + 1]
+    self assert: visited equals: 3
+    self assert: (self sampleTree do: [:n | n kind]) equals: nil
 
   // BT-3594 (ADR 0127 §9): `uses: Enumerable(SupervisionNode) excluding:
   // #(#do:)` — `do:`/`select:`/`detect:`/`detect:ifNone:`/`collect:` stay

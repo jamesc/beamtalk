@@ -122,7 +122,7 @@ deprecation = "warn"
 type = "hint"
 ```
 
-Keys are kebab-case diagnostic categories (`dnu`, `type`, `unused`, `empty-body`, `lint`, `dead-assignment`, `extension-conflict`, `deprecation`, `actor-new`, `visibility`, `unresolved-class`, `unresolved-ffi`, `arity-mismatch`, `shadowed-class`, `type-annotation`, `inheritance`, `sendability`, `native-declaration-location`, `file-class-name-mismatch`, `definite-assignment`, `unguarded-late-read`, `match-arm-block`, `class-state-abroad`, `class-process-ffi`, `class-method-process-resource`, `class-var-reflection-shadowing`, `actor-state-abroad`, `ffi-nested-string`, `cascade-drops-update`, `handleinfo-no-catch-all`). Values are one of `"off"` (drop the diagnostic entirely), `"lint"`, `"hint"`, `"warn"`, or `"error"` (fails the build unconditionally, independent of `--warnings-as-errors`).
+Keys are kebab-case diagnostic categories (`dnu`, `type`, `unused`, `empty-body`, `lint`, `dead-assignment`, `extension-conflict`, `deprecation`, `actor-new`, `visibility`, `unresolved-class`, `unresolved-ffi`, `arity-mismatch`, `shadowed-class`, `type-annotation`, `inheritance`, `sendability`, `native-declaration-location`, `file-class-name-mismatch`, `definite-assignment`, `unguarded-late-read`, `match-arm-block`, `class-state-abroad`, `class-process-ffi`, `class-method-process-resource`, `class-var-reflection-shadowing`, `actor-state-abroad`, `ffi-nested-string`, `binary-string-compare`, `cascade-drops-update`, `handleinfo-no-catch-all`). Values are one of `"off"` (drop the diagnostic entirely), `"lint"`, `"hint"`, `"warn"`, or `"error"` (fails the build unconditionally, independent of `--warnings-as-errors`).
 
 `definite-assignment` ([ADR 0124](ADR/0124-slots-late-assignment-definite-assignment.md) §6) is the construction-site check that a declared, typed, no-default, non-nilable, non-`late` slot is actually supplied — see [Definite Assignment](beamtalk-language-features.md#definite-assignment-adr-0124) in the language reference. It has no site-level `@expect` category by design (the exemption is the `late` declaration, not an annotation), so this table is the only way to change its severity per project. Because a Value's `Warning` has no runtime backstop the way an Actor's does, `definite-assignment = "error"` is a more attractive escalation for a Value-heavy package than for most other categories here.
 
@@ -199,11 +199,11 @@ A registry dependency's row shows the resolved git URL, tag, and locked commit S
 ### Updating Dependencies
 
 ```bash
-beamtalk deps update          # Update all git and registry dependencies
+beamtalk deps update          # Update all git, registry and native dependencies
 beamtalk deps update json     # Update a single dependency
 ```
 
-Advances git dependencies to the latest commit matching their spec (the latest tag, the head of the branch, etc.). For a registry dependency, `deps update` refreshes the registry index and re-resolves the dependency's *already-pinned* version to a fresh commit SHA — picking up a moved tag or a corrected index entry. It does not change which version is pinned; to take a newer release, edit the version string directly in `beamtalk.toml` (`yaml = "0.3.0"`) and run `beamtalk deps update yaml` (or any build) to re-resolve it. Either way, the lockfile is updated.
+Advances git dependencies to the latest commit matching their spec (the latest tag, the head of the branch, etc.). For a registry dependency, `deps update` refreshes the registry index and re-resolves the dependency's *already-pinned* version to a fresh commit SHA — picking up a moved tag or a corrected index entry. It does not change which version is pinned; to take a newer release, edit the version string directly in `beamtalk.toml` (`yaml = "0.3.0"`) and run `beamtalk deps update yaml` (or any build) to re-resolve it. Either way, the lockfile is updated. For native dependencies (`[native.dependencies]`), `deps update` clears their locks so the next build re-resolves them; `deps update <name>` does that for one native package, direct or transitive.
 
 ### Manual Editing
 
@@ -409,6 +409,7 @@ sha = "def456..."
 - **Commit to version control.** The lockfile should be checked into git so all developers and CI use the same dependency versions.
 - **Path dependencies are not locked.** They resolve to whatever is on disk, so they are only reproducible within a single repository checkout.
 - **Registry dependencies lock like git dependencies**, plus the requested `version` field shown above.
+- **Native packages track the dependency graph.** `[[native_package]]` entries are rewritten from rebar3's resolution on each build that has native dependencies. When nothing in the graph declares a native dependency any more (for example, a dependency dropped its native deps), `beamtalk build` prunes the leftover entries, and `beamtalk deps update` clears all native locks so the next build re-resolves them.
 - **Implicit fetch on build.** `beamtalk build`, `beamtalk test`, and `beamtalk repl` automatically fetch and compile dependencies if the lockfile is missing or stale. No separate "deps get" step is needed.
 
 ## Qualified Names (`package@Class`)

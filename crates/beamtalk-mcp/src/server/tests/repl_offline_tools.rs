@@ -16,11 +16,60 @@ async fn lint_tool_reports_clean_file() {
     let result = mcp
         .lint(Parameters(LintParams {
             path: Some(file.to_str().unwrap().to_string()),
+            warnings_as_errors: None,
         }))
         .await
         .unwrap();
     assert_ne!(result.is_error, Some(true));
     assert!(result.structured_content.is_some());
+}
+
+/// BT-4336: MCP `lint` mirrors CLI `beamtalk lint --warnings-as-errors`.
+/// The same buccaneer-style source the CLI regression uses
+/// (`lint_warnings_as_errors_fails_on_repl_only_dnu`: a DNU hint on a
+/// builtin, which a REPL `load-project` rejects) passes by default and
+/// fails with `warnings_as_errors`.
+#[tokio::test]
+async fn lint_tool_warnings_as_errors_fails_on_repl_only_dnu() {
+    let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+    let temp = tempfile::TempDir::new().unwrap();
+    let root = temp.path();
+    std::fs::write(
+        root.join("beamtalk.toml"),
+        "[package]\nname = \"recheck_probe\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("src/recheck_probe.bt"),
+        "Value subclass: RecheckProbe\n\n  probe => 42 foo\n",
+    )
+    .unwrap();
+    let path = root.to_str().unwrap().to_string();
+
+    let plain = mcp
+        .lint(Parameters(LintParams {
+            path: Some(path.clone()),
+            warnings_as_errors: None,
+        }))
+        .await
+        .unwrap();
+    assert_ne!(plain.is_error, Some(true), "default MCP lint stays green");
+    let structured = plain.structured_content.expect("structured result");
+    assert_eq!(structured["live_recheck_failures"], 1, "{structured}");
+
+    let strict = mcp
+        .lint(Parameters(LintParams {
+            path: Some(path),
+            warnings_as_errors: Some(true),
+        }))
+        .await
+        .unwrap();
+    assert_eq!(
+        strict.is_error,
+        Some(true),
+        "warnings_as_errors must fail on the REPL-only DNU hint"
+    );
 }
 
 #[tokio::test]
@@ -29,6 +78,7 @@ async fn lint_tool_reports_errors_for_nonexistent_path() {
     let result = mcp
         .lint(Parameters(LintParams {
             path: Some("/nonexistent/path/nope".to_string()),
+            warnings_as_errors: None,
         }))
         .await
         .unwrap();

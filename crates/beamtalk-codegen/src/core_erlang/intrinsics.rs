@@ -239,6 +239,33 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-4510: whether a `value`/`value:`… send leaves the block intrinsic to
+    /// the typed send path, because the receiver's trusted static type is a
+    /// class other than `Block` that has a guarded direct route
+    /// ([`Self::typed_send_target`]): `aResult value` is `Result>>value`, not
+    /// block evaluation, and the intrinsic's `is_function` tests and dynamic
+    /// fallback would send it through `beamtalk_message_dispatch:send/3`
+    /// every time. A value that is a fun after all (a lying annotation)
+    /// misses the route's guard, which rejects every fun, and takes the
+    /// dynamic send, which evaluates the block as the intrinsic's fallback
+    /// would — except a Tier 2 (arity-1, stateful) fun, which the intrinsic
+    /// rejects with `stateful_block_dispatch` and the dynamic send rejects
+    /// with its own error. Block literals and `Block`-typed receivers keep
+    /// the intrinsic.
+    fn block_value_yields_to_typed_send(
+        &self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+    ) -> bool {
+        if matches!(receiver, Expression::Block(_)) {
+            return false;
+        }
+        let Ok(class) = self.trusted_static_class(receiver) else {
+            return false;
+        };
+        class.as_str() != "Block" && self.typed_send_target(receiver, selector).is_ok()
+    }
+
     /// Generates code for unary `value` message on a block receiver.
     ///
     /// When the receiver is a block literal, use fast inline apply.
@@ -269,6 +296,9 @@ impl CoreErlangGenerator {
                     receiver, selector, arguments, tuple_doc,
                 )));
             }
+        }
+        if self.block_value_yields_to_typed_send(receiver, selector) {
+            return Ok(None);
         }
         // BT-3881: a block literal of another arity is applied, never
         // inlined, so it raises `badarity` (in the REPL and in a method).
@@ -493,6 +523,9 @@ impl CoreErlangGenerator {
                     receiver, selector, arguments, tuple_doc,
                 )));
             }
+        }
+        if self.block_value_yields_to_typed_send(receiver, selector) {
+            return Ok(None);
         }
         // BT-3881: a block literal of another arity is applied, never
         // inlined, so it raises `badarity` (in the REPL and in a method).
@@ -2622,7 +2655,7 @@ impl CoreErlangGenerator {
     /// **DDD Context:** Object Protocol — Object Reflection
     ///
     /// - `respondsTo:` — Check if object responds to a selector
-    /// - `fieldNames` — Get list of instance variable names (actors only)
+    /// - `fieldNames` — Get list of instance variable names (empty for primitive values)
     /// - `fieldAt:` — Read instance variable by name
     /// - `fieldAt:put:` — Write instance variable by name
     /// - `hasField:` — Presence test for a named field (ADR 0124 §1/B4); never raises
@@ -2664,28 +2697,29 @@ impl CoreErlangGenerator {
             let mut seq = self.sequence_call(&[receiver], "FNames")?;
             let recv_doc = seq.next();
             let receiver_var = self.fresh_var("Receiver");
-            let pid_var = self.fresh_var("Pid");
 
-            // If receiver is a map (value object or stdlib tagged map),
-            // delegate to beamtalk_primitive:send which routes through the
-            // correct dispatch/3 for the receiver's class kind.
-            // Actor (tuple) receivers use sync_send (ADR-0043).
+            // Every receiver kind goes through
+            // `beamtalk_message_dispatch:send/3`, the same router the dynamic
+            // `perform: #fieldNames` path uses, so the two cannot disagree:
+            // its `classify_receiver` sends an actor `sync_send` (ADR 0043),
+            // a class object `class_send` (BT-4470), and every other value —
+            // maps (value objects, tagged stdlib maps) and raw BEAM terms
+            // (Integer, Binary, Bitstring, List, ...) — `beamtalk_primitive:send`.
+            // Guessing "not a map ⇒ actor" here sent `element(4, R)` a
+            // non-tuple and raised `badarg` (BT-4264). The call is nested in
+            // a `let`, so it carries its own line annotation (BT-4356).
+            let dispatch_call = self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(receiver_var.clone()),
+                ", 'fieldNames', [])",
+            ]);
             let call_doc = docvec![
                 "let ",
-                leaf::var(receiver_var.clone()),
+                leaf::var(receiver_var),
                 " = ",
                 recv_doc,
-                " in case call 'erlang':'is_map'(",
-                leaf::var(receiver_var.clone()),
-                ") of <'true'> when 'true' -> call 'beamtalk_primitive':'send'(",
-                leaf::var(receiver_var.clone()),
-                ", 'fieldNames', []) <_> when 'true' -> let ",
-                leaf::var(pid_var.clone()),
-                " = call 'erlang':'element'(4, ",
-                leaf::var(receiver_var),
-                ") in call 'beamtalk_actor':'sync_send'(",
-                leaf::var(pid_var),
-                ", 'fieldNames', []) end",
+                " in ",
+                dispatch_call,
             ];
             return Ok(Some(seq.close(self, call_doc, "FNamesRes")));
         }

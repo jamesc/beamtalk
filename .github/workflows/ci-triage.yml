@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 name: CI Triage
 
-# When "CI" fails on main, or the "Nightly" platform run fails, have Claude read
+# When "CI" fails on main, or a "Nightly" platform or coverage run fails, have Claude read
 # the failed jobs' logs, find the culprit commit range, and file (or update) a
 # Linear issue. Triage only: no reproduction, no code, no re-runs.
 #
@@ -20,8 +20,10 @@ on:
     # "CI (all platforms)" is ci-platforms.yml (BT-4209): the scheduled macOS/Windows/
     # desktop run. Its schedule runs report head_branch main with event `schedule`, so
     # they pass the guard below; its labelled PR runs have event `pull_request` and do
-    # not. If any of these workflows is renamed, update this list.
-    workflows: ["CI", "Nightly", "CI (all platforms)"]
+    # not. "Nightly Coverage" (coverage.yml) and "Corpus Tier" (corpus.yml) moved out
+    # of CI in BT-4609; their main runs pass the same guard. If any of these
+    # workflows is renamed, update this list.
+    workflows: ["CI", "Nightly", "CI (all platforms)", "Nightly Coverage", "Corpus Tier"]
     types: [completed]
   workflow_dispatch:
     inputs:

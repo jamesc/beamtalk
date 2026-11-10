@@ -59,6 +59,10 @@ const RULES = [
   { cls: "ident", re: /^[A-Za-z_]\w*/ }, // identifier (resolved below)
   { cls: "send", re: /^!/ }, // async send suffix
   { cls: "cascade", re: /^;/ }, // cascade
+  // pipeline `|>` (ADR 0145): one token, ahead of `binary`, which would
+  // otherwise take `|` and `>` as binary characters and run them into a
+  // following operator (`|>-`).
+  { cls: "pipe", re: /^\|>/ },
   { cls: "binary", re: /^(?:=:=|=\/=|\/=|==|\*\*|\+\+|<=|>=|[-+*/<>=~&|@%?])+/ },
   { cls: "punct", re: /^[\[\]{}().|]/ },
   { cls: "ws", re: /^\s+/ },
@@ -98,6 +102,7 @@ const CLASSES = [
   "match",
   "send",
   "cascade",
+  "pipe",
   "punct",
 ]
 

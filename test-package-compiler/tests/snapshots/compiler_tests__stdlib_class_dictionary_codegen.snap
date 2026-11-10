@@ -142,6 +142,7 @@ call 'bt@stdlib@dictionary':'dispatch'('keysAndValuesDo:', [_block@9], Self)
                 <'show:'> when 'true' -> 'slow'
                 <'showCr:'> when 'true' -> 'slow'
                 <'subclassResponsibility'> when 'true' -> 'slow'
+                <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
                 <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('Dictionary', Selector)
             end of

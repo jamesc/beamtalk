@@ -32,6 +32,7 @@ pub(super) fn make_static_supervisor_module() -> Module {
         span: Span::new(0, 0),
     };
     Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -71,6 +72,7 @@ fn make_dynamic_supervisor_module() -> Module {
         span: Span::new(0, 0),
     };
     Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -304,6 +306,7 @@ fn test_supervisor_instance_methods_are_compiled_with_dispatch() {
     // class's own selectors (so inherited ones keep the base as their owner).
     let mut module = make_static_supervisor_module();
     module.classes[0].methods.push(MethodDefinition {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         selector: MessageSelector::Unary("childSpecs".into()),
         parameters: vec![],
         body: vec![bare(Expression::Literal(
@@ -383,6 +386,7 @@ fn test_static_supervisor_with_user_class_method_exports_it() {
     // A concrete WebApp with a user class method (here `class children`, which the
     // validator rejects since ADR 0135, but codegen still compiles) exports it.
     let children_method = MethodDefinition {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         selector: MessageSelector::Unary("children".into()),
         parameters: vec![],
         body: vec![bare(Expression::Literal(
@@ -424,6 +428,7 @@ fn test_static_supervisor_with_user_class_method_exports_it() {
         span: Span::new(0, 0),
     };
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -464,6 +469,7 @@ fn test_static_supervisor_class_method_alias_param_emits_user_type_and_named_typ
         span: Span::new(0, 0),
     };
     let strategy_method = MethodDefinition {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         selector: MessageSelector::Keyword(vec![KeywordPart::new(
             "defaultStrategy:",
             Span::new(0, 0),
@@ -511,6 +517,7 @@ fn test_static_supervisor_class_method_alias_param_emits_user_type_and_named_typ
         span: Span::new(0, 0),
     };
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -563,6 +570,7 @@ fn test_static_supervisor_cross_module_alias_reference_emits_user_type() {
         ),
     ];
     let strategy_method = MethodDefinition {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         selector: MessageSelector::Keyword(vec![KeywordPart::new(
             "defaultStrategy:",
             Span::new(0, 0),
@@ -611,6 +619,7 @@ fn test_static_supervisor_cross_module_alias_reference_emits_user_type() {
     };
     // No `type_aliases` of its own — the module only references the name.
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -666,6 +675,7 @@ fn test_dynamic_supervisor_cross_module_alias_reference_emits_user_type() {
         ),
     ];
     let strategy_method = MethodDefinition {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         selector: MessageSelector::Keyword(vec![KeywordPart::new(
             "defaultStrategy:",
             Span::new(0, 0),
@@ -714,6 +724,7 @@ fn test_dynamic_supervisor_cross_module_alias_reference_emits_user_type() {
     };
     // No `type_aliases` of its own — the module only references the name.
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -748,6 +759,7 @@ fn test_dynamic_supervisor_with_user_class_method_exports_it() {
     // same invariant as the static case (see
     // `test_static_supervisor_with_user_class_method_exports_it`).
     let max_concurrency_method = MethodDefinition {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         selector: MessageSelector::Unary("maxConcurrency".into()),
         parameters: vec![],
         body: vec![bare(Expression::Literal(
@@ -789,6 +801,7 @@ fn test_dynamic_supervisor_with_user_class_method_exports_it() {
         span: Span::new(0, 0),
     };
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: vec![],
         protocols: Vec::new(),

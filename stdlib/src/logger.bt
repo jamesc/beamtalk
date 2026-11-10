@@ -214,9 +214,5 @@ sealed typed Object subclass: Logger
   /// ```beamtalk
   /// Logger loggerInfo
   /// ```
-  ///
-  /// BT-2829: the FFI spec types the result `binary()` (`String | Binary`,
-  /// BT-2254) — suppress the resulting return-type mismatch against `String`.
-  @expect type
   class sealed loggerInfo -> String =>
     (Erlang beamtalk_logging_config) loggerInfo

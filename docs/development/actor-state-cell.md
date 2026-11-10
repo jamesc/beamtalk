@@ -110,7 +110,11 @@ when the block touches nothing else of the actor's: the closure's `^` carries
 the cell, so the cell must hold the method's `State` first (ADR 0146 P0,
 BT-4524). A call no bracket covers (a conditional's non-Boolean fallback
 send, a conditional the compiler does not inline) stores that `State` just
-before it instead.
+before it instead, through a store-only `SyncedCall` node. The rule holds for
+every operand that may be a block, not only literals (BT-4532): a construct
+handed a block variable or parameter where it runs a block (`blk value`,
+`3 timesRepeat: blk`, `xs do: blk`, `[…] ensure: blk`) runs whatever that
+value is as a closure, so it is bracketed like any call into user code.
 
 Three kinds of call need no bracket. A construct the compiler lowers in place
 (`ifTrue:`, an inlined `do:`, `whileTrue:`, …) is not a call. An intrinsic or
@@ -477,7 +481,34 @@ verifier's `CatchWithoutClassVarRestore` becomes `CatchWithoutStateRestore`.
 `Result tryDo:` and the other runtime catchers do the same through
 `protect/1`. A `^` stores the current version to the cell before the
 `$bt_nlr` throw. The actor NLR 4-tuple `{'$bt_nlr', Tok, Val, State}` keeps its
-`State` slot, which is how the method returns that version.
+`State` slot, but the slot is not the state of record (ADR 0146, BT-4535).
+
+**The NLR boundary commits the cell.** When a `^` reaches the actor method it
+returns from, the method's catch arm answers `{'reply', Val,
+beamtalk_actor_state:commit(Self, State)}`. At home `commit/2` is the cell as
+it stands: an `ensure:` cleanup's writes made while the `^` unwound are there,
+and the throw's own `__local__` keys are dead at the method boundary, so none
+is merged back. Away (an away `super_send/5` runs the method in another
+process) there is no cell of the actor's, and the commit is the carried
+`State` unchanged, as before. Ownership is `at_home/1`'s, decided by process
+identity. So a block an actor created and another actor ran (BT-4459), whose
+`^` carries the block's creation-time capture, no longer rolls the actor back
+to that capture, and a `^` from a block passed to another method of the same
+actor keeps that method's inlined cleanup's writes (ADR 0146 R1). An actor a
+`^` merely passes through still keeps its entry state, because its callback
+exits by the throw. `VerifyError::ActorNlrCommitBypassesCell` rejects an actor
+NLR boundary that commits the carried copy.
+
+This relies on the cell being current whenever a `^` starts: every call that
+may run a closure holding a `^` is entered with the method's state stored
+(`UnbracketedNlrClosure`), and a `^` stores before it throws. A test-build
+check asserts it directly at the commit: with `BEAMTALK_CHECK_NLR_COMMIT` set
+(the `Justfile` exports it, so BUnit, the stdlib corpus and the REPL and e2e
+suites run with it), a `^` thrown at home must reach its boundary carrying
+fields equal to the cell, unless an `ensure:` foreign clause put the cell
+ahead on the way (`store_unwound/2`, noted for that throw only) or the throw came from away (the BT-4448
+stamp). Anything else raises `actor_nlr_stale_cell`: a lowering let a `^`
+start without storing the method's state.
 
 Entering an `ensure:` stores the current `State` to the cell, and inside the
 protected body every field write also stores (write-through). The protected

@@ -416,4 +416,5 @@ Module {
             preceding_blank_line: false,
         },
     ],
+    pipeline_sends: {},
 }

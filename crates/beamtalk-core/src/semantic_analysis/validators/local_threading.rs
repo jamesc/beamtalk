@@ -1419,6 +1419,15 @@ enum Escape {
     /// The condition of a `whileTrue:`/`whileFalse:` whose loop does not
     /// thread a condition write here (BT-3782).
     Condition(EcoString),
+    /// The receiver of a unary `whileTrue`/`whileFalse` (BT-4313): the same
+    /// condition as [`Self::Condition`], named as written. The flag is whether
+    /// the method can write a field to keep the state in
+    /// ([`Walker::method_can_write_field`]).
+    UnaryLoop(EcoString, bool),
+    /// The condition of a `whileTrue:`/`whileFalse:` whose body is not a block
+    /// literal: the loop runs its condition as a closure in every context
+    /// (BT-4062, `block_facts::while_body_block`).
+    ConditionBodyNotLiteral(EcoString),
 }
 
 impl Escape {
@@ -1460,6 +1469,14 @@ impl Escape {
             Self::Condition(selector) => format!(
                 "used as the condition of `{selector}`, which does not thread an assignment in \
                  its condition here"
+            ),
+            Self::UnaryLoop(selector, _) => format!(
+                "sent `{selector}`, which runs it as the loop's condition and does not thread an \
+                 assignment in its condition here"
+            ),
+            Self::ConditionBodyNotLiteral(selector) => format!(
+                "used as the condition of a `{selector}` whose body is not a block literal, \
+                 which the compiler runs as a closure and does not thread it through"
             ),
             Self::ExceptionNotInlined(selector) => format!(
                 "of an `{selector}` whose blocks are not all written in place, which the compiler \
@@ -1512,6 +1529,22 @@ impl Escape {
             Self::Condition(selector) => format!(
                 "assign `{name}` in the loop body instead: `[{name} < limit] {selector} [{name} := \
                  {name} + 1]`"
+            ),
+            Self::UnaryLoop(selector, has_fields) => {
+                let field = if *has_fields {
+                    format!("keep `{name}` in a field (`self.{name} := self.{name} + 1`), or ")
+                } else {
+                    String::new()
+                };
+                format!(
+                    "{field}write the loop with a body that assigns `{name}`: \
+                     `[{name} := {name} + 1. {name} < limit] {selector}` runs as \
+                     `{name} := {name} + 1. [{name} < limit] {selector}: [{name} := {name} + 1]`"
+                )
+            }
+            Self::ConditionBodyNotLiteral(selector) => format!(
+                "write the loop body directly, wrapping a block value in a literal \
+                 (`[...] {selector} [body value]`), or assign `{name}` in a literal loop body"
             ),
             Self::ExceptionNotInlined(selector) => format!(
                 "write both blocks of the `{selector}` directly, wrapping a block value in a \
@@ -2743,6 +2776,20 @@ impl<'d> Walker<'d> {
         // receiver once itself, so `inlined: false` skips it here.
         if inlined {
             match receiver {
+                // BT-4062: a `whileTrue:`/`whileFalse:` whose body is not a
+                // block literal takes codegen's simple lowering in every
+                // context (the REPL included), whose condition is a plain
+                // closure: its write is lost (the loop never ends) or, as a
+                // Tier 2 block, applied with the wrong arity.
+                Expression::Block(block)
+                    if matches!(sel.as_str(), "whileTrue:" | "whileFalse:")
+                        && arguments
+                            .first()
+                            .and_then(crate::semantic_analysis::block_facts::while_body_block)
+                            .is_none() =>
+                {
+                    self.report_literal(block, &Escape::ConditionBodyNotLiteral(sel.clone()));
+                }
                 // BT-3782: a `whileTrue:`/`whileFalse:` CONDITION block has a
                 // return channel only where codegen lowers it through the
                 // loop's `StateAcc` (`while_loop_threads`).
@@ -2750,7 +2797,16 @@ impl<'d> Walker<'d> {
                     if matches!(sel.as_str(), "whileTrue:" | "whileFalse:")
                         && !self.while_condition_threads(block, arguments) =>
                 {
-                    self.report_literal(block, &Escape::Condition(sel.clone()));
+                    // BT-4313: a unary `[...] whileTrue` reaches here as the
+                    // `whileTrue: []` it is canonicalised to; name it as written.
+                    let escape =
+                        match crate::ast::normalize::written_unary_loop(selector, arguments) {
+                            Some(unary) => {
+                                Escape::UnaryLoop(unary.into(), self.method_can_write_field())
+                            }
+                            None => Escape::Condition(sel.clone()),
+                        };
+                    self.report_literal(block, &escape);
                 }
                 // BT-3884: a block literal sent a `value`-family selector of
                 // another arity (`[t := t + 1] value: 1`) is applied, never
@@ -2918,14 +2974,29 @@ impl<'d> Walker<'d> {
         }
     }
 
+    /// Whether `self.f := ...` is legal in this method, so a diagnostic may
+    /// suggest keeping state in a field: an instance method of an actor or a
+    /// `TestCase` subclass. Not a class-side method, an `Object` subclass
+    /// (which cannot declare instance data) or a `Value` subclass
+    /// ([`ClassHierarchy::rejects_slot_assignment`]).
+    fn method_can_write_field(&self) -> bool {
+        self.context != Class
+            && self.receivers.as_ref().is_some_and(|facts| {
+                let class = facts.class_name.as_str();
+                facts.hierarchy.resolve_class_kind(class) != crate::ast::ClassKind::Object
+                    && !facts.hierarchy.rejects_slot_assignment(class)
+            })
+    }
+
     /// Whether codegen threads an outer-local write in the condition block of
     /// a keyword `whileTrue:`/`whileFalse:` (BT-3782): the shared leaf
     /// [`while_condition_writes_thread`](crate::semantic_analysis::block_facts::while_condition_writes_thread),
     /// whose condition half is the predicate codegen's loop gates call
     /// (BT-3845). Every other condition is compiled as a Tier 2 closure that
     /// is called with the wrong arity, or as a plain block body whose write
-    /// is never packed (the loop hangs); a top-level expression is left to
-    /// the REPL's own handling.
+    /// is never packed (the loop hangs). At the REPL a condition write is
+    /// carried (BT-4015) once the body is a block literal, which the caller
+    /// has already checked (BT-4062, `Escape::ConditionBodyNotLiteral`).
     fn while_condition_threads(&self, cond: &Block, arguments: &[Expression]) -> bool {
         match self.context {
             Repl => true,

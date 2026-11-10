@@ -182,9 +182,10 @@ step, to tell "this class was removed mid-walk" apart from a genuine error.
 
 For a local class this is message-free: the pid's reverse-index row
 (`class_name_for_pid/1`), which `terminate/2` deletes when the class is
-removed (and a restart deletes when it replaces the pid). A class killed
-untrappably skips `terminate/2`, so its row survives: it is crashed and
-awaiting auto-restart, not removed, and still answers its name. The walk then
+removed, together with the rows of its earlier, crashed incarnations
+(`forget_class_pids/2`). A class killed untrappably skips `terminate/2`, so
+its row survives, including after a restart (BT-4552): it is crashed and
+awaiting or past auto-restart, not removed, and still answers its name. The walk then
 sends to it, `class_send_with_recovery` restarts it, and a genuine error from
 it is re-raised rather than swallowed.
 
@@ -1176,7 +1177,110 @@ format_class_help(ClassName, ClassPid) ->
 
     OwnMethodsPart = render_own_methods_part(OwnDocs, OwnCategories),
 
-    InheritedParts = lists:map(
+    InheritedParts = render_inherited_parts(<<"Inherited from ">>, InheritedGrouped),
+
+    %% BT-4166: class-side methods. Own class methods render with their full
+    %% signature (the only way to learn e.g. `Binary fromBytes:`'s parameter
+    %% type without a compile error); inherited ones are summarised per
+    %% defining class, mirroring the instance side above.
+    {OwnClassDocs, InheritedClassGrouped} = class_side_methods(ClassName, ClassPid),
+    OwnClassMethodsPart = render_own_class_methods_part(OwnClassDocs),
+    InheritedClassParts = render_inherited_parts(
+        <<"Inherited class methods from ">>, InheritedClassGrouped
+    ),
+
+    HintPart = <<"\nUse Beamtalk help: ClassName selector: #method for method details.">>,
+
+    AllParts =
+        [Header, ModifierPart, DocPart, OwnMethodsPart, OwnClassMethodsPart] ++
+            InheritedParts ++ InheritedClassParts ++ [HintPart],
+    iolist_to_binary(
+        lists:filter(
+            fun
+                (<<>>) -> false;
+                (_) -> true
+            end,
+            lists:flatten(AllParts)
+        )
+    ).
+
+-doc """
+Collect the class-side methods for `format_class_help/2`.
+
+Returns `{OwnDocs, InheritedGrouped}`: `OwnDocs` is `[{Selector, Sig,
+Sealed}]` for the class methods `ClassName` itself defines (sorted by
+selector), with `Sig` the method's `__signature__` (falling back to the bare
+selector); `InheritedGrouped` is the class methods inherited from ancestors,
+grouped by defining class via `group_by_class/1`. The hierarchy walk is the
+one `beamtalk_repl_docs` (`:h ClassName class`) and the `inherited-methods`
+ws op share (`beamtalk_hierarchy_docs:collect_flattened_class_methods/2`).
+""".
+-spec class_side_methods(atom(), pid()) ->
+    {[{atom(), binary(), boolean()}], [{atom(), [atom()]}]}.
+class_side_methods(ClassName, ClassPid) ->
+    Flat = beamtalk_hierarchy_docs:collect_flattened_class_methods(ClassName, ClassPid),
+    {Own, Inherited} = maps:fold(
+        fun
+            (Sel, ClassName0, {OwnAcc, InhAcc}) when ClassName0 =:= ClassName ->
+                {[Sel | OwnAcc], InhAcc};
+            (Sel, DefClass, {OwnAcc, InhAcc}) ->
+                {OwnAcc, [{Sel, DefClass} | InhAcc]}
+        end,
+        {[], []},
+        Flat
+    ),
+    OwnDocs = [class_method_sig(ClassPid, Sel) || Sel <- lists:sort(Own)],
+    {OwnDocs, group_by_class(lists:sort(Inherited))}.
+
+-doc """
+Signature line data for one class-side method: `{Selector, Sig, Sealed}`.
+`Sig` is the method's compiled `__signature__` (e.g. `fromBytes: bytes ::
+List(Integer) -> Binary`), or the bare selector when it carries none.
+""".
+-spec class_method_sig(pid(), atom()) -> {atom(), binary(), boolean()}.
+class_method_sig(ClassPid, Selector) ->
+    SelBin = atom_to_binary(Selector, utf8),
+    case gen_server:call(ClassPid, {class_method, Selector}, 5000) of
+        MethodObj when is_map(MethodObj) ->
+            Sig =
+                case maps:get('__signature__', MethodObj, nil) of
+                    %% BT-4173: signatures arrive tagged — unwrap for rendering.
+                    {beamtalk_string, TaggedSig} when is_binary(TaggedSig) -> TaggedSig;
+                    SigBin when is_binary(SigBin) -> SigBin;
+                    _ -> SelBin
+                end,
+            Sealed =
+                case maps:get('__method_info__', MethodObj, #{}) of
+                    Info when is_map(Info) -> maps:get(is_sealed, Info, false);
+                    _ -> false
+                end,
+            {Selector, Sig, Sealed};
+        _ ->
+            {Selector, SelBin, false}
+    end.
+
+-doc """
+Render `format_class_help/2`'s `Class methods:` section — one indented
+signature line per own class method, `<<>>` when there are none.
+""".
+-spec render_own_class_methods_part([{atom(), binary(), boolean()}]) -> binary().
+render_own_class_methods_part([]) ->
+    <<>>;
+render_own_class_methods_part(OwnClassDocs) ->
+    Lines = [
+        iolist_to_binary([<<"  ">>, method_sig_line(Sig, Sealed)])
+     || {_Sel, Sig, Sealed} <- OwnClassDocs
+    ],
+    iolist_to_binary([<<"\nClass methods:\n">>, lists:join(<<"\n">>, Lines)]).
+
+-doc """
+Render one summary line per `{FromClass, Selectors}` group, prefixed by
+`Label` (`Inherited from ` / `Inherited class methods from `). Up to five
+selectors are listed in full; beyond that the first three plus a count.
+""".
+-spec render_inherited_parts(binary(), [{atom(), [atom()]}]) -> [binary()].
+render_inherited_parts(Label, Grouped) ->
+    lists:map(
         fun({FromClass, Selectors}) ->
             Count = length(Selectors),
             Summary =
@@ -1194,7 +1298,8 @@ format_class_help(ClassName, ClassPid) ->
                         ])
                 end,
             iolist_to_binary([
-                <<"\nInherited from ">>,
+                <<"\n">>,
+                Label,
                 atom_to_binary(FromClass, utf8),
                 <<" (">>,
                 integer_to_binary(Count),
@@ -1202,20 +1307,7 @@ format_class_help(ClassName, ClassPid) ->
                 Summary
             ])
         end,
-        InheritedGrouped
-    ),
-
-    HintPart = <<"\nUse Beamtalk help: ClassName selector: #method for method details.">>,
-
-    AllParts = [Header, ModifierPart, DocPart, OwnMethodsPart | InheritedParts] ++ [HintPart],
-    iolist_to_binary(
-        lists:filter(
-            fun
-                (<<>>) -> false;
-                (_) -> true
-            end,
-            lists:flatten(AllParts)
-        )
+        Grouped
     ).
 
 -doc "Format method-level help output.".

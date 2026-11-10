@@ -104,6 +104,26 @@ pub mod test_support {
         module
     }
 
+    /// `value`'s `Debug` form with every span erased, so two trees that
+    /// differ only in source positions compare equal.
+    pub fn without_spans(value: &impl std::fmt::Debug) -> String {
+        let debug = format!("{value:?}");
+        let mut out = String::with_capacity(debug.len());
+        let mut rest = debug.as_str();
+        while let Some(at) = rest.find("Span { start: ") {
+            out.push_str(&rest[..at]);
+            out.push_str("Span");
+            match rest[at..].find('}') {
+                Some(close) => rest = &rest[at + close + 1..],
+                None => {
+                    rest = "";
+                }
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+
     /// Parses `source` and returns the [`Module`] AST, discarding all
     /// diagnostics without assertion.
     ///

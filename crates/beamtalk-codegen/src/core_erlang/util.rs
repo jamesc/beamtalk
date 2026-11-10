@@ -15,10 +15,12 @@ use std::fmt::Write as _;
 use super::sequencing::PrecompiledScope;
 use super::threaded_expr::ProducerTail;
 use super::threaded_ir::{
-    FrameId, RenderCtx, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, render, render_value,
+    BindOp, FrameId, RenderCtx, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
+    render, render_value,
 };
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::leaf;
 use beamtalk_cerl_doc::leaf::{atom, int_lit, string_lit};
 use beamtalk_cerl_doc::{Document, join};
 use beamtalk_core::ast::{
@@ -518,6 +520,13 @@ impl CoreErlangGenerator {
             });
         }
 
+        // BT-4318: a `super` send that threads the method's `State` is a
+        // producer: its `{reply, Result, NewState}` tuple is unpacked into a
+        // `State` `Bind`, and it answers `Result` in any value position.
+        if self.is_super_send_producer(inner) {
+            return self.super_send_producer(inner, frame);
+        }
+
         if let Some(children) = Self::sequenced_send_children(inner) {
             let (mut prelude, scope) = self.sequence_children(&children, frame)?;
             let value = self.generate_expression_as_value(expr, span, &mut prelude)?;
@@ -935,6 +944,81 @@ impl CoreErlangGenerator {
         self.in_actor_instance_context() && self.is_dispatching_actor_self_send(expr)
     }
 
+    /// `true` if `expr` (already paren-unwrapped) is a `super` send whose
+    /// dispatch threads the method's own `State`
+    /// ([`Self::super_send_threads_state`]) — [`Self::super_send_producer`]'s
+    /// shape. Every other `super` send answers a plain value.
+    pub(super) fn is_super_send_producer(&self, expr: &Expression) -> bool {
+        #[cfg(test)]
+        if super::threaded_expr::fault::active()
+            == Some(super::threaded_expr::fault::LocalRebindFault::SuperSendNotAProducer)
+        {
+            return false;
+        }
+        matches!(expr, Expression::MessageSend { is_cast: false, .. })
+            && Self::is_super_message_send(expr)
+            && self.super_send_threads_state()
+    }
+
+    /// BT-4318: the one lowering of a `State`-threading `super` send
+    /// ([`Self::is_super_send_producer`]), in statement and value position
+    /// alike. Its arguments are sequenced ahead (BT-3814), the
+    /// `beamtalk_dispatch:super/5` call is bound to a `_SuperReply` temp
+    /// (bracketed by `generate_super_send` when it may reach the default
+    /// arm), and a `State` `Bind` takes the callee's state from the reply
+    /// tuple; the value is the reply's result.
+    pub(super) fn super_send_producer(
+        &mut self,
+        expr: &Expression,
+        frame: FrameId,
+    ) -> Result<ThreadedValue> {
+        let Expression::MessageSend {
+            selector,
+            arguments,
+            span,
+            ..
+        } = expr
+        else {
+            return Err(CodeGenError::Internal(
+                "super_send_producer called on a non-MessageSend expression".to_string(),
+            ));
+        };
+        let span = *span;
+        let children: Vec<&Expression> = arguments.iter().collect();
+        let (mut prelude, scope) = self.sequence_children(&children, frame)?;
+        let source_version = self.state_version();
+        self.in_super_send_producer = true;
+        let call = self.generate_super_send(selector, arguments);
+        self.in_super_send_producer = false;
+        let call = call?;
+        self.finish_precompiled_scope(scope)?;
+        let reply_var = self.fresh_temp_var("SuperReply");
+        prelude.push(ThreadedStmt::Statement(
+            docvec!["let ", leaf::var(reply_var.clone()), " = ", call, " in "],
+            span,
+        ));
+        let _ = self.next_state_var();
+        let target_version = self.state_version();
+        prelude.push(ThreadedStmt::Bind {
+            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+            op: BindOp::Direct(ValueRef::Doc(docvec![
+                "call 'erlang':'element'(3, ",
+                leaf::var(reply_var.clone()),
+                ")",
+            ])),
+            span,
+        });
+        Ok(ThreadedValue {
+            prelude,
+            value: ValueRef::Doc(docvec![
+                "call 'erlang':'element'(2, ",
+                leaf::var(reply_var),
+                ")",
+            ]),
+        })
+    }
+
     /// ADR 0130: compiles `expr` (already paren-unwrapped) through the
     /// class-method-context producer when it is, at its own top level, a
     /// class-variable write or a same-class class-method self-send
@@ -1277,7 +1361,7 @@ impl CoreErlangGenerator {
         {
             return true;
         }
-        if self.is_prelude_producer(inner) {
+        if self.is_prelude_producer(inner) || self.is_super_send_producer(inner) {
             return true;
         }
         // ADR 0137: mirrors `threaded_expression`'s bracket window.
@@ -1429,7 +1513,7 @@ impl CoreErlangGenerator {
     /// literal, an identifier, a class reference, `super`, or a block —
     /// each compiles to a value that cannot raise or observe threaded
     /// state, so the parent may compile it in place after every prelude.
-    fn is_trivial_subexpr(expr: &Expression) -> bool {
+    pub(super) fn is_trivial_subexpr(expr: &Expression) -> bool {
         matches!(
             expr,
             Expression::Literal(..)

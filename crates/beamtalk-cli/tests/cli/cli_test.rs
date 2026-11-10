@@ -100,6 +100,52 @@ fn test_no_tests_found_succeeds() {
         .stdout(contains("No tests found"));
 }
 
+/// A test file with a syntax error (BT-4304). Before the fix, discovery
+/// dropped the parse diagnostics, so this read as "No tests found", exit 0.
+const BROKEN_TEST_SOURCE: &str = "// Copyright 2026 James Casey\n\
+     // SPDX-License-Identifier: Apache-2.0\n\
+     \n\
+     TestCase subclass: BrokenTest\n\
+     \n\
+     \x20\x20testBroken => self assert: (1 + ) equals: 3\n";
+
+#[test]
+fn test_single_file_with_parse_error_fails_with_diagnostics() {
+    let project = cli_common::fixture_project();
+    std::fs::remove_file(project.path().join("test/GreeterTest.bt")).unwrap();
+    std::fs::write(
+        project.path().join("test/BrokenTest.bt"),
+        BROKEN_TEST_SOURCE,
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["test", "--quiet", "test/BrokenTest.bt"])
+        .assert()
+        .failure()
+        .stdout(contains("No tests found").not())
+        .stderr(contains("Failed to parse test file").and(contains("BrokenTest.bt")));
+}
+
+#[test]
+fn test_directory_with_one_unparsable_file_fails() {
+    let project = cli_common::fixture_project();
+    // GreeterTest.bt still parses; the broken file must not be skipped.
+    std::fs::write(
+        project.path().join("test/BrokenTest.bt"),
+        BROKEN_TEST_SOURCE,
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["test", "--quiet"])
+        .assert()
+        .failure()
+        .stderr(contains("Failed to parse test file").and(contains("BrokenTest.bt")));
+}
+
 #[test]
 fn test_script_runs_btscript_files() {
     // test-script reads `.btscript` files and asserts on `// =>` annotations.

@@ -96,6 +96,7 @@ call 'beamtalk_method_resolver':'resolve'(_cls@1, 'getValue')
                 <'show:'> when 'true' -> 'slow'
                 <'showCr:'> when 'true' -> 'slow'
                 <'subclassResponsibility'> when 'true' -> 'slow'
+                <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
                 <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('MethodLookupTest', Selector)
             end of
