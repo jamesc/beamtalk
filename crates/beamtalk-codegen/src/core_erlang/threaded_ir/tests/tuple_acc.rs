@@ -330,3 +330,34 @@ fn lower_and_render_tuple_acc_unpack_respects_gate_slots_offset() {
     let rendered = lower_and_render(&ir).to_pretty_string();
     assert_eq!(rendered, "let N@1 = call 'erlang':'element'(3, AccSt0) in ");
 }
+
+#[test]
+fn bare_unpack_of_several_targets_is_reported() {
+    let frame = FrameId::new(1);
+    let targets: Vec<VersionedVar> = ["a", "b"]
+        .iter()
+        .enumerate()
+        .map(|(i, n)| VersionedVar::new(VersionPrefix::Gensym((*n).to_string()), i + 1, frame))
+        .collect();
+    let stmt = ThreadedStmt::Threaded {
+        mode: ThreadingMode::TupleAcc(0, FoldAccShape::Bare),
+        frame,
+        threads: vec!["a".into(), "b".into()],
+        body: vec![ThreadedStmt::TupleAccUnpack {
+            param: AccParam::new("AccSt"),
+            gate_slots: 0,
+            shape: FoldAccShape::Bare,
+            targets: targets.clone(),
+            frame,
+            span: span(),
+        }],
+        produces: targets,
+        span: span(),
+    };
+    assert!(
+        verify(std::slice::from_ref(&stmt)).contains(&VerifyError::BareAccTargets {
+            targets: 2,
+            at: span()
+        })
+    );
+}

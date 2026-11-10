@@ -93,10 +93,18 @@ fn runtime_ebins() -> Vec<PathBuf> {
     let Ok(rd) = std::fs::read_dir(&root) else {
         return Vec::new();
     };
-    rd.flatten()
+    let mut ebins: Vec<PathBuf> = rd
+        .flatten()
         .map(|e| e.path().join("ebin"))
         .filter(|p| p.is_dir())
-        .collect()
+        .collect();
+    // The compiled stdlib classes (`bt@stdlib@dictionary`, ...) live here.
+    let stdlib =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/apps/beamtalk_stdlib/ebin");
+    if stdlib.is_dir() {
+        ebins.push(stdlib);
+    }
+    ebins
 }
 
 /// One `erlc` run over every written `.core` file (spawning it per file
@@ -171,7 +179,7 @@ fn bare_and_tuple_folds_agree_with_the_map_oracle() {
         return;
     }
     let mut script = String::from(
-        "Run = fun(M) -> try {ok, M:run(M:new())} catch C:R -> {caught, C, element(1, case R of {E, _} -> {E}; E -> {E} end)} end end,\n",
+        "{ok, _} = application:ensure_all_started(beamtalk_stdlib),\nRun = fun(M) -> try {ok, M:run(M:new())} catch C:R -> {caught, C, element(1, case R of {E, _} -> {E}; E -> {E} end)} end end,\n",
     );
     for (n, o) in &exec {
         let _ = writeln!(
@@ -181,13 +189,16 @@ fn bare_and_tuple_folds_agree_with_the_map_oracle() {
     }
     // Guard against a vacuous agreement (both builds failing alike): most
     // programs must actually answer a value.
-    let _ = write!(
-        script,
-        "Ok = length([M || M <- [{}], element(1, Run(M)) =/= caught]),\nio:format(\"RAN ~p~n\", [Ok]),\n",
-        exec.iter()
-            .map(|(n, _)| n.as_str())
-            .collect::<Vec<_>>()
-            .join(", ")
+    let list = exec
+        .iter()
+        .map(|(n, _)| n.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    script.push_str(
+        &"Ok = length([M || M <- [LIST], element(1, Run(M)) =/= caught]),\n\
+          io:format(\"RAN ~p~n\", [Ok]),\n\
+          [case Run(M) of {caught, _, E} when E =:= undef; E =:= class_not_found -> io:format(\"BROKEN ~p ~p~n\", [M, E]); _ -> ok end || M <- [LIST]],\n"
+            .replace("LIST", &list),
     );
     script.push_str("io:format(\"DONE~n\"), halt().");
     let mut cmd = Command::new("erl");
@@ -204,6 +215,9 @@ fn bare_and_tuple_folds_agree_with_the_map_oracle() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert!(!text.contains("DISAGREE"), "{text}");
+    // Both builds failing alike (a missing module or class) would agree
+    // vacuously; the runtime must be complete enough to run every program.
+    assert!(!text.contains("BROKEN"), "{text}");
     let ran: usize = text
         .lines()
         .find_map(|l| l.strip_prefix("RAN ")?.trim().parse().ok())

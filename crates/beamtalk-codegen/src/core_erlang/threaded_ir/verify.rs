@@ -86,6 +86,10 @@ pub(in crate::core_erlang) enum VerifyError {
     /// rides the map path (`select_tuple_acc`'s `field_writes` guard).
     TupleAccWithFamily { at: Span },
 
+    /// BT-4116: a [`FoldAccShape::Bare`] unpack with other than exactly one
+    /// target (`render_tuple_acc_unpack` would bind each to the whole value).
+    BareAccTargets { targets: usize, at: Span },
+
     /// BT-4116: the fold's accumulator statement disagrees with its mode's
     /// [`FoldAccShape`] — a bare value where the mode unpacks a tuple, or a
     /// tuple where it unpacks a bare value (the next iteration would read
@@ -2154,8 +2158,20 @@ impl VerifyWalk<'_> {
                 }
             }
             ThreadedStmt::TupleAccUnpack {
-                gate_slots, span, ..
+                gate_slots,
+                shape,
+                targets,
+                span,
+                ..
             } => {
+                // BT-4116: a bare accumulator IS its one local; a bare unpack
+                // of several targets would bind each to the whole accumulator.
+                if *shape == FoldAccShape::Bare && targets.len() != 1 {
+                    self.errors.push(VerifyError::BareAccTargets {
+                        targets: targets.len(),
+                        at: *span,
+                    });
+                }
                 // Mirrors the `BindOp::Unpack` check above (invariant class 1:
                 // legal only inside `TupleAcc` mode), plus invariant class 4:
                 // the node's own `gate_slots` must match the enclosing mode's.
