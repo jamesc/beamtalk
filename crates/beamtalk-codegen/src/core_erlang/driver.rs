@@ -259,7 +259,7 @@ pub fn generate_module_with_warnings(
     if added_beam_meta || added_superclasses {
         // BT-4625: keep `ClassInfo::in_caller_new1` equal to the verdict
         // computed on the injected hierarchy.
-        hierarchy.publish_explicit_new1_verdicts(module);
+        hierarchy.publish_explicit_new1_verdicts(self_flattened.as_ref().unwrap_or(module));
     }
 
     // The hand-off contract: a driver that handed off `AnalysisResult` is
