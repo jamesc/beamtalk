@@ -51,6 +51,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     shape_version/1,
     class_name/1,
     class_name_safe/1,
+    class_name_or_undefined/1,
     module_name/1,
     module_name_safe/1,
     superclass_safe/1,
@@ -439,6 +440,24 @@ class_name_safe(ClassPid) ->
     case beamtalk_class_registry:class_name_for_pid(ClassPid) of
         {ok, ClassName} -> ClassName;
         not_found -> class_name(ClassPid)
+    end.
+
+-doc """
+Registered class name from the pure ETS reverse index only, or `undefined`.
+
+Never sends a message, so unlike `class_name_safe/1` it cannot exit `noproc`
+when the class stops mid-probe. Used as the class-name thunk of
+`beamtalk_primitive:ensure_class_module_loaded/2`: `undefined` never equals a
+module, so a miss falls back to the plain `code:ensure_loaded/1` probe
+(BT-4627).
+""".
+-spec class_name_or_undefined(pid()) -> class_name() | undefined.
+class_name_or_undefined(ClassPid) when ClassPid =:= self() ->
+    get(beamtalk_class_name);
+class_name_or_undefined(ClassPid) ->
+    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
+        {ok, ClassName} -> ClassName;
+        not_found -> undefined
     end.
 
 -doc """
@@ -915,7 +934,7 @@ probe_local_method(ClassPid, Selector, EnsureLoaded, ResolveFun) ->
                     case EnsureLoaded of
                         true ->
                             _ = beamtalk_primitive:ensure_class_module_loaded(
-                                fun() -> class_name_safe(ClassPid) end, ModuleName
+                                fun() -> class_name_or_undefined(ClassPid) end, ModuleName
                             );
                         false ->
                             ok

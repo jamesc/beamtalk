@@ -1491,7 +1491,8 @@ guaranteed `code_server` miss. Loaded modules never reach `code_server`
 either. Shared by dispatch, instantiation and method lookup (BT-4056).
 
 `Class` may be a thunk so hot-path callers that only hold a class pid pay for
-the class-name lookup (a gen_server call) only when the module is not loaded.
+the class-name lookup only when the module is not loaded (see
+`beamtalk_object_class:class_name_or_undefined/1`, a non-raising ETS read).
 """.
 -spec ensure_class_module_loaded(atom() | fun(() -> atom()), atom()) -> boolean().
 ensure_class_module_loaded(Class, Module) ->
