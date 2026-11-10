@@ -204,8 +204,12 @@ Bt4519Host new smallestKey: #{#b => 2, #a => 1}
 Bt4519Host >> chained: q :: Bt4519Point -> Bt4519Point => q withX: 5 |> withY: 10
 // => NO-WARNING: is discarded
 
+// `Bt4519Point` comes from an earlier input, so the REPL types `q` from the
+// class's loaded metadata; its synthesized `withX:` answers a `Bt4519Point`
+// there too, and the cascade warns as it does under `beamtalk build`
+// (BT-4621).
 Bt4519Host >> dropped: q :: Bt4519Point -> Bt4519Point => q withX: 5; withY: 10
-// => _
+// => WARNING: the result of `withX:` is discarded HINT: use a pipeline: `q withX: … |> withY: …`
 
 Bt4519Host >> droppedMax: n :: Integer -> Integer => n max: 1; max: 2
 // => WARNING: the result of `max:` is discarded HINT: use a pipeline: `n max: … |> max: …`
@@ -216,6 +220,14 @@ Bt4519Host >> droppedMax: n :: Integer -> Integer => n max: 1; max: 2
 
 (Bt4519Host new chained: p) x
 // => 5
+
+// A class body whose method takes an earlier input's value class warns too.
+Value subclass: Bt4519Mover
+  moved: q :: Bt4519Point -> Bt4519Point => q withX: 5; withY: 10
+// => WARNING: the result of `withX:` is discarded HINT: use a pipeline: `q withX: … |> withY: …`
+
+(Bt4519Mover new moved: p) x
+// => 1
 
 // ===========================================================================
 // Parse errors

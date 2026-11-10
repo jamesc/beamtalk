@@ -1,20 +1,27 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shared naming authority for compiler-synthesized `Value subclass:` methods.
+//! Shared naming and signature authority for compiler-synthesized
+//! `Value subclass:` methods.
 //!
 //! `Value` classes get auto-generated slot accessors, `with<Field>:` copy-setters,
-//! and a keyword constructor (ADR 0042). The *names* of those selectors are a
-//! convention that must agree across three consumers:
+//! and a keyword constructor (ADR 0042). The *names* of those selectors, and
+//! the return types they are recorded with, are a convention that must agree
+//! across the consumers:
 //!
 //! - **codegen** (`value_type_codegen`, `gen_server::methods`) — emits the Core
-//!   Erlang functions and their exports.
+//!   Erlang functions and their exports, and records them in the class's
+//!   `__beamtalk_meta` `method_info` (which is how the REPL and other
+//!   cross-file compiles see an already-loaded class).
 //! - **`class_hierarchy`** — synthesizes matching [`MethodInfo`](crate::semantic_analysis::MethodInfo)
 //!   entries so the type checker and LSP know the methods exist before codegen runs.
 //!
-//! Keeping the selector-name computation here (rather than duplicating it in each
-//! consumer) makes this module the single source of truth and removes the drift
-//! risk that previously existed between codegen and the hierarchy.
+//! Keeping the selector-name and return-type computation here (rather than
+//! duplicating it in each consumer) makes this module the single source of
+//! truth and removes the drift risk that previously existed between codegen
+//! and the hierarchy.
+
+use crate::semantic_analysis::class_hierarchy::DeclaredType;
 
 /// Computes the `with*:` copy-setter selector name for a slot field.
 ///
@@ -100,6 +107,23 @@ pub fn synthesized_keyword_constructor<'a>(
     } else {
         Some(sel)
     }
+}
+
+/// The declared return type of a synthesized `with<Field>:` copy-setter or
+/// keyword constructor on the value class `class_name`: the class itself,
+/// since both answer a new instance of it.
+///
+/// A synthesized getter's return type is its field's declared type (none
+/// when the field is untyped).
+///
+/// Read by the hierarchy's synthesized `MethodInfo`s and by codegen's
+/// `__beamtalk_meta` `method_info` entries, so a class seen through its
+/// loaded BEAM metadata (the REPL's view of an earlier input) records the
+/// same return types as one built from its AST (BT-4621) — the
+/// `cascade-drops-update` warning, for one, reads them.
+#[must_use]
+pub fn synthesized_copy_return_type(class_name: &str) -> DeclaredType {
+    DeclaredType::simple(class_name)
 }
 
 #[cfg(test)]
