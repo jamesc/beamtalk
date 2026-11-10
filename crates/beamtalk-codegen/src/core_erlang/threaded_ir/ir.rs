@@ -1804,16 +1804,40 @@ pub(in crate::core_erlang) struct EnsureNlrRelay {
 /// Val}` or `{'$bt_nlr', Tok, Val, State}`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) struct EnsureForeignNlr {
-    /// The cleanup's entry: the cell refresh into `StateAcc` and the arm's
-    /// family seed. Rendered first.
-    pub seed: Document<'static>,
-    /// The cleanup's code, a `let ... in` chain (verified by its own arm
-    /// frame when it is built).
-    pub cleanup: Document<'static>,
+    /// The cleanup the clause runs: its own, or (BT-4598) the relay's.
+    pub body: ForeignCleanupBody,
     /// The `StateAcc` version the clause stores to the cell before the
     /// re-raise (`None`: it stores nothing, the shape before ADR 0146,
     /// test builds' fault only).
     pub store: Option<usize>,
+}
+
+/// The cleanup an [`EnsureForeignNlr`] clause runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) enum ForeignCleanupBody {
+    /// The clause compiles the cleanup itself: no relay of the scope's own
+    /// throw shares it (no `^` of the scope crosses the `ensure:`).
+    Own {
+        /// The cleanup's entry: the cell refresh into `StateAcc` and the
+        /// arm's family seed. Rendered first.
+        seed: Document<'static>,
+        /// The cleanup's code, a `let ... in` chain (verified by its own arm
+        /// frame when it is built).
+        cleanup: Document<'static>,
+    },
+    /// BT-4598: the clause shares the relay's cleanup. Where the cell is
+    /// live, the relay of the scope's own throw (an
+    /// [`NlrCarry::ActorState`] relay with `cell_store`) runs the cleanup
+    /// from the cell refresh, exactly as this clause would, so the two
+    /// compiled the same cleanup twice, and a nested `ensure:` in the
+    /// cleanup 4^depth times. One `$bt_nlr` clause instead runs the relay's
+    /// seed and cleanup, then branches on the token: the scope's own throw
+    /// stores and resumes with the relay's [`RethrowSlot::Version`]; any
+    /// other stores this clause's `store` (`store_unwound/2`) and is
+    /// re-raised as it came.
+    /// [`VerifyError::EnsureForeignCleanupNotStored`](super::verify::VerifyError::EnsureForeignCleanupNotStored)
+    /// (`SharedWithoutCellRelay`) when there is no such relay to share.
+    SharedWithRelay,
 }
 
 /// The two `$bt_nlr` throw shapes a compiled catch passes through.

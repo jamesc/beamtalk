@@ -346,10 +346,12 @@ fn foreign_node(
 
 fn foreign_clause(store: Option<usize>) -> EnsureForeignNlr {
     EnsureForeignNlr {
-        seed: Document::Str(
-            "let StateAcc = call 'beamtalk_actor_state':'refresh'(Self, StateAcc) in ",
-        ),
-        cleanup: Document::Str("let StateAcc1 = call 'maps':'put'('n', 40, StateAcc) in"),
+        body: ForeignCleanupBody::Own {
+            seed: Document::Str(
+                "let StateAcc = call 'beamtalk_actor_state':'refresh'(Self, StateAcc) in ",
+            ),
+            cleanup: Document::Str("let StateAcc1 = call 'maps':'put'('n', 40, StateAcc) in"),
+        },
         store,
     }
 }
@@ -430,4 +432,85 @@ fn no_foreign_store_is_owed_where_there_is_nothing_to_store() {
         foreign_defect(&[foreign_node(false, inlined(Some(1)), None)]),
         None
     );
+}
+
+/// BT-4598: an actor method's own relay, seeded from the cell and storing to
+/// it, resuming with `StateAcc{version}`.
+fn cell_relay(version: usize) -> EnsureNlrRelay {
+    EnsureNlrRelay {
+        seed: Document::Str(
+            "let StateAcc = call 'beamtalk_actor_state':'refresh'(Self, StateAcc) in ",
+        ),
+        cleanup: Document::Str("let StateAcc1 = call 'maps':'put'('n', 40, StateAcc) in"),
+        cell_store: true,
+        rethrow: RethrowSlot::Version(version),
+    }
+}
+
+/// BT-4598: an `ensure:` of an actor method's threaded body whose foreign
+/// clause shares `relay`'s cleanup.
+fn shared_node(token: bool, relay: Option<EnsureNlrRelay>) -> ThreadedStmt {
+    ThreadedStmt::EnsureCatch {
+        vars: Box::new(vars()),
+        token: token.then(|| TokenId::new("NlrToken1")),
+        carry: Some(NlrCarry::ActorState),
+        private_scratch: false,
+        cleanup: inlined(Some(1)),
+        relay,
+        cell_live: true,
+        foreign: Some(EnsureForeignNlr {
+            body: ForeignCleanupBody::SharedWithRelay,
+            store: Some(1),
+        }),
+        other: Document::Str("primop 'raw_raise'(Type1, Error1, Stack1)"),
+        span: span(),
+    }
+}
+
+/// BT-4598: where the cell is live, the relay and the foreign clause share
+/// one compiled cleanup: a single `$bt_nlr` clause runs it once, then the
+/// scope's own throw stores (`store/1`) and resumes with the cleanup's
+/// `StateAcc`, and any other stores it (`store_unwound/2`) and is re-raised
+/// as it came.
+#[test]
+fn a_foreign_clause_sharing_the_relays_cleanup_renders_one_clause() {
+    let ir = [shared_node(true, Some(cell_relay(1)))];
+    assert_eq!(verify(&ir), vec![]);
+    let text = lower_and_render(&ir).to_pretty_string();
+    assert!(
+        text.contains(
+            "case {Type1, Error1} of <{'throw', Foreign1}> when call 'erlang':'=:='(call 'erlang':'element'(1, Foreign1), '$bt_nlr') -> let StateAcc = call 'beamtalk_actor_state':'refresh'(Self, StateAcc) in let StateAcc1 = call 'maps':'put'('n', 40, StateAcc) in case Foreign1 of {'$bt_nlr', Tok1, Val1, Carried1} when call 'erlang':'=:='(Tok1, NlrToken1) -> let _ = call 'beamtalk_actor_state':'store'(StateAcc1) in call 'erlang':'throw'({'$bt_nlr', Tok1, Val1, StateAcc1}) <_> when 'true' -> let _ = call 'beamtalk_actor_state':'store_unwound'(Foreign1, StateAcc1) in primop 'raw_raise'(Type1, Error1, Stack1) end <Other1> when 'true' -> primop 'raw_raise'(Type1, Error1, Stack1) end"
+        ),
+        "{text}"
+    );
+    assert_eq!(
+        text.matches("'maps':'put'('n', 40,").count(),
+        1,
+        "the cleanup is compiled once:\n{text}"
+    );
+}
+
+/// BT-4598: a foreign clause that shares the relay's cleanup has nothing to
+/// run without a relay of the scope's own throw that runs it from the cell.
+#[test]
+fn a_foreign_clause_sharing_no_cell_relay_fails() {
+    let not_from_cell = EnsureNlrRelay {
+        cell_store: false,
+        ..cell_relay(1)
+    };
+    for ir in [
+        shared_node(true, None),
+        shared_node(false, Some(cell_relay(1))),
+        shared_node(true, Some(not_from_cell)),
+    ] {
+        assert!(
+            verify(std::slice::from_ref(&ir)).contains(
+                &VerifyError::EnsureForeignCleanupNotStored {
+                    defect: ForeignStoreDefect::SharedWithoutCellRelay,
+                    at: span(),
+                }
+            ),
+            "{ir:?}"
+        );
+    }
 }
