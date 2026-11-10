@@ -1798,19 +1798,30 @@ impl CoreErlangGenerator {
         bracketed: bool,
     ) -> Result<Document<'static>> {
         let at = blocks.first().map(|b| b.span).unwrap_or_default();
-        // The send's `^`-holding arms are checked as closures whichever path
-        // lowered the conditional (the mutation path never reaches
-        // `note_send`): uncovered, each is an `UnbracketedNlrClosure`.
-        self.note_nlr_blocks(blocks.iter().copied(), selector_atom);
+        // The send's `^`-holding arms that go as closures are checked
+        // whichever path lowered the conditional (the mutation path never
+        // reaches `note_send`): uncovered, each is an `UnbracketedNlrClosure`.
+        // An arm passed as a raising stub never becomes a closure, so it is
+        // not recorded (BT-4532).
+        let closure_arms: Vec<&Block> = blocks
+            .iter()
+            .copied()
+            .filter(|block| self.fallback_passes_closure(block))
+            .collect();
+        self.note_nlr_blocks(closure_arms.iter().copied(), selector_atom);
         let prestore = if bracketed {
             None
         } else {
-            self.nlr_closure_prestore(blocks, at)
+            self.nlr_closure_prestore(&closure_arms, at)
         };
-        let covered = bracketed || prestore.is_some();
+        let cover: Vec<_> = if bracketed || prestore.is_some() {
+            closure_arms.iter().map(|block| block.span).collect()
+        } else {
+            Vec::new()
+        };
         let prev = std::mem::replace(&mut self.decline_pure_boolean_inline, true);
         let warn_len = self.codegen_warnings.len();
-        let closures: Result<Vec<_>> = self.with_nlr_closure_cover(covered, |this| {
+        let closures: Result<Vec<_>> = self.with_nlr_closure_cover(&cover, |this| {
             blocks
                 .iter()
                 .map(|block| this.fallback_block_doc(block, selector_atom))
@@ -1822,7 +1833,7 @@ impl CoreErlangGenerator {
         let send =
             self.runtime_send_call(leaf::var(cond_var.to_string()), selector_atom, closures?);
         Ok(match prestore {
-            Some(prestore) => docvec![prestore, send],
+            Some(prestore) => self.nlr_closure_prestored_call(prestore, send),
             None => send,
         })
     }

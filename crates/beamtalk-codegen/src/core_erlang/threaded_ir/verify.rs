@@ -645,7 +645,15 @@ pub(in crate::core_erlang) enum VerifyError {
     /// a block holding a `^` of the current scope stores the threaded state
     /// first. Recorded by the send emitter (`note_send`, the operands) and
     /// checked where the block becomes a closure (`with_actor_closure`), so
-    /// an operand the lowering inlines is never a finding.
+    /// an operand the lowering inlines is never a finding. A store covers
+    /// only the block literals it stores for (`with_nlr_closure_cover`,
+    /// BT-4532), never a closure of another send nested in an operand.
+    ///
+    /// BT-4532 (ADR 0146): the same rule for every operand that may be a
+    /// block. A send that runs as a closure something other than a block
+    /// literal (a block variable or parameter, any expression:
+    /// `SendUserCode::ClosureOperand`) and is left unbracketed is itself the
+    /// finding, at the send: the value may hold a `^` of this method.
     UnbracketedNlrClosure {
         selector: String,
         region: UserCodeRegion,

@@ -1606,22 +1606,33 @@ impl CoreErlangGenerator {
                 _ => None,
             })
             .collect();
+        // BT-4532: emitted as a store-only `SyncedCall` around the call, and
+        // covering only those block literals (`with_nlr_closure_cover`).
+        // Whether it stores is decided before the operands compile (the
+        // cover depends on it); what it stores is read after them, where the
+        // store is emitted, since an operand may step `State` (a
+        // field-writing self-send) and the store must carry that step.
         let at = receiver.span();
-        let unbracketed = self.synced.window_depth == 0;
-        let covered = unbracketed && self.nlr_closure_prestore_applies(&nlr_blocks);
+        let prestore = if self.synced.window_depth == 0 {
+            self.nlr_closure_prestore(&nlr_blocks, at)
+        } else {
+            None
+        };
+        let cover: Vec<_> = if prestore.is_some() {
+            nlr_blocks.iter().map(|block| block.span).collect()
+        } else {
+            Vec::new()
+        };
         let mut seq =
-            self.with_nlr_closure_cover(covered, |this| this.sequence_call(&all_exprs, "Disp"))?;
+            self.with_nlr_closure_cover(&cover, |this| this.sequence_call(&all_exprs, "Disp"))?;
         let actual_receiver = seq.next();
 
         // BT-4070: the call shape itself lives in `runtime_send_call`,
         // shared with the pure-conditional fallback arm — byte-identical
         // to the inline splice this replaces.
         let call_doc = self.runtime_send_call(actual_receiver, &selector_atom, seq.rest());
-        let call_doc = match covered
-            .then(|| self.nlr_closure_prestore(&nlr_blocks, at))
-            .flatten()
-        {
-            Some(prestore) => docvec![prestore, call_doc],
+        let call_doc = match prestore {
+            Some(prestore) => self.nlr_closure_prestored_call(prestore, call_doc),
             None => call_doc,
         };
 
