@@ -355,6 +355,7 @@ fn resolves_selector_through_unknown_external_parent_to_object() {
     // Beverage is NOT in the hierarchy — only CondimentDecorator is.
     // subclassResponsibility lives on Object, two hops above CondimentDecorator.
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("CondimentDecorator", "Beverage")],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -413,6 +414,7 @@ fn make_user_class(name: &str, superclass: &str) -> ClassDefinition {
             span: test_span(),
         }],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: crate::ast::MessageSelector::Unary("increment".into()),
             parameters: vec![],
             body: vec![],
@@ -442,6 +444,7 @@ fn make_user_class(name: &str, superclass: &str) -> ClassDefinition {
 #[test]
 fn user_defined_class_added_to_hierarchy() {
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("Counter", "Actor")],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -465,6 +468,7 @@ fn user_defined_class_added_to_hierarchy() {
 #[test]
 fn user_class_inherits_from_actor_chain() {
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("Counter", "Actor")],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -489,6 +493,7 @@ fn user_class_inherits_from_actor_chain() {
 #[test]
 fn user_class_resolves_inherited_selectors() {
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("Counter", "Actor")],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -518,6 +523,7 @@ fn user_class_resolves_inherited_selectors() {
 #[test]
 fn sealed_class_subclassing_rejected() {
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("MyInt", "Integer")],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -539,6 +545,7 @@ fn sealed_class_subclassing_rejected() {
 #[test]
 fn sealed_string_subclassing_rejected() {
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("MyString", "String")],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -556,6 +563,7 @@ fn sealed_string_subclassing_rejected() {
 #[test]
 fn non_sealed_subclassing_allowed() {
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("MyActor", "Actor")],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -576,6 +584,7 @@ fn non_sealed_subclassing_allowed() {
 fn stdlib_mode_exempts_builtin_class_from_sealed_check() {
     // In stdlib_mode, a class named "Character" extending sealed "Integer" is allowed.
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("Character", "Integer")],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -598,6 +607,7 @@ fn stdlib_mode_exempts_builtin_class_from_sealed_check() {
 fn user_code_character_subclassing_integer_rejected() {
     // Without stdlib_mode, even a class named "Character" is rejected.
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("Character", "Integer")],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -620,6 +630,7 @@ fn user_code_character_subclassing_integer_rejected() {
 fn stdlib_mode_does_not_exempt_non_builtin_class() {
     // Even in stdlib_mode, a non-builtin name extending a sealed class is rejected.
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("MyCustomClass", "Integer")],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -708,6 +719,7 @@ fn make_class_with_sealed_method(
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: crate::ast::MessageSelector::Unary(method_name.into()),
             parameters: vec![],
             body: vec![],
@@ -753,6 +765,7 @@ fn make_class_with_sealed_class_method(
         state: vec![],
         methods: vec![],
         class_methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: crate::ast::MessageSelector::Unary(method_name.into()),
             parameters: vec![],
             body: vec![],
@@ -784,6 +797,7 @@ fn sealed_method_override_rejected() {
     let parent = make_class_with_sealed_method("Parent", "Actor", "doCustomWork", true);
     let child = make_class_with_sealed_method("Child", "Parent", "doCustomWork", false);
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![parent, child],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -809,6 +823,7 @@ fn non_sealed_method_override_allowed() {
     let parent = make_class_with_sealed_method("Parent", "Actor", "doWork", false);
     let child = make_class_with_sealed_method("Child", "Parent", "doWork", false);
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![parent, child],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -829,6 +844,7 @@ fn sealed_method_in_grandparent_enforced() {
     let parent = make_class_with_sealed_method("Parent", "GrandParent", "doWork", false);
     let grandchild = make_class_with_sealed_method("GrandChild", "Parent", "locked", false);
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![grandparent, parent, grandchild],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -852,6 +868,7 @@ fn builtin_sealed_method_override_rejected() {
     // Object's respondsTo: is sealed in builtins — user class cannot override it
     let child = make_class_with_sealed_method("MyObj", "Object", "respondsTo:", false);
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![child],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -875,6 +892,7 @@ fn builtin_actor_spawn_override_rejected() {
     // Actor's class-side spawn is sealed in builtins — subclass cannot override it
     let child = make_class_with_sealed_class_method("MyActor", "Actor", "spawn", false);
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![child],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -898,6 +916,7 @@ fn builtin_actor_spawn_override_rejected() {
 fn mro_is_depth_first() {
     // Counter -> Actor -> Object -> ProtoObject
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("Counter", "Actor")],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1010,6 +1029,7 @@ fn multiple_user_classes_in_module() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: crate::ast::MessageSelector::Unary("baseMethod".into()),
             parameters: vec![],
             body: vec![],
@@ -1047,6 +1067,7 @@ fn multiple_user_classes_in_module() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: crate::ast::MessageSelector::Unary("derivedMethod".into()),
             parameters: vec![],
             body: vec![],
@@ -1073,6 +1094,7 @@ fn multiple_user_classes_in_module() {
         span: test_span(),
     };
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![base, derived],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1101,6 +1123,7 @@ fn multiple_user_classes_in_module() {
 #[test]
 fn user_class_with_unknown_superclass() {
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("Orphan", "NonExistent")],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1139,6 +1162,7 @@ fn duplicate_instance_method_detected() {
         state: vec![],
         methods: vec![
             MethodDefinition {
+                pipeline_sends: crate::ast::PipelineSends::default(),
                 selector: crate::ast::MessageSelector::Unary("increment".into()),
                 parameters: vec![],
                 body: vec![],
@@ -1153,6 +1177,7 @@ fn duplicate_instance_method_detected() {
                 span: Span::new(10, 20),
             },
             MethodDefinition {
+                pipeline_sends: crate::ast::PipelineSends::default(),
                 selector: crate::ast::MessageSelector::Unary("increment".into()),
                 parameters: vec![],
                 body: vec![],
@@ -1180,6 +1205,7 @@ fn duplicate_instance_method_detected() {
         span: test_span(),
     };
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1214,6 +1240,7 @@ fn duplicate_class_method_detected() {
         methods: vec![],
         class_methods: vec![
             MethodDefinition {
+                pipeline_sends: crate::ast::PipelineSends::default(),
                 selector: crate::ast::MessageSelector::Unary("create".into()),
                 parameters: vec![],
                 body: vec![],
@@ -1228,6 +1255,7 @@ fn duplicate_class_method_detected() {
                 span: Span::new(10, 20),
             },
             MethodDefinition {
+                pipeline_sends: crate::ast::PipelineSends::default(),
                 selector: crate::ast::MessageSelector::Unary("create".into()),
                 parameters: vec![],
                 body: vec![],
@@ -1254,6 +1282,7 @@ fn duplicate_class_method_detected() {
         span: test_span(),
     };
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1284,6 +1313,7 @@ fn no_duplicate_for_different_selectors() {
         state: vec![],
         methods: vec![
             MethodDefinition {
+                pipeline_sends: crate::ast::PipelineSends::default(),
                 selector: crate::ast::MessageSelector::Unary("increment".into()),
                 parameters: vec![],
                 body: vec![],
@@ -1298,6 +1328,7 @@ fn no_duplicate_for_different_selectors() {
                 span: test_span(),
             },
             MethodDefinition {
+                pipeline_sends: crate::ast::PipelineSends::default(),
                 selector: crate::ast::MessageSelector::Unary("decrement".into()),
                 parameters: vec![],
                 body: vec![],
@@ -1325,6 +1356,7 @@ fn no_duplicate_for_different_selectors() {
         span: test_span(),
     };
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1344,6 +1376,7 @@ fn typed_class_is_typed() {
     let mut class = make_class_with_sealed_method("StrictCounter", "Actor", "increment", false);
     class.is_typed = true;
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1367,6 +1400,7 @@ fn typed_class_inheritance() {
     parent.is_typed = true;
     let child = make_class_with_sealed_method("UntypedChild", "TypedParent", "method", false);
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![parent, child],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1392,6 +1426,7 @@ fn typed_class_inheritance_reverse_order() {
     let child = make_class_with_sealed_method("UntypedChild", "TypedParent", "method", false);
     // Note: child comes first in the vec! (reverse definition order)
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![child, parent],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1415,6 +1450,7 @@ fn non_typed_class_not_inherited() {
     let parent = make_class_with_sealed_method("Parent", "Actor", "method", false);
     let child = make_class_with_sealed_method("Child", "Parent", "method", false);
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![parent, child],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1466,6 +1502,7 @@ fn user_class_return_type_propagated() {
         class_kind: ClassKind::Object,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: crate::ast::MessageSelector::Unary("getValue".into()),
             parameters: vec![],
             body: vec![],
@@ -1497,6 +1534,7 @@ fn user_class_return_type_propagated() {
         span: test_span(),
     };
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1522,6 +1560,7 @@ fn user_class_param_types_propagated() {
         class_kind: ClassKind::Object,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: crate::ast::MessageSelector::Keyword(vec![crate::ast::KeywordPart {
                 keyword: "add:".into(),
                 span: test_span(),
@@ -1559,6 +1598,7 @@ fn user_class_param_types_propagated() {
         span: test_span(),
     };
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1616,6 +1656,7 @@ fn make_typed_state_class(name: &str, superclass: &str) -> ClassDefinition {
 #[test]
 fn state_field_type_returns_type_for_annotated_field() {
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_typed_state_class("Counter", "Actor")],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1637,6 +1678,7 @@ fn state_field_type_returns_type_for_annotated_field() {
 #[test]
 fn state_field_type_returns_none_for_untyped_field() {
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_typed_state_class("Counter", "Actor")],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1653,6 +1695,7 @@ fn state_field_type_returns_none_for_untyped_field() {
 #[test]
 fn state_field_type_returns_none_for_unknown_field() {
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_typed_state_class("Counter", "Actor")],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1703,6 +1746,7 @@ fn state_field_type_inherited_from_parent() {
         span: test_span(),
     };
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![parent, child],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1769,6 +1813,7 @@ fn state_field_type_shadowed_untyped_field() {
         span: test_span(),
     };
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![parent, child],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -1970,6 +2015,7 @@ fn value_subclass_auto_generates_slot_methods() {
         span: test_span(),
     };
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -2046,6 +2092,7 @@ fn value_subclass_auto_methods_have_generated_docs() {
         span: test_span(),
     };
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -2141,6 +2188,7 @@ fn value_subclass_auto_methods_respect_user_overrides() {
         span: test_span(),
     };
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -2167,6 +2215,7 @@ fn value_subclass_auto_methods_respect_user_overrides() {
 #[test]
 fn actor_subclass_does_not_set_is_value_flag() {
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("Counter", "Actor")],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -2205,6 +2254,7 @@ fn sealed_override_checks_with_external_superclasses() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: crate::ast::MessageSelector::Unary("foo".into()),
             parameters: vec![],
             body: vec![],
@@ -2244,6 +2294,7 @@ fn sealed_override_checks_with_external_superclasses() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: crate::ast::MessageSelector::Unary("foo".into()),
             parameters: vec![],
             body: vec![],
@@ -2270,6 +2321,7 @@ fn sealed_override_checks_with_external_superclasses() {
         span: test_span(),
     };
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![sealed_base, override_class],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -2988,6 +3040,7 @@ fn indirect_value_subclass_sets_is_value_in_hierarchy() {
     // MyValueChild should get is_value = true even though its direct superclass
     // is MyValueBase, not Value.
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![
             make_user_class("MyValueBase", "Value"),
             make_user_class("MyValueChild", "MyValueBase"),
@@ -3024,6 +3077,7 @@ fn indirect_value_subclass_gets_auto_methods() {
     // MyValueChild inherits from MyValueBase which inherits from Value.
     // MyValueChild should get auto-slot methods synthesized.
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![
             make_user_class("MyValueBase", "Value"),
             make_user_class("MyValueChild", "MyValueBase"),
@@ -3064,6 +3118,7 @@ fn testcase_indirect_value_subclass() {
     // TestCase inherits from Value, MyTest inherits from TestCase.
     // MyTest should get is_value = true.
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![
             make_user_class("TestCase", "Value"),
             make_user_class("MyTest", "TestCase"),
@@ -3092,6 +3147,7 @@ fn supervisor_subclass_stays_object() {
     // Supervisor inherits from Object. WebApp inherits from Supervisor.
     // WebApp should remain ClassKind::Object.
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("WebApp", "Supervisor")],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -3121,6 +3177,7 @@ fn cross_file_indirect_value_subclass() {
     // Simulate: File A defines MyValueBase as Value subclass (external).
     // File B defines MyChild as MyValueBase subclass (in module).
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("MyChild", "MyValueBase")],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -3205,6 +3262,7 @@ fn cross_file_value_sub_subclass_finds_new() {
         span: test_span(),
     });
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![child_class],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -3287,6 +3345,7 @@ fn cross_file_value_sub_subclass_finds_new() {
 #[test]
 fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("B", "A")],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -3402,6 +3461,7 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
 #[test]
 fn cross_file_all_initialize_assigns_includes_parent_summary() {
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("B", "A")],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -3471,6 +3531,7 @@ fn all_initialize_assigns_includes_own_summary() {
     // real body — this test is about the flattening accessor, not the
     // must-analysis itself (covered by `initialize_assigns.rs`'s own tests).
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -3504,6 +3565,7 @@ fn all_initialize_assigns_includes_own_summary() {
 #[test]
 fn all_initialize_assigns_native_ancestor_marks_incomplete() {
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("Child", "NativeParent")],
         method_definitions: vec![],
         protocols: Vec::new(),
@@ -3569,6 +3631,7 @@ fn all_initialize_assigns_native_ancestor_marks_incomplete() {
 #[test]
 fn all_initialize_assigns_missing_chain_link_marks_incomplete() {
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![make_user_class("Orphan", "UnknownAncestor")],
         method_definitions: vec![],
         protocols: Vec::new(),

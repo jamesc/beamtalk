@@ -284,6 +284,7 @@ fn make_actor_typed_no_default(field_name: &str, ty: TypeAnnotation) -> Module {
         span: s,
     };
     Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),

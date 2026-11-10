@@ -2128,7 +2128,10 @@ impl Parser {
         // doc comment and `parse_method_body`'s declaration-boundary checks.
         let previous_method_header_indent = self.current_method_header_indent.take();
         self.current_method_header_indent = Some(header_indent.unwrap_or(2));
+        // The `|>` sends this body adds belong to this method (ADR 0145).
+        let pipeline_mark = self.pipeline_sends.len();
         let body = self.parse_method_body();
+        let pipeline_sends = self.pipeline_sends.drain(pipeline_mark..).collect();
         self.current_method_header_indent = previous_method_header_indent;
         self.current_method_selector = previous_method_selector;
         self.in_method_body = false;
@@ -2151,6 +2154,7 @@ impl Parser {
         );
         method.doc_comment = doc_comment;
         method.comments = comments;
+        method.pipeline_sends = pipeline_sends;
         Some(method)
     }
 

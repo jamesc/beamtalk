@@ -121,6 +121,16 @@ pub enum TokenKind {
     /// Block argument separator: `|`
     Pipe,
 
+    /// Pipeline operator: `|>` (ADR 0145)
+    ///
+    /// One token only when `|` and `>` are adjacent; `| >` stays [`Pipe`]
+    /// followed by the binary selector `>`. Not a binary selector: it cannot
+    /// be defined as a method. `recv m1 |> m2` sends `m2` to the result of
+    /// `recv m1`.
+    ///
+    /// [`Pipe`]: TokenKind::Pipe
+    PipeGt,
+
     /// Colon for block argument declaration (not keyword selectors): `:`
     Colon,
 
@@ -299,6 +309,7 @@ impl TokenKind {
             | Self::Period
             | Self::Bang
             | Self::Pipe
+            | Self::PipeGt
             | Self::Colon
             | Self::DoubleColon
             | Self::Arrow
@@ -349,6 +360,7 @@ impl std::fmt::Display for TokenKind {
             Self::Period => write!(f, "."),
             Self::Bang => write!(f, "!"),
             Self::Pipe => write!(f, "|"),
+            Self::PipeGt => write!(f, "|>"),
             Self::Colon => write!(f, ":"),
             Self::DoubleColon => write!(f, "::"),
             Self::Arrow => write!(f, "->"),
@@ -972,6 +984,7 @@ mod tests {
         assert_eq!(TokenKind::LeftBrace.to_string(), "{");
         assert_eq!(TokenKind::RightBrace.to_string(), "}");
         assert_eq!(TokenKind::Pipe.to_string(), "|");
+        assert_eq!(TokenKind::PipeGt.to_string(), "|>");
         assert_eq!(TokenKind::Colon.to_string(), ":");
         assert_eq!(TokenKind::Hash.to_string(), "#");
         assert_eq!(TokenKind::Eof.to_string(), "<eof>");

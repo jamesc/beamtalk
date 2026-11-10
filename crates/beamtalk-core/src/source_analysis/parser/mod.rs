@@ -1097,6 +1097,10 @@ pub(super) struct Parser {
     /// treated as unattached and preserved as a plain comment, matching the
     /// pre-existing fallback behavior.
     attached_doc_comment_positions: Option<(usize, HashSet<usize>)>,
+    /// The sends written after a `|>` so far, each with the comments written
+    /// before its `|>` (ADR 0145). A method definition takes the entries its
+    /// body added (`parse_method_definition`); the module takes the rest.
+    pub(super) pipeline_sends: Vec<(Span, CommentAttachment)>,
 }
 
 impl Parser {
@@ -1124,6 +1128,7 @@ impl Parser {
             nesting_depth: 0,
             unattached_doc_comment_indices,
             attached_doc_comment_positions: None,
+            pipeline_sends: Vec::new(),
         }
     }
 
@@ -1741,6 +1746,9 @@ impl Parser {
             span,
             file_leading_comments,
             file_trailing_comments,
+            pipeline_sends: std::mem::take(&mut self.pipeline_sends)
+                .into_iter()
+                .collect(),
         }
     }
 

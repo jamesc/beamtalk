@@ -42,11 +42,12 @@ use crate::ast::{
     CascadeMessage, ClassDefinition, Comment, CommentAttachment, CommentKind, ExpectCategory,
     Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MapPair, MapPatternKey,
     MatchArm, MessageSelector, MethodDefinition, Module, NativeDeclaration, ParameterDefinition,
-    Pattern, ProtocolDefinition, ProtocolMethodSignature, ProtocolUse, SlotKind,
+    Pattern, PipelineSends, ProtocolDefinition, ProtocolMethodSignature, ProtocolUse, SlotKind,
     StandaloneMethodDefinition, StateDeclaration, StringSegment, TypeAliasDefinition,
     TypeAnnotation,
 };
 use crate::source_analysis::{Severity, binary_binding_power, lex_with_eof, parse, parse_method};
+use crate::span::Span;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{DEFAULT_LINE_WIDTH, Document, break_, concat, group, line, nest, nil};
 
@@ -397,6 +398,9 @@ impl TopLevelDecl<'_> {
 /// Builds a [`Document`] for a [`Module`].
 #[must_use]
 pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
+    // Code outside any method re-sugars from the module's own `|>` record;
+    // each method replaces it with its own (ADR 0145).
+    let _pipeline_scope = PipelineScope::enter(&module.pipeline_sends);
     let mut docs: Vec<Document<'static>> = Vec::new();
 
     // File-level leading comments (empty module edge case — ADR 0044)
@@ -1075,6 +1079,8 @@ fn unparse_method_definition_inner(
     prefix: Document<'static>,
     emit_leading: EmitLeadingComments,
 ) -> Document<'static> {
+    // The body re-sugars from the method's own `|>` record (ADR 0145).
+    let _pipeline_scope = PipelineScope::enter(&method.pipeline_sends);
     let mut docs: Vec<Document<'static>> = Vec::new();
 
     // Non-doc leading comments (section dividers etc.) — emitted only on the
@@ -1419,8 +1425,12 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             selector,
             arguments,
             is_cast,
-            ..
+            span,
         } => {
+            if let Some(comments) = pipeline_comments(*span) {
+                let prefix = unparse_pipeline_prefix(receiver, &comments);
+                return unparse_message(prefix, selector, arguments, *is_cast);
+            }
             // Flatten ++ chains for width-aware line breaking
             if matches!(selector, MessageSelector::Binary(op) if op.as_str() == "++") && !*is_cast {
                 if let Some(doc) = unparse_concat_chain(expr) {
@@ -1462,8 +1472,15 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             value,
             arms,
             exhaustive,
-            ..
-        } => unparse_match(value, arms, *exhaustive),
+            span,
+        } => {
+            // `x |> match: [...]`: the stage's keyword message is `match:`.
+            let value_doc = match pipeline_comments(*span) {
+                Some(comments) => unparse_pipeline_prefix(value, &comments),
+                None => unparse_expression(value),
+            };
+            unparse_match(value_doc, arms, *exhaustive)
+        }
         Expression::MapLiteral { pairs, .. } => unparse_map_literal(pairs),
         Expression::ListLiteral { elements, tail, .. } => {
             unparse_list_literal(elements, tail.as_deref())
@@ -1588,8 +1605,10 @@ enum OperandSlot<'a> {
     BinaryReceiver(&'a str),
     /// The argument of a binary send with this operator.
     BinaryArgument(&'a str),
-    /// A keyword send's receiver or argument.
+    /// A keyword send's receiver.
     KeywordOperand,
+    /// A keyword send's argument.
+    KeywordArgument,
 }
 
 impl<'a> OperandSlot<'a> {
@@ -1604,9 +1623,14 @@ impl<'a> OperandSlot<'a> {
     fn argument_of(selector: &'a MessageSelector) -> Self {
         match selector {
             // A unary send has no arguments; keyword is the conservative answer.
-            MessageSelector::Unary(_) | MessageSelector::Keyword(_) => Self::KeywordOperand,
+            MessageSelector::Unary(_) | MessageSelector::Keyword(_) => Self::KeywordArgument,
             MessageSelector::Binary(op) => Self::BinaryArgument(op),
         }
+    }
+
+    /// Whether this slot is a send's argument (rather than its receiver).
+    const fn is_argument(self) -> bool {
+        matches!(self, Self::BinaryArgument(_) | Self::KeywordArgument)
     }
 
     /// Whether `expr` must be parenthesised to re-parse as this slot's
@@ -1616,13 +1640,22 @@ impl<'a> OperandSlot<'a> {
     /// ([`binary_binding_power`]): Beamtalk binary operators have math
     /// precedence, not Smalltalk's flat left-to-right order, so `(a + b) * c`
     /// keeps its parentheses while `(a * b) + c` and `a + (b * c)` do not.
+    ///
+    /// A pipeline (ADR 0145) prints as `head |> stage`, and `|>` binds looser
+    /// than every message, so as an argument it must be parenthesised
+    /// whatever its own shape: `x at: (a |> foo)`. As a receiver it needs
+    /// nothing extra: a message after it extends its last stage, which is the
+    /// same tree.
     fn needs_parens(self, expr: &Expression) -> bool {
+        if self.is_argument() && starts_with_pipeline(expr) {
+            return true;
+        }
         match OperandShape::of(expr) {
             OperandShape::Tight => false,
             OperandShape::Loose => true,
             OperandShape::Binary(inner) => match self {
                 Self::UnaryReceiver => true,
-                Self::KeywordOperand => false,
+                Self::KeywordOperand | Self::KeywordArgument => false,
                 // `inner`'s chain swallows `outer` when `outer` binds its
                 // left operand at least as tightly as `inner` binds its right.
                 Self::BinaryReceiver(outer) => {
@@ -1720,6 +1753,18 @@ fn unparse_message_send(
     is_cast: bool,
 ) -> Document<'static> {
     let recv_doc = unparse_operand(receiver, OperandSlot::receiver_of(selector));
+    unparse_message(recv_doc, selector, arguments, is_cast)
+}
+
+/// Builds a send's document from its already-built receiver document: the
+/// receiver, then the message (`recv_doc` must already carry any
+/// parentheses its slot needs).
+fn unparse_message(
+    recv_doc: Document<'static>,
+    selector: &MessageSelector,
+    arguments: &[Expression],
+    is_cast: bool,
+) -> Document<'static> {
     let cast_suffix = if is_cast { Document::Str("!") } else { nil() };
     let arg_doc = |arg: &Expression| unparse_operand(arg, OperandSlot::argument_of(selector));
 
@@ -1779,6 +1824,121 @@ fn unparse_message_send(
     };
 
     docvec![msg, cast_suffix]
+}
+
+// --- Pipeline re-sugaring (ADR 0145) ---
+//
+// The parser builds `recv m1 |> m2` as the plain send `(recv m1) m2` and
+// records the send each `|>` introduced on the owning definition
+// ([`PipelineSends`]). Printing `|>` back needs that record wherever a send is
+// unparsed, which is many functions deep. Rather than thread it through every
+// one, the definition that owns it installs it for the duration of its own
+// unparse ([`PipelineScope`]): `unparse_module_doc` for code outside methods,
+// `unparse_method_definition_inner` for a method body. The scope is restored
+// on exit, so a method's record never leaks into the module-level code
+// around it.
+
+thread_local! {
+    /// The `|>` record of the definition being unparsed on this thread.
+    static PIPELINE_SENDS: std::cell::RefCell<PipelineSends> =
+        std::cell::RefCell::new(PipelineSends::default());
+}
+
+/// Installs a definition's `|>` record for unparsing its code, restoring the
+/// enclosing definition's record when dropped.
+struct PipelineScope {
+    previous: PipelineSends,
+}
+
+impl PipelineScope {
+    fn enter(sends: &PipelineSends) -> Self {
+        let previous = PIPELINE_SENDS.with(|current| current.replace(sends.clone()));
+        Self { previous }
+    }
+}
+
+impl Drop for PipelineScope {
+    fn drop(&mut self) {
+        let previous = std::mem::take(&mut self.previous);
+        PIPELINE_SENDS.with(|current| *current.borrow_mut() = previous);
+    }
+}
+
+/// Whether the send spanning `span` was written with `|>`.
+fn is_pipeline_send(span: Span) -> bool {
+    PIPELINE_SENDS.with(|current| current.borrow().contains(span))
+}
+
+/// The comments written before the `|>` of the send spanning `span`, or
+/// `None` if that send was not written with `|>`.
+fn pipeline_comments(span: Span) -> Option<CommentAttachment> {
+    PIPELINE_SENDS.with(|current| current.borrow().comments(span).cloned())
+}
+
+/// Whether `expr` prints as a pipeline: whether a send on its receiver
+/// spine (itself, its receiver, that one's receiver, …) was written with
+/// `|>`. A parenthesised receiver ends the spine: it is self-delimiting.
+fn starts_with_pipeline(expr: &Expression) -> bool {
+    let mut current = expr;
+    loop {
+        match current {
+            Expression::MessageSend { receiver, span, .. } => {
+                if is_pipeline_send(*span) {
+                    return true;
+                }
+                current = receiver;
+            }
+            Expression::Match { value, span, .. } => {
+                if is_pipeline_send(*span) {
+                    return true;
+                }
+                current = value;
+            }
+            _ => return false,
+        }
+    }
+}
+
+/// The receiver half of a send written with `|>`: the previous stage as
+/// written, any comments written before the `|>`, then `|>` itself. The
+/// message follows it as for any send.
+///
+/// The previous stage needs no parentheses: `|>` binds looser than every
+/// message, so a keyword send (`a withX: 1 |> withY: 2`) or a `match:`
+/// prints bare. Only a statement-shaped node, which a stage can never be,
+/// would need them.
+fn unparse_pipeline_prefix(
+    receiver: &Expression,
+    comments: &CommentAttachment,
+) -> Document<'static> {
+    let receiver_doc = unparse_expression(receiver);
+    let receiver_doc = if matches!(
+        receiver,
+        Expression::Cascade { .. }
+            | Expression::Assignment { .. }
+            | Expression::DestructureAssignment { .. }
+            | Expression::Return { .. }
+            | Expression::Primitive { .. }
+            | Expression::ExpectDirective { .. }
+            | Expression::MessageSend { is_cast: true, .. }
+    ) {
+        docvec!["(", receiver_doc, ")"]
+    } else {
+        receiver_doc
+    };
+    if comments.leading.is_empty() && comments.trailing.is_none() {
+        return docvec![receiver_doc, " |>"];
+    }
+    // A comment between stages puts the `|>` on its own line, indented
+    // under the pipeline's head (the full layout is BT-4517's).
+    let trailing = comments
+        .trailing
+        .as_ref()
+        .map_or_else(nil, |trail| docvec!["  ", unparse_comment(trail)]);
+    let mut before_pipe: Vec<Document<'static>> = vec![line()];
+    before_pipe.extend(unparse_comment_attachment_leading(comments));
+    before_pipe.push(Document::Str("|>"));
+    docvec![receiver_doc, trailing, nest(2, concat(before_pipe))]
 }
 
 // --- String concatenation chain (++) ---
@@ -1994,7 +2154,26 @@ fn unparse_cascade_message(msg: &CascadeMessage) -> Document<'static> {
 }
 
 fn unparse_cascade(receiver: &Expression, messages: &[CascadeMessage]) -> Document<'static> {
-    let receiver_doc = unparse_expression(receiver);
+    // The cascade's target is the folded first send's receiver. A pipeline
+    // there must keep its parentheses: `(a |> foo) bar; baz` written without
+    // them is `a |> foo bar; baz`, which mixes `|>` and `;` and does not
+    // re-parse (ADR 0145). After the operand-paren peel nothing else puts
+    // them back, because as a plain unary receiver a pipeline needs none.
+    let receiver_doc = match receiver {
+        Expression::MessageSend {
+            receiver: target,
+            selector,
+            arguments,
+            is_cast,
+            ..
+        } if starts_with_pipeline(target) => unparse_message(
+            docvec!["(", unparse_expression(target), ")"],
+            selector,
+            arguments,
+            *is_cast,
+        ),
+        _ => unparse_expression(receiver),
+    };
     let msg_docs: Vec<Document<'static>> = messages.iter().map(unparse_cascade_message).collect();
 
     if messages.len() == 1 {
@@ -2030,7 +2209,11 @@ fn unparse_cascade(receiver: &Expression, messages: &[CascadeMessage]) -> Docume
 
 // --- Match unparsing ---
 
-fn unparse_match(value: &Expression, arms: &[MatchArm], exhaustive: bool) -> Document<'static> {
+fn unparse_match(
+    value_doc: Document<'static>,
+    arms: &[MatchArm],
+    exhaustive: bool,
+) -> Document<'static> {
     // ADR 0106: `matchExhaustive:` round-trips through unparse just
     // like `match:` — only the keyword selector differs.
     let keyword = if exhaustive {
@@ -2042,7 +2225,7 @@ fn unparse_match(value: &Expression, arms: &[MatchArm], exhaustive: bool) -> Doc
     if arm_docs.len() <= 1 {
         // Single arm: try inline, break if too wide
         let joined = join_docs(arm_docs, "; ");
-        group(docvec![unparse_expression(value), keyword, joined, "]"])
+        group(docvec![value_doc, keyword, joined, "]"])
     } else {
         // Multiple arms: one per line
         let mut body: Vec<Document<'static>> = Vec::new();
@@ -2064,13 +2247,7 @@ fn unparse_match(value: &Expression, arms: &[MatchArm], exhaustive: bool) -> Doc
                 body.push(Document::Str(";"));
             }
         }
-        docvec![
-            unparse_expression(value),
-            keyword,
-            nest(2, concat(body)),
-            line(),
-            "]"
-        ]
+        docvec![value_doc, keyword, nest(2, concat(body)), line(), "]"]
     }
 }
 
