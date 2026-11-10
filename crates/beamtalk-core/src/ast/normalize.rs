@@ -87,12 +87,23 @@
 //! written. Only a parameterless literal block receiver is rewritten: any
 //! other receiver is an ordinary send of `whileTrue`/`whileFalse` (`Block`
 //! defines both for those).
+//!
+//! `repeat` is the same loop with a condition that is always true (BT-4589):
+//! `[b] repeat` becomes `[true] whileTrue: [b]`. The condition block the pass
+//! adds is zero-width at the start of the send and holds only `true`, which no
+//! parsed block is, so [`written_repeat`] recognises it and the restore puts
+//! `[b] repeat` back. Before, codegen lowered `repeat` on its own path, which
+//! no state-threading recognizer knew: a body that wrote a REPL binding was a
+//! stateful block applied with no arguments (`arity_mismatch`).
 
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
-use super::{Block, Expression, KeywordPart, MessageSelector, MethodDefinition, Module};
+use super::{
+    Block, Expression, ExpressionStatement, Identifier, KeywordPart, MessageSelector,
+    MethodDefinition, Module,
+};
 use crate::ast_walker::{walk_expression, walk_expression_mut};
 use crate::span::Span;
 
@@ -283,9 +294,9 @@ fn unary_loop_keyword(node: &Expression) -> Option<&'static str> {
     else {
         return None;
     };
-    // A receiver with parameters is no loop condition (the keyword loop never
-    // checks the condition's arity): it stays an ordinary send, which
-    // `Block>>whileTrue` rejects.
+    // A receiver with parameters is no loop condition: it stays an ordinary
+    // send, which `Block>>whileTrue` rejects at run time. (Rewriting it would
+    // turn that into the keyword loop's compile-time arity error, BT-4617.)
     if !arguments.is_empty()
         || !matches!(receiver.unwrap_parens(), Expression::Block(b) if b.parameters.is_empty())
     {
@@ -297,6 +308,25 @@ fn unary_loop_keyword(node: &Expression) -> Option<&'static str> {
         .map(|&(_, keyword)| keyword)
 }
 
+/// Whether `node` is a `repeat` send to a parameterless literal block
+/// (parentheses around it included, which the peel removes first): the loop
+/// [`desugar_unary_loops`] rewrites as `[true] whileTrue: <block>` (BT-4589).
+/// Any other receiver is an ordinary send of `repeat`.
+fn is_literal_repeat(node: &Expression) -> bool {
+    matches!(
+        node,
+        Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Unary(name),
+            arguments,
+            is_cast: false,
+            ..
+        } if name == "repeat"
+            && arguments.is_empty()
+            && matches!(receiver.unwrap_parens(), Expression::Block(b) if b.parameters.is_empty())
+    )
+}
+
 /// The span of the empty body block [`desugar_unary_loops`] gives the unary
 /// loop send spanning `send`: zero-width, at the send's end.
 fn desugared_body_span(send: Span) -> Span {
@@ -305,9 +335,15 @@ fn desugared_body_span(send: Span) -> Span {
 
 /// Rewrites every unary loop send in `expr`'s tree (`[c] whileTrue`) as its
 /// keyword loop with an empty body (`[c] whileTrue: []`), the body's span
-/// marking it as added ([`desugared_body_span`]). Idempotent.
+/// marking it as added ([`desugared_body_span`]), and every literal `[b]
+/// repeat` as `[true] whileTrue: [b]`, the condition's span marking it as
+/// added. Idempotent.
 pub fn desugar_unary_loops(expr: &mut Expression) {
     walk_expression_mut(expr, &mut |node| {
+        if is_literal_repeat(node) {
+            desugar_repeat(node);
+            return;
+        }
         let Some(keyword) = unary_loop_keyword(node) else {
             return;
         };
@@ -323,6 +359,88 @@ pub fn desugar_unary_loops(expr: &mut Expression) {
             arguments.push(Expression::Block(Block::new(Vec::new(), Vec::new(), body)));
         }
     });
+}
+
+/// Rewrites the literal `[b] repeat` send `node` ([`is_literal_repeat`]) as
+/// `[true] whileTrue: [b]`. The added condition block and its keyword are
+/// zero-width at the start of the send ([`written_repeat`] reads that).
+///
+/// The block and its `true` share that one span. Span-keyed maps hold the
+/// block's entry: the type checker records a node after its children, so the
+/// block's type replaces its statement's (pinned by
+/// `repeat_condition_block_keeps_its_block_type`), and no reader looks up the
+/// added `true` itself (codegen lowers it as the literal atom).
+fn desugar_repeat(node: &mut Expression) {
+    let Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        span,
+        ..
+    } = node
+    else {
+        return;
+    };
+    let added = Span::new(span.start(), span.start());
+    let condition = Expression::Block(Block::new(
+        Vec::new(),
+        vec![ExpressionStatement::bare(Expression::Identifier(
+            Identifier::new("true", added),
+        ))],
+        added,
+    ));
+    let body = std::mem::replace(receiver.as_mut(), condition);
+    *selector = MessageSelector::Keyword(vec![KeywordPart::new("whileTrue:", added)]);
+    arguments.push(body);
+}
+
+/// Whether a send of `selector` to `receiver` with `arguments` is a `repeat`
+/// [`desugar_unary_loops`] canonicalised (BT-4589): a `whileTrue:` whose
+/// receiver is the zero-width, parameterless `[true]` block the pass adds (no
+/// parsed block is zero-width). The one test for "this loop was written
+/// `repeat`": the restore below and the diagnostics that name the selector as
+/// written read it.
+#[must_use]
+pub fn written_repeat(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    arguments: &[Expression],
+) -> bool {
+    let MessageSelector::Keyword(parts) = selector else {
+        return false;
+    };
+    let ([part], [_]) = (parts.as_slice(), arguments) else {
+        return false;
+    };
+    part.keyword == "whileTrue:"
+        && matches!(
+            receiver,
+            Expression::Block(b) if b.span.is_empty()
+                && b.parameters.is_empty()
+                && matches!(
+                    b.body.as_slice(),
+                    [stmt] if matches!(&stmt.expression, Expression::Identifier(id) if id.name == "true")
+                )
+        )
+}
+
+/// The selector a send of `selector` to `receiver` with `arguments` was
+/// written as: `repeat` for a loop [`written_repeat`] reads, the unary loop
+/// for one [`written_unary_loop`] reads, else `selector` itself. The one
+/// helper diagnostics use to name a canonicalised loop as written.
+#[must_use]
+pub fn selector_as_written(
+    receiver: &Expression,
+    selector: &MessageSelector,
+    arguments: &[Expression],
+) -> ecow::EcoString {
+    if written_repeat(receiver, selector, arguments) {
+        return "repeat".into();
+    }
+    match written_unary_loop(selector, arguments) {
+        Some(unary) => unary.into(),
+        None => selector.name(),
+    }
 }
 
 /// The unary selector a send of `selector` with `arguments` was written as,
@@ -367,12 +485,15 @@ pub fn method_has_desugared_unary_loop(method: &MethodDefinition) -> bool {
                 return;
             }
             if let Expression::MessageSend {
+                receiver,
                 selector,
                 arguments,
                 ..
             } = node
             {
-                found = found || written_unary_loop(selector, arguments).is_some();
+                found = found
+                    || written_unary_loop(selector, arguments).is_some()
+                    || written_repeat(receiver, selector, arguments);
             }
         });
     }
@@ -381,10 +502,12 @@ pub fn method_has_desugared_unary_loop(method: &MethodDefinition) -> bool {
 
 /// The inverse of [`desugar_unary_loops`] on `expr`'s tree: a keyword loop
 /// whose body is the empty block the pass added ([`written_unary_loop`])
-/// becomes the unary send again.
+/// becomes the unary send again, and a `whileTrue:` whose condition the pass
+/// added ([`written_repeat`]) becomes `<body> repeat`.
 fn restore_unary_loops(expr: &mut Expression) {
     walk_expression_mut(expr, &mut |node| {
         let Expression::MessageSend {
+            receiver,
             selector,
             arguments,
             ..
@@ -392,6 +515,13 @@ fn restore_unary_loops(expr: &mut Expression) {
         else {
             return;
         };
+        if written_repeat(receiver, selector, arguments) {
+            if let Some(body) = arguments.pop() {
+                **receiver = body;
+                *selector = MessageSelector::Unary("repeat".into());
+            }
+            return;
+        }
         if let Some(unary) = written_unary_loop(selector, arguments) {
             arguments.clear();
             *selector = MessageSelector::Unary(unary.into());
@@ -411,7 +541,7 @@ pub fn restore_unary_loops_in_module(module: &mut Module) {
 fn expr_first_unary_loop(expr: &Expression) -> Option<Span> {
     let mut found = None;
     walk_expression(expr, &mut |node| {
-        if found.is_none() && unary_loop_keyword(node).is_some() {
+        if found.is_none() && (unary_loop_keyword(node).is_some() || is_literal_repeat(node)) {
             found = Some(node.span());
         }
     });
@@ -1136,6 +1266,106 @@ Protocol define: P
     #[test]
     fn restore_gives_back_unary_loops_as_written() {
         for (restored, raw) in restored_and_raw(UNARY_LOOP_SOURCE) {
+            assert_eq!(restored, raw);
+        }
+    }
+
+    // --- BT-4589: `repeat` ---
+
+    const REPEAT_SOURCE: &str = "Object subclass: A
+  r => [x := x + 1. x >= 3 ifTrue: [^x]] repeat
+  p => ([x foo]) repeat
+  n => [[y bar] repeat] repeat. z := [nil] repeat
+  w => [true] whileTrue: [x foo]
+  o => b repeat
+  q => [:x | x] repeat
+";
+
+    #[test]
+    fn repeat_becomes_while_true_with_a_true_condition() {
+        let module = peeled(REPEAT_SOURCE);
+        assert!(!needs_normalising(&module));
+        let methods = &module.classes[0].methods;
+        let text = |i: usize| crate::unparse::unparse_method(&methods[i]);
+        for i in 0..2 {
+            assert!(
+                text(i).contains("[true]") && text(i).contains("whileTrue:"),
+                "{}",
+                text(i)
+            );
+            assert!(!text(i).contains("repeat"), "{}", text(i));
+        }
+        assert_eq!(text(2).matches("whileTrue:").count(), 3, "{}", text(2));
+        // A non-literal receiver, or one with parameters, is an ordinary send.
+        assert!(text(4).trim_end().ends_with("b repeat"), "{}", text(4));
+        assert!(
+            text(5).trim_end().ends_with("[:x | x] repeat"),
+            "{}",
+            text(5)
+        );
+        // Only the loops the pass wrote are read back as `repeat`: a written
+        // `[true] whileTrue:` is not.
+        let written = |i: usize| {
+            let mut found = 0;
+            walk_expression(&methods[i].body[0].expression, &mut |node| {
+                if let Expression::MessageSend {
+                    receiver,
+                    selector,
+                    arguments,
+                    ..
+                } = node
+                {
+                    found += usize::from(written_repeat(receiver, selector, arguments));
+                }
+            });
+            found
+        };
+        assert_eq!(
+            (0..4).map(written).collect::<Vec<_>>(),
+            vec![1, 1, 2, 0],
+            "{module:?}"
+        );
+    }
+
+    #[test]
+    fn repeat_is_detected_and_the_pass_is_idempotent() {
+        assert!(needs_normalising(&parse_bt("[x] repeat")));
+        assert!(!needs_normalising(&parse_bt("b repeat\n[:x | x] repeat")));
+        let once = peeled(REPEAT_SOURCE);
+        let mut twice = once.clone();
+        peel_operand_parens(&mut twice);
+        assert_eq!(once, twice);
+    }
+
+    /// The added condition block and its `true` share one zero-width span;
+    /// the type map holds the block's type there, the same type a written
+    /// `[true]` condition gets.
+    #[test]
+    fn repeat_condition_block_keeps_its_block_type() {
+        use crate::semantic_analysis::ClassHierarchy;
+        use crate::semantic_analysis::type_checker::infer_types;
+        let condition_type = |source: &str| {
+            let module = peeled(source);
+            let types = infer_types(&module, &ClassHierarchy::with_builtins(), None);
+            let Expression::MessageSend { receiver, .. } = first_expr(&module) else {
+                panic!("expected a send: {source}");
+            };
+            types.get(receiver.span()).cloned()
+        };
+        let canonical = condition_type("[3 printString] repeat");
+        assert!(
+            canonical.is_some(),
+            "no type recorded for the condition block"
+        );
+        assert_eq!(
+            canonical,
+            condition_type("[true] whileTrue: [3 printString]")
+        );
+    }
+
+    #[test]
+    fn restore_gives_back_repeat_as_written() {
+        for (restored, raw) in restored_and_raw(REPEAT_SOURCE) {
             assert_eq!(restored, raw);
         }
     }

@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Uses the sibling files' extension, alias and protocol; lints clean.
+Value subclass: Greeter
+
+  greet -> String => "hi" shout
+
+  level -> Level => #low
+
+  welcome: other :: Greetable -> String => other greet

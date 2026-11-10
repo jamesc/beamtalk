@@ -457,6 +457,16 @@ const PROCESS_BOUND_CLASS_SELECTORS: &[&str] = &[
 ];
 
 impl ClassInfo {
+    /// Whether this entry is a superclass-index stub inserted by
+    /// `ClassHierarchy::add_external_superclasses`: it carries only a name and
+    /// a superclass, so its class variables and method surface are unknown,
+    /// not absent. No other producer sets both flags; a new producer of that
+    /// combination must decide whether it is a stub (BT-4644).
+    #[must_use]
+    pub fn is_superclass_index_stub(&self) -> bool {
+        self.is_module_less && self.surface_incomplete
+    }
+
     /// Whether a class registered under `module` is module-less
     /// ([`Self::is_module_less`]): a live module-less class registers its own
     /// class name as its module (`beamtalk_object_class:init/1`'s default),

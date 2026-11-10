@@ -2653,7 +2653,7 @@ pending source fails to compile — a `{compile_error, ...}` from this
 advisory-only precheck is swallowed to `{ok, []}` rather than surfaced as a
 blocking error, since a syntactically-broken pending edit already gets its
 own diagnostics from the editor's live parse-diagnostics op
-(`beamtalk_repl_ops_dev:diagnostics_for/2`) — this precheck adding a second,
+(`beamtalk_repl_ops_dev:diagnostics_for/3`) — this precheck adding a second,
 differently-worded compile-failure report would be redundant, not helpful.
 
 The baseline is `beamtalk_workspace_shape_store:previous/1`, which an

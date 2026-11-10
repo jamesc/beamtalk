@@ -1,0 +1,5 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A type alias used from `greeter.bt`.
+type Level = #low | #high

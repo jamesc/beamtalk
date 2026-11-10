@@ -1,0 +1,42 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4584: a destructuring assignment in a `whileTrue:`/`whileFalse:`
+// condition writes the outer locals it binds, in value-type methods. The
+// condition's field write is the state effect that lets it write a local. See
+// stdlib/test/bt4584while_condition_destructure_test.bt.
+//
+// A `TestCase` subclass is the instantiable value type whose methods may
+// write a field (as in fixtures/bt4002while_field_condition_probe.bt). This
+// one holds no tests: the test class calls it on a fresh instance per row.
+
+TestCase subclass: Bt4584WhileConditionDestructureProbe
+  field: n = 0
+
+  afterLoop =>
+    w := 5
+    [
+      self.n := self.n + 1
+      #(w, _) := #(w + self.n, 0)
+      self.n < 3
+    ] whileTrue: [nil]
+    w
+
+  bodyReads =>
+    w := 5
+    k := 0
+    [
+      self.n := self.n + 1
+      #(w, _) := #(w + self.n, 0)
+      self.n < 3
+    ] whileTrue: [k := k + w]
+    #[w, k]
+
+  whileFalse =>
+    w := 5
+    [
+      self.n := self.n + 1
+      {_, w} := {#ok, w + self.n}
+      self.n >= 3
+    ] whileFalse: [nil]
+    w

@@ -107,11 +107,13 @@ fn check_source(name: &str, source: &str) -> Result<(), String> {
 
 /// ADR 0130 §4: the first violation of the `on:do:` catch-boundary order in
 /// `code`, or `None`. Each compiled `on:do:` catch is anchored by its
-/// `build_stacktrace` wrap (only `on:do:` emits it).
+/// `build_stacktrace` wrap; the value-type `dispatch/4` adapter's own wrap
+/// (`D4Built`, BT-4593) is not an `on:do:` catch and is skipped.
 fn catch_boundary_issues(code: &str) -> Option<String> {
     let anchors: Vec<usize> = code
         .match_indices("primop 'build_stacktrace'(")
         .map(|(i, _)| i)
+        .filter(|&i| !code[..i].ends_with("<D4Built> = "))
         .collect();
     let snapshots = code
         .matches("call 'beamtalk_class_vars':'snapshot'() in try")

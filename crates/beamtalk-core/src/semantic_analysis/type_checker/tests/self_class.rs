@@ -903,6 +903,63 @@ typed Object subclass: Registry
 }
 
 #[test]
+fn class_typed_parameter_forwards_to_class_parameter() {
+    // BT-4599: a value already typed `Class` (here a `:: Class` parameter, not
+    // a class literal) must satisfy another `:: Class` parameter, on both the
+    // class side and the instance side. The `:: Class` argument guard used to
+    // reject every non-literal argument, warning "expects Class, got Class".
+    let source = "
+Object subclass: Rp
+  class take: c :: Class -> Class => c
+  class pass: c :: Class -> Class => self take: c
+  take2: c :: Class -> Class => c
+  pass2: c :: Class -> Class => self take2: c
+  passBehaviour: c :: Class -> Behaviour => c
+";
+    let (module, hierarchy) = parse_and_build(source);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let warnings: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .map(|d| d.message.clone())
+        .collect();
+    assert!(
+        warnings.is_empty(),
+        "forwarding a `:: Class` parameter to a `:: Class` parameter must not warn; got {warnings:?}"
+    );
+}
+
+#[test]
+fn instance_typed_parameter_still_rejected_for_class_parameter() {
+    // BT-4599 negative side: accepting `Class`-typed values must not let an
+    // instance-typed (non-literal) argument through a `:: Class` parameter.
+    let source = "
+Object subclass: Rp
+  take: c :: Class -> Class => c
+  pass: n :: Integer -> Class => self take: n
+";
+    let (module, hierarchy) = parse_and_build(source);
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    let hits: Vec<_> = checker
+        .diagnostics()
+        .iter()
+        .filter(|d| {
+            d.message
+                .contains("Argument 1 of 'take:' on Rp expects Class, got Integer")
+        })
+        .map(|d| d.message.clone())
+        .collect();
+    assert_eq!(
+        hits.len(),
+        1,
+        "an `:: Integer` argument to a `:: Class` parameter must still warn; got {:?}",
+        checker.diagnostics()
+    );
+}
+
+#[test]
 fn syntactic_class_literal_new_still_works() {
     // REGRESSION: the syntactic `Foo new` direct-literal path must keep working
     // (it dispatches via the `Expression::ClassReference` receiver arm, not the

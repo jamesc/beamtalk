@@ -853,18 +853,6 @@ fn run_proofs(rows: &[(&Row, bool)], prefix: &str) -> Vec<String> {
     failures
 }
 
-/// PIN-BUG BT-4584: a destructuring assignment in a `whileTrue:`/`whileFalse:`
-/// condition drops its write to a workspace binding (the loop-body shape was
-/// fixed by BT-4439). Matches a row (or a failure, which starts with its row's
-/// name) whose `{S}` is in the condition and whose position destructures.
-fn pin_bug_bt4584(name: &str) -> bool {
-    let mut parts = name.splitn(3, " / ");
-    let (Some(lp), Some(position)) = (parts.next(), parts.next()) else {
-        return false;
-    };
-    lp.starts_with("[x := x + 1. {S}.") && position.starts_with("destructuring write")
-}
-
 /// Proofs 1 and 2 for the loop-body corpus.
 #[test]
 fn repl_loop_body_return_corpus_compiles_and_needs_its_boundary() {
@@ -898,22 +886,7 @@ fn repl_loop_body_returns_answer_like_a_method() {
         "too few rows fire their `^`"
     );
     let rows: Vec<(&Row, bool)> = rows.iter().map(|row| (row, true)).collect();
-    let (pinned, failures): (Vec<String>, Vec<String>) = run_proofs(&rows, "bt4288")
-        .into_iter()
-        .partition(|failure| pin_bug_bt4584(failure));
-    // PIN-BUG BT-4584: every pinned row, in both modes, still disagrees. When
-    // the fix lands this fails: delete the pin.
-    let pinned_rows = rows
-        .iter()
-        .filter(|(row, _)| pin_bug_bt4584(&row.name))
-        .count();
-    assert!(pinned_rows > 0, "the BT-4584 pin matches no row");
-    assert_eq!(
-        pinned.len(),
-        pinned_rows * 2,
-        "PIN-BUG BT-4584 flipped: a destructuring write in a loop condition now \
-         answers like a method; delete `pin_bug_bt4584`"
-    );
+    let failures = run_proofs(&rows, "bt4288");
     assert!(
         failures.is_empty(),
         "{} REPL loop-body `^` run(s) disagree with the method semantics:\n\n{}",

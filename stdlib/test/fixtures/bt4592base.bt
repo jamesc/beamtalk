@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4592 fixture: a compiled actor superclass whose method raises, reached
+// from a method-root `super` send in Bt4592Actor.
+// See stdlib/test/actor_root_super_error_test.bt.
+
+Actor subclass: Bt4592Base
+  state: count = 0
+
+  boom =>
+    self.count := self.count + 1
+    self error: "base"
+
+  count => self.count

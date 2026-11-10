@@ -52,6 +52,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Do);
         self.emit_loop_convention_diagnostic(&plan, body.span);
+        let discard = self.take_discarded_fold(body.span);
 
         let dict_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -127,8 +128,8 @@ impl CoreErlangGenerator {
                     extract_doc,
                 ]
             } else {
-                let (repack_doc, stateacc) =
-                    plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+                let tail =
+                    plan.closed_fold_tail_doc(self, extract_doc, guarded_op_bracket, discard);
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -139,11 +140,7 @@ impl CoreErlangGenerator {
                     ", ",
                     leaf::var(values_var),
                     ") in ",
-                    extract_doc,
-                    repack_doc,
-                    "{'nil', ",
-                    leaf::var(stateacc),
-                    "}",
+                    tail,
                 ]
             };
             docs.push(result_doc);
@@ -268,6 +265,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Do);
         self.emit_loop_convention_diagnostic(&plan, body.span);
+        let discard = self.take_discarded_fold(body.span);
 
         let dict_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -366,8 +364,8 @@ impl CoreErlangGenerator {
                     extract_doc,
                 ]
             } else {
-                let (repack_doc, stateacc) =
-                    plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+                let tail =
+                    plan.closed_fold_tail_doc(self, extract_doc, guarded_op_bracket, discard);
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -378,11 +376,7 @@ impl CoreErlangGenerator {
                     ", ",
                     leaf::var(pairs_var),
                     ") in ",
-                    extract_doc,
-                    repack_doc,
-                    "{'nil', ",
-                    leaf::var(stateacc),
-                    "}",
+                    tail,
                 ]
             };
             docs.push(result_doc);
@@ -863,5 +857,50 @@ mod tests {
                 );
             }
         }
+    }
+
+    // BT-4647: pins BT-4629's discarded-fold repack drop for the dict folds. A
+    // closed `do:` / `doWithKey:` that is the method root's last expression
+    // answers a bare `{'nil'}` carrier: nothing reads the locals back, so no
+    // `maps:put` of `'__local__total'` and no `{'nil', Map}`.
+    #[test]
+    fn test_dict_do_discarded_locals_answer_bare_carrier() {
+        for send in [
+            "#{#a => 1, #b => 2} do: [:v | total := total + v]",
+            "#{#a => 1, #b => 2} doWithKey: [:k :v | total := total + v]",
+        ] {
+            let src = format!(
+                "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    total := 0\n    {send}\n"
+            );
+            let code = codegen(&src);
+            assert!(
+                code.contains("{'nil'} in let _ThreadedValue"),
+                "discarded `{send}` should answer a bare carrier. Got:\n{code}"
+            );
+            assert!(
+                !code.contains("{'nil', ") && !code.contains("'__local__total'"),
+                "discarded `{send}` must not repack locals into a map. Got:\n{code}"
+            );
+        }
+    }
+
+    // BT-4647: a dict fold whose tail is read afterwards is not discarded: it
+    // must keep the `{'nil', ...}` carrier (the producer unpacks the local).
+    #[test]
+    fn test_dict_do_read_afterwards_keeps_carrier() {
+        let src = concat!(
+            "Value subclass: V\n",
+            "  state: dummy = 0\n\n",
+            "  run =>\n",
+            "    total := 0\n",
+            "    #{#a => 1, #b => 2} do: [:v | total := total + v]\n",
+            "    total\n",
+        );
+        let code = codegen(src);
+        assert!(
+            code.contains("let Total@ = _FoldResult@")
+                && !code.contains("{'nil'} in let _ThreadedValue"),
+            "a dict do: whose local is read afterwards must not drop its carrier. Got:\n{code}"
+        );
     }
 }

@@ -500,7 +500,15 @@ defmodule BtAttach.Facade do
       # LiveView event whitelist can't push a non-binary into
       # `Workspace.diagnostics/2`'s `is_binary(mode)` guard (BT-2569).
       mode = if Map.get(params, :mode) == "method", do: "method", else: "expression"
-      client().diagnostics(code, mode)
+
+      # `source_path` (BT-4583): the file a file-backed editor buffer edits,
+      # resolved server-side by the caller. Only a non-empty binary is
+      # forwarded; anything else (absent, nil, a non-binary) is a scratch
+      # buffer and takes the path-less call, so today's behaviour is kept.
+      case Map.get(params, :source_path) do
+        path when is_binary(path) and path != "" -> client().diagnostics(code, mode, path)
+        _ -> client().diagnostics(code, mode)
+      end
     else
       {:error, :invalid_params}
     end

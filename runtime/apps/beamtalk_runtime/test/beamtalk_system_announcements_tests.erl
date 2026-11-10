@@ -143,6 +143,83 @@ system_announce_is_type_targeted_test_() ->
     end}.
 
 %%====================================================================
+%% BT-4631: an unrelated subscriber (the node monitor's ClassLoaded) does not
+%% make supervision / actor events walk the class chain
+%%====================================================================
+
+unrelated_subscriber_no_walk_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        ?_test(begin
+            beamtalk_class_metadata:new(),
+            Events = [
+                {'SupervisionChildAdded', #{supervisor => 'Sup', childClass => 'Worker'}},
+                {'ActorSpawned', #{actorClass => 'Counter'}},
+                {'ActorStopped', #{actorClass => 'Counter', reason => normal}}
+            ],
+            beamtalk_class_metadata:insert('Announcement', undefined, undefined, none, undefined),
+            lists:foreach(
+                fun({C, _}) ->
+                    beamtalk_class_metadata:insert(
+                        C, undefined, undefined, 'Announcement', undefined
+                    )
+                end,
+                Events
+            ),
+            beamtalk_class_metadata:insert(
+                'ClassLoaded', undefined, undefined, 'Announcement', undefined
+            ),
+            _Monitor = subscribe_self('ClassLoaded'),
+            lists:foreach(
+                fun({C, F}) -> ok = beamtalk_announcements:system_announce(C, F) end, Events
+            ),
+            ok = meck:new(beamtalk_class_metadata, [passthrough]),
+            try
+                lists:foreach(
+                    fun({C, F}) -> ok = beamtalk_announcements:system_announce(C, F) end, Events
+                ),
+                ?assertEqual(0, meck:num_calls(beamtalk_class_metadata, lookup_superclass, '_'))
+            after
+                meck:unload(beamtalk_class_metadata),
+                lists:foreach(
+                    fun(C) -> catch beamtalk_class_metadata:delete(C) end,
+                    ['Announcement', 'ClassLoaded' | [C || {C, _} <- Events]]
+                )
+            end,
+            receive
+                {got, 'ClassLoaded', _} -> ?assert(false)
+            after 100 -> ok
+            end
+        end)
+    end}.
+
+exact_and_announcement_subscribers_still_receive_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        ?_test(begin
+            beamtalk_class_metadata:new(),
+            beamtalk_class_metadata:insert('Announcement', undefined, undefined, none, undefined),
+            beamtalk_class_metadata:insert(
+                'ActorSpawned', undefined, undefined, 'Announcement', undefined
+            ),
+            beamtalk_class_metadata:insert(
+                'ClassLoaded', undefined, undefined, 'Announcement', undefined
+            ),
+            try
+                _Monitor = subscribe_self('ClassLoaded'),
+                _Exact = subscribe_self('ActorSpawned'),
+                _Root = subscribe_self('Announcement'),
+                ok = beamtalk_announcements:system_announce('ActorSpawned', #{actorClass => 'C'}),
+                expect_event('ActorSpawned'),
+                expect_event('Announcement')
+            after
+                lists:foreach(
+                    fun(C) -> catch beamtalk_class_metadata:delete(C) end,
+                    ['Announcement', 'ClassLoaded', 'ActorSpawned']
+                )
+            end
+        end)
+    end}.
+
+%%====================================================================
 %% ClassLoaded / ClassRemoved fire on the real class lifecycle
 %%====================================================================
 
@@ -182,6 +259,46 @@ class_removed_fires_on_stop_test_() ->
             gen_server:stop(Pid),
             Event = expect_event('ClassRemoved'),
             ?assertEqual('SysAnnRemovedClass', maps:get(className, Event))
+        end)
+    end}.
+
+%% BT-4622: a callback-exception crash is not a removal — no ClassRemoved,
+%% and the metadata row stays so the class can be restarted.
+class_removed_not_fired_on_callback_crash_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        ?_test(begin
+            Name = 'SysAnnCrashedClass',
+            ClassInfo = #{
+                name => Name,
+                module => test_class,
+                superclass => 'Object',
+                instance_methods => #{},
+                instance_variables => []
+            },
+            {ok, Pid} = beamtalk_object_class:start(Name, ClassInfo),
+            _SubRef = subscribe_self('ClassRemoved'),
+            MRef = erlang:monitor(process, Pid),
+            ?assertExit(_, gen_server:call(Pid, bt4622_no_such_call)),
+            receive
+                {'DOWN', MRef, process, Pid, _} -> ok
+            after 5000 -> ?assert(false)
+            end,
+            try
+                receive
+                    {got, 'ClassRemoved', _} -> ?assert(false)
+                after 300 -> ok
+                end,
+                ?assertEqual({ok, test_class}, beamtalk_class_metadata:lookup_module(Name))
+            after
+                %% A monitor from another suite may have restarted it; stop
+                %% whatever runs now, then drop the crashed class's rows.
+                case beamtalk_class_registry:whereis_class(Name) of
+                    undefined -> ok;
+                    Live -> catch gen_server:stop(Live)
+                end,
+                beamtalk_class_metadata:delete(Name),
+                beamtalk_class_registry:forget_class_pids(Pid, Name)
+            end
         end)
     end}.
 

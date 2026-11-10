@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4617: a `whileTrue:`/`whileFalse:` loop evaluates its condition block
+// with no arguments. A literal condition block with parameters is a
+// compile-time error, like a body block with parameters. Before, the loop ran
+// and silently dropped the parameter.
+
+x := 0
+// => 0
+[:y | x < 3] whileTrue: [x := x + 1]
+// => ERROR: whileTrue: expects its receiver to be a block with 0 parameters, but got 1
+[:y | x >= 3] whileFalse: [x := x + 1]
+// => ERROR: whileFalse: expects its receiver to be a block with 0 parameters, but got 1
+[x < 3] whileTrue: [:y | x := x + 1]
+// => ERROR: whileTrue: expects a block with 0 parameters, but got 1
+x
+// => 0
+
+// A zero-argument condition still loops.
+[x < 3] whileTrue: [x := x + 1]
+// => nil
+x
+// => 3

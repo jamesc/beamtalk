@@ -171,8 +171,9 @@ fn overriding_subclass_runs_its_own_override() {
 #[test]
 fn dynamic_receiver_keeps_send() {
     let out = codegen("Object subclass: Raiser\n  boom: cls msg: m => cls signal: m\n");
+    let body = function_body(&out, "boom:msg:");
     assert!(
-        !out.contains("'beamtalk_exception_handler'") && !out.contains("'static_call_target'"),
-        "a dynamic receiver is an ordinary send. Got:\n{out}"
+        !body.contains("'beamtalk_exception_handler'") && !body.contains("'static_call_target'"),
+        "a dynamic receiver is an ordinary send. Got:\n{body}"
     );
 }

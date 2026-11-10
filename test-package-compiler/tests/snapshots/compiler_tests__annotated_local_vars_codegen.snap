@@ -96,7 +96,13 @@ call 'maps':'get'('eventId', Self)
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     try call 'annotated_local_vars':'dispatch'(Selector, Args, Self)
     of <D4Result> -> {'reply', D4Result, State}
-    catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}
+    catch <D4Type, D4Error, D4Stack> ->
+        case D4Type of
+            <'error'> when 'true' ->
+                let <D4Built> = primop 'build_stacktrace'(D4Stack) in
+                {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built, ~{}~), State}
+            <_D4Other> when 'true' -> primop 'raw_raise'(D4Type, D4Error, D4Stack)
+        end
 
 
 'has_method'/1 = fun (Selector) ->
@@ -161,8 +167,8 @@ call 'maps':'get'('eventId', Self)
       'field_kinds' => ~{'eventId' => 'eager'}~,
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
-      'method_info' => ~{'eventId' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withEventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'method_info' => ~{'eventId' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withEventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Snapshot', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Snapshot', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'direct_constructors' => ['new', 'new:'],
@@ -251,8 +257,8 @@ call 'maps':'get'('eventId', Self)
       'field_kinds' => ~{'eventId' => 'eager'}~,
       'class_field_kinds' => ~{}~,
       'initialize_assigns' => [],
-      'method_info' => ~{'eventId' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withEventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
-      'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'method_info' => ~{'eventId' => ~{'arity' => 0, 'param_types' => [], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'withEventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Snapshot', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
+      'class_method_info' => ~{'eventId:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Snapshot', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'direct_constructors' => ['new', 'new:'],

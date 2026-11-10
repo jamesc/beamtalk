@@ -1755,6 +1755,32 @@ impl ThreadingPlan {
         }
         (Document::Vec(docs), current)
     }
+
+    /// The tail of a closed tuple/bare `do:`-style fold, after the `foldl`
+    /// call has bound `extract_doc`'s `FoldResult`. Normally the extracted
+    /// locals are repacked into the `{'nil', Map}` carrier the producer site
+    /// unpacks. BT-4629: when `discard` (the producer's locals are never read
+    /// again, `LoopMode::discarded_fold_block`) and no guarded-op bracket owes
+    /// a cell take, nothing reads the map, so the carrier is just `{'nil'}`.
+    pub fn closed_fold_tail_doc(
+        &self,
+        generator: &mut CoreErlangGenerator,
+        extract_doc: Document<'static>,
+        guarded_op_bracket: bool,
+        discard: bool,
+    ) -> Document<'static> {
+        if discard && !guarded_op_bracket {
+            return docvec!["{'nil'}"];
+        }
+        let (repack_doc, stateacc) = self.append_repack_stateacc_doc(generator, guarded_op_bracket);
+        docvec![
+            extract_doc,
+            repack_doc,
+            "{'nil', ",
+            leaf::var(stateacc),
+            "}"
+        ]
+    }
 }
 
 #[cfg(test)]

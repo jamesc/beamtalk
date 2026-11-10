@@ -3814,6 +3814,44 @@ fn unary_while_condition_write_has_the_keyword_loop_verdict() {
     assert_eq!(checked, 30);
 }
 
+/// BT-4589: a `repeat` is canonicalised to `[true] whileTrue: [...]`
+/// (`ast::normalize::desugar_unary_loops`), and a unary `whileTrue` to
+/// `whileTrue: []`; a diagnostic about either names the selector as written,
+/// in a construct-position error and in a cascade escape.
+#[test]
+fn canonicalised_loop_diagnostics_name_the_written_selector() {
+    let cases = [
+        (
+            in_actor(
+                "x := 0\n#(1, 2) do: [:e | y := ([x := x + 1. x > 3 ifTrue: [^x]] repeat) printString]\nx",
+            ),
+            "`repeat` writes outer local `x`",
+        ),
+        (
+            in_actor(
+                "x := 0\n#(1, 2) do: [:e | y := ([x := x + 1. x < 3] whileTrue) printString]\nx",
+            ),
+            "`whileTrue` writes outer local `x`",
+        ),
+        (
+            in_class("x := 0\n[x := x + 1. x > 3 ifTrue: [^x]] repeat; yourself\nx"),
+            "(`repeat`)",
+        ),
+    ];
+    for (source, expected) in cases {
+        let diags = adr0131_diagnostics(&source);
+        assert!(!diags.is_empty(), "{source}: no diagnostic");
+        // (A unary loop's help may show the keyword loop to write instead.)
+        for d in &diags {
+            assert!(!d.message.contains("whileTrue:"), "{source}: {}", d.message);
+        }
+        assert!(
+            diags.iter().any(|d| d.message.contains(expected)),
+            "{source}: {diags:?}"
+        );
+    }
+}
+
 /// BT-3782: a condition that only reads outer locals, and a loop body that
 /// writes them, stay accepted in every context.
 #[test]

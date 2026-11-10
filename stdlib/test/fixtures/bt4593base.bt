@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4593 fixtures: methods a subclass inherits without overriding, so a send
+// to the subclass resolves through `beamtalk_dispatch`'s hierarchy walk.
+// See stdlib/test/dispatch_raise_shape_test.bt.
+
+Actor subclass: Bt4593Base
+
+  // The body sends a selector `x` does not understand: the DNU raised here
+  // is the method's own error, not a miss of `raisesOwnDnuOn:`.
+  raisesOwnDnuOn: x => x bt4593NoSuchSelector
+
+  // A `^` out of a block evaluated by an inherited value-class (Object)
+  // method, `then:`, reached through a dynamic send from inside a block.
+  earlyReturn =>
+    [self then: [:_ | ^#early]] value
+    #late

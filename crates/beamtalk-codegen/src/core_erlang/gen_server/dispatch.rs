@@ -832,21 +832,17 @@ impl CoreErlangGenerator {
     /// The case over `InheritedOutcome`, falling back to DNU.
     ///
     /// `beamtalk_dispatch:super/5` and `invoke_resolved/6` return
-    /// `{error, E}` for two semantically different situations — the
-    /// selector genuinely isn't found anywhere in the hierarchy (a
-    /// `#beamtalk_error{}` with `kind = does_not_understand`), or the
-    /// selector *was* found and invoked but the method itself raised a real
-    /// error: a `#beamtalk_error{}` of any other kind, or (BT-4208) the
-    /// already-wrapped exception map a value-class owner's `dispatch/4`
-    /// adapter answers — e.g. `Object>>error:` reached by an actor's
-    /// in-block `self error:` self-send. Only the former should fall
-    /// through to the fabricated DNU fallback
-    /// (`beamtalk_error:is_does_not_understand/1` is total over both
-    /// shapes); the latter must propagate via the idempotent
-    /// `beamtalk_exception_handler:reraise/1` (record-only
-    /// `beamtalk_error:raise/1` would crash with `function_clause` on the
-    /// map) instead of being discarded. An extension's own
-    /// `{error, E, State}` passes through unchanged.
+    /// `{error, E}` for two semantically different situations, told apart
+    /// by `E`'s shape (BT-4593): the selector genuinely isn't found anywhere
+    /// in the hierarchy (a `#beamtalk_error{}` record with
+    /// `kind = does_not_understand`), or the selector *was* found and invoked
+    /// but the method itself raised (always the wrapped exception map — even
+    /// for a `does_not_understand` raised inside the method body). Only the
+    /// former falls through to the fabricated DNU fallback
+    /// (`beamtalk_error:is_does_not_understand/1` answers `true` only for
+    /// that record); everything else propagates via the idempotent
+    /// `beamtalk_exception_handler:reraise/1` instead of being discarded.
+    /// An extension's own `{error, E, State}` passes through unchanged.
     fn generate_inherited_outcome_case(&self, class_name: &str) -> Document<'static> {
         let dnu_fallback = self.generate_dnu_fallback(class_name);
 

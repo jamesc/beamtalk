@@ -16,6 +16,23 @@ fn test_list_do_pure_generates_foreach() {
 }
 
 #[test]
+fn test_list_do_pure_answers_nil_not_foreach_ok() {
+    // BT-4619: `lists:foreach/2` answers `ok`; `do:` is declared `-> Nil`,
+    // so the inlined call is sequenced and the list arm answers `'nil'`.
+    let src = "Object subclass: Walker\n  run: items => items do: [:item | item]\n";
+    let code = codegen(src);
+    let squashed: String = code.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        squashed.contains("-> do call 'lists':'foreach'("),
+        "Pure do: should sequence lists:foreach. Got:\n{code}"
+    );
+    assert!(
+        squashed.contains(") 'nil' <'false'> when 'true' ->"),
+        "Pure do: list arm should answer 'nil', not foreach's 'ok'. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_list_collect_generates_map() {
     // collect: (no mutations) generates lists:map
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items collect: [:item | item]\n";
@@ -1359,7 +1376,7 @@ fn test_actor_do_non_literal_callable_emits_plain_guard_and_send() {
     let code = codegen(src);
     for needle in [
         "case call 'erlang':'is_list'(",
-        ") of <'true'> when 'true' -> call 'lists':'foreach'(",
+        ") of <'true'> when 'true' -> do call 'lists':'foreach'(",
         "<'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
         ", 'do:', [",
     ] {
@@ -3094,5 +3111,97 @@ fn test_do_fold_and_pure_inject_do_not_use_receiver_guard() {
     assert!(
         !code.contains("to_list_for_threading"),
         "A pure inject:into: must not call the receiver guard. Got:\n{code}"
+    );
+}
+
+// BT-4629: a closed tuple/bare `do:` whose locals nobody reads afterwards
+// (the method root's last expression) answers `{'nil'}` — no per-call
+// `{'nil', Map}` repack.
+#[test]
+fn test_closed_do_discarded_locals_skip_map_repack() {
+    let src = concat!(
+        "Value subclass: V\n",
+        "  state: dummy = 0\n\n",
+        "  run =>\n",
+        "    total := 0\n",
+        "    #(1, 2) do: [:v | total := total + v]\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("{'nil'} in let _ThreadedValue"),
+        "discarded do: should answer a bare carrier. Got:\n{code}"
+    );
+    assert!(
+        !code.contains("'__local__total'"),
+        "discarded do: must not repack locals into a map. Got:\n{code}"
+    );
+}
+
+// BT-4647: a non-last `do:` whose local is read afterwards lowers as a Rebind
+// producer (`let Total = FoldResult`), not a closed-form carrier. The
+// `LoopMode::discarded_fold_block` the later, discarded `do:` arms must not
+// leak into it: exactly one fold (the last) answers `{'nil'}`, and the first
+// still rebinds the fold result.
+#[test]
+fn test_discarded_fold_flag_does_not_leak_into_rebind_producer() {
+    let src = concat!(
+        "Value subclass: V\n",
+        "  state: dummy = 0\n\n",
+        "  run =>\n",
+        "    total := 0\n",
+        "    #(1, 2) do: [:v | total := total + v].\n",
+        "    #(3) do: [:v | total := total + v]\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("let Total@ = _FoldResult@"),
+        "the non-last do: must rebind its fold result. Got:\n{code}"
+    );
+    assert_eq!(
+        code.matches("{'nil'} in let _ThreadedValue").count(),
+        1,
+        "only the last (discarded) do: answers a bare carrier. Got:\n{code}"
+    );
+}
+
+// BT-4647: the same non-last `do:` with the local read afterwards keeps its
+// value: no bare `{'nil'}` carrier anywhere.
+#[test]
+fn test_rebind_tail_do_never_answers_bare_carrier() {
+    let src = concat!(
+        "Value subclass: V\n",
+        "  state: dummy = 0\n\n",
+        "  run =>\n",
+        "    total := 0\n",
+        "    #(1, 2) do: [:v | total := total + v].\n",
+        "    total\n",
+    );
+    let code = codegen(src);
+    assert!(
+        code.contains("let Total@ = _FoldResult@") && !code.contains("{'nil'}"),
+        "a do: whose local is read afterwards must rebind it. Got:\n{code}"
+    );
+}
+
+// BT-4647: a value-type fold that also writes a `self` field carries the
+// field family in its carrier slots, so it is never discarded to `{'nil'}`.
+// `Object subclass:` (field writes are illegal on `Value subclass:`).
+#[test]
+fn test_closed_do_writing_self_field_keeps_carrier_slots() {
+    let src = concat!(
+        "Object subclass: V\n",
+        "  state: n = 0\n\n",
+        "  run =>\n",
+        "    total := 0\n",
+        "    #(1, 2) do: [:v | total := total + v. self.n := self.n + 1]\n",
+    );
+    let code = codegen(src);
+    assert!(
+        !code.contains("{'nil'} in let _ThreadedValue"),
+        "a self-field-writing fold must keep its carrier slots. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'nil', "),
+        "the carrier must still hold the fold's slots. Got:\n{code}"
     );
 }

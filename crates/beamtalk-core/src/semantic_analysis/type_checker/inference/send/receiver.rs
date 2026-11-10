@@ -19,6 +19,7 @@ use crate::semantic_analysis::protocol_registry::ProtocolMethodRequirement;
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::type_checker::known_remote;
 use crate::semantic_analysis::type_checker::type_resolver;
+use crate::semantic_analysis::type_checker::validation::ProtocolSendResolution;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{
     DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv, TypeStringContext, narrowing,
@@ -119,6 +120,12 @@ impl TypeChecker {
         let is_object_then = selector_name == super::super::blocks::THEN_SELECTOR
             && !Self::is_class_side_receiver(receiver, env)
             && Self::then_resolves_to_object(&receiver_ty, hierarchy);
+
+        // BT-4636: collect the block arguments' writes to outer locals and join
+        // them into `env` once all arguments are inferred (see
+        // `TypeChecker::defer_block_widening`).
+        let outer_defer = std::mem::replace(&mut self.defer_block_widening, true);
+        let outer_deferred = std::mem::take(&mut self.deferred_block_widenings);
 
         // Infer argument types, applying narrowing to block arguments when detected.
         let arg_types: Vec<InferredType> = if let Some(ref info) = narrowing {
@@ -234,6 +241,10 @@ impl TypeChecker {
                 in_abstract_method,
             )
         };
+
+        self.defer_block_widening = outer_defer;
+        let deferred = std::mem::replace(&mut self.deferred_block_widenings, outer_deferred);
+        Self::apply_deferred_block_widenings(&deferred, env);
 
         // BT-4444: `[:x :: T | ...] value: arg` — check each argument
         // against the literal's annotated parameter types.
@@ -722,12 +733,22 @@ impl TypeChecker {
             // (`#west =:= unionVar`) must fall through to the
             // statically-decidable-comparison hint below rather than
             // short-circuiting on `Symbol`'s `=:=`.
-            let resolve_class: EcoString =
-                if !class_name.contains('|') && !matches!(selector, MessageSelector::Binary(_)) {
-                    EcoString::from(super::super::method_resolution_class(class_name))
-                } else {
-                    class_name.clone()
-                };
+            //
+            // A protocol receiver's non-protocol selector that every object
+            // answers (`printString`, `respondsTo:`) resolves through
+            // `Object`'s method table for its argument and return types
+            // (BT-4594). This includes binary sends: `p = x` on a protocol
+            // receiver infers `Object`'s `Boolean` rather than `Dynamic` —
+            // the singleton exclusion above does not apply.
+            let via_object = self.protocol_send_resolution(class_name, &selector_name, hierarchy)
+                == Some(ProtocolSendResolution::Object);
+            let resolve_class: EcoString = if via_object {
+                EcoString::from(WellKnownClass::Object.as_str())
+            } else if !class_name.contains('|') && !matches!(selector, MessageSelector::Binary(_)) {
+                EcoString::from(super::super::method_resolution_class(class_name))
+            } else {
+                class_name.clone()
+            };
             // Skip argument type check for binary messages only when
             // `check_binary_operand_types` already ran above (the Known/Known
             // case) — it provides more specific warnings for
@@ -810,6 +831,12 @@ impl TypeChecker {
                     // (`obj class new`, `self species withAll:`) route through
                     // `find_class_method`. Pre-0083 this returned `Dynamic`.
                     if matches!(ret_ty, DeclaredType::SelfClass) {
+                        // A protocol receiver's class is some class
+                        // conforming to it: the protocol metatype (ADR 0144),
+                        // not the `Object class` its signature came from.
+                        if via_object {
+                            return InferredType::protocol_meta(class_name.clone());
+                        }
                         // For a singleton receiver, `resolve_class` is
                         // `Symbol` so `#text class` is `Symbol class` (`#text` is a
                         // Symbol at runtime), not a phantom `Meta("#text")`.
@@ -1343,7 +1370,35 @@ impl TypeChecker {
             // `Boolean`) and downgrades genuine non-responder warnings to hints.
             // The original `member_name` (`#foo`) is still used for the
             // user-facing missing-selector message and for `Self`-typed returns.
-            let resolve_name: &str = super::super::method_resolution_class(member_name);
+            //
+            // A protocol member follows the same rule as a bare protocol
+            // receiver (BT-4594), rather than counting as an uncertain
+            // unknown class: one of its own selectors responds with
+            // `Dynamic` (as the bare `Known` path infers it), a method every
+            // object answers resolves through `Object`, and anything else is
+            // a missing member, exactly as DNU validation reports it.
+            let protocol_resolution =
+                self.protocol_send_resolution(member_name, selector, hierarchy);
+            let resolve_name: &str = match protocol_resolution {
+                Some(ProtocolSendResolution::Protocol) => {
+                    responding_count += 1;
+                    return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
+                    continue;
+                }
+                Some(ProtocolSendResolution::Unknown) => {
+                    // Reported missing, but a conformer may override
+                    // `doesNotUnderstand:`, so — like a bare protocol
+                    // receiver — this member caps the union DNU at `Hint`
+                    // and, like every other uncertain member, widens the
+                    // send's type with `Dynamic`.
+                    uncertain_member_count += 1;
+                    missing_names.push(member_name.clone());
+                    return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
+                    continue;
+                }
+                Some(ProtocolSendResolution::Object) => WellKnownClass::Object.as_str(),
+                None => super::super::method_resolution_class(member_name),
+            };
             // ADR 0100 Rule 1: route this member's completeness
             // classification through the shared classifier instead of
             // re-deriving it — the two checks this replaced (unknown class,
@@ -1371,8 +1426,16 @@ impl TypeChecker {
                             // the concrete union member (was Dynamic pre-0083).
                             // Use `resolve_name` so a singleton member
                             // yields `Symbol class` (`#foo class` is `Symbol` at
-                            // runtime), not a phantom `Meta("#foo")`.
-                            return_types.push(InferredType::meta(EcoString::from(resolve_name)));
+                            // runtime), not a phantom `Meta("#foo")`. A
+                            // protocol member's class is its protocol
+                            // metatype (ADR 0144), as on the bare path.
+                            return_types.push(
+                                if protocol_resolution == Some(ProtocolSendResolution::Object) {
+                                    InferredType::protocol_meta(member_name.clone())
+                                } else {
+                                    InferredType::meta(EcoString::from(resolve_name))
+                                },
+                            );
                         } else if let DeclaredType::ClassOf(meta_class) = ret_ty
                             && hierarchy.has_class(meta_class)
                         {

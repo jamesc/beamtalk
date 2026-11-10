@@ -14,7 +14,8 @@ writes without message-passing overhead. `private:` and `protected:` (BT-4576)
 make unnamed tables for one actor's internal state: no node-global name, and
 other processes cannot read (`private`) or write (`protected`) them. The
 owning process holds the table; when the owner terminates, the table is
-deleted automatically. Only the owner process may call `deleteTable/1`.
+deleted automatically. Any process may call `deleteTable/1` on a public
+(named) table; only the owner may delete a private/protected one.
 
 Ets objects are represented as tagged maps:
 ```
@@ -72,6 +73,11 @@ A use the table's protection forbids raises `access_denied`, never a raw
 %% e.g. `lookup: self key: key` → selector `lookup:key:` → function `lookup/2`
 -export([lookup/2, insert/3, lookupIfAbsent/3, includesKey/2, removeKey/2, removeKey/3]).
 -export([keys/1, tableSize/1, deleteTable/1]).
+
+-ifdef(TEST).
+%% Expose the badarg classifier for EUnit (named-table reuse cases).
+-export([badarg_error/2]).
+-endif.
 -export([
     removeAll/1, values/1, keysAndValuesDo/2, asDictionary/1, ifPresent/3, incrementAt/3, updateAt/3
 ]).
@@ -408,24 +414,15 @@ deleteTable(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
         ets:delete(TableName),
         nil
     catch
-        error:badarg when not is_atom(TableName) ->
-            %% An unnamed table's id is never reused, so the failure is
-            %% unambiguous: gone, or the caller is not the owner (only the
-            %% owner may delete, whatever the protection).
-            case ets:info(TableName, owner) of
-                undefined -> stale_table_error('delete', TableName);
-                _Owner -> access_denied_error('delete', TableName)
-            end;
         error:badarg ->
-            %% Named tables keep their historical `permission_error`.
-            beamtalk_error:raise(
-                beamtalk_error:new(
-                    permission_error,
-                    'Ets',
-                    'delete',
-                    <<"Caller is not the owner of the ETS table, or the table has already been deleted">>
-                )
-            )
+            %% ETS lets any process delete a public table and only the owner
+            %% a protected/private one: the same rule as a write, so the
+            %% `write` classification applies. A named table's name can be
+            %% reused before the probe; a replacement the caller could delete
+            %% (its own, or public) means the original is gone (`stale_table`),
+            %% and one it cannot delete gives `access_denied`, the stated
+            %% default since it cannot be told apart from the original.
+            badarg_error('delete', TableName)
     end;
 deleteTable(_Self) ->
     beamtalk_error:raise_type_error('Ets', 'delete', <<"Receiver must be an Ets instance">>).

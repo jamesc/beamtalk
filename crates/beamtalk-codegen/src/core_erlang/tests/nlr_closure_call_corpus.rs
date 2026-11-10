@@ -194,6 +194,19 @@ const CALLS: &[(&str, &str, bool)] = &[
     ("while_true_param_receiver", "blk whileTrue: [^2]", true),
     ("ensure_param_body", "blk ensure: [^2]", true),
     ("on_do_param_body", "blk on: Error do: [:e | ^4]", true),
+    // BT-4632: a bracketed cascade's window covers the block literals its
+    // own sends run (`bracketed_call_blocks`): those of every message, and
+    // a block-literal shared receiver. A `^`-running send nested in its
+    // receiver or an argument runs before the window's store and is
+    // checked on its own (here a conditional's fallback, which pre-stores).
+    ("cascade_own_blocks", "p foo: [^1]; bar: [^2]", false),
+    ("cascade_block_receiver", "[^1] foo; bar", false),
+    ("cascade_nested_receiver", "(p ifTrue: [^8]) foo; bar", true),
+    (
+        "cascade_nested_argument",
+        "p foo: (q ifTrue: [^8]); bar",
+        true,
+    ),
     // BT-4612: a parenthesised block literal operand is the literal (the
     // operand normalisation pass peels it), recorded, stored for and covered
     // like the bare one (`note_nlr_operands`, `on:do:`'s cover).
@@ -213,12 +226,6 @@ const CALLS: &[(&str, &str, bool)] = &[
 /// self-send) and whose non-Boolean fallback passes a `^` arm as a closure,
 /// so the fallback's pre-store must store the state after that step. Rows of
 /// the corpus like [`CALLS`]'s (`state_step_conditional` is the first).
-///
-/// The two whose conditional is an operand of a bracketed send
-/// (`state_step_operand`, `state_step_argument`) do not report with the
-/// pre-store off: the `UnbracketedNlrClosure` rule exempts every closure
-/// compiled inside a bracket window, though the operands run before the
-/// window's store (BT-4632). The pre-store is emitted there all the same.
 const STATE_STEP_PRESTORES: &[(&str, &str, bool)] = &[
     (
         "state_step_if_true",
@@ -255,12 +262,12 @@ const STATE_STEP_PRESTORES: &[(&str, &str, bool)] = &[
     (
         "state_step_operand",
         "r := 1 + ((self flip: p) ifTrue: [^8])",
-        false,
+        true,
     ),
     (
         "state_step_argument",
         "p foo: ((self flip: p) ifTrue: [^8])",
-        false,
+        true,
     ),
 ];
 

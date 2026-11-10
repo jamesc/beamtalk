@@ -128,6 +128,11 @@ pub struct DependencyScan {
     pub protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
     /// Every dependency's extension methods, merged (ADR 0070 WS3, BT-4608).
     pub extensions: beamtalk_core::compilation::extension_index::ExtensionIndex,
+    /// Every protocol those dependencies declare, stamped with its package.
+    pub protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    /// Every type alias they declare, `internal` ones included (see
+    /// [`dependency_protocol_alias_infos`]).
+    pub alias_infos: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
     /// Whether `extensions` holds all of them: every transitive dependency
     /// was found on disk and scanned completely
     /// ([`crate::dependency_extensions`]). A dependency that has not been
@@ -159,6 +164,8 @@ pub fn resolve_dependency_class_infos_with_sources(project_root: &Utf8Path) -> D
     };
     let mut class_infos = Vec::new();
     let mut protocol_defs = Vec::new();
+    let mut protocol_infos = Vec::new();
+    let mut alias_infos = Vec::new();
     let mut scanned: Vec<DiscoveredDep> = Vec::new();
 
     // The transitive walk over whatever checkouts are on disk — no network
@@ -205,6 +212,8 @@ pub fn resolve_dependency_class_infos_with_sources(project_root: &Utf8Path) -> D
             &mut protocol_sources,
             dep.scan.trait_users.protocol_sources().clone(),
         );
+        protocol_infos.extend(dep.scan.protocol_infos.iter().cloned());
+        alias_infos.extend(dep.scan.alias_infos.iter().cloned());
         let own_protocol_defs = dep.scan.trait_users.protocol_defs();
         protocol_defs.extend(own_protocol_defs.iter().cloned());
         flattened.push((dep.name.clone(), own_protocol_defs));
@@ -222,8 +231,55 @@ pub fn resolve_dependency_class_infos_with_sources(project_root: &Utf8Path) -> D
         protocol_defs,
         protocol_sources,
         extensions,
+        protocol_infos,
+        alias_infos,
         extensions_complete,
     }
+}
+
+impl From<DependencyScan> for crate::lint_pipeline::DependencyMetadata {
+    fn from(scan: DependencyScan) -> Self {
+        Self {
+            class_infos: scan.class_infos,
+            protocol_infos: scan.protocol_infos,
+            protocol_defs: scan.protocol_defs,
+            protocol_sources: scan.protocol_sources,
+            alias_infos: scan.alias_infos,
+            extensions: scan.extensions,
+            extensions_complete: scan.extensions_complete,
+        }
+    }
+}
+
+/// A dependency module's protocol and type-alias infos, as a consumer
+/// pre-loads them: protocols stamped with `dep_name` so the registry applies
+/// the `uses:` shadowing rule to a bare type annotation too (BT-3941), and
+/// every alias stamped with it, `internal` ones included, so
+/// `AliasRegistry::add_pre_loaded`'s seeding-boundary filter can drop those.
+///
+/// Shared by the build path's dependency index and this module's offline
+/// scan, so both surfaces pre-load the same dependency metadata (BT-4585).
+#[must_use]
+pub fn dependency_protocol_alias_infos(
+    module: &beamtalk_core::ast::Module,
+    dep_name: &str,
+) -> (
+    Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
+) {
+    let mut protocol_infos =
+        beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
+            module,
+        );
+    for info in &mut protocol_infos {
+        info.package = Some(dep_name.into());
+    }
+    let alias_infos =
+        beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_package_alias_infos(
+            module,
+            Some(dep_name),
+        );
+    (protocol_infos, alias_infos)
 }
 
 /// A dependency found on disk by [`resolve_dependency_class_infos`]'s walk.
@@ -295,6 +351,9 @@ struct ScannedDep {
     trait_users: beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
     /// The dependency's extension methods (ADR 0070 WS3, BT-4608).
     extensions: crate::dependency_extensions::DependencyExtensions,
+    /// Its protocols and type aliases ([`dependency_protocol_alias_infos`]).
+    protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    alias_infos: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
 }
 
 /// A [`ScannedDep`] tagged with the [`DepFingerprint`] it was scanned under.
@@ -358,6 +417,8 @@ fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<Scanne
             dep_name,
         );
     let mut extensions = crate::dependency_extensions::DependencyExtensions::scanning();
+    let mut protocol_infos = Vec::new();
+    let mut alias_infos = Vec::new();
     let mut all_read = true;
     for file in files {
         let source = match std::fs::read_to_string(&file) {
@@ -376,12 +437,17 @@ fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<Scanne
             .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
         trait_users.add_source_file(&module, file.as_str(), &source, Some(dep_name));
         extensions.add_file(&module, file.as_std_path(), &parse_diags);
+        let (module_protocols, module_aliases) = dependency_protocol_alias_infos(&module, dep_name);
+        protocol_infos.extend(module_protocols);
+        alias_infos.extend(module_aliases);
     }
 
     let scanned = std::sync::Arc::new(ScannedDep {
         class_infos,
         trait_users,
         extensions,
+        protocol_infos,
+        alias_infos,
     });
     // Only cache a result derived from every file being read successfully —
     // caching a partial result under this fingerprint would make a transient read failure
@@ -748,6 +814,53 @@ mod tests {
         let (has_deps, infos, _) = resolve_dependency_class_infos(root);
         assert!(has_deps);
         assert!(infos.is_empty());
+    }
+
+    /// BT-4585: the offline scan carries the dependency's protocol and
+    /// type-alias infos — stamped with its package, `internal` aliases
+    /// included for `AliasRegistry::add_pre_loaded` to filter — so MCP
+    /// `lint` pre-loads the same dependency metadata as `beamtalk lint`.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn path_dependency_protocol_and_alias_infos_are_collected() {
+        let tmp = TempDir::new().unwrap();
+        let project_dir = tmp.path().join("app");
+        let root = Utf8Path::from_path(project_dir.as_path()).unwrap();
+        write(
+            project_dir.join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nutils = { path = \"../utils\" }\n",
+        );
+        write(
+            tmp.path().join("utils/src/types.bt").as_path(),
+            "type Status = #active | #inactive\n\
+             internal type Secret = Integer\n\n\
+             Protocol define: Greetable\n  greet -> String\n",
+        );
+
+        let metadata: crate::lint_pipeline::DependencyMetadata =
+            resolve_dependency_class_infos_with_sources(root).into();
+        let greetable = metadata
+            .protocol_infos
+            .iter()
+            .find(|p| p.name == "Greetable")
+            .expect("Greetable protocol info");
+        assert_eq!(greetable.package.as_deref(), Some("utils"));
+        let status = metadata
+            .alias_infos
+            .iter()
+            .find(|a| a.name == "Status")
+            .expect("Status alias info");
+        assert!(!status.is_internal);
+        assert_eq!(status.package.as_deref(), Some("utils"));
+        assert!(
+            metadata
+                .alias_infos
+                .iter()
+                .any(|a| a.name == "Secret" && a.is_internal),
+            "internal aliases are carried for the seeding filter: {:?}",
+            metadata.alias_infos
+        );
     }
 
     #[test]

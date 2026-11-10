@@ -1719,17 +1719,7 @@ impl CoreErlangGenerator {
 
         // Emit the dynamic-site report entry (BT-4292): the receiver's static
         // type and the gate that kept the send dynamic.
-        if self.codegen_diagnostics_enabled {
-            let span = receiver.span();
-            let line_info = self
-                .span_to_line(span)
-                .map_or(String::new(), |l| format!(" at line {l}"));
-            let description = self.dynamic_site_description(receiver, selector);
-            self.emit_codegen_diagnostic(
-                format!("Send '{selector_atom}'{line_info}: dynamic dispatch ({description})"),
-                span,
-            );
-        }
+        self.report_dynamic_site(receiver, selector);
 
         // Capture receiver + args as one ordered sub-expression
         // sequence so left-to-right evaluation order is preserved.
@@ -3758,8 +3748,9 @@ impl CoreErlangGenerator {
 
     /// Generates code for a super message send.
     ///
-    /// Super calls use `beamtalk_dispatch:super/5` to invoke the superclass
-    /// implementation via hierarchy walking (ADR 0006).
+    /// A method-root actor super call uses `beamtalk_dispatch:super_reply/5`
+    /// (`super/5`, re-raising an error answer, BT-4592) to invoke the
+    /// superclass implementation via hierarchy walking (ADR 0006).
     ///
     /// # Example
     ///
@@ -3772,9 +3763,9 @@ impl CoreErlangGenerator {
     /// Generates:
     ///
     /// ```erlang
-    /// call 'beamtalk_dispatch':'super'('increment', [], Self, State, 'Counter')
-    /// call 'beamtalk_dispatch':'super'('getValue', [], Self, State, 'Counter')
-    /// call 'beamtalk_dispatch':'super'('at:put:', [1, Value], Self, State, 'Counter')
+    /// call 'beamtalk_dispatch':'super_reply'('increment', [], Self, State, 'Counter')
+    /// call 'beamtalk_dispatch':'super_reply'('getValue', [], Self, State, 'Counter')
+    /// call 'beamtalk_dispatch':'super_reply'('at:put:', [1, Value], Self, State, 'Counter')
     /// ```
     pub(super) fn generate_super_send(
         &mut self,
@@ -3798,7 +3789,7 @@ impl CoreErlangGenerator {
         // The live receiver (`ClassSelf`) is passed as is (BT-4301), so a
         // subclass receiver runs the superclass method under its own
         // class-variable key with its real reference. A class method binds no instance `Self`/`State`,
-        // so it must never reach the `beamtalk_dispatch:super/5` instance path
+        // so it must never reach the `beamtalk_dispatch:super_reply/5` instance path
         // below.
         let class_side_super_class = (self.builder_class_method_class().is_some()
             || self.in_class_method())
@@ -3887,9 +3878,12 @@ impl CoreErlangGenerator {
         // `super_send_producer` (`sequence_children`) and read back here.
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
+        // BT-4592: `super_reply/5`, not `super/5`, so an inherited method that
+        // raises re-raises its error here instead of answering an `{error, E}`
+        // 2-tuple that the `{reply, Result, NewState}` unpack fails on.
         let current_state = self.current_state_var();
         let doc = docvec![
-            "call 'beamtalk_dispatch':'super'(",
+            "call 'beamtalk_dispatch':'super_reply'(",
             leaf::atom(selector_atom),
             ", [",
             args_doc,
@@ -3907,7 +3901,7 @@ impl CoreErlangGenerator {
 
     /// Whether a `super` send compiled now threads the method's own `State`:
     /// `generate_super_send` answers the raw `{reply, Result, NewState}`
-    /// tuple of `beamtalk_dispatch:super/5`, which the caller must unpack
+    /// tuple of `beamtalk_dispatch:super_reply/5`, which the caller must unpack
     /// (BT-4318) — through [`Self::threaded_expression`]'s `super` producer
     /// in any value position. False on the class side, in a value type, and
     /// wherever the send runs against the actor-state cell (a closure, a

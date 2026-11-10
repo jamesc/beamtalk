@@ -166,6 +166,11 @@ pub(super) mod fault {
         /// so the condition closure answers only its boolean and the write
         /// dies with it (`ConditionFamilyNotCarried` over a `Local` family).
         ConditionWritesNotCarried,
+        /// BT-4584: a destructuring statement of a carried
+        /// `whileTrue:`/`whileFalse:` condition binds its names with plain
+        /// `let`s, as before BT-4584, so the map the condition hands back
+        /// lacks the write (`ConditionWriteNotInMap`).
+        ConditionDestructurePlain,
         /// BT-4017: a fold body statement that `thread_ahead` would register
         /// unwrapped takes the fold's raw `{Value, StateAcc}` unpack instead,
         /// as before BT-4017. With a non-literal block argument the
@@ -1847,6 +1852,33 @@ impl CoreErlangGenerator {
                 .any(|site| self.local_producer_locals(site).is_some())
     }
 
+    /// BT-4629: the span of the body block of `expr` when it is a plain
+    /// `do:` / `doWithKey:` send with a literal block, the only folds whose
+    /// closed tuple form can drop the carrier map ([`Self::take_discarded_fold`]).
+    fn discardable_fold_block(expr: &Expression) -> Option<Span> {
+        let Expression::MessageSend {
+            selector,
+            arguments,
+            ..
+        } = expr
+        else {
+            return None;
+        };
+        if !matches!(selector.name().as_str(), "do:" | "doWithKey:") {
+            return None;
+        }
+        match arguments.first() {
+            Some(Expression::Block(b)) => Some(b.span),
+            _ => None,
+        }
+    }
+
+    /// BT-4629: consumes [`LoopMode::discarded_fold_block`]: whether the fold
+    /// whose body block is at `body_span` is the discarded construct.
+    pub(super) fn take_discarded_fold(&mut self, body_span: Span) -> bool {
+        self.loop_mode.discarded_fold_block.take() == Some(body_span)
+    }
+
     /// Runs `f` with the enclosing direct-params loop's list-op mode
     /// (`LoopMode::in_direct_params_loop`) off, restoring it afterwards.
     fn with_cleared_direct_params_loop<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
@@ -2548,9 +2580,20 @@ impl CoreErlangGenerator {
         // A nested construct returns its own `{Value, StateAcc}` tuple: the
         // enclosing direct-params loop's open-chain list-op forms (which
         // rebind by name and return no tuple) must not apply to it.
+        // BT-4629: a `Discard` tail reads no local back, so a `do:` fold that
+        // is this construct need not repack them into its carrier's map.
+        // Self-family folds also read the carrier's other slots: they keep it.
+        let discard_block = (tail == ProducerTail::Discard
+            && !actor
+            && self_families == super::control_flow::analysis::ThreadedFamilies::default())
+        .then(|| Self::discardable_fold_block(expr))
+        .flatten();
+        self.loop_mode.discarded_fold_block = discard_block;
         let doc = self.with_fold_self_slot_consumer(expr, |this| {
             this.with_cleared_direct_params_loop(|this| this.expression_doc(expr))
-        })?;
+        });
+        self.loop_mode.discarded_fold_block = None;
+        let doc = doc?;
         let carrier = self.fresh_temp_var("ThreadedResult");
         let element = |k: i64, carrier: &str| {
             docvec![

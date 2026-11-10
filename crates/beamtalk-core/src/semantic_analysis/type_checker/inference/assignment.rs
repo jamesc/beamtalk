@@ -238,10 +238,8 @@ impl TypeChecker {
         let value = InferredType::union_of(instances);
         // As in `instance_assignable`: where a protocol is involved, the
         // nominal rule's unknown-class leniency must not decide.
-        let protocol_involved = protocol_registry.is_some_and(|registry| {
-            Self::mentions_protocol(&value, hierarchy, registry)
-                || Self::mentions_protocol(declared, hierarchy, registry)
-        });
+        let protocol_involved =
+            Self::protocol_involved(&value, declared, hierarchy, protocol_registry);
         instances.is_empty()
             || (!protocol_involved
                 && Self::is_assignable_to(
@@ -271,11 +269,7 @@ impl TypeChecker {
     ) -> bool {
         let inferred_members = Self::union_members(inferred_ty);
         let declared_members = Self::union_members(declared);
-        let protocol_involved = protocol_registry.is_some_and(|registry| {
-            Self::mentions_protocol(inferred_ty, hierarchy, registry)
-                || Self::mentions_protocol(declared, hierarchy, registry)
-        });
-        if !protocol_involved {
+        if !Self::protocol_involved(inferred_ty, declared, hierarchy, protocol_registry) {
             let inferred_name = inferred_ty.display_name();
             let declared_name = declared.display_name();
             return Self::is_assignable_to(&inferred_name, &declared_name, hierarchy)
@@ -292,6 +286,52 @@ impl TypeChecker {
             hierarchy,
             protocol_registry,
         )
+    }
+
+    /// Whether either side of an assignment names a protocol type (as a
+    /// union member or intersection part) — where the nominal rule's
+    /// unknown-class leniency must not decide and structural conformance
+    /// ([`Self::members_conform_structurally`]) does instead. `false`
+    /// without a registry.
+    fn protocol_involved(
+        value: &InferredType,
+        declared: &InferredType,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&ProtocolRegistry>,
+    ) -> bool {
+        protocol_registry.is_some_and(|registry| {
+            Self::mentions_protocol(value, hierarchy, registry)
+                || Self::mentions_protocol(declared, hierarchy, registry)
+        })
+    }
+
+    /// BT-4607: whether a state slot of type `declared` accepts the value
+    /// member `value` — the rule `self.f := v` and `state: f :: T = v`
+    /// share. Where a protocol is involved on either side, the
+    /// annotated-local rule ([`Self::instances_widen`], BT-4482) decides by
+    /// structural conformance, so a conformer of a protocol-typed slot (`P`,
+    /// `P | Nil`, `P1 & P2`) is accepted and a non-conformer is not.
+    /// Otherwise the nominal superclass walk ([`Self::is_assignable_to`])
+    /// compares `value_name` against `declared_name`, the slot's flattened,
+    /// alias-expanded spelling.
+    pub(in crate::semantic_analysis::type_checker) fn slot_accepts(
+        value: &InferredType,
+        value_name: &EcoString,
+        declared: &InferredType,
+        declared_name: &EcoString,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&ProtocolRegistry>,
+    ) -> bool {
+        if Self::protocol_involved(value, declared, hierarchy, protocol_registry) {
+            Self::instances_widen(
+                std::slice::from_ref(value),
+                declared,
+                hierarchy,
+                protocol_registry,
+            )
+        } else {
+            Self::is_assignable_to(value_name, declared_name, hierarchy)
+        }
     }
 
     /// BT-4482: whether every one of the `values` (union members of a value
