@@ -51,6 +51,28 @@ fn sealed_value_typed_param_sends_direct_with_tag_guard() {
 }
 
 #[test]
+fn destructured_tuple_local_sends_direct_with_tag_guard() {
+    // BT-4487: `{w, _} := pair` types `w` from `Tuple(SealedWidget, Integer)`,
+    // so the send to it takes the guarded direct path.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: pair :: Tuple(SealedWidget, Integer) -> Integer =>\n",
+        "    {w, _} := pair\n",
+        "    w x\n\n",
+        "sealed Value subclass: SealedWidget\n",
+        "  field: x :: Integer = 0\n",
+    ));
+    assert!(
+        code.contains("call 'bt@sealed_widget':'dispatch'('x'"),
+        "destructured typed local should direct-call the class module. Got:\n{code}"
+    );
+    assert!(
+        code.contains("maps':'get'('$beamtalk_class'"),
+        "direct call should be guarded on the runtime class tag. Got:\n{code}"
+    );
+}
+
+#[test]
 fn sealed_object_typed_param_sends_direct() {
     let code = codegen(concat!(
         "Object subclass: Caller\n",
