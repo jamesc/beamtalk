@@ -233,7 +233,7 @@ fn test_class_in_module(
 /// on the BEAM code path during test execution, making fixture classes
 /// available without explicit `// @load` directives — similar to how all
 /// classes exist in a Smalltalk image.
-#[allow(clippy::too_many_arguments)] // Each param is load-bearing context, same as `beamtalk lint`'s `collect_diagnostics`.
+#[allow(clippy::too_many_arguments)] // Each param is load-bearing context, same as `beamtalk lint`'s pipeline.
 fn compile_fixtures_directory(
     fixtures_dir: &Utf8Path,
     output_dir: &Utf8Path,
@@ -304,7 +304,7 @@ fn compile_fixtures_directory(
 }
 
 /// Compile a fixture file referenced by `@load` directive.
-#[allow(clippy::too_many_arguments)] // Each param is load-bearing context, same as `beamtalk lint`'s `collect_diagnostics`.
+#[allow(clippy::too_many_arguments)] // Each param is load-bearing context, same as `beamtalk lint`'s pipeline.
 fn compile_fixture(
     fixture_path: &Utf8Path,
     output_dir: &Utf8Path,
@@ -504,7 +504,7 @@ struct FixtureProtocolDefs {
 /// Returns the path to the generated `.core` file. Callers should collect
 /// multiple core files and batch-compile them with a single `BeamCompiler`
 /// call to avoid repeated Erlang VM startup overhead.
-#[allow(clippy::too_many_arguments)] // Each param is load-bearing context, same as `beamtalk lint`'s `collect_diagnostics`.
+#[allow(clippy::too_many_arguments)] // Each param is load-bearing context, same as `beamtalk lint`'s pipeline.
 fn generate_core_file(
     source_path: &Utf8Path,
     module_name: &str,
@@ -764,7 +764,7 @@ fn canonical_package_root(path: &Utf8Path) -> Option<Utf8PathBuf> {
 /// Parses the file's AST to find `///` doc comments with `// =>` assertions
 /// inside ` ```beamtalk ` code blocks, compiles each expression to Core Erlang,
 /// and generates an `EUnit` wrapper module per class.
-#[allow(clippy::too_many_arguments)] // Each param is load-bearing context, same as `beamtalk lint`'s `collect_diagnostics`.
+#[allow(clippy::too_many_arguments)] // Each param is load-bearing context, same as `beamtalk lint`'s pipeline.
 fn discover_and_compile_doc_tests(
     source_path: &Utf8Path,
     build_dir: &Utf8Path,

@@ -49,6 +49,10 @@ const REPL_CONDITIONS: &[&str] = &[
     "(cw > 0) ifTrue: [w := cw]. cw := cw + 1. cw CMP 3",
     "cw := cw + 1. (cw CMP 3) and: [w := cw. true]",
     "cw := (cw + 1) max: 0. cw CMP 3",
+    // BT-4584: a destructuring statement writes each binding it binds.
+    "cw := cw + 1. #(w, b) := #(w + cw, 0). cw CMP 3",
+    "#(cw, w) := #(cw + 1, cw). cw CMP 3",
+    "cw := cw + 1. {b, w} := {0, w + cw}. cw CMP 3",
 ];
 
 /// REPL bodies that write a binding, so the loop is a `ConditionalLoop` the
@@ -166,6 +170,37 @@ fn repl_condition_binding_rows_report_the_pre_fix_lowering() {
     );
 }
 
+/// BT-4584: with the pre-fix lowering (a destructuring statement of a carried
+/// condition binds its names with plain `let`s,
+/// [`LocalRebindFault::ConditionDestructurePlain`]) every destructuring row
+/// reports `ConditionWriteNotInMap`: the condition hands its map back, but the
+/// map lacks the write.
+#[cfg(debug_assertions)]
+#[test]
+fn repl_condition_destructure_rows_report_the_pre_fix_lowering() {
+    let rows: Vec<String> = repl_rows()
+        .into_iter()
+        .filter(|row| row.contains(":= #(") || row.contains(":= {"))
+        .collect();
+    assert!(rows.len() >= 20, "the destructuring rows have thinned out");
+    let missed: Vec<String> = rows
+        .into_iter()
+        .filter_map(|row| {
+            let report = repl_report(&row, Some(LocalRebindFault::ConditionDestructurePlain));
+            (!report
+                .as_deref()
+                .is_some_and(|r| r.contains("ConditionWriteNotInMap")))
+            .then(|| format!("{row}: {report:?}"))
+        })
+        .collect();
+    assert!(
+        missed.is_empty(),
+        "{} row(s) where the verifier missed the dropped destructuring write:\n{}",
+        missed.len(),
+        missed.join("\n")
+    );
+}
+
 /// State-effecting conditions (a field write or a self-send) with a
 /// value-position local write ahead of or in the boolean, in a compiled method
 /// (`F` rows write the field and need a class that has one).
@@ -186,6 +221,12 @@ const COMPILED_CONDITIONS: &[(&str, bool)] = &[
         "[w := t + 1] on: Error do: [:err | 0]. self done. s < 2",
         false,
     ),
+    // BT-4584: a destructuring statement writing an outer local, with the
+    // condition's own block local (`d`) bound alongside it.
+    ("#(w, d) := #(t + 1, 0). self.f := 1. s < 2", true),
+    ("#(w, d) := #(t + 1, 0). self done. s < 2", false),
+    ("self done. {d, w} := {s, t + 1}. s < 2", false),
+    ("#(w, x) := #(t + 1, w). self done. s < 2", false),
     // A non-local return from the condition after a local write.
     (
         "x := (w := t + 1). (s > 5) ifTrue: [^ w]. self done. s < 2",
@@ -274,5 +315,56 @@ fn compiled_condition_value_position_writes_compile() {
     assert!(
         compiled >= 100,
         "only {compiled} rows compiled; the corpus has thinned out"
+    );
+}
+
+/// BT-4584: the compiled-method twin of
+/// [`repl_condition_destructure_rows_report_the_pre_fix_lowering`]. Every
+/// destructuring condition row, in every method context that can carry it,
+/// reports `ConditionWriteNotInMap` under the pre-fix lowering. In an actor
+/// method the pre-fix lowering was not silent: its generic statement path
+/// rejected the destructuring (`UnsupportedFeature`, "destructuring
+/// assignment in expression position"), which is the only other outcome
+/// accepted there.
+#[cfg(debug_assertions)]
+#[test]
+fn compiled_condition_destructure_rows_report_the_pre_fix_lowering() {
+    let mut missed = Vec::new();
+    let mut checked = 0;
+    for (name, header, has_field) in COMPILED_CONTEXTS {
+        for (cond, writes_field) in COMPILED_CONDITIONS {
+            if !(cond.contains(":= #(") || cond.contains(":= {")) || (*writes_field && !has_field) {
+                continue;
+            }
+            let src = format!(
+                "{header}{HELPERS}  probe =>\n    s := 0\n    t := 0\n    w := 0\n    x := 0\n    [{cond}] whileTrue: [s := s + 1]\n    #(s, t, w, x)\n"
+            );
+            // A context that cannot carry the condition's effect rejects the
+            // write before lowering (no finding to look for).
+            if super::verifier_report(&src, None).is_some() {
+                continue;
+            }
+            checked += 1;
+            let report =
+                super::verifier_report(&src, Some(LocalRebindFault::ConditionDestructurePlain));
+            let caught = report.as_deref().is_some_and(|r| {
+                r.contains("ConditionWriteNotInMap")
+                    || (*name == "actor"
+                        && r.contains("destructuring assignment in expression position"))
+            });
+            if !caught {
+                missed.push(format!("{name}: {cond}: {report:?}"));
+            }
+        }
+    }
+    assert!(
+        checked >= 12,
+        "only {checked} rows checked; the corpus has thinned out"
+    );
+    assert!(
+        missed.is_empty(),
+        "{} row(s) where the verifier missed the dropped destructuring write:\n{}",
+        missed.len(),
+        missed.join("\n")
     );
 }

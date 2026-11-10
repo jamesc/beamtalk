@@ -112,6 +112,7 @@ dispatch_test_() ->
             {"default actor displayString bypasses to object_ops (no override)",
                 fun test_actor_default_displaystring_bypass/0},
             {"super on non-existent class returns error", fun test_super_nonexistent_class/0},
+            {"super_reply re-raises a super error", fun test_super_reply_reraises/0},
             {"lookup returns class_not_found when parent class is gone",
                 fun test_stale_parent_class/0},
             {"continue_to_superclass at root returns DNU", fun test_continue_to_superclass_root/0},
@@ -755,6 +756,16 @@ test_super_nonexistent_class() ->
     Self = make_ref(),
     Result = beamtalk_dispatch:super(anyMethod, [], Self, State, 'NoSuchClass'),
     ?assertMatch({error, #beamtalk_error{kind = class_not_found}}, Result).
+
+%% BT-4592: super_reply/5 (a method-root actor `super` send) raises the error
+%% super/5 answers instead of returning `{error, E}` to the reply unpack.
+test_super_reply_reraises() ->
+    State = #{'$beamtalk_class' => 'NoSuchClass'},
+    Self = make_ref(),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = class_not_found}},
+        beamtalk_dispatch:super_reply(anyMethod, [], Self, State, 'NoSuchClass')
+    ).
 
 %% Test that when the parent class process is killed, lookup returns class_not_found.
 %% Chain walk tries to reach the parent via registry; when it's gone, class_not_found.

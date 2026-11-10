@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4589: an actor whose `repeat` bodies write a field and a local.
+
+Actor subclass: Bt4589RepeatActor
+  state: count = 0
+
+  // The body writes a field; `^` ends the loop.
+  countToField: n =>
+    [
+      self.count := self.count + 1
+      self.count >= n ifTrue: [^self.count]
+    ] repeat
+
+  // The body writes a local; `^` ends the loop.
+  countToLocal: n =>
+    i := 0
+    [
+      i := i + 1
+      i >= n ifTrue: [^i]
+    ] repeat
+
+  count => self.count

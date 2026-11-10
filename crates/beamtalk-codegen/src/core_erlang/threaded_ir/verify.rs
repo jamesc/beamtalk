@@ -676,6 +676,21 @@ pub(in crate::core_erlang) enum VerifyError {
     /// (`erlc`: unbound variable).
     ConditionFamilyNotCarried { family: VersionPrefix, at: Span },
 
+    /// BT-4584: [`Self::ConditionFamilyNotCarried`]'s converse inside the
+    /// condition closure. A carried `whileTrue:`/`whileFalse:` condition hands
+    /// its `StateAcc` map back to the loop (`ConditionHandBack`), so a statement
+    /// of it that writes `local` (an outer local, in the REPL a binding, of the
+    /// condition's `Local` families: `name := ...` or a destructuring
+    /// `#(a, b) := ...`) must `Put` it into that map at its own span. Without
+    /// the `Put` the hand-back is well-formed but the map lacks the write: the
+    /// name was bound by a plain `let` that dies with the closure, so the body,
+    /// the next iteration and the code after the loop read the old value
+    /// (`[x := x + 1. #(w, b) := #(w + x, 0). x < 3] whileTrue: [nil]` at the
+    /// REPL left `w` at 5, not 11), `erlc`-clean. Applies to every carried
+    /// condition in every scope kind; checked by
+    /// [`verify_condition_writes_in_map`].
+    ConditionWriteNotInMap { local: String, at: Span },
+
     /// ADR 0137 §2 (Phase 2a, BT-4020): a call that may run user code in this
     /// process (a non-inlined `value`-family call, a send with a block
     /// argument, a send to an in-process or unknown receiver, an Erlang FFI
@@ -1524,6 +1539,49 @@ fn condition_families_not_carried(
         .map(|family| VerifyError::ConditionFamilyNotCarried {
             family: family.clone(),
             at,
+        })
+        .collect()
+}
+
+/// BT-4584: a statement of a carried loop condition that writes outer
+/// locals: its span, and each local with its scratch-map key (the binding
+/// name in the REPL, the `__local__` key in a method).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct ConditionWriteSite {
+    pub(in crate::core_erlang) span: Span,
+    pub(in crate::core_erlang) writes: Vec<(String, String)>,
+}
+
+/// BT-4584, [`VerifyError::ConditionWriteNotInMap`] over one carried loop
+/// condition's lowered statements (`body`, the condition frame's own list):
+/// each local of each `site` must be written into the frame's map by a
+/// top-level `Bind` whose op is a `Put` of the local's key, inside the site's
+/// span. The sites are read off the AST before the condition is lowered; the
+/// `Put`s off the lowered IR.
+pub(in crate::core_erlang) fn verify_condition_writes_in_map(
+    body: &[ThreadedStmt],
+    sites: &[ConditionWriteSite],
+) -> Vec<VerifyError> {
+    sites
+        .iter()
+        .flat_map(|site| {
+            site.writes
+                .iter()
+                .filter(|(_, key)| {
+                    !body.iter().any(|stmt| {
+                        matches!(
+                            stmt,
+                            ThreadedStmt::Bind { op: BindOp::Put { field, .. }, span, .. }
+                                if field == key
+                                    && span.start() >= site.span.start()
+                                    && span.end() <= site.span.end()
+                        )
+                    })
+                })
+                .map(|(local, _)| VerifyError::ConditionWriteNotInMap {
+                    local: local.clone(),
+                    at: site.span,
+                })
         })
         .collect()
 }

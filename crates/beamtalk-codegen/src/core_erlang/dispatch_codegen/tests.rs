@@ -225,8 +225,8 @@ fn test_generate_super_send_uses_beamtalk_dispatch() {
     let doc = generator.generate_super_send(&selector, &[]).unwrap();
     let output = doc.to_pretty_string();
     assert!(
-        output.contains("beamtalk_dispatch':'super'("),
-        "super send should use beamtalk_dispatch:super. Got: {output}"
+        output.contains("beamtalk_dispatch':'super_reply'("),
+        "super send should use beamtalk_dispatch:super_reply (BT-4592). Got: {output}"
     );
     assert!(
         output.contains("'initialize'"),

@@ -727,7 +727,9 @@ impl TypeChecker {
             // A protocol receiver's non-protocol selector that every object
             // answers (`printString`, `respondsTo:`) resolves through
             // `Object`'s method table for its argument and return types
-            // (BT-4594).
+            // (BT-4594). This includes binary sends: `p = x` on a protocol
+            // receiver infers `Object`'s `Boolean` rather than `Dynamic` —
+            // the singleton exclusion above does not apply.
             let via_object = self.protocol_send_resolution(class_name, &selector_name, hierarchy)
                 == Some(ProtocolSendResolution::Object);
             let resolve_class: EcoString = if via_object {

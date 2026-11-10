@@ -812,15 +812,27 @@ impl CoreErlangGenerator {
                 entries.push(Self::meta_method_entry(&standalone.method, type_params));
             }
         }
+        // Synthesized accessors carry the same return types the hierarchy's
+        // AST-built `MethodInfo`s record (`synthetic_selectors`), so a class
+        // seen through this metadata — the REPL's view of an earlier input —
+        // types `p withX: …` as the class, not as untyped (BT-4621).
         if let Some(auto) = auto {
             for field in &auto.getters {
-                entries.push((field.clone(), 0, MetaTypeRepr::None, vec![], sealed, false));
+                let return_type = class
+                    .state
+                    .iter()
+                    .find(|slot| slot.name.name == field.as_str())
+                    .and_then(beamtalk_core::synthetic_selectors::synthesized_getter_return_type)
+                    .map_or(MetaTypeRepr::None, |dt| {
+                        Self::declared_type_to_meta_repr(&dt, type_params)
+                    });
+                entries.push((field.clone(), 0, return_type, vec![], sealed, false));
             }
             for field in &auto.setters {
                 entries.push((
                     AutoSlotMethods::with_star_selector(field),
                     1,
-                    MetaTypeRepr::None,
+                    Self::synthesized_copy_return_repr(class),
                     vec![MetaTypeRepr::None],
                     sealed,
                     false,
@@ -869,7 +881,7 @@ impl CoreErlangGenerator {
                 entries.push((
                     safe_sel,
                     arity,
-                    MetaTypeRepr::None,
+                    Self::synthesized_copy_return_repr(class),
                     vec![MetaTypeRepr::None; arity],
                     sealed,
                     false,
@@ -889,6 +901,17 @@ impl CoreErlangGenerator {
             ));
         }
         entries
+    }
+
+    /// The `method_info` return type of a synthesized `with*:` copy-setter or
+    /// keyword constructor on `class`: the shared
+    /// [`beamtalk_core::synthetic_selectors::synthesized_copy_return_type`],
+    /// converted like any declared return type.
+    fn synthesized_copy_return_repr(class: &ClassDefinition) -> MetaTypeRepr {
+        Self::declared_type_to_meta_repr(
+            &beamtalk_core::synthetic_selectors::synthesized_copy_return_type(&class.name.name),
+            &class.type_params,
+        )
     }
 
     /// Converts a `MethodDefinition` into a `MethodInfoEntry`.

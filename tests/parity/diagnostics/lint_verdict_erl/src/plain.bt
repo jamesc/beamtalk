@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Lints clean; the package's only finding is in its native module.
+Object subclass: Plain
+
+  answer -> Integer => 42

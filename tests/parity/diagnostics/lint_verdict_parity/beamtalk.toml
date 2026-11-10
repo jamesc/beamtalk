@@ -1,0 +1,15 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Lint-verdict parity fixture (BT-4585): CLI `beamtalk lint` and MCP `lint`
+# must report the same diagnostics, counts and verdict, with and without
+# warnings-as-errors, for a package that leans on cross-file context — a
+# standalone extension, a type alias and a protocol in sibling files, the
+# project-complete knowledge scope, and a native `.erl` file.
+
+[package]
+name = "parity_lint_verdict"
+version = "0.1.0"
+description = "CLI/MCP lint verdict parity fixture (BT-4585)"
+
+[dependencies]

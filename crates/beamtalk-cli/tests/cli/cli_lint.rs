@@ -37,12 +37,12 @@ fn lint_succeeds_with_project_local_stubs_directory() {
 /// `collect_lint_files`'s `stubs/` exclusion above only
 /// applies to a *directory* walk (no path argument) — a direct single-file
 /// target bypasses it entirely, so once `check_native_declaration_location`'s
-/// diagnostic gained a category (making it survive `collect_diagnostics`'s
+/// diagnostic gained a category (making it survive `lint_pipeline::analyse_file`'s
 /// `category.is_some()` filter), a legitimate `stubs/lists.bt` linted
 /// directly by path would have started reporting a false "only valid in
-/// stubs/ directory" error. `collect_diagnostics`'s caller must derive
-/// `is_stub_file` itself (`beamtalk_project::package::is_under_stubs_dir`),
-/// the same way MCP's `run_module_analysis` already does.
+/// stubs/ directory" error. `lint_pipeline::analyse_package` derives
+/// `is_stub_file` itself (`beamtalk_project::package::is_under_stubs_dir`)
+/// for CLI and MCP `lint` alike.
 #[test]
 fn lint_direct_file_target_succeeds_on_legitimate_stub_file() {
     let project = cli_common::fixture_project();
@@ -88,7 +88,7 @@ fn lint_json_format_streams_stub_diagnostics_as_json_lines() {
 }
 
 /// Regression: `check_native_declaration_location`'s diagnostic must
-/// carry a `DiagnosticCategory`, or `collect_diagnostics`'s
+/// carry a `DiagnosticCategory`, or `lint_pipeline::analyse_file`'s
 /// `.filter(|d| d.category.is_some())` would silently drop it — a direct
 /// file-target `beamtalk lint <file>` pointed at a `declare native:` block
 /// outside `stubs/` would report no diagnostic at all, even though `beamtalk

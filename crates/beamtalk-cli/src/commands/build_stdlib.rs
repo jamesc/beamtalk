@@ -1030,7 +1030,9 @@ fn synthesize_value_auto_methods(
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: slot.type_annotation.as_ref().map(DeclaredType::from),
+                return_type: beamtalk_core::synthetic_selectors::synthesized_getter_return_type(
+                    slot,
+                ),
                 param_types: vec![],
                 doc: Some(getter_doc),
                 primitive: None,
@@ -1052,7 +1054,9 @@ fn synthesize_value_auto_methods(
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some(DeclaredType::simple(class_name)),
+                return_type: Some(
+                    beamtalk_core::synthetic_selectors::synthesized_copy_return_type(class_name),
+                ),
                 param_types: vec![param_type],
                 doc: Some(setter_doc),
                 primitive: None,
@@ -1093,7 +1097,9 @@ fn synthesize_value_auto_methods(
         is_sealed: false,
         is_internal: false,
         spawns_block: false,
-        return_type: Some(DeclaredType::simple(class_name)),
+        return_type: Some(
+            beamtalk_core::synthetic_selectors::synthesized_copy_return_type(class_name),
+        ),
         param_types,
         doc: Some(ctor_doc),
         primitive: None,

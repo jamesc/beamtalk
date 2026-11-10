@@ -242,6 +242,14 @@ fn union_member_protocol_unknown_selector_widens_to_dynamic() {
   class a: h :: Callable | Integer -> String => h abs
 ",
     ));
+    // The send was checked (the union DNU hint is present) ...
+    assert!(
+        msgs.iter()
+            .any(|m| m == "Callable does not understand 'abs' (in union Callable | Integer)"),
+        "{msgs:#?}"
+    );
+    // ... and its type is not `Integer`, so the declared `String` return
+    // raises no mismatch.
     assert!(
         !msgs.iter().any(|m| m.contains("returns Integer")),
         "{msgs:#?}"
