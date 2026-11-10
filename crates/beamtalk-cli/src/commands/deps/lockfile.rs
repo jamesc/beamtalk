@@ -327,6 +327,25 @@ impl Lockfile {
         self.native_packages.clear();
     }
 
+    /// Drop every `[[native_package]]` entry from the project's on-disk
+    /// lockfile, returning the names that were removed (BT-4549).
+    ///
+    /// Used when nothing in the dependency graph declares a native
+    /// dependency any more: the lock's native entries are then orphans, and
+    /// leaving them makes the runtime try to boot OTP applications that no
+    /// longer exist. Leaves the file untouched when there is nothing to drop.
+    pub fn prune_native_packages(project_root: &Utf8Path) -> Result<Vec<String>> {
+        let Some(mut lock) = Self::read(project_root)? else {
+            return Ok(Vec::new());
+        };
+        let pruned: Vec<String> = lock.native_packages.keys().cloned().collect();
+        if !pruned.is_empty() {
+            lock.clear_native_packages();
+            lock.write(project_root)?;
+        }
+        Ok(pruned)
+    }
+
     /// Collect all native (hex) dependency names from the lockfile.
     ///
     /// ADR 0072: After a build with `[native.dependencies]`,
@@ -1153,6 +1172,51 @@ sha = "abc123"
 
         let result = Lockfile::read(&project_root).unwrap();
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_prune_native_packages_keeps_beamtalk_entries() {
+        let temp = TempDir::new().unwrap();
+        let project_root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let mut lockfile = sample_lockfile();
+        lockfile.insert_native(NativePackageLock::hex("gun", "2.1.3", "def456"));
+        lockfile.insert_native(NativePackageLock::hex("cowlib", "2.13.0", "abc123"));
+        lockfile.write(&project_root).unwrap();
+
+        let pruned = Lockfile::prune_native_packages(&project_root).unwrap();
+        assert_eq!(pruned, vec!["cowlib".to_string(), "gun".to_string()]);
+
+        let read_back = Lockfile::read(&project_root).unwrap().unwrap();
+        assert!(!read_back.has_native_packages());
+        assert_eq!(read_back.packages, sample_lockfile().packages);
+    }
+
+    #[test]
+    fn test_prune_native_packages_removes_native_only_lockfile() {
+        let temp = TempDir::new().unwrap();
+        let project_root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let mut lockfile = Lockfile::new();
+        lockfile.insert_native(NativePackageLock::hex("gun", "2.1.3", "def456"));
+        lockfile.write(&project_root).unwrap();
+
+        let pruned = Lockfile::prune_native_packages(&project_root).unwrap();
+        assert_eq!(pruned, vec!["gun".to_string()]);
+        assert!(!project_root.join(LOCKFILE_NAME).exists());
+    }
+
+    #[test]
+    fn test_prune_native_packages_without_lockfile_is_noop() {
+        let temp = TempDir::new().unwrap();
+        let project_root = camino::Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        assert!(
+            Lockfile::prune_native_packages(&project_root)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(!project_root.join(LOCKFILE_NAME).exists());
     }
 
     #[test]
