@@ -5181,7 +5181,9 @@ impl CoreErlangGenerator {
             "                    let <PerfClass4> = call 'beamtalk_tagged_map':'class_of'(State) in\n",
             "                    let <PerfResult4> = call 'beamtalk_dispatch':'lookup'(PerfSel4, [], Self, State, PerfClass4) in\n",
             "                    case PerfResult4 of\n",
-            "                        <{'error', PerfErr4}> when 'true' -> {'error', PerfErr4, State}\n",
+            // BT-4593: `perform:` itself was invoked, so its target's lookup
+            // failure is a raise (a wrapped map), not a miss of `perform:`.
+            "                        <{'error', PerfErr4}> when 'true' -> {'error', call 'beamtalk_exception_handler':'ensure_wrapped'(PerfErr4), State}\n",
             "                        <PerfOther4> when 'true' -> PerfOther4\n",
             "                    end\n",
             "                <_PerfBadArgs> when 'true' ->\n",
@@ -5197,7 +5199,9 @@ impl CoreErlangGenerator {
             "                            let <PwaClass4> = call 'beamtalk_tagged_map':'class_of'(State) in\n",
             "                            let <PwaResult4> = call 'beamtalk_dispatch':'lookup'(PwaSel4, PwaArgs4, Self, State, PwaClass4) in\n",
             "                            case PwaResult4 of\n",
-            "                                <{'error', PwaErr4}> when 'true' -> {'error', PwaErr4, State}\n",
+            // BT-4593: `perform:` itself was invoked, so its target's lookup
+            // failure is a raise (a wrapped map), not a miss of `perform:`.
+            "                                <{'error', PwaErr4}> when 'true' -> {'error', call 'beamtalk_exception_handler':'ensure_wrapped'(PwaErr4), State}\n",
             "                                <PwaOther4> when 'true' -> PwaOther4\n",
             "                            end\n",
             "                        <_PwaBadArgList> when 'true' ->\n",
@@ -5210,27 +5214,53 @@ impl CoreErlangGenerator {
             "            end\n",
             // --- Default: delegate to dispatch/3 ---
             "        <_OtherSel4> when 'true' ->\n",
-            "            try call ",
-            leaf::atom(mod_name.to_string()),
-            ":'dispatch'(Selector, Args, Self)\n",
-            "            of <D4Result> -> {'reply', D4Result, State}\n",
-            "            catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}\n",
+            Self::dispatch_3_adapter(mod_name, "            "),
             "    end\n",
         ]
     }
 
     /// Generates a simple dispatch/4 wrapper that delegates to dispatch/3.
-    ///
-    /// Uses try-catch to convert exceptions from dispatch/3 (e.g., `does_not_understand`
-    /// calling `erlang:error`) into `{error, Error, State}` tuples expected by the
-    /// dispatch service.
     pub(super) fn generate_dispatch_4_wrapper(mod_name: &str) -> Document<'static> {
+        Self::dispatch_3_adapter(mod_name, "    ")
+    }
+
+    /// The `dispatch/4` → `dispatch/3` adapter: calls the state-less
+    /// `dispatch/3` and answers `{'reply', Result, State}`, or, for an
+    /// `error` the method raised, `{'error', Wrapped, State}` with the raised
+    /// term wrapped (with its stacktrace) as an exception map — so the walk
+    /// reads it as "the invoked method raised", never as a lookup miss, even
+    /// when it is a `does_not_understand` from inside the method body
+    /// (BT-4593).
+    ///
+    /// Only `error` is caught. A `throw` (a `^` non-local return in flight,
+    /// ADR 0041, or a `Program exit:`, ADR 0099 §3) and an `exit` are
+    /// re-raised unchanged, so a `^` out of a block reaching an inherited
+    /// value-class method keeps its semantics instead of turning into an
+    /// error result.
+    ///
+    /// `indent` is the leading indentation of the `try` line.
+    fn dispatch_3_adapter(mod_name: &str, indent: &'static str) -> Document<'static> {
         docvec![
-            "    try call ",
+            indent,
+            "try call ",
             leaf::atom(mod_name.to_string()),
             ":'dispatch'(Selector, Args, Self)\n",
-            "    of <D4Result> -> {'reply', D4Result, State}\n",
-            "    catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}\n",
+            indent,
+            "of <D4Result> -> {'reply', D4Result, State}\n",
+            indent,
+            "catch <D4Type, D4Error, D4Stack> ->\n",
+            indent,
+            "    case D4Type of\n",
+            indent,
+            "        <'error'> when 'true' ->\n",
+            indent,
+            "            let <D4Built> = primop 'build_stacktrace'(D4Stack) in\n",
+            indent,
+            "            {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built), State}\n",
+            indent,
+            "        <_D4Other> when 'true' -> primop 'raw_raise'(D4Type, D4Error, D4Stack)\n",
+            indent,
+            "    end\n",
         ]
     }
 

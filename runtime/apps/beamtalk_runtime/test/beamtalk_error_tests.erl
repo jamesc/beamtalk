@@ -560,4 +560,7 @@ is_does_not_understand_test() ->
     ),
     ?assertNot(
         beamtalk_error:is_does_not_understand(beamtalk_exception_handler:wrap(Dnu))
-    ).
+    ),
+    %% BT-4593: total over any other term.
+    ?assertNot(beamtalk_error:is_does_not_understand(badarith)),
+    ?assertNot(beamtalk_error:is_does_not_understand({some, tuple})).
