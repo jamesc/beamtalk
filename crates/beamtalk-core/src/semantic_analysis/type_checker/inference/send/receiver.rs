@@ -262,6 +262,15 @@ impl TypeChecker {
             return receiver_ty;
         }
 
+        // `Object >> then:` (BT-4515) answers its block's result type.
+        if is_object_then {
+            if let (Some(arg), Some(ty)) = (arguments.first(), arg_types.first()) {
+                if let Some(ty) = Self::block_arg_result_ty(arg, ty) {
+                    return ty;
+                }
+            }
+        }
+
         // `ifNil:ifNotNil:` / `ifNotNil:ifNil:` return the union of
         // both branch bodies' return types. `infer_args_for_if_not_nil`
         // already inferred both branches as `Block(..., R)` with
@@ -275,13 +284,6 @@ impl TypeChecker {
         // flow through `check_class_side_send` so an invalid metaclass send
         // still emits DNU. The helper unwraps parens so `(ClassName) ifNil: ...`
         // and `(self) ifNil: ...` aren't accidentally treated as non-class-side.
-        if is_object_then {
-            if let (Some(arg), Some(ty)) = (arguments.first(), arg_types.first()) {
-                if let Some(ty) = Self::block_arg_result_ty(arg, ty) {
-                    return ty;
-                }
-            }
-        }
         let is_class_side_receiver = Self::is_class_side_receiver(receiver, env);
         if !is_class_side_receiver {
             if matches!(
