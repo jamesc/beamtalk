@@ -262,11 +262,26 @@ impl TypeChecker {
                         .is_some_and(|m| m.defined_in.as_str() == WellKnownClass::Object.as_str())
                 };
                 let class = super::method_resolution_class(class_name);
-                resolves_to_object(class)
-                    && hierarchy
-                        .all_subclasses(class)
-                        .iter()
-                        .all(|sub| resolves_to_object(sub))
+                // A known subclass overrides `then:` exactly when some class
+                // below `class` defines its own. Only the (few) classes that
+                // define `then:` locally need their superclass chain walked:
+                // O(classes x depth), not a walk of the whole subtree.
+                let overridden_below = || {
+                    hierarchy.class_names().any(|name| {
+                        name.as_str() != WellKnownClass::Object.as_str()
+                            && hierarchy.get_class(name).is_some_and(|info| {
+                                info.methods.iter().any(|m| {
+                                    m.selector.as_str() == THEN_SELECTOR
+                                        && m.defined_in.as_str() == name.as_str()
+                                })
+                            })
+                            && hierarchy
+                                .superclass_chain(name)
+                                .iter()
+                                .any(|ancestor| ancestor.as_str() == class)
+                    })
+                };
+                resolves_to_object(class) && !overridden_below()
             }
             InferredType::Union { members, .. } => {
                 !members.is_empty()
