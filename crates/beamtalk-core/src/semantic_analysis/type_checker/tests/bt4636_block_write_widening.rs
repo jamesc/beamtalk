@@ -132,3 +132,36 @@ fn control_two_keyword_class_method_shape_is_checked() {
     );
     assert_eq!(dnu(&diags).len(), 1, "expected one DNU: {diags:#?}");
 }
+
+#[test]
+fn diverging_block_write_is_not_widened() {
+    // The `^` means the write never reaches the code after the send, so
+    // `result` stays a String and `size` is fine. Typed values, not literals:
+    // a literal write is not reported against the union, so it could not tell
+    // the guard apart from its absence.
+    let diags = diagnostics_for(
+        "  class f: n :: Integer with: s :: String -> Integer =>\n    result := s\n    n > 1 ifTrue: [result := n. ^1]\n    result size\n",
+    );
+    assert!(dnu(&diags).is_empty(), "unexpected DNU: {diags:#?}");
+}
+
+#[test]
+fn non_diverging_block_write_is_widened() {
+    // Control for the test above: the same shape without the `^` is widened
+    // and `size` is rejected on the Integer member.
+    let diags = diagnostics_for(
+        "  class f: n :: Integer with: s :: String -> Integer =>\n    result := s\n    n > 1 ifTrue: [result := n]\n    result size\n",
+    );
+    assert_eq!(dnu(&diags).len(), 1, "expected one DNU: {diags:#?}");
+}
+
+#[test]
+fn widened_local_is_a_union_not_dynamic() {
+    // A Dynamic result would never report a DNU, so the other tests alone
+    // could not tell a union from a lost type. `found` is `Integer | String`
+    // after the loop: the Integer member must be rejected by `size`.
+    let diags = diagnostics_for(
+        "  class f: items :: List(String) -> Integer =>\n    found := 0\n    items do: [:each | found := each]\n    found size\n",
+    );
+    assert_eq!(dnu(&diags).len(), 1, "expected one DNU: {diags:#?}");
+}

@@ -1630,6 +1630,12 @@ impl TypeChecker {
         env: &mut TypeEnv,
         deferring: bool,
     ) {
+        // A block ending in a top-level `^` never returns to the code after
+        // the send, so its writes cannot be seen there (the same rule that
+        // gives it a `Never` body type).
+        if block_has_return(block) {
+            return;
+        }
         let writes = crate::semantic_analysis::block_facts::outer_local_writes(block, &|name| {
             env.get_local(name).is_some()
         });
