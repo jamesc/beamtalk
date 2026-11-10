@@ -731,24 +731,6 @@ impl ClassHierarchy {
         self.explicit_class_constructor_builds_in_caller(class, "new:")
     }
 
-    /// BT-4501: record [`Self::explicit_class_new1_runs_in_caller`] on each
-    /// of `module`'s classes (`ClassInfo::in_caller_new1`), so the
-    /// compile-time [`Self::runs_class_method_in_caller`] answers `new:` from
-    /// the verdict codegen publishes. Run once the module's classes are
-    /// registered and indexed. A superclass not yet known (a sibling file not
-    /// yet injected) answers `false`, the conservative side, so callers
-    /// re-run this after cross-file injection (`add_from_beam_meta`,
-    /// `add_external_superclasses`) changed the hierarchy (BT-4625): the
-    /// verdict then equals the one codegen computes on the injected hierarchy.
-    pub fn publish_explicit_new1_verdicts(&mut self, module: &Module) {
-        for class in &module.classes {
-            let verdict = self.explicit_class_new1_runs_in_caller(class);
-            if let Some(info) = self.classes.get_mut(class.name.name.as_str()) {
-                info.in_caller_new1 = verdict;
-            }
-        }
-    }
-
     /// The one rule behind [`Self::explicit_class_new_builds_in_caller`]
     /// (`new`, BT-4464) and [`Self::explicit_class_new1_runs_in_caller`]
     /// (`new:`, BT-4475): whether `class`'s own explicit class-side
@@ -798,6 +780,52 @@ impl ClassHierarchy {
         class: &ClassDefinition,
         selector: &str,
     ) -> bool {
+        Self::explicit_class_constructor_shape(class, selector)
+            && self.constructor_chain_allows_in_caller(class)
+    }
+
+    /// The chain-dependent half of
+    /// [`Self::explicit_class_constructor_builds_in_caller`]: what only the
+    /// hierarchy can answer about `class` (no class variables in the chain,
+    /// not an actor, a fully known surface). Evaluated at query time against
+    /// whatever hierarchy is in hand, so a sibling-file ancestor injected
+    /// later is seen (BT-4640).
+    fn constructor_chain_allows_in_caller(&self, class: &ClassDefinition) -> bool {
+        let class_name = class.name.name.as_str();
+        !self.compiles_as_actor(class)
+            && !self.chain_has_class_variables(class_name)
+            && self
+                .get_class(class_name)
+                .is_some_and(|info| !info.surface_incomplete)
+    }
+
+    /// [`Self::constructor_chain_allows_in_caller`] for a class known only by
+    /// its published [`ClassInfo`] (a sibling file's, injected cross-file):
+    /// the same conditions, but `ClassInfo` carries no `supervisor_kind`, which
+    /// [`Self::explicit_class_constructor_shape`] has already folded into the
+    /// published fact.
+    pub(super) fn info_constructor_chain_allows_in_caller(&self, class_name: &str) -> bool {
+        let Some(info) = self.get_class(class_name) else {
+            return false;
+        };
+        !info.surface_incomplete
+            && !info.is_abstract
+            && !self.chain_has_class_variables(class_name)
+            && match self.resolve_class_kind(class_name) {
+                ClassKind::Actor => false,
+                ClassKind::Value => true,
+                ClassKind::Object => !self.has_cross_file_parent(class_name),
+            }
+    }
+
+    /// The chain-independent half of
+    /// [`Self::explicit_class_constructor_builds_in_caller`]: everything
+    /// decided by `class`'s own AST (BT-4640). It is what `from_class_definition`
+    /// publishes as [`ClassInfo::in_caller_new1`] for `new:`, so it survives
+    /// Pass 1 extraction and cross-file callers combine it with their own view
+    /// of the chain ([`Self::info_constructor_chain_allows_in_caller`]).
+    #[must_use]
+    pub fn explicit_class_constructor_shape(class: &ClassDefinition, selector: &str) -> bool {
         use crate::ast::Expression;
         fn primary<'m>(
             methods: &'m [crate::ast::MethodDefinition],
@@ -812,14 +840,7 @@ impl ClassHierarchy {
             "new:" => true,
             _ => return false,
         };
-        let class_name = class.name.name.as_str();
-        if class.is_abstract
-            || self.compiles_as_actor(class)
-            || self.chain_has_class_variables(class_name)
-            || self
-                .get_class(class_name)
-                .is_none_or(|info| info.surface_incomplete)
-        {
+        if class.is_abstract || class.supervisor_kind.is_some() {
             return false;
         }
         if primary(&class.methods, selector).is_some() {
@@ -856,7 +877,8 @@ impl ClassHierarchy {
             && arguments
                 .iter()
                 .all(|arg| plain_argument(method, arg, keyword))
-            && self.is_direct_call_eligible(class_name, &sent)
+            && !ClassInfo::is_process_bound_class_selector(&sent)
+            && !ClassInfo::is_class_var_reflection_selector(&sent)
             && primary(&class.class_methods, &sent).is_some_and(|target| {
                 matches!(target.body.as_slice(), [only] if
                 plain_ffi_forward(target, &only.expression, true)

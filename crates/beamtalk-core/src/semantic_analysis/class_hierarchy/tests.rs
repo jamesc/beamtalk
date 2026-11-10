@@ -4616,24 +4616,52 @@ fn runs_class_method_in_caller_follows_published_explicit_new1_verdict() {
     assert!(!h.runs_class_method_in_caller("Fwd", "new"));
 }
 
-/// BT-4625: a forwarding `new:` whose superclass lives in a sibling file
-/// answers `false` right after `build` (unknown ancestor), and `true` once the
-/// parent is injected via `add_from_beam_meta` and the verdict re-published.
+/// BT-4625 / BT-4640: the published `in_caller_new1` is the chain-independent
+/// body shape, so Pass 1's `extract_class_infos` carries it and a caller file
+/// that only has the sibling's `ClassInfo` answers like the defining module:
+/// `true` for a forwarding `new:` whose parent is another file, and `false`
+/// when that parent declares class variables.
 #[test]
-fn explicit_new1_verdict_republished_after_cross_file_injection() {
+fn explicit_new1_verdict_survives_pass1_extraction_across_files() {
     let parse = |src: &str| {
         let tokens = crate::source_analysis::lex_with_eof(src);
         crate::source_analysis::parse(tokens).0
     };
-    let base = parse("Object subclass: Base\n");
-    let fwd = parse(
-        "Base subclass: Fwd\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: xs\n",
-    );
-    let (h, _) = ClassHierarchy::build(&fwd);
-    let mut h = h.expect("hierarchy");
-    assert!(!h.runs_class_method_in_caller("Fwd", "new:"));
-    assert!(h.add_from_beam_meta(ClassHierarchy::extract_class_infos(&base)));
-    h.publish_explicit_new1_verdicts(&fwd);
-    assert!(h.get_class("Fwd").unwrap().in_caller_new1);
-    assert!(h.runs_class_method_in_caller("Fwd", "new:"));
+    let fwd_src = "Base subclass: Fwd\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: xs\n";
+    let fwd = parse(fwd_src);
+    let caller = parse("Object subclass: Caller\n");
+    let fwd_infos = ClassHierarchy::extract_class_infos(&fwd);
+    assert!(fwd_infos[0].in_caller_new1);
+
+    for (base_src, expected) in [
+        ("Object subclass: Base\n", true),
+        ("Object subclass: Base\n  classState: n = 0\n", false),
+    ] {
+        let base = parse(base_src);
+        // Caller's view: only Pass 1 infos of both sibling files.
+        let (h, _) = ClassHierarchy::build(&caller);
+        let mut h = h.expect("hierarchy");
+        let mut injected = ClassHierarchy::extract_class_infos(&base);
+        injected.extend(fwd_infos.clone());
+        assert!(h.add_from_beam_meta(injected));
+        // Defining module's view (codegen).
+        let (hd, _) = ClassHierarchy::build(&fwd);
+        let mut hd = hd.expect("hierarchy");
+        assert!(hd.add_from_beam_meta(ClassHierarchy::extract_class_infos(&base)));
+        assert_eq!(
+            hd.explicit_class_new1_runs_in_caller(&fwd.classes[0]),
+            expected,
+            "{base_src}"
+        );
+        assert_eq!(
+            h.runs_class_method_in_caller("Fwd", "new:"),
+            expected,
+            "{base_src}"
+        );
+        assert_eq!(
+            hd.runs_class_method_in_caller("Fwd", "new:"),
+            expected,
+            "{base_src}"
+        );
+    }
 }

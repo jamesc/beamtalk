@@ -289,14 +289,18 @@ pub struct ClassInfo {
     /// the current module (their parse errors surface directly).
     #[cfg_attr(feature = "serde", serde(default))]
     pub surface_incomplete: bool,
-    /// BT-4501: whether this class's own explicit class-side `new:` runs in
-    /// the caller ([`ClassHierarchy::explicit_class_new1_runs_in_caller`]),
-    /// i.e. codegen leaves `new:` out of the class's published
+    /// BT-4501: whether this class's own explicit class-side `new:` has the
+    /// body shape that runs in the caller
+    /// ([`ClassHierarchy::explicit_class_constructor_shape`]); combined with
+    /// the chain conditions it is
+    /// [`ClassHierarchy::explicit_class_new1_runs_in_caller`], i.e. codegen
+    /// leaves `new:` out of the class's published
     /// `process_bound_class_selectors`. Decided where the AST is in hand
-    /// (`ClassHierarchy::build_with_options`, and the stdlib snapshot in
-    /// `generated_builtins.rs`) and published here so
-    /// [`ClassHierarchy::runs_class_method_in_caller`] answers `new:` from
-    /// the same fact. Own-class only: a subclass inheriting the `new:`
+    /// (`ClassInfo::from_class_definition`, so Pass 1 extraction carries it to
+    /// cross-file callers, BT-4640; and the stdlib snapshot in
+    /// `generated_builtins.rs`) and chain-independent: the chain half is
+    /// re-evaluated by [`ClassHierarchy::runs_class_method_in_caller`] against
+    /// the hierarchy at hand. Own-class only: a subclass inheriting the `new:`
     /// keeps the class process, so this is never inherited.
     #[cfg_attr(feature = "serde", serde(default))]
     pub in_caller_new1: bool,
@@ -595,7 +599,7 @@ impl ClassInfo {
             auto_ctors: None,
             handle_scope: class.handle_scope.as_ref().map(|s| s.name.clone()),
             surface_incomplete: false,
-            in_caller_new1: false,
+            in_caller_new1: ClassHierarchy::explicit_class_constructor_shape(class, "new:"),
             // AST-built classes always compile to a module.
             is_module_less: false,
             state: class.state.iter().map(|s| s.name.name.clone()).collect(),

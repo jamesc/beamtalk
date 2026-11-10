@@ -923,11 +923,6 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         // propagate_cross_file_class_kind handles all remaining classes.
         result.class_hierarchy.propagate_class_kind(module);
         result.class_hierarchy.propagate_cross_file_class_kind();
-        // BT-4625: the `new:` verdict published at build time saw any
-        // sibling-file superclass as unknown; re-publish on the injected chain.
-        result
-            .class_hierarchy
-            .publish_explicit_new1_verdicts(module);
     }
 
     // ADR 0066 Phase 4: Register extension methods into the class hierarchy

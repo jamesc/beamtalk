@@ -5030,6 +5030,70 @@ fn test_runs_class_method_in_caller_new1_agrees_with_published_list_over_stdlib(
     assert_eq!(in_caller, ["Array", "List", "Set", "Tuple"]);
 }
 
+/// BT-4640: with the superclass in a sibling file, a caller file that only has
+/// the Pass 1 `ClassInfo`s (and, for the `add_external_superclasses` branch,
+/// just the superclass index) answers `runs_class_method_in_caller(c, "new:")`
+/// exactly as the defining module's codegen publishes
+/// `process_bound_class_selectors`.
+#[test]
+fn test_new1_verdict_agrees_across_files_with_sibling_parent() {
+    use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+    use std::collections::HashMap;
+    let parse = |src: &str| {
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+        beamtalk_core::source_analysis::parse(tokens).0
+    };
+    let fwd_src = "Base subclass: Fwd\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: xs\n";
+    let fwd = parse(fwd_src);
+    let published_bound = |code: &str| {
+        let list = code
+            .lines()
+            .find_map(|l| l.split("'process_bound_class_selectors' => [").nth(1))
+            .and_then(|rest| rest.split(']').next())
+            .expect("process_bound_class_selectors in meta");
+        list.split(", ").any(|s| s == "'new:'")
+    };
+    let index: HashMap<String, String> = HashMap::from([
+        ("Fwd".to_string(), "Base".to_string()),
+        ("Base".to_string(), "Object".to_string()),
+    ]);
+    let cases = [
+        ("Object subclass: Base\n", true),
+        ("Object subclass: Base\n  classState: n = 0\n", false),
+    ];
+    for (base_src, with_infos_expected) in cases {
+        let base = parse(base_src);
+        for use_infos in [true, false] {
+            // Defining module's codegen.
+            let mut options = crate::core_erlang::CodegenOptions::new("test")
+                .with_class_superclass_index(index.clone());
+            if use_infos {
+                options = options.with_class_hierarchy(ClassHierarchy::extract_class_infos(&base));
+            }
+            let code = crate::core_erlang::generate_module(&fwd, options).expect("codegen");
+            let codegen_in_caller = !published_bound(&code);
+            // A sibling caller's view: its own module, plus the same injection.
+            let caller = parse("Object subclass: Caller\n");
+            let (h, _) = ClassHierarchy::build(&caller);
+            let mut h = h.expect("hierarchy");
+            let mut infos = ClassHierarchy::extract_class_infos(&fwd);
+            if use_infos {
+                infos.extend(ClassHierarchy::extract_class_infos(&base));
+            }
+            h.add_from_beam_meta(infos);
+            h.add_external_superclasses(&index);
+            assert_eq!(
+                h.runs_class_method_in_caller("Fwd", "new:"),
+                codegen_in_caller,
+                "use_infos={use_infos}, base={base_src}"
+            );
+            if use_infos {
+                assert_eq!(codegen_in_caller, with_infos_expected, "{base_src}");
+            }
+        }
+    }
+}
+
 #[test]
 fn test_actor_meta_omits_direct_constructors() {
     // actor classes have no constructor anchor, so no key is
