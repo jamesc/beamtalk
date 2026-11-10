@@ -767,14 +767,14 @@ impl TypeChecker {
                 // Guard sees `binding`/scrutinee already narrowed
                 // above (ADR 0107: "scope includes the arm's `when:`
                 // guard, not just its body").
-                if let Some(guard) = &arm.guard {
-                    self.infer_expr(guard, hierarchy, &mut arm_env, in_abstract_method);
-                }
-                // BT-4650: widenings queued by the arm body name a local in
+                // BT-4650: widenings queued by the arm guard and body name a local in
                 // `arm_env`, where a pattern variable may shadow an outer
                 // local of the same name. Collect them in a frame of their
                 // own and forward only those that name the outer binding.
                 let outer_deferred = std::mem::take(&mut self.deferred_block_widenings);
+                if let Some(guard) = &arm.guard {
+                    self.infer_expr(guard, hierarchy, &mut arm_env, in_abstract_method);
+                }
                 let body_ty =
                     self.infer_expr(&arm.body, hierarchy, &mut arm_env, in_abstract_method);
                 let arm_deferred =
