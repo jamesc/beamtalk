@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4619: every stdlib `do:` is declared `-> Nil` and answers `nil` at run
+// time. The pure inlined `List do:` lowers to `lists:foreach/2`, which answers
+// `ok`; the codegen sequences it and answers `nil`, as the runtime primitives
+// (the `is_list` fallback send) and the mutation-threaded fold already did.
+
+TestCase subclass: DoAnswersNilTest
+
+  testListDoLiteralBlockAnswersNil =>
+    self assert: (#(1, 2) do: [:x | x]) isNil
+
+  testListDoNonLiteralBlockAnswersNil =>
+    b := [:x | x]
+    self assert: (#(1, 2) do: b) isNil
+
+  testListDoMutatingBlockAnswersNil =>
+    sum := 0
+    self assert: (#(1, 2) do: [:x | sum := sum + x]) isNil
+    self assert: sum equals: 3
+
+  testEmptyListDoAnswersNil =>
+    self assert: (#() do: [:x | x]) isNil
+
+  testArrayDoAnswersNil =>
+    self assert: ((Array withAll: #(1, 2)) do: [:x | x]) isNil
+
+  testDictionaryDoAnswersNil =>
+    self assert: (#{#a => 1, #b => 2} do: [:v | v]) isNil
+
+  testBinaryDoAnswersNil =>
+    self assert: ((Binary fromBytes: #(1, 2)) do: [:b | b]) isNil
+
+  testSetDoAnswersNil =>
+    self assert: ((Set new add: 1) do: [:x | x]) isNil
+
+  testEnumerableUserClassDoAnswersNil =>
+    bag := Adr0133EnumerableStdlib new: #{#items => #(1, 2, 3)}
+    self assert: (bag do: [:x | x]) isNil

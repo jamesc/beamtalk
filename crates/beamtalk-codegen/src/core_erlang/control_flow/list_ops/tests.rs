@@ -16,6 +16,23 @@ fn test_list_do_pure_generates_foreach() {
 }
 
 #[test]
+fn test_list_do_pure_answers_nil_not_foreach_ok() {
+    // BT-4619: `lists:foreach/2` answers `ok`; `do:` is declared `-> Nil`,
+    // so the inlined call is sequenced and the list arm answers `'nil'`.
+    let src = "Object subclass: Walker\n  run: items => items do: [:item | item]\n";
+    let code = codegen(src);
+    let squashed: String = code.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(
+        squashed.contains("-> do call 'lists':'foreach'("),
+        "Pure do: should sequence lists:foreach. Got:\n{code}"
+    );
+    assert!(
+        squashed.contains(") 'nil' <'false'> when 'true' ->"),
+        "Pure do: list arm should answer 'nil', not foreach's 'ok'. Got:\n{code}"
+    );
+}
+
+#[test]
 fn test_list_collect_generates_map() {
     // collect: (no mutations) generates lists:map
     let src = "Actor subclass: Srv\n  state: x = 0\n\n  run: items =>\n    items collect: [:item | item]\n";
@@ -1359,7 +1376,7 @@ fn test_actor_do_non_literal_callable_emits_plain_guard_and_send() {
     let code = codegen(src);
     for needle in [
         "case call 'erlang':'is_list'(",
-        ") of <'true'> when 'true' -> call 'lists':'foreach'(",
+        ") of <'true'> when 'true' -> do call 'lists':'foreach'(",
         "<'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(",
         ", 'do:', [",
     ] {

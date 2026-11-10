@@ -100,7 +100,7 @@ typed Value subclass: SupervisionTree
   // === Enumerating ===
 
   /// Pre-order walk: evaluate `aBlock` for every node in the snapshot.
-  /// Answers `nil` (BT-4515); cascade a second walk with `;`.
+  /// Answers `nil`; cascade a second walk with `;`.
   ///
   /// ## Examples
   /// ```beamtalk
@@ -108,7 +108,6 @@ typed Value subclass: SupervisionTree
   /// ```
   do: aBlock :: Block(SupervisionNode, Object) -> Nil =>
     self nodes do: aBlock
-    nil
 
   /// The nodes for which `aBlock` answers `true`.
   ///
