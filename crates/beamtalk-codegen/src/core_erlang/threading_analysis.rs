@@ -506,8 +506,9 @@ impl CoreErlangGenerator {
     /// `while_condition_binding_corpus.rs`. Before, such a condition was a
     /// plain closure answering only its boolean: the write was lost (the loop
     /// re-read the pre-loop value forever), or a body that read it read the
-    /// closure's own variable (`erlc`: unbound variable). Like a state effect, a write counts only
-    /// when the loop has something to carry it in (BT-3999).
+    /// closure's own variable (`erlc`: unbound variable). Like a state effect,
+    /// a write counts only when the loop has something to carry it in
+    /// (BT-3999).
     pub(in crate::core_erlang) fn while_condition_has_carried_effects(
         &self,
         condition: &Expression,
