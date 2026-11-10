@@ -226,7 +226,8 @@ impl Analyser {
                 self.analyse_expression(receiver, None);
                 // The parser folds the first send into `receiver`, so the
                 // object every cascade message is sent to is that send's own
-                // receiver. Report a bad target once: the first send's own
+                // receiver: the receiver-based checks below look at it. Report
+                // a bad loop condition once: the first send's own
                 // check (in `analyse_expression` above) may already have.
                 let (cascade_target, mut receiver_reported) = match receiver.as_ref() {
                     MessageSend {
@@ -267,14 +268,14 @@ impl Analyser {
 
                     // Run receiver-based validators for cascade messages
                     if let Some(diag) = method_validators::validate_primitive_instantiation(
-                        receiver,
+                        cascade_target,
                         &selector_str,
                         msg.span,
                     ) {
                         self.result.diagnostics.push(diag);
                     }
                     if let Some(diag) = method_validators::validate_immutable_mutation(
-                        receiver,
+                        cascade_target,
                         &selector_str,
                         msg.span,
                     ) {

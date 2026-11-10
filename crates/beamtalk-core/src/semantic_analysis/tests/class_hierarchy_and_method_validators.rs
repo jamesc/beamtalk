@@ -576,3 +576,32 @@ fn test_while_condition_arity_in_cascade_reported_once() {
         1
     );
 }
+
+#[test]
+fn test_cascade_receiver_checks_see_the_cascade_target() {
+    // The parser folds a cascade's first send into its receiver; the
+    // receiver-based checks look at that send's receiver, the object each
+    // cascaded message is sent to.
+    let count = |body: &str, needle: &str| {
+        let src = format!("Object subclass: W\n  run =>\n    {body}\n");
+        analyse(&crate::semantic_analysis::test_helpers::parse_module(&src))
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains(needle))
+            .count()
+    };
+    assert_eq!(
+        count(
+            "Integer printString; new",
+            "Cannot instantiate primitive class"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            "42 printString; fieldAt: #x put: 1",
+            "Cannot mutate immutable value"
+        ),
+        1
+    );
+}
