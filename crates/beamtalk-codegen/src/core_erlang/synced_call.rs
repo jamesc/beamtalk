@@ -166,9 +166,11 @@ thread_local! {
     /// `StalePrestore` rule can be shown to fire.
     pub(in crate::core_erlang) static FAULT_PRESTORE_READS_BEFORE_OPERANDS: std::cell::Cell<bool> =
         const { std::cell::Cell::new(false) };
-    /// Every send [`CoreErlangGenerator::note_dispatch_nlr_literals`] logged.
+    /// Every send [`CoreErlangGenerator::note_dispatch_nlr_literals`] logged:
+    /// its selector, and whether it runs none of its operands
+    /// ([`CoreErlangGenerator::send_runs_no_operand`]).
     pub(in crate::core_erlang) static DISPATCH_NLR_LITERALS:
-        std::cell::RefCell<Vec<(String, SendUserCode)>> = const { std::cell::RefCell::new(Vec::new()) };
+        std::cell::RefCell<Vec<(String, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
     /// The reads the fault stores instead, by the conditional's first block
     /// argument (the pre-store's `at`)
     /// ([`CoreErlangGenerator::publish_fault_prestore_read`]); cleared with
@@ -801,6 +803,27 @@ impl CoreErlangGenerator {
             .is_no_user_code(class_name.as_str(), selector.name().as_str())
     }
 
+    /// BT-4633: whether the send `receiver selector arguments` runs none of
+    /// its operands, so a `^` in one of its block literals can never throw
+    /// from it: the shared table classifies it [`SendUserCode::Never`]
+    /// (BT-4606), or it is a `no_user_code` primitive
+    /// ([`Self::is_no_user_code_send`]), which runs no user code at all, a
+    /// block of any argument included, whatever its declared parameter types
+    /// (an annotation is not checked at run time). Both are ways
+    /// [`Self::classify_send`] answers [`UserCodeCall::No`] for the send
+    /// itself; the operand rule ([`Self::note_nlr_operands`]) and the
+    /// dispatch's test-build log ([`Self::note_dispatch_nlr_literals`]) read
+    /// this one answer.
+    fn send_runs_no_operand(
+        &self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+    ) -> bool {
+        self.is_no_user_code_send(receiver, selector)
+            || send_user_code(receiver, selector, arguments) == SendUserCode::Never
+    }
+
     /// A construct the compiler lowers in place is not a call. The exception is
     /// a conditional that does not thread `State` (a `super` send is not a
     /// state effect, BT-3995) with a `super` send in a branch: it is a real send
@@ -1036,6 +1059,9 @@ impl CoreErlangGenerator {
     /// block (`b value`, `(... yourself) value`) receives it as a value, not
     /// a literal: that send is a [`SendUserCode::ClosureOperand`] and is
     /// judged on its own.
+    ///
+    /// BT-4633: so does a send to a `no_user_code` primitive
+    /// ([`Self::send_runs_no_operand`]).
     fn note_nlr_operands(
         &mut self,
         receiver: &Expression,
@@ -1043,13 +1069,12 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
         at: Span,
     ) {
-        match send_user_code(receiver, selector, arguments) {
-            SendUserCode::Never => return,
-            SendUserCode::ClosureOperand => {
-                let gap = self.make_unbracketed_send(selector.name().to_string(), at);
-                self.synced.nlr_closure_gaps.push(gap);
-            }
-            _ => {}
+        if self.send_runs_no_operand(receiver, selector, arguments) {
+            return;
+        }
+        if send_user_code(receiver, selector, arguments) == SendUserCode::ClosureOperand {
+            let gap = self.make_unbracketed_send(selector.name().to_string(), at);
+            self.synced.nlr_closure_gaps.push(gap);
         }
         let blocks =
             std::iter::once(receiver)
@@ -1252,10 +1277,13 @@ impl CoreErlangGenerator {
     }
 
     /// BT-4612 (test-only): logs a send that reaches the runtime dispatch
-    /// outside every bracket window with a `^`-holding block literal among
-    /// its operands, where the cell protocol applies, with its
-    /// [`SendUserCode`] class ([`DISPATCH_NLR_LITERALS`]). The dispatch has
-    /// no pre-store, so every logged send must be [`SendUserCode::Never`].
+    /// (or, BT-4633, the typed guarded send) outside every bracket window
+    /// with a `^`-holding block literal among its operands, where the cell
+    /// protocol applies, with whether it runs none of its operands
+    /// ([`DISPATCH_NLR_LITERALS`]). Neither dispatch has a pre-store, so
+    /// every logged send must be one that runs none
+    /// ([`Self::send_runs_no_operand`]: a [`SendUserCode::Never`] send, or a
+    /// `no_user_code` primitive, BT-4633).
     #[cfg(test)]
     pub(in crate::core_erlang) fn note_dispatch_nlr_literals(
         &self,
@@ -1273,9 +1301,10 @@ impl CoreErlangGenerator {
         if self.synced.window_depth > 0 || !self.nlr_closure_prestore_applies(&blocks) {
             return;
         }
-        let class = send_user_code(receiver, selector, arguments);
+        let runs_no_operand = self.send_runs_no_operand(receiver, selector, arguments);
         DISPATCH_NLR_LITERALS.with(|log| {
-            log.borrow_mut().push((selector.name().to_string(), class));
+            log.borrow_mut()
+                .push((selector.name().to_string(), runs_no_operand));
         });
     }
 

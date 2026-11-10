@@ -153,66 +153,25 @@ module_less_class_paths_make_no_code_server_call() ->
     %% BT-4056: module-less ancestors and the class itself must not be probed
     %% by `new`, dispatch lookup or has_method_local/2. `new` runs inside the
     %% class gen_server, so trace that process as well as the worker.
-    Base = start_class('ZzMlBase', undefined, 'Object'),
+    Base = start_class('ZzMlBase', undefined, 'Object', [foo]),
     Sub = start_class('ZzMlSub', undefined, 'ZzMlBase'),
     try
-        {_, Calls} = code_server_calls_traced([Base, Sub], fun() ->
+        {Result, Calls} = calls_during([{code_server, call, 1}], [Base, Sub], fun() ->
             _ = gen_server:call(Sub, {new, []}),
             _ = gen_server:call(Base, {new, []}),
+            %% `foo` is defined on Base, so the walk reaches
+            %% dispatchable_module/1 (and its class-name thunk).
             _ = beamtalk_dispatch:lookup(
-                foo, [], #{'$beamtalk_class' => 'ZzMlSub'}, 'ZzMlSub', #{}
+                foo, [], #{'$beamtalk_class' => 'ZzMlSub'}, #{}, 'ZzMlSub'
             ),
-            _ = beamtalk_object_class:has_method_local(Sub, foo)
+            _ = beamtalk_object_class:has_method_local(Base, foo),
+            ok
         end),
-        ?assertEqual([], Calls)
+        ?assertEqual(ok, Result),
+        ?assertEqual([], [R || {code_server, call, [R]} <- Calls])
     after
         stop_class(Sub),
         stop_class(Base)
-    end.
-
-code_server_calls_traced(ExtraPids, Fun) ->
-    Pattern = {code_server, call, 1},
-    Parent = self(),
-    Worker = spawn(fun() ->
-        receive
-            go -> ok
-        end,
-        Parent ! {result, self(), catch Fun()}
-    end),
-    erlang:trace_pattern(Pattern, true, [local]),
-    Pids = [Worker | ExtraPids],
-    try
-        lists:foreach(fun(P) -> 1 = erlang:trace(P, true, [call]) end, Pids),
-        Worker ! go,
-        Result =
-            receive
-                {result, Worker, R} -> R
-            after 5000 -> error(worker_timeout)
-            end,
-        lists:foreach(
-            fun(P) ->
-                Ref = erlang:trace_delivered(P),
-                receive
-                    {trace_delivered, P, Ref} -> ok
-                after 5000 -> error(trace_delivery_timeout)
-                end
-            end,
-            Pids
-        ),
-        {Result, collect_traced(Pids)}
-    after
-        erlang:trace_pattern(Pattern, false, [local]),
-        exit(Worker, kill)
-    end.
-
-collect_traced(Pids) ->
-    receive
-        {trace, P, call, {code_server, call, [Req]}} when is_pid(P) ->
-            case lists:member(P, Pids) of
-                true -> [Req | collect_traced(Pids)];
-                false -> collect_traced(Pids)
-            end
-    after 0 -> []
     end.
 
 warm_value_send_does_no_string_work() ->
@@ -423,7 +382,15 @@ start_class(Name, Module) ->
     start_class(Name, Module, none).
 
 start_class(Name, Module, Superclass) ->
-    Base = #{superclass => Superclass, class_methods => #{}, class_state => #{}},
+    start_class(Name, Module, Superclass, []).
+
+start_class(Name, Module, Superclass, Selectors) ->
+    Base = #{
+        superclass => Superclass,
+        class_methods => #{},
+        class_state => #{},
+        instance_methods => maps:from_list([{S, #{}} || S <- Selectors])
+    },
     ClassInfo =
         case Module of
             undefined -> Base;
@@ -473,6 +440,13 @@ every `{M, F, Args}` call that process made to a function matching one of
 `Patterns` (`{M, F, Arity}`, `'_'` wildcards allowed, traced as local calls).
 """.
 calls_during(Patterns, Fun) ->
+    calls_during(Patterns, [], Fun).
+
+-doc """
+As `calls_during/2`, additionally tracing `ExtraPids` (e.g. class gen_servers
+that run part of `Fun`'s work); their calls are included in `Calls`.
+""".
+calls_during(Patterns, ExtraPids, Fun) ->
     Parent = self(),
     Worker = spawn(fun() ->
         receive
@@ -488,7 +462,7 @@ calls_during(Patterns, Fun) ->
     %% success path it has already exited, so the kill is a no-op.
     Result =
         try
-            1 = erlang:trace(Worker, true, [call]),
+            lists:foreach(fun(P) -> 1 = erlang:trace(P, true, [call]) end, [Worker | ExtraPids]),
             Worker ! go,
             receive
                 {result, Worker, R} -> R
@@ -499,16 +473,25 @@ calls_during(Patterns, Fun) ->
             exit(Worker, kill)
         end,
     %% Make sure every trace message the worker generated has arrived.
-    Ref = erlang:trace_delivered(Worker),
-    receive
-        {trace_delivered, Worker, Ref} -> ok
-    after 5000 -> error(trace_delivery_timeout)
-    end,
-    {Result, drain_calls(Worker, [])}.
+    Pids = [Worker | ExtraPids],
+    lists:foreach(
+        fun(P) ->
+            Ref = erlang:trace_delivered(P),
+            receive
+                {trace_delivered, P, Ref} -> ok
+            after 5000 -> error(trace_delivery_timeout)
+            end
+        end,
+        Pids
+    ),
+    {Result, drain_calls(Pids, [])}.
 
-drain_calls(Worker, Acc) ->
+drain_calls(Pids, Acc) ->
     receive
-        {trace, Worker, call, MFA} ->
-            drain_calls(Worker, [MFA | Acc])
+        {trace, P, call, MFA} when is_pid(P) ->
+            case lists:member(P, Pids) of
+                true -> drain_calls(Pids, [MFA | Acc]);
+                false -> drain_calls(Pids, Acc)
+            end
     after 0 -> lists:reverse(Acc)
     end.

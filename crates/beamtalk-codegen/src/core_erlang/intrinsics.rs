@@ -252,6 +252,12 @@ impl CoreErlangGenerator {
     /// rejects with `stateful_block_dispatch` and the dynamic send rejects
     /// with its own error. Block literals and `Block`-typed receivers keep
     /// the intrinsic.
+    ///
+    /// BT-4630: a *protocol*-typed receiver never yields, decided on the
+    /// static class being a protocol rather than on the target's shape: a
+    /// protocol with one guardable conformer resolves to `Tagged`, yet a real
+    /// `Block` may conform structurally and is never an arm, so yielding would
+    /// forfeit the inline apply (and `stateful_block_dispatch` for Tier 2).
     fn block_value_yields_to_typed_send(
         &self,
         receiver: &Expression,
@@ -264,14 +270,17 @@ impl CoreErlangGenerator {
             return false;
         };
         class.as_str() != "Block"
-            && self
-                .typed_send_target(receiver, selector)
-                .is_ok_and(|target| {
-                    !matches!(
-                        target,
-                        super::dispatch_codegen::TypedSendTarget::Conformers(_)
-                    )
-                })
+            // A protocol-typed receiver may be a real block (`Block` is never
+            // a tagged arm), whatever shape its target resolves to.
+            && !self.is_protocol_class(class.as_str())
+            && self.typed_send_target(receiver, selector).is_ok()
+    }
+
+    /// Whether `class` names a protocol in scope.
+    fn is_protocol_class(&self, class: &str) -> bool {
+        self.protocol_registry
+            .as_ref()
+            .is_some_and(|r| r.has_protocol(class))
     }
 
     /// Generates code for unary `value` message on a block receiver.

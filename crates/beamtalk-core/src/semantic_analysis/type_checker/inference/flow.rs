@@ -81,25 +81,34 @@ impl TypeChecker {
         };
         for (element, ty) in elements.iter().zip(positions) {
             if let Pattern::Variable(id) = element {
-                let is_dynamic_position = match &ty {
-                    InferredType::Dynamic(_) => true,
-                    InferredType::Known {
-                        class_name,
-                        type_args,
-                        ..
-                    } => {
-                        (class_name == "Object" && type_args.is_empty())
-                            || super::super::types::is_type_var_placeholder(class_name, hierarchy)
-                    }
-                    _ => false,
-                };
-                let bound = if is_dynamic_position {
+                let bound = if Self::is_dynamic_position(&ty, hierarchy) {
                     InferredType::Dynamic(DynamicReason::Unknown)
                 } else {
                     ty
                 };
                 env.set_local(id.name.clone(), bound);
             }
+        }
+    }
+
+    /// Whether a destructured tuple position must bind as `Dynamic`: it is
+    /// `Dynamic`, bare `Object`, or an unresolved type variable — or, for a
+    /// union column, any member is (BT-4628).
+    fn is_dynamic_position(ty: &InferredType, hierarchy: &ClassHierarchy) -> bool {
+        match ty {
+            InferredType::Dynamic(_) => true,
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                (class_name == "Object" && type_args.is_empty())
+                    || super::super::types::is_type_var_placeholder(class_name, hierarchy)
+            }
+            InferredType::Union { members, .. } => members
+                .iter()
+                .any(|m| Self::is_dynamic_position(m, hierarchy)),
+            _ => false,
         }
     }
 
