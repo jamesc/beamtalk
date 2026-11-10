@@ -85,9 +85,50 @@ fn find_first_idiom_with_nil_guard_arm_is_widened() {
 fn block_stored_in_a_local_is_widened_where_it_is_defined() {
     // A block literal on an assignment RHS goes through the same inference as
     // a message argument, so its write is joined in at the definition: the
-    // block can run at any later point.
+    // block can run at any later point. This is approximate, not a soundness
+    // guarantee: a reassignment between the definition and `setter value` is
+    // not tracked.
     let diags = diagnostics_for(
         "  class f: s :: String -> Integer =>\n    found := nil\n    setter := [found := s]\n    setter value\n    found isNil ifTrue: [^0]\n    found size\n",
     );
     assert!(dnu(&diags).is_empty(), "unexpected DNU: {diags:#?}");
+}
+
+#[test]
+fn sibling_arms_do_not_see_each_others_writes() {
+    // The arms are mutually exclusive: the false arm must still see `x` as an
+    // Integer, not `Integer | String` from the true arm's write (`abs` would be
+    // reported against the String member).
+    let diags = diagnostics_for(
+        "  class g: flag :: Boolean -> Integer =>\n    x := 0\n    flag ifTrue: [x := 'a'] ifFalse: [x abs]\n    0\n\n  class f: n :: Integer | Nil -> Integer =>\n    x := 0\n    n isNil ifTrue: [x := 'a'] ifFalse: [x abs]\n    0\n",
+    );
+    assert!(dnu(&diags).is_empty(), "unexpected DNU: {diags:#?}");
+}
+
+#[test]
+fn both_arms_writes_are_joined_after_the_send() {
+    let diags = diagnostics_for(
+        "  class flag: flag :: Boolean with: s :: String -> Integer =>\n    result := ''\n    flag ifTrue: [result := nil] ifFalse: [result := s]\n    result isNil ifTrue: [^0]\n    result size\n",
+    );
+    assert!(dnu(&diags).is_empty(), "unexpected DNU: {diags:#?}");
+}
+
+#[test]
+fn control_sibling_arm_shape_is_checked() {
+    // Pins the deferral: the false arm must still see `x` as the Integer it
+    // was before the send, so `size` is rejected. If the true arm's write
+    // leaked into the sibling arm, `x` would be a union there and the DNU
+    // would be lost. Also proves the shapes above are parsed and checked.
+    let diags = diagnostics_for(
+        "  class g: flag :: Boolean -> Integer =>\n    x := 0\n    flag ifTrue: [x := 'a'] ifFalse: [x size]\n    0\n\n  class f: n :: Integer | Nil -> Integer =>\n    x := 0\n    n isNil ifTrue: [x := 'a'] ifFalse: [x size]\n    0\n",
+    );
+    assert_eq!(dnu(&diags).len(), 2, "expected two DNUs: {diags:#?}");
+}
+
+#[test]
+fn control_two_keyword_class_method_shape_is_checked() {
+    let diags = diagnostics_for(
+        "  class flag: flag :: Boolean with: s :: String -> Integer =>\n    s fooBar\n    0\n",
+    );
+    assert_eq!(dnu(&diags).len(), 1, "expected one DNU: {diags:#?}");
 }

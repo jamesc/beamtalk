@@ -932,13 +932,15 @@ impl TypeChecker {
                 block_env.set_local(param.name.clone(), param_ty.clone());
                 block_param_types.push(param_ty);
             }
+            let deferring = std::mem::take(&mut self.defer_block_widening);
             let body_ty =
                 self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
+            self.defer_block_widening = deferring;
             // BT-4636: a write inside a narrowing arm (`found isNil ifTrue:
             // [found := e]`) is joined into the enclosing scope too, so it
             // reaches the method scope through the `do:` block around it.
             // `before` is read from the un-narrowed `env`.
-            Self::widen_outer_locals_written_by_block(block, &block_env, env);
+            self.widen_outer_locals_written_by_block(block, &block_env, env, deferring);
             // Build `Block(P1, ..., Pn, R)` so downstream generic inference
             // (e.g. `infer_method_local_params` matching `Block(R) -> R`) can
             // recover the block's return type.
@@ -1559,8 +1561,11 @@ impl TypeChecker {
         for (param, ty) in block.parameters.iter().zip(resolved.iter()) {
             block_env.set_local(param.name.clone(), ty.clone());
         }
+        // A block body starts a fresh send frame (see `defer_block_widening`).
+        let deferring = std::mem::take(&mut self.defer_block_widening);
         let body_ty = self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
-        Self::widen_outer_locals_written_by_block(block, &block_env, env);
+        self.defer_block_widening = deferring;
+        self.widen_outer_locals_written_by_block(block, &block_env, env, deferring);
         // A block whose body ends in a top-level non-local return
         // (`^expr`) never produces a *local* value — it diverges out of the
         // enclosing method entirely, and `^expr`'s type naturally matches
@@ -1607,15 +1612,23 @@ impl TypeChecker {
     /// environment that is then dropped, so `found := nil. xs do: [:e | found
     /// := e]` left `found` typed `UndefinedObject` afterwards. Widen each outer
     /// local the block writes to the join of its type before the block and the
-    /// type the block leaves it with (`String | Nil`), exactly as the
-    /// `ifTrue:`/`ifFalse:` arm join does (BT-4207). The block may run zero
-    /// times, so the prior type always stays a member. Nested blocks apply the
-    /// same rule to their own parent, so a write under `ifFalse: [...]` inside a
-    /// `do:` block reaches the method scope one level at a time.
+    /// type the block leaves it with (`String | Nil`), using the same
+    /// [`Self::join_branch_arms`] the arms' result types use. The block may run
+    /// zero times, so the prior type always stays a member. Nested blocks apply
+    /// the same rule to their own parent, so a write under `ifFalse: [...]`
+    /// inside a `do:` block reaches the method scope one level at a time.
+    ///
+    /// While `deferring` (the block is an argument of a send) the pair is
+    /// queued instead, and [`Self::apply_deferred_block_widenings`] joins all
+    /// of the send's arms at once. A block stored in a local is widened where
+    /// it is defined, which is approximate: it does not track a later
+    /// reassignment before the block runs.
     fn widen_outer_locals_written_by_block(
+        &mut self,
         block: &crate::ast::Block,
         block_env: &TypeEnv,
         env: &mut TypeEnv,
+        deferring: bool,
     ) {
         let writes = crate::semantic_analysis::block_facts::outer_local_writes(block, &|name| {
             env.get_local(name).is_some()
@@ -1627,20 +1640,48 @@ impl TypeChecker {
             ) {
                 continue;
             }
-            let (Some(before), Some(after)) =
-                (env.get_local(&write.name), block_env.get_local(&write.name))
-            else {
+            let Some(after) = block_env.get_local(&write.name) else {
                 continue;
             };
-            if before == after {
+            if deferring {
+                self.deferred_block_widenings.push((write.name, after));
+            } else {
+                Self::apply_deferred_block_widenings(&[(write.name, after)], env);
+            }
+        }
+    }
+
+    /// Join each `(local, type after a block)` pair into `env`: the local's
+    /// current type joined with every type the send's arms left it with.
+    pub(in crate::semantic_analysis::type_checker) fn apply_deferred_block_widenings(
+        deferred: &[(ecow::EcoString, InferredType)],
+        env: &mut TypeEnv,
+    ) {
+        let mut names: Vec<ecow::EcoString> = Vec::new();
+        for (name, _) in deferred {
+            if !names.contains(name) {
+                names.push(name.clone());
+            }
+        }
+        for name in names {
+            let Some(before) = env.get_local(&name) else {
+                continue;
+            };
+            let mut arms = vec![before.clone()];
+            arms.extend(
+                deferred
+                    .iter()
+                    .filter(|(n, _)| *n == name)
+                    .map(|(_, ty)| ty.clone()),
+            );
+            if arms.iter().skip(1).all(|ty| *ty == before) {
                 continue;
             }
-            let joined = Self::join_branch_arms(&[before, after]);
+            let joined = Self::join_branch_arms(&arms);
             // The old origin note and flow facts (known-remote, raw-Binary)
             // described the earlier binding, not this union: drop them.
-            let key = EnvKey::local(write.name.clone());
-            env.remove(&key);
-            env.set_local(write.name.clone(), joined);
+            env.remove(&EnvKey::local(name.clone()));
+            env.set_local(name, joined);
         }
     }
 

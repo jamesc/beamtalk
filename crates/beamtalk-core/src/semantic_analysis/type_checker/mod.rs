@@ -550,6 +550,16 @@ pub struct TypeChecker {
     /// may run at any later point, so such a local is never treated as a
     /// raw `Binary` — see [`binary_string_compare::block_written_locals`].
     pub(super) block_written_locals: std::collections::HashSet<EcoString>,
+    /// BT-4636: set while a send's arguments are being inferred, so a block
+    /// argument's writes to outer locals are collected in
+    /// [`Self::deferred_block_widenings`] and joined into the environment once
+    /// every argument is done. Sibling arms (`ifTrue:ifFalse:`) are mutually
+    /// exclusive and must not see each other's writes. Cleared on entering a
+    /// block body, whose own sends start a fresh frame.
+    pub(super) defer_block_widening: bool,
+    /// BT-4636: `(local, type the block left it with)` pairs collected while
+    /// [`Self::defer_block_widening`] is set.
+    pub(super) deferred_block_widenings: Vec<(EcoString, InferredType)>,
 }
 
 impl TypeChecker {
@@ -569,6 +579,8 @@ impl TypeChecker {
             typed_class_context: None,
             known_remote_spans: HashMap::new(),
             block_written_locals: std::collections::HashSet::new(),
+            defer_block_widening: false,
+            deferred_block_widenings: Vec::new(),
             block_param_pushdown: HashMap::new(),
             unresolved_selector_sends: std::collections::HashSet::new(),
         }
@@ -593,6 +605,8 @@ impl TypeChecker {
             typed_class_context: None,
             known_remote_spans: HashMap::new(),
             block_written_locals: std::collections::HashSet::new(),
+            defer_block_widening: false,
+            deferred_block_widenings: Vec::new(),
             block_param_pushdown: HashMap::new(),
             unresolved_selector_sends: std::collections::HashSet::new(),
         }
