@@ -286,8 +286,13 @@ struct BodyEffects {
 ///
 /// The rule itself is the `beamtalk-core` leaf
 /// [`while_condition_has_state_effects`](beamtalk_core::semantic_analysis::block_facts::while_condition_has_state_effects),
-/// which the ADR 0131 §6 validator reads too (BT-3845), so the validator's
-/// "this condition write threads" and this lowering cannot disagree.
+/// for the state effect; BT-4015 adds a condition's own outer-local writes
+/// (`loop_condition_written_locals`). The ADR 0131 §6 validator accepts such a
+/// write whenever the body is a block literal (BT-4602,
+/// `block_facts::while_condition_threads`); that the two agree is checked at
+/// lowering time, not by construction: a plain loop whose condition writes an
+/// outer local fails `verify()` (`ConditionFamilyNotCarried`), over the
+/// generated rows of `while_condition_binding_corpus.rs`.
 ///
 /// BT-3999: an effect counts only when the loop carries it (a threaded local or
 /// the scope's ambient carrier), the condition-side twin of BT-3834's

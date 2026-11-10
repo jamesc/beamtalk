@@ -212,6 +212,29 @@ impl CoreErlangGenerator {
             ("'true'", "'false'")
         };
 
+        // BT-4602: this lowering runs the condition as a plain closure, so an
+        // outer local it writes dies with the closure (the loop re-reads the
+        // pre-loop value forever). A condition that writes one must take the
+        // stateful lowering (`while_loop_threads` via
+        // `while_condition_has_carried_effects`), or Phase 0 must reject it
+        // (a body that is not a block literal, `Escape::ConditionBodyNotLiteral`).
+        // This is the `ConditionalLoop` check's twin for the loop that builds no
+        // node: without it a gate that wrongly answered `false` would compile
+        // silently.
+        let dropped: Vec<threaded_ir::VerifyError> = self
+            .loop_condition_written_locals(condition)
+            .into_iter()
+            .map(|name| threaded_ir::VerifyError::ConditionFamilyNotCarried {
+                family: VersionPrefix::Local(name),
+                at: condition.span(),
+            })
+            .collect();
+        self.report_threaded_ir_verify_errors(
+            &dropped,
+            "plain loop whose condition writes an outer local",
+            condition.span(),
+        );
+
         let loop_fn = self.fresh_temp_var(threaded_ir::LOOP_FN_STEM);
         let cond_var = self.fresh_temp_var("CondFun");
         let cond_code = self.expression_doc(condition)?;

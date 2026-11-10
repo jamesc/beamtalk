@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4577: a static Supervisor with a named (`withName:`) `native:` actor
+// child.
+
+Supervisor subclass: Bt4577NativeNamedSup
+
+  childSpecs =>
+    #((Bt4577NativeCounter supervisionSpec withName: #bt4577_native_counter withArgs: #{
+      #initial => 7
+    }))

@@ -1280,6 +1280,12 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
 
     // Native actor validation (ADR 0056)
     validators::check_native_state_fields(module, &result.class_hierarchy, &mut result.diagnostics);
+    // BT-4577: a native actor's instance methods must be `self delegate`
+    validators::check_native_actor_instance_method_bodies(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
     validators::check_native_delegate_return_type(
         module,
         &result.class_hierarchy,
