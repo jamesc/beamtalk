@@ -42,6 +42,24 @@ fn fmt_keeps_top_level_pipelines_as_written() {
     assert_identity("x := p withX: 5 |> withY: 10\nx |> keys sorted |> size + 1\n");
 }
 
+#[test]
+fn fmt_keeps_pipelines_at_keyword_expression_sites() {
+    // BT-4516: string interpolation, `match:` arm bodies, map values and
+    // list, array and tuple elements.
+    assert_identity(
+        "\"total: {xs select: [:x | x] |> sum}\"\n\
+         x match: [\n  1 -> a withX: 1 |> withY: 2;\n  _ -> ^b |> foo\n]\n\
+         #{#a => x foo |> bar}\n\
+         #(a foo |> bar, b)\n\
+         #[a |> foo, b]\n\
+         {a |> foo, b}\n",
+    );
+    assert_identity(
+        "Object subclass: Piper\n\n  \
+         pair: d => #(d |> keys, d |> size)\n",
+    );
+}
+
 fn first_method(source: &str) -> MethodDefinition {
     parse_bt(source).classes[0].methods[0].clone()
 }
