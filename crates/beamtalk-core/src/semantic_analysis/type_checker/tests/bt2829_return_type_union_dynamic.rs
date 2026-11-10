@@ -44,6 +44,7 @@ fn untyped_class_hierarchy(class_name: &str) -> ClassHierarchy {
 /// directly with a hand-constructed `body_type`, bypassing inference.
 fn method_with_return_type(return_type: TypeAnnotation) -> MethodDefinition {
     MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Unary("probe".into()),
         parameters: vec![],
         body: vec![bare(int_lit(0))],

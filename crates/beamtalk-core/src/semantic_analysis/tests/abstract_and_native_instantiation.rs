@@ -59,6 +59,7 @@ fn test_abstract_instantiation_in_class_method() {
     // abstract instantiation inside a class-side method should be detected
     let mut shape = make_abstract_class("Shape");
     shape.class_methods.push(MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Unary("create".into()),
         parameters: vec![],
         body: vec![bare(make_spawn_expr("Shape"))],
@@ -74,6 +75,7 @@ fn test_abstract_instantiation_in_class_method() {
     });
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![shape],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -115,6 +117,7 @@ fn test_abstract_instantiation_in_string_interpolation() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![shape],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -154,6 +157,7 @@ fn test_abstract_instantiation_in_standalone_method() {
         package: None,
         is_class_method: false,
         method: MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("build".into()),
             parameters: vec![],
             body: vec![bare(make_spawn_expr("Shape"))],
@@ -171,6 +175,7 @@ fn test_abstract_instantiation_in_standalone_method() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![shape],
         method_definitions: vec![standalone],
         protocols: Vec::new(),
@@ -246,6 +251,7 @@ fn test_actor_new_error_in_standalone_method() {
         package: None,
         is_class_method: false,
         method: MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("build".into()),
             parameters: vec![],
             body: vec![bare(new_expr)],
@@ -263,6 +269,7 @@ fn test_actor_new_error_in_standalone_method() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![counter],
         method_definitions: vec![standalone],
         protocols: Vec::new(),

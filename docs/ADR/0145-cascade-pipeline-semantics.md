@@ -466,8 +466,12 @@ Consequences of this design:
 `// …` on a stage. Comments currently attach only at statement level, and
 the workspace compares reflected source with the file on disk. So fmt and
 the reflected-source restore must keep a comment between stages, or every
-method that has one is reported as modified. BT-4514 decides where such a
-comment attaches; the round-trip corpus above covers it.
+method that has one is reported as modified. BT-4514 decided where such a
+comment attaches: to the record entry of the send whose `|>` follows it.
+An end-of-line comment after the previous stage is that entry's trailing
+comment, and comments on their own lines before the `|>` are its leading
+comments. A comment after the last stage stays the statement's own trailing
+comment. The round-trip corpus above covers it.
 
 **Rejected: an `Expression::Pipeline` variant desugared in
 normalisation.** This was the original design. It gives the formatter the

@@ -17,6 +17,7 @@ mod declaration_order_and_blank_lines;
 mod escape_corpus_conformance;
 mod format_source_and_comments;
 mod keyword_and_protocol_round_trip;
+mod pipeline_round_trip;
 mod property_tests;
 mod reindent_and_literal_display;
 mod round_trip_and_idempotency;

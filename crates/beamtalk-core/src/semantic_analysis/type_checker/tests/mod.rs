@@ -55,6 +55,7 @@ mod bt4385_list_literal_element_check;
 mod bt4444_block_value_arg_check;
 mod bt4482_protocol_assignment_conformance;
 mod bt4512_cascade_drops_update;
+mod bt4515_object_then;
 mod bt4526_static_dnu_known_receiver;
 mod cast_and_sync_send;
 mod destructure_and_extension;

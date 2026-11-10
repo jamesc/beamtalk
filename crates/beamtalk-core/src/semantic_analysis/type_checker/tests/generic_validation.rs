@@ -16,6 +16,7 @@ fn bt2022_generic_return_type_inner_arg_mismatch_warns() {
     add_generic_result_class(&mut hierarchy);
 
     let method = MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Unary("compute".into()),
         parameters: vec![],
         body: vec![bare(int_lit(42))],
@@ -80,6 +81,7 @@ fn bt2022_generic_return_type_matching_inner_args_no_warning() {
     add_generic_result_class(&mut hierarchy);
 
     let method = MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Unary("compute".into()),
         parameters: vec![],
         body: vec![bare(int_lit(42))],
@@ -130,6 +132,7 @@ fn bt2022_generic_return_type_bare_body_no_warning() {
     add_generic_result_class(&mut hierarchy);
 
     let method = MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Unary("compute".into()),
         parameters: vec![],
         body: vec![bare(int_lit(42))],
@@ -174,6 +177,7 @@ fn bt2022_dictionary_inner_arg_mismatch_warns() {
     let hierarchy = ClassHierarchy::with_builtins();
 
     let method = MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Unary("data".into()),
         parameters: vec![],
         body: vec![bare(int_lit(42))],
@@ -222,6 +226,7 @@ fn bt2022_list_inner_arg_mismatch_warns() {
     let hierarchy = ClassHierarchy::with_builtins();
 
     let method = MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Unary("items".into()),
         parameters: vec![],
         body: vec![bare(int_lit(42))],
@@ -301,6 +306,7 @@ fn bt2022_generic_type_param_in_declared_args_not_warned() {
     add_generic_result_class(&mut hierarchy);
 
     let method = MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Unary("compute".into()),
         parameters: vec![],
         body: vec![bare(int_lit(42))],
@@ -352,6 +358,7 @@ fn bt2033_never_return_with_known_body_warns() {
     let hierarchy = ClassHierarchy::with_builtins();
 
     let method = MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Unary("diverge".into()),
         parameters: vec![],
         body: vec![bare(int_lit(42))],
@@ -401,6 +408,7 @@ fn bt2033_never_return_with_never_body_no_warning() {
     let hierarchy = ClassHierarchy::with_builtins();
 
     let method = MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Unary("diverge".into()),
         parameters: vec![],
         body: vec![bare(int_lit(42))],

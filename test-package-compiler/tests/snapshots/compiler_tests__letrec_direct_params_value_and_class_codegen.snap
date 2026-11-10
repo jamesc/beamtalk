@@ -109,6 +109,7 @@ module 'letrec_direct_params_value_and_class' ['new'/0, 'new'/1, 'countUpTo:'/2,
                 <'show:'> when 'true' -> 'slow'
                 <'showCr:'> when 'true' -> 'slow'
                 <'subclassResponsibility'> when 'true' -> 'slow'
+                <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
                 <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('DirectParamsValue', Selector)
             end of

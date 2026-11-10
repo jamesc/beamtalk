@@ -25,9 +25,9 @@ use beamtalk_codegen::core_erlang::{
     CodeGenContext, CodeGenError, CoreErlangGenerator, GeneratedModule, Result,
 };
 use beamtalk_core::ast::normalize::{
-    PeeledParens, expr_has_parenthesised_operand, peel_operand_parens_expr_recording,
+    PeeledParens, expr_needs_normalising, peel_operand_parens_expr_recording,
 };
-use beamtalk_core::ast::{Expression, Pattern};
+use beamtalk_core::ast::{Expression, Pattern, PipelineSends};
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
 use beamtalk_core::source_analysis::Diagnostic;
 use std::borrow::Cow;
@@ -47,7 +47,7 @@ use std::borrow::Cow;
 /// parentheses as written.
 fn peeled(expressions: &[Expression]) -> (Cow<'_, [Expression]>, PeeledParens) {
     let mut record = PeeledParens::default();
-    if expressions.iter().any(expr_has_parenthesised_operand) {
+    if expressions.iter().any(expr_needs_normalising) {
         let mut owned = expressions.to_vec();
         for expression in &mut owned {
             peel_operand_parens_expr_recording(expression, &mut record);
@@ -124,8 +124,15 @@ pub fn generate_repl_expressions_with_index(
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
 ) -> Result<String> {
-    generate_repl_expressions_impl(expressions, module_name, class_module_index, None, false)
-        .map(|m| m.code)
+    generate_repl_expressions_impl(
+        expressions,
+        &PipelineSends::default(),
+        module_name,
+        class_module_index,
+        None,
+        false,
+    )
+    .map(|m| m.code)
 }
 
 /// Like [`generate_repl_expressions_with_index`] but also computes direct-call
@@ -151,6 +158,7 @@ pub fn generate_repl_expressions_with_hierarchy(
 ) -> Result<String> {
     generate_repl_expressions_impl(
         expressions,
+        &PipelineSends::default(),
         module_name,
         class_module_index,
         Some(hierarchy),
@@ -162,6 +170,7 @@ pub fn generate_repl_expressions_with_hierarchy(
 #[allow(clippy::implicit_hasher)]
 fn generate_repl_expressions_impl(
     expressions: &[Expression],
+    pipeline_sends: &PipelineSends,
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
     hierarchy: Option<&ClassHierarchy>,
@@ -176,6 +185,7 @@ fn generate_repl_expressions_impl(
     let (expressions, peeled_parens) = peeled(expressions);
     let mut generator = CoreErlangGenerator::new(module_name);
     generator.set_peeled_parens(peeled_parens);
+    generator.set_pipeline_sends(pipeline_sends.clone());
     generator.set_class_module_index(class_module_index);
     if let Some(hierarchy) = hierarchy {
         generator.set_direct_call_eligible_from_hierarchy(hierarchy);
@@ -200,6 +210,12 @@ fn generate_repl_expressions_impl(
 /// compile path uses; every other codegen warning is dropped. The diagnostics
 /// are warnings: generation still succeeds with the generator's output.
 ///
+/// `pipeline_sends` is the `|>` record (ADR 0145) of the module the
+/// expressions were parsed from (`Module::pipeline_sends`): expressions
+/// outside any method record their `|>` sends there, so a `ClassBuilder`
+/// block method's reflected source needs it to keep `|>` as written. The
+/// convenience entries above pass an empty record.
+///
 /// `inject_verifier_violation` is the
 /// `CodegenOptions::with_injected_verifier_violation` test hook.
 ///
@@ -209,6 +225,7 @@ fn generate_repl_expressions_impl(
 #[allow(clippy::implicit_hasher)]
 pub fn generate_repl_expressions_surfacing_verifier(
     expressions: &[Expression],
+    pipeline_sends: &PipelineSends,
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
     hierarchy: Option<&ClassHierarchy>,
@@ -216,6 +233,7 @@ pub fn generate_repl_expressions_surfacing_verifier(
 ) -> Result<(String, Vec<Diagnostic>)> {
     generate_repl_expressions_impl(
         expressions,
+        pipeline_sends,
         module_name,
         class_module_index,
         hierarchy,
@@ -245,6 +263,7 @@ pub fn generate_repl_expressions_traced(
 ) -> Result<String> {
     generate_repl_expressions_traced_impl(
         expressions,
+        &PipelineSends::default(),
         source,
         module_name,
         class_module_index,
@@ -270,6 +289,7 @@ pub fn generate_repl_expressions_traced_with_hierarchy(
 ) -> Result<String> {
     generate_repl_expressions_traced_impl(
         expressions,
+        &PipelineSends::default(),
         source,
         module_name,
         class_module_index,
@@ -287,6 +307,7 @@ pub fn generate_repl_expressions_traced_with_hierarchy(
 #[allow(clippy::implicit_hasher)]
 pub fn generate_repl_expressions_traced_surfacing_verifier(
     expressions: &[Expression],
+    pipeline_sends: &PipelineSends,
     source: &str,
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
@@ -295,6 +316,7 @@ pub fn generate_repl_expressions_traced_surfacing_verifier(
 ) -> Result<(String, Vec<Diagnostic>)> {
     generate_repl_expressions_traced_impl(
         expressions,
+        pipeline_sends,
         source,
         module_name,
         class_module_index,
@@ -307,6 +329,7 @@ pub fn generate_repl_expressions_traced_surfacing_verifier(
 #[allow(clippy::implicit_hasher)]
 fn generate_repl_expressions_traced_impl(
     expressions: &[Expression],
+    pipeline_sends: &PipelineSends,
     source: &str,
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
@@ -332,6 +355,7 @@ fn generate_repl_expressions_traced_impl(
     let (expressions, peeled_parens) = peeled(expressions);
     let mut generator = CoreErlangGenerator::new(module_name);
     generator.set_peeled_parens(peeled_parens);
+    generator.set_pipeline_sends(pipeline_sends.clone());
     generator.set_class_module_index(class_module_index);
     if let Some(hierarchy) = hierarchy {
         generator.set_direct_call_eligible_from_hierarchy(hierarchy);
@@ -357,7 +381,8 @@ fn generate_repl_expressions_traced_impl(
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_test_expression(expression: &Expression, module_name: &str) -> Result<String> {
-    generate_test_expression_surfacing_verifier(expression, module_name).map(|(code, _)| code)
+    generate_test_expression_surfacing_verifier(expression, &PipelineSends::default(), module_name)
+        .map(|(code, _)| code)
 }
 
 /// Like [`generate_test_expression`] but also returns the `ThreadedIr`
@@ -365,16 +390,22 @@ pub fn generate_test_expression(expression: &Expression, module_name: &str) -> R
 /// codegen report hints (BT-4292), filtered by
 /// [`GeneratedModule::into_code_and_verifier_diagnostics`].
 ///
+/// `pipeline_sends` is the `|>` record (ADR 0145) of the module the
+/// expression was parsed from, so a `ClassBuilder` block method's reflected
+/// source keeps `|>` as written.
+///
 /// # Errors
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_test_expression_surfacing_verifier(
     expression: &Expression,
+    pipeline_sends: &PipelineSends,
     module_name: &str,
 ) -> Result<(String, Vec<Diagnostic>)> {
     let (expression, peeled_parens) = peeled(std::slice::from_ref(expression));
     let mut generator = CoreErlangGenerator::new(module_name);
     generator.set_peeled_parens(peeled_parens);
+    generator.set_pipeline_sends(pipeline_sends.clone());
     let mut assembler = ReplAssembler::new(&mut generator);
     let doc = assembler.generate_test_module(&expression[0])?;
     let code = doc.to_pretty_string();

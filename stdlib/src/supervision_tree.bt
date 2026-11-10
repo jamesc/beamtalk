@@ -14,9 +14,11 @@
 ///
 /// `do:`, `select:`, `detect:`, `detect:ifNone:` and `collect:` stay this
 /// class's own hand-written methods (class wins, ADR 0127 §3) rather than
-/// `Enumerable`'s provisions — `do:` in particular answers `self` for
-/// chaining, not `Enumerable`'s `Nil`, which is why its `uses:` line
-/// excludes it explicitly.
+/// `Enumerable`'s provisions. `do:` in particular walks the enriched `nodes`
+/// rather than `Enumerable`'s `elements` (the flat records), which is why its
+/// `uses:` line excludes it explicitly. It is declared `-> Nil` like every
+/// other `do:` in the stdlib and answers `nil` (BT-4515); use a cascade
+/// (`tree do: [...]; do: [...]`) to walk the same tree twice.
 ///
 /// The snapshot is *best-effort point-in-time*: iterating a tree never re-enters
 /// OTP (it is frozen), so the walk is internally consistent. To observe change,
@@ -98,14 +100,15 @@ typed Value subclass: SupervisionTree
   // === Enumerating ===
 
   /// Pre-order walk: evaluate `aBlock` for every node in the snapshot.
+  /// Answers `nil` (BT-4515); cascade a second walk with `;`.
   ///
   /// ## Examples
   /// ```beamtalk
   /// tree do: [:node | Transcript showCr: node printString]
   /// ```
-  do: aBlock :: Block(SupervisionNode, Object) -> SupervisionTree =>
+  do: aBlock :: Block(SupervisionNode, Object) -> Nil =>
     self nodes do: aBlock
-    self
+    nil
 
   /// The nodes for which `aBlock` answers `true`.
   ///

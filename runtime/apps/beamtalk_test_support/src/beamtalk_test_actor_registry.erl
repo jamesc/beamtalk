@@ -30,7 +30,11 @@ with_registry(Fun) ->
         try
             Fun(Pid)
         after
-            catch gen_server:stop(Pid)
+            try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end
         end
     end).
 
@@ -42,7 +46,11 @@ with_registered(Pid, Fun) ->
         try
             Fun()
         after
-            catch unregister(?NAME)
+            try
+                unregister(?NAME)
+            catch
+                _:_ -> ok
+            end
         end
     end).
 
@@ -75,14 +83,30 @@ end_isolated() ->
             ok;
         {Original, Fresh} ->
             _ = persistent_term:erase({?MODULE, isolated}),
-            catch gen_server:stop(Fresh),
+            try
+                gen_server:stop(Fresh)
+            catch
+                _:_ -> ok
+            end,
             case whereis(?NAME) of
-                undefined -> ok;
-                _ -> catch unregister(?NAME)
+                undefined ->
+                    ok;
+                _ ->
+                    try
+                        unregister(?NAME)
+                    catch
+                        _:_ -> ok
+                    end
             end,
             case is_pid(Original) andalso is_process_alive(Original) of
-                true -> catch register(?NAME, Original);
-                false -> ok
+                true ->
+                    try
+                        register(?NAME, Original)
+                    catch
+                        _:_ -> ok
+                    end;
+                false ->
+                    ok
             end,
             ok
     end.
@@ -98,16 +122,28 @@ with_swapped(Fun) ->
         Fun()
     after
         case whereis(?NAME) of
-            undefined -> ok;
-            _ -> catch unregister(?NAME)
+            undefined ->
+                ok;
+            _ ->
+                try
+                    unregister(?NAME)
+                catch
+                    _:_ -> ok
+                end
         end,
         case Original of
             undefined ->
                 ok;
             _ ->
                 case is_process_alive(Original) of
-                    true -> catch register(?NAME, Original);
-                    false -> ok
+                    true ->
+                        try
+                            register(?NAME, Original)
+                        catch
+                            _:_ -> ok
+                        end;
+                    false ->
+                        ok
                 end
         end
     end.

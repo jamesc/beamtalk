@@ -380,7 +380,7 @@ fn a_foreign_throw_stores_the_cleanups_final_state_acc_where_the_cell_is_live() 
     let text = lower_and_render(&ir).to_pretty_string();
     assert!(
         text.contains(
-            "case {Type1, Error1} of <{'throw', Foreign1}> when call 'erlang':'=:='(call 'erlang':'element'(1, Foreign1), '$bt_nlr') -> let StateAcc = call 'beamtalk_actor_state':'refresh'(Self, StateAcc) in let StateAcc1 = call 'maps':'put'('n', 40, StateAcc) in let _ = call 'beamtalk_actor_state':'store'(StateAcc1) in primop 'raw_raise'(Type1, Error1, Stack1) <Other1> when 'true' -> primop 'raw_raise'(Type1, Error1, Stack1) end"
+            "case {Type1, Error1} of <{'throw', Foreign1}> when call 'erlang':'=:='(call 'erlang':'element'(1, Foreign1), '$bt_nlr') -> let StateAcc = call 'beamtalk_actor_state':'refresh'(Self, StateAcc) in let StateAcc1 = call 'maps':'put'('n', 40, StateAcc) in let _ = call 'beamtalk_actor_state':'store_unwound'(Foreign1, StateAcc1) in primop 'raw_raise'(Type1, Error1, Stack1) <Other1> when 'true' -> primop 'raw_raise'(Type1, Error1, Stack1) end"
         ),
         "{text}"
     );

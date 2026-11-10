@@ -8,10 +8,12 @@ Rule 1 and Rule 3 landed via BT-2793. Rule 2 landed via BT-2796 (WS2:
 `KnowledgeScope` completeness contract + parse-error guard), BT-2795 (WS1:
 project-wide extension visibility), and BT-2794 (pre-WS3 dependency guard) —
 see the Rule 2 section for how "removal" of the cross-file-parent
-suppression was realised. WS3 (cross-package extension metadata, ADR 0070
-amendment) remains future work; until it lands, packages that declare
-dependencies get no unresolved-selector hints in project-complete builds
-(the Rule 1 third downgrade, implemented as the BT-2794 guard). BT-2800
+suppression was realised. WS3 (dependency extensions, ADR 0070 amendments)
+landed for `beamtalk build`/`check`/`lint`/`test` and MCP lint via BT-4608:
+dependency extensions are read from dependency source, and the BT-2794 guard
+(the Rule 1 third downgrade) now applies only while some dependency's
+extensions could not be loaded completely. The LSP still applies the guard
+whenever it sees dependencies (BT-4611). BT-2800
 closed a surface-parity gap BT-2793 left behind: the LSP now applies the
 Rule 3 `[diagnostics]` table too, not just `beamtalk build` (see the
 Escalation implementation note below). BT-2839 closed the same gap for a
@@ -156,6 +158,8 @@ never misreported:
   classes local to a package with no dependencies). So WS1/WS2 alone deliver the
   `Hint` precision benefit only for local, dependency-free types; the full benefit
   for stdlib and imported types waits on WS3. This is intentional, not a gap.
+  (WS3 landed for the CLI surfaces and MCP lint in BT-4608: once every
+  dependency's extensions are loaded, the guard lifts.)
 
 Because severity hinges entirely on this classification, the
 `Dynamic`/`Open`/`ClosedComplete` decision MUST be made in **one shared place** so
@@ -181,8 +185,12 @@ warning). `ModuleOnly` contexts (REPL, isolated single files,
 budget-exhausted LSP preloads) keep the pre-Rule-2 behaviour automatically.
 BT-2794 added the pre-WS3 dependency guard from the sequencing bullet below:
 a package that declares dependencies has **no** `ClosedComplete` receivers
-until WS3, because a dependency can extend any class — including `Object`,
-which every receiver's chain reaches. (This supersedes the design note's
+while its dependencies' extensions are unknown, because a dependency can
+extend any class — including `Object`, which every receiver's chain reaches.
+Since BT-4608 (WS3) the guard keys on `CompilerOptions::dependency_extensions_unknown`
+— on only when some dependency's extensions could not be loaded completely
+(not fetched, unreadable, or not parsed cleanly; ADR 0070's 2026-11-09
+amendment) — rather than on merely having dependencies. (This supersedes the design note's
 tentative "package-local classes are dependency-extension-free" refinement:
 it is false for *inherited* extensions on shared roots.) Note the guard's
 full blast radius: `classify_receiver` gates all four consumer sites, so a
@@ -191,7 +199,7 @@ and the class-side dispatch checks pre-WS3 — a dependency extension could
 supply the missing required method, so non-conformance is no longer
 provable. Deliberate and test-covered
 (`test_dependency_guard_suppresses_conformance_warning`); full checking
-returns with WS3.
+returns once the dependencies' extensions are loaded (WS3, BT-4608).
 
 When project-scoped compilation (BT-2251 WS1/WS2) gives the checker complete
 intra-project knowledge, it **replaces the incompleteness workarounds with real

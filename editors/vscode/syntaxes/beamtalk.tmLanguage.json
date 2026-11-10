@@ -175,6 +175,11 @@
           "match": "=>"
         },
         {
+          "comment": "ADR 0145: the pipeline operator `|>`, one token (only when `|` and `>` are adjacent, like the lexer's `PipeGt`). Listed ahead of the comparison operators so its `>` is not taken as one.",
+          "name": "keyword.operator.pipeline.beamtalk",
+          "match": "\\|>"
+        },
+        {
           "name": "keyword.operator.comparison.beamtalk",
           "match": "=:=|=/=|==|/=|<=|>=|<|>"
         },

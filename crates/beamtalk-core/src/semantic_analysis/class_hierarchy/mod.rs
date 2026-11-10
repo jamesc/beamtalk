@@ -85,14 +85,15 @@ pub struct ClassHierarchy {
     /// [`KnowledgeScope::ModuleOnly`]; consulted by the receiver-knowledge
     /// classifier (ADR 0100 Rule 2).
     knowledge_scope: crate::semantic_analysis::receiver_knowledge::KnowledgeScope,
-    /// Whether the compiled package declares dependencies whose extension
-    /// contributions are not yet loaded (pre-WS3 guard).
+    /// Whether the compiled package has dependencies whose extension
+    /// contributions were not all loaded (pre-WS3 guard).
     ///
-    /// Until WS3 (ADR 0070 amendment) ships cross-package extension metadata,
-    /// a dependency can extend *any* class — including `Object`, which every
-    /// receiver inherits from — so no receiver's method surface is provably
-    /// complete. When true (and the scope is `ProjectComplete`), the
-    /// receiver-knowledge classifier keeps every receiver `Open`.
+    /// A dependency can extend *any* class — including `Object`, which every
+    /// receiver inherits from — so while any dependency's extensions are
+    /// unknown no receiver's method surface is provably complete. When true
+    /// (and the scope is `ProjectComplete`), the receiver-knowledge
+    /// classifier keeps every receiver `Open`. Surfaces that load every
+    /// dependency's extensions (ADR 0070 WS3, BT-4608) leave it `false`.
     dependency_extensions_unknown: bool,
     /// The class names more than one package in this compilation's scope
     /// declares (BT-4151/BT-4283), installed by `analyse_full` and the
@@ -386,9 +387,9 @@ impl ClassHierarchy {
     }
 
     /// Declare that the compiled package has dependencies whose extension
-    /// contributions are not loaded (pre-WS3 guard). Set by
+    /// contributions were not all loaded (pre-WS3 guard). Set by
     /// `analyse_full` from
-    /// `CompilerOptions::has_package_dependencies`.
+    /// `CompilerOptions::dependency_extensions_unknown`.
     pub fn set_dependency_extensions_unknown(&mut self, unknown: bool) {
         self.dependency_extensions_unknown = unknown;
     }

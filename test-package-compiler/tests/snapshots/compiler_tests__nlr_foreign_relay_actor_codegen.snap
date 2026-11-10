@@ -432,7 +432,7 @@ module 'nlr_foreign_relay_actor' ['start_link'/1, 'start_link'/2, 'init'/1, 'han
                         of _NlrResult@39 -> _NlrResult@39
                         catch <_NlrCls@40, _NlrErr@41, _NlrStk@42> ->
                           case {_NlrCls@40, _NlrErr@41} of
-                            <{'throw', {'$bt_nlr', _CatchTok@43, _NlrVal@44, _NlrState@45}}> when call 'erlang':'=:='(_CatchTok@43, _NlrToken@14) -> {'reply', _NlrVal@44, _NlrState@45}
+                            <{'throw', {'$bt_nlr', _CatchTok@43, _NlrVal@44, _NlrState@45}}> when call 'erlang':'=:='(_CatchTok@43, _NlrToken@14) -> {'reply', _NlrVal@44, call 'beamtalk_actor_state':'commit'(Self, _NlrState@45)}
                             <_OtherPair@46> when 'true' -> primop 'raw_raise'(_NlrCls@40, _NlrErr@41, _NlrStk@42)
                           end
                     in apply '__nlr_body'/0 ()

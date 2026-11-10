@@ -300,6 +300,7 @@ Module {
     },
     file_leading_comments: [],
     file_trailing_comments: [],
+    pipeline_sends: {},
 }
 
 Diagnostics:

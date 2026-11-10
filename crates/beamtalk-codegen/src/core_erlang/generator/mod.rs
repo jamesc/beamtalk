@@ -351,6 +351,12 @@ pub struct CoreErlangGenerator {
     /// `with_rebind_frame`, the one place frames are entered; read by
     /// `loop_holds_no_whole_state`.
     pub(in crate::core_erlang) in_private_scratch: bool,
+    /// BT-4318: set by `super_send_producer` for the one `generate_super_send`
+    /// call it makes. A `State`-threading `super` send compiled without it
+    /// would leak its `{reply, Result, NewState}` tuple and drop the state
+    /// change, so `generate_super_send` reports it
+    /// (`VerifyError::StateEffectEscapesExpression`).
+    pub(in crate::core_erlang) in_super_send_producer: bool,
     /// Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     pub(in crate::core_erlang) source_path: Option<String>,
@@ -541,6 +547,13 @@ pub struct CoreErlangGenerator {
     /// The [`PeelScope`](beamtalk_core::ast::normalize::PeelScope) a
     /// `ClassBuilder` block method's operands were recorded under (BT-4059).
     pub(in crate::core_erlang) current_method_span: Option<beamtalk_core::source_analysis::Span>,
+    /// The `|>` record (ADR 0145) of the code being generated: the current
+    /// method's (swapped in by `MethodFrame::enter`, restored on drop), or
+    /// the module's outside any method (set by `generate_module_with_warnings`
+    /// and the REPL entries via [`Self::set_pipeline_sends`]). A
+    /// `ClassBuilder` block method's reflected source takes the entries that
+    /// fall inside its block, so it keeps `|>` as written.
+    pub(in crate::core_erlang) current_pipeline_sends: beamtalk_core::ast::PipelineSends,
     /// What codegen's guard-return rewrite changed (BT-4415,
     /// `guard_returns`): the bodies as written, which
     /// [`Self::as_written_method_source`] reflects in place of the rewritten
@@ -569,8 +582,8 @@ pub struct CoreErlangGenerator {
 }
 
 /// `method`'s reflected source: its text as written, with the operand
-/// parentheses `peeled` recorded removing in `scope` put back (BT-4059).
-/// Equal to `unparse_method(method)` when nothing was recorded.
+/// parentheses `peeled` recorded removing in `scope` (BT-4059) and the
+/// canonicalised unary loops (BT-4313) put back.
 ///
 /// The one place reflected method source is produced from codegen's
 /// (peeled) tree; [`CoreErlangGenerator::as_written_method_source`] is this
@@ -580,7 +593,8 @@ pub(in crate::core_erlang) fn as_written_method_source(
     peeled: &beamtalk_core::ast::normalize::PeeledParens,
     scope: beamtalk_core::ast::normalize::PeelScope,
 ) -> String {
-    if peeled.is_empty() {
+    if peeled.is_empty() && !beamtalk_core::ast::normalize::method_has_desugared_unary_loop(method)
+    {
         return beamtalk_core::unparse::unparse_method(method);
     }
     let mut written = method.clone();
@@ -642,6 +656,15 @@ impl CoreErlangGenerator {
         self.peeled_parens = peeled;
     }
 
+    /// Records the `|>` record (ADR 0145) of the code outside any method this
+    /// generator compiles, so a `ClassBuilder` block method's reflected
+    /// source keeps `|>` as written.
+    // `pub` — `beamtalk-repl` compiles a module's expressions without the
+    // module, so it passes the module's record here.
+    pub fn set_pipeline_sends(&mut self, pipeline_sends: beamtalk_core::ast::PipelineSends) {
+        self.current_pipeline_sends = pipeline_sends;
+    }
+
     /// Creates a new code generator for the given module name.
     // widened from `pub(crate)` — `beamtalk-repl` constructs its
     // own generator.
@@ -681,6 +704,7 @@ impl CoreErlangGenerator {
             in_fold_frame: false,
             rebind_frames: std::collections::HashMap::new(),
             in_private_scratch: false,
+            in_super_send_producer: false,
             source_path: None,
             tier2_local_vars: std::collections::HashSet::new(),
             tier2_local_var_captured_mutations: std::collections::HashMap::new(),
@@ -713,6 +737,7 @@ impl CoreErlangGenerator {
             method_return_types_written_back: std::collections::HashMap::new(),
             peeled_parens: beamtalk_core::ast::normalize::PeeledParens::default(),
             current_method_span: None,
+            current_pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
             guard_rewrite: super::guard_returns::GuardRewrite::default(),
             guard_conditions_used: std::collections::HashSet::new(),
             boolean_comparison_lowerings: std::collections::HashMap::new(),

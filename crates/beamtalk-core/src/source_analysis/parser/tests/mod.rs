@@ -24,6 +24,7 @@ mod expression_tests;
 mod literal_tests;
 mod method_tests;
 mod native_declaration_tests;
+mod pipeline_tests;
 mod traits_tests;
 mod type_alias_tests;
 mod type_tests;

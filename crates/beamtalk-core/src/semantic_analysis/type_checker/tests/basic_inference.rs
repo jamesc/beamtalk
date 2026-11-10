@@ -254,6 +254,7 @@ fn test_class_side_spawn_returns_class_type() {
             supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
+                pipeline_sends: crate::ast::PipelineSends::default(),
                 selector: MessageSelector::Unary("increment".into()),
                 parameters: vec![],
                 body: vec![],
@@ -642,6 +643,7 @@ fn test_class_method_body_gets_self_type() {
             supervisor_kind: None,
             state: vec![],
             methods: vec![MethodDefinition {
+                pipeline_sends: crate::ast::PipelineSends::default(),
                 selector: MessageSelector::Unary("greet".into()),
                 parameters: vec![],
                 body: vec![bare(msg_send(

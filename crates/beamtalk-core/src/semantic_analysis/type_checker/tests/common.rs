@@ -230,6 +230,7 @@ pub(super) fn make_keyword_method(
     body: Vec<Expression>,
 ) -> MethodDefinition {
     MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Keyword(
             selector_parts
                 .iter()
@@ -357,6 +358,7 @@ pub(super) fn make_class_with_methods(
 
 pub(super) fn make_method(selector: &str, body: Vec<Expression>) -> MethodDefinition {
     MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Unary(selector.into()),
         parameters: vec![],
         body: body.into_iter().map(ExpressionStatement::bare).collect(),

@@ -330,6 +330,7 @@ fn test_bt1213_block_value_with_captured_mutation_actor() {
     };
 
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),

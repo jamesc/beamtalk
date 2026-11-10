@@ -27,7 +27,8 @@
 //! BT-4062: the carried lowering exists only for a block-literal body; any
 //! other body (a variable, a computed block) is rejected at Phase 0 when the
 //! condition writes a binding, and the unary `whileTrue` / `whileFalse` forms
-//! are ordinary sends that raise `does_not_understand`.
+//! are the keyword loop with an empty body (BT-4313), so they carry the
+//! condition's write too.
 
 mod common;
 
@@ -260,11 +261,10 @@ fn bt4062_non_literal_body_with_condition_write_is_rejected() {
     assert_inputs_compile(&pure, pure.len());
 }
 
-/// BT-4062: the unary `whileTrue` / `whileFalse` forms are not loops on
-/// `Block` (it has only the keyword forms), so a binding-writing receiver is
-/// accepted and compiles to an ordinary send that raises
-/// `does_not_understand` at run time (pinned in
-/// `bt4015_while_condition_binding.btscript`); no write is silently lost.
+/// BT-4062 / BT-4313: a binding-writing receiver of the unary `whileTrue` /
+/// `whileFalse` is accepted in every position and compiles: `ast::normalize`
+/// makes it the keyword loop with an empty body, whose condition write is
+/// carried (the answers are pinned in `bt4015_while_condition_binding.btscript`).
 #[test]
 fn bt4062_unary_while_with_condition_write_compiles() {
     let unary: Vec<String> = POSITIONS

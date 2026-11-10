@@ -200,7 +200,12 @@ halts (ADR 0129 §5). Best-effort: a missing or busy handler is ignored.
 """.
 -spec flush_transcript() -> ok.
 flush_transcript() ->
-    _ = (catch logger_std_h:filesync(?TRANSCRIPT_HANDLER)),
+    _ =
+        try
+            logger_std_h:filesync(?TRANSCRIPT_HANDLER)
+        catch
+            _:_ -> ok
+        end,
     ok.
 
 -doc "Return the current OTP primary log level as an atom.".
