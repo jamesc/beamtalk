@@ -902,8 +902,8 @@ impl TypeChecker {
             }
             // Destructure assignment — infer value type, bind pattern variables into TypeEnv
             Expression::DestructureAssignment { pattern, value, .. } => {
-                self.infer_expr(value, hierarchy, env, in_abstract_method);
-                Self::bind_pattern_vars(pattern, env);
+                let value_ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
+                Self::bind_destructure_vars(pattern, &value_ty, hierarchy, env);
                 InferredType::Dynamic(DynamicReason::Unknown)
             }
         };

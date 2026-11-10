@@ -49,6 +49,7 @@ mod bt4175_override_return_types;
 mod bt4199_false_positives;
 mod bt4210_param_type_variables;
 mod bt4220_tuple_annotations;
+mod bt4487_destructure_tuple_types;
 mod bt4233_type_var_placeholder;
 mod bt4235_value_type_trailing_field_assignment;
 mod bt4385_list_literal_element_check;
