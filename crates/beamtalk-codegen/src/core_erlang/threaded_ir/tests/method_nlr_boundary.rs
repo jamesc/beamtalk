@@ -78,6 +78,37 @@ fn actor_and_repl_scopes_are_not_constrained() {
     }
 }
 
+/// ADR 0146 (BT-4535): an actor reply that commits the carried state is
+/// rejected in every scope; the cell-committing reply verifies clean.
+#[test]
+fn an_actor_reply_committing_the_carried_state_is_rejected() {
+    use crate::core_erlang::nlr::fault::{NlrFault, with_fault};
+    for scope in [ScopeKind::Instance, ScopeKind::Repl] {
+        assert_eq!(
+            verify_in_scope(&nlr_catch(NlrBoundary::ActorReply), scope),
+            Vec::new(),
+            "{scope:?}"
+        );
+        assert_eq!(
+            with_fault(NlrFault::CommitCarried, || {
+                verify_in_scope(&nlr_catch(NlrBoundary::ActorReply), scope)
+            }),
+            vec![VerifyError::ActorNlrCommitBypassesCell { at: span() }],
+            "{scope:?}"
+        );
+    }
+}
+
+#[test]
+fn the_actor_boundary_renders_the_cell_commit() {
+    let out = lower_and_render(&nlr_catch(NlrBoundary::ActorReply)).to_pretty_string();
+    assert!(
+        out.contains("{'reply', _NlrVal")
+            && out.contains("call 'beamtalk_actor_state':'commit'(Self, _NlrState"),
+        "the actor catch arm must commit the cell: {out}"
+    );
+}
+
 #[test]
 fn the_value_type_boundary_renders_the_bare_value_on_both_paths() {
     let out = lower_and_render(&nlr_catch(NlrBoundary::ValueType)).to_pretty_string();
