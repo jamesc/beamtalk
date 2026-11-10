@@ -20,6 +20,14 @@
 //! the fix off (`FAULT_NLR_CLOSURES_UNSTORED`) every shape that relied on it
 //! reports, while the shapes covered independently (a bracketed send, the
 //! `on:do:` entry store, an inlined construct) stay clean.
+//!
+//! BT-4532 (ADR 0146) widens the rule from block literals to every operand
+//! that may be a block: a construct that runs a block parameter or variable
+//! as a closure (`3 timesRepeat: blk`, `blk value`, `[p foo] on: Error do:
+//! blk`, ...) is classified as user code and bracketed, and with that rule
+//! off the send itself reports. A store vouches only for the block literals
+//! it stores for (`with_nlr_closure_cover`), so a `^`-closure of another send
+//! nested in a non-block operand is checked on its own.
 
 use super::assert_compiles_through_erlc;
 use crate::core_erlang::synced_call::{CLASSIFY_SEND_CALLS, FAULT_NLR_CLOSURES_UNSTORED};
@@ -28,6 +36,8 @@ use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
 const HEADER: &str = "Actor subclass: NlrClosureCallProbe
   state: n = 0
+
+  flip: v => self.n := 9. v
 ";
 
 /// How the block holding the `^` is called, and whether the fix is what
@@ -98,6 +108,33 @@ const CALLS: &[(&str, &str, bool)] = &[
         "k := 0. 1 to: 3 do: [:i | k := i. ^k]",
         false,
     ),
+    // BT-4532: a block parameter (`blk`) run as a closure by a construct.
+    // It may hold a `^` of the method that passed it, so the construct is
+    // user code (`SendUserCode::ClosureOperand`) and is bracketed.
+    ("param_value", "blk value", true),
+    ("param_times_repeat", "3 timesRepeat: blk", true),
+    ("param_to_do", "1 to: 3 do: blk", true),
+    ("param_while_true", "[true] whileTrue: blk", true),
+    ("param_collection_do", "#(1, 2) do: blk", true),
+    ("param_ensure_body", "blk ensure: [nil]", true),
+    ("param_ensure_cleanup", "[nil] ensure: blk", true),
+    ("param_on_do_handler", "[p foo] on: Error do: blk", true),
+    ("param_if_true", "r := q ifTrue: blk", true),
+    // A send to an unknown receiver brackets whatever it is passed.
+    ("param_unknown_receiver", "p at: 1 ifAbsent: blk", false),
+    // BT-4532: an operand that steps `State` (a field-writing self-send)
+    // ahead of the `^` block. Whatever stores for the `^` reads the state
+    // after the operands are threaded, so the store carries the step.
+    (
+        "state_step_operand_send",
+        "r := p foo: (self flip: p) bar: [^8]",
+        false,
+    ),
+    (
+        "state_step_conditional",
+        "r := (self flip: p) ifTrue: [^8]",
+        true,
+    ),
 ];
 
 /// Where the call sits.
@@ -117,7 +154,7 @@ fn corpus() -> Vec<(String, String, bool)> {
             for (prefix_name, prefix) in PREFIXES {
                 let body = pos.replace("CALL", call);
                 let src = format!(
-                    "{HEADER}\n  probe: p with: q =>\n    m := 0.\n    {prefix}{body}.\n    0\n"
+                    "{HEADER}\n  probe: p with: q with: blk =>\n    m := 0.\n    {prefix}{body}.\n    0\n"
                 );
                 out.push((
                     format!("{call_name} / {pos_name} / {prefix_name}"),
@@ -216,6 +253,34 @@ fn unstored_nlr_closure_calls_report_with_the_fix_off() {
     );
     let needing = CALLS.iter().filter(|(_, _, needs)| *needs).count();
     assert!(reported >= needing * POSITIONS.len() * PREFIXES.len());
+}
+
+/// BT-4532: a `^`-closure of one send nested in a non-block operand of
+/// another send whose closures a store covers (here `on:do:`'s handler, whose
+/// catch boundary stores on entry). The nested `[^4] value` runs while the
+/// handler operand is evaluated, before that store, so it is covered only by
+/// its own call's bracket: with the `^` rule off it reports by its own
+/// selector (`value`), not exempt under the `on:do:` cover.
+const NESTED_IN_OPERAND: &str = "[p foo] on: Error do: ([^4] value)";
+
+fn nested_in_operand_src() -> String {
+    format!("{HEADER}\n  probe: p =>\n    self.n := 6.\n    {NESTED_IN_OPERAND}.\n    0\n")
+}
+
+#[test]
+fn nlr_closure_nested_in_a_non_block_operand_is_clean() {
+    assert_compiles_through_erlc("test", &compile(&nested_in_operand_src()));
+}
+
+#[test]
+fn nlr_closure_nested_in_a_non_block_operand_reports_with_the_fix_off() {
+    let finding = with_fix_off(|| report(&nested_in_operand_src()));
+    assert!(
+        finding
+            .as_deref()
+            .is_some_and(|f| f.contains("UnbracketedNlrClosure { selector: \"value\"")),
+        "expected the nested `[^4] value` to report on its own: {finding:?}"
+    );
 }
 
 /// How many times compiling an actor method whose `^` sits in conditionals

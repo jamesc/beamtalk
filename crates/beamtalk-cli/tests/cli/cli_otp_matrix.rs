@@ -38,7 +38,7 @@ fn otp_matrix_output_is_well_formed_json_array_of_strings() {
         .expect("run beamtalk otp-matrix");
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
 
-    // e.g. ["27","28"] — every element a quoted major, ascending.
+    // e.g. ["28","29"] — every element a quoted major, ascending.
     assert!(stdout.starts_with('['), "got: {stdout}");
     assert!(stdout.ends_with(']'), "got: {stdout}");
     let window = beamtalk_cli::otp_support::window();

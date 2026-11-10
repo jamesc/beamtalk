@@ -1,0 +1,22 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0146 / BT-4459: a block this actor creates, run by another actor,
+// returns here with its creation-time capture. The method commits the cell,
+// so the write made after the block's creation is kept.
+
+Actor subclass: Bt4459Owner
+  state: n = 0
+
+  n => self.n
+
+  run: peer =>
+    blk := [^1]
+    self.n := 5
+    peer call: blk
+    0
+
+  call: blk =>
+    self.n := 7
+    blk value
+    0

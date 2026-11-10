@@ -1,0 +1,55 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4313: the unary `[...] whileTrue` / `[...] whileFalse`, whose receiver
+// block is both the condition and the body. Before, both raised "Block does
+// not understand 'whileTrue'": the compiler classified them as loops but sent
+// them as messages. A literal receiver is now the keyword loop with an empty
+// body, so a binding it writes is carried like a `whileTrue:` condition's
+// (BT-4015).
+
+// The issue's repro.
+x := 0
+// => 0
+[x := x + 1. x < 3] whileTrue
+// => nil
+x
+// => 3
+
+// The `whileFalse` twin.
+x := 0
+// => 0
+[x := x + 1. x >= 3] whileFalse
+// => nil
+x
+// => 3
+
+// The receiver runs once even when it answers the exit value at once.
+x := 0
+// => 0
+[x := x + 1. false] whileTrue
+// => nil
+x
+// => 1
+
+// Two bindings, one read by the condition after the other's write.
+x := 0
+// => 0
+s := 0
+// => 0
+[x := x + 1. s := s + x. x < 4] whileTrue
+// => nil
+#[x, s]
+// => #[4, 10]
+
+// A stored block is sent `whileTrue` (`Block>>whileTrue`).
+// @load tests/repl-protocol/fixtures/counter.bt
+
+c := Counter spawn
+// => Actor(Counter, _)
+cond := [c increment < 3]
+// => _
+cond whileTrue
+// => nil
+c getValue
+// => 3

@@ -208,7 +208,7 @@ fn typo_hints_in_project_complete_dependency_free_package() {
     let (module, _) = crate::source_analysis::parse(tokens);
     let options = crate::CompilerOptions {
         knowledge_scope: KnowledgeScope::ProjectComplete,
-        has_package_dependencies: false,
+        dependency_extensions_unknown: false,
         ..Default::default()
     };
     let result = analyse_full(&module, AnalysisContext::default().with_options(&options));
@@ -232,7 +232,7 @@ fn dependency_package_suppresses_unresolved_selector_hints_pre_ws3() {
     let (module, _) = crate::source_analysis::parse(tokens);
     let options = crate::CompilerOptions {
         knowledge_scope: KnowledgeScope::ProjectComplete,
-        has_package_dependencies: true,
+        dependency_extensions_unknown: true,
         ..Default::default()
     };
     let result = analyse_full(&module, AnalysisContext::default().with_options(&options));

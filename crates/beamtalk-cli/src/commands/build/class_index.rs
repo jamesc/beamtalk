@@ -64,8 +64,13 @@ pub(crate) struct ClassIndexResult {
     /// dependency alike (ADR 0127 §3; BT-3625, BT-3663) — so a flattened
     /// dependency method maps its lines to the dependency's own file.
     pub(crate) all_protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
-    /// Project-wide standalone extension index from Pass 1.
+    /// Project-wide standalone extension index from Pass 1, with every
+    /// dependency's extensions merged in (ADR 0070 WS3, BT-4608).
     pub(crate) extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
+    /// Whether every dependency's extensions were loaded completely
+    /// (`dependency_extensions::merge_dependency_extensions`). Pass 2 lifts
+    /// the pre-WS3 dependency guard only when this holds.
+    pub(crate) dependency_extensions_complete: bool,
     /// Dependency registry for cross-package collision detection.
     pub(crate) dep_registry: beamtalk_core::semantic_analysis::DependencyRegistry,
     /// Cached ASTs from incremental Pass 1, keyed by source file path.
@@ -120,7 +125,7 @@ pub(crate) fn build_class_index(
         mut class_module_index,
         class_superclass_index,
         source_class_infos,
-        extension_index,
+        mut extension_index,
         cached_asts,
         force_pass2,
         source_hashes,
@@ -206,6 +211,16 @@ pub(crate) fn build_class_index(
         );
         dep_alias_infos.extend(dep.alias_infos.clone());
     }
+
+    // ADR 0070 WS3 (BT-4608): every dependency's extension methods join the
+    // project's cross-file extension index, so Pass 2's type checker sees
+    // them as part of their target classes' method surfaces. Pass 2 lifts
+    // the pre-WS3 dependency guard only when all of them were complete.
+    let dependency_extensions_complete =
+        beamtalk_cli::dependency_extensions::merge_dependency_extensions(
+            dep_ctx.resolved_deps.iter().map(|dep| &dep.extensions),
+            &mut extension_index,
+        );
 
     // Single unified collection of all ClassInfo from all sources.
     // To add a new .bt source location, add its ClassInfo slice here.
@@ -301,6 +316,24 @@ pub(crate) fn build_class_index(
             &all_alias_infos,
             &extension_index,
         );
+        // The dependency guard's final value changes every file's
+        // diagnostics, and can flip without the extension index changing (a
+        // dependency file gains a parse error; diagnostics cached before
+        // dependency extensions were loaded at all), so for a package with
+        // dependencies it is part of the surface too. Folded as the value
+        // analysis will actually use (`beam_compiler` computes it the same
+        // way), so the two cannot drift apart.
+        if options.dependency_extensions_unknown {
+            let guard = beamtalk_cli::dependency_extensions::dependency_extensions_unknown(
+                options.dependency_extensions_unknown,
+                true,
+                dependency_extensions_complete,
+            );
+            analysis_surface_hash = crate::commands::util::sha256_hex(
+                format!("{analysis_surface_hash}\ndependency-extensions-unknown:{guard}")
+                    .as_bytes(),
+            );
+        }
     }
 
     // Taken after trait flattening, which rewrites only project classes'
@@ -317,6 +350,7 @@ pub(crate) fn build_class_index(
         all_protocol_defs,
         all_protocol_sources,
         extension_index,
+        dependency_extensions_complete,
         dep_registry,
         cached_asts,
         force_pass2,

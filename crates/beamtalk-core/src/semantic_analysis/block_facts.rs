@@ -1098,7 +1098,7 @@ fn send_may_run_user_code(
         return false;
     }
     match send_user_code(receiver, selector, arguments) {
-        SendUserCode::MayRun => true,
+        SendUserCode::MayRun | SendUserCode::ClosureOperand => true,
         // A collection message is a call only when its block is a closure
         // handed to the runtime. A block that carries something (writes a
         // captured local or a field, or sends to `self`) is lowered in place

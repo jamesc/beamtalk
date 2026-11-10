@@ -31,7 +31,7 @@
 use beamtalk_core::ast::normalize::{PeelScope, PeeledParens};
 use beamtalk_core::ast::{
     Block, CascadeMessage, Expression, Identifier, KeywordPart, Literal, MapPair, MessageSelector,
-    MethodDefinition, ParameterDefinition,
+    MethodDefinition, ParameterDefinition, PipelineSends,
 };
 use beamtalk_core::source_analysis::{Span, is_binary_selector_char};
 
@@ -99,6 +99,9 @@ pub(super) fn selector_from_symbol(sym: &str) -> Option<MessageSelector> {
 /// parentheses are kept as written: `peeled` is what codegen's peel removed
 /// from the tree the block came from, and `scope` the reflection unit the
 /// block sits in — the enclosing method's, or the module level (BT-4059).
+/// Its `|>` sends are kept as written too: `pipeline_sends` is the record of
+/// that same reflection unit, and the rebuilt method takes the entries that
+/// fall inside the block (ADR 0145).
 ///
 /// The block's first parameter is the receiver (`self`); the remaining
 /// parameters map positionally onto the selector's argument slots. Returns
@@ -110,6 +113,7 @@ fn block_method_source(
     is_class_method: bool,
     peeled: &PeeledParens,
     scope: PeelScope,
+    pipeline_sends: &PipelineSends,
 ) -> Option<String> {
     let selector = selector_from_symbol(selector_sym)?;
     // A method fun receives `self` plus one argument per selector slot, so the
@@ -126,6 +130,9 @@ fn block_method_source(
     // class-side method, matching a file-defined class method's stored
     // source.
     method.is_class_method = is_class_method;
+    // The block's `|>` sends were recorded on the enclosing definition, not
+    // on this rebuilt one.
+    method.pipeline_sends = pipeline_sends.within(block.span);
     Some(as_written_method_source(&method, peeled, scope))
 }
 
@@ -138,13 +145,16 @@ fn build_source_map(
     is_class_method: bool,
     peeled: &PeeledParens,
     scope: PeelScope,
+    pipeline_sends: &PipelineSends,
 ) -> Option<Expression> {
     let mut source_pairs: Vec<MapPair> = Vec::new();
     for pair in pairs {
         if let (Expression::Literal(Literal::Symbol(sym), _), Expression::Block(block)) =
             (&pair.key, &pair.value)
         {
-            if let Some(source) = block_method_source(sym, block, is_class_method, peeled, scope) {
+            if let Some(source) =
+                block_method_source(sym, block, is_class_method, peeled, scope, pipeline_sends)
+            {
                 source_pairs.push(MapPair {
                     key: pair.key.clone(),
                     value: Expression::Literal(Literal::String(source.into()), pair.span),
@@ -189,12 +199,14 @@ fn keyword_setter(name: &str) -> MessageSelector {
 /// recognised `ClassBuilder` construction or has nothing indexable on either
 /// side. `peeled` is the generator's record of the operand parentheses its
 /// peel removed and `scope` the reflection unit the cascade sits in, so the
-/// synthesised source keeps them as written.
+/// synthesised source keeps them as written. `pipeline_sends` is that
+/// unit's `|>` record (ADR 0145), so it keeps `|>` as written too.
 pub(super) fn inject_method_source(
     receiver: &Expression,
     messages: &[CascadeMessage],
     peeled: &PeeledParens,
     scope: PeelScope,
+    pipeline_sends: &PipelineSends,
 ) -> Option<Vec<CascadeMessage>> {
     // The parser keeps the first cascade message inside `receiver` (as the
     // outer MessageSend); the object the cascade targets is that send's
@@ -253,10 +265,14 @@ pub(super) fn inject_method_source(
     // when there is no explicit `methodSource:` (and an indexable `methods:`
     // map); the class side likewise for `classMethodSource:` / `classMethods:`.
     let method_source = (!has_method_source)
-        .then(|| methods_map.and_then(|m| build_source_map(m, false, peeled, scope)))
+        .then(|| {
+            methods_map.and_then(|m| build_source_map(m, false, peeled, scope, pipeline_sends))
+        })
         .flatten();
     let class_method_source = (!has_class_method_source)
-        .then(|| class_methods_map.and_then(|m| build_source_map(m, true, peeled, scope)))
+        .then(|| {
+            class_methods_map.and_then(|m| build_source_map(m, true, peeled, scope, pipeline_sends))
+        })
         .flatten();
 
     // Nothing to inject on either side — leave the cascade untouched.
@@ -447,9 +463,14 @@ mod tests {
             "Object classBuilder name: #Foo; \
              methods: #{ #greet => [:self | self name asUppercase] }; register",
         );
-        let augmented =
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .expect("should inject");
+        let augmented = inject_method_source(
+            &recv,
+            &msgs,
+            &PeeledParens::default(),
+            PeelScope::Module,
+            &PipelineSends::default(),
+        )
+        .expect("should inject");
         let entries = injected_source_map(&augmented, "methodSource:");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, "greet");
@@ -483,8 +504,14 @@ mod tests {
             panic!("expected a cascade");
         };
         let sources = |peeled: &PeeledParens| {
-            let augmented = inject_method_source(&receiver, &messages, peeled, PeelScope::Module)
-                .expect("should inject");
+            let augmented = inject_method_source(
+                &receiver,
+                &messages,
+                peeled,
+                PeelScope::Module,
+                &PipelineSends::default(),
+            )
+            .expect("should inject");
             injected_source_map(&augmented, "methodSource:")
         };
         let written = sources(&record);
@@ -509,9 +536,14 @@ mod tests {
             "ClassBuilder new methods: #{ #add: => [:self :amount | self.total := amount] }; \
              register",
         );
-        let augmented =
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .expect("should inject");
+        let augmented = inject_method_source(
+            &recv,
+            &msgs,
+            &PeeledParens::default(),
+            PeelScope::Module,
+            &PipelineSends::default(),
+        )
+        .expect("should inject");
         let entries = injected_source_map(&augmented, "methodSource:");
         assert_eq!(entries.len(), 1);
         assert!(
@@ -525,8 +557,14 @@ mod tests {
     fn skips_non_class_builder_cascade() {
         let (recv, msgs) = parse_cascade("foo bar; methods: #{ #m => [:self | self x] }; baz");
         assert!(
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .is_none()
+            inject_method_source(
+                &recv,
+                &msgs,
+                &PeeledParens::default(),
+                PeelScope::Module,
+                &PipelineSends::default()
+            )
+            .is_none()
         );
     }
 
@@ -536,8 +574,14 @@ mod tests {
         let (recv, msgs) =
             parse_cascade("Object classBuilder methods: #{ #m => someFun }; register");
         assert!(
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .is_none()
+            inject_method_source(
+                &recv,
+                &msgs,
+                &PeeledParens::default(),
+                PeelScope::Module,
+                &PipelineSends::default()
+            )
+            .is_none()
         );
     }
 
@@ -547,8 +591,14 @@ mod tests {
         let (recv, msgs) =
             parse_cascade("Object classBuilder methods: #{ #add: => [:self | self x] }; register");
         assert!(
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .is_none()
+            inject_method_source(
+                &recv,
+                &msgs,
+                &PeeledParens::default(),
+                PeelScope::Module,
+                &PipelineSends::default()
+            )
+            .is_none()
         );
     }
 
@@ -559,8 +609,14 @@ mod tests {
         let (recv, msgs) =
             parse_cascade("Object classBuilder name: #Foo; methods: #{ #m => [:_self | _self x] }");
         assert!(
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .is_none()
+            inject_method_source(
+                &recv,
+                &msgs,
+                &PeeledParens::default(),
+                PeelScope::Module,
+                &PipelineSends::default()
+            )
+            .is_none()
         );
     }
 
@@ -571,8 +627,14 @@ mod tests {
             "Object classBuilder methods: #{ #m => [:_self | _self x] }; register; name: #Foo",
         );
         assert!(
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .is_none()
+            inject_method_source(
+                &recv,
+                &msgs,
+                &PeeledParens::default(),
+                PeelScope::Module,
+                &PipelineSends::default()
+            )
+            .is_none()
         );
     }
 
@@ -584,9 +646,14 @@ mod tests {
             "Object classBuilder methods: #{ #a => [:_self | _self aa] }; \
              methods: #{ #b => [:_self | _self bb] }; register",
         );
-        let augmented =
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .expect("should inject");
+        let augmented = inject_method_source(
+            &recv,
+            &msgs,
+            &PeeledParens::default(),
+            PeelScope::Module,
+            &PipelineSends::default(),
+        )
+        .expect("should inject");
         let entries = injected_source_map(&augmented, "methodSource:");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, "b");
@@ -599,8 +666,14 @@ mod tests {
              methodSource: #{ #m => \"m => self x\" }; register",
         );
         assert!(
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .is_none()
+            inject_method_source(
+                &recv,
+                &msgs,
+                &PeeledParens::default(),
+                PeelScope::Module,
+                &PipelineSends::default()
+            )
+            .is_none()
         );
     }
 
@@ -616,9 +689,14 @@ mod tests {
             "Object classBuilder name: #Foo; \
              classMethods: #{ #bump => [:self | self.total := self.total + 1] }; register",
         );
-        let augmented =
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .expect("should inject");
+        let augmented = inject_method_source(
+            &recv,
+            &msgs,
+            &PeeledParens::default(),
+            PeelScope::Module,
+            &PipelineSends::default(),
+        )
+        .expect("should inject");
         let entries = injected_source_map(&augmented, "classMethodSource:");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, "bump");
@@ -639,9 +717,14 @@ mod tests {
             "ClassBuilder new classMethods: #{ #addTo: => [:self :n | self.total := n] }; \
              register",
         );
-        let augmented =
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .expect("should inject");
+        let augmented = inject_method_source(
+            &recv,
+            &msgs,
+            &PeeledParens::default(),
+            PeelScope::Module,
+            &PipelineSends::default(),
+        )
+        .expect("should inject");
         let entries = injected_source_map(&augmented, "classMethodSource:");
         assert_eq!(entries.len(), 1);
         assert!(
@@ -658,8 +741,14 @@ mod tests {
         let (recv, msgs) =
             parse_cascade("Object classBuilder classMethods: #{ #m => someFun }; register");
         assert!(
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .is_none()
+            inject_method_source(
+                &recv,
+                &msgs,
+                &PeeledParens::default(),
+                PeelScope::Module,
+                &PipelineSends::default()
+            )
+            .is_none()
         );
     }
 
@@ -671,8 +760,14 @@ mod tests {
             "Object classBuilder classMethods: #{ #addTo: => [:self | self x] }; register",
         );
         assert!(
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .is_none()
+            inject_method_source(
+                &recv,
+                &msgs,
+                &PeeledParens::default(),
+                PeelScope::Module,
+                &PipelineSends::default()
+            )
+            .is_none()
         );
     }
 
@@ -682,8 +777,14 @@ mod tests {
             "Object classBuilder name: #Foo; classMethods: #{ #m => [:_self | _self x] }",
         );
         assert!(
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .is_none()
+            inject_method_source(
+                &recv,
+                &msgs,
+                &PeeledParens::default(),
+                PeelScope::Module,
+                &PipelineSends::default()
+            )
+            .is_none()
         );
     }
 
@@ -694,8 +795,14 @@ mod tests {
              classMethodSource: #{ #m => \"m => self x\" }; register",
         );
         assert!(
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .is_none()
+            inject_method_source(
+                &recv,
+                &msgs,
+                &PeeledParens::default(),
+                PeelScope::Module,
+                &PipelineSends::default()
+            )
+            .is_none()
         );
     }
 
@@ -705,9 +812,14 @@ mod tests {
             "Object classBuilder classMethods: #{ #a => [:_self | _self aa] }; \
              classMethods: #{ #b => [:_self | _self bb] }; register",
         );
-        let augmented =
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .expect("should inject");
+        let augmented = inject_method_source(
+            &recv,
+            &msgs,
+            &PeeledParens::default(),
+            PeelScope::Module,
+            &PipelineSends::default(),
+        )
+        .expect("should inject");
         let entries = injected_source_map(&augmented, "classMethodSource:");
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, "b");
@@ -722,9 +834,14 @@ mod tests {
              methods: #{ #greet => [:_self | _self hello] }; \
              classMethods: #{ #bump => [:_self | _self tick] }; register",
         );
-        let augmented =
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .expect("should inject");
+        let augmented = inject_method_source(
+            &recv,
+            &msgs,
+            &PeeledParens::default(),
+            PeelScope::Module,
+            &PipelineSends::default(),
+        )
+        .expect("should inject");
 
         let instance = injected_source_map(&augmented, "methodSource:");
         assert_eq!(instance.len(), 1);
@@ -746,9 +863,14 @@ mod tests {
              methodSource: #{ #greet => \"greet => self hi\" }; \
              classMethods: #{ #bump => [:_self | _self tick] }; register",
         );
-        let augmented =
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .expect("should inject");
+        let augmented = inject_method_source(
+            &recv,
+            &msgs,
+            &PeeledParens::default(),
+            PeelScope::Module,
+            &PipelineSends::default(),
+        )
+        .expect("should inject");
         // Instance side not re-injected (already present once).
         assert_eq!(
             augmented
@@ -767,9 +889,14 @@ mod tests {
         // No `classMethods:` → no `classMethodSource:` setter is added.
         let (recv, msgs) =
             parse_cascade("Object classBuilder methods: #{ #m => [:_self | _self x] }; register");
-        let augmented =
-            inject_method_source(&recv, &msgs, &PeeledParens::default(), PeelScope::Module)
-                .expect("should inject");
+        let augmented = inject_method_source(
+            &recv,
+            &msgs,
+            &PeeledParens::default(),
+            PeelScope::Module,
+            &PipelineSends::default(),
+        )
+        .expect("should inject");
         assert!(has_setter(&augmented, "methodSource:"));
         assert!(!has_setter(&augmented, "classMethodSource:"));
     }

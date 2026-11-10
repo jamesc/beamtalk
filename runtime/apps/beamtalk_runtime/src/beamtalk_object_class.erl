@@ -1550,7 +1550,13 @@ handle_call(
     %% unreachable under either name. Caught and rolled back here instead,
     %% so the caller gets the same clean `{error, {already_registered, _}}`
     %% `rename/2`'s pre-check is meant to produce.
-    case catch erlang:register(NewRegName, self()) of
+    Registered =
+        try
+            erlang:register(NewRegName, self())
+        catch
+            _:_ -> false
+        end,
+    case Registered of
         true ->
             put(beamtalk_class_name, NewName),
             sync_identity(
@@ -1582,13 +1588,17 @@ handle_call(
                 end
             ),
             beamtalk_class_registry:record_class_pid(self(), NewName),
+            %% BT-4552: kept dead incarnations follow the rename, so a class
+            %% object taken before both recovers to this class, and none is
+            %% left naming `OldName` for a later, unrelated class of that name.
+            beamtalk_class_registry:rename_class_pids(OldName, NewName),
             beamtalk_class_registry:record_loaded_class(NewName, self()),
             beamtalk_class_metadata:delete(OldName),
             _ = beamtalk_class_registry:forget_loaded_class(OldName, self()),
             beamtalk_class_monitor:unwatch(OldName),
             beamtalk_class_monitor:watch(NewName, self()),
             {reply, ok, State#class_state{name = NewName}};
-        {'EXIT', _Reason} ->
+        false ->
             %% Residual gap, not closed here (review feedback on PR #3523):
             %% this rollback assumes `OldRegName` is still free. Another
             %% process registering under `OldRegName` in the narrow window
@@ -1991,11 +2001,16 @@ terminate(_Reason, #class_state{name = ClassName}) ->
         catch
             _:_ -> ok
         end),
-    %% Clean up pid reverse index. Only cleaned on graceful shutdown —
-    %% on crash, the entry intentionally survives for auto-restart recovery.
+    %% Clean up pid reverse index whenever this callback runs: the metadata
+    %% row above is gone, so this class cannot be restarted and its rows must
+    %% not keep naming it. An untrappable kill skips this callback, so its
+    %% entry survives for auto-restart recovery, including after the restart
+    %% (BT-4552, `restart_class/1`). The class's
+    %% dead incarnations go with it, so a removed class answers `nil` from
+    %% `beamtalk_interface:liveClassName/1` however many times it crashed.
     _ =
         (try
-            ets:delete(beamtalk_class_pids, self())
+            beamtalk_class_registry:forget_class_pids(self(), ClassName)
         catch
             _:_ -> ok
         end),

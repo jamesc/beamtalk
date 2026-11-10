@@ -86,6 +86,8 @@ pub(in crate::core_erlang) mod actor_state_helper {
     pub const CAPTURE: (&str, u32) = ("capture", 2);
     pub const VIEW: (&str, u32) = ("view", 2);
     pub const NLR_STATE: (&str, u32) = ("nlr_state", 2);
+    pub const COMMIT: (&str, u32) = ("commit", 2);
+    pub const STORE_UNWOUND: (&str, u32) = ("store_unwound", 2);
     pub const GET: (&str, u32) = ("get", 3);
     pub const PUT: (&str, u32) = ("put", 3);
     pub const SUPER_SEND: (&str, u32) = ("super_send", 5);
@@ -105,6 +107,8 @@ pub(in crate::core_erlang) mod actor_state_helper {
         CAPTURE,
         VIEW,
         NLR_STATE,
+        COMMIT,
+        STORE_UNWOUND,
         GET,
         PUT,
         SUPER_SEND,

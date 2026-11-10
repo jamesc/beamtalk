@@ -2680,6 +2680,7 @@ mod tests {
 
     fn empty_module() -> Module {
         Module {
+            pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
             classes: Vec::new(),
             method_definitions: Vec::new(),
             protocols: Vec::new(),

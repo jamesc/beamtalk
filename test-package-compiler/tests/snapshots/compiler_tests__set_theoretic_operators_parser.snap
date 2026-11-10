@@ -111,6 +111,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 1204,
                         end: 1242,
@@ -238,6 +239,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 1373,
                         end: 1439,
@@ -477,6 +479,7 @@ Module {
                         blank_line_after_comments: false,
                     },
                     doc_comment: None,
+                    pipeline_sends: {},
                     span: Span {
                         start: 1678,
                         end: 1839,
@@ -812,6 +815,7 @@ Module {
                     blank_line_after_comments: false,
                 },
                 doc_comment: None,
+                pipeline_sends: {},
                 span: Span {
                     start: 2357,
                     end: 2408,
@@ -1026,6 +1030,7 @@ Module {
                     blank_line_after_comments: false,
                 },
                 doc_comment: None,
+                pipeline_sends: {},
                 span: Span {
                     start: 3343,
                     end: 3404,
@@ -1047,6 +1052,7 @@ Module {
     },
     file_leading_comments: [],
     file_trailing_comments: [],
+    pipeline_sends: {},
 }
 
 Diagnostics:

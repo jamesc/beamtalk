@@ -2538,3 +2538,60 @@ load_keyword_vocabulary_corpus() ->
         "fixtures",
         "completion_keyword_vocabulary_corpus.json"
     ]).
+
+%%====================================================================
+%% Pipeline `|>` completion (ADR 0145, BT-4518)
+%%====================================================================
+
+%% Conformance: completing a pipeline stage, the REPL/MCP/LiveView engine
+%% (`parse_receiver_and_prefix/1`) and the Rust LSP (`pipeline_receiver_end`
+%% in `crates/beamtalk-language-service/src/queries/completion_provider.rs`)
+%% must agree on the stage's receiver: the value before the last `|>`. Both
+%% assert the cases in the shared corpus; the Rust side in
+%% `pipeline_receiver_matches_shared_corpus`.
+pipeline_receiver_matches_shared_corpus_test() ->
+    Cases = load_pipeline_receiver_corpus(),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(Case) ->
+            Line = maps:get(<<"line">>, Case),
+            Expected = {maps:get(<<"receiver">>, Case), maps:get(<<"prefix">>, Case)},
+            Actual =
+                case beamtalk_repl_ops_dev:parse_receiver_and_prefix(Line) of
+                    {expression, Receiver, Prefix} -> {Receiver, Prefix};
+                    {Receiver, Prefix} -> {Receiver, Prefix}
+                end,
+            ?assertEqual(Expected, Actual, {corpus_mismatch, Line})
+        end,
+        Cases
+    ).
+
+pipeline_with_nothing_before_has_no_receiver_test() ->
+    ?assertEqual(
+        {undefined, <<"ab">>}, beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"|> ab">>)
+    ).
+
+tokenise_send_chain_drops_pipeline_tokens_test() ->
+    %% `"hello" |> size abs` is the unary chain `"hello" size abs`, so it
+    %% resolves without the compiler port.
+    ?assertEqual(
+        {ok, <<"\"hello\"">>, [size, abs]},
+        beamtalk_repl_ops_dev:tokenise_send_chain(<<"\"hello\" |> size |> abs">>)
+    ).
+
+tokenise_binary_chain_drops_pipeline_tokens_test() ->
+    ?assertEqual(
+        {ok, <<"x">>, [{binary, '+'}, {unary, abs}]},
+        beamtalk_repl_ops_dev:tokenise_binary_chain(<<"x + 1 |> abs">>)
+    ).
+
+%% Load the shared pipeline-receiver conformance corpus from the repo tree.
+load_pipeline_receiver_corpus() ->
+    beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_workspace",
+        "test",
+        "fixtures",
+        "completion_pipeline_receiver_corpus.json"
+    ]).

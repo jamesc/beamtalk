@@ -4033,7 +4033,7 @@ leak path never surfaces as a watched-actor changed slot.
 changed_state_keys(OldState, NewState) ->
     InternalKeys = ['__methods__', beamtalk_tagged_map:class_key(), '__class_mod__'],
     AllKeys = lists:usort(maps:keys(OldState) ++ maps:keys(NewState)),
-    UserKeys = [K || K <- AllKeys -- InternalKeys, not is_local_temp_key(K)],
+    UserKeys = [K || K <- AllKeys -- InternalKeys, not beamtalk_tagged_map:is_local_temp_key(K)],
     [
         K
      || K <- UserKeys, maps:get(K, OldState, '__absent__') =/= maps:get(K, NewState, '__absent__')
@@ -4057,19 +4057,10 @@ case for a method that threads nothing.
 """.
 -spec strip_local_temps(map()) -> map().
 strip_local_temps(State) ->
-    case [K || K <- maps:keys(State), is_local_temp_key(K)] of
+    case [K || K <- maps:keys(State), beamtalk_tagged_map:is_local_temp_key(K)] of
         [] -> State;
         LocalKeys -> maps:without(LocalKeys, State)
     end.
-
--spec is_local_temp_key(term()) -> boolean().
-is_local_temp_key(Key) when is_atom(Key) ->
-    case atom_to_binary(Key, utf8) of
-        <<"__local__", _/binary>> -> true;
-        _ -> false
-    end;
-is_local_temp_key(_Key) ->
-    false.
 
 -doc """
 Construct a Self reference (#beamtalk_object{}) from the actor's state.
@@ -6681,7 +6672,11 @@ stop_global_conflict_loser(Loser) ->
             gen_server:stop(Loser, {shutdown, global_name_conflict}, ?BT_REMOTE_CALL_TIMEOUT)
         catch
             _:_ ->
-                catch exit(Loser, kill)
+                try
+                    exit(Loser, kill)
+                catch
+                    _:_ -> ok
+                end
         end
     end),
     ok.

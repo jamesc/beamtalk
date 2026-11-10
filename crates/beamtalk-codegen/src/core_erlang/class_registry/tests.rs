@@ -13,6 +13,7 @@ fn s() -> Span {
 
 fn empty_module() -> Module {
     Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![],
         method_definitions: Vec::new(),
         protocols: Vec::new(),

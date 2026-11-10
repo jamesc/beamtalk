@@ -70,10 +70,12 @@ impl LintResult {
 /// resulting diagnostics together with the `ClassHierarchy` (used by
 /// `compute_diagnostic_summary` for type inference).
 ///
-/// `has_package_dependencies` mirrors `beamtalk lint`'s
-/// `CompilerOptions::has_package_dependencies`: true when
-/// the project's manifest declares `[dependencies]`, regardless of whether
-/// any of them could be resolved on disk.
+/// `cross_file_extensions` is every package source file's extension
+/// methods plus the dependencies' (ADR 0066; ADR 0070 WS3, BT-4608), as
+/// `beamtalk lint` registers them, and `dependency_extensions_unknown`
+/// mirrors `beamtalk lint`'s `CompilerOptions::dependency_extensions_unknown`:
+/// true when the manifest declares `[dependencies]` and not all of their
+/// extensions could be loaded from disk.
 ///
 /// `native_type_registry` mirrors `beamtalk lint`'s FFI type
 /// registry: when `Some`, `(Erlang m) f:` calls get return
@@ -128,7 +130,8 @@ pub(crate) fn run_module_analysis(
     pre_loaded_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
     protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
     mut diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
-    has_package_dependencies: bool,
+    cross_file_extensions: &beamtalk_core::compilation::extension_index::ExtensionIndex,
+    dependency_extensions_unknown: bool,
     native_type_registry: Option<
         std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
     >,
@@ -145,7 +148,7 @@ pub(crate) fn run_module_analysis(
 
     let cross_file_classes = ClassHierarchy::cross_file_class_infos(all_class_infos, module);
     let options = beamtalk_core::CompilerOptions {
-        has_package_dependencies,
+        dependency_extensions_unknown,
         current_package: current_package.map(str::to_string),
         known_erlang_modules: known_erlang_modules.clone(),
         ..Default::default()
@@ -158,6 +161,7 @@ pub(crate) fn run_module_analysis(
         .with_pre_loaded_protocol_defs(pre_loaded_protocol_defs)
         .with_protocol_sources(protocol_sources)
         .with_native_type_registry(native_type_registry)
+        .with_cross_file_extensions(cross_file_extensions)
         .with_is_stub_file(is_stub_file);
     let class_hierarchy =
         beamtalk_language_service::queries::diagnostic_provider::run_post_analysis_lint_pipeline(
@@ -282,7 +286,8 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         },
     );
     let LintAnalysisContext {
-        has_package_dependencies,
+        extension_index,
+        dependency_extensions_unknown,
         native_type_registry,
         known_erlang_modules,
         diagnostics_overrides,
@@ -292,6 +297,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         path,
         &mut pass1.all_class_infos,
         &pass1.trait_users,
+        std::mem::take(&mut pass1.extension_index),
         current_package.as_deref(),
     );
     let LintPass1State {
@@ -331,7 +337,8 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             pre_loaded_protocol_defs.clone(),
             protocol_sources.clone(),
             initial_diags,
-            has_package_dependencies,
+            &extension_index,
+            dependency_extensions_unknown,
             native_type_registry.clone(),
             current_package.as_deref(),
             is_stub_file,
@@ -499,13 +506,18 @@ fn resolve_current_package(path: &str) -> Option<String> {
 /// metadata (conformance/`extending:`) is still not collected here, unlike
 /// CLI `beamtalk lint`'s `parse_and_extract_class_infos`.
 ///
-/// Returns whether the project's manifest declares any dependencies, for use
-/// as `CompilerOptions::has_package_dependencies`.
+/// Also merges the dependencies' extension methods into `extensions` (ADR
+/// 0070 WS3, BT-4608), and returns the pre-WS3 dependency guard for
+/// `CompilerOptions::dependency_extensions_unknown` — on when the manifest
+/// declares dependencies and not all of their extensions were on disk to
+/// load, by the rule `beamtalk lint` uses
+/// (`beamtalk_cli::dependency_extensions::dependency_extensions_unknown`).
 fn merge_dependency_class_infos(
     path: &str,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     all_protocol_defs: &mut Vec<beamtalk_core::ast::ProtocolDefinition>,
     protocol_sources: &mut beamtalk_core::semantic_analysis::ProtocolSourceMap,
+    extensions: &mut beamtalk_core::compilation::extension_index::ExtensionIndex,
 ) -> bool {
     let Some(project_root) =
         beamtalk_project::package::find_package_root(std::path::Path::new(path))
@@ -516,17 +528,21 @@ fn merge_dependency_class_infos(
         return false;
     };
 
-    let (has_package_dependencies, dep_class_infos, dep_protocol_defs, dep_protocol_sources) =
-        beamtalk_cli::dependency_classes::resolve_dependency_class_infos_with_sources(
-            &project_root,
-        );
-    all_class_infos.extend(dep_class_infos);
-    all_protocol_defs.extend(dep_protocol_defs);
+    let scan = beamtalk_cli::dependency_classes::resolve_dependency_class_infos_with_sources(
+        &project_root,
+    );
+    all_class_infos.extend(scan.class_infos);
+    all_protocol_defs.extend(scan.protocol_defs);
     beamtalk_core::semantic_analysis::protocol_source::merge_protocol_sources(
         protocol_sources,
-        dep_protocol_sources,
+        scan.protocol_sources,
     );
-    has_package_dependencies
+    extensions.merge(&scan.extensions);
+    beamtalk_cli::dependency_extensions::dependency_extensions_unknown(
+        scan.has_package_dependencies,
+        true,
+        scan.extensions_complete,
+    )
 }
 
 /// The protocol ASTs Pass 2 carries into each file's analysis: the package's
@@ -620,7 +636,9 @@ fn package_then_dependency_protocol_sources(
 /// Shared post-Pass-1 context assembled by both `run_lint_structured` and
 /// `compute_diagnostic_summary` before their respective Pass-2 loops.
 struct LintAnalysisContext {
-    has_package_dependencies: bool,
+    /// The package's own extension methods plus its dependencies'.
+    extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
+    dependency_extensions_unknown: bool,
     native_type_registry:
         Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>>,
     known_erlang_modules: std::collections::HashSet<String>,
@@ -641,6 +659,7 @@ fn build_lint_analysis_context(
     path: &str,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     trait_users: &beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
+    mut extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
     current_package: Option<&str>,
 ) -> LintAnalysisContext {
     // Merge dependency class metadata so cross-file references to
@@ -651,11 +670,12 @@ fn build_lint_analysis_context(
     let mut all_protocol_defs = Vec::new();
     let mut dependency_protocol_sources =
         beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
-    let has_package_dependencies = merge_dependency_class_infos(
+    let dependency_extensions_unknown = merge_dependency_class_infos(
         path,
         all_class_infos,
         &mut all_protocol_defs,
         &mut dependency_protocol_sources,
+        &mut extension_index,
     );
 
     // Flatten cross-file trait provisions into the same-package infos (BT-3673),
@@ -687,7 +707,8 @@ fn build_lint_analysis_context(
         package_then_dependency_protocol_sources(trait_users, dependency_protocol_sources);
 
     LintAnalysisContext {
-        has_package_dependencies,
+        extension_index,
+        dependency_extensions_unknown,
         native_type_registry,
         known_erlang_modules,
         diagnostics_overrides,
@@ -703,6 +724,9 @@ fn build_lint_analysis_context(
 struct LintPass1State {
     all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     trait_users: beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
+    /// Every package source file's extension methods (ADR 0066), as
+    /// `beamtalk lint`'s Pass 1 collects them.
+    extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
     /// Files from `target_set` that were read and parsed successfully, in encounter order.
     parsed_targets: Vec<(
         std::path::PathBuf,
@@ -733,6 +757,7 @@ fn run_lint_pass1(
     let mut parsed_targets = Vec::new();
     let mut trait_users =
         beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
+    let mut extension_index = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
 
     for file in extraction_files {
         // Canonicalize once per file; used for both the error path and the
@@ -756,6 +781,7 @@ fn run_lint_pass1(
         all_class_infos.extend(class_infos);
         // Records each carried protocol's source too, for provision routing.
         trait_users.add_source_file(&module, &file_str, &source, current_package);
+        extension_index.add_module(&module, file);
         if target_set.contains(&canonical) {
             parsed_targets.push((file.clone(), source, module, parse_diags));
         }
@@ -764,6 +790,7 @@ fn run_lint_pass1(
     LintPass1State {
         all_class_infos,
         trait_users,
+        extension_index,
         parsed_targets,
     }
 }
@@ -834,7 +861,8 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
         },
     );
     let LintAnalysisContext {
-        has_package_dependencies,
+        extension_index,
+        dependency_extensions_unknown,
         native_type_registry,
         known_erlang_modules,
         diagnostics_overrides,
@@ -844,6 +872,7 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
         path,
         &mut pass1.all_class_infos,
         &pass1.trait_users,
+        std::mem::take(&mut pass1.extension_index),
         current_package.as_deref(),
     );
     let LintPass1State {
@@ -883,7 +912,8 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
             pre_loaded_protocol_defs.clone(),
             protocol_sources.clone(),
             initial_diags,
-            has_package_dependencies,
+            &extension_index,
+            dependency_extensions_unknown,
             native_type_registry.clone(),
             current_package.as_deref(),
             is_stub_file,

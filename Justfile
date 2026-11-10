@@ -24,6 +24,14 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 # rather than clobbering it, matching `resolve_epmd_address`'s own fallback.
 export ERL_EPMD_ADDRESS := env_var_or_default("ERL_EPMD_ADDRESS", "127.0.0.1")
 
+# ADR 0146 (BT-4535): every BEAM node this project's tooling starts (BUnit,
+# the stdlib corpus, the REPL and e2e suites) runs the test-build check in
+# `beamtalk_actor_state:commit/2`: an actor method's own `^` reaches its
+# boundary with the cell current. A failure is a stale-cell bug in the
+# ThreadedIr lowering that owns the scope, not something to switch off.
+# Set to 0 to run without it.
+export BEAMTALK_CHECK_NLR_COMMIT := env_var_or_default("BEAMTALK_CHECK_NLR_COMMIT", "1")
+
 # Default recipe (list all tasks)
 default:
     @just --list
@@ -752,7 +760,7 @@ check-surface-drift:
     @cargo run -p beamtalk-surface-drift --quiet
 
 # Print the declared OTP support window (ADR 0125 §3.1, otp-support.toml)
-# as a JSON array of majors, e.g. ["27","28"]. Consumed by ci.yml's
+# as a JSON array of majors, e.g. ["28","29"]. Consumed by ci.yml's
 # matrix.otp so the workflow never hardcodes the window itself; a drift
 # test (crates/beamtalk-cli/tests/cli/cli_otp_matrix.rs) asserts this output
 # equals the declared window.
@@ -1002,14 +1010,15 @@ lint-js: fmt-check-js
 # fixture crates/beamtalk-core/tests/fixtures/section_divider_grammar_cases.json
 # — the same fixture crates/beamtalk-core/tests/section_divider_grammar_conformance.rs
 # checks against parse_divider_name directly, so the two recognizers can't
-# silently drift apart again.
+# silently drift apart again. Also runs the pipeline-operator `|>` scope test
+# (BT-4517, pipelineGrammar.test.ts) over the same grammar file.
 [unix]
 [working-directory: 'editors/vscode']
 test-grammar:
-    @echo "🔍 Running TextMate section-divider grammar conformance test..."
+    @echo "🔍 Running TextMate grammar tests (section divider, pipeline operator)..."
     npm ci --quiet
     npm run test:grammar
-    @echo "✅ TextMate section-divider grammar conformance test passed"
+    @echo "✅ TextMate grammar tests passed"
 
 [windows]
 test-grammar:

@@ -255,6 +255,15 @@ This allows the compiler to:
 
 #### Amendment (2026-06-27, BT-2251 WS3): extension contributions in the package interface
 
+> **Carrier superseded (2026-11-09, BT-4608).** The *carrier* chosen below —
+> extension records in each module's `__beamtalk_meta/0`, indexed from `.app`
+> metadata — was never built. Dependency extensions now reach a consumer's
+> type checker from the dependency's **source**, like its classes, protocols
+> and aliases; see the [2026-11-09 amendment](#amendment-2026-11-09-bt-4608-dependency-extensions-are-read-from-dependency-source)
+> below. The problem statement and the scope rules here (extensions are always
+> exported, conformance stays use-site computed, and the ADR 0100 sequencing)
+> still stand.
+
 The cross-package metadata above carries a package's **classes** but not its
 **open-class extensions** (ADR 0066, `TargetClass >> selector => …`). Extensions
 are discovered today only by scanning a package's own source ASTs at *its* compile
@@ -376,6 +385,80 @@ Scope and boundaries:
 - This is the **static** complement to the runtime write path (BT-2250) and the
   live xref index (ADR 0087 / BT-2228): the same extension facts, made visible to a
   *consumer's compiler* rather than only to the running image.
+
+#### Amendment (2026-11-09, BT-4608): dependency extensions are read from dependency source
+
+**Decision.** A consumer's type checker learns a dependency's extension methods
+by parsing the dependency's source — the same way it already learns that
+dependency's classes, protocols and aliases — not from compiled metadata.
+
+**Why.**
+
+- **It is how dependencies already reach the checker.** Despite §7's `.app`
+  class metadata, the checker reads dependency classes, protocols and aliases
+  from dependency *source*, through two scanners: `build_dep_class_index`
+  (`beamtalk build`, `check`, `lint`, `test`) and the offline
+  `dependency_classes` scan (MCP lint). A `.beam`-based channel only for
+  extensions would be the one exception.
+- **Every Beamtalk dependency has source.** Path, git and registry
+  dependencies (a registry dependency resolves to a git checkout) are all
+  source checkouts. Erlang-native hex dependencies cannot define Beamtalk
+  extensions.
+- **The divergence the 2026-06-27 carrier guarded against cannot happen.** It
+  chose `__beamtalk_meta/0` so the type facts could not drift from the
+  `register/5` calls in the `.beam`. The source *is* what that `.beam` is
+  compiled from.
+- **It costs almost nothing.** Both scanners already parse every dependency
+  file; collecting its extensions is one `ExtensionIndex::add_module` per
+  module they parse.
+
+**Mechanism.** Each scanner records, per dependency, a
+`DependencyExtensions` (`beamtalk_cli::dependency_extensions`): the
+extensions found, and whether that is all of them. Every surface merges them
+into the cross-file extension index it already hands the checker, so they
+register through the same `ClassHierarchy::register_extensions` path as
+intra-project extensions (WS1).
+
+**Completeness lifts the ADR 0100 guard.** `CompilerOptions::dependency_extensions_unknown`
+(previously `has_package_dependencies`) is on unless every dependency's
+extensions were loaded completely:
+
+- a dependency's extensions are complete only when every one of its source
+  files was read and parsed without errors (error recovery can drop a
+  definition; an unreadable file hides what it holds);
+- a dependency with no `.bt` source is complete and empty — it defines no
+  extensions at runtime either;
+- the guard stays on if dependency resolution failed, or (offline scan) any
+  transitive dependency is not on disk, its path is not UTF-8, or its
+  manifest cannot be read (its own dependencies are then unknown).
+
+So a missing extension can never become a false does-not-understand. The rule
+lives in one function, `dependency_extensions_unknown`, used by every surface.
+
+**Scope and what remains.**
+
+- `beamtalk build`, `check`, `lint`, `test` and MCP lint load dependency
+  extensions. `beamtalk test` also registers each package's own `src/`
+  extensions, which it previously did not.
+- The LSP keeps the guard on whenever it sees dependencies: it cannot reuse
+  the CLI's scanner and does not read `[dependencies]` (BT-4611).
+- A dependency compiled as part of a consumer's build keeps the guard on for
+  its own code; its own dependencies' extensions are not loaded there.
+- The conflict reporting described in the 2026-06-27 amendment (two packages
+  extending the same `{target, selector}`) is not yet wired: the extension
+  conflict detector exists but no surface calls it, for project or dependency
+  extensions alike. Until it is, the checker types such a selector by the
+  first definition it registers (the consumer's own, then dependencies in
+  resolution order), while the runtime is last-writer-wins (ADR 0066).
+- Only extensions declared in `.bt` source are seen. An extension a
+  dependency registers from its own Erlang (`native/`) code through the
+  runtime registry is invisible to the checker; doing so is unsupported for
+  static checking.
+- `beamtalk test` registers each package's `src/` extensions, its fixtures'
+  (`test/fixtures/`) and those of every test file it compiles (one defining
+  a test class). A package whose sources sit at its root, and a test file
+  with deprecated `// @load` directives, keep the guard on there: the
+  extensions they would need are not scanned.
 
 ### 8. Package Reflection: The `Package` Class
 

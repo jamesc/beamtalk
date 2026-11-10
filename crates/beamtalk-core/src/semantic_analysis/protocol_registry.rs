@@ -1179,6 +1179,7 @@ mod tests {
                         MessageSelector::Unary(sel.into())
                     };
                     MethodDefinition {
+                        pipeline_sends: crate::ast::PipelineSends::default(),
                         selector,
                         parameters: vec![],
                         body: vec![ExpressionStatement::bare(
@@ -1219,6 +1220,7 @@ mod tests {
             MessageSelector::Binary(sel.into())
         };
         MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector,
             parameters: (0..arity)
                 .map(|i| ParameterDefinition::new(ident(&format!("arg{i}"))))

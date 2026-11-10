@@ -50,6 +50,7 @@ fn test_analyse_hierarchy_includes_user_classes() {
             span: test_span(),
         }],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("increment".into()),
             parameters: vec![],
             body: vec![],
@@ -77,6 +78,7 @@ fn test_analyse_hierarchy_includes_user_classes() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -136,6 +138,7 @@ fn test_analyse_reports_sealed_class_diagnostic() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -469,6 +472,7 @@ fn test_abstract_class_instantiation_error() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("area".into()),
             parameters: vec![],
             body: vec![bare(Expression::Literal(Literal::Integer(42), test_span()))],
@@ -509,6 +513,7 @@ fn test_abstract_class_instantiation_error() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),

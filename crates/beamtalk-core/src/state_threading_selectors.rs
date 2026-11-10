@@ -629,9 +629,20 @@ pub enum SendUserCode {
     LoopOrClosureCall,
     /// Anything else: bracket it. This is the default (ADR 0137 §2): a
     /// primitive that takes a block or can dispatch to user code for some
-    /// argument, a non-inlined `value`, `perform:`, a send to an unknown or
-    /// in-process receiver, an FFI call.
+    /// argument, `perform:`, a send to an unknown or in-process receiver, an
+    /// FFI call.
     MayRun,
+    /// BT-4532 (ADR 0146): one of the constructs above (an evaluated block,
+    /// a loop, a collection message, a conditional, `on:do:`/`ensure:`) given
+    /// something other than a block literal where it runs a block
+    /// (`blk value`, `5 timesRepeat: blk`, `xs do: blk`, `x ifTrue: blk`).
+    /// The call runs whatever that value is as a closure in this process, so
+    /// it may be any block: one that touches this actor's state (ADR 0137),
+    /// or one holding a `^` of the method, whose throw carries the cell
+    /// (ADR 0146). A call into user code, like [`Self::MayRun`]; named apart
+    /// so codegen's verifier can check that no such call is left unbracketed
+    /// (`VerifyError::UnbracketedNlrClosure`).
+    ClosureOperand,
 }
 
 /// Classifies the send `receiver selector arguments`. A receiver of `self`
@@ -674,7 +685,7 @@ pub fn send_user_code(
             return if is_block(receiver) {
                 SendUserCode::LoopOrClosureCall
             } else {
-                SendUserCode::MayRun
+                SendUserCode::ClosureOperand
             };
         }
     }
@@ -690,6 +701,7 @@ pub fn send_user_code(
     if COLLECTION_KEYWORD_SELECTORS.contains(&name) {
         return match opaque_fold_callable_arg(name, arguments) {
             Some(callable) if is_block(callable) => SendUserCode::InlinedOrClosureCall,
+            Some(_) => SendUserCode::ClosureOperand,
             // `eachWithIndex:`/`do:separatedBy:`/... take their blocks by position.
             None if !arguments.is_empty() && arguments.iter().all(is_block) => {
                 SendUserCode::InlinedOrClosureCall
@@ -717,7 +729,7 @@ pub fn send_user_code(
             .iter()
             .all(|&i| arguments.get(i).is_some_and(is_block));
         return if !(receiver_inlined && args_inlined) {
-            SendUserCode::MayRun
+            SendUserCode::ClosureOperand
         } else if is_loop_selector(name) {
             SendUserCode::LoopOrClosureCall
         } else {
@@ -1350,7 +1362,7 @@ mod tests {
         ] {
             assert_eq!(classify(src), SendUserCode::LoopOrClosureCall, "{src}");
         }
-        assert_eq!(classify("5 timesRepeat: b"), SendUserCode::MayRun);
+        assert_eq!(classify("5 timesRepeat: b"), SendUserCode::ClosureOperand);
     }
 
     #[test]
@@ -1365,8 +1377,10 @@ mod tests {
         }
     }
 
+    /// BT-4532: a construct given a value where it runs a block runs that
+    /// value as a closure, whatever block it is.
     #[test]
-    fn the_same_constructs_with_a_non_literal_block_are_calls() {
+    fn the_same_constructs_with_a_non_literal_block_run_it_as_a_closure() {
         for src in [
             "x ifTrue: blk",
             "xs do: blk",
@@ -1374,8 +1388,17 @@ mod tests {
             "blk value: 1",
             "xs inject: 0 into: blk",
             "5 timesRepeat: blk",
+            "1 to: 3 do: blk",
+            "blk whileTrue: [x]",
+            "[x] whileTrue: blk",
+            "blk repeat",
+            "blk ensure: [x]",
+            "[x] ensure: blk",
+            "[x] on: Error do: handler",
+            "blk on: Error do: [:e | 0]",
+            "(p foo) value",
         ] {
-            assert_eq!(classify(src), SendUserCode::MayRun, "{src}");
+            assert_eq!(classify(src), SendUserCode::ClosureOperand, "{src}");
         }
     }
 

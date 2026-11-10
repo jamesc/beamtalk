@@ -627,13 +627,21 @@ impl CoreErlangGenerator {
         // Capture expression outputs (ADR 0018 bridge pattern). BT-4524: the
         // catch boundary stores the pre-region `State` on entry
         // (`CellBoundary::PreState`) wherever the cell protocol applies, so a
-        // `^` in either closure carries the method's state: covered.
-        let covered = self.synced_calls_active();
+        // `^` in either closure carries the method's state: covered. BT-4532:
+        // only the operand that is itself a block literal; a closure nested in
+        // a non-block operand runs as that operand is evaluated, before the
+        // boundary's store, and its own call has to store.
+        let covered = |this: &Self, operand: &Expression| match operand {
+            Expression::Block(block) if this.synced_calls_active() => vec![block.span],
+            _ => Vec::new(),
+        };
+        let receiver_cover = covered(self, receiver);
         let receiver_code =
-            self.with_nlr_closure_cover(covered, |this| this.expression_doc(receiver))?;
+            self.with_nlr_closure_cover(&receiver_cover, |this| this.expression_doc(receiver))?;
         let ex_class_code = self.on_do_filter_doc(ex_class)?;
+        let handler_cover = covered(self, handler);
         let handler_code =
-            self.with_nlr_closure_cover(covered, |this| this.expression_doc(handler))?;
+            self.with_nlr_closure_cover(&handler_cover, |this| this.expression_doc(handler))?;
 
         let handler_apply =
             self.make_handler_apply(handler_var.clone(), ex_obj_var, handler_takes_arg);

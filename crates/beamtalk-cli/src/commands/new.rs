@@ -320,8 +320,9 @@ fn write_justfile(path: &Utf8Path, name: &str, kind: ProjectKind) -> Result<()> 
 }
 
 fn write_ci_workflow(path: &Utf8Path, name: &str) -> Result<()> {
-    // Target the newest supported OTP major: the nightly toolchain is built
-    // on it, so its .beam files may not load on older majors.
+    // Target the newest supported OTP major. The toolchain is built on the
+    // window's min-major (ADR 0125 §3.1), so it loads on every major in the
+    // window; the newest one is what a new project should test against.
     let otp_major = beamtalk_cli::otp_support::window().max_major.to_string();
     let content = include_str!("../../templates/ci.yml")
         .replace("{{project_name}}", name)

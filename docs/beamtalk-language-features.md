@@ -616,7 +616,11 @@ collection element, `super.count` (fields are read through `self`), and a
 cascade on `super` (`super a; b`; send each message to `super` separately). To
 use the receiver itself as a value, write `self`
 ([BT-4251](https://linear.app/beamtalk/issue/BT-4251),
-[BT-4258](https://linear.app/beamtalk/issue/BT-4258)).
+[BT-4258](https://linear.app/beamtalk/issue/BT-4258)). A cast to `super`
+(`super foo!`) is a compile error too: `super` runs the parent class's method
+in the current process, synchronously, so there is no mailbox to post to. Send
+it without `!`, or cast to `self` (`self foo!`)
+([BT-4318](https://linear.app/beamtalk/issue/BT-4318)).
 
 ### Splitting a Message Send Across Lines
 
@@ -2475,7 +2479,7 @@ the class's own or inherited version instead:
 
 ```beamtalk
 typed Value subclass: SupervisionTree
-  // This class's own `do:` answers `self` (chainable), not `Nil` —
+  // This class's own `do:` walks the enriched `nodes`, not `elements` —
   // `Enumerable`'s provision is dropped before it can conflict.
   uses: Enumerable(SupervisionNode) excluding: #(#do:)
 ```
@@ -3090,10 +3094,13 @@ These message sends are Tier 1 optimized — the compiler generates inlined tail
 | Construct | Example | Mutations Allowed |
 |-----------|---------|-------------------|
 | `whileTrue:` / `whileFalse:` | `[count < 10] whileTrue: [count := count + 1]` | ✅ |
+| `whileTrue` / `whileFalse` (unary: the receiver block is condition and body, so it runs at least once) | `[self.count := self.count + 1. self.count < 10] whileTrue` | ✅ as for a `whileTrue:` condition (below) |
 | `timesRepeat:` | `5 timesRepeat: [sum := sum + n]` | ✅ |
 | `to:do:` | `1 to: 10 do: [:n \| total := total + n]` | ✅ |
 | `do:`, `collect:`, `select:`, `reject:` | `items do: [:x \| sum := sum + x]` | ✅ |
 | `inject:into:` | `items inject: 0 into: [:acc :x \| acc + x]` | ✅ |
+
+The unary `[...] whileTrue` / `[...] whileFalse` is the keyword loop with an empty body (`[...] whileTrue: []`), so its receiver follows the rule for a `whileTrue:` condition ([BT-4313](https://linear.app/beamtalk/issue/BT-4313)): at the REPL it threads the bindings it writes; in a value-type or actor method it threads a local it writes when it also writes a field or sends to `self`; otherwise a local written in it (and every local in a class method) is a compile error. Keep the counter in a field, or write the loop with a body: `[count := count + 1. count < 10] whileTrue` runs as `count := count + 1. [count < 10] whileTrue: [count := count + 1]`.
 
 ### Local Variable Mutations
 
@@ -8449,7 +8456,7 @@ new => @intrinsic basicNew
 hash => @intrinsic hash
 ```
 
-The full list of structural intrinsics: `blockValue`, `blockValue1`–`blockValue3`, `whileTrue`, `whileFalse`, `repeat`, `onDo`, `ensure`, `timesRepeat`, `toDo`, `toByDo`, `basicNew`, `basicNewWith`, `hash`, `respondsTo`, `fieldNames`, `fieldAt`, `fieldAtPut`, `dynamicSend`, `dynamicSendWithArgs`, `error`.
+The full list of structural intrinsics: `blockValue`, `blockValue1`–`blockValue3`, `whileTrue`, `whileFalse`, `unaryWhileTrue`, `unaryWhileFalse`, `repeat`, `onDo`, `ensure`, `timesRepeat`, `toDo`, `toByDo`, `basicNew`, `basicNewWith`, `hash`, `respondsTo`, `fieldNames`, `fieldAt`, `fieldAtPut`, `dynamicSend`, `dynamicSendWithArgs`, `error`.
 
 **`Actor>>spawn`/`spawnWith:` (BT-3072).** Unlike the intrinsics above, `spawn`/`spawnWith:` are *not* `@intrinsic` — `actor.bt` declares real FFI bodies (`(Erlang beamtalk_actor) doSpawn: self`). The compiler's static `Counter spawn` / `self spawn` call sites still lower directly to `beamtalk_actor:safe_spawn`/`class_self_spawn` (unchanged, to avoid serializing every spawn through the class `gen_server`) — the declared body is the documented source of behaviour for the dynamic dispatch path, mirroring `spawnAs:`/`spawnWith:as:`'s existing FFI-body shape. See `stdlib/src/actor.bt`.
 

@@ -47,7 +47,8 @@ use super::gen_server::SpawnVariant;
 use super::method_frame::CLASS_SELF_VAR;
 use super::routing;
 use super::threaded_ir::{
-    BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
+    BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VerifyError, VersionPrefix,
+    VersionedVar,
 };
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 
@@ -1606,22 +1607,33 @@ impl CoreErlangGenerator {
                 _ => None,
             })
             .collect();
+        // BT-4532: emitted as a store-only `SyncedCall` around the call, and
+        // covering only those block literals (`with_nlr_closure_cover`).
+        // Whether it stores is decided before the operands compile (the
+        // cover depends on it); what it stores is read after them, where the
+        // store is emitted, since an operand may step `State` (a
+        // field-writing self-send) and the store must carry that step.
         let at = receiver.span();
-        let unbracketed = self.synced.window_depth == 0;
-        let covered = unbracketed && self.nlr_closure_prestore_applies(&nlr_blocks);
+        let prestore = if self.synced.window_depth == 0 {
+            self.nlr_closure_prestore(&nlr_blocks, at)
+        } else {
+            None
+        };
+        let cover: Vec<_> = if prestore.is_some() {
+            nlr_blocks.iter().map(|block| block.span).collect()
+        } else {
+            Vec::new()
+        };
         let mut seq =
-            self.with_nlr_closure_cover(covered, |this| this.sequence_call(&all_exprs, "Disp"))?;
+            self.with_nlr_closure_cover(&cover, |this| this.sequence_call(&all_exprs, "Disp"))?;
         let actual_receiver = seq.next();
 
         // BT-4070: the call shape itself lives in `runtime_send_call`,
         // shared with the pure-conditional fallback arm — byte-identical
         // to the inline splice this replaces.
         let call_doc = self.runtime_send_call(actual_receiver, &selector_atom, seq.rest());
-        let call_doc = match covered
-            .then(|| self.nlr_closure_prestore(&nlr_blocks, at))
-            .flatten()
-        {
-            Some(prestore) => docvec![prestore, call_doc],
+        let call_doc = match prestore {
+            Some(prestore) => self.nlr_closure_prestored_call(prestore, call_doc),
             None => call_doc,
         };
 
@@ -3623,6 +3635,9 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
+        // Taken before any argument compiles, so a nested `super` send is
+        // judged on its own.
+        let from_producer = std::mem::take(&mut self.in_super_send_producer);
         let selector_atom = selector.name().to_string();
 
         // A class-side `super` resolves up the metaclass chain via the runtime
@@ -3689,7 +3704,7 @@ impl CoreErlangGenerator {
         // (`classify_super_send`), and answers its value. Sends there are not
         // sync-bracketed, so the arguments are sequenced (`thread_args`) to
         // evaluate in source order (BT-4296).
-        if self.in_cell_closure() || self.super_send_uses_cell() {
+        if !self.super_send_threads_state() {
             let (args_preamble, args_doc) = self.thread_args(arguments)?;
             // The prelude closes around this call, so a threaded-state rebind in
             // it would be scoped away from later statements (BT-3809): report
@@ -3707,8 +3722,23 @@ impl CoreErlangGenerator {
             return Ok(self.close_prelude(&args_preamble, call_doc, "SuperRes"));
         }
 
-        // A method-body `super` send's sending arguments are sync sites, already
-        // sequenced by the enclosing `sequence_children` and read back here.
+        // BT-4318: this form answers `{reply, Result, NewState}`; only
+        // `super_send_producer` unpacks it into a `State` `Bind`. Anywhere
+        // else the tuple leaks as the value and the state change is lost.
+        if !from_producer {
+            let at = self.current_send_span.unwrap_or_default();
+            self.report_threaded_ir_verify_errors(
+                &[VerifyError::StateEffectEscapesExpression {
+                    prefix: VersionPrefix::State,
+                    at,
+                }],
+                "state-threading super send compiled outside its producer",
+                at,
+            );
+        }
+
+        // A method-body `super` send's arguments are sequenced ahead by
+        // `super_send_producer` (`sequence_children`) and read back here.
         let args_doc = self.capture_argument_list_doc(arguments)?;
 
         let current_state = self.current_state_var();
@@ -3727,6 +3757,21 @@ impl CoreErlangGenerator {
         // A `super` send in a closure runs against the cell (the early returns
         // above), so its change is kept and no guard is needed (BT-3985 retired).
         Ok(self.bracket_super_send(selector, doc, Span::default()))
+    }
+
+    /// Whether a `super` send compiled now threads the method's own `State`:
+    /// `generate_super_send` answers the raw `{reply, Result, NewState}`
+    /// tuple of `beamtalk_dispatch:super/5`, which the caller must unpack
+    /// (BT-4318) — through [`Self::threaded_expression`]'s `super` producer
+    /// in any value position. False on the class side, in a value type, and
+    /// wherever the send runs against the actor-state cell (a closure, a
+    /// block or loop body), all of which answer a plain value.
+    pub(super) fn super_send_threads_state(&self) -> bool {
+        self.builder_class_method_class().is_none()
+            && !self.in_class_method()
+            && self.context != CodeGenContext::ValueType
+            && !self.in_cell_closure()
+            && !self.super_send_uses_cell()
     }
 
     /// Generates code for actor spawn with conditional REPL registry integration.

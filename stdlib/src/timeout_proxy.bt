@@ -39,6 +39,10 @@ type Timeout = Integer | #infinity
 /// All messages, including cast sends (`!`), are forwarded using the
 /// configured timeout via `perform:withArguments:timeout:`.
 ///
+/// Only messages the proxy does not understand are forwarded, plus the few it
+/// forwards explicitly (`node`, `isRemote`, `then:`). Other messages it
+/// inherits from `Object`, such as `class`, answer on the proxy itself.
+///
 /// @see Actor#withTimeout:
 typed Actor subclass: TimeoutProxy
   state: target :: Actor | Nil = nil
@@ -63,6 +67,20 @@ typed Actor subclass: TimeoutProxy
   /// caller's process from the forwarded `node` above; this body covers a
   /// send from inside the proxy itself.
   isRemote -> Boolean => self.target isRemote
+
+  // === Pipelines ===
+
+  /// Forward `then:` to the target (ADR 0145, BT-4515), with the configured
+  /// timeout. The type checker treats `withTimeout:` as transparent
+  /// (ADR 0104), so it types `slowDb then: [...]` against the target's class.
+  /// Forwarding makes the runtime agree: a target that defines its own
+  /// `then:` (a promise, say) runs it, and otherwise `Object >> then:` runs
+  /// in the target's process with the target as the block's argument.
+  then: aBlock :: Block -> Dynamic =>
+    self.target
+      perform: #then:
+      withArguments: #(aBlock)
+      timeout: self.timeoutMs
 
   // === Forwarding ===
 
