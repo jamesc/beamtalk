@@ -9,11 +9,10 @@ Rule 1 and Rule 3 landed via BT-2793. Rule 2 landed via BT-2796 (WS2:
 project-wide extension visibility), and BT-2794 (pre-WS3 dependency guard) —
 see the Rule 2 section for how "removal" of the cross-file-parent
 suppression was realised. WS3 (dependency extensions, ADR 0070 amendments)
-landed for `beamtalk build`/`check`/`lint`/`test` and MCP lint via BT-4608:
-dependency extensions are read from dependency source, and the BT-2794 guard
-(the Rule 1 third downgrade) now applies only while some dependency's
-extensions could not be loaded completely. The LSP still applies the guard
-whenever it sees dependencies (BT-4611). BT-2800
+landed for `beamtalk build`/`check`/`lint`/`test` and MCP lint via BT-4608,
+and for the LSP via BT-4611: dependency extensions are read from dependency
+source, and the BT-2794 guard (the Rule 1 third downgrade) now applies only
+while some dependency's extensions could not be loaded completely. BT-2800
 closed a surface-parity gap BT-2793 left behind: the LSP now applies the
 Rule 3 `[diagnostics]` table too, not just `beamtalk build` (see the
 Escalation implementation note below). BT-2839 closed the same gap for a

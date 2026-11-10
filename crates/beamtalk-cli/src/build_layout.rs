@@ -109,9 +109,10 @@ impl BuildLayout {
 
     // ── Dependencies ─────────────────────────────────────────────────
 
-    /// `_build/deps/` — top-level dependency directory.
+    /// `_build/deps/` — top-level dependency directory. The convention is
+    /// shared with the offline dependency-graph walk (MCP lint, the LSP).
     pub fn deps_dir(&self) -> Utf8PathBuf {
-        self.build_root().join("deps")
+        beamtalk_project::dependency_graph::dependency_checkouts_dir(&self.project_root)
     }
 
     /// `_build/deps/.dep-graph.json` — snapshot of the effective dependency
