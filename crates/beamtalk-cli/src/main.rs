@@ -508,7 +508,7 @@ enum Command {
     WarmOtpCache,
 
     /// Print the declared OTP support window (ADR 0125 §3.1) as a JSON
-    /// array of majors, e.g. `["27","28"]`
+    /// array of majors, e.g. `["28","29"]`
     ///
     /// The single consumer of `otp-support.toml` for CI: `just otp-matrix`
     /// runs this and feeds the result to `ci.yml`'s `matrix.otp`, so the

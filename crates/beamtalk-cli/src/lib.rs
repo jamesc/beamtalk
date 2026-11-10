@@ -22,6 +22,7 @@
 
 pub mod build_layout;
 pub mod dependency_classes;
+pub mod dependency_extensions;
 pub mod erlc;
 pub mod manifest;
 pub mod native_type_specs;

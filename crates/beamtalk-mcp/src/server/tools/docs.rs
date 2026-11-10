@@ -271,13 +271,13 @@ impl BeamtalkMcp {
         let start = std::time::Instant::now();
 
         // Aggregate package corpora with the bundled corpus.
+        let bundled = beamtalk_examples::bundled_corpus();
         let (pkg_corpora, _) = discover_package_corpora();
         let merged;
         let corpus_ref = if pkg_corpora.is_empty() {
-            &*beamtalk_examples::corpus::CORPUS
+            bundled.corpus()
         } else {
-            merged =
-                beamtalk_examples::merge_corpora(&beamtalk_examples::corpus::CORPUS, &pkg_corpora);
+            merged = beamtalk_examples::merge_corpora(bundled.corpus(), &pkg_corpora);
             &merged
         };
         let results = beamtalk_examples::search_in(corpus_ref, &params.query, params.limit);
@@ -307,6 +307,19 @@ impl BeamtalkMcp {
 
         if results.is_empty() {
             timer.mark_ok();
+            // The bundled corpus is generated at build time (BT-4614); say so
+            // rather than reporting "no matches" against an empty corpus.
+            if let beamtalk_examples::BundledCorpus::Missing { path } = bundled {
+                let location = path.as_ref().map_or_else(
+                    || "this installation".to_string(),
+                    |p| p.display().to_string(),
+                );
+                return Ok(CallToolResult::success(vec![ContentBlock::text(format!(
+                    "No examples found: the bundled example corpus is missing ({location}). \
+                     It is generated at build time — run `just build` in a dev checkout, or \
+                     reinstall beamtalk."
+                ))]));
+            }
             return Ok(CallToolResult::success(vec![ContentBlock::text(
                 "No examples found for that query. Try different keywords — e.g. 'closures', 'actor state', 'collections'.",
             )]));

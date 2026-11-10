@@ -358,6 +358,7 @@ mod residual_dynamic_sends;
 mod shadowed_class_direct_calls;
 mod sibling_snapshot;
 mod stale_read_sites;
+mod super_send_value_position_corpus;
 mod supervisor;
 mod synced_call_sites_corpus;
 mod synced_calls;

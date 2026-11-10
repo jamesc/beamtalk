@@ -386,6 +386,7 @@ enum TopLevelDecl<'a> {
     Protocol(&'a ProtocolDefinition),
     TypeAlias(&'a TypeAliasDefinition),
     Native(&'a NativeDeclaration),
+    Method(&'a StandaloneMethodDefinition),
 }
 
 impl TopLevelDecl<'_> {
@@ -396,6 +397,18 @@ impl TopLevelDecl<'_> {
             Self::Protocol(protocol) => protocol.comments.leading_blank_line,
             Self::TypeAlias(type_alias) => type_alias.comments.leading_blank_line,
             Self::Native(native) => native.comments.leading_blank_line,
+            Self::Method(smd) => smd.method.comments.leading_blank_line,
+        }
+    }
+
+    /// Source offset where this declaration starts.
+    fn start(&self) -> u32 {
+        match self {
+            Self::Class(class) => class.span.start(),
+            Self::Protocol(protocol) => protocol.span.start(),
+            Self::TypeAlias(type_alias) => type_alias.span.start(),
+            Self::Native(native) => native.span.start(),
+            Self::Method(smd) => smd.span.start(),
         }
     }
 }
@@ -414,33 +427,29 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
         docs.push(line());
     }
 
-    // Classes, protocols, type aliases, and native declarations
-    // (ADR 0068 Phase 2a, ADR 0108 Phase 1) are interleaved back into their
-    // original source order rather than grouped by kind — a `type` alias
-    // declared after a class must stay after that class on a format
-    // round-trip. `sort_by_key` is a stable sort, so declarations that
+    // Classes, protocols, type aliases, native declarations (ADR 0068
+    // Phase 2a, ADR 0108 Phase 1) and standalone/extension methods are
+    // interleaved back into their original source order rather than grouped
+    // by kind — a `type` alias declared after a class must stay after that
+    // class, and a leading `Port >> foo` extension (with the license header
+    // attached to it) must stay ahead of the class that follows it
+    // (BT-4488). `sort_by_key` is a stable sort, so declarations that
     // legitimately share a start offset (shouldn't happen for top-level
-    // decls) keep this append order: classes, then protocols, then type
-    // aliases, then native declarations.
+    // decls) keep this append order.
     let mut top_level_decls: Vec<TopLevelDecl<'_>> = Vec::new();
     top_level_decls.extend(module.classes.iter().map(TopLevelDecl::Class));
     top_level_decls.extend(module.protocols.iter().map(TopLevelDecl::Protocol));
     top_level_decls.extend(module.type_aliases.iter().map(TopLevelDecl::TypeAlias));
     top_level_decls.extend(module.native_declarations.iter().map(TopLevelDecl::Native));
-    top_level_decls.sort_by_key(|decl| match decl {
-        TopLevelDecl::Class(class) => class.span.start(),
-        TopLevelDecl::Protocol(protocol) => protocol.span.start(),
-        TopLevelDecl::TypeAlias(type_alias) => type_alias.span.start(),
-        TopLevelDecl::Native(native) => native.span.start(),
-    });
+    top_level_decls.extend(module.method_definitions.iter().map(TopLevelDecl::Method));
+    top_level_decls.sort_by_key(TopLevelDecl::start);
 
-    for (i, decl) in top_level_decls.into_iter().enumerate() {
+    for decl in top_level_decls {
         // Re-emit the blank line the author placed between this
-        // declaration and the previous one. Skipped for the first
-        // declaration in the section — a blank line there (before the very
-        // first top-level declaration) is dropped, same as pre-existing
-        // behaviour; we only preserve inter-declaration gaps.
-        if i > 0 && decl.preceding_blank_line() {
+        // declaration and whatever precedes it. Dropped when nothing
+        // precedes it — a blank line before the very first top-level
+        // declaration is not preserved; we only preserve inter-item gaps.
+        if !docs.is_empty() && decl.preceding_blank_line() {
             docs.push(line());
         }
         match decl {
@@ -452,23 +461,10 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
             TopLevelDecl::Native(native) => {
                 docs.push(unparse_native_declaration(native));
             }
+            TopLevelDecl::Method(smd) => {
+                docs.push(unparse_standalone_method_definition(smd));
+            }
         }
-        docs.push(line());
-    }
-
-    // Standalone method definitions
-    for (i, smd) in module.method_definitions.iter().enumerate() {
-        // Re-emit the blank line the author placed before this
-        // standalone method — either separating it from the previous
-        // standalone method (i > 0), or separating the whole
-        // standalone-methods section from the class/protocol/type-alias
-        // declarations above it (i == 0, but `docs` already has content).
-        // Dropped when nothing precedes it (same first-item convention as
-        // the declarations loop above).
-        if (i > 0 || !docs.is_empty()) && smd.method.comments.leading_blank_line {
-            docs.push(line());
-        }
-        docs.push(unparse_standalone_method_definition(smd));
         docs.push(line());
     }
 
@@ -735,7 +731,15 @@ pub(crate) fn unparse_standalone_method_definition(
     };
     // The target goes on the signature line, after the method's leading
     // comments and doc comment — not in front of them (BT-4253).
-    unparse_method_definition_with_prefix(&smd.method, docvec![class, separator])
+    // A standalone method is a top-level declaration, so — like a class,
+    // protocol, type alias or native declaration — it keeps the blank line
+    // the author left between its leading comments (e.g. a license header)
+    // and the method itself (BT-4488).
+    unparse_method_definition_inner(
+        &smd.method,
+        docvec![class, separator],
+        EmitLeadingComments::YesKeepingTrailingGap,
+    )
 }
 
 /// Builds a [`Document`] for a [`TypeAliasDefinition`] (ADR 0108 Phase 1).
@@ -1076,6 +1080,11 @@ fn unparse_method_definition_with_prefix(
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EmitLeadingComments {
     Yes,
+    /// Like [`Self::Yes`], and also re-emit a blank line the source had
+    /// between the leading comments and the method (its
+    /// `blank_line_after_comments`). Used for top-level standalone methods,
+    /// matching the other top-level declarations.
+    YesKeepingTrailingGap,
     No,
 }
 
@@ -1090,7 +1099,8 @@ fn unparse_method_definition_inner(
 
     // Non-doc leading comments (section dividers etc.) — emitted only on the
     // whole-file path; the per-method edit unit excludes them.
-    let emit_leading = emit_leading == EmitLeadingComments::Yes;
+    let keep_trailing_gap = emit_leading == EmitLeadingComments::YesKeepingTrailingGap;
+    let emit_leading = emit_leading != EmitLeadingComments::No;
     if emit_leading {
         docs.extend(unparse_comment_attachment_leading(&method.comments));
     }
@@ -1105,7 +1115,8 @@ fn unparse_method_definition_inner(
     // or the separator doubles up.
     if method.doc_comment.is_none()
         && emit_leading
-        && leading_ends_with_orphaned_doc_comment(&method.comments)
+        && (leading_ends_with_orphaned_doc_comment(&method.comments)
+            || (keep_trailing_gap && method.comments.blank_line_after_comments))
     {
         docs.push(line());
     }

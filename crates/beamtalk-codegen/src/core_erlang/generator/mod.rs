@@ -351,6 +351,12 @@ pub struct CoreErlangGenerator {
     /// `with_rebind_frame`, the one place frames are entered; read by
     /// `loop_holds_no_whole_state`.
     pub(in crate::core_erlang) in_private_scratch: bool,
+    /// BT-4318: set by `super_send_producer` for the one `generate_super_send`
+    /// call it makes. A `State`-threading `super` send compiled without it
+    /// would leak its `{reply, Result, NewState}` tuple and drop the state
+    /// change, so `generate_super_send` reports it
+    /// (`VerifyError::StateEffectEscapesExpression`).
+    pub(in crate::core_erlang) in_super_send_producer: bool,
     /// Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     pub(in crate::core_erlang) source_path: Option<String>,
@@ -576,8 +582,8 @@ pub struct CoreErlangGenerator {
 }
 
 /// `method`'s reflected source: its text as written, with the operand
-/// parentheses `peeled` recorded removing in `scope` put back (BT-4059).
-/// Equal to `unparse_method(method)` when nothing was recorded.
+/// parentheses `peeled` recorded removing in `scope` (BT-4059) and the
+/// canonicalised unary loops (BT-4313) put back.
 ///
 /// The one place reflected method source is produced from codegen's
 /// (peeled) tree; [`CoreErlangGenerator::as_written_method_source`] is this
@@ -587,7 +593,8 @@ pub(in crate::core_erlang) fn as_written_method_source(
     peeled: &beamtalk_core::ast::normalize::PeeledParens,
     scope: beamtalk_core::ast::normalize::PeelScope,
 ) -> String {
-    if peeled.is_empty() {
+    if peeled.is_empty() && !beamtalk_core::ast::normalize::method_has_desugared_unary_loop(method)
+    {
         return beamtalk_core::unparse::unparse_method(method);
     }
     let mut written = method.clone();
@@ -697,6 +704,7 @@ impl CoreErlangGenerator {
             in_fold_frame: false,
             rebind_frames: std::collections::HashMap::new(),
             in_private_scratch: false,
+            in_super_send_producer: false,
             source_path: None,
             tier2_local_vars: std::collections::HashSet::new(),
             tier2_local_var_captured_mutations: std::collections::HashMap::new(),

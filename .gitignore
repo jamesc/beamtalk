@@ -169,7 +169,7 @@ tests/repl-protocol/fixtures/build/
 # Compiled stdlib/test/fixtures/*.bt outputs + beamtalk build's own cache
 # files (.beamtalk-beam-hashes.json, .beamtalk-diagnostics-cache.json — not
 # covered by any existing *.json rule since other committed .json files,
-# e.g. corpus.json, are legitimate source)
+# e.g. the conformance fixtures, are legitimate source)
 stdlib/test/fixtures/build/
 # Python bytecode cache (scripts/*.py are run directly, never packaged)
 __pycache__/

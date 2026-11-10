@@ -26,7 +26,6 @@ hits="$(git grep -nE "$PATTERN" -- . \
     ':(exclude)docs/ADR/' \
     ':(exclude)CHANGELOG.md' \
     ':(exclude)AGENTS.md' \
-    ':(exclude)crates/beamtalk-examples/corpus.json' \
     ':(exclude)crates/beamtalk-examples/class_corpus.json' \
     ':(exclude)scripts/ci/lint-removed-facade-names.sh' \
     ':(exclude)tests/repl-protocol/cases/class_side_facades.btscript' || true)"

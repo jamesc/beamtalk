@@ -1,9 +1,14 @@
 # Single source of truth for the OTP support window (ADR 0125 §3.1).
 #
-# Supported = max(27, current_major - 1) .. current_major. When a new OTP
-# major ships, bump max-major (and drop min-major only once the old major is
-# no longer worth testing) — nothing else in the repo hardcodes an OTP
-# version; every consumer (`beamtalk doctor`, `beamtalk build`/`release`, the
-# CI matrix) reads this file. See crates/beamtalk-cli/src/otp_support.rs.
-min-major = 27
-max-major = 28
+# Supported = current_major - 1 .. current_major. When a new OTP
+# major ships, bump max-major and min-major together — dropping the oldest
+# major is a minor-version release note, not a breaking change. Every
+# consumer (`beamtalk doctor`, `beamtalk build`/`release`, the CI matrix, the
+# `beamtalk new` CI template) reads this file. See
+# crates/beamtalk-cli/src/otp_support.rs.
+#
+# Release and nightly artifacts are built on min-major (BEAM files load on
+# later releases, never earlier ones), so `.tool-versions`' `erlang` pin must
+# be a min-major release — `tool_versions_erlang_pin_is_min_major` enforces it.
+min-major = 28
+max-major = 29

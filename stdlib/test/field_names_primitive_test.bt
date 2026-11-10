@@ -1,0 +1,65 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4264: the inline `fieldNames` intrinsic answers every receiver kind the
+// way the dynamic `perform: #fieldNames` path does. A raw BEAM value (Integer,
+// Binary, Bitstring, List, ...) has no fields and answers #(); it used to
+// raise badarg because the intrinsic treated every non-map as an actor.
+// BT-4470: a class object answers #() too, instead of being sync_sent.
+
+TestCase subclass: FieldNamesPrimitiveTest
+
+  // 234 = 0b11101010: dropping 3 bits leaves a 5-bit unaligned Bitstring.
+  bitstring =>
+    (Binary fromBytes: #(234)) match: [<<_:3, rest/bitstring>> -> rest]
+
+  testIntegerFieldNames =>
+    self assert: 42 fieldNames equals: #()
+    self assert: 42 fieldNames equals: (42 perform: #fieldNames)
+
+  testFloatFieldNames =>
+    self assert: 1.5 fieldNames equals: #()
+    self assert: 1.5 fieldNames equals: (1.5 perform: #fieldNames)
+
+  testStringFieldNames =>
+    self assert: "abc" fieldNames equals: #()
+    self assert: "abc" fieldNames equals: ("abc" perform: #fieldNames)
+
+  testSymbolFieldNames =>
+    self assert: #abc fieldNames equals: #()
+    self assert: #abc fieldNames equals: (#abc perform: #fieldNames)
+
+  testBinaryFieldNames =>
+    b := Binary fromBytes: #(1)
+    self assert: b fieldNames equals: #()
+    self assert: b fieldNames equals: (b perform: #fieldNames)
+
+  testBitstringFieldNames =>
+    self assert: self bitstring fieldNames equals: #()
+    self assert: self bitstring fieldNames equals: (self bitstring perform: #fieldNames)
+
+  testListFieldNames =>
+    self assert: #(1) fieldNames equals: #()
+    self assert: #(1) fieldNames equals: (#(1) perform: #fieldNames)
+
+  testNilFieldNames =>
+    self assert: nil fieldNames equals: #()
+    self assert: nil fieldNames equals: (nil perform: #fieldNames)
+
+  testBlockFieldNames =>
+    blk := [:x | x]
+    self assert: blk fieldNames equals: (blk perform: #fieldNames)
+
+  testValueObjectFieldNames =>
+    p := ValuePoint x: 3 y: 4
+    self assert: p fieldNames equals: (p perform: #fieldNames)
+
+  testActorFieldNames =>
+    c := Counter spawn
+    self assert: c fieldNames equals: #(#value)
+    self assert: c fieldNames equals: (c perform: #fieldNames)
+    c stop
+
+  testClassObjectFieldNames =>
+    self assert: ValuePoint fieldNames equals: #()
+    self assert: ValuePoint fieldNames equals: (ValuePoint perform: #fieldNames)

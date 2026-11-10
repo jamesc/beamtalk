@@ -431,11 +431,11 @@ impl CoreErlangGenerator {
         beamtalk_core::semantic_analysis::block_facts::stored_block_var_uses(expr, var_name)
     }
 
-    /// BT-3814 / BT-3819: the one lowering of the arguments of a send whose
-    /// statement lowering compiles them itself: a `super` send (`super take:
-    /// (self bump)`, `^super take: (c ifTrue: [self.n := 1 ...])`) and,
-    /// BT-4310, a `self error:`, `self fieldAt:put:` or `self clearField:`
-    /// statement, at the method root (`frame` is `ROOT`) or in an arm frame.
+    /// BT-4310: the one lowering of the arguments of a send whose statement
+    /// lowering compiles them itself: a `self error:`, `self fieldAt:put:` or
+    /// `self clearField:` statement, at the method root (`frame` is `ROOT`)
+    /// or in an arm frame. (A `super` send's arguments are sequenced by
+    /// `super_send_producer`, BT-4318.)
     /// Their state-effecting sub-expressions thread ahead of the send into
     /// `stmts` (the sequencing rule), so the send reads the post-operand
     /// `State` and an operand's rebind is not scoped away inside its closed
@@ -688,7 +688,7 @@ impl CoreErlangGenerator {
     /// call production ran before this migration (byte-identity: only the
     /// container changed, from `Vec<Document>` to `Vec<ThreadedStmt>`).
     /// Version steps hidden inside shared multi-module helpers
-    /// (`emit_super_send_open`, `generate_field_assignment_open`,
+    /// (`generate_field_assignment_open`,
     /// `generate_self_field_at_put_open`) remain inside their `Statement`s —
     /// see `verify_body_with_opaque_version_gaps`'s backfill accounting.
     ///
@@ -828,25 +828,12 @@ impl CoreErlangGenerator {
                     }
                     match value_kind {
                         BodyExprKind::SuperSend => {
-                            // BT-3819: `^super take: (c ifTrue: [self.n := 1. ...])`
-                            // sequences its operands like the statement form.
-                            let super_scope = self.thread_send_arguments(
-                                value,
-                                threaded_ir::FrameId::ROOT,
-                                &mut stmts,
-                            )?;
-                            let expr_str = self.expression_doc(value)?;
-                            self.finish_precompiled_scope(super_scope)?;
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec![
-                                    "let _SuperTuple = ",
-                                    expr_str,
-                                    " in let _Result = call 'erlang':'element'(2, _SuperTuple)",
-                                    " in let _NewState = call 'erlang':'element'(3, _SuperTuple)",
-                                    " in {'reply', _Result, _NewState}",
-                                ],
-                                span,
-                            ));
+                            // BT-3819 / BT-4318: `^super take: (c ifTrue: [...])`
+                            // is the `super` producer, like the statement form.
+                            let tv = self.threaded_expression(value, threaded_ir::FrameId::ROOT)?;
+                            stmts.extend(tv.prelude);
+                            let reply = self.threaded_value_reply_doc(&tv.value);
+                            stmts.push(ThreadedStmt::Statement(reply, span));
                         }
                         BodyExprKind::Tier2ValueCall => {
                             let expr_str = self.generate_tier2_value_call_doc(value)?;
@@ -1666,32 +1653,16 @@ impl CoreErlangGenerator {
                     }
                 }
                 BodyExprKind::SuperSend => {
-                    // BT-3814: `super take: (self bump)` — the operands'
-                    // state-effecting sub-expressions thread ahead of the
-                    // super dispatch (the sequencing rule, as for every other
-                    // statement shape here), so the dispatch reads the
-                    // post-operand `State` and the operand's rebind is not
-                    // scoped away inside the dispatch's argument list.
-                    let super_scope =
-                        self.thread_send_arguments(expr, threaded_ir::FrameId::ROOT, &mut stmts)?;
+                    // BT-3814 / BT-4318: the one `super` producer — the
+                    // operands thread ahead of the dispatch (the sequencing
+                    // rule), and its `State` `Bind` carries the callee's
+                    // state change to the next statement or the reply.
+                    let tv = self.threaded_expression(expr, threaded_ir::FrameId::ROOT)?;
+                    stmts.extend(tv.prelude);
                     if is_last {
-                        let expr_str = self.expression_doc(expr)?;
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                "let _SuperTuple = ",
-                                expr_str,
-                                " in let _Result = call 'erlang':'element'(2, _SuperTuple)",
-                                " in let _NewState = call 'erlang':'element'(3, _SuperTuple)",
-                                " in {'reply', _Result, _NewState}",
-                            ],
-                            span,
-                        ));
-                    } else {
-                        let mut open_docs: Vec<Document<'static>> = Vec::new();
-                        self.emit_super_send_open(expr, &mut open_docs)?;
-                        stmts.push(ThreadedStmt::Statement(Document::Vec(open_docs), span));
+                        let reply = self.threaded_value_reply_doc(&tv.value);
+                        stmts.push(ThreadedStmt::Statement(reply, span));
                     }
-                    self.finish_precompiled_scope(super_scope)?;
                 }
                 BodyExprKind::ErrorSend => {
                     // BT-4310: `self error: (xs inject: ...) printString` — the
@@ -2050,56 +2021,6 @@ impl CoreErlangGenerator {
             leaf::var(tuple_var),
             ") in {'reply', _Result, _NewState}",
         ]
-    }
-
-    /// Emit a super message send in non-last position, threading state.
-    fn emit_super_send_open(
-        &mut self,
-        expr: &Expression,
-        docs: &mut Vec<Document<'static>>,
-    ) -> Result<()> {
-        let super_result_var = self.fresh_temp_var("SuperReply");
-        let current_state = self.current_state_var();
-        let new_state = self.next_state_var();
-        let class_name = self.class_name();
-
-        if let Expression::MessageSend {
-            selector,
-            arguments,
-            ..
-        } = expr
-        {
-            let selector_atom = selector.name().to_string();
-            let mut arg_docs: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
-            for (j, arg) in arguments.iter().enumerate() {
-                if j > 0 {
-                    arg_docs.push(Document::Str(", "));
-                }
-                arg_docs.push(self.expression_doc(arg)?);
-            }
-            docs.push(docvec![
-                "let ",
-                leaf::var(super_result_var.clone()),
-                " = call 'beamtalk_dispatch':'super'(",
-                leaf::atom(selector_atom),
-                ", [",
-                Document::Vec(arg_docs),
-                "], Self, ",
-                leaf::var(current_state),
-                ", ",
-                leaf::atom(class_name),
-                ")",
-            ]);
-        }
-
-        docs.push(docvec![
-            " in let ",
-            leaf::var(new_state),
-            " = call 'erlang':'element'(3, ",
-            leaf::var(super_result_var),
-            ") in ",
-        ]);
-        Ok(())
     }
 
     /// Generates standalone function bodies for class-side methods.

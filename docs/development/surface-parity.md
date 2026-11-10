@@ -657,6 +657,30 @@ the same message at the same span. No operation is surface-specific.
 - `beamtalk lint`'s `cascade_candidate` pass reads the same predicate
   (`cascade_drops_update`) and does not suggest a cascade it would flag.
 
+### Dependency extensions and the dependency guard (ADR 0070 WS3, ADR 0100, BT-4608)
+
+In a package with dependencies, whether does-not-understand hints and
+protocol-conformance warnings can fire depends on whether the checker has
+seen every dependency's extension methods: a dependency can extend any class,
+`Object` included. ADR 0100's pre-WS3 guard keeps every receiver `Open` while
+any dependency's extensions are unknown
+(`CompilerOptions::dependency_extensions_unknown`). One rule decides it,
+`beamtalk_cli::dependency_extensions::dependency_extensions_unknown`: the
+guard is on unless dependency resolution succeeded and every dependency's
+extensions were loaded completely from its source (every file read and
+parsed cleanly).
+
+| Surface | Dependency extensions loaded | Guard |
+|---|---|---|
+| CLI `build`, `check`, `test` | Yes (`build_dep_class_index`), into `ClassHierarchyContext::extension_index` | Lifts when complete (`ClassHierarchyContext::dependency_extensions_complete`, applied in `beam_compiler`) |
+| CLI `lint` | Yes (`merge_dependency_infos`) | Lifts when complete |
+| MCP `lint` / `diagnostic_summary` | Yes (offline `dependency_classes` scan; also the package's own extensions) | Lifts when complete — but MCP analysis still runs `ModuleOnly` (BT-4585), where the guard does not apply |
+| LSP | Fetched (`_build/deps`) dependencies' extensions are preloaded; path dependencies are not | **Divergent:** on whenever dependencies are present (BT-4611) |
+| REPL | — | `ModuleOnly`; the guard does not apply |
+
+`beamtalk test` also registers each package's own `src/` extensions for test
+and fixture files, as `build` does for every file.
+
 ### `ffi-nested-string` diagnostic (ADR 0140 Rejection, BT-4243)
 
 An argument of an inline `Erlang <mod> <fn>:` call to a stock module whose

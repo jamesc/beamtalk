@@ -67,6 +67,8 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     ensure_pending_errors_table/0,
     record_class_pid/2,
     class_name_for_pid/1,
+    forget_class_pids/2,
+    rename_class_pids/2,
     ensure_loaded_classes_table/0,
     record_loaded_class/2,
     forget_loaded_class/2,
@@ -89,7 +91,7 @@ Extracted from `beamtalk_object_class` for single-responsibility.
 ]).
 
 -ifdef(TEST).
--export([class_identity/1]).
+-export([class_identity/1, prune_dead_class_pids/1]).
 -endif.
 
 -export_type([
@@ -905,6 +907,87 @@ class_name_for_pid(Pid) ->
         error:badarg -> not_found
     end.
 
+%% How many dead incarnations of one class keep their reverse-index row for
+%% crash recovery (BT-4552). A class object held across more restarts than this
+%% gets `class_not_found` on its next send, as every stale holder did before.
+-define(MAX_DEAD_CLASS_PIDS, 8).
+
+%% Keep only the newest `?MAX_DEAD_CLASS_PIDS` dead local rows of `ClassName`,
+%% so a class that keeps crashing on a long-running node does not grow
+%% `beamtalk_class_pids` without bound. Local pids order by creation in Erlang
+%% term order in practice (the pid counter only grows and does not wrap on
+%% 64-bit OTP), so the smallest are the oldest. The language does not promise
+%% that order, so the pruning is best-effort: a wrong order only keeps an older
+%% row in place of a newer one.
+-spec prune_dead_class_pids(class_name()) -> ok.
+prune_dead_class_pids(ClassName) ->
+    try
+        Dead = lists:sort([
+            P
+         || [P] <- ets:match(beamtalk_class_pids, {'$1', ClassName}),
+            node(P) =:= node(),
+            not is_process_alive(P)
+        ]),
+        Excess = length(Dead) - ?MAX_DEAD_CLASS_PIDS,
+        _ =
+            [ets:delete(beamtalk_class_pids, P) || Excess > 0, P <- lists:sublist(Dead, Excess)],
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-doc """
+Drop the reverse-index rows of a class whose process is terminating:
+`Pid`'s own row and every dead local incarnation of `ClassName` that
+`restart_class/1` kept for crash recovery (BT-4552).
+
+Called from `beamtalk_object_class:terminate/2`, whatever its `Reason`:
+that callback deletes the class's metadata row in the same pass, so the class
+cannot be restarted afterwards and its rows must go with it (a callback
+exception included; only an untrappable kill skips `terminate/2` and keeps
+them for recovery). Rows of live pids are left
+alone, so a replacement process already recorded under the same name is not
+clobbered (the reason `forget_loaded_class/2` guards on `self()`).
+""".
+-spec forget_class_pids(pid(), class_name()) -> ok.
+forget_class_pids(Pid, ClassName) ->
+    try
+        ets:delete(beamtalk_class_pids, Pid),
+        _ = [
+            ets:delete(beamtalk_class_pids, P)
+         || [P] <- ets:match(beamtalk_class_pids, {'$1', ClassName}),
+            node(P) =:= node(),
+            not is_process_alive(P)
+        ],
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
+-doc """
+Move the dead local reverse-index rows naming `OldName` to `NewName`, for a
+class renamed in place (`beamtalk_object_class` rename; the renaming process
+records its own row under `NewName` first). A live pid is never relabelled, so
+a process restarted as `OldName` during the rename keeps its name. The dead
+incarnations
+`restart_class/1` kept for crash recovery (BT-4552) then recover to the
+renamed class, are pruned and reclaimed under its new name, and never name a
+later, unrelated class that reuses `OldName`.
+""".
+-spec rename_class_pids(class_name(), class_name()) -> ok.
+rename_class_pids(OldName, NewName) ->
+    try
+        _ = [
+            ets:insert(beamtalk_class_pids, {P, NewName})
+         || [P] <- ets:match(beamtalk_class_pids, {'$1', OldName}),
+            node(P) =:= node(),
+            not is_process_alive(P)
+        ],
+        ok
+    catch
+        error:badarg -> ok
+    end.
+
 %%====================================================================
 %% Class-State (classState:) Live Snapshot
 %%====================================================================
@@ -1347,15 +1430,19 @@ restart_class(ClassName) ->
                 superclass => Superclass,
                 meta => Meta
             },
-            %% Clean up stale pid entries for this class before restarting.
-            %% On crash, terminate doesn't run, so old {DeadPid, ClassName} entries
-            %% linger. Remove them so they don't accumulate on repeated crashes.
-            _ =
-                (try
-                    ets:match_delete(beamtalk_class_pids, {'_', ClassName})
-                catch
-                    _:_ -> ok
-                end),
+            %% BT-4552: the dead incarnation's `{DeadPid, ClassName}` reverse-index
+            %% row is kept, never deleted here. A class object is a value: any
+            %% holder of the dead pid (a variable, an `allClasses` walk taken
+            %% just before the crash) recovers through
+            %% `beamtalk_class_dispatch:handle_class_crash_recovery/3`, which can
+            %% only name the class from this row. Deleting it on restart (the
+            %% eager `beamtalk_class_monitor` restart runs immediately on the
+            %% crash) turned every such send into
+            %% `Class 'unknown' not found`. Only the newest
+            %% `?MAX_DEAD_CLASS_PIDS` dead rows are kept
+            %% (`prune_dead_class_pids/1`), and any `terminate/2` (removal or a
+            %% callback exception) reclaims the rest (`forget_class_pids/2`).
+            prune_dead_class_pids(ClassName),
             case beamtalk_object_class:start(ClassName, ClassInfo) of
                 {ok, NewPid} ->
                     ?LOG_WARNING(

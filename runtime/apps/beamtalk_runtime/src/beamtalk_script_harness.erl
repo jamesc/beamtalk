@@ -74,9 +74,13 @@ dispatch(ClassPid, Selector, Args) ->
             %% crash: do not report it.
             case stop_requested() of
                 none ->
-                    catch io:put_chars(
-                        standard_error, [beamtalk_error:format_safe(Reason, Stacktrace), $\n]
-                    );
+                    try
+                        io:put_chars(
+                            standard_error, [beamtalk_error:format_safe(Reason, Stacktrace), $\n]
+                        )
+                    catch
+                        _:_ -> ok
+                    end;
                 {ok, _} ->
                     ok
             end,
@@ -169,7 +173,11 @@ flush_loggers() ->
     lists:foreach(
         fun
             (#{id := Id, module := logger_std_h}) ->
-                catch logger_std_h:filesync(Id);
+                try
+                    logger_std_h:filesync(Id)
+                catch
+                    _:_ -> ok
+                end;
             (_) ->
                 ok
         end,

@@ -1,0 +1,85 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4313: the unary `[...] whileTrue` / `[...] whileFalse` loops, whose
+// receiver block is both the condition and the body. Before the fix every
+// context raised `does_not_understand`: the compiler classified them as loops
+// but sent them as messages, which `Block` did not define. Now a literal
+// receiver is the keyword loop with an empty body (`ast::normalize`), so it
+// threads exactly what a `whileTrue:` condition threads, and `Block` defines
+// both for any other receiver. Rows: a `TestCase` method (the value-type
+// scope), class methods and actor methods.
+// Fixtures: fixtures/bt4313unary_while_{actor,class_probe}.bt.
+
+TestCase subclass: Bt4313UnaryWhileTest
+  field: n = 0
+
+  // --- TestCase methods (value-type scope) ---
+  testFieldWhileTrue =>
+    [
+      self.n := self.n + 1
+      self.n < 4
+    ] whileTrue
+    self assert: self.n equals: 4
+
+  testFieldWhileFalse =>
+    [
+      self.n := self.n + 1
+      self.n >= 4
+    ] whileFalse
+    self assert: self.n equals: 4
+
+  testRunsOnceWhenFalseAtOnce =>
+    [
+      self.n := self.n + 1
+      false
+    ] whileTrue
+    self assert: self.n equals: 1
+
+  testAnswersNil =>
+    self assert: ([false] whileTrue) equals: nil
+    self assert: ([true] whileFalse) equals: nil
+
+  testSendToCounter =>
+    counter := Bt4313UnaryWhileActor spawn
+    [counter bump < 3] whileTrue
+    self assert: counter count equals: 3
+
+  testEarlyReturnFromReceiver => self assert: self firstOver equals: 3
+
+  firstOver =>
+    [
+      self.n := self.n + 1
+      self.n > 2 ifTrue: [^self.n]
+      true
+    ] whileTrue
+    -1
+
+  // --- A block that is not a literal: `Block>>whileTrue`/`whileFalse` ---
+  testStoredBlock =>
+    counter := Bt4313UnaryWhileActor spawn
+    cond := [counter bump < 3]
+    cond whileTrue
+    self assert: counter count equals: 3
+
+  testStoredBlockWhileFalse =>
+    counter := Bt4313UnaryWhileActor spawn
+    cond := [counter bump >= 2]
+    cond whileFalse
+    self assert: counter count equals: 2
+
+  testPerform =>
+    counter := Bt4313UnaryWhileActor spawn
+    [counter bump < 5] perform: #whileTrue
+    self assert: counter count equals: 5
+
+  // --- Class methods ---
+  testClassRows =>
+    self assert: (Bt4313UnaryWhileClassProbe countUpWith: Bt4313UnaryWhileActor spawn) equals: 3
+    self assert: (Bt4313UnaryWhileClassProbe countUntilWith: Bt4313UnaryWhileActor spawn) equals: 5
+
+  // --- Actor methods ---
+  testActorRows =>
+    self assert: Bt4313UnaryWhileActor spawn fieldWhileTrue equals: 3
+    self assert: Bt4313UnaryWhileActor spawn fieldWhileFalse equals: 6
+    self assert: Bt4313UnaryWhileActor spawn selfSendWhileTrue equals: 4

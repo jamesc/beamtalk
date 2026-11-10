@@ -258,7 +258,7 @@ impl McpDriver {
             .ok()
             .and_then(|v| v.get("total").and_then(serde_json::Value::as_u64))
             .and_then(|n| usize::try_from(n).ok())
-            .unwrap_or_else(|| count_diagnostic_lines(&text));
+            .unwrap_or_else(|| normalize::count_diagnostic_lines(&text, true));
         Ok(SurfaceOutput {
             diagnostic_count: Some(count),
             raw: text,
@@ -414,19 +414,6 @@ fn strip_value_label(text: &str) -> String {
         }
     }
     text.to_string()
-}
-
-fn count_diagnostic_lines(text: &str) -> usize {
-    text.lines()
-        .filter(|l| {
-            let t = l.trim_start();
-            t.starts_with("warning")
-                || t.starts_with("error")
-                || t.starts_with("note")
-                || t.contains(": warning:")
-                || t.contains(": error:")
-        })
-        .count()
 }
 
 fn count_error_lines(text: &str) -> usize {
