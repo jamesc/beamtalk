@@ -184,3 +184,38 @@ class_removed_fires_on_stop_test_() ->
             ?assertEqual('SysAnnRemovedClass', maps:get(className, Event))
         end)
     end}.
+
+%% BT-4502: each runtime lifecycle event reaches both an exact-class subscriber
+%% and an `Announcement`-superclass subscriber.
+system_events_reach_exact_and_superclass_subscribers_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            ?_test(check_exact_and_super(Class, Fields))
+         || {Class, Fields} <- [
+                {'SupervisionChildAdded', #{supervisor => 'Sup', childClass => 'W'}},
+                {'ActorSpawned', #{actorClass => 'Counter'}},
+                {'ActorStopped', #{actorClass => 'Counter', reason => normal}}
+            ]
+        ]
+    end}.
+
+check_exact_and_super(EventClass, Fields) ->
+    clear_subscriptions(),
+    beamtalk_class_metadata:insert('Announcement', undefined, undefined, none, undefined),
+    beamtalk_class_metadata:insert(EventClass, undefined, undefined, 'Announcement', undefined),
+    Collector = self(),
+    {ok, _} = beamtalk_announcements:subscribe(
+        EventClass, self(), fun(E) -> Collector ! {exact, E} end, false
+    ),
+    {ok, _} = beamtalk_announcements:subscribe(
+        'Announcement', self(), fun(E) -> Collector ! {super, E} end, false
+    ),
+    ok = beamtalk_announcements:system_announce_running(EventClass, Fields),
+    receive
+        {exact, E1} -> ?assertEqual(EventClass, maps:get('$beamtalk_class', E1))
+    after 1000 -> ?assert(false)
+    end,
+    receive
+        {super, E2} -> ?assertEqual(EventClass, maps:get('$beamtalk_class', E2))
+    after 1000 -> ?assert(false)
+    end.

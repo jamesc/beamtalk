@@ -3927,7 +3927,7 @@ do_announce_actor_lifecycle(EventClass, Fields) ->
             ok;
         _Pid ->
             try
-                beamtalk_announcements:system_announce(EventClass, Fields)
+                beamtalk_announcements:system_announce_running(EventClass, Fields)
             catch
                 _:_ -> ok
             end

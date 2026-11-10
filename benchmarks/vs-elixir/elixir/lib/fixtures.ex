@@ -63,6 +63,7 @@ defmodule VeBench.Counter do
   use GenServer
 
   def start, do: GenServer.start(__MODULE__, 0)
+  def start_link(n), do: GenServer.start_link(__MODULE__, n)
 
   @impl true
   def init(n), do: {:ok, n}
