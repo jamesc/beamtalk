@@ -46,7 +46,7 @@ TestCase subclass: ThenTest
     self assert: (5 then: [:x | x + offset]) equals: 15
 
   testTempLocalInsteadOfCapturedWrite =>
-    // The ADR 0133 workaround: bind the result, do not assign inside.
+    // ADR 0133: bind the result to a temp local; do not assign a captured local inside the block.
     total := 3 then: [:x | x + 1]
     self assert: total equals: 4
 
