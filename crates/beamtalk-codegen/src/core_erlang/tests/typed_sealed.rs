@@ -836,6 +836,7 @@ fn ambient_sealed_object(
         auto_ctors: None,
         handle_scope: None,
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: module_less,
         state: vec![],
         state_types: std::collections::HashMap::new(),

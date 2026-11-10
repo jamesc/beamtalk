@@ -951,6 +951,7 @@ fn cycle_detection_in_superclass_chain() {
         "A".into(),
         ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: "A".into(),
             superclass: Some("B".into()),
@@ -981,6 +982,7 @@ fn cycle_detection_in_superclass_chain() {
         "B".into(),
         ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: "B".into(),
             superclass: Some("A".into()),
@@ -2361,6 +2363,7 @@ fn add_from_beam_meta_inserts_non_builtin_class() {
     let mut h = ClassHierarchy::with_builtins();
     let info = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: EcoString::from("Counter"),
         superclass: Some(EcoString::from("Actor")),
@@ -2414,6 +2417,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
     // Simulate AST-derived entry (from ClassHierarchy::build)
     let ast_info = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: EcoString::from("Counter"),
         superclass: Some(EcoString::from("Actor")),
@@ -2458,6 +2462,7 @@ fn add_from_beam_meta_preserves_existing_entries() {
     // Stale cache entry with different method
     let cache_info = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: EcoString::from("Counter"),
         superclass: Some(EcoString::from("Object")),
@@ -2510,6 +2515,7 @@ fn add_from_beam_meta_skips_builtins() {
     let original_method_count = h.get_class("Integer").unwrap().methods.len();
     let stub = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: EcoString::from("Integer"),
         superclass: None,
@@ -2598,6 +2604,7 @@ fn stamp_package_does_not_overwrite_existing_package() {
     let mut h = ClassHierarchy::with_builtins();
     let info = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: EcoString::from("RemoteClass"),
         superclass: Some(EcoString::from("Object")),
@@ -2659,6 +2666,7 @@ fn stamp_package_on_infos_sets_package_on_non_builtin_classes() {
 fn stamp_package_on_infos_does_not_overwrite_existing_package() {
     let mut infos = vec![ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: EcoString::from("RemoteClass"),
         superclass: Some(EcoString::from("Object")),
@@ -2698,6 +2706,7 @@ fn add_from_beam_meta_preserves_is_internal_and_package() {
     let mut h = ClassHierarchy::with_builtins();
     let info = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: EcoString::from("InternalHelper"),
         superclass: Some(EcoString::from("Object")),
@@ -3279,6 +3288,7 @@ fn cross_file_value_sub_subclass_finds_new() {
     // Inject cross-file Base class (from another file: Value subclass: Base)
     let base_info = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: EcoString::from("Base"),
         superclass: Some(EcoString::from("Value")),
@@ -3364,6 +3374,7 @@ fn cross_file_state_field_kind_and_class_variable_kind_report_late() {
     // `late classState: current`, `classState: total`.
     let a_info = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: EcoString::from("A"),
         superclass: Some(EcoString::from("Object")),
@@ -3478,6 +3489,7 @@ fn cross_file_all_initialize_assigns_includes_parent_summary() {
 
     let a_info = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: EcoString::from("A"),
         superclass: Some(EcoString::from("Object")),
@@ -3587,6 +3599,7 @@ fn all_initialize_assigns_native_ancestor_marks_incomplete() {
 
     let native_info = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: EcoString::from("NativeParent"),
         superclass: Some(EcoString::from("Actor")),
@@ -4579,4 +4592,26 @@ fn explicit_class_new1_stdlib_audit() {
             "{file}"
         );
     }
+}
+
+/// BT-4501: `ClassHierarchy::build` publishes the explicit-`new:` verdict on
+/// the class's `ClassInfo`, and `runs_class_method_in_caller` answers `new:`
+/// from it; a `new:` that needs the class process, and a subclass inheriting
+/// a forwarding `new:`, stay process-bound.
+#[test]
+fn runs_class_method_in_caller_follows_published_explicit_new1_verdict() {
+    let src = "Object subclass: Fwd\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: xs\n\nFwd subclass: FwdChild\n\nObject subclass: Basic\n  class new: xs => self basicNew\n";
+    let tokens = crate::source_analysis::lex_with_eof(src);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let (h, _) = ClassHierarchy::build(&module);
+    let h = h.expect("hierarchy");
+    assert!(h.get_class("Fwd").unwrap().in_caller_new1);
+    assert!(h.runs_class_method_in_caller("Fwd", "new:"));
+    assert!(!h.get_class("FwdChild").unwrap().in_caller_new1);
+    assert!(!h.runs_class_method_in_caller("FwdChild", "new:"));
+    assert!(!h.get_class("Basic").unwrap().in_caller_new1);
+    assert!(!h.runs_class_method_in_caller("Basic", "new:"));
+    // The ordinary rule is unchanged for other selectors.
+    assert!(h.runs_class_method_in_caller("Fwd", "withAll:"));
+    assert!(!h.runs_class_method_in_caller("Fwd", "new"));
 }

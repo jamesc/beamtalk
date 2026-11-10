@@ -4973,6 +4973,61 @@ fn test_explicit_forwarding_class_new1_is_not_process_bound() {
     );
 }
 
+/// BT-4501: the compile-time rule and the published per-class list agree.
+/// For every stdlib class, `ClassHierarchy::runs_class_method_in_caller(c,
+/// "new:")` (read by block-escape analysis, `actor-state-abroad` and the
+/// class-method FFI lints, here through the generated builtin snapshot a
+/// referencing module sees) is `true` exactly when codegen leaves `new:` out
+/// of that class's `process_bound_class_selectors`.
+#[test]
+fn test_runs_class_method_in_caller_new1_agrees_with_published_list_over_stdlib() {
+    use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/src");
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut in_caller = Vec::new();
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&dir).expect("read stdlib/src") {
+        let path = entry.expect("dir entry").path();
+        if path.extension().is_none_or(|e| e != "bt") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).expect("read stdlib source");
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+        let [class] = module.classes.as_slice() else {
+            continue;
+        };
+        let name = class.name.name.as_str();
+        let Ok(code) = crate::core_erlang::generate_module(
+            &module,
+            crate::core_erlang::CodegenOptions::new("test"),
+        ) else {
+            continue;
+        };
+        let list = code
+            .lines()
+            .find_map(|l| l.split("'process_bound_class_selectors' => [").nth(1))
+            .and_then(|rest| rest.split(']').next())
+            .unwrap_or_else(|| panic!("{name}: no process_bound_class_selectors in meta"));
+        let published_bound = list.split(", ").any(|s| s == "'new:'");
+        let rule = hierarchy.runs_class_method_in_caller(name, "new:");
+        assert_eq!(
+            rule,
+            !published_bound,
+            "{name}: runs_class_method_in_caller(\"new:\") = {rule}, but codegen {} `new:` \
+             from process_bound_class_selectors",
+            if published_bound { "keeps" } else { "omits" }
+        );
+        if rule {
+            in_caller.push(name.to_string());
+        }
+        checked += 1;
+    }
+    assert!(checked > 50, "expected to check the stdlib, got {checked}");
+    in_caller.sort();
+    assert_eq!(in_caller, ["Array", "List", "Set", "Tuple"]);
+}
+
 #[test]
 fn test_actor_meta_omits_direct_constructors() {
     // actor classes have no constructor anchor, so no key is
