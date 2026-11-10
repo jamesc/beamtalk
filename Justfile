@@ -1021,14 +1021,15 @@ lint-js: fmt-check-js
 # fixture crates/beamtalk-core/tests/fixtures/section_divider_grammar_cases.json
 # — the same fixture crates/beamtalk-core/tests/section_divider_grammar_conformance.rs
 # checks against parse_divider_name directly, so the two recognizers can't
-# silently drift apart again.
+# silently drift apart again. Also runs the pipeline-operator `|>` scope test
+# (BT-4517, pipelineGrammar.test.ts) over the same grammar file.
 [unix]
 [working-directory: 'editors/vscode']
 test-grammar:
-    @echo "🔍 Running TextMate section-divider grammar conformance test..."
+    @echo "🔍 Running TextMate grammar tests (section divider, pipeline operator)..."
     npm ci --quiet
     npm run test:grammar
-    @echo "✅ TextMate section-divider grammar conformance test passed"
+    @echo "✅ TextMate grammar tests passed"
 
 [windows]
 test-grammar:

@@ -111,9 +111,8 @@ fn a_method_record_does_not_leak_into_module_code() {
 
 #[test]
 fn comments_between_stages_round_trip() {
-    // Each comment stays before the `|>` it was written before. A stage with
-    // a comment before it starts its own line; laying out the rest of a
-    // broken pipeline one stage per line is BT-4517's.
+    // Each comment stays before the `|>` it was written before, and a
+    // comment between stages breaks the pipeline one stage per line.
     assert_identity(
         "x foo  // after foo\n  // before bar\n  |> bar  // after bar\n  |> baz  // after baz\n",
     );
@@ -155,4 +154,73 @@ fn a_comment_after_a_trailing_pipe_is_kept() {
     assert!(text.contains("// why"), "comment dropped:\n{text}");
     assert!(text.contains("|> bar"), "pipeline lost:\n{text}");
     assert_idempotent(own_line);
+}
+
+// --- Layout (BT-4517) ---
+
+#[test]
+fn fmt_puts_a_short_pipeline_on_one_line() {
+    assert_eq!(
+        format_source("x foo\n  |> bar baz\n  |> qux: 1\n").as_deref(),
+        Some("x foo |> bar baz |> qux: 1\n")
+    );
+}
+
+#[test]
+fn fmt_breaks_a_long_pipeline_one_stage_per_line() {
+    let long = "total := orders select: [:o | o isPaid] |> collect: [:o | o amount] \
+                |> inject: 0 into: [:sum :each | sum + each]\n";
+    assert_eq!(
+        format_source(long).as_deref(),
+        Some(
+            "total := orders select: [:o | o isPaid]\n  |> collect: [:o | o amount]\n  \
+             |> inject: 0 into: [:sum :each | sum + each]\n"
+        )
+    );
+}
+
+#[test]
+fn a_comment_between_stages_breaks_the_whole_pipeline() {
+    // The comment forces a break, and a broken pipeline puts every stage on
+    // its own line, not only the one after the comment.
+    assert_eq!(
+        format_source("x foo |> bar  // why\n  |> baz |> qux\n").as_deref(),
+        Some("x foo\n  |> bar  // why\n  |> baz\n  |> qux\n")
+    );
+}
+
+#[test]
+fn a_stage_spanning_lines_breaks_the_pipeline() {
+    // A stage whose block argument holds several statements spans lines, so
+    // the pipeline is broken and the next stage starts its own line.
+    assert_eq!(
+        format_source("xs |> collect: [:e |\n  e foo\n  e bar] |> size\n").as_deref(),
+        Some("xs\n  |> collect: [:e |\n    e foo\n    e bar\n  ]\n  |> size\n")
+    );
+}
+
+#[test]
+fn a_broken_keyword_stage_keeps_its_first_keyword_after_the_pipe() {
+    // Three keywords always break; the first stays on the `|>` line and the
+    // rest align under it.
+    assert_eq!(
+        format_source("x |> at: 1 put: 2 ifAbsent: [0]\n").as_deref(),
+        Some("x\n  |> at: 1\n     put: 2\n     ifAbsent: [0]\n")
+    );
+}
+
+#[test]
+fn the_break_decision_counts_the_column_the_pipeline_starts_at() {
+    // 78 columns at the top level fit; indented under a method they do not.
+    let stage = "|> inject: 0 into: [:sum :each | sum + each]";
+    let flat = format!("allOrders select: [:o | o isPaid] {stage}");
+    assert_eq!(flat.len(), 78);
+    assert_identity(&format!("{flat}\n"));
+    let method = format!("Object subclass: A\n\n  m: allOrders => {flat}\n");
+    assert_eq!(
+        format_source(&method),
+        Some(format!(
+            "Object subclass: A\n\n  m: allOrders =>\n    allOrders select: [:o | o isPaid]\n      {stage}\n"
+        ))
+    );
 }
