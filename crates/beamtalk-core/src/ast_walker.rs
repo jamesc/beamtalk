@@ -34,8 +34,10 @@
 //! This module handles the common pre-order-visitor pattern.
 
 use crate::ast::{
-    BinarySegment, Expression, ExpressionStatement, MessageSelector, Module, Pattern, StringSegment,
+    BinarySegment, CascadeMessage, Expression, ExpressionStatement, MessageSelector, Module,
+    Pattern, StringSegment,
 };
+use crate::source_analysis::Span;
 
 // ── Module-level iterators ────────────────────────────────────────────────────
 
@@ -402,6 +404,12 @@ pub struct SendRef<'a> {
     pub is_cast: bool,
     /// Whether, and where, the send is a cascade message.
     pub site: SendSite,
+    /// Where a diagnostic about this send is reported: the whole send for a
+    /// plain or folded-first cascade send, the message's own span for a later
+    /// cascade message (which has no node of its own). The type checker's
+    /// `cascade-drops-update` and the `setUp` lint both read this, so they
+    /// agree on where a dropped message is (BT-4573).
+    pub span: Span,
 }
 
 /// The one receiver every message of a cascade is sent to.
@@ -431,38 +439,49 @@ pub fn cascade_shared_receiver(receiver: &Expression) -> &Expression {
 /// "what is sent to what" goes through this (or [`walk_sends`]), so none of
 /// them can forget the later messages again (BT-3716, BT-3761).
 pub fn cascade_sends(expr: &Expression) -> impl Iterator<Item = SendRef<'_>> {
-    let (first, later) = match expr {
+    let parts = match expr {
         Expression::Cascade {
             receiver, messages, ..
-        } => {
-            let shared = cascade_shared_receiver(receiver);
-            let first = match receiver.as_ref() {
-                Expression::MessageSend {
-                    selector,
-                    arguments,
-                    is_cast,
-                    ..
-                } => Some(SendRef {
-                    receiver: shared,
-                    selector,
-                    arguments,
-                    is_cast: *is_cast,
-                    site: SendSite::CascadeFirst,
-                }),
-                _ => None,
-            };
-            let later = messages.iter().map(move |msg| SendRef {
-                receiver: shared,
-                selector: &msg.selector,
-                arguments: &msg.arguments,
-                is_cast: false,
-                site: SendSite::CascadeLater,
-            });
-            (first, Some(later))
-        }
-        _ => (None, None),
+        } => Some(cascade_part_sends(receiver, messages)),
+        _ => None,
     };
-    first.into_iter().chain(later.into_iter().flatten())
+    parts.into_iter().flatten()
+}
+
+/// [`cascade_sends`] for a cascade already taken apart into its `receiver`
+/// (the folded first `MessageSend`, or a bare receiver) and its later
+/// `messages`, as the type checker holds it.
+pub fn cascade_part_sends<'a>(
+    receiver: &'a Expression,
+    messages: &'a [CascadeMessage],
+) -> impl Iterator<Item = SendRef<'a>> {
+    let shared = cascade_shared_receiver(receiver);
+    let first = match receiver {
+        Expression::MessageSend {
+            selector,
+            arguments,
+            is_cast,
+            span,
+            ..
+        } => Some(SendRef {
+            receiver: shared,
+            selector,
+            arguments,
+            is_cast: *is_cast,
+            site: SendSite::CascadeFirst,
+            span: *span,
+        }),
+        _ => None,
+    };
+    let later = messages.iter().map(move |msg| SendRef {
+        receiver: shared,
+        selector: &msg.selector,
+        arguments: &msg.arguments,
+        is_cast: false,
+        site: SendSite::CascadeLater,
+        span: msg.span,
+    });
+    first.into_iter().chain(later)
 }
 
 /// One step of [`walk_expression_and_sends`].
@@ -505,7 +524,7 @@ where
                 selector,
                 arguments,
                 is_cast,
-                ..
+                span,
             } if !cascade_firsts.contains(&std::ptr::from_ref(e)) => {
                 f(WalkEvent::Send(SendRef {
                     receiver,
@@ -513,6 +532,7 @@ where
                     arguments,
                     is_cast: *is_cast,
                     site: SendSite::Plain,
+                    span: *span,
                 }));
             }
             _ => {}

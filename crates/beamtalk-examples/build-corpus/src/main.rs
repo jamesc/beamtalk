@@ -10,6 +10,12 @@ use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use beamtalk_examples::{Corpus, CorpusEntry};
 use pulldown_cmark::{CodeBlockKind, Event, Tag, TagEnd};
 
+/// The learning guide: its `.md` chapters and its `fixtures/` feed the corpus.
+const LEARNING_DOCS_DIR: &str = "docs/learning";
+
+/// The language reference: its fenced `beamtalk` blocks feed the corpus.
+const LANGUAGE_FEATURES_DOC: &str = "docs/beamtalk-language-features.md";
+
 fn main() {
     let root = find_repo_root();
     let corpus = generate_corpus(&root);
@@ -37,7 +43,12 @@ fn generate_corpus(root: &Path) -> Corpus {
     // .bt fixture files — whole-file entries
     extract_bt_dir(root, "stdlib/test/fixtures", None, &mut entries);
     extract_bt_dir(root, "tests/repl-protocol/fixtures", None, &mut entries);
-    extract_bt_dir(root, "docs/learning/fixtures", None, &mut entries);
+    extract_bt_dir(
+        root,
+        &format!("{LEARNING_DOCS_DIR}/fixtures"),
+        None,
+        &mut entries,
+    );
 
     // .bt test files — whole-file entries (tests show how to *use* patterns)
     extract_bt_dir(root, "stdlib/test", Some("/fixtures/"), &mut entries);
@@ -46,10 +57,10 @@ fn generate_corpus(root: &Path) -> Corpus {
     extract_bt_dir(root, "examples", None, &mut entries);
 
     // .md learning docs — extract fenced beamtalk code blocks
-    extract_md_files(root, "docs/learning", &mut entries);
+    extract_md_files(root, LEARNING_DOCS_DIR, &mut entries);
 
     // beamtalk-language-features.md
-    let lang_features = root.join("docs/beamtalk-language-features.md");
+    let lang_features = root.join(LANGUAGE_FEATURES_DOC);
     if lang_features.exists() {
         extract_md_code_blocks(root, &lang_features, &mut entries);
     }
@@ -514,6 +525,59 @@ fn add_synonym_tags(entries: &mut [CorpusEntry]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every corpus source under `docs/`, as a GitHub Actions path pattern.
+    ///
+    /// `ci.yml` ignores `docs/**` and must put each of these back (and
+    /// `ci-docs-only.yml` must exclude them), or a doc-only PR that changes a
+    /// corpus source skips the real `check-corpus` job and merges with a stale
+    /// `corpus.json` (BT-4554). `docs_corpus_sources_trigger_full_ci` enforces it.
+    const DOCS_CORPUS_SOURCE_PATTERNS: &[&str] = &["docs/learning/**", LANGUAGE_FEATURES_DOC];
+
+    /// Count `- '<pattern>'` list items in a workflow file's `paths:` filters.
+    fn path_filter_count(workflow: &str, pattern: &str) -> usize {
+        let item = format!("- '{pattern}'");
+        workflow.lines().filter(|l| l.trim() == item).count()
+    }
+
+    /// BT-4554: a doc-only PR that edits a corpus source under `docs/` must run
+    /// `ci.yml` (whose `check-corpus` job regenerates and diffs `corpus.json`),
+    /// not the `ci-docs-only.yml` stub that reports `check-corpus` green
+    /// without checking. Each source must be re-included after `!docs/**` in
+    /// both of `ci.yml`'s triggers and excluded from both of
+    /// `ci-docs-only.yml`'s.
+    #[test]
+    fn docs_corpus_sources_trigger_full_ci() {
+        let learning = format!("{LEARNING_DOCS_DIR}/**");
+        for source in [learning.as_str(), LANGUAGE_FEATURES_DOC] {
+            assert!(
+                DOCS_CORPUS_SOURCE_PATTERNS.contains(&source),
+                "corpus source {source} is missing from DOCS_CORPUS_SOURCE_PATTERNS"
+            );
+        }
+
+        let root = find_repo_root();
+        let read = |rel: &str| {
+            fs::read_to_string(root.join(rel)).unwrap_or_else(|e| panic!("cannot read {rel}: {e}"))
+        };
+        let ci = read(".github/workflows/ci.yml");
+        let docs_only = read(".github/workflows/ci-docs-only.yml");
+
+        for pattern in DOCS_CORPUS_SOURCE_PATTERNS {
+            assert_eq!(
+                path_filter_count(&ci, pattern),
+                2,
+                "ci.yml must re-include '{pattern}' after '!docs/**' in both its \
+                 push and pull_request paths, or a PR editing it skips check-corpus"
+            );
+            assert_eq!(
+                path_filter_count(&docs_only, &format!("!{pattern}")),
+                2,
+                "ci-docs-only.yml must exclude '!{pattern}' in both its push and \
+                 pull_request paths, or its stub check-corpus masks a stale corpus.json"
+            );
+        }
+    }
 
     /// Regression guard: two back-to-back builds of the same source
     /// tree must serialize identically — entries sorted by id, tags sorted+

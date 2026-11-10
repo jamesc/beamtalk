@@ -201,6 +201,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::ClassVarReflectionShadowing => "ClassVarReflectionShadowing",
         DiagnosticCategory::ActorStateAbroad => "ActorStateAbroad",
         DiagnosticCategory::FfiNestedString => "FfiNestedString",
+        DiagnosticCategory::BinaryStringCompare => "BinaryStringCompare",
         DiagnosticCategory::CascadeDropsUpdate => "CascadeDropsUpdate",
         DiagnosticCategory::Tier2BlockNoReturnChannel => "Tier2BlockNoReturnChannel",
         DiagnosticCategory::UnthreadedLocalWrite => "UnthreadedLocalWrite",
@@ -442,6 +443,10 @@ mod tests {
             ),
             (DiagnosticCategory::ActorStateAbroad, "ActorStateAbroad"),
             (DiagnosticCategory::FfiNestedString, "FfiNestedString"),
+            (
+                DiagnosticCategory::BinaryStringCompare,
+                "BinaryStringCompare",
+            ),
             (DiagnosticCategory::CascadeDropsUpdate, "CascadeDropsUpdate"),
             (
                 DiagnosticCategory::Tier2BlockNoReturnChannel,

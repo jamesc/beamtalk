@@ -121,7 +121,7 @@ purge_xref(ClassName) ->
 Purge every extension registered on `ClassName` — instance-side (keyed by
 the class name atom) and class-side (keyed by the metaclass tag, e.g.
 `'Counter class'`), which the extension registry stores as two distinct ETS
-keys (mirrors `beamtalk_protocol_registry:class_has_class_method/2`'s
+keys (mirrors `beamtalk_class_dispatch:class_understands_class_selector/2`'s
 lookup convention for the same split).
 """.
 -spec purge_extensions(atom()) -> ok.

@@ -468,3 +468,50 @@ fn type_alias_trailing_comment_round_trip() {
     let source = "type Port = Integer  // comment\n";
     assert_identity(source);
 }
+
+/// Builds an actor method with `depth` nested single-statement `ifTrue:`
+/// blocks and `^x` innermost.
+fn nested_if_true_source(depth: usize) -> String {
+    let mut body = String::from("^x");
+    for _ in 0..depth {
+        body = format!("x ifTrue: [{body}]");
+    }
+    format!("Actor subclass: A\n  state: x = 0\n  m => {body}\n")
+}
+
+/// BT-4531: unparsing nested keyword-block arguments must do work linear in
+/// the depth. Each block argument used to be unparsed for the multi-line
+/// checks and again for output, so the call count grew about 3x per level
+/// (~280k `unparse_expression` calls at d=12).
+/// Counting `unparse_expression` calls makes this deterministic, not timed.
+#[test]
+fn nested_keyword_blocks_unparse_linear_in_depth() {
+    let calls_for = |depth: usize| {
+        let module = parse_source(&nested_if_true_source(depth));
+        UNPARSE_EXPRESSION_CALLS.with(|n| n.set(0));
+        let out = unparse_module(&module);
+        let calls = UNPARSE_EXPRESSION_CALLS.with(std::cell::Cell::get);
+        (out, calls)
+    };
+    // Every level adds the same expressions (`x ifTrue: [...]`, `x`, the
+    // block), each unparsed once, so the per-level cost is constant. Checked at small depths first so a
+    // regression fails here instead of running for minutes at d=20.
+    let (_, base_calls) = calls_for(0);
+    let (_, six_deep_calls) = calls_for(6);
+    let (_, twelve_deep_calls) = calls_for(12);
+    assert_eq!(
+        twelve_deep_calls - six_deep_calls,
+        six_deep_calls - base_calls,
+        "unparse_expression calls must grow linearly with nesting depth \
+         (d=0: {base_calls}, d=6: {six_deep_calls}, d=12: {twelve_deep_calls})"
+    );
+    let per_level = (six_deep_calls - base_calls) / 6;
+    assert!(
+        per_level <= 10,
+        "{per_level} unparse_expression calls per level"
+    );
+    let (out_20, twenty_deep_calls) = calls_for(20);
+    assert_eq!(twenty_deep_calls, base_calls + 20 * per_level);
+    // The output is canonical and re-parses to the same text.
+    assert_eq!(unparse_module(&parse_source(&out_20)), out_20);
+}

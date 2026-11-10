@@ -372,3 +372,41 @@ fn asserted_binary_scrutinee_member_is_not_closed() {
         diags[0].message
     );
 }
+
+// ── BT-4510: a bare generic type arm against a parameterized scrutinee ──
+
+/// `raw :: Result(String, Error); raw match: [s :: String -> s; r :: Result
+/// -> r]` — the `Result` arm binds `r` to the scrutinee's instantiation (it
+/// was `Never`, so every send to `r` compiled to dynamic dispatch and the
+/// arm's body went unchecked).
+#[test]
+fn bare_generic_type_arm_narrows_to_the_parameterized_scrutinee() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let scrutinee = InferredType::known_with_args(
+        "Result",
+        vec![InferredType::known("String"), InferredType::known("Error")],
+    );
+    for arms in [
+        vec![type_arm("r", "Result", var("r"))],
+        vec![
+            type_arm("s", "String", var("s")),
+            type_arm("r", "Result", var("r")),
+        ],
+    ] {
+        let mut env = TypeEnv::new();
+        env.set_local("raw", scrutinee.clone());
+        let expr = match_expr(false, var("raw"), arms);
+        let mut checker = TypeChecker::new();
+        let ty = checker.infer_expr(&expr, &hierarchy, &mut env, false);
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = &ty
+        else {
+            panic!("expected Result(String, Error), got {ty:?}");
+        };
+        assert_eq!(class_name.as_str(), "Result", "{ty:?}");
+        assert_eq!(type_args.len(), 2, "{ty:?}");
+    }
+}

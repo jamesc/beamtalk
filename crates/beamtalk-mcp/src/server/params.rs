@@ -177,6 +177,11 @@ pub struct LintParams {
         description = "Path to a .bt source file or directory to lint. Defaults to the current directory."
     )]
     pub path: Option<String>,
+    /// Mirror CLI `beamtalk lint --warnings-as-errors` (BT-4336).
+    #[schemars(
+        description = "Apply the `beamtalk lint --warnings-as-errors` gate: fail (is_error) on lint-severity diagnostics and on the type/DNU/error diagnostics a REPL load-project rejects. Defaults to false (fail only on errors)."
+    )]
+    pub warnings_as_errors: Option<bool>,
 }
 
 /// Parameters for the `search_examples` MCP tool.

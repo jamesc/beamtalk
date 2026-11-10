@@ -53,6 +53,7 @@ thread_local! {
         const { std::cell::Cell::new(0) };
 }
 
+mod binary_string_compare;
 mod env_key;
 mod exhaustiveness;
 mod inference;
@@ -458,6 +459,12 @@ pub struct TypeChecker {
     /// expected-type threading through `infer_expr`, so this side channel is
     /// how a declared type reaches the literal.
     pub(super) block_param_pushdown: HashMap<Span, Vec<InferredType>>,
+    /// BT-4526: spans of the sends whose own selector `check_class_side_send`
+    /// found unresolved (`DynamicReason::UnresolvedSelector`). The reason
+    /// flows on through wrappers and through sends that only pass a block's
+    /// result along (`ifTrue:ifFalse:`, `value`), so the typed-class warning
+    /// fires only at a send recorded here — the one that owns the selector.
+    pub(super) unresolved_selector_sends: std::collections::HashSet<Span>,
     pub(super) diagnostics: Vec<Diagnostic>,
     pub(super) type_map: TypeMap,
     pub(super) method_return_types: HashMap<MethodReturnKey, InferredType>,
@@ -538,6 +545,11 @@ pub struct TypeChecker {
     /// (`sendability_validators.rs`'s block-argument check) consults this
     /// persisted table instead — see `known_remote::classify`'s doc.
     pub(super) known_remote_spans: HashMap<Span, known_remote::KnownRemote>,
+    /// BT-4257: the locals some block literal in the body being checked
+    /// (a method body, or the module's top-level statements) writes. A block
+    /// may run at any later point, so such a local is never treated as a
+    /// raw `Binary` — see [`binary_string_compare::block_written_locals`].
+    pub(super) block_written_locals: std::collections::HashSet<EcoString>,
 }
 
 impl TypeChecker {
@@ -556,7 +568,9 @@ impl TypeChecker {
             native_type_registry: None,
             typed_class_context: None,
             known_remote_spans: HashMap::new(),
+            block_written_locals: std::collections::HashSet::new(),
             block_param_pushdown: HashMap::new(),
+            unresolved_selector_sends: std::collections::HashSet::new(),
         }
     }
 
@@ -578,7 +592,9 @@ impl TypeChecker {
             native_type_registry: None,
             typed_class_context: None,
             known_remote_spans: HashMap::new(),
+            block_written_locals: std::collections::HashSet::new(),
             block_param_pushdown: HashMap::new(),
+            unresolved_selector_sends: std::collections::HashSet::new(),
         }
     }
 
@@ -833,6 +849,11 @@ struct TypeEnv {
     /// `infer_assignment` on every reassignment (including back to a
     /// non-remote value, which clears the entry).
     known_remote: HashMap<EnvKey, known_remote::KnownRemote>,
+    /// BT-4257: locals currently bound to a value that is provably a raw
+    /// `Binary`, never a `String` (see [`binary_string_compare`]). Any write
+    /// to a binding clears its entry; `infer_assignment` re-marks it when
+    /// the right-hand side is itself a raw-Binary producer.
+    raw_binary: std::collections::HashSet<EnvKey>,
 }
 
 impl TypeEnv {
@@ -842,6 +863,7 @@ impl TypeEnv {
             origins: HashMap::new(),
             in_class_method: false,
             known_remote: HashMap::new(),
+            raw_binary: std::collections::HashSet::new(),
         }
     }
 
@@ -861,6 +883,7 @@ impl TypeEnv {
     }
 
     fn set(&mut self, key: EnvKey, ty: InferredType) {
+        self.raw_binary.remove(&key);
         self.bindings.insert(key, ty);
     }
 
@@ -873,6 +896,18 @@ impl TypeEnv {
         self.bindings.remove(key);
         self.origins.remove(key);
         self.known_remote.remove(key);
+        self.raw_binary.remove(key);
+    }
+
+    /// BT-4257: record that the local `key` is bound to a provably raw
+    /// `Binary`. Call after the binding is written — a write clears it.
+    fn mark_raw_binary(&mut self, key: EnvKey) {
+        self.raw_binary.insert(key);
+    }
+
+    /// BT-4257: whether the local `name` is bound to a provably raw `Binary`.
+    fn is_raw_binary_local(&self, name: &str) -> bool {
+        self.raw_binary.contains(&EnvKey::local(name))
     }
 
     /// ADR 0126 §6: mark `key` as known-remote with the given provenance,
@@ -909,6 +944,7 @@ impl TypeEnv {
                 span,
             },
         );
+        self.raw_binary.remove(&key);
         self.bindings.insert(key, ty);
     }
 

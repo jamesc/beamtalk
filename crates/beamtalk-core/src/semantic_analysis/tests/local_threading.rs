@@ -3685,6 +3685,10 @@ fn closure_local_loop_in_a_protected_body_does_not_unbind_the_producers() {
 /// rejected; the decision is the shared leaf
 /// `block_facts::while_condition_writes_thread`. The accepted shapes run in
 /// `stdlib/test/bt3746stateful_while_test.bt`.
+///
+/// BT-4062: a body that is not a block literal is rejected in every context,
+/// the REPL included, with its own message
+/// (`block_facts::while_body_block`).
 #[test]
 fn while_condition_outer_local_write_is_rejected_unless_codegen_threads_it() {
     type Wrap = fn(&str) -> String;
@@ -3722,6 +3726,14 @@ fn while_condition_outer_local_write_is_rejected_unless_codegen_threads_it() {
                     assert_eq!(
                         errors.is_empty(),
                         threads,
+                        "{ctx_name} {selector} cond=[{cond}] body={body}: {diags:?}"
+                    );
+                    // BT-4062: a non-literal body is named as the reason.
+                    assert_eq!(
+                        errors
+                            .iter()
+                            .any(|d| d.message.contains("whose body is not a block literal")),
+                        !literal,
                         "{ctx_name} {selector} cond=[{cond}] body={body}: {diags:?}"
                     );
                     checked += 1;

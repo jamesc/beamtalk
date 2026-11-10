@@ -80,9 +80,6 @@ fn describe_routed(class: &str, why: NoBuiltinRoute) -> String {
         NoBuiltinRoute::SpecialSelector(selector) => {
             format!("builtin — {class}: the dynamic path answers '{selector}' outside {target}")
         }
-        NoBuiltinRoute::GuardSpansRoutes => format!(
-            "builtin — {class}: its representation test also admits values routed away from {target}"
-        ),
     }
 }
 

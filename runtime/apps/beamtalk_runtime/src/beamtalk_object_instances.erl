@@ -22,7 +22,14 @@ is maintained next to it so `class_of/1` answers in O(1) (BT-4113): the bag
 is keyed by class, and finding a pid's class there is a full-table scan,
 which made every actor send O(live actors) while it sat on the send path.
 
-See also: docs/beamtalk-object-model.md Part 5 "Instance Tracking"
+Both tables name `beamtalk_ets_heir` as heir (BT-4123). If this server
+crashes the heir keeps them, and the supervisor-restarted server reclaims
+them and re-monitors every registered pid, so registrations survive the
+restart. They are lost only if the heir dies too while it holds them (a
+runtime-level failure; see `beamtalk_ets_heir`): the tables come back empty
+and already-running actors stay unregistered until they are respawned.
+
+See also: docs/beamtalk-ddd-model.md "Instance Tracking"
 """.
 
 %% API
@@ -121,6 +128,8 @@ class_of(Pid) ->
         [{_, Class}] -> Class;
         [] -> undefined
     catch
+        %% Table missing: the registry is not running, or it and the heir
+        %% both died and the table was lost (BT-4123).
         error:badarg -> undefined
     end.
 
@@ -137,13 +146,17 @@ each(Class, Fun) when is_atom(Class), is_function(Fun, 1) ->
 %%====================================================================
 
 init([]) ->
-    %% Create the ETS table owned by this process so it survives
-    %% until the gen_server terminates
-    ?INSTANCE_REGISTRY = ets:new(?INSTANCE_REGISTRY, [named_table, public, bag]),
-    ?INSTANCE_CLASS = ets:new(?INSTANCE_CLASS, [
+    %% BT-4123: both tables name `beamtalk_ets_heir` as heir, so a crash of
+    %% this server leaves them alive under the heir and the restarted server
+    %% reclaims them — actors register once at spawn and nothing re-registers
+    %% them, so losing the tables would orphan every live actor (dispatch
+    %% telemetry attributing to `unknown`, empty `bottlenecks:`).
+    ok = beamtalk_ets_heir:ensure_table(?INSTANCE_REGISTRY, [named_table, public, bag]),
+    ok = beamtalk_ets_heir:ensure_table(?INSTANCE_CLASS, [
         named_table, public, set, {read_concurrency, true}
     ]),
-    {ok, #state{}}.
+    ok = sync_class_index(),
+    {ok, #state{monitors = monitor_registered()}}.
 
 handle_call({register, Class, Pid}, _From, State) ->
     Key = {Class, Pid},
@@ -206,16 +219,43 @@ handle_info(_Info, State) ->
     {noreply, State}.
 
 terminate(_Reason, _State) ->
-    %% ETS table is owned by this process, will be deleted automatically
+    %% The tables pass to `beamtalk_ets_heir` when this process exits and the
+    %% next server reclaims them in init/1 (BT-4123).
     ok.
 
 code_change(OldVsn, State, Extra) ->
     ensure_class_index(),
+    %% A registry upgraded in place never re-runs init/1: give the tables
+    %% the heir it would have set (BT-4123).
+    ok = beamtalk_ets_heir:maybe_set_heir(?INSTANCE_REGISTRY),
+    ok = beamtalk_ets_heir:maybe_set_heir(?INSTANCE_CLASS),
     beamtalk_hot_reload:code_change(OldVsn, State, Extra).
 
 %%====================================================================
 %% Internal
 %%====================================================================
+
+-doc """
+Monitor every pid already in the registry and return the monitor map.
+
+Fresh tables are empty, so this only does work after a restart that
+reclaimed the tables from the heir (BT-4123): the previous server's monitors
+died with it. A pid that died while no server was running gets an immediate
+`'DOWN'` (reason `noproc`), which `handle_info/2` cleans up like any other.
+""".
+-spec monitor_registered() -> #{{class_name(), pid()} => reference()}.
+monitor_registered() ->
+    ets:foldl(
+        fun({Class, Pid}, Acc) ->
+            Key = {Class, Pid},
+            case maps:is_key(Key, Acc) of
+                true -> Acc;
+                false -> Acc#{Key => erlang:monitor(process, Pid)}
+            end
+        end,
+        #{},
+        ?INSTANCE_REGISTRY
+    ).
 
 -doc """
 Create and fill the pid-keyed index when upgrading from a registry that
@@ -228,11 +268,35 @@ ensure_class_index() ->
             ?INSTANCE_CLASS = ets:new(?INSTANCE_CLASS, [
                 named_table, public, set, {read_concurrency, true}
             ]),
-            ets:insert(?INSTANCE_CLASS, [
-                {Pid, Class}
-             || {Class, Pid} <- ets:tab2list(?INSTANCE_REGISTRY)
-            ]),
-            ok;
+            sync_class_index();
         _ ->
             ok
     end.
+
+-doc """
+Make the pid-keyed index agree with the bag, which is the source of truth:
+add a `{Pid, Class}` row for every bag row and drop index rows whose pid has
+no bag row.
+
+Each write updates the two tables in two steps, so a server killed between
+them leaves the tables out of step. Before BT-4123 that state died with the
+tables; now it survives under the heir, so `init/1` repairs it before
+re-monitoring. Rows are added before stale ones are dropped, so a concurrent
+`class_of/1` never sees a registered pid's row missing.
+""".
+-spec sync_class_index() -> ok.
+sync_class_index() ->
+    Pairs = ets:tab2list(?INSTANCE_REGISTRY),
+    true = ets:insert(?INSTANCE_CLASS, [{Pid, Class} || {Class, Pid} <- Pairs]),
+    InBag = maps:from_list([{Pid, true} || {_, Pid} <- Pairs]),
+    Stale = ets:foldl(
+        fun({Pid, _Class}, Acc) ->
+            case maps:is_key(Pid, InBag) of
+                true -> Acc;
+                false -> [Pid | Acc]
+            end
+        end,
+        [],
+        ?INSTANCE_CLASS
+    ),
+    lists:foreach(fun(Pid) -> ets:delete(?INSTANCE_CLASS, Pid) end, Stale).

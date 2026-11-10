@@ -91,7 +91,9 @@ impl CoreErlangGenerator {
         self.reject_unthreadable_condition_field_writes(condition)?;
 
         // Check if body is a literal block (enables mutation analysis)
-        if let Expression::Block(body_block) = body {
+        if let Some(body_block) =
+            beamtalk_core::semantic_analysis::block_facts::while_body_block(body)
+        {
             // ADR 0118 phase 3: a condition-only self-send/field
             // write (`whileTrue: [nil]` with a mutating CONDITION) must also
             // route here — the stateful lowering keeps the condition in the
@@ -146,7 +148,9 @@ impl CoreErlangGenerator {
         self.reject_unthreadable_condition_field_writes(condition)?;
 
         // Check if body is a literal block (enables mutation analysis)
-        if let Expression::Block(body_block) = body {
+        if let Some(body_block) =
+            beamtalk_core::semantic_analysis::block_facts::while_body_block(body)
+        {
             // ADR 0118 phase 3: see the analogous comment in
             // `generate_while_true`.
             if self.while_loop_threads(condition, body_block) {

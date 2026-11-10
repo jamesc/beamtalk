@@ -116,7 +116,29 @@ pub(crate) fn discover_test_classes_in_hierarchy(
         .wrap_err_with(|| format!("Failed to read '{source_path}'"))?;
 
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&content);
-    let (module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+
+    // BT-4304: a file that fails to parse must fail the run with its
+    // diagnostics. Parse recovery can drop the class (or its `test*`
+    // methods), so ignoring the errors made a broken test file look like one
+    // with no tests ("No tests found", exit 0).
+    let parse_errors: Vec<_> = diagnostics
+        .into_iter()
+        .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
+        .collect();
+    if !parse_errors.is_empty() {
+        crate::diagnostic::print_diagnostics_text(
+            &parse_errors,
+            source_path.as_str(),
+            &content,
+            &beamtalk_core::CompilerOptions::default(),
+        );
+        miette::bail!(
+            "Failed to parse test file '{}': {} error(s)",
+            source_path,
+            parse_errors.len()
+        );
+    }
 
     let mut test_classes = Vec::new();
 
@@ -2674,6 +2696,20 @@ mod tests {
         let (classes, loads) = discover_test_classes(&file).unwrap();
         assert!(classes.is_empty());
         assert!(loads.is_empty());
+    }
+
+    #[test]
+    fn test_discover_rejects_file_with_parse_error() {
+        // BT-4304: a syntax error must surface, not read as "no tests".
+        let (_temp, file) = write_bt_file(
+            "broken_test.bt",
+            "TestCase subclass: BrokenTest\n  testIt => self assert: (1 + ) equals: 3\n",
+        );
+
+        let err = discover_test_classes(&file).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("Failed to parse test file"), "{msg}");
+        assert!(msg.contains("broken_test.bt"), "{msg}");
     }
 
     #[test]

@@ -1316,8 +1316,25 @@ pub fn while_condition_writes_thread(
     body: Option<&Expression>,
     in_class_method: bool,
 ) -> bool {
-    matches!(body, Some(Expression::Block(_)))
+    body.and_then(while_body_block).is_some()
         && block_condition_has_state_effects(condition, in_class_method)
+}
+
+/// BT-4062: the body block of a keyword `whileTrue:`/`whileFalse:` when it is
+/// lowered in place: a bare block literal. Only then does codegen consider the
+/// stateful lowering (`generate_while_true`/`generate_while_false`), which is
+/// the only lowering that carries a write in the condition; any other body (a
+/// variable, a computed block) takes the simple lowering,
+/// which runs the condition as a plain closure. (The parser drops the
+/// parentheses around a block argument, so `([...])` is a literal.) The one
+/// rule the Phase 0 check
+/// (`Walker`'s `whileTrue:` condition arm) and the codegen loop gates read.
+#[must_use]
+pub fn while_body_block(body: &Expression) -> Option<&Block> {
+    match body {
+        Expression::Block(block) => Some(block),
+        _ => None,
+    }
 }
 
 fn block_condition_has_state_effects(condition: &Block, in_class_method: bool) -> bool {
