@@ -256,6 +256,11 @@ pub fn generate_module_with_warnings(
     // Backfill missing cross-file superclass stubs (only for classes not
     // already present from build() or BEAM metadata).
     let added_superclasses = hierarchy.add_external_superclasses(&options.class_superclass_index);
+    if added_beam_meta || added_superclasses {
+        // BT-4625: keep `ClassInfo::in_caller_new1` equal to the verdict
+        // computed on the injected hierarchy.
+        hierarchy.publish_explicit_new1_verdicts(self_flattened.as_ref().unwrap_or(module));
+    }
 
     // The hand-off contract: a driver that handed off `AnalysisResult` is
     // expected to have already called
