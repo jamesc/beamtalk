@@ -130,6 +130,7 @@ pub(super) use ir::{AccParam, CloseContext};
 #[cfg(test)]
 pub(super) use verify::{
     CatchRestoreDefect, EnsureRelayDefect, ForeignStoreDefect, ScopeKind, verify, verify_in_scope,
+    verify_in_scope_after,
 };
 
 // Test-only: brings the ambient names `threaded_ir.rs`'s own top-level

@@ -337,6 +337,22 @@ pub(in crate::core_erlang) enum VerifyError {
         at: Span,
     },
 
+    /// BT-4612: a store-only [`ThreadedStmt::SyncedCall`] stores `State`
+    /// version `reads` (its `reads`) while an earlier statement of the same
+    /// frame already bound the newer version `newest`: the store was read
+    /// before a step that precedes it, so the cell it fills misses that
+    /// step's field writes, and a `^` thrown from a closure the call runs
+    /// carries the stale cell out of the method (the `^`-closure pre-store
+    /// read before the call's operands were threaded, BT-4532). The same
+    /// check as [`Self::StaleConstructSeed`], over every statement list at
+    /// every nesting level, including the frame's `State` bound before a
+    /// verified slice ([`verify_in_scope_after`]).
+    StalePrestore {
+        reads: VersionedVar,
+        newest: VersionedVar,
+        at: Span,
+    },
+
     /// ADR 0133 Phase 3 (BT-3911), [`Self::ConstructFamilyDropped`] extended
     /// to the `Local` family: a [`ThreadedStmt::BranchArm`]'s body writes the
     /// scratch-map slot of a local (a `Put` of its `__local__` key) that the
@@ -1083,6 +1099,20 @@ pub(in crate::core_erlang) fn verify_in_scope(
     ir: &[ThreadedStmt],
     scope: ScopeKind,
 ) -> Vec<VerifyError> {
+    verify_in_scope_after(ir, scope, None)
+}
+
+/// BT-4612: [`verify_in_scope`] for a slice that runs after its root frame
+/// has already bound `State` version `bound_before` (a node the generator
+/// builds and renders on its own, mid-frame: the `^`-closure pre-store). The
+/// slice's top-level statements are checked against that version as if an
+/// earlier statement of the list had bound it
+/// ([`VerifyError::StalePrestore`], [`VerifyError::StaleConstructSeed`]).
+pub(in crate::core_erlang) fn verify_in_scope_after(
+    ir: &[ThreadedStmt],
+    scope: ScopeKind,
+    bound_before: Option<VersionedVar>,
+) -> Vec<VerifyError> {
     let mut producers: HashMap<VersionedVar, usize> = HashMap::new();
     let mut consumers: HashMap<VersionedVar, usize> = HashMap::new();
     collect_producer_consumer_counts(ir, &mut producers, &mut consumers);
@@ -1123,6 +1153,7 @@ pub(in crate::core_erlang) fn verify_in_scope(
         mode_stack: Vec::new(),
         rebind_frames: Vec::new(),
         scope,
+        bound_before,
         errors: &mut errors,
     };
     walk.walk(ir);
@@ -1456,6 +1487,10 @@ struct VerifyWalk<'a> {
     /// method root ([`RebindFrame::implicit_root`]).
     rebind_frames: Vec<RebindFrame>,
     scope: ScopeKind,
+    /// BT-4612: the root frame's `State` bound before the slice
+    /// ([`verify_in_scope_after`]), taken by the first statement list
+    /// checked (the slice's top level).
+    bound_before: Option<VersionedVar>,
     errors: &'a mut Vec<VerifyError>,
 }
 
@@ -1632,14 +1667,37 @@ impl VerifyWalk<'_> {
     ///   `map`.
     /// - [`VerifyError::StaleConstructSeed`]: a `ConstructTuple`'s
     ///   `scratch_base` in this frame is no older than the last such step.
+    /// - [`VerifyError::StalePrestore`] (BT-4612): a `SyncedCall`'s `reads`
+    ///   in this frame is no older than the last such step, read before the
+    ///   node's own reload (if any) steps the frame.
     ///
     /// A list that has not stepped the map yet inherits its current version
-    /// from outside the list, which these checks do not reconstruct.
+    /// from outside the list, which these checks reconstruct only for the
+    /// top-level list of a slice verified with the frame's `State` bound
+    /// before it ([`verify_in_scope_after`]).
     fn check_frame_state_reads(&mut self, stmts: &[ThreadedStmt]) {
         let frame = self.enclosing_frame().frame;
         let own_state = |v: &VersionedVar| v.prefix == VersionPrefix::State && v.frame == frame;
-        let mut current: Option<&VersionedVar> = None;
+        // Only the first list walked (the slice's top level) runs after the
+        // bound `State`; every nested list is a frame or region of its own.
+        let bound_before = self.bound_before.take();
+        let mut current: Option<&VersionedVar> = bound_before.as_ref();
         for stmt in stmts {
+            if let ThreadedStmt::SyncedCall {
+                reads: Some(reads),
+                span,
+                ..
+            } = stmt
+                && let Some(newest) = current
+                && own_state(reads)
+                && reads.version < newest.version
+            {
+                self.errors.push(VerifyError::StalePrestore {
+                    reads: reads.clone(),
+                    newest: newest.clone(),
+                    at: *span,
+                });
+            }
             match stmt {
                 ThreadedStmt::Bind { target, .. }
                 | ThreadedStmt::SyncedCall {
@@ -2451,6 +2509,17 @@ impl CoreErlangGenerator {
         ir: &[ThreadedStmt],
     ) -> Vec<VerifyError> {
         verify_in_scope(ir, self.threaded_scope())
+    }
+
+    /// BT-4612: [`Self::verify_threaded_ir`] for a slice rendered mid-frame,
+    /// after the frame bound `State` version `bound_before`
+    /// ([`verify_in_scope_after`]).
+    pub(in crate::core_erlang) fn verify_threaded_ir_after(
+        &self,
+        ir: &[ThreadedStmt],
+        bound_before: VersionedVar,
+    ) -> Vec<VerifyError> {
+        verify_in_scope_after(ir, self.threaded_scope(), Some(bound_before))
     }
 
     /// Shared failure-reporting path for every `ThreadedIr` production

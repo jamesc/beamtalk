@@ -648,7 +648,11 @@ impl CoreErlangGenerator {
         else {
             return Ok(None);
         };
+        #[cfg(test)]
+        let early_prestore_read = self.fault_prestore_read_before_operands(inner);
         let (mut prelude, scope) = self.sequence_children(&[receiver], frame)?;
+        #[cfg(test)]
+        Self::publish_fault_prestore_read(early_prestore_read);
         let over_receiver = match self.local_threading_producer(inner, frame)? {
             Some(tv) => Some(tv),
             None => self.inline_control_flow_producer(inner)?,
