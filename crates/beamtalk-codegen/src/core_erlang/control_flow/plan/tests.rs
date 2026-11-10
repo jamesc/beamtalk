@@ -999,3 +999,48 @@ fn letrec_self_sends_falls_back_to_stateacc() {
     );
     assert!(matches!(reason, StateAccFallbackReason::SelfSendInBody));
 }
+
+// ─── closed_fold_tail_doc (BT-4647) ─────────────────────────────────────────
+
+fn closed_tail(guarded_op_bracket: bool, discard: bool) -> String {
+    let mut generator = plain_generator();
+    let plan = make_plan(
+        vec!["x".into()],
+        KeyStyle::LocalPrefixed,
+        false,
+        true,
+        false,
+        vec![],
+        vec![],
+    );
+    plan.closed_fold_tail_doc(
+        &mut generator,
+        Document::Str("EXTRACT "),
+        guarded_op_bracket,
+        discard,
+    )
+    .to_pretty_string()
+}
+
+#[test]
+fn closed_fold_tail_discarded_without_bracket_is_bare_carrier() {
+    assert_eq!(closed_tail(false, true), "{'nil'}");
+}
+
+#[test]
+fn closed_fold_tail_keeps_repack_unless_discarded() {
+    let tail = closed_tail(false, false);
+    assert!(
+        tail.starts_with("EXTRACT ") && tail.contains("{'nil', "),
+        "a non-discarded fold repacks its carrier. Got: {tail}"
+    );
+}
+
+#[test]
+fn closed_fold_tail_guarded_op_bracket_keeps_repack_even_when_discarded() {
+    let tail = closed_tail(true, true);
+    assert!(
+        tail.contains("{'nil', ") && tail.contains("'take'"),
+        "a guarded-op bracket owes a cell take, so the repack stays. Got: {tail}"
+    );
+}

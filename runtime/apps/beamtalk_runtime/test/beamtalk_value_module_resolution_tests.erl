@@ -84,8 +84,21 @@ value_module_resolution_test_() ->
             fun runtime_method_changes_are_seen_by_next_send/0},
         {"BT-4624: perform: finds fun-backed methods of a module-less class",
             fun perform_finds_runtime_fun_methods/0},
+        {"BT-4642: perform: of a fun-backed method relays `^` and script-exit throws",
+            fun perform_relays_nlr_and_script_exit_from_runtime_fun/0},
         {"method_origin/3 copies no generation table (BT-4071)",
-            fun method_origin_copies_no_generation_table/0}
+            fun method_origin_copies_no_generation_table/0},
+        {"warm tagged-class dispatch is a per-process memo hit, no ETS read (BT-4623)",
+            fun memo_hit_reads_no_ets/0},
+        {"memo follows re-registration under another module (BT-4623)",
+            fun memo_follows_reregistration/0},
+        {"memo follows an ancestor reparented into Exception (BT-4623)",
+            fun memo_follows_ancestor_reparent/0},
+        {"memo of a purged module is re-derived (BT-4623)",
+            fun memo_of_purged_module_is_rederived/0},
+        {"an uncacheable answer is not memoised (BT-4623)",
+            fun uncacheable_answer_is_not_memoised/0},
+        {"without a generation nothing is memoised (BT-4623)", fun no_generation_memoises_nothing/0}
     ]}.
 
 package_value_send_makes_no_code_server_call() ->
@@ -401,6 +414,30 @@ perform_finds_runtime_fun_methods() ->
         stop_class(Parent)
     end.
 
+perform_relays_nlr_and_script_exit_from_runtime_fun() ->
+    %% BT-4642: a `^` NLR throw (ADR 0041) or script exit (ADR 0099 §3) raised in
+    %% a fun-backed method (or a block passed to it) is control flow: perform:
+    %% must let it propagate exactly as a direct send does, not wrap it.
+    Pid = start_class(?MODULE_LESS, undefined, 'Object'),
+    Self = #{'$beamtalk_class' => ?MODULE_LESS},
+    Nlr = ?NLR(make_ref(), 7, #{}),
+    try
+        ok = beamtalk_object_class:put_method(Pid, 'do:', fun(_S, Blk) -> Blk(1) end),
+        Throwing = fun(_) -> erlang:throw(Nlr) end,
+        ?assertThrow(Nlr, beamtalk_primitive:send(Self, 'do:', [Throwing])),
+        ?assertThrow(
+            Nlr, beamtalk_primitive:send(Self, 'perform:withArguments:', ['do:', [Throwing]])
+        ),
+        Exit = {beamtalk_script_exit, 3},
+        ExitBlk = fun(_) -> erlang:throw(Exit) end,
+        ?assertThrow(Exit, beamtalk_primitive:send(Self, 'do:', [ExitBlk])),
+        ?assertThrow(
+            Exit, beamtalk_primitive:send(Self, 'perform:withArguments:', ['do:', [ExitBlk]])
+        )
+    after
+        stop_class(Pid)
+    end.
+
 method_origin_copies_no_generation_table() ->
     %% Reflection (`CompiledMethod origin`) still reads xref, but a one-class
     %% read snapshots only that class's generation (read_stable/2), not the
@@ -416,6 +453,123 @@ method_origin_copies_no_generation_table() ->
     ),
     ?assertMatch([nil, _], Results),
     ?assertEqual([], Calls).
+
+memo_hit_reads_no_ets() ->
+    %% BT-4623: the first dispatch in a process fetches from the derived cache
+    %% and memoises; later ones in the same process read no ETS entry for it.
+    Pid = start_class(?CLASS, ?MOD),
+    Self = #{'$beamtalk_class' => ?CLASS, x => 7},
+    try
+        {Results, Calls} = calls_during([{ets, lookup, 2}], fun() ->
+            [beamtalk_primitive:tagged_map_dispatch(Self) || _ <- lists:seq(1, 5)]
+        end),
+        ?assertEqual([{value, ?CLASS, ?MOD} || _ <- lists:seq(1, 5)], Results),
+        ?assertEqual(
+            1,
+            length([
+                K
+             || {ets, lookup, [beamtalk_class_derived_cache, {tagged_class_dispatch, _} = K]} <-
+                    Calls
+            ])
+        ),
+        _ = beamtalk_primitive:tagged_map_dispatch(Self),
+        ?assertEqual(
+            {beamtalk_class_derived_cache:generation(), {value, ?MOD}}, memo(?CLASS)
+        )
+    after
+        stop_class(Pid)
+    end.
+
+memo_follows_reregistration() ->
+    %% A module move in the same process (merge_identity/5) bumps the
+    %% generation, so the memo is a miss and the class is re-resolved.
+    Pid = start_class(?CLASS, ?MOD),
+    Self = #{'$beamtalk_class' => ?CLASS, x => 7},
+    try
+        ?assertEqual({value, ?CLASS, ?MOD}, beamtalk_primitive:tagged_map_dispatch(Self)),
+        ?assertMatch({_, {value, ?MOD}}, memo(?CLASS)),
+        ok = beamtalk_class_metadata:merge_identity(?CLASS, ?MOD2, [], none, false),
+        ?assertEqual({value, ?CLASS, ?MOD2}, beamtalk_primitive:tagged_map_dispatch(Self)),
+        ?assertMatch({_, {value, ?MOD2}}, memo(?CLASS))
+    after
+        stop_class(Pid)
+    end.
+
+memo_follows_ancestor_reparent() ->
+    %% Reparenting an ancestor into Exception makes an already-memoised
+    %% subclass an Exception too; it must resolve to `exception`.
+    Parent = start_class('ZzMemoParent', undefined, 'Object'),
+    Child = start_class(?CLASS, ?MOD, 'ZzMemoParent'),
+    Self = #{'$beamtalk_class' => ?CLASS, x => 7},
+    try
+        ?assertEqual({value, ?CLASS, ?MOD}, beamtalk_primitive:tagged_map_dispatch(Self)),
+        ?assertMatch({_, {value, ?MOD}}, memo(?CLASS)),
+        ok = beamtalk_class_metadata:merge_identity(
+            'ZzMemoParent', 'ZzMemoParent', [], 'Exception', false
+        ),
+        ?assertEqual(
+            {module, 'bt@stdlib@exception'}, beamtalk_primitive:tagged_map_dispatch(Self)
+        ),
+        ?assertMatch({_, exception}, memo(?CLASS))
+    after
+        stop_class(Child),
+        stop_class(Parent)
+    end.
+
+memo_of_purged_module_is_rederived() ->
+    %% Purging is not a metadata write, so the generation stays put: the memo
+    %% hit's own purge check must send it back to the derived cache.
+    Pid = start_class(?CLASS, ?MOD),
+    Self = #{'$beamtalk_class' => ?CLASS, x => 7},
+    try
+        ?assertEqual({value, ?CLASS, ?MOD}, beamtalk_primitive:tagged_map_dispatch(Self)),
+        Gen = beamtalk_class_derived_cache:generation(),
+        ?assertEqual({Gen, {value, ?MOD}}, memo(?CLASS)),
+        code:purge(?MOD),
+        true = code:delete(?MOD),
+        code:purge(?MOD),
+        ?assertEqual(Gen, beamtalk_class_derived_cache:generation()),
+        ?assertError(
+            #{error := #beamtalk_error{kind = does_not_understand, selector = getX}},
+            beamtalk_primitive:send(Self, getX, [])
+        ),
+        ok = load_accessor_module(?MOD, x),
+        ?assertEqual(7, beamtalk_primitive:send(Self, getX, []))
+    after
+        stop_class(Pid),
+        _ = load_accessor_module(?MOD, x)
+    end.
+
+uncacheable_answer_is_not_memoised() ->
+    %% An unregistered class's answer comes from the code path, which the
+    %% cache does not track, so Compute says `nocache` and nothing is memoised
+    %% (and no `nocache` marker is left behind).
+    Class = 'ZzMemoUnregistered',
+    ?assertEqual(not_found, beamtalk_class_metadata:lookup_module(Class)),
+    ?assertMatch(
+        {value, Class, _}, beamtalk_primitive:tagged_map_dispatch(#{'$beamtalk_class' => Class})
+    ),
+    ?assertEqual(undefined, memo(Class)).
+
+no_generation_memoises_nothing() ->
+    %% Before beamtalk_class_derived_cache:new/0 there is no generation: every
+    %% call computes, the answer is still right, and nothing is memoised.
+    Pid = start_class(?CLASS, ?MOD),
+    Self = #{'$beamtalk_class' => ?CLASS, x => 7},
+    GenKey = {beamtalk_class_derived_cache, generation},
+    Ref = persistent_term:get(GenKey),
+    try
+        erase({beamtalk_primitive, tagged_class_dispatch, ?CLASS}),
+        persistent_term:erase(GenKey),
+        ?assertEqual(undefined, beamtalk_class_derived_cache:generation()),
+        ?assertEqual({value, ?CLASS, ?MOD}, beamtalk_primitive:tagged_map_dispatch(Self)),
+        ?assertEqual({value, ?CLASS, ?MOD}, beamtalk_primitive:tagged_map_dispatch(Self)),
+        ?assertEqual(undefined, memo(?CLASS))
+    after
+        persistent_term:put(GenKey, Ref),
+        beamtalk_class_derived_cache:invalidate(),
+        stop_class(Pid)
+    end.
 
 %%% ============================================================================
 %%% Helpers
@@ -446,6 +600,10 @@ start_class(Name, Module, Superclass, Selectors) ->
 stop_class(Pid) ->
     catch gen_server:stop(Pid, normal, 5000),
     ok.
+
+%% The calling process's tagged_class_dispatch/1 memo for Class (BT-4623).
+memo(Class) ->
+    get({beamtalk_primitive, tagged_class_dispatch, Class}).
 
 -doc """
 Load a module exporting `getX/1`, which returns `Field` from the receiver map —

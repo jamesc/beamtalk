@@ -106,4 +106,7 @@ jobs:
         run: just build-stdlib
 
       - name: Rust corpus tier (state-threading agreement and corpus proofs)
+        env:
+          # BT-4641: fail, not skip, if erlc or the runtime is missing.
+          BEAMTALK_REQUIRE_RUNTIME: "1"
         run: just test-corpus count:${{ matrix.shard }}/2
