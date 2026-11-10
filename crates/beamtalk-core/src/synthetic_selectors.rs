@@ -21,6 +21,7 @@
 //! truth and removes the drift risk that previously existed between codegen
 //! and the hierarchy.
 
+use crate::ast::StateDeclaration;
 use crate::semantic_analysis::class_hierarchy::DeclaredType;
 
 /// Computes the `with*:` copy-setter selector name for a slot field.
@@ -113,17 +114,23 @@ pub fn synthesized_keyword_constructor<'a>(
 /// keyword constructor on the value class `class_name`: the class itself,
 /// since both answer a new instance of it.
 ///
-/// A synthesized getter's return type is its field's declared type (none
-/// when the field is untyped).
-///
-/// Read by the hierarchy's synthesized `MethodInfo`s and by codegen's
-/// `__beamtalk_meta` `method_info` entries, so a class seen through its
+/// Read by the hierarchy's synthesized `MethodInfo`s, the stdlib builtins
+/// generator (`build_stdlib`) and codegen's `__beamtalk_meta` `method_info`
+/// entries, so a class seen through its
 /// loaded BEAM metadata (the REPL's view of an earlier input) records the
 /// same return types as one built from its AST (BT-4621) — the
 /// `cascade-drops-update` warning, for one, reads them.
 #[must_use]
 pub fn synthesized_copy_return_type(class_name: &str) -> DeclaredType {
     DeclaredType::simple(class_name)
+}
+
+/// The declared return type of the synthesized getter for `slot`: the
+/// field's declared type, or none when the field is untyped. Read by the
+/// same consumers as [`synthesized_copy_return_type`].
+#[must_use]
+pub fn synthesized_getter_return_type(slot: &StateDeclaration) -> Option<DeclaredType> {
+    slot.type_annotation.as_ref().map(DeclaredType::from)
 }
 
 #[cfg(test)]

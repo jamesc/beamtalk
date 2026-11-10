@@ -1386,7 +1386,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     is_internal: false,
                     spawns_block: false,
-                    return_type: slot.type_annotation.as_ref().map(DeclaredType::from),
+                    return_type: crate::synthetic_selectors::synthesized_getter_return_type(slot),
                     param_types: vec![],
                     doc: Some(getter_doc.into()),
                     origin: None,

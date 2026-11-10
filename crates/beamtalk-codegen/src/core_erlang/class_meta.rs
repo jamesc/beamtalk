@@ -822,9 +822,9 @@ impl CoreErlangGenerator {
                     .state
                     .iter()
                     .find(|slot| slot.name.name == field.as_str())
-                    .and_then(|slot| slot.type_annotation.as_ref())
-                    .map_or(MetaTypeRepr::None, |ta| {
-                        Self::type_annotation_to_meta_repr(ta, type_params)
+                    .and_then(beamtalk_core::synthetic_selectors::synthesized_getter_return_type)
+                    .map_or(MetaTypeRepr::None, |dt| {
+                        Self::declared_type_to_meta_repr(&dt, type_params)
                     });
                 entries.push((field.clone(), 0, return_type, vec![], sealed, false));
             }
