@@ -562,7 +562,7 @@ compiles_to("3k") ->
 compiles_to("3l") ->
     "folded constant, as 3k: the key and the hit arm carry the tagged {'beamtalk_string', <<...>>} term (BT-4504)";
 compiles_to("3m") -> "folded constant, as 3k: the key and the hit arm carry the atom (BT-4504)";
-compiles_to("4a") -> "send(O, x, []) -> classify, tagged-map class lookup (ETS + cache), Mod:dispatch/3 (untyped receiver stays dynamic)";
+compiles_to("4a") -> "send(O, x, []) -> classify, tagged-map class lookup (per-process memo, BT-4623), Mod:dispatch/3 (untyped receiver stays dynamic)";
 compiles_to("4b") -> "send(O, area, []), same path as 4a";
 compiles_to("4c") -> "send(S, area, []), same path as 4a (open class stays dynamic)";
 compiles_to("5a") -> "send(S, base, []): VbSub:dispatch/3 misses, extensions lookup, VbBase:dispatch/3";
