@@ -611,6 +611,12 @@ mod tests {
              http = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n\
              json = { git = \"https://example.com/json.git\", tag = \"v1.0.0\" }\n",
         );
+        // `http` is complete on its own (manifest and clean source), so only
+        // the missing `json` checkout can make the scan incomplete.
+        write(
+            tmp.path().join("_build/deps/http/beamtalk.toml").as_path(),
+            "[package]\nname = \"http\"\nversion = \"1.0.0\"\n",
+        );
         write(
             tmp.path().join("_build/deps/http/src/ext.bt").as_path(),
             "Object >> shout -> Integer => 1\n",

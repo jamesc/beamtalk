@@ -1470,6 +1470,20 @@ fn initialize_pipeline(
             super::build::collect_all_alias_infos(&[&all_alias_infos, &extra_aliases]);
     }
 
+    // Every test file's own extension methods, so a test calling a helper
+    // extension declared in a sibling test file is not reported once the
+    // dependency guard lifts (ADR 0070 WS3, BT-4608). A file that cannot be
+    // read or parsed fails its own compilation later.
+    let mut extension_index = extension_index;
+    for test_file in &test_files {
+        if let Ok(source) = fs::read_to_string(test_file) {
+            let (module, _) = beamtalk_core::source_analysis::parse(
+                beamtalk_core::source_analysis::lex_with_eof(&source),
+            );
+            extension_index.add_module(&module, test_file.as_std_path());
+        }
+    }
+
     let native_type_registry = compute_native_type_registry(&discovered_packages, &test_files);
 
     // BT-4022: project-known Erlang modules for the `unresolved_ffi` check,
@@ -1747,7 +1761,11 @@ fn compile_single_test_file(
         pre_loaded_protocol_sources: pipeline.fixture_protocol_defs.sources.clone(),
         pre_loaded_aliases: pipeline.all_alias_infos.clone(),
         extension_index: pipeline.extension_index.clone(),
-        dependency_extensions_complete: pipeline.dependency_extensions_complete,
+        // A deprecated `// @load` pulls in an arbitrary file whose
+        // extensions are not in the index, so a file using one keeps the
+        // dependency guard on (ADR 0070 WS3, BT-4608).
+        dependency_extensions_complete: pipeline.dependency_extensions_complete
+            && load_files.is_empty(),
     };
 
     // Handle deprecated @load directives as fallback.
