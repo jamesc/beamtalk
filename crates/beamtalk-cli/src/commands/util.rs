@@ -6,10 +6,8 @@
 //! **DDD Context:** CLI
 
 use beamtalk_core::file_walker::FileWalker;
-use beamtalk_workspace::hex_encode;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::time::SystemTime;
 
@@ -99,14 +97,10 @@ pub(super) fn content_hash_of(path: &Utf8Path) -> Option<String> {
 }
 
 /// SHA-256 hash of arbitrary bytes, as a lowercase hex string — the shared
-/// leaf [`content_hash_of`] and [`protocol_content_hash`] both hash through,
-/// so there is exactly one digest-to-hex-string routine in this crate.
-pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let digest = hasher.finalize();
-    hex_encode(&digest)
-}
+/// leaf [`content_hash_of`] and [`protocol_content_hash`] both hash through.
+/// Lives in the lib target so the FFI stub-tier fingerprint
+/// (`beamtalk_cli::ffi_type_registry`) hashes through the same routine.
+pub(crate) use beamtalk_cli::content_hash::sha256_hex;
 
 /// Content hash of a protocol's *own* AST, independent of which file it came
 /// from (ADR 0127 §10a; BT-3591) — used to build a class's build-graph edge

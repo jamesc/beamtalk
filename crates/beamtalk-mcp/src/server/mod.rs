@@ -43,9 +43,7 @@ mod tests;
 #[cfg(test)]
 pub(crate) use beamtalk_core::source_analysis::{lex_with_eof, parse};
 #[cfg(test)]
-pub(crate) use lint::{
-    build_native_type_registry, compute_diagnostic_summary, run_lint_structured,
-};
+pub(crate) use lint::{compute_diagnostic_summary, run_lint_structured};
 #[cfg(test)]
 pub(crate) use params::*;
 #[cfg(test)]

@@ -6,6 +6,18 @@
 use super::*;
 use camino::Utf8PathBuf;
 
+/// The FFI type registry MCP `lint` analyses the package at `dir` against.
+fn lint_registry(
+    dir: &std::path::Path,
+) -> Option<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry> {
+    beamtalk_cli::ffi_type_registry::lint_type_registry(
+        Some(camino::Utf8Path::from_path(dir).expect("UTF-8 temp dir")),
+        &[],
+        &[],
+    )
+    .registry
+}
+
 // --- run_lint_structured ---
 
 #[test]
@@ -328,13 +340,13 @@ fn run_lint_structured_stub_file_declare_native_no_location_error() {
     );
 }
 
-/// `build_native_type_registry` extracts live from OTP `.beam`
+/// `lint_type_registry` (the registry MCP `lint` builds) extracts live from OTP `.beam`
 /// files for a manifest-backed project with no prior `beamtalk build` —
 /// analogous to `commands::lint`'s
 /// `lint_extracts_type_specs_live_on_cold_cache_bt_2851` in the CLI
 /// binary.
 #[test]
-fn build_native_type_registry_extracts_live_on_cold_cache() {
+fn lint_type_registry_extracts_live_on_cold_cache() {
     let temp = tempfile::TempDir::new().unwrap();
     let dir = temp.path();
     std::fs::create_dir_all(dir.join("src")).unwrap();
@@ -347,13 +359,11 @@ fn build_native_type_registry_extracts_live_on_cold_cache() {
     // No `_build/` directory exists yet — the cold-cache case.
     assert!(!dir.join("_build").exists());
 
-    let Some(registry) = build_native_type_registry(Some(
-        camino::Utf8Path::from_path(dir).expect("UTF-8 temp dir"),
-    )) else {
+    let Some(registry) = lint_registry(dir) else {
         // OTP `.beam` discovery is environment-dependent (e.g. a sandbox
         // with no OTP install on disk); skip rather than false-fail.
         eprintln!(
-            "skipping build_native_type_registry_extracts_live_on_cold_cache: \
+            "skipping lint_type_registry_extracts_live_on_cold_cache: \
                  no OTP .beam files discovered in this environment"
         );
         return;
@@ -393,11 +403,7 @@ fn run_lint_structured_ffi_call_does_not_warn_dynamic_in_typed_class() {
         )
         .unwrap();
 
-    if build_native_type_registry(Some(
-        camino::Utf8Path::from_path(dir).expect("UTF-8 temp dir"),
-    ))
-    .is_none()
-    {
+    if lint_registry(dir).is_none() {
         eprintln!(
             "skipping run_lint_structured_ffi_call_does_not_warn_dynamic_in_typed_class: \
                  no OTP .beam files discovered in this environment"
@@ -907,4 +913,120 @@ fn run_lint_structured_resolves_out_of_file_actor_ancestor_bt_4183() {
         .collect();
     assert_eq!(abroad.len(), 1, "got: {:?}", result.warnings);
     assert!(abroad[0].file.ends_with("Sub.bt"), "{}", abroad[0].file);
+}
+
+/// BT-4643: MCP `lint` merges the project's own `stubs/` tier (ADR 0075)
+/// into its FFI type registry, as `beamtalk lint` does, so a stub-typed
+/// argument mismatch is reported. `parity_stub_native` is not a real module,
+/// so the stub is the only type source and no OTP install is needed.
+#[test]
+fn run_lint_structured_reports_project_stub_argument_mismatch() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let dir = temp.path();
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::create_dir_all(dir.join("stubs")).unwrap();
+    std::fs::write(
+        dir.join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("stubs").join("parity_stub_native.bt"),
+        "declare native: parity_stub_native\n  double: x :: Integer -> Integer\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("src").join("caller.bt"),
+        "Object subclass: Caller\n  bad => Erlang parity_stub_native double: \"text\"\n",
+    )
+    .unwrap();
+
+    let result = run_lint_structured(dir.to_str().unwrap());
+    assert!(
+        result
+            .warnings
+            .iter()
+            .chain(result.errors.iter())
+            .any(|d| d.message.contains("expects Integer") && d.message.contains("got String")),
+        "the project stub must type the FFI argument; got: {result:?}"
+    );
+}
+
+/// BT-4643: MCP `lint` takes the dependency stub tier from the dependency
+/// checkouts already on disk — here a path dependency declaring
+/// `[stubs] path` — without fetching anything.
+#[test]
+fn run_lint_structured_reports_dependency_stub_argument_mismatch() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let app = temp.path().join("app");
+    let dep = temp.path().join("dep");
+    std::fs::create_dir_all(app.join("src")).unwrap();
+    std::fs::create_dir_all(dep.join("src")).unwrap();
+    std::fs::create_dir_all(dep.join("native_stubs")).unwrap();
+    std::fs::write(
+        app.join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\ndep = { path = \"../dep\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dep.join("beamtalk.toml"),
+        "[package]\nname = \"dep\"\nversion = \"0.1.0\"\n\n[stubs]\npath = \"native_stubs\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dep.join("native_stubs").join("dep_stub_native.bt"),
+        "declare native: dep_stub_native\n  double: x :: Integer -> Integer\n",
+    )
+    .unwrap();
+    std::fs::write(
+        app.join("src").join("caller.bt"),
+        "Object subclass: Caller\n  bad => Erlang dep_stub_native double: \"text\"\n",
+    )
+    .unwrap();
+
+    let result = run_lint_structured(app.to_str().unwrap());
+    assert!(
+        result
+            .warnings
+            .iter()
+            .chain(result.errors.iter())
+            .any(|d| d.message.contains("expects Integer") && d.message.contains("got String")),
+        "the dependency's stub must type the FFI argument; got: {result:?}"
+    );
+}
+
+/// BT-4643: MCP `lint` on a `stdlib/src` target (no `beamtalk.toml`) types
+/// FFI calls with the runtime's own specs, as `beamtalk lint` does — the CLI
+/// twin is `lint_types_ffi_calls_into_stdlibs_own_backing_modules_bt_3597`.
+#[test]
+fn run_lint_structured_types_stdlib_ffi_with_runtime_specs() {
+    if beamtalk_cli::native_type_specs::extract_stdlib_type_specs().is_none() {
+        eprintln!(
+            "skipping run_lint_structured_types_stdlib_ffi_with_runtime_specs: \
+             runtime .beam files not built in this environment"
+        );
+        return;
+    }
+    let temp = tempfile::TempDir::new().unwrap();
+    let stdlib_src = temp.path().join("stdlib").join("src");
+    std::fs::create_dir_all(&stdlib_src).unwrap();
+    std::fs::write(
+        stdlib_src.join("FfiTypeSpecStdlib.bt"),
+        "typed Object subclass: FfiTypeSpecStdlib\n\n  \
+         check: x :: String -> Boolean => (Erlang beamtalk_uuid) isValid: x\n",
+    )
+    .unwrap();
+
+    let result = run_lint_structured(stdlib_src.to_str().unwrap());
+    let dynamic: Vec<_> = result
+        .warnings
+        .iter()
+        .chain(result.errors.iter())
+        .filter(|d| d.message.contains("inferred as Dynamic") || d.message.contains("untyped FFI"))
+        .collect();
+    assert!(
+        dynamic.is_empty(),
+        "stdlib FFI calls must type against the runtime specs; got: {result:?}"
+    );
 }

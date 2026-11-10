@@ -368,6 +368,18 @@ fn lint_verdict_cases() -> Vec<LintVerdictCase> {
             fails: true,
             fails_warnings_as_errors: true,
         },
+        // A String passed where the project's `stubs/` tier declares an
+        // Integer: a `Type` warning only a surface that merges the stub
+        // tiers into its FFI registry reports. Before BT-4643 MCP built the
+        // registry from auto-extracted specs alone and reported 0.
+        LintVerdictCase {
+            name: "lint_verdict_stub",
+            total: 1,
+            lint: 0,
+            live_recheck: 1,
+            fails: false,
+            fails_warnings_as_errors: true,
+        },
     ]
 }
 
