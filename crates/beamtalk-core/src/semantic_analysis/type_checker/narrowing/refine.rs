@@ -39,6 +39,61 @@ impl TypeChecker {
         super::detect(receiver)
     }
 
+    /// BT-4635: narrowing for the lazy block of `<test> and: [...]` /
+    /// `<test> or: [...]`, where `<test>` is any single-variable type test
+    /// the [`super::rules::RULES`] table recognises (`isKindOf:`, `class =`,
+    /// `respondsTo:`, `isOk`, singleton equality, `isNil`, ...).
+    ///
+    /// The block runs only when the test answered true (`and:`) or false
+    /// (`or:`), so it gets the table's true-branch type for `and:` and the
+    /// complement for `or:` — exactly what the matching `ifTrue:` /
+    /// `ifFalse:` arm would get. Returns `None` when the test has no
+    /// usable narrowing for that direction.
+    pub(in crate::semantic_analysis::type_checker) fn boolean_connective_narrowing(
+        &mut self,
+        selector_name: &str,
+        receiver: &Expression,
+        hierarchy: &ClassHierarchy,
+        env: &TypeEnv,
+        span: Span,
+    ) -> Option<(EnvKey, InferredType)> {
+        let info = Self::detect_narrowing(receiver.unwrap_parens())
+            .map(|info| self.refine_responds_to_narrowing(info))
+            .map(|info| {
+                Self::refine_result_narrowing(
+                    info,
+                    env,
+                    hierarchy,
+                    self.alias_registry.as_ref(),
+                    self.protocol_registry.as_deref(),
+                )
+            })
+            .map(|info| {
+                Self::refine_singleton_narrowing(
+                    info,
+                    env,
+                    hierarchy,
+                    self.alias_registry.as_ref(),
+                    self.protocol_registry.as_deref(),
+                )
+            })
+            .map(|info| self.refine_class_narrowing(info, env, hierarchy, span))?;
+        match selector_name {
+            "and:" => Some((info.variable, info.true_type)),
+            "or:" => {
+                if let Some(false_ty) = info.false_type {
+                    Some((info.variable, false_ty))
+                } else if info.is_nil_check {
+                    let current = self.narrowing_variable_type(&info.variable, env, hierarchy);
+                    Some((info.variable, Self::non_nil_type(&current)))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// Detect `X notNil` as the receiver of `and:`.
     ///
     /// Deliberately separate from the [`super::rules::RULES`] table:

@@ -224,6 +224,25 @@ impl TypeChecker {
                 env,
                 in_abstract_method,
             )]
+        } else if let (true, Some((var_key, narrowed_ty)), Some(arg)) = (
+            // BT-4635: any other single-variable type test (`isKindOf:`,
+            // `class =`, `respondsTo:`, `isOk`, singleton equality, ...) on
+            // the receiver of `and:` / `or:`. The lazy block runs only when
+            // the test answered true (`and:`) or false (`or:`), so it gets
+            // the same narrowing the matching `ifTrue:` / `ifFalse:` arm
+            // would. `notNil` is handled by the branch above.
+            matches!(selector_name.as_str(), "and:" | "or:"),
+            self.boolean_connective_narrowing(&selector_name, receiver, hierarchy, env, span),
+            arguments.first(),
+        ) {
+            vec![self.infer_block_with_narrowing(
+                arg,
+                &var_key,
+                &narrowed_ty,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )]
         } else {
             self.infer_generic_send_args(
                 arguments,
