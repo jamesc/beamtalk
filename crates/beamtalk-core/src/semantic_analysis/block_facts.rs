@@ -1279,45 +1279,11 @@ pub fn while_condition_has_synced_user_code_sends(condition: &Expression) -> boo
 ///
 /// The one rule codegen's loop gates read (`condition_has_state_effects`:
 /// `while_loop_threads`, the stateful condition lowering, the actor
-/// statement classifier) and the one the ADR 0131 §6 validator reads through
-/// [`while_condition_writes_thread`].
+/// statement classifier).
 #[must_use]
 pub fn while_condition_has_state_effects(condition: &Expression, in_class_method: bool) -> bool {
     matches!(condition, Expression::Block(block)
         if block_condition_has_state_effects(block, in_class_method))
-}
-
-/// BT-3782/BT-3845: whether an outer-local write in the condition block of a
-/// keyword `whileTrue:`/`whileFalse:` is threaded back to the method in a
-/// compiled (non-REPL) method. It is exactly when codegen compiles the
-/// condition in the loop's own frame and packs its local writes into the
-/// loop's `StateAcc` (`generate_stateful_while_condition`): the `body`
-/// argument is a literal block (only then is the stateful lowering
-/// considered at all) and the condition has state effects
-/// ([`while_condition_has_state_effects`]).
-///
-/// A body that writes a local does **not** extend this: it also selects the
-/// stateful lowering, but with a pure condition the condition is compiled as a
-/// plain block body whose own writes are never packed, so the loop re-reads
-/// the pre-loop value forever (probed for BT-3845:
-/// `[t := t + 1. t < 3] whileTrue: [u := u + 1]` hangs in value-type, actor and
-/// class methods). Such a condition write stays a compile error; pinned by the
-/// `while_condition_*` matrix in `semantic_analysis/tests/local_threading.rs`
-/// and, for the accepted shapes, `stdlib/test/bt3746stateful_while_test.bt`.
-///
-/// BT-4015: codegen now carries a condition's local write whether or not the
-/// condition has a state effect (`while_condition_has_carried_effects`, for the
-/// REPL and legacy workspace block bodies, which this check does not gate).
-/// Accepting such a write in a compiled method too would be a separate change,
-/// proven over the compiled contexts first.
-#[must_use]
-pub fn while_condition_writes_thread(
-    condition: &Block,
-    body: Option<&Expression>,
-    in_class_method: bool,
-) -> bool {
-    body.and_then(while_body_block).is_some()
-        && block_condition_has_state_effects(condition, in_class_method)
 }
 
 /// BT-4062: the body block of a keyword `whileTrue:`/`whileFalse:` when it is
@@ -1335,6 +1301,24 @@ pub fn while_body_block(body: &Expression) -> Option<&Block> {
         Expression::Block(block) => Some(block),
         _ => None,
     }
+}
+
+/// BT-4602: for a keyword `whileTrue:`/`whileFalse:` send (`None` for any
+/// other selector), whether its block literal receiver, the loop's condition,
+/// threads its outer-local writes back to the method: exactly when the body is
+/// a block literal ([`while_body_block`]), in every context. Codegen then
+/// carries the condition's writes in the loop's `StateAcc` (BT-4015); with any
+/// other body the loop runs its condition as a closure (BT-4062). A unary
+/// `[...] whileTrue` is the keyword loop with an empty body once normalised
+/// (BT-4313), so it always threads.
+///
+/// The one rule the ADR 0131 §6 validator (`Escape::ConditionBodyNotLiteral`
+/// on `Some(false)`) and `beamtalk-lint`'s `dead_block_assignment` (no warning
+/// on `Some(true)`) read.
+#[must_use]
+pub fn while_condition_threads(selector: &str, arguments: &[Expression]) -> Option<bool> {
+    matches!(selector, "whileTrue:" | "whileFalse:")
+        .then(|| arguments.first().and_then(while_body_block).is_some())
 }
 
 fn block_condition_has_state_effects(condition: &Block, in_class_method: bool) -> bool {

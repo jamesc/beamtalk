@@ -9,6 +9,11 @@
 // threads exactly what a `whileTrue:` condition threads, and `Block` defines
 // both for any other receiver. Rows: a `TestCase` method (the value-type
 // scope), class methods and actor methods.
+//
+// BT-4602: a local written in the condition threads too, in every context and
+// whatever the body (the `testLocal*` rows and the fixtures' `local*`
+// methods): `[t := t + 1. t < 3] whileTrue` was a compile error unless the
+// condition also wrote a field or sent to `self` outside a class method.
 // Fixtures: fixtures/bt4313unary_while_{actor,class_probe}.bt.
 
 TestCase subclass: Bt4313UnaryWhileTest
@@ -45,6 +50,51 @@ TestCase subclass: Bt4313UnaryWhileTest
     [counter bump < 3] whileTrue
     self assert: counter count equals: 3
 
+  // --- BT-4602: a local written in the condition ---
+  testLocalWhileTrue =>
+    t := 0
+    [t := t + 1. t < 3] whileTrue
+    self assert: t equals: 3
+
+  testLocalWhileFalse =>
+    t := 10
+    [t := t - 1. t <= 4] whileFalse
+    self assert: t equals: 4
+
+  testLocalKeywordEmptyBody =>
+    t := 0
+    [t := t + 1. t < 3] whileTrue: []
+    self assert: t equals: 3
+
+  testLocalConditionAndBody =>
+    t := 0
+    u := 0
+    [t := t + 1. t < 5] whileTrue: [u := u + t]
+    self assert: t equals: 5
+    self assert: u equals: 10
+
+  testLocalConditionCountsEveryTest =>
+    i := 0
+    c := 0
+    [c := c + 1. i < 2] whileTrue: [i := i + 1]
+    self assert: c equals: 3
+
+  testLocalWrittenInAnArm =>
+    t := 0
+    w := 0
+    [
+      t > 0 ifTrue: [w := w + t]
+      t := t + 1
+      t < 3
+    ] whileTrue
+    self assert: t equals: 3
+    self assert: w equals: 3
+
+  testLocalWrittenInValuePosition =>
+    t := 0
+    [(t := t + 1) < 3] whileTrue
+    self assert: t equals: 3
+
   testEarlyReturnFromReceiver => self assert: self firstOver equals: 3
 
   firstOver =>
@@ -77,9 +127,15 @@ TestCase subclass: Bt4313UnaryWhileTest
   testClassRows =>
     self assert: (Bt4313UnaryWhileClassProbe countUpWith: Bt4313UnaryWhileActor spawn) equals: 3
     self assert: (Bt4313UnaryWhileClassProbe countUntilWith: Bt4313UnaryWhileActor spawn) equals: 5
+    self assert: Bt4313UnaryWhileClassProbe localWhileTrue equals: 3
+    self assert: Bt4313UnaryWhileClassProbe localWhileFalse equals: 4
+    self assert: Bt4313UnaryWhileClassProbe localConditionAndBody equals: #(5, 10)
 
   // --- Actor methods ---
   testActorRows =>
     self assert: Bt4313UnaryWhileActor spawn fieldWhileTrue equals: 3
     self assert: Bt4313UnaryWhileActor spawn fieldWhileFalse equals: 6
     self assert: Bt4313UnaryWhileActor spawn selfSendWhileTrue equals: 4
+    self assert: Bt4313UnaryWhileActor spawn localWhileTrue equals: 3
+    self assert: Bt4313UnaryWhileActor spawn localWhileFalse equals: 4
+    self assert: Bt4313UnaryWhileActor spawn localConditionAndBody equals: #(5, 10)

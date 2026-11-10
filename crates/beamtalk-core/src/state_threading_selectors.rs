@@ -354,15 +354,9 @@ pub fn is_state_threaded_block_arg(selector: &str, arg_index: usize) -> bool {
 /// through `thread_value_call_receiver` — a runtime `apply`, never inlined);
 /// `repeat` and the unary `whileTrue`/`whileFalse` (no receiver inlining
 /// path in codegen today); and the keyword `whileTrue:`/`whileFalse:`
-/// CONDITION block — ADR 0118 phase 3 routes a condition-only self-send or
-/// field write through `generate_while_loop_with_mutations`, but a plain
-/// outer-*local* write in the condition (`[i := i + 1. i < 3] whileTrue:
-/// [nil]` in a Value/`TestCase` context) still compiles the condition as a
-/// Tier 2 closure and crashes at runtime with "function expects 1 arguments
-/// but was called with 0" (BT-3782). ADR 0131 §6 rejects that shape at
-/// compile time (`Walker::while_condition_threads`), so it never reaches
-/// codegen; it stays out of this table until the condition is lowered as a
-/// producer (BT-3743). A block
+/// CONDITION block, which threads its writes only when the loop's body is a
+/// block literal (BT-4602, `block_facts::while_condition_threads`): a rule of
+/// the send, not of the selector alone, so it is not a row of this table. A block
 /// literal that is merely *stored* and later sent `value` is not a literal
 /// receiver at all and is likewise outside this table — `beamtalk-lint`'s
 /// `DeadAssignment` check keeps flagging it.

@@ -118,10 +118,12 @@ pub fn container_group(container: &str) -> &'static str {
 
 /// How many times the probe statement runs in `container`: the number of
 /// iterations of the loops around it (every looping role runs twice, so a
-/// write that survives one iteration but not the next shows).
+/// write that survives one iteration but not the next shows). A loop's
+/// condition runs once more than its body: three times (BT-4602).
 #[must_use]
 pub fn container_runs(container: &str) -> i64 {
     match container {
+        "cond" => 3,
         "loop" | "timesC" | "toDoC" | "iter" | "coll" | "armIter" | "iterArm" | "armLoop"
         | "armProtIter" | "protIterArm" | "loopArm" | "timesArm" | "valLoop" | "valTimes" => 2,
         "iterIter" | "armIterIter" | "loopIter" | "timesIter" | "loopLoop" | "timesLoop"
