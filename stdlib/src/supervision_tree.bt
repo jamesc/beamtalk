@@ -106,8 +106,7 @@ typed Value subclass: SupervisionTree
   /// ```beamtalk
   /// tree do: [:node | Transcript showCr: node printString]
   /// ```
-  do: aBlock :: Block(SupervisionNode, Object) -> Nil =>
-    self nodes do: aBlock
+  do: aBlock :: Block(SupervisionNode, Object) -> Nil => self nodes do: aBlock
 
   /// The nodes for which `aBlock` answers `true`.
   ///

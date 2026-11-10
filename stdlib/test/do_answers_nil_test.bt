@@ -8,8 +8,7 @@
 
 TestCase subclass: DoAnswersNilTest
 
-  testListDoLiteralBlockAnswersNil =>
-    self assert: (#(1, 2) do: [:x | x]) isNil
+  testListDoLiteralBlockAnswersNil => self assert: (#(1, 2) do: [:x | x]) isNil
 
   testListDoNonLiteralBlockAnswersNil =>
     b := [:x | x]
@@ -20,8 +19,7 @@ TestCase subclass: DoAnswersNilTest
     self assert: (#(1, 2) do: [:x | sum := sum + x]) isNil
     self assert: sum equals: 3
 
-  testEmptyListDoAnswersNil =>
-    self assert: (#() do: [:x | x]) isNil
+  testEmptyListDoAnswersNil => self assert: (#() do: [:x | x]) isNil
 
   testArrayDoAnswersNil =>
     self assert: ((Array withAll: #(1, 2)) do: [:x | x]) isNil
@@ -32,8 +30,7 @@ TestCase subclass: DoAnswersNilTest
   testBinaryDoAnswersNil =>
     self assert: ((Binary fromBytes: #(1, 2)) do: [:b | b]) isNil
 
-  testSetDoAnswersNil =>
-    self assert: ((Set new add: 1) do: [:x | x]) isNil
+  testSetDoAnswersNil => self assert: ((Set new add: 1) do: [:x | x]) isNil
 
   testEnumerableUserClassDoAnswersNil =>
     bag := Adr0133EnumerableStdlib new: #{#items => #(1, 2, 3)}
