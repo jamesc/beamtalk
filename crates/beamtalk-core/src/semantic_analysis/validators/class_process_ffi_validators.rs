@@ -19,8 +19,9 @@
 //!   `not_owner` (the caller owns the socket), and `erlang:self/0`, the
 //!   process dictionary, `link` and `monitor` all see the class process.
 //!   A table from the `Ets` constructors (`new:type:`, `newOrExisting:type:`,
-//!   `private:`, `protected:`) is owned by the class process, so a private or
-//!   protected one refuses callers (BT-4587). Only an unqualified `Ets`
+//!   `private:`, `protected:`) is owned by the class process, so callers get
+//!   `access_denied` on every access to a private one and on writes to a
+//!   protected one (BT-4587). Only an unqualified `Ets`
 //!   reference is matched, not a package-qualified one.
 //!   Suppress deliberate serialisation with `@expect class_process_ffi`.
 //! - **`class-method-process-resource`** — no class in the chain declares
@@ -88,7 +89,8 @@ enum Sensitivity {
     OwnedTable,
     /// The call creates an access-restricted (`private`/`protected`) ETS
     /// table owned by the calling process, so the class process owns it and
-    /// callers are refused with `access_denied`.
+    /// callers get `access_denied` (every access for `private:`, writes for
+    /// `protected:`).
     OwnedRestrictedTable,
 }
 
@@ -451,7 +453,7 @@ impl Site<'_> {
             Sensitivity::OwnedRestrictedTable => (
                 "which creates an access-restricted ETS table owned by the calling process",
                 "so the class process owns the table and callers are refused with \
-                 `access_denied`",
+                 `access_denied` (every access for `private:`, writes for `protected:`)",
             ),
         };
         Diagnostic::warning(
