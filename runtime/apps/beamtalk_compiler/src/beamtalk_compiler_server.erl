@@ -280,7 +280,7 @@ Options:
   Defaults to `false' — deliberately opt-in, not the default for
   `diagnostics/1,2', because this command also backs the LiveView cockpit's
   keystroke-driven editor diagnostics
-  (`beamtalk_repl_ops_dev:diagnostics_for/2'), and changing what fires on
+  (`beamtalk_repl_ops_dev:diagnostics_for/3'), and changing what fires on
   every keystroke for every existing caller is a bigger behavioural change
   than this option's one new caller (the re-check orchestration)
   needs.
