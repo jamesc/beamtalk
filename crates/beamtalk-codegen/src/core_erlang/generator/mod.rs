@@ -580,6 +580,10 @@ pub(in crate::core_erlang) fn as_written_method_source(
     peeled: &beamtalk_core::ast::normalize::PeeledParens,
     scope: beamtalk_core::ast::normalize::PeelScope,
 ) -> String {
+    if peeled.is_empty() && !beamtalk_core::ast::normalize::method_has_desugared_unary_loop(method)
+    {
+        return beamtalk_core::unparse::unparse_method(method);
+    }
     let mut written = method.clone();
     beamtalk_core::ast::normalize::restore_operand_parens_in_scope(&mut written, peeled, scope);
     beamtalk_core::unparse::unparse_method(&written)

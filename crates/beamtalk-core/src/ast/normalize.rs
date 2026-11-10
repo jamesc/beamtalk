@@ -346,6 +346,27 @@ pub fn written_unary_loop(
     .then_some(unary)
 }
 
+/// Whether `method`'s body holds a loop [`desugar_unary_loops`] produced
+/// ([`written_unary_loop`]): the cheap scan that lets a reflection caller
+/// with nothing peeled skip the restoring clone.
+#[must_use]
+pub fn method_has_desugared_unary_loop(method: &MethodDefinition) -> bool {
+    let mut found = false;
+    for stmt in &method.body {
+        walk_expression(&stmt.expression, &mut |node| {
+            if let Expression::MessageSend {
+                selector,
+                arguments,
+                ..
+            } = node
+            {
+                found = found || written_unary_loop(selector, arguments).is_some();
+            }
+        });
+    }
+    found
+}
+
 /// The inverse of [`desugar_unary_loops`] on `expr`'s tree: a keyword loop
 /// whose body is the empty block the pass added ([`written_unary_loop`])
 /// becomes the unary send again.
