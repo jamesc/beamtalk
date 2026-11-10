@@ -1086,6 +1086,7 @@ tagged_map_dispatch(X) ->
     end.
 
 -ifdef(TEST).
+-export([tagged_class_dispatch/1]).
 -spec proxy_routes() -> #{atom() => module()}.
 proxy_routes() -> ?PROXY_ROUTES.
 -endif.
@@ -1126,11 +1127,42 @@ What is cached, and why that is safe:
 """.
 -spec tagged_class_dispatch(atom()) -> exception | {stdlib, atom()} | {value, atom()}.
 tagged_class_dispatch(Class) ->
-    beamtalk_class_derived_cache:fetch(
+    %% Per-process memo (BT-4623), as in beamtalk_default_method:is_default/2:
+    %% the answer is tagged with the derived-cache generation read before
+    %% deriving it, and every metadata write bumps that generation, so a
+    %% mismatch is a miss. The purge check stays on a hit (code loading is
+    %% not tracked by the generation).
+    Gen = beamtalk_class_derived_cache:generation(),
+    MemoKey = {?MODULE, tagged_class_dispatch, Class},
+    case get(MemoKey) of
+        {Gen, Resolved} when Gen =/= undefined ->
+            case resolved_module_loaded(Class, Resolved) of
+                true -> Resolved;
+                false -> tagged_class_dispatch_slow(Class, Gen, MemoKey)
+            end;
+        _ ->
+            tagged_class_dispatch_slow(Class, Gen, MemoKey)
+    end.
+
+-spec tagged_class_dispatch_slow(atom(), integer() | undefined, term()) ->
+    exception | {stdlib, atom()} | {value, atom()}.
+tagged_class_dispatch_slow(Class, Gen, MemoKey) ->
+    Resolved = beamtalk_class_derived_cache:fetch(
         {tagged_class_dispatch, Class},
         fun() -> resolve_tagged_class_dispatch(Class) end,
-        fun(Resolved) -> resolved_module_loaded(Class, Resolved) end
-    ).
+        fun(R) -> resolved_module_loaded(Class, R) end
+    ),
+    %% Memoise only what the ETS layer would cache: a registered class whose
+    %% module is loaded (see resolve_tagged_class_dispatch/1).
+    case
+        Gen =/= undefined andalso
+            beamtalk_class_metadata:lookup_module(Class) =/= not_found andalso
+            resolved_module_loaded(Class, Resolved)
+    of
+        true -> put(MemoKey, {Gen, Resolved});
+        false -> ok
+    end,
+    Resolved.
 
 -doc "Uncached derivation behind `tagged_class_dispatch/1`.".
 -spec resolve_tagged_class_dispatch(atom()) ->

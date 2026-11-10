@@ -78,6 +78,7 @@ value_module_resolution_test_() ->
             fun exception_bit_follows_superclass_change/0},
         {"a cached module that is purged and reloaded is re-derived (BT-4064)",
             fun purged_module_is_rederived/0},
+        {"tagged_class_dispatch per-process memo (BT-4623)", fun tagged_class_dispatch_memo/0},
         {"inherited Object send makes no xref or CompiledMethod work (BT-4071)",
             fun inherited_object_send_makes_no_xref_call/0},
         {"fun-backed methods added or replaced at runtime are seen by the next send (BT-4071)",
@@ -287,6 +288,59 @@ purged_module_is_rederived() ->
         stop_class(Pid),
         _ = load_accessor_module(?MOD, x)
     end.
+
+tagged_class_dispatch_memo() ->
+    %% BT-4623: a warm tagged_class_dispatch/1 is answered from a per-process
+    %% memo tagged with the derived-cache generation.
+    Memo = {beamtalk_primitive, tagged_class_dispatch, ?CLASS},
+    Pid = start_class(?CLASS, ?MOD),
+    Self = #{'$beamtalk_class' => ?CLASS, x => 7},
+    try
+        erase(Memo),
+        ?assertEqual(7, beamtalk_primitive:send(Self, getX, [])),
+        Gen = beamtalk_class_derived_cache:generation(),
+        ?assertEqual({Gen, {value, ?MOD}}, get(Memo)),
+        %% A hit is answered by the memo: a poisoned (but current, loaded)
+        %% memo is returned without consulting the cache.
+        put(Memo, {Gen, {stdlib, 'bt@stdlib@dictionary'}}),
+        ?assertEqual(
+            {stdlib, 'bt@stdlib@dictionary'}, beamtalk_primitive:tagged_class_dispatch(?CLASS)
+        ),
+        erase(Memo),
+        ?assertEqual({value, ?MOD}, beamtalk_primitive:tagged_class_dispatch(?CLASS)),
+        %% Moving the class to another module is re-resolved in this process.
+        ok = beamtalk_class_metadata:merge_identity(?CLASS, ?MOD2, [], none, false),
+        ?assertEqual(?MOD2, beamtalk_primitive:class_name_to_module(?CLASS)),
+        ?assertEqual(
+            {beamtalk_class_derived_cache:generation(), {value, ?MOD2}}, get(Memo)
+        ),
+        %% Reparenting into Exception re-resolves an already-memoised class.
+        ok = beamtalk_class_metadata:merge_identity(?CLASS, ?MOD2, [], 'Exception', false),
+        ?assertMatch({_, exception}, begin
+            _ = beamtalk_primitive:responds_to(Self, getX),
+            get(Memo)
+        end),
+        ok = beamtalk_class_metadata:merge_identity(?CLASS, ?MOD2, [], none, false),
+        ?assertEqual(2, beamtalk_primitive:send(Self, getX, [])),
+        %% A purged module whose class is still registered is re-derived.
+        code:purge(?MOD2),
+        true = code:delete(?MOD2),
+        code:purge(?MOD2),
+        ?assertError(
+            #{error := #beamtalk_error{kind = does_not_understand, selector = getX}},
+            beamtalk_primitive:send(Self, getX, [])
+        )
+    after
+        stop_class(Pid),
+        _ = load_accessor_module(?MOD2, y),
+        erase(Memo)
+    end,
+    %% An unregistered class is not memoised.
+    Unreg = 'PkgHotUnregistered',
+    UMemo = {beamtalk_primitive, tagged_class_dispatch, Unreg},
+    erase(UMemo),
+    _ = (catch beamtalk_primitive:send(#{'$beamtalk_class' => Unreg}, foo, [])),
+    ?assertEqual(undefined, get(UMemo)).
 
 inherited_object_send_makes_no_xref_call() ->
     %% `hasField:` is not in the class module, so the send falls through to
