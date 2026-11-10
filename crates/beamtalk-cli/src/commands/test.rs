@@ -164,7 +164,9 @@ pub(crate) fn discover_test_classes_in_hierarchy(
             source_path, candidates
         );
     }
-    let test_classes = test_classes_in_module(&module, superclass_index);
+    let test_classes = test_class_in_module(&module, superclass_index)
+        .into_iter()
+        .collect();
 
     Ok((test_classes, load_files))
 }
@@ -184,18 +186,15 @@ fn test_case_class_count(
 /// The test class `module` compiles to, if any — the pure part of
 /// [`discover_test_classes_in_hierarchy`] (no I/O, no warnings), shared with
 /// `collect_test_file_extensions`. The compiler generates one module per
-/// `.bt` file from its first `TestCase` subclass, so at most one is returned.
-fn test_classes_in_module(
+/// `.bt` file from its first `TestCase` subclass, hence at most one.
+fn test_class_in_module(
     module: &beamtalk_core::ast::Module,
     superclass_index: &HashMap<String, String>,
-) -> Vec<TestCaseClass> {
-    let Some(class) = module
+) -> Option<TestCaseClass> {
+    let class = module
         .classes
         .iter()
-        .find(|c| inherits_from_test_case(c.superclass_name(), superclass_index))
-    else {
-        return Vec::new();
-    };
+        .find(|c| inherits_from_test_case(c.superclass_name(), superclass_index))?;
     let class_name = class.name.name.to_string();
     let stem = beamtalk_codegen::core_erlang::to_module_name(&class_name);
     let module_name = format!("bt@{stem}");
@@ -214,14 +213,14 @@ fn test_classes_in_module(
     // An indirect subclass inherits its test methods (see
     // `discover_test_classes_in_hierarchy`'s doc comment).
     if test_methods.is_empty() && class.superclass_name() == "TestCase" {
-        return Vec::new();
+        return None;
     }
-    vec![TestCaseClass {
+    Some(TestCaseClass {
         class_name,
         superclass_name: class.superclass_name().to_string(),
         module_name,
         test_methods,
-    }]
+    })
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -1656,7 +1655,7 @@ fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
 
 /// The extension methods of the test files `beamtalk test` will compile and
 /// load: those with at least one test class, found by the same discovery
-/// `compile_single_test_file` uses (`test_classes_in_module`, minus its
+/// `compile_single_test_file` uses (`test_class_in_module`, minus its
 /// warnings, which the compile pass reports). A helper-only file is never compiled or
 /// loaded, so its extensions must not hide a does-not-understand that would
 /// fail at runtime. A file that cannot be read or parsed fails its own
@@ -1683,7 +1682,7 @@ fn collect_test_file_extensions(
         let (module, _) = beamtalk_core::source_analysis::parse(
             beamtalk_core::source_analysis::lex_with_eof(&source),
         );
-        if !test_classes_in_module(&module, &file_super_index).is_empty() {
+        if test_class_in_module(&module, &file_super_index).is_some() {
             extensions.add_module(&module, test_file.as_std_path());
         }
     }
