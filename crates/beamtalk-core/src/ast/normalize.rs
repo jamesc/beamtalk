@@ -353,7 +353,13 @@ pub fn written_unary_loop(
 pub fn method_has_desugared_unary_loop(method: &MethodDefinition) -> bool {
     let mut found = false;
     for stmt in &method.body {
+        if found {
+            break;
+        }
         walk_expression(&stmt.expression, &mut |node| {
+            if found {
+                return;
+            }
             if let Expression::MessageSend {
                 selector,
                 arguments,
