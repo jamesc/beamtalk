@@ -787,7 +787,9 @@ mod tests {
     #[test]
     fn lint_extraction_records_protocol_source_identity() {
         let temp = tempfile::TempDir::new().unwrap();
-        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        // Canonicalise root — the recorded protocol source path is the
+        // canonical spelling; see find_package_root_from_subdir.
+        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(temp.path()).unwrap()).unwrap();
         std::fs::write(
             root.join("beamtalk.toml"),
             "[package]\nname = \"xpkg\"\nversion = \"0.1.0\"\n",
@@ -908,7 +910,11 @@ mod tests {
     #[allow(clippy::too_many_lines)] // Two-package fixture setup + assertions; splitting would obscure the flow
     fn lint_resolves_dependency_protocol_and_public_alias_but_not_internal_alias() {
         let temp = tempfile::TempDir::new().unwrap();
-        let root = temp.path();
+        // Canonicalise root — parsed files carry the canonical spelling, which
+        // `consumer_file` is compared against below; see
+        // find_package_root_from_subdir.
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let root = root.as_path();
 
         // Producer package: public Status alias, internal Secret alias,
         // Greetable protocol.

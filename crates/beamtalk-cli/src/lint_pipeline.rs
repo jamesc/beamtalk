@@ -672,7 +672,10 @@ mod tests {
 
     fn package_with(files: &[(&str, &str)]) -> (tempfile::TempDir, Utf8PathBuf) {
         let temp = tempfile::TempDir::new().unwrap();
-        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        // Canonical root: the pipeline reports the canonical spelling of
+        // package files (`/private/var/...` on macOS, `\\?\C:\...` with
+        // long names on Windows), so expected paths must start from it.
+        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(temp.path()).unwrap()).unwrap();
         std::fs::write(
             root.join("beamtalk.toml"),
             "[package]\nname = \"pkg\"\nversion = \"0.1.0\"\n",
