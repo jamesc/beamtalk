@@ -2454,8 +2454,15 @@ impl Parser {
         // The later `collect_comment_attachment()` inside
         // `parse_method_definition()` looks at the selector token instead, which
         // would otherwise silently lose this signal.
+        //
+        // A `///` block directly above the class-name token is this method's
+        // doc comment; collect it first (as class and method parsing do) so
+        // `collect_comment_attachment` doesn't demote it to an orphaned
+        // leading comment, which split it from the method on format.
+        let class_doc_comment = self.collect_doc_comment();
         let initial_comments = self.collect_comment_attachment();
         let leading_blank_line = initial_comments.leading_blank_line;
+        let class_blank_line_after_comments = initial_comments.blank_line_after_comments;
         let mut class_leading_comments = initial_comments.leading;
 
         // Parse class name, with optional package qualifier (ADR 0070).
@@ -2504,11 +2511,22 @@ impl Parser {
             )
         });
 
+        if method.doc_comment.is_none() {
+            method.doc_comment = class_doc_comment;
+        }
+
         // Prepend the class-name token's leading comments to the method's
         // own comments.  parse_method_definition() reads trivia from the
         // selector token, so comments before the class name would otherwise
         // be lost.
         if !class_leading_comments.is_empty() {
+            // The gap after the last leading comment belongs to whichever
+            // block ends the combined list: the selector token's own
+            // comments when there are any, else the class-name token's
+            // (e.g. a license header followed by a blank line, BT-4488).
+            if method.comments.leading.is_empty() {
+                method.comments.blank_line_after_comments = class_blank_line_after_comments;
+            }
             class_leading_comments.append(&mut method.comments.leading);
             method.comments.leading = class_leading_comments;
         }
