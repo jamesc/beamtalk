@@ -84,11 +84,23 @@ TestCase subclass: NativeActorSupervisedTest
     pool stop
 
   testNativeSpawnAsRegistersName =>
-    c := (Bt4577NativeCounter spawnWith: #{
+    c :: Bt4577NativeCounter := (Bt4577NativeCounter spawnWith: #{
       #initial => 3
     } as: #bt4577_spawn_as) unwrap
-    self assert: c getValue equals: 3
-    again := Bt4577NativeCounter spawnAs: #bt4577_spawn_as
-    self assert: again isError equals: true
-    self assert: again error kind equals: #name_registered
-    c kill
+    [
+      self assert: c getValue equals: 3
+      again := Bt4577NativeCounter spawnAs: #bt4577_spawn_as
+      self assert: again isError equals: true
+      self assert: again error kind equals: #name_registered
+    ] ensure: [c kill]
+
+  testNativeSpawnAsGlobal =>
+    c :: Bt4577NativeCounter := (Bt4577NativeCounter
+      spawnWith: #{#initial => 9}
+      as: #bt4577_spawn_as_global
+      scope: #global) unwrap
+    [
+      self assert: c getValue equals: 9
+      again := Bt4577NativeCounter spawnAs: #bt4577_spawn_as_global scope: #global
+      self assert: again error kind equals: #name_registered
+    ] ensure: [c kill]
