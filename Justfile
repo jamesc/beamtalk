@@ -24,6 +24,14 @@ set windows-shell := ["powershell.exe", "-NoLogo", "-NoProfile", "-Command"]
 # rather than clobbering it, matching `resolve_epmd_address`'s own fallback.
 export ERL_EPMD_ADDRESS := env_var_or_default("ERL_EPMD_ADDRESS", "127.0.0.1")
 
+# ADR 0146 (BT-4535): every BEAM node this project's tooling starts (BUnit,
+# the stdlib corpus, the REPL and e2e suites) runs the test-build check in
+# `beamtalk_actor_state:commit/2`: an actor method's own `^` reaches its
+# boundary with the cell current. A failure is a stale-cell bug in the
+# ThreadedIr lowering that owns the scope, not something to switch off.
+# Set to 0 to run without it.
+export BEAMTALK_CHECK_NLR_COMMIT := env_var_or_default("BEAMTALK_CHECK_NLR_COMMIT", "1")
+
 # Default recipe (list all tasks)
 default:
     @just --list

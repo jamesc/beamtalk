@@ -384,6 +384,100 @@ refresh_carried_leaves_its_own_stamp_alone_under_another_actors_cell_test() ->
     Snap = {spawn(fun() -> ok end), #{n => 0}},
     ?assertEqual(Own, beamtalk_actor_state:refresh_carried(Snap, Own)).
 
+%% ADR 0146 (BT-4535): an actor method's `^` commits the cell at home and the
+%% carried state away.
+commit_at_home_answers_the_cell_test() ->
+    with_cell(#{n => 5, '__local__i' => 1}, fun() ->
+        %% The throw's own `__local__` keys are dead: not merged back.
+        ?assertEqual(
+            #{n => 5, '__local__i' => 1},
+            beamtalk_actor_state:commit(self_obj(), #{n => 0, '__local__j' => 2})
+        )
+    end).
+
+commit_under_another_owners_cell_answers_the_carried_state_test() ->
+    %% A nested away `super_send/5` installed another actor's state here.
+    Other = spawn(fun() -> ok end),
+    Old = beamtalk_actor_state:snapshot(),
+    try
+        ok = beamtalk_actor_state:uninstall({Other, #{n => 7}}),
+        ?assertEqual(#{n => 0}, beamtalk_actor_state:commit(self_obj(), #{n => 0}))
+    after
+        beamtalk_actor_state:uninstall(Old)
+    end.
+
+commit_for_another_pid_answers_the_carried_state_test() ->
+    with_cell(#{n => 5}, fun() ->
+        ?assertEqual(#{n => 0}, beamtalk_actor_state:commit(foreign_obj(), #{n => 0}))
+    end),
+    ?assertEqual(nil, beamtalk_actor_state:commit(foreign_obj(), nil)).
+
+commit_without_a_cell_answers_the_carried_state_test() ->
+    ?assertEqual(#{n => 0}, beamtalk_actor_state:commit(self_obj(), #{n => 0})).
+
+with_commit_check(Fun) ->
+    beamtalk_actor_state:enable_commit_check(true),
+    try
+        Fun()
+    after
+        beamtalk_actor_state:enable_commit_check(false),
+        erlang:erase('$bt_nlr_cell_ahead')
+    end.
+
+commit_check_passes_a_current_cell_test() ->
+    with_commit_check(fun() ->
+        with_cell(#{n => 5}, fun() ->
+            ?assertEqual(
+                #{n => 5}, beamtalk_actor_state:commit(self_obj(), #{n => 5, '__local__i' => 3})
+            )
+        end)
+    end).
+
+commit_check_raises_on_a_stale_cell_test() ->
+    with_commit_check(fun() ->
+        with_cell(#{n => 0}, fun() ->
+            ?assertEqual(
+                actor_nlr_stale_cell,
+                kind_of(fun() -> beamtalk_actor_state:commit(self_obj(), #{n => 5}) end)
+            )
+        end)
+    end).
+
+commit_check_skips_a_cell_a_foreign_cleanup_put_ahead_test() ->
+    with_commit_check(fun() ->
+        with_cell(#{n => 0}, fun() ->
+            ok = beamtalk_actor_state:store_unwound(#{n => 40}),
+            ?assertEqual(#{n => 40}, beamtalk_actor_state:commit(self_obj(), #{n => 0})),
+            %% The marker is spent by the commit it was left for.
+            ?assertEqual(
+                actor_nlr_stale_cell,
+                kind_of(fun() -> beamtalk_actor_state:commit(self_obj(), #{n => 0}) end)
+            )
+        end)
+    end).
+
+commit_check_skips_an_away_capture_test() ->
+    %% BT-4459: this actor's block, run by another actor, carries its
+    %% creation-time capture (stamped), which the cell has moved past.
+    Carried = beamtalk_actor_state:nlr_state(self_obj(), #{n => 0}),
+    with_commit_check(fun() ->
+        with_cell(#{n => 5}, fun() ->
+            ?assertEqual(#{n => 5}, beamtalk_actor_state:commit(self_obj(), Carried))
+        end)
+    end).
+
+commit_check_off_never_raises_test() ->
+    with_cell(#{n => 0}, fun() ->
+        ?assertEqual(#{n => 0}, beamtalk_actor_state:commit(self_obj(), #{n => 5}))
+    end).
+
+store_unwound_stores_like_store_test() ->
+    with_cell(#{n => 0}, fun() ->
+        ok = beamtalk_actor_state:store_unwound(#{n => 3}),
+        ?assertEqual(#{n => 3}, beamtalk_actor_state:take()),
+        ?assertEqual(undefined, erlang:get('$bt_nlr_cell_ahead'))
+    end).
+
 call_foreign_takes_the_cell_over_a_stamped_entry_answer_test() ->
     %% A compiled callee that caught its own away closure's `^` answers the
     %% entry state stamped: still "answer equals entry", so the cell wins.

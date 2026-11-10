@@ -378,8 +378,23 @@ pub(in crate::core_erlang) fn take_cell_store_emitted() -> bool {
 /// is installed (a nested away `super_send/5`) does not claim that state for
 /// the host process.
 pub(in crate::core_erlang) fn cell_put_call(state: Document<'static>) -> Document<'static> {
+    cell_store_call(actor_state_helper::STORE, state)
+}
+
+/// ADR 0146 R1 / BT-4535: `call 'beamtalk_actor_state':'store_unwound'(<state>)`,
+/// the store of an `ensure:` foreign clause ([`EnsureForeignNlr`]): the
+/// cleanup's writes, made while a `^` of another scope unwinds through it.
+/// That throw is re-raised as it came, so the cell is now ahead of the state
+/// it carries, which `store_unwound/1` tells the test-build check in
+/// `beamtalk_actor_state:commit/2`. Otherwise a [`cell_put_call`].
+pub(in crate::core_erlang) fn cell_put_unwound_call(state: Document<'static>) -> Document<'static> {
+    cell_store_call(actor_state_helper::STORE_UNWOUND, state)
+}
+
+/// Every cell store, marking it for [`take_cell_store_emitted`].
+fn cell_store_call(helper: (&'static str, u32), state: Document<'static>) -> Document<'static> {
     CELL_STORE_EMITTED.with(|c| c.set(true));
-    actor_state_call(actor_state_helper::STORE, vec![state])
+    actor_state_call(helper, vec![state])
 }
 
 /// `call 'beamtalk_actor_state':'take'()`: the one emitter of every cell
@@ -489,13 +504,15 @@ fn render_fast_path_synced_call(
 
 /// Renders one [`ThreadedStmt::NlrThrow`]: `let R = call
 /// 'erlang':'throw'({'$bt_nlr', Tok, Val, Slot}) in`, where `Slot` is the one
-/// slot version bare, or every slot version as a tuple in order.
+/// slot version bare, or every slot version as a tuple in order; with
+/// `cell_store`, after `let _ = beamtalk_actor_state:store(Slot) in`.
 fn render_nlr_throw(stmt: &ThreadedStmt, ctx: &RenderCtx) -> Document<'static> {
     let ThreadedStmt::NlrThrow {
         token,
         value,
         slot,
         result_var,
+        cell_store,
         ..
     } = stmt
     else {
@@ -516,7 +533,14 @@ fn render_nlr_throw(stmt: &ThreadedStmt, ctx: &RenderCtx) -> Document<'static> {
             Document::Vec(parts)
         }
     };
+    // ADR 0137 §5 / ADR 0146: the cell is current whenever a `^` starts.
+    let store = if *cell_store {
+        docvec!["let _ = ", cell_put_call(slot_doc.clone()), " in "]
+    } else {
+        Document::Nil
+    };
     docvec![
+        store,
         "let ",
         leaf::var(result_var.clone()),
         " = call 'erlang':'throw'({'$bt_nlr', ",
@@ -783,7 +807,7 @@ fn render_ensure_foreign_clause(
     let store = match foreign.store {
         Some(version) => docvec![
             "let _ = ",
-            cell_put_call(leaf::var(super::super::util::versioned_var(
+            cell_put_unwound_call(leaf::var(super::super::util::versioned_var(
                 "StateAcc", version
             ))),
             " in ",

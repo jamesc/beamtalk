@@ -167,50 +167,51 @@ TestCase subclass: ActorClosureCellTest
     self assert: c performedCleanupInALoopAfterReturn equals: 2
     self assert: c n equals: 2
 
-  // PIN-BUG BT-4459: a block this actor created, run by another actor,
-  // returns here with its creation-time capture, and the method commits that
-  // copy: the write made after the block's creation is lost (should be 5).
+  // ADR 0146 (BT-4535, fixes BT-4459): a block this actor created, run by
+  // another actor, returns here with its creation-time capture. The method
+  // commits the cell, so the write made after the block's creation is kept.
   testAwayBlocksReturnKeepsTheOwnersWritesSinceItsCreation =>
     a := ClosureCellOwner spawn
     b := ClosureCellOwner spawn
     self assert: (a run: b) equals: 1
-    self assert: a n equals: 0
+    self assert: a n equals: 5
     // The `^` leaves `b`'s callback by a throw, so `b` keeps its entry state.
     self assert: b n equals: 0
 
-  // PIN-BUG BT-4459: the same through a `perform:`ed `ensure:` in the owner
-  // (should be 6: the write after creation, then the cleanup's).
+  // The same through a `perform:`ed `ensure:` in the owner: the write after
+  // the block's creation, then the cleanup's.
   testAwayBlocksReturnThroughAPerformedEnsureKeepsBothWrites =>
     a := ClosureCellOwner spawn
     b := ClosureCellOwner spawn
     self assert: (a runThroughPerformedEnsure: b) equals: 1
-    self assert: a n equals: 0
+    self assert: a n equals: 6
     self assert: b n equals: 0
 
-  // PIN-BUG BT-4459: a foreign `^` through another method's inlined
-  // `ensure: [self.n := 40]`: the cleanup stored its write to the cell, but
-  // the method commits the carried copy (should be 40).
+  // A foreign `^` through another method's inlined `ensure: [self.n := 40]`:
+  // the cleanup stored its write to the cell (ADR 0146 R1) and the method
+  // commits the cell.
   testForeignReturnThroughAnInlinedEnsureCommitsTheCleanupsWrite =>
     a := ClosureCellOwner spawn
     self assert: a foreignReturnThroughEnsure equals: 3
-    self assert: a n equals: 0
+    self assert: a n equals: 40
 
   // ADR 0146 R1 (BT-4534): a `^` from a block passed to another method of
   // the same actor unwinds through that method's inlined `ensure:`; the
   // cleanup's write is in the cell while the `^` is in flight, so the
-  // owner's own cleanup reads it. (What the owner finally commits is
-  // BT-4535's.)
+  // owner's own cleanup reads it, and the owner commits it (BT-4535).
   testForeignReturnLeavesTheCleanupsWriteInTheCell =>
     c := ClosureCellEnsure spawn
     rec := ClosureCellRecorder spawn
     self assert: (c foreignReturnThroughEnsure: rec) equals: 3
     self assert: rec last equals: 40
+    self assert: c n equals: 40
 
   testForeignReturnLeavesTheCleanupsWriteAfterACallInTheCell =>
     c := ClosureCellEnsure spawn
     rec := ClosureCellRecorder spawn
     self assert: (c foreignReturnThroughEnsureAfterACall: rec) equals: 3
     self assert: rec last equals: 41
+    self assert: c n equals: 41
 
   testEnsureCleanupSeesTheBodysLexicalWritesAfterAnError =>
     c := ClosureCellEnsure spawn

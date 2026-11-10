@@ -2988,21 +2988,15 @@ impl CoreErlangGenerator {
                             )
                         })?;
                         let new_state = self.current_state_var();
-                        let throw_var = self.fresh_temp_var("NlrThrow");
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                "let ",
-                                leaf::var(throw_var.clone()),
-                                " = call 'erlang':'throw'({'$bt_nlr', ",
-                                leaf::var(nlr_token),
-                                ", ",
-                                dispatch_value_doc,
-                                ", ",
-                                leaf::var(new_state),
-                                "}) in ",
-                            ],
+                        // BT-4535: the node stores `new_state` to the cell
+                        // before the throw where the cell is live.
+                        let (throw, throw_var) = self.nlr_throw_stmt(
+                            nlr_token,
+                            ValueRef::Doc(dispatch_value_doc),
+                            new_state,
                             span,
-                        ));
+                        );
+                        stmts.push(throw);
                         if is_last {
                             last_result = Some(ValueRef::Var(throw_var));
                         }
@@ -3032,21 +3026,14 @@ impl CoreErlangGenerator {
                             )
                         })?;
                         let new_state = self.current_state_var();
-                        let throw_var = self.fresh_temp_var("NlrThrow");
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                "let ",
-                                leaf::var(throw_var.clone()),
-                                " = call 'erlang':'throw'({'$bt_nlr', ",
-                                leaf::var(nlr_token),
-                                ", ",
-                                leaf::var(field_val_var),
-                                ", ",
-                                leaf::var(new_state),
-                                "}) in ",
-                            ],
+                        // BT-4535: as above.
+                        let (throw, throw_var) = self.nlr_throw_stmt(
+                            nlr_token,
+                            ValueRef::Var(field_val_var),
+                            new_state,
                             span,
-                        ));
+                        );
+                        stmts.push(throw);
                         if is_last {
                             last_result = Some(ValueRef::Var(throw_var));
                         }

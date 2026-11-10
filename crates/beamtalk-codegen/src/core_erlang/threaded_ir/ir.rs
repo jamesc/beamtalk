@@ -1130,13 +1130,25 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// `slot` is the state slot of the 4-tuple: one version renders bare, two
     /// or more render as a tuple in order.
     ///
-    /// No production caller yet: `^` throws are still opaque `Statement`s.
-    #[allow(dead_code)]
+    /// ADR 0137 §5 / ADR 0146: where the actor-state cell is live
+    /// (`cell_live`, an actor instance method's threaded body) the throw
+    /// stores its slot to the cell first (`cell_store`), so the cell is
+    /// current whenever a `^` starts: a cleanup the throw runs reads it, and
+    /// the method's NLR boundary commits it
+    /// (`beamtalk_actor_state:commit/2`). Built by
+    /// `CoreErlangGenerator::nlr_throw_stmt` for a `^` a conditional arm
+    /// lowers to `ThreadedIr` (BT-3374's self-send value, BT-3495's
+    /// field-write value); the generic `Return` lowering builds its throw as
+    /// text from the same `nlr_throw_stores_cell` decision.
     NlrThrow {
         token: TokenId,
         value: ValueRef,
         slot: Vec<VersionedVar>,
         result_var: String,
+        /// Whether the actor-state cell is live where the throw starts.
+        cell_live: bool,
+        /// Whether the throw stores its (single) slot to the cell first.
+        cell_store: bool,
         span: Span,
     },
 

@@ -43,12 +43,14 @@ code that still answers `{reply, R, NewState}` (native methods, ADR 0066
 instance-side extension funs, `beamtalk_actor:dispatch/4`): it stores
 `NewState` in the cell so the callback can `take/0` it. `protect/1` is the
 rollback for runtime catchers that continue after an error: it restores the
-cell to its value at entry before re-raising.
+cell to its value at entry before re-raising. A `^` that reaches its actor
+method commits the cell, not the copy the throw carries (`commit/2`, ADR 0146).
 
 ## Dependencies
 
-It depends on `beamtalk_error`, and on `beamtalk_dispatch` and `beamtalk_actor`
-only for `super_send/5` and `refresh/2`, which call them.
+It depends on `beamtalk_error` and `beamtalk_tagged_map`, and on
+`beamtalk_dispatch` and `beamtalk_actor` only for `super_send/5`, `refresh/2`
+and the test-build check in `commit/2`, which call them.
 """.
 
 -include("beamtalk.hrl").
@@ -67,6 +69,10 @@ only for `super_send/5` and `refresh/2`, which call them.
     get/3,
     view/2,
     nlr_state/2,
+    commit/2,
+    store_unwound/1,
+    enable_commit_check/1,
+    init_commit_check/0,
     refresh/2,
     refresh_carried/2,
     call_foreign/3,
@@ -87,6 +93,12 @@ only for `super_send/5` and `refresh/2`, which call them.
 %% key, so the committed state never keeps it (`beamtalk_actor:strip_local_temps/1`);
 %% the `$` keeps it apart from every threaded local (`__local__<name>`).
 -define(AWAY_OWNER, '__local__$nlr_away_owner').
+%% ADR 0146 (BT-4535): the persistent_term switch for the test-build check in
+%% `commit/2`, and the process-dictionary marker `store_unwound/1` leaves when a
+%% cleanup put the cell ahead of an in-flight `^`'s carried state.
+-define(CHECK_COMMIT, {?MODULE, check_commit}).
+-define(CELL_AHEAD, '$bt_nlr_cell_ahead').
+-define(CHECK_ENV, "BEAMTALK_CHECK_NLR_COMMIT").
 
 -type cell() :: {pid() | tuple(), map()} | undefined.
 -type capture() :: none | map().
@@ -246,6 +258,123 @@ nlr_state(Self, Capture) ->
         {true, State} -> State;
         false -> (away_capture(Self, '_', Capture))#{?AWAY_OWNER => owner_of(Self)}
     end.
+
+-doc """
+ADR 0146: the state an actor method commits when a `^` of its own reaches its
+NLR boundary (`{'reply', Value, commit(Self, Carried)}`). The cell is the one
+place the actor's fields live, so at home the commit is the cell as it stands:
+a cleanup's writes made while the `^` unwound are there, and the throw's own
+`__local__` keys are dead at the method boundary, so none is merged back (as
+`refresh/2` would). Away (an away `super_send/5` runs the method in another
+process, or no callback of this actor is running here) there is no cell of this
+actor's, and the commit is `Carried` unchanged, so `super_send/5`'s
+illegal-write check still sees what the method answered. Ownership is
+`at_home/1`'s; nothing compares two state maps to decide it.
+
+When the test-build check is on (`enable_commit_check/1`, or the
+`BEAMTALK_CHECK_NLR_COMMIT` environment variable at runtime start) a commit at
+home also asserts the invariant the cell commit relies on: the cell is current
+whenever a `^` starts. A `^` thrown at home stores its state to the cell (or
+carries the cell) as it throws, so on reaching its boundary its carried fields
+equal the cell unless something put the cell ahead on the way: a cleanup of
+another method's inlined `ensure:` (`store_unwound/1`). A `^` thrown away from
+home carries its creation-time capture, stamped by `nlr_state/2`, and is not
+checked. Any other difference raises `actor_nlr_stale_cell`.
+""".
+-spec commit(#beamtalk_object{}, term()) -> term().
+commit(Self, Carried) ->
+    case at_home(Self) of
+        {true, Cell} ->
+            case persistent_term:get(?CHECK_COMMIT, false) of
+                false -> Cell;
+                true -> check_commit(Self, Cell, Carried)
+            end;
+        false ->
+            Carried
+    end.
+
+-doc """
+ADR 0146 R1: store the writes an inlined `ensure:` cleanup made while a `^` of
+another method of this actor unwound through it, as `store/1` does. That throw
+is re-raised as it came, so the cell is now ahead of the state it carries; the
+test-build check in `commit/2` is told so.
+""".
+-spec store_unwound(map()) -> ok.
+store_unwound(State) when is_map(State) ->
+    case persistent_term:get(?CHECK_COMMIT, false) of
+        false -> ok;
+        true -> erlang:put(?CELL_AHEAD, true)
+    end,
+    store(State).
+
+-doc """
+Switch the test-build check in `commit/2` on (when the `BEAMTALK_CHECK_NLR_COMMIT`
+environment variable is set to anything but `0` or the empty string) at
+runtime start (`beamtalk_runtime_app`). Leaves it as it is otherwise, so no
+`persistent_term` write happens in a build that does not ask for the check.
+""".
+-spec init_commit_check() -> ok.
+init_commit_check() ->
+    case os:getenv(?CHECK_ENV) of
+        false -> ok;
+        "" -> ok;
+        "0" -> ok;
+        _ -> enable_commit_check(true)
+    end.
+
+-doc """
+Switch the test-build check in `commit/2` on or off. A `persistent_term`
+write, so never on a hot path: at runtime start (`init_commit_check/0`) or in
+a test.
+""".
+-spec enable_commit_check(boolean()) -> ok.
+enable_commit_check(true) ->
+    persistent_term:put(?CHECK_COMMIT, true);
+enable_commit_check(false) ->
+    _ = persistent_term:erase(?CHECK_COMMIT),
+    ok.
+
+-spec check_commit(#beamtalk_object{}, map(), term()) -> map().
+check_commit(Self, Cell, Carried) ->
+    Ahead = erlang:erase(?CELL_AHEAD) =:= true,
+    case
+        Ahead orelse not is_map(Carried) orelse maps:is_key(?AWAY_OWNER, Carried) orelse
+            beamtalk_actor:strip_local_temps(Carried) =:= beamtalk_actor:strip_local_temps(Cell)
+    of
+        true -> Cell;
+        false -> raise_stale_cell(Self, Cell, Carried)
+    end.
+
+-spec raise_stale_cell(#beamtalk_object{}, map(), map()) -> no_return().
+raise_stale_cell(#beamtalk_object{class = Class}, Cell, Carried) ->
+    Fields = beamtalk_actor:strip_local_temps(Carried),
+    Stale = lists:sort([
+        K
+     || K <- maps:keys(maps:merge(Fields, Cell)),
+        not beamtalk_tagged_map:is_local_temp_key(K),
+        maps:get(K, Fields, '$absent') =/= maps:get(K, Cell, '$absent')
+    ]),
+    Error0 = beamtalk_error:new(actor_nlr_stale_cell, Class),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        iolist_to_binary(
+            io_lib:format(
+                "~s's state cell was stale when a `^` reached its method: the throw carried "
+                "fields the cell did not hold (~p)",
+                [Class, Stale]
+            )
+        )
+    ),
+    Error2 = beamtalk_error:with_details(Error1, #{fields => Stale}),
+    beamtalk_error:raise(
+        beamtalk_error:with_hint(
+            Error2,
+            <<
+                "Compiler invariant (ADR 0146): the cell is current whenever a `^` starts. "
+                "A ThreadedIr lowering let a `^` start without storing the method's state."
+            >>
+        )
+    ).
 
 -doc """
 Run a `dispatch/4` exit that is not a compiled Beamtalk method (ADR 0137 §2): a

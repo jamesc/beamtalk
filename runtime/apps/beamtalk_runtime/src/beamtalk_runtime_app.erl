@@ -69,6 +69,10 @@ start(_StartType, _StartArgs) ->
     %% BT-3994: `supervise`'s start lock (owned here so it outlives callers).
     beamtalk_fifo_lock:ensure_table(),
 
+    %% ADR 0146 (BT-4535): the test-build check that an actor method's `^`
+    %% reaches its boundary with the cell current. Off unless asked for.
+    beamtalk_actor_state:init_commit_check(),
+
     %% ADR 0068 Phase 2c: Initialize protocol registry ETS table.
     beamtalk_protocol_registry:init(),
 
