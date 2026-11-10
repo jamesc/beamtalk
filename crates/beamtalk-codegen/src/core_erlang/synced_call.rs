@@ -1006,6 +1006,14 @@ impl CoreErlangGenerator {
     /// at `at`. Read off the shared selector table directly, not the
     /// classifier's answer, so a path that classifies such a send `No` before
     /// reaching the table is caught too.
+    ///
+    /// BT-4606: a send the table classifies [`SendUserCode::Never`] runs none
+    /// of its operands (`[^1] yourself`, `[^1] hash`, `x fieldAt: #y put:
+    /// [^1]`, `[^1] asType: Block`), so a `^` in one of its block literals
+    /// cannot throw from it, and it records nothing. Whatever later runs the
+    /// block (`b value`, `(... yourself) value`) receives it as a value, not
+    /// a literal: that send is a [`SendUserCode::ClosureOperand`] and is
+    /// judged on its own.
     fn note_nlr_operands(
         &mut self,
         receiver: &Expression,
@@ -1013,9 +1021,13 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
         at: Span,
     ) {
-        if send_user_code(receiver, selector, arguments) == SendUserCode::ClosureOperand {
-            let gap = self.make_unbracketed_send(selector.name().to_string(), at);
-            self.synced.nlr_closure_gaps.push(gap);
+        match send_user_code(receiver, selector, arguments) {
+            SendUserCode::Never => return,
+            SendUserCode::ClosureOperand => {
+                let gap = self.make_unbracketed_send(selector.name().to_string(), at);
+                self.synced.nlr_closure_gaps.push(gap);
+            }
+            _ => {}
         }
         let blocks =
             std::iter::once(receiver)

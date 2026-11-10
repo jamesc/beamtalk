@@ -511,7 +511,7 @@ fn resolve_current_package(path: &str) -> Option<String> {
 /// `CompilerOptions::dependency_extensions_unknown` — on when the manifest
 /// declares dependencies and not all of their extensions were on disk to
 /// load, by the rule `beamtalk lint` uses
-/// (`beamtalk_cli::dependency_extensions::dependency_extensions_unknown`).
+/// (`beamtalk_project::dependency_extensions::dependency_extensions_unknown`).
 fn merge_dependency_class_infos(
     path: &str,
     all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,

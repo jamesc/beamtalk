@@ -17,10 +17,10 @@ use super::super::nlr::NlrArmShape;
 use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCleanup,
-    EnsureForeignNlr, EnsureNlrRelay, FoldAccShape, FoldCarry, FrameId, LOCAL_STATE_KEY_PREFIX,
-    NlrCarry, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering,
-    RebindShape, RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadingMode, UserCodeRegion,
-    ValueRef, VersionPrefix, VersionedVar,
+    EnsureForeignNlr, EnsureNlrRelay, FoldAccShape, FoldCarry, ForeignCleanupBody, FrameId,
+    LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind,
+    RebindLowering, RebindShape, RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadingMode,
+    UserCodeRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -972,6 +972,12 @@ pub(in crate::core_erlang) enum ForeignStoreDefect {
     /// The clause stores a `StateAcc` version other than the cleanup's final
     /// one.
     StoresStaleVersion { stored: usize, expected: usize },
+    /// BT-4598: the clause shares the relay's cleanup
+    /// ([`ForeignCleanupBody::SharedWithRelay`]) but there is no relay of the
+    /// scope's own throw that runs it from the cell (no token, no relay, or
+    /// one that neither stores to the cell nor resumes with a `StateAcc`
+    /// version), so the clause has no cleanup to run.
+    SharedWithoutCellRelay,
 }
 
 /// What is wrong with an [`ThreadedStmt::OnDoCatch`] node
@@ -2152,9 +2158,12 @@ impl VerifyWalk<'_> {
                     self.errors
                         .push(VerifyError::EnsureCleanupLostOnNlr { defect, at: *span });
                 }
-                if let Some(defect) =
-                    check_ensure_foreign_store(*cell_live, *cleanup, foreign.as_ref())
-                {
+                if let Some(defect) = check_ensure_foreign_store(
+                    *cell_live,
+                    *cleanup,
+                    foreign.as_ref(),
+                    token.is_some().then_some(relay.as_ref()).flatten(),
+                ) {
                     self.errors
                         .push(VerifyError::EnsureForeignCleanupNotStored { defect, at: *span });
                 }
@@ -2285,12 +2294,23 @@ fn check_ensure_relay(
 /// `StateAcc` (`final_version`), the clause a foreign `$bt_nlr` takes stores
 /// that final version to the cell. A cleanup applied as a closure writes the
 /// cell in place and owes nothing; one that threads no write has nothing to
-/// store.
+/// store. BT-4598: a clause that shares the relay's cleanup
+/// ([`ForeignCleanupBody::SharedWithRelay`]) needs a relay of the scope's own
+/// throw (`own_relay`, `None` where the scope has no token) that runs it from
+/// the cell, whatever the cleanup: without one it has nothing to run.
 fn check_ensure_foreign_store(
     cell_live: bool,
     cleanup: EnsureCleanup,
     foreign: Option<&EnsureForeignNlr>,
+    own_relay: Option<&EnsureNlrRelay>,
 ) -> Option<ForeignStoreDefect> {
+    if foreign.is_some_and(|foreign| foreign.body == ForeignCleanupBody::SharedWithRelay)
+        && !own_relay.is_some_and(|relay| {
+            relay.cell_store && matches!(relay.rethrow, RethrowSlot::Version(_))
+        })
+    {
+        return Some(ForeignStoreDefect::SharedWithoutCellRelay);
+    }
     let EnsureCleanup::Inlined {
         final_version: Some(expected),
         ..

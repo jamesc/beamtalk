@@ -497,6 +497,7 @@ pub(crate) fn parse_class_info_from_meta_term(
         // BEAM metadata comes from successfully-compiled modules, whose
         // surfaces are complete by construction.
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less,
         is_typed,
         state,

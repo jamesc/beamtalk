@@ -36,6 +36,10 @@ sealed Object subclass: VbBench
 
   class subCounter -> VbSubCounter => VbSubCounter spawn
 
+  class pool -> VbPool => VbPool spawn
+
+  class cappedPool -> VbCappedPool => VbCappedPool spawn
+
   class adder -> Block(Integer, Integer) => [:x | x + 1]
 
   class list100 -> List(Integer) => (1 to: 100) asList
@@ -250,6 +254,23 @@ sealed Object subclass: VbBench
     last := 0
     n timesRepeat: [last := c count]
     last
+
+  // Rows 15a/15b (BT-4502): one child start and terminate per iteration.
+  class poolStartTerminate: n :: Integer pool: pool :: VbPool -> Integer =>
+    n
+      timesRepeat: [
+        child := pool startChild unwrap
+        (pool terminateChild: child) unwrap
+      ]
+    pool count
+
+  class cappedPoolStartTerminate: n :: Integer pool: pool :: VbCappedPool -> Integer =>
+    n
+      timesRepeat: [
+        child := pool startChild unwrap
+        (pool terminateChild: child) unwrap
+      ]
+    pool count
 
   class actorUpdate: n :: Integer c: c :: VbCounter -> Integer =>
     last := 0

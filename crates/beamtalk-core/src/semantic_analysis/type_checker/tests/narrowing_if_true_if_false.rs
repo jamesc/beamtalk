@@ -135,6 +135,7 @@ fn bt_2020_result_is_ok_if_true_if_false_preserves_my_val() {
     // Register a `MyVal` class so `MyVal new` yields `Known(MyVal)`.
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: "MyVal".into(),
         superclass: Some("Object".into()),
@@ -727,6 +728,7 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: eco_string("Weird"),
         superclass: Some(eco_string("Object")),

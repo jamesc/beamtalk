@@ -196,6 +196,7 @@ mod tests {
     fn base_class_info(name: &str, superclass: &str) -> ClassInfo {
         ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: eco(name),
             superclass: Some(eco(superclass)),

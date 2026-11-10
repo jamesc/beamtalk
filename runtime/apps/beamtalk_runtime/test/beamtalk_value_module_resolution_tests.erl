@@ -68,6 +68,8 @@ value_module_resolution_test_() ->
             fun resolution_follows_class_redefinition/0},
         {"module-less class resolves without a code_server call",
             fun module_less_class_makes_no_code_server_call/0},
+        {"builder-class new/lookup/has_method_local make no code_server call (BT-4056)",
+            fun module_less_class_paths_make_no_code_server_call/0},
         {"warm Value sends do no module-name string work (BT-4064)",
             fun warm_value_send_does_no_string_work/0},
         {"warm `class` builds no atoms and reads no registry (BT-4117)",
@@ -145,6 +147,72 @@ module_less_class_makes_no_code_server_call() ->
         ?assertEqual([], Calls)
     after
         stop_class(Pid)
+    end.
+
+module_less_class_paths_make_no_code_server_call() ->
+    %% BT-4056: module-less ancestors and the class itself must not be probed
+    %% by `new`, dispatch lookup or has_method_local/2. `new` runs inside the
+    %% class gen_server, so trace that process as well as the worker.
+    Base = start_class('ZzMlBase', undefined, 'Object'),
+    Sub = start_class('ZzMlSub', undefined, 'ZzMlBase'),
+    try
+        {_, Calls} = code_server_calls_traced([Base, Sub], fun() ->
+            _ = gen_server:call(Sub, {new, []}),
+            _ = gen_server:call(Base, {new, []}),
+            _ = beamtalk_dispatch:lookup(
+                foo, [], #{'$beamtalk_class' => 'ZzMlSub'}, 'ZzMlSub', #{}
+            ),
+            _ = beamtalk_object_class:has_method_local(Sub, foo)
+        end),
+        ?assertEqual([], Calls)
+    after
+        stop_class(Sub),
+        stop_class(Base)
+    end.
+
+code_server_calls_traced(ExtraPids, Fun) ->
+    Pattern = {code_server, call, 1},
+    Parent = self(),
+    Worker = spawn(fun() ->
+        receive
+            go -> ok
+        end,
+        Parent ! {result, self(), catch Fun()}
+    end),
+    erlang:trace_pattern(Pattern, true, [local]),
+    Pids = [Worker | ExtraPids],
+    try
+        lists:foreach(fun(P) -> 1 = erlang:trace(P, true, [call]) end, Pids),
+        Worker ! go,
+        Result =
+            receive
+                {result, Worker, R} -> R
+            after 5000 -> error(worker_timeout)
+            end,
+        lists:foreach(
+            fun(P) ->
+                Ref = erlang:trace_delivered(P),
+                receive
+                    {trace_delivered, P, Ref} -> ok
+                after 5000 -> error(trace_delivery_timeout)
+                end
+            end,
+            Pids
+        ),
+        {Result, collect_traced(Pids)}
+    after
+        erlang:trace_pattern(Pattern, false, [local]),
+        exit(Worker, kill)
+    end.
+
+collect_traced(Pids) ->
+    receive
+        {trace, P, call, {code_server, call, [Req]}} when is_pid(P) ->
+            case lists:member(P, Pids) of
+                true -> [Req | collect_traced(Pids)];
+                false -> collect_traced(Pids)
+            end
+    after 0 -> []
     end.
 
 warm_value_send_does_no_string_work() ->

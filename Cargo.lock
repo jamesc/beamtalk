@@ -459,8 +459,12 @@ version = "0.4.0"
 dependencies = [
  "beamtalk-core",
  "beamtalk-home",
+ "camino",
  "miette",
+ "serde",
  "tempfile",
+ "toml",
+ "tracing",
 ]
 
 [[package]]

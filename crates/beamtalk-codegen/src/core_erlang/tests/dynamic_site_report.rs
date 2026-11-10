@@ -348,3 +348,39 @@ fn alias_of_a_union_stays_dynamic() {
         "{hints:?}"
     );
 }
+
+/// BT-4486: a protocol-typed send names the protocol gate it failed.
+#[test]
+fn protocol_without_guardable_conformers_reports_protocol_gate() {
+    let hints = report_full(concat!(
+        "Object subclass: Caller\n",
+        "  run: n :: Namer => n protoLabel\n\n",
+        "Protocol define: Namer\n  protoLabel -> String\n",
+    ));
+    assert!(
+        hints.iter().any(|h| h.starts_with("Send 'protoLabel'")
+            && h.contains("protocol — no known conformer of Namer")),
+        "got {hints:?}"
+    );
+}
+
+#[test]
+fn protocol_with_too_many_conformers_reports_the_cap() {
+    let mut src = String::from(concat!(
+        "Object subclass: Caller\n",
+        "  run: n :: Namer => n protoLabel\n\n",
+        "Protocol define: Namer\n  protoLabel -> String\n\n",
+    ));
+    for i in 1..=5 {
+        src.push_str("sealed Value subclass: A");
+        src.push_str(&i.to_string());
+        src.push_str("\n  protoLabel -> String => \"a\"\n\n");
+    }
+    let hints = report_full(&src);
+    assert!(
+        hints
+            .iter()
+            .any(|h| h.starts_with("Send 'protoLabel'") && h.contains("protocol-too-many")),
+        "got {hints:?}"
+    );
+}

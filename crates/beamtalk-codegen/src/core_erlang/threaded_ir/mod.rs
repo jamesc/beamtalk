@@ -100,10 +100,10 @@ pub(super) use ir::RebindFrameKind;
 pub(super) use ir::STATIC_LOOP_FNS;
 pub(super) use ir::{
     BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCatchVars, EnsureCleanup,
-    EnsureForeignNlr, EnsureNlrRelay, FastPath, FoldAccShape, FoldCarry, FrameId, LoopCounter,
-    NlrCarry, NlrThrowShape, OnDoCatchVars, RethrowSlot, StateAccFallbackReason, ThreadedStmt,
-    ThreadedValue, ThreadingMode, TokenId, TryRegion, UserCodeRegion, ValueRef, VersionCounter,
-    VersionPrefix, VersionedVar,
+    EnsureForeignNlr, EnsureNlrRelay, FastPath, FoldAccShape, FoldCarry, ForeignCleanupBody,
+    FrameId, LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars, RethrowSlot,
+    StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId, TryRegion,
+    UserCodeRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
 pub(super) use ir::{COUNTED_LOOP_FN, LOOP_FN_STEM, REPEAT_LOOP_FN, WHILE_LOOP_FN};
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};

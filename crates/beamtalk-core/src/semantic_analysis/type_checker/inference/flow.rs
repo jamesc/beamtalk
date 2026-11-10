@@ -49,6 +49,90 @@ impl TypeChecker {
         }
     }
 
+    /// Bind the variables of a destructuring assignment, typing flat tuple
+    /// patterns from the right-hand side's positional type (BT-4487).
+    ///
+    /// A plain-variable element of a `{a, b}` pattern is typed like
+    /// `t at: i` would be (see `infer_literal_index_tuple_at`), except that an
+    /// `Object`, `Dynamic` or unresolved-generic position binds as
+    /// `Dynamic(Unknown)`: `Object` is never a useful typed-send target.
+    ///
+    /// `Nil` is dropped from the right-hand side (a nil value raises
+    /// `#pattern_mismatch`). The result must be a `Tuple(..)` whose arity
+    /// equals the pattern's, or a union whose every member is one; element
+    /// types are then the per-position union. Anything else (bare `Tuple`,
+    /// arity mismatch, mixed union, non-tuple patterns) falls back to
+    /// [`Self::bind_pattern_vars`]. Wildcard and literal elements bind nothing.
+    pub(in crate::semantic_analysis::type_checker) fn bind_destructure_vars(
+        pattern: &Pattern,
+        value_ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+    ) {
+        // Variables are bound by the fallback first so every name is
+        // defined; typed positions then overwrite their entry.
+        Self::bind_pattern_vars(pattern, env);
+        let Pattern::Tuple { elements, .. } = pattern else {
+            return;
+        };
+        let Some(positions) = Self::tuple_positions(&Self::non_nil_type(value_ty), elements.len())
+        else {
+            return;
+        };
+        for (element, ty) in elements.iter().zip(positions) {
+            if let Pattern::Variable(id) = element {
+                let is_dynamic_position = match &ty {
+                    InferredType::Dynamic(_) => true,
+                    InferredType::Known {
+                        class_name,
+                        type_args,
+                        ..
+                    } => {
+                        (class_name == "Object" && type_args.is_empty())
+                            || super::super::types::is_type_var_placeholder(class_name, hierarchy)
+                    }
+                    _ => false,
+                };
+                let bound = if is_dynamic_position {
+                    InferredType::Dynamic(DynamicReason::Unknown)
+                } else {
+                    ty
+                };
+                env.set_local(id.name.clone(), bound);
+            }
+        }
+    }
+
+    /// Per-position element types of `ty` if it is a `Tuple(..)` of exactly
+    /// `arity` positions, or a union of only such tuples (element-wise union).
+    fn tuple_positions(ty: &InferredType, arity: usize) -> Option<Vec<InferredType>> {
+        match ty {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } if class_name == "Tuple" && type_args.len() == arity && arity > 0 => {
+                Some(type_args.clone())
+            }
+            InferredType::Union { members, .. } => {
+                let rows: Vec<Vec<InferredType>> = members
+                    .iter()
+                    .map(|m| Self::tuple_positions(m, arity))
+                    .collect::<Option<_>>()?;
+                Some(
+                    (0..arity)
+                        .map(|i| {
+                            let col: Vec<InferredType> =
+                                rows.iter().map(|r| r[i].clone()).collect();
+                            InferredType::union_of(&col)
+                        })
+                        .collect(),
+                )
+            }
+            _ => None,
+        }
+    }
+
     /// Check whether a block's execution cannot fall through to the enclosing
     /// method's next statement.
     ///

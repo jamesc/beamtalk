@@ -34,6 +34,7 @@ fn sealed_parser(package: Option<&str>) -> ClassInfo {
         auto_ctors: None,
         handle_scope: None,
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         state: vec![],
         state_types: std::collections::HashMap::new(),

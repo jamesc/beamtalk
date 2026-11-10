@@ -1737,3 +1737,61 @@ wait_until(Pred, N) ->
             timer:sleep(10),
             wait_until(Pred, N - 1)
     end.
+
+%%====================================================================
+%% BT-4502: no class-chain walk when nothing is subscribed
+%%====================================================================
+
+no_subscribers_no_superclass_walk_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                build_hierarchy(),
+                ok = meck:new(beamtalk_class_metadata, [passthrough]),
+                try
+                    ok = beamtalk_announcements:announce('ButtonClicked', x),
+                    ok = beamtalk_announcements:system_announce('ButtonClicked', #{}),
+                    ?assertEqual(0, meck:num_calls(beamtalk_class_metadata, lookup_superclass, '_'))
+                after
+                    meck:unload(beamtalk_class_metadata)
+                end
+            end),
+            ?_test(begin
+                %% A superclass subscription added after an earlier (empty)
+                %% announce receives the next announce.
+                build_hierarchy(),
+                Sub = spawn_subscriber(self()),
+                try
+                    ok = beamtalk_announcements:announce('ButtonClicked', first),
+                    {ok, SubRef} = beamtalk_announcements:subscribe('UIEvent', Sub, h, false),
+                    ok = beamtalk_announcements:announce('ButtonClicked', second),
+                    ?assertMatch({SubRef, 'ButtonClicked', h, second}, expect_received())
+                after
+                    stop_subscriber(Sub)
+                end
+            end),
+            ?_test(begin
+                %% A consumed once-subscription leaves the announcer empty, so
+                %% the next announce does no walk.
+                build_hierarchy(),
+                Sub = spawn_subscriber(self()),
+                try
+                    {ok, _} = beamtalk_announcements:subscribe('UIEvent', Sub, h, true),
+                    ok = beamtalk_announcements:announce('ButtonClicked', once),
+                    {_, 'ButtonClicked', h, once} = expect_received(),
+                    ok = meck:new(beamtalk_class_metadata, [passthrough]),
+                    try
+                        ok = beamtalk_announcements:announce('ButtonClicked', again),
+                        ?assertEqual(
+                            0, meck:num_calls(beamtalk_class_metadata, lookup_superclass, '_')
+                        ),
+                        refute_received()
+                    after
+                        meck:unload(beamtalk_class_metadata)
+                    end
+                after
+                    stop_subscriber(Sub)
+                end
+            end)
+        ]
+    end}.

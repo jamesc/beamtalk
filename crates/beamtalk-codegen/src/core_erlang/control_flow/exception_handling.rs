@@ -58,9 +58,9 @@ use super::super::synced_call::ActorStateSource;
 use super::super::threaded_expr::ProducerTail;
 use super::super::threaded_ir::{
     self, BindOp, CatchClause, CatchEntry, CatchStep, EnsureCleanup, EnsureForeignNlr,
-    EnsureNlrRelay, FrameId, NlrCarry, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind,
-    RenderCtx, RethrowSlot, StateReadSite, ThreadedStmt, TryRegion, ValueRef, VersionPrefix,
-    VersionedVar,
+    EnsureNlrRelay, ForeignCleanupBody, FrameId, NlrCarry, NlrThrowShape, OnDoCatchVars,
+    RebindFrame, RebindFrameKind, RenderCtx, RethrowSlot, StateReadSite, ThreadedStmt, TryRegion,
+    ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use super::LocalWrite;
@@ -1614,17 +1614,36 @@ impl CoreErlangGenerator {
         // error path runs the cleanup with write-through off, so its writes
         // would die with the re-raise. A cleanup that threads no write has
         // nothing to store.
-        let foreign = if cell_boundary && cleanup_final.is_some() {
-            let (seed, cleanup) =
-                self.ensure_cleanup_from_cell(cleanup_block, families, arm, outer_version)?;
-            self.set_self_version(outer_self);
-            Some(EnsureForeignNlr {
-                seed,
-                store: Some(cleanup.state_version),
-                cleanup: cleanup.doc,
-            })
-        } else {
-            None
+        //
+        // BT-4598: where the relay of the scope's own throw already runs the
+        // cleanup from the cell (`cell_store`), the foreign clause shares that
+        // one compiled body instead of compiling the cleanup once more: the
+        // two seeds are the same cell refresh, so their final `StateAcc`
+        // versions are the same too. Each extra copy multiplies a nested
+        // `ensure:` in the cleanup, so the cleanup is compiled 3^depth times,
+        // not 4^depth.
+        let foreign = match &relay {
+            _ if !cell_boundary || cleanup_final.is_none() => None,
+            Some(EnsureNlrRelay {
+                cell_store: true,
+                rethrow: RethrowSlot::Version(version),
+                ..
+            }) => Some(EnsureForeignNlr {
+                body: ForeignCleanupBody::SharedWithRelay,
+                store: Some(*version),
+            }),
+            _ => {
+                let (seed, cleanup) =
+                    self.ensure_cleanup_from_cell(cleanup_block, families, arm, outer_version)?;
+                self.set_self_version(outer_self);
+                Some(EnsureForeignNlr {
+                    body: ForeignCleanupBody::Own {
+                        seed,
+                        cleanup: cleanup.doc,
+                    },
+                    store: Some(cleanup.state_version),
+                })
+            }
         };
         Ok(self.ensure_catch(
             EnsureCatchTriple {

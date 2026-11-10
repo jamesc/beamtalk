@@ -135,6 +135,13 @@ const CALLS: &[(&str, &str, bool)] = &[
         "r := (self flip: p) ifTrue: [^8]",
         true,
     ),
+    // BT-4606: a send classified as never running user code
+    // (`SendUserCode::Never`) never runs its block operands, so a `^` in one
+    // can never throw from it: nothing to store, and nothing to report.
+    ("never_yourself", "r := [^1] yourself", false),
+    ("never_hash", "r := [^1] hash", false),
+    ("never_field_at_put", "p fieldAt: #n put: [^1]", false),
+    ("never_as_type", "r := [^1] asType: Block", false),
 ];
 
 /// Where the call sits.

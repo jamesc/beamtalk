@@ -128,7 +128,7 @@ Most FFI calls run through `beamtalk_erlang_proxy`, which unwraps `String` argum
 
 Static types aren't checked at run time, so the direct call also checks each argument (`is_number`, `is_atom` or `is_pid`) and goes through the proxy when one fails. It raises the same structured errors: its error path hands the exception to the proxy's classifier, `badarg` retry included.
 
-Only a `-spec` extracted from a `.beam` proves a call; a hand-written stub signature never removes a coercion. The proof uses the specs the compiler saw: a project build reads OTP and dependency specs, while `beamtalk build-stdlib` and `beamtalk test` on `stdlib/` read only the runtime's own modules. When a spec change adds or removes a proof, `beamtalk build` recompiles the callers. A call the table can't prove behaves exactly as before.
+Only a `-spec` extracted from a `.beam` proves a call; a hand-written stub signature never removes a coercion. Only first-party specs prove a result: OTP, the runtime's `beamtalk_*` modules, and the package's own `native/` modules. Specs from path/git Beamtalk dependencies and hex/rebar3 dependencies never do, because Dialyzer specs are not enforced: a wrong third-party `-spec` (say `integer()` on a function that returns `{ok, X}`) would otherwise change what the call returns. Calls into dependency modules stay on the proxy. A project build reads OTP, `native/` and dependency specs (dependencies for type checking only), while `beamtalk build-stdlib` and `beamtalk test` on `stdlib/` read only the runtime's own modules. When a spec change adds or removes a proof, `beamtalk build` recompiles the callers. A call the table can't prove behaves exactly as before.
 
 FFI is the right choice when:
 - You need to call a handful of Erlang functions

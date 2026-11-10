@@ -84,6 +84,10 @@ routing_conformance_test_() ->
             fun reserved_tuples_are_not_plain_values/0},
         {"with no override, isKindOfBuiltin answers the test for plain values only",
             fun is_kind_of_builtin_answers_test_without_override/0},
+        {"every row's type-test guard agrees with Object>>isKindOf: for every sample",
+            fun guards_agree_with_is_kind_of/0},
+        {"a deliberately broken guard is caught by the agreement check",
+            fun broken_guard_is_caught/0},
         {"an isKindOf: override below Object makes isKindOfBuiltin send",
             fun is_kind_of_override_makes_builtin_send/0},
         {"rewritten selectors are rewritten before classification",
@@ -310,6 +314,108 @@ is_kind_of_override_makes_builtin_send() ->
     %% raises the flag.
     ?assert(beamtalk_default_method:overridden_anywhere('printString')),
     ok = beamtalk_default_method:note_override('Object', 'isKindOf:').
+
+%% BT-4495: the lowering of `x isKindOf: C` to C's routing-fixture type test is
+%% sound only if the guard equals `Object>>isKindOf:` for every value. Check
+%% it here, against the dynamic send (never the lowered literal or
+%% `kind_of_builtin/4`), so it runs on every run whatever `isKindOf:`
+%% extensions other tests registered.
+guards_agree_with_is_kind_of() ->
+    ?assertEqual([], guard_disagreements(rows())).
+
+%% The check has teeth: each broken guard below must be reported.
+broken_guard_is_caught() ->
+    Broken = fun(Class, Guard) ->
+        [Row] = [R#{<<"guard">> := Guard} || R <- rows(), maps:get(<<"class">>, R) =:= Class],
+        guard_disagreements([Row])
+    end,
+    ?assertNotEqual(
+        [], Broken(<<"Integer">>, #{<<"kind">> => <<"bif">>, <<"bif">> => <<"is_float">>})
+    ),
+    ?assertNotEqual(
+        [], Broken(<<"Binary">>, #{<<"kind">> => <<"bif">>, <<"bif">> => <<"is_binary">>})
+    ),
+    ?assertNotEqual(
+        [], Broken(<<"Symbol">>, #{<<"kind">> => <<"bif">>, <<"bif">> => <<"is_atom">>})
+    ),
+    ?assertNotEqual(
+        [], Broken(<<"Tuple">>, #{<<"kind">> => <<"bif">>, <<"bif">> => <<"is_tuple">>})
+    ).
+
+%% {Class, Sample, Guard answer, send answer} for every guarded row and sample
+%% where the two differ.
+guard_disagreements(Rows) ->
+    Samples = agreement_samples(),
+    [
+        {ClassBin, Sample, Guarded, Sent}
+     || #{<<"class">> := ClassBin, <<"guard">> := Guard} <- Rows,
+        Guard =/= null,
+        Sample <- Samples,
+        begin
+            K = beamtalk_class_registry:resolve_class_object(binary_to_atom(ClassBin, utf8)),
+            Sent = beamtalk_message_dispatch:send(Sample, 'isKindOf:', [K]),
+            Guarded = guard_holds(Guard, Sample),
+            Guarded =/= Sent
+        end
+    ].
+
+%% Every routed sample, plus values the fixture has no row for: empty
+%% containers, every reserved tuple head, a class object.
+agreement_samples() ->
+    %% A future is awaited before `isKindOf:` runs (the send answers for its
+    %% value) and `plain_value/1` keeps it out of the lowered test, so it is no
+    %% sample here.
+    Reserved = [
+        reserved_sample(binary_to_atom(T, utf8))
+     || #{<<"tag">> := T} <- reserved_tuples(), T =/= <<"beamtalk_future">>
+    ],
+    [S || {_Row, S, _Target} <- routed_samples()] ++
+        Reserved ++
+        [
+            {},
+            [],
+            <<>>,
+            <<"abc">>,
+            true,
+            false,
+            nil,
+            #{},
+            'a',
+            {a, 1},
+            {a, b, c, d},
+            beamtalk_class_registry:resolve_class_object('Integer')
+        ].
+
+reserved_tuples() ->
+    #{<<"reserved_tuple_tags">> := Tags} = fixture(),
+    Tags.
+
+%% Interprets a fixture guard (see `_fields.guard` in the fixture).
+guard_holds(#{<<"kind">> := <<"bif">>, <<"bif">> := Bif}, V) ->
+    erlang:apply(erlang, binary_to_atom(Bif, utf8), [V]);
+guard_holds(#{<<"kind">> := <<"string_tag">>}, V) ->
+    is_string_tag(V);
+guard_holds(#{<<"kind">> := <<"binary_or_string_tag">>}, V) ->
+    is_binary(V) orelse is_string_tag(V);
+guard_holds(#{<<"kind">> := <<"unaligned_bitstring">>}, V) ->
+    is_bitstring(V) andalso not is_binary(V);
+guard_holds(#{<<"kind">> := <<"symbol">>}, V) ->
+    is_atom(V) andalso V =/= true andalso V =/= false andalso V =/= nil;
+guard_holds(#{<<"kind">> := <<"exact_atom">>, <<"atom">> := A}, V) ->
+    V =:= binary_to_atom(A, utf8);
+guard_holds(#{<<"kind">> := <<"untagged_map">>}, V) ->
+    is_map(V) andalso not maps:is_key('$beamtalk_class', V) andalso
+        not maps:is_key('__class_mod__', V);
+guard_holds(#{<<"kind">> := <<"unreserved_tuple">>}, V) ->
+    is_tuple(V) andalso
+        (tuple_size(V) =:= 0 orelse
+            not lists:any(fun(T) -> element(1, V) =:= T end, reserved_heads())).
+
+is_string_tag({beamtalk_string, _}) -> true;
+is_string_tag(_) -> false.
+
+reserved_heads() ->
+    atoms([T || #{<<"tag">> := T} <- reserved_tuples()]).
 
 reserved_sample(beamtalk_string) ->
     {beamtalk_string, <<"s">>};
