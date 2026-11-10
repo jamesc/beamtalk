@@ -83,7 +83,7 @@ fn programs() -> Vec<(usize, String)> {
                 out.push((
                     c,
                     format!(
-                        "{header}  {sig}\n    s := 0.\n    t := 0.\n    blk := nil.\n    {nested}.\n    s + t\n"
+                        "{header}  {sig}\n    s := 0\n    t := 0\n    blk := nil\n    {nested}\n    s + t\n"
                     ),
                 ));
             }
@@ -151,7 +151,7 @@ fn bare_and_tuple_folds_compile_clean_in_every_context() {
 /// agree with the oracle (a failure shared by both builds would agree).
 /// Writes `bt4116_pin` (production codegen) and `bt4116_pino` (oracle).
 fn write_pinned_modules(dir: &Path) {
-    let pinned = "Object subclass: Probe\n  state: n = 7\n\n  run =>\n    s := 0.\n    t := 0.\n    blk := nil.\n    #(1, 2, 3) do: [:e | s := s + e. e =:= 2 ifTrue: [^s]].\n    s + t\n";
+    let pinned = "Object subclass: Probe\n  state: n = 7\n\n  run =>\n    s := 0\n    t := 0\n    blk := nil\n    #(1, 2, 3) do: [:e | s := s + e. e =:= 2 ifTrue: [^s]]\n    s + t\n";
     assert_parses(pinned);
     std::fs::write(
         dir.join("bt4116_pin.core"),
