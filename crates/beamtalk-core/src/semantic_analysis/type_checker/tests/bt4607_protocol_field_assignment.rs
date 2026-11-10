@@ -55,9 +55,24 @@ fn field_accepts_a_structural_conformer() {
   state: s :: Sized = "abc"
   put => self.q := Duck new
   putSized => self.s := "abc"
+  putAny: x :: Quacker => self.q := x
 "#,
     ));
     assert!(msgs.is_empty(), "{msgs:#?}");
+}
+
+#[test]
+fn field_rejects_a_protocol_value_it_does_not_subsume() {
+    let msgs = checker_messages(&source_with(
+        r"
+  state: q :: Quacker = Duck new
+  put: x :: Sized => self.q := x
+",
+    ));
+    assert_eq!(
+        msgs,
+        vec!["Type mismatch: field `q` declared as Quacker, got Sized".to_string()]
+    );
 }
 
 #[test]
