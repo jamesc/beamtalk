@@ -21,6 +21,18 @@
     "comments": {
       "patterns": [
         {
+          "comment": "A ```beamtalk (or ```btscript) fence inside `///` doc comments: the `///` prefixes and fence lines stay comments, and the code between them is highlighted as Beamtalk. Ends at the closing ``` line, or at the first line that is not a `///` line so an unclosed fence cannot leak into the code below.",
+          "begin": "^\\s*///\\s*```(?:beamtalk|btscript)\\s*$",
+          "beginCaptures": { "0": { "name": "comment.line.documentation.beamtalk" } },
+          "end": "^\\s*///\\s*```\\s*$|^(?!\\s*///)",
+          "endCaptures": { "0": { "name": "comment.line.documentation.beamtalk" } },
+          "contentName": "meta.embedded.block.beamtalk",
+          "patterns": [
+            { "name": "comment.line.documentation.beamtalk", "match": "^\\s*///" },
+            { "include": "$self" }
+          ]
+        },
+        {
           "comment": "BT-3237/BT-3261: `// === Name ===` section-divider banner (BT-2601's category-recognition rule, source_analysis::method_category::parse_divider_name) — matched ahead of the plain line-comment pattern below so it renders visually distinct (bold heading name, dimmed border) instead of as an ordinary comment. Kept in sync with parse_divider_name by a shared fixture both a Rust test and a JS/Oniguruma test consume — see crates/beamtalk-core/tests/section_divider_grammar_conformance.rs and editors/vscode/src/__tests__/sectionDividerGrammar.test.ts; extend that fixture, not just this regex, on any future change. `(?<!/)` / `(?!/)` around the slashes excludes `///` doc comments (and any longer run) — without both, a lookahead alone still lets the regex match starting at the 2nd/3rd slash of a `///` line, since the character immediately after that inner `//` is a space, not another `/`. The opening border `((?>={3,}))` is an atomic group so its captured run-length can never backtrack shorter once matched (mirrors parse_divider_name's independent `take_while` counts from each end). `\\s*+` before the name is possessive (optional, but once matched can't give characters back) so whitespace can never leak into the name capture — without that, a whitespace-only 'name' like `// ===  ===` would wrongly match (parse_divider_name trims it to empty and rejects). The closing border `(\\1)` is a backreference to the opening run (not an independent capture), separated from the name by `(?:\\s+|(?<!=))` — real whitespace, or (when the name sits directly against the border, e.g. `// ===Name===`) a zero-width assertion that the name's last character isn't itself `=` — so a length mismatch like `// === Name ====`, which parse_divider_name rejects, still fails to match here even with the border-name gap now optional; a naive `\\s+` → `\\s*` substitution alone reopens exactly that hole by letting the border's extra `=` characters get silently absorbed into the name capture instead. `(?!=)` after the backreference is a second, defense-in-depth guard against the same kind of run-length ambiguity on the closing side.",
           "name": "comment.line.double-slash.section-divider.beamtalk",
           "match": "(?<!/)//(?!/)\\s*((?>={3,}))\\s*+(.+?)(?:\\s+|(?<!=))(\\1)(?!=)\\s*$",
@@ -143,12 +155,26 @@
           "match": "\\b(true|false)\\b"
         },
         {
-          "name": "keyword.other.sealed.beamtalk",
-          "match": "\\bsealed\\b"
+          "comment": "Type alias: `[internal] type Name = ...` (or `type Name(T) = ...`). Listed before the modifier rule so it wins the tie at line start.",
+          "match": "^\\s*(?:(internal)\\s+)?(type)\\s+([A-Z][a-zA-Z0-9_]*)(?=\\s*[(=])",
+          "captures": {
+            "1": { "name": "keyword.other.modifier.beamtalk" },
+            "2": { "name": "keyword.other.type.beamtalk" },
+            "3": { "name": "entity.name.type.beamtalk" }
+          }
         },
         {
-          "name": "keyword.other.abstract.beamtalk",
-          "match": "\\babstract\\b"
+          "comment": "Declaration modifiers at line start: class headers (`abstract sealed typed internal`) and method definitions (`class internal sealed`). These are contextual keywords, so they are only matched as a leading run on the line, and not when the line is an assignment to a variable of the same name (`class := ...`). A unary method name directly after the run is scoped as a function name, as `class name =>` already was.",
+          "match": "^\\s*((?:(?:abstract|sealed|typed|internal|class)\\s+)+)(?!:=)(?:([a-zA-Z_][a-zA-Z0-9_]*)(?=\\s*(?:->|=>)))?",
+          "captures": {
+            "1": {
+              "patterns": [
+                { "name": "keyword.other.modifier.beamtalk", "match": "\\b(?:abstract|sealed|typed|internal)\\b" },
+                { "name": "storage.modifier.class.beamtalk", "match": "\\bclass\\b" }
+              ]
+            },
+            "2": { "name": "entity.name.function.beamtalk" }
+          }
         }
       ]
     },
@@ -212,12 +238,31 @@
           }
         },
         {
-          "match": "\\b(state:)\\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\\s*(::)\\s*([A-Z][a-zA-Z0-9_]*))?",
+          "match": "\\b(Protocol)\\s+(define:)\\s+([A-Z][a-zA-Z0-9_]*)",
           "captures": {
-            "1": { "name": "keyword.other.state.beamtalk" },
-            "2": { "name": "variable.other.field.beamtalk" },
-            "3": { "name": "keyword.operator.type-annotation.beamtalk" },
-            "4": { "name": "entity.name.type.class.beamtalk" }
+            "1": { "name": "entity.other.inherited-class.beamtalk" },
+            "2": { "name": "keyword.other.define.beamtalk" },
+            "3": { "name": "entity.name.type.class.beamtalk" }
+          }
+        },
+        {
+          "comment": "Backing Erlang module: a class header's `... subclass: Foo native: beamtalk_foo`, or a type stub's `declare native: lists`. Anchored to end of line so an ordinary `native:` keyword send mid-expression is unaffected.",
+          "match": "\\b(?:(declare)\\s+)?(native:)\\s+([a-z][a-zA-Z0-9_]*)\\s*$",
+          "captures": {
+            "1": { "name": "keyword.other.declare.beamtalk" },
+            "2": { "name": "keyword.other.native.beamtalk" },
+            "3": { "name": "entity.name.namespace.beamtalk" }
+          }
+        },
+        {
+          "comment": "Slot declarations, optionally `late` (ADR 0124). `late` is a contextual keyword only directly before these.",
+          "match": "\\b(?:(late)\\s+)?(state:|field:|classState:)\\s+([a-zA-Z_][a-zA-Z0-9_]*)(?:\\s*(::)\\s*([A-Z][a-zA-Z0-9_]*))?",
+          "captures": {
+            "1": { "name": "keyword.other.modifier.beamtalk" },
+            "2": { "name": "keyword.other.declaration.beamtalk" },
+            "3": { "name": "variable.other.field.beamtalk" },
+            "4": { "name": "keyword.operator.type-annotation.beamtalk" },
+            "5": { "name": "entity.name.type.class.beamtalk" }
           }
         }
       ]
