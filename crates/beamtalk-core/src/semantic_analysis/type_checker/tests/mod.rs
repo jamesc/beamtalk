@@ -58,6 +58,7 @@ mod bt4487_destructure_tuple_types;
 mod bt4512_cascade_drops_update;
 mod bt4515_object_then;
 mod bt4526_static_dnu_known_receiver;
+mod bt4594_protocol_receiver_object_methods;
 mod bt4607_protocol_field_assignment;
 mod bt4635_and_or_type_test_narrowing;
 mod bt4636_block_write_widening;

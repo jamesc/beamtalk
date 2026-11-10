@@ -45,6 +45,19 @@ use super::types::{
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 
+/// How a send resolves on a protocol-typed receiver — see
+/// [`TypeChecker::protocol_send_resolution`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ProtocolSendResolution {
+    /// One of the protocol's own (required or provided) selectors.
+    Protocol,
+    /// Not a protocol selector, but a method every object answers; its
+    /// signature comes from `Object`'s method table.
+    Object,
+    /// Neither — a does-not-understand.
+    Unknown,
+}
+
 /// Outcome of walking a `Union`-typed argument's members against one
 /// expected simple type, via [`TypeChecker::classify_union_members`] +
 /// [`TypeChecker::is_type_compatible`].
@@ -609,6 +622,46 @@ impl TypeChecker {
         }
     }
 
+    /// How an instance-side send of `selector` resolves on a receiver typed
+    /// as protocol `name`, or `None` when `name` is not a registered
+    /// protocol (a hierarchy class — including the LSP's synthetic protocol
+    /// entries, which inherit `Object` already — or an unknown name).
+    ///
+    /// A protocol-typed value is still an object (BT-4594): the protocol's
+    /// own selectors (required ∪ provided, through `extending:`) win, then
+    /// the methods every object answers (`Object`/`ProtoObject`). This is
+    /// the one rule both DNU validation ([`Self::check_instance_selector`])
+    /// and inference (the `Known` and union receiver paths) read, so they
+    /// cannot disagree about which selectors a protocol receiver
+    /// understands. An `Object` method's return type comes from `Object`'s
+    /// method table; a send of the protocol's own selector still infers
+    /// `Dynamic` on both paths.
+    pub(super) fn protocol_send_resolution(
+        &self,
+        name: &str,
+        selector: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> Option<ProtocolSendResolution> {
+        if hierarchy.has_class(name) {
+            return None;
+        }
+        let registry = self.protocol_registry.as_deref()?;
+        let info = registry.get(name)?;
+        Some(
+            if info
+                .all_conformance_selectors(registry)
+                .iter()
+                .any(|s| s.as_str() == selector)
+            {
+                ProtocolSendResolution::Protocol
+            } else if hierarchy.resolves_selector(WellKnownClass::Object.as_str(), selector) {
+                ProtocolSendResolution::Object
+            } else {
+                ProtocolSendResolution::Unknown
+            },
+        )
+    }
+
     /// Check if an instance-side selector is valid for a known class.
     pub(super) fn check_instance_selector(
         &mut self,
@@ -637,25 +690,23 @@ impl TypeChecker {
                 class_name
             };
         if !hierarchy.has_class(effective_class) {
-            // If the type is a protocol (from respondsTo: narrowing),
-            // validate the selector against the protocol's required methods.
-            if let Some(ref registry) = self.protocol_registry {
-                if let Some(proto_info) = registry.get(effective_class) {
-                    let required = proto_info.all_required_selectors(registry);
-                    if !required.iter().any(|s| s.as_str() == selector) {
-                        self.emit_unknown_selector_warning(
-                            class_name,
-                            effective_class,
-                            selector,
-                            span,
-                            hierarchy,
-                            false,
-                            Severity::Hint,
-                            None,
-                            None,
-                        );
-                    }
-                }
+            // A protocol-typed receiver (a `:: P` annotation, or
+            // `respondsTo:` narrowing) answers its protocol's selectors and
+            // every `Object` method; anything else is a DNU (BT-4594).
+            if self.protocol_send_resolution(effective_class, selector, hierarchy)
+                == Some(ProtocolSendResolution::Unknown)
+            {
+                self.emit_unknown_selector_warning(
+                    class_name,
+                    effective_class,
+                    selector,
+                    span,
+                    hierarchy,
+                    false,
+                    Severity::Hint,
+                    None,
+                    None,
+                );
             }
             return;
         }
