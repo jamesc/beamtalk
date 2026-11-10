@@ -8,6 +8,7 @@
 //! does-not-understand.
 
 use super::common::*;
+use crate::source_analysis::Severity;
 
 /// Type and DNU diagnostic messages for `source`, after asserting it parses.
 fn checker_messages(source: &str) -> Vec<String> {
@@ -170,4 +171,62 @@ fn union_member_protocol_unknown_selector_is_missing() {
         msgs[0].contains("Callable") && msgs[0].contains("Integer"),
         "{msgs:#?}"
     );
+}
+
+/// DNU diagnostics for `source` as `(severity, message)` pairs.
+fn dnu_diagnostics(source: &str) -> Vec<(Severity, String)> {
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    crate::semantic_analysis::analyse(&module)
+        .diagnostics
+        .into_iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Dnu))
+        .map(|d| (d.severity, d.message.to_string()))
+        .collect()
+}
+
+#[test]
+fn protocol_dnu_is_a_hint_on_bare_and_union_receivers() {
+    // A conformer may override `doesNotUnderstand:`, so a protocol's method
+    // set is never closed: the DNU stays a `Hint` whether the protocol is the
+    // whole receiver type or one member of a union (ADR 0100 Rule 1).
+    let diags = dnu_diagnostics(&source_with(
+        r"
+  class bare: h :: Callable -> Object => h frobnicate
+  class union: h :: Callable | Integer -> Object => h frobnicate
+",
+    ));
+    assert_eq!(diags.len(), 2, "{diags:#?}");
+    assert!(
+        diags.iter().all(|(sev, _)| *sev == Severity::Hint),
+        "{diags:#?}"
+    );
+}
+
+/// A `Wire` protocol with a `class label` requirement and `{body}` appended
+/// verbatim as the class methods of a typed `P`.
+fn wire_source_with(body: &str) -> String {
+    format!(
+        r"
+Protocol define: Wire
+  class label -> String
+
+typed Object subclass: P
+{body}"
+    )
+}
+
+#[test]
+fn class_of_a_protocol_receiver_is_the_protocol_metatype() {
+    // `w class` is some class conforming to `Wire` (ADR 0144), not
+    // `Object class`, so its `class` requirement resolves with its type.
+    let msgs = checker_messages(&wire_source_with(
+        r"
+  class go: w :: Wire -> String => w class label
+  class bad: w :: Wire -> Integer => w class label
+",
+    ));
+    assert_eq!(msgs.len(), 1, "{msgs:#?}");
+    assert!(msgs[0].contains("String"), "{msgs:#?}");
 }

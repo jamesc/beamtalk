@@ -728,18 +728,15 @@ impl TypeChecker {
             // answers (`printString`, `respondsTo:`) resolves through
             // `Object`'s method table for its argument and return types
             // (BT-4594).
-            let resolve_class: EcoString =
-                if self.protocol_send_resolution(class_name, &selector_name, hierarchy)
-                    == Some(ProtocolSendResolution::Object)
-                {
-                    EcoString::from(WellKnownClass::Object.as_str())
-                } else if !class_name.contains('|')
-                    && !matches!(selector, MessageSelector::Binary(_))
-                {
-                    EcoString::from(super::super::method_resolution_class(class_name))
-                } else {
-                    class_name.clone()
-                };
+            let via_object = self.protocol_send_resolution(class_name, &selector_name, hierarchy)
+                == Some(ProtocolSendResolution::Object);
+            let resolve_class: EcoString = if via_object {
+                EcoString::from(WellKnownClass::Object.as_str())
+            } else if !class_name.contains('|') && !matches!(selector, MessageSelector::Binary(_)) {
+                EcoString::from(super::super::method_resolution_class(class_name))
+            } else {
+                class_name.clone()
+            };
             // Skip argument type check for binary messages only when
             // `check_binary_operand_types` already ran above (the Known/Known
             // case) — it provides more specific warnings for
@@ -822,6 +819,12 @@ impl TypeChecker {
                     // (`obj class new`, `self species withAll:`) route through
                     // `find_class_method`. Pre-0083 this returned `Dynamic`.
                     if matches!(ret_ty, DeclaredType::SelfClass) {
+                        // A protocol receiver's class is some class
+                        // conforming to it: the protocol metatype (ADR 0144),
+                        // not the `Object class` its signature came from.
+                        if via_object {
+                            return InferredType::protocol_meta(class_name.clone());
+                        }
                         // For a singleton receiver, `resolve_class` is
                         // `Symbol` so `#text class` is `Symbol class` (`#text` is a
                         // Symbol at runtime), not a phantom `Meta("#text")`.
@@ -1362,20 +1365,25 @@ impl TypeChecker {
             // `Dynamic` (as the bare `Known` path infers it), a method every
             // object answers resolves through `Object`, and anything else is
             // a missing member, exactly as DNU validation reports it.
-            let resolve_name: &str =
-                match self.protocol_send_resolution(member_name, selector, hierarchy) {
-                    Some(ProtocolSendResolution::Protocol) => {
-                        responding_count += 1;
-                        return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
-                        continue;
-                    }
-                    Some(ProtocolSendResolution::Unknown) => {
-                        missing_names.push(member_name.clone());
-                        continue;
-                    }
-                    Some(ProtocolSendResolution::Object) => WellKnownClass::Object.as_str(),
-                    None => super::super::method_resolution_class(member_name),
-                };
+            let protocol_resolution =
+                self.protocol_send_resolution(member_name, selector, hierarchy);
+            let resolve_name: &str = match protocol_resolution {
+                Some(ProtocolSendResolution::Protocol) => {
+                    responding_count += 1;
+                    return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
+                    continue;
+                }
+                Some(ProtocolSendResolution::Unknown) => {
+                    // Reported missing, but a conformer may override
+                    // `doesNotUnderstand:`, so — like a bare protocol
+                    // receiver — this member caps the union DNU at `Hint`.
+                    uncertain_member_count += 1;
+                    missing_names.push(member_name.clone());
+                    continue;
+                }
+                Some(ProtocolSendResolution::Object) => WellKnownClass::Object.as_str(),
+                None => super::super::method_resolution_class(member_name),
+            };
             // ADR 0100 Rule 1: route this member's completeness
             // classification through the shared classifier instead of
             // re-deriving it — the two checks this replaced (unknown class,
@@ -1403,8 +1411,16 @@ impl TypeChecker {
                             // the concrete union member (was Dynamic pre-0083).
                             // Use `resolve_name` so a singleton member
                             // yields `Symbol class` (`#foo class` is `Symbol` at
-                            // runtime), not a phantom `Meta("#foo")`.
-                            return_types.push(InferredType::meta(EcoString::from(resolve_name)));
+                            // runtime), not a phantom `Meta("#foo")`. A
+                            // protocol member's class is its protocol
+                            // metatype (ADR 0144), as on the bare path.
+                            return_types.push(
+                                if protocol_resolution == Some(ProtocolSendResolution::Object) {
+                                    InferredType::protocol_meta(member_name.clone())
+                                } else {
+                                    InferredType::meta(EcoString::from(resolve_name))
+                                },
+                            );
                         } else if let DeclaredType::ClassOf(meta_class) = ret_ty
                             && hierarchy.has_class(meta_class)
                         {
