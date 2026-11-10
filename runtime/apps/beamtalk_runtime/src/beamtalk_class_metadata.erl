@@ -1479,7 +1479,10 @@ Walks the ancestors' published `defines_user_class_new1` facts
 is already in its baked `direct_constructors` (and an own ADR 0084 runtime fun
 already turns the class's direct paths off). An ancestor's runtime-installed
 `new:` fun (`put_class_method`) counts as a user `new:` too: the class-process
-path runs it (`handle_class_method_call/6` finds it in the chain). Fails
+path runs it (`handle_class_method_call/6` finds it in the chain). So does a
+class-side extension of `new:` registered on an ancestor (BT-4588): it counts
+as that ancestor's class method (BT-4307), and the class-process path runs it
+(`beamtalk_object_class:constructor_shadowed/2`). Fails
 closed (`true`) on any
 doubt: a missing row, a missing superclass link, an unpublished fact (an older
 module or a dynamic ancestor) or a hierarchy cycle. `Value`'s fact is `false`
@@ -1490,8 +1493,9 @@ not this question.
 Memoised as `{chain_has_user_new1, Name}` in `beamtalk_class_derived_cache`,
 whose generation counter every class-metadata write bumps (each fact write,
 `put_defines_user_class_new1/2`, and each superclass link write, `insert/5`
-and `merge_identity/5`), so an answer derived before an ancestor's write is
-never served after it.
+and `merge_identity/5`), as does each class-side extension row that appears
+or goes away (`beamtalk_extensions:register/5`, `unregister/3`), so an answer
+derived before an ancestor's write is never served after it.
 """.
 -spec chain_has_user_new1(class_name()) -> boolean().
 chain_has_user_new1(Name) ->
@@ -1507,7 +1511,10 @@ ancestors_have_user_new1(Start) ->
     StepFun = fun(Class, _Depth) ->
         case
             lookup_class_method_fun(Class, 'new:') =:= error andalso
-                lookup_defines_user_class_new1(Class) =:= false
+                lookup_defines_user_class_new1(Class) =:= false andalso
+                beamtalk_dispatch:check_extension(
+                    beamtalk_class_registry:class_object_tag(Class), 'new:'
+                ) =:= not_found
         of
             true ->
                 case lookup_superclass(Class) of

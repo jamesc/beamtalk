@@ -1,0 +1,75 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4584: a destructuring assignment in a `whileTrue:`/`whileFalse:`
+// condition writes the outer locals it binds, in an actor method. The
+// condition's self-send is the state effect that lets it write a local. See
+// stdlib/test/bt4584while_condition_destructure_test.bt.
+
+Actor subclass: Bt4584WhileConditionDestructureActor
+  state: polls = 0
+
+  tick =>
+    self.polls := self.polls + 1
+    self.polls
+
+  afterLoop =>
+    w := 5
+    x := 0
+    [
+      x := self tick
+      #(w, _) := #(w + x, 0)
+      x < 3
+    ] whileTrue: [nil]
+    w
+
+  bodyReads =>
+    w := 5
+    x := 0
+    k := 0
+    [
+      x := self tick
+      #(w, _) := #(w + x, 0)
+      x < 3
+    ] whileTrue: [k := k + w]
+    #[w, k]
+
+  whileFalse =>
+    w := 5
+    x := 0
+    [
+      x := self tick
+      #(w, _) := #(w + x, 0)
+      x >= 3
+    ] whileFalse: [nil]
+    w
+
+  tuple =>
+    w := 5
+    x := 0
+    [
+      x := self tick
+      {_, w} := {#ok, w + x}
+      x < 3
+    ] whileTrue: [nil]
+    w
+
+  counterDestructured =>
+    w := 5
+    x := 0
+    [
+      #(x, w) := #(self tick, w + 1)
+      x < 3
+    ] whileTrue: [nil]
+    #[x, w]
+
+  earlyReturn =>
+    w := 5
+    x := 0
+    [
+      x := self tick
+      #(w, _) := #(w + x, 0)
+      x == 2 ifTrue: [^w]
+      x < 3
+    ] whileTrue: [nil]
+    0

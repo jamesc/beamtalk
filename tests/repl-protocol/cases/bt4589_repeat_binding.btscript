@@ -1,0 +1,53 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4589: a `repeat` whose receiver block writes a binding is the loop
+// `[true] whileTrue: <block>` (the receiver is canonicalised to that shape),
+// so the write is carried from one iteration to the next. Before, the
+// receiver compiled as a stateful block applied with no arguments:
+// `Wrong number of arguments: block expects 1 but was called with 0`.
+
+// Exit by an error (the issue's repro): the loop runs until the error, and the
+// error ends the input, so the bindings keep their values from before it.
+cw := 0
+// => 0
+[cw := cw + 1. cw >= 3 ifTrue: [Error signal: "done"]] repeat
+// => ERROR: done
+cw
+// => 0
+
+// Exit by an error caught in the same input: the protected-region rule
+// discards the loop's writes, as for `whileTrue:`.
+[[cw := cw + 1. cw >= 3 ifTrue: [Error signal: "done"]] repeat] on: Error do: [:e | cw]
+// => 0
+cw
+// => 0
+
+// Exit by `^`: the input answers its value, and the writes made before it are
+// kept.
+[cw := cw + 1. cw >= 3 ifTrue: [^cw * 10]] repeat
+// => 30
+cw
+// => 3
+
+// Two bindings, one read from the other, and a write in a conditional arm.
+cw := 0
+// => 0
+ck := 0
+// => 0
+[cw := cw + 1. (cw > 1) ifTrue: [ck := ck + cw]. cw >= 4 ifTrue: [^#[cw, ck]]] repeat
+// => #[4, 9]
+#[cw, ck]
+// => #[4, 9]
+
+// After another statement in the same input, and in a conditional arm.
+cw := 0. [cw := cw + 1. cw >= 2 ifTrue: [^cw]] repeat
+// => 2
+(cw > 0) ifTrue: [[cw := cw + 1. cw >= 5 ifTrue: [^cw]] repeat]
+// => 5
+cw
+// => 5
+
+// A receiver that writes nothing is unchanged: `^` still ends it.
+[^#done] repeat
+// => done

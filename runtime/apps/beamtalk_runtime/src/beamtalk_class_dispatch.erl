@@ -45,6 +45,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     class_understands_class_selector/2,
     class_object_understands/2,
     find_class_method_from_class/2,
+    ancestor_class_side_extension/2,
     in_caller_owner/2,
     class_method_body/2
 ]).
@@ -468,7 +469,9 @@ brings the fast path back. `new` needs no chain check because `new/0` is
 itself the override slot (a custom `new` compiles to, or delegates from, it),
 so the direct call and the gen_server path reach the same function either
 way; an ancestor's class-side `new` extension does not shadow the class's own
-synthesized `new` (whether an ancestor's `new:` extension should is BT-4588).
+synthesized `new` (the class's own method is found first, BT-4307). An
+ancestor's class-side `new:` extension does (BT-4588): `chain_has_user_new1/1`
+counts it as that ancestor's user `new:`.
 
 The class, its tag and module (or the decline) are memoised per class pid and
 selector in `beamtalk_class_derived_cache` (`{direct_constructor, ClassPid,
@@ -718,6 +721,21 @@ superclass.
 -spec find_class_super_method(selector(), class_name()) -> class_side_found().
 find_class_super_method(Selector, ClassName) ->
     find_class_side_method(Selector, superclass_from_ets(ClassName), ClassName).
+
+-doc """
+Whether the class-side chain walk from `ClassName`'s superclass
+(`find_class_side_method/3`) finds a class-side extension of `Selector` on an
+ancestor before any class method (BT-4588): what the class process runs for
+`Selector` sent to `ClassName` when `ClassName` itself does not define it.
+`beamtalk_object_class`'s `{new, _}` handler asks it for `new:`, so an
+ancestor's `new:` extension is not hidden by the class's synthesized `new:`.
+""".
+-spec ancestor_class_side_extension(class_name(), selector()) -> boolean().
+ancestor_class_side_extension(ClassName, Selector) ->
+    case find_class_super_method(Selector, ClassName) of
+        {extension, _Owner, _Fun} -> true;
+        _ -> false
+    end.
 
 -doc """
 The class-side chain walk from `ClassName` itself (BT-4307): what an external

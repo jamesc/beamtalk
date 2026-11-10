@@ -704,17 +704,18 @@ mod tests {
 
     #[test]
     fn test_repeat_generates_infinite_letrec_loop() {
-        // repeat generates a letrec that loops forever (no condition check)
+        // BT-4589: a literal `[b] repeat` is canonicalised to
+        // `[true] whileTrue: [b]`, so it lowers as that loop, whose condition
+        // is always `'true'`.
         let src = "Actor subclass: Server\n  state: x = 0\n\n  run =>\n    [42] repeat\n";
         let code = codegen(src);
         assert!(
             code.contains("letrec"),
             "repeat should generate a letrec. Got:\n{code}"
         );
-        // repeat uses a simple loop function that recurses unconditionally
         assert!(
-            !code.contains("case apply"),
-            "repeat should NOT have a case on a condition. Got:\n{code}"
+            code.contains("fun () -> 'true'"),
+            "repeat's condition should be a constant `true`. Got:\n{code}"
         );
     }
 

@@ -723,6 +723,100 @@ indirect_value_subclass_test_() ->
                     [stop_class(P) || P <- [Leaf, Mid]]
                 end
             end},
+        {"an ancestor's class-side new: extension answers a descendant's new: on every path",
+            fun() ->
+                %% BT-4588: the extension counts as Mid's class-side `new:`
+                %% (BT-4307), like a compiled or runtime-fun `new:` on Mid.
+                %% Rooted at Object, whose chain exports no `class_new:`
+                %% (Value's does, which already sent a Value's `{new, [Map]}`
+                %% through the class-side walk), so the class process's own
+                %% handler must see the ancestor's extension itself.
+                Mid = start_subclass('BT4588Mid', 'Object', #{
+                    direct_constructors => [new, 'new:'], defines_user_class_new1 => false
+                }),
+                Leaf = start_subclass('BT4588Leaf', 'BT4588Mid', #{
+                    direct_constructors => [new, 'new:'], defines_user_class_new1 => false
+                }),
+                MidTag = beamtalk_class_registry:class_object_tag('BT4588Mid'),
+                try
+                    ?assertNot(beamtalk_class_metadata:chain_has_user_new1('BT4588Leaf')),
+                    ?assertEqual(
+                        {self(), #{a => 1}},
+                        beamtalk_class_dispatch:class_send(Leaf, 'new:', [#{a => 1}])
+                    ),
+                    ok = beamtalk_extensions:register(
+                        MidTag,
+                        'new:',
+                        fun([Map], #beamtalk_object{class = Tag}) -> {from_extension, Tag, Map} end,
+                        test
+                    ),
+                    LeafTag = beamtalk_class_registry:class_object_tag('BT4588Leaf'),
+                    try
+                        %% Registering flushed the memoised verdict.
+                        ?assert(beamtalk_class_metadata:chain_has_user_new1('BT4588Leaf')),
+                        ?assertEqual(
+                            error,
+                            beamtalk_class_dispatch:lookup_direct_constructor(
+                                Leaf, 'new:', [#{a => 1}]
+                            )
+                        ),
+                        %% The dynamic send, and the class process's own
+                        %% `{new, [Map]}` handler, run the extension with the
+                        %% receiving subclass as `self`.
+                        ?assertEqual(
+                            {from_extension, LeafTag, #{a => 1}},
+                            beamtalk_class_dispatch:class_send(Leaf, 'new:', [#{a => 1}])
+                        ),
+                        ?assertEqual(
+                            {ok, {from_extension, LeafTag, #{a => 1}}},
+                            gen_server:call(Leaf, {new, [#{a => 1}]})
+                        ),
+                        %% `new` is untouched: Leaf's own `new/0` stays direct.
+                        ?assertEqual(self(), beamtalk_class_dispatch:class_send(Leaf, new, []))
+                    after
+                        beamtalk_extensions:unregister('BT4588Mid', 'new:', true)
+                    end,
+                    %% Removing it flushes the verdict again: direct once more.
+                    ?assertNot(beamtalk_class_metadata:chain_has_user_new1('BT4588Leaf')),
+                    ?assertMatch(
+                        {ok, _},
+                        beamtalk_class_dispatch:lookup_direct_constructor(Leaf, 'new:', [#{a => 1}])
+                    ),
+                    ?assertEqual(
+                        {self(), #{a => 1}},
+                        beamtalk_class_dispatch:class_send(Leaf, 'new:', [#{a => 1}])
+                    )
+                after
+                    [stop_class(P) || P <- [Leaf, Mid]]
+                end
+            end},
+        {"an ancestor's class-side new extension does not shadow a descendant's own new", fun() ->
+            %% BT-4588: the descendant's synthesized `new` is its own
+            %% class-side method, found before an ancestor's extension.
+            Mid = start_subclass('BT4588NewMid', 'Value', #{
+                direct_constructors => [new, 'new:'], defines_user_class_new1 => false
+            }),
+            Leaf = start_subclass('BT4588NewLeaf', 'BT4588NewMid', #{
+                direct_constructors => [new, 'new:'], defines_user_class_new1 => false
+            }),
+            MidTag = beamtalk_class_registry:class_object_tag('BT4588NewMid'),
+            ok = beamtalk_extensions:register(
+                MidTag, new, fun([], _ClassSelf) -> from_extension end, test
+            ),
+            try
+                ?assertEqual(from_extension, beamtalk_class_dispatch:class_send(Mid, new, [])),
+                ?assertMatch(
+                    {ok, _}, beamtalk_class_dispatch:lookup_direct_constructor(Leaf, new, [])
+                ),
+                ?assertEqual(self(), beamtalk_class_dispatch:class_send(Leaf, new, [])),
+                %% The class process builds through Leaf's own `new/0`,
+                %% which answers the builder's pid: the class process.
+                ?assertEqual({ok, Leaf}, gen_server:call(Leaf, {new, []}))
+            after
+                beamtalk_extensions:unregister('BT4588NewMid', new, true),
+                [stop_class(P) || P <- [Leaf, Mid]]
+            end
+        end},
         {"the compiled stdlib publishes the facts that let Bag's dynamic new: build in the caller",
             fun() ->
                 %% Over the real compiled stdlib chain, not a fixture: if

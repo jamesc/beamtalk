@@ -52,6 +52,15 @@ super(Selector, Args, Self, State, CurrentClass)
     -> {reply, Result, NewState} | {error, #beamtalk_error{} | map()}
 ```
 
+### super_reply/5
+`super/5` that re-raises an `{error, E}` answer instead of returning it.
+Called by a method-root actor `super` send and by a block's `super` send
+(`beamtalk_actor_state:super_send/5`).
+```erlang
+super_reply(Selector, Args, Self, State, CurrentClass)
+    -> {reply, Result, NewState}
+```
+
 ### Error results
 
 `{error, E}` means one of two things, and its shape says which (BT-4593):
@@ -78,6 +87,7 @@ never an `{error, _}` result: it propagates unchanged.
 -export([
     lookup/5,
     super/5,
+    super_reply/5,
     super_value/4,
     inherited_target/2,
     invoke_resolved/6,
@@ -344,8 +354,23 @@ structured error.
 """.
 -spec super_value(selector(), args(), bt_self(), class_name()) -> term().
 super_value(Selector, Args, Self, CurrentClass) ->
-    case super(Selector, Args, Self, #{}, CurrentClass) of
-        {reply, Result, _State} -> Result;
+    {reply, Result, _State} = super_reply(Selector, Args, Self, #{}, CurrentClass),
+    Result.
+
+-doc """
+`super/5` for a method-root actor `super` send (BT-4592): answers the
+`{reply, Result, NewState}` triple the generated code unpacks, and re-raises
+an `{error, E}` answer instead of handing the caller a 2-tuple.
+
+`E` is a `#beamtalk_error{}` for a walk miss or the wrapped exception map for
+a raise from an invoked method (BT-4593; see the module doc's "Error
+results"); `beamtalk_exception_handler:reraise/1` raises both shapes.
+""".
+-spec super_reply(selector(), args(), bt_self(), state(), class_name()) ->
+    {reply, term(), state()}.
+super_reply(Selector, Args, Self, State, CurrentClass) ->
+    case super(Selector, Args, Self, State, CurrentClass) of
+        {reply, _Result, _NewState} = Reply -> Reply;
         {error, Error} -> beamtalk_exception_handler:reraise(Error)
     end.
 
