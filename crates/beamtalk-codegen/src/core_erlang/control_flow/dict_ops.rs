@@ -898,7 +898,8 @@ mod tests {
         );
         let code = codegen(src);
         assert!(
-            !code.contains("{'nil'} in let _ThreadedValue"),
+            code.contains("let Total@ = _FoldResult@")
+                && !code.contains("{'nil'} in let _ThreadedValue"),
             "a dict do: whose local is read afterwards must not drop its carrier. Got:\n{code}"
         );
     }

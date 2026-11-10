@@ -3168,18 +3168,23 @@ fn test_rebind_tail_do_never_answers_bare_carrier() {
 
 // BT-4647: a value-type fold that also writes a `self` field carries the
 // field family in its carrier slots, so it is never discarded to `{'nil'}`.
+// `Object subclass:` (field writes are illegal on `Value subclass:`).
 #[test]
 fn test_closed_do_writing_self_field_keeps_carrier_slots() {
     let src = concat!(
-        "Value subclass: V\n",
+        "Object subclass: V\n",
         "  state: n = 0\n\n",
-        "  run: items =>\n",
+        "  run =>\n",
         "    total := 0\n",
-        "    items do: [:v | total := total + v. self.n := self.n + 1]\n",
+        "    #(1, 2) do: [:v | total := total + v. self.n := self.n + 1]\n",
     );
     let code = codegen(src);
     assert!(
         !code.contains("{'nil'} in let _ThreadedValue"),
         "a self-field-writing fold must keep its carrier slots. Got:\n{code}"
+    );
+    assert!(
+        code.contains("{'nil', "),
+        "the carrier must still hold the fold's slots. Got:\n{code}"
     );
 }
