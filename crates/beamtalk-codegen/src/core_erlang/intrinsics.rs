@@ -331,6 +331,8 @@ impl CoreErlangGenerator {
         let doc = if matches!(receiver, Expression::Block { .. }) {
             self.generate_block_value_call(receiver, &[])?
         } else {
+            // BT-4596: the non-fun fallback below is a dynamic site.
+            self.report_block_value_fallback(receiver, selector);
             // Hoist open-scope receiver (e.g. class method self-send).
             let mut seq = self.sequence_call(&[receiver], "ValRecv")?;
             let recv_doc = seq.next();
@@ -454,9 +456,8 @@ impl CoreErlangGenerator {
             // valueWithArguments: (call-site-intercepted @intrinsic,
             // was previously a bare @primitive with no access to the calling
             // method's state — see stdlib/src/block.bt).
-            "valueWithArguments:" if arguments.len() == 1 => {
-                self.try_generate_block_value_with_arguments_keyword(receiver, &arguments[0])
-            }
+            "valueWithArguments:" if arguments.len() == 1 => self
+                .try_generate_block_value_with_arguments_keyword(receiver, selector, &arguments[0]),
 
             _ => Ok(None),
         }
@@ -478,6 +479,7 @@ impl CoreErlangGenerator {
     fn try_generate_block_value_with_arguments_keyword(
         &mut self,
         receiver: &Expression,
+        selector: &MessageSelector,
         args_expr: &Expression,
     ) -> Result<Option<Document<'static>>> {
         // A bare class name as receiver is a class-method send, not
@@ -510,6 +512,8 @@ impl CoreErlangGenerator {
             ];
             return Ok(Some(doc));
         }
+        // The non-fun fallback is a dynamic site (BT-4596).
+        self.report_block_value_fallback(receiver, selector);
         let doc = self.generate_block_value_with_arguments_call(receiver, args_expr)?;
         Ok(Some(doc))
     }
@@ -572,7 +576,9 @@ impl CoreErlangGenerator {
         if matches!(receiver, Expression::ClassReference { .. }) {
             return Ok(None);
         }
-        // Unknown receiver → runtime is_function guard with fallback
+        // Unknown receiver → runtime is_function guard with fallback, a
+        // dynamic site (BT-4596).
+        self.report_block_value_fallback(receiver, selector);
         let doc = self.generate_value_keyword_guard(receiver, arguments, selector_name)?;
         Ok(Some(doc))
     }

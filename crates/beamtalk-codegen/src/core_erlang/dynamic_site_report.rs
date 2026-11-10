@@ -23,6 +23,29 @@
 //! The word after `reason: ` is a stable token (`untyped`, `builtin`,
 //! `supervisor`, `abstract`, `root`, `actor`, `exception`, …) for counting
 //! sites by reason.
+//!
+//! ## Coverage
+//!
+//! Reported ([`CoreErlangGenerator::report_dynamic_site`]): every written
+//! send that falls through to the generic dispatch, each cascade message,
+//! each string-interpolation segment's `displayString` without a guarded
+//! route, and the block `value`/`value:`…/`valueWithArguments:` intrinsics'
+//! non-fun fallback unless the receiver is typed `Block`
+//! ([`CoreErlangGenerator::report_block_value_fallback`], BT-4596).
+//!
+//! Not reported, though they emit `send/3`:
+//!
+//! * miss arms behind a guard — the guarded direct call's, a binary
+//!   operator's non-number fallback, the list-op intrinsics' `is_list`
+//!   fallback (`do:`, `collect:`, `anySatisfy:`, …) and an inlined
+//!   `ifTrue:`/`ifFalse:` on a non-boolean: the guard is the typed path;
+//! * the `perform:` family (`perform:`, `perform:withArguments:`,
+//!   `perform:withArguments:timeout:`): the selector is a runtime value, so
+//!   there is no static send to report;
+//! * reflective intrinsics with their own handling (`fieldNames`,
+//!   `fieldAt:`, `fieldAt:put:`) and `error:`'s class-side probe;
+//! * the `at:` sends a pattern match or destructuring assignment makes on
+//!   an array it binds from.
 
 use super::CoreErlangGenerator;
 use super::dispatch_codegen::{StaysDynamic, supervisor_family_root};
@@ -84,6 +107,52 @@ fn describe_routed(class: &str, why: NoBuiltinRoute) -> String {
 }
 
 impl CoreErlangGenerator {
+    /// Emits the dynamic-site report entry for `receiver selector` when
+    /// diagnostics are on: the receiver's static type and the
+    /// [`StaysDynamic`] gate that kept the send dynamic. The one emitter for
+    /// every `send/3` site the report covers, written or compiler-made.
+    pub(in crate::core_erlang) fn report_dynamic_site(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+    ) {
+        if !self.codegen_diagnostics_enabled {
+            return;
+        }
+        let span = receiver.span();
+        let line_info = self
+            .span_to_line(span)
+            .map_or(String::new(), |l| format!(" at line {l}"));
+        let description = self.dynamic_site_description(receiver, selector);
+        self.emit_codegen_diagnostic(
+            format!(
+                "Send '{}'{line_info}: dynamic dispatch ({description})",
+                selector.name()
+            ),
+            span,
+        );
+    }
+
+    /// BT-4596: the report entry for a block `value`/`value:`/
+    /// `valueWithArguments:` intrinsic's non-fun fallback. A receiver whose
+    /// trusted static type is `Block` is not a dynamic site: the
+    /// `is_function` test is its guard and the fallback only a miss arm, as
+    /// in a guarded direct call. Any other receiver reaches the fallback
+    /// whenever it is not a fun, so it is reported like a written send.
+    pub(in crate::core_erlang) fn report_block_value_fallback(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+    ) {
+        if self
+            .trusted_static_class(receiver)
+            .is_ok_and(|class| class.as_str() == "Block")
+        {
+            return;
+        }
+        self.report_dynamic_site(receiver, selector);
+    }
+
     /// The `(receiver: …; reason: …)` part of a dynamic-dispatch hint for
     /// `receiver selector`.
     pub(in crate::core_erlang) fn dynamic_site_description(

@@ -384,3 +384,79 @@ fn protocol_with_too_many_conformers_reports_the_cap() {
         "got {hints:?}"
     );
 }
+
+// BT-4596: compiler-made dynamic sends — the block `value` intrinsic's
+// non-fun fallback and each interpolation segment's `displayString` — are
+// reported like written sends.
+
+#[test]
+fn untyped_block_value_fallback_is_reported() {
+    let hint = hint_for("Object subclass: Caller\n  run: b => b value\n", "value");
+    assert!(hint.contains("reason: untyped"), "{hint}");
+}
+
+#[test]
+fn untyped_block_value_keyword_fallback_is_reported() {
+    let hint = hint_for(
+        "Object subclass: Caller\n  run: b => b value: 1 value: 2\n",
+        "value:value:",
+    );
+    assert!(hint.contains("reason: untyped"), "{hint}");
+}
+
+#[test]
+fn untyped_value_with_arguments_fallback_is_reported() {
+    let hint = hint_for(
+        "Object subclass: Caller\n  run: b => b valueWithArguments: #(1)\n",
+        "valueWithArguments:",
+    );
+    assert!(hint.contains("reason: untyped"), "{hint}");
+}
+
+#[test]
+fn block_typed_and_literal_value_sends_are_not_reported() {
+    // A `Block`-typed receiver's `is_function` test is its guard, and a
+    // block literal never reaches the fallback.
+    let hints = report(concat!(
+        "Object subclass: Caller\n",
+        "  run: b :: Block => b value\n",
+        "  go: b :: Block => b value: 1\n",
+        "  lit => [:x | x] value: 1\n",
+    ));
+    assert!(
+        !hints.iter().any(|h| h.starts_with("Send 'value")),
+        "{hints:?}"
+    );
+}
+
+#[test]
+fn untyped_interpolation_segment_is_reported() {
+    let hint = hint_for(
+        "Object subclass: Caller\n  run: x => \"got {x}\"\n",
+        "displayString",
+    );
+    assert!(hint.contains("reason: untyped"), "{hint}");
+}
+
+#[test]
+fn typed_interpolation_segment_is_not_reported() {
+    let hints = report("Object subclass: Caller\n  run: n :: Integer => \"got {n}\"\n");
+    assert!(
+        !hints.iter().any(|h| h.starts_with("Send 'displayString'")),
+        "{hints:?}"
+    );
+}
+
+#[test]
+fn cascade_messages_are_reported() {
+    let hints = report("Object subclass: Caller\n  run: x => x foo; bar\n");
+    for selector in ["foo", "bar"] {
+        assert!(
+            hints
+                .iter()
+                .any(|h| h.starts_with(&format!("Send '{selector}'"))
+                    && h.contains("reason: untyped")),
+            "{selector}: {hints:?}"
+        );
+    }
+}
