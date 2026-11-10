@@ -280,6 +280,26 @@ fn peel_in_scope(expr: &mut Expression, scope: PeelScope, record: &mut PeeledPar
 /// (see the module documentation's "Unary loops").
 const UNARY_LOOPS: [(&str, &str); 2] = [("whileTrue", "whileTrue:"), ("whileFalse", "whileFalse:")];
 
+/// The unary loop selectors as users write them: `whileTrue`, `whileFalse`
+/// and `repeat`. [`desugar_unary_loops`] rewrites each sent to a
+/// parameterless literal block as a keyword loop, so no analysis or codegen
+/// consumer classifies them (BT-4603); this list is for the user-facing note
+/// that names the messages which thread a block's assignments
+/// (`state_threading_selectors::assignment_threading_constructs`).
+#[must_use]
+pub fn written_unary_loop_selectors() -> [&'static str; 3] {
+    [UNARY_LOOPS[0].0, UNARY_LOOPS[1].0, "repeat"]
+}
+
+/// Whether `node` itself (not its subtree) is a loop send
+/// [`desugar_unary_loops`] would rewrite: a unary `whileTrue`/`whileFalse`
+/// or `repeat` sent to a parameterless literal block. False on a normalised
+/// tree; the classifiers that read only normalised trees assert it (BT-4603).
+#[must_use]
+pub fn is_uncanonicalised_loop(node: &Expression) -> bool {
+    unary_loop_keyword(node).is_some() || is_literal_repeat(node)
+}
+
 /// The keyword selector `node` canonicalises to when it is a unary loop send
 /// with a literal block receiver (parentheses around it included, which the
 /// peel removes first), or `None`.
@@ -541,7 +561,7 @@ pub fn restore_unary_loops_in_module(module: &mut Module) {
 fn expr_first_unary_loop(expr: &Expression) -> Option<Span> {
     let mut found = None;
     walk_expression(expr, &mut |node| {
-        if found.is_none() && (unary_loop_keyword(node).is_some() || is_literal_repeat(node)) {
+        if found.is_none() && is_uncanonicalised_loop(node) {
             found = Some(node.span());
         }
     });

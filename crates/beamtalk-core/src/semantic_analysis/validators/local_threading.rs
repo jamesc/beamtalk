@@ -167,8 +167,10 @@ impl ConstructKind {
     fn of(selector: &str, handler_writes: bool) -> Self {
         use crate::state_threading_selectors::{is_exception_selector, is_try_do_selector};
         match selector {
-            "whileTrue:" | "whileFalse:" | "whileTrue" | "whileFalse" => Self::Loop,
-            "to:do:" | "to:by:do:" | "timesRepeat:" | "timesRepeat" => Self::CountedLoop,
+            // The unary loops reach here as the keyword loops they are
+            // canonicalised to (`ast::normalize`, BT-4313, BT-4603).
+            "whileTrue:" | "whileFalse:" => Self::Loop,
+            "to:do:" | "to:by:do:" | "timesRepeat:" => Self::CountedLoop,
             "do:" => Self::Do,
             "keysAndValuesDo:" | "doWithKey:" => Self::KeyedDo,
             "anySatisfy:" | "allSatisfy:" => Self::Satisfy,
@@ -1406,9 +1408,13 @@ enum Escape {
     /// An argument of an Erlang FFI send (`Erlang <module> <selector>`): the
     /// block is handed to Erlang as a plain fun (BT-3917).
     Ffi(EcoString, EcoString),
-    /// An argument or the receiver of a cascade message: a cascade sends every
-    /// message through ordinary dispatch.
+    /// An argument of a cascade message: a cascade sends every message
+    /// through ordinary dispatch.
     Cascade(EcoString),
+    /// The shared receiver of a cascade, named by its first message as
+    /// written (BT-4603: `[...] whileTrue; yourself`, not the `whileTrue:` it
+    /// is canonicalised to).
+    CascadeReceiver(EcoString),
     /// The receiver of this selector, which does not run its receiver block in
     /// place.
     Receiver(EcoString),
@@ -1452,7 +1458,7 @@ impl Escape {
             Self::Ffi(module, selector) => {
                 format!("passed to Erlang `{module}` `{selector}`, which calls it as a plain fun")
             }
-            Self::Cascade(selector) => format!(
+            Self::Cascade(selector) | Self::CascadeReceiver(selector) => format!(
                 "sent in a cascade (`{selector}`), which the compiler does not thread it through"
             ),
             Self::Receiver(selector) => format!(
@@ -1506,7 +1512,7 @@ impl Escape {
                  or return the new value from the block and use the Erlang call's result \
                  (`rs := Erlang lists map: [:e | ... {name} + e] with: xs`)"
             ),
-            Self::Receiver(selector) => format!(
+            Self::Receiver(selector) | Self::CascadeReceiver(selector) => format!(
                 "return the new value from the block and assign it where it is called: \
                  `{name} := [... {name} + 1] {selector}`"
             ),
@@ -2020,7 +2026,12 @@ impl<'d> Walker<'d> {
                     // selector.
                     // The shared receiver is evaluated once: check it once.
                     if let Expression::Block(block) = shared.unwrap_parens() {
-                        self.report_literal(block, &Escape::Cascade(selector.name()));
+                        self.report_literal(
+                            block,
+                            &Escape::CascadeReceiver(crate::ast::normalize::selector_as_written(
+                                shared, selector, arguments,
+                            )),
+                        );
                     }
                     self.check_send(shared, selector, arguments, false, false, false);
                     for msg in messages {
@@ -3139,9 +3150,10 @@ fn is_section1_selector(selector: &str) -> bool {
 /// `value` send, a loop's condition, or a protected body. A keyword
 /// `whileTrue:`/`whileFalse:` condition is narrowed first to a loop whose body
 /// is a block literal (BT-4062, `Escape::ConditionBodyNotLiteral`); with one,
-/// its writes thread in every context (BT-4602).
+/// its writes thread in every context (BT-4602). A unary `[...] whileTrue` or
+/// `[...] repeat` is that keyword loop once normalised; a unary loop sent to a
+/// literal block with parameters stays an ordinary send (BT-4603).
 fn receiver_has_channel(selector: &str) -> bool {
     crate::state_threading_selectors::is_state_threaded_block_receiver(selector)
-        || crate::state_threading_selectors::is_state_threading_unary_selector(selector)
-        || matches!(selector, "whileTrue:" | "whileFalse:" | "repeat")
+        || matches!(selector, "whileTrue:" | "whileFalse:")
 }
