@@ -31,7 +31,12 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
+        // BT-4650: the receiver is evaluated before this send's arguments, so
+        // a block in it (`[i := "x". 1] value`) writes through to `env` at
+        // once rather than joining an enclosing send's deferred arms.
+        let outer_defer = std::mem::take(&mut self.defer_block_widening);
         let receiver_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
+        self.defer_block_widening = outer_defer;
         self.infer_message_send_with_receiver_ty(
             receiver,
             receiver_ty,

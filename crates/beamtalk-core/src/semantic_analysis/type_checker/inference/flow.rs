@@ -770,8 +770,21 @@ impl TypeChecker {
                 if let Some(guard) = &arm.guard {
                     self.infer_expr(guard, hierarchy, &mut arm_env, in_abstract_method);
                 }
+                // BT-4650: widenings queued by the arm body name a local in
+                // `arm_env`, where a pattern variable may shadow an outer
+                // local of the same name. Collect them in a frame of their
+                // own and forward only those that name the outer binding.
+                let outer_deferred = std::mem::take(&mut self.deferred_block_widenings);
                 let body_ty =
                     self.infer_expr(&arm.body, hierarchy, &mut arm_env, in_abstract_method);
+                let arm_deferred =
+                    std::mem::replace(&mut self.deferred_block_widenings, outer_deferred);
+                let (bound, _) = crate::semantic_analysis::extract_pattern_bindings(&arm.pattern);
+                self.deferred_block_widenings.extend(
+                    arm_deferred
+                        .into_iter()
+                        .filter(|w| !bound.iter().any(|id| id.name == w.name)),
+                );
                 if arm.guard.is_none() {
                     if matches!(arm.pattern, Pattern::Nil(_)) {
                         residual_scrutinee_ty = Self::non_nil_type(&residual_scrutinee_ty);
