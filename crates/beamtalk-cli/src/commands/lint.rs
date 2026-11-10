@@ -23,174 +23,17 @@
 //! `build` and the REPL (BT-4377).
 
 use crate::commands::OutputFormat;
-use crate::commands::erlang_lint;
 use crate::diagnostic::CompileDiagnostic;
-use beamtalk_core::compilation::diagnostics_policy;
-use beamtalk_core::file_walker::FileWalker;
-use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
+use beamtalk_cli::lint_pipeline::{self, DependencyMetadata, LintGate};
+#[cfg(test)]
+use beamtalk_cli::lint_pipeline::{FileContext, analyse_file, dedup_pre_loaded_alias_collision};
+pub(crate) use beamtalk_cli::lint_pipeline::{collect_lint_files, find_package_root};
+#[cfg(test)]
+use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use beamtalk_project::package;
 use camino::{Utf8Path, Utf8PathBuf};
-use miette::{IntoDiagnostic, Result};
+use miette::Result;
 use tracing::warn;
-
-/// Collect lint diagnostics for a parsed module.
-///
-/// Gathers lint-severity diagnostics from parsing and lint passes, plus
-/// DNU hint diagnostics from semantic analysis, then applies
-/// `@expect` directives.
-///
-/// `cross_file_classes` provides class metadata from other files in the same
-/// project so that cross-file type/DNU diagnostics match what `build` emits.
-/// Without this, `@expect type` / `@expect all` annotations that suppress real
-/// diagnostics during build would be reported as stale by lint.
-///
-/// `source` is the module's raw source text, mirroring
-/// `queries::diagnostic_provider::compute_project_diagnostics_with_analysis`:
-/// needed so the near-miss `// === Name ===` divider check can
-/// scan `source` directly (`beamtalk_core::near_miss_divider::check_near_miss_dividers`)
-/// instead of relying on the AST's `Comment::span`, which is actually the
-/// *following declaration's* span, not the comment's own.
-///
-/// `is_stub_file` gates `check_native_declaration_location`: a
-/// legitimate `declare native:` block is only valid inside a `stubs/`
-/// directory, so a genuine stub file must not be flagged. Callers derive
-/// this the same way MCP's `run_module_analysis` does —
-/// [`beamtalk_project::package::is_under_stubs_dir`] against the file's own
-/// path — since `collect_lint_files`'s `stubs/` exclusion only applies to
-/// its *directory-walk* branch, not a direct single-file lint target.
-///
-/// `stdlib_mode` sets `CompilerOptions::stdlib_mode`, which permits known
-/// stdlib classes to override sealed methods (e.g. `Uuid class new:`
-/// raising a pointed error instead of constructing). Without it, every such
-/// class is reported as a "Cannot override sealed method" error that
-/// `beamtalk build-stdlib` — which always sets `stdlib_mode: true` — never
-/// emits. Callers derive this via
-/// [`beamtalk_project::package::is_under_stdlib_src_dir`] against the
-/// file's own path, mirroring `is_stub_file` above; stdlib has no
-/// `beamtalk.toml`, so there is no package root to anchor the check on.
-///
-/// `file_stem` is the target file's basename without extension,
-/// passed to `check_class_file_name_agreement` so `beamtalk lint` reports
-/// the same file-name/class-name mismatch `beamtalk build`/the LSP do (via
-/// `ProjectDiagnosticContext::source_file_stem`) — `None` for callers with
-/// no real file backing the module skips the check.
-///
-/// `diagnostics_overrides` is the package's `[diagnostics]` table, applied
-/// by the shared pipeline after `@expect` — the same helper `build` and the
-/// REPL use (BT-4377). Pass an empty table outside a package.
-#[allow(clippy::too_many_arguments)] // pre_loaded_protocols/pre_loaded_protocol_defs/pre_loaded_aliases are separate params; each is load-bearing context
-fn collect_diagnostics(
-    module: &beamtalk_core::ast::Module,
-    source: &str,
-    parse_diags: Vec<beamtalk_core::source_analysis::Diagnostic>,
-    cross_file_classes: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-    pre_loaded_protocols: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
-    pre_loaded_protocol_defs: Vec<beamtalk_core::ast::ProtocolDefinition>,
-    pre_loaded_aliases: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
-    native_type_registry: Option<
-        std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
-    >,
-    knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope,
-    cross_file_extensions: &beamtalk_core::compilation::extension_index::ExtensionIndex,
-    dependency_extensions_unknown: bool,
-    current_package: Option<&str>,
-    is_stub_file: bool,
-    file_stem: Option<&str>,
-    stdlib_mode: bool,
-    known_erlang_modules: &std::collections::HashSet<String>,
-    diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
-) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
-    // Collect parser-level lint diagnostics (e.g. unnecessary `.`) and
-    // parse errors. Parse errors are kept so a
-    // file with a syntax error — which fails `build` and a REPL load — is
-    // reported here too and fails the `--warnings-as-errors` gate (BT-4377).
-    let mut lint_diags: Vec<_> = parse_diags
-        .into_iter()
-        .filter(|d| matches!(d.severity, Severity::Lint | Severity::Error))
-        .collect();
-
-    // Run semantic analysis, the AST-level lint passes, apply @expect
-    // directives, and check near-miss section dividers. The shared helper
-    // performs every step: analyse_full (filtered by category.is_some()),
-    // the lint passes against analyse_full's cross-file hierarchy (BT-4183:
-    // an actor ancestor declared in another file resolves),
-    // check_class_file_name_agreement, apply_expect_directives,
-    // check_near_miss_dividers, and the [diagnostics] table.
-    //
-    // Pass cross-file class info so lint sees the same class hierarchy as build,
-    // matching diagnostics for actor instantiation, type errors, etc.
-    //
-    // Pass the FFI type registry (loaded from the build cache) so lint
-    // sees `(Erlang m) f:` calls as typed when build does. Without it, every
-    // FFI call falls back to `Dynamic(UntypedFfi)` and lint emits a
-    // "Dynamic in typed class" warning that build does not — leaving the user
-    // with no `@expect` configuration that satisfies both passes.
-    // Set current_package so E0401/E0402 visibility checks fire in
-    // `beamtalk lint`, matching `beamtalk build` — both gate on
-    // `current_package: Some(_)` (see `check_class_visibility`).
-    let options = beamtalk_core::CompilerOptions {
-        knowledge_scope,
-        dependency_extensions_unknown,
-        current_package: current_package.map(str::to_string),
-        stdlib_mode,
-        // BT-4022: project-known Erlang modules so the `unresolved_ffi`
-        // check agrees with `build` on hex-dep and own-`native/` modules.
-        known_erlang_modules: known_erlang_modules.clone(),
-        ..Default::default()
-    };
-    let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
-        .with_options(&options)
-        .with_pre_loaded_classes(cross_file_classes)
-        .with_pre_loaded_protocols(pre_loaded_protocols)
-        .with_pre_loaded_protocol_defs(pre_loaded_protocol_defs)
-        .with_pre_loaded_aliases(pre_loaded_aliases)
-        .with_native_type_registry(native_type_registry)
-        .with_cross_file_extensions(cross_file_extensions)
-        .with_is_stub_file(is_stub_file);
-    beamtalk_language_service::queries::diagnostic_provider::run_post_analysis_lint_pipeline(
-        module,
-        source,
-        analysis_ctx,
-        file_stem,
-        diagnostics_overrides,
-        &mut lint_diags,
-        |hierarchy| beamtalk_lint::run_lint_passes_with_hierarchy(module, hierarchy),
-    );
-
-    lint_diags
-}
-
-/// Decides whether a diagnostic from one file's [`collect_diagnostics`] call
-/// should be kept, deduplicating repeat sightings of a pre-loaded alias
-/// collision across the whole `run_lint` invocation.
-///
-/// `run_lint`'s Pass 2 loop calls `collect_diagnostics` once per project
-/// file, each time seeding a *fresh* `AliasRegistry` from the same
-/// project-wide `all_alias_infos` list. A genuine collision between two of
-/// that list's entries is therefore rediscovered — with byte-identical
-/// message and span, since neither depends on the file currently being
-/// analysed — on every single call, once per file in the project instead of
-/// once per lint run. `seen` tracks which (message, span) pairs have already
-/// been kept so only the first sighting survives; every other diagnostic
-/// (file-specific by construction) always passes through unfiltered.
-///
-/// The `"Pre-loaded type alias "` prefix is the stable, distinctive lead-in
-/// shared by all three of `AliasRegistry::add_pre_loaded`'s diagnostic
-/// messages (alias-vs-class, alias-vs-protocol, alias-vs-alias) and no other
-/// diagnostic in the compiler — matching on it (rather than deduping every
-/// diagnostic indiscriminately by (message, span)) avoids ever dropping a
-/// genuinely distinct per-file diagnostic that happens to coincide with
-/// another file's on both message text and byte offset.
-fn dedup_pre_loaded_alias_collision(
-    diag: &beamtalk_core::source_analysis::Diagnostic,
-    seen: &mut std::collections::HashSet<(String, beamtalk_core::source_analysis::Span)>,
-) -> bool {
-    if diag.message.starts_with("Pre-loaded type alias ") {
-        seen.insert((diag.message.to_string(), diag.span))
-    } else {
-        true
-    }
-}
 
 /// Run lint passes on the given path (file or directory).
 ///
@@ -199,319 +42,68 @@ fn dedup_pre_loaded_alias_collision(
 /// `Dnu`/`Type` findings, plus any `Error`) also fail the command, so the
 /// buccaneer-style sources the REPL `load-project` rejects fail CI here too
 /// (BT-4334).
-#[allow(clippy::too_many_lines)] // current_package resolution joins an already-large orchestration function
+///
+/// The analysis is [`beamtalk_cli::lint_pipeline`], shared with the MCP
+/// `lint` tool (BT-4585); this function supplies the CLI's dependency
+/// resolution and FFI type registry and prints the results.
 pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> Result<()> {
     let source_path = Utf8PathBuf::from(path);
     let (source_files, erl_files) = collect_lint_files(&source_path, path)?;
 
-    // Pass 1: Parse all files and extract class metadata so that cross-file
-    // type/DNU diagnostics in Pass 2 match what `build` emits. Without this,
-    // `@expect` annotations that suppress real cross-file diagnostics during
-    // build would be reported as stale by lint.
-    //
-    // When the lint target is a subset of a package (e.g. `test/` or a
-    // single file), extraction must still cover the full package source set so
-    // classes defined in sibling directories (`src/` from `test/`, etc.) are
-    // visible. Otherwise a test file that references a `src/` class produces
-    // spurious `Unresolved class` diagnostics.
-    let package_root = find_package_root(&source_path);
-
-    // One manifest read derives the knowledge scope, `current_package`
-    // (E0401/E0402 gating, see `check_class_visibility`) and
-    // `has_package_dependencies`, by the rule `build`/`test` share. With a
-    // package root, Pass 1 walks the full package source set, so the
-    // injected knowledge is project-complete; a bare file outside any
-    // package keeps the conservative `ModuleOnly` default.
-    let super::manifest::PackageCheckerScope {
-        knowledge_scope,
-        has_package_dependencies,
-        package_name: current_package,
-    } = super::manifest::package_checker_scope(package_root.as_deref());
-
-    // Resolved before extraction so cross-file `ClassInfo` can be
-    // package-stamped too (see `parse_and_extract_class_infos`'s
-    // `stamp_package_on_infos` call).
-    let (
-        mut all_class_infos,
-        mut extension_index,
-        mut all_protocol_infos,
-        mut all_protocol_defs,
-        mut all_protocol_sources,
-        mut all_alias_infos,
-        parsed_files,
-        trait_users,
-    ) = parse_and_extract_class_infos(
-        &source_files,
-        package_root.as_deref(),
-        current_package.as_deref(),
-    )?;
+    // Pass 1: parse the full package source set — not only the targets —
+    // so cross-file type/DNU diagnostics in Pass 2 match what `build` emits.
+    // Without this, `@expect` annotations that suppress real cross-file
+    // diagnostics during build would be reported as stale by lint, and a
+    // test file referencing a `src/` class would report it unresolved.
+    let mut unreadable: Option<miette::Report> = None;
+    let sources =
+        lint_pipeline::parse_package_sources(&source_path, &source_files, |file, _, e| {
+            unreadable.get_or_insert_with(|| miette::miette!("Failed to read '{file}': {e}"));
+        });
+    if let Some(e) = unreadable {
+        return Err(e);
+    }
 
     // Merge dependency class/protocol/alias metadata so lint sees the same
-    // cross-package picture as build. Without this, @expect annotations that
-    // suppress real cross-package diagnostics would be reported as stale.
-    // The resolved deps are also needed below for their `stubs_dir`s (ADR
-    // 0075 layer 2).
-    let (resolved_deps, dependency_extensions_complete) =
-        if let Some(ref project_root) = package_root {
-            merge_dependency_infos(
-                project_root,
-                &mut all_class_infos,
-                &mut all_protocol_infos,
-                &mut all_protocol_defs,
-                &mut all_protocol_sources,
-                &mut all_alias_infos,
-                &mut extension_index,
-            )
-        } else {
-            (Vec::new(), false)
-        };
-    // The pre-WS3 dependency guard, by the rule `build`/`check`/`test`
-    // share: on unless every dependency's extensions were loaded.
-    let dependency_extensions_unknown =
-        beamtalk_cli::dependency_extensions::dependency_extensions_unknown(
-            has_package_dependencies,
-            package_root.is_some(),
-            dependency_extensions_complete,
-        );
-
-    // Flatten cross-file trait provisions into the same-package infos, as
-    // `build` does (BT-3673) — after the dependency merge so a `uses:` of a
-    // dependency's trait resolves too. Without it a typed call to a provided
-    // method on a class whose trait lives in another file reports a false
-    // "does not understand" from every *other* file.
-    trait_users.flatten(
-        &mut all_class_infos,
-        all_protocol_defs.iter().cloned(),
-        current_package.as_deref(),
-    );
-
-    // Populate the FFI type registry via the same
-    // `extract_type_specs` that `beamtalk build` calls, instead of only
-    // reading whatever `_build/type_cache/` happens to hold. Reading a cache
-    // written by a *previous* build let lint's view of FFI types drift from
-    // build's live view — on a project that had never been built, lint's
-    // cache read silently returned `None` (skipping FFI arg-type checks
-    // build performs), and any `@expect type` written to suppress a real
-    // build-time FFI diagnostic was then flagged as stale by lint. Calling
-    // the shared extractor directly makes `beamtalk lint` and `beamtalk
-    // build`/`test` agree on the FFI type registry by construction: a fresh
-    // cache still short-circuits to zero `.beam` reads, and a cold/stale one
-    // extracts once and writes the same cache a subsequent build would.
-    // The full ADR 0075 stub resolution chain overrides
-    // auto-extract at the function/arity level — same merge `beamtalk build`
-    // performs, via the same shared loaders, so `beamtalk lint` and
-    // `beamtalk build` agree on stub-derived FFI types too, not just
-    // auto-extracted ones. These loaders print their own diagnostics
-    // (skipped signatures, version drift) directly; they are not folded into
-    // `all_diags` below, which is scoped to `.bt` diagnostics.
-    //
-    // Stdlib has no `beamtalk.toml` (see `stdlib_mode`'s doc above), so
-    // `package_root` is always `None` when linting it — falling all the way
-    // through to `beamtalk build-stdlib`'s own extractor
-    // (`extract_stdlib_type_specs`, which scans `runtime/apps/beamtalk_stdlib`'s
-    // compiled `.beam` files, ADR 0075) instead of leaving the registry
-    // `None`. Without this, every `(Erlang m) f:` call in `stdlib/src`
-    // reported `Dynamic (untyped FFI)` in `beamtalk lint` even though
-    // `beamtalk build-stdlib` already infers it correctly — a lint-only
-    // false positive with no `@expect` that could satisfy both passes.
-    let is_stdlib_lint_target = package_root.is_none()
-        && source_files
-            .iter()
-            .any(|f| package::is_under_stdlib_src_dir(f.as_std_path()));
-
-    let native_type_registry = if let Some(root) = package_root.as_deref() {
-        let layout = crate::commands::build_layout::BuildLayout::new(root);
-        let auto_extract = super::build::extract_type_specs(&layout, true, false);
-
-        super::build::resolve_package_type_registry(
-            root,
-            auto_extract,
-            &resolved_deps,
-            Some(format),
-        )
-        .registry
-        .map(std::sync::Arc::new)
-    } else if is_stdlib_lint_target {
-        super::build_stdlib::extract_stdlib_type_specs().map(std::sync::Arc::new)
-    } else {
-        None
+    // cross-package picture as build. The resolved deps are also needed
+    // below for their `stubs_dir`s (ADR 0075 layer 2).
+    let (resolved_deps, dependencies) = match sources.package_root.as_deref() {
+        Some(project_root) => merge_dependency_infos(project_root),
+        None => (Vec::new(), DependencyMetadata::default()),
     };
 
-    // BT-4022: project-known Erlang modules for the `unresolved_ffi`
-    // check — same package-root anchoring as `native_type_registry`
-    // above. `beamtalk lint` never compiles native/hex deps itself, so the
-    // ebin tier reflects whatever a previous `beamtalk build` left on disk
-    // (absent on a fresh checkout — genuinely-unknown modules still warn);
-    // the `native/` source tier is known regardless.
-    let known_erlang_modules = package_root.as_deref().map_or_else(
-        std::collections::HashSet::new,
-        beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules,
+    let native_type_registry = lint_type_registry(
+        sources.package_root.as_deref(),
+        &source_files,
+        &resolved_deps,
+        format,
     );
 
-    // BT-4377: the package's `[diagnostics]` table, via the same loader the
-    // compiler port (REPL) and LSP use, so a category the package turns
-    // `off` or re-levels gets the same verdict here as in a REPL load.
-    let diagnostics_overrides = package_root.as_deref().map_or_else(
-        beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new,
-        |root| {
-            beamtalk_core::compilation::diagnostics_policy::load_diagnostics_table_for_root(
-                root.as_std_path(),
-            )
+    // Pass 2: analyse each file with cross-file class context.
+    let mut gate = LintGate::default();
+    let mut all_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
+    let provision_diags = lint_pipeline::analyse_package(
+        sources,
+        dependencies,
+        native_type_registry.as_ref(),
+        |file| {
+            for diag in &file.diagnostics {
+                print_diagnostic(format, file.path.as_str(), file.source, diag);
+                gate.count(diag);
+            }
+            all_diags.extend(file.diagnostics);
         },
     );
 
-    // Pass 2: Analyse each file with cross-file class context.
-    let mut total_lint_count = 0usize;
-    // BT-4334: live-recheck failures surfaced only under --warnings-as-errors.
-    let mut total_recheck_count = 0usize;
-    let mut all_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
-    // Flattened-provision diagnostics, held until every file has been analysed.
-    let mut all_provision_diags: Vec<beamtalk_core::source_analysis::Diagnostic> = Vec::new();
-
-    // `all_alias_infos` (the pre-loaded/cross-package alias seed
-    // list) is identical on every iteration of the Pass 2 loop below, so a
-    // genuine collision between two of its entries — reported fresh by
-    // `AliasRegistry::add_pre_loaded` inside `collect_diagnostics` (a new
-    // `AliasRegistry` per file, seeded from the same list every time) — would
-    // otherwise be re-diagnosed once per file in the project instead of once
-    // per lint run. Dedup by (message, span): every `add_pre_loaded`
-    // collision diagnostic for a given colliding pair has byte-identical
-    // text and span regardless of which file triggered the seeding, since
-    // neither depends on the file currently being analysed.
-    let mut seen_pre_loaded_alias_collisions: std::collections::HashSet<(
-        String,
-        beamtalk_core::source_analysis::Span,
-    )> = std::collections::HashSet::new();
-
-    for (file, source, module, parse_diags) in parsed_files {
-        let cross_file_classes =
-            beamtalk_core::semantic_analysis::ClassHierarchy::cross_file_class_infos(
-                &all_class_infos,
-                &module,
-            );
-
-        // `collect_lint_files`'s `stubs/` exclusion only covers its
-        // directory-walk branch — a direct single-file lint target (e.g.
-        // `beamtalk lint stubs/lists.bt`) bypasses it entirely, so a
-        // legitimate stub file must be recognised here or
-        // `check_native_declaration_location` reports a false
-        // "only valid in stubs/ directory" error on it.
-        let is_stub_file = package_root.as_deref().is_some_and(|root| {
-            package::is_under_stubs_dir(root.as_std_path(), file.as_std_path())
-        });
-        let stdlib_mode = package::is_under_stdlib_src_dir(file.as_std_path());
-
-        let lint_diags = collect_diagnostics(
-            &module,
-            &source,
-            parse_diags,
-            cross_file_classes,
-            all_protocol_infos.clone(),
-            all_protocol_defs.clone(),
-            all_alias_infos.clone(),
-            native_type_registry.clone(),
-            knowledge_scope,
-            &extension_index,
-            dependency_extensions_unknown,
-            current_package.as_deref(),
-            is_stub_file,
-            file.file_stem(),
-            stdlib_mode,
-            &known_erlang_modules,
-            &diagnostics_overrides,
-        );
-
-        // Drop repeat sightings of a pre-loaded alias collision —
-        // see `seen_pre_loaded_alias_collisions`'s doc above. Every other
-        // diagnostic is file-specific and passes through unfiltered.
-        let lint_diags: Vec<_> = lint_diags
-            .into_iter()
-            .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
-            .collect();
-
-        // ADR 0127 §3 / BT-3665: a diagnostic in a flattened trait provision
-        // has a span in the *protocol's* file, so it is held back here and
-        // published once (merged across the using classes) in that file
-        // after the loop, instead of at a meaningless offset in this one.
-        // An `@expect` in the protocol's provided method suppresses it (and is
-        // matched here, not by the using file's own `@expect` pass).
-        let mut lint_diags = lint_diags;
-        beamtalk_core::compilation::diagnostics_policy::apply_protocol_expect_directives(
-            &all_protocol_defs,
-            &mut lint_diags,
-        );
-        let (provision_diags, lint_diags): (Vec<_>, Vec<_>) =
-            lint_diags.into_iter().partition(|d| d.provision.is_some());
-        all_provision_diags.extend(provision_diags);
-
-        for diag in &lint_diags {
-            match format {
-                OutputFormat::Text => {
-                    let compile_diag =
-                        CompileDiagnostic::from_core_diagnostic(diag, file.as_str(), &source);
-                    eprintln!("{:?}", miette::Report::new(compile_diag));
-                }
-                OutputFormat::Json => {
-                    // Stream each diagnostic as line-delimited JSON
-                    // instead of buffering all diagnostics in memory.
-                    let json = crate::diagnostic::diagnostic_to_json(file.as_str(), diag);
-                    println!("{json}");
-                }
-            }
-        }
-
-        // Only count actual lint diagnostics toward the failure threshold.
-        // apply_expect_directives may inject Severity::Warning for stale @expect
-        // annotations — those should be displayed but not fail the command.
-        total_lint_count += lint_diags
-            .iter()
-            .filter(|d| d.severity == Severity::Lint)
-            .count();
-
-        // BT-4334: with `--warnings-as-errors`, the live-recheck categories
-        // fail the command too so CI agrees with a REPL `load-project`.
-        if warnings_as_errors {
-            total_recheck_count += lint_diags
-                .iter()
-                .filter(|d| diagnostics_policy::is_live_recheck_failure(d))
-                .count();
-        }
-
-        // Collect diagnostics for the summary.
-        all_diags.extend(lint_diags);
-    }
-
-    // Publish each flattened-provision diagnostic once, in its protocol's file.
-    for diag in crate::diagnostic::dedupe_provision_diagnostics(all_provision_diags) {
-        let Some((protocol_path, protocol_text)) =
-            crate::diagnostic::provision_report_target(&diag, &all_protocol_sources)
-        else {
-            continue;
-        };
-        match format {
-            OutputFormat::Text => {
-                let compile_diag =
-                    CompileDiagnostic::from_core_diagnostic(&diag, &protocol_path, protocol_text);
-                eprintln!("{:?}", miette::Report::new(compile_diag));
-            }
-            OutputFormat::Json => {
-                println!(
-                    "{}",
-                    crate::diagnostic::diagnostic_to_json(&protocol_path, &diag)
-                );
-            }
-        }
-        if diag.severity == Severity::Lint {
-            total_lint_count += 1;
-        }
-        if warnings_as_errors && diagnostics_policy::is_live_recheck_failure(&diag) {
-            total_recheck_count += 1;
-        }
-        all_diags.push(diag);
+    // Each flattened-provision diagnostic once, in its protocol's file.
+    for routed in provision_diags {
+        print_diagnostic(format, &routed.path, &routed.source, &routed.diagnostic);
+        gate.count(&routed.diagnostic);
+        all_diags.push(routed.diagnostic);
     }
 
     // Lint native .erl files.
-    total_lint_count += lint_erl_files(&erl_files, format)?;
+    gate.count_erlang(lint_erl_files(&erl_files, format)?);
 
     // Build and print diagnostic summary.
     // `all_diags` only contains `.bt` diagnostics, so `files_checked` must
@@ -538,81 +130,90 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
         }
     }
 
-    if total_lint_count > 0 {
-        let plural = if total_lint_count == 1 { "" } else { "s" };
-        miette::bail!(
-            "{total_lint_count} lint diagnostic{plural} found in {total_files_checked} file(s)"
-        );
+    // Stale `@expect` warnings are displayed but do not fail the command:
+    // only Lint-severity diagnostics count toward the default gate.
+    if gate.lint > 0 {
+        let count = gate.lint;
+        let plural = if count == 1 { "" } else { "s" };
+        miette::bail!("{count} lint diagnostic{plural} found in {total_files_checked} file(s)");
     }
 
     // BT-4334: the REPL-parity gate. Reported separately so the default
     // lint-severity message above stays unchanged for existing callers.
-    if total_recheck_count > 0 {
-        let plural = if total_recheck_count == 1 { "" } else { "s" };
+    if gate.fails(warnings_as_errors) {
+        let count = gate.live_recheck;
+        let plural = if count == 1 { "" } else { "s" };
         miette::bail!(
-            "{total_recheck_count} type/DNU/error diagnostic{plural} found in {total_files_checked} file(s) (--warnings-as-errors: REPL load-project parity)"
+            "{count} type/DNU/error diagnostic{plural} found in {total_files_checked} file(s) (--warnings-as-errors: REPL load-project parity)"
         );
     }
 
     Ok(())
 }
 
-/// Collect `.bt` and `.erl` files from the given path.
-fn collect_lint_files(
-    source_path: &Utf8PathBuf,
-    path: &str,
-) -> Result<(Vec<Utf8PathBuf>, Vec<Utf8PathBuf>)> {
-    let mut erl_files: Vec<Utf8PathBuf> = Vec::new();
-
-    let source_files = if source_path.is_file() {
-        match source_path.extension() {
-            Some("bt") => vec![source_path.clone()],
-            Some("erl") => {
-                erl_files.push(source_path.clone());
-                Vec::new()
-            }
-            _ => miette::bail!("File '{}' is not a .bt or .erl source file", path),
+/// Print one `.bt` diagnostic: miette-rendered for text, one JSON line for
+/// JSON (streamed rather than buffered).
+fn print_diagnostic(
+    format: OutputFormat,
+    file: &str,
+    source: &str,
+    diag: &beamtalk_core::source_analysis::Diagnostic,
+) {
+    match format {
+        OutputFormat::Text => {
+            let compile_diag = CompileDiagnostic::from_core_diagnostic(diag, file, source);
+            eprintln!("{:?}", miette::Report::new(compile_diag));
         }
-    } else if source_path.is_dir() {
-        let project_root = find_package_root(source_path).unwrap_or_else(|| source_path.clone());
-        let native_dir = project_root.join("native");
-        if native_dir.is_dir() {
-            match FileWalker::native_erl_files().walk(&native_dir) {
-                Ok(files) => erl_files = files,
-                Err(e) => warn!("failed to scan native directory: {e}"),
-            }
+        OutputFormat::Json => {
+            println!("{}", crate::diagnostic::diagnostic_to_json(file, diag));
         }
-        // `stubs/` is excluded (ADR 0075): it's type-only and
-        // never compiled, but this walk has no src/-only scoping to
-        // exclude it implicitly the way `find_source_files` does, so a
-        // `declare native:` stub file would otherwise be swept in and
-        // rejected here as a hard error.
-        let stubs_dir = project_root.join("stubs");
-        FileWalker::lint_files()
-            .walk(source_path)?
-            .into_iter()
-            .filter(|f| !f.starts_with(&stubs_dir))
-            .collect()
-    } else {
-        miette::bail!("Path '{}' does not exist", path);
-    };
-
-    if source_files.is_empty() && erl_files.is_empty() {
-        miette::bail!("No .bt or .erl source files found in '{path}'");
     }
+}
 
-    Ok((source_files, erl_files))
+/// The FFI type registry `beamtalk lint` analyses against.
+///
+/// Built via the same `extract_type_specs` that `beamtalk build` calls,
+/// instead of only reading whatever `_build/type_cache/` happens to hold — a
+/// cache written by a *previous* build let lint's view of FFI types drift
+/// from build's, and an `@expect type` written to suppress a real build-time
+/// FFI diagnostic was then flagged as stale by lint. The full ADR 0075 stub
+/// resolution chain overrides auto-extract at the function/arity level —
+/// the same merge `beamtalk build` performs, via the same shared loaders.
+/// These loaders print their own diagnostics (skipped signatures, version
+/// drift) directly.
+///
+/// Stdlib has no `beamtalk.toml`, so `package_root` is `None` when linting
+/// it; the registry then comes from `beamtalk build-stdlib`'s own extractor
+/// (`extract_stdlib_type_specs`, ADR 0075) instead of being `None`, which
+/// would report every `(Erlang m) f:` call in `stdlib/src` as untyped.
+fn lint_type_registry(
+    package_root: Option<&Utf8Path>,
+    source_files: &[Utf8PathBuf],
+    resolved_deps: &[super::deps::path::ResolvedDependency],
+    format: OutputFormat,
+) -> Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>> {
+    if let Some(root) = package_root {
+        let layout = crate::commands::build_layout::BuildLayout::new(root);
+        let auto_extract = super::build::extract_type_specs(&layout, true, false);
+        super::build::resolve_package_type_registry(root, auto_extract, resolved_deps, Some(format))
+            .registry
+            .map(std::sync::Arc::new)
+    } else if source_files
+        .iter()
+        .any(|f| package::is_under_stdlib_src_dir(f.as_std_path()))
+    {
+        super::build_stdlib::extract_stdlib_type_specs().map(std::sync::Arc::new)
+    } else {
+        None
+    }
 }
 
 /// Lint native `.erl` files and print diagnostics. Returns the total count.
 fn lint_erl_files(erl_files: &[Utf8PathBuf], format: OutputFormat) -> Result<usize> {
     let mut count = 0;
     for erl_file in erl_files {
-        let source = std::fs::read_to_string(erl_file)
-            .into_diagnostic()
+        let diags = lint_pipeline::lint_erl_file(erl_file)
             .map_err(|e| miette::miette!("Failed to read '{}': {e}", erl_file))?;
-
-        let diags = erlang_lint::lint_erl_file(erl_file, &source);
 
         for diag in &diags {
             match format {
@@ -645,277 +246,42 @@ fn lint_erl_files(erl_files: &[Utf8PathBuf], format: OutputFormat) -> Result<usi
     Ok(count)
 }
 
-/// Collect all `.bt` files in the package's conventional source directories
-/// (`src/` and `test/`) plus any explicitly-targeted lint files that fall
-/// outside those directories.
-///
-/// Used so that `beamtalk lint test/` or `beamtalk lint src/foo.bt`
-/// extracts class metadata from the full package source set, not just the
-/// path the user passed. Without this, a test file that references a `src/`
-/// class produces spurious `Unresolved class` diagnostics.
-///
-/// Thin camino wrapper around
-/// [`beamtalk_project::package::collect_package_source_files_with_errors`]
-/// so MCP and CLI share the underlying implementation. Walk errors are logged
-/// via the `tracing` stack that CLI already uses.
-fn collect_package_class_files(
-    package_root: &Utf8Path,
-    target_files: &[Utf8PathBuf],
-) -> Vec<Utf8PathBuf> {
-    use std::collections::HashSet;
-
-    let (files, errors) =
-        package::collect_package_source_files_with_errors(package_root.as_std_path());
-    for (dir, e) in errors {
-        warn!(
-            "failed to walk '{}' for cross-file class extraction: {e}",
-            dir.display()
-        );
-    }
-
-    // Dedup by canonical form: walked paths are absolute (`package_root` is
-    // canonicalized upstream) but `target_files` often arrive as relative
-    // user-typed paths (e.g. `test/Foo.bt`). Comparing raw `Utf8PathBuf`
-    // would let the same file appear twice and get parsed twice.
-    let mut seen: HashSet<Utf8PathBuf> = HashSet::new();
-    let mut out: Vec<Utf8PathBuf> = Vec::new();
-
-    for f in files {
-        let utf8 = Utf8PathBuf::from_path_buf(f)
-            .unwrap_or_else(|p| Utf8PathBuf::from(p.to_string_lossy().into_owned()));
-        if seen.insert(canonicalize_or_clone(&utf8)) {
-            out.push(utf8);
-        }
-    }
-
-    // Ensure explicitly-targeted files are always included, even if they live
-    // outside `src/`/`test/` (e.g. a one-off file at the package root).
-    for f in target_files {
-        if seen.insert(canonicalize_or_clone(f)) {
-            out.push(f.clone());
-        }
-    }
-
-    out
-}
-
-/// Returns the canonical filesystem form of `path`, falling back to a clone
-/// when the path cannot be canonicalized (e.g. it does not yet exist). Used
-/// as a normalized key for path-based deduplication.
-fn canonicalize_or_clone(path: &Utf8Path) -> Utf8PathBuf {
-    Utf8PathBuf::from_path_buf(beamtalk_project::package::try_canonicalize(
-        path.as_std_path(),
-    ))
-    .unwrap_or_else(|_| path.to_path_buf())
-}
-
-/// Parse each lint target and collect class-info metadata from the package's
-/// full source set (src/ + test/) so cross-file class resolution works for
-/// partial-path lint targets.
-///
-/// Returns `(all_class_infos, parsed_files)` where `parsed_files` contains only
-/// the files the user asked to lint; sibling files walked purely for
-/// class-info extraction are dropped.
-type ParsedLintFile = (
-    Utf8PathBuf,
-    String,
-    beamtalk_core::ast::Module,
-    Vec<beamtalk_core::source_analysis::Diagnostic>,
-);
-
-#[allow(clippy::type_complexity)] // Mirrors the pre-existing 3-tuple return; adds two sibling collections
-fn parse_and_extract_class_infos(
-    source_files: &[Utf8PathBuf],
-    package_root: Option<&Utf8Path>,
-    current_package: Option<&str>,
-) -> Result<(
-    Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-    beamtalk_core::compilation::extension_index::ExtensionIndex,
-    Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
-    Vec<beamtalk_core::ast::ProtocolDefinition>,
-    beamtalk_core::semantic_analysis::ProtocolSourceMap,
-    Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
-    Vec<ParsedLintFile>,
-    beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
-)> {
-    let extraction_files = match package_root {
-        Some(root) => collect_package_class_files(root, source_files),
-        None => source_files.to_vec(),
-    };
-
-    // Match by canonical form: `source_files` may be user-typed relative
-    // paths while `extraction_files` contains absolute paths from the package
-    // walk. Comparing raw `Utf8PathBuf` would drop relative targets from
-    // `parsed_files` after dedup canonicalized them into walked form.
-    let source_file_set: std::collections::HashSet<Utf8PathBuf> = source_files
-        .iter()
-        .map(|p| canonicalize_or_clone(p))
-        .collect();
-    let mut all_class_infos = Vec::new();
-    let mut extension_index = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
-    // Same-package cross-file protocol/alias metadata — without collecting
-    // protocols and aliases here (as `build` does), `:: Alias` and
-    // `extending:` diagnostics could disagree between `build` and `lint`.
-    let mut all_protocol_infos = Vec::new();
-    let mut all_protocol_defs = Vec::new();
-    let mut all_alias_infos = Vec::new();
-    let mut parsed_files: Vec<ParsedLintFile> = Vec::new();
-    // Trait users (BT-3673): flattened by the caller once the dependencies'
-    // protocols are merged in.
-    let mut trait_users =
-        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
-
-    for file in &extraction_files {
-        let source = std::fs::read_to_string(file)
-            .into_diagnostic()
-            .map_err(|e| miette::miette!("Failed to read '{}': {e}", file))?;
-
-        let tokens = lex_with_eof(&source);
-        let (module, parse_diags) = parse(tokens);
-
-        // A file with parse errors may have an under-recovered
-        // method surface — mark its classes so the receiver-knowledge
-        // classifier treats them (and their subclasses) as `Open` rather
-        // than emitting hints against a surface extraction never fully saw.
-        let has_parse_errors = parse_diags.iter().any(|d| d.severity == Severity::Error);
-        let mut class_infos =
-            beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module);
-        if has_parse_errors {
-            for info in &mut class_infos {
-                info.surface_incomplete = true;
-            }
-        }
-        // Stamp the package per-file, same as build's Pass 1 — see
-        // `stamp_package_on_infos`'s doc comment for why this can't wait
-        // until each file's own analysis pass.
-        if let Some(pkg) = current_package {
-            beamtalk_core::semantic_analysis::ClassHierarchy::stamp_package_on_infos(
-                &mut class_infos,
-                pkg,
-            );
-        }
-        all_class_infos.extend(class_infos);
-        // Also records each carried protocol's source identity (ADR 0127 §3),
-        // first definition wins — the file a diagnostic in a flattened
-        // provision is reported against.
-        trait_users.add_source_file(&module, file.as_str(), &source, current_package);
-
-        // Collect standalone extensions package-wide so cross-file
-        // `ClassName >> selector` definitions resolve during lint the same
-        // way they do during build.
-        extension_index.add_module(&module, file.as_std_path());
-
-        // Extract protocol/alias infos from the already-parsed
-        // module — no second parse pass, mirroring the class_infos handling
-        // just above. Aliases are stamped with `current_package` the same
-        // way `build`'s `collect_project_alias_infos` stamps them, so
-        // `AliasRegistry::add_pre_loaded`'s seeding-boundary filter can tell
-        // a same-package alias apart from a dependency's `internal` one.
-        all_protocol_infos.extend(
-            beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
-                &module,
-            ),
-        );
-        // Full ASTs of carried protocols only (ADR 0127 §10a;
-        // BT-3591) — the trait-flattening counterpart to `all_protocol_infos`
-        // immediately above; see `collect_diagnostics`'s
-        // `pre_loaded_protocol_defs` parameter.
-        for protocol in module
-            .protocols
-            .iter()
-            .filter(|p| beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol(p))
-        {
-            all_protocol_defs.push(protocol.clone());
-        }
-        all_alias_infos.extend(
-            beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_package_alias_infos(
-                &module,
-                current_package,
-            ),
-        );
-
-        if source_file_set.contains(&canonicalize_or_clone(file)) {
-            parsed_files.push((file.clone(), source, module, parse_diags));
-        }
-    }
-
-    let all_protocol_sources = trait_users.protocol_sources().clone();
-    Ok((
-        all_class_infos,
-        extension_index,
-        all_protocol_infos,
-        all_protocol_defs,
-        all_protocol_sources,
-        all_alias_infos,
-        parsed_files,
-        trait_users,
-    ))
-}
-
-/// Walk ancestors from the given path to find the package root (containing `beamtalk.toml`).
-///
-/// Returns `None` if no `beamtalk.toml` is found in any ancestor directory.
-///
-/// Relative paths like `test/` or `src/foo.bt` are canonicalized
-/// before ancestor walking so that the search reaches the real package root
-/// rather than bailing out when the short relative path runs out of parents.
-///
-/// Camino wrapper around
-/// [`beamtalk_project::package::find_package_root`] so MCP and CLI share
-/// the same implementation.
-pub(crate) fn find_package_root(start: &Utf8Path) -> Option<Utf8PathBuf> {
-    package::find_package_root(start.as_std_path()).and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
-}
-
-/// Resolve dependency classes/protocols/aliases and merge them into the
-/// respective info lists.
+/// Resolve the project's dependencies and collect their class, protocol and
+/// alias metadata and extension methods (ADR 0070 WS3, BT-4608) for the
+/// shared pipeline.
 ///
 /// Best-effort: if dependency resolution fails (e.g. network error for a git
-/// dep), lint continues without dep metadata rather than failing entirely.
-///
-/// `has_package_dependencies` is derived, together with `current_package`,
-/// from `run_lint`'s single manifest read; this function's job is the
-/// dependency-metadata side effect on the `all_*` lists, plus reporting
-/// whether the dependencies' extensions are known completely.
-///
-/// Merges `dep.protocol_infos`/`dep.alias_infos` as well as class infos, giving `beamtalk lint` the same
-/// cross-package protocol/alias resolution `beamtalk build` has.
-/// Resolves the project's dependencies, merges their class/protocol/alias
-/// metadata and extension methods (ADR 0070 WS3, BT-4608) into the running
-/// lists, and returns the resolved dependencies (empty on resolution
-/// failure) so callers can also use their `stubs_dir`s (ADR 0075 layer 2) —
-/// see [`run_lint`]'s `native_type_registry` construction — together with
-/// whether every dependency's extensions are now known completely: `false`
-/// when resolution failed, which keeps the pre-WS3 dependency guard on.
+/// dep), lint continues without dependency metadata — and with the pre-WS3
+/// dependency guard on — rather than failing entirely. Also returns the
+/// resolved dependencies (empty on failure) for their `stubs_dir`s (ADR 0075
+/// layer 2); see [`lint_type_registry`].
 fn merge_dependency_infos(
     project_root: &Utf8Path,
-    all_class_infos: &mut Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
-    all_protocol_infos: &mut Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
-    all_protocol_defs: &mut Vec<beamtalk_core::ast::ProtocolDefinition>,
-    all_protocol_sources: &mut beamtalk_core::semantic_analysis::ProtocolSourceMap,
-    all_alias_infos: &mut Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
-    all_extensions: &mut beamtalk_core::compilation::extension_index::ExtensionIndex,
-) -> (Vec<super::deps::path::ResolvedDependency>, bool) {
+) -> (
+    Vec<super::deps::path::ResolvedDependency>,
+    DependencyMetadata,
+) {
     let options = beamtalk_core::CompilerOptions::default();
     match super::deps::ensure_deps_resolved(project_root, &options) {
         Ok(resolved_deps) => {
-            let extensions_complete =
+            let mut metadata = DependencyMetadata::default();
+            metadata.extensions_complete =
                 beamtalk_cli::dependency_extensions::merge_dependency_extensions(
                     resolved_deps.iter().map(|dep| &dep.extensions),
-                    all_extensions,
+                    &mut metadata.extensions,
                 );
             for dep in &resolved_deps {
-                all_class_infos.extend(dep.class_infos.clone());
-                all_protocol_infos.extend(dep.protocol_infos.clone());
-                all_protocol_defs.extend(dep.protocol_defs.clone());
-                // First definition wins (project, then dependencies).
+                metadata.class_infos.extend(dep.class_infos.clone());
+                metadata.protocol_infos.extend(dep.protocol_infos.clone());
+                metadata.protocol_defs.extend(dep.protocol_defs.clone());
+                // First definition wins.
                 beamtalk_core::semantic_analysis::protocol_source::merge_protocol_sources(
-                    all_protocol_sources,
+                    &mut metadata.protocol_sources,
                     dep.protocol_sources.clone(),
                 );
-                all_alias_infos.extend(dep.alias_infos.clone());
+                metadata.alias_infos.extend(dep.alias_infos.clone());
             }
-            (resolved_deps, extensions_complete)
+            (resolved_deps, metadata)
         }
         Err(e) => {
             warn!(
@@ -923,7 +289,7 @@ fn merge_dependency_infos(
                 "Failed to resolve dependencies for lint; \
                  dependency classes/protocols/aliases may not be available"
             );
-            (Vec::new(), false)
+            (Vec::new(), DependencyMetadata::default())
         }
     }
 }
@@ -951,7 +317,7 @@ fn collect_lint_diagnostics(source: &str) -> Vec<beamtalk_core::source_analysis:
 /// As [`collect_lint_diagnostics`], but with `is_stub_file` set explicitly —
 /// Regression test for a direct-file-target `beamtalk lint` on a
 /// genuine `stubs/` file needs `is_stub_file: true` to reproduce what
-/// `collect_diagnostics`'s real caller now derives via `is_under_stubs_dir`.
+/// `analyse_file`'s real caller now derives via `is_under_stubs_dir`.
 #[cfg(test)]
 fn collect_lint_diagnostics_with_stub_flag(
     source: &str,
@@ -959,25 +325,16 @@ fn collect_lint_diagnostics_with_stub_flag(
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     let tokens = lex_with_eof(source);
     let (module, parse_diags) = parse(tokens);
-    collect_diagnostics(
+    analyse_file(
         &module,
         source,
         parse_diags,
-        vec![],
-        vec![],
-        vec![],
-        vec![],
-        None,
-        beamtalk_core::semantic_analysis::KnowledgeScope::default(),
-        &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
-        false,
-        None,
-        is_stub_file,
-        None,
-        false,
-        &std::collections::HashSet::new(),
-        &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
+        FileContext {
+            is_stub_file,
+            ..FileContext::default()
+        },
     )
+    .0
 }
 
 /// As [`collect_lint_diagnostics`], but with `file_stem` set explicitly —
@@ -990,25 +347,16 @@ fn collect_lint_diagnostics_with_file_stem(
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     let tokens = lex_with_eof(source);
     let (module, parse_diags) = parse(tokens);
-    collect_diagnostics(
+    analyse_file(
         &module,
         source,
         parse_diags,
-        vec![],
-        vec![],
-        vec![],
-        vec![],
-        None,
-        beamtalk_core::semantic_analysis::KnowledgeScope::default(),
-        &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
-        false,
-        None,
-        false,
-        file_stem,
-        false,
-        &std::collections::HashSet::new(),
-        &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
+        FileContext {
+            file_stem,
+            ..FileContext::default()
+        },
     )
+    .0
 }
 
 /// As [`collect_lint_diagnostics`], but with `stdlib_mode` set explicitly —
@@ -1022,25 +370,16 @@ fn collect_lint_diagnostics_with_stdlib_flag(
 ) -> Vec<beamtalk_core::source_analysis::Diagnostic> {
     let tokens = lex_with_eof(source);
     let (module, parse_diags) = parse(tokens);
-    collect_diagnostics(
+    analyse_file(
         &module,
         source,
         parse_diags,
-        vec![],
-        vec![],
-        vec![],
-        vec![],
-        None,
-        beamtalk_core::semantic_analysis::KnowledgeScope::default(),
-        &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
-        false,
-        None,
-        false,
-        None,
-        stdlib_mode,
-        &std::collections::HashSet::new(),
-        &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
+        FileContext {
+            stdlib_mode,
+            ..FileContext::default()
+        },
     )
+    .0
 }
 
 #[cfg(test)]
@@ -1073,7 +412,7 @@ mod tests {
     #[test]
     fn declare_native_outside_stubs_is_reported() {
         // A `declare native:` block outside `stubs/` (is_stub_file:
-        // false, what `collect_diagnostics`'s real caller derives for a
+        // false, what `analyse_file`'s real caller derives for a
         // direct file-target NOT under `stubs/`) must be reported.
         let source = "declare native: lists\n";
         let diags = collect_lint_diagnostics_with_stub_flag(source, false);
@@ -1088,7 +427,7 @@ mod tests {
     #[test]
     fn declare_native_inside_stubs_is_not_reported() {
         // Giving `check_native_declaration_location`'s
-        // diagnostic a category (so it survives `collect_diagnostics`'s
+        // diagnostic a category (so it survives `analyse_file`'s
         // `category.is_some()` filter) would otherwise newly surface a FALSE
         // positive on a legitimate stub file reached via a direct
         // single-file lint target — `collect_lint_files`'s `stubs/`
@@ -1215,7 +554,7 @@ mod tests {
 
     // ── near-miss `// === Name ===` divider ─────────────────────────────
     //
-    // These exercise `collect_diagnostics` through its real entry point
+    // These exercise `analyse_file` through its real entry point
     // (`collect_lint_diagnostics`, mirroring `run_lint`'s Pass 2 call), not
     // `near_miss_divider::scan_source` directly (already covered by that
     // module's own `scan_source_locates_the_near_miss_comment_line_precisely`
@@ -1223,7 +562,7 @@ mod tests {
 
     #[test]
     fn near_miss_divider_span_points_at_the_comment_line_not_the_declaration() {
-        // `collect_diagnostics` threads `source` through so this diagnostic's
+        // `analyse_file` threads `source` through so this diagnostic's
         // span covers the comment line itself, not the AST's `Comment::span`
         // (which is actually `bar`'s token span — the *following*
         // declaration). Slicing `source` by the reported span proves it
@@ -1295,25 +634,16 @@ mod tests {
 ";
         let tokens = lex_with_eof(test_source);
         let (module, parse_diags) = parse(tokens);
-        let diags = collect_diagnostics(
+        let diags = analyse_file(
             &module,
             test_source,
             parse_diags,
-            cross_file_classes,
-            vec![],
-            vec![],
-            vec![],
-            None,
-            beamtalk_core::semantic_analysis::KnowledgeScope::default(),
-            &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
-            false,
-            None,
-            false,
-            None,
-            false,
-            &std::collections::HashSet::new(),
-            &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
-        );
+            FileContext {
+                cross_file_classes,
+                ..FileContext::default()
+            },
+        )
+        .0;
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
             !stale,
@@ -1474,10 +804,16 @@ mod tests {
         )
         .unwrap();
 
-        let (_, _, _, defs, sources, _, _, _) =
-            parse_and_extract_class_infos(&[user], Some(&root), Some("xpkg")).unwrap();
-        assert_eq!(defs.len(), 1);
-        let src = sources.get("Broken").expect("protocol source recorded");
+        let parsed =
+            lint_pipeline::parse_package_sources(&user, std::slice::from_ref(&user), |f, _, e| {
+                panic!("unreadable {f}: {e}")
+            });
+        assert_eq!(parsed.protocol_defs.len(), 1);
+        let src = parsed
+            .trait_users
+            .protocol_sources()
+            .get("Broken")
+            .expect("protocol source recorded");
         assert_eq!(src.path.as_deref(), Some(proto.as_str()));
         assert_eq!(src.text.as_str(), text);
         assert_eq!(src.package.as_deref(), Some("xpkg"));
@@ -1513,18 +849,11 @@ mod tests {
         // class infos from the full package source set (src/ + test/).
         let test_utf8 = camino::Utf8PathBuf::from_path_buf(test.clone()).unwrap();
         let test_files = crate::commands::build::collect_source_files_from_dir(&test_utf8).unwrap();
-        let pkg_root = find_package_root(&test_utf8).expect("package root must be found");
-        let extraction_files = collect_package_class_files(&pkg_root, &test_files);
-
-        let mut all_class_infos = Vec::new();
-        for file in &extraction_files {
-            let source = std::fs::read_to_string(file).unwrap();
-            let tokens = lex_with_eof(&source);
-            let (module, _) = parse(tokens);
-            all_class_infos.extend(
-                beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module),
-            );
-        }
+        let all_class_infos =
+            lint_pipeline::parse_package_sources(&test_utf8, &test_files, |f, _, e| {
+                panic!("unreadable {f}: {e}")
+            })
+            .class_infos;
 
         // Now lint-analyse the test file with the full class info set.
         let test_source = std::fs::read_to_string(test.join("foo_test.bt")).unwrap();
@@ -1535,25 +864,16 @@ mod tests {
                 &all_class_infos,
                 &module,
             );
-        let diags = collect_diagnostics(
+        let diags = analyse_file(
             &module,
             &test_source,
             parse_diags,
-            cross_file_classes,
-            vec![],
-            vec![],
-            vec![],
-            None,
-            beamtalk_core::semantic_analysis::KnowledgeScope::default(),
-            &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
-            false,
-            None,
-            false,
-            None,
-            false,
-            &std::collections::HashSet::new(),
-            &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
-        );
+            FileContext {
+                cross_file_classes,
+                ..FileContext::default()
+            },
+        )
+        .0;
 
         let unresolved: Vec<_> = diags
             .iter()
@@ -1648,29 +968,22 @@ mod tests {
 
         // Mirrors `run_lint`'s own orchestration: extract same-package
         // protocol/alias infos, then merge in the resolved dependency's.
-        let (
-            mut all_class_infos,
-            extension_index,
-            mut all_protocol_infos,
-            mut all_protocol_defs,
-            mut all_protocol_sources,
-            mut all_alias_infos,
-            parsed_files,
-            _trait_user_modules,
-        ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
-            .unwrap();
-        let (_, dependency_extensions_complete) = merge_dependency_infos(
-            &consumer_root,
-            &mut all_class_infos,
-            &mut all_protocol_infos,
-            &mut all_protocol_defs,
-            &mut all_protocol_sources,
-            &mut all_alias_infos,
-            &mut beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
-        );
+        let sources =
+            lint_pipeline::parse_package_sources(&consumer_file, &source_files, |f, _, e| {
+                panic!("unreadable {f}: {e}")
+            });
+        let (_, dependencies) = merge_dependency_infos(&consumer_root);
         // ADR 0070 WS3 (BT-4608): every dependency was loaded, so `lint`
         // lifts the pre-WS3 dependency guard as `build` does.
-        assert!(dependency_extensions_complete);
+        assert!(dependencies.extensions_complete);
+        let extension_index = sources.extension_index;
+        let mut all_protocol_infos = sources.protocol_infos;
+        all_protocol_infos.extend(dependencies.protocol_infos);
+        let mut all_protocol_defs = sources.protocol_defs;
+        all_protocol_defs.extend(dependencies.protocol_defs);
+        let mut all_alias_infos = sources.alias_infos;
+        all_alias_infos.extend(dependencies.alias_infos);
+        let parsed_files = sources.targets;
 
         assert!(
             all_protocol_infos.iter().any(|p| p.name == "Greetable"),
@@ -1686,7 +999,7 @@ mod tests {
         // stage (`merge_dependency_infos`/`ResolvedDependency.alias_infos`
         // carry every declaration, filtered or not) — the seeding-boundary
         // exclusion happens downstream, inside `AliasRegistry::add_pre_loaded`
-        // when `collect_diagnostics` calls `analyse_full` below. That
+        // when `analyse_file` calls `analyse_full` below. That
         // exclusion logic itself is already covered by
         // `add_pre_loaded_never_seeds_internal_alias_from_different_package`
         // in `alias_registry.rs`; what this test proves is that the
@@ -1705,7 +1018,7 @@ mod tests {
              seeding-boundary check can tell it apart from consumer's own package"
         );
 
-        // Directly exercise the seeding step `collect_diagnostics` performs
+        // Directly exercise the seeding step `analyse_file` performs
         // internally (`AliasRegistry::add_pre_loaded`, via `analyse_full`),
         // rather than trying to observe the exclusion through a lint diagnostic: a `::
         // Secret` annotation on its own produces no diagnostic either way —
@@ -1747,31 +1060,32 @@ mod tests {
             "producer's internal Secret alias must NOT be seeded into consumer's alias table"
         );
 
-        let (file, source, module, parse_diags) = parsed_files
+        let lint_pipeline::ParsedFile {
+            source,
+            module,
+            parse_diagnostics: parse_diags,
+            ..
+        } = parsed_files
             .into_iter()
-            .find(|(f, ..)| *f == consumer_file)
+            .find(|f| f.path == consumer_file)
             .expect("consumer.bt should be among the parsed files");
-        assert_eq!(file, consumer_file);
 
-        let diags = collect_diagnostics(
+        let diags = analyse_file(
             &module,
             &source,
             parse_diags,
-            vec![], // no same-package cross-file classes
-            all_protocol_infos,
-            all_protocol_defs,
-            all_alias_infos,
-            None,
-            beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
-            &extension_index,
-            true, // dependency_extensions_unknown
-            Some("consumer"),
-            false,
-            None,
-            false,
-            &std::collections::HashSet::new(),
-            &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
-        );
+            FileContext {
+                pre_loaded_protocols: all_protocol_infos,
+                pre_loaded_protocol_defs: all_protocol_defs,
+                pre_loaded_aliases: all_alias_infos,
+                knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
+                cross_file_extensions: Some(&extension_index),
+                dependency_extensions_unknown: true,
+                current_package: Some("consumer"),
+                ..FileContext::default()
+            },
+        )
+        .0;
 
         let unresolved_names: Vec<String> = diags
             .iter()
@@ -1898,7 +1212,7 @@ mod tests {
     ///
     /// Mirrors `lint_resolves_dependency_protocol_and_public_alias_but_not_internal_alias`'s
     /// fixture shape (a real producer/consumer path-dependency pair with a
-    /// faked-fresh dependency stamp), but drives `collect_diagnostics` across
+    /// faked-fresh dependency stamp), but drives `analyse_file` across
     /// *several* consumer files the way `run_lint`'s Pass 2 loop does, since
     /// the bug this guards against only manifests when the same pre-loaded
     /// alias list is re-seeded into a fresh `AliasRegistry` once per file.
@@ -1953,26 +1267,16 @@ mod tests {
             crate::commands::build_stamp::current_otp_version(),
         );
 
-        let (
-            mut all_class_infos,
-            extension_index,
-            mut all_protocol_infos,
-            mut all_protocol_defs,
-            mut all_protocol_sources,
-            mut all_alias_infos,
-            parsed_files,
-            _trait_user_modules,
-        ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
-            .unwrap();
-        merge_dependency_infos(
-            &consumer_root,
-            &mut all_class_infos,
-            &mut all_protocol_infos,
-            &mut all_protocol_defs,
-            &mut all_protocol_sources,
-            &mut all_alias_infos,
-            &mut beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
-        );
+        let sources =
+            lint_pipeline::parse_package_sources(&consumer_root, &source_files, |f, _, e| {
+                panic!("unreadable {f}: {e}")
+            });
+        let (_, dependencies) = merge_dependency_infos(&consumer_root);
+        let all_alias_infos: Vec<_> = sources
+            .alias_infos
+            .iter()
+            .chain(&dependencies.alias_infos)
+            .collect();
         assert_eq!(
             all_alias_infos
                 .iter()
@@ -1982,54 +1286,28 @@ mod tests {
             "the fixture declares Handler exactly once: {all_alias_infos:?}"
         );
 
-        let mut seen_pre_loaded_alias_collisions = std::collections::HashSet::new();
-        for (_file, source, module, parse_diags) in parsed_files {
-            let cross_file_classes =
-                beamtalk_core::semantic_analysis::ClassHierarchy::cross_file_class_infos(
-                    &all_class_infos,
-                    &module,
-                );
-            let diags = collect_diagnostics(
-                &module,
-                &source,
-                parse_diags,
-                cross_file_classes,
-                all_protocol_infos.clone(),
-                all_protocol_defs.clone(),
-                all_alias_infos.clone(),
-                None,
-                beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
-                &extension_index,
-                true,
-                Some("consumer"),
-                false,
-                None,
-                false,
-                &std::collections::HashSet::new(),
-                &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
-            )
-            .into_iter()
-            .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
-            .collect::<Vec<_>>();
-
-            assert!(
-                diags
-                    .iter()
-                    .all(|d| !d.message.contains("collides with another type alias")),
-                "a once-declared dependency alias must never be flagged as colliding: {diags:?}"
-            );
-        }
+        // The real Pass 2, so its cross-file collision dedup is what runs.
+        let mut diags = Vec::new();
+        lint_pipeline::analyse_package(sources, dependencies, None, |file| {
+            diags.extend(file.diagnostics);
+        });
+        assert!(
+            diags
+                .iter()
+                .all(|d| !d.message.contains("collides with another type alias")),
+            "a once-declared dependency alias must never be flagged as colliding: {diags:?}"
+        );
     }
 
     /// Acceptance criterion: a *genuine* cross-package alias
     /// collision — two different dependencies each exporting a same-named
     /// alias with a different RHS — must be reported exactly once across a
     /// multi-file consumer project, not once per file. Exercises the real
-    /// pipeline end to end (`parse_and_extract_class_infos` +
-    /// `merge_dependency_infos` + the same Pass-2 loop shape `run_lint` uses,
-    /// dedup included) rather than synthetic diagnostics, so it would have
-    /// caught a regression in either the `AliasRegistry::add_pre_loaded`
-    /// identity check or `run_lint`'s cross-file dedup.
+    /// pipeline end to end (`parse_package_sources` +
+    /// `merge_dependency_infos` + `analyse_package`, the Pass 2 `run_lint`
+    /// uses, dedup included) rather than synthetic diagnostics, so it would
+    /// have caught a regression in either the `AliasRegistry::add_pre_loaded`
+    /// identity check or the pipeline's cross-file dedup.
     #[test]
     #[allow(clippy::too_many_lines)]
     fn lint_across_many_files_reports_a_genuine_cross_package_alias_collision_exactly_once() {
@@ -2082,26 +1360,16 @@ mod tests {
             );
         }
 
-        let (
-            mut all_class_infos,
-            extension_index,
-            mut all_protocol_infos,
-            mut all_protocol_defs,
-            mut all_protocol_sources,
-            mut all_alias_infos,
-            parsed_files,
-            _trait_user_modules,
-        ) = parse_and_extract_class_infos(&source_files, Some(&consumer_root), Some("consumer"))
-            .unwrap();
-        merge_dependency_infos(
-            &consumer_root,
-            &mut all_class_infos,
-            &mut all_protocol_infos,
-            &mut all_protocol_defs,
-            &mut all_protocol_sources,
-            &mut all_alias_infos,
-            &mut beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
-        );
+        let sources =
+            lint_pipeline::parse_package_sources(&consumer_root, &source_files, |f, _, e| {
+                panic!("unreadable {f}: {e}")
+            });
+        let (_, dependencies) = merge_dependency_infos(&consumer_root);
+        let all_alias_infos: Vec<_> = sources
+            .alias_infos
+            .iter()
+            .chain(&dependencies.alias_infos)
+            .collect();
         assert_eq!(
             all_alias_infos
                 .iter()
@@ -2111,42 +1379,15 @@ mod tests {
             "the fixture declares Shared twice, with different RHS: {all_alias_infos:?}"
         );
 
-        let mut seen_pre_loaded_alias_collisions = std::collections::HashSet::new();
+        // The real Pass 2, so its cross-file collision dedup is what runs.
         let mut collision_count = 0usize;
-        for (_file, source, module, parse_diags) in parsed_files {
-            let cross_file_classes =
-                beamtalk_core::semantic_analysis::ClassHierarchy::cross_file_class_infos(
-                    &all_class_infos,
-                    &module,
-                );
-            let diags = collect_diagnostics(
-                &module,
-                &source,
-                parse_diags,
-                cross_file_classes,
-                all_protocol_infos.clone(),
-                all_protocol_defs.clone(),
-                all_alias_infos.clone(),
-                None,
-                beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete,
-                &extension_index,
-                true,
-                Some("consumer"),
-                false,
-                None,
-                false,
-                &std::collections::HashSet::new(),
-                &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
-            )
-            .into_iter()
-            .filter(|d| dedup_pre_loaded_alias_collision(d, &mut seen_pre_loaded_alias_collisions))
-            .collect::<Vec<_>>();
-
-            collision_count += diags
+        lint_pipeline::analyse_package(sources, dependencies, None, |file| {
+            collision_count += file
+                .diagnostics
                 .iter()
                 .filter(|d| d.message.contains("collides with another type alias"))
                 .count();
-        }
+        });
 
         assert_eq!(
             collision_count, 1,
@@ -2156,10 +1397,10 @@ mod tests {
     }
 
     /// Acceptance criterion: when two pre-loaded aliases *do*
-    /// genuinely collide, `run_lint`'s per-file loop must report that
+    /// genuinely collide, the lint pipeline's per-file loop must report that
     /// collision once for the whole run, not once per file — `add_pre_loaded`
     /// rediscovers the same collision on every file (a fresh `AliasRegistry`
-    /// seeded from the same list each time), so without `run_lint`'s own
+    /// seeded from the same list each time), so without the pipeline's own
     /// cross-file dedup the user would see the same diagnostic N times for
     /// an N-file project.
     #[test]
@@ -2201,7 +1442,7 @@ mod tests {
         assert!(dedup_pre_loaded_alias_collision(&unrelated, &mut seen));
     }
 
-    /// `collect_package_class_files` must dedup across the absolute
+    /// Pass 1's extraction set must dedup across the absolute
     /// paths produced by walking `src/`/`test/` and the relative paths a user
     /// may pass as explicit lint targets. Without canonical-form dedup the
     /// same file would appear twice in the extraction list and be parsed
@@ -2211,7 +1452,7 @@ mod tests {
     /// process working directory, which this test temporarily changes.
     #[test]
     #[serial_test::serial(cwd)]
-    fn collect_package_class_files_dedups_absolute_and_relative() {
+    fn package_extraction_dedups_absolute_and_relative_targets() {
         let temp = tempfile::TempDir::new().unwrap();
         let root = temp.path();
         std::fs::write(
@@ -2228,16 +1469,20 @@ mod tests {
 
         // Walked form is absolute (under canonical package_root); user-typed
         // target is relative. Both refer to the same file.
-        let pkg_root = find_package_root(&camino::Utf8PathBuf::from("test")).expect("package root");
         let relative_target = camino::Utf8PathBuf::from("test/foo.bt");
-        let out = collect_package_class_files(&pkg_root, std::slice::from_ref(&relative_target));
+        let out = lint_pipeline::parse_package_sources(
+            &camino::Utf8PathBuf::from("test"),
+            std::slice::from_ref(&relative_target),
+            |f, _, e| panic!("unreadable {f}: {e}"),
+        );
 
         std::env::set_current_dir(prev_cwd).unwrap();
 
         assert_eq!(
-            out.len(),
-            1,
-            "expected single entry after canonical-form dedup, got {out:?}"
+            (out.targets.len(), out.class_infos.len()),
+            (1, 1),
+            "expected one parse of foo.bt after canonical-form dedup, got {:?}",
+            out.targets.iter().map(|t| &t.path).collect::<Vec<_>>()
         );
     }
 
@@ -2287,25 +1532,15 @@ mod tests {
 "#;
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
-        let diags = collect_diagnostics(
+        let diags = analyse_file(
             &module,
             source,
             parse_diags,
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            None,
-            beamtalk_core::semantic_analysis::KnowledgeScope::default(),
-            &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
-            false,
-            None,
-            false,
-            None,
-            false,
-            &std::collections::HashSet::new(),
-            &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
-        );
+            FileContext {
+                ..FileContext::default()
+            },
+        )
+        .0;
 
         let has_untyped_ffi = diags.iter().any(|d| d.message.contains("untyped FFI"));
         assert!(
@@ -2343,25 +1578,16 @@ mod tests {
 "#;
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
-        let diags = collect_diagnostics(
+        let diags = analyse_file(
             &module,
             source,
             parse_diags,
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            Some(std::sync::Arc::new(registry)),
-            beamtalk_core::semantic_analysis::KnowledgeScope::default(),
-            &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
-            false,
-            None,
-            false,
-            None,
-            false,
-            &std::collections::HashSet::new(),
-            &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
-        );
+            FileContext {
+                native_type_registry: Some(std::sync::Arc::new(registry)),
+                ..FileContext::default()
+            },
+        )
+        .0;
 
         let untyped_ffi: Vec<_> = diags
             .iter()
@@ -2414,25 +1640,16 @@ mod tests {
         let source = "Object subclass: LintFfiColdCacheTest\n\n  @expect type\n  class badCall => Erlang lists reverse: 42\n";
         let tokens = lex_with_eof(source);
         let (module, parse_diags) = parse(tokens);
-        let diags = collect_diagnostics(
+        let diags = analyse_file(
             &module,
             source,
             parse_diags,
-            vec![],
-            vec![],
-            vec![],
-            vec![],
-            Some(std::sync::Arc::new(registry)),
-            beamtalk_core::semantic_analysis::KnowledgeScope::default(),
-            &beamtalk_core::compilation::extension_index::ExtensionIndex::new(),
-            false,
-            None,
-            false,
-            None,
-            false,
-            &std::collections::HashSet::new(),
-            &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
-        );
+            FileContext {
+                native_type_registry: Some(std::sync::Arc::new(registry)),
+                ..FileContext::default()
+            },
+        )
+        .0;
         let stale = diags.iter().any(|d| d.message.contains("stale @expect"));
         assert!(
             !stale,

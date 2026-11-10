@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// A standalone extension used from `greeter.bt`: without cross-file
+/// extensions the send there is a false does-not-understand.
+String >> shout -> String => self uppercase ++ "!"

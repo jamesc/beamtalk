@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Each method misuses a sibling file's declaration. Every finding is a
+/// live-recheck failure, so it fails `--warnings-as-errors`, and each needs
+/// cross-file context the lint surfaces must share to be reported at all.
+Object subclass: Caller
+
+  /// A selector no class or extension defines: does-not-understand.
+  unknownSelector => Greeter new frobnicate
+
+  /// `42` does not conform to the sibling file's `Greetable` protocol.
+  nonConforming -> String => Greeter new welcome: 42
+
+  /// `#medium` is not a member of the sibling file's `Level` alias.
+  outOfRange -> Level => #medium
