@@ -2410,14 +2410,7 @@ impl Parser {
             } else if self.match_token(&TokenKind::Bang) {
                 // Cast terminator — mark the last expression as a cast if it's a MessageSend.
                 // If the expression is not a MessageSend (e.g. `x := foo bar!`), emit an error.
-                match body.last_mut().map(|s| &mut s.expression) {
-                    Some(Expression::MessageSend { is_cast, .. }) => *is_cast = true,
-                    Some(last) => {
-                        let span = last.span();
-                        self.cast_in_expression_error(span);
-                    }
-                    None => {}
-                }
+                self.apply_cast_terminator(body.last_mut().map(|s| &mut s.expression));
                 // Check if next token starts a new method/state/class (same as period)
                 if self.is_at_member_boundary() {
                     break;

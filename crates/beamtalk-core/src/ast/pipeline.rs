@@ -117,6 +117,24 @@ impl PipelineSends {
     pub fn spans(&self) -> impl Iterator<Item = Span> + '_ {
         self.sends.keys().map(|&(start, end)| Span::new(start, end))
     }
+
+    /// The entries whose sends lie inside `span`, with their comments.
+    ///
+    /// For a definition rebuilt from part of another one's code, such as a
+    /// `ClassBuilder` block method (`#sel => [:self | …]`): the block's `|>`
+    /// sends were recorded on the enclosing definition, so the rebuilt one
+    /// takes the entries inside the block.
+    #[must_use]
+    pub fn within(&self, span: Span) -> Self {
+        Self {
+            sends: self
+                .sends
+                .range((span.start(), span.start())..=(span.end(), span.end()))
+                .filter(|&(&(_, end), _)| end <= span.end())
+                .map(|(&key, comments)| (key, comments.clone()))
+                .collect(),
+        }
+    }
 }
 
 impl FromIterator<(Span, CommentAttachment)> for PipelineSends {

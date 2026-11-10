@@ -1,0 +1,69 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Multi-line `|>` pipelines in the REPL (ADR 0145, BT-4516).
+// A line that ends in `|>` is incomplete, so the next line continues it.
+// A line that starts with `|>` cannot continue the line above in the REPL
+// (that line was already complete), so a leading-`|>` layout is wrapped in
+// `( … )`.
+
+// ===========================================================================
+// TRAILING `|>`
+// ===========================================================================
+
+// One stage per line, each line ending in `|>`
+#(1, 2, 3) collect: [:x | x * 2] |>
+  sum
+// => 12
+
+// Several stages, and a stage that is a keyword message
+#(3, 1, 2) collect: [:x | x * 10] |>
+  reversed |>
+  inject: 0 into: [:acc :x | acc + x]
+// => 60
+
+// A pipeline bound to a local
+total := #(1, 2, 3, 4) select: [:x | x > 1] |>
+  sum
+// => 9
+
+total
+// => 9
+
+// ===========================================================================
+// PARENTHESISED LEADING `|>`
+// ===========================================================================
+
+// Inside parentheses, a line that starts with `|>` continues the expression
+(#(1, 2, 3) collect: [:x | x * 2]
+  |> sum)
+// => 12
+
+(#(1, 2, 3, 4) select: [:x | x isEven]
+  |> collect: [:x | x * x]
+  |> sum)
+// => 20
+
+// ===========================================================================
+// `|>` AT KEYWORD-EXPRESSION SITES
+// ===========================================================================
+
+// String interpolation
+"total: {#(1, 2, 3) collect: [:x | x * 2] |> sum}"
+// => "total: 12"
+
+// List elements
+#(#(1, 2) |> size, #(3, 4, 5) |> sum) |> sum
+// => 14
+
+// ===========================================================================
+// ERRORS
+// ===========================================================================
+
+// A leading `|>` on its own input: the line above has already run
+|> sum
+// => ERROR: a statement cannot start with `|>`
+
+// A pipeline cannot end in a cast
+#(1, 2) |> size!
+// => ERROR: Cast (!) has no return value

@@ -16,6 +16,7 @@ mod find_references_click_rejection;
 mod goto_definition_navigation;
 mod native_delegate_ffi_and_code_actions;
 mod native_types_and_protocol_registry;
+mod pipeline_stage_navigation;
 mod property_tests;
 mod simple_service_and_call_hierarchy;
 mod type_hierarchy;

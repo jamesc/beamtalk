@@ -116,6 +116,7 @@ pub fn generate_module_with_warnings(
         CoreErlangGenerator::new(&options.module_name)
     };
     generator.peeled_parens = peeled_parens;
+    generator.current_pipeline_sends = module.pipeline_sends.clone();
     generator.source_text = options.source_text;
     generator.set_stdlib_mode(options.stdlib_mode);
     generator.protocol_sources = options.protocol_sources;
