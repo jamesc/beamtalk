@@ -62,11 +62,10 @@ pub(crate) fn current_otp_version() -> Option<&'static str> {
 /// below the floor dies with ERTS's `requires a more recent Erlang/OTP
 /// version` crash. The paths that must boot such a node (`build`, `check`,
 /// `BeamCompiler::compile_batch`, the workspace node and the foreground REPL
-/// node) call this first, so
-/// the user gets the same
-/// "unsupported, need N+" line `beamtalk doctor` prints instead. Fails open
-/// (`Ok`) when the OTP major cannot be probed, matching every other consumer
-/// of [`current_otp_version`]; above the window is only a warning
+/// node) call this first, so the user gets the same "unsupported, need N+"
+/// line `beamtalk doctor` prints instead. Fails open (`Ok`) when the OTP
+/// major cannot be probed, matching every other consumer of
+/// [`current_otp_version`]; above the window is only a warning
 /// (`build::warn_if_otp_out_of_window`), since newer releases load older code.
 pub(crate) fn require_supported_otp() -> miette::Result<()> {
     match super::build::current_otp_major().and_then(beamtalk_cli::otp_support::below_floor_message)

@@ -6681,7 +6681,11 @@ stop_global_conflict_loser(Loser) ->
             gen_server:stop(Loser, {shutdown, global_name_conflict}, ?BT_REMOTE_CALL_TIMEOUT)
         catch
             _:_ ->
-                catch exit(Loser, kill)
+                try
+                    exit(Loser, kill)
+                catch
+                    _:_ -> ok
+                end
         end
     end),
     ok.
