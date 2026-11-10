@@ -186,19 +186,20 @@ struct DiscoveredDep {
 /// Used by both `deps_are_fresh` and `collect_fresh_deps` to handle the full
 /// transitive graph rather than just direct deps.
 ///
-/// Note: `dependency_classes.rs`'s offline MCP `lint`/`diagnostic_summary`
-/// dependency-class resolution performs a similar BFS but cannot call this
-/// function directly (it lives in the library crate while this module is
-/// binary-only). The checkout-path resolution step — the shared primitive
+/// Note: the offline walk shared by MCP `lint`/`diagnostic_summary` and the
+/// LSP ([`beamtalk_project::dependency_graph::discover_dependency_graph`])
+/// performs a similar BFS, but skips what it cannot find where this one
+/// reports an error, and records stubs and via-chains this one needs. The
+/// checkout-path resolution step — the shared primitive
 /// that determines *where* each dep lives on disk — is extracted into
-/// [`beamtalk_cli::path_util::dep_root_for_source`] and called by both
-/// walkers, so that piece cannot drift between them.
+/// [`beamtalk_project::dependency_graph::dep_root_for_source`] and called by
+/// both walkers, so that piece cannot drift between them.
 fn discover_all_dep_roots(
     project_root: &Utf8Path,
     manifest: &manifest::ParsedManifest,
 ) -> Result<Vec<DiscoveredDep>> {
-    use beamtalk_cli::path_util::dep_root_for_source;
     use beamtalk_core::compilation::DependencySource;
+    use beamtalk_project::dependency_graph::dep_root_for_source;
 
     let layout = BuildLayout::new(project_root);
     let direct_names: std::collections::HashSet<&str> =
@@ -224,13 +225,14 @@ fn discover_all_dep_roots(
             }
 
             let is_path_dep = matches!(spec.source, DependencySource::Path { .. });
-            let dep_root = dep_root_for_source(&parent_root, dep_name, &spec.source, &layout)
-                .map_err(|path| {
-                    miette::miette!(
-                        "Dependency '{dep_name}' has a non-UTF-8 path: {}",
-                        path.display()
-                    )
-                })?;
+            let dep_root =
+                dep_root_for_source(&parent_root, dep_name, &spec.source, &layout.deps_dir())
+                    .map_err(|path| {
+                        miette::miette!(
+                            "Dependency '{dep_name}' has a non-UTF-8 path: {}",
+                            path.display()
+                        )
+                    })?;
 
             let is_direct = direct_names.contains(dep_name.as_str());
 

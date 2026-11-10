@@ -40,6 +40,22 @@ Actor subclass: ClosureCellOwner
     [blk value] ensure: [self.n := 40]
     0
 
+  // BT-4598: one inlined `ensure:` that a `^` of its own method (`own`
+  // true) or a foreign one (`blk`) crosses. Its relay and its foreign clause
+  // share one compiled cleanup; each `^` keeps the cleanup's write.
+  ownOrForeign: blk own: own =>
+    [
+      own ifTrue: [^5]
+      blk value
+    ] ensure: [self.n := self.n + 10]
+    0
+
+  ownReturnThroughSharedEnsure => self ownOrForeign: [^3] own: true
+
+  foreignReturnThroughSharedEnsure =>
+    self ownOrForeign: [^3] own: false
+    0
+
   // As a peer: writes its own field, then runs the block. The `^` leaves this
   // actor's callback by a throw, so this actor keeps its entry state (ADR
   // 0137's callback contract, ADR 0146 R2).

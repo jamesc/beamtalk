@@ -54,6 +54,7 @@ mod bt4235_value_type_trailing_field_assignment;
 mod bt4385_list_literal_element_check;
 mod bt4444_block_value_arg_check;
 mod bt4482_protocol_assignment_conformance;
+mod bt4487_destructure_tuple_types;
 mod bt4512_cascade_drops_update;
 mod bt4515_object_then;
 mod bt4526_static_dnu_known_receiver;

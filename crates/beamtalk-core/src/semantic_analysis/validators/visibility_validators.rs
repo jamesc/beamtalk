@@ -1261,6 +1261,7 @@ mod tests {
         // Add an internal class from another package
         let info = ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: EcoString::from(internal_class),
             superclass: Some(EcoString::from("Object")),
@@ -1356,6 +1357,7 @@ mod tests {
         // Add a public class from another package
         let info = ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: EcoString::from("Parser"),
             superclass: Some(EcoString::from("Object")),
@@ -2084,6 +2086,7 @@ mod tests {
         let mut hierarchy = ClassHierarchy::with_builtins();
         hierarchy.add_from_beam_meta(vec![ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: "Parent".into(),
             superclass: Some("Object".into()),
@@ -2149,6 +2152,7 @@ mod tests {
         let mut hierarchy = ClassHierarchy::with_builtins();
         hierarchy.add_from_beam_meta(vec![ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: "Parent".into(),
             superclass: Some("Object".into()),
@@ -2215,6 +2219,7 @@ mod tests {
         let mut hierarchy = ClassHierarchy::with_builtins();
         hierarchy.add_from_beam_meta(vec![ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: "Parent".into(),
             superclass: Some("Object".into()),

@@ -5286,6 +5286,8 @@ t match: [{#ok, v} -> v; {#error, _} -> 0]
 // => 42
 ```
 
+**Destructured locals are typed (BT-4487):** in a destructuring assignment, a plain-variable element of a tuple pattern takes the type of the matching position of a `Tuple(A, B)` right-hand side, the same as `t at: i` with a literal index. An `Object`, `Dynamic` or unresolved-generic position stays `Dynamic`. A right-hand side that is not a same-arity tuple (a bare `Tuple`, a different arity, a mixed union) binds `Dynamic`. A narrower declared type than the position can prove draws the usual type-mismatch warning, so narrow first with `isKindOf:`.
+
 **Pattern failures (BT-3943):** a destructuring assignment whose tuple size, literal slot or array shape does not match, and a `match:` with no matching arm, raise a structured `#pattern_mismatch` error (class `RuntimeError`, the offending value in the error details). A map destructure with a missing key raises `#key_error` instead.
 
 ```beamtalk

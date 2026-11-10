@@ -15,12 +15,16 @@
 //!
 //! Dependency extensions reach the checker the same way dependency classes,
 //! protocols and aliases do: from the dependency's *source*, parsed by the
-//! scan that already reads every dependency file. Both dependency scanners
-//! (`build_dep_class_index` for `build`/`check`/`lint`/`test`, and
-//! [`crate::dependency_classes`] for MCP lint) collect a
+//! scan that already reads every dependency file. Both CLI dependency
+//! scanners (`build_dep_class_index` for `build`/`check`/`lint`/`test`, and
+//! `beamtalk_cli::dependency_classes` for MCP lint) collect a
 //! [`DependencyExtensions`] per dependency through [`DependencyExtensions::add_file`],
-//! and every surface merges them with [`merge_dependency_extensions`] — one
-//! rule for "complete", in one place.
+//! and merge them with [`merge_dependency_extensions`]. The LSP indexes
+//! dependency source into its `ProjectIndex` instead, and applies the same
+//! per-file rule ([`DependencyExtensions::file_is_complete`]) and the same
+//! guard rule ([`dependency_extensions_unknown`]) — one rule for "complete",
+//! in one place. This module lives in `beamtalk-project`, below both
+//! `beamtalk-cli` and the LSP, for that reason (BT-4611).
 //!
 //! **Completeness is what lifts the guard.** A dependency's extensions are
 //! complete only when every one of its source files was read and parsed
@@ -63,9 +67,17 @@ impl DependencyExtensions {
     /// definitions; its surviving extensions are still recorded.
     pub fn add_file(&mut self, module: &Module, file: &Path, diagnostics: &[Diagnostic]) {
         self.index.add_module(module, file);
-        if diagnostics.iter().any(|d| d.severity == Severity::Error) {
+        if !Self::file_is_complete(diagnostics) {
             self.complete = false;
         }
+    }
+
+    /// Whether a dependency source file with these parse diagnostics
+    /// contributes all of its extensions: it must have no parse *error*,
+    /// since error recovery can drop extension definitions.
+    #[must_use]
+    pub fn file_is_complete(diagnostics: &[Diagnostic]) -> bool {
+        !diagnostics.iter().any(|d| d.severity == Severity::Error)
     }
 
     /// Records a source file that could not be read: whatever it defines is

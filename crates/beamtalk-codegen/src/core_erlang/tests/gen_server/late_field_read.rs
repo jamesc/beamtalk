@@ -168,6 +168,7 @@ fn cross_file_inherited_late_field_read_is_guarded() {
 
     let ancestor = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: ecow::EcoString::from("BaseActor"),
         superclass: Some(ecow::EcoString::from("Actor")),

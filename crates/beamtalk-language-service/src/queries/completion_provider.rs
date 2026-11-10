@@ -2864,6 +2864,7 @@ mod tests {
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,
+                in_caller_new1: false,
                 is_module_less: false,
                 name: EcoString::from("SecretHelper"),
                 superclass: Some(EcoString::from("Object")),
@@ -2914,6 +2915,7 @@ mod tests {
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,
+                in_caller_new1: false,
                 is_module_less: false,
                 name: EcoString::from("InternalHelper"),
                 superclass: Some(EcoString::from("Object")),
@@ -2964,6 +2966,7 @@ mod tests {
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,
+                in_caller_new1: false,
                 is_module_less: false,
                 name: EcoString::from("InternalHelper"),
                 superclass: Some(EcoString::from("Object")),
@@ -3007,6 +3010,7 @@ mod tests {
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,
+                in_caller_new1: false,
                 is_module_less: false,
                 name: EcoString::from("RemoteService"),
                 superclass: Some(EcoString::from("Object")),
@@ -3098,6 +3102,7 @@ mod tests {
         use std::collections::HashMap;
         let internal_class = beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: EcoString::from("InternalClass"),
             superclass: Some(EcoString::from("Object")),
@@ -3140,6 +3145,7 @@ mod tests {
         );
         let public_class = beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: EcoString::from("PublicClass"),
             is_internal: false,
@@ -3165,6 +3171,7 @@ mod tests {
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,
+                in_caller_new1: false,
                 is_module_less: false,
                 name: EcoString::from("RemoteService"),
                 superclass: Some(EcoString::from("Object")),

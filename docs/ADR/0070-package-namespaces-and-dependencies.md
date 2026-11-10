@@ -413,7 +413,7 @@ dependency's classes, protocols and aliases — not from compiled metadata.
   module they parse.
 
 **Mechanism.** Each scanner records, per dependency, a
-`DependencyExtensions` (`beamtalk_cli::dependency_extensions`): the
+`DependencyExtensions` (`beamtalk_project::dependency_extensions`): the
 extensions found, and whether that is all of them. Every surface merges them
 into the cross-file extension index it already hands the checker, so they
 register through the same `ClassHierarchy::register_extensions` path as
@@ -437,11 +437,17 @@ lives in one function, `dependency_extensions_unknown`, used by every surface.
 
 **Scope and what remains.**
 
-- `beamtalk build`, `check`, `lint`, `test` and MCP lint load dependency
-  extensions. `beamtalk test` also registers each package's own `src/`
-  extensions, which it previously did not.
-- The LSP keeps the guard on whenever it sees dependencies: it cannot reuse
-  the CLI's scanner and does not read `[dependencies]` (BT-4611).
+- `beamtalk build`, `check`, `lint`, `test`, MCP lint and the LSP load
+  dependency extensions. `beamtalk test` also registers each package's own
+  `src/` extensions, which it previously did not.
+- The LSP (BT-4611) reads `[dependencies]` and walks the transitive graph
+  with the offline scan's walk, `beamtalk_project::dependency_graph`
+  (`[dependencies]` parsing moved to `beamtalk_project::dependencies`). It
+  preloads every dependency's source into its project index, path
+  dependencies included, and applies the same rule: the guard lifts only
+  when every transitive dependency was found on disk, preloaded within the
+  preload budget, and parsed without errors. The verdict is sticky for the
+  editor session.
 - A dependency compiled as part of a consumer's build keeps the guard on for
   its own code; its own dependencies' extensions are not loaded there.
 - The conflict reporting described in the 2026-06-27 amendment (two packages

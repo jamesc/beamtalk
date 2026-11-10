@@ -37,6 +37,10 @@
 //!    cell fails, so a foreign `^` there would take the error path and drop
 //!    the cleanup's writes.
 //!
+//! A fifth proof bounds code size (BT-4598): a cleanup nested `depth`
+//! `ensure:`s deep in an actor method is compiled exactly 3^depth times, the
+//! relay and the foreign clause sharing one body.
+//!
 //! The merged Tier 2 fun is reachable only in an unvalidated compile (ADR
 //! 0133 rejects a stored block that assigns a captured local), like
 //! `tier2_merge.rs`; codegen here never runs the validator. The runtime
@@ -648,5 +652,77 @@ fn block_ensure_fallback_relays_a_foreign_throw() {
             .as_deref()
             .is_some_and(|r| r.contains("EnsureCleanupLostOnNlr") && r.contains("NoRelay")),
         "without the relay, expected EnsureCleanupLostOnNlr, got {report:?}"
+    );
+}
+
+/// An actor method whose `ensure:` cleanup nests `depth - 1` more inlined
+/// `ensure:`s, each in the cleanup of the one outside it, the innermost
+/// cleanup writing `self.n := 41`; the `^` thrown by `thrower`.
+fn nested_ensure_source(thrower: Thrower, depth: u32) -> String {
+    let mut cleanup = "self.n := 41".to_string();
+    for k in 2..=depth {
+        cleanup = format!("[self.n := {k}] ensure: [{cleanup}]");
+    }
+    let stmt = thrower.ensure(&format!("[^1] ensure: [{cleanup}]"));
+    let (header, _) = Scope::ActorMethod.class();
+    format!(
+        "{header}\n{}",
+        thrower.methods(Scope::ActorMethod, "probe", &stmt)
+    )
+}
+
+/// Proof 5 (BT-4598): the size of a nested `ensure:`. Each inlined `ensure:`
+/// in an actor method's threaded body compiles its cleanup once per path that
+/// runs it: the success path, the error path, and one `$bt_nlr` clause that
+/// the scope's own throw (the relay) and a foreign one share. So a cleanup
+/// nested `depth` deep is compiled exactly 3^depth times, whoever throws.
+/// Before the relay and the foreign clause shared one body it was 4^depth
+/// (at depth 3 the method was 43 KB of Core Erlang with 64 copies of the
+/// innermost cleanup; it is 27 KB with 27); any regrowth fails here. Every depth
+/// compiles with the verifier on and, at depth 3, through `erlc`.
+#[test]
+fn ensure_relay_corpus_nested_cleanup_grows_as_three_to_the_depth() {
+    let mut failures = Vec::new();
+    for &thrower in THROWERS {
+        for depth in 1..=4 {
+            let src = nested_ensure_source(thrower, depth);
+            let code = match compile(&src) {
+                Ok(code) => code,
+                Err(why) => {
+                    failures.push(format!("{thrower:?}, depth {depth}: {why}\n{src}"));
+                    continue;
+                }
+            };
+            let copies = code.matches(" = 41 in ").count();
+            if copies != 3usize.pow(depth) {
+                failures.push(format!(
+                    "{thrower:?}, depth {depth}: the innermost cleanup is compiled {copies} times, expected {}\n{src}",
+                    3usize.pow(depth)
+                ));
+            }
+            let shared = code.contains("_EnsureNlrTok") && code.contains("_EnsureForeignNlr");
+            if thrower == Thrower::OwnScope && !shared {
+                failures.push(format!(
+                    "{thrower:?}, depth {depth}: no relay sharing a foreign clause\n{code}"
+                ));
+            }
+            if depth == 3
+                && erlc_available()
+                && catch_unwind(AssertUnwindSafe(|| {
+                    assert_compiles_through_erlc("test", &code);
+                }))
+                .is_err()
+            {
+                failures.push(format!(
+                    "{thrower:?}, depth {depth}: erlc rejected the module"
+                ));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} nested `ensure:` cell(s) fail:\n\n{}",
+        failures.len(),
+        failures.join("\n\n")
     );
 }

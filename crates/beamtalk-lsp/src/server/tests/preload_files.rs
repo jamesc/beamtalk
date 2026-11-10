@@ -110,8 +110,8 @@ fn collect_preload_files_walks_src_and_test() {
     let _ = fs::remove_dir_all(&temp);
 }
 
-/// Preload must walk every `_build/deps/<name>/src/` so classes
-/// from declared `beamtalk.toml` dependencies resolve without spurious
+/// Preload must walk every declared dependency's `_build/deps/<name>/src/`
+/// so classes from `beamtalk.toml` dependencies resolve without spurious
 /// `Unresolved class` warnings.
 #[test]
 fn collect_preload_files_walks_dependency_src_dirs() {
@@ -133,6 +133,7 @@ fn collect_preload_files_walks_dependency_src_dirs() {
     fs::create_dir_all(&dep_src).expect("create dep src dir");
     fs::create_dir_all(&other_dep_src).expect("create other dep src dir");
 
+    write_manifest_with_git_deps(&project_root, "project", &["http", "json"]);
     fs::write(src_dir.join("App.bt"), "Object subclass: App").expect("write src file");
     fs::write(dep_src.join("HTTPClient.bt"), "Object subclass: HTTPClient")
         .expect("write dep file");
@@ -268,6 +269,7 @@ fn collect_preload_files_prioritizes_user_files_across_multi_root_workspace() {
     fs::create_dir_all(&src_b).expect("create root_b src");
     fs::create_dir_all(&dep_a_src).expect("create root_a dep src");
 
+    write_manifest_with_git_deps(&root_a, "root_a", &["dep_a"]);
     fs::write(src_a.join("AppA.bt"), "Object subclass: AppA").expect("write src_a file");
     fs::write(src_b.join("AppB.bt"), "Object subclass: AppB").expect("write src_b file");
     fs::write(dep_a_src.join("DepA.bt"), "Object subclass: DepA").expect("write dep file");

@@ -143,6 +143,13 @@ impl CoreErlangGenerator {
             StaysDynamic::CrossFileParent => {
                 format!("cross-file-parent — {class}'s ancestry is not fully known")
             }
+            StaysDynamic::ProtocolNoConformers => {
+                format!("protocol — no known conformer of {class} is a guardable tagged class")
+            }
+            StaysDynamic::ProtocolTooManyConformers => format!(
+                "protocol-too-many — {class} has more than {} guardable conformers",
+                super::dispatch_codegen::MAX_PROTOCOL_ARMS
+            ),
         }
     }
 

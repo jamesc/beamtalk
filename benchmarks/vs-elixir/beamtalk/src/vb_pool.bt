@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4502: pools of VbCounter for rows 15a/15b (DynamicSupervisor
+// startChild + terminateChild), paired with Elixir's DynamicSupervisor.
+DynamicSupervisor(VbCounter) subclass: VbPool
+
+  childClass => VbCounter

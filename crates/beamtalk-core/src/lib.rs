@@ -143,7 +143,7 @@ pub struct CompilerOptions {
     /// hinting on a dependency-contributed method that genuinely exists
     /// (ADR 0100 Rule 1's third downgrade). Surfaces that load every
     /// dependency's extensions into `cross_file_extensions` set it `false`;
-    /// see `beamtalk_cli::dependency_extensions`.
+    /// see `beamtalk_project::dependency_extensions`.
     pub dependency_extensions_unknown: bool,
 
     /// Erlang module names the `unresolved_ffi` check treats as known

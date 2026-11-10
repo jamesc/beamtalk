@@ -665,17 +665,19 @@ seen every dependency's extension methods: a dependency can extend any class,
 `Object` included. ADR 0100's pre-WS3 guard keeps every receiver `Open` while
 any dependency's extensions are unknown
 (`CompilerOptions::dependency_extensions_unknown`). One rule decides it,
-`beamtalk_cli::dependency_extensions::dependency_extensions_unknown`: the
-guard is on unless dependency resolution succeeded and every dependency's
+`beamtalk_project::dependency_extensions::dependency_extensions_unknown`:
+the guard is on unless dependency resolution succeeded and every dependency's
 extensions were loaded completely from its source (every file read and
-parsed cleanly).
+parsed cleanly). Every surface now applies it, so each reports
+does-not-understand for a missing selector in a package with dependencies,
+and none reports it for a selector a dependency's extension defines.
 
 | Surface | Dependency extensions loaded | Guard |
 |---|---|---|
 | CLI `build`, `check`, `test` | Yes (`build_dep_class_index`), into `ClassHierarchyContext::extension_index` | Lifts when complete (`ClassHierarchyContext::dependency_extensions_complete`, applied in `beam_compiler`) |
 | CLI `lint` | Yes (`merge_dependency_infos`) | Lifts when complete |
 | MCP `lint` / `diagnostic_summary` | Yes (offline `dependency_classes` scan; also the package's own extensions) | Lifts when complete — but MCP analysis still runs `ModuleOnly` (BT-4585), where the guard does not apply |
-| LSP | Fetched (`_build/deps`) dependencies' extensions are preloaded; path dependencies are not | **Divergent:** on whenever dependencies are present (BT-4611) |
+| LSP | Yes: every declared transitive dependency's source, path dependencies included, is preloaded into the `ProjectIndex` (`root_dependencies`, using the offline scan's walk, `beamtalk_project::dependency_graph::discover_dependency_graph`) | Lifts when complete: every dependency found on disk and preloaded within the preload budget, and no preloaded dependency file has a parse error (BT-4611). Sticky for the session: one incomplete package root keeps it on |
 | REPL | — | `ModuleOnly`; the guard does not apply |
 
 `beamtalk test` also registers each package's own `src/` extensions for test

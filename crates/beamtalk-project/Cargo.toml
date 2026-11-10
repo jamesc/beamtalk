@@ -25,6 +25,14 @@ beamtalk-home.workspace = true
 # walk failures as `miette::Report`, matching `FileWalker::walk_pathbuf`'s
 # own error type.
 miette.workspace = true
+# why: BT-4611 — `[dependencies]` parsing moved here from `beamtalk-cli` so
+# the LSP can read a manifest's dependency graph; `camino` for its paths,
+# `serde`/`toml` to deserialize the table.
+camino.workspace = true
+serde.workspace = true
+toml.workspace = true
+# why: BT-4611 — the dependency-graph walk warns on a skipped dependency.
+tracing.workspace = true
 
 [dev-dependencies]
 tempfile = "3.14"

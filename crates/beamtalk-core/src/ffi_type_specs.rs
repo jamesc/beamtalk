@@ -1397,6 +1397,16 @@ pub fn collect_project_known_erlang_modules(
     known
 }
 
+/// Whether `dir` is the package's own compiled `native/` ebin
+/// (`_build/dev/native/ebin`), as opposed to a path/git dependency
+/// (`_build/deps/*/ebin`) or a hex/rebar3 dependency
+/// (`_build/dev/native/default/lib/*/ebin`). Only the former may prove
+/// result-coercion-free FFI calls (BT-4507).
+#[must_use]
+pub fn is_own_native_ebin(dir: &Utf8Path) -> bool {
+    dir.ends_with("_build/dev/native/ebin")
+}
+
 /// ADR 0075 Phase 1: Extract type specs from OTP and
 /// dependency `.beam` files and cache them.
 ///
@@ -1444,7 +1454,14 @@ pub fn extract_type_specs(
         None => true,
     });
 
-    if otp_beams.is_empty() && dep_beams.is_empty() {
+    // BT-4507: only the package's own `native/` specs may prove a direct FFI
+    // call; path/git and hex dependency specs never do (specs are not
+    // enforced, so a wrong third-party `-spec` would change a call's result).
+    let (native_beams, dep_beams): (Vec<_>, Vec<_>) = dep_beams
+        .into_iter()
+        .partition(|beam| beam.parent().is_some_and(is_own_native_ebin));
+
+    if otp_beams.is_empty() && native_beams.is_empty() && dep_beams.is_empty() {
         debug!("No .beam files found for type spec extraction");
         return None;
     }
@@ -1456,14 +1473,24 @@ pub fn extract_type_specs(
         debug!(dir = %shared, "Using shared OTP type-spec cache");
     }
 
-    let otp_registry = match extract_beam_specs_tiered(&otp_beams, cache_dir, shared_dir.as_deref())
-    {
+    let mut otp_registry =
+        match extract_beam_specs_tiered(&otp_beams, cache_dir, shared_dir.as_deref()) {
+            Ok(registry) => registry,
+            Err(e) => {
+                debug!("OTP type spec extraction failed (non-fatal): {e}");
+                NativeTypeRegistry::new()
+            }
+        };
+    otp_registry.trust_all_modules();
+
+    let mut native_registry = match extract_beam_specs(&native_beams, cache_dir) {
         Ok(registry) => registry,
         Err(e) => {
-            debug!("OTP type spec extraction failed (non-fatal): {e}");
+            debug!("Native type spec extraction failed (non-fatal): {e}");
             NativeTypeRegistry::new()
         }
     };
+    native_registry.trust_all_modules();
 
     let dep_registry = match extract_beam_specs(&dep_beams, cache_dir) {
         Ok(registry) => registry,
@@ -1473,8 +1500,9 @@ pub fn extract_type_specs(
         }
     };
 
-    // Merge dependency specs into the OTP registry; OTP wins on any collision.
+    // Merge in order OTP, own native, dependencies; earlier wins on collision.
     let mut registry = otp_registry;
+    registry.merge(native_registry);
     registry.merge(dep_registry);
 
     if registry.module_count() > 0 {
@@ -1706,6 +1734,17 @@ mod tests {
     // -----------------------------------------------------------------------
     // extract_type_specs
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn is_own_native_ebin_distinguishes_native_from_dependencies() {
+        assert!(is_own_native_ebin(Utf8Path::new(
+            "/p/_build/dev/native/ebin"
+        )));
+        assert!(!is_own_native_ebin(Utf8Path::new("/p/_build/deps/x/ebin")));
+        assert!(!is_own_native_ebin(Utf8Path::new(
+            "/p/_build/dev/native/default/lib/x/ebin"
+        )));
+    }
 
     #[test]
     fn extract_type_specs_extracts_live_on_cold_cache() {

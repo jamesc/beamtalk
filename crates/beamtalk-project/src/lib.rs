@@ -5,13 +5,20 @@
 //!
 //! **DDD Context:** Build System
 //!
-//! Shared project/workspace discovery logic for Beamtalk tooling (CLI, LSP, etc.).
+//! Shared project/workspace discovery logic for Beamtalk tooling (CLI, LSP, etc.):
+//! project roots, package source files, `[dependencies]` parsing
+//! ([`dependencies`]), the on-disk dependency graph ([`dependency_graph`]) and
+//! the dependency-extension completeness rule ([`dependency_extensions`]).
 //!
 //! A standalone crate (ADR 0117 Decision step 2) depending only on
 //! `beamtalk-core::file_walker`, so the boundary is `cargo`-enforced rather
 //! than a convention within `beamtalk-core`.
 
+pub mod dependencies;
+pub mod dependency_extensions;
+pub mod dependency_graph;
 pub mod package;
+pub mod package_name;
 
 use std::fs;
 use std::path::{Path, PathBuf};

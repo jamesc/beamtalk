@@ -191,6 +191,7 @@ impl ClassHierarchy {
         let mut hierarchy = Self::with_builtins();
         let diagnostics = hierarchy.add_module_classes(module, stdlib_mode);
         hierarchy.rebuild_all_indexes();
+        hierarchy.publish_explicit_new1_verdicts(module);
         (Ok(hierarchy), diagnostics)
     }
     /// Register protocol definitions as synthetic class entries.
@@ -266,6 +267,7 @@ impl ClassHierarchy {
                     is_native: false,
                     handle_scope: None,
                     surface_incomplete: false,
+                    in_caller_new1: false,
                     // Synthetic entry: no compiled module exists.
                     is_module_less: true,
                     state: vec![],
@@ -460,6 +462,13 @@ impl ClassHierarchy {
     /// of every static direct call re-checks.
     #[must_use]
     pub fn runs_class_method_in_caller(&self, class_name: &str, selector: &str) -> bool {
+        if selector == "new:" && self.get_class(class_name).is_some_and(|c| c.in_caller_new1) {
+            // BT-4501: the class's own explicit `new:` is published out of
+            // `process_bound_class_selectors` (codegen), so it runs in the
+            // caller like any in-caller class method. The verdict already
+            // implies no class variables in the chain.
+            return true;
+        }
         !ClassInfo::is_process_bound_class_selector(selector)
             && !ClassInfo::is_class_var_reflection_selector(selector)
             && !self.chain_has_class_variables(class_name)
@@ -622,6 +631,7 @@ impl ClassHierarchy {
                         // whose chain includes it must never be classified
                         // ClosedComplete.
                         surface_incomplete: true,
+                        in_caller_new1: false,
                         // Stub: no compiled module is known.
                         is_module_less: true,
                         state: Vec::new(),

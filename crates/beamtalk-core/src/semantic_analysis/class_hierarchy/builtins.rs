@@ -122,6 +122,7 @@ pub(super) fn builtin_classes() -> HashMap<EcoString, ClassInfo> {
             is_native: false,
             handle_scope: None,
             surface_incomplete: false,
+            in_caller_new1: false,
             // Runtime-only with no `.bt` module (native-backed): truthfully
             // module-less. Static dispatch excludes `Future` via the builtin
             // gate before reading this flag.

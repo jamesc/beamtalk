@@ -10,9 +10,9 @@ use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     AccParam, BindOp, CallSiteLine, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary,
-    EnsureCatchVars, EnsureForeignNlr, EnsureNlrRelay, FastPath, FrameId, LOOP_FN_STEM,
-    LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars, RebindLowering, RethrowSlot, ThreadedStmt,
-    ThreadingMode, TokenId, TryRegion, ValueRef, VersionPrefix, VersionedVar,
+    EnsureCatchVars, EnsureForeignNlr, EnsureNlrRelay, FastPath, ForeignCleanupBody, FrameId,
+    LOOP_FN_STEM, LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars, RebindLowering, RethrowSlot,
+    ThreadedStmt, ThreadingMode, TokenId, TryRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -757,7 +757,9 @@ fn render_on_do_catch(
 /// 0146 R1) every other `$bt_nlr` throw runs the cleanup, stores its final
 /// `StateAcc` to the cell and is re-raised unchanged; every other exception
 /// takes `other`. With neither the catch is `other` alone, the shape every
-/// `ensure:` had before BT-4312.
+/// `ensure:` had before BT-4312. A foreign clause that shares the relay's
+/// cleanup ([`ForeignCleanupBody::SharedWithRelay`], BT-4598) renders the two
+/// as one clause ([`render_ensure_shared_clause`]).
 fn render_ensure_catch(
     vars: &EnsureCatchVars,
     token: Option<&TokenId>,
@@ -775,14 +777,44 @@ fn render_ensure_catch(
         leaf::var(vars.stack_var.clone()),
         "> -> ",
     ];
-    let relay_clause = match (relay, carry) {
-        (Some(relay), Some(carry)) => render_ensure_relay_clause(vars, token, carry, relay),
-        _ => None,
+    let relay = relay.zip(carry);
+    let nlr_clauses = if let (
+        Some((relay, carry)),
+        Some(
+            foreign @ EnsureForeignNlr {
+                body: ForeignCleanupBody::SharedWithRelay,
+                ..
+            },
+        ),
+    ) = (relay, foreign)
+    {
+        Some(render_ensure_shared_clause(
+            vars, token, carry, relay, foreign,
+        ))
+    } else {
+        let relay_clause =
+            relay.and_then(|(relay, carry)| render_ensure_relay_clause(vars, token, carry, relay));
+        // A shared foreign clause with no relay has no cleanup to run
+        // (`verify`'s `SharedWithoutCellRelay`): such a throw takes `other`.
+        let foreign_clause = foreign.and_then(|foreign| match &foreign.body {
+            ForeignCleanupBody::Own { seed, cleanup } => Some(render_ensure_foreign_clause(
+                vars,
+                docvec![seed.clone(), cleanup.clone(), " "],
+                foreign,
+            )),
+            ForeignCleanupBody::SharedWithRelay => None,
+        });
+        match (relay_clause, foreign_clause) {
+            (None, None) => None,
+            (relay_clause, foreign_clause) => Some(docvec![
+                relay_clause.unwrap_or(Document::Nil),
+                foreign_clause.unwrap_or(Document::Nil),
+            ]),
+        }
     };
-    let foreign_clause = foreign.map(|foreign| render_ensure_foreign_clause(vars, foreign));
-    if relay_clause.is_none() && foreign_clause.is_none() {
+    let Some(nlr_clauses) = nlr_clauses else {
         return docvec![head, other.clone()];
-    }
+    };
     docvec![
         head,
         "case {",
@@ -790,8 +822,7 @@ fn render_ensure_catch(
         ", ",
         leaf::var(vars.error_var.clone()),
         "} of ",
-        relay_clause.unwrap_or(Document::Nil),
-        foreign_clause.unwrap_or(Document::Nil),
+        nlr_clauses,
         "<",
         leaf::var(vars.other_pair_var.clone()),
         "> when 'true' -> ",
@@ -800,14 +831,25 @@ fn render_ensure_catch(
     ]
 }
 
-/// ADR 0146 R1: the [`EnsureForeignNlr`] clause of an `ensure:` catch: a
-/// `$bt_nlr` throw of either shape the relay did not take runs the cleanup
-/// from the cell, stores its final `StateAcc` to the cell, and is re-raised
-/// as it came. Followed by a space.
-fn render_ensure_foreign_clause(
-    vars: &EnsureCatchVars,
-    foreign: &EnsureForeignNlr,
-) -> Document<'static> {
+/// The `$bt_nlr` clause head every foreign clause shares: a throw of either
+/// shape, bound to [`EnsureCatchVars::foreign_nlr_var`].
+fn foreign_clause_head(vars: &EnsureCatchVars) -> Document<'static> {
+    docvec![
+        "<{'throw', ",
+        leaf::var(vars.foreign_nlr_var.clone()),
+        "}> when call 'erlang':'=:='(call 'erlang':'element'(1, ",
+        leaf::var(vars.foreign_nlr_var.clone()),
+        "), ",
+        leaf::atom("$bt_nlr"),
+        ") -> ",
+    ]
+}
+
+/// The end of a foreign clause, once the cleanup has run: the store of its
+/// final `StateAcc` (`store_unwound/2`, so the test-build commit check knows
+/// the cell is ahead of that throw), then the re-raise of the throw as it
+/// came.
+fn foreign_reraise(vars: &EnsureCatchVars, foreign: &EnsureForeignNlr) -> Document<'static> {
     let store = match foreign.store {
         Some(version) => docvec![
             "let _ = ",
@@ -820,49 +862,111 @@ fn render_ensure_foreign_clause(
         None => Document::Nil,
     };
     docvec![
-        "<{'throw', ",
-        leaf::var(vars.foreign_nlr_var.clone()),
-        "}> when call 'erlang':'=:='(call 'erlang':'element'(1, ",
-        leaf::var(vars.foreign_nlr_var.clone()),
-        "), ",
-        leaf::atom("$bt_nlr"),
-        ") -> ",
-        foreign.seed.clone(),
-        foreign.cleanup.clone(),
-        " ",
         store,
         CoreErlangGenerator::emit_raw_raise(
             vars.type_var.clone(),
             vars.error_var.clone(),
             vars.stack_var.clone(),
         ),
+    ]
+}
+
+/// ADR 0146 R1: the [`EnsureForeignNlr`] clause of an `ensure:` catch: a
+/// `$bt_nlr` throw of either shape the relay did not take runs the cleanup
+/// (`cleanup`: its seed and code, followed by a space) from the cell, stores
+/// its final `StateAcc` to the cell, and is re-raised as it came. Followed by
+/// a space.
+fn render_ensure_foreign_clause(
+    vars: &EnsureCatchVars,
+    cleanup: Document<'static>,
+    foreign: &EnsureForeignNlr,
+) -> Document<'static> {
+    docvec![
+        foreign_clause_head(vars),
+        cleanup,
+        foreign_reraise(vars, foreign),
         " ",
     ]
 }
 
-/// The relay clause of an `ensure:` catch: the scope's own `$bt_nlr` throw
-/// (or, BT-4429, every one) runs the relay's cleanup and resumes with its
-/// result. `None` when no throw of the scope can reach it. Followed by a
-/// space.
-fn render_ensure_relay_clause(
+/// BT-4598: the relay and the foreign clause of an `ensure:` catch as one
+/// `$bt_nlr` clause ([`ForeignCleanupBody::SharedWithRelay`]): every `$bt_nlr`
+/// throw runs the relay's cleanup once, from the cell, then the scope's own
+/// throw resumes as the relay resumes it and any other stores the cleanup's
+/// final `StateAcc` and is re-raised as it came. Followed by a space.
+fn render_ensure_shared_clause(
     vars: &EnsureCatchVars,
     token: Option<&TokenId>,
     carry: NlrCarry,
     relay: &EnsureNlrRelay,
+    foreign: &EnsureForeignNlr,
+) -> Document<'static> {
+    // With no token of the scope (`verify`'s `SharedWithoutCellRelay`)
+    // every throw is foreign.
+    let guard = relay_guard(vars, token, carry).unwrap_or_else(|| leaf::atom("false"));
+    let (snapshot, resume) = relay_resume(vars, carry, relay);
+    docvec![
+        foreign_clause_head(vars),
+        snapshot,
+        relay.seed.clone(),
+        relay.cleanup.clone(),
+        " case ",
+        leaf::var(vars.foreign_nlr_var.clone()),
+        " of ",
+        relay_pattern(vars),
+        " when ",
+        guard,
+        " -> ",
+        resume,
+        "<_> when 'true' -> ",
+        foreign_reraise(vars, foreign),
+        " end ",
+    ]
+}
+
+/// The guard of a relay clause: the scope's own throw matches its token; a
+/// foreign one (BT-4429) is every `$bt_nlr` throw that reaches the catch.
+/// `None` when no throw of the scope can reach it.
+fn relay_guard(
+    vars: &EnsureCatchVars,
+    token: Option<&TokenId>,
+    carry: NlrCarry,
 ) -> Option<Document<'static>> {
-    // The scope's own throw matches its token; a foreign one (BT-4429) is
-    // every `$bt_nlr` throw that reaches the catch.
-    let guard = match (carry, token) {
-        (NlrCarry::Foreign, _) => leaf::atom("true"),
-        (_, Some(token)) => docvec![
+    match (carry, token) {
+        (NlrCarry::Foreign, _) => Some(leaf::atom("true")),
+        (_, Some(token)) => Some(docvec![
             "call 'erlang':'=:='(",
             leaf::var(vars.nlr_tok_var.clone()),
             ", ",
             leaf::var(token.name().to_string()),
             ")",
-        ],
-        (_, None) => return None,
-    };
+        ]),
+        (_, None) => None,
+    }
+}
+
+/// `{'$bt_nlr', Tok, Val, Carried}`, the throw a relay takes.
+fn relay_pattern(vars: &EnsureCatchVars) -> Document<'static> {
+    docvec![
+        "{'$bt_nlr', ",
+        leaf::var(vars.nlr_tok_var.clone()),
+        ", ",
+        leaf::var(vars.nlr_val_var.clone()),
+        ", ",
+        leaf::var(vars.nlr_carried_var.clone()),
+        "}",
+    ]
+}
+
+/// A relay's two ends around its seed and cleanup: the cell snapshot bound
+/// ahead of the seed ([`RethrowSlot::CellIfCarried`] only), and, once the
+/// cleanup has run, the store of the re-thrown state (`cell_store`) and the
+/// throw resumed with it. The resume is followed by a space.
+fn relay_resume(
+    vars: &EnsureCatchVars,
+    carry: NlrCarry,
+    relay: &EnsureNlrRelay,
+) -> (Document<'static>, Document<'static>) {
     let rethrow = match &relay.rethrow {
         RethrowSlot::Version(version) => {
             let family = match carry {
@@ -905,20 +1009,7 @@ fn render_ensure_relay_clause(
     } else {
         Document::Nil
     };
-    Some(docvec![
-        "<{'throw', {'$bt_nlr', ",
-        leaf::var(vars.nlr_tok_var.clone()),
-        ", ",
-        leaf::var(vars.nlr_val_var.clone()),
-        ", ",
-        leaf::var(vars.nlr_carried_var.clone()),
-        "}}> when ",
-        guard,
-        " -> ",
-        snapshot,
-        relay.seed.clone(),
-        relay.cleanup.clone(),
-        " ",
+    let resume = docvec![
         store,
         "call 'erlang':'throw'({'$bt_nlr', ",
         leaf::var(vars.nlr_tok_var.clone()),
@@ -927,6 +1018,33 @@ fn render_ensure_relay_clause(
         ", ",
         rethrow,
         "}) ",
+    ];
+    (snapshot, resume)
+}
+
+/// The relay clause of an `ensure:` catch: the scope's own `$bt_nlr` throw
+/// (or, BT-4429, every one) runs the relay's cleanup and resumes with its
+/// result. `None` when no throw of the scope can reach it. Followed by a
+/// space.
+fn render_ensure_relay_clause(
+    vars: &EnsureCatchVars,
+    token: Option<&TokenId>,
+    carry: NlrCarry,
+    relay: &EnsureNlrRelay,
+) -> Option<Document<'static>> {
+    let guard = relay_guard(vars, token, carry)?;
+    let (snapshot, resume) = relay_resume(vars, carry, relay);
+    Some(docvec![
+        "<{'throw', ",
+        relay_pattern(vars),
+        "}> when ",
+        guard,
+        " -> ",
+        snapshot,
+        relay.seed.clone(),
+        relay.cleanup.clone(),
+        " ",
+        resume,
     ])
 }
 

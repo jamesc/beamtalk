@@ -366,6 +366,7 @@ fn setup_json_class_side_fixture(
     // `add_from_beam_meta` skips, silently substituting the stdlib class.)
     let json_info = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: "JsonEncoder".into(),
         superclass: Some("Object".into()),
@@ -815,6 +816,7 @@ fn setup_intersection_param_fixture() -> (
 
     let zzyzx_info = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: "Zzyzx".into(),
         superclass: Some("Object".into()),
@@ -979,6 +981,7 @@ fn test_intersection_param_conforms_to_both_no_warning() {
 
     let report_info = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: "Report".into(),
         superclass: Some("Object".into()),
@@ -1112,6 +1115,7 @@ fn add_widget_class(hierarchy: &mut ClassHierarchy, class_side_selectors: &[&str
 
     let widget_info = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: "Widget".into(),
         superclass: Some("Object".into()),
