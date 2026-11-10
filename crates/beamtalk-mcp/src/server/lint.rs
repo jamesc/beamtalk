@@ -42,8 +42,9 @@ pub(crate) struct LintResult {
     pub(crate) lint_failures: usize,
     /// Diagnostics a REPL `load-project` rejects — any `Error` plus the
     /// non-error `Dnu`/`Type` findings — classified by the shared
-    /// [`LintGate`] CLI `beamtalk lint --warnings-as-errors` uses (BT-4336). File-level read errors are not
-    /// counted here; they are already in `errors`.
+    /// [`LintGate`] CLI `beamtalk lint --warnings-as-errors` uses (BT-4336).
+    /// File-level read errors are not counted here; they are already in
+    /// `errors`.
     pub(crate) live_recheck_failures: usize,
 }
 
@@ -63,11 +64,12 @@ impl LintResult {
     }
 }
 
-/// Build the Erlang FFI native-type registry for `path`'s package from the
-/// project's auto-extracted type specs (`beamtalk_cli::native_type_specs`),
-/// the extractor `beamtalk lint` uses. Returns `None` outside a
-/// manifest-backed package or when extraction finds no `.beam` files (e.g.
-/// runtime not yet compiled).
+/// Build the Erlang FFI native-type registry for the package at
+/// `package_root` from its auto-extracted type specs
+/// (`beamtalk_cli::native_type_specs`), the extractor `beamtalk lint` uses.
+/// Unlike `beamtalk lint` it does not yet merge the ADR 0075 stub tiers
+/// (BT-4643). Returns `None` outside a package or when extraction finds no
+/// `.beam` files (e.g. runtime not yet compiled).
 pub(crate) fn build_native_type_registry(
     package_root: Option<&Utf8Path>,
 ) -> Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>> {
