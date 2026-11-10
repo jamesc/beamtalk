@@ -190,7 +190,7 @@ dictionary.
 -spec handle_new(list(), class_name(), atom(), boolean() | undefined) ->
     {ok, term(), boolean() | undefined} | {error, term(), boolean() | undefined}.
 handle_new(Args, ClassName, Module, IsConstructible0) ->
-    case is_module_loaded_with_new(Module) of
+    case is_module_loaded_with_new(ClassName, Module) of
         true ->
             handle_new_compiled(Args, ClassName, Module, IsConstructible0);
         false ->
@@ -206,15 +206,11 @@ module-free path. `code:ensure_loaded/1` triggers lazy load so
 (module name with no `.beam` behind it) fails to load and falls through to the
 generic path.
 """.
--spec is_module_loaded_with_new(atom()) -> boolean().
-is_module_loaded_with_new(Module) when is_atom(Module) ->
-    case code:ensure_loaded(Module) of
-        {module, Module} ->
-            erlang:function_exported(Module, new, 0);
-        _ ->
-            false
-    end;
-is_module_loaded_with_new(_) ->
+-spec is_module_loaded_with_new(atom(), atom()) -> boolean().
+is_module_loaded_with_new(Class, Module) when is_atom(Module) ->
+    beamtalk_primitive:ensure_class_module_loaded(Class, Module) andalso
+        erlang:function_exported(Module, new, 0);
+is_module_loaded_with_new(_, _) ->
     false.
 
 -doc """
@@ -551,7 +547,7 @@ collect_ancestor_defaults(Name, Acc, Depth) ->
             _ -> Name
         end,
     AncestorDefaults =
-        case is_module_loaded_with_new(Module) of
+        case is_module_loaded_with_new(Name, Module) of
             true ->
                 ancestor_compiled_defaults(Module);
             false ->

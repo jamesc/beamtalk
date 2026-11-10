@@ -15,6 +15,7 @@ See also: docs/internal/design-self-as-object.md Section 3.3
 """.
 -export([
     class_of/1,
+    ensure_class_module_loaded/2,
     string_from_binary/1,
     string_to_binary/1,
     deep_unwrap_strings/1,
@@ -1477,15 +1478,30 @@ registers itself from its module's `on_load`) and module-less classes (whose
 registered "module" is the class name itself) never reach `code_server`.
 """.
 -spec ensure_registered_module_loaded(atom(), atom()) -> atom().
-ensure_registered_module_loaded(Class, Class) ->
-    Class;
-ensure_registered_module_loaded(_Class, Module) ->
+ensure_registered_module_loaded(Class, Module) ->
+    _ = ensure_class_module_loaded(Class, Module),
+    Module.
+
+-doc """
+Ensure a class's registered `Module` is loaded; true when it is loaded after.
+
+A module-less (builder-built) class registers its own name as its "module",
+so there is no `.beam` to find and `code:ensure_loaded/1` would be a
+guaranteed `code_server` miss. Loaded modules never reach `code_server`
+either. Shared by dispatch, instantiation and method lookup (BT-4056).
+""".
+-spec ensure_class_module_loaded(atom(), atom()) -> boolean().
+ensure_class_module_loaded(Class, Module) ->
     case erlang:module_loaded(Module) of
         true ->
-            Module;
+            true;
+        false when Module =:= Class ->
+            false;
         false ->
-            _ = code:ensure_loaded(Module),
-            Module
+            case code:ensure_loaded(Module) of
+                {module, Module} -> true;
+                _ -> false
+            end
     end.
 
 -doc """

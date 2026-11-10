@@ -913,8 +913,12 @@ probe_local_method(ClassPid, Selector, EnsureLoaded, ResolveFun) ->
                     false;
                 ModuleName ->
                     case EnsureLoaded of
-                        true -> _ = code:ensure_loaded(ModuleName);
-                        false -> ok
+                        true ->
+                            _ = beamtalk_primitive:ensure_class_module_loaded(
+                                class_name_safe(ClassPid), ModuleName
+                            );
+                        false ->
+                            ok
                     end,
                     Fun = ResolveFun(ModuleName),
                     case erlang:function_exported(ModuleName, Fun, 1) of
