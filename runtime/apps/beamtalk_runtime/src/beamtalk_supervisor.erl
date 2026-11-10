@@ -3699,8 +3699,6 @@ with_pool_child({beamtalk_supervisor, _SupClass, _Module, SupPid} = Self, Select
         case pool_child_config(Self) of
             {ok, {ChildClass, ChildModule, Kind}, Max} ->
                 Fun(ChildClass, ChildModule, Kind, Max);
-            {error, #beamtalk_error{} = Error} ->
-                {error, Error#beamtalk_error{selector = Selector}};
             {slow, _} ->
                 slow_pool_child(Self, SupPid, Selector, Fun)
         end
@@ -3719,9 +3717,7 @@ slow_pool_child(Self, SupPid, Selector, Fun) ->
     end.
 
 -spec pool_child_config(tuple()) ->
-    {ok, {atom(), module(), atom()}, non_neg_integer() | infinity}
-    | {error, #beamtalk_error{}}
-    | {slow, term()}.
+    {ok, {atom(), module(), atom()}, non_neg_integer() | infinity} | {slow, term()}.
 pool_child_config({beamtalk_supervisor, _SupClass, _Module, SupPid}) when
     is_pid(SupPid), SupPid =/= self(), node(SupPid) =:= node()
 ->

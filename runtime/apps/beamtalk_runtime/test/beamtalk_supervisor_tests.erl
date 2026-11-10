@@ -4866,7 +4866,9 @@ startChild_cached_kind_capped_test() ->
     try
         Self = {beamtalk_supervisor, 'BT4502CapSup', ?MODULE, SupPid},
         {ok, Child} = beamtalk_supervisor:startChild(Self),
-        ?assertMatch({error, #beamtalk_error{kind = max_children}}, beamtalk_supervisor:startChild(Self)),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = max_children}}, beamtalk_supervisor:startChild(Self)
+        ),
         ok = supervisor:terminate_child(SupPid, element(4, Child)),
         wait_until_count(Self, 0),
         ?assertMatch({ok, _}, beamtalk_supervisor:startChild(Self))
