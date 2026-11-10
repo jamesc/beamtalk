@@ -428,8 +428,23 @@ compute_step(ClassName, Selector) ->
             case beamtalk_object_class:has_method_local(ClassPid, Selector) of
                 true ->
                     case dispatchable_module(ClassPid) of
-                        {ok, Module} -> {found, {owner, ClassName, Module}};
-                        continue -> {next, beamtalk_object_class:superclass_safe(ClassPid)}
+                        {ok, Module} ->
+                            {found, {owner, ClassName, Module}};
+                        continue ->
+                            %% A module-less class holding the selector as a runtime
+                            %% fun is the owner, but there is no module to cache: miss,
+                            %% so the invoking walk (invoke_runtime_fun/6) resolves it
+                            %% rather than a compiled ancestor's method of the same name.
+                            case
+                                runtime_value_fun(
+                                    ClassName,
+                                    Selector,
+                                    beamtalk_class_builder:selector_arity(Selector)
+                                )
+                            of
+                                {ok, _} -> {found, miss};
+                                none -> {next, beamtalk_object_class:superclass_safe(ClassPid)}
+                            end
                     end;
                 false ->
                     case beamtalk_object_class:superclass_safe(ClassPid) of
@@ -589,6 +604,45 @@ invoke_method(MethodOwner, ClassPid, Selector, Args, Self, State) ->
         {ok, ModuleName} ->
             invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State);
         continue ->
+            invoke_runtime_fun(MethodOwner, ClassPid, Selector, Args, Self, State)
+    end.
+
+-doc """
+The runtime fun for `Selector` on a module-less class, only when it has the
+value-type shape `fun(Self, Arg1..ArgN)`. Dynamic classes also register funs in
+the legacy `fun(Self, Args, State)` shape; those are not value-type methods and
+must keep falling through to the superclass rather than crash with badarity.
+Shared by the invoking walk and `compute_step/2` so both agree.
+""".
+-spec runtime_value_fun(class_name(), selector(), non_neg_integer()) -> {ok, fun()} | none.
+runtime_value_fun(Class, Selector, ArgCount) ->
+    case beamtalk_primitive:runtime_instance_method(Class, Selector) of
+        {ok, Fun} = Found when is_function(Fun, ArgCount + 1) -> Found;
+        _ -> none
+    end.
+
+-doc """
+A class with no dispatchable module that `has_method_local/2` accepted may
+hold the method as a runtime fun (module-less builder classes, ADR 0038 /
+0084). Resolve it with the same rule the direct send uses
+(`beamtalk_primitive:runtime_instance_method/2`) and invoke it with the
+value-type convention `fun(Self, Arg1..ArgN)`. Otherwise advance the walk.
+""".
+-spec invoke_runtime_fun(class_name(), pid(), selector(), args(), bt_self(), state()) ->
+    dispatch_result() | {continue, class_name() | none}.
+invoke_runtime_fun(MethodOwner, ClassPid, Selector, Args, Self, State) ->
+    case runtime_value_fun(MethodOwner, Selector, length(Args)) of
+        {ok, Fun} ->
+            %% bt-catcher-audit: not-applicable-reraises - {error,_} is re-raised
+            %% by every in-tree caller (or replied by an actor), as in
+            %% invoke_resolved/6.
+            try
+                {reply, erlang:apply(Fun, [Self | Args]), State}
+            catch
+                Type:Reason:Stack ->
+                    wrap_dispatch_error(Type, Reason, Stack, Selector, Self, State, MethodOwner)
+            end;
+        _ ->
             {continue, beamtalk_object_class:superclass_safe(ClassPid)}
     end.
 
@@ -610,7 +664,8 @@ dispatchable_module(ClassPid) ->
             %% BEAM lazy-loads modules, and function_exported/3 only checks
             %% loaded modules.
             _ = beamtalk_primitive:ensure_class_module_loaded(
-                fun() -> beamtalk_object_class:class_name_safe(ClassPid) end, ModuleName
+                fun() -> beamtalk_object_class:class_name_or_undefined(ClassPid) end,
+                ModuleName
             ),
             %% Verify the module exports dispatch/4 before calling it.
             %% This avoids catching error:undef broadly, which could mask
@@ -718,14 +773,7 @@ invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State) ->
                         reason => beamtalk_error:format_reason(Type, Reason),
                         domain => [beamtalk, runtime]
                     }),
-                    Wrapped = beamtalk_exception_handler:ensure_wrapped(
-                        Type,
-                        Reason,
-                        Stack,
-                        dispatch_context(Selector, Self, State, MethodOwner)
-                    ),
-                    #{error := BtError} = Wrapped,
-                    {error, BtError}
+                    wrap_dispatch_error(Type, Reason, Stack, Selector, Self, State, MethodOwner)
             end;
         false ->
             %% Normalize the return value: dispatch/4 returns either
@@ -748,16 +796,21 @@ invoke_resolved(MethodOwner, ModuleName, Selector, Args, Self, State) ->
                         reason => beamtalk_error:format_reason(Type, Reason),
                         domain => [beamtalk, runtime]
                     }),
-                    Wrapped = beamtalk_exception_handler:ensure_wrapped(
-                        Type,
-                        Reason,
-                        Stack,
-                        dispatch_context(Selector, Self, State, MethodOwner)
-                    ),
-                    #{error := BtError} = Wrapped,
-                    {error, BtError}
+                    wrap_dispatch_error(Type, Reason, Stack, Selector, Self, State, MethodOwner)
             end
     end.
+
+%% Wrap a raw Erlang error escaping a method into a structured
+%% `{error, #beamtalk_error{}}`, located by `dispatch_context/4`.
+-spec wrap_dispatch_error(
+    error | exit | throw, term(), list(), selector(), bt_self(), state(), class_name()
+) -> {error, term()}.
+wrap_dispatch_error(Type, Reason, Stack, Selector, Self, State, MethodOwner) ->
+    Wrapped = beamtalk_exception_handler:ensure_wrapped(
+        Type, Reason, Stack, dispatch_context(Selector, Self, State, MethodOwner)
+    ),
+    #{error := BtError} = Wrapped,
+    {error, BtError}.
 
 %% Build the dispatch breadcrumb handed to the error-wrap boundary so
 %% raw Erlang errors escaping a compiled method are classified *and* located.

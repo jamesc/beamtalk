@@ -134,10 +134,17 @@ function clamp(n, lo, hi) {
 // is not a valid top-level token), or null/absent for the Workspace + REPL
 // editors (the server defaults to "expression"). When set, it rides the same
 // `diagnostics` event alongside `code`.
-export function lintQuery(pushEvent, mode = null) {
+//
+// `tabId` (BT-4583) is the method-editor tab the buffer belongs to. The server
+// resolves a class-definition tab to its class's source file and checks the
+// buffer under that file's project scope; the client never sends a path. The
+// Workspace + REPL editors have no tab id and send none.
+export function lintQuery(pushEvent, mode = null, tabId = null) {
   return (code) =>
     new Promise((resolve) => {
-      const payload = mode ? { code, mode } : { code }
+      const payload = { code }
+      if (mode) payload.mode = mode
+      if (tabId) payload.tab_id = tabId
       pushEvent("diagnostics", payload, (reply) => {
         resolve((reply && reply.diagnostics) || [])
       })

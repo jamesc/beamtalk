@@ -2086,15 +2086,17 @@ bt4552_prune_dead_class_pids_caps_dead_rows_test() ->
         ets:match_delete(beamtalk_class_pids, {'_', Name})
     end.
 
-%% BT-4552: a callback exception runs terminate/2, which deletes the class's
-%% metadata, so the class cannot be restarted; its reverse-index row must go
-%% too, or the class would look live (`liveClassName/1`) while gone.
-bt4552_callback_crash_forgets_pid_row_test() ->
+%% BT-4622: a callback exception is a crash, not a removal. terminate/2 keeps
+%% the class's metadata and reverse-index row (as an untrappable kill does),
+%% so the class restarts under its own name and a class object holding the
+%% dead pid still names it; a deliberate stop then removes it fully. This
+%% flips the BT-4552 pin, which expected the row gone and no restart.
+bt4622_callback_crash_keeps_class_restartable_test() ->
     beamtalk_class_registry:ensure_pg_started(),
     beamtalk_class_registry:ensure_hierarchy_table(),
     beamtalk_class_registry:ensure_module_table(),
     beamtalk_class_registry:ensure_pid_table(),
-    Name = 'BT4552CallbackCrash',
+    Name = 'BT4622CallbackCrash',
     {ok, Pid} = beamtalk_object_class:start(Name, #{
         name => Name,
         module => beamtalk_class_bt,
@@ -2105,13 +2107,39 @@ bt4552_callback_crash_forgets_pid_row_test() ->
     ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(Pid)),
     MRef = monitor(process, Pid),
     %% No handle_call clause matches: function_clause, then terminate/2.
-    ?assertExit(_, gen_server:call(Pid, bt4552_no_such_call)),
+    ?assertExit(_, gen_server:call(Pid, bt4622_no_such_call)),
     receive
-        {'DOWN', MRef, process, Pid, _} -> ok
+        {'DOWN', MRef, process, Pid, Reason} ->
+            ?assertNot(beamtalk_class_registry:is_deliberate_stop(Reason))
     after 5000 -> ?assert(false)
     end,
-    ?assertMatch({error, _}, beamtalk_class_registry:restart_class(Name)),
-    ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(Pid)).
+    %% Metadata and the dead pid's row survive the crash.
+    ?assertEqual({ok, beamtalk_class_bt}, beamtalk_class_metadata:lookup_module(Name)),
+    ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(Pid)),
+    %% Restart (eager, if a monitor is running, else here) keeps the name
+    %% and module; the dead incarnation still names the class.
+    {ok, NewPid} = beamtalk_class_registry:restart_class(Name),
+    ?assertNotEqual(Pid, NewPid),
+    ?assertEqual(NewPid, beamtalk_class_registry:whereis_class(Name)),
+    ?assertEqual(beamtalk_class_bt, beamtalk_object_class:module_name(NewPid)),
+    ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(Pid)),
+    ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(NewPid)),
+    %% A deliberate stop (removeFromSystem) removes the class fully.
+    ok = gen_server:stop(NewPid),
+    ?assertEqual(not_found, beamtalk_class_metadata:lookup_module(Name)),
+    ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(Pid)),
+    ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(NewPid)),
+    ?assertMatch({error, _}, beamtalk_class_registry:restart_class(Name)).
+
+%% BT-4622: the deliberate-stop reasons, shared by terminate/2 and
+%% beamtalk_class_monitor.
+is_deliberate_stop_test() ->
+    ?assert(beamtalk_class_registry:is_deliberate_stop(normal)),
+    ?assert(beamtalk_class_registry:is_deliberate_stop(shutdown)),
+    ?assert(beamtalk_class_registry:is_deliberate_stop({shutdown, removed})),
+    ?assertNot(beamtalk_class_registry:is_deliberate_stop(killed)),
+    ?assertNot(beamtalk_class_registry:is_deliberate_stop({function_clause, []})),
+    ?assertNot(beamtalk_class_registry:is_deliberate_stop(noproc)).
 
 %% BT-4552: a rename moves the kept dead incarnations to the new name.
 bt4552_rename_class_pids_moves_rows_test() ->

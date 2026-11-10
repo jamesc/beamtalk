@@ -57,6 +57,28 @@ TestCase subclass: InspectorTest
     self assert: (f printString startsWith: "#InspectorField<")
     self assert: (f printString includesSubstring: "x: 3")
 
+  // BT-4581: runtime-minted fields carry a String label, so printString's
+  // `++` chain works and labels compare equal to String literals.
+  testRuntimeFieldPrintStringForValue =>
+    self assert: self.i fields first printString equals: "#InspectorField<x: 3>"
+
+  testRuntimeFieldPrintStringForDictionary =>
+    f := (Inspector on: #{#a => 1}) fields first
+    self assert: (f printString startsWith: "#InspectorField<")
+    self assert: (f printString includesSubstring: ": 1>")
+
+  testRuntimeFieldPrintStringForEts =>
+    table := Ets new: #inspectorFieldLabelEts type: #set
+    [
+      f := (Inspector on: table) fields first
+      self assert: (f printString startsWith: "#InspectorField<table: ")
+      self assert: f label equals: "table"
+    ] ensure: [table delete]
+
+  testRuntimeFieldLabelsEqualStringLiterals =>
+    self assert: (self.i fields collect: [:f | f label]) equals: #("x", "y")
+    self assert: self.i fields first label =:= "x"
+
   // === Construction: Inspector on: / inspect shorthand ===
   testInspectorOnReturnsInspector => self assert: (self.i isKindOf: Inspector)
 

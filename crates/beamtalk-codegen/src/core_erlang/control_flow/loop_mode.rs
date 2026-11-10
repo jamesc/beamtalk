@@ -94,6 +94,14 @@ pub(in crate::core_erlang) struct LoopMode {
     /// (`threaded_ir::verify_tuple_acc_state_reads`). Behind a `RefCell`
     /// because the accessor takes `&self`.
     pub(in crate::core_erlang) tuple_acc_state_reads: std::cell::RefCell<Vec<Vec<String>>>,
+    /// BT-4629: the body-block span of the one `do:`/`doWithKey:` fold whose
+    /// threaded locals nobody reads afterwards (a local-threading producer
+    /// with a `Discard` tail, `ProducerTail::Discard`). Armed by
+    /// `lower_construct_tuple` around the construct's lowering and consumed
+    /// (`take_discarded_fold`) at the fold's entry, so a nested fold never
+    /// sees it. The closed tuple/bare form then answers `{'nil'}` instead of
+    /// repacking the locals into a `{'nil', Map}` carrier nobody unpacks.
+    pub(in crate::core_erlang) discarded_fold_block: Option<beamtalk_core::source_analysis::Span>,
 }
 
 impl LoopMode {
