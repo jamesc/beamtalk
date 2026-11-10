@@ -93,6 +93,7 @@ let _Match@2 = _r@1 in case _Match@2 of <~{'$beamtalk_class' := 'Result', 'isOk'
                 <'show:'> when 'true' -> 'slow'
                 <'showCr:'> when 'true' -> 'slow'
                 <'subclassResponsibility'> when 'true' -> 'slow'
+                <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
                 <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('ExhaustivenessTest', Selector)
             end of

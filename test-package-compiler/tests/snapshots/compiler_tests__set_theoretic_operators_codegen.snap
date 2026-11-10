@@ -108,6 +108,7 @@ let _Match@3 = _heading@2 in case _Match@3 of <'north'> when 'true' -> {'beamtal
                 <'show:'> when 'true' -> 'slow'
                 <'showCr:'> when 'true' -> 'slow'
                 <'subclassResponsibility'> when 'true' -> 'slow'
+                <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
                 <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('SetTheoreticOperatorsCase', Selector)
             end of
