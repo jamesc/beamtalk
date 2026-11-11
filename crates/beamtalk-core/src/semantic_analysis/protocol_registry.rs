@@ -122,9 +122,11 @@ pub struct ProtocolInfo {
     /// Required class method signatures.
     pub class_methods: Vec<ProtocolMethodRequirement>,
     /// Provided (instance-side) method signatures (ADR 0127 §1, §8) — the
-    /// selector and declared types of each provision, since a provision's
-    /// body is what implements it: nothing checks a using class's
-    /// signature against these the way [`Self::methods`] does. A
+    /// selector and declared types of each provision. A provision's body
+    /// implements it, so only its declared *return type* is checked against
+    /// a conformer (BT-4490,
+    /// [`ProtocolRegistry::conformance_return_type_mismatches`]); parameter
+    /// types are not. A
     /// protocol's *type* is required ∪ provided (§8, decided), so their
     /// selectors — via [`Self::all_conformance_selectors`] — join `methods`
     /// in every conformance check; `Protocol requiredMethods:` keeps
