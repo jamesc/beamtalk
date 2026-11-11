@@ -150,6 +150,24 @@ sweep_stale_temps_deletes_only_old_unique_temps_of_that_file_test() ->
         )
     end).
 
+sweep_stale_temps_in_deletes_any_old_unique_temp_in_the_dir_test() ->
+    with_dir(fun(Dir) ->
+        Old1 = filename:join(Dir, "changes.jsonl.5.tmp"),
+        Old2 = filename:join(Dir, "000001-source.bt.77.tmp"),
+        Young = filename:join(Dir, "changes.jsonl.6.tmp"),
+        Legacy = filename:join(Dir, "changes.jsonl.tmp"),
+        NoBase = filename:join(Dir, ".5.tmp"),
+        Plain = filename:join(Dir, "000001-source.bt"),
+        Kept = [Young, Legacy, NoBase, Plain],
+        lists:foreach(fun(F) -> ok = file:write_file(F, <<>>) end, [Old1, Old2 | Kept]),
+        lists:foreach(fun(F) -> ok = set_age(F, 7200) end, [Old1, Old2, Legacy, NoBase, Plain]),
+        ?assertEqual(
+            lists:sort([Old1, Old2]),
+            lists:sort(beamtalk_workspace_file:sweep_stale_temps_in(Dir, 3600))
+        ),
+        lists:foreach(fun(F) -> ?assert(filelib:is_regular(F)) end, Kept)
+    end).
+
 %%====================================================================
 %% beamtalk_workspace_flush stages through a unique temp name
 %%====================================================================
@@ -239,6 +257,39 @@ changelog_log_rewrite_does_not_touch_a_foreign_fixed_tmp_test() ->
         ?assertEqual({ok, <<>>}, file:read_file(filename:join(ChangesDir, "changes.jsonl"))),
         ?assertEqual({ok, <<"foreign">>}, file:read_file(Foreign))
     end).
+
+%% A crashed write's stale temp file under changes/ or changes/sources/ is
+%% swept when the ChangeLog starts; a fresh one is left alone.
+changelog_start_sweeps_stale_temps_test() ->
+    Unique = beamtalk_test_unique:id(),
+    WorkspaceId = list_to_binary("test-ws-file-sweep-" ++ Unique),
+    Home = filename:join(temp_dir(), "bt-wsfile-home-" ++ Unique),
+    OldHome = os:getenv("HOME"),
+    true = os:putenv("HOME", Home),
+    try
+        ChangesDir = beamtalk_workspace_changelog:changes_dir(WorkspaceId),
+        SourcesDir = filename:join(ChangesDir, "sources"),
+        ok = filelib:ensure_path(SourcesDir),
+        StaleLog = filename:join(ChangesDir, "changes.jsonl.11.tmp"),
+        StaleSource = filename:join(SourcesDir, "000003-source.bt.12.tmp"),
+        Fresh = filename:join(ChangesDir, "changes.jsonl.13.tmp"),
+        lists:foreach(
+            fun(F) -> ok = file:write_file(F, <<>>) end, [StaleLog, StaleSource, Fresh]
+        ),
+        ok = set_age(StaleLog, 7200),
+        ok = set_age(StaleSource, 7200),
+        {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+        stop(Pid),
+        ?assertNot(filelib:is_regular(StaleLog)),
+        ?assertNot(filelib:is_regular(StaleSource)),
+        ?assert(filelib:is_regular(Fresh))
+    after
+        case OldHome of
+            false -> os:unsetenv("HOME");
+            _ -> os:putenv("HOME", OldHome)
+        end,
+        _ = file:del_dir_r(Home)
+    end.
 
 %%====================================================================
 %% Helpers

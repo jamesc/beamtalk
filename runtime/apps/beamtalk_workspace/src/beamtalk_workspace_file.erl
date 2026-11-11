@@ -17,8 +17,9 @@ checks (BT-4683).
     per call (`erlang:unique_integer/1`), never a fixed `<file>.tmp`, so two
     writers aiming at the same path can never write into one shared temp file
     and rename each other's partial content into place.
-  * `sweep_stale_temps/2`: delete `temp_path/1` leftovers of a crashed
-    staged write once they are old enough that no live writer can own them.
+  * `sweep_stale_temps/2` (one file's) and `sweep_stale_temps_in/2` (a whole
+    directory's): delete `temp_path/1` leftovers of a crashed staged write
+    once they are old enough that no live writer can own them.
 
 A leaf module: it calls only OTP.
 """.
@@ -31,7 +32,8 @@ A leaf module: it calls only OTP.
     temp_path/1,
     write_temp/2,
     atomic_write/3,
-    sweep_stale_temps/2
+    sweep_stale_temps/2,
+    sweep_stale_temps_in/2
 ]).
 
 -doc """
@@ -149,8 +151,24 @@ files that cannot be inspected or deleted are skipped.
 """.
 -spec sweep_stale_temps(string(), non_neg_integer()) -> [string()].
 sweep_stale_temps(Path, MaxAgeSeconds) ->
-    Dir = filename:dirname(Path),
     Prefix = filename:basename(Path) ++ ".",
+    sweep(filename:dirname(Path), fun(Name) -> is_temp_name(Prefix, Name) end, MaxAgeSeconds).
+
+-doc """
+Delete every stale `temp_path/1` leftover directly in `Dir`: any
+`<name>.<digits>.tmp` whose last modification is more than `MaxAgeSeconds`
+ago, whatever file it was staging. Returns the paths it deleted.
+
+For a writer that does not sweep per file, such as the ChangeLog at startup.
+The same age rule as `sweep_stale_temps/2` keeps it safe while other writers
+are staging files in `Dir`.
+""".
+-spec sweep_stale_temps_in(file:filename(), non_neg_integer()) -> [string()].
+sweep_stale_temps_in(Dir, MaxAgeSeconds) ->
+    sweep(Dir, fun is_any_temp_name/1, MaxAgeSeconds).
+
+-spec sweep(file:filename(), fun((string()) -> boolean()), non_neg_integer()) -> [string()].
+sweep(Dir, IsTemp, MaxAgeSeconds) ->
     Now = erlang:system_time(second),
     Names =
         case file:list_dir(Dir) of
@@ -160,13 +178,26 @@ sweep_stale_temps(Path, MaxAgeSeconds) ->
     lists:filtermap(
         fun(Name) ->
             Candidate = filename:join(Dir, Name),
-            case is_temp_name(Prefix, Name) andalso older_than(Candidate, Now, MaxAgeSeconds) of
+            case IsTemp(Name) andalso older_than(Candidate, Now, MaxAgeSeconds) of
                 true -> file:delete(Candidate) =:= ok andalso {true, Candidate};
                 false -> false
             end
         end,
         Names
     ).
+
+%% `Name` is `<base>.<digits>.tmp` for some non-empty `<base>`.
+-spec is_any_temp_name(string()) -> boolean().
+is_any_temp_name(Name) ->
+    case string:split(Name, ".", trailing) of
+        [Stem, "tmp"] ->
+            case string:split(Stem, ".", trailing) of
+                [Base, _Digits] when Base =/= [] -> is_temp_name(Base ++ ".", Name);
+                _ -> false
+            end;
+        _ ->
+            false
+    end.
 
 %% `Name` is `Prefix ++ Digits ++ ".tmp"` with at least one digit: exactly
 %% what `temp_path/1` produces for the file `Prefix` was built from.
