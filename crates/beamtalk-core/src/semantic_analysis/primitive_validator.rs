@@ -105,17 +105,20 @@ pub fn validate_primitives(module: &Module, options: &CompilerOptions) -> Vec<Di
         validate_expr(&stmt.expression, is_stdlib, options, &mut diagnostics);
     }
 
-    // Check class methods and state default values
+    // Check state default values
     for class in &module.classes {
         for state in &class.state {
             if let Some(ref default_expr) = state.default_value {
                 validate_expr(default_expr, is_stdlib, options, &mut diagnostics);
             }
         }
-        for method in &class.methods {
-            for stmt in &method.body {
-                validate_expr(&stmt.expression, is_stdlib, options, &mut diagnostics);
-            }
+    }
+
+    // Check every method body: instance-side, class-side and standalone
+    // `Foo >> bar` definitions (BT-4670).
+    for method in module.all_methods() {
+        for stmt in &method.body {
+            validate_expr(&stmt.expression, is_stdlib, options, &mut diagnostics);
         }
     }
 
@@ -389,6 +392,43 @@ mod tests {
         let diags = validate_primitives(&module, &options);
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("Primitives can only be declared"));
+    }
+
+    // BT-4670: class-side and standalone (`Foo >> bar`) methods were never
+    // visited, so a `@primitive` there passed this check outside stdlib.
+
+    #[test]
+    fn primitive_in_class_side_method_validated() {
+        let source = "Object subclass: T\n  class m => @primitive \"+\"";
+        let module = parse_bt(source);
+        assert_eq!(module.classes[0].class_methods.len(), 1);
+        let diags = validate_primitives(&module, &CompilerOptions::default());
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert!(diags[0].message.contains("Primitives can only be declared"));
+    }
+
+    #[test]
+    fn primitive_in_standalone_method_validated() {
+        let source = "Object subclass: T\nT >> m => @primitive \"+\"";
+        let module = parse_bt(source);
+        assert_eq!(module.method_definitions.len(), 1);
+        let diags = validate_primitives(&module, &CompilerOptions::default());
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
+        assert!(diags[0].message.contains("Primitives can only be declared"));
+    }
+
+    #[test]
+    fn unknown_intrinsic_in_class_side_and_standalone_methods_validated() {
+        let source = "Object subclass: T\n  class m => @primitive unknownFoo\nT >> n => @primitive unknownBar";
+        let module = parse_bt(source);
+        let options = CompilerOptions {
+            stdlib_mode: true,
+            ..Default::default()
+        };
+        let diags = validate_primitives(&module, &options);
+        assert_eq!(diags.len(), 2, "got: {diags:?}");
+        assert!(diags[0].message.contains("Unknown intrinsic 'unknownFoo'"));
+        assert!(diags[1].message.contains("Unknown intrinsic 'unknownBar'"));
     }
 
     #[test]
