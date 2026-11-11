@@ -1195,3 +1195,31 @@ Object subclass: Caller
         "{msgs:#?}"
     );
 }
+
+#[test]
+fn subsumption_judges_the_other_protocols_provision_return_types() {
+    // `Quoted` provides `name -> String`; `Plain` requires `name -> Integer`. `Cee`
+    // (`name -> Integer`) is refused at `:: Quoted class` directly, so it must not
+    // reach it through `Plain class` either.
+    let source = r#"
+Protocol define: Quoted
+  name -> String => "q"
+
+Protocol define: Plain
+  name -> Integer
+
+sealed Object subclass: Cee
+  name -> Integer => 1
+
+Object subclass: Caller
+  q: x :: Quoted class => x
+  viaP: y :: Plain class => self q: y
+  direct => self q: Cee
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert_eq!(
+        msgs.iter().filter(|m| m.contains("Quoted class")).count(),
+        2,
+        "both the direct and the via-P path are refused: {msgs:#?}"
+    );
+}

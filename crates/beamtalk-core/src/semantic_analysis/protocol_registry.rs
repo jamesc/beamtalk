@@ -384,7 +384,11 @@ impl ProtocolInfo {
         // is not hidden by an untyped requirement of the same selector.
         let mut instance_side = self.all_requirements(registry);
         instance_side.extend(self.all_provided(registry));
-        refines(instance_side, other.all_requirements(registry))
+        // `other`'s provisions carry declared types too (ADR 0127 §8), the
+        // same entries `conformance_return_type_mismatches` judges a class by.
+        let mut theirs = other.all_requirements(registry);
+        theirs.extend(other.all_provided(registry));
+        refines(instance_side, theirs)
             && refines(
                 self.all_class_requirements(registry),
                 other.all_class_requirements(registry),
