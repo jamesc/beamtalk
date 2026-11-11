@@ -25,7 +25,7 @@ use crate::ast::{Expression, Literal, MessageSelector};
 #[cfg(test)]
 use crate::semantic_analysis::type_checker::DynamicReason;
 use crate::semantic_analysis::type_checker::InferredType;
-use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
 use std::collections::HashMap;
 
 /// A validator for method-specific argument constraints.
@@ -385,12 +385,14 @@ impl BlockArityValidator {
 }
 
 /// The diagnostic for a literal block of the wrong arity, shared by the
-/// argument and receiver checks. `None` when the arity matches.
-fn block_arity_diagnostic(
+/// argument and receiver checks and by the type checker's `then:` rule
+/// (BT-4620). `None` when the arity matches.
+pub(crate) fn block_arity_diagnostic(
     block: &crate::ast::Block,
     expected: usize,
     message_prefix: &str,
     hint: String,
+    severity: Severity,
 ) -> Option<Diagnostic> {
     let actual = block.arity();
     if actual == expected {
@@ -401,14 +403,14 @@ fn block_arity_diagnostic(
     } else {
         "parameters"
     };
-    Some(
-        Diagnostic::error(
-            format!("{message_prefix} a block with {expected} {params_word}, but got {actual}"),
-            block.span,
-        )
-        .with_hint(hint)
-        .with_category(DiagnosticCategory::Type),
+    let mut diagnostic = Diagnostic::error(
+        format!("{message_prefix} a block with {expected} {params_word}, but got {actual}"),
+        block.span,
     )
+    .with_hint(hint)
+    .with_category(DiagnosticCategory::Type);
+    diagnostic.severity = severity;
+    Some(diagnostic)
 }
 
 impl MethodValidator for BlockArityValidator {
@@ -436,6 +438,7 @@ impl MethodValidator for BlockArityValidator {
             expected,
             &format!("{selector_name} expects"),
             block_arity_hint(&selector_name, expected),
+            Severity::Error,
         )
         .into_iter()
         .collect()
@@ -455,6 +458,7 @@ impl MethodValidator for BlockArityValidator {
             expected,
             &format!("{selector_name} expects its receiver to be"),
             format!("Use a {expected}-parameter condition block: [...] {selector_name} [...]"),
+            Severity::Error,
         )
         .into_iter()
         .collect()

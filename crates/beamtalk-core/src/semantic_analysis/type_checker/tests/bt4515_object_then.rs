@@ -235,7 +235,10 @@ fn a_class_receiver_is_understood() {
 fn arity_warnings(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
     diags
         .iter()
-        .filter(|d| d.message.contains("`then:` passes one argument"))
+        .filter(|d| {
+            d.message
+                .contains("`then:` expects a block with 1 parameter")
+        })
         .collect()
 }
 
@@ -245,7 +248,7 @@ fn a_zero_parameter_block_warns_and_is_not_typed() {
     let (ty, diags) = probe_return("Object subclass: Probe\n  run => 3 then: [42]\n", "run");
     let warns = arity_warnings(&diags);
     assert_eq!(warns.len(), 1, "{diags:?}");
-    assert!(warns[0].message.contains("0 parameters"), "{warns:?}");
+    assert!(warns[0].message.contains("got 0"), "{warns:?}");
     assert_ne!(known_name(ty.as_ref()), Some("Integer"), "{ty:?}");
 }
 
@@ -257,7 +260,7 @@ fn a_two_parameter_block_warns_and_is_not_typed() {
     );
     let warns = arity_warnings(&diags);
     assert_eq!(warns.len(), 1, "{diags:?}");
-    assert!(warns[0].message.contains("2 parameters"), "{warns:?}");
+    assert!(warns[0].message.contains("got 2"), "{warns:?}");
     assert_ne!(known_name(ty.as_ref()), Some("Integer"), "{ty:?}");
 }
 
