@@ -223,7 +223,7 @@ fn lint_erl_files(erl_files: &[Utf8PathBuf], format: OutputFormat) -> Result<usi
 /// ([`beamtalk_cli::dependency_classes::resolve_dependency_class_infos_with_sources`])
 /// — rather than failing, or dropping every dependency's classes and stubs,
 /// so both surfaces see the same dependencies whenever resolution fails.
-fn merge_dependency_infos(
+pub(crate) fn merge_dependency_infos(
     project_root: &Utf8Path,
 ) -> (
     Vec<beamtalk_cli::ffi_type_registry::DependencyStubsDir>,
