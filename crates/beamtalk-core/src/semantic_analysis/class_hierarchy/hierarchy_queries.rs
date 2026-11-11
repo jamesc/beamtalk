@@ -1024,7 +1024,7 @@ impl ClassHierarchy {
             return_type: Some(
                 crate::synthetic_selectors::synthesized_constructor_return_type(class_name),
             ),
-            param_types: vec![None; slots.len()],
+            param_types: slots.iter().map(|(_, ty)| ty.clone()).collect(),
             doc: Some(EcoString::from("*(compiler-generated)*")),
             origin: None,
             primitive: None,
@@ -1465,7 +1465,11 @@ impl ClassHierarchy {
             return_type: Some(
                 crate::synthetic_selectors::synthesized_constructor_return_type(&class_name),
             ),
-            param_types: vec![None; arity],
+            param_types: class
+                .state
+                .iter()
+                .map(crate::synthetic_selectors::synthesized_constructor_param_type)
+                .collect(),
             doc: Some(ctor_doc.into()),
             origin: None,
             primitive: None,

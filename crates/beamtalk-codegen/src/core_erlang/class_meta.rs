@@ -890,7 +890,18 @@ impl CoreErlangGenerator {
                     safe_sel,
                     arity,
                     Self::synthesized_constructor_return_repr(class),
-                    vec![MetaTypeRepr::None; arity],
+                    class
+                        .state
+                        .iter()
+                        .map(|slot| {
+                            beamtalk_core::synthetic_selectors::synthesized_constructor_param_type(
+                                slot,
+                            )
+                            .map_or(MetaTypeRepr::None, |dt| {
+                                Self::declared_type_to_meta_repr(&dt, type_params)
+                            })
+                        })
+                        .collect(),
                     sealed,
                     false,
                 ));

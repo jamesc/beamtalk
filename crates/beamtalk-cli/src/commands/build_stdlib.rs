@@ -1010,7 +1010,7 @@ fn synthesize_value_auto_methods(
     let param_types = class
         .state
         .iter()
-        .map(|s| s.type_annotation.as_ref().map(DeclaredType::from))
+        .map(beamtalk_core::synthetic_selectors::synthesized_constructor_param_type)
         .collect();
     let args_desc: String = class
         .state
