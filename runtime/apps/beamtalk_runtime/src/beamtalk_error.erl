@@ -279,13 +279,87 @@ extract_from_tuple(T, I, Size, Depth) ->
         Found -> Found
     end.
 
-%% BT-4159: render a `signal:reason:` term. Strings print quoted; everything
-%% else uses `~0tp` (pure formatting; never messages an actor).
+%% BT-4159 / BT-4230: render a `signal:reason:` term Beamtalk-style.
+%% A small pure walker (never awaits futures or messages an actor, so it
+%% must not delegate to the general `print_string/1`): strings print quoted,
+%% symbols with `#`, lists as `#(..)`, wrapped Exceptions via `format/1`.
+%% Depth and total size are bounded so a large reason cannot flood a report.
+-define(REASON_MAX_DEPTH, 20).
+-define(REASON_MAX_BYTES, 2048).
+-define(REASON_MAX_ELEMS, 50).
 -spec format_reason_term(term()) -> iodata().
-format_reason_term({beamtalk_string, _} = Str) ->
-    beamtalk_primitive:print_string(Str);
 format_reason_term(Reason) ->
-    io_lib:format("~0tp", [Reason]).
+    Bin = chars_to_binary(reason_doc(Reason, ?REASON_MAX_DEPTH)),
+    truncate_reason(Bin).
+
+-spec truncate_reason(binary()) -> binary().
+truncate_reason(Bin) when byte_size(Bin) =< ?REASON_MAX_BYTES ->
+    Bin;
+truncate_reason(Bin) ->
+    %% Cut on a UTF-8 boundary: drop trailing partial sequence bytes.
+    Cut = binary:part(Bin, 0, ?REASON_MAX_BYTES),
+    Safe = utf8_prefix(Cut),
+    <<Safe/binary, "...">>.
+
+-spec utf8_prefix(binary()) -> binary().
+utf8_prefix(<<>>) ->
+    <<>>;
+utf8_prefix(Bin) ->
+    case unicode:characters_to_binary(Bin, utf8, utf8) of
+        B when is_binary(B) -> B;
+        {incomplete, Good, _} -> Good;
+        {error, Good, _} -> Good
+    end.
+
+-spec reason_doc(term(), integer()) -> iodata().
+reason_doc(_Term, Depth) when Depth =< 0 ->
+    <<"...">>;
+reason_doc({beamtalk_string, Bin} = Str, _Depth) when is_binary(Bin) ->
+    beamtalk_primitive:print_string(Str);
+reason_doc(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}, _Depth) ->
+    format(Err);
+reason_doc(#beamtalk_error{} = Err, _Depth) ->
+    format(Err);
+reason_doc(true, _Depth) ->
+    <<"true">>;
+reason_doc(false, _Depth) ->
+    <<"false">>;
+reason_doc(nil, _Depth) ->
+    <<"nil">>;
+reason_doc(Atom, _Depth) when is_atom(Atom) ->
+    [<<"#">>, atom_to_binary(Atom, utf8)];
+reason_doc(N, _Depth) when is_integer(N) ->
+    integer_to_binary(N);
+reason_doc(F, _Depth) when is_float(F) ->
+    float_to_binary(F, [short]);
+reason_doc(Bin, _Depth) when is_binary(Bin) ->
+    io_lib:format("~0tP", [Bin, 10]);
+reason_doc(List, Depth) when is_list(List) ->
+    case is_proper_list(List) of
+        true ->
+            {Shown, More} = split_reason_list(List, ?REASON_MAX_ELEMS),
+            Elems = [reason_doc(E, Depth - 1) || E <- Shown],
+            [<<"#(">>, lists:join(<<", ">>, Elems ++ More), <<")">>];
+        false ->
+            io_lib:format("~0tP", [List, Depth])
+    end;
+reason_doc(Tuple, Depth) when is_tuple(Tuple) ->
+    [
+        <<"{">>,
+        lists:join(<<", ">>, [reason_doc(E, Depth - 1) || E <- tuple_to_list(Tuple)]),
+        <<"}">>
+    ];
+reason_doc(Other, Depth) ->
+    io_lib:format("~0tP", [Other, Depth]).
+
+-spec split_reason_list(list(), non_neg_integer()) -> {list(), [binary()]}.
+split_reason_list(List, N) when length(List) =< N -> {List, []};
+split_reason_list(List, N) -> {lists:sublist(List, N), [<<"...">>]}.
+
+-spec is_proper_list(list()) -> boolean().
+is_proper_list([]) -> true;
+is_proper_list([_ | T]) -> is_proper_list(T);
+is_proper_list(_) -> false.
 
 %% Format message with optional hint.
 -spec format_parts(term(), term()) -> binary().
