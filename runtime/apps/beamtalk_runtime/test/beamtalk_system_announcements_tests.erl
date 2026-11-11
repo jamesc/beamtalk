@@ -282,7 +282,7 @@ class_removed_not_fired_on_callback_crash_test_() ->
             Name = 'SysAnnCrashedClass',
             ClassInfo = #{
                 name => Name,
-                module => test_class,
+                module => beamtalk_class_bt,
                 superclass => 'Object',
                 instance_methods => #{},
                 instance_variables => []
@@ -300,7 +300,7 @@ class_removed_not_fired_on_callback_crash_test_() ->
                     {got, 'ClassRemoved', _} -> ?assert(false)
                 after 300 -> ok
                 end,
-                ?assertEqual({ok, test_class}, beamtalk_class_metadata:lookup_module(Name))
+                ?assertEqual({ok, beamtalk_class_bt}, beamtalk_class_metadata:lookup_module(Name))
             after
                 %% A monitor from another suite may have restarted it; stop
                 %% whatever runs now, then drop the crashed class's rows.

@@ -1066,6 +1066,7 @@ restart_class_recovery_test_() ->
             HierSaved = ets:tab2list(beamtalk_class_metadata),
             %% Start a class, then kill it to test recovery
             ClassInfo = #{
+                module => beamtalk_class_bt,
                 superclass => none,
                 methods => #{},
                 class_methods => #{}

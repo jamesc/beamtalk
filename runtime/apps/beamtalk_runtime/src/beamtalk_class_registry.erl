@@ -1514,19 +1514,40 @@ restart_class(ClassName) ->
 %% process under the name (a concurrent restart or redefinition) wins.
 -spec remove_module_less_class(class_name(), module()) -> {ok, pid()} | {error, term()}.
 remove_module_less_class(ClassName, Module) ->
-    case whereis_class(ClassName) of
-        Pid when is_pid(Pid) ->
-            {ok, Pid};
-        undefined ->
-            ?LOG_WARNING(
-                "Class process for module-less class '~p' crashed; it cannot be "
-                "restarted and was removed",
-                [ClassName],
-                #{class => ClassName, module => Module, domain => [beamtalk, runtime]}
-            ),
-            ok = beamtalk_object_class:remove_dead_class_registration(ClassName, Module),
-            {error, {module_less_class_removed, ClassName}}
-    end.
+    %% Serialised per class and re-checked under the lock: the eager monitor
+    %% restart and a lazy-recovery caller can both reach here for one crash,
+    %% and `ClassRemoved` must be announced exactly once. The loser finds the
+    %% metadata row gone.
+    global:trans(
+        {{?MODULE, remove_module_less_class, ClassName}, self()},
+        fun() ->
+            case whereis_class(ClassName) of
+                Pid when is_pid(Pid) ->
+                    {ok, Pid};
+                undefined ->
+                    case beamtalk_class_metadata:lookup_module(ClassName) of
+                        not_found ->
+                            {error, {no_module_for_class, ClassName}};
+                        {ok, _} ->
+                            ?LOG_WARNING(
+                                "Class process for module-less class '~p' crashed; it "
+                                "cannot be restarted and was removed",
+                                [ClassName],
+                                #{
+                                    class => ClassName,
+                                    module => Module,
+                                    domain => [beamtalk, runtime]
+                                }
+                            ),
+                            ok = beamtalk_object_class:remove_dead_class_registration(
+                                ClassName, Module
+                            ),
+                            {error, {module_less_class_removed, ClassName}}
+                    end
+            end
+        end,
+        [node()]
+    ).
 
 -spec restart_compiled_class(class_name(), module(), class_name() | none, map()) ->
     {ok, pid()} | {error, term()}.
