@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4489: an extension written in its target class's own file answers (and
+// is not registered twice) when the file is loaded into a REPL workspace.
+// @load tests/repl-protocol/fixtures/same_file_ext_repl.bt
+
+(SameFileExtRepl x: 3) extra: 4
+// => 7
+
+SameFileExtRepl make x
+// => 9

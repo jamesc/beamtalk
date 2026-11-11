@@ -367,7 +367,7 @@ fn dispatched_typed_comparison_is_reported() {
 
 #[test]
 fn same_file_extension_guard_compiles() {
-    // A same-file `X >> m` is runtime-patched, not generated into X's
+    // A same-file `X >> m` is registered as an extension, not generated into X's
     // module, so its recorded guards (helper-decided or typed) are not
     // checked there; before BT-4452 they made the compile fail.
     codegen("Object subclass: X\n  n => 1\nX >> pick: x =>\n    x > 0 ifTrue: [^1]\n    2\n");

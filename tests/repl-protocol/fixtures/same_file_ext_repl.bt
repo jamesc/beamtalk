@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4489: same-file extensions loaded through the REPL.
+Value subclass: SameFileExtRepl
+  field: x :: Integer = 0
+
+SameFileExtRepl >> extra: n :: Integer => self.x + n
+SameFileExtRepl class >> make => SameFileExtRepl x: 9

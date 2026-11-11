@@ -8,7 +8,8 @@
 //! Beamtalk lets a file add methods to a class declared elsewhere via
 //! `TargetClass >> selector => body` (an "open class extension"). When the
 //! target class is declared in the *same* file ("self-extension") the method is
-//! folded into the host class. When the target class is **foreign** (declared in
+//! registered like a foreign one, after the host class registers (BT-4489).
+//! When the target class is **foreign** (declared in
 //! stdlib or another file — e.g. `Array >> doubled`, `String >> shout`), the
 //! method has no host module to live in. This module emits load-time
 //! `beamtalk_extensions:register/5` calls — carrying a callable fun and the
@@ -43,13 +44,8 @@ use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{MethodKind, Module, StandaloneMethodDefinition};
 
 impl CoreErlangGenerator {
-    /// Returns the foreign cross-class extension methods declared in `module`.
-    ///
-    /// A standalone method definition (`TargetClass >> sel`) is *foreign* when
-    /// its target class is **not** declared in this module — i.e. it extends a
-    /// class defined in stdlib or another file. Self-extensions (target class
-    /// declared in the same file) are excluded: they are handled by the host
-    /// class and must not be re-registered here.
+    /// Returns the extension methods in `module` whose target class is **not**
+    /// declared in this module (stdlib or another file).
     ///
     /// Only `Primary` methods are returned (abstract/signature-only entries have
     /// no body to register).
@@ -66,17 +62,37 @@ impl CoreErlangGenerator {
             .collect()
     }
 
+    /// Returns the same-file extension methods in `module` (BT-4489): standalone
+    /// `Target >> sel` / `Target class >> sel` definitions whose target class is
+    /// declared in this module. No host-class codegen emits them, so they are
+    /// registered through `beamtalk_extensions:register/5` after the module's
+    /// classes register, exactly like foreign ones.
+    pub(in crate::core_erlang) fn same_file_extension_methods(
+        module: &Module,
+    ) -> Vec<&StandaloneMethodDefinition> {
+        let declared = Self::declared_class_names(module);
+        module
+            .method_definitions
+            .iter()
+            .filter(|md| {
+                md.method.kind == MethodKind::Primary && declared.contains(&md.class_name.name)
+            })
+            .collect()
+    }
+
     /// The names of the classes declared in `module`. A standalone method
-    /// definition whose target is in this set is a same-file extension: it is
-    /// runtime-patched, never generated into the target's module. This is the
-    /// one test for "foreign" vs "same-file"; guard-return rewriting uses it too.
+    /// definition whose target is in this set is a same-file extension. This is
+    /// the one test for "foreign" vs "same-file"; guard-return rewriting uses it
+    /// too (same-file extensions stay unrewritten there, BT-4497).
     pub(in crate::core_erlang) fn declared_class_names(
         module: &Module,
     ) -> std::collections::HashSet<ecow::EcoString> {
         module.classes.iter().map(|c| c.name.name.clone()).collect()
     }
 
-    /// Returns true when `module` declares at least one foreign extension method.
+    /// Returns true when `module` declares at least one foreign extension
+    /// method. (A same-file extension needs a declared class, so modules with
+    /// one always take the class path.)
     pub(in crate::core_erlang) fn has_foreign_extensions(module: &Module) -> bool {
         !Self::foreign_extension_methods(module).is_empty()
     }
@@ -87,7 +103,7 @@ impl CoreErlangGenerator {
     /// Each registration is emitted as an open `let _Ext{N} = <register call> in`
     /// fragment so the calls compose into the surrounding `register_class/0`
     /// `try` body (the trailing expression after the chain is supplied by the
-    /// caller). Returns [`Document::Nil`] when there are no foreign extensions.
+    /// caller). Returns [`Document::Nil`] when there are none.
     ///
     /// The registration carries:
     /// - `Class` — the target class tag atom. For class-side extensions
@@ -105,13 +121,32 @@ impl CoreErlangGenerator {
         module: &Module,
     ) -> Result<Document<'static>> {
         let extensions = Self::foreign_extension_methods(module);
+        self.generate_extension_registrations(&extensions, 0)
+    }
+
+    /// Same as [`Self::generate_foreign_extension_registrations`] for the
+    /// same-file extensions (BT-4489). Variables are numbered after the foreign
+    /// ones so the two chains can share one `register_class/0` body.
+    pub(in crate::core_erlang) fn generate_same_file_extension_registrations(
+        &mut self,
+        module: &Module,
+    ) -> Result<Document<'static>> {
+        let offset = Self::foreign_extension_methods(module).len();
+        let extensions = Self::same_file_extension_methods(module);
+        self.generate_extension_registrations(&extensions, offset)
+    }
+
+    fn generate_extension_registrations(
+        &mut self,
+        extensions: &[&StandaloneMethodDefinition],
+        offset: usize,
+    ) -> Result<Document<'static>> {
         if extensions.is_empty() {
             return Ok(Document::Nil);
         }
-
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(extensions.len());
         for (idx, ext) in extensions.iter().enumerate() {
-            parts.push(self.generate_extension_registration(idx, ext)?);
+            parts.push(self.generate_extension_registration(offset + idx, ext)?);
         }
         Ok(Document::Vec(parts))
     }

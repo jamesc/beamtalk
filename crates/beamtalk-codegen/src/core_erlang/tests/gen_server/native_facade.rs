@@ -782,3 +782,26 @@ fn test_bt_2998_opaque_native_class_registers_as_non_constructible() {
         "opaque native class must register isConstructible => false. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_native_facade_registers_same_file_extension_after_class() {
+    // BT-4489: `X >> foo` next to a `native:` class registers as an extension,
+    // reachable only from the non-error clause of the class registration result.
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(
+        "Actor subclass: Wrapper native: my_mod\n  doIt => self delegate\nWrapper >> extra => 1\n",
+    );
+    let module = beamtalk_core::source_analysis::parse(tokens).0;
+    let code =
+        generate_module(&module, CodegenOptions::new("bt@test_native")).expect("codegen succeeds");
+    let gate = code
+        .find("case RegResult of")
+        .unwrap_or_else(|| panic!("registration must be gated. Got:\n{code}"));
+    let ok = code[gate..].find("<_> when 'true' ->").expect("ok clause");
+    let reg = code[gate..]
+        .find("call 'beamtalk_extensions':'register'('Wrapper', 'extra'")
+        .unwrap_or_else(|| panic!("extension must register. Got:\n{code}"));
+    assert!(
+        ok < reg,
+        "register call must sit in the ok clause. Got:\n{code}"
+    );
+}

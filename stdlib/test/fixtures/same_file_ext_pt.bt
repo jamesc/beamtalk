@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4489: Value class with extensions written in its OWN file.
+Value subclass: SameFileExtPt
+  field: x :: Integer = 0
+
+  getX => self.x
+
+SameFileExtPt >> extra: n :: Integer => self.x + n
+SameFileExtPt class >> make => SameFileExtPt x: 9

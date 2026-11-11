@@ -6203,9 +6203,17 @@ when parameters already have `::` annotations (to avoid consecutive `::` tokens)
 ### Cross-file extensions
 
 Extensions can target classes defined in other files or in stdlib. The compiler
-registers each foreign extension at module load, so it dispatches at runtime just
-like a same-file extension. Class-side extensions register under the metaclass tag
-(`String class`).
+registers each foreign extension at module load. An extension written in the
+target class's own file (`Pt >> extra: n => ...` next to `Value subclass: Pt`) is
+registered the same way, after the class itself (and only if the class registered
+successfully), so both dispatch identically. Class-side extensions register under
+the metaclass tag (`String class`).
+
+On hot reload, a reload re-registers the extensions the file still declares but
+does not unregister one you deleted, or moved into the class body as a regular
+method: the old extension keeps answering (class-side, it shadows the new class
+method) until `removeSelector:` or a restart. Foreign and same-file extensions
+behave alike.
 
 ```beamtalk
 // In helpers.bt — String is defined in stdlib, not this file

@@ -168,7 +168,7 @@ impl CoreErlangGenerator {
         Ok(docvec![
             "'__beamtalk_meta'/0 = fun () ->\n",
             "    ",
-            // include_standalone: false — standalone methods are runtime-patched, not static
+            // include_standalone: false — standalone methods are registered as extensions at load (BT-4489), not static
             Self::build_meta_map_doc(
                 class,
                 module,
@@ -192,7 +192,7 @@ impl CoreErlangGenerator {
     ///
     /// When `include_standalone` is `false` (used for `__beamtalk_meta/0`), standalone
     /// Tonel-style methods (`module.method_definitions`) are excluded — they are
-    /// runtime-patched and deliberately absent from the static meta. When `true`
+    /// registered as extensions at load (BT-4489) and deliberately absent from the static meta. When `true`
     /// (used for `BuilderState.meta`), standalone methods are included so that
     /// return-type information is available to `init/1` during `on_load`.
     pub(super) fn build_meta_map_doc(
@@ -801,7 +801,7 @@ impl CoreErlangGenerator {
             .filter(|m| m.kind == MethodKind::Primary)
             .map(|m| Self::meta_method_entry(m, type_params))
             .collect();
-        // Standalone methods are excluded from __beamtalk_meta/0 (runtime-patched)
+        // Standalone methods are excluded from __beamtalk_meta/0 (registered as extensions at load, BT-4489)
         // but included in BuilderState.meta so init/1 can register their return types.
         if include_standalone {
             for standalone in module.method_definitions.iter().filter(|m| {
@@ -867,7 +867,7 @@ impl CoreErlangGenerator {
             .filter(|m| m.kind == MethodKind::Primary)
             .map(|m| Self::meta_method_entry(m, type_params))
             .collect();
-        // Standalone methods are excluded from __beamtalk_meta/0 (runtime-patched)
+        // Standalone methods are excluded from __beamtalk_meta/0 (registered as extensions at load, BT-4489)
         // but included in BuilderState.meta so init/1 can register their return types.
         if include_standalone {
             for standalone in module.method_definitions.iter().filter(|m| {
