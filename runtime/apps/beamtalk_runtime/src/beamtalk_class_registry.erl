@@ -1013,20 +1013,22 @@ forget_dead_incarnations(ClassName) ->
     _ =
         [
             forget_loaded_class(ClassName, P)
-         || {_, P} <- case ets:info(beamtalk_loaded_classes) of
-                undefined -> [];
-                _ -> ets:lookup(beamtalk_loaded_classes, ClassName)
-            end,
+         || {_, P} <-
+                case ets:info(beamtalk_loaded_classes) of
+                    undefined -> [];
+                    _ -> ets:lookup(beamtalk_loaded_classes, ClassName)
+                end,
             is_pid(P),
             not is_process_alive(P)
         ],
     _ =
         [
             forget_backing_module_entries(ClassName, P)
-         || {_, _, P} <- case ets:info(beamtalk_backing_module_index) of
-                undefined -> [];
-                _ -> ets:match_object(beamtalk_backing_module_index, {'_', ClassName, '_'})
-            end,
+         || {_, _, P} <-
+                case ets:info(beamtalk_backing_module_index) of
+                    undefined -> [];
+                    _ -> ets:match_object(beamtalk_backing_module_index, {'_', ClassName, '_'})
+                end,
             is_pid(P),
             not is_process_alive(P)
         ],
@@ -1552,54 +1554,54 @@ remove_module_less_class(ClassName, Module) ->
 -spec restart_compiled_class(class_name(), module(), class_name() | none, map()) ->
     {ok, pid()} | {error, term()}.
 restart_compiled_class(ClassName, Module, Superclass, Meta) ->
-            ClassInfo = #{
-                module => Module,
-                superclass => Superclass,
-                meta => Meta
-            },
-            %% BT-4552: the dead incarnation's `{DeadPid, ClassName}` reverse-index
-            %% row is kept, never deleted here. A class object is a value: any
-            %% holder of the dead pid (a variable, an `allClasses` walk taken
-            %% just before the crash) recovers through
-            %% `beamtalk_class_dispatch:handle_class_crash_recovery/3`, which can
-            %% only name the class from this row. Deleting it on restart (the
-            %% eager `beamtalk_class_monitor` restart runs immediately on the
-            %% crash) turned every such send into
-            %% `Class 'unknown' not found`. Only the newest
-            %% `?MAX_DEAD_CLASS_PIDS` dead rows are kept
-            %% (`prune_dead_class_pids/1`), and a removal's `terminate/2`
-            %% reclaims the rest (`forget_class_pids/2`).
-            prune_dead_class_pids(ClassName),
-            case beamtalk_object_class:start(ClassName, ClassInfo) of
-                {ok, NewPid} ->
-                    ?LOG_WARNING(
-                        "Class process for '~p' crashed and was auto-restarted "
-                        "(hot-patched methods and class variable state were lost)",
-                        [ClassName],
-                        #{
-                            class => ClassName,
-                            module => Module,
-                            new_pid => NewPid,
-                            domain => [beamtalk, runtime]
-                        }
-                    ),
-                    {ok, NewPid};
-                {error, {already_started, ExistingPid}} ->
-                    %% Another caller already restarted this class (concurrent race).
-                    %% Return the existing process — no need to log an error.
-                    {ok, ExistingPid};
-                {error, Reason} = Err ->
-                    ?LOG_ERROR(
-                        "Failed to restart crashed class process for '~p': ~p",
-                        [ClassName, Reason],
-                        #{
-                            class => ClassName,
-                            module => Module,
-                            domain => [beamtalk, runtime]
-                        }
-                    ),
-                    Err
-            end.
+    ClassInfo = #{
+        module => Module,
+        superclass => Superclass,
+        meta => Meta
+    },
+    %% BT-4552: the dead incarnation's `{DeadPid, ClassName}` reverse-index
+    %% row is kept, never deleted here. A class object is a value: any
+    %% holder of the dead pid (a variable, an `allClasses` walk taken
+    %% just before the crash) recovers through
+    %% `beamtalk_class_dispatch:handle_class_crash_recovery/3`, which can
+    %% only name the class from this row. Deleting it on restart (the
+    %% eager `beamtalk_class_monitor` restart runs immediately on the
+    %% crash) turned every such send into
+    %% `Class 'unknown' not found`. Only the newest
+    %% `?MAX_DEAD_CLASS_PIDS` dead rows are kept
+    %% (`prune_dead_class_pids/1`), and a removal's `terminate/2`
+    %% reclaims the rest (`forget_class_pids/2`).
+    prune_dead_class_pids(ClassName),
+    case beamtalk_object_class:start(ClassName, ClassInfo) of
+        {ok, NewPid} ->
+            ?LOG_WARNING(
+                "Class process for '~p' crashed and was auto-restarted "
+                "(hot-patched methods and class variable state were lost)",
+                [ClassName],
+                #{
+                    class => ClassName,
+                    module => Module,
+                    new_pid => NewPid,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            {ok, NewPid};
+        {error, {already_started, ExistingPid}} ->
+            %% Another caller already restarted this class (concurrent race).
+            %% Return the existing process — no need to log an error.
+            {ok, ExistingPid};
+        {error, Reason} = Err ->
+            ?LOG_ERROR(
+                "Failed to restart crashed class process for '~p': ~p",
+                [ClassName, Reason],
+                #{
+                    class => ClassName,
+                    module => Module,
+                    domain => [beamtalk, runtime]
+                }
+            ),
+            Err
+    end.
 
 %%====================================================================
 %% Return-Type Lookup (ADR 0045)

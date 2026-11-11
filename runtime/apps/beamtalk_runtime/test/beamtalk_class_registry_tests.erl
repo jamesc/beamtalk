@@ -2255,7 +2255,9 @@ bt4646_with_announce_spy(Name, Fun) ->
 bt4646_assert_removed(Name, Pid) ->
     ?assertEqual(undefined, beamtalk_class_registry:whereis_class(Name)),
     ?assertEqual(not_found, beamtalk_class_metadata:lookup_module(Name)),
-    ?assertNot(lists:member(Name, [N || {N, _, _} <- beamtalk_class_registry:live_class_entries()])),
+    ?assertNot(
+        lists:member(Name, [N || {N, _, _} <- beamtalk_class_registry:live_class_entries()])
+    ),
     ?assertNot(lists:member(Name, beamtalk_class_registry:all_classes())),
     ?assertNot(sets:is_element(Name, beamtalk_class_registry:loaded_class_names())),
     ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(Pid)),
@@ -2292,7 +2294,9 @@ bt4646_module_less_kill_removes_class_test() ->
         bt4646_assert_removed(Name, Pid),
         ?assertEqual(1, bt4646_count_removed(Name, 0)),
         %% A later restart attempt finds nothing to restart and announces nothing.
-        ?assertMatch({error, {no_module_for_class, Name}}, beamtalk_class_registry:restart_class(Name)),
+        ?assertMatch(
+            {error, {no_module_for_class, Name}}, beamtalk_class_registry:restart_class(Name)
+        ),
         ?assertEqual(0, bt4646_count_removed(Name, 0))
     end).
 

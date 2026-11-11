@@ -273,34 +273,34 @@ restart_within_budget(
             %% remaining watch.
             Counted =
                 try beamtalk_class_registry:restart_class(ClassName) of
-                {ok, _NewPid} ->
-                    counted;
-                {error, {module_less_class_removed, _}} ->
-                    %% BT-4646: a module-less (ClassBuilder) class cannot be
-                    %% restarted; restart_class/1 removed it and logged the
-                    %% warning. Not a failed restart, so it does not count
-                    %% toward the budget.
-                    uncounted;
-                {error, RestartReason} ->
-                    %% Failed restart leaves the class dead like the
-                    %% budget-exhausted branch above: flush for the same reason.
-                    beamtalk_class_derived_cache:invalidate(),
-                    ?LOG_ERROR(
-                        "Eager restart of crashed class '~p' failed: ~p",
-                        [ClassName, RestartReason],
-                        #{class => ClassName, reason => RestartReason}
-                    ),
-                    counted
-            catch
-                ErrClass:CatchReason ->
-                    beamtalk_class_derived_cache:invalidate(),
-                    ?LOG_ERROR(
-                        "Eager restart of crashed class '~p' raised ~p:~p",
-                        [ClassName, ErrClass, CatchReason],
-                        #{class => ClassName, reason => CatchReason}
-                    ),
-                    counted
-            end,
+                    {ok, _NewPid} ->
+                        counted;
+                    {error, {module_less_class_removed, _}} ->
+                        %% BT-4646: a module-less (ClassBuilder) class cannot be
+                        %% restarted; restart_class/1 removed it and logged the
+                        %% warning. Not a failed restart, so it does not count
+                        %% toward the budget.
+                        uncounted;
+                    {error, RestartReason} ->
+                        %% Failed restart leaves the class dead like the
+                        %% budget-exhausted branch above: flush for the same reason.
+                        beamtalk_class_derived_cache:invalidate(),
+                        ?LOG_ERROR(
+                            "Eager restart of crashed class '~p' failed: ~p",
+                            [ClassName, RestartReason],
+                            #{class => ClassName, reason => RestartReason}
+                        ),
+                        counted
+                catch
+                    ErrClass:CatchReason ->
+                        beamtalk_class_derived_cache:invalidate(),
+                        ?LOG_ERROR(
+                            "Eager restart of crashed class '~p' raised ~p:~p",
+                            [ClassName, ErrClass, CatchReason],
+                            #{class => ClassName, reason => CatchReason}
+                        ),
+                        counted
+                end,
             case Counted of
                 counted -> State#state{history = History#{ClassName => [Now | Recent]}};
                 uncounted -> State#state{history = History#{ClassName => Recent}}
