@@ -162,6 +162,15 @@
 %% which redacts secret-selector continuations in status and sys logs.
 -define(BT_CONTINUE_TAG, '$bt_continue').
 
+%% @doc BT-3968: process-dictionary key holding an actor's deferred
+%% continuation queue (`self continueWith: #sel` from inside a method) as a
+%% *reversed* list of `{Selector, Args}`, consumed by
+%% `beamtalk_actor:apply_pending_actions/1` once the current gen_server
+%% callback returns — it becomes OTP's `{continue, _}` action. Shared with
+%% `beamtalk_actor_redaction`, which redacts secret-selector entries in a
+%% crash report's process dictionary (BT-4666).
+-define(PENDING_CONTINUE_KEY, '$bt_pending_continue').
+
 %% @doc ADR 0126 §3 timeout (ms) for a bounded `erpc:call/5` to a peer node —
 %% remote spawn/lookup (`beamtalk_actor`), `Node>>shapeManifest`, and
 %% `beamtalk_node_monitor`'s connect-/reload-time shape-skew comparison

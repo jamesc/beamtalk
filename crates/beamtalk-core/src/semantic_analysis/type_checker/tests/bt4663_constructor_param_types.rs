@@ -13,7 +13,11 @@ use super::common::*;
 fn arg_mismatches(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
     diags
         .iter()
-        .filter(|d| d.message.contains("expects") && d.message.contains("got"))
+        .filter(|d| {
+            d.category == Some(DiagnosticCategory::Type)
+                && d.message.contains("expects")
+                && d.message.contains("got")
+        })
         .collect()
 }
 
@@ -51,4 +55,17 @@ fn generic_field_is_not_flagged() {
          Object subclass: User\n  run => Box item: \"a\"\n",
     );
     assert!(arg_mismatches(&diags).is_empty(), "{diags:#?}");
+}
+
+/// A generic class's `T` field stays unchecked, but its concrete fields are
+/// still checked: exactly one mismatch, on `count:`.
+#[test]
+fn concrete_field_on_generic_class_is_still_checked() {
+    let diags = check(
+        "Value subclass: Box(T)\n  field: item :: T = nil\n  field: count :: Integer = 0\n\
+         Object subclass: User\n  run => Box item: \"a\" count: \"b\"\n",
+    );
+    let hits = arg_mismatches(&diags);
+    assert_eq!(hits.len(), 1, "{diags:#?}");
+    assert!(hits[0].message.contains("Argument 2"), "{hits:#?}");
 }

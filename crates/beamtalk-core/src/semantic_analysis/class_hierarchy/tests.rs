@@ -4667,3 +4667,31 @@ fn explicit_new1_verdict_survives_pass1_extraction_across_files() {
         );
     }
 }
+
+/// BT-4663: the `ClassInfo`/state producer (cross-file and REPL classes) types the
+/// synthesized keyword constructor's parameters from the stored slot types.
+#[test]
+fn state_path_keyword_constructor_carries_slot_types() {
+    let slots = vec![
+        (EcoString::from("x"), Some(DeclaredType::simple("Integer"))),
+        (EcoString::from("label"), None),
+    ];
+    let mut instance_methods = Vec::new();
+    let mut class_methods = Vec::new();
+    let _ = ClassHierarchy::synthesize_auto_methods_from_state(
+        &EcoString::from("Point"),
+        &slots,
+        &HashSet::new(),
+        &HashSet::new(),
+        &mut instance_methods,
+        &mut class_methods,
+    );
+    let ctor = class_methods
+        .iter()
+        .find(|m| m.selector.as_str() == "x:label:")
+        .expect("keyword constructor synthesized");
+    assert_eq!(
+        ctor.param_types,
+        vec![Some(DeclaredType::simple("Integer")), None]
+    );
+}
