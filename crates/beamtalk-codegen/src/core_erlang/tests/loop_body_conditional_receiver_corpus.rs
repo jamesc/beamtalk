@@ -28,7 +28,7 @@
 //! the verifier catches the pre-fix lowering
 //! ([`LocalRebindFault::ReceiverPreludeInTuple`]) over the same rows.
 
-use super::{assert_compiles_through_erlc, codegen};
+use super::{assert_compiles_through_erlc, assert_parses, codegen};
 #[cfg(debug_assertions)]
 use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -107,14 +107,6 @@ fn rows() -> Vec<(String, String)> {
 
 fn method(prelude: &str, i: usize, body: &str) -> String {
     format!("  probe{i} =>\n{prelude}    n := 3\n    {body}\n    n\n")
-}
-
-/// Every generated row must be well-formed source, so a placeholder slip
-/// cannot turn rows into parser recoveries that pass vacuously.
-fn assert_parses(src: &str) {
-    let (_, diags) =
-        beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(src));
-    assert!(diags.is_empty(), "malformed corpus row:\n{src}\n{diags:?}");
 }
 
 fn passes(src: &str) -> bool {

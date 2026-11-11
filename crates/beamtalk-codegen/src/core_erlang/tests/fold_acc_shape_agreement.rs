@@ -19,7 +19,7 @@
 //! reported as `FoldAccShapeMismatch`. The execution half is skipped (unless `BEAMTALK_REQUIRE_RUNTIME` is set, as in CI) when the
 //! Erlang runtime has not been built (`runtime/_build`).
 
-use super::{codegen_named, verifier_report};
+use super::{assert_parses, codegen_named, verifier_report};
 use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -63,23 +63,6 @@ const CONTEXTS: [(&str, &str, bool); 5] = [
     ("Value subclass: Probe\n  state: n = 7\n\n", "run =>", true),
 ];
 
-/// `codegen_named` discards parse diagnostics and emits whatever survived
-/// error recovery, so a typo in a program (`=` is not an operator; `=:=` is)
-/// would silently drop statements from both builds and still "agree".
-fn assert_parses(src: &str) {
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (_, diags) = beamtalk_core::source_analysis::parse(tokens);
-    let errors: Vec<_> = diags
-        .iter()
-        .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
-        .map(|d| d.message.to_string())
-        .collect();
-    assert!(
-        errors.is_empty(),
-        "program has parse errors {errors:?}:\n{src}"
-    );
-}
-
 fn programs() -> Vec<(usize, String)> {
     let mut out = Vec::new();
     for (c, (header, sig, _)) in CONTEXTS.iter().enumerate() {
@@ -100,7 +83,7 @@ fn programs() -> Vec<(usize, String)> {
                 out.push((
                     c,
                     format!(
-                        "{header}  {sig}\n    s := 0.\n    t := 0.\n    blk := nil.\n    {nested}.\n    s + t\n"
+                        "{header}  {sig}\n    s := 0\n    t := 0\n    blk := nil\n    {nested}\n    s + t\n"
                     ),
                 ));
             }
@@ -168,7 +151,7 @@ fn bare_and_tuple_folds_compile_clean_in_every_context() {
 /// agree with the oracle (a failure shared by both builds would agree).
 /// Writes `bt4116_pin` (production codegen) and `bt4116_pino` (oracle).
 fn write_pinned_modules(dir: &Path) {
-    let pinned = "Object subclass: Probe\n  state: n = 7\n\n  run =>\n    s := 0.\n    t := 0.\n    blk := nil.\n    #(1, 2, 3) do: [:e | s := s + e. e =:= 2 ifTrue: [^s]].\n    s + t\n";
+    let pinned = "Object subclass: Probe\n  state: n = 7\n\n  run =>\n    s := 0\n    t := 0\n    blk := nil\n    #(1, 2, 3) do: [:e | s := s + e. e =:= 2 ifTrue: [^s]]\n    s + t\n";
     assert_parses(pinned);
     std::fs::write(
         dir.join("bt4116_pin.core"),
