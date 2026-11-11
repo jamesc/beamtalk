@@ -36,6 +36,9 @@
 
 use beamtalk_core::ast::Module;
 use beamtalk_core::compilation::extension_index::ExtensionIndex;
+use beamtalk_core::semantic_analysis::alias_expansion::InternalAliasExpander;
+use beamtalk_core::semantic_analysis::alias_registry::AliasInfo;
+use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 use beamtalk_core::source_analysis::{Diagnostic, Severity};
 use std::path::Path;
 
@@ -92,11 +95,46 @@ impl DependencyExtensions {
         &self.index
     }
 
+    /// Expands the dependency's own `internal type` aliases in every
+    /// extension signature (BT-4615), so the consumer never sees a name its
+    /// alias scope cannot resolve.
+    pub fn expand_internal_aliases(&mut self, expander: &InternalAliasExpander) {
+        if expander.is_empty() {
+            return;
+        }
+        self.index.map_type_infos(|info| {
+            for ty in info.param_types.iter_mut().flatten() {
+                *ty = expander.expand_str(ty);
+            }
+            if let Some(ty) = &mut info.return_type {
+                *ty = expander.expand_str(ty);
+            }
+        });
+    }
+
     /// Whether [`Self::index`] holds every extension the dependency defines.
     #[must_use]
     pub fn is_complete(&self) -> bool {
         self.complete
     }
+}
+
+/// Expands one dependency's own `internal type` aliases in everything it
+/// exports to a consumer — its class signatures and its extension signatures
+/// (BT-4615). The one entry point both CLI dependency scanners call, so class
+/// methods and extension methods cannot diverge. `alias_infos` is the
+/// dependency's own table; only its `internal` aliases are expanded, public
+/// ones keep resolving by name in the consumer.
+pub fn expand_dependency_internal_aliases(
+    alias_infos: &[AliasInfo],
+    class_infos: &mut [ClassInfo],
+    extensions: &mut DependencyExtensions,
+) {
+    let expander = InternalAliasExpander::from_alias_infos(alias_infos);
+    for info in class_infos {
+        expander.expand_class_info(info);
+    }
+    extensions.expand_internal_aliases(&expander);
 }
 
 /// Merges every dependency's extensions into `into` (the consumer's

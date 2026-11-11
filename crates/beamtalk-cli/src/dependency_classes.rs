@@ -463,6 +463,14 @@ fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<Scanne
         alias_infos.extend(module_aliases);
     }
 
+    // BT-4615: the dependency's own `internal type` aliases never reach the
+    // consumer's alias scope, so expand them out of what it exports.
+    crate::dependency_extensions::expand_dependency_internal_aliases(
+        &alias_infos,
+        &mut class_infos,
+        &mut extensions,
+    );
+
     let scanned = std::sync::Arc::new(ScannedDep {
         class_infos,
         trait_users,

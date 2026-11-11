@@ -1495,3 +1495,81 @@ fn own_sealed_class_in_unqualified_test_module_is_not_its_own_rival() {
         "a test-module class must not be flagged as shadowing itself. Got:\n{core}"
     );
 }
+
+/// BT-4615: a dependency method declared `-> Secret`, where `Secret` is an
+/// `internal type` of the dependency, must not resolve to an unknown nominal
+/// type `Secret` in the consumer. The dependency expands the alias when it
+/// exports its signatures, so `x :: Integer := vault thing` is clean and
+/// `x :: String := vault thing` is still a type error.
+#[test]
+fn dependency_internal_alias_in_signature_expands_for_consumer() {
+    use beamtalk_core::source_analysis::DiagnosticCategory;
+
+    let temp = TempDir::new().unwrap();
+    let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+    let dep_dir = root.join("dep_secret");
+    fs::create_dir_all(&dep_dir).unwrap();
+    fs::write(
+        dep_dir.join("beamtalk.toml"),
+        "[package]\nname = \"dep_secret\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    fs::create_dir_all(dep_dir.join("src")).unwrap();
+    write_test_file(
+        &dep_dir.join("src/vault.bt"),
+        "internal type Secret = Integer\n\
+         Object subclass: Vault\n  thing -> Secret => 42\n",
+    );
+    let (_, dep_class_infos, _, _, _, _, _) =
+        crate::commands::deps::path::build_dep_class_index(&dep_dir, "dep_secret", &[]).unwrap();
+
+    let src_path = root.join("src");
+    fs::create_dir_all(&src_path).unwrap();
+    let build_dir = root.join("_build/dev/ebin");
+    fs::create_dir_all(&build_dir).unwrap();
+
+    let type_errors = |annotation: &str| {
+        let file = src_path.join("consumer.bt");
+        write_test_file(
+            &file,
+            &format!(
+                "Object subclass: Consumer\n  \
+                 run: vault :: Vault =>\n    x :: {annotation} := vault thing\n    x\n"
+            ),
+        );
+        let (class_module_index, class_superclass_index, mut all_class_infos, _, _) =
+            build_class_module_index(&[file.clone()], Some(&src_path), "consumer").unwrap();
+        all_class_infos.extend(dep_class_infos.clone());
+        let core_file = build_dir.join("bt@consumer@consumer.core");
+        compile_file(
+            &file,
+            "bt@consumer@consumer",
+            &core_file,
+            &default_options(),
+            &CompileContext {
+                hierarchy: ClassHierarchyContext {
+                    class_module_index,
+                    class_superclass_index,
+                    pre_loaded_classes: all_class_infos,
+                    ..ClassHierarchyContext::default()
+                },
+                ..CompileContext::default()
+            },
+            None,
+        )
+        .expect("consumer compiles")
+        .into_iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect::<Vec<_>>()
+    };
+
+    assert!(
+        type_errors("Integer").is_empty(),
+        "the alias's expansion is Integer: {:?}",
+        type_errors("Integer")
+    );
+    assert!(
+        !type_errors("String").is_empty(),
+        "a String binding of an Integer result is still a type error"
+    );
+}
