@@ -14,6 +14,7 @@
 
 use crate::ast::{Expression, WellKnownSelector};
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType, MethodInfo};
+use crate::semantic_analysis::method_validators::block_arity_diagnostic;
 use crate::semantic_analysis::type_checker::narrowing::CompoundNilGuardKind;
 use crate::semantic_analysis::type_checker::narrowing::NarrowingInfo;
 use crate::semantic_analysis::type_checker::narrowing::refinement::RefinementLayer;
@@ -25,7 +26,7 @@ use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{
     DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv,
 };
-use crate::source_analysis::Span;
+use crate::source_analysis::{Severity, Span};
 
 /// The `then:` selector (`Object >> then:`, ADR 0145 § 2, BT-4515).
 ///
@@ -321,11 +322,26 @@ impl TypeChecker {
                 let Expression::Block(block) = arg else {
                     return self.infer_expr(arg, hierarchy, env, in_abstract_method);
                 };
+                if !Self::then_block_has_one_param(arg) {
+                    // BT-4620: `then:` passes exactly one argument, so any
+                    // other arity fails at run time. The send's result is not
+                    // typed from this block (see `then_block_has_one_param`).
+                    // Shares the builder with the `do:`/`collect:` arity check;
+                    // a warning, not an error, since the checker may be wrong
+                    // about the receiver's `then:`.
+                    self.diagnostics.extend(block_arity_diagnostic(
+                        block,
+                        1,
+                        "`then:` expects",
+                        "`then:` passes one argument; use `[:x | ...]`".to_string(),
+                        Severity::Warning,
+                    ));
+                }
                 // `Object >> then:` sends `value:`, so a well-formed block has
                 // one parameter; any beyond the first stay `Dynamic`, as in
-                // `infer_if_not_nil_block`. A zero-arity block still goes
-                // through the typed-param helper so its `Block(R)` type
-                // carries the body's result type.
+                // `infer_if_not_nil_block`. A block of the wrong arity is
+                // still inferred so its body is checked, but its result type
+                // does not type the send (see `then_block_has_one_param`).
                 let param_types: Vec<InferredType> = block
                     .parameters
                     .iter()
@@ -348,6 +364,16 @@ impl TypeChecker {
                 )
             })
             .collect()
+    }
+
+    /// Whether `arg` may be typed by the `then:` rule: anything but a literal
+    /// block whose parameter count is not exactly one (BT-4620). Such a block
+    /// draws a warning in [`Self::infer_args_for_then`] and the send keeps
+    /// the generic result type.
+    pub(in crate::semantic_analysis::type_checker) fn then_block_has_one_param(
+        arg: &Expression,
+    ) -> bool {
+        !matches!(arg, Expression::Block(block) if block.parameters.len() != 1)
     }
 
     /// The result type of evaluating a block argument: the last type-arg of

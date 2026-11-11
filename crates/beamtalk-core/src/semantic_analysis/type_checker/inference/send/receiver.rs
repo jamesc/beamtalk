@@ -275,8 +275,10 @@ impl TypeChecker {
         // `Object >> then:` (BT-4515) answers its block's result type.
         if is_object_then {
             if let (Some(arg), Some(ty)) = (arguments.first(), arg_types.first()) {
-                if let Some(ty) = Self::block_arg_result_ty(arg, ty) {
-                    return ty;
+                if Self::then_block_has_one_param(arg) {
+                    if let Some(ty) = Self::block_arg_result_ty(arg, ty) {
+                        return ty;
+                    }
                 }
             }
         }
