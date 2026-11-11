@@ -128,7 +128,10 @@ fn non_test_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
             if name != "tests" {
                 non_test_rust_files(&path, out);
             }
-        } else if name.ends_with(".rs") && name != "tests.rs" && !name.ends_with("_tests.rs") {
+        } else if path.extension().is_some_and(|e| e == "rs")
+            && name != "tests.rs"
+            && !name.ends_with("_tests.rs")
+        {
             out.push(path);
         }
     }
@@ -270,7 +273,11 @@ fn source_literal_calls(root: &Path) -> Vec<EmittedCall> {
     for file in files {
         let src = std::fs::read_to_string(&file)
             .unwrap_or_else(|e| panic!("read {}: {e}", file.display()));
-        let rel = file.strip_prefix(root).unwrap_or(&file).display().to_string();
+        let rel = file
+            .strip_prefix(root)
+            .unwrap_or(&file)
+            .display()
+            .to_string();
         for (line, lit) in string_literals(&src) {
             out.extend(calls_in(&lit, &format!("{rel}:{line}")));
         }
@@ -306,10 +313,7 @@ fn primitive_table_calls(root: &Path) -> Vec<EmittedCall> {
 }
 
 /// The calls among `calls` that the runtime does not export.
-fn unexported(
-    calls: &[EmittedCall],
-    exports: &BTreeMap<String, BTreeSet<String>>,
-) -> Vec<String> {
+fn unexported(calls: &[EmittedCall], exports: &BTreeMap<String, BTreeSet<String>>) -> Vec<String> {
     let mut problems = BTreeSet::new();
     for call in calls {
         let Some(entries) = exports.get(&call.module) else {
@@ -319,17 +323,16 @@ fn unexported(
             ));
             continue;
         };
-        let ok = match call.arity {
-            Some(n) => entries.contains(&format!("{}/{n}", call.function)),
-            None => {
-                let prefix = format!("{}/", call.function);
-                entries.iter().any(|e| e.starts_with(&prefix))
-            }
-        };
+        let prefix = format!("{}/", call.function);
+        let ok = call.arity.map_or_else(
+            || entries.iter().any(|e| e.starts_with(&prefix)),
+            |n| entries.contains(&format!("{prefix}{n}")),
+        );
         if !ok {
-            let shown = call
-                .arity
-                .map_or_else(|| call.function.clone(), |n| format!("{}/{n}", call.function));
+            let shown = call.arity.map_or_else(
+                || call.function.clone(),
+                |n| format!("{}/{n}", call.function),
+            );
             problems.insert(format!(
                 "{}: {} does not export {shown}",
                 call.origin, call.module
@@ -379,9 +382,11 @@ fn the_tower_table_reaches_every_zero_arg_intrinsic() {
     let root = super::tests::repo_root();
     let calls = primitive_table_calls(&root);
     assert!(
-        calls.iter().any(|c| c.module == "beamtalk_behaviour_intrinsics"
-            && c.function == "className"
-            && c.arity == Some(1)),
+        calls
+            .iter()
+            .any(|c| c.module == "beamtalk_behaviour_intrinsics"
+                && c.function == "className"
+                && c.arity == Some(1)),
         "className/1 not rendered"
     );
 }

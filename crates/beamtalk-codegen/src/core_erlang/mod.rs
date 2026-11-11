@@ -151,7 +151,7 @@ mod primitives;
 pub mod repl_nlr;
 mod routing;
 #[cfg(test)]
-mod runtime_export_contract;
+mod runtime_export_contract_tests;
 pub mod selector_mangler;
 mod sequencing;
 mod spec_codegen;

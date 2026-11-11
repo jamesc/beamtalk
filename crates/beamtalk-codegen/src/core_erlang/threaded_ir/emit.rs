@@ -1685,7 +1685,7 @@ fn render_return(value: &ValueRef, state: &VersionedVar, ctx: &RenderCtx) -> Doc
 #[cfg(test)]
 mod cell_helper_conformance {
     use crate::core_erlang::actor_state_access::actor_state_helper;
-    use crate::core_erlang::runtime_export_contract::exported_entries;
+    use crate::core_erlang::runtime_export_contract_tests::exported_entries;
 
     /// Every `beamtalk_actor_state` helper codegen emits must be exported by
     /// the runtime: generated code calls them, so removing or renaming one
