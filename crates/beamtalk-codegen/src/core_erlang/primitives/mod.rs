@@ -116,7 +116,7 @@ type PrimitiveLowerFn = fn(&str, &[String]) -> Option<Document<'static>>;
 /// primitive, not the class that happens to declare it. That closes the gap
 /// that let `className` silently fall through to runtime dispatch when it moved
 /// up the tower.
-const REGISTRY: &[(&str, PrimitiveLowerFn)] = &[
+pub(in crate::core_erlang) const REGISTRY: &[(&str, PrimitiveLowerFn)] = &[
     ("Array", array::generate_array_bif),
     ("Binary", binary::generate_binary_bif),
     ("Integer", integer::generate_integer_bif),

@@ -49,23 +49,6 @@ pub(crate) fn generate_tuple_bif(selector: &str, params: &[String]) -> Option<Do
         "isError" => Some(Document::Str(
             "case Self of <{'error', _Reason}> when 'true' -> 'true' <_> when 'true' -> 'false' end",
         )),
-        "unwrap" => Some(Document::Str("call 'beamtalk_tuple':'unwrap'(Self)")),
-        "unwrapOr:" => {
-            let p0 = params.first()?;
-            Some(docvec![
-                "call 'beamtalk_tuple':'unwrap_or'(Self, ",
-                leaf::var(p0.clone()),
-                ")",
-            ])
-        }
-        "unwrapOrElse:" => {
-            let p0 = params.first()?;
-            Some(docvec![
-                "call 'beamtalk_tuple':'unwrap_or_else'(Self, ",
-                leaf::var(p0.clone()),
-                ")",
-            ])
-        }
         "asString" => Some(wrap_string_result(Document::Str(
             "call 'beamtalk_tuple':'as_string'(Self)",
         ))),
@@ -341,46 +324,6 @@ mod tests {
         assert!(output.contains("'error'"));
         assert!(output.contains("'true'"));
         assert!(output.contains("'false'"));
-    }
-
-    #[test]
-    fn test_tuple_unwrap() {
-        let result = doc_to_string(generate_tuple_bif("unwrap", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_tuple':'unwrap'(Self)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_tuple_unwrap_or_with_param() {
-        let result = doc_to_string(generate_tuple_bif("unwrapOr:", &["Default".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_tuple':'unwrap_or'(Self, Default)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_tuple_unwrap_or_without_params_returns_none() {
-        assert_eq!(doc_to_string(generate_tuple_bif("unwrapOr:", &[])), None);
-    }
-
-    #[test]
-    fn test_tuple_unwrap_or_else_with_param() {
-        let result = doc_to_string(generate_tuple_bif("unwrapOrElse:", &["Block".to_string()]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_tuple':'unwrap_or_else'(Self, Block)".to_string())
-        );
-    }
-
-    #[test]
-    fn test_tuple_unwrap_or_else_without_params_returns_none() {
-        assert_eq!(
-            doc_to_string(generate_tuple_bif("unwrapOrElse:", &[])),
-            None
-        );
     }
 
     #[test]

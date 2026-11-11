@@ -71,7 +71,7 @@ impl ActorClosure {
 /// [`actor_state_call`] takes `[Document; N]` for a `Helper<N>`, so emitting
 /// the wrong number of arguments is a compile error at the call site, not a
 /// failure at codegen time or an `undef` when the generated module runs.
-/// `cell_helper_conformance` checks every entry against the runtime's
+/// `runtime_export_contract_tests` checks every entry against the runtime's
 /// `-export` blocks, so renaming or unexporting a helper fails the build too.
 #[derive(Debug, Clone, Copy)]
 pub(in crate::core_erlang) struct Helper<const N: usize> {

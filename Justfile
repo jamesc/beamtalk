@@ -851,7 +851,7 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips test-lint-stamp
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips lint-duplicate-erlang-modules test-lint-stamp
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
@@ -925,6 +925,18 @@ lint-nlr-tuple-matches:
 [windows]
 lint-nlr-tuple-matches:
     @echo "lint-nlr-tuple-matches: skipped on Windows (covered by Linux CI)"
+
+# Guard (BT-4671): every Erlang module name under runtime/apps/*/{src,test} is
+# unique — the BEAM loads one module per name, so a second copy's tests silently
+# never run. Unix-only (shells out to bash); Linux CI covers it, so the Windows
+# variant is a no-op.
+[unix]
+lint-duplicate-erlang-modules:
+    @bash scripts/ci/lint-duplicate-erlang-modules.sh
+
+[windows]
+lint-duplicate-erlang-modules:
+    @echo "lint-duplicate-erlang-modules: skipped on Windows (covered by Linux CI)"
 
 # Guard (BT-3769, ADR 0130 §4): every runtime/stdlib `try ... catch` (or old-style
 # `catch`) whose body applies a fun or a dynamic module call must run it under

@@ -73,6 +73,17 @@ enum IntrinsicBody {
     /// itself (the BT-4432 `hash` loop), so it is the value arm's own
     /// `beamtalk_reflection:field_names/1` call instead.
     FieldNames,
+    /// `loggerDebug`/`loggerInfo`/`loggerWarn`/`loggerError` and their
+    /// `…Meta` forms — `logger.bt`'s class-side bodies, a
+    /// `beamtalk_logging_config:log/3` call at `level`. Direct `Logger
+    /// warn:` sends are intercepted at the call site
+    /// (`try_generate_logger_intrinsic`, which injects the caller's
+    /// class/selector as metadata); this body is reached only via indirect
+    /// dispatch (e.g. `perform:`), where Logger's own metadata is right.
+    Logger {
+        level: &'static str,
+        has_metadata: bool,
+    },
     /// `erlangApply` — DNU-forwarding Erlang interop intrinsic.
     ErlangApply,
     /// `erlangModuleLookup` — same shape as `ErlangApply`, different target module.
@@ -189,6 +200,62 @@ static INTRINSIC_BODIES: &[(&str, IntrinsicBody)] = &[
     ("ensure", IntrinsicBody::Ensure),
     ("error", IntrinsicBody::Error),
     ("erlangModuleLookup", IntrinsicBody::ErlangModuleLookup),
+    (
+        "loggerDebug",
+        IntrinsicBody::Logger {
+            level: "debug",
+            has_metadata: false,
+        },
+    ),
+    (
+        "loggerInfo",
+        IntrinsicBody::Logger {
+            level: "info",
+            has_metadata: false,
+        },
+    ),
+    (
+        "loggerWarn",
+        IntrinsicBody::Logger {
+            level: "warning",
+            has_metadata: false,
+        },
+    ),
+    (
+        "loggerError",
+        IntrinsicBody::Logger {
+            level: "error",
+            has_metadata: false,
+        },
+    ),
+    (
+        "loggerDebugMeta",
+        IntrinsicBody::Logger {
+            level: "debug",
+            has_metadata: true,
+        },
+    ),
+    (
+        "loggerInfoMeta",
+        IntrinsicBody::Logger {
+            level: "info",
+            has_metadata: true,
+        },
+    ),
+    (
+        "loggerWarnMeta",
+        IntrinsicBody::Logger {
+            level: "warning",
+            has_metadata: true,
+        },
+    ),
+    (
+        "loggerErrorMeta",
+        IntrinsicBody::Logger {
+            level: "error",
+            has_metadata: true,
+        },
+    ),
     ("erlangApply", IntrinsicBody::ErlangApply),
     ("classBuilderRegister", IntrinsicBody::ClassBuilderRegister),
 ];
@@ -246,23 +313,6 @@ impl CoreErlangGenerator {
                     )));
                 }
                 return Ok(self.render_intrinsic_body(body, name, &class_name, span));
-            }
-
-            // Logger intrinsics — generate beamtalk_logging_config:log/3 calls.
-            // These are the method bodies for logger.bt's @intrinsic declarations.
-            // Direct `Logger warn:` calls are intercepted at the call site by
-            // try_generate_logger_intrinsic (which injects the caller's class/selector
-            // as metadata). This body path is reached only via indirect dispatch
-            // (e.g., perform:), in which case Logger's own class/selector metadata
-            // is appropriate.
-            //
-            // Not an `INTRINSIC_BODIES` entry: logger names aren't in
-            // `STRUCTURAL_INTRINSICS` (a `class`-side `@intrinsic` bypasses
-            // `primitive_validator`'s name check — it only walks
-            // `class.methods`, not `class.class_methods`), so they're outside
-            // the completeness invariant that table enforces.
-            if let Some(doc) = self.try_generate_logger_body_intrinsic(name) {
-                return Ok(doc);
             }
         }
 
@@ -348,6 +398,10 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         match body {
             IntrinsicBody::ClassBuilderRegister => self.generate_class_builder_register(),
+            IntrinsicBody::Logger {
+                level,
+                has_metadata,
+            } => self.generate_logger_body(level, *has_metadata),
 
             // basicNew/basicNewWith intrinsics in class method context.
             // When Value defines `class sealed new => @intrinsic basicNew`, the class
@@ -606,44 +660,20 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Generates the Logger @intrinsic method bodies as
-    /// `beamtalk_logging_config:log/3` calls (see `logger_log_call_doc`).
-    ///
-    /// Maps intrinsic names to OTP logger levels:
-    /// - `loggerDebug` / `loggerDebugMeta` → `debug`
-    /// - `loggerInfo` / `loggerInfoMeta` → `info`
-    /// - `loggerWarn` / `loggerWarnMeta` → `warning`
-    /// - `loggerError` / `loggerErrorMeta` → `error`
-    ///
-    /// Returns `None` for non-logger intrinsic names.
-    pub(in crate::core_erlang) fn try_generate_logger_body_intrinsic(
-        &mut self,
-        name: &str,
-    ) -> Option<Document<'static>> {
-        let (level, has_metadata) = match name {
-            "loggerDebug" => ("debug", false),
-            "loggerInfo" => ("info", false),
-            "loggerWarn" => ("warning", false),
-            "loggerError" => ("error", false),
-            "loggerDebugMeta" => ("debug", true),
-            "loggerInfoMeta" => ("info", true),
-            "loggerWarnMeta" => ("warning", true),
-            "loggerErrorMeta" => ("error", true),
-            _ => return None,
-        };
-
+    /// Generates a Logger `@intrinsic` method body as a
+    /// `beamtalk_logging_config:log/3` call (see `logger_log_call_doc`) at
+    /// OTP logger `level`, passing the method's second parameter as user
+    /// metadata when `has_metadata`.
+    fn generate_logger_body(&mut self, level: &str, has_metadata: bool) -> Document<'static> {
         let params = self.current_method_params.clone();
         let msg_param = params
             .first()
             .cloned()
             .unwrap_or_else(|| "Message".to_string());
-
         let msg_doc = leaf::var(msg_param);
         let user_meta_doc = has_metadata
             .then(|| leaf::var(params.get(1).cloned().unwrap_or_else(|| "Meta".to_string())));
-        let doc = self.logger_log_call_doc(level, msg_doc, user_meta_doc);
-
-        Some(doc)
+        self.logger_log_call_doc(level, msg_doc, user_meta_doc)
     }
 
     /// ADR 0038: Generates code for the `classBuilderRegister` intrinsic.

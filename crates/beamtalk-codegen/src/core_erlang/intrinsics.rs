@@ -22,6 +22,7 @@
 //! at runtime), these intrinsics generate efficient inline code because they are
 //! fundamental language operations that cannot be deferred to runtime dispatch.
 
+use super::class_var_access::class_var_fn;
 use super::control_flow::SoloBoolean;
 use super::control_flow::{PureArm, SoloAnswer};
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result, primitives};
@@ -2800,7 +2801,7 @@ impl CoreErlangGenerator {
                                 name_code,
                                 " in ",
                                 self.class_var_read_helper_call_doc(
-                                    "field_at",
+                                    class_var_fn::FIELD_AT,
                                     vec![leaf::var(name_var)],
                                 ),
                             ];
@@ -2943,7 +2944,7 @@ impl CoreErlangGenerator {
                                 value_code,
                                 " in ",
                                 Self::class_var_helper_call_doc(
-                                    "field_at_put",
+                                    class_var_fn::FIELD_AT_PUT,
                                     vec![leaf::var(name_var), leaf::var(value_var)],
                                 ),
                             ];
@@ -3084,7 +3085,7 @@ impl CoreErlangGenerator {
                                 name_code,
                                 " in ",
                                 self.class_var_read_helper_call_doc(
-                                    "has",
+                                    class_var_fn::HAS,
                                     vec![leaf::var(name_var)],
                                 ),
                             ];
@@ -3165,7 +3166,10 @@ impl CoreErlangGenerator {
                                 " = ",
                                 name_code,
                                 " in ",
-                                Self::class_var_helper_call_doc("clear", vec![leaf::var(name_var)],),
+                                Self::class_var_helper_call_doc(
+                                    class_var_fn::CLEAR,
+                                    vec![leaf::var(name_var)],
+                                ),
                             ];
                             return Ok(Some(doc));
                         }
@@ -3712,7 +3716,8 @@ impl CoreErlangGenerator {
     /// Emits the `beamtalk_logging_config:log/3` call shared by the call-site
     /// Logger intrinsic ([`Self::try_generate_logger_intrinsic`]) and the
     /// `@intrinsic logger*` method bodies
-    /// ([`Self::try_generate_logger_body_intrinsic`]). The call answers `'nil'`.
+    /// (`IntrinsicBody::Logger` in `primitives::intrinsic_bodies`). The call
+    /// answers `'nil'`.
     ///
     /// The message is passed through unchanged: a Beamtalk `String` is the
     /// tagged `{beamtalk_string, Bin}` term, and the runtime unwraps it (and

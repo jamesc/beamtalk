@@ -713,12 +713,11 @@ atomic_write_file(Path, Content) ->
 -doc """
 Atomic file write with an optional pre-rename "changed on disk" guard.
 
-The temp path is unique per call (`erlang:unique_integer/1`-suffixed), never a
-fixed name — two concurrent writers targeting the same `Path` each get their
-own temp file, so one writer's `file:write_file/2` can never interleave with
-or clobber another's in-flight temp write (the bug: a shared fixed temp name
-let that happen before either side renamed). On any failure — write, recheck,
-or rename — the temp file is deleted so nothing is leaked.
+Delegates to `beamtalk_workspace_file:atomic_write/3`: the temp path is unique
+per call, never a fixed name, so two concurrent writers targeting the same
+`Path` each get their own temp file and one writer's `file:write_file/2` can
+never interleave with or clobber another's in-flight temp write. On any
+failure the temp file is deleted.
 
 `ExpectedCurrent`, when not `undefined`, is byte-compared against `Path`'s
 *current* on-disk contents immediately before the rename. This closes the
@@ -727,43 +726,21 @@ concurrent writer's rename can land in the gap between that earlier check and
 this call's own rename. A mismatch aborts with `{error, changed_on_disk}` —
 nothing is written — rather than silently overwriting a concurrent edit,
 mirroring the ADR 0082 flush pipeline's `prev_source` span check
-(`beamtalk_workspace_flush.erl`).
+(`beamtalk_workspace_flush.erl`). Other failures return the bare file error
+`Reason` (untagged).
+
+After a successful write it sweeps stale staging files a crashed earlier write
+to `Path` left beside it (`beamtalk_workspace_file:sweep_stale_temps/1`), as
+flush does after its own commits, since both write into the user's source tree.
 """.
 -spec atomic_write_file(string(), binary(), binary() | undefined) -> ok | {error, term()}.
 atomic_write_file(Path, Content, ExpectedCurrent) ->
-    TempPath = Path ++ "." ++ integer_to_list(erlang:unique_integer([positive])) ++ ".tmp",
-    case file:write_file(TempPath, Content) of
+    case beamtalk_workspace_file:atomic_write(Path, Content, ExpectedCurrent) of
         ok ->
-            case recheck_unchanged(Path, ExpectedCurrent) of
-                ok ->
-                    case file:rename(TempPath, Path) of
-                        ok ->
-                            ok;
-                        {error, RenameReason} ->
-                            _ = file:delete(TempPath),
-                            {error, RenameReason}
-                    end;
-                {error, _} = RecheckErr ->
-                    _ = file:delete(TempPath),
-                    RecheckErr
-            end;
-        {error, WriteReason} ->
-            _ = file:delete(TempPath),
-            {error, WriteReason}
-    end.
-
-%% `ok` when `ExpectedCurrent` is `undefined` (no recheck requested) or
-%% byte-matches `Path`'s current contents; `{error, changed_on_disk}` on a
-%% byte mismatch (a concurrent writer landed since the caller's own read);
-%% `{error, Reason}` if `Path` can no longer be read at all.
--spec recheck_unchanged(string(), binary() | undefined) -> ok | {error, term()}.
-recheck_unchanged(_Path, undefined) ->
-    ok;
-recheck_unchanged(Path, ExpectedCurrent) ->
-    case file:read_file(Path) of
-        {ok, ExpectedCurrent} -> ok;
-        {ok, _Other} -> {error, changed_on_disk};
-        {error, Reason} -> {error, Reason}
+            _ = beamtalk_workspace_file:sweep_stale_temps(Path),
+            ok;
+        {error, {_Step, Reason}} ->
+            {error, Reason}
     end.
 
 -doc """
@@ -1671,12 +1648,10 @@ re-derived here.
 relative_bt_path(Path, SrcDir) ->
     AbsPath = filename:absname(Path),
     AbsSrc = filename:absname(SrcDir),
-    SrcParts = filename:split(AbsSrc),
-    PathParts = filename:split(AbsPath),
     RelSegments =
-        case lists:prefix(SrcParts, PathParts) of
-            true ->
-                lists:nthtail(length(SrcParts), PathParts);
+        case beamtalk_workspace_file:relative_parts(AbsSrc, AbsPath) of
+            {ok, Parts} ->
+                Parts;
             false ->
                 %% Defensive: fall back to the bare basename if the file is
                 %% somehow not under src/ (find_bt_files only returns files
@@ -2407,21 +2382,18 @@ their classes. Scoping by project root keeps each sync responsible only
 for its own files.
 
 The `ProjectRoot` is expected to be an absolute path. Files under it are
-matched by string prefix on the directory boundary; the path
-`/p/foo/src/a.bt` matches root `/p/foo` but `/p/foobar/src/a.bt` does not.
+matched component-wise (`beamtalk_workspace_file:path_inside/2`); the path
+`/p/foo/src/a.bt` matches root `/p/foo` (or `/p/foo/`) but
+`/p/foobar/src/a.bt` does not.
 """.
 -spec filter_mtimes_under_project(
     #{string() => calendar:datetime()}, string()
 ) -> #{string() => calendar:datetime()}.
 filter_mtimes_under_project(Mtimes, ProjectRoot) ->
-    %% Normalise the project root so the prefix check is unambiguous.
-    %% Trim any trailing separator to avoid double-slash artefacts.
-    Root = string:trim(ProjectRoot, trailing, "/"),
-    Prefix = Root ++ "/",
     maps:filter(
         fun
             (Path, _Mtime) when is_list(Path) ->
-                Path =:= Root orelse lists:prefix(Prefix, Path);
+                beamtalk_workspace_file:path_inside(ProjectRoot, Path);
             (_NonString, _Mtime) ->
                 false
         end,

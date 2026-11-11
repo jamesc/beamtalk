@@ -951,7 +951,7 @@ clean rename (ADR 0114 explicitly calls this out: "a single incidental
 stdlib candidate sender would leave the whole rename stuck forever").
 
 Callers classify each site themselves before folding — reusing
-`beamtalk_repl_loader:classify_source_file/1`/`no_source_reason/1` exactly
+`beamtalk_repl_loader_changelog_entries:classify_source_file/1`/`no_source_reason/1` exactly
 as the single-file kinds already do (ADR 0112), rather than this module
 re-deriving that classification, which would duplicate it: this module has
 no class-registry access, and a bare `sourceFile` cannot distinguish
@@ -1515,6 +1515,7 @@ init(Config) ->
         next_seq = 0,
         epoch = 0
     },
+    sweep_stale_temps(ChangesDir),
     State1 = load_from_disk(State0),
     %% A persisted log may already exceed MAX_ENTRIES (it was written by an older
     %% build, hand-edited, or restored from backup). The ring bound is otherwise
@@ -2007,24 +2008,26 @@ truncate_log(State) ->
     _ = write_file_atomic(State#state.log_path, <<>>),
     ok.
 
+%% Delete temp files a crashed `write_file_atomic/2` left in `changes/` or
+%% `changes/sources/`. Unique temp names mean nothing else ever overwrites or
+%% removes them. Best effort; a missing directory is fine.
+-spec sweep_stale_temps(string() | undefined) -> ok.
+sweep_stale_temps(undefined) ->
+    ok;
+sweep_stale_temps(ChangesDir) ->
+    _ = beamtalk_workspace_file:sweep_stale_temps_in(ChangesDir),
+    _ = beamtalk_workspace_file:sweep_stale_temps_in(filename:join(ChangesDir, "sources")),
+    ok.
+
 %% Write Data to Path via a sibling temp file + atomic rename so readers never
-%% observe a partially written file.
+%% observe a partially written file (`beamtalk_workspace_file:atomic_write/3`:
+%% a unique temp name per call, so a writer outside this gen_server — e.g.
+%% `store_site_body/1`, which runs in the caller — can never share a temp file
+%% with another writer). Errors are `{write, Reason}` / `{rename, Reason}`.
 -spec write_file_atomic(string(), iodata()) -> ok | {error, term()}.
 write_file_atomic(Path, Data) ->
     _ = filelib:ensure_dir(Path),
-    Tmp = Path ++ ".tmp",
-    case file:write_file(Tmp, Data) of
-        ok ->
-            case file:rename(Tmp, Path) of
-                ok ->
-                    ok;
-                {error, Reason} ->
-                    _ = file:delete(Tmp),
-                    {error, {rename, Reason}}
-            end;
-        {error, Reason} ->
-            {error, {write, Reason}}
-    end.
+    beamtalk_workspace_file:atomic_write(Path, Data, undefined).
 
 %% sources/<seq6>-source.bt / sources/<seq6>-prev.bt
 -spec source_ref_filename(non_neg_integer(), source | prev) -> binary().

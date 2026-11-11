@@ -36,6 +36,25 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf::{self, atom};
 use beamtalk_core::ast::{ClassDefinition, Module, SupervisorKind};
 
+/// The `beamtalk_supervisor` function a supervisor module's `init/1` calls.
+pub(in crate::core_erlang) fn supervisor_init_fn(kind: SupervisorKind) -> &'static str {
+    match kind {
+        SupervisorKind::Static => "static_init",
+        SupervisorKind::Dynamic => "dynamic_init",
+    }
+}
+
+/// Every supervisor kind, for the runtime export contract
+/// (`runtime_export_contract_tests`). The exhaustive `match` makes a new kind
+/// a compile error here until it is listed.
+#[cfg(test)]
+pub(in crate::core_erlang) const ALL_SUPERVISOR_KINDS: [SupervisorKind; 2] = {
+    match SupervisorKind::Static {
+        SupervisorKind::Static | SupervisorKind::Dynamic => {}
+    }
+    [SupervisorKind::Static, SupervisorKind::Dynamic]
+};
+
 impl CoreErlangGenerator {
     /// Generates an OTP supervisor module for `Supervisor subclass:` or
     /// `DynamicSupervisor subclass:` classes.
@@ -61,10 +80,7 @@ impl CoreErlangGenerator {
         let kind = class.supervisor_kind.as_ref().ok_or_else(|| {
             CodeGenError::Internal("supervisor_kind must be set for supervisor module".to_string())
         })?;
-        let init_fn = match kind {
-            SupervisorKind::Static => "static_init",
-            SupervisorKind::Dynamic => "dynamic_init",
-        };
+        let init_fn = supervisor_init_fn(*kind);
 
         let class_name = class.name.name.clone();
         let module_name = self.module_name.clone();

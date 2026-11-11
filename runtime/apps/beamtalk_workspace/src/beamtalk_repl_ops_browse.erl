@@ -1519,9 +1519,8 @@ alias_disk_content(<<"project">>, SourceFile) when byte_size(SourceFile) > 0 ->
             %% `safe_relative_path/1` already guarantees `SourceFile` has no
             %% `..` component and is not itself absolute, so joining it onto
             %% `ProjectPath` cannot resolve outside that root — no further
-            %% containment check is needed (and `beamtalk_repl_loader`'s
-            %% `is_path_inside/2` is exported test-only, not for cross-module
-            %% production use).
+            %% containment check (`beamtalk_workspace_file:path_inside/2`)
+            %% is needed.
             case beamtalk_workspace_meta:get_metadata() of
                 {ok, #{project_path := ProjectPath}} when is_binary(ProjectPath) ->
                     Path = filename:join(binary_to_list(ProjectPath), binary_to_list(SourceFile)),
@@ -1907,9 +1906,7 @@ classify_source_origin(SourceFile) ->
     case beamtalk_workspace_meta:get_metadata() of
         {ok, #{project_path := ProjectPath}} when is_binary(ProjectPath) ->
             ProjectRoot = filename:absname(binary_to_list(ProjectPath)),
-            RootParts = filename:split(ProjectRoot),
-            PathParts = filename:split(AbsPath),
-            case lists:prefix(RootParts, PathParts) of
+            case beamtalk_workspace_file:path_inside(ProjectRoot, AbsPath) of
                 true -> project;
                 false -> dependency
             end;

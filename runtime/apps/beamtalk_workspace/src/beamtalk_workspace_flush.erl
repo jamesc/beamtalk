@@ -64,6 +64,19 @@ atomic on POSIX, so a crash leaves either the old or the new file on disk —
 never partial. The ChangeEntries for that file are marked flushed only *after*
 the rename returns ok.
 
+`<file>.tmp` throughout this doc is shorthand: the real staging name is
+unique per write, `<file>.bt-staging.<unique>.tmp` (`beamtalk_workspace_file:write_temp/2`,
+BT-4683). Flush runs in its caller's process, so two flushes (an autoflush and
+a manual `Workspace flush`, say) can stage the same file at once; a shared
+fixed name would let one rename the other's half-written body into place. A
+crash between Phase A and Phase B can therefore leave a stray
+`<file>.bt-staging.<unique>.tmp` behind instead of one that the next attempt overwrites.
+It is never read back. The next successful commit to `<file>` deletes any such
+leftover more than an hour old (`beamtalk_workspace_file:sweep_stale_temps/2`);
+a younger one may belong to a flush still in flight, so it is left alone. The
+sweep matches only the `.bt-staging.` marker, so it never deletes another
+tool's `<file>.<digits>.tmp` from the user's source tree.
+
 ## Atomicity (multi-file)
 
 Two-phase per flush operation (ADR 0082, *Multi-file atomicity*):
@@ -950,9 +963,10 @@ group_by_file(Entries) ->
     %% this is `new_path` — the file this operation ultimately
     %% leaves on disk — not the file Phase A read from.
     file :: binary(),
-    %% The staging path Phase A produced: `<file>.tmp` for `op = write` (and
-    %% `move`, staged at `<new_path>.tmp`), `<file>.tmp-delete-<epoch>-<seq>`
-    %% for `op = delete` (ADR 0113), unused for `op = noop`/`move_noop`.
+    %% The staging path Phase A produced: `<file>.bt-staging.<unique>.tmp` for
+    %% `op = write` (and `move`, staged at `<new_path>.bt-staging.<unique>.tmp`; see
+    %% `beamtalk_workspace_file:write_temp/2`), `<file>.tmp-delete-<epoch>-<seq>`
+    %% for `op = delete` (ADR 0113), `undefined` for `op = noop`/`move_noop`.
     tmp :: string() | undefined,
     %% The entries whose patches were merged into this file's new body (or,
     %% for `op = delete` / `op = noop` / `move` / `move_noop`, the owning
@@ -1831,7 +1845,7 @@ resolve_missing_rename_source(Entry, OldPath, NewPath, Units) ->
                     {ok, #prepared{
                         file = NewPath,
                         old_file = undefined,
-                        tmp = binary_to_list(NewPath) ++ ".tmp",
+                        tmp = undefined,
                         entries = [Entry],
                         pre_existing = false,
                         op = move_noop
@@ -2604,24 +2618,34 @@ phase_b_loop([P | Rest], Shadowed, Committed, Failed, Skipped, RenameExpectedFil
 %%     ever removed once its content is durably present at the new name. If
 %%     the unlink itself fails, `old_file` simply lingers (still untouched,
 %%     still matching its recorded `prev_source`) and the next flush attempt
-%%     harmlessly re-derives and overwrites `new_path.tmp` before retrying
+%%     harmlessly re-derives and re-stages `new_path` before retrying
 %%     the unlink — see the moduledoc's "Atomicity (class rename)" section.
 %%   - `move_noop` — the move already completed in an earlier, crashed or
 %%     marker-failed attempt; no I/O.
 -spec commit(#prepared{}) -> ok | {error, term()}.
 commit(#prepared{op = write, tmp = Tmp, file = File}) ->
-    file:rename(Tmp, binary_to_list(File));
+    after_rename(file:rename(Tmp, binary_to_list(File)), File);
 commit(#prepared{op = delete, tmp = Tmp}) ->
     file:delete(Tmp);
 commit(#prepared{op = noop}) ->
     ok;
 commit(#prepared{op = move, tmp = Tmp, file = NewPath, old_file = OldPath}) ->
-    case file:rename(Tmp, binary_to_list(NewPath)) of
+    case after_rename(file:rename(Tmp, binary_to_list(NewPath)), NewPath) of
         ok -> file:delete(binary_to_list(OldPath));
         {error, _} = Err -> Err
     end;
 commit(#prepared{op = move_noop}) ->
     ok.
+
+%% After a successful staging rename into `File`, sweep stale staging files a
+%% crashed earlier attempt left next to it (see the moduledoc's "Atomicity
+%% (single-file)" section). Best effort: never turns a commit into a failure.
+-spec after_rename(ok | {error, term()}, binary()) -> ok | {error, term()}.
+after_rename(ok, File) ->
+    _ = beamtalk_workspace_file:sweep_stale_temps(binary_to_list(File)),
+    ok;
+after_rename({error, _} = Err, _File) ->
+    Err.
 
 -doc """
 Best-effort post-commit source-attribute refresh (ADR 0114 follow-up). See the moduledoc's "Post-commit source-attribute
@@ -2880,14 +2904,16 @@ file_kind_map(#prepared{file = File, entries = [Entry | _], old_file = OldFile})
 %%% Helpers
 %%% ----------------------------------------------------------------------------
 
+%% Phase A staging write. The temp name is unique per call
+%% (`beamtalk_workspace_file:write_temp/2`), not a fixed `<file>.tmp`: flush
+%% runs in its caller's process (an autoflush after a live patch, or a manual
+%% `Workspace flush` from another session), so two flushes can stage the same
+%% file at once, and with a shared temp name one could rename the other's
+%% half-written body into place.
 -spec write_tmp(string(), binary()) -> {ok, string()} | {error, term()}.
 write_tmp(AbsPath, Body) ->
-    Tmp = AbsPath ++ ".tmp",
     _ = filelib:ensure_dir(AbsPath),
-    case file:write_file(Tmp, Body) of
-        ok -> {ok, Tmp};
-        {error, Reason} -> {error, {write, Reason}}
-    end.
+    beamtalk_workspace_file:write_temp(AbsPath, Body).
 
 %% Undo Phase A staging for every not-yet-committed `Prepared` record, so an
 %% aborted flush (Phase A conflict on another file, or a Phase B failure
@@ -3050,7 +3076,7 @@ wrap_io_error({error, Reason}, File) ->
     Err1 = beamtalk_error:with_selector(Err0, 'flush'),
     Err2 = beamtalk_error:with_message(
         Err1,
-        iolist_to_binary([<<"I/O error writing ">>, file_label(File), <<".tmp">>])
+        iolist_to_binary([<<"I/O error writing staging file for ">>, file_label(File)])
     ),
     {error, beamtalk_error:with_details(Err2, #{reason => Reason})}.
 

@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
--module(beamtalk_exec_port_tests).
+-module(beamtalk_exec_port_io_tests).
 
 %%% **DDD Context:** runtime
 
@@ -10,7 +10,6 @@ EUnit tests for beamtalk_exec_port module.
 
 Tests cover:
 - find_exec_binary/0 (finds the dev build)
-- find_project_root/0 (finds Cargo.toml)
 - open/close lifecycle (opens the port and closes cleanly)
 - spawn_child: sends spawn command, receives exit event
 - write_stdin: sends data to a subprocess
@@ -57,14 +56,6 @@ cat_cmd() ->
             ExecBin = beamtalk_exec_port:find_exec_binary(),
             {list_to_binary(ExecBin), [<<"--cat">>]}
     end.
-
-%%% ============================================================================
-%%% find_project_root/0
-%%% ============================================================================
-
-find_project_root_finds_cargo_toml_test() ->
-    Root = beamtalk_exec_port:find_project_root(),
-    ?assert(filelib:is_regular(filename:join(Root, "Cargo.toml"))).
 
 %%% ============================================================================
 %%% find_exec_binary/0

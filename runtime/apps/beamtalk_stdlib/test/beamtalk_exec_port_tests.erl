@@ -21,7 +21,8 @@ Covers: find_exec_binary/0 env-var paths (lines 149, 151-153),
         find_project_root/0 happy path and filesystem-root error (line 213).
 
 Port I/O tests (open/spawn_child/write_stdin/kill_child) are integration-
-shaped and kept in runtime/apps/beamtalk_runtime/test/beamtalk_exec_port_tests.erl.
+shaped and kept in runtime/apps/beamtalk_runtime/test/beamtalk_exec_port_io_tests.erl
+(a distinct module name: BT-4671).
 """.
 
 -include_lib("eunit/include/eunit.hrl").

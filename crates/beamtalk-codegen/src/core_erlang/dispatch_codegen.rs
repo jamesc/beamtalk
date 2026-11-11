@@ -2939,18 +2939,12 @@ impl CoreErlangGenerator {
             // Without these arms, the fallthrough in the caller emits
             // `call 'CURRENT_MODULE':'spawnAs' / 'spawnWithas'` — neither function
             // exists, so calls crash at runtime with `undef`.
-            "spawnAs:" => Ok(Some(self.generate_class_self_named_spawn(
-                "class_self_spawn_as",
-                "SpawnAsRes",
-                "spawnAs:",
-                arguments,
-            )?)),
-            "spawnWith:as:" => Ok(Some(self.generate_class_self_named_spawn(
-                "class_self_spawn_with",
-                "SpawnWithAsRes",
-                "spawnWith:as:",
-                arguments,
-            )?)),
+            "spawnAs:" => Ok(Some(
+                self.generate_class_self_named_spawn(NamedSpawn::As, arguments)?,
+            )),
+            "spawnWith:as:" => Ok(Some(
+                self.generate_class_self_named_spawn(NamedSpawn::WithAs, arguments)?,
+            )),
             _ => Ok(None),
         }
     }
@@ -3080,15 +3074,14 @@ impl CoreErlangGenerator {
     /// followed by the Beamtalk-level arguments.
     fn generate_class_self_named_spawn(
         &mut self,
-        helper: &'static str,
-        result_prefix: &'static str,
-        selector_atom: &'static str,
+        named: NamedSpawn,
         arguments: ClassSendArgs<'_>,
     ) -> Result<Document<'static>> {
+        let selector_atom = named.selector();
         let (args_preamble, args_doc) = self.thread_class_send_args(arguments)?;
         let call_doc = docvec![
             "call 'beamtalk_class_instantiation':'",
-            Document::Str(helper),
+            Document::Str(named.helper()),
             "'(",
             Self::class_self_name_doc(),
             ", ",
@@ -3101,7 +3094,7 @@ impl CoreErlangGenerator {
             args_doc,
             ")"
         ];
-        Ok(self.close_prelude(&args_preamble, call_doc, result_prefix))
+        Ok(self.close_prelude(&args_preamble, call_doc, named.result_prefix()))
     }
 
     /// Generates synchronous self-dispatch for actor self-sends.
@@ -4903,6 +4896,54 @@ impl CoreErlangGenerator {
 // is_bt_stdlib_class, is_erlang_stdlib_module) have been removed.
 // Class dispatch now goes through runtime class_send/3 instead of
 // compile-time module name resolution.
+
+/// A named-registration spawn sent to `self` in a class method
+/// (`spawnAs:` / `spawnWith:as:`), lowered to a
+/// `beamtalk_class_instantiation` helper.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum NamedSpawn {
+    /// `spawnAs:`.
+    As,
+    /// `spawnWith:as:`.
+    WithAs,
+}
+
+impl NamedSpawn {
+    /// Every form, for the runtime export contract
+    /// (`runtime_export_contract_tests`). The exhaustive `match` makes a new
+    /// form a compile error here until it is listed.
+    #[cfg(test)]
+    pub(in crate::core_erlang) const ALL: [Self; 2] = {
+        match Self::As {
+            Self::As | Self::WithAs => {}
+        }
+        [Self::As, Self::WithAs]
+    };
+
+    /// The `beamtalk_class_instantiation` helper it calls.
+    pub(in crate::core_erlang) fn helper(self) -> &'static str {
+        match self {
+            Self::As => "class_self_spawn_as",
+            Self::WithAs => "class_self_spawn_with",
+        }
+    }
+
+    /// The selector, as the atom passed to the helper.
+    fn selector(self) -> &'static str {
+        match self {
+            Self::As => "spawnAs:",
+            Self::WithAs => "spawnWith:as:",
+        }
+    }
+
+    /// The prefix of the result variable.
+    fn result_prefix(self) -> &'static str {
+        match self {
+            Self::As => "SpawnAsRes",
+            Self::WithAs => "SpawnWithAsRes",
+        }
+    }
+}
 
 /// Class-module auto-exports reachable via `self <sel>`
 /// from inside a class method.
