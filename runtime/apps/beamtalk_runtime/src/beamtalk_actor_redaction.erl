@@ -39,8 +39,10 @@ by `gen_server`'s crash report (keys `state`, `message`, `reason`, `log`).
 A crashing actor also gets a `proc_lib` crash report, which does not go
 through `format_status/1`. The logger primary filter crash_report_filter/2
 (installed when the runtime starts, BT-4666) redacts it instead: secret
-sends still queued in its `messages` (the mailbox) and secret-selector
-entries in the pending `continueWith:` queue in its `dictionary`.
+sends still queued in its `messages` (the mailbox); and, in its
+`dictionary`, secret-selector entries in the pending `continueWith:` queue
+and secret slots in any actor state still held there (defense in depth:
+every crash path uninstalls the state cell before re-raising).
 
 `sys:get_state/1`, `sys:replace_state/2`, `sys:log(Pid, get)`,
 `sys:log(Pid, print)` and `sys:trace/2` do not go through `format_status/1`
@@ -232,10 +234,11 @@ redact_info_item({dictionary, Dict}, Slots, Selectors) when is_list(Dict) ->
 redact_info_item(Item, _Slots, _Selectors) ->
     Item.
 
-%% Pending continuations to a secret selector, and secret slots in the
-%% actor-state cell. Every crash path uninstalls the cell before re-raising,
-%% so it is normally gone by the time proc_lib reports; redacting it anyway
-%% keeps the secretState guarantee from resting on that.
+%% Pending continuations to a secret selector, and secret slots in actor
+%% state still held in the dictionary (the cell, and the test-build commit
+%% check's excused carried states). Every crash path uninstalls the cell
+%% before re-raising, so it is normally gone by the time proc_lib reports;
+%% redacting it anyway keeps the secretState guarantee from resting on that.
 -spec redact_dict_entry(term(), [atom()], [atom()]) -> term().
 redact_dict_entry({?PENDING_CONTINUE_KEY, Queue}, _Slots, Selectors) when is_list(Queue) ->
     {?PENDING_CONTINUE_KEY, [redact_request(Step, Selectors) || Step <- Queue]};

@@ -389,3 +389,13 @@ crash_filter_secret_state_only_actor_test() ->
     after
         meck:unload(bt4666_state_only_actor)
     end.
+
+crash_filter_redacts_excused_carried_states_test() ->
+    %% The test-build commit check's excused list holds carried state maps.
+    Excused = {'$bt_nlr_commit_excused', [#{token => <<"tok">>}, not_a_map]},
+    Event = crash_event({?MODULE, init, ['Argument__1']}, [], [Excused]),
+    Info = crash_info(beamtalk_actor_redaction:crash_report_filter(Event, [])),
+    ?assertEqual(
+        [{'$bt_nlr_commit_excused', [#{token => ?R}, not_a_map]}],
+        proplists:get_value(dictionary, Info)
+    ).

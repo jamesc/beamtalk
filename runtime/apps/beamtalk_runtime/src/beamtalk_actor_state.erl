@@ -138,17 +138,23 @@ take() ->
     end.
 
 -doc """
-BT-4666: apply `Fun` to the state map of a process-dictionary entry when the
-entry is the cell (`{Key, {Owner, Map}}`); any other entry is answered
-unchanged. Lets `beamtalk_actor_redaction`'s crash-report filter redact
-secret slots in a cell that is still installed, without knowing the cell's
-key or shape.
+BT-4666: apply `Fun` to every actor state map a process-dictionary entry
+holds: the cell (`{Key, {Owner, Map}}`), and the carried states the
+test-build commit check notes as excused (`'$bt_nlr_commit_excused'`, see
+note_excused/1). Any other entry is answered unchanged. Lets
+`beamtalk_actor_redaction`'s crash-report filter redact secret slots in
+state still held in the dictionary, without knowing these keys or shapes.
 """.
 -spec map_cell_entry(term(), fun((map()) -> map())) -> term().
 map_cell_entry({?CELL, {Owner, State}}, Fun) when is_map(State) ->
     {?CELL, {Owner, Fun(State)}};
+map_cell_entry({?EXCUSED, Carried}, Fun) when is_list(Carried) ->
+    {?EXCUSED, [map_if_state(C, Fun) || C <- Carried]};
 map_cell_entry(Entry, _Fun) ->
     Entry.
+
+map_if_state(State, Fun) when is_map(State) -> Fun(State);
+map_if_state(Other, _Fun) -> Other.
 
 -doc "Restore the value `install/1` returned: erase the cell, or put the enclosing one back.".
 -spec uninstall(cell()) -> ok.
