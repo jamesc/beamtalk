@@ -468,3 +468,97 @@ fn character_literal_backslash() {
     let expr = Expression::Literal(Literal::Character('\\'), span());
     assert_eq!(unparse_expression(&expr).to_pretty_string(), "$\\\\");
 }
+
+// --- Comments inside collection literals (BT-3983) ---
+
+/// Formats `source` and asserts the output is exactly `expected` and that a
+/// second pass changes nothing.
+fn assert_literal_formats(source: &str, expected: &str) {
+    let pass1 = format_source(source).expect("source should format");
+    assert_eq!(pass1, expected, "unexpected formatting of:\n{source}");
+    let pass2 = format_source(&pass1).expect("formatted output should format");
+    assert_eq!(pass2, pass1, "format_source must be idempotent");
+}
+
+#[test]
+fn literal_comments_tuple_survive() {
+    assert_literal_formats(
+        "t := {\n  #active, // first\n  false\n}\n",
+        "t := {\n  #active, // first\n  false\n}\n",
+    );
+}
+
+#[test]
+fn literal_comments_tuple_leading_and_closing() {
+    assert_literal_formats(
+        "t := {\n  // the state\n  #active,\n  false // last\n  // dangling\n}\n",
+        "t := {\n  // the state\n  #active,\n  false // last\n  // dangling\n}\n",
+    );
+}
+
+#[test]
+fn literal_comments_after_opening_delimiter() {
+    assert_literal_formats(
+        "t := { // opts\n  #a,\n  #b\n}\n",
+        "t := {\n  // opts\n  #a,\n  #b\n}\n",
+    );
+}
+
+#[test]
+fn literal_comments_list_array_map() {
+    assert_literal_formats(
+        "l := #(\n  1, // one\n  2\n)\n",
+        "l := #(\n  1, // one\n  2\n)\n",
+    );
+    assert_literal_formats(
+        "a := #[\n  // lead\n  1,\n  2 // two\n]\n",
+        "a := #[\n  // lead\n  1,\n  2 // two\n]\n",
+    );
+    assert_literal_formats(
+        "m := #{\n  #a => 1, // a\n  // b next\n  #b => 2\n}\n",
+        "m := #{\n  #a => 1, // a\n  // b next\n  #b => 2\n}\n",
+    );
+}
+
+#[test]
+fn literal_comments_block_comments_kept() {
+    assert_literal_formats(
+        "t := {\n  /* first */\n  #a,\n  #b\n  /* end */\n}\n",
+        "t := {\n  /* first */\n  #a,\n  #b\n  /* end */\n}\n",
+    );
+}
+
+#[test]
+fn literal_comments_cons_tail_kept() {
+    assert_literal_formats(
+        "l := #(\n  1, // head\n  2\n  // before tail\n  | rest // tail\n  // end\n)\n",
+        "l := #(\n  1, // head\n  2\n  // before tail\n  | rest // tail\n  // end\n)\n",
+    );
+}
+
+#[test]
+fn literal_comments_nested_and_keyword_argument() {
+    assert_literal_formats(
+        "x foo: {\n  #a, // outer\n  #(\n    1, // inner\n    2\n  )\n} bar: 1\n",
+        "x\n  foo: {\n    #a, // outer\n    #(\n      1, // inner\n      2\n    )\n  }\n  bar: 1\n",
+    );
+}
+
+#[test]
+fn literal_comments_inside_method_body() {
+    assert_literal_formats(
+        "Object subclass: Foo\n  opts =>\n    {\n      #a, // a\n      #b\n    }\n",
+        "Object subclass: Foo\n\n  opts =>\n    {\n      #a, // a\n      #b\n    }\n",
+    );
+}
+
+#[test]
+fn literal_comments_empty_literal() {
+    assert_literal_formats("t := {\n  // nothing\n}\n", "t := {\n  // nothing\n}\n");
+}
+
+#[test]
+fn literal_without_comments_unchanged() {
+    assert_literal_formats("t := {#a, #b}\n", "t := {#a, #b}\n");
+    assert_literal_formats("l := #(1, 2 | r)\n", "l := #(1, 2 | r)\n");
+}

@@ -40,11 +40,11 @@ pub use signature_text::{
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySignedness, Block, BlockParameter,
     CascadeMessage, ClassDefinition, Comment, CommentAttachment, CommentKind, ExpectCategory,
-    Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MapPair, MapPatternKey,
-    MatchArm, MessageSelector, MethodDefinition, Module, NativeDeclaration, ParameterDefinition,
-    Pattern, PipelineSends, ProtocolDefinition, ProtocolMethodSignature, ProtocolUse, SlotKind,
-    StandaloneMethodDefinition, StateDeclaration, StringSegment, TypeAliasDefinition,
-    TypeAnnotation,
+    Expression, ExpressionStatement, Identifier, KeywordPart, Literal, LiteralCommentSlots,
+    LiteralComments, MapPair, MapPatternKey, MatchArm, MessageSelector, MethodDefinition, Module,
+    NativeDeclaration, ParameterDefinition, Pattern, PipelineSends, ProtocolDefinition,
+    ProtocolMethodSignature, ProtocolUse, SlotKind, StandaloneMethodDefinition, StateDeclaration,
+    StringSegment, TypeAliasDefinition, TypeAnnotation,
 };
 use crate::source_analysis::{Severity, binary_binding_power, lex_with_eof, parse, parse_method};
 use crate::span::Span;
@@ -419,6 +419,7 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
     // Code outside any method re-sugars from the module's own `|>` record;
     // each method replaces it with its own (ADR 0145).
     let _pipeline_scope = PipelineScope::enter(&module.pipeline_sends);
+    let _literal_scope = LiteralCommentScope::enter(&module.literal_comments);
     let mut docs: Vec<Document<'static>> = Vec::new();
 
     // File-level leading comments (empty module edge case — ADR 0044)
@@ -1095,6 +1096,7 @@ fn unparse_method_definition_inner(
 ) -> Document<'static> {
     // The body re-sugars from the method's own `|>` record (ADR 0145).
     let _pipeline_scope = PipelineScope::enter(&method.pipeline_sends);
+    let _literal_scope = LiteralCommentScope::enter(&method.literal_comments);
     let mut docs: Vec<Document<'static>> = Vec::new();
 
     // Non-doc leading comments (section dividers etc.) — emitted only on the
@@ -1495,12 +1497,14 @@ pub(crate) fn unparse_expression(expr: &Expression) -> Document<'static> {
             }
             unparse_match(unparse_expression(value), arms, *exhaustive)
         }
-        Expression::MapLiteral { pairs, .. } => unparse_map_literal(pairs),
-        Expression::ListLiteral { elements, tail, .. } => {
-            unparse_list_literal(elements, tail.as_deref())
-        }
-        Expression::ArrayLiteral { elements, .. } => unparse_array_literal(elements),
-        Expression::TupleLiteral { elements, .. } => unparse_tuple_literal(elements),
+        Expression::MapLiteral { pairs, span } => unparse_map_literal(pairs, *span),
+        Expression::ListLiteral {
+            elements,
+            tail,
+            span,
+        } => unparse_list_literal(elements, tail.as_deref(), *span),
+        Expression::ArrayLiteral { elements, span } => unparse_array_literal(elements, *span),
+        Expression::TupleLiteral { elements, span } => unparse_tuple_literal(elements, *span),
         Expression::Primitive {
             name,
             is_quoted,
@@ -2644,13 +2648,106 @@ fn unparse_binary_segment<V>(
     concat(docs)
 }
 
+// --- Collection-literal comments (BT-3983) ---
+//
+// The parser records the comments inside each collection literal on the
+// owning definition ([`LiteralComments`], keyed by the literal's span). Like
+// the `|>` record, the definition installs it for the duration of its own
+// unparse ([`LiteralCommentScope`]).
+
+thread_local! {
+    /// The literal-comment record of the definition being unparsed on this
+    /// thread.
+    static LITERAL_COMMENTS: std::cell::RefCell<LiteralComments> =
+        std::cell::RefCell::new(LiteralComments::default());
+}
+
+/// Installs a definition's literal-comment record for unparsing its code,
+/// restoring the enclosing definition's record when dropped.
+struct LiteralCommentScope {
+    previous: LiteralComments,
+}
+
+impl LiteralCommentScope {
+    fn enter(comments: &LiteralComments) -> Self {
+        let previous = LITERAL_COMMENTS.with(|current| current.replace(comments.clone()));
+        Self { previous }
+    }
+}
+
+impl Drop for LiteralCommentScope {
+    fn drop(&mut self) {
+        let previous = std::mem::take(&mut self.previous);
+        LITERAL_COMMENTS.with(|current| *current.borrow_mut() = previous);
+    }
+}
+
+/// The comments recorded for the literal spanning `span`, if any.
+fn literal_comment_slots(span: Span) -> Option<LiteralCommentSlots> {
+    LITERAL_COMMENTS.with(|current| current.borrow().get(span).cloned())
+}
+
+/// Prints a collection literal that has comments: one item per line, with
+/// leading comments above their item, an end-of-line comment after the item's
+/// `,`, and the comments before the closing delimiter on their own lines.
+///
+/// `items` are the printed elements; `tail` is a cons tail (`#(a | t)`),
+/// printed on its own `| t` line after the last element.
+fn unparse_commented_literal(
+    open: &'static str,
+    close: &'static str,
+    items: Vec<Document<'static>>,
+    tail: Option<Document<'static>>,
+    slots: &LiteralCommentSlots,
+) -> Document<'static> {
+    let has_tail = tail.is_some();
+    let total = items.len() + usize::from(has_tail);
+    let mut body: Vec<Document<'static>> = Vec::new();
+    let all = items
+        .into_iter()
+        .map(|d| (false, d))
+        .chain(tail.map(|d| (true, d)));
+    for (i, (is_tail, doc)) in all.enumerate() {
+        body.push(line());
+        let slot = slots.items.get(i);
+        if let Some(slot) = slot {
+            body.extend(unparse_comment_attachment_leading(slot));
+        }
+        if is_tail {
+            body.push(Document::Str("| "));
+        }
+        body.push(doc);
+        // A comma after every item but the last; the cons tail's `|` line
+        // follows the last element with no comma.
+        let tail_next = has_tail && i + 2 == total;
+        if i + 1 < total && !tail_next {
+            body.push(Document::Str(","));
+        }
+        if let Some(trailing) = slot.and_then(|s| s.trailing.as_ref()) {
+            body.push(Document::Str(" "));
+            body.push(unparse_comment(trailing));
+        }
+    }
+    for comment in &slots.closing {
+        body.push(line());
+        body.push(unparse_comment(comment));
+    }
+    docvec![open, nest(2, concat(body)), line(), close]
+}
+
 // --- Map literal unparsing ---
 
-fn unparse_map_literal(pairs: &[MapPair]) -> Document<'static> {
+fn unparse_map_literal(pairs: &[MapPair], span: Span) -> Document<'static> {
     if pairs.is_empty() {
-        return Document::Str("#{}");
+        return match literal_comment_slots(span) {
+            Some(slots) => unparse_commented_literal("#{", "}", Vec::new(), None, &slots),
+            None => Document::Str("#{}"),
+        };
     }
     let pair_docs: Vec<Document<'static>> = pairs.iter().map(unparse_map_pair).collect();
+    if let Some(slots) = literal_comment_slots(span) {
+        return unparse_commented_literal("#{", "}", pair_docs, None, &slots);
+    }
     // Try inline first (#{a => 1, b => 2}), break to one-per-line if too wide
     let mut body = Vec::new();
     for (i, pair_doc) in pair_docs.into_iter().enumerate() {
@@ -2675,11 +2772,28 @@ fn unparse_map_pair(pair: &MapPair) -> Document<'static> {
 
 // --- List literal unparsing ---
 
-fn unparse_list_literal(elements: &[Expression], tail: Option<&Expression>) -> Document<'static> {
+fn unparse_list_literal(
+    elements: &[Expression],
+    tail: Option<&Expression>,
+    span: Span,
+) -> Document<'static> {
+    let slots = literal_comment_slots(span);
     if elements.is_empty() && tail.is_none() {
-        return Document::Str("#()");
+        return match slots {
+            Some(slots) => unparse_commented_literal("#(", ")", Vec::new(), None, &slots),
+            None => Document::Str("#()"),
+        };
     }
     let elem_docs: Vec<Document<'static>> = elements.iter().map(unparse_expression).collect();
+    if let Some(slots) = slots {
+        return unparse_commented_literal(
+            "#(",
+            ")",
+            elem_docs,
+            tail.map(unparse_expression),
+            &slots,
+        );
+    }
     let joined = join_docs(elem_docs, ", ");
     if let Some(t) = tail {
         docvec!["#(", joined, " | ", unparse_expression(t), ")"]
@@ -2690,11 +2804,18 @@ fn unparse_list_literal(elements: &[Expression], tail: Option<&Expression>) -> D
 
 // --- Array literal unparsing ---
 
-fn unparse_array_literal(elements: &[Expression]) -> Document<'static> {
+fn unparse_array_literal(elements: &[Expression], span: Span) -> Document<'static> {
+    let slots = literal_comment_slots(span);
     if elements.is_empty() {
-        return Document::Str("#[]");
+        return match slots {
+            Some(slots) => unparse_commented_literal("#[", "]", Vec::new(), None, &slots),
+            None => Document::Str("#[]"),
+        };
     }
     let elem_docs: Vec<Document<'static>> = elements.iter().map(unparse_expression).collect();
+    if let Some(slots) = slots {
+        return unparse_commented_literal("#[", "]", elem_docs, None, &slots);
+    }
     let joined = join_docs(elem_docs, ", ");
     docvec!["#[", joined, "]"]
 }
@@ -2702,11 +2823,18 @@ fn unparse_array_literal(elements: &[Expression]) -> Document<'static> {
 // --- Tuple literal unparsing ---
 
 /// `{e1, e2}` (ADR 0136). A trailing comma in the source is normalised away.
-fn unparse_tuple_literal(elements: &[Expression]) -> Document<'static> {
+fn unparse_tuple_literal(elements: &[Expression], span: Span) -> Document<'static> {
+    let slots = literal_comment_slots(span);
     if elements.is_empty() {
-        return Document::Str("{}");
+        return match slots {
+            Some(slots) => unparse_commented_literal("{", "}", Vec::new(), None, &slots),
+            None => Document::Str("{}"),
+        };
     }
     let elem_docs: Vec<Document<'static>> = elements.iter().map(unparse_expression).collect();
+    if let Some(slots) = slots {
+        return unparse_commented_literal("{", "}", elem_docs, None, &slots);
+    }
     let joined = join_docs(elem_docs, ", ");
     docvec!["{", joined, "}"]
 }

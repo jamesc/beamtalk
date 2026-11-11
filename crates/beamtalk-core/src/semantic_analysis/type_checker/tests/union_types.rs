@@ -800,6 +800,7 @@ fn false_or_param_resolves_to_union() {
     // A method with parameter `x :: Integer | False` should infer x as Union.
     let method = MethodDefinition {
         pipeline_sends: crate::ast::PipelineSends::default(),
+        literal_comments: crate::ast::LiteralComments::default(),
         selector: MessageSelector::Keyword(vec![KeywordPart::new("check:", span())]),
         parameters: vec![ParameterDefinition::with_type(
             ident("x"),
@@ -851,6 +852,7 @@ fn false_or_param_resolves_to_union() {
 
     let module = Module {
         pipeline_sends: crate::ast::PipelineSends::default(),
+        literal_comments: crate::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: vec![],
         protocols: vec![],
@@ -898,6 +900,7 @@ fn bt3076_union_member_class_of_unregistered_class_still_contributes() {
         state: vec![],
         methods: vec![MethodDefinition {
             pipeline_sends: crate::ast::PipelineSends::default(),
+            literal_comments: crate::ast::LiteralComments::default(),
             selector: MessageSelector::Unary("tag".into()),
             parameters: vec![],
             body: vec![],
@@ -926,6 +929,7 @@ fn bt3076_union_member_class_of_unregistered_class_still_contributes() {
 
     let module = Module {
         pipeline_sends: crate::ast::PipelineSends::default(),
+        literal_comments: crate::ast::LiteralComments::default(),
         classes: vec![
             make_class("UnionA", TypeAnnotation::Simple(ident("Integer"))),
             make_class(
