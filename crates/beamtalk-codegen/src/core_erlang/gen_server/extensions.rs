@@ -90,11 +90,11 @@ impl CoreErlangGenerator {
         module.classes.iter().map(|c| c.name.name.clone()).collect()
     }
 
-    /// Returns true when `module` declares at least one extension method to
-    /// register (foreign or same-file).
+    /// Returns true when `module` declares at least one foreign extension
+    /// method. (A same-file extension needs a declared class, so modules with
+    /// one always take the class path.)
     pub(in crate::core_erlang) fn has_foreign_extensions(module: &Module) -> bool {
         !Self::foreign_extension_methods(module).is_empty()
-            || !Self::same_file_extension_methods(module).is_empty()
     }
 
     /// Generates the load-time `beamtalk_extensions:register/5` registration

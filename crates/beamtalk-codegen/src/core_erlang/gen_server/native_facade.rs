@@ -822,6 +822,24 @@ impl CoreErlangGenerator {
             ];
         }
 
+        // BT-4489: extensions in a native-facade file (foreign ones before the
+        // chain, same-file ones only after the classes registered successfully).
+        let foreign_ext_doc = self.generate_foreign_extension_registrations(module)?;
+        let try_body = docvec![foreign_ext_doc, try_body];
+        let has_same_file_ext = !Self::same_file_extension_methods(module).is_empty();
+        let same_file_ext_doc = self.generate_same_file_extension_registrations(module)?;
+        let of_clause = if has_same_file_ext {
+            docvec![
+                "of RegResult ->",
+                nest(
+                    INDENT,
+                    Self::gate_on_registration_ok("RegResult", same_file_ext_doc),
+                ),
+            ]
+        } else {
+            Document::Str("of RegResult -> RegResult")
+        };
+
         let doc = docvec![
             "'register_class'/0 = fun () ->",
             nest(
@@ -832,7 +850,7 @@ impl CoreErlangGenerator {
                 INDENT,
                 docvec![
                     line(),
-                    "of RegResult -> RegResult",
+                    of_clause,
                     line(),
                     "catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)",
                 ]

@@ -347,8 +347,10 @@ impl CoreErlangGenerator {
         // succeeds — it just inserts into ETS — so it does not short-circuit).
         let ext_reg_doc = self.generate_foreign_extension_registrations(module)?;
         let try_body = docvec![ext_reg_doc, class_chain];
-        // BT-4489: same-file extensions register after the host classes, once
-        // the class chain has succeeded (class-side tags need the class object).
+        // BT-4489: same-file extensions register after the host classes, only
+        // when the class chain returned success: the chain yields `{'error', _}`
+        // as a value, so the clause body is gated by `gate_on_registration_ok`
+        // (class-side tags also need the class object to exist).
         let has_same_file_ext = !Self::same_file_extension_methods(module).is_empty();
         let same_file_ext_doc = self.generate_same_file_extension_registrations(module)?;
 
@@ -375,7 +377,10 @@ impl CoreErlangGenerator {
                                 "of _ClassRegResult ->",
                                 nest(
                                     INDENT,
-                                    docvec![same_file_ext_doc, line(), "_ClassRegResult",]
+                                    Self::gate_on_registration_ok(
+                                        "_ClassRegResult",
+                                        same_file_ext_doc
+                                    ),
                                 ),
                             ]
                         } else {
@@ -403,12 +408,10 @@ impl CoreErlangGenerator {
                         "of _ClassRegResult ->",
                         nest(
                             INDENT,
-                            docvec![
-                                same_file_ext_doc,
-                                protocol_reg_doc,
-                                line(),
+                            Self::gate_on_registration_ok(
                                 "_ClassRegResult",
-                            ]
+                                docvec![same_file_ext_doc, protocol_reg_doc],
+                            )
                         ),
                         line(),
                         "catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)",
@@ -931,6 +934,36 @@ impl CoreErlangGenerator {
         }
 
         Document::Vec(parts)
+    }
+
+    /// Wraps `body` (open `let ... in` fragments) so it runs only when
+    /// `result_var` is not an `{'error', _}` registration result, then yields
+    /// `result_var` (BT-4489). A failed class registration must not leave
+    /// extension or protocol rows behind: `on_load` fails and the module is
+    /// unloaded, leaving them pointing at funs of an unloaded module.
+    pub(in crate::core_erlang) fn gate_on_registration_ok(
+        result_var: &'static str,
+        body: Document<'static>,
+    ) -> Document<'static> {
+        docvec![
+            line(),
+            "case ",
+            result_var,
+            " of",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "<{'error', _GateErr}> when 'true' -> ",
+                    result_var,
+                    line(),
+                    "<_> when 'true' ->",
+                    nest(INDENT, docvec![body, line(), result_var]),
+                ]
+            ),
+            line(),
+            "end",
+        ]
     }
 
     fn build_short_circuit_chain(class_docs: &[Document<'static>]) -> Document<'static> {

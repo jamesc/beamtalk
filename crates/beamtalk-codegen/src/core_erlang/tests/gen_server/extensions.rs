@@ -264,6 +264,21 @@ fn test_self_extension_registered_via_beamtalk_extensions() {
         "same-file class-side extension must register under the metaclass tag. Got:\n{code}"
     );
     let class_reg = code.find("_ClassRegResult ->").expect("class chain result");
+    // Reachable only from the non-error clause of the class chain's result.
+    let gate = code
+        .find("case _ClassRegResult of")
+        .expect("same-file registrations are gated on class registration success");
+    let err_clause = code[gate..]
+        .find("<{'error', _GateErr}>")
+        .expect("error clause");
+    let ok_clause = code[gate..].find("<_> when 'true' ->").expect("ok clause");
+    let reg = code[gate..]
+        .find("call 'beamtalk_extensions':'register'")
+        .expect("register call");
+    assert!(
+        err_clause < ok_clause && ok_clause < reg,
+        "register calls must sit in the non-error clause. Got:\n{code}"
+    );
     let ext_reg = code
         .find("call 'beamtalk_extensions':'register'")
         .expect("register call");

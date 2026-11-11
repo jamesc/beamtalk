@@ -220,6 +220,7 @@ const HAND_WRITTEN: &[&str] = &[
     "_ExtOwner",
     "_Extra",
     "_From",
+    "_GateErr",
     "_H",
     "_HfBadArgs",
     "_InfoDispatchResult",
