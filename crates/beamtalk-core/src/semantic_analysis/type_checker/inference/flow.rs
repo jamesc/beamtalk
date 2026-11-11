@@ -298,7 +298,7 @@ impl TypeChecker {
             var_key,
             env,
             hierarchy,
-            self.alias_registry.as_ref(),
+            self.alias_registry.as_deref(),
             self.protocol_registry.as_deref(),
         )
     }
@@ -428,7 +428,7 @@ impl TypeChecker {
                 info,
                 env,
                 hierarchy,
-                self.alias_registry.as_ref(),
+                self.alias_registry.as_deref(),
                 self.protocol_registry.as_deref(),
             );
         }
@@ -470,7 +470,7 @@ impl TypeChecker {
                 &info,
                 env,
                 hierarchy,
-                self.alias_registry.as_ref(),
+                self.alias_registry.as_deref(),
                 self.protocol_registry.as_deref(),
             ) else {
                 return;

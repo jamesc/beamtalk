@@ -1994,8 +1994,8 @@ impl LanguageService for SimpleLanguageService {
             position,
             self.project_index.hierarchy(),
             current_package.as_deref(),
-            self.native_types.as_deref(),
-            Some(self.project_index.alias_registry()),
+            self.native_types.as_ref(),
+            Some(self.project_index.alias_registry_arc()),
             Some(protocol_registry),
         )
     }
@@ -2017,8 +2017,8 @@ impl LanguageService for SimpleLanguageService {
             &file_data.source,
             position,
             self.project_index.hierarchy(),
-            self.native_types.as_deref(),
-            Some(self.project_index.alias_registry()),
+            self.native_types.as_ref(),
+            Some(self.project_index.alias_registry_arc()),
             Some(protocol_registry),
         )
     }
@@ -2036,9 +2036,9 @@ impl LanguageService for SimpleLanguageService {
             &file_data.source,
             position,
             self.project_index.hierarchy(),
-            self.native_types.as_deref(),
+            self.native_types.as_ref(),
             Some(protocol_registry),
-            Some(self.project_index.alias_registry()),
+            Some(self.project_index.alias_registry_arc()),
         )
     }
 

@@ -1791,7 +1791,7 @@ impl TypeChecker {
                     // Inline (not `resolution_context()`) so the disjoint
                     // `protocol_registry` borrow composes.
                     let declared = type_resolver::ResolutionContext::new(
-                        self.alias_registry.as_ref(),
+                        self.alias_registry.as_deref(),
                         &mut self.referenced_aliases,
                     )
                     .resolve_type_annotation(
@@ -1949,7 +1949,7 @@ impl TypeChecker {
             return;
         }
         let expected = type_resolver::ResolutionContext::new(
-            self.alias_registry.as_ref(),
+            self.alias_registry.as_deref(),
             &mut self.referenced_aliases,
         )
         .resolve_type_annotation(

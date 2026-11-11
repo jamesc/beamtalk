@@ -533,7 +533,7 @@ impl TypeChecker {
             // sibling borrow in one expression where a method call would not
             // — see `TypeChecker::resolution_context`'s doc.
             type_resolver::ResolutionContext::new(
-                self.alias_registry.as_ref(),
+                self.alias_registry.as_deref(),
                 &mut self.referenced_aliases,
             )
             .resolve_type_annotation(

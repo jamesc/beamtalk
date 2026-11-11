@@ -240,7 +240,7 @@ pub(in crate::semantic_analysis) fn resolve_declared_type_with_alias_deps(
 /// hot-reload re-check trigger) — as one value.
 ///
 /// Every call site that needs *both* fields previously reached
-/// `self.alias_registry.as_ref()` and `&mut self.referenced_aliases` (or
+/// `self.alias_registry.as_deref()` and `&mut self.referenced_aliases` (or
 /// `self.referenced_aliases.extend(deps)`) as two separate `TypeChecker`
 /// field accesses; `TypeChecker::resolution_context` hands back one value
 /// instead, and [`Self::resolve_type_annotation`] collapses the

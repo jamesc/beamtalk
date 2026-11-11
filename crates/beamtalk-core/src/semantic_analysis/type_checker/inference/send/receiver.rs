@@ -898,7 +898,7 @@ impl TypeChecker {
                                 Some(&receiver_ty),
                             ),
                             self.protocol_registry.as_deref(),
-                            self.alias_registry.as_ref(),
+                            self.alias_registry.as_deref(),
                             TypeStringContext::Substitution,
                             Some(hierarchy),
                         );
@@ -935,7 +935,7 @@ impl TypeChecker {
                         ret_ty,
                         &type_resolver::SubstitutionMap::new(),
                         self.protocol_registry.as_deref(),
-                        self.alias_registry.as_ref(),
+                        self.alias_registry.as_deref(),
                         TypeStringContext::Declared,
                     );
                 }
@@ -1182,7 +1182,7 @@ impl TypeChecker {
                         Some(&instance_ty),
                     ),
                     self.protocol_registry.as_deref(),
-                    self.alias_registry.as_ref(),
+                    self.alias_registry.as_deref(),
                     TypeStringContext::Declared,
                 ),
             };
@@ -1484,7 +1484,7 @@ impl TypeChecker {
                                         Some(member),
                                     ),
                                     self.protocol_registry.as_deref(),
-                                    self.alias_registry.as_ref(),
+                                    self.alias_registry.as_deref(),
                                     TypeStringContext::Substitution,
                                     Some(hierarchy),
                                 ));
@@ -1501,7 +1501,7 @@ impl TypeChecker {
                                     ret_ty,
                                     &type_resolver::SubstitutionMap::new(),
                                     self.protocol_registry.as_deref(),
-                                    self.alias_registry.as_ref(),
+                                    self.alias_registry.as_deref(),
                                     TypeStringContext::Declared,
                                 ));
                             }
@@ -1565,7 +1565,7 @@ impl TypeChecker {
                             ret_ty,
                             &type_resolver::SubstitutionMap::new(),
                             self.protocol_registry.as_deref(),
-                            self.alias_registry.as_ref(),
+                            self.alias_registry.as_deref(),
                             TypeStringContext::Declared,
                         )
                     };

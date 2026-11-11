@@ -122,7 +122,7 @@ pub struct ProjectIndex {
     /// Rebuilt from [`Self::file_aliases`] on every [`Self::update_file_aliases`]
     /// / [`Self::remove_file`] call; see [`Self::rebuild_alias_registry`]'s
     /// doc for why a full rebuild (rather than incremental removal) is used.
-    merged_aliases: AliasRegistry,
+    merged_aliases: Arc<AliasRegistry>,
     /// Per-file tracking of which [`AliasInfo`] entries came from which file
     /// (mirrors `file_classes`), so [`Self::rebuild_alias_registry`] can
     /// recompute `merged_aliases` deterministically after an incremental
@@ -169,6 +169,40 @@ pub struct ProjectIndex {
     /// distinct real packages opened as sibling workspace roots get distinct
     /// stamps instead of colliding on the same fixed marker.
     root_packages: Vec<(Utf8PathBuf, EcoString)>,
+    /// Per-file protocol registries built by [`Self::protocol_registry_for`]
+    /// (BT-4456). Cleared by every mutator that can change what the build
+    /// reads (`merged_hierarchy`, `file_protocols`, the stdlib/package
+    /// classification).
+    protocol_registry_cache: ProtocolRegistryCache,
+}
+
+/// One cached [`ProjectIndex::protocol_registry_for`] result, valid while the
+/// index is unchanged (the cache is cleared on every mutation) and the module's
+/// own protocol declarations equal `module_protocols`.
+#[derive(Debug)]
+struct CachedProtocolRegistry {
+    module_protocols: Vec<beamtalk_core::ast::ProtocolDefinition>,
+    registry: Arc<ProtocolRegistry>,
+}
+
+/// Interior-mutable cache behind `&self` queries. `Clone` yields an *empty*
+/// cache: a cloned index must not share entries with the original.
+#[derive(Debug, Default)]
+struct ProtocolRegistryCache(std::sync::Mutex<HashMap<Utf8PathBuf, CachedProtocolRegistry>>);
+
+impl Clone for ProtocolRegistryCache {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl ProtocolRegistryCache {
+    fn clear(&mut self) {
+        self.0
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+    }
 }
 
 impl ProjectIndex {
@@ -182,13 +216,14 @@ impl ProjectIndex {
             stdlib_class_names: HashSet::new(),
             stdlib_files: HashSet::new(),
             file_extensions: HashMap::new(),
-            merged_aliases: AliasRegistry::new(),
+            merged_aliases: Arc::new(AliasRegistry::new()),
             file_aliases: HashMap::new(),
             file_protocols: HashMap::new(),
             file_protocol_defs: HashMap::new(),
             file_protocol_uses: HashMap::new(),
             protocol_users: HashMap::new(),
             root_packages: Vec::new(),
+            protocol_registry_cache: ProtocolRegistryCache::default(),
         }
     }
 
@@ -324,12 +359,22 @@ impl ProjectIndex {
         &self.merged_aliases
     }
 
+    /// [`Self::alias_registry`] as the shared `Arc`, which the hover,
+    /// completion and signature-help type pass hands to its `TypeChecker`
+    /// without a deep clone per request (BT-4456). The `Arc` is replaced, not
+    /// mutated, on every rebuild, so a clone taken here is a stable snapshot.
+    #[must_use]
+    pub fn alias_registry_arc(&self) -> &Arc<AliasRegistry> {
+        &self.merged_aliases
+    }
+
     /// Add or update a file in the index.
     ///
     /// If the file was previously indexed, its old class definitions are
     /// removed and then re-merged from remaining files to handle conflicts
     /// correctly (two files defining the same class name).
     pub fn update_file(&mut self, file: Utf8PathBuf, hierarchy: &ClassHierarchy) {
+        self.protocol_registry_cache.clear();
         // Remove old classes from this file (if any)
         if let Some(old_names) = self.file_classes.remove(&file) {
             self.merged_hierarchy.remove_classes(&old_names);
@@ -426,6 +471,7 @@ impl ProjectIndex {
     /// it exists purely so this method's shape mirrors
     /// [`Self::update_file_aliases`]'s for a reader comparing the two.
     pub fn update_file_protocols(&mut self, file: Utf8PathBuf, mut protocols: Vec<ProtocolInfo>) {
+        self.protocol_registry_cache.clear();
         // A dependency's protocols are stamped with its package so
         // `ProtocolRegistry::add_pre_loaded` applies the BT-3915 shadow rule
         // to type annotations, as the CLI does (BT-3946); a project file's
@@ -566,7 +612,7 @@ impl ProjectIndex {
                 Some(CURRENT_PROJECT_PACKAGE_MARKER),
             );
         }
-        self.merged_aliases = registry;
+        self.merged_aliases = Arc::new(registry);
     }
 
     /// Record the standalone extension definitions contributed by `file`
@@ -599,6 +645,7 @@ impl ProjectIndex {
     /// Classes defined only in this file are removed from the merged hierarchy.
     /// Classes also defined in other files are preserved (re-merged).
     pub fn remove_file(&mut self, file: &Utf8PathBuf) {
+        self.protocol_registry_cache.clear();
         if self.stdlib_files.contains(file) {
             // Stdlib files are never truly removed — preserve their hierarchy
             return;
@@ -653,6 +700,7 @@ impl ProjectIndex {
     /// other files. This method restores the first definition found, using
     /// deterministic (sorted by path) iteration order.
     fn remerge_classes(&mut self, names: &[EcoString]) {
+        self.protocol_registry_cache.clear();
         // Sort file paths for deterministic conflict resolution
         let mut sorted_paths: Vec<&Utf8PathBuf> = self.file_hierarchies.keys().collect();
         sorted_paths.sort();
@@ -742,6 +790,7 @@ impl ProjectIndex {
     /// against the new root map, so call order relative to
     /// [`Self::update_file_aliases`] no longer matters for correctness.
     pub fn set_root_packages(&mut self, root_packages: Vec<(Utf8PathBuf, EcoString)>) {
+        self.protocol_registry_cache.clear();
         self.root_packages = root_packages;
         self.restamp_file_aliases();
     }
@@ -819,6 +868,7 @@ impl ProjectIndex {
     /// [`STDLIB_PACKAGE_MARKER`] here instead of keeping the same-project
     /// marker until the next edit.
     pub fn mark_stdlib_file(&mut self, file: Utf8PathBuf) {
+        self.protocol_registry_cache.clear();
         let had_aliases = self.file_aliases.contains_key(&file);
         let newly_marked = self.stdlib_files.insert(file);
         if newly_marked && had_aliases {
@@ -906,15 +956,27 @@ impl ProjectIndex {
     /// the same in the editor as in `beamtalk build`. Collision diagnostics
     /// are dropped — the diagnostics provider reports them.
     ///
-    /// Built once per request and returned as an `Arc`, which the providers
-    /// hand on to the type pass's `TypeChecker` without a second deep clone
-    /// (BT-4450).
+    /// Returned as an `Arc`, which the providers hand on to the type pass's
+    /// `TypeChecker` without a second deep clone (BT-4450). Cached per file
+    /// (BT-4456): a repeat call returns the same `Arc` while the index is
+    /// unchanged and `module` declares the same protocols; any index mutation
+    /// drops the cache.
     #[must_use]
     pub fn protocol_registry_for(
         &self,
         file: &Utf8PathBuf,
         module: &beamtalk_core::ast::Module,
     ) -> Arc<ProtocolRegistry> {
+        let mut cache = self
+            .protocol_registry_cache
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(hit) = cache.get(file)
+            && hit.module_protocols == module.protocols
+        {
+            return Arc::clone(&hit.registry);
+        }
         let package = self.alias_package_for_file(file);
         let mut registry = ProtocolRegistry::new();
         let _ = registry.seed_and_register_module(
@@ -923,7 +985,15 @@ impl ProjectIndex {
             &self.merged_hierarchy,
             beamtalk_core::semantic_analysis::trait_expansion::known_package(Some(&package)),
         );
-        Arc::new(registry)
+        let registry = Arc::new(registry);
+        cache.insert(
+            file.clone(),
+            CachedProtocolRegistry {
+                module_protocols: module.protocols.clone(),
+                registry: Arc::clone(&registry),
+            },
+        );
+        registry
     }
 
     /// The per-file entries of `map` other than `file`'s own, in the one
@@ -1367,7 +1437,7 @@ mod tests {
         index.update_file(Utf8PathBuf::from("aliases.bt"), &alias_hierarchy);
         index.update_file_aliases(
             Utf8PathBuf::from("aliases.bt"),
-            beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&alias_module),
+            AliasRegistry::extract_alias_infos(&alias_module),
         );
         assert!(index.alias_registry().has_alias("RestartStrategy"));
 
@@ -1395,7 +1465,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
-        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file, infos);
 
         assert!(index.alias_registry().has_alias("RestartStrategy"));
@@ -1410,7 +1480,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
-        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file.clone(), infos);
         assert!(index.alias_registry().has_alias("Foo"));
 
@@ -1419,7 +1489,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
-        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file, infos);
 
         assert!(index.alias_registry().has_alias("Bar"));
@@ -1470,6 +1540,72 @@ mod tests {
         assert_eq!(own[0].package, None, "own-package protocols stay unstamped");
     }
 
+    /// BT-4456: `protocol_registry_for` is cached per file — a repeat call
+    /// returns the same `Arc` — and any index mutation (here a cross-file
+    /// protocol changing) drops the cache so the next call sees it.
+    #[test]
+    fn protocol_registry_for_is_cached_until_the_index_changes() {
+        let parse_module = |src: &str| parse(lex_with_eof(src)).0;
+        let mut index = ProjectIndex::new();
+        let file = Utf8PathBuf::from("src/Own.bt");
+        let other = Utf8PathBuf::from("src/Other.bt");
+        let module = parse_module("Protocol define: Mine\n  label -> String\n");
+
+        let first = index.protocol_registry_for(&file, &module);
+        let second = index.protocol_registry_for(&file, &module);
+        assert!(
+            Arc::ptr_eq(&first, &second),
+            "repeat call must hit the cache"
+        );
+        assert!(first.has_protocol("Mine"));
+
+        // A different module for the same file (an edit) is not served stale.
+        let edited = parse_module("Protocol define: Renamed\n  label -> String\n");
+        let after_edit = index.protocol_registry_for(&file, &edited);
+        assert!(!Arc::ptr_eq(&first, &after_edit));
+        assert!(after_edit.has_protocol("Renamed"));
+        assert!(!after_edit.has_protocol("Mine"));
+
+        // A cross-file protocol change invalidates.
+        let before = index.protocol_registry_for(&file, &edited);
+        assert!(!before.has_protocol("Wire"));
+        let wire = parse_module("Protocol define: Wire\n  label -> String\n");
+        index.update_file_protocols(other, ProtocolRegistry::extract_protocol_infos(&wire));
+        let after = index.protocol_registry_for(&file, &edited);
+        assert!(!Arc::ptr_eq(&before, &after));
+        assert!(after.has_protocol("Wire"));
+    }
+
+    /// BT-4456: a cloned index starts with an empty cache rather than
+    /// sharing the original's entries.
+    #[test]
+    fn cloned_index_does_not_share_the_protocol_registry_cache() {
+        let module = parse(lex_with_eof("Protocol define: Mine\n  label -> String\n")).0;
+        let file = Utf8PathBuf::from("src/Own.bt");
+        let index = ProjectIndex::new();
+        let original = index.protocol_registry_for(&file, &module);
+        let cloned = index.clone();
+        let from_clone = cloned.protocol_registry_for(&file, &module);
+        assert!(!Arc::ptr_eq(&original, &from_clone));
+    }
+
+    /// BT-4456: the alias registry handed to the type pass is the index's own
+    /// `Arc`, not a copy, and a rebuild replaces it.
+    #[test]
+    fn alias_registry_arc_is_shared_and_replaced_on_rebuild() {
+        let mut index = ProjectIndex::new();
+        assert!(Arc::ptr_eq(
+            index.alias_registry_arc(),
+            index.alias_registry_arc()
+        ));
+        let before = Arc::clone(index.alias_registry_arc());
+        let (module, _) = parse(lex_with_eof("type Id = Integer\n"));
+        let infos = AliasRegistry::extract_alias_infos(&module);
+        index.update_file_aliases(Utf8PathBuf::from("src/A.bt"), infos);
+        assert!(!Arc::ptr_eq(&before, index.alias_registry_arc()));
+        assert!(!before.has_alias("Id"), "an earlier snapshot is unchanged");
+    }
+
     /// `update_file_aliases` must stamp `AliasInfo.package` from the
     /// file's own path — a dependency file (under `_build/deps/<name>/src/`)
     /// gets `<name>`, a same-project file gets the same-project marker.
@@ -1485,7 +1621,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(dep_file.clone(), &hierarchy);
-        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(dep_file.clone(), infos);
 
         let dep_infos = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
@@ -1500,7 +1636,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(project_file.clone(), &hierarchy);
-        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(project_file, infos);
 
         let project_infos = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
@@ -1544,7 +1680,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(stdlib_file.clone(), &hierarchy);
-        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(stdlib_file.clone(), infos);
 
         let reindexed = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
@@ -1582,7 +1718,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(stdlib_file.clone(), &hierarchy);
-        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(stdlib_file, infos);
 
         let seen = index.cross_file_alias_infos_for(&Utf8PathBuf::from("elsewhere.bt"));
@@ -1610,7 +1746,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(stdlib_file.clone(), &hierarchy);
-        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(stdlib_file.clone(), infos);
 
         index.mark_stdlib_file(stdlib_file);
@@ -1638,7 +1774,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
-        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file.clone(), infos);
 
         // Indexed before any root is known — fallback marker for now.
@@ -1679,14 +1815,14 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file_a.clone(), &hierarchy);
-        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file_a.clone(), infos);
 
         let tokens = lex_with_eof("internal type Foo = String");
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file_b.clone(), &hierarchy);
-        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file_b.clone(), infos);
 
         assert_eq!(
@@ -1760,7 +1896,7 @@ mod tests {
         let (module, _) = parse(tokens);
         let hierarchy = ClassHierarchy::build(&module).0.unwrap();
         index.update_file(file.clone(), &hierarchy);
-        let infos = beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+        let infos = AliasRegistry::extract_alias_infos(&module);
         index.update_file_aliases(file.clone(), infos);
         assert!(index.alias_registry().has_alias("RestartStrategy"));
 
@@ -1785,8 +1921,7 @@ mod tests {
         let (alias_module, _) = parse(alias_tokens);
         let alias_hierarchy = ClassHierarchy::build(&alias_module).0.unwrap();
         index.update_file(Utf8PathBuf::from("alias_foo.bt"), &alias_hierarchy);
-        let infos =
-            beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&alias_module);
+        let infos = AliasRegistry::extract_alias_infos(&alias_module);
         index.update_file_aliases(Utf8PathBuf::from("alias_foo.bt"), infos);
 
         assert!(
@@ -1813,8 +1948,7 @@ mod tests {
         let (alias_module, _) = parse(alias_tokens);
         let alias_hierarchy = ClassHierarchy::build(&alias_module).0.unwrap();
         index.update_file(Utf8PathBuf::from("alias_foo.bt"), &alias_hierarchy);
-        let infos =
-            beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&alias_module);
+        let infos = AliasRegistry::extract_alias_infos(&alias_module);
         index.update_file_aliases(Utf8PathBuf::from("alias_foo.bt"), infos);
         assert!(index.alias_registry().has_alias("Foo"));
 

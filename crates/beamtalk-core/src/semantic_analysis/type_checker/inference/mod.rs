@@ -387,7 +387,7 @@ impl TypeChecker {
         // sibling borrow in one expression where a method call (opaque to
         // the borrow checker) would not — see `resolution_context`'s doc.
         let mut ctx = type_resolver::ResolutionContext::new(
-            self.alias_registry.as_ref(),
+            self.alias_registry.as_deref(),
             &mut self.referenced_aliases,
         );
         Self::set_param_types(
@@ -670,7 +670,7 @@ impl TypeChecker {
                                         &field_type,
                                         &type_resolver::SubstitutionMap::new(),
                                         self.protocol_registry.as_deref(),
-                                        self.alias_registry.as_ref(),
+                                        self.alias_registry.as_deref(),
                                         TypeStringContext::Declared,
                                     )
                                 } else {
@@ -736,7 +736,7 @@ impl TypeChecker {
                                     &field_type,
                                     &type_resolver::SubstitutionMap::new(),
                                     self.protocol_registry.as_deref(),
-                                    self.alias_registry.as_ref(),
+                                    self.alias_registry.as_deref(),
                                     TypeStringContext::Declared,
                                 );
                             }
@@ -898,7 +898,7 @@ impl TypeChecker {
                                 &type_args,
                                 parent,
                                 hierarchy,
-                                self.alias_registry.as_ref(),
+                                self.alias_registry.as_deref(),
                             )
                         } else {
                             InferredType::Dynamic(DynamicReason::Unknown)

@@ -415,23 +415,27 @@ pub fn infer_types_and_returns(
 /// [`TypeChecker::check_module_with_protocols_and_aliases`], whose
 /// diagnostics these callers discard. `None` for both registries is
 /// identical to [`infer_types_and_returns`].
+///
+/// All three registries are `Arc`s shared with the caller rather than
+/// deep-cloned per call (BT-4450, BT-4456): the LSP runs this on every
+/// keystroke.
 #[must_use]
 pub fn infer_types_and_returns_with_registries(
     module: &Module,
     hierarchy: &ClassHierarchy,
-    native_type_registry: Option<&NativeTypeRegistry>,
+    native_type_registry: Option<Arc<NativeTypeRegistry>>,
     protocol_registry: Option<Arc<ProtocolRegistry>>,
-    alias_registry: Option<&AliasRegistry>,
+    alias_registry: Option<Arc<AliasRegistry>>,
 ) -> (TypeMap, HashMap<MethodReturnKey, InferredType>) {
     let mut checker = TypeChecker::new();
     if let Some(registry) = native_type_registry {
-        checker.set_native_type_registry(registry.clone());
+        checker.set_native_type_registry(registry);
     }
     if let Some(protocols) = protocol_registry {
         checker.set_protocol_registry(protocols);
     }
     if let Some(aliases) = alias_registry {
-        checker.set_alias_registry(aliases.clone());
+        checker.set_alias_registry(aliases);
     }
     checker.check_module(module, hierarchy);
     (checker.take_type_map(), checker.take_method_return_types())
@@ -511,7 +515,7 @@ pub struct TypeChecker {
     /// running the main type checking pass; `None` means "no aliases in
     /// this compile" and every `Simple` name resolves as an ordinary
     /// nominal class, matching pre-ADR-0108 behaviour.
-    pub(super) alias_registry: Option<AliasRegistry>,
+    pub(super) alias_registry: Option<Arc<AliasRegistry>>,
     /// Every alias name touched while resolving an annotation during this
     /// check (ADR 0108 hot-reload re-check trigger).
     ///
@@ -615,7 +619,7 @@ impl TypeChecker {
 
     /// Borrows `alias_registry` and `referenced_aliases` together as one
     /// [`type_resolver::ResolutionContext`], so a call site that needs both
-    /// no longer reaches `self.alias_registry.as_ref()` and `&mut
+    /// no longer reaches `self.alias_registry.as_deref()` and `&mut
     /// self.referenced_aliases` (or `self.referenced_aliases.extend`) as two
     /// separate field accesses.
     ///
@@ -628,7 +632,7 @@ impl TypeChecker {
         &mut self,
     ) -> type_resolver::ResolutionContext<'_> {
         type_resolver::ResolutionContext::new(
-            self.alias_registry.as_ref(),
+            self.alias_registry.as_deref(),
             &mut self.referenced_aliases,
         )
     }
@@ -653,8 +657,8 @@ impl TypeChecker {
     /// `resolve_type_annotation` call site (see that field's doc), so
     /// setting it here before calling `check_module` directly is sufficient
     /// — no separate "aliases-only" entry point is needed.
-    pub fn set_alias_registry(&mut self, registry: AliasRegistry) {
-        self.alias_registry = Some(registry);
+    pub fn set_alias_registry(&mut self, registry: impl Into<Arc<AliasRegistry>>) {
+        self.alias_registry = Some(registry.into());
     }
 
     /// Sets the protocol registry for the *base* [`Self::check_module`]
@@ -783,7 +787,7 @@ impl TypeChecker {
         // `self.alias_registry` to resolve alias-named generic type
         // arguments (e.g. `Logger(Small)` where `type Small = Integer`)
         // before checking them against a declared bound.
-        self.alias_registry = Some(alias_registry.clone());
+        self.alias_registry = Some(Arc::new(alias_registry.clone()));
 
         // Run the standard type checking pass first
         self.check_normalised_module(module, hierarchy);
