@@ -169,7 +169,7 @@ do_register(ClassName, ClassInfo) ->
             Error1 = beamtalk_error:new(internal_error, 'ClassBuilder', register),
             Error = beamtalk_error:with_hint(
                 Error1,
-                iolist_to_binary(io_lib:format("~s failed: ~p", [Phase, Reason]))
+                beamtalk_error:chars_to_binary(io_lib:format("~ts failed: ~tp", [Phase, Reason]))
             ),
             {error, Error}
     end.
@@ -232,9 +232,9 @@ validate(_ClassName, SuperclassRef, _) when
     {error,
         beamtalk_error:with_hint(
             Error1,
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "superclassRef must be an atom, pid, or class object, got: ~p",
+                    "superclassRef must be an atom, pid, or class object, got: ~tp",
                     [SuperclassRef]
                 )
             )
@@ -273,9 +273,9 @@ validate_superclass_not_sealed(SuperclassRef) ->
                     {error,
                         beamtalk_error:with_hint(
                             Error1,
-                            iolist_to_binary(
+                            beamtalk_error:chars_to_binary(
                                 io_lib:format(
-                                    "cannot subclass sealed class ~p",
+                                    "cannot subclass sealed class ~tp",
                                     [SuperclassName]
                                 )
                             )

@@ -661,7 +661,7 @@ classify_erlang_error(
 -doc "Format an actionable hint for an Erlang error.".
 -spec erlang_error_hint(atom(), atom(), term()) -> binary().
 erlang_error_hint(Module, FunName, Reason) ->
-    ReasonBin = iolist_to_binary(io_lib:format("~p", [Reason])),
+    ReasonBin = beamtalk_error:chars_to_binary(io_lib:format("~tp", [Reason])),
     iolist_to_binary([
         <<"Erlang error in ">>,
         atom_to_binary(Module, utf8),

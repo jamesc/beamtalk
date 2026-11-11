@@ -383,7 +383,7 @@ Any other `badarg` keeps its generic message.
 wrap_raw({badarity, {Fun, Args}}, _Context) when is_function(Fun), is_list(Args) ->
     {arity, Expected} = erlang:fun_info(Fun, arity),
     Actual = length(Args),
-    Message = iolist_to_binary(
+    Message = beamtalk_error:chars_to_binary(
         io_lib:format(
             "Wrong number of arguments: block expects ~B but was called with ~B",
             [Expected, Actual]
@@ -403,7 +403,7 @@ wrap_raw(badarith, Context) ->
     wrap_classified(classify_kind(badarith), Cls, Sel, Message, Hint, #{reason => badarith});
 wrap_raw({badkey, Key}, Context) ->
     {Sel, Cls} = breadcrumb(Context),
-    Core = iolist_to_binary(io_lib:format("key not found: ~tp", [Key])),
+    Core = beamtalk_error:chars_to_binary(io_lib:format("key not found: ~tp", [Key])),
     Message = located(Sel, Cls, Core),
     Hint = <<"Use 'includesKey:' to test first, or 'at:ifAbsent:' to supply a default.">>,
     wrap_classified(classify_kind({badkey, Key}), Cls, Sel, Message, Hint, #{
@@ -448,8 +448,8 @@ wrap_raw(Reason, Context) when
     Message = located(
         Sel,
         Cls,
-        iolist_to_binary(
-            io_lib:format("internal error (~s) - this is a bug in Beamtalk", [Tag])
+        beamtalk_error:chars_to_binary(
+            io_lib:format("internal error (~ts) - this is a bug in Beamtalk", [Tag])
         )
     ),
     Hint = <<"Please report this with the code that triggered it; it should not happen.">>,
@@ -483,7 +483,7 @@ wrap_raw(Other, Context) ->
         classify_kind(Other),
         Cls,
         Sel,
-        iolist_to_binary(io_lib:format("~p", [Other])),
+        beamtalk_error:chars_to_binary(io_lib:format("~tp", [Other])),
         undefined,
         #{reason => Other}
     ).
@@ -529,9 +529,9 @@ located(undefined, _Class, Core) ->
 %% ~ts (not ~s): an error formatter must never itself crash, even on an
 %% interop-supplied class/selector atom carrying non-Latin1 codepoints.
 located(Selector, undefined, Core) ->
-    iolist_to_binary(io_lib:format("'~ts': ~ts", [Selector, Core]));
+    beamtalk_error:chars_to_binary(io_lib:format("'~ts': ~ts", [Selector, Core]));
 located(Selector, Class, Core) ->
-    iolist_to_binary(io_lib:format("~ts>>~ts: ~ts", [Class, Selector, Core])).
+    beamtalk_error:chars_to_binary(io_lib:format("~ts>>~ts: ~ts", [Class, Selector, Core])).
 
 %% Human-readable tag for a bucket-B internal reason.
 -spec internal_reason_tag(term()) -> atom().
@@ -673,7 +673,7 @@ bs_fail_scalar(_) ->
 
 -spec bs_fail_term(term()) -> binary().
 bs_fail_term(Value) ->
-    iolist_to_binary(io_lib:format("~0tP", [Value, ?BS_FAIL_VALUE_DEPTH])).
+    beamtalk_error:chars_to_binary(io_lib:format("~0tP", [Value, ?BS_FAIL_VALUE_DEPTH])).
 
 -spec bs_fail_truncate(unicode:chardata()) -> unicode:chardata().
 bs_fail_truncate(Printed) ->
@@ -774,8 +774,8 @@ ensure_wrapped(error, undef, Stacktrace) ->
                         is_integer(ArgsOrArity) -> ArgsOrArity;
                         true -> 0
                     end,
-                iolist_to_binary(
-                    io_lib:format("Undefined function: ~p:~p/~p", [Mod, Fun, Arity])
+                beamtalk_error:chars_to_binary(
+                    io_lib:format("Undefined function: ~tp:~tp/~tp", [Mod, Fun, Arity])
                 );
             _ ->
                 <<"Undefined function">>
@@ -798,7 +798,7 @@ ensure_wrapped(exit, Reason, Stacktrace) ->
         class = undefined,
         selector = undefined,
         message = beamtalk_primitive:string_from_binary(
-            iolist_to_binary(io_lib:format("~p", [Reason]))
+            beamtalk_error:chars_to_binary(io_lib:format("~tp", [Reason]))
         ),
         hint = undefined,
         details = #{reason => Reason}
@@ -829,7 +829,7 @@ ensure_wrapped(throw, Reason, Stacktrace) ->
                 class = undefined,
                 selector = undefined,
                 message = beamtalk_primitive:string_from_binary(
-                    iolist_to_binary(io_lib:format("~p", [Reason]))
+                    beamtalk_error:chars_to_binary(io_lib:format("~tp", [Reason]))
                 ),
                 hint = undefined,
                 details = #{reason => Reason}
@@ -1194,7 +1194,7 @@ signal_message(Message) when is_atom(Message) ->
     signal_message(atom_to_binary(Message, utf8));
 signal_message(Message) ->
     %% Convert other types to binary for robustness
-    signal_message(iolist_to_binary(io_lib:format("~p", [Message]))).
+    signal_message(beamtalk_error:chars_to_binary(io_lib:format("~tp", [Message]))).
 
 -doc """
 Raise a new exception with a message, preserving the exception class.
@@ -1223,7 +1223,9 @@ signal_message(Message, ExceptionClass, Details) when is_binary(Message) ->
 signal_message(Message, ExceptionClass, Details) when is_atom(Message) ->
     signal_message(atom_to_binary(Message, utf8), ExceptionClass, Details);
 signal_message(Message, ExceptionClass, Details) ->
-    signal_message(iolist_to_binary(io_lib:format("~p", [Message])), ExceptionClass, Details).
+    signal_message(
+        beamtalk_error:chars_to_binary(io_lib:format("~tp", [Message])), ExceptionClass, Details
+    ).
 
 -doc """
 Raise a new exception from a class instance without a message.

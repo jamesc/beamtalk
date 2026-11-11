@@ -376,7 +376,7 @@ remote_introspect(Name, Selector, Fun, Args) ->
 
 -spec format_reason(term()) -> binary().
 format_reason(Reason) ->
-    iolist_to_binary(io_lib:format("remote query failed: ~tp", [Reason])).
+    beamtalk_error:chars_to_binary(io_lib:format("remote query failed: ~tp", [Reason])).
 
 -spec introspection_error(atom(), atom(), node(), binary()) -> #beamtalk_error{}.
 introspection_error(Kind, Selector, Name, Hint) ->
@@ -544,7 +544,7 @@ remote_manifest_timeout_error(Name) ->
 remote_manifest_error(Name, Reason) ->
     Error0 = beamtalk_error:with_hint(
         beamtalk_error:new(runtime_error, 'Node', shapeManifest),
-        iolist_to_binary(io_lib:format("shapeManifest fetch failed: ~tp", [Reason]))
+        beamtalk_error:chars_to_binary(io_lib:format("shapeManifest fetch failed: ~tp", [Reason]))
     ),
     beamtalk_error:with_details(Error0, #{node => Name}).
 

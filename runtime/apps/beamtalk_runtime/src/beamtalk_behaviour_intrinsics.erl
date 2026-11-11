@@ -1858,8 +1858,8 @@ remove_local_method(ClassName, Selector, Side) ->
             beamtalk_error:raise(Structured);
         {error, Reason} ->
             Error0 = beamtalk_error:new(runtime_error, ClassName, Selector),
-            Msg = iolist_to_binary(
-                io_lib:format("Could not remove method: ~p", [Reason])
+            Msg = beamtalk_error:chars_to_binary(
+                io_lib:format("Could not remove method: ~tp", [Reason])
             ),
             beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
     end.
@@ -2188,7 +2188,7 @@ rename_rewrite_failed_error(OldName, no_sites) ->
     );
 rename_rewrite_failed_error(OldName, Reason) ->
     Error0 = beamtalk_error:new(runtime_error, OldName),
-    Msg = iolist_to_binary(io_lib:format("Could not rename class: ~p", [Reason])),
+    Msg = beamtalk_error:chars_to_binary(io_lib:format("Could not rename class: ~tp", [Reason])),
     beamtalk_error:with_message(Error0, Msg).
 
 %% A dynamic class's identity move committed AFTER `validate_class_sites/4`
@@ -2201,11 +2201,11 @@ rename_rewrite_failed_error(OldName, Reason) ->
 -spec rename_partial_failure_error(atom(), atom(), term()) -> #beamtalk_error{}.
 rename_partial_failure_error(OldName, NewName, Reason) ->
     Error0 = beamtalk_error:new(runtime_error, OldName),
-    Msg = iolist_to_binary(
+    Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "Renamed ~p to ~p, but rewriting its reference sites failed after "
+            "Renamed ~tp to ~tp, but rewriting its reference sites failed after "
             "validation passed (partial state — the class's own identity has "
-            "already moved; investigate before retrying): ~p",
+            "already moved; investigate before retrying): ~tp",
             [OldName, NewName, Reason]
         )
     ),
@@ -2554,9 +2554,9 @@ install_class_rename(OldName, NewName, #{not_flushable_reason := <<"dynamic">>})
             Pid;
         {error, Reason} ->
             Error0 = beamtalk_error:new(runtime_error, OldName),
-            Msg = iolist_to_binary(
+            Msg = beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "The dynamic class's own registration could not move, so no reference sites were rewritten: ~p",
+                    "The dynamic class's own registration could not move, so no reference sites were rewritten: ~tp",
                     [
                         Reason
                     ]
@@ -2590,9 +2590,9 @@ install_class_rename(OldName, NewName, _Classification) ->
 -spec rename_install_incomplete_error(atom(), atom()) -> #beamtalk_error{}.
 rename_install_incomplete_error(OldName, NewName) ->
     Error0 = beamtalk_error:new(runtime_error, OldName),
-    Msg = iolist_to_binary(
+    Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "renameTo: reported success but '~p' was never installed under '~p'; "
+            "renameTo: reported success but '~tp' was never installed under '~tp'; "
             "the old class was left untouched",
             [OldName, NewName]
         )
@@ -2769,8 +2769,8 @@ classReload(Self) ->
                     beamtalk_error:raise(StructuredError);
                 {error, Reason} ->
                     Error0 = beamtalk_error:new(reload_failed, ClassName),
-                    Msg = iolist_to_binary(
-                        io_lib:format("Reload failed: ~p", [Reason])
+                    Msg = beamtalk_error:chars_to_binary(
+                        io_lib:format("Reload failed: ~tp", [Reason])
                     ),
                     beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
             end
@@ -2824,7 +2824,9 @@ require_method_capability(Op, ClassName, Selector) ->
                 true -> "~ts";
                 false -> "~tp"
             end,
-        iolist_to_binary(io_lib:format("~ts >> " ++ SelectorFormat, [ClassName, Selector]))
+        beamtalk_error:chars_to_binary(
+            io_lib:format("~ts >> " ++ SelectorFormat, [ClassName, Selector])
+        )
     end).
 
 %% `Class <Suffix>` subject for a class-level capability refusal, built lazily.
@@ -2862,8 +2864,8 @@ do_compile_source(Self, Selector, Source, Intent) ->
             Self;
         {error, Reason} ->
             Error0 = beamtalk_error:new(compile_failed, ClassName),
-            Msg = iolist_to_binary(
-                io_lib:format("Could not compile method: ~p", [Reason])
+            Msg = beamtalk_error:chars_to_binary(
+                io_lib:format("Could not compile method: ~tp", [Reason])
             ),
             beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
     end.
@@ -2909,8 +2911,8 @@ classPrecheckCompileSource(Self, Selector, Source) ->
             precheck_result_to_dictionary(Result);
         {error, Reason} ->
             Error0 = beamtalk_error:new(compile_failed, ClassName),
-            Msg = iolist_to_binary(
-                io_lib:format("Could not precheck method: ~p", [Reason])
+            Msg = beamtalk_error:chars_to_binary(
+                io_lib:format("Could not precheck method: ~tp", [Reason])
             ),
             beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
     end.
@@ -2927,8 +2929,8 @@ ensure_precheck_source_binary(Source, _ClassName) when is_binary(Source) ->
     Source;
 ensure_precheck_source_binary(Source, ClassName) ->
     Error0 = beamtalk_error:new(type_error, ClassName),
-    Msg = iolist_to_binary(
-        io_lib:format("precheckCompile:source: expects a String body, got: ~p", [Source])
+    Msg = beamtalk_error:chars_to_binary(
+        io_lib:format("precheckCompile:source: expects a String body, got: ~tp", [Source])
     ),
     beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg)).
 
@@ -3017,8 +3019,8 @@ ensure_source_binary(_Selector, Source, _Intent, _ClassName) when is_binary(Sour
 ensure_source_binary(_Selector, Source, Intent, ClassName) ->
     Error0 = beamtalk_error:new(type_error, ClassName),
     SelectorName = intent_selector(Intent),
-    Msg = iolist_to_binary(
-        io_lib:format("~s expects a String body, got: ~p", [SelectorName, Source])
+    Msg = beamtalk_error:chars_to_binary(
+        io_lib:format("~ts expects a String body, got: ~tp", [SelectorName, Source])
     ),
     beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg)).
 
@@ -3427,7 +3429,7 @@ rename_selector_rewrite_failed_error(ClassName, OldSelectorBin, no_sites) ->
     beamtalk_error:with_message(Error0, Msg);
 rename_selector_rewrite_failed_error(ClassName, _OldSelectorBin, Reason) ->
     Error0 = beamtalk_error:new(runtime_error, ClassName),
-    Msg = iolist_to_binary(io_lib:format("Could not rename selector: ~p", [Reason])),
+    Msg = beamtalk_error:chars_to_binary(io_lib:format("Could not rename selector: ~tp", [Reason])),
     beamtalk_error:with_message(Error0, Msg).
 
 %%% ----------------------------------------------------------------------------
@@ -4210,8 +4212,8 @@ ensure_code_step(_ClassName, _Module, _Step, true) ->
     ok;
 ensure_code_step(ClassName, Module, Step, false) ->
     Error0 = beamtalk_error:new(runtime_error, ClassName),
-    Msg = iolist_to_binary(
-        io_lib:format("Failed to ~p module ~p during unload", [Step, Module])
+    Msg = beamtalk_error:chars_to_binary(
+        io_lib:format("Failed to ~tp module ~tp during unload", [Step, Module])
     ),
     beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg)).
 

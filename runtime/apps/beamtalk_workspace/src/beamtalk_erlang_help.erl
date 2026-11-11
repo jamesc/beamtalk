@@ -497,7 +497,7 @@ format_specs_list(Module, Specs) ->
                 if
                     is_atom(Name) -> atom_to_binary(Name);
                     is_binary(Name) -> Name;
-                    true -> iolist_to_binary(io_lib:format("~p", [Name]))
+                    true -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [Name]))
                 end,
             Sig = format_beamtalk_signature(NameBin, Params, RetType),
             iolist_to_binary([<<"  ">>, Sig])

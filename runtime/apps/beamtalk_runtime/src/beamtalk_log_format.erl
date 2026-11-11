@@ -21,7 +21,7 @@ format_time(#{time := Timestamp}) ->
     Millis = Micros div 1000,
     Seconds = Timestamp div 1000000,
     {{Y, Mo, D}, {H, Mi, S}} = calendar:system_time_to_universal_time(Seconds, second),
-    iolist_to_binary(
+    beamtalk_error:chars_to_binary(
         io_lib:format(
             "~4..0B-~2..0B-~2..0BT~2..0B:~2..0B:~2..0B.~3..0BZ",
             [Y, Mo, D, H, Mi, S, Millis]

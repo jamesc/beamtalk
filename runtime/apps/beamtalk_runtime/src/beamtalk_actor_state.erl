@@ -443,10 +443,10 @@ raise_stale_cell(#beamtalk_object{class = Class}, Cell, Carried) ->
     Error0 = beamtalk_error:new(actor_nlr_stale_cell, Class),
     Error1 = beamtalk_error:with_message(
         Error0,
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format(
-                "~s's state cell was stale when a `^` reached its method: the throw carried "
-                "fields the cell did not hold (~p)",
+                "~ts's state cell was stale when a `^` reached its method: the throw carried "
+                "fields the cell did not hold (~tp)",
                 [Class, Stale]
             )
         )
@@ -519,9 +519,9 @@ raise_conflict(Entry) ->
     Error0 = beamtalk_error:new(actor_state_conflict, Class),
     Error1 = beamtalk_error:with_message(
         Error0,
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format(
-                "~s's state was changed twice by one call: a block it ran wrote a field "
+                "~ts's state was changed twice by one call: a block it ran wrote a field "
                 "and the method also answered a different state",
                 [Class]
             )
@@ -689,15 +689,15 @@ raise_unreachable(#beamtalk_object{class = Class}, Name, Mode) ->
             read -> "read";
             write -> "written"
         end,
-    Message = iolist_to_binary(
-        io_lib:format("~s's state field ~s cannot be ~s from this process", [Class, Name, Verb])
+    Message = beamtalk_error:chars_to_binary(
+        io_lib:format("~ts's state field ~ts cannot be ~ts from this process", [Class, Name, Verb])
     ),
-    Hint = iolist_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "A block that accesses ~s's state ran outside ~s's own process (it was sent "
+            "A block that accesses ~ts's state ran outside ~ts's own process (it was sent "
             "to another actor, a Timer or a Future, or run after the method returned). "
-            "A block can read ~s's fields anywhere, as the values they had when the block "
-            "was made, but can only write them inside ~s's own methods: send ~s a message "
+            "A block can read ~ts's fields anywhere, as the values they had when the block "
+            "was made, but can only write them inside ~ts's own methods: send ~ts a message "
             "instead.",
             [Class, Class, Class, Class, Class]
         )

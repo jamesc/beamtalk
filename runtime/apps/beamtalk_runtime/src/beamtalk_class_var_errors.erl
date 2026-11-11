@@ -32,9 +32,9 @@ where the errors both build their values from.
 -doc "Hint of `uninitialized_state_error` for an unassigned `late` class variable.".
 -spec uninitialized_hint(atom(), atom()) -> binary().
 uninitialized_hint(Class, Name) ->
-    iolist_to_binary(
+    beamtalk_error:chars_to_binary(
         io_lib:format(
-            "~s class variable '~s' is declared `late` and has not been assigned yet",
+            "~ts class variable '~ts' is declared `late` and has not been assigned yet",
             [Class, Name]
         )
     ).
@@ -86,8 +86,8 @@ raise_unreachable(Class, undefined, _Mode) ->
     Error0 = beamtalk_error:new(class_state_unreachable, Class),
     Error1 = beamtalk_error:with_message(
         Error0,
-        iolist_to_binary(
-            io_lib:format("~s's class state cannot be reached: no live ~s class process", [
+        beamtalk_error:chars_to_binary(
+            io_lib:format("~ts's class state cannot be reached: no live ~ts class process", [
                 Class, Class
             ])
         )
@@ -107,16 +107,18 @@ raise_unreachable(Class, Name, Mode) ->
             read -> "read";
             write -> "written"
         end,
-    Message = iolist_to_binary(
-        io_lib:format("~s's class variable ~s cannot be ~s from this process", [Class, Name, Verb])
+    Message = beamtalk_error:chars_to_binary(
+        io_lib:format("~ts's class variable ~ts cannot be ~ts from this process", [
+            Class, Name, Verb
+        ])
     ),
-    Hint = iolist_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "A block that writes ~s's class variables ran outside any ~s class "
+            "A block that writes ~ts's class variables ran outside any ~ts class "
             "method (it was passed to another class's class method or an actor, or "
-            "stored or returned and run later outside ~s's own methods). A block "
-            "can read ~s's class variables anywhere, as the values they had when the "
-            "block was made, but can only write them from ~s's own method: return the "
+            "stored or returned and run later outside ~ts's own methods). A block "
+            "can read ~ts's class variables anywhere, as the values they had when the "
+            "block was made, but can only write them from ~ts's own method: return the "
             "value and assign it there.",
             [Class, Class, Class, Class, Class]
         )
@@ -132,8 +134,8 @@ raise_no_snapshot(Class, Name) ->
     Error0 = beamtalk_error:new(class_state_unreachable, Class),
     Error1 = beamtalk_error:with_message(
         Error0,
-        iolist_to_binary(
-            io_lib:format("~s's class state cannot be reached: no snapshot recorded yet", [Class])
+        beamtalk_error:chars_to_binary(
+            io_lib:format("~ts's class state cannot be reached: no snapshot recorded yet", [Class])
         )
     ),
     Error2 =
@@ -154,14 +156,14 @@ raise_no_snapshot(Class, Name) ->
 -doc "`class_state_read_only`: a write under `with_snapshot/2`'s read-only marker.".
 -spec raise_read_only(atom(), atom()) -> no_return().
 raise_read_only(Class, Name) ->
-    Message = iolist_to_binary(
-        io_lib:format("~s's class variable ~s is read-only here", [Class, Name])
+    Message = beamtalk_error:chars_to_binary(
+        io_lib:format("~ts's class variable ~ts is read-only here", [Class, Name])
     ),
-    Hint = iolist_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "This code runs against a read-only snapshot of ~s's class variables "
+            "This code runs against a read-only snapshot of ~ts's class variables "
             "(supervisor definition, a class `initialize:` hook, or `performLocally:`). "
-            "Assign the variable from one of ~s's own class methods, sent as a normal "
+            "Assign the variable from one of ~ts's own class methods, sent as a normal "
             "class-side message.",
             [Class, Class]
         )
@@ -183,8 +185,8 @@ raise (see `uninitialized_error/2`).
 """.
 -spec undeclared_error(atom(), atom()) -> #beamtalk_error{}.
 undeclared_error(Class, Name) ->
-    Message = iolist_to_binary(
-        io_lib:format("~s has no class variable named ~s", [Class, Name])
+    Message = beamtalk_error:chars_to_binary(
+        io_lib:format("~ts has no class variable named ~ts", [Class, Name])
     ),
     Error0 = beamtalk_error:new(undeclared_class_variable, Class),
     Error1 = beamtalk_error:with_message(Error0, Message),

@@ -445,7 +445,7 @@ print_string(X) when is_pid(X) -> beamtalk_opaque_ops:pid_to_string(X);
 print_string(X) when is_port(X) -> beamtalk_opaque_ops:port_to_string(X);
 print_string(X) when is_reference(X) -> beamtalk_opaque_ops:ref_to_string(X);
 print_string(X) ->
-    iolist_to_binary(io_lib:format("~p", [X])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp", [X])).
 
 -doc "Format tagged maps for display.".
 -spec print_string_map(map()) -> binary().
@@ -513,7 +513,7 @@ display_string({beamtalk_string, Bin}) when is_binary(Bin) ->
 display_string(X) when is_binary(X) ->
     case unicode:characters_to_binary(X) of
         Utf8 when is_binary(Utf8) -> Utf8;
-        _ -> iolist_to_binary(io_lib:format("~p", [X]))
+        _ -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [X]))
     end;
 display_string(X) when is_bitstring(X) ->
     bitstring_print_string(X);
@@ -562,7 +562,7 @@ display_string(X) when is_pid(X) ->
 display_string(X) when is_port(X) -> beamtalk_opaque_ops:port_to_string(X);
 display_string(X) when is_reference(X) -> beamtalk_opaque_ops:ref_to_string(X);
 display_string(X) ->
-    iolist_to_binary(io_lib:format("~p", [X])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp", [X])).
 
 -doc """
 Render the kind-headed, positional label for a live process (ADR 0094).
@@ -615,7 +615,7 @@ identity_inner({registered, Name, Node}) when is_atom(Name), is_atom(Node) ->
 identity_inner({global, Name}) when is_atom(Name) ->
     iolist_to_binary([<<"global, ">>, atom_to_binary(Name, utf8)]);
 identity_inner(Other) ->
-    iolist_to_binary(io_lib:format("~tp", [Other])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp", [Other])).
 
 -doc """
 `Block/N` label for a bare fun, `N` being its arity.
@@ -745,7 +745,7 @@ send_bitstring(X, Selector, Args) ->
 -doc "Re-raise a `Bitstring` `does_not_understand` with the bit-size hint.".
 -spec raise_bitstring_dnu(bitstring(), #beamtalk_error{}) -> no_return().
 raise_bitstring_dnu(X, Error) ->
-    Hint = iolist_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
             "a Bitstring is not byte-aligned (~B bits); use 'bitSize'/'toBits', "
             "or 'asBinary' to check alignment",
@@ -1602,7 +1602,7 @@ and `displayString` answer this form: a Bitstring has no text reading.
 """.
 -spec bitstring_print_string(bitstring()) -> binary().
 bitstring_print_string(X) ->
-    iolist_to_binary(io_lib:format("~w", [X])).
+    beamtalk_error:chars_to_binary(io_lib:format("~w", [X])).
 
 -doc """
 Escape string content per the ADR 0138 shared escape mapping: `\\` doubles,

@@ -696,7 +696,7 @@ summarise_diagnostics([First | Rest]) ->
 diagnostic_message(D) ->
     case maps:get(message, D, <<"(no message)">>) of
         Msg when is_binary(Msg) -> Msg;
-        Other -> iolist_to_binary(io_lib:format("~p", [Other]))
+        Other -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [Other]))
     end.
 
 -doc "Format Erlang module help via beamtalk_erlang_help (dynamic call).".

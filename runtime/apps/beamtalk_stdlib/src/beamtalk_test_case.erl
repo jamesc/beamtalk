@@ -77,8 +77,10 @@ should_raise(Block, ExpectedKind) when is_function(Block, 0), is_atom(ExpectedKi
             % Block completed without error
             NoRaiseErr0 = beamtalk_error:new(assertion_failed, 'TestCase'),
             NoRaiseErr1 = beamtalk_error:with_selector(NoRaiseErr0, 'should:raise:'),
-            NoRaiseMsg = iolist_to_binary(
-                io_lib:format("Expected block to raise ~s but it completed normally", [ExpectedKind])
+            NoRaiseMsg = beamtalk_error:chars_to_binary(
+                io_lib:format("Expected block to raise ~ts but it completed normally", [
+                    ExpectedKind
+                ])
             ),
             NoRaiseErr2 = beamtalk_error:with_message(NoRaiseErr1, NoRaiseMsg),
             NoRaiseErr3 = beamtalk_error:with_details(NoRaiseErr2, #{
@@ -102,8 +104,8 @@ should_raise(Block, ExpectedKind) when is_function(Block, 0), is_atom(ExpectedKi
                 false ->
                     MismatchErr0 = beamtalk_error:new(assertion_failed, 'TestCase'),
                     MismatchErr1 = beamtalk_error:with_selector(MismatchErr0, 'should:raise:'),
-                    MismatchMsg = iolist_to_binary(
-                        io_lib:format("Expected error kind ~s but got ~s", [
+                    MismatchMsg = beamtalk_error:chars_to_binary(
+                        io_lib:format("Expected error kind ~ts but got ~ts", [
                             ExpectedKind, ActualKind
                         ])
                     ),
@@ -182,9 +184,9 @@ execute_tests(runAll, _Args, ClassName, Module, FlatMethods) ->
     TestMethods = discover_test_methods(FlatMethods),
     case TestMethods of
         [] ->
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "No test methods found in ~s", [ClassName]
+                    "No test methods found in ~ts", [ClassName]
                 )
             );
         _ ->
@@ -208,9 +210,9 @@ execute_tests(runAll, _Args, ClassName, Module, FlatMethods) ->
 execute_tests('run:', [TestMethodName], ClassName, Module, FlatMethods) ->
     case maps:is_key(TestMethodName, FlatMethods) of
         false ->
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "Method '~s' not found in ~s", [TestMethodName, ClassName]
+                    "Method '~ts' not found in ~ts", [TestMethodName, ClassName]
                 )
             );
         true ->
@@ -241,9 +243,9 @@ any gen_server:call back to the class process.
 run_all(ClassName) ->
     case run_class_tests(ClassName, all) of
         no_tests ->
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "No test methods found in ~s", [ClassName]
+                    "No test methods found in ~ts", [ClassName]
                 )
             );
         {Results, Duration} ->
@@ -466,8 +468,8 @@ decode_beam_error(if_clause) ->
     <<"no true branch in conditional">>;
 decode_beam_error({badarity, {Fun, Args}}) when is_function(Fun), is_list(Args) ->
     {arity, Expected} = erlang:fun_info(Fun, arity),
-    iolist_to_binary(
-        io_lib:format("function expects ~p arguments but was called with ~p", [
+    beamtalk_error:chars_to_binary(
+        io_lib:format("function expects ~tp arguments but was called with ~tp", [
             Expected, length(Args)
         ])
     );
@@ -741,8 +743,10 @@ build_trace(Module, MethodName, Stacktrace) ->
     {collapse_repeats(frame_entries(Relevant)), Synthetic}.
 
 -spec entry_line(trace_entry()) -> binary().
-entry_line({Line, _Parts, 1, _Src, _Std}) -> Line;
-entry_line({Line, _Parts, N, _Src, _Std}) -> iolist_to_binary(io_lib:format("~s [x~B]", [Line, N])).
+entry_line({Line, _Parts, 1, _Src, _Std}) ->
+    Line;
+entry_line({Line, _Parts, N, _Src, _Std}) ->
+    beamtalk_error:chars_to_binary(io_lib:format("~ts [x~B]", [Line, N])).
 
 -spec entry_frame(trace_entry()) -> map().
 entry_frame({_Line, Parts, N, _Src, _Std}) -> Parts#{repeat => N}.
@@ -1432,6 +1436,8 @@ ffi_extract_class_name(ClassRef) when is_tuple(ClassRef) ->
     catch
         error:badarg ->
             Err0 = beamtalk_error:new(does_not_understand, 'TestCase'),
-            Msg = iolist_to_binary(io_lib:format("Unknown TestCase class: ~s", [NameStr])),
+            Msg = beamtalk_error:chars_to_binary(
+                io_lib:format("Unknown TestCase class: ~ts", [NameStr])
+            ),
             beamtalk_error:raise(beamtalk_error:with_message(Err0, Msg))
     end.

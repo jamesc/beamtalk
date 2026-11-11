@@ -443,8 +443,8 @@ handle_term(<<"list-classes">>, Params, _Msg, SessionPid) ->
                             class = 'Object',
                             selector = undefined,
                             message = beamtalk_primitive:string_from_binary(
-                                iolist_to_binary(
-                                    io_lib:format("Failed to list classes: ~p", [AllClassesErr])
+                                beamtalk_error:chars_to_binary(
+                                    io_lib:format("Failed to list classes: ~tp", [AllClassesErr])
                                 )
                             ),
                             hint = beamtalk_primitive:string_from_binary(
@@ -741,8 +741,8 @@ compile_class_source(ClassBin, ClassAtom, ClassPid) ->
                 beamtalk_repl_errors:make(
                     runtime_error,
                     ClassAtom,
-                    iolist_to_binary(
-                        io_lib:format("Cannot read source file ~s: ~p", [SourcePath, Reason])
+                    beamtalk_error:chars_to_binary(
+                        io_lib:format("Cannot read source file ~ts: ~tp", [SourcePath, Reason])
                     )
                 )}
     end.
@@ -815,7 +815,7 @@ run_test_op(undefined) ->
                 beamtalk_repl_errors:make(
                     runtime_error,
                     'TestRunner',
-                    iolist_to_binary(io_lib:format("Test run failed: ~p", [Reason]))
+                    beamtalk_error:chars_to_binary(io_lib:format("Test run failed: ~tp", [Reason]))
                 )}
     end;
 run_test_op(ClassName) when is_binary(ClassName) ->
@@ -837,8 +837,8 @@ run_test_op(ClassName) when is_binary(ClassName) ->
                         beamtalk_repl_errors:make(
                             runtime_error,
                             'TestRunner',
-                            iolist_to_binary(
-                                io_lib:format("Test run failed for ~s: ~p", [ClassName, Reason])
+                            beamtalk_error:chars_to_binary(
+                                io_lib:format("Test run failed for ~ts: ~tp", [ClassName, Reason])
                             )
                         )}
             end
@@ -866,8 +866,8 @@ run_test_op_file(FilePath) ->
                 beamtalk_repl_errors:make(
                     runtime_error,
                     'TestRunner',
-                    iolist_to_binary(
-                        io_lib:format("Test run failed for file ~s: ~p", [FilePath, Reason])
+                    beamtalk_error:chars_to_binary(
+                        io_lib:format("Test run failed for file ~ts: ~tp", [FilePath, Reason])
                     )
                 )}
     end.
@@ -2919,7 +2919,7 @@ validate_list_classes_filter(FilterBin) when is_binary(FilterBin) ->
         {error, badarg} -> {error, FilterBin}
     end;
 validate_list_classes_filter(Other) ->
-    {error, iolist_to_binary(io_lib:format("~p", [Other]))}.
+    {error, beamtalk_error:chars_to_binary(io_lib:format("~tp", [Other]))}.
 
 -doc """
 Filter predicate for list-classes op.

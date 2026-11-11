@@ -1156,7 +1156,7 @@ unwrap_self_dispatch_outcome(ClassName, Selector, Outcome) ->
 -spec raise_test_spawn_self_dispatch_unsupported(class_name(), selector()) -> no_return().
 raise_test_spawn_self_dispatch_unsupported(ClassName, Selector) ->
     %% Atom-safe formatting — see note on raise_class_self_dnu/2.
-    Hint = iolist_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
             "Inherited test-execution selector '~ts' cannot be self-sent from "
             "inside a class method on '~ts' — it would deadlock the class "
@@ -1177,7 +1177,7 @@ raise_class_self_dnu(ClassName, Selector) ->
     %% ClassName and Selector are atoms; use ~ts (unicode string) with
     %% atom_to_list/1 rather than ~s, which expects an iolist and raises
     %% badarg on atoms — that would mask the intended does_not_understand.
-    Hint = iolist_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
             "Class '~ts' has no class method '~ts' and no ancestor defines it",
             [atom_to_list(ClassName), atom_to_list(Selector)]
@@ -1332,8 +1332,8 @@ raise_class_timeout(ClassPid, Selector, Timeout) ->
         Selector,
         <<"The class method may legitimately take longer: send it with a longer timeout">>
     ),
-    Message = iolist_to_binary(
-        io_lib:format("Class process did not answer within ~p ms", [Timeout])
+    Message = beamtalk_error:chars_to_binary(
+        io_lib:format("Class process did not answer within ~tp ms", [Timeout])
     ),
     Error1 = beamtalk_error:with_message(Error, Message),
     beamtalk_exception_handler:reraise(Error1).
@@ -2036,16 +2036,16 @@ classify_undef(ClassName, DefiningClass, DefiningModule, Selector, FunName, ST) 
 module_not_loaded_hint(ClassName, DefiningClass, DefiningModule) ->
     case ClassName =:= DefiningClass of
         true ->
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "Class '~s' is not registered - the module '~s' may have failed to load",
+                    "Class '~ts' is not registered - the module '~ts' may have failed to load",
                     [ClassName, DefiningModule]
                 )
             );
         false ->
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "Class '~s' inherits this method from '~s' - that class's module '~s' may have failed to load",
+                    "Class '~ts' inherits this method from '~ts' - that class's module '~ts' may have failed to load",
                     [ClassName, DefiningClass, DefiningModule]
                 )
             )
@@ -2055,16 +2055,16 @@ module_not_loaded_hint(ClassName, DefiningClass, DefiningModule) ->
 method_not_found_hint(ClassName, DefiningClass, Selector) ->
     case ClassName =:= DefiningClass of
         true ->
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "Class method '~s' not found on '~s' (arity mismatch or undefined selector)",
+                    "Class method '~ts' not found on '~ts' (arity mismatch or undefined selector)",
                     [Selector, ClassName]
                 )
             );
         false ->
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "Class method '~s' inherited from '~s' not found on '~s' (arity mismatch or undefined selector)",
+                    "Class method '~ts' inherited from '~ts' not found on '~ts' (arity mismatch or undefined selector)",
                     [Selector, DefiningClass, ClassName]
                 )
             )
@@ -2467,7 +2467,7 @@ handle_metaclass_self_call(Selector, _Args) ->
     Error0 = beamtalk_error:new(dispatch_error, ClassName, Selector),
     Error1 = beamtalk_error:with_hint(
         Error0,
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format(
                 "'self class ~ts' inside a class method of '~ts' would deadlock "
                 "(gen_server:call to self). Only spawn/new selectors can be "

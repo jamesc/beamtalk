@@ -16,6 +16,7 @@ See docs/internal/design-self-as-object.md Section 3.8 for error taxonomy.
 -include("beamtalk.hrl").
 
 -export([
+    chars_to_binary/1,
     new/2,
     new/3,
     new/4,
@@ -111,7 +112,7 @@ with_message(Error, Message) when is_atom(Message) ->
 with_message(Error, Message) ->
     Error#beamtalk_error{
         message = beamtalk_primitive:string_from_binary(
-            iolist_to_binary(io_lib:format("~p", [Message]))
+            chars_to_binary(io_lib:format("~tp", [Message]))
         )
     }.
 
@@ -159,7 +160,7 @@ with_hint(Error, Hint) when is_atom(Hint) ->
 with_hint(Error, Hint) ->
     Error#beamtalk_error{
         hint = beamtalk_primitive:string_from_binary(
-            iolist_to_binary(io_lib:format("~tp", [Hint]))
+            chars_to_binary(io_lib:format("~tp", [Hint]))
         )
     }.
 
@@ -196,7 +197,7 @@ format(#beamtalk_error{kind = does_not_understand} = Error) ->
     format_parts(Enriched#beamtalk_error.message, Enriched#beamtalk_error.hint);
 format(#beamtalk_error{message = Message, hint = Hint, details = #{signal_reason := Reason}}) ->
     %% BT-4159: `signal:reason:` — show the reason in uncaught reports.
-    iolist_to_binary([
+    chars_to_binary([
         format_parts(Message, Hint), <<"\nReason: ">>, format_reason_term(Reason)
     ]);
 format(#beamtalk_error{message = Message, hint = Hint}) ->
@@ -214,10 +215,10 @@ format_safe(#beamtalk_error{} = Error) ->
     try
         format(Error)
     catch
-        _:_ -> iolist_to_binary(io_lib:format("~0p", [Error]))
+        _:_ -> chars_to_binary(io_lib:format("~0tp", [Error]))
     end;
 format_safe(Term) ->
-    iolist_to_binary(io_lib:format("~0p", [Term])).
+    chars_to_binary(io_lib:format("~0tp", [Term])).
 
 -doc """
 Safely format an error term, searching the stacktrace for a
@@ -486,7 +487,7 @@ generate_message(io_error, Class, Selector) ->
 generate_message(user_error, _Class, undefined) ->
     <<"Error">>;
 generate_message(user_error, _Class, Selector) ->
-    chars_to_binary(io_lib:format("~p", [Selector]));
+    chars_to_binary(io_lib:format("~tp", [Selector]));
 generate_message(stdlib_shadowing, Class, undefined) ->
     chars_to_binary(io_lib:format("Cannot redefine stdlib class '~ts'", [Class]));
 generate_message(stdlib_shadowing, Class, Selector) ->
@@ -582,10 +583,19 @@ format_reason(_ErrClass, #beamtalk_error{kind = Kind, class = Class, message = M
 format_reason(_ErrClass, #{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}) ->
     format_reason(error, Err);
 format_reason(ErrClass, Reason) ->
-    chars_to_binary(io_lib:format("~p:~tp", [ErrClass, Reason])).
+    chars_to_binary(io_lib:format("~tp:~tp", [ErrClass, Reason])).
 
-%% BT-4241: `iolist_to_binary/1` raises badarg on codepoints above 255 (which
-%% `~ts` emits for e.g. a `λ` selector); encode as UTF-8 instead.
+-doc """
+Encode formatted text (e.g. `io_lib:format/2` output) as a UTF-8 binary.
+
+`iolist_to_binary/1` raises `badarg` on codepoints above 255, which `~ts` emits
+for e.g. a selector like `x_λ:`; this is the one place that encodes formatted
+error text. Raises `badarg` rather than returning an `{error, _, _}` tuple, so a
+bad input fails at the call site instead of landing in a message field.
+""".
 -spec chars_to_binary(io_lib:chars()) -> binary().
 chars_to_binary(Chars) ->
-    unicode:characters_to_binary(Chars).
+    case unicode:characters_to_binary(Chars) of
+        Bin when is_binary(Bin) -> Bin;
+        _ -> erlang:error(badarg, [Chars])
+    end.

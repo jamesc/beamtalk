@@ -601,7 +601,7 @@ handle_info(
     Err0 = beamtalk_error:new(eval_crashed, 'REPL'),
     Err1 = beamtalk_error:with_message(
         Err0,
-        iolist_to_binary(io_lib:format("Evaluation crashed: ~p", [Reason]))
+        beamtalk_error:chars_to_binary(io_lib:format("Evaluation crashed: ~tp", [Reason]))
     ),
     reply_eval(From, {eval_error, Err1, <<>>, []}),
     %% Apply any pending module removals that arrived while the
