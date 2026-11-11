@@ -117,6 +117,17 @@ impl NameResolver {
             self.resolve_class(class);
         }
 
+        // Resolve extension methods (`Foo >> sel =>`, `Foo class >> sel =>`)
+        // (BT-4658). No class scope: an extension cannot see the target
+        // class's declared state, so only `self` and parameters are in scope.
+        // An empty class-level scope keeps the method at depth 2, which
+        // `resolve_super` relies on.
+        for standalone in &module.method_definitions {
+            self.scope.push();
+            self.resolve_method(&standalone.method);
+            self.scope.pop();
+        }
+
         // Note: No unused variable warnings at module scope (depth 0).
         // Module-level variables include built-in identifiers (true, false, nil)
         // and REPL known vars, which would produce false positives.

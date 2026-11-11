@@ -65,6 +65,14 @@ impl Analyser {
         for class in &module.classes {
             self.analyse_class(class);
         }
+
+        // Analyse extension method bodies (BT-4658), mirroring
+        // `NameResolver::resolve_module`: no class scope, so no instance fields.
+        for standalone in &module.method_definitions {
+            self.scope.push(); // empty class-level scope, as in the resolver
+            self.analyse_method(&standalone.method);
+            self.scope.pop();
+        }
     }
 
     fn analyse_class(&mut self, class: &crate::ast::ClassDefinition) {
