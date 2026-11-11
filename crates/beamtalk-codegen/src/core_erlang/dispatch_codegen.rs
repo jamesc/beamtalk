@@ -191,8 +191,6 @@ pub(in crate::core_erlang) enum StaysDynamic {
     Untyped,
     /// A binary selector: lowered by the operator path, never a guarded call.
     BinarySelector,
-    /// `fieldAt:put:`, whose dynamic path raises a different hint.
-    FieldAtPut,
     /// The `perform:` family, or a selector the dynamic entry point rewrites
     /// before classifying the receiver (`perform:withArguments:timeout:`,
     /// from the routing fixture): the dynamic send does not reach the
@@ -848,9 +846,9 @@ impl CoreErlangGenerator {
     ///   shadowing — are excluded above; stdlib shadowing is a build error),
     ///   and `dispatch/3` preserves DNU, extensions, superclass
     ///   delegation and `perform:` identically — which is why no
-    ///   method-resolution check is needed. (`fieldAt:put:` is the one
-    ///   selector whose dynamic path diverges — a different hint via
-    ///   `is_ivar_method` — so the handler below excludes it.)
+    ///   method-resolution check is needed. (`fieldAt:put:` needs no
+    ///   exclusion: its `immutable_value` hint is the same on every path,
+    ///   BT-4273, and the object-reflection intrinsic claims it first.)
     /// - Every hierarchy entry that can reach here has a compiled module
     ///   exporting `dispatch/3`: batch hierarchies contain only compiled
     ///   classes, and live module-less (`ClassBuilder`) classes arriving via
@@ -967,10 +965,9 @@ impl CoreErlangGenerator {
     ///
     /// The selector gates come first. Binary operators never reach the
     /// dynamic fallthrough (preserving `generate_runtime_dispatch`'s internal
-    /// error exactly). `fieldAt:put:`'s dynamic path raised a different hint
-    /// via the runtime's `is_ivar_method` check (unreachable today: the
-    /// object-reflection intrinsic claims it first; kept as enforcement). The
-    /// `perform:` family is claimed by intrinsics first too, and the
+    /// error exactly). `fieldAt:put:` needs no gate: the object-reflection
+    /// intrinsic always claims it, and its hint agrees on every path
+    /// (BT-4273). The `perform:` family is claimed by intrinsics first too, and the
     /// fixture's rewritten selectors (`perform:withArguments:timeout:`) never
     /// reach a `dispatch/3` through the dynamic path, which turns them into a
     /// `send/4` of the target selector.
@@ -1005,14 +1002,13 @@ impl CoreErlangGenerator {
         if matches!(selector, MessageSelector::Binary(_)) {
             return Err(StaysDynamic::BinarySelector);
         }
-        match selector.well_known() {
-            Some(WellKnownSelector::FieldAtPut) => return Err(StaysDynamic::FieldAtPut),
-            Some(
-                WellKnownSelector::Perform
-                | WellKnownSelector::PerformWithArgs
-                | WellKnownSelector::PerformLocallyWithArgs,
-            ) => return Err(StaysDynamic::PerformFamily),
-            _ => {}
+        if let Some(
+            WellKnownSelector::Perform
+            | WellKnownSelector::PerformWithArgs
+            | WellKnownSelector::PerformLocallyWithArgs,
+        ) = selector.well_known()
+        {
+            return Err(StaysDynamic::PerformFamily);
         }
         if routing::rewritten_selectors().contains(&selector.name().as_str()) {
             return Err(StaysDynamic::PerformFamily);
