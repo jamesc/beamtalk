@@ -74,3 +74,25 @@ fn if_true_if_false_return_branch_does_not_pollute_result_type() {
     );
     assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 }
+
+/// An unannotated method whose tail is an all-`^` `match:` returns through
+/// those `^`s, so it is not `-> Never`: a send to it must not count as
+/// diverging and narrow the caller's local.
+#[test]
+fn all_return_match_tail_does_not_make_method_never() {
+    let diags = type_diagnostics(
+        r"typed Object subclass: ZzRepro
+  kind: v => v match: [1 -> ^#one; _ -> ^#other]
+
+  pick: x :: String | Nil -> Integer =>
+    x isNil ifTrue: [self kind: 1]
+    self len: x
+
+  len: s :: String -> Integer => s size
+",
+    );
+    assert!(
+        diags.iter().any(|m| m.contains("expects String")),
+        "`self kind: 1` returns, so `x` must stay `String | Nil`: {diags:?}"
+    );
+}

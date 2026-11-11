@@ -804,20 +804,30 @@ impl TypeChecker {
                         );
                     }
                 }
-                // BT-4458: an arm whose body is a bare `^expr` never produces
-                // a value for the match — it leaves the enclosing method — so
-                // it contributes bottom (`Never`), not `expr`'s type.
-                if matches!(arm.body.unwrap_parens(), Expression::Return { .. }) {
-                    InferredType::Never
-                } else {
-                    body_ty
-                }
+                body_ty
             })
             .collect();
         if arm_types.is_empty() {
-            InferredType::Dynamic(DynamicReason::AmbiguousControlFlow)
-        } else {
+            return InferredType::Dynamic(DynamicReason::AmbiguousControlFlow);
+        }
+        // BT-4458: an arm whose body is a bare `^expr` never produces a value
+        // for the match — it leaves the enclosing method — so it contributes
+        // `Never`, not `expr`'s type, when another arm does produce one.
+        // When *every* arm is a `^`, the match is a method's tail returning
+        // through them; keep their types so the method's inferred return type
+        // is not `Never` (which would make sends to it count as diverging).
+        let is_return_arm =
+            |arm: &MatchArm| matches!(arm.body.unwrap_parens(), Expression::Return { .. });
+        if arms.iter().all(is_return_arm) {
             InferredType::union_of(&arm_types)
+        } else {
+            let kept: Vec<InferredType> = arms
+                .iter()
+                .zip(arm_types)
+                .filter(|(arm, _)| !is_return_arm(arm))
+                .map(|(_, ty)| ty)
+                .collect();
+            InferredType::union_of(&kept)
         }
     }
 }
