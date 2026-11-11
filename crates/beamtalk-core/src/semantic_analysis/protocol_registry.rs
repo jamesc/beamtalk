@@ -357,7 +357,11 @@ impl ProtocolInfo {
                 };
                 // Selector presence was checked above, and `mine` holds this
                 // protocol's provisions as well as its requirements.
-                let Some(own) = mine.iter().find(|r| r.selector == req.selector) else {
+                let Some(own) = mine
+                    .iter()
+                    .filter(|r| r.selector == req.selector)
+                    .max_by_key(|r| r.return_type.is_some())
+                else {
                     return false;
                 };
                 own.return_type
@@ -369,15 +373,11 @@ impl ProtocolInfo {
                     })
             })
         };
+        // Requirements and provisions side by side: `refines` prefers the
+        // entry that declares a return type, so a provision's own type is
+        // not hidden by an untyped requirement of the same selector.
         let mut instance_side = self.all_requirements(registry);
-        for provided in self.all_provided(registry) {
-            if !instance_side
-                .iter()
-                .any(|r| r.selector == provided.selector)
-            {
-                instance_side.push(provided);
-            }
-        }
+        instance_side.extend(self.all_provided(registry));
         refines(instance_side, other.all_requirements(registry))
             && refines(
                 self.all_class_requirements(registry),
@@ -877,7 +877,17 @@ impl ProtocolRegistry {
         }
         let type_params = protocol.all_type_params(self);
         let mut mismatches = Vec::new();
-        for req in protocol.all_requirements(self) {
+        // A provision's declared return type is part of the protocol's type
+        // too (ADR 0127 §8; BT-4490), so a class is judged against it as
+        // against a requirement — otherwise `P class <: Q class` would accept
+        // what a direct `C class` check rejects. A requirement of the same
+        // selector takes precedence.
+        let requirements = protocol.all_requirements(self);
+        let provisions = protocol
+            .all_provided(self)
+            .into_iter()
+            .filter(|p| !requirements.iter().any(|r| r.selector == p.selector));
+        for req in requirements.iter().copied().chain(provisions) {
             let Some(expected) = req.judged_return_type(&type_params) else {
                 continue;
             };

@@ -1064,3 +1064,56 @@ Object subclass: Caller
         "a String provision does not refine Integer: {msgs:#?}"
     );
 }
+
+#[test]
+fn typed_provision_is_not_hidden_by_an_untyped_inherited_requirement() {
+    // `Base` requires an untyped `name`; `Child extending: Base` provides a
+    // `name -> String`. The provision's own type must count.
+    let source = r#"
+Protocol define: Base
+  name
+
+Protocol define: Child
+  extending: Base
+  name -> String => "c"
+
+Protocol define: Requires
+  name -> String
+
+Object subclass: Caller
+  requires: r :: Requires class => r
+  run: c :: Child class => self requires: c
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        !msgs.iter().any(|m| m.contains("Requires class")),
+        "Child's typed provision refines Requires: {msgs:#?}"
+    );
+}
+
+#[test]
+fn class_is_judged_against_a_provisions_return_type() {
+    // `Clash` answers `name -> Integer`, clashing with `Provides`'s
+    // `name -> String` provision; it must not slip through `:: Provides
+    // class` only to reach `Requires class` via `Provides class <: Requires
+    // class`.
+    let source = r#"
+Protocol define: Requires
+  name -> String
+
+Protocol define: Provides
+  name -> String => "p"
+
+sealed Object subclass: Clash
+  name -> Integer => 1
+
+Object subclass: Caller
+  provides: p :: Provides class => p
+  run => self provides: Clash
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        msgs.iter().any(|m| m.contains("Provides class")),
+        "Clash's `name -> Integer` clashes with the provision: {msgs:#?}"
+    );
+}
