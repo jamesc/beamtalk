@@ -1576,13 +1576,15 @@ fn resolve_fixtures_dir(test_path: &Utf8Path) -> Utf8PathBuf {
     if local.is_dir() {
         return local;
     }
-    // A target already inside `test/fixtures` is not a scoped test run.
-    if test_path.components().any(|c| c.as_str() == "fixtures") {
-        return local;
-    }
+    // Only a target under the package's `test/` (and not already inside
+    // `test/fixtures`) is a scoped run that should see the package fixtures.
     if let Some(root) = canonical_package_root(test_path) {
+        let target = canonical_path(test_path);
         let pkg_fixtures = root.join("test").join("fixtures");
-        if pkg_fixtures.is_dir() {
+        if target.starts_with(root.join("test"))
+            && !target.starts_with(&pkg_fixtures)
+            && pkg_fixtures.is_dir()
+        {
             return pkg_fixtures;
         }
     }
