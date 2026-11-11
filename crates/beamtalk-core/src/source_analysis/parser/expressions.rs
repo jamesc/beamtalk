@@ -18,9 +18,10 @@
 
 use crate::ast::{
     BinaryEndianness, BinarySegment, BinarySegmentType, BinarySegmentValue, BinarySignedness,
-    Block, BlockParameter, CascadeMessage, CommentAttachment, Expression, ExpressionStatement,
-    Identifier, KeywordPart, Literal, MapPair, MapPatternKey, MapPatternPair, MatchArm,
-    MessageSelector, Pattern, StringSegment, binary_literal_size,
+    Block, BlockParameter, CascadeMessage, Comment, CommentAttachment, Expression,
+    ExpressionStatement, Identifier, KeywordPart, Literal, LiteralCommentSlots, MapPair,
+    MapPatternKey, MapPatternPair, MatchArm, MessageSelector, Pattern, StringSegment,
+    binary_literal_size,
 };
 use crate::source_analysis::{Span, Token, TokenKind};
 use ecow::EcoString;
@@ -3907,16 +3908,21 @@ impl Parser {
     /// (and discard) an `aliasing:` clause's `#{...}` argument for parse
     /// recovery — `aliasing:` itself is reserved but "not yet supported"
     /// in v1 (ADR 0127 §Status 4).
+    #[allow(clippy::too_many_lines)] // element loop plus comment capture
     pub(super) fn parse_map_literal(&mut self) -> Expression {
         let start_token = self.expect(&TokenKind::MapOpen, "Expected '#{'");
         let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
 
         let mut pairs = Vec::new();
+        let mut slots = LiteralCommentSlots::default();
+        let open_idx = self.current.saturating_sub(1);
 
         // Handle empty map: #{}
         if self.check(&TokenKind::RightBrace) {
+            self.collect_literal_closing(&mut slots, open_idx);
             let end_token = self.advance();
             let span = start.merge(end_token.span());
+            self.record_literal_comments(span, slots);
             return Expression::MapLiteral { pairs, span };
         }
 
@@ -3928,6 +3934,7 @@ impl Parser {
             }
 
             let pair_start = self.current_token().span();
+            let mut item_comments = self.collect_literal_item_leading(&slots, open_idx);
 
             // Bare identifier keys in map literals are a compile error.
             // `#{foo => v}` is invalid; write `#{#foo => v}` instead.
@@ -3952,6 +3959,16 @@ impl Parser {
             };
 
             // Expect '=>' separator between key and value
+            if matches!(self.current_kind(), TokenKind::FatArrow) {
+                // Comments between the key and `=>` join the pair's leading
+                // comments, so they are kept (printed above the pair).
+                if let Some(after_key) = self.collect_trailing_comment() {
+                    item_comments.leading.push(after_key);
+                }
+                item_comments
+                    .leading
+                    .extend(self.collect_comment_attachment().leading);
+            }
             if !matches!(self.current_kind(), TokenKind::FatArrow) {
                 let bad_token = self.advance();
                 let span = bad_token.span();
@@ -3984,6 +4001,13 @@ impl Parser {
                 continue;
             }
             self.advance(); // consume '=>'
+            // Likewise comments between `=>` and the value.
+            if let Some(after_arrow) = self.collect_trailing_comment() {
+                item_comments.leading.push(after_arrow);
+            }
+            item_comments
+                .leading
+                .extend(self.collect_comment_attachment().leading);
 
             // Parse value expression as a full keyword message (lowest message
             // precedence), so `#{#k => Foo new: #{#a => 1}}` correctly parses
@@ -3994,15 +4018,19 @@ impl Parser {
 
             let pair_span = pair_start.merge(value.span());
             pairs.push(MapPair::new(key, value, pair_span));
+            let item_end = self.current - 1;
+            slots.items.push(item_comments);
 
             // Check for comma (continue) or closing brace (end)
             if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",") {
                 self.advance(); // consume comma
+                self.collect_literal_item_trailing(&mut slots, item_end);
                 // Allow trailing comma
                 if self.check(&TokenKind::RightBrace) {
                     break;
                 }
             } else if self.check(&TokenKind::RightBrace) {
+                self.collect_literal_item_trailing(&mut slots, item_end);
                 break;
             } else {
                 let bad_token = self.advance();
@@ -4017,18 +4045,15 @@ impl Parser {
             }
         }
 
-        // Expect closing brace
-        let end_span = if self.check(&TokenKind::RightBrace) {
-            self.advance().span()
-        } else {
-            self.diagnostics.push(Diagnostic::error(
-                "Expected '}' to close map literal",
-                self.current_token().span(),
-            ));
-            self.current_token().span()
-        };
+        let end_span = self.finish_literal(
+            &TokenKind::RightBrace,
+            "Expected '}' to close map literal",
+            &mut slots,
+            open_idx,
+        );
 
         let span = start.merge(end_span);
+        self.record_literal_comments(span, slots);
         Expression::MapLiteral { pairs, span }
     }
 
@@ -4043,16 +4068,21 @@ impl Parser {
     /// (`parse_selector_symbol_list`, ADR 0127 §2) can reuse this for
     /// `excluding:`/`overriding:` selector lists rather than duplicating
     /// the comma/paren/cons/error-recovery handling.
+    #[allow(clippy::too_many_lines)] // element loop plus comment capture
     pub(super) fn parse_list_literal(&mut self) -> Expression {
         let start_token = self.expect(&TokenKind::ListOpen, "Expected '#('");
         let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
 
         let mut elements = Vec::new();
+        let mut slots = LiteralCommentSlots::default();
+        let open_idx = self.current.saturating_sub(1);
 
         // Handle empty list: #()
         if self.check(&TokenKind::RightParen) {
+            self.collect_literal_closing(&mut slots, open_idx);
             let end_token = self.advance();
             let span = start.merge(end_token.span());
+            self.record_literal_comments(span, slots);
             return Expression::ListLiteral {
                 elements,
                 tail: None,
@@ -4062,6 +4092,7 @@ impl Parser {
 
         // Parse elements
         loop {
+            let item_comments = self.collect_literal_item_leading(&slots, open_idx);
             // Rest/spread element: `...ident` — only valid in destructuring patterns
             let is_spread = self.check(&TokenKind::Ellipsis);
             let elem = if is_spread {
@@ -4079,11 +4110,29 @@ impl Parser {
             };
             let elem_span = elem.span();
             elements.push(elem);
+            let item_end = self.current - 1;
+            slots.items.push(item_comments);
 
             // Check for cons operator `|`
             if self.check(&TokenKind::Pipe) {
+                self.collect_literal_item_trailing(&mut slots, item_end);
+                // Comments before the `|` and between the `|` and the tail
+                // belong to the tail slot.
+                let mut tail_comments = self.collect_comment_attachment();
                 self.advance(); // consume `|`
+                if let Some(after_pipe) = self.collect_trailing_comment() {
+                    tail_comments.leading.push(after_pipe);
+                }
+                tail_comments
+                    .leading
+                    .extend(self.collect_comment_attachment().leading);
                 let tail = self.parse_unary_message();
+                let tail_end = self.current - 1;
+                slots.items.push(tail_comments);
+                self.collect_literal_item_trailing(&mut slots, tail_end);
+                if self.check(&TokenKind::RightParen) {
+                    self.collect_literal_closing(&mut slots, open_idx);
+                }
                 // Expect closing paren after tail
                 let end_span = if self.check(&TokenKind::RightParen) {
                     self.advance().span()
@@ -4095,6 +4144,7 @@ impl Parser {
                     self.current_token().span()
                 };
                 let span = start.merge(end_span);
+                self.record_literal_comments(span, slots);
                 return Expression::ListLiteral {
                     elements,
                     tail: Some(Box::new(tail)),
@@ -4111,11 +4161,13 @@ impl Parser {
                     ));
                 }
                 self.advance(); // consume comma
+                self.collect_literal_item_trailing(&mut slots, item_end);
                 // Allow trailing comma
                 if self.check(&TokenKind::RightParen) {
                     break;
                 }
             } else if self.check(&TokenKind::RightParen) {
+                self.collect_literal_item_trailing(&mut slots, item_end);
                 break;
             } else {
                 let bad_token = self.advance();
@@ -4130,18 +4182,15 @@ impl Parser {
             }
         }
 
-        // Expect closing paren
-        let end_span = if self.check(&TokenKind::RightParen) {
-            self.advance().span()
-        } else {
-            self.diagnostics.push(Diagnostic::error(
-                "Expected ')' to close list literal",
-                self.current_token().span(),
-            ));
-            self.current_token().span()
-        };
+        let end_span = self.finish_literal(
+            &TokenKind::RightParen,
+            "Expected ')' to close list literal",
+            &mut slots,
+            open_idx,
+        );
 
         let span = start.merge(end_span);
+        self.record_literal_comments(span, slots);
         Expression::ListLiteral {
             elements,
             tail: None,
@@ -4158,16 +4207,21 @@ impl Parser {
         let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
 
         let mut elements = Vec::new();
+        let mut slots = LiteralCommentSlots::default();
+        let open_idx = self.current.saturating_sub(1);
 
         // Handle empty array: #[]
         if self.check(&TokenKind::RightBracket) {
+            self.collect_literal_closing(&mut slots, open_idx);
             let end_token = self.advance();
             let span = start.merge(end_token.span());
+            self.record_literal_comments(span, slots);
             return Expression::ArrayLiteral { elements, span };
         }
 
         // Parse elements
         loop {
+            let item_comments = self.collect_literal_item_leading(&slots, open_idx);
             // Rest/spread element: `...ident` — only valid in destructuring patterns
             let is_spread = self.check(&TokenKind::Ellipsis);
             let elem = if is_spread {
@@ -4183,6 +4237,8 @@ impl Parser {
             };
             let elem_span = elem.span();
             elements.push(elem);
+            let item_end = self.current - 1;
+            slots.items.push(item_comments);
 
             // Check for comma (continue) or closing bracket (end)
             if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",") {
@@ -4193,11 +4249,13 @@ impl Parser {
                     ));
                 }
                 self.advance(); // consume comma
+                self.collect_literal_item_trailing(&mut slots, item_end);
                 // Allow trailing comma
                 if self.check(&TokenKind::RightBracket) {
                     break;
                 }
             } else if self.check(&TokenKind::RightBracket) {
+                self.collect_literal_item_trailing(&mut slots, item_end);
                 break;
             } else {
                 let bad_token = self.advance();
@@ -4212,18 +4270,15 @@ impl Parser {
             }
         }
 
-        // Expect closing bracket
-        let end_span = if self.check(&TokenKind::RightBracket) {
-            self.advance().span()
-        } else {
-            self.diagnostics.push(Diagnostic::error(
-                "Expected ']' to close array literal",
-                self.current_token().span(),
-            ));
-            self.current_token().span()
-        };
+        let end_span = self.finish_literal(
+            &TokenKind::RightBracket,
+            "Expected ']' to close array literal",
+            &mut slots,
+            open_idx,
+        );
 
         let span = start.merge(end_span);
+        self.record_literal_comments(span, slots);
         Expression::ArrayLiteral { elements, span }
     }
 
@@ -4238,19 +4293,27 @@ impl Parser {
         let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
 
         let mut elements = Vec::new();
+        let mut slots = LiteralCommentSlots::default();
+        let open_idx = self.current.saturating_sub(1);
 
         // Handle empty tuple: {}
         if self.check(&TokenKind::RightBrace) {
+            self.collect_literal_closing(&mut slots, open_idx);
             let end_token = self.advance();
             let span = start.merge(end_token.span());
+            self.record_literal_comments(span, slots);
             return Expression::TupleLiteral { elements, span };
         }
 
         loop {
+            let item_comments = self.collect_literal_item_leading(&slots, open_idx);
             elements.push(self.parse_keyword_expression());
+            let item_end = self.current - 1;
+            slots.items.push(item_comments);
 
             if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",") {
                 self.advance(); // consume comma
+                self.collect_literal_item_trailing(&mut slots, item_end);
                 if self.check(&TokenKind::RightBrace) {
                     break; // trailing comma
                 }
@@ -4258,6 +4321,7 @@ impl Parser {
                 || self.is_at_end()
                 || self.at_tuple_recovery_boundary()
             {
+                self.collect_literal_item_trailing(&mut slots, item_end);
                 // A `]`/`)` belongs to an enclosing construct, and a token on
                 // a new line starts the next statement or method: leave both
                 // for the caller and report the missing `}` below.
@@ -4282,18 +4346,103 @@ impl Parser {
             }
         }
 
-        let end_span = if self.check(&TokenKind::RightBrace) {
-            self.advance().span()
-        } else {
-            self.diagnostics.push(Diagnostic::error(
-                "Expected '}' to close tuple literal",
-                self.current_token().span(),
-            ));
-            self.current_token().span()
-        };
+        let end_span = self.finish_literal(
+            &TokenKind::RightBrace,
+            "Expected '}' to close tuple literal",
+            &mut slots,
+            open_idx,
+        );
 
         let span = start.merge(end_span);
+        self.record_literal_comments(span, slots);
         Expression::TupleLiteral { elements, span }
+    }
+
+    /// The comments before the next element of the collection literal being
+    /// parsed (BT-3983): those on their own lines before it, and, for the
+    /// first element, an end-of-line comment after the opening delimiter
+    /// (token `open_idx`), which prints above the element.
+    fn collect_literal_item_leading(
+        &self,
+        slots: &LiteralCommentSlots,
+        open_idx: usize,
+    ) -> CommentAttachment {
+        let mut comments = self.collect_comment_attachment();
+        comments.trailing = None;
+        if slots.items.is_empty() {
+            if let Some(after_open) = self.literal_open_trailing(open_idx) {
+                comments.leading.insert(0, after_open);
+            }
+        }
+        comments
+    }
+
+    /// The end-of-line comment after the opening delimiter at `open_idx`, if
+    /// that token has been consumed.
+    fn literal_open_trailing(&self, open_idx: usize) -> Option<Comment> {
+        if open_idx < self.current && open_idx < self.tokens.len() {
+            self.collect_trailing_comment_at(open_idx)
+        } else {
+            None
+        }
+    }
+
+    /// Records the end-of-line comment after the item whose last token is
+    /// `item_end`, or after the comma that followed it, as the last slot's
+    /// trailing comment (BT-3983). Call after the comma was consumed, or when
+    /// the closing delimiter follows.
+    fn collect_literal_item_trailing(&self, slots: &mut LiteralCommentSlots, item_end: usize) {
+        let Some(slot) = slots.items.last_mut() else {
+            return;
+        };
+        slot.trailing = self.collect_trailing_comment_at(item_end).or_else(|| {
+            let last = self.current - 1;
+            (last > item_end)
+                .then(|| self.collect_trailing_comment_at(last))
+                .flatten()
+        });
+    }
+
+    /// Consumes the closing delimiter `close` of a collection literal,
+    /// recording the comments before it (BT-3983), or reports `message` and
+    /// leaves the current token. Returns the delimiter's span.
+    fn finish_literal(
+        &mut self,
+        close: &TokenKind,
+        message: &'static str,
+        slots: &mut LiteralCommentSlots,
+        open_idx: usize,
+    ) -> Span {
+        if self.check(close) {
+            self.collect_literal_closing(slots, open_idx);
+            self.advance().span()
+        } else {
+            self.diagnostics
+                .push(Diagnostic::error(message, self.current_token().span()));
+            self.current_token().span()
+        }
+    }
+
+    /// Records the comments before the closing delimiter (the current token)
+    /// of the literal being parsed (BT-3983). For an empty literal this
+    /// includes an end-of-line comment after the opening delimiter.
+    fn collect_literal_closing(&self, slots: &mut LiteralCommentSlots, open_idx: usize) {
+        if slots.items.is_empty() {
+            if let Some(after_open) = self.literal_open_trailing(open_idx) {
+                slots.closing.push(after_open);
+            }
+        }
+        slots
+            .closing
+            .extend(self.collect_comment_attachment().leading);
+    }
+
+    /// Files a finished literal's comments on the parser (BT-3983); the
+    /// owning definition takes them. Literals without comments are skipped.
+    fn record_literal_comments(&mut self, span: Span, slots: LiteralCommentSlots) {
+        if !slots.is_empty() {
+            self.literal_comments.push((span, slots));
+        }
     }
 
     /// Whether the current token, at the tuple's own nesting level, belongs

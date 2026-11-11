@@ -1527,3 +1527,25 @@ fn parse_tuple_literal_in_block_body_and_match_arm_body() {
         other => panic!("Expected match, got: {other:?}"),
     }
 }
+
+// --- Comments inside collection literals (BT-3983) ---
+
+#[test]
+fn literal_comments_recorded_per_literal_kind() {
+    for src in [
+        "t := {\n  #a, // first\n  #b\n}\n",
+        "t := #(\n  // lead\n  1,\n  2\n)\n",
+        "t := #[\n  1, // one\n  2\n]\n",
+        "t := #{\n  #a => 1, // a\n  #b => 2\n}\n",
+    ] {
+        let (module, _) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
+        assert_eq!(module.literal_comments.len(), 1, "{src}");
+    }
+}
+
+#[test]
+fn literal_without_comments_has_no_record() {
+    let (module, _) =
+        crate::source_analysis::parse(crate::source_analysis::lex_with_eof("t := {#a, #b}\n"));
+    assert!(module.literal_comments.is_empty());
+}

@@ -65,6 +65,7 @@
 //!     file_leading_comments: Vec::new(),
 //!     file_trailing_comments: Vec::new(),
 //!     pipeline_sends: PipelineSends::default(),
+//!     literal_comments: LiteralComments::default(),
 //! };
 //! # assert_eq!(module.expressions.len(), 1);
 //! ```
@@ -88,6 +89,7 @@
 
 mod class;
 mod expression;
+mod literal_comments;
 mod method;
 pub mod normalize;
 mod pattern;
@@ -98,6 +100,7 @@ pub mod well_known;
 // Re-export all public types so `use crate::ast::Foo` continues to work.
 pub use class::*;
 pub use expression::*;
+pub use literal_comments::{LiteralCommentSlots, LiteralComments};
 pub use method::*;
 pub use pattern::*;
 pub use pipeline::PipelineSends;
@@ -154,6 +157,9 @@ pub struct Module {
     /// initialisers. A method's own are on
     /// [`MethodDefinition::pipeline_sends`].
     pub pipeline_sends: PipelineSends,
+    /// The comments inside collection literals outside any method (BT-3983);
+    /// a method's own are on [`MethodDefinition::literal_comments`].
+    pub literal_comments: LiteralComments,
 }
 
 impl Module {
@@ -171,6 +177,7 @@ impl Module {
             file_leading_comments: Vec::new(),
             file_trailing_comments: Vec::new(),
             pipeline_sends: PipelineSends::default(),
+            literal_comments: LiteralComments::default(),
         }
     }
 
@@ -188,6 +195,7 @@ impl Module {
             file_leading_comments: Vec::new(),
             file_trailing_comments: Vec::new(),
             pipeline_sends: PipelineSends::default(),
+            literal_comments: LiteralComments::default(),
         }
     }
 
@@ -209,6 +217,7 @@ impl Module {
             file_leading_comments,
             file_trailing_comments: Vec::new(),
             pipeline_sends: PipelineSends::default(),
+            literal_comments: LiteralComments::default(),
         }
     }
 

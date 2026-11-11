@@ -1355,6 +1355,7 @@ mod tests {
     fn make_method(body_expr: Expression) -> MethodDefinition {
         MethodDefinition {
             pipeline_sends: crate::ast::PipelineSends::default(),
+            literal_comments: crate::ast::LiteralComments::default(),
             selector: MessageSelector::Unary("test".into()),
             parameters: vec![],
             body: vec![ExpressionStatement::bare(body_expr)],

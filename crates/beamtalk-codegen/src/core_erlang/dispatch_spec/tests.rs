@@ -49,6 +49,7 @@ fn class_with_methods(methods: Vec<MethodDefinition>) -> ClassDefinition {
 fn dnu_method(body: Vec<ExpressionStatement>) -> MethodDefinition {
     MethodDefinition {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         selector: MessageSelector::Keyword(vec![
             KeywordPart::new("doesNotUnderstand:", s()),
             KeywordPart::new("args:", s()),
