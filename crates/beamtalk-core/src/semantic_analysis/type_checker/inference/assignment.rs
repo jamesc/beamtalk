@@ -140,18 +140,13 @@ impl TypeChecker {
         let declared_members = Self::union_members(declared);
         let has_class_object =
             |members: &[InferredType]| members.iter().any(|m| ClassObjectType::of(m).is_some());
-        let refused_class_object = inferred_members
-            .iter()
-            .filter_map(ClassObjectType::of)
-            .find(|class_object| {
-                !Self::metatype_assignable_to(
-                    *class_object,
-                    &declared_name,
-                    hierarchy,
-                    protocol_registry,
-                    Self::is_assignable_to,
-                )
-            });
+        let refused_class_object = Self::refused_class_object(
+            inferred_members,
+            &declared_name,
+            hierarchy,
+            protocol_registry,
+            Self::is_assignable_to,
+        );
         let assignable = if has_class_object(inferred_members) || has_class_object(declared_members)
         {
             let inferred_instances: Vec<InferredType> = inferred_members
