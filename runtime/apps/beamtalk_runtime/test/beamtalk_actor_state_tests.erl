@@ -9,9 +9,6 @@
 -include_lib("eunit/include/eunit.hrl").
 -include("beamtalk.hrl").
 
-%% BT-4536: the deprecated `nlr_state/2` shim is tested here until it goes.
--compile({nowarn_deprecated_function, [{beamtalk_actor_state, nlr_state, 2}]}).
-
 self_obj() ->
     #beamtalk_object{class = 'ActorStateTestClass', class_mod = astc, pid = self()}.
 
@@ -304,35 +301,6 @@ refresh_takes_the_cells_fields_and_keeps_local_scratch_test() ->
 refresh_away_answers_the_accumulator_unchanged_test() ->
     Acc = #{a => 1, '__local__x' => 5},
     ?assertEqual(Acc, beamtalk_actor_state:refresh(foreign_obj(), Acc)).
-
-%% BT-4536: `nlr_state/2` is a deprecated alias of `view/2`, kept one release
-%% for closures compiled before it; it no longer stamps an away capture.
-nlr_state_is_view_at_home_test() ->
-    with_cell(#{n => 1}, fun() ->
-        ?assertEqual(
-            beamtalk_actor_state:view(self_obj(), #{n => 0}),
-            beamtalk_actor_state:nlr_state(self_obj(), #{n => 0})
-        ),
-        ?assertEqual(#{n => 1}, beamtalk_actor_state:nlr_state(self_obj(), #{n => 0}))
-    end).
-
-nlr_state_is_view_away_test() ->
-    Away = foreign_obj(),
-    ?assertEqual(#{n => 0}, beamtalk_actor_state:nlr_state(Away, #{n => 0})),
-    ?assertEqual(
-        actor_state_unreachable,
-        kind_of(fun() -> beamtalk_actor_state:nlr_state(Away, none) end)
-    ).
-
-nlr_state_is_view_under_another_owners_cell_test() ->
-    Other = spawn(fun() -> ok end),
-    Old = beamtalk_actor_state:snapshot(),
-    try
-        ok = beamtalk_actor_state:uninstall({Other, #{n => 7}}),
-        ?assertEqual(#{n => 0}, beamtalk_actor_state:nlr_state(self_obj(), #{n => 0}))
-    after
-        beamtalk_actor_state:uninstall(Old)
-    end.
 
 %% ADR 0146 (BT-4535, BT-4536): an actor method's `^` commits the cell at home
 %% and the carried state away. Whose cell it is is decided by identity (the

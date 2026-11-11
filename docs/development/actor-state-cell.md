@@ -523,8 +523,7 @@ method commits the cell (BT-4536). The relay that used to resume such a throw
 with the cell over its carried state (`refresh_carried/2`, BT-4429), and the
 owner stamp it read to tell this actor's state from another's (BT-4448), are
 gone. A closure's `^` carries `view/2`: the cell at home, the creation-time
-capture away. `nlr_state/2` remains one release as a deprecated alias of
-`view/2` for closures compiled before BT-4536.
+capture away.
 
 Entering an `ensure:` stores the current `State` to the cell, and inside the
 protected body every field write also stores (write-through). The protected

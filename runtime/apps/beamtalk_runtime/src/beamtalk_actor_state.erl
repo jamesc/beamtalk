@@ -68,7 +68,6 @@ and the test-build check in `commit/2`, which call them.
     get/2,
     get/3,
     view/2,
-    nlr_state/2,
     commit/2,
     store_unwound/2,
     note_unwound/1,
@@ -88,10 +87,6 @@ and the test-build check in `commit/2`, which call them.
 ]).
 
 -export_type([cell/0, capture/0, adapted/0]).
-
-%% BT-4536: closures compiled before BT-4536 still call it; removed one
-%% release later.
--deprecated([{nlr_state, 2, "use view/2 (ADR 0146, BT-4536)"}]).
 
 -define(CELL, '$bt_actor_state').
 %% ADR 0146 (BT-4535): the persistent_term switch for the test-build check in
@@ -141,7 +136,7 @@ take() ->
 BT-4666: apply `Fun` to every actor state map a process-dictionary entry
 holds: the cell (`{Key, {Owner, Map}}`), and the carried states the
 test-build commit check notes as excused (`'$bt_nlr_commit_excused'`, see
-note_excused/1). Any other entry is answered unchanged. Lets
+note_unwound/1). Any other entry is answered unchanged. Lets
 `beamtalk_actor_redaction`'s crash-report filter redact secret slots in
 state still held in the dictionary, without knowing these keys or shapes.
 """.
@@ -273,16 +268,6 @@ view(Self, Capture) ->
     end.
 
 -doc """
-Deprecated alias of `view/2` (ADR 0146, BT-4536). Closures compiled before
-BT-4536 call it for the state their `^` carries; it used to stamp an away
-capture with its actor (BT-4448), which nothing reads any more. Kept one more
-release for those closures, then removed.
-""".
--spec nlr_state(#beamtalk_object{}, capture()) -> map().
-nlr_state(Self, Capture) ->
-    view(Self, Capture).
-
--doc """
 ADR 0146: the state an actor method commits when a `^` of its own reaches its
 NLR boundary (`{'reply', Value, commit(Self, Carried)}`). The cell is the one
 place the actor's fields live, so at home the commit is the cell as it stands:
@@ -331,6 +316,19 @@ store_unwound(Throw, State) when is_map(State) ->
     store(State).
 
 -doc """
+Re-throw `Nlr`, a `^` another process threw on this one's behalf and answered
+here (a block run by another actor or by a class's process; BT-3582). No
+actor's block is at home outside its actor's own process, so the block was away
+when it threw and its `^` carries the block's creation-time capture, not this
+process's cell. The test-build check in `commit/2` is told so (BT-4536): the
+throw is recognised as away by process identity, not by a mark in the state map.
+""".
+-spec rethrow_from_away(term()) -> no_return().
+rethrow_from_away(Nlr) ->
+    note_unwound(Nlr),
+    throw(Nlr).
+
+-doc """
 Tell the test-build check in `commit/2` that a cleanup may have put the cell
 ahead of `Throw`, a `^` re-raised as it came after the cleanup ran: an inlined
 `ensure:`'s foreign clause (`store_unwound/2`), or `Block>>ensure:` reached
@@ -349,24 +347,7 @@ flight at once with equal carried states share one note: the first commit
 spends it, and the other is checked as if it was never noted.
 """.
 -spec note_unwound(term()) -> ok.
-note_unwound(Throw) ->
-    note_excused(Throw).
-
--doc """
-Re-throw `Nlr`, a `^` another process threw on this one's behalf and answered
-here (a block run by another actor or by a class's process; BT-3582). No
-actor's block is at home outside its actor's own process, so the block was away
-when it threw and its `^` carries the block's creation-time capture, not this
-process's cell. The test-build check in `commit/2` is told so (BT-4536): the
-throw is recognised as away by process identity, not by a mark in the state map.
-""".
--spec rethrow_from_away(term()) -> no_return().
-rethrow_from_away(Nlr) ->
-    note_excused(Nlr),
-    throw(Nlr).
-
--spec note_excused(term()) -> ok.
-note_excused(Throw) when ?IS_NLR(Throw), tuple_size(Throw) =:= 4 ->
+note_unwound(Throw) when ?IS_NLR(Throw), tuple_size(Throw) =:= 4 ->
     case persistent_term:get(?CHECK_COMMIT, false) andalso installed() of
         true ->
             Carried = element(4, Throw),
@@ -383,7 +364,7 @@ note_excused(Throw) when ?IS_NLR(Throw), tuple_size(Throw) =:= 4 ->
         false ->
             ok
     end;
-note_excused(_Throw) ->
+note_unwound(_Throw) ->
     ok.
 
 %% Spends the note left for the throw carrying `Carried`.
@@ -605,8 +586,10 @@ super_send(Self, Capture, Class, Selector, Args) ->
                 {reply, _Result, _Changed} -> raise_unreachable(Self, Selector, write)
             catch
                 throw:Nlr:Stack when ?IS_NLR(Nlr) ->
+                    %% Load-bearing, not a duplicate of the `after`: `note_unwound/1`
+                    %% needs `installed()` to see the host's cell, not the borrowed one.
                     uninstall(Saved),
-                    note_excused(Nlr),
+                    note_unwound(Nlr),
                     erlang:raise(throw, Nlr, Stack)
             after
                 uninstall(Saved)
