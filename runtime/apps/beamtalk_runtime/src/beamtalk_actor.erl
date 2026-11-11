@@ -6605,6 +6605,23 @@ pid_class_name(Pid) ->
         {dictionary, Dict} when is_list(Dict) ->
             case lists:keyfind('$beamtalk_actor', 1, Dict) of
                 {'$beamtalk_actor', Class} when is_atom(Class) -> Class;
+                _ -> native_pid_class_name(Dict)
+            end;
+        _ ->
+            nil
+    end.
+
+%% BT-4657: a `native:` actor's hand-written backing gen_server (ADR 0056)
+%% never plants the `'$beamtalk_actor'` marker. Its class is read from the
+%% process's `'$initial_call'` (`{BackingModule, init, 1}`, set by
+%% `proc_lib`) through the backing-module index. A backing module shared by
+%% several classes names none of them: `nil`, as for a non-Beamtalk process.
+-spec native_pid_class_name(list()) -> atom() | nil.
+native_pid_class_name(Dict) ->
+    case lists:keyfind('$initial_call', 1, Dict) of
+        {'$initial_call', {Backing, _, _}} when is_atom(Backing) ->
+            case beamtalk_class_registry:classes_backing_module(Backing) of
+                [Class] -> Class;
                 _ -> nil
             end;
         _ ->
