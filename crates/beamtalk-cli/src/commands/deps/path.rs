@@ -1000,16 +1000,21 @@ impl DepIndexScan {
             mut class_infos,
             trait_users,
             metadata,
-            extensions,
+            mut extensions,
             dep_name,
         } = self;
-        let mut extensions = extensions;
-        beamtalk_cli::dependency_extensions::expand_dependency_internal_aliases(
+        trait_users.flatten(&mut class_infos, extra_protocol_defs, Some(&dep_name));
+        // BT-4615: after flattening, which replaces trait-users' infos.
+        let mut metadata = metadata;
+        beamtalk_cli::dependency_extensions::expand_dependency_class_aliases(
             &metadata.alias_infos,
             &mut class_infos,
+            &mut metadata.protocol_infos,
+        );
+        beamtalk_cli::dependency_extensions::expand_dependency_extension_aliases(
+            &metadata.alias_infos,
             &mut extensions,
         );
-        trait_users.flatten(&mut class_infos, extra_protocol_defs, Some(&dep_name));
         (
             class_module_index,
             class_infos,
@@ -1608,7 +1613,12 @@ dep_utils = { path = "dep_utils" }"#,
              internal type Secret = Integer\n\
              internal type Chain = Secret\n\
              internal type Loop = Loop\n\n\
+             Protocol define: Tagged\n  \
+             name -> String\n\n  \
+             tag -> Secret => 1\n\n\
              Object subclass: Vault\n  \
+             uses: Tagged\n  \
+             name -> String => \"v\"\n  \
              thing -> Secret => 1\n  \
              many: n :: Secret -> List(Secret) => #()\n  \
              maybe -> Secret | Nil => nil\n  \
@@ -1636,6 +1646,7 @@ dep_utils = { path = "dep_utils" }"#,
                 .map_or_else(|| panic!("no return type for {sel}"), ToString::to_string)
         };
         assert_eq!(ret("thing"), "Integer");
+        assert_eq!(ret("tag"), "Integer", "a flattened provision is expanded");
         assert_eq!(ret("many:"), "List(Integer)");
         assert_eq!(ret("maybe"), "Integer | Nil");
         assert_eq!(ret("chained"), "Integer");

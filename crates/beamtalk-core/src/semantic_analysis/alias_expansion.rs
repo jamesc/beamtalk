@@ -18,6 +18,11 @@
 //! [`InternalAliasExpander`] is the one shared implementation, used for both
 //! class-method signatures ([`ClassInfo`]) and extension-method signatures
 //! (which are stored as strings — [`InternalAliasExpander::expand_str`]).
+//! Known gap: protocol *ASTs* (`ProtocolDefinition`, which a consumer's own
+//! `uses: dep@Proto` flattens provisions from) are not rewritten; that needs a
+//! `TypeAnnotation`-level pass. Exported `ProtocolInfo`s and every
+//! `ClassInfo` (provisions flattened into dependency classes included) are.
+//!
 //! Public aliases are left alone; they keep resolving by name through the
 //! seeded registry.
 //!
@@ -29,6 +34,7 @@ use ecow::EcoString;
 
 use super::alias_registry::AliasInfo;
 use super::class_hierarchy::{ClassInfo, DeclaredType, MethodInfo};
+use super::protocol_registry::ProtocolInfo;
 
 /// Expands a package's `internal type` aliases inside exported signatures.
 #[derive(Debug, Clone, Default)]
@@ -84,9 +90,16 @@ impl InternalAliasExpander {
             DeclaredType::Union(members) => {
                 let mut out = Vec::with_capacity(members.len());
                 for member in members {
-                    match self.expand_inner(member, active) {
-                        DeclaredType::Union(inner) => out.extend(inner),
-                        other => out.push(other),
+                    let expanded = match self.expand_inner(member, active) {
+                        DeclaredType::Union(inner) => inner,
+                        other => vec![other],
+                    };
+                    for m in expanded {
+                        // `internal type Opt = Integer | Nil` used as
+                        // `Opt | Nil` must not print `Integer | Nil | Nil`.
+                        if !out.contains(&m) {
+                            out.push(m);
+                        }
                     }
                 }
                 DeclaredType::Union(out)
@@ -148,6 +161,26 @@ impl InternalAliasExpander {
         for var in &mut info.class_variables {
             if let Some(ty) = &mut var.ty {
                 *ty = self.expand(ty);
+            }
+        }
+    }
+
+    /// Expands a protocol's required and provided method signatures.
+    pub fn expand_protocol_info(&self, info: &mut ProtocolInfo) {
+        if self.is_empty() {
+            return;
+        }
+        let all = info
+            .methods
+            .iter_mut()
+            .chain(&mut info.class_methods)
+            .chain(&mut info.provided);
+        for req in all {
+            for ty in req.param_types.iter_mut().flatten() {
+                *ty = self.expand_str(ty);
+            }
+            if let Some(ty) = &mut req.return_type {
+                *ty = self.expand_str(ty);
             }
         }
     }
@@ -218,6 +251,15 @@ mod tests {
         assert_eq!(
             e.expand(&DeclaredType::parse("U | Nil")).to_string(),
             "Integer | String | Nil"
+        );
+    }
+
+    #[test]
+    fn union_expansion_dedupes_members() {
+        let e = expander(&[("Opt", DeclaredType::parse("Integer | Nil"))]);
+        assert_eq!(
+            e.expand(&DeclaredType::parse("Opt | Nil")).to_string(),
+            "Integer | Nil"
         );
     }
 

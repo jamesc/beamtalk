@@ -39,6 +39,7 @@ use beamtalk_core::compilation::extension_index::ExtensionIndex;
 use beamtalk_core::semantic_analysis::alias_expansion::InternalAliasExpander;
 use beamtalk_core::semantic_analysis::alias_registry::AliasInfo;
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
+use beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo;
 use beamtalk_core::source_analysis::{Diagnostic, Severity};
 use std::path::Path;
 
@@ -119,22 +120,31 @@ impl DependencyExtensions {
     }
 }
 
-/// Expands one dependency's own `internal type` aliases in everything it
-/// exports to a consumer — its class signatures and its extension signatures
-/// (BT-4615). The one entry point both CLI dependency scanners call, so class
-/// methods and extension methods cannot diverge. `alias_infos` is the
-/// dependency's own table; only its `internal` aliases are expanded, public
-/// ones keep resolving by name in the consumer.
-pub fn expand_dependency_internal_aliases(
+/// Expands a dependency's own `internal type` aliases in its class
+/// signatures (BT-4615). Must run **after** trait flattening: flattening
+/// re-extracts each trait-using class from its AST and replaces the whole
+/// `ClassInfo`, which would discard an earlier expansion.
+pub fn expand_dependency_class_aliases(
     alias_infos: &[AliasInfo],
     class_infos: &mut [ClassInfo],
-    extensions: &mut DependencyExtensions,
+    protocol_infos: &mut [ProtocolInfo],
 ) {
     let expander = InternalAliasExpander::from_alias_infos(alias_infos);
     for info in class_infos {
         expander.expand_class_info(info);
     }
-    extensions.expand_internal_aliases(&expander);
+    for info in protocol_infos {
+        expander.expand_protocol_info(info);
+    }
+}
+
+/// Expands a dependency's own `internal type` aliases in its extension
+/// signatures (BT-4615).
+pub fn expand_dependency_extension_aliases(
+    alias_infos: &[AliasInfo],
+    extensions: &mut DependencyExtensions,
+) {
+    extensions.expand_internal_aliases(&InternalAliasExpander::from_alias_infos(alias_infos));
 }
 
 /// Merges every dependency's extensions into `into` (the consumer's
