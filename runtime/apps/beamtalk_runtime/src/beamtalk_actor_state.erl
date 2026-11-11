@@ -83,7 +83,8 @@ and the test-build check in `commit/2`, which call them.
     has/3,
     clear/2,
     capture/2,
-    protect/1
+    protect/1,
+    map_cell_entry/2
 ]).
 
 -export_type([cell/0, capture/0, adapted/0]).
@@ -135,6 +136,26 @@ take() ->
         {_, State} when is_map(State) -> State;
         _ -> raise_no_cell(take)
     end.
+
+-doc """
+BT-4666: apply `Fun` to every actor state map a process-dictionary entry
+holds: the cell (`{Key, {Owner, Map}}`), and the carried states the
+test-build commit check notes as excused (`'$bt_nlr_commit_excused'`, see
+note_excused/1). Any other entry is answered unchanged. Lets
+`beamtalk_actor_redaction`'s crash-report filter redact secret slots in
+state still held in the dictionary, without knowing these keys or shapes.
+""".
+-spec map_cell_entry(term(), fun((map()) -> map())) -> term().
+map_cell_entry({?CELL, {Owner, State}}, Fun) when is_map(State) ->
+    {?CELL, {Owner, Fun(State)}};
+map_cell_entry({?EXCUSED, Carried}, Fun) when is_list(Carried) ->
+    {?EXCUSED, [map_if_state(C, Fun) || C <- Carried]};
+map_cell_entry(Entry, _Fun) ->
+    Entry.
+
+-spec map_if_state(term(), fun((map()) -> map())) -> term().
+map_if_state(State, Fun) when is_map(State) -> Fun(State);
+map_if_state(Other, _Fun) -> Other.
 
 -doc "Restore the value `install/1` returned: erase the cell, or put the enclosing one back.".
 -spec uninstall(cell()) -> ok.
