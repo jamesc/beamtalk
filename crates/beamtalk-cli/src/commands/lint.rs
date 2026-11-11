@@ -787,7 +787,9 @@ mod tests {
     #[test]
     fn lint_extraction_records_protocol_source_identity() {
         let temp = tempfile::TempDir::new().unwrap();
-        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        // Canonicalise root — the recorded protocol source path is the
+        // canonical spelling; see find_package_root_from_subdir.
+        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(temp.path()).unwrap()).unwrap();
         std::fs::write(
             root.join("beamtalk.toml"),
             "[package]\nname = \"xpkg\"\nversion = \"0.1.0\"\n",
@@ -1067,7 +1069,13 @@ mod tests {
             ..
         } = parsed_files
             .into_iter()
-            .find(|f| f.path == consumer_file)
+            // Parsed files carry the canonical spelling (`/private/var/...`
+            // on macOS, `\\?\C:\...` on Windows), so compare canonically.
+            // The fixture root itself stays raw: a verbatim Windows path
+            // would not resolve the manifest's `../producer` dependency.
+            .find(|f| {
+                std::fs::canonicalize(&f.path).ok() == std::fs::canonicalize(&consumer_file).ok()
+            })
             .expect("consumer.bt should be among the parsed files");
 
         let diags = analyse_file(
