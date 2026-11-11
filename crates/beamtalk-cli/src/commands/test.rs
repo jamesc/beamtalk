@@ -1576,6 +1576,10 @@ fn resolve_fixtures_dir(test_path: &Utf8Path) -> Utf8PathBuf {
     if local.is_dir() {
         return local;
     }
+    // A target already inside `test/fixtures` is not a scoped test run.
+    if test_path.components().any(|c| c.as_str() == "fixtures") {
+        return local;
+    }
     if let Some(root) = canonical_package_root(test_path) {
         let pkg_fixtures = root.join("test").join("fixtures");
         if pkg_fixtures.is_dir() {
@@ -1950,7 +1954,7 @@ fn resolve_load_directives(
 
         // Skip if already pre-compiled from the fixtures directory
         if pipeline.precompiled_modules.contains(&fixture_module) {
-            if fixture_path.starts_with(fixtures_dir) {
+            if canonical_path(&fixture_path).starts_with(canonical_path(fixtures_dir)) {
                 // This @load points into fixtures_dir itself -- already compiled in Phase 0
                 eprintln!(
                     "Deprecated: '// @load {load_path}' in '{test_file}' \u{2014} fixture is already available \
