@@ -62,10 +62,14 @@ pub use sources::{collect_formattable_files_from_dir, collect_source_files_from_
 pub(crate) use sources::{
     compile_file, compile_to_beam, compute_file_module_pairs, compute_relative_module,
 };
-pub(crate) use stubs::{ResolvedTypeRegistry, extract_type_specs, resolve_package_type_registry};
 #[cfg(test)]
 pub(crate) use stubs::{
-    StubLayer, distribution_stubs_dir, load_dependency_stub_registries, load_project_stub_registry,
+    DependencyStubsDir, StubLayer, distribution_stubs_dir, load_dependency_stub_registries,
+    load_project_stub_registry,
+};
+pub(crate) use stubs::{
+    ResolvedTypeRegistry, dependency_stub_dirs, extract_type_specs, render_stub_reports,
+    resolve_package_type_registry,
 };
 
 // Re-exported only for `build::tests` (which relies on `super::*` to see
@@ -223,16 +227,18 @@ fn execute_build_passes(
         options.stdlib_mode,
     );
     // ADR 0075 full resolution chain over the auto-extracted registry.
-    let stubs::ResolvedTypeRegistry {
-        registry: native_type_registry,
-        diagnostics: stub_diagnostics,
-        stub_inputs_hash,
-    } = resolve_package_type_registry(
+    let resolved_registry = resolve_package_type_registry(
         &env.project_root,
         auto_extract_registry,
         &dep_ctx.resolved_deps,
         Some(OutputFormat::Text),
     );
+    let stub_diagnostics: Vec<_> = resolved_registry.diagnostics().cloned().collect();
+    let ResolvedTypeRegistry {
+        registry: native_type_registry,
+        stub_inputs_hash,
+        ..
+    } = resolved_registry;
     // BT-4485: inline FFI calls the FFI type table proves need no coercion
     // compile to direct calls, so the set of proved functions shapes the
     // generated code: fold it into every file's cache key with the stub inputs.

@@ -1,0 +1,13 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Lint-verdict parity fixture (BT-4643): CLI `beamtalk lint` and MCP `lint`
+# type an FFI call through the project's own `stubs/` tier (ADR 0075), so a
+# stub-typed argument mismatch is reported identically on both surfaces.
+
+[package]
+name = "parity_lint_verdict_stub"
+version = "0.1.0"
+description = "CLI/MCP lint stub-tier parity fixture (BT-4643)"
+
+[dependencies]

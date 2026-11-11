@@ -41,6 +41,19 @@
 //! `ensure:`s deep in an actor method is compiled exactly 3^depth times, the
 //! relay and the foreign clause sharing one body.
 //!
+//! The REPL is a scope kind too (ADR 0146): a `^` run in place at the REPL
+//! carries the workspace bindings, which only an inlined cleanup writes. It
+//! has no methods, so only its own `^` crosses its `ensure:`, and it compiles
+//! as an input (no module, so not through `erlc` here:
+//! `beamtalk-repl/tests/repl_loop_body_return.rs` runs such inputs on a BEAM).
+//!
+//! Two further cells are not crossed with the axes: `Block>>ensure:` reached
+//! dynamically (`perform:`), a plain catch since BT-4536
+//! ([`block_ensure_fallback_re_raises_a_foreign_throw_after_its_cleanup`]), and
+//! a `^` through an `ensure:` inside an away `super_send/5`, whose commit
+//! answers the carried state
+//! ([`an_ensure_inside_an_away_super_send_relays_its_own_return`]).
+//!
 //! The merged Tier 2 fun is reachable only in an unvalidated compile (ADR
 //! 0133 rejects a stored block that assigns a captured local), like
 //! `tier2_merge.rs`; codegen here never runs the validator. The runtime
@@ -49,7 +62,12 @@
 
 use super::{assert_compiles_through_erlc, erlc_available};
 use crate::core_erlang::ensure_nlr_relay::fault::{RelayFault, with_fault};
-use crate::core_erlang::{CodegenOptions, generate_module};
+use crate::core_erlang::nlr::fault::{NlrFault, with_fault as with_nlr_fault};
+use crate::core_erlang::{
+    CodeGenContext, CodeGenError, CodegenOptions, CoreErlangGenerator, generate_module,
+};
+use beamtalk_cerl_doc::Document;
+use beamtalk_core::ast::Expression;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// A scope kind a `^` is thrown from, and the class it is compiled in.
@@ -60,6 +78,8 @@ enum Scope {
     MergedTier2Fun,
     ValueTypeMethod,
     ClassMethod,
+    /// ADR 0146: a REPL input, whose `^` carries the workspace bindings.
+    Repl,
 }
 
 const SCOPES: &[Scope] = &[
@@ -68,6 +88,7 @@ const SCOPES: &[Scope] = &[
     Scope::MergedTier2Fun,
     Scope::ValueTypeMethod,
     Scope::ClassMethod,
+    Scope::Repl,
 ];
 
 impl Scope {
@@ -99,6 +120,18 @@ impl Scope {
                 "Object subclass: Bt4312RelayClass\n  classState: n = 0\n  class bump => self.n := self.n + 1\n",
                 "n",
             ),
+            // No class: the input binds `w` first and writes it.
+            Self::Repl => ("w := 0", "w"),
+        }
+    }
+
+    /// The assignment its cleanups write: a field, or (at the REPL) a
+    /// workspace binding.
+    fn write(self) -> String {
+        let (_, field) = self.class();
+        match self {
+            Self::Repl => format!("{field} := 9"),
+            _ => format!("self.{field} := 9"),
         }
     }
 
@@ -110,6 +143,8 @@ impl Scope {
                 format!("  {name} =>\n    {stmt}\n    0\n")
             }
             Self::ClassMethod => format!("  class {name} =>\n    {stmt}\n    0\n"),
+            // An input of its own: a REPL statement per line.
+            Self::Repl => format!("{stmt}\n"),
             Self::ActorClosure => {
                 format!("  {name} =>\n    b := [{stmt}. 0]\n    b value\n    0\n")
             }
@@ -135,6 +170,13 @@ enum Thrower {
 }
 
 const THROWERS: &[Thrower] = &[Thrower::OwnScope, Thrower::OtherMethod];
+
+impl Thrower {
+    /// Whether this thrower exists in `scope`: the REPL has no other method.
+    fn in_scope(self, scope: Scope) -> bool {
+        !(scope == Scope::Repl && self == Self::OtherMethod)
+    }
+}
 
 impl Thrower {
     /// `ensure`, with the scope's own `^` block replaced by the method's
@@ -268,11 +310,17 @@ const SHAPES: &[Shape] = &[
 /// actor-state cell, like a closure's: a self-send's callee and a stored
 /// block both write the actor's state there; a value type's self-send
 /// answers a new value and leaves the sender's `Self` as it was.
+///
+/// The REPL's bindings, like a value type's `Self`, are written only by an
+/// inlined cleanup (a closure that assigns a binding cannot be stored, ADR
+/// 0133, and one run in place writes nothing of the eval's map); a shape that
+/// nests a closure cleanup in an inlined one that writes needs the relay for
+/// the outer one ([`Cell::relay_needed`]).
 fn relay_needed(scope: Scope, cleanup: Cleanup) -> bool {
     match (scope, cleanup) {
         (_, Cleanup::Inlined { writes: false })
         | (Scope::ClassMethod, _)
-        | (Scope::ValueTypeMethod, Cleanup::Closure | Cleanup::Indirect) => false,
+        | (Scope::Repl | Scope::ValueTypeMethod, Cleanup::Closure | Cleanup::Indirect) => false,
         (_, Cleanup::Inlined { writes: true } | Cleanup::Closure | Cleanup::Indirect) => true,
     }
 }
@@ -314,14 +362,35 @@ impl Cell {
             self.thrower.methods(self.scope, "probe", &self.stmt)
         )
     }
+
+    /// The oracle for this cell's own `^` ([`relay_needed`]). At the REPL an
+    /// inlined cleanup that assigns the binding needs the relay wherever it
+    /// sits, even around a closure cleanup.
+    fn relay_needed(&self) -> bool {
+        self.thrower == Thrower::OwnScope
+            && match self.scope {
+                Scope::Repl => self
+                    .stmt
+                    .contains(&format!("] ensure: [{}]", Scope::Repl.write())),
+                scope => relay_needed(scope, self.cleanup),
+            }
+    }
+
+    /// Compiles the cell as its scope compiles: a class module, or a REPL
+    /// input.
+    fn compile(&self) -> Result<String, String> {
+        match self.scope {
+            Scope::Repl => compile_repl(&self.source()),
+            _ => compile(&self.source()),
+        }
+    }
 }
 
 fn cells() -> Vec<Cell> {
     let mut cells = Vec::new();
     for &scope in SCOPES {
-        let (_, field) = scope.class();
-        let write = format!("self.{field} := 9");
-        for &thrower in THROWERS {
+        let write = scope.write();
+        for &thrower in THROWERS.iter().filter(|t| t.in_scope(scope)) {
             for &(position, template) in POSITIONS {
                 for shape in SHAPES {
                     let ensure = thrower.ensure(&shape.ensure.replace("{F}", &write));
@@ -368,6 +437,50 @@ fn compile(src: &str) -> Result<String, String> {
     }
 }
 
+/// Compiles `src` as the REPL compiles one input, inside the eval's `^`
+/// boundary (`repl_nlr`), with the verifier on: the statements' code, or why
+/// it fails. The module around them (`beamtalk-repl`'s assembler) adds
+/// nothing a relay depends on.
+fn compile_repl(src: &str) -> Result<String, String> {
+    let (module, diagnostics) = super::parse_normalised(src);
+    if let Some(error) = diagnostics
+        .iter()
+        .find(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
+    {
+        return Err(format!("parse error: {}", error.message));
+    }
+    let statements: Vec<Expression> = module
+        .expressions
+        .iter()
+        .map(|s| s.expression.clone())
+        .collect();
+    match catch_unwind(AssertUnwindSafe(|| {
+        let mut generator = CoreErlangGenerator::new("bt4536_repl");
+        generator.context = CodeGenContext::Repl;
+        generator.set_is_repl_mode(true);
+        generator.push_scope();
+        generator.bind_var("__bindings__", "Bindings");
+        generator.enter_repl_eval_boundary(&statements);
+        let mut docs = Vec::new();
+        for stmt in &statements {
+            match generator.repl_statement_with_producers(stmt, stmt)? {
+                Some(producer) => docs.extend([producer.prelude, producer.value]),
+                None => docs.push(
+                    generator
+                        .expression_doc_with_repl_mutation_tracking(stmt)?
+                        .0,
+                ),
+            }
+        }
+        generator.exit_repl_eval_boundary();
+        Ok::<_, CodeGenError>(Document::Vec(docs).to_pretty_string())
+    })) {
+        Ok(Ok(code)) => Ok(code),
+        Ok(Err(e)) => Err(format!("codegen error: {e}")),
+        Err(payload) => Err(format!("panic: {}", panic_message(payload.as_ref()))),
+    }
+}
+
 /// The cells that are programs: every cell but a
 /// [`rejected_value_type_closure`] one, which must be rejected for that
 /// reason alone. Answers them, and the cells that failed otherwise.
@@ -375,7 +488,7 @@ fn compiled_cells() -> (Vec<(Cell, String)>, Vec<String>) {
     let mut compiled = Vec::new();
     let mut failures = Vec::new();
     for cell in cells() {
-        match compile(&cell.source()) {
+        match cell.compile() {
             Ok(code) => compiled.push((cell, code)),
             Err(why) if rejected_value_type_closure(&cell, &why) => {}
             Err(why) => failures.push(format!("{}: {why}\n{}", cell.label, cell.source())),
@@ -394,7 +507,7 @@ fn ensure_relay_corpus_compiles_and_relays() {
         let relays = code.contains("_EnsureNlrTok");
         // Another method's `^` is no `^` of the `ensure:`'s scope: there is
         // nothing of its own to relay.
-        let needed = cell.thrower == Thrower::OwnScope && relay_needed(cell.scope, cell.cleanup);
+        let needed = cell.relay_needed();
         if relays != needed {
             failures.push(format!(
                 "{}: relays: {relays}, oracle: {needed}\n{}",
@@ -420,7 +533,7 @@ fn ensure_relay_corpus_compiles_and_relays() {
         }
     }
     if erlc_available() {
-        for &scope in SCOPES {
+        for &scope in SCOPES.iter().filter(|&&scope| scope != Scope::Repl) {
             let (header, _) = scope.class();
             let methods: Vec<String> = compiled
                 .iter()
@@ -447,7 +560,11 @@ fn ensure_relay_corpus_compiles_and_relays() {
     // compiles, so proofs 1 and 2 cover the heuristic its `writes_cell` reads.
     let indirect = compiled
         .iter()
-        .filter(|(c, _)| c.cleanup == Cleanup::Indirect && relay_needed(c.scope, c.cleanup))
+        .filter(|(c, _)| {
+            c.cleanup == Cleanup::Indirect
+                && c.scope != Scope::Repl
+                && relay_needed(c.scope, c.cleanup)
+        })
         .count();
     let indirect_shapes = SHAPES
         .iter()
@@ -459,9 +576,23 @@ fn ensure_relay_corpus_compiles_and_relays() {
         "an indirect-write actor cell does not compile"
     );
     assert!(
-        compiled.len() >= SCOPES.len() * THROWERS.len() * POSITIONS.len() * SHAPES.len() * 4 / 5,
+        compiled.len() >= cells().len() * 4 / 5,
         "the corpus has thinned out: {}",
         compiled.len()
+    );
+    // The REPL axis keeps every cell, and relays some.
+    let repl = compiled
+        .iter()
+        .filter(|(c, _)| c.scope == Scope::Repl)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        repl.len(),
+        POSITIONS.len() * SHAPES.len(),
+        "a REPL cell does not compile"
+    );
+    assert!(
+        repl.iter().filter(|(c, _)| c.relay_needed()).count() >= POSITIONS.len() * 2,
+        "too few REPL cells relay"
     );
     assert!(
         failures.is_empty(),
@@ -478,12 +609,11 @@ fn ensure_relay_corpus_fails_without_the_relay() {
     let (compiled, mut failures) = compiled_cells();
     let mut fired = 0;
     for (cell, _) in &compiled {
-        let src = cell.source();
-        let report = with_fault(RelayFault::NoRelay, || compile(&src)).err();
+        let report = with_fault(RelayFault::NoRelay, || cell.compile()).err();
         let lost = report
             .as_deref()
             .is_some_and(|r| r.contains("EnsureCleanupLostOnNlr") && r.contains("NoRelay"));
-        let expected = cell.thrower == Thrower::OwnScope && relay_needed(cell.scope, cell.cleanup);
+        let expected = cell.relay_needed();
         fired += usize::from(lost);
         if lost != expected || (!expected && report.is_some()) {
             failures.push(format!(
@@ -513,18 +643,17 @@ fn ensure_relay_corpus_fails_when_the_relay_rebuilds_at_the_site() {
     let (compiled, mut failures) = compiled_cells();
     let mut fired = 0;
     for (cell, _) in &compiled {
-        let src = cell.source();
-        let report = with_fault(RelayFault::RebuildAtSite, || compile(&src)).err();
+        let report = with_fault(RelayFault::RebuildAtSite, || cell.compile()).err();
         let rebuilt = report
             .as_deref()
             .is_some_and(|r| r.contains("RebuildsCarriedStateAtSite"));
         fired += usize::from(rebuilt);
-        let needed = cell.thrower == Thrower::OwnScope && relay_needed(cell.scope, cell.cleanup);
+        let needed = cell.relay_needed();
         let agrees = match cell.scope {
             _ if cell.thrower == Thrower::OtherMethod => report.is_none(),
             Scope::ActorClosure | Scope::MergedTier2Fun => rebuilt == needed,
             Scope::ActorMethod => rebuilt || report.is_none(),
-            Scope::ValueTypeMethod | Scope::ClassMethod => report.is_none(),
+            Scope::ValueTypeMethod | Scope::ClassMethod | Scope::Repl => report.is_none(),
         };
         if !agrees || (report.is_some() && !rebuilt) {
             failures.push(format!(
@@ -555,8 +684,7 @@ fn ensure_relay_corpus_fails_when_a_foreign_return_takes_the_error_path() {
     let (compiled, mut failures) = compiled_cells();
     let mut fired_foreign = 0;
     for (cell, _) in &compiled {
-        let src = cell.source();
-        let report = with_fault(RelayFault::ForeignOnErrorPath, || compile(&src)).err();
+        let report = with_fault(RelayFault::ForeignOnErrorPath, || cell.compile()).err();
         let lost = report
             .as_deref()
             .is_some_and(|r| r.contains("EnsureForeignCleanupNotStored") && r.contains("NoClause"));
@@ -628,25 +756,99 @@ fn a_class_method_running_in_its_caller_stores_no_foreign_cleanup() {
     }
 }
 
-/// BT-4429: `Block>>ensure:` reached dynamically (`perform:`) compiles to the
-/// structural fallback in the Block method, where every `^` is foreign. The
-/// real stdlib `Block` relays every `$bt_nlr` throw with the cell over the
-/// carried state when it was the cell's, through `erlc`; with the relay off
-/// (the fallback before the fix) it fails `EnsureCleanupLostOnNlr`.
+/// BT-4429 / BT-4536: `Block>>ensure:` reached dynamically (`perform:`)
+/// compiles to the structural fallback in the Block method, where every `^`
+/// is foreign. Its closure cleanup writes the actor-state cell in place and
+/// the method the `^` returns from commits the cell (ADR 0146), so the real
+/// stdlib `Block`'s catch is plain: the cleanup, `note_unwound/1` for the
+/// test-build commit check, and the re-raise of the throw as it came. No
+/// relay, no cell snapshot, no `refresh_carried/2`; through `erlc`.
+///
+/// Before BT-4536 the fallback relayed every throw with the cell over the
+/// carried state (`NlrCarry::Foreign`), and this test proved that with the
+/// relay off it failed `EnsureCleanupLostOnNlr`. That fault has no subject
+/// now. What keeps a performed cleanup's write is the commit, so the
+/// replacement proof is the commit's own fault: an actor method whose `^`
+/// crosses a performed `ensure:`, with its boundary committing the carried
+/// copy (`NlrFault::CommitCarried`, every actor method before ADR 0146), fails
+/// `ActorNlrCommitBypassesCell`. The runtime answer is
+/// `ActorClosureCellTest`'s performed-`ensure:` cells.
 #[test]
-fn block_ensure_fallback_relays_a_foreign_throw() {
+fn block_ensure_fallback_re_raises_a_foreign_throw_after_its_cleanup() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../stdlib/src/block.bt");
     let src = std::fs::read_to_string(path).expect("stdlib/src/block.bt");
     let code = compile(&src).expect("Block compiles with the verifier on");
+    for gone in [
+        "'refresh_carried'(",
+        "'nlr_state'(",
+        "_EnsureCellSnap",
+        "_EnsureNlrTok",
+    ] {
+        assert!(
+            !code.contains(gone),
+            "Block>>ensure: still relays a foreign `^` (`{gone}`):\n{code}"
+        );
+    }
     assert!(
-        code.contains("call 'beamtalk_actor_state':'snapshot'()")
-            && code.contains("call 'beamtalk_actor_state':'refresh_carried'("),
-        "Block>>ensure: relays no foreign `^`:\n{code}"
+        code.contains("call 'beamtalk_actor_state':'note_unwound'("),
+        "Block>>ensure: does not tell the commit check its cleanup ran:\n{code}"
     );
     if erlc_available() {
         assert_compiles_through_erlc("test", &code);
     }
-    let report = with_fault(RelayFault::NoRelay, || compile(&src)).err();
+    // No relay to switch off: the fault leaves it unchanged.
+    let without = with_fault(RelayFault::NoRelay, || compile(&src));
+    assert_eq!(without.as_deref().ok(), Some(code.as_str()));
+
+    // The replacement proof: a `^` across a performed `ensure:` keeps the
+    // cleanup's write only because the method commits the cell.
+    let performed = "Actor subclass: Bt4536Performed\n  state: n = 0\n  probe =>\n    c := [self.n := 9]\n    [^1] perform: #ensure: withArguments: #(c)\n    0\n";
+    let code = compile(performed).expect("compiles with the verifier on");
+    assert!(
+        code.contains("call 'beamtalk_actor_state':'commit'(Self, "),
+        "the method does not commit the cell:\n{code}"
+    );
+    let report = with_nlr_fault(NlrFault::CommitCarried, || compile(performed)).err();
+    assert!(
+        report
+            .as_deref()
+            .is_some_and(|r| r.contains("ActorNlrCommitBypassesCell")),
+        "committing the carried copy, expected ActorNlrCommitBypassesCell, got {report:?}"
+    );
+}
+
+/// ADR 0146 / BT-4536: a block's `super` send run away from home
+/// (`beamtalk_actor_state:super_send/5`) runs the superclass method against
+/// the block's creation-time capture, in another process. A `^` of that
+/// method through its own `ensure:` reaches the method's boundary, whose
+/// commit answers the carried state away (there is no cell of the actor's),
+/// and `super_send/5` compares it with the capture to raise
+/// `actor_state_unreachable` for a write. So the relay of the method's own
+/// `^` still carries the cleanup's write: without it the write would vanish
+/// silently instead of raising. The superclass compiles with the relay and
+/// the commit, the subclass with the `super_send/5`, both through `erlc`;
+/// with the relay off the superclass fails `EnsureCleanupLostOnNlr`. The
+/// runtime answer is `ActorClosureCellTest>>testAwaySuperReturnThroughAWritingEnsureRaises`.
+#[test]
+fn an_ensure_inside_an_away_super_send_relays_its_own_return() {
+    let base = "Actor subclass: Bt4536SuperBase\n  state: n = 0\n  probe =>\n    [^1] ensure: [self.n := 9]\n    0\n";
+    let sub = "Bt4536SuperBase subclass: Bt4536SuperSub\n  probeBlock => [super probe]\n";
+    let base_code = compile(base).expect("the superclass compiles with the verifier on");
+    assert!(
+        base_code.contains("_EnsureNlrTok")
+            && base_code.contains("call 'beamtalk_actor_state':'commit'(Self, "),
+        "the superclass method neither relays its own `^` nor commits:\n{base_code}"
+    );
+    let sub_code = compile(sub).expect("the subclass compiles with the verifier on");
+    assert!(
+        sub_code.contains("call 'beamtalk_actor_state':'super_send'("),
+        "the block's `super` send is not `super_send/5`:\n{sub_code}"
+    );
+    if erlc_available() {
+        assert_compiles_through_erlc("test", &base_code);
+        assert_compiles_through_erlc("test", &sub_code);
+    }
+    let report = with_fault(RelayFault::NoRelay, || compile(base)).err();
     assert!(
         report
             .as_deref()

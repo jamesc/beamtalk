@@ -38,7 +38,7 @@ use beamtalk_project::package_name::{ERLANG_APPS, RESERVED_NAMES};
 pub use beamtalk_project::package_name::{
     PackageNameError, format_name_error, suggest_package_name, validate_package_name,
 };
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -950,6 +950,19 @@ pub struct ParsedManifest {
     pub release: ReleaseConfig,
 }
 
+impl ParsedManifest {
+    /// This package's own package-bundled FFI type stubs directory (ADR 0075
+    /// layer 2), its `[stubs] path` resolved against `package_root` — `None`
+    /// if it declares no `[stubs]` section. Shared by dependency resolution
+    /// and the offline dependency scan MCP `lint` uses (BT-4643).
+    #[must_use]
+    pub fn stubs_dir(&self, package_root: &Utf8Path) -> Option<Utf8PathBuf> {
+        self.stubs
+            .as_ref()
+            .map(|stubs| package_root.join(&stubs.path))
+    }
+}
+
 /// Parse a `beamtalk.toml` manifest file.
 ///
 /// Returns the parsed manifest, or an error if the file cannot be read or
@@ -1181,7 +1194,6 @@ pub fn find_application_config(project_root: &Utf8Path) -> Result<Option<Applica
 #[cfg(test)]
 mod tests {
     use super::*;
-    use camino::Utf8PathBuf;
     use tempfile::TempDir;
 
     fn write_manifest(dir: &TempDir, content: &str) -> Utf8PathBuf {

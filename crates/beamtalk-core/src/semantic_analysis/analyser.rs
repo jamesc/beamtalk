@@ -76,8 +76,10 @@ impl Analyser {
                 .define(&state.name.name, state.span, BindingKind::InstanceField);
         }
 
-        // Analyse methods
-        for method in &class.methods {
+        // Analyse instance and class-side methods alike, so method validators
+        // (block arity, literal-argument checks) cover class methods too
+        // (BT-4645). Same scope shape as `NameResolver::resolve_class`.
+        for method in class.methods.iter().chain(&class.class_methods) {
             self.analyse_method(method);
         }
 

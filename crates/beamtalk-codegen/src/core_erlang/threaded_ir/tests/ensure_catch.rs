@@ -17,7 +17,6 @@ fn vars() -> EnsureCatchVars {
         nlr_val_var: v("Val1"),
         nlr_carried_var: v("Carried1"),
         other_pair_var: v("Other1"),
-        cell_snapshot_var: v("Snap1"),
         foreign_nlr_var: v("Foreign1"),
     }
 }
@@ -271,55 +270,54 @@ fn nothing_to_relay_verifies_clean() {
     assert_eq!(defect(&[no_token]), None);
 }
 
-/// BT-4429: `Block>>ensure:` reached by `perform:` runs in the Block method,
-/// where every `^` is foreign: no token of the scope, a state kind known only
-/// at run time. Its closure cleanup may write the cell, so the relay must
-/// resume every `$bt_nlr` throw with the cell over the carried state when
-/// that state is the cell's; re-raising it (the fallback before the fix)
-/// loses the cleanup's write.
+/// `Block>>ensure:` reached by `perform:` runs in the Block method, where
+/// every `^` is foreign: no token of the scope and no carry. Its closure
+/// cleanup writes the actor-state cell in place, which the `^`'s method
+/// commits (ADR 0146), so it owes no relay (BT-4536): a plain catch, the
+/// cleanup and then the re-raise, renders as `other` alone. What keeps the
+/// cleanup's writes is the commit, which
+/// `VerifyError::ActorNlrCommitBypassesCell` guards (`tests/nlr.rs`).
 #[test]
-fn a_foreign_throw_needs_the_cell_over_the_carried_state_when_it_is_the_cells() {
-    let catch = |carry: NlrCarry, cleanup: EnsureCleanup, relay: Option<EnsureNlrRelay>| {
-        ThreadedStmt::EnsureCatch {
-            vars: Box::new(vars()),
-            token: None,
-            carry: Some(carry),
-            private_scratch: false,
-            cleanup,
-            relay,
-            cell_live: false,
-            foreign: None,
-            other: Document::Str("primop 'raw_raise'(Type1, Error1, Stack1)"),
-            span: span(),
-        }
+fn a_foreign_throw_through_a_closure_cleanup_owes_no_relay() {
+    let catch = |cleanup: EnsureCleanup| ThreadedStmt::EnsureCatch {
+        vars: Box::new(vars()),
+        token: None,
+        carry: None,
+        private_scratch: false,
+        cleanup,
+        relay: None,
+        cell_live: false,
+        foreign: None,
+        other: Document::Str("do apply Cleanup1 () primop 'raw_raise'(Type1, Error1, Stack1)"),
+        span: span(),
     };
-    let foreign = |relay| catch(NlrCarry::Foreign, CLOSURE, relay);
-    assert_eq!(defect(&[foreign(None)]), Some(EnsureRelayDefect::NoRelay));
-    for stale in [RethrowSlot::CellOverCarried, RethrowSlot::Version(0)] {
+    for cleanup in [CLOSURE, EnsureCleanup::Closure { writes_cell: false }] {
+        let ir = [catch(cleanup)];
+        assert_eq!(defect(&ir), None);
+        let text = lower_and_render(&ir).to_pretty_string();
         assert_eq!(
-            defect(&[foreign(Some(relay(stale)))]),
-            Some(EnsureRelayDefect::RethrowsStaleState)
+            text,
+            "catch <Type1, Error1, Stack1> -> do apply Cleanup1 () primop 'raw_raise'(Type1, Error1, Stack1)"
         );
     }
-    let ir = [foreign(Some(relay(RethrowSlot::CellIfCarried)))];
-    assert_eq!(defect(&ir), None);
-    let text = lower_and_render(&ir).to_pretty_string();
-    assert!(
-        text.contains("<{'throw', {'$bt_nlr', Tok1, Val1, Carried1}}> when 'true' -> let Snap1 = call 'beamtalk_actor_state':'snapshot'() in let StateAcc = Carried1 in")
-            && text.contains(
-                "call 'erlang':'throw'({'$bt_nlr', Tok1, Val1, call 'beamtalk_actor_state':'refresh_carried'(Snap1, Carried1)})"
-            ),
-        "{text}"
-    );
-    // A cleanup that cannot write the cell has nothing to relay.
-    let quiet = catch(
-        NlrCarry::Foreign,
-        EnsureCleanup::Closure { writes_cell: false },
-        None,
-    );
-    assert_eq!(defect(&[quiet]), None);
     // The scope's own carries still need their token.
-    assert_eq!(defect(&[catch(NlrCarry::ActorState, CLOSURE, None)]), None);
+    assert_eq!(defect(&[catch_with_carry(NlrCarry::ActorState)]), None);
+}
+
+/// A closure-cleanup catch carrying `carry` with no token of the scope.
+fn catch_with_carry(carry: NlrCarry) -> ThreadedStmt {
+    ThreadedStmt::EnsureCatch {
+        vars: Box::new(vars()),
+        token: None,
+        carry: Some(carry),
+        private_scratch: false,
+        cleanup: CLOSURE,
+        relay: None,
+        cell_live: false,
+        foreign: None,
+        other: Document::Str("primop 'raw_raise'(Type1, Error1, Stack1)"),
+        span: span(),
+    }
 }
 
 /// ADR 0146 R1: an `ensure:` whose cleanup is `cleanup`, where the

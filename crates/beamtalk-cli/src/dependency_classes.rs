@@ -140,6 +140,10 @@ pub struct DependencyScan {
     /// (its own dependencies are then unknown), or whose source could not be
     /// read or parsed cleanly leaves this `false`.
     pub extensions_complete: bool,
+    /// Each scanned dependency's own package-bundled FFI stub directory (ADR
+    /// 0075 layer 2), in compile order — the dependency stub tier MCP `lint`
+    /// types FFI calls with, as `beamtalk lint` does (BT-4643).
+    pub stub_dirs: Vec<crate::ffi_type_registry::DependencyStubsDir>,
 }
 
 /// [`resolve_dependency_class_infos`], also returning the source identity
@@ -175,10 +179,14 @@ pub fn resolve_dependency_class_infos_with_sources(project_root: &Utf8Path) -> D
     let mut every_dependency_found = graph.all_found;
     for dep in graph.found {
         if let Some(scan) = scan_dep(&dep.root, &dep.name) {
+            let stubs_dir = manifest::parse_manifest_full(&dep.root.join("beamtalk.toml"))
+                .ok()
+                .and_then(|dep_manifest| dep_manifest.stubs_dir(&dep.root));
             scanned.push(DiscoveredDep {
                 name: dep.name,
                 dependencies: dep.dependencies,
                 scan,
+                stubs_dir,
             });
         } else {
             every_dependency_found = false;
@@ -219,6 +227,16 @@ pub fn resolve_dependency_class_infos_with_sources(project_root: &Utf8Path) -> D
         flattened.push((dep.name.clone(), own_protocol_defs));
     }
 
+    let stub_dirs = ordered
+        .iter()
+        .filter_map(|dep| {
+            Some(crate::ffi_type_registry::DependencyStubsDir {
+                package: dep.name.clone(),
+                stubs_dir: dep.stubs_dir.clone()?,
+            })
+        })
+        .collect();
+
     let mut extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
     let extensions_complete = crate::dependency_extensions::merge_dependency_extensions(
         ordered.iter().map(|dep| &dep.scan.extensions),
@@ -234,6 +252,7 @@ pub fn resolve_dependency_class_infos_with_sources(project_root: &Utf8Path) -> D
         protocol_infos,
         alias_infos,
         extensions_complete,
+        stub_dirs,
     }
 }
 
@@ -288,6 +307,8 @@ struct DiscoveredDep {
     /// Names of its own direct dependencies, from its `beamtalk.toml`.
     dependencies: Vec<String>,
     scan: std::sync::Arc<ScannedDep>,
+    /// Its own `[stubs] path` (ADR 0075 layer 2), if it declares one.
+    stubs_dir: Option<Utf8PathBuf>,
 }
 
 /// `deps` in the order the graph compile (`beamtalk build`) compiles them

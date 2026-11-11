@@ -30,7 +30,6 @@ use beamtalk_cli::lint_pipeline::{FileContext, analyse_file, dedup_pre_loaded_al
 pub(crate) use beamtalk_cli::lint_pipeline::{collect_lint_files, find_package_root};
 #[cfg(test)]
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
-use beamtalk_project::package;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::Result;
 use tracing::warn;
@@ -72,12 +71,16 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
         None => (Vec::new(), DependencyMetadata::default()),
     };
 
-    let native_type_registry = lint_type_registry(
+    // The FFI type registry, built by the function MCP `lint` uses too
+    // (BT-4643); its stub-tier diagnostics stream in `format` as they
+    // always have, outside the lint gate.
+    let resolved_registry = beamtalk_cli::ffi_type_registry::lint_type_registry(
         sources.package_root.as_deref(),
         &source_files,
-        &resolved_deps,
-        format,
+        &super::build::dependency_stub_dirs(&resolved_deps),
     );
+    super::build::render_stub_reports(&resolved_registry.reports, Some(format));
+    let native_type_registry = resolved_registry.registry.map(std::sync::Arc::new);
 
     // Pass 2: analyse each file with cross-file class context.
     let mut gate = LintGate::default();
@@ -170,44 +173,6 @@ fn print_diagnostic(
     }
 }
 
-/// The FFI type registry `beamtalk lint` analyses against.
-///
-/// Built via the same `extract_type_specs` that `beamtalk build` calls,
-/// instead of only reading whatever `_build/type_cache/` happens to hold — a
-/// cache written by a *previous* build let lint's view of FFI types drift
-/// from build's, and an `@expect type` written to suppress a real build-time
-/// FFI diagnostic was then flagged as stale by lint. The full ADR 0075 stub
-/// resolution chain overrides auto-extract at the function/arity level —
-/// the same merge `beamtalk build` performs, via the same shared loaders.
-/// These loaders print their own diagnostics (skipped signatures, version
-/// drift) directly.
-///
-/// Stdlib has no `beamtalk.toml`, so `package_root` is `None` when linting
-/// it; the registry then comes from `beamtalk build-stdlib`'s own extractor
-/// (`extract_stdlib_type_specs`, ADR 0075) instead of being `None`, which
-/// would report every `(Erlang m) f:` call in `stdlib/src` as untyped.
-fn lint_type_registry(
-    package_root: Option<&Utf8Path>,
-    source_files: &[Utf8PathBuf],
-    resolved_deps: &[super::deps::path::ResolvedDependency],
-    format: OutputFormat,
-) -> Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>> {
-    if let Some(root) = package_root {
-        let layout = crate::commands::build_layout::BuildLayout::new(root);
-        let auto_extract = super::build::extract_type_specs(&layout, true, false);
-        super::build::resolve_package_type_registry(root, auto_extract, resolved_deps, Some(format))
-            .registry
-            .map(std::sync::Arc::new)
-    } else if source_files
-        .iter()
-        .any(|f| package::is_under_stdlib_src_dir(f.as_std_path()))
-    {
-        super::build_stdlib::extract_stdlib_type_specs().map(std::sync::Arc::new)
-    } else {
-        None
-    }
-}
-
 /// Lint native `.erl` files and print diagnostics. Returns the total count.
 fn lint_erl_files(erl_files: &[Utf8PathBuf], format: OutputFormat) -> Result<usize> {
     let mut count = 0;
@@ -254,7 +219,7 @@ fn lint_erl_files(erl_files: &[Utf8PathBuf], format: OutputFormat) -> Result<usi
 /// dep), lint continues without dependency metadata — and with the pre-WS3
 /// dependency guard on — rather than failing entirely. Also returns the
 /// resolved dependencies (empty on failure) for their `stubs_dir`s (ADR 0075
-/// layer 2); see [`lint_type_registry`].
+/// layer 2); see [`beamtalk_cli::ffi_type_registry::lint_type_registry`].
 fn merge_dependency_infos(
     project_root: &Utf8Path,
 ) -> (
@@ -787,7 +752,9 @@ mod tests {
     #[test]
     fn lint_extraction_records_protocol_source_identity() {
         let temp = tempfile::TempDir::new().unwrap();
-        let root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        // Canonicalise root — the recorded protocol source path is the
+        // canonical spelling; see find_package_root_from_subdir.
+        let root = Utf8PathBuf::from_path_buf(std::fs::canonicalize(temp.path()).unwrap()).unwrap();
         std::fs::write(
             root.join("beamtalk.toml"),
             "[package]\nname = \"xpkg\"\nversion = \"0.1.0\"\n",
@@ -1067,7 +1034,13 @@ mod tests {
             ..
         } = parsed_files
             .into_iter()
-            .find(|f| f.path == consumer_file)
+            // Parsed files carry the canonical spelling (`/private/var/...`
+            // on macOS, `\\?\C:\...` on Windows), so compare canonically.
+            // The fixture root itself stays raw: a verbatim Windows path
+            // would not resolve the manifest's `../producer` dependency.
+            .find(|f| {
+                std::fs::canonicalize(&f.path).ok() == std::fs::canonicalize(&consumer_file).ok()
+            })
             .expect("consumer.bt should be among the parsed files");
 
         let diags = analyse_file(

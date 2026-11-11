@@ -13,9 +13,10 @@
 //! and shapes the results for the tools. No REPL connection is required,
 //! which is what lets both tools work without a live workspace.
 
+use beamtalk_cli::ffi_type_registry::{ResolvedTypeRegistry, StubReport};
 use beamtalk_cli::lint_pipeline::{self, DependencyMetadata, LintGate, PackageSources};
 use beamtalk_core::source_analysis::Severity;
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 
 /// A single lint diagnostic in structured form.
 ///
@@ -53,9 +54,9 @@ impl LintResult {
     /// `warnings_as_errors` only `errors` fail it; with it, it applies CLI
     /// `beamtalk lint --warnings-as-errors`' gate ([`LintGate::fails`]) —
     /// Lint-severity diagnostics or the live-recheck set — plus file-level
-    /// errors (BT-4336). Both surfaces run [`lint_pipeline`] (BT-4585), so
-    /// the diagnostics gated match the CLI's except where the FFI type
-    /// registry differs (BT-4643).
+    /// errors (BT-4336). Both surfaces run [`lint_pipeline`] (BT-4585)
+    /// against the same FFI type registry (BT-4643), so the diagnostics
+    /// gated match the CLI's.
     pub(crate) fn fails(&self, warnings_as_errors: bool) -> bool {
         let gate = LintGate {
             lint: self.lint_failures,
@@ -65,33 +66,32 @@ impl LintResult {
     }
 }
 
-/// Build the Erlang FFI native-type registry for the package at
-/// `package_root` from its auto-extracted type specs
-/// (`beamtalk_cli::native_type_specs`), the extractor `beamtalk lint` uses.
-/// Unlike `beamtalk lint` it does not yet merge the ADR 0075 stub tiers or
-/// fall back to the stdlib's runtime specs for `stdlib/src` (BT-4643). Returns `None` outside a package or when extraction finds no
-/// `.beam` files (e.g. runtime not yet compiled).
-pub(crate) fn build_native_type_registry(
-    package_root: Option<&Utf8Path>,
-) -> Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>> {
-    let layout = beamtalk_cli::build_layout::BuildLayout::new(package_root?);
-    beamtalk_cli::native_type_specs::extract_project_type_specs(&layout).map(std::sync::Arc::new)
-}
-
-/// The dependencies' metadata for `sources`' package, read offline from the
-/// checkouts a prior `beamtalk build` left on disk
+/// The offline inputs `sources`' package is analysed against: its
+/// dependencies' metadata, read from the checkouts a prior `beamtalk build`
+/// left on disk
 /// ([`beamtalk_cli::dependency_classes::resolve_dependency_class_infos_with_sources`])
-/// — never fetched, so a diagnostics query has no network side effects.
-/// A dependency that has not been fetched contributes nothing and keeps the
-/// pre-WS3 dependency guard on, as an unresolved one does for the CLI.
-fn offline_dependency_metadata(sources: &PackageSources) -> DependencyMetadata {
-    sources
-        .package_root
-        .as_deref()
-        .map_or_else(DependencyMetadata::default, |root| {
-            beamtalk_cli::dependency_classes::resolve_dependency_class_infos_with_sources(root)
-                .into()
-        })
+/// — never fetched, so a diagnostics query has no network side effects —
+/// and the FFI type registry `beamtalk lint` builds
+/// ([`beamtalk_cli::ffi_type_registry::lint_type_registry`]: auto-extracted
+/// specs plus the distribution, dependency and project stub tiers, or the
+/// runtime's specs for a `stdlib/src` target; BT-4643), with those same
+/// checkouts' stub directories as the dependency tier. A dependency that
+/// has not been fetched contributes nothing and keeps the pre-WS3
+/// dependency guard on, as an unresolved one does for the CLI.
+fn offline_inputs(
+    sources: &PackageSources,
+    source_files: &[Utf8PathBuf],
+) -> (DependencyMetadata, ResolvedTypeRegistry) {
+    let package_root = sources.package_root.as_deref();
+    let scan = package_root
+        .map(beamtalk_cli::dependency_classes::resolve_dependency_class_infos_with_sources)
+        .unwrap_or_default();
+    let registry = beamtalk_cli::ffi_type_registry::lint_type_registry(
+        package_root,
+        source_files,
+        &scan.stub_dirs,
+    );
+    (scan.into(), registry)
 }
 
 /// Compute a diagnostic summary (counts + type coverage) for a path.
@@ -138,8 +138,8 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
                 unreadable_files.push(file.to_string());
             }
         });
-    let dependencies = offline_dependency_metadata(&sources);
-    let native_type_registry = build_native_type_registry(sources.package_root.as_deref());
+    let (dependencies, resolved_registry) = offline_inputs(&sources, &source_files);
+    let native_type_registry = resolved_registry.registry.map(std::sync::Arc::new);
 
     // Pass 2: analyse each file and collect diagnostics + coverage.
     let mut all_diags = Vec::new();
@@ -263,6 +263,32 @@ fn push_lint_diagnostic(
     }
 }
 
+/// Appends the stub tiers' own diagnostics (parse errors, skipped
+/// signatures, version drift, collisions) as `beamtalk lint` streams them:
+/// outside the gate, Lint-severity ones omitted. They all go to `warnings`,
+/// even an `error`-severity one (a broken stub file), because `errors` fails
+/// the tool and CLI `beamtalk lint` never counts a stub diagnostic toward
+/// its exit code, with or without `--warnings-as-errors`. A stub file's are
+/// reported against that file; a collision, which has no one source, against
+/// the winning package.
+fn push_stub_reports(reports: &[StubReport], warnings: &mut Vec<LintDiagnostic>) {
+    for report in reports {
+        let (path, source) = match report {
+            StubReport::File(file) => (file.path.to_string(), Some(file.source.as_str())),
+            StubReport::Collision { package, .. } => (package.clone(), None),
+        };
+        for diag in report.diagnostics() {
+            if diag.severity == Severity::Lint {
+                continue;
+            }
+            let line = source.map(|source| diag.span.line_number(source));
+            let mut errors = Vec::new();
+            push_lint_diagnostic(diag, path.clone(), line, warnings, &mut errors);
+            warnings.append(&mut errors);
+        }
+    }
+}
+
 /// Run `beamtalk lint`'s pipeline ([`lint_pipeline`]) on `path` (file or
 /// directory) and return structured results: the same `.bt` diagnostics,
 /// `.erl` lint findings and gate counts as the CLI, given the same
@@ -304,8 +330,9 @@ pub(crate) fn run_lint_structured(path: &str) -> LintResult {
             }
         },
     );
-    let dependencies = offline_dependency_metadata(&sources);
-    let native_type_registry = build_native_type_registry(sources.package_root.as_deref());
+    let (dependencies, resolved_registry) = offline_inputs(&sources, &source_files);
+    push_stub_reports(&resolved_registry.reports, &mut warnings);
+    let native_type_registry = resolved_registry.registry.map(std::sync::Arc::new);
 
     // Pass 2.
     let provision_diags = lint_pipeline::analyse_package(

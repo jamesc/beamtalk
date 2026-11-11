@@ -241,9 +241,7 @@ fn discover_all_dep_roots(
             // stubs) can be recorded alongside it.
             let dep_manifest_path = dep_root.join("beamtalk.toml");
             let dep_parsed = manifest::parse_manifest_full(&dep_manifest_path).ok();
-            let stubs_dir = dep_parsed
-                .as_ref()
-                .and_then(|m| path::resolve_dep_stubs_dir(m, &dep_root));
+            let stubs_dir = dep_parsed.as_ref().and_then(|m| m.stubs_dir(&dep_root));
 
             result.push(DiscoveredDep {
                 name: dep_name.clone(),

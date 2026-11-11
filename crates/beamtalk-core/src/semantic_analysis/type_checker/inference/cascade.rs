@@ -55,7 +55,7 @@ impl TypeChecker {
             ..
         } = receiver
         {
-            let inner_ty = self.infer_expr(inner, hierarchy, env, in_abstract_method);
+            let inner_ty = self.infer_send_receiver(inner, hierarchy, env, in_abstract_method);
             let send_ty = self.infer_message_send_with_receiver_ty(
                 inner,
                 inner_ty.clone(),
@@ -77,7 +77,7 @@ impl TypeChecker {
             // Non-MessageSend receiver (or a cast send, which short-circuits
             // to Dynamic): fall back to a single infer_expr; the cascade
             // dispatches messages to that same type.
-            let send_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
+            let send_ty = self.infer_send_receiver(receiver, hierarchy, env, in_abstract_method);
             (send_ty.clone(), receiver, send_ty)
         };
         // `dispatch_ty` is passed to `infer_message_send_with_receiver_ty`
