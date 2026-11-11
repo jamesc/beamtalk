@@ -1,7 +1,7 @@
 # ADR 0147: Map-Shape Types for Keyed Dictionaries
 
 ## Status
-Proposed (2026-11-11)
+Accepted (2026-11-11)
 
 ## Context
 
