@@ -296,7 +296,7 @@ format_reason_term(Reason) ->
             truncate_reason(Bin);
         _ ->
             %% Invalid encoding somewhere inside: never raise from the formatter.
-            truncate_reason(chars_to_binary(io_lib:format("~0tP", [Reason, ?REASON_MAX_DEPTH])))
+            truncate_reason(chars_to_binary(io_lib:format("~0tP", [Reason, ?REASON_MAX_DEPTH], [{chars_limit, ?REASON_MAX_BYTES}])))
     end.
 
 -spec truncate_reason(binary()) -> binary().
@@ -321,8 +321,9 @@ utf8_prefix(Bin) ->
 -spec reason_doc(term(), integer(), integer()) -> {iodata(), integer()}.
 reason_doc(_Term, Depth, Budget) when Depth =< 0; Budget =< 0 ->
     {<<"...">>, Budget};
-reason_doc({beamtalk_string, Bin} = Str, _Depth, B) when is_binary(Bin) ->
-    {beamtalk_primitive:print_string(Str), B - 1};
+reason_doc({beamtalk_string, Bin}, _Depth, B) when is_binary(Bin) ->
+    {Cut, Marker} = cut_binary(Bin),
+    {[beamtalk_primitive:print_string({beamtalk_string, Cut}), Marker], B - 1};
 reason_doc(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}, _Depth, B) ->
     {format(Err), B - 1};
 reason_doc(#beamtalk_error{} = Err, _Depth, B) ->
@@ -343,20 +344,34 @@ reason_doc(F, _Depth, B) when is_float(F) ->
     {float_to_binary(F, [short]), B - 1};
 reason_doc(Bin, _Depth, B) when is_binary(Bin) ->
     %% A bare binary prints the way `Binary printString` does (pure clause).
-    {beamtalk_primitive:print_string(Bin), B - 1};
+    {Cut, Marker} = cut_binary(Bin),
+    {[beamtalk_primitive:print_string(Cut), Marker], B - 1};
 reason_doc(List, Depth, B) when is_list(List) ->
     case is_proper_list(List) of
         true ->
             {Elems, B1} = reason_elems(cap_elems(List), Depth - 1, B - 1),
             {[<<"#(">>, lists:join(<<", ">>, Elems), <<")">>], B1};
         false ->
-            {io_lib:format("~0tP", [List, Depth]), B - 1}
+            {io_lib:format("~0tP", [List, Depth], [{chars_limit, ?REASON_MAX_BYTES}]), B - 1}
     end;
 reason_doc(Tuple, Depth, B) when is_tuple(Tuple) ->
     {Elems, B1} = reason_elems(cap_elems(tuple_to_list(Tuple)), Depth - 1, B - 1),
     {[<<"{">>, lists:join(<<", ">>, Elems), <<"}">>], B1};
 reason_doc(Other, Depth, B) ->
-    {io_lib:format("~0tP", [Other, Depth]), B - 1}.
+    {io_lib:format("~0tP", [Other, Depth], [{chars_limit, ?REASON_MAX_BYTES}]), B - 1}.
+
+%% Cut a binary *before* rendering so the work is bounded by the output cap,
+%% not by the binary's size. A cut that lands mid-character drops the partial
+%% sequence; genuinely invalid bytes are kept (they render as hex).
+-spec cut_binary(binary()) -> {binary(), binary()}.
+cut_binary(Bin) when byte_size(Bin) =< ?REASON_MAX_BYTES ->
+    {Bin, <<>>};
+cut_binary(Bin) ->
+    Cut = binary:part(Bin, 0, ?REASON_MAX_BYTES),
+    case unicode:characters_to_binary(Cut, utf8, utf8) of
+        {incomplete, Good, _} -> {Good, <<"...">>};
+        _ -> {Cut, <<"...">>}
+    end.
 
 %% Render elements, threading the remaining node budget.
 -spec reason_elems(list(), integer(), integer()) -> {[iodata()], integer()}.
