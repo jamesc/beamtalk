@@ -18,8 +18,9 @@ of a `.beam` file in a single pass, mapping Erlang types to Beamtalk types.
 Supports batch processing of multiple modules via `read_specs_batch/1' and
 integration with the `beamtalk_build_worker' protocol.
 
-Multi-clause specs produce a union of return types. Parameter names and
-types come from the first clause (Erlang convention).
+Multi-clause specs produce a union of return types. Parameter names come
+from the first clause (Erlang convention); parameter types are the union
+across all clauses (BT-4457).
 """.
 
 -export([
@@ -406,14 +407,15 @@ extract_exports(Forms) ->
 
 %% Process a single spec into our result format.
 %%
-%% Multi-clause specs: parameter names and types come from the first clause
-%% (Erlang convention — all clauses share the same arity). The return type
-%% is the union (deduped) of all clause return types.
+%% Multi-clause specs: parameter names come from the first clause (Erlang
+%% convention — all clauses share the same arity); parameter types and the
+%% return type are the union (deduped) across all clauses.
 %%
 %% `LineMap' maps `{Name, Arity}' to the source line of the function definition.
 -spec process_spec(atom(), non_neg_integer(), [tuple()], map()) -> map().
 process_spec(Name, Arity, Clauses, LineMap) ->
-    %% Extract params from the first clause, return types from all clauses
+    %% Param names from the first clause, param and return types unioned
+    %% across all clauses
     {Params, ReturnTypes} = extract_from_clauses(Clauses, Arity),
     ReturnType = merge_return_types(ReturnTypes),
     Base = #{
@@ -428,7 +430,8 @@ process_spec(Name, Arity, Clauses, LineMap) ->
         error -> Base
     end.
 
-%% Extract params (from first clause) and return types (from all clauses).
+%% Extract params (names from the first clause, types unioned across all
+%% clauses) and return types (from all clauses).
 -spec extract_from_clauses([tuple()], non_neg_integer()) ->
     {[map()], [binary()]}.
 extract_from_clauses(Clauses, Arity) ->
