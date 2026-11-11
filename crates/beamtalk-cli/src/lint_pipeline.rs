@@ -112,12 +112,13 @@ pub fn collect_lint_files(
         // compiled, but this walk has no src/-only scoping to exclude it
         // implicitly the way `find_source_files` does, so a `declare
         // native:` stub file would otherwise be swept in and rejected here
-        // as a hard error.
-        let stubs_dir = project_root.join("stubs");
+        // as a hard error. `project_root` is canonical but the walk yields
+        // paths as `source_path` spells them (a symlink, macOS `/var`,
+        // a Windows 8.3 name), so compare canonically (BT-4656 follow-up).
         FileWalker::lint_files()
             .walk(source_path)?
             .into_iter()
-            .filter(|f| !f.starts_with(&stubs_dir))
+            .filter(|f| !package::is_under_stubs_dir(project_root.as_std_path(), f.as_std_path()))
             .collect()
     } else {
         miette::bail!("Path '{}' does not exist", path);
@@ -686,6 +687,32 @@ mod tests {
             std::fs::write(root.join("src").join(name), text).unwrap();
         }
         (temp, root)
+    }
+
+    /// `stubs/` stays excluded when the package is reached through a
+    /// non-canonical path (here a symlink; on macOS `/var` vs
+    /// `/private/var`, on Windows an 8.3 name). The walk yields the
+    /// caller's spelling and `find_package_root` the canonical one, so a
+    /// plain `starts_with` let the stubs in as lint targets.
+    #[cfg(unix)]
+    #[test]
+    fn collect_lint_files_excludes_stubs_via_symlinked_root() {
+        let (_temp, root) = package_with(&[("a.bt", "Object subclass: A\n")]);
+        std::fs::create_dir_all(root.join("stubs")).unwrap();
+        std::fs::write(root.join("stubs").join("s.bt"), "class Foo { @@@@ }").unwrap();
+        let link_dir = tempfile::TempDir::new().unwrap();
+        let link = Utf8PathBuf::from_path_buf(link_dir.path().join("pkg")).unwrap();
+        std::os::unix::fs::symlink(root.as_std_path(), link.as_std_path()).unwrap();
+
+        let (files, _) = collect_lint_files(&link, link.as_str()).unwrap();
+        assert!(
+            files.iter().all(|f| !f.as_str().contains("stubs")),
+            "stubs/ must not be lint targets: {files:?}"
+        );
+        assert!(
+            files.iter().any(|f| f.as_str().ends_with("a.bt")),
+            "{files:?}"
+        );
     }
 
     #[test]
