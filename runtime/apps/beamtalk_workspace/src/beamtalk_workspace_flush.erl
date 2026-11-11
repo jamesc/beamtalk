@@ -65,15 +65,17 @@ never partial. The ChangeEntries for that file are marked flushed only *after*
 the rename returns ok.
 
 `<file>.tmp` throughout this doc is shorthand: the real staging name is
-unique per write, `<file>.<unique>.tmp` (`beamtalk_workspace_file:write_temp/2`,
+unique per write, `<file>.bt-staging.<unique>.tmp` (`beamtalk_workspace_file:write_temp/2`,
 BT-4683). Flush runs in its caller's process, so two flushes (an autoflush and
 a manual `Workspace flush`, say) can stage the same file at once; a shared
 fixed name would let one rename the other's half-written body into place. A
 crash between Phase A and Phase B can therefore leave a stray
-`<file>.<unique>.tmp` behind instead of one that the next attempt overwrites.
+`<file>.bt-staging.<unique>.tmp` behind instead of one that the next attempt overwrites.
 It is never read back. The next successful commit to `<file>` deletes any such
 leftover more than an hour old (`beamtalk_workspace_file:sweep_stale_temps/2`);
-a younger one may belong to a flush still in flight, so it is left alone.
+a younger one may belong to a flush still in flight, so it is left alone. The
+sweep matches only the `.bt-staging.` marker, so it never deletes another
+tool's `<file>.<digits>.tmp` from the user's source tree.
 
 ## Atomicity (multi-file)
 
@@ -961,8 +963,8 @@ group_by_file(Entries) ->
     %% this is `new_path` — the file this operation ultimately
     %% leaves on disk — not the file Phase A read from.
     file :: binary(),
-    %% The staging path Phase A produced: `<file>.<unique>.tmp` for
-    %% `op = write` (and `move`, staged at `<new_path>.<unique>.tmp`; see
+    %% The staging path Phase A produced: `<file>.bt-staging.<unique>.tmp` for
+    %% `op = write` (and `move`, staged at `<new_path>.bt-staging.<unique>.tmp`; see
     %% `beamtalk_workspace_file:write_temp/2`), `<file>.tmp-delete-<epoch>-<seq>`
     %% for `op = delete` (ADR 0113), `undefined` for `op = noop`/`move_noop`.
     tmp :: string() | undefined,

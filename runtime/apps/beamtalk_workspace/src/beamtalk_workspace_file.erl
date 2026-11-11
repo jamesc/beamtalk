@@ -16,7 +16,9 @@ checks (BT-4683).
     target's directory, then rename over the target. The temp name is unique
     per call (`erlang:unique_integer/1`), never a fixed `<file>.tmp`, so two
     writers aiming at the same path can never write into one shared temp file
-    and rename each other's partial content into place.
+    and rename each other's partial content into place. It also carries a
+    `.bt-staging.` marker, so a sweep never mistakes another tool's
+    `<file>.<digits>.tmp` in the user's source tree for one of ours.
   * `sweep_stale_temps/2` (one file's) and `sweep_stale_temps_in/2` (a whole
     directory's): delete `temp_path/1` leftovers of a crashed staged write
     once they are old enough that no live writer can own them.
@@ -42,6 +44,11 @@ A leaf module: it calls only OTP.
 %% writer renames its temp file within moments of writing it, so a file this
 %% old can only be a crashed writer's. The one value every workspace sweep uses.
 -define(STALE_TEMP_SECONDS, 3600).
+
+%% Marks a `temp_path/1` name as the workspace's own. Sweeps delete only names
+%% carrying it, never a bare `<file>.<digits>.tmp` some editor or other tool
+%% left beside a source file.
+-define(TEMP_MARKER, ".bt-staging.").
 
 -doc """
 True iff `Path` is `Root` itself or lies beneath it.
@@ -70,12 +77,12 @@ relative_parts(Root, Path) ->
     end.
 
 -doc """
-A fresh temp path next to `Path`: `<Path>.<unique>.tmp`. Unique per call, so
-concurrent writers to the same `Path` never share a temp file.
+A fresh temp path next to `Path`: `<Path>.bt-staging.<unique>.tmp`. Unique per
+call, so concurrent writers to the same `Path` never share a temp file.
 """.
 -spec temp_path(string()) -> string().
 temp_path(Path) ->
-    Path ++ "." ++ integer_to_list(erlang:unique_integer([positive])) ++ ".tmp".
+    Path ++ ?TEMP_MARKER ++ integer_to_list(erlang:unique_integer([positive])) ++ ".tmp".
 
 -doc """
 Write `Data` to a fresh `temp_path/1` next to `Path` and return the temp
@@ -145,7 +152,7 @@ recheck_unchanged(Path, ExpectedCurrent) ->
 
 -doc """
 Delete stale `temp_path/1` leftovers next to `Path`: siblings named
-`<basename>.<digits>.tmp` whose last modification is more than `MaxAgeSeconds`
+`<basename>.bt-staging.<digits>.tmp` whose last modification is more than `MaxAgeSeconds`
 ago. Returns the paths it deleted.
 
 A staged writer (flush Phase A then Phase B) that crashes between its two
@@ -158,12 +165,12 @@ files that cannot be inspected or deleted are skipped.
 """.
 -spec sweep_stale_temps(string(), non_neg_integer()) -> [string()].
 sweep_stale_temps(Path, MaxAgeSeconds) ->
-    Prefix = filename:basename(Path) ++ ".",
+    Prefix = filename:basename(Path) ++ ?TEMP_MARKER,
     sweep(filename:dirname(Path), fun(Name) -> is_temp_name(Prefix, Name) end, MaxAgeSeconds).
 
 -doc """
 Delete every stale `temp_path/1` leftover directly in `Dir`: any
-`<name>.<digits>.tmp` whose last modification is more than `MaxAgeSeconds`
+`<name>.bt-staging.<digits>.tmp` whose last modification is more than `MaxAgeSeconds`
 ago, whatever file it was staging. Returns the paths it deleted.
 
 For a writer that does not sweep per file, such as the ChangeLog at startup.
@@ -193,17 +200,12 @@ sweep(Dir, IsTemp, MaxAgeSeconds) ->
         Names
     ).
 
-%% `Name` is `<base>.<digits>.tmp` for some non-empty `<base>`.
+%% `Name` is `<base>.bt-staging.<digits>.tmp` for some non-empty `<base>`.
 -spec is_any_temp_name(string()) -> boolean().
 is_any_temp_name(Name) ->
-    case string:split(Name, ".", trailing) of
-        [Stem, "tmp"] ->
-            case string:split(Stem, ".", trailing) of
-                [Base, _Digits] when Base =/= [] -> is_temp_name(Base ++ ".", Name);
-                _ -> false
-            end;
-        _ ->
-            false
+    case string:split(Name, ?TEMP_MARKER, trailing) of
+        [Base, _Rest] when Base =/= [] -> is_temp_name(Base ++ ?TEMP_MARKER, Name);
+        _ -> false
     end.
 
 %% `Name` is `Prefix ++ Digits ++ ".tmp"` with at least one digit: exactly
@@ -212,9 +214,8 @@ is_any_temp_name(Name) ->
 is_temp_name(Prefix, Name) ->
     case lists:prefix(Prefix, Name) of
         true ->
-            %% Match ".tmp" on what follows the prefix, so a name where the
-            %% prefix's own trailing "." would also start ".tmp" (the legacy
-            %% `<basename>.tmp`) is not mistaken for one.
+            %% Match ".tmp" on what follows the prefix, so the prefix's own
+            %% trailing "." can never double as the start of ".tmp".
             case lists:reverse(lists:nthtail(length(Prefix), Name)) of
                 "pmt." ++ RevDigits when RevDigits =/= [] ->
                     lists:all(fun(C) -> C >= $0 andalso C =< $9 end, RevDigits);

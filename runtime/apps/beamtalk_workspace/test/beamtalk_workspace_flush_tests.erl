@@ -4091,9 +4091,9 @@ has_staging_file_sees_unique_and_legacy_names_test() ->
     File = filename:join(Dir, "a.bt"),
     try
         ?assertEqual(false, has_staging_file(File)),
-        ok = file:write_file(File ++ ".42.tmp", <<>>),
+        ok = file:write_file(File ++ ".bt-staging.42.tmp", <<>>),
         ?assert(has_staging_file(File)),
-        ok = file:delete(File ++ ".42.tmp"),
+        ok = file:delete(File ++ ".bt-staging.42.tmp"),
         ok = file:write_file(File ++ ".tmp", <<>>),
         ?assert(has_staging_file(File))
     after
@@ -4101,7 +4101,7 @@ has_staging_file_sees_unique_and_legacy_names_test() ->
     end.
 
 %% True when a write to `File` left a staging file behind: the legacy fixed
-%% `<File>.tmp` or a `beamtalk_workspace_file` unique `<File>.<N>.tmp`
+%% `<File>.tmp` or a `beamtalk_workspace_file` unique `<File>.bt-staging.<N>.tmp`
 %% (BT-4683). Checking only `<File>.tmp` can no longer fail now that staging
 %% uses unique names.
 has_staging_file(File) ->

@@ -55,6 +55,7 @@ write_temp_uses_a_fresh_name_per_call_test() ->
         {ok, T2} = beamtalk_workspace_file:write_temp(Path, <<"two">>),
         ?assertNotEqual(T1, T2),
         ?assertNotEqual(Path ++ ".tmp", T1),
+        ?assert(lists:prefix(Path ++ ".bt-staging.", T1)),
         ?assertEqual(Dir, filename:dirname(T1)),
         %% The second staging write did not touch the first one's file.
         ?assertEqual({ok, <<"one">>}, file:read_file(T1)),
@@ -130,17 +131,18 @@ atomic_write_concurrent_writers_never_mix_test() ->
 sweep_stale_temps_deletes_only_old_unique_temps_of_that_file_test() ->
     with_dir(fun(Dir) ->
         Path = filename:join(Dir, "a.bt"),
-        Old = Path ++ ".17.tmp",
-        Young = Path ++ ".18.tmp",
+        Old = Path ++ ".bt-staging.17.tmp",
+        Young = Path ++ ".bt-staging.18.tmp",
         Legacy = Path ++ ".tmp",
-        NotDigits = Path ++ ".x1.tmp",
-        Sibling = filename:join(Dir, "b.bt.17.tmp"),
-        Prefixed = filename:join(Dir, "a.bt2.17.tmp"),
-        Kept = [Young, Legacy, NotDigits, Sibling, Prefixed],
+        %% Another tool's `<file>.<digits>.tmp`: no `.bt-staging.` marker.
+        Unmarked = Path ++ ".17.tmp",
+        NotDigits = Path ++ ".bt-staging.x1.tmp",
+        Sibling = filename:join(Dir, "b.bt.bt-staging.17.tmp"),
+        Prefixed = filename:join(Dir, "a.bt2.bt-staging.17.tmp"),
+        OldKept = [Legacy, Unmarked, NotDigits, Sibling, Prefixed],
+        Kept = [Young | OldKept],
         lists:foreach(fun(F) -> ok = file:write_file(F, <<>>) end, [Old | Kept]),
-        lists:foreach(fun(F) -> ok = set_age(F, 7200) end, [
-            Old, Legacy, NotDigits, Sibling, Prefixed
-        ]),
+        lists:foreach(fun(F) -> ok = set_age(F, 7200) end, [Old | OldKept]),
         ?assertEqual([Old], beamtalk_workspace_file:sweep_stale_temps(Path, 3600)),
         ?assertNot(filelib:is_regular(Old)),
         lists:foreach(fun(F) -> ?assert(filelib:is_regular(F)) end, Kept),
@@ -152,15 +154,18 @@ sweep_stale_temps_deletes_only_old_unique_temps_of_that_file_test() ->
 
 sweep_stale_temps_in_deletes_any_old_unique_temp_in_the_dir_test() ->
     with_dir(fun(Dir) ->
-        Old1 = filename:join(Dir, "changes.jsonl.5.tmp"),
-        Old2 = filename:join(Dir, "000001-source.bt.77.tmp"),
-        Young = filename:join(Dir, "changes.jsonl.6.tmp"),
+        Old1 = filename:join(Dir, "changes.jsonl.bt-staging.5.tmp"),
+        Old2 = filename:join(Dir, "000001-source.bt.bt-staging.77.tmp"),
+        Young = filename:join(Dir, "changes.jsonl.bt-staging.6.tmp"),
         Legacy = filename:join(Dir, "changes.jsonl.tmp"),
-        NoBase = filename:join(Dir, ".5.tmp"),
+        Unmarked = filename:join(Dir, "changes.jsonl.5.tmp"),
+        NoBase = filename:join(Dir, ".bt-staging.5.tmp"),
         Plain = filename:join(Dir, "000001-source.bt"),
-        Kept = [Young, Legacy, NoBase, Plain],
+        Kept = [Young, Legacy, Unmarked, NoBase, Plain],
         lists:foreach(fun(F) -> ok = file:write_file(F, <<>>) end, [Old1, Old2 | Kept]),
-        lists:foreach(fun(F) -> ok = set_age(F, 7200) end, [Old1, Old2, Legacy, NoBase, Plain]),
+        lists:foreach(fun(F) -> ok = set_age(F, 7200) end, [
+            Old1, Old2, Legacy, Unmarked, NoBase, Plain
+        ]),
         ?assertEqual(
             lists:sort([Old1, Old2]),
             lists:sort(beamtalk_workspace_file:sweep_stale_temps_in(Dir, 3600))
@@ -217,11 +222,15 @@ flush_sweeps_a_stale_unique_tmp_but_not_a_fresh_one_test() ->
         File = filename:join(ProjDir, "counter.bt"),
         Original = <<"Object subclass: Counter\n  value => 0\nend\n">>,
         ok = file:write_file(File, Original),
-        Stale = File ++ ".111.tmp",
-        Fresh = File ++ ".222.tmp",
+        Stale = File ++ ".bt-staging.111.tmp",
+        Fresh = File ++ ".bt-staging.222.tmp",
+        %% An old `<file>.<digits>.tmp` some other tool left: not ours.
+        Unmarked = File ++ ".333.tmp",
         ok = file:write_file(Stale, <<"crashed attempt">>),
         ok = file:write_file(Fresh, <<"in flight">>),
+        ok = file:write_file(Unmarked, <<"another tool's file">>),
         ok = set_age(Stale, 2 * 3600),
+        ok = set_age(Unmarked, 2 * 3600),
         OldBody = <<"value => 0\n">>,
         {Start, Len} = binary:match(Original, OldBody),
         {ok, _} = beamtalk_workspace_changelog:append(#{
@@ -239,7 +248,7 @@ flush_sweeps_a_stale_unique_tmp_but_not_a_fresh_one_test() ->
         }),
         {ok, Summary} = beamtalk_workspace_flush:flush(),
         ?assertEqual(1, maps:get(flushed, Summary)),
-        ?assertEqual(["counter.bt.222.tmp"], tmp_files(ProjDir))
+        ?assertEqual(["counter.bt.333.tmp", "counter.bt.bt-staging.222.tmp"], tmp_files(ProjDir))
     end).
 
 %%====================================================================
@@ -266,9 +275,9 @@ changelog_start_sweeps_stale_temps_test() ->
         ChangesDir = beamtalk_workspace_changelog:changes_dir(WorkspaceId),
         SourcesDir = filename:join(ChangesDir, "sources"),
         ok = filelib:ensure_path(SourcesDir),
-        StaleLog = filename:join(ChangesDir, "changes.jsonl.11.tmp"),
-        StaleSource = filename:join(SourcesDir, "000003-source.bt.12.tmp"),
-        Fresh = filename:join(ChangesDir, "changes.jsonl.13.tmp"),
+        StaleLog = filename:join(ChangesDir, "changes.jsonl.bt-staging.11.tmp"),
+        StaleSource = filename:join(SourcesDir, "000003-source.bt.bt-staging.12.tmp"),
+        Fresh = filename:join(ChangesDir, "changes.jsonl.bt-staging.13.tmp"),
         lists:foreach(
             fun(F) -> ok = file:write_file(F, <<>>) end, [StaleLog, StaleSource, Fresh]
         ),
