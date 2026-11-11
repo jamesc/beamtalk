@@ -21,7 +21,10 @@ checks (BT-4683).
     `<file>.<digits>.tmp` in the user's source tree for one of ours.
   * `sweep_stale_temps/2` (one file's) and `sweep_stale_temps_in/2` (a whole
     directory's): delete `temp_path/1` leftovers of a crashed staged write
-    once they are old enough that no live writer can own them.
+    once they are old enough that no live writer can own them. A fixed-name
+    `<file>.tmp` left by a crash under a build from before BT-4683 is never
+    swept: nothing reads it back, so it is harmless, and without the marker
+    it cannot be told apart from another tool's file.
 
 A leaf module: it calls only OTP.
 """.

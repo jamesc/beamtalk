@@ -173,6 +173,23 @@ sweep_stale_temps_in_deletes_any_old_unique_temp_in_the_dir_test() ->
         lists:foreach(fun(F) -> ?assert(filelib:is_regular(F)) end, Kept)
     end).
 
+%% `beamtalk_repl_ops_load`'s direct source writes (save-native-source,
+%% section dividers) sweep a crashed earlier write's stale staging file too.
+ops_load_atomic_write_sweeps_stale_temps_test() ->
+    with_dir(fun(Dir) ->
+        Path = filename:join(Dir, "a.bt"),
+        Stale = Path ++ ".bt-staging.5.tmp",
+        Unmarked = Path ++ ".6.tmp",
+        ok = file:write_file(Stale, <<>>),
+        ok = file:write_file(Unmarked, <<>>),
+        ok = set_age(Stale, 7200),
+        ok = set_age(Unmarked, 7200),
+        ok = beamtalk_repl_ops_load:atomic_write_file(Path, <<"new">>),
+        ?assertEqual({ok, <<"new">>}, file:read_file(Path)),
+        ?assertNot(filelib:is_regular(Stale)),
+        ?assert(filelib:is_regular(Unmarked))
+    end).
+
 %%====================================================================
 %% beamtalk_workspace_flush stages through a unique temp name
 %%====================================================================

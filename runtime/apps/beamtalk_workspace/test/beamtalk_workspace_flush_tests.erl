@@ -4106,4 +4106,5 @@ has_staging_file_sees_unique_and_legacy_names_test() ->
 %% uses unique names.
 has_staging_file(File) ->
     filelib:is_regular(File ++ ".tmp") orelse
-        filelib:wildcard(filename:basename(File) ++ ".*.tmp", filename:dirname(File)) =/= [].
+        filelib:wildcard(filename:basename(File) ++ ".bt-staging.*.tmp", filename:dirname(File)) =/=
+            [].

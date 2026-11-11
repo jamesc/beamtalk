@@ -728,12 +728,19 @@ nothing is written — rather than silently overwriting a concurrent edit,
 mirroring the ADR 0082 flush pipeline's `prev_source` span check
 (`beamtalk_workspace_flush.erl`). Other failures return the bare file error
 `Reason` (untagged).
+
+After a successful write it sweeps stale staging files a crashed earlier write
+to `Path` left beside it (`beamtalk_workspace_file:sweep_stale_temps/1`), as
+flush does after its own commits, since both write into the user's source tree.
 """.
 -spec atomic_write_file(string(), binary(), binary() | undefined) -> ok | {error, term()}.
 atomic_write_file(Path, Content, ExpectedCurrent) ->
     case beamtalk_workspace_file:atomic_write(Path, Content, ExpectedCurrent) of
-        ok -> ok;
-        {error, {_Step, Reason}} -> {error, Reason}
+        ok ->
+            _ = beamtalk_workspace_file:sweep_stale_temps(Path),
+            ok;
+        {error, {_Step, Reason}} ->
+            {error, Reason}
     end.
 
 -doc """
