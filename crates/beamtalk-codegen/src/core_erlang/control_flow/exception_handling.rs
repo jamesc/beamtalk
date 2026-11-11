@@ -1589,7 +1589,7 @@ impl CoreErlangGenerator {
             Some(NlrCarry::SelfVt) => error_arm.family_mutated_version.map(|(_, v)| v),
             // A scope's own throw is never foreign: only the
             // `Block>>ensure:` fallback relays a foreign one.
-            Some(NlrCarry::Live | NlrCarry::Foreign) | None => None,
+            Some(NlrCarry::Live) | None => None,
         };
         let writes_cell = self.block_touches_actor_state(cleanup_block);
         let relays = self.scope_nlr_token().is_some()
@@ -1808,12 +1808,6 @@ impl CoreErlangGenerator {
                     rethrow: RethrowSlot::CellOverCarried,
                 }
             }
-            NlrCarry::Foreign => {
-                return Err(CodeGenError::Internal(
-                    "an inlined `ensure:` cleanup relays its own scope's `^`, never a foreign one"
-                        .to_string(),
-                ));
-            }
         };
         Ok(relay)
     }
@@ -1968,33 +1962,29 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-4429: the catch of `Block>>ensure:`'s structural fallback, an
+    /// The catch of `Block>>ensure:`'s structural fallback, an
     /// [`ThreadedStmt::EnsureCatch`](threaded_ir::ThreadedStmt::EnsureCatch)
-    /// whose relay takes every foreign `^` ([`NlrCarry::Foreign`]).
+    /// with no relay: the cleanup, then the re-raise (BT-4536).
     fn ensure_structural_fallback_catch(&mut self, cleanup_param: &str) -> Document<'static> {
         let type_var = self.fresh_temp_var("Type");
         let error_var = self.fresh_temp_var("Error");
         let stack_var = self.fresh_temp_var("Stack");
-        // BT-4429: every `^` that crosses this catch is foreign (this is the
-        // Block method's frame), so its state kind is known only at run time.
-        // The cleanup is a closure, which writes only the actor-state cell:
-        // the relay resumes the throw with the cell over the carried state
-        // when the throw carried the cell's state (an actor method's or
-        // closure's `^`), and as it came otherwise (`ensure_nlr_relay`).
+        // Every `^` that crosses this catch is foreign (this is the Block
+        // method's frame). The cleanup is a closure, which writes only the
+        // actor-state cell, in place, and the method a `^` returns from
+        // commits the cell (ADR 0146): the throw is re-raised as it came
+        // (`ensure_nlr_relay`). `note_unwound/1` tells the test-build commit
+        // check that the cell may be ahead of it now; for any other
+        // exception it does nothing.
         let cleanup_apply = || docvec!["apply ", leaf::var(cleanup_param.to_string()), " ()"];
-        let relay = EnsureNlrRelay {
-            seed: Document::Nil,
-            cleanup: docvec![
-                "let _ = ",
-                self.annotate_current_send_call(cleanup_apply()),
-                " in"
-            ],
-            cell_store: false,
-            rethrow: RethrowSlot::CellIfCarried,
-        };
         let other = docvec![
             "do ",
             self.annotate_current_send_call(cleanup_apply()),
+            " do ",
+            actor_state_call(
+                actor_state_helper::NOTE_UNWOUND,
+                vec![leaf::var(error_var.clone())],
+            ),
             " ",
             Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone()),
         ];
@@ -2005,9 +1995,9 @@ impl CoreErlangGenerator {
                 stack_var,
                 carried_var: None,
             },
-            (Some(NlrCarry::Foreign), false, false),
+            (None, false, false),
             EnsureCleanup::Closure { writes_cell: true },
-            (Some(relay), None),
+            (None, None),
             other,
             beamtalk_core::source_analysis::Span::default(),
         )

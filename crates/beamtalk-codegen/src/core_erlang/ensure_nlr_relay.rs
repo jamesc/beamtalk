@@ -53,18 +53,17 @@
 //!   (an away `super_send/5`) that commit answers the carried state.
 //! - **`Block>>ensure:` reached dynamically** (`perform:`, BT-4429). Its
 //!   structural-fallback body runs in the Block method, where every `^` is of
-//!   another scope and its state kind is known only at run time
-//!   ([`NlrCarry::Foreign`]). The cleanup is a closure, so it writes only the
-//!   cell: the relay matches every `$bt_nlr` throw, snapshots the cell before
-//!   the cleanup, and resumes the throw with the cell over the carried state
-//!   when the carried state was the cell's
-//!   (`beamtalk_actor_state:refresh_carried/2`,
-//!   [`RethrowSlot::CellIfCarried`]); any other state (the REPL's bindings, a
-//!   value type's `Self`, another actor's state) a closure cannot write, and
-//!   resumes as it came. "Was the cell's" is decided by identity, not by
-//!   equal fields (BT-4448): a closure of another actor of the same class,
-//!   run here away from home, carries its own actor's capture stamped with
-//!   that actor (`beamtalk_actor_state:nlr_state/2`), never this cell.
+//!   another scope. The cleanup is a closure, so it writes only the cell, in
+//!   place, and the method a `^` returns from commits the cell, not the copy
+//!   the throw carries (ADR 0146): the catch is plain, the cleanup and then
+//!   the re-raise of the throw as it came (BT-4536). Away from home there is
+//!   no cell of the actor's for a closure to write, and the REPL's bindings
+//!   and a value type's `Self` no closure writes. The one thing the catch
+//!   adds is `beamtalk_actor_state:note_unwound/1`, which tells the
+//!   test-build commit check that the cell may now be ahead of the throw.
+//!   (BT-4429 and BT-4448 relayed every throw here with the cell over the
+//!   carried state, deciding whose cell it was by an owner stamp in the
+//!   state map; ADR 0146 decides it once, at the commit, by identity.)
 //!
 //! The same holds at every nesting: a statement, a conditional arm, a loop or
 //! fold body, an `on:do:` arm or another `ensure:` cleanup (whose relay hands
@@ -83,7 +82,7 @@
 use super::generator::CoreErlangGenerator;
 use super::threaded_ir::{
     self, EnsureCatchVars, EnsureCleanup, EnsureForeignNlr, EnsureNlrRelay, ForeignCleanupBody,
-    NlrCarry, RenderCtx, RethrowSlot, ThreadedStmt, TokenId,
+    NlrCarry, RenderCtx, ThreadedStmt, TokenId,
 };
 use beamtalk_cerl_doc::Document;
 use beamtalk_core::source_analysis::Span;
@@ -146,9 +145,13 @@ impl CoreErlangGenerator {
             // a `^` at this site would carry, rebuilt from the site's bindings.
             #[cfg(any(test, feature = "test"))]
             Some(fault::RelayFault::RebuildAtSite) => relay.map(|relay| {
-                if relay.rethrow == RethrowSlot::CellOverCarried && carry == Some(NlrCarry::Live) {
+                if relay.rethrow == threaded_ir::RethrowSlot::CellOverCarried
+                    && carry == Some(NlrCarry::Live)
+                {
                     EnsureNlrRelay {
-                        rethrow: RethrowSlot::SiteState(self.nlr_throw_state_doc(span)),
+                        rethrow: threaded_ir::RethrowSlot::SiteState(
+                            self.nlr_throw_state_doc(span),
+                        ),
                         ..relay
                     }
                 } else {
@@ -177,12 +180,6 @@ impl CoreErlangGenerator {
                 self.fresh_temp_var("EnsureOther")
             } else {
                 String::new()
-            },
-            cell_snapshot_var: match &relay {
-                Some(relay) if relay.rethrow == RethrowSlot::CellIfCarried => {
-                    self.fresh_temp_var("EnsureCellSnap")
-                }
-                _ => String::new(),
             },
             foreign_nlr_var: if foreign.is_some() {
                 self.fresh_temp_var("EnsureForeignNlr")

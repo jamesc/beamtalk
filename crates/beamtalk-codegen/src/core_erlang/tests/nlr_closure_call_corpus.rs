@@ -4,7 +4,7 @@
 //! BT-4524 (ADR 0146 P0): a call that may run a block holding a `^` of the
 //! current scope stores the method's state to the cell first.
 //!
-//! A `^` in an actor closure carries the cell (`nlr_state`). A call that ran
+//! A `^` in an actor closure carries the cell (`view`). A call that ran
 //! such a closure with no store before it (`UserCodeCall::No`) let the throw
 //! carry a cell older than the method's `State`, so the method's earlier field
 //! writes were lost: `self.n := 6. [^2] ensure: [nil]` left `n` at 0, and so

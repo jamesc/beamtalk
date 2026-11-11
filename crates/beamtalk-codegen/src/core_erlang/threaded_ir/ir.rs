@@ -989,19 +989,21 @@ pub(in crate::core_erlang) enum ThreadedStmt {
     /// Built by `ensure_nlr_relay.rs`'s `ensure_catch`, the single owner of
     /// every compiled `ensure:` catch.
     ///
-    /// BT-4429: `Block>>ensure:` reached dynamically (`perform:`) is one too.
-    /// Its structural-fallback body runs in the Block method, where every `^`
-    /// is a foreign throw whose state kind it cannot know
-    /// ([`NlrCarry::Foreign`], no `token`): its relay matches every
-    /// `$bt_nlr` throw and resumes it with the cell over the carried state
-    /// when the carried state is the cell's ([`RethrowSlot::CellIfCarried`]).
+    /// `Block>>ensure:` reached dynamically (`perform:`) is one too: its
+    /// structural-fallback body runs in the Block method, where every `^` is
+    /// foreign (no `token`, no `carry`). Its closure cleanup writes the
+    /// actor-state cell in place and the method a `^` returns from commits
+    /// the cell (ADR 0146), so it is a plain catch: the cleanup, then the
+    /// re-raise (BT-4536; before it, BT-4429's relay patched the carried
+    /// copy).
     EnsureCatch {
         vars: Box<EnsureCatchVars>,
         /// The scope's own NLR token: `None` when no `^` of the scope can
         /// cross this `ensure:` (a foreign token's throw is `other`'s).
         token: Option<TokenId>,
         /// What the scope's own throw carries, `None` when it carries no
-        /// state a cleanup can write (a class method).
+        /// state a cleanup can write (a class method), or the frame has no
+        /// `^` of its own (the `Block>>ensure:` fallback).
         carry: Option<NlrCarry>,
         /// The construct's scratch map is private (`~{}~`): it sits in a
         /// frame with no `State` chain (a direct-params loop body, a class or
@@ -1696,10 +1698,6 @@ pub(in crate::core_erlang) struct EnsureCatchVars {
     /// The state the in-flight throw carries (its 4th element).
     pub nlr_carried_var: String,
     pub other_pair_var: String,
-    /// BT-4429: the cell as it was before the cleanup ran, bound by the
-    /// relay of an [`NlrCarry::Foreign`] throw for
-    /// [`RethrowSlot::CellIfCarried`]. Empty when that relay is not rendered.
-    pub cell_snapshot_var: String,
     /// ADR 0146 R1: the pattern variable of the foreign `$bt_nlr` clause
     /// ([`EnsureForeignNlr`]), bound to the thrown term. Empty when that
     /// clause is not rendered.
@@ -1725,18 +1723,6 @@ pub(in crate::core_erlang) enum NlrCarry {
     /// The actor-state cell, read when the throw is made (an actor closure, a
     /// merged Tier 2 fun): the cleanup's writes land in the cell itself.
     Live,
-    /// BT-4429: any `^` whose state kind this code cannot know, because it
-    /// runs in a frame no `^` belongs to: `Block>>ensure:` reached
-    /// dynamically (`perform:`), the structural-fallback body compiled in the
-    /// Block method. Every `{'$bt_nlr', Tok, Val, Carried}` that crosses it
-    /// is foreign, so the relay matches every token. The throw may carry an
-    /// actor's state (an actor method's `State`, which its `^` stored to the
-    /// cell, or the cell itself, read by a closure's `^`), the REPL's bindings
-    /// or a value type's `Self`; the cleanup is a closure, which writes only
-    /// the cell. So the throw resumes with the cell over the carried state
-    /// exactly when the carried state is the cell's
-    /// ([`RethrowSlot::CellIfCarried`]), and as it came otherwise.
-    Foreign,
 }
 
 impl NlrCarry {
@@ -1787,14 +1773,6 @@ pub(in crate::core_erlang) enum RethrowSlot {
     /// the `__local__` keys the throw carried ([`NlrCarry::Live`], and a
     /// closure cleanup of an [`NlrCarry::ActorState`]).
     CellOverCarried,
-    /// BT-4429: `beamtalk_actor_state:refresh_carried(Snap, Carried)`, where
-    /// `Snap` ([`EnsureCatchVars::cell_snapshot_var`]) is the cell before the
-    /// cleanup ran, bound by the render ahead of the relay's seed: the
-    /// carried state with the cell's fields over it when it was the cell's
-    /// state, else the carried state untouched ([`NlrCarry::Foreign`]).
-    /// BT-4448: an away closure's capture is stamped with its own actor
-    /// (`nlr_state/2`), so another actor's equal state is never the cell's.
-    CellIfCarried,
     /// The state a fresh `^` at the `ensure:` site would carry, rebuilt there
     /// from the site's bindings. Never right for a relay: in a merged Tier 2
     /// fun it re-flushes the captured locals as bound at the `ensure:`, not as

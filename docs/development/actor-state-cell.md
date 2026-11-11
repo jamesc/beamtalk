@@ -505,10 +505,26 @@ may run a closure holding a `^` is entered with the method's state stored
 check asserts it directly at the commit: with `BEAMTALK_CHECK_NLR_COMMIT` set
 (the `Justfile` exports it, so BUnit, the stdlib corpus and the REPL and e2e
 suites run with it), a `^` thrown at home must reach its boundary carrying
-fields equal to the cell, unless an `ensure:` foreign clause put the cell
-ahead on the way (`store_unwound/2`, noted for that throw only) or the throw came from away (the BT-4448
-stamp). Anything else raises `actor_nlr_stale_cell`: a lowering let a `^`
-start without storing the method's state.
+fields equal to the cell, unless a cleanup put the cell ahead on the way or
+the throw was made away from home. Both are noted for that throw only (keyed on
+its carried state, noted once however many times it is noted, and spent by its
+commit), never written into the state map. A cleanup notes it through
+`note_unwound/1`: an inlined `ensure:`'s foreign clause (`store_unwound/2`) and
+the `Block>>ensure:` fallback reached with `perform:`. An away throw is
+recognised by process identity: it reached this process from the one it was
+thrown in (`rethrow_from_away/1`, at the actor and class-process call
+boundaries that relay a `^` back) or left an away `super_send/5`, which runs
+under another actor's cell. Anything else raises `actor_nlr_stale_cell`: a
+lowering let a `^` start without storing the method's state.
+
+`Block>>ensure:` reached dynamically (`perform:`) is a plain catch: its closure
+cleanup writes the cell in place and the `^` is re-raised as it came, since the
+method commits the cell (BT-4536). The relay that used to resume such a throw
+with the cell over its carried state (`refresh_carried/2`, BT-4429), and the
+owner stamp it read to tell this actor's state from another's (BT-4448), are
+gone. A closure's `^` carries `view/2`: the cell at home, the creation-time
+capture away. `nlr_state/2` remains one release as a deprecated alias of
+`view/2` for closures compiled before BT-4536.
 
 Entering an `ensure:` stores the current `State` to the cell, and inside the
 protected body every field write also stores (write-through). The protected

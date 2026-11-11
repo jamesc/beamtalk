@@ -2013,7 +2013,10 @@ sync_call(ActorPid, Selector, Args, CallTimeout, Class) ->
                     %% method unwinds as it would have without the
                     %% process hop — same relay shape as
                     %% beamtalk_class_dispatch.erl's class-method hops.
-                    throw(Nlr);
+                    %% The block was away from home in ActorPid, which
+                    %% `rethrow_from_away/1` tells the test-build commit
+                    %% check (BT-4536).
+                    beamtalk_actor_state:rethrow_from_away(Nlr);
                 {error, Error} ->
                     beamtalk_exception_handler:reraise(Error);
                 DirectValue ->

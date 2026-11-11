@@ -1300,7 +1300,17 @@ class_method_call(ClassPid, Selector, Args, Timeout) ->
             exit:{timeout, {gen_server, call, [ClassPid | _]}} ->
                 raise_class_timeout(ClassPid, Selector, Timeout)
         end,
-    class_method_result(ClassPid, Selector, Args, Reply).
+    case Reply of
+        {error, Nlr} when ?IS_NLR(Nlr) ->
+            %% A `^` out of a caller-supplied block the class process ran:
+            %% re-thrown as `class_method_result/4` would, and told to the
+            %% test-build commit check as thrown away from home, since the
+            %% block ran in another process (BT-4536). `run_in_caller/7`'s
+            %% `^` never hopped, so it takes `class_method_result/4`'s.
+            beamtalk_actor_state:rethrow_from_away(Nlr);
+        _ ->
+            class_method_result(ClassPid, Selector, Args, Reply)
+    end.
 
 -doc """
 Raise the structured `timeout` error for a class method the class process did
@@ -1473,7 +1483,8 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
             %% `beamtalk_primitive:send/3` routes it here. A plain class literal or
             %% a single `class` send goes through `class_send/3` instead, which is
             %% why this needs its own clause rather than sharing that one.
-            throw(Nlr);
+            %% The block was away from home in the class process (BT-4536).
+            beamtalk_actor_state:rethrow_from_away(Nlr);
         Other ->
             unwrap_class_call(Other)
     end.

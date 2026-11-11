@@ -352,6 +352,27 @@ TestCase subclass: ActorClosureCellTest
     self assert: b n equals: 0
     self assert: a n equals: 0
 
+  // BT-4536: an away `super` to a method whose own `^` runs a writing
+  // `ensure:` cleanup. The `^` carries the cleanup's write to the method's
+  // boundary, whose commit answers it away, so the `super` send's
+  // illegal-write check sees the write and raises.
+  testAwaySuperReturnThroughAWritingEnsureRaises =>
+    a := ClosureCellSuperChild spawn
+    b := ClosureCellSuperChild spawn
+    self should: [
+      b runBlock: a writingEnsureBlock
+    ] raise: #actor_state_unreachable
+    self assert: a n equals: 0
+    self assert: b n equals: 0
+
+  // The control: a cleanup that writes nothing returns the `^`'s value.
+  testAwaySuperReturnThroughAQuietEnsureAnswers =>
+    a := ClosureCellSuperChild spawn
+    b := ClosureCellSuperChild spawn
+    self assert: (b runBlock: a quietEnsureBlock) equals: 1
+    self assert: a n equals: 0
+    self assert: b n equals: 0
+
   // A self-send from a host block running inside an away `super` cannot be
   // served (the host's callback is blocked in that call): it raises
   // `deadlock_detected` instead of misreporting the live actor as dead.

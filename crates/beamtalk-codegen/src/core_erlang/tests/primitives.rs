@@ -278,8 +278,15 @@ fn test_generate_primitive_ensure_structural_fallback() {
         "expected both the protected block and cleanup block to be applied, got: {rendered}"
     );
     assert!(
-        rendered.contains("do apply CleanupBlock () primop 'raw_raise'"),
-        "expected cleanup to run on the error path before re-raising, got: {rendered}"
+        rendered.contains(
+            "do apply CleanupBlock () do call 'beamtalk_actor_state':'note_unwound'(_Error"
+        ) && rendered.contains(") primop 'raw_raise'("),
+        "expected cleanup to run on every exception path before re-raising, got: {rendered}"
+    );
+    // BT-4536: a `^` is re-raised as it came, like any other exception.
+    assert!(
+        !rendered.contains("'$bt_nlr'"),
+        "expected no `^` relay clause, got: {rendered}"
     );
     assert!(
         rendered.matches("'stateful_block_dispatch'").count() == 2,
