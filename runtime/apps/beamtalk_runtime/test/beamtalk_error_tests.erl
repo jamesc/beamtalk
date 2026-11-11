@@ -525,7 +525,7 @@ reason_invalid_utf8_does_not_raise_test() ->
 
 %% A huge binary is cut before rendering; a multibyte char at the cut stays valid.
 reason_huge_binary_is_cut_test() ->
-    Big = binary:copy(<<"\x{3bb}"/utf8>>, 100000),
+    Big = <<"a", (binary:copy(<<"\x{3bb}"/utf8>>, 100000))/binary>>,
     Line = reason_line({beamtalk_string, Big}),
     ?assert(byte_size(Line) =< 2048 + 8),
     ?assert(is_binary(unicode:characters_to_binary(Line))),

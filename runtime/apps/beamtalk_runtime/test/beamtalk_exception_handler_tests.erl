@@ -1413,7 +1413,7 @@ class_signal_message_reason_records_reason_test() ->
             ?assertEqual({tls, closed}, beamtalk_exception_handler:dispatch('reason', [], Wrapped)),
             ?assertEqual('MyErr', Inner#beamtalk_error.class),
             Formatted = beamtalk_error:format(Inner),
-            ?assertNotEqual(nomatch, binary:match(Formatted, <<"Reason: {tls,closed}">>))
+            ?assertNotEqual(nomatch, binary:match(Formatted, <<"Reason: {#tls, #closed}">>))
     end.
 
 class_signal_message_reason_string_and_details_test() ->
