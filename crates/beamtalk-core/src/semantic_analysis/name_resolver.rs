@@ -112,6 +112,11 @@ impl NameResolver {
             );
         }
 
+        // BT-4665: method bodies (in-class and extension) cannot read
+        // top-level bindings or REPL `known_vars`, so hide them while the
+        // methods are resolved. Restored below for later phases.
+        let hidden_module_bindings = self.scope.hide_module_bindings();
+
         // Resolve classes
         for class in &module.classes {
             self.resolve_class(class);
@@ -128,6 +133,8 @@ impl NameResolver {
             self.resolve_method(&standalone.method);
             self.scope.pop();
         }
+
+        self.scope.restore_module_bindings(hidden_module_bindings);
 
         // Note: No unused variable warnings at module scope (depth 0).
         // Module-level variables include built-in identifiers (true, false, nil)
@@ -1196,6 +1203,23 @@ mod tests {
             errors.is_empty(),
             "sessionVar should be defined via known_vars, got: {errors:?}"
         );
+    }
+
+    #[test]
+    fn known_vars_are_hidden_from_method_bodies() {
+        // BT-4665: REPL `known_vars` are readable at top level, not in methods.
+        let module = parse_bt(
+            "sessionVar\nObject subclass: W\n  run => sessionVar\n\nW >> foo => sessionVar\n",
+        );
+        let mut resolver = NameResolver::new();
+        resolver.define_known_vars(&["sessionVar"], Span::new(0, 0));
+        resolver.resolve_module(&module);
+        let errors = resolver
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("Undefined variable: sessionVar"))
+            .count();
+        assert_eq!(errors, 2, "got: {:?}", resolver.diagnostics());
     }
 
     #[test]
