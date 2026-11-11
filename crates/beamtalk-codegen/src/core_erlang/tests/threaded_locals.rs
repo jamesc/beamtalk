@@ -8,9 +8,12 @@ use super::*;
 use crate::core_erlang::threading_analysis::{ThreadedConstruct, ThreadedLocals};
 use beamtalk_core::semantic_analysis::block_facts::LocalThreadingFamily;
 
+/// The first expression of `src` as codegen reads it: normalised
+/// (`ast::normalize`, BT-4603: a unary loop is its keyword loop).
 fn parse_expr(src: &str) -> Expression {
-    let (module, diagnostics) =
+    let (mut module, diagnostics) =
         beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(src));
+    beamtalk_core::ast::normalize::peel_operand_parens(&mut module);
     assert!(diagnostics.is_empty(), "{src}: {diagnostics:?}");
     module
         .expressions
@@ -94,12 +97,26 @@ fn constructs_not_lowered_today_are_recognized_with_an_empty_lowered_set() {
             LocalThreadingFamily::Lookup,
         ),
         ("[t := t + 1] value", LocalThreadingFamily::BlockValue),
-        ("[t := t + 1. t < 3] whileTrue", LocalThreadingFamily::Loop),
     ] {
         let set = threaded(&generator, src).unwrap_or_else(|| panic!("{src}: no set"));
         assert_eq!(set.construct, ThreadedConstruct::Inline(family), "{src}");
         assert_eq!(set.names, vec!["t"], "{src}");
         assert_eq!(set.clone().into_lowered(), None, "{src}");
+    }
+    // BT-4603: a unary loop is the keyword loop with an empty body as codegen
+    // reads it, so its condition's write is lowered (BT-4602), not the
+    // unlowered receiver "body" a raw parse once classified it as.
+    for src in [
+        "[t := t + 1. t < 3] whileTrue",
+        "[t := t + 1. t >= 3] whileFalse",
+    ] {
+        let set = threaded(&generator, src).unwrap_or_else(|| panic!("{src}: no set"));
+        assert_eq!(
+            set.construct,
+            ThreadedConstruct::Inline(LocalThreadingFamily::Loop),
+            "{src}"
+        );
+        assert_eq!(set.into_lowered(), Some(vec!["t".to_string()]), "{src}");
     }
     // BT-3798: `Dictionary at:ifAbsent:` packs its handler's writes.
     let set = threaded(&generator, "d at: #k ifAbsent: [t := 1]").expect("lookup");

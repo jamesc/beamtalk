@@ -271,7 +271,7 @@ fn escaping_block_note_lists_exactly_the_threading_constructs() {
         assert!(
             crate::state_threading_selectors::is_state_threading_keyword_selector(bare)
                 || crate::state_threading_selectors::is_state_threaded_block_receiver(bare)
-                || crate::state_threading_selectors::is_state_threading_unary_selector(bare)
+                || crate::ast::normalize::written_unary_loop_selectors().contains(&bare)
                 || crate::state_threading_selectors::is_dictionary_inline_lookup(bare)
                 || crate::state_threading_selectors::is_try_do_selector(bare),
             "{selector} is not a threading construct"
@@ -3837,6 +3837,16 @@ fn canonicalised_loop_diagnostics_name_the_written_selector() {
             in_class("x := 0\n[x := x + 1. x > 3 ifTrue: [^x]] repeat; yourself\nx"),
             "(`repeat`)",
         ),
+        // BT-4603: the cascade's shared receiver block, the unary loop's
+        // condition (BT-4602 review repro).
+        (
+            in_class("x := 0\n[x := x + 1. x < 3] whileTrue; yourself\nx"),
+            "(`whileTrue`)",
+        ),
+        (
+            in_value("x := 0\n[x := x + 1. x >= 3] whileFalse; yourself\nx"),
+            "(`whileFalse`)",
+        ),
     ];
     for (source, expected) in cases {
         let diags = adr0131_diagnostics(&source);
@@ -3844,6 +3854,25 @@ fn canonicalised_loop_diagnostics_name_the_written_selector() {
         // (A unary loop's help may show the keyword loop to write instead.)
         for d in &diags {
             assert!(!d.message.contains("whileTrue:"), "{source}: {}", d.message);
+            assert!(
+                !d.message.contains("whileFalse:"),
+                "{source}: {}",
+                d.message
+            );
+        }
+        // A cascade's receiver block is told to answer the new value as the
+        // receiver, in the selector as written (BT-4603).
+        if source.contains("; yourself") && !source.contains("repeat") {
+            let hint = diags
+                .iter()
+                .find_map(|d| d.hint.as_deref())
+                .unwrap_or_default()
+                .to_string();
+            assert!(hint.contains("+ 1] while"), "{source}: {hint}");
+            assert!(
+                !hint.contains("whileTrue:") && !hint.contains("whileFalse:"),
+                "{hint}"
+            );
         }
         assert!(
             diags.iter().any(|d| d.message.contains(expected)),

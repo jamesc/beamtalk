@@ -956,3 +956,52 @@ fn test_cascade_in_class_method_checks_class_side() {
         checker.diagnostics()
     );
 }
+
+/// A unary loop in a `match:` arm, as the language service hands it to type
+/// inference: a raw parse (BT-4603). Shared by the paired tests below, which
+/// only mean something together on the same input.
+const MATCH_ARM_UNARY_LOOP_SRC: &str = "Object subclass: P\n  run =>\n    i := 0\n    x := 1\n    x match: [1 -> [i := i + 1. i < 3] whileTrue; _ -> nil]\n    i\n";
+
+/// BT-4603 review: the type checker's `match:`-arm write walk reaches
+/// `block_facts::local_threading_construct`, which asserts it never sees an
+/// uncanonicalised unary loop. Every public inference entry point normalises
+/// its input (`check_module`, BT-4238), so a raw parse holding a unary loop in
+/// a `match:` arm, the language service's case, type-checks without
+/// tripping it.
+#[test]
+fn inference_on_a_raw_parse_with_a_unary_loop_in_a_match_arm() {
+    let (module, diags) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(
+        MATCH_ARM_UNARY_LOOP_SRC,
+    ));
+    assert!(diags.is_empty(), "{diags:?}");
+    assert!(crate::ast::normalize::needs_normalising(&module));
+    let hierarchy = ClassHierarchy::build(&module)
+        .0
+        .unwrap_or_else(|_| ClassHierarchy::with_builtins());
+    let _ = infer_types(&module, &hierarchy, None);
+    let _ = infer_types_and_returns(&module, &hierarchy, None);
+    let _ = infer_types_and_returns_with_registries(&module, &hierarchy, None, None, None);
+    let _ = infer_method_return_types(&module, &hierarchy, None);
+}
+
+/// The companion that keeps the test above meaningful: skipping the
+/// normalisation `check_module` does reaches the classifier's assertion
+/// through the `match:`-arm write walk (BT-4603).
+#[cfg(debug_assertions)]
+#[test]
+#[should_panic(expected = "uncanonicalised unary loop")]
+fn the_match_arm_walk_reaches_the_classifier_on_a_raw_parse() {
+    let (module, _) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(
+        MATCH_ARM_UNARY_LOOP_SRC,
+    ));
+    // The input is the raw shape, so a missing panic means the walk changed,
+    // not the parser.
+    assert!(
+        crate::ast::normalize::needs_normalising(&module),
+        "the parser no longer produces the raw unary loop"
+    );
+    let hierarchy = ClassHierarchy::build(&module)
+        .0
+        .unwrap_or_else(|_| ClassHierarchy::with_builtins());
+    TypeChecker::new().check_normalised_module(&module, &hierarchy);
+}

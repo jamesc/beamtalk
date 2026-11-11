@@ -1308,9 +1308,11 @@ pub fn while_body_block(body: &Expression) -> Option<&Block> {
 /// threads its outer-local writes back to the method: exactly when the body is
 /// a block literal ([`while_body_block`]), in every context. Codegen then
 /// carries the condition's writes in the loop's `StateAcc` (BT-4015); with any
-/// other body the loop runs its condition as a closure (BT-4062). A unary
-/// `[...] whileTrue` is the keyword loop with an empty body once normalised
-/// (BT-4313), so it always threads.
+/// other body the loop runs its condition as a closure (BT-4062).
+///
+/// Callers pass the normalised selector (`ast::normalize`): a unary
+/// `[...] whileTrue` is the keyword loop with an empty body there (BT-4313),
+/// so it always threads. On a raw parse it would answer `None`.
 ///
 /// The one rule the ADR 0131 §6 validator (`Escape::ConditionBodyNotLiteral`
 /// on `Some(false)`) and `beamtalk-lint`'s `dead_block_assignment` (no warning
@@ -1837,16 +1839,25 @@ impl LocalThreadingConstruct<'_> {
 pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingConstruct<'_>> {
     use crate::state_threading_selectors::{
         is_conditional_selector, is_exception_selector, is_state_threaded_block_receiver,
-        is_state_threading_keyword_selector, is_state_threading_unary_selector,
-        lookup_block_arg_indices,
+        is_state_threading_keyword_selector, lookup_block_arg_indices,
     };
+    // BT-4603: analysis reads only the normalised tree, where every unary loop
+    // on a parameterless literal block is its keyword loop (BT-4313, BT-4589).
+    // A raw parse would classify its receiver as a loop body, while codegen
+    // lowers it as the keyword loop's condition.
+    let node = expr.unwrap_parens();
+    debug_assert!(
+        !crate::ast::normalize::is_uncanonicalised_loop(node),
+        "local_threading_construct reached an uncanonicalised unary loop; \
+         run `ast::normalize` first"
+    );
     let Expression::MessageSend {
         receiver,
         selector,
         arguments,
         is_cast: false,
         ..
-    } = expr.unwrap_parens()
+    } = node
     else {
         return None;
     };
@@ -1910,12 +1921,10 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
             }
         }
         MessageSelector::Unary(_) => {
-            // A literal `[b] repeat` reaches analysis as the
-            // `[true] whileTrue: [b]` it is canonicalised to (BT-4589).
-            if is_state_threading_unary_selector(&sel) {
-                blocks.extend(receiver_block);
-                LocalThreadingFamily::Loop
-            } else if is_state_threaded_block_receiver(&sel) {
+            // A literal `[c] whileTrue`/`[b] repeat` reaches analysis as the
+            // keyword loop it is canonicalised to (BT-4313, BT-4589); any
+            // other unary loop send is an ordinary send to `Block` (BT-4603).
+            if is_state_threaded_block_receiver(&sel) {
                 blocks.extend(evaluated_block);
                 LocalThreadingFamily::BlockValue
             } else {
@@ -5447,6 +5456,57 @@ mod tests {
             panic!("block")
         };
         assert!(analyze_block(block).local_writes.contains("t"));
+    }
+
+    /// BT-4603: a unary loop reaches the classifier only canonicalised. A
+    /// parameterless literal receiver is the keyword loop (its condition is
+    /// the receiver, its body the added empty block, its selector named as
+    /// written); a literal with parameters, or a block value, is an ordinary
+    /// send to `Block` and no construct.
+    #[test]
+    fn unary_loops_reach_the_classifier_only_canonicalised() {
+        for (src, keyword, written) in [
+            ("[i := i + 1. i < 3] whileTrue", "whileTrue:", "whileTrue"),
+            (
+                "[i := i + 1. i >= 3] whileFalse",
+                "whileFalse:",
+                "whileFalse",
+            ),
+            ("[i := i + 1] repeat", "whileTrue:", "repeat"),
+        ] {
+            let mut expr = parse_first_expr(src);
+            crate::ast::normalize::desugar_unary_loops(&mut expr);
+            assert!(
+                !crate::ast::normalize::is_uncanonicalised_loop(&expr),
+                "{src}"
+            );
+            let construct =
+                local_threading_construct(&expr).unwrap_or_else(|| panic!("{src}: not recognized"));
+            assert_eq!(construct.family, LocalThreadingFamily::Loop, "{src}");
+            assert_eq!(construct.selector, keyword, "{src}");
+            assert_eq!(construct.written_selector, written, "{src}");
+        }
+        for src in [
+            "[:k | i := k] whileTrue",
+            "[:k | i := k] repeat",
+            "cond whileTrue",
+            "cond whileFalse",
+            "cond repeat",
+        ] {
+            let mut expr = parse_first_expr(src);
+            crate::ast::normalize::desugar_unary_loops(&mut expr);
+            assert!(local_threading_construct(&expr).is_none(), "{src}");
+        }
+    }
+
+    /// BT-4603: the classifier refuses a raw parse of a unary loop rather
+    /// than classifying its receiver as a loop body, which codegen would lower
+    /// as the keyword loop's condition.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "uncanonicalised unary loop")]
+    fn the_classifier_rejects_a_raw_unary_loop() {
+        let _ = local_threading_construct(&parse_first_expr("[i := i + 1. i < 3] whileTrue"));
     }
 
     #[test]

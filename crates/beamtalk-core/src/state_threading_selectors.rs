@@ -184,7 +184,9 @@ pub fn assignment_threading_constructs() -> AssignmentThreadingConstructs {
     let mut control: Vec<&'static str> =
         CONDITIONAL_WELL_KNOWN.iter().map(|w| w.as_str()).collect();
     control.extend(CONTROL_KEYWORD_SELECTORS);
-    control.extend(UNARY_LOOP_SELECTORS);
+    // The unary loops as written: analysis sees them as the keyword loops
+    // they are canonicalised to (BT-4313, BT-4589), but users write them.
+    control.extend(crate::ast::normalize::written_unary_loop_selectors());
     control.push(WellKnownSelector::OnDo.as_str());
     // `tryDo:` threads only when sent to the `Result` class (ADR 0131 §5).
     control.push("Result tryDo:");
@@ -211,16 +213,6 @@ pub fn assignment_threading_constructs() -> AssignmentThreadingConstructs {
         collection,
     }
 }
-
-/// Returns `true` if `sel` is a state-threading unary selector.
-#[must_use]
-pub fn is_state_threading_unary_selector(sel: &str) -> bool {
-    UNARY_LOOP_SELECTORS.contains(&sel)
-}
-
-/// The state-threading unary selectors: the loops whose receiver block is the
-/// body.
-const UNARY_LOOP_SELECTORS: &[&str] = &["whileTrue", "whileFalse", "timesRepeat"];
 
 /// Returns `true` if `sel` is an exception-handling selector (`on:do:` or `ensure:`).
 ///
@@ -703,21 +695,21 @@ pub fn send_user_code(
             _ => SendUserCode::MayRun,
         };
     }
-    if is_state_threading_keyword_selector(name)
-        || is_state_threading_unary_selector(name)
-        || name == "repeat"
+    // BT-4603: a unary `whileTrue`/`whileFalse`/`repeat` sent to a
+    // parameterless literal block is canonicalised to a keyword loop before
+    // anything classifies it (`ast::normalize`, BT-4313/BT-4589). Any that
+    // reaches here (a block value, or a literal block with parameters) is an
+    // ordinary send to `Block`, which runs its receiver as a closure in this
+    // process.
+    if matches!(selector, MessageSelector::Unary(_))
+        && crate::ast::normalize::written_unary_loop_selectors().contains(&name)
     {
+        return SendUserCode::ClosureOperand;
+    }
+    if is_state_threading_keyword_selector(name) {
         // Loops and `ensure:`/`on:do:` run their receiver block in place.
         let receiver_inlined = !(is_state_threaded_block_receiver(name)
-            || matches!(
-                name,
-                "whileTrue:"
-                    | "whileFalse:"
-                    | "whileTrue"
-                    | "whileFalse"
-                    | "timesRepeat"
-                    | "repeat"
-            ))
+            || matches!(name, "whileTrue:" | "whileFalse:"))
             || is_block(receiver);
         let args_inlined = state_threaded_block_arg_indices(name)
             .iter()
@@ -738,15 +730,7 @@ pub fn send_user_code(
 fn is_loop_selector(name: &str) -> bool {
     matches!(
         name,
-        "whileTrue:"
-            | "whileFalse:"
-            | "whileTrue"
-            | "whileFalse"
-            | "timesRepeat:"
-            | "timesRepeat"
-            | "repeat"
-            | "to:do:"
-            | "to:by:do:"
+        "whileTrue:" | "whileFalse:" | "timesRepeat:" | "to:do:" | "to:by:do:"
     )
 }
 
@@ -967,11 +951,12 @@ mod tests {
     }
 
     #[test]
-    fn unary_selectors() {
-        assert!(is_state_threading_unary_selector("whileTrue"));
-        assert!(is_state_threading_unary_selector("whileFalse"));
-        assert!(is_state_threading_unary_selector("timesRepeat"));
-        assert!(!is_state_threading_unary_selector("do:"));
+    fn the_construct_note_names_the_unary_loops_as_written() {
+        let control = assignment_threading_constructs().control;
+        for sel in ["whileTrue", "whileFalse", "repeat"] {
+            assert!(control.contains(&sel), "{sel:?} missing from {control:?}");
+        }
+        assert!(!control.contains(&"timesRepeat"), "{control:?}");
     }
 
     #[test]
@@ -1281,9 +1266,12 @@ mod tests {
 
     // ─── ADR 0137 (BT-4020): `send_user_code` ───────────────────────────────
 
+    /// Classifies the first expression of `src` as every caller sees it: on
+    /// the normalised tree (`[x] repeat` is `[true] whileTrue: [x]`).
     fn classify(src: &str) -> SendUserCode {
         use crate::source_analysis::{lex_with_eof, parse};
-        let (module, _) = parse(lex_with_eof(src));
+        let (mut module, _) = parse(lex_with_eof(src));
+        crate::ast::normalize::peel_operand_parens(&mut module);
         let expr = &module.expressions[0].expression;
         let Expression::MessageSend {
             receiver,
@@ -1351,6 +1339,8 @@ mod tests {
             "1 to: 3 do: [:i | i]",
             "1 to: 9 by: 2 do: [:i | i]",
             "[x] repeat",
+            "[x] whileTrue",
+            "[x] whileFalse",
             "[1] value",
             "[:a | a] value: 1",
         ] {
@@ -1386,6 +1376,12 @@ mod tests {
             "blk whileTrue: [x]",
             "[x] whileTrue: blk",
             "blk repeat",
+            // BT-4603: a unary loop that is not canonicalised is an
+            // ordinary send to `Block`, never a loop.
+            "blk whileTrue",
+            "blk whileFalse",
+            "[:a | a] whileTrue",
+            "[:a | a] repeat",
             "blk ensure: [x]",
             "[x] ensure: blk",
             "[x] on: Error do: handler",
