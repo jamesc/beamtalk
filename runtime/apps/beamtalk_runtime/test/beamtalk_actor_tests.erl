@@ -4508,7 +4508,29 @@ pid_class_name_native_backing_module_test() ->
         ?assertEqual(nil, beamtalk_actor:pid_class_name(Helper)),
         %% Two live classes sharing the module are ambiguous.
         ets:insert(beamtalk_backing_module_index, {Backing, Other, OtherPid}),
-        ?assertEqual(nil, beamtalk_actor:pid_class_name(Pid))
+        ?assertEqual(nil, beamtalk_actor:pid_class_name(Pid)),
+        %% BT-4664: the candidates stay visible, and `named:` resolves
+        %% through them instead of reporting a non-Beamtalk process.
+        ?assertEqual(lists:sort([Live, Other]), beamtalk_actor:pid_class_candidates(Pid)),
+        ?assertEqual([], beamtalk_actor:pid_class_candidates(Helper)),
+        Name = bt4664_shared_native,
+        register(Name, Pid),
+        try
+            %% Receiver is one of the sharing classes: it is resolved (the
+            %% fake class has no loaded module, so it stops at that check).
+            {error, MatchErr} = beamtalk_actor:named_lookup(local, Other, Name, 'named:'),
+            ?assertMatch(#beamtalk_error{kind = wrong_class}, MatchErr),
+            ?assertNotEqual(nomatch, binary:match(MatchErr#beamtalk_error.hint, <<"no loaded module">>)),
+            %% Receiver is not among them: the error names the candidates.
+            {error, SharedErr} = beamtalk_actor:named_lookup(local, 'Bt4664Unrelated', Name, 'named:'),
+            Hint = SharedErr#beamtalk_error.hint,
+            ?assertNotEqual(nomatch, binary:match(Hint, <<"backing module is shared">>)),
+            ?assertNotEqual(nomatch, binary:match(Hint, atom_to_binary(Live))),
+            ?assertNotEqual(nomatch, binary:match(Hint, atom_to_binary(Other))),
+            ?assertEqual(nomatch, binary:match(Hint, <<"non-Beamtalk">>))
+        after
+            unregister(Name)
+        end
     after
         ets:match_delete(beamtalk_backing_module_index, {Backing, '_', '_'}),
         unregister(beamtalk_class_registry_name(Live)),
