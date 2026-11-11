@@ -287,7 +287,7 @@ extract_from_tuple(T, I, Size, Depth) ->
 -define(REASON_MAX_DEPTH, 20).
 -define(REASON_MAX_BYTES, 2048).
 -define(REASON_MAX_ELEMS, 50).
--spec format_reason_term(term()) -> iodata().
+-spec format_reason_term(term()) -> binary().
 format_reason_term(Reason) ->
     Bin = chars_to_binary(reason_doc(Reason, ?REASON_MAX_DEPTH)),
     truncate_reason(Bin).
