@@ -26,9 +26,30 @@ use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 // ─── Verifier ───────────────────────────────────────────────────────────────
 
+/// The Core Erlang construct a [`VerifyError::RacingOperands`] finds its
+/// operands in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum RacingConstruct {
+    /// A list cell (`[A, B | T]`): erlc evaluates the tail before the head.
+    ListCell,
+    /// A map literal (`~{ K => V, ... }~`): erlc evaluates the last pair first.
+    MapLiteral,
+}
+
 /// A violated invariant, found by [`verify`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum VerifyError {
+    /// BT-4591: a list cell or map literal of the finished Core Erlang holds
+    /// `operands` (two or more) operands that may run code (a `call`/`apply`),
+    /// so erlc may evaluate them out of source order (BT-4296). Found by
+    /// `operand_order_check` over the module text, not by [`verify`], so it
+    /// names the top-level `function` rather than a span.
+    RacingOperands {
+        construct: RacingConstruct,
+        function: String,
+        operands: usize,
+    },
+
     /// A versioned var referenced with no producing `Bind` in its frame (or
     /// an ancestor frame currently on the frame stack — the explicit
     /// frame-flow rule). Catches the unbound-`StateX` class one layer earlier

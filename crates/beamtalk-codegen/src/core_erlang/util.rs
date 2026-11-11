@@ -528,6 +528,16 @@ impl CoreErlangGenerator {
         }
 
         if let Some(children) = Self::sequenced_send_children(inner) {
+            // BT-4591 fault: skip a `super` send's argument pre-sequencing.
+            #[cfg(test)]
+            let children = if super::threaded_expr::fault::active()
+                == Some(super::threaded_expr::fault::LocalRebindFault::SuperArgsNotPresequenced)
+                && Self::is_super_message_send(inner)
+            {
+                Vec::new()
+            } else {
+                children
+            };
             let (mut prelude, scope) = self.sequence_children(&children, frame)?;
             let value = self.generate_expression_as_value(expr, span, &mut prelude)?;
             self.finish_precompiled_scope(scope)?;

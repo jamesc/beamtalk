@@ -143,6 +143,7 @@ mod intrinsics;
 mod method_frame;
 pub mod module_shell;
 mod nlr;
+mod operand_order_check;
 mod operators;
 mod options;
 mod patterns;

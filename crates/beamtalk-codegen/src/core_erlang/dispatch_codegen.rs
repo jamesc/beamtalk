@@ -3843,9 +3843,19 @@ impl CoreErlangGenerator {
             // it would be scoped away from later statements (BT-3809): report
             // it, as `capture_argument_list_doc` does for its arguments.
             let escaped = super::threaded_ir::opaque_escapes(&args_preamble, false);
-            let at = arguments
-                .first()
-                .map_or_else(Span::default, Expression::span);
+            // BT-4591: the report's main span is the escaping argument (the one
+            // holding the escaped bind), not merely the first argument.
+            let at = escaped
+                .iter()
+                .find_map(|e| match e {
+                    VerifyError::StateEffectEscapesExpression { at, .. } => arguments
+                        .iter()
+                        .find(|a| a.span().start() <= at.start() && at.end() <= a.span().end())
+                        .map(Expression::span),
+                    _ => None,
+                })
+                .or_else(|| arguments.first().map(Expression::span))
+                .unwrap_or_default();
             self.report_threaded_ir_verify_errors(
                 &escaped,
                 "super-send argument state rebind trapped in a closed argument list",

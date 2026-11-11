@@ -245,6 +245,17 @@ pub(super) mod fault {
         /// `{reply, Result, NewState}` tuple becomes the value
         /// (`StateEffectEscapesExpression`).
         SuperSendNotAProducer,
+        /// BT-4591: the enclosing `sequence_children` pre-sequencing of a
+        /// `super` send's arguments is skipped, so a state-writing argument
+        /// reaches the cell/loop-body `super` lowering un-sequenced and its
+        /// `State` `Bind` is closed into that lowering's argument list
+        /// (`StateEffectEscapesExpression`).
+        SuperArgsNotPresequenced,
+        /// BT-4591: `thread_subexprs` leaves operands in place even when two or
+        /// more may run code — the in-place list builder BT-4296 removed — so a
+        /// list cell or map literal evaluates its later operand first
+        /// (`operand_order_check`'s `RacingOperands`).
+        OperandsInPlace,
     }
 
     thread_local! {

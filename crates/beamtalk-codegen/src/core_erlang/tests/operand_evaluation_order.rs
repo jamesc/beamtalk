@@ -15,7 +15,7 @@
 
 use super::{assert_compiles_through_erlc, codegen};
 
-const SRC: &str = "Value subclass: Probe
+pub(super) const SRC: &str = "Value subclass: Probe
   field: x = 0
   field: y = 0
   arrayOf: a => #[a bump, a n]

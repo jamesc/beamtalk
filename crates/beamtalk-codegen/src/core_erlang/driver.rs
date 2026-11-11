@@ -428,8 +428,22 @@ pub fn generate_module_with_warnings(
 
     generator.finish_synced_calls(module.span);
     generator.inject_synthetic_verifier_violation(options.inject_verifier_violation, module.span);
+    let code = doc.to_pretty_string();
+    // BT-4591: left-to-right operand evaluation is a checked invariant on the
+    // finished text — no list cell or map literal may hold two operands that
+    // run code. Debug builds only: it is a codegen-bug backstop that the
+    // stdlib / bootstrap corpus (`verify-threaded-ir`) exercises, not
+    // something a release compile of user code should pay a scan for.
+    if cfg!(debug_assertions) {
+        let racing = super::operand_order_check::racing_operand_errors(&code);
+        generator.report_threaded_ir_verify_errors(
+            &racing,
+            "list cell or map literal with operands evaluated out of source order",
+            module.span,
+        );
+    }
     Ok(GeneratedModule {
-        code: doc.to_pretty_string(),
+        code,
         warnings: generator.codegen_warnings,
     })
 }
