@@ -45,7 +45,9 @@ pub(crate) struct NarrowingRule {
 /// discriminate on the first keyword. `singleton_eq` runs on a binary
 /// `=` / `=:=` / `/=` / `=/=` send with exactly one Symbol-literal operand —
 /// distinct from `class_eq` (whose operand is a `ClassReference` and whose
-/// inner receiver is a `class` send). So any order is correct; we list them
+/// inner receiver is a `class` send). `boolean_eq` (BT-4638) runs on a binary
+/// `=:=` / `==` send with exactly one `true` / `false` literal operand, so it
+/// is distinct from both. So any order is correct; we list them
 /// grouped by shape for readability.
 pub(crate) static RULES: &[NarrowingRule] = &[
     is_nil::RULE,

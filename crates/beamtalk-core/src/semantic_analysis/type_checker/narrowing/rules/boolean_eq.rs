@@ -16,6 +16,7 @@ use ecow::EcoString;
 
 use crate::ast::{Expression, MessageSelector};
 use crate::semantic_analysis::type_checker::{DynamicReason, InferredType};
+use crate::source_analysis::equality_operator_is_negated;
 
 use super::super::extract::extract_variable_name;
 use super::super::info::{ClassTestInfo, ClassTestKind, NarrowingInfo};
@@ -33,8 +34,14 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
     else {
         return None;
     };
-    // Only the positive spellings: the matching branch is the boolean class.
-    if !matches!(op.as_str(), "=:=" | "==") {
+    // `equality_operator_is_negated` is the single definition of the
+    // equality-operator set. Only the positive spellings are narrowed: the
+    // matching branch is the boolean class. The negated spellings (`/=`,
+    // `=/=`) are left out on purpose, not because they are unsound (they are
+    // the same `KindOf` test with the branches swapped) but because nothing
+    // needs them yet; supporting them means carrying a `negated` flag through
+    // `ClassTestInfo`, as `singleton_eq` does.
+    if equality_operator_is_negated(op.as_str())? {
         return None;
     }
     let rhs = arguments.first()?;

@@ -3283,6 +3283,9 @@ render: coll :: Printable | Nil -> String =>
 | `x =:= #sym ifTrue: [^...]` | `x` is `T \ #sym` after the statement | Rest of method |
 | `x == #sym ifTrue: [^...]` | `x` is `T \ #sym` after the statement | Rest of method |
 | `x respondsTo: #sel ifFalse: [^...]` | `x` narrows post-guard | Rest of method |
+| `(x =:= false) ifTrue: [^...]` | `x` is `T \ False` after the statement | Rest of method |
+| `(x == true) ifTrue: [^...]` | `x` is `T \ True` after the statement | Rest of method |
+| `(x =:= false) ifTrue: [...] ifFalse: [...]` | `x` is `False` in the true block, `T \ False` in the false block | Each block |
 
 The diverging-guard pattern (`isNil ifTrue: [self error: "..."]`) recognises any block whose body infers as `Never` — including calls to `error:`, `notImplemented`, or any `-> Never` method — not just non-local returns (`^`). Narrowing also works on `self.field` reads: inside `self.field isNil ifFalse: [...]`, the field narrows to non-nil within the block.
 
@@ -3291,6 +3294,8 @@ The diverging-guard pattern (`isNil ifTrue: [self error: "..."]`) recognises any
 **Combined nil-guards (BT-4107):** an `or:`-chain of `isNil` tests narrows *every* tested variable — `(a isNil or: [b isNil]) ifTrue: [^nil]` proves both `a` and `b` non-nil afterwards (`or:` is false only when both disjuncts are false), and both are non-nil inside the `ifFalse:` arm. Dually, `(a notNil and: [b notNil]) ifFalse: [^nil]` proves both non-nil afterwards, and both are non-nil inside the `ifTrue:` arm. The complementary directions are disjunctive and never narrow: an `or:` guard that holds (or an `and:` guard that fails) only proves *some* variable is nil, not which. As a consequence, a lone `a notNil` test narrows too (`ifFalse: [^...]` post-guard, `ifTrue:` in-branch).
 
 **`isKindOf:` guard-and-return (BT-2825):** the same diverging-guard treatment `isNil` gets also applies to `isKindOf:` — `(x isKindOf: Foo) ifFalse: [^default]` proves `x` is `Foo` for the rest of the method, and `(x isKindOf: Foo) ifTrue: [^default]` proves `x` is `T \ Foo`. This also closes a related gap: when `x`'s declared type is a Protocol (e.g. `Printable`) and `Foo` is a concrete class, the narrowed type collapses to the bare `Foo` — a runtime `isKindOf: Foo` check is a stronger proof than the protocol annotation, so the narrowed value is assignable to a `Foo`-typed local without an `@expect type` escape hatch.
+
+**Boolean-literal equality (BT-4638):** `x =:= false` and `x =:= true` (also `==`, and either operand order) narrow exactly like `x isKindOf: False` / `x isKindOf: True`, because `true` and `false` are the only instances of the sealed classes `True` and `False`. `(x =:= false) ifTrue: [^0]` removes `False` from `x` afterwards (`Integer | False` becomes `Integer`). The negated spellings `/=` and `=/=` are not narrowed. Testing a variable whose *inferred* type can never be that boolean also produces the "comparison can never be true" hint: after `n := 3`, `(n =:= false)` reports that `Integer` is never a `False`. As with `isKindOf:`, a declared (annotated) type does not fire the hint, since annotations are unverified promises and a defensive guard against them is legitimate.
 
 **Singleton-equality guard-and-return (BT-3369):** the same diverging-guard treatment extends to singleton-equality checks — `x == #undefined ifTrue: [^false]` proves `x` is not `#undefined` for the rest of the method, narrowing to `T \ #undefined`. Both `==` and `=:=` are accepted (they are provably equivalent for atom/symbol comparisons). `respondsTo:` guards also carry forward: `(x respondsTo: #foo) ifFalse: [^default]` narrows `x` post-guard.
 
