@@ -1720,10 +1720,10 @@ mod cell_helper_conformance {
         let mut exported = std::collections::BTreeSet::new();
         let mut in_export = false;
         for line in src.lines() {
-            let code = line.split('%').next().unwrap_or("").trim();
+            let code = line.split('%').next().unwrap_or("").trim_end();
             let mut rest = code;
-            // A real attribute starts in column 0 (after trimming); a
-            // `-export([` inside a `-doc """` body or a string is not one.
+            // A real attribute starts in column 0; a `-export([` inside a
+            // `-doc """` body (indented or mid-line) or a string is not one.
             if let Some(after) = rest.strip_prefix("-export([") {
                 in_export = true;
                 rest = after;
@@ -1768,6 +1768,7 @@ mod cell_helper_conformance {
         let src = [
             "-doc \"\"\"",
             "Mentions -export([fake/1]). mid-line.",
+            "    -export([indented_fake/2]).",
             "\"\"\".",
             "-export([real/0]).",
         ]
