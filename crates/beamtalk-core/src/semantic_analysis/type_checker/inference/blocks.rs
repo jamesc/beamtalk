@@ -1649,45 +1649,73 @@ impl TypeChecker {
             let Some(after) = block_env.get_local(&write.name) else {
                 continue;
             };
+            let widening = BlockWriteWidening {
+                remote: block_env.known_remote(&EnvKey::local(write.name.clone())),
+                name: write.name,
+                ty: after,
+            };
             if deferring {
-                self.deferred_block_widenings.push((write.name, after));
+                self.deferred_block_widenings.push(widening);
             } else {
-                Self::apply_deferred_block_widenings(&[(write.name, after)], env);
+                Self::apply_deferred_block_widenings(&[widening], env);
             }
         }
     }
 
-    /// Join each `(local, type after a block)` pair into `env`: the local's
-    /// current type joined with every type the send's arms left it with.
+    /// Join each deferred block write into `env`: the local's current type
+    /// joined with every type the send's arms left it with.
     pub(in crate::semantic_analysis::type_checker) fn apply_deferred_block_widenings(
-        deferred: &[(ecow::EcoString, InferredType)],
+        deferred: &[BlockWriteWidening],
         env: &mut TypeEnv,
     ) {
-        let mut names: Vec<ecow::EcoString> = Vec::new();
-        for (name, _) in deferred {
-            if !names.contains(name) {
-                names.push(name.clone());
+        let mut names: Vec<&ecow::EcoString> = Vec::new();
+        for w in deferred {
+            if !names.contains(&&w.name) {
+                names.push(&w.name);
             }
         }
         for name in names {
-            let Some(before) = env.get_local(&name) else {
+            let Some(before) = env.get_local(name) else {
                 continue;
             };
+            let key = EnvKey::local(name.clone());
+            let writes: Vec<&BlockWriteWidening> =
+                deferred.iter().filter(|w| w.name == *name).collect();
+            // ADR 0126 §6: the known-remote fact survives only when the
+            // binding and every arm are known-remote; otherwise a stale fact
+            // would describe a value the local may no longer hold.
+            // `node_hint` names the node the local was spawned on, so it is
+            // kept only when the binding and every arm agree on it; otherwise
+            // the fact stays with no hint and the diagnostic says "there".
+            let remote = env.known_remote(&key).and_then(|binding| {
+                let mut node_hint = binding.node_hint;
+                for w in &writes {
+                    let arm = w.remote.as_ref()?;
+                    if arm.node_hint != node_hint {
+                        node_hint = None;
+                    }
+                }
+                Some(
+                    crate::semantic_analysis::type_checker::known_remote::KnownRemote { node_hint },
+                )
+            });
             let mut arms = vec![before.clone()];
-            arms.extend(
-                deferred
-                    .iter()
-                    .filter(|(n, _)| *n == name)
-                    .map(|(_, ty)| ty.clone()),
-            );
+            arms.extend(writes.iter().map(|w| w.ty.clone()));
             if arms.iter().skip(1).all(|ty| *ty == before) {
+                match remote {
+                    Some(remote) => env.mark_known_remote(key, remote),
+                    None => env.clear_known_remote(&key),
+                }
                 continue;
             }
             let joined = Self::join_branch_arms(&arms);
-            // The old origin note and flow facts (known-remote, raw-Binary)
-            // described the earlier binding, not this union: drop them.
-            env.remove(&EnvKey::local(name.clone()));
-            env.set_local(name, joined);
+            // The old origin note and flow facts (raw-Binary) described the
+            // earlier binding, not this union: drop them.
+            env.remove(&key);
+            env.set_local(name.clone(), joined);
+            if let Some(remote) = remote {
+                env.mark_known_remote(key, remote);
+            }
         }
     }
 
@@ -1922,4 +1950,15 @@ impl TypeChecker {
             _ => false,
         }
     }
+}
+
+/// BT-4636: one outer local a block writes — the type the block leaves it
+/// with and its known-remote fact (ADR 0126 §6) — queued until every arm of
+/// the enclosing send is inferred.
+#[derive(Debug, Clone)]
+pub(in crate::semantic_analysis::type_checker) struct BlockWriteWidening {
+    pub(in crate::semantic_analysis::type_checker) name: ecow::EcoString,
+    pub(in crate::semantic_analysis::type_checker) ty: InferredType,
+    pub(in crate::semantic_analysis::type_checker) remote:
+        Option<crate::semantic_analysis::type_checker::known_remote::KnownRemote>,
 }

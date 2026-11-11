@@ -559,7 +559,8 @@ pub struct TypeChecker {
     pub(super) defer_block_widening: bool,
     /// BT-4636: `(local, type the block left it with)` pairs collected while
     /// [`Self::defer_block_widening`] is set.
-    pub(super) deferred_block_widenings: Vec<(EcoString, InferredType)>,
+    pub(in crate::semantic_analysis::type_checker) deferred_block_widenings:
+        Vec<inference::blocks::BlockWriteWidening>,
 }
 
 impl TypeChecker {
