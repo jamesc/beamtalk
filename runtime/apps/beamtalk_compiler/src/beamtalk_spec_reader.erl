@@ -474,7 +474,8 @@ merge_clause_params([First | _] = ParamLists) ->
 
 -spec merge_param_types([binary()]) -> binary().
 merge_param_types(Types) ->
-    case lists:member(<<"Dynamic">>, Types) of
+    Members = lists:flatmap(fun split_top_level_union/1, Types),
+    case lists:member(<<"Dynamic">>, Members) of
         true -> <<"Dynamic">>;
         false -> join_types(Types)
     end.

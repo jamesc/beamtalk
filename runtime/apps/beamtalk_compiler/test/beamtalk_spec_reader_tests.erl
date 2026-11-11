@@ -53,6 +53,30 @@ read_specs_zstd_compress_accepts_context_test() ->
             ?assertEqual(<<"Dynamic">>, maps:get(type, Opts))
     end.
 
+%% BT-4457: a clause whose param is a union containing an unresolvable
+%% (opaque) member must also widen the merged position to Dynamic.
+multi_clause_union_with_dynamic_member_widens_to_dynamic_test() ->
+    Forms = [
+        {attribute, 1, export, [{f, 1}]},
+        {attribute, 1, opaque, {ctx, {type, 1, tuple, any}, []}},
+        {attribute, 1, spec,
+            {{f, 1}, [
+                {type, 2, 'fun', [
+                    {type, 2, product, [{type, 2, map, any}]},
+                    {type, 2, ok, []}
+                ]},
+                {type, 3, 'fun', [
+                    {type, 3, product, [
+                        {type, 3, union, [{type, 3, binary, []}, {user_type, 3, ctx, []}]}
+                    ]},
+                    {type, 3, ok, []}
+                ]}
+            ]}}
+    ],
+    [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    [Param] = maps:get(params, Spec),
+    ?assertEqual(<<"Dynamic">>, maps:get(type, Param)).
+
 %% Reading specs from maps.beam succeeds and returns non-empty results.
 read_specs_maps_test() ->
     BeamFile = code:which(maps),
