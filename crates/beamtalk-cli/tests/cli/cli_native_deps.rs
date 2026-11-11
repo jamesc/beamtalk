@@ -11,14 +11,25 @@
 //! `beamtalk deps update` re-resolves, and transitive deps stay pinned on a
 //! fresh `_build`.
 //!
+//! The hex path (BT-4582) runs rebar3 against a local hex repository built by
+//! `fixtures/make_hex_repo.escript` and served over loopback HTTP, so a
+//! rendered `rebar.lock` (`{pkg, ..}` with `pkg_hash`/`pkg_hash_ext`) is
+//! exercised end to end with no network.
+//!
 //! Unix-only: `file://` URLs for Windows paths need separate handling.
 
 #![cfg(unix)]
 
 use crate::cli_common;
 
-use std::path::Path;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let output = Command::new("git")
@@ -251,4 +262,303 @@ fn changing_one_native_dep_keeps_others_pinned() {
         "removed dependency's checkout must be deleted"
     );
     assert!(!lockfile(project).contains("name = \"baz\""));
+}
+
+// ── hex sources (BT-4582) ────────────────────────────────────────────
+
+/// A local hex repository: a directory built by `make_hex_repo.escript`
+/// and served over loopback HTTP (rebar3 speaks HTTP only, and insists on
+/// an `ETag` for tarballs).
+struct HexRepo {
+    dir: tempfile::TempDir,
+    cache: tempfile::TempDir,
+    releases: Vec<String>,
+    listing: String,
+    url: String,
+    stop: Arc<AtomicBool>,
+    port: u16,
+}
+
+impl HexRepo {
+    fn new(releases: &[&str]) -> Self {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let stop = Arc::new(AtomicBool::new(false));
+        let (root, flag) = (dir.path().to_path_buf(), Arc::clone(&stop));
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                if flag.load(Ordering::SeqCst) {
+                    break;
+                }
+                if let Ok(stream) = stream {
+                    let root = root.clone();
+                    std::thread::spawn(move || serve(stream, &root));
+                }
+            }
+        });
+        let mut repo = Self {
+            dir,
+            cache: tempfile::tempdir().expect("tempdir"),
+            releases: Vec::new(),
+            listing: String::new(),
+            url: format!("http://127.0.0.1:{port}"),
+            stop,
+            port,
+        };
+        for release in releases {
+            repo.releases.push((*release).to_string());
+        }
+        repo.rebuild();
+        repo
+    }
+
+    /// Publish another release (`name@version`) and regenerate the index.
+    fn publish(&mut self, release: &str) -> &mut Self {
+        self.releases.push(release.to_string());
+        self.rebuild();
+        self
+    }
+
+    /// `(inner, outer)` checksums (lowercase hex) of a published release.
+    fn checksums(&self, name: &str, version: &str) -> (String, String) {
+        let line = self
+            .listing
+            .lines()
+            .find(|l| l.starts_with(&format!("{name} {version} ")))
+            .unwrap_or_else(|| panic!("release {name}@{version} not published"));
+        let mut parts = line.split(' ').skip(2);
+        (
+            parts.next().expect("inner").to_string(),
+            parts.next().expect("outer").to_string(),
+        )
+    }
+
+    fn rebuild(&mut self) {
+        let script =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/make_hex_repo.escript");
+        let output = Command::new("escript")
+            .arg(script)
+            .arg(rebar3_escript())
+            .arg(self.dir.path())
+            .args(&self.releases)
+            .output()
+            .expect("run escript (is Erlang/OTP installed?)");
+        assert!(
+            output.status.success(),
+            "make_hex_repo failed: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        self.listing = String::from_utf8_lossy(&output.stdout).to_string();
+    }
+
+    /// `beamtalk <args>` in `project`, pointed at this repository.
+    fn beamtalk(&self, project: &Path) -> assert_cmd::Command {
+        let mut cmd = cli_common::beamtalk();
+        cmd.current_dir(project)
+            .env("BEAMTALK_TEST_HEX_REPO_URL", &self.url)
+            // The hex-mirror variables some environments set would
+            // redirect rebar3 away from the local repository.
+            .env_remove("HEX_MIRROR")
+            .env("HEX_CDN", &self.url)
+            .env("REBAR_CACHE_DIR", self.cache.path());
+        cmd
+    }
+
+    fn build(&self, project: &Path) {
+        self.beamtalk(project).arg("build").assert().success();
+    }
+}
+
+impl Drop for HexRepo {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::SeqCst);
+        // Wake the accept loop so the server thread exits.
+        let _ = TcpStream::connect(("127.0.0.1", self.port));
+    }
+}
+
+/// The rebar3 escript whose bundled `r3_hex_*` modules build the repository:
+/// the runtime's copy when present, else the one on `$PATH`.
+fn rebar3_escript() -> PathBuf {
+    let bundled = cli_common::project_root().join("runtime/tools/rebar3");
+    if bundled.exists() {
+        return bundled;
+    }
+    std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
+        .map(|dir| dir.join("rebar3"))
+        .find(|candidate| candidate.is_file())
+        .expect("rebar3 not found")
+}
+
+/// Answer one HTTP request with a file under `root` (404 when missing,
+/// 304 when `If-None-Match` matches the `ETag`).
+fn serve(mut stream: TcpStream, root: &Path) {
+    let mut reader = BufReader::new(stream.try_clone().expect("clone"));
+    let mut request_line = String::new();
+    if reader.read_line(&mut request_line).is_err() {
+        return;
+    }
+    let mut if_none_match = None;
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line).unwrap_or(0) == 0 || line.trim().is_empty() {
+            break;
+        }
+        if let Some(value) = line.to_ascii_lowercase().strip_prefix("if-none-match:") {
+            if_none_match = Some(value.trim().to_string());
+        }
+    }
+    let path = request_line
+        .split(' ')
+        .nth(1)
+        .unwrap_or("/")
+        .trim_start_matches('/');
+    let Ok(body) = std::fs::read(root.join(path)) else {
+        let _ = stream
+            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return;
+    };
+    let mut hasher = DefaultHasher::new();
+    body.hash(&mut hasher);
+    let etag = format!("\"{:016x}\"", hasher.finish());
+    let response = if if_none_match.as_deref() == Some(etag.as_str()) {
+        format!("HTTP/1.1 304 Not Modified\r\nETag: {etag}\r\nConnection: close\r\n\r\n")
+            .into_bytes()
+    } else {
+        let mut head = format!(
+            "HTTP/1.1 200 OK\r\nETag: {etag}\r\nContent-Type: application/octet-stream\r\n\
+             Content-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        head.extend_from_slice(&body);
+        head
+    };
+    let _ = stream.write_all(&response);
+    let _ = stream.flush();
+    let mut sink = Vec::new();
+    let _ = reader.read_to_end(&mut sink);
+}
+
+fn write_hex_manifest(project: &Path, deps: &[(&str, &str)]) {
+    let lines: Vec<String> = deps
+        .iter()
+        .map(|(name, constraint)| format!("{name} = \"{constraint}\""))
+        .collect();
+    write_manifest(project, &lines.join("\n"));
+}
+
+/// The `version = "..."` of a `[[native_package]]` entry in `beamtalk.lock`.
+fn locked_hex_version(project: &Path, name: &str) -> String {
+    let lock = lockfile(project);
+    let entry = lock
+        .split("[[native_package]]")
+        .find(|block| block.contains(&format!("name = \"{name}\"")))
+        .unwrap_or_else(|| panic!("no native lock entry for {name}:\n{lock}"));
+    entry
+        .lines()
+        .find_map(|l| l.strip_prefix("version = \""))
+        .and_then(|v| v.strip_suffix('"'))
+        .expect("locked version")
+        .to_string()
+}
+
+/// A locked hex version is honoured on a fresh `_build` even though a newer
+/// release exists, and the rendered `rebar.lock` carries both hashes.
+#[test]
+fn locked_hex_version_honoured_on_fresh_build() {
+    let mut repo = HexRepo::new(&["foo@1.0.0"]);
+    let project = cli_common::fixture_project();
+    let project = project.path();
+    write_hex_manifest(project, &[("foo", "~> 1.0")]);
+
+    repo.build(project);
+    assert_eq!(checked_out_version(project, "foo"), "1.0.0");
+    let (inner, outer) = repo.checksums("foo", "1.0.0");
+    let lock = lockfile(project);
+    assert!(lock.contains("version = \"1.0.0\""), "{lock}");
+    assert!(lock.to_lowercase().contains(&inner), "inner hash: {lock}");
+    assert!(lock.to_lowercase().contains(&outer), "outer hash: {lock}");
+
+    // A newer release appears; a fresh _build still gets the locked one.
+    repo.publish("foo@1.1.0");
+    std::fs::remove_dir_all(project.join("_build")).expect("remove _build");
+    repo.build(project);
+    assert_eq!(checked_out_version(project, "foo"), "1.0.0");
+    assert_eq!(locked_hex_version(project, "foo"), "1.0.0");
+}
+
+/// A legacy `beamtalk.lock` entry without `outer_sha` renders a `rebar.lock`
+/// with `pkg_hash` only, which rebar3 accepts; the build then records the
+/// outer checksum again.
+#[test]
+fn legacy_hex_lock_without_outer_sha_is_accepted() {
+    let mut repo = HexRepo::new(&["foo@1.0.0"]);
+    let project = cli_common::fixture_project();
+    let project = project.path();
+    write_hex_manifest(project, &[("foo", "~> 1.0")]);
+    repo.build(project);
+
+    let legacy = lockfile(project)
+        .lines()
+        .filter(|l| !l.starts_with("outer_sha"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(!legacy.contains("outer_sha"));
+    std::fs::write(project.join("beamtalk.lock"), legacy).expect("write legacy lock");
+
+    repo.publish("foo@1.1.0");
+    std::fs::remove_dir_all(project.join("_build")).expect("remove _build");
+    repo.build(project);
+    assert_eq!(checked_out_version(project, "foo"), "1.0.0");
+    let (_, outer) = repo.checksums("foo", "1.0.0");
+    assert!(lockfile(project).to_lowercase().contains(&outer));
+}
+
+/// Changing a constraint so the locked version no longer matches re-resolves
+/// that package only; the other keeps its locked version.
+#[test]
+fn changed_hex_constraint_re_resolves_only_that_package() {
+    let mut repo = HexRepo::new(&["foo@1.0.0", "bar@2.0.0"]);
+    let project = cli_common::fixture_project();
+    let project = project.path();
+    write_hex_manifest(project, &[("foo", "~> 1.0"), ("bar", "~> 2.0")]);
+    repo.build(project);
+    assert_eq!(checked_out_version(project, "foo"), "1.0.0");
+    assert_eq!(checked_out_version(project, "bar"), "2.0.0");
+
+    repo.publish("foo@1.1.0").publish("bar@2.1.0");
+    write_hex_manifest(project, &[("foo", "~> 1.1"), ("bar", "~> 2.0")]);
+    repo.build(project);
+    assert_eq!(checked_out_version(project, "foo"), "1.1.0");
+    assert_eq!(checked_out_version(project, "bar"), "2.0.0");
+    assert_eq!(locked_hex_version(project, "foo"), "1.1.0");
+    assert_eq!(locked_hex_version(project, "bar"), "2.0.0");
+}
+
+/// `deps update <name>` moves one hex package and leaves the rest locked.
+#[test]
+fn deps_update_moves_one_hex_package() {
+    let mut repo = HexRepo::new(&["foo@1.0.0", "bar@2.0.0"]);
+    let project = cli_common::fixture_project();
+    let project = project.path();
+    write_hex_manifest(project, &[("foo", "~> 1.0"), ("bar", "~> 2.0")]);
+    repo.build(project);
+
+    repo.publish("foo@1.1.0").publish("bar@2.1.0");
+    repo.build(project);
+    assert_eq!(checked_out_version(project, "foo"), "1.0.0", "pinned");
+
+    repo.beamtalk(project)
+        .args(["deps", "update", "foo"])
+        .assert()
+        .success();
+    repo.build(project);
+    assert_eq!(checked_out_version(project, "foo"), "1.1.0");
+    assert_eq!(checked_out_version(project, "bar"), "2.0.0");
+    assert_eq!(locked_hex_version(project, "bar"), "2.0.0");
 }
