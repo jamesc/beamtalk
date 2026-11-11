@@ -347,7 +347,6 @@ fn dispatched_typed_comparison_is_reported() {
     let method = &module.classes[0].methods[0];
     let key = (MethodKey::of(method), Span::new(0, 1));
     let mut generator = CoreErlangGenerator::new("test");
-    generator.generated_methods.insert(key.0.clone());
     generator
         .guard_rewrite
         .boolean_comparisons
@@ -372,4 +371,18 @@ fn same_file_extension_guard_compiles() {
     // module, so its recorded guards (helper-decided or typed) are not
     // checked there; before BT-4452 they made the compile fail.
     codegen("Object subclass: X\n  n => 1\nX >> pick: x =>\n    x > 0 ifTrue: [^1]\n    2\n");
+}
+
+#[test]
+fn same_file_extension_guard_is_not_recorded() {
+    // BT-4497: the exclusion is made at record time, so the guard-return
+    // checks stay fail-closed for every method the module does lower.
+    let mut module = parse_normalised(
+        "Object subclass: X\n  n => 1\nX >> pick: x =>\n    x > 0 ifTrue: [^1]\n    2\n",
+    )
+    .0;
+    let rewrite = crate::core_erlang::guard_returns::rewrite_guard_returns(&mut module);
+    assert!(rewrite.bodies.is_empty());
+    assert!(rewrite.conditions.is_empty());
+    assert!(rewrite.boolean_comparisons.is_empty());
 }
