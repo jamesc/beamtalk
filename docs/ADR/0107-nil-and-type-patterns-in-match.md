@@ -268,12 +268,13 @@ coll match: [
 > `beamtalk_behaviour_intrinsics:valueIsKindOfClass/2`, a runtime class-table
 > lookup (the second of the two strategies below), so the answer tracks the
 > live hierarchy: subclasses in other files or added by hot reload match. A
-> class with no subclass at compile time keeps Phase A's exact-class test.
+> class with no visible subclass keeps a constant-time exact-tag fast path and
+> falls back to the same lookup for an instance of a different user class, so
+> the arm means the same whatever subclasses the compiler could see.
 > Exhaustiveness is unchanged: a class with subclasses is never a closed-union
 > member, so a `matchExhaustive:` over it still needs a wildcard. `when:`
 > guards were not widened (see Rejected B). The text below is the original
 > Phase B deferral rationale.
-
 
 `binding :: Shape` where `Shape` has subclasses `Circle`/`Square` needs
 either compile-time subclass enumeration (using the class-hierarchy data

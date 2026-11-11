@@ -150,3 +150,23 @@ TestCase subclass: TypePatternNonLeafTest
         ]
       ]
     self assert: result equals: #specific
+
+  testStdlibNonLeafBaseMatchesPrimitives =>
+    self
+      assert: (3 match: [
+        n :: Number -> #number;
+        _ -> #no
+      ])
+      equals: #number
+    self
+      assert: (2.5 match: [
+        n :: Number -> #number;
+        _ -> #no
+      ])
+      equals: #number
+    self
+      assert: ("s" match: [
+        n :: Number -> #number;
+        _ -> #no
+      ])
+      equals: #no

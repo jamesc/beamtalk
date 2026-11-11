@@ -553,10 +553,15 @@ hierarchy.
 
 ## Why this exists
 
+**BT-4319 note:** a plain `Type` pattern on a class with subclasses is now
+legal, and an arm compiled while the class was leaf falls back to a runtime
+kind-of test, so only the `matchExhaustive:` proof below can be invalidated by
+a first subclass. The "has subclasses" error mentioned below no longer exists.
+
 ADR 0107 Phase A's `Type` pattern (`binding :: ClassName`) and
 `matchExhaustive:`'s residual computation over a closed `Known | Nil` union
 are both restricted to **leaf** classes at compile time
-(`match_validators:validate_type_pattern_class`'s "has subclasses" error;
+(`match_validators:validate_type_pattern_class`, relaxed by BT-4319;
 `is_concrete_leaf_class`). A `matchExhaustive:` site
 proved exhaustive while `SuperclassBin` was leaf has that proof silently
 invalidated the moment a live reload gives it a first subclass — with

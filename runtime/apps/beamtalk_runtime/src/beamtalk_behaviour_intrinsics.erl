@@ -996,8 +996,13 @@ Answers `Value isKindOf: Class` for an instance of any representation, from the
 class table (`beamtalk_class_derived_cache:inherits_from/2`), without sending a
 message: a match arm must not run user code or call into a class process. An
 unregistered class name answers `false`.
+
+A future answers `false` without being awaited, so a pending or rejected future
+never blocks or raises inside an arm test (the same as an exact-class arm).
 """.
 -spec valueIsKindOfClass(term(), atom()) -> boolean().
+valueIsKindOfClass({beamtalk_future, _}, Class) when is_atom(Class) ->
+    false;
 valueIsKindOfClass(Value, Class) when is_atom(Class) ->
     beamtalk_class_derived_cache:inherits_from(beamtalk_primitive:class_of(Value), Class).
 

@@ -1401,10 +1401,11 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         );
     }
     // ADR 0107 Phase A: validate `Pattern::Type` class names in
-    // `match:` arms (unknown class, non-leaf class, `Character` exclusion).
+    // `match:` arms (unknown class, abstract class with no subclass, `Character`
+    // exclusion). A class with subclasses is legal (BT-4319).
     // The unknown-class branch is internally gated on `has_cross_file_classes`,
     // same open-world policy as `check_unresolved_classes` above; the
-    // leaf-class and `Character` checks run unconditionally.
+    // abstract-class and `Character` checks run unconditionally.
     validators::check_type_pattern_classes(
         module,
         &result.class_hierarchy,

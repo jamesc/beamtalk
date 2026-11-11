@@ -219,19 +219,42 @@ impl CoreErlangGenerator {
             .as_ref()
             .is_some_and(|h| !h.direct_subclasses(class_name).is_empty());
         if is_non_leaf {
-            Self::wrap_kind_of_test(match_var, class_name, bound_success, rest_doc)
-        } else if is_actor {
-            self.wrap_actor_class_tag_test(match_var, class_name, bound_success, rest_doc)
+            return Self::wrap_kind_of_test(match_var, class_name, bound_success, rest_doc);
+        }
+        // A class with no *visible* subclass keeps a constant-time exact-tag
+        // fast path, but an instance of a different user class falls back to
+        // the same runtime kind-of test. A subclass the compiler could not
+        // see (another package, or added by hot reload after this module was
+        // compiled) therefore still matches, and the arm means the same
+        // whatever the compiling unit could see (BT-4319). The two shapes
+        // compute one `'true'`/`'false'` so `bound_success` is emitted once.
+        let kind_of = Self::kind_of_call(match_var, class_name);
+        let exact_or_kind_of = if is_actor {
+            self.wrap_actor_class_tag_test(
+                match_var,
+                class_name,
+                true_doc(),
+                &false_doc(),
+                &kind_of,
+            )
         } else if is_supervisor {
-            self.wrap_supervisor_class_tag_test(match_var, class_name, bound_success, rest_doc)
+            self.wrap_supervisor_class_tag_test(
+                match_var,
+                class_name,
+                true_doc(),
+                &false_doc(),
+                &kind_of,
+            )
         } else {
             self.wrap_class_tag_test(
                 match_var,
                 leaf::atom(class_name.to_string()),
-                bound_success,
-                rest_doc,
+                true_doc(),
+                &false_doc(),
+                &kind_of,
             )
-        }
+        };
+        Self::branch_on_test(exact_or_kind_of, bound_success, rest_doc)
     }
 
     /// Subclass-aware test for a class that has subclasses (BT-4319):
@@ -246,14 +269,19 @@ impl CoreErlangGenerator {
         success: Document<'static>,
         rest: &Document<'static>,
     ) -> Document<'static> {
-        let test = docvec![
+        Self::branch_on_test(Self::kind_of_call(match_var, class_name), success, rest)
+    }
+
+    /// `call 'beamtalk_behaviour_intrinsics':'valueIsKindOfClass'(X, 'Class')`,
+    /// evaluating to `'true'`/`'false'`.
+    fn kind_of_call(match_var: &str, class_name: &str) -> Document<'static> {
+        docvec![
             "call 'beamtalk_behaviour_intrinsics':'valueIsKindOfClass'(",
             leaf::var(match_var.to_string()),
             ", ",
             leaf::atom(class_name.to_string()),
             ")"
-        ];
-        Self::branch_on_test(test, success, rest)
+        ]
     }
 
     /// Dispatches a routing-table [`Guard`] to its renderer — the one
@@ -511,6 +539,7 @@ impl CoreErlangGenerator {
         expected_tag: Document<'static>,
         success: Document<'static>,
         rest: &Document<'static>,
+        other_class: &Document<'static>,
     ) -> Document<'static> {
         let no_match_class = self.fresh_temp_var("NoMatch");
         docvec![
@@ -528,7 +557,7 @@ impl CoreErlangGenerator {
             " <",
             leaf::var(no_match_class),
             "> when 'true' -> ",
-            rest.clone(),
+            other_class.clone(),
             " end ",
             "<'false'> when 'true' -> ",
             rest.clone(),
@@ -588,6 +617,7 @@ impl CoreErlangGenerator {
         class_name: &str,
         success: Document<'static>,
         rest: &Document<'static>,
+        other_class: &Document<'static>,
     ) -> Document<'static> {
         // `is_tuple`/`tuple_size == 4` are boolean-returning (2-clause,
         // `'true'`/`'false'` only — same convention as the outer `is_map`
@@ -619,7 +649,7 @@ impl CoreErlangGenerator {
             " <",
             leaf::var(no_match_class),
             "> when 'true' -> ",
-            rest.clone(),
+            other_class.clone(),
             " end ",
             "<",
             leaf::var(no_match_tag),
@@ -651,6 +681,7 @@ impl CoreErlangGenerator {
         class_name: &str,
         success: Document<'static>,
         rest: &Document<'static>,
+        other_class: &Document<'static>,
     ) -> Document<'static> {
         let no_match_tag = self.fresh_temp_var("NoMatch");
         let no_match_class = self.fresh_temp_var("NoMatch");
@@ -667,7 +698,7 @@ impl CoreErlangGenerator {
             " <",
             leaf::var(no_match_class),
             "> when 'true' -> ",
-            rest.clone(),
+            other_class.clone(),
             " end"
         ];
 

@@ -321,9 +321,8 @@ pub(crate) fn is_concrete_leaf_class(class_name: &str, hierarchy: &ClassHierarch
 /// `Array`, `List`, `Map`, `Constructor` keywords) — a `Pattern::Type` can
 /// appear anywhere a sub-pattern can, not just as an arm's top-level pattern.
 ///
-/// This is purely a semantic-analysis-stage check — `Pattern::Type` has no
-/// codegen yet (that lands with bindings/narrowing codegen), so there is
-/// nothing to gate at codegen time. Three checks, in order:
+/// This is a semantic-analysis-stage check; codegen is
+/// `generate_type_pattern`. Three checks, in order:
 ///
 /// - **`Character`** is never accepted, known or not: it shares `Integer`'s
 ///   runtime representation with no distinct tag (ADR 0107 §Phase A scope),

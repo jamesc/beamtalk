@@ -233,10 +233,10 @@ wait_for_leaf_change_worker() ->
 shape_source() ->
     <<"Object subclass: LeafRecheckShape\n">>.
 
-%% Uses a plain `Type` pattern (not `matchExhaustive:`) — the "has
-%% subclasses" compile error fires on *any* `match:` with a
-%% `Type` pattern on a non-leaf class, independent of exhaustiveness
-%% assertions, so this is the simplest possible dependent.
+%% Uses a plain `Type` pattern (not `matchExhaustive:`). Since BT-4319 a
+%% `Type` pattern on a class with subclasses is legal and a leaf-compiled arm
+%% falls back to a runtime kind-of test, so this dependent stays correct
+%% (and unflagged) when the shape gains a subclass.
 user_source() ->
     <<
         "Object subclass: LeafRecheckUser\n"
@@ -251,7 +251,7 @@ circle_source() ->
 %% pattern dependent that has no xref-recorded call site at all
 %%====================================================================
 
-gaining_a_first_subclass_flags_a_type_pattern_dependent_test_() ->
+gaining_a_first_subclass_does_not_flag_a_plain_type_pattern_dependent_test_() ->
     {timeout, 30,
         {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->
             [
@@ -295,24 +295,13 @@ gaining_a_first_subclass_flags_a_type_pattern_dependent_test_() ->
                     ok = file:write_file(CirclePath, circle_source()),
                     {ok, _, _State2} = beamtalk_repl_loader:handle_load(CirclePath, State1),
 
-                    Event = receive_reload_check_announcement(),
-                    ?assertEqual(<<"LeafRecheckShape">>, maps:get(changedClass, Event)),
-                    ?assertEqual(leaf_change, maps:get(classification, Event)),
-                    ?assert(
-                        lists:member(<<"LeafRecheckUser">>, maps:get(checkedOwners, Event))
-                    ),
-
-                    StoredFindings = beamtalk_workspace_findings_store:for_owner(
-                        <<"LeafRecheckUser">>
-                    ),
-                    ?assertEqual(1, length(StoredFindings)),
-                    [Finding] = StoredFindings,
-                    ?assertEqual(leaf_change, maps:get(classification, Finding)),
-                    ?assertEqual(<<"LeafRecheckShape">>, maps:get(changed_class, Finding)),
-                    ?assertEqual(<<"Type">>, maps:get(category, Finding)),
-                    ?assert(
-                        binary:match(maps:get(message, Finding), <<"LeafRecheckShape">>) =/=
-                            nomatch
+                    %% The sweep ran (the worker is drained) and found
+                    %% nothing: the dependent's arm is subclass-aware, so a
+                    %% `LeafRecheckCircle` instance still takes it.
+                    ok = wait_for_leaf_change_worker(),
+                    ?assertEqual(
+                        [],
+                        beamtalk_workspace_findings_store:for_owner(<<"LeafRecheckUser">>)
                     )
                 end)
             ]
@@ -509,9 +498,8 @@ exhaustive_source() ->
 %% cover the whole `Known | Nil` union, so `matchExhaustive:` compiles clean
 %% with no diagnostic at all. Once the shape gains a subclass, the same
 %% `s :: LeafRecheckExhaustiveShape` arm can no longer prove the match
-%% exhaustive (ADR 0107 Phase A's leaf-only restriction) — the compiler
-%% falls back to the "has subclasses" error before exhaustiveness is even
-%% considered (`match_validators:validate_type_pattern_class`).
+%% exhaustive (a class with subclasses is not a closed-union member), so the
+%% compiler reports that it "cannot verify" the match.
 exhaustive_user_source() ->
     <<
         "Object subclass: LeafRecheckExhaustiveUser\n"
@@ -570,17 +558,13 @@ gaining_a_first_subclass_invalidates_a_matchexhaustive_proof_test_() ->
                     ),
                     ?assertEqual(leaf_change, maps:get(classification, Event)),
 
-                    %% Two independent validators both newly fire once the
-                    %% shape is non-leaf: `check_type_pattern_classes`'s "has
-                    %% subclasses" error, and the `matchExhaustive:`
-                    %% exhaustiveness gate's "cannot verify" error (which
-                    %% falls back to "not a closed union" the moment the
-                    %% scrutinee's `Type` arm class stops being leaf) — both
-                    %% are genuinely new, both belong in the findings.
+                    %% The `Type` arm itself stays legal (BT-4319), so only the
+                    %% `matchExhaustive:` exhaustiveness gate's "cannot verify"
+                    %% error is newly raised.
                     Findings = beamtalk_workspace_findings_store:for_owner(
                         <<"LeafRecheckExhaustiveUser">>
                     ),
-                    ?assertEqual(2, length(Findings)),
+                    ?assertEqual(1, length(Findings)),
                     ?assert(
                         lists:all(
                             fun(F) ->
@@ -594,12 +578,6 @@ gaining_a_first_subclass_invalidates_a_matchexhaustive_proof_test_() ->
                         )
                     ),
                     Messages = [maps:get(message, F) || F <- Findings],
-                    ?assert(
-                        lists:any(
-                            fun(M) -> binary:match(M, <<"has subclasses">>) =/= nomatch end,
-                            Messages
-                        )
-                    ),
                     ?assert(
                         lists:any(
                             fun(M) -> binary:match(M, <<"cannot verify">>) =/= nomatch end,

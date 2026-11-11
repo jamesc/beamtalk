@@ -5208,7 +5208,7 @@ ex match: [
 ]
 ```
 
-Two limits remain. Whether an arm is subclass-aware is decided when the `match:` is compiled, from the subclasses the compiler can see. A class with no visible subclass keeps the constant-time exact-class test, so a subclass declared later by hot reload, or in a dependent package the compiling package cannot see, falls through to the next arm. A `Future` scrutinee is awaited by a subclass-aware arm (as `isKindOf:` does) but not by an exact-class arm. And `when:` guards stay comparison/arithmetic-only: `_ when: [e isKindOf: HTTPError] -> …` is rejected ("complex guard expression"), so use the type pattern instead.
+Two things to know. A class with no visible subclass tests its exact class first and, only for an instance of a different user class, falls back to the same runtime lookup — so a subclass declared in another package or loaded later by hot reload still matches, without changing the arm. And `when:` guards stay comparison/arithmetic-only: `_ when: [e isKindOf: HTTPError] -> …` is rejected ("complex guard expression"), so use the type pattern instead. A `Future` scrutinee never matches a user-class arm (it is not awaited).
 
 **`Binary` was the first subclass-aware pattern (BT-4228).** `Binary` is `sealed` and `String` is its only subclass, so `b :: Binary` is accepted and compiles to a closed, constant-time *subclass-aware* test: it matches a bare binary (valid UTF-8 or not) **or** a `String`, agreeing with `isKindOf: Binary`. To tell bytes from text, put the `String` arm first:
 

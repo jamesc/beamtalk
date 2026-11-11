@@ -3445,7 +3445,18 @@ value_is_kind_of_class_test_() ->
                             beamtalk_behaviour_intrinsics:valueIsKindOfClass(V, 'BT4319Base')
                         )
                     end,
-                    [1, 2.5, nil, true, sym, <<"b">>, {beamtalk_string, <<"s">>}, [1], #{a => 1}]
+                    [
+                        1,
+                        2.5,
+                        nil,
+                        true,
+                        sym,
+                        <<"b">>,
+                        {beamtalk_string, <<"s">>},
+                        [1],
+                        #{a => 1},
+                        {beamtalk_future, make_ref()}
+                    ]
                 )
             end)
         ]
