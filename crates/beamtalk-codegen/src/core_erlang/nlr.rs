@@ -132,7 +132,7 @@ fn nlr_arm_result(val_var: &str, state_var: &str, boundary: &NlrBoundary) -> Doc
                 NlrArmShape::CarriedReply => leaf::var(state_var.to_string()),
                 _ => actor_state_call(
                     actor_state_helper::COMMIT,
-                    vec![leaf::var("Self"), leaf::var(state_var.to_string())],
+                    [leaf::var("Self"), leaf::var(state_var.to_string())],
                 ),
             };
             docvec![

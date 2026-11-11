@@ -1284,7 +1284,7 @@ impl CoreErlangGenerator {
                         " = ",
                         actor_state_call(
                             actor_state_helper::INSTALL,
-                            vec![leaf::var(in_state_var.clone())],
+                            [leaf::var(in_state_var.clone())],
                         ),
                         " in",
                     ],
@@ -1305,7 +1305,7 @@ impl CoreErlangGenerator {
                         " = ",
                         actor_state_call(
                             actor_state_helper::UNINSTALL,
-                            vec![leaf::var(old_state_var.clone())],
+                            [leaf::var(old_state_var.clone())],
                         ),
                         " in",
                     ],
@@ -1637,7 +1637,7 @@ impl CoreErlangGenerator {
             "let _OldState = ",
             actor_state_call(
                 actor_state_helper::INSTALL,
-                vec![leaf::var("State".to_string())],
+                [leaf::var("State".to_string())],
             ),
             " in",
         ]
@@ -1651,7 +1651,7 @@ impl CoreErlangGenerator {
             "let _RestoreOk = ",
             actor_state_call(
                 actor_state_helper::UNINSTALL,
-                vec![leaf::var("_OldState".to_string())],
+                [leaf::var("_OldState".to_string())],
             ),
             " in",
             line(),
