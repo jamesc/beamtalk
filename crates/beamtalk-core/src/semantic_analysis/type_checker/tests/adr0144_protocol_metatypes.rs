@@ -1223,3 +1223,28 @@ Object subclass: Caller
         "both the direct and the via-P path are refused: {msgs:#?}"
     );
 }
+
+#[test]
+fn uses_class_overriding_a_provision_wider_is_reported_at_the_call_site_too() {
+    // Pins a deliberate behaviour (BT-4490): the widening is warned about at
+    // the override's definition, and — because the class really answers a
+    // type `Provides` does not promise — at each `:: Provides` call site.
+    let source = r#"
+Protocol define: Provides
+  name -> String => "p"
+
+Object subclass: Widened
+  uses: Provides
+  name -> Object => 1
+
+Object subclass: Caller
+  take: p :: Provides => p
+  run => self take: Widened new
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        msgs.iter()
+            .any(|m| m.contains("Widened>>name returns Object")),
+        "the call site reports the widened provision: {msgs:#?}"
+    );
+}

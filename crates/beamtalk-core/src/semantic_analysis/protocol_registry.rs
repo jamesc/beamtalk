@@ -20,7 +20,9 @@
 //! - `docs/ADR/0068-parametric-types-and-protocols.md` — Stage 2
 //! - `docs/ADR/0025-gradual-typing-and-protocols.md` — Diagnostic philosophy
 
-use crate::ast::{Module, ProtocolDefinition, TypeAnnotation};
+use crate::ast::{
+    MessageSelector, Module, ParameterDefinition, ProtocolDefinition, TypeAnnotation,
+};
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::trait_expansion;
@@ -45,6 +47,25 @@ pub struct ProtocolMethodRequirement {
 }
 
 impl ProtocolMethodRequirement {
+    /// The requirement a declared signature states — one source for how a
+    /// required (`ProtocolMethodSignature`) and a provided
+    /// (`MethodDefinition`) method become a `ProtocolMethodRequirement`.
+    fn from_signature(
+        selector: &MessageSelector,
+        return_type: Option<&TypeAnnotation>,
+        parameters: &[ParameterDefinition],
+    ) -> Self {
+        Self {
+            selector: selector.name(),
+            arity: selector.arity(),
+            return_type: return_type.map(TypeAnnotation::type_name),
+            param_types: parameters
+                .iter()
+                .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
+                .collect(),
+        }
+    }
+
     /// The requirement's declared return type, when it has one that can be
     /// judged without a substitution context: `None` when it is
     /// unannotated or names one of `type_params` (the type parameters of
@@ -125,30 +146,24 @@ pub struct ProtocolInfo {
 impl ProtocolInfo {
     /// Build a `ProtocolInfo` from a parsed `ProtocolDefinition` AST node.
     fn from_definition(def: &ProtocolDefinition) -> Self {
-        let make_req = |sig: &crate::ast::ProtocolMethodSignature| ProtocolMethodRequirement {
-            selector: sig.selector.name(),
-            arity: sig.selector.arity(),
-            return_type: sig.return_type.as_ref().map(TypeAnnotation::type_name),
-            param_types: sig
-                .parameters
-                .iter()
-                .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
-                .collect(),
+        let make_req = |sig: &crate::ast::ProtocolMethodSignature| {
+            ProtocolMethodRequirement::from_signature(
+                &sig.selector,
+                sig.return_type.as_ref(),
+                &sig.parameters,
+            )
         };
 
         let methods = def.method_signatures.iter().map(make_req).collect();
         let provided = def
             .provided_methods
             .iter()
-            .map(|m| ProtocolMethodRequirement {
-                selector: m.selector.name(),
-                arity: m.selector.arity(),
-                return_type: m.return_type.as_ref().map(TypeAnnotation::type_name),
-                param_types: m
-                    .parameters
-                    .iter()
-                    .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
-                    .collect(),
+            .map(|m| {
+                ProtocolMethodRequirement::from_signature(
+                    &m.selector,
+                    m.return_type.as_ref(),
+                    &m.parameters,
+                )
             })
             .collect();
         let class_methods = def.class_method_signatures.iter().map(make_req).collect();
