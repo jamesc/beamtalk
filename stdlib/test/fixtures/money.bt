@@ -34,7 +34,8 @@ Value subclass: Money
   plusFromNumber: n :: Integer -> Money => (Money new) withCents: n + self.cents
 
   /// `5 * aMoney` (number-on-the-left): scale by `n`, same as receiver-dispatched `*`.
-  timesFromNumber: n :: Integer -> Money => (Money new) withCents: n * self.cents
+  timesFromNumber: n :: Integer -> Money =>
+    (Money new) withCents: n * self.cents
 
   /// `5 / aMoney` — "a number divided by a money amount" has no sensible
   /// meaning, unlike `plusFromNumber:`/`timesFromNumber:` above. Implemented
