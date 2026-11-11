@@ -1874,6 +1874,13 @@ impl CoreErlangGenerator {
     /// when they are exhaustive over every shape the value can genuinely
     /// take at runtime.
     ///
+    /// BT-4202: the same clause also sidesteps an OTP 28 `beam_clean` crash
+    /// (`undefined_label` / `{jump,{f,0}}`): a boolean-only `case` with no
+    /// catch-all whose scrutinee has a branch that provably matches neither
+    /// clause (e.g. an inlined pure conditional answering a non-boolean
+    /// literal) leaves a jump to a missing label. Pinned by
+    /// `boolean_only_case_with_failing_branch_needs_catch_all`.
+    ///
     /// Without an explicit wildcard, the compiler synthesizes an implicit
     /// one for the same fallback — but when the `case` sits inside a
     /// `try`'s protected region, OTP's `beam_validator` rejects the

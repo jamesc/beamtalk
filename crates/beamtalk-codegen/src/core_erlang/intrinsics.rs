@@ -3450,8 +3450,8 @@ impl CoreErlangGenerator {
     /// is also intercepted before the handler chain ever runs; excluding
     /// it here is defense in depth.)
     ///
-    /// Never fires while [`Self::decline_pure_boolean_inline`] is set (a
-    /// stateful loop-condition tail — see the field's doc comment).
+    /// Never fires while [`Self::decline_pure_boolean_inline`] is set (the
+    /// non-Boolean fallback closures — see the field's doc comment).
     ///
     /// Never fires in an actor instance method when a branch block holds a
     /// guarded operator or another call codegen brackets (see
@@ -3502,10 +3502,8 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &'a [Expression],
     ) -> Option<PureBooleanShape<'a>> {
-        // A stateful loop-condition tail keeps today's dynamic dispatch:
-        // its value splices into the `{Bool, StateAcc[, Self]}` hand-back
-        // tuple, where a bare `case` breaks erlc's `beam_clean`
-        // (`undefined_label`) in complex nestings (corpus run70/run139).
+        // Fallback closures of a pure-inline conditional keep dynamic
+        // dispatch (exponential duplication otherwise).
         if self.decline_pure_boolean_inline {
             return None;
         }
