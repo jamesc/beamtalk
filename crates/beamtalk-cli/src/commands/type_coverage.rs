@@ -13,7 +13,8 @@
 
 use crate::commands::OutputFormat;
 use crate::commands::build::collect_source_files_from_dir;
-use beamtalk_core::semantic_analysis::{ClassHierarchy, CoverageReport, infer_types};
+use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
+use beamtalk_core::semantic_analysis::{ClassHierarchy, CoverageReport};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use beamtalk_language_service::{ByteOffset, Position};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -49,10 +50,18 @@ pub fn run(
             super::build::extract_type_specs(&layout, true, false)
         }
         None => super::build_stdlib::extract_stdlib_type_specs(),
-    };
+    }
+    .map(std::sync::Arc::new);
+
+    // Package name for alias seeding-boundary checks (ADR 0108), derived the
+    // same way `beamtalk lint` does so an `internal` alias from another
+    // package stays invisible here too.
+    let current_package =
+        super::manifest::package_checker_scope(package_root.as_deref()).package_name;
 
     // Pass 1: Parse all files and extract class metadata for cross-file hierarchy.
     let mut all_class_infos = Vec::new();
+    let mut all_alias_infos = Vec::new();
     let mut parsed_files: Vec<(Utf8PathBuf, String, beamtalk_core::ast::Module)> = Vec::new();
 
     for file in &source_files {
@@ -64,6 +73,10 @@ pub fn run(
         let (module, _parse_diags) = parse(tokens);
 
         all_class_infos.extend(ClassHierarchy::extract_class_infos(&module));
+        all_alias_infos.extend(AliasRegistry::extract_package_alias_infos(
+            &module,
+            current_package.as_deref(),
+        ));
         parsed_files.push((file.clone(), source, module));
     }
 
@@ -91,16 +104,19 @@ pub fn run(
         let default_options = beamtalk_core::CompilerOptions::default();
         let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
             .with_options(&default_options)
-            .with_pre_loaded_classes(cross_file_classes);
+            .with_pre_loaded_classes(cross_file_classes)
+            .with_pre_loaded_aliases(all_alias_infos.clone())
+            .with_native_type_registry(native_type_registry.clone());
         let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
 
-        let type_map = infer_types(
-            module,
-            &analysis_result.class_hierarchy,
-            native_type_registry.as_ref(),
-        );
-
-        let file_report = CoverageReport::from_module(module, &type_map, file.as_str(), detail);
+        // Use `analyse_full`'s alias-aware type map directly (ADR 0108): a
+        // separate `infer_types` pass runs without the alias registry, so a
+        // `Simple` annotation naming a registered alias resolves to an
+        // unknown nominal class and every downstream expression infers as
+        // `Dynamic`. The shared map expands aliases to their structural
+        // union, matching `build`/`lint`/checker behavior.
+        let file_report =
+            CoverageReport::from_module(module, &analysis_result.type_map, file.as_str(), detail);
         report.merge(file_report);
     }
 
@@ -574,6 +590,45 @@ mod tests {
         assert!(
             result.is_ok(),
             "Caller must be fully typed through the flattened Widget: {result:?}"
+        );
+    }
+
+    /// BT-4537: a `type` alias attributes identically to its inline
+    /// expansion — `input :: TextOrBytes` (alias for `String | Binary`)
+    /// keeps `input size` typed, so `Parser` reaches 100% just like the
+    /// spelled-out union. Before the fix the alias resolved to an unknown
+    /// nominal class and the send inferred as `Dynamic` (50%).
+    #[test]
+    fn run_alias_annotation_matches_inline_coverage_bt_4537() {
+        let inline_src = "Object subclass: Parser\n  parseDecimal: input :: String | Binary -> Integer =>\n    input size\n";
+        let alias_src = "type TextOrBytes = String | Binary\n\nObject subclass: Parser\n  parseDecimal: input :: TextOrBytes -> Integer =>\n    input size\n";
+
+        let inline_dir = TempDir::new().unwrap();
+        let inline_file = write_minimal_bt(&inline_dir, "Parser.bt", inline_src);
+        assert!(
+            run(
+                inline_file.as_str(),
+                false,
+                OutputFormat::Text,
+                Some(100.0),
+                Some("Parser")
+            )
+            .is_ok(),
+            "inline union baseline must be fully typed"
+        );
+
+        let alias_dir = TempDir::new().unwrap();
+        let alias_file = write_minimal_bt(&alias_dir, "Parser.bt", alias_src);
+        let result = run(
+            alias_file.as_str(),
+            false,
+            OutputFormat::Text,
+            Some(100.0),
+            Some("Parser"),
+        );
+        assert!(
+            result.is_ok(),
+            "alias-typed param must attribute identically to the inline union: {result:?}"
         );
     }
 }

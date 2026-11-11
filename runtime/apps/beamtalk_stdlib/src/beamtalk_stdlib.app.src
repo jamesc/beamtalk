@@ -71,6 +71,7 @@
             #{name => 'Parallel', module => 'bt@stdlib@parallel', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Pid', module => 'bt@stdlib@pid', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Port', module => 'bt@stdlib@port', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'ProcessDictionary', module => 'bt@stdlib@process_dictionary', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'ProcessNavigation', module => 'bt@stdlib@process_navigation', parent => 'Value', package => 'stdlib', kind => value, type_params => []},
             #{name => 'Program', module => 'bt@stdlib@program', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'ProtoObject', module => 'bt@stdlib@proto_object', parent => 'none', package => 'stdlib', kind => object, type_params => []},
@@ -112,6 +113,7 @@
             #{name => 'Time', module => 'bt@stdlib@time', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'TimeoutProxy', module => 'bt@stdlib@timeout_proxy', parent => 'Actor', package => 'stdlib', kind => actor, type_params => []},
             #{name => 'Timer', module => 'bt@stdlib@timer', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
+            #{name => 'Tls', module => 'bt@stdlib@tls', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Tracing', module => 'bt@stdlib@tracing', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'Transcript', module => 'bt@stdlib@transcript', parent => 'Object', package => 'stdlib', kind => object, type_params => []},
             #{name => 'TranscriptStream', module => 'bt@stdlib@transcript_stream', parent => 'Actor', package => 'stdlib', kind => actor, type_params => []},
@@ -136,6 +138,7 @@
             #{name => 'SupervisionStrategy', expansion => "#oneForOne | #oneForAll | #restForOne", doc => "OTP supervisor restart strategy — how sibling children are affected when\none of them crashes.", source_file => "stdlib/src/supervisor.bt", internal => false},
             #{name => 'SupervisorChildStatus', expansion => "#running | #restarting | #stopped", doc => "Whether a supervised child is running, being restarted by OTP, or stopped\nwith its spec still held (terminated, not yet restarted or deleted).", source_file => "stdlib/src/supervisor_child.bt", internal => false},
             #{name => 'TimeUnit', expansion => "#second | #millisecond | #microsecond | #nanosecond | #native", doc => "The time unit for `Time monotonic:`, `Time systemTime:` and\n`Time convertTime:from:to:` — Erlang's five canonical units.", source_file => "stdlib/src/time.bt", internal => false},
-            #{name => 'Timeout', expansion => "Integer | #infinity", doc => "A `gen_server:call` timeout in milliseconds, or `#infinity` to wait forever.\n\n@see Actor#withTimeout:", source_file => "stdlib/src/timeout_proxy.bt", internal => false}]}
+            #{name => 'Timeout', expansion => "Integer | #infinity", doc => "A `gen_server:call` timeout in milliseconds, or `#infinity` to wait forever.\n\n@see Actor#withTimeout:", source_file => "stdlib/src/timeout_proxy.bt", internal => false},
+            #{name => 'TlsVerify', expansion => "#verify_peer | #verify_none", doc => "The verify policies `Tls clientOptions:alpn:verify:` accepts.", source_file => "stdlib/src/tls.bt", internal => false}]}
     ]}
 ]}.

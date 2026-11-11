@@ -107,6 +107,18 @@ cowboy = "~> 2.12"
 - `">= 1.0.0 and < 2.0.0"` — explicit range
 - `"2.12.0"` — exact version
 
+**Git sources and overrides (BT-4555).** An entry can instead be a git source, and `[native.overrides]` passes rebar3 overrides through:
+
+```toml
+[native.dependencies]
+oidcc = { git = "https://github.com/jamesc/oidcc", branch = "rfc7009-revocation" }
+
+[native.overrides]
+jose = { erl_opts = [] }
+```
+
+A git entry takes exactly one of `tag`, `branch` or `rev` (the same keys as a git entry in `[dependencies]`) and becomes `{oidcc, {git, Url, {branch, B}}}` (or `{tag, T}` / `{ref, Sha}`) in the generated `rebar.config`. `[native.overrides]` supports only `erl_opts` (a list of plain atoms), emitted as `{overrides, [{override, Dep, [{erl_opts, [...]}]}]}`. Both aggregate across the dependency graph like hex constraints: first declaration wins, and a differing redeclaration produces a build warning.
+
 Naming: `[native.dependencies]` rather than `[erlang.dependencies]` because:
 - Consistent with the `native/` directory name
 - Consistent with the `native:` keyword (ADR 0056)
@@ -188,7 +200,7 @@ rebar3 handles version resolution against hex.pm, transitive deps, include paths
 
 **Error handling:** rebar3 errors are surfaced through `beamtalk build`. Common error patterns (version conflicts, missing packages) are translated into Beamtalk-style diagnostics with context about which packages contributed the conflicting constraints. Unrecognized errors are passed through verbatim with a note indicating they originate from rebar3. Authors of native Erlang code should expect to debug Erlang build issues directly when they arise.
 
-**On rebuild from lockfile:** When `beamtalk.lock` already contains resolved versions from a previous build, `beamtalk build` generates `rebar.config` with exact pinned versions instead of constraints, ensuring reproducible builds without re-resolving against hex.pm.
+**On rebuild from lockfile:** When `beamtalk.lock` already contains resolved versions from a previous build, `beamtalk build` writes `_build/dev/native/rebar.lock` from it before running rebar3, so every locked package is fetched at its pinned version without re-resolving (see §5).
 
 ### 5. Native Dependency Resolution
 
@@ -220,8 +232,16 @@ Constraints are passed through to the generated `rebar.config` verbatim — no t
 1. `beamtalk build` collects `[native.dependencies]` from all packages in the dependency graph
 2. Aggregates all constraints into a single generated `rebar.config`
 3. On first build (no lockfile): rebar3 resolves actual versions against hex.pm, handling constraint intersection, transitive deps, and conflict detection. All resolved versions are captured in `beamtalk.lock`
-4. On subsequent builds: generates `rebar.config` with exact pinned versions from `beamtalk.lock`, ensuring reproducible builds including transitive deps
-5. `beamtalk deps update` re-resolves constraints and updates the lock
+4. On subsequent builds: writes rebar3's `rebar.lock` from `beamtalk.lock`, pinning every locked package — direct and transitive — including on a fresh checkout
+5. `beamtalk deps update` clears the native locks; the next build re-resolves and updates the lock
+
+**Why `rebar.lock`, not `rebar.config` (BT-4566).** rebar3 treats its `rebar.lock` as authoritative and never re-fetches an existing dependency checkout because `rebar.config` changed — not for a new branch, a new constraint, or even an explicit `{ref, Sha}`. Only a `rebar.lock` entry moves a checkout, and rebar3 keeps checkouts and lock entries nothing needs any more. So `beamtalk.lock` is the one source of truth, and before each rebar3 run `beamtalk build` makes rebar3's state match it:
+
+- **Current** — every direct native dependency's entry still satisfies the manifest (a hex version within the constraint, or a git commit resolved from the same URL and `tag`/`branch`/`rev`), and no locked direct dependency was removed: write `rebar.lock` from all of `beamtalk.lock`, at each entry's recorded level.
+- **Partially current** — a direct dependency's constraint or git source changed, or one was added or removed: pin only the unchanged direct dependencies, and delete every other checkout under `_build/dev/native/default/lib/` so rebar3 resolves it afresh from `rebar.config`. Transitive dependencies re-resolve too, because `beamtalk.lock` does not record which direct dependency needs which.
+- **Unlocked** — no lock, or `beamtalk deps update` cleared the native locks: the same, with nothing pinned. `beamtalk deps update <name>` unlocks one native package (direct or transitive) and removes its checkout.
+
+`rebar.config` itself always carries the manifest's constraints and git references. The step runs under an advisory lock on `_build/dev/native/`, because it deletes checkouts that another build of the same project may be compiling.
 
 rebar3's error messages for version conflicts are passed through to the user. If rebar3's error output proves insufficient for common cases, Beamtalk-level pre-checking can be added as a follow-up — but rebar3's solver is battle-tested and handles the general case correctly.
 
@@ -254,7 +274,17 @@ version = "2.1.0"
 sha = "jkl012..."
 ```
 
-All resolved versions — direct and transitive — are pinned. This ensures `rebar.lock` in `_build/` can be regenerated deterministically from `beamtalk.lock`.
+A native git dependency is locked by URL, the manifest reference and the resolved commit SHA instead of `version` (BT-4555). Every entry also records rebar3's dependency `level` (0 = direct), and a hex entry its outer checksum (`outer_sha`, rebar3's `pkg_hash_ext`) and, for an aliased dependency, its hex `package` name (BT-4566):
+
+```toml
+[[native_package]]
+name = "oidcc"
+git = "https://github.com/jamesc/oidcc"
+reference = "branch:rfc7009-revocation"
+sha = "0123abcd..."
+```
+
+All resolved versions — direct and transitive — are pinned: `rebar.lock` in `_build/` is regenerated from `beamtalk.lock` on every build.
 
 ### 6. Native Module Naming
 

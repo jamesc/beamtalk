@@ -19,16 +19,7 @@
 // tooltip opens).
 
 import { hoverTooltip } from "@codemirror/view"
-
-// Identifier characters of a hoverable token — class names and unary selectors
-// (matches cm_autocomplete's TOKEN). A keyword part additionally takes its
-// trailing `:` (see `wordAt`), so `fetch:` is hovered as a keyword (BT-4343).
-const TOKEN = /[A-Za-z0-9_]/
-
-// Lines of context sent either side of the hovered line, so a keyword send split
-// across lines (`Fetcher fetch: u` / `  options: o`) resolves as one send. The
-// backend bounds the total it scans, so this only needs to cover a typical send.
-const CONTEXT_LINES = 10
+import { wordAt, editorContext } from "./cm_token.js"
 
 // Build the hover extension. `requestHover({code, before, suffix})` must return
 // a Promise<string> — the hover docs HTML (an empty string when there is nothing
@@ -51,15 +42,7 @@ export function backendHover(requestHover) {
     // method docs). Send the line from its start through the hovered token's
     // end, plus a few lines of context either side so a hovered keyword part
     // resolves every keyword of its send (`fetch:options:`), even across lines.
-    const doc = view.state.doc
-    const line = doc.lineAt(pos)
-    const firstLine = doc.line(Math.max(1, line.number - CONTEXT_LINES))
-    const lastLine = doc.line(Math.min(doc.lines, line.number + CONTEXT_LINES))
-    const docs = await requestHover({
-      code: view.state.sliceDoc(line.from, to),
-      before: view.state.sliceDoc(firstLine.from, line.from),
-      suffix: view.state.sliceDoc(to, lastLine.to),
-    })
+    const docs = await requestHover(editorContext(view.state, pos, to))
     if (!docs) return null
 
     return {
@@ -82,40 +65,6 @@ export function backendHover(requestHover) {
   })
 }
 
-// The identifier token at `pos`, as {from, to}. Grows left then right over
-// identifier characters, so a pointer resting just after a token (e.g. on the
-// space following it) still resolves that token — benign, and matches the
-// completion plugin's `matchBefore` behaviour. A keyword part keeps its
-// trailing `:` (`fetch:`), including when the pointer rests on that colon; a
-// `:` starting `:=` or `::` is assignment/annotation, not a keyword, and is left
-// out. Returns an empty range (from === to) only when there is no identifier on
-// either side of `pos`.
-function wordAt(state, pos) {
-  const line = state.doc.lineAt(pos)
-  const s = line.text
-  const rel = pos - line.from
-  let start = rel
-  // Pointer just past a keyword's colon: step back onto the keyword.
-  if (isKeywordColon(s, rel - 1) && !TOKEN.test(s[rel] ?? "")) start = rel - 1
-  let end = start
-  while (start > 0 && TOKEN.test(s[start - 1])) start--
-  while (end < s.length && TOKEN.test(s[end])) end++
-  if (end > start && isKeywordColon(s, end)) end++
-  return { from: line.from + start, to: line.from + end }
-}
-
-// True when `s[i]` is a keyword part's `:` — directly after an identifier char
-// and not the start of `:=` / `::`.
-function isKeywordColon(s, i) {
-  return (
-    i > 0 &&
-    s[i] === ":" &&
-    TOKEN.test(s[i - 1]) &&
-    s[i + 1] !== "=" &&
-    s[i + 1] !== ":"
-  )
-}
-
 // Wrap a hook's `pushEvent` into the `({code, before, suffix}) => Promise<string>` contract
 // the source expects. The LiveView `hover` handler replies `{hover: "…"}` on the
 // same event (a `{:reply, …}` from `handle_event`), resolving the callback. A
@@ -127,10 +76,15 @@ function isKeywordColon(s, i) {
 // editor is destroyed) and the same accepted gap as `completionQuery`. The
 // correct fix when it matters is a shared per-hook cancel signal, not a local
 // try/catch — left uncancelled deliberately.
-export function hoverQuery(pushEvent) {
+//
+// `tabId` (BT-4463) is the method-editor tab the buffer belongs to. The server
+// resolves it to the edited class and side, so a hovered `self` / `super`
+// receiver resolves against that class; the client never sends a class name.
+// The Workspace + REPL editors have no tab id and send none.
+export function hoverQuery(pushEvent, tabId = null) {
   return (payload) =>
     new Promise((resolve) => {
-      pushEvent("hover", payload, (reply) => {
+      pushEvent("hover", tabId ? { ...payload, tab_id: tabId } : payload, (reply) => {
         resolve((reply && reply.hover) || "")
       })
     })

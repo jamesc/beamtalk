@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4319: subclass of Bt4319HttpError.
+
+Bt4319HttpError subclass: Bt4319HttpError414

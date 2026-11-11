@@ -6,14 +6,14 @@
 // (ADR 0108 Phase 8, BT-2902), plus (final section below) the alias
 // hot-reload re-check trigger verified end-to-end from a live REPL session
 // (ADR 0108 Phase 10, BT-2905 — the epic's required final E2E validation
-// phase; per CLAUDE.md, "EUnit and BUnit alone are insufficient for
+// phase; per AGENTS.md, "EUnit and BUnit alone are insufficient for
 // user-facing features"). The very first section below (BT-2938) instead
 // proves a *stdlib-declared* alias resolves in a session that never
 // declared it at all — the gap this file's other sections don't cover,
 // since every other section's aliases are typed at the REPL first.
 //
 // REPL display-value decision (flagged for maintainer sign-off — see the
-// PR description and CLAUDE.md's REPL-output rule): a `type` declaration
+// PR description and AGENTS.md's REPL-output rule): a `type` declaration
 // echoes its declared name, mirroring the existing class-declaration
 // convention (`Actor subclass: Counter` displays `Counter`).
 //
@@ -46,7 +46,7 @@
 // unlike `Direction` below) without pinning its exact line-wrapping; the
 // `Declared in: stdlib` provenance line (distinct from `Declared in: REPL`
 // below) is this issue's own REPL-output convention, flagged in the PR
-// description for maintainer sign-off per CLAUDE.md's REPL-output rule.
+// description for maintainer sign-off per AGENTS.md's REPL-output rule.
 // ===========================================================================
 
 :help SupervisionStrategy

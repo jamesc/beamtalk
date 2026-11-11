@@ -69,6 +69,10 @@ start(_StartType, _StartArgs) ->
     %% BT-3994: `supervise`'s start lock (owned here so it outlives callers).
     beamtalk_fifo_lock:ensure_table(),
 
+    %% ADR 0146 (BT-4535): the test-build check that an actor method's `^`
+    %% reaches its boundary with the cell current. Off unless asked for.
+    beamtalk_actor_state:init_commit_check(),
+
     %% ADR 0068 Phase 2c: Initialize protocol registry ETS table.
     beamtalk_protocol_registry:init(),
 
@@ -79,6 +83,10 @@ start(_StartType, _StartArgs) ->
     %% ADR 0129 §5: plain-format handler for `Transcript` output outside an
     %% interactive workspace. Installed before any user code can run.
     ok = beamtalk_logging_config:install_transcript_handler(),
+
+    %% BT-4666: redact declared actor secrets in `proc_lib` crash reports,
+    %% which do not go through an actor's format_status/1.
+    ok = beamtalk_actor_redaction:install_crash_report_filter(),
 
     %% Start the runtime supervisor tree (which starts beamtalk_bootstrap, beamtalk_stdlib,
     %% and beamtalk_object_instances; pg is conditionally started inside beamtalk_bootstrap:init/1)
@@ -154,4 +162,9 @@ verify_metaclass_self_grounding() ->
 -doc "Stop the Beamtalk runtime application.".
 -spec stop(term()) -> ok.
 stop(_State) ->
+    %% BT-4666: the crash-report filter stays installed. Actors spawned
+    %% unlinked (`Module:spawn/0`) can outlive the runtime's supervision
+    %% tree, and removing the filter would let their crash reports through
+    %% raw. It ignores every other event, and installing it again on the
+    %% next start is a no-op.
     ok.

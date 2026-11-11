@@ -644,6 +644,7 @@ Value subclass: Driver
 
 fn method_unannotated(selector: &str, body: Vec<Expression>) -> MethodDefinition {
     MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Unary(selector.into()),
         parameters: vec![],
         body: body.into_iter().map(ExpressionStatement::bare).collect(),
@@ -661,6 +662,7 @@ fn method_unannotated(selector: &str, body: Vec<Expression>) -> MethodDefinition
 
 fn method_annotated(selector: &str, return_type: &str, body: Vec<Expression>) -> MethodDefinition {
     MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Unary(selector.into()),
         parameters: vec![],
         body: body.into_iter().map(ExpressionStatement::bare).collect(),

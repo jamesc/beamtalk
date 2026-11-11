@@ -583,8 +583,8 @@ compile_and_write_native(Module, ModuleBin, ErlPath, Source) ->
                     #{
                         <<"path">> => SourceFileBin,
                         <<"kind">> => <<"write_error">>,
-                        <<"message">> => iolist_to_binary(
-                            io_lib:format("Could not stage source for compile: ~p", [WriteReason])
+                        <<"message">> => beamtalk_error:chars_to_binary(
+                            io_lib:format("Could not stage source for compile: ~tp", [WriteReason])
                         )
                     }
                 ]
@@ -688,9 +688,9 @@ finish_native_write(_Module, ModuleBin, ErlPath, SourceFileBin, Source, CompileR
                     #{
                         <<"path">> => SourceFileBin,
                         <<"kind">> => <<"write_error">>,
-                        <<"message">> => iolist_to_binary(
+                        <<"message">> => beamtalk_error:chars_to_binary(
                             io_lib:format(
-                                "Compiled and reloaded, but writing the source to disk failed: ~p",
+                                "Compiled and reloaded, but writing the source to disk failed: ~tp",
                                 [WriteReason]
                             )
                         )
@@ -1239,7 +1239,7 @@ section_io_error(ClassBin, Verb, Reason) ->
             <<" source for '">>,
             ClassBin,
             <<"': ">>,
-            iolist_to_binary(io_lib:format("~p", [Reason]))
+            beamtalk_error:chars_to_binary(io_lib:format("~tp", [Reason]))
         ]),
         <<"Check file permissions and try again.">>
     ).
@@ -1254,8 +1254,8 @@ format_dep_error(Mod, Reason) ->
     #{
         <<"path">> => atom_to_binary(Mod, utf8),
         <<"kind">> => <<"dep_activation_error">>,
-        <<"message">> => iolist_to_binary(
-            io_lib:format("Failed to activate dependency module ~p: ~p", [Mod, Reason])
+        <<"message">> => beamtalk_error:chars_to_binary(
+            io_lib:format("Failed to activate dependency module ~tp: ~tp", [Mod, Reason])
         )
     }.
 
@@ -1355,8 +1355,8 @@ compile_native_erl_files(ErlFiles, ProjectRoot) ->
                             ErrMap = #{
                                 <<"path">> => list_to_binary(ErlPath),
                                 <<"kind">> => <<"load_error">>,
-                                <<"message">> => iolist_to_binary(
-                                    io_lib:format("Failed to load compiled module: ~p", [LoadErr])
+                                <<"message">> => beamtalk_error:chars_to_binary(
+                                    io_lib:format("Failed to load compiled module: ~tp", [LoadErr])
                                 )
                             },
                             {[ErrMap | ErrsAcc], CountAcc}
@@ -1370,8 +1370,8 @@ compile_native_erl_files(ErlFiles, ProjectRoot) ->
                             ErrMap = #{
                                 <<"path">> => list_to_binary(ErlPath),
                                 <<"kind">> => <<"load_error">>,
-                                <<"message">> => iolist_to_binary(
-                                    io_lib:format("Failed to load compiled module: ~p", [LoadErr])
+                                <<"message">> => beamtalk_error:chars_to_binary(
+                                    io_lib:format("Failed to load compiled module: ~tp", [LoadErr])
                                 )
                             },
                             {[ErrMap | ErrsAcc], CountAcc}
@@ -1416,8 +1416,8 @@ format_erl_compile_errors(ErlPath, CompileErrors) ->
                         #{
                             <<"path">> => PathBin,
                             <<"kind">> => <<"compile_error">>,
-                            <<"message">> => iolist_to_binary(
-                                io_lib:format("~p", [Other])
+                            <<"message">> => beamtalk_error:chars_to_binary(
+                                io_lib:format("~tp", [Other])
                             )
                         }
                 end,
@@ -1593,7 +1593,7 @@ package-qualified module atom `bt@<pkg>@<relative@path>` via the shared
 `relative_module_segments` leaf the CLI's own `build_class_module_index`
 (`build.rs`) uses — so this index and a `beamtalk build` of the same project can
 never diverge on either class extraction or module-name casing (see
-CLAUDE.md's "No duplicate implementations" rule). The package name is read from
+AGENTS.md's "No duplicate implementations" rule). The package name is read from
 `PackageName` argument (never re-parsed from `beamtalk.toml` here; see
 `resolve_package_name/2`).
 

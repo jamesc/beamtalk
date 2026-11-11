@@ -371,7 +371,7 @@
     "package": "vsce package",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:grammar": "vitest run src/__tests__/sectionDividerGrammar.test.ts",
+    "test:grammar": "vitest run src/__tests__/sectionDividerGrammar.test.ts src/__tests__/pipelineGrammar.test.ts",
     "lint": "biome lint src/",
     "format": "biome format --write src/",
     "format:check": "biome format src/"

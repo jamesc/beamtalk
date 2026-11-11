@@ -140,6 +140,7 @@ fn base_class_info(
 ) -> beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
     beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: name.into(),
         superclass: Some(superclass.into()),

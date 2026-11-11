@@ -8,6 +8,8 @@
 //! - [`hover_and_stdlib`] — hover `SymbolKind` disambiguation, stdlib
 //!   source-dir resolution and policy notes, hover class-name extraction
 //! - [`content_fetch`] — `load_type_cache` and stdlib `fetch_content`
+//! - [`dependency_guard`] — loading dependency extensions (path
+//!   dependencies included) and lifting the pre-WS3 dependency guard (BT-4611)
 //! - [`diagnostics_table`] — `beamtalk.toml` `[diagnostics]` table
 //! - [`preload_racing`] — sibling-root package stamps and didOpen-vs-preload
 //!   races
@@ -37,6 +39,33 @@ pub use super::*;
 pub(crate) use beamtalk_core::test_helpers::unique_temp_dir;
 pub(crate) use camino::Utf8PathBuf;
 pub(crate) use std::fs;
+
+/// Helper: writes `root/beamtalk.toml` for package `name`, declaring each of
+/// `deps` as a git dependency (checked out at `root/_build/deps/<dep>/`),
+/// and a manifest in each such checkout that already exists. The LSP reads
+/// the declared graph, not the `_build/deps` directory listing (BT-4611).
+pub(crate) fn write_manifest_with_git_deps(root: &std::path::Path, name: &str, deps: &[&str]) {
+    use std::fmt::Write as _;
+    let mut manifest =
+        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n\n[dependencies]\n");
+    for dep in deps {
+        writeln!(
+            manifest,
+            "{dep} = {{ git = \"https://example.com/{dep}.git\", tag = \"v1\" }}"
+        )
+        .expect("write to String");
+        let checkout = root.join("_build").join("deps").join(dep);
+        if checkout.is_dir() {
+            fs::write(
+                checkout.join("beamtalk.toml"),
+                format!("[package]\nname = \"{dep}\"\nversion = \"0.1.0\"\n"),
+            )
+            .expect("write dependency manifest");
+        }
+    }
+    fs::create_dir_all(root).expect("create package root");
+    fs::write(root.join("beamtalk.toml"), manifest).expect("write manifest");
+}
 
 /// Helper: open a single file in a `Backend` test fixture by directly
 /// updating the service and versions maps. Skips the full LSP lifecycle
@@ -152,6 +181,7 @@ mod call_hierarchy;
 mod code_actions;
 mod command_builders;
 mod content_fetch;
+mod dependency_guard;
 mod diagnostics_table;
 mod did_close_racing;
 mod flush_and_rename_edits;

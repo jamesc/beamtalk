@@ -74,7 +74,11 @@ clear_all_subscriptions() ->
     %% link cannot leak into a later test's announce walk.
     lists:foreach(
         fun(C) ->
-            catch beamtalk_class_metadata:delete(C)
+            try
+                beamtalk_class_metadata:delete(C)
+            catch
+                _:_ -> ok
+            end
         end,
         ['ButtonClicked', 'UIEvent', 'DomainEvent', 'PriceChanged', 'OtherEvent']
     ),
@@ -507,8 +511,16 @@ mro_cyclic_hierarchy_test_() ->
                     ?assert(is_integer(beamtalk_announcements:subscription_count()))
                 after
                     stop_subscriber(Sub),
-                    catch beamtalk_class_metadata:delete('CycA'),
-                    catch beamtalk_class_metadata:delete('CycB')
+                    try
+                        beamtalk_class_metadata:delete('CycA')
+                    catch
+                        _:_ -> ok
+                    end,
+                    try
+                        beamtalk_class_metadata:delete('CycB')
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -1226,13 +1238,12 @@ heir_crash_survival_test_() ->
 heir_crash_survival_impl() ->
     {timeout, 15,
         ?_test(begin
-            %% We need a fake supervisor registered as `beamtalk_runtime_sup` so the
-            %% bus uses it as the ETS heir and the tables survive a bus crash. If a
-            %% real supervisor is already registered (full app running), use it.
+            %% We need the real `beamtalk_ets_heir` process running so the bus
+            %% names it as the ETS heir and the tables survive a bus crash.
             FakeSup = ensure_heir_process(),
             try
                 %% Stop any existing bus (which may have wrong heir) and restart
-                %% fresh so the tables get created with the fake supervisor as heir.
+                %% fresh so the tables get created with the heir process as heir.
                 stop_existing_bus(),
                 {ok, _} = beamtalk_announcements:start_link(),
                 clear_all_subscriptions(),
@@ -1255,7 +1266,7 @@ heir_crash_survival_impl() ->
 
                     %% Kill the bus (simulating a crash). Unlink first so the kill does
                     %% not propagate to the test process. The tables survive via heir
-                    %% to the fake supervisor.
+                    %% to the heir process.
                     BusPid = whereis(beamtalk_announcements),
                     unlink(BusPid),
                     BusMon = erlang:monitor(process, BusPid),
@@ -1298,7 +1309,11 @@ heir_crash_survival_impl() ->
                     refute_received()
                 after
                     stop_subscriber(LiveSub),
-                    catch stop_subscriber(DyingSub),
+                    try
+                        stop_subscriber(DyingSub)
+                    catch
+                        _:_ -> ok
+                    end,
                     clear_all_subscriptions()
                 end
             after
@@ -1370,7 +1385,11 @@ heir_rearm_monitor_fires_on_later_death_impl() ->
                     ?assertNot(beamtalk_announcements:is_active(SubRef)),
                     ?assertEqual([], beamtalk_announcements:subscribers_of('RearmEvent'))
                 after
-                    catch stop_subscriber(Sub),
+                    try
+                        stop_subscriber(Sub)
+                    catch
+                        _:_ -> ok
+                    end,
                     clear_all_subscriptions()
                 end
             after
@@ -1619,7 +1638,11 @@ build_hierarchy() ->
 %% created the table.
 setup_with_dispatch() ->
     Pid = setup(),
-    catch beamtalk_extensions:init(),
+    try
+        beamtalk_extensions:init()
+    catch
+        _:_ -> ok
+    end,
     Pid.
 
 %% Spawn an idle process to act as the subscriber pid for synchronous-path tests.
@@ -1678,50 +1701,48 @@ stop_existing_bus() ->
             end
     end,
     %% Delete any leftover tables so they get recreated with the correct heir.
-    catch ets:delete(beamtalk_announcement_subs),
-    catch ets:delete(beamtalk_announcement_by_class),
+    try
+        ets:delete(beamtalk_announcement_subs)
+    catch
+        _:_ -> ok
+    end,
+    try
+        ets:delete(beamtalk_announcement_by_class)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
-%% Ensure a process registered as `beamtalk_runtime_sup` exists to act as the ETS
-%% heir in tests. If one already exists (full app running), returns `existing` and
-%% `stop_heir_process/1` is a no-op. Otherwise spawns a fake supervisor process
-%% that just receives ETS-TRANSFER messages and holds the tables.
+%% Ensure the real `beamtalk_ets_heir` process (BT-3787) is running so the bus's
+%% tables name it as heir and survive a bus crash. If one already exists (full
+%% app running), returns `existing` and `stop_heir_process/1` is a no-op.
+%% Otherwise starts one, unlinked from the test process.
 ensure_heir_process() ->
-    case whereis(beamtalk_runtime_sup) of
+    case whereis(beamtalk_ets_heir) of
         undefined ->
-            Pid = spawn(fun heir_loop/0),
-            true = register(beamtalk_runtime_sup, Pid),
-            {fake, Pid};
+            {ok, Pid} = beamtalk_ets_heir:start_link(),
+            unlink(Pid),
+            {started, Pid};
         _Pid ->
             existing
     end.
 
 stop_heir_process(existing) ->
     ok;
-stop_heir_process({fake, Pid}) ->
-    unregister(beamtalk_runtime_sup),
+stop_heir_process({started, Pid}) ->
     Mon = erlang:monitor(process, Pid),
     exit(Pid, kill),
     receive
         {'DOWN', Mon, process, Pid, _} -> ok
     after 1000 -> ok
     end,
-    %% The fake heir *owned* the ETS tables (they were transferred to it when the
-    %% bus was killed in the crash-survival test), so killing it dropped them —
-    %% leaving the last restarted bus alive but tableless. That would crash the
-    %% next downstream suite that subscribes. Stop the stale bus and delete any
-    %% leftover tables so the next `setup/0` (or a bus consumer in another suite)
-    %% starts a fresh, healthy bus.
+    %% The heir *owned* the ETS tables (they were transferred to it when the bus
+    %% was killed in the crash-survival test), so killing it dropped them —
+    %% leaving the last restarted bus alive but tableless. Stop the stale bus and
+    %% delete any leftover tables so the next `setup/0` (or a bus consumer in
+    %% another suite) starts a fresh, healthy bus.
     stop_existing_bus(),
     ok.
-
-heir_loop() ->
-    receive
-        {'ETS-TRANSFER', _Table, _FromPid, _HeirData} ->
-            heir_loop();
-        _ ->
-            heir_loop()
-    end.
 
 %% Poll `Pred` until it returns true, or fail after ~2s.
 wait_until(Pred) ->
@@ -1737,3 +1758,151 @@ wait_until(Pred, N) ->
             timer:sleep(10),
             wait_until(Pred, N - 1)
     end.
+
+%%====================================================================
+%% BT-4502: no class-chain walk when nothing is subscribed
+%%====================================================================
+
+no_subscribers_no_superclass_walk_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                build_hierarchy(),
+                ok = meck:new(beamtalk_class_metadata, [passthrough]),
+                try
+                    %% Only the system bus pre-checks ancestry (BT-4653); a
+                    %% per-instance announce walks, so it is not metered here.
+                    ok = beamtalk_announcements:system_announce('ButtonClicked', #{}),
+                    ?assertEqual(0, meck:num_calls(beamtalk_class_metadata, lookup_superclass, '_'))
+                after
+                    meck:unload(beamtalk_class_metadata)
+                end
+            end),
+            ?_test(begin
+                %% A superclass subscription added after an earlier (empty)
+                %% announce receives the next announce.
+                build_hierarchy(),
+                Sub = spawn_subscriber(self()),
+                try
+                    ok = beamtalk_announcements:announce('ButtonClicked', first),
+                    {ok, SubRef} = beamtalk_announcements:subscribe('UIEvent', Sub, h, false),
+                    ok = beamtalk_announcements:announce('ButtonClicked', second),
+                    ?assertMatch({SubRef, 'ButtonClicked', h, second}, expect_received())
+                after
+                    stop_subscriber(Sub)
+                end
+            end),
+            ?_test(begin
+                %% A consumed once-subscription leaves the announcer empty, so
+                %% the next announce does no walk.
+                build_hierarchy(),
+                Sub = spawn_subscriber(self()),
+                try
+                    {ok, _} = beamtalk_announcements:subscribe('UIEvent', Sub, h, true),
+                    ok = beamtalk_announcements:announce('ButtonClicked', once),
+                    {_, 'ButtonClicked', h, once} = expect_received(),
+                    ok = meck:new(beamtalk_class_metadata, [passthrough]),
+                    try
+                        ok = beamtalk_announcements:announce('ButtonClicked', again),
+                        ?assertEqual(
+                            0, meck:num_calls(beamtalk_class_metadata, lookup_superclass, '_')
+                        ),
+                        refute_received()
+                    after
+                        meck:unload(beamtalk_class_metadata)
+                    end
+                after
+                    stop_subscriber(Sub)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% BT-4631: unrelated subscriptions do not trigger a class-chain walk on the
+%% system bus
+%%====================================================================
+
+unrelated_subscription_no_superclass_walk_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            beamtalk_class_metadata:new(),
+            build_hierarchy(),
+            beamtalk_class_metadata:insert('ClassLoaded', undefined, undefined, none, undefined),
+            Sub = spawn_subscriber(self()),
+            try
+                {ok, _} = beamtalk_announcements:subscribe('ClassLoaded', Sub, h, false),
+                %% Warm the derived cache.
+                ok = beamtalk_announcements:announce('ButtonClicked', warm),
+                ok = beamtalk_announcements:system_announce('ButtonClicked', #{}),
+                refute_received(),
+                ok = meck:new(beamtalk_class_metadata, [passthrough]),
+                try
+                    %% Only the system bus pre-checks ancestry (BT-4653); a
+                    %% per-instance announce walks, so it is not metered here.
+                    ok = beamtalk_announcements:system_announce('ButtonClicked', #{}),
+                    ?assertEqual(
+                        0, meck:num_calls(beamtalk_class_metadata, lookup_superclass, '_')
+                    ),
+                    refute_received()
+                after
+                    meck:unload(beamtalk_class_metadata)
+                end
+            after
+                try
+                    beamtalk_class_metadata:delete('ClassLoaded')
+                catch
+                    _:_ -> ok
+                end,
+                stop_subscriber(Sub)
+            end
+        end)
+    end}.
+
+reparent_respected_after_precheck_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            beamtalk_class_metadata:new(),
+            build_hierarchy(),
+            beamtalk_class_metadata:insert(
+                'OtherEvent', undefined, undefined, 'DomainEvent', undefined
+            ),
+            Sub = spawn_subscriber(self()),
+            try
+                %% ButtonClicked starts under OtherEvent, not UIEvent.
+                beamtalk_class_metadata:insert(
+                    'ButtonClicked', undefined, undefined, 'OtherEvent', undefined
+                ),
+                {ok, SubRef} = beamtalk_announcements:subscribe('UIEvent', Sub, h, false),
+                ok = beamtalk_announcements:announce('ButtonClicked', a),
+                refute_received(),
+                beamtalk_class_metadata:insert(
+                    'ButtonClicked', undefined, undefined, 'UIEvent', undefined
+                ),
+                ok = beamtalk_announcements:announce('ButtonClicked', b),
+                ?assertMatch({SubRef, 'ButtonClicked', h, b}, expect_received()),
+                beamtalk_class_metadata:insert(
+                    'ButtonClicked', undefined, undefined, 'OtherEvent', undefined
+                ),
+                ok = beamtalk_announcements:announce('ButtonClicked', c),
+                refute_received()
+            after
+                stop_subscriber(Sub)
+            end
+        end)
+    end}.
+
+unregistered_exact_class_still_matches_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            beamtalk_class_metadata:new(),
+            Sub = spawn_subscriber(self()),
+            try
+                {ok, SubRef} = beamtalk_announcements:subscribe('NoSuchEvent', Sub, h, false),
+                ok = beamtalk_announcements:announce('NoSuchEvent', e),
+                ?assertMatch({SubRef, 'NoSuchEvent', h, e}, expect_received())
+            after
+                stop_subscriber(Sub)
+            end
+        end)
+    end}.

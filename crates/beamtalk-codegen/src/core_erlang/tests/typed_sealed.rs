@@ -51,6 +51,28 @@ fn sealed_value_typed_param_sends_direct_with_tag_guard() {
 }
 
 #[test]
+fn destructured_tuple_local_sends_direct_with_tag_guard() {
+    // BT-4487: `{w, _} := pair` types `w` from `Tuple(SealedWidget, Integer)`,
+    // so the send to it takes the guarded direct path.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: pair :: Tuple(SealedWidget, Integer) -> Integer =>\n",
+        "    {w, _} := pair\n",
+        "    w x\n\n",
+        "sealed Value subclass: SealedWidget\n",
+        "  field: x :: Integer = 0\n",
+    ));
+    assert!(
+        code.contains("call 'bt@sealed_widget':'dispatch'('x'"),
+        "destructured typed local should direct-call the class module. Got:\n{code}"
+    );
+    assert!(
+        code.contains("maps':'get'('$beamtalk_class'"),
+        "direct call should be guarded on the runtime class tag. Got:\n{code}"
+    );
+}
+
+#[test]
 fn sealed_object_typed_param_sends_direct() {
     let code = codegen(concat!(
         "Object subclass: Caller\n",
@@ -573,12 +595,9 @@ fn builtin_typed_keyword_send_to_pid_and_string_is_routed() {
 
 #[test]
 fn builtins_without_a_single_route_stay_dynamic() {
-    // From the routing fixture: `Binary`'s test also admits a `String`
-    // (routed to `bt@stdlib@string`), and `Boolean`, `Bitstring`,
-    // `Character`, `Class`, `Metaclass` and `ErlangModule` carry a
-    // `dynamic_only` reason.
+    // From the routing fixture: `Boolean`, `Bitstring`, `Character`,
+    // `Class`, `Metaclass` and `ErlangModule` carry a `dynamic_only` reason.
     for ty in [
-        "Binary",
         "Boolean",
         "Bitstring",
         "Character",
@@ -596,6 +615,42 @@ fn builtins_without_a_single_route_stay_dynamic() {
             "{ty} receiver send should still exist as a dynamic send. Got:\n{code}"
         );
     }
+}
+
+#[test]
+fn binary_typed_send_routes_bare_binaries_and_strings() {
+    // BT-4510: `Binary`'s test admits a bare binary (routed to
+    // `bt@stdlib@binary`) or the `String` tag (routed to
+    // `bt@stdlib@string`), so a `Binary`-typed send guards on each in turn
+    // before the dynamic send.
+    let code = builtin_typed_send("Binary");
+    assert!(
+        code.contains("call 'erlang':'is_binary'(")
+            && code.contains("call 'bt@stdlib@binary':'dispatch'('frobnicate'"),
+        "a bare binary should direct-call bt@stdlib@binary. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'beamtalk_string'")
+            && code.contains("call 'bt@stdlib@string':'dispatch'('frobnicate'"),
+        "a String should direct-call bt@stdlib@string. Got:\n{code}"
+    );
+    assert!(
+        code.contains("beamtalk_message_dispatch':'send'("),
+        "anything else should take the dynamic send. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+
+    // A `String` special selector (answered by `bt@stdlib@binary` for a
+    // `String` unless an extension says otherwise) keeps only the
+    // bare-binary route.
+    let code =
+        codegen("Object subclass: Caller\n  useIt: r :: Binary -> Object =>\n    r toBytes\n");
+    assert!(
+        code.contains("call 'bt@stdlib@binary':'dispatch'('toBytes'")
+            && !code.contains("call 'bt@stdlib@string':'dispatch'('toBytes'"),
+        "a String special selector must not direct-call bt@stdlib@string. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
 }
 
 #[test]
@@ -638,10 +693,9 @@ fn sealed_exception_subclass_stays_dynamic() {
 #[test]
 fn field_at_put_on_sealed_receiver_never_direct() {
     // The object-reflection intrinsic claims `fieldAt:put:` before dispatch
-    // selection, so this pins the end state rather than the handler's own
-    // guard: no direct call, ever. (The dynamic path's hint used to diverge
-    // from `dispatch/3`'s; BT-4273 unified them, so the handler's own
-    // exclusion is now redundant — see its follow-up.)
+    // selection (the handler has no exclusion of its own since BT-4282; the
+    // hints agree on every path, BT-4273), so this pins the end state: no
+    // direct call, ever.
     let code = codegen(concat!(
         "Object subclass: Caller\n",
         "  useIt: w :: SealedWidget -> Object =>\n",
@@ -728,6 +782,39 @@ fn sealed_stdlib_result_sends_direct() {
 }
 
 #[test]
+fn value_to_a_typed_non_block_receiver_is_a_typed_send_not_block_evaluation() {
+    // BT-4510: `r value` on a `Result` is `Result>>value`. The block-value
+    // intrinsic used to claim it (is_function tests, then a dynamic send);
+    // now it yields to the guarded direct call, for `value` and `value:`.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: r :: Result(Integer, Symbol) -> Object =>\n",
+        "    r value\n",
+        "  useWidget: w :: SealedWidget -> Object =>\n",
+        "    w value: 1\n",
+        "  useBlock: b :: Block -> Object =>\n",
+        "    b value\n\n",
+        "sealed Value subclass: SealedWidget\n",
+        "  field: x :: Integer = 0\n",
+        "  value: n :: Integer -> Integer => n\n",
+    ));
+    assert!(
+        code.contains("call 'bt@stdlib@result':'dispatch'('value', []"),
+        "Result-typed `value` should direct-call bt@stdlib@result. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'bt@sealed_widget':'dispatch'('value:', ["),
+        "SealedWidget-typed `value:` should direct-call its module. Got:\n{code}"
+    );
+    // A `Block`-typed receiver keeps the intrinsic's fun application.
+    assert!(
+        code.contains("call 'erlang':'is_function'(") && code.contains("apply "),
+        "Block-typed `value` should keep block evaluation. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
 fn future_typed_param_stays_dynamic() {
     // `Future` is the runtime-only builtin: no compiled module, so no
     // `dispatch/3` to direct-call (its dynamic sends route via
@@ -770,6 +857,7 @@ fn ambient_sealed_object(
         auto_ctors: None,
         handle_scope: None,
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: module_less,
         state: vec![],
         state_types: std::collections::HashMap::new(),
@@ -1119,6 +1207,7 @@ const KNOWN_TAGGED_BUILTINS: &[&str] = &[
     "ObjectStateChanged",
     "Package",
     "Parallel",
+    "ProcessDictionary",
     "ProcessNavigation",
     "Program",
     "Protocol",
@@ -1149,6 +1238,7 @@ const KNOWN_TAGGED_BUILTINS: &[&str] = &[
     "TestRunner",
     "Time",
     "Timer",
+    "Tls",
     "Tracing",
     "Transcript",
     "Uuid",
@@ -1622,4 +1712,30 @@ fn packaged_ambient_class_of_pins_the_qualified_module() {
         ),
         "packaged ambient receiver should pin the qualified module. Got:\n{code}"
     );
+}
+
+#[test]
+fn interpolation_segment_display_string_uses_the_typed_route() {
+    // BT-4510: each interpolation segment's `displayString` is the same
+    // typed-send decision as a written `x displayString`: a typed segment
+    // calls its class's `dispatch/3` behind the guard, an untyped one
+    // sends dynamically.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  show: n :: Integer name: s :: String -> String =>\n",
+        "    \"{n} {s}\"\n",
+        "  showAny: x -> String =>\n",
+        "    \"{x}\"\n",
+    ));
+    for module in ["bt@stdlib@integer", "bt@stdlib@string"] {
+        assert!(
+            code.contains(&format!("call '{module}':'dispatch'('displayString', []")),
+            "a typed segment should direct-call {module}. Got:\n{code}"
+        );
+    }
+    assert!(
+        code.contains("'displayString', [])"),
+        "the untyped segment (and every miss arm) keeps the dynamic send. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
 }

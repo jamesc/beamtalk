@@ -57,7 +57,11 @@ start_class(Name, Superclass, ClassVars, Methods) ->
     Pid.
 
 stop_class(Pid) ->
-    catch gen_server:stop(Pid, normal, 5000),
+    try
+        gen_server:stop(Pid, normal, 5000)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 tag(Name) -> beamtalk_class_registry:class_object_tag(Name).

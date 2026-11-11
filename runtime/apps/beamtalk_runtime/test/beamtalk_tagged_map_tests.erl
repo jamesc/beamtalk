@@ -148,6 +148,26 @@ user_field_keys_filters_registry_pid_test() ->
     ?assert(lists:member(field, Keys)),
     ?assertNot(lists:member('__registry_pid__', Keys)).
 
+%% BT-4459: a state map can carry codegen-internal `__local__` scratch keys (a
+%% threaded local); `printString`, `fieldNames` and the inspector must never
+%% show them.
+user_field_keys_filters_local_scratch_keys_test() ->
+    State = #{
+        '$beamtalk_class' => 'Test',
+        '__local__count' => 3,
+        '__local__$scratch' => self(),
+        field => 1,
+        local => 2
+    },
+    ?assertEqual([field, local], lists:sort(beamtalk_tagged_map:user_field_keys(State))).
+
+is_local_temp_key_test() ->
+    ?assert(beamtalk_tagged_map:is_local_temp_key('__local__x')),
+    ?assert(beamtalk_tagged_map:is_local_temp_key('__local__$scratch')),
+    ?assertNot(beamtalk_tagged_map:is_local_temp_key(local)),
+    ?assertNot(beamtalk_tagged_map:is_local_temp_key('__locals')),
+    ?assertNot(beamtalk_tagged_map:is_local_temp_key(<<"__local__x">>)).
+
 %%% ============================================================================
 %%% format_for_display/1 tests
 %%% ============================================================================

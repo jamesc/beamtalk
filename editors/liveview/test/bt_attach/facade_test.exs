@@ -69,6 +69,10 @@ defmodule BtAttach.FacadeTest do
     def implementors_of(selector),
       do: record({:implementors_of, selector}) && {:value, %{"sites" => []}}
 
+    # BT-4455: go-to-definition's keyword-selector resolver (nav-query kind).
+    def keyword_selector_at(code, context),
+      do: record({:keyword_selector_at, code, context}) && {:value, %{"selector" => "a:b:"}}
+
     # BT-2639: the protocol-definition action row — required methods / conforming
     # classes (nav-query protocol kinds).
     def required_methods_of(protocol),
@@ -97,6 +101,12 @@ defmodule BtAttach.FacadeTest do
     def diagnostics(code, mode),
       do:
         record({:diagnostics, code, mode}) &&
+          {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
+
+    # BT-4583: a file-backed buffer also names its source file.
+    def diagnostics(code, mode, source_path),
+      do:
+        record({:diagnostics, code, mode, source_path}) &&
           {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
 
     # BT-2557: test-runner pane — discovery + run.
@@ -180,7 +190,7 @@ defmodule BtAttach.FacadeTest do
                      browse_alias_source
                      list_tests
                      senders implementors required_methods conforming_classes
-                     callers_of_native_module symbols
+                     callers_of_native_module keyword_selector symbols
                      git_status git_diff git_log
                      autoflush)a do
         assert Facade.capability(read) == :read, "#{read} should be :read"
@@ -453,6 +463,22 @@ defmodule BtAttach.FacadeTest do
   end
 
   describe "native-module callers (reverse FFI nav, BT-2669)" do
+    test "keyword_selector routes the editor context to the client (BT-4455)" do
+      assert Facade.dispatch(:keyword_selector, %{code: "X a:", suffix: " 1 b: 2"}) ==
+               {:value, %{"selector" => "a:b:"}}
+
+      assert {:keyword_selector_at, "X a:", %{before: "", suffix: " 1 b: 2"}} in RecordingClient.calls()
+    end
+
+    test "keyword_selector rejects a bad shape with no client call (BT-4455)" do
+      assert Facade.dispatch(:keyword_selector, %{code: 42}) == {:error, :invalid_params}
+
+      assert Facade.dispatch(:keyword_selector, %{code: "x", suffix: :nope}) ==
+               {:error, :invalid_params}
+
+      assert RecordingClient.calls() == []
+    end
+
     test "callers_of_native_module routes to the client and returns the live term" do
       assert Facade.dispatch(:callers_of_native_module, %{module: "lists"}) ==
                {:value, %{"sites" => []}}
@@ -594,6 +620,22 @@ defmodule BtAttach.FacadeTest do
       assert {:hover, self(), "  options:", %{before: "Fetcher fetch: u\n", suffix: " o"}} in RecordingClient.calls()
     end
 
+    test "hover passes the edited method's class and side through (BT-4463)" do
+      assert Facade.dispatch(:hover, %{
+               session_pid: self(),
+               code: "self size",
+               class: "Counter",
+               side: "class"
+             }) == {:ok, "== Integer < Number =="}
+
+      assert {:hover, self(), "self size",
+              %{before: "", suffix: "", class: "Counter", side: "class"}} in RecordingClient.calls()
+
+      # A half-specified class context is dropped rather than forwarded.
+      Facade.dispatch(:hover, %{session_pid: self(), code: "self size", class: "Counter"})
+      assert {:hover, self(), "self size", %{before: "", suffix: ""}} in RecordingClient.calls()
+    end
+
     test "a bad shape is invalid params, with no dist call" do
       assert Facade.dispatch(:hover, %{session_pid: :nope, code: "x"}) ==
                {:error, :invalid_params}
@@ -649,6 +691,23 @@ defmodule BtAttach.FacadeTest do
       assert {:diagnostics, "x", "expression"} in calls
       refute {:diagnostics, "x", "bogus"} in calls
       refute {:diagnostics, "x", 42} in calls
+    end
+
+    test "a non-empty source_path rides the call for a file-backed buffer (BT-4583)" do
+      assert Facade.dispatch(:diagnostics, %{code: "x", source_path: "/p/src/a.bt"}) ==
+               {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
+
+      assert {:diagnostics, "x", "expression", "/p/src/a.bt"} in RecordingClient.calls()
+    end
+
+    test "a nil, empty or non-binary source_path takes the path-less call (BT-4583)" do
+      for path <- [nil, "", 42] do
+        assert {:ok, _} = Facade.dispatch(:diagnostics, %{code: "x", source_path: path})
+      end
+
+      calls = RecordingClient.calls()
+      assert Enum.count(calls, &(&1 == {:diagnostics, "x", "expression"})) == 3
+      refute Enum.any?(calls, &match?({:diagnostics, _, _, _}, &1))
     end
 
     test "a bad shape is invalid params, with no dist call" do

@@ -594,6 +594,27 @@ defmodule BtAttach.Workspace do
     do: dispatch_browse("nav-query", %{"kind" => "implementors", "selector" => selector})
 
   @doc """
+  Return the full keyword selector of the send whose keyword part ends `code`
+  (`nav-query` `kind=keyword_selector`, BT-4455) — go-to-definition's resolver.
+  `context` carries the same editor text the `hover` op takes: `:before`, `:suffix`
+  (both default `""`). The op runs the **same** recognizer as hover
+  (`beamtalk_repl_ops_dev:keyword_send_at/3`), so the two cannot drift.
+
+  Returns the live `{:value, %{"selector" => selector | nil}}` term verbatim
+  (`nil` when no send resolves), or `{:error, reason}` on a dispatch failure.
+  """
+  @spec keyword_selector_at(String.t(), %{optional(:before | :suffix) => String.t()}) ::
+          {:value, term()} | {:error, term()}
+  def keyword_selector_at(code, context \\ %{}) when is_binary(code) and is_map(context),
+    do:
+      dispatch_browse("nav-query", %{
+        "kind" => "keyword_selector",
+        "code" => code,
+        "before" => Map.get(context, :before, ""),
+        "suffix" => Map.get(context, :suffix, "")
+      })
+
+  @doc """
   Return the **required methods** of a protocol (`nav-query`
   `kind=required_methods`, BT-2639) — the protocol equivalent of Implementors,
   backing the System Browser's protocol-definition action row. `protocol` is the
@@ -718,11 +739,18 @@ defmodule BtAttach.Workspace do
   send — possibly split across lines — to resolve its full keyword selector
   (`fetch:options:`). Both default to `""`.
 
+  `context` may also carry `:class` and `:side` (`"instance"` | `"class"`) —
+  the class a method editor edits (BT-4463). A `self` / `super` receiver then
+  resolves against that class (`super` against its superclass); without them
+  `self` / `super` do not resolve.
+
   Returns the formatted markdown as `{:ok, String.t()}` (`""` when nothing
   resolves — the client then shows no tooltip), or `{:error, reason}` on a
   dispatch failure — JSON never crosses the Attach path here either.
   """
-  @spec hover(pid(), String.t(), %{optional(:before | :suffix) => String.t()}) ::
+  @spec hover(pid(), String.t(), %{
+          optional(:before | :suffix | :class | :side) => String.t()
+        }) ::
           {:ok, String.t()} | {:error, term()}
   def hover(session_pid, code, context \\ %{})
       when is_pid(session_pid) and is_binary(code) and is_map(context) do
@@ -776,8 +804,21 @@ defmodule BtAttach.Workspace do
   a method has no class context here, so semantic checks run on Compile.
   """
   @spec diagnostics(String.t(), String.t()) :: {:ok, [map()]} | {:error, term()}
-  def diagnostics(code, mode) when is_binary(code) and is_binary(mode) do
-    case dispatch_diagnostics(code, mode) do
+  def diagnostics(code, mode) when is_binary(code) and is_binary(mode),
+    do: diagnostics(code, mode, "")
+
+  @doc """
+  Like `diagnostics/2`, but `source_path` (BT-4583) names the file the buffer
+  edits. A non-empty path rides the op's `source_path` param, so the compiler
+  checks the buffer under that file's project scope — its `beamtalk.toml`
+  `[diagnostics]` table, cross-file type aliases and FFI registry, the scope
+  `load-project` compiles the same file with. `""` sends no path (a scratch
+  buffer), keeping today's behaviour. `"method"` mode ignores the path.
+  """
+  @spec diagnostics(String.t(), String.t(), String.t()) :: {:ok, [map()]} | {:error, term()}
+  def diagnostics(code, mode, source_path)
+      when is_binary(code) and is_binary(mode) and is_binary(source_path) do
+    case dispatch_diagnostics(code, mode, source_path) do
       {:diagnostics, list} when is_list(list) ->
         {:ok, Enum.map(list, &normalize_diagnostic/1)}
 
@@ -1078,6 +1119,16 @@ defmodule BtAttach.Workspace do
       "suffix" => Map.get(context, :suffix, "")
     }
 
+    # BT-4463: the edited method's class, only when a method editor sent one.
+    request =
+      case context do
+        %{class: class, side: side} when is_binary(class) and is_binary(side) ->
+          Map.merge(request, %{"class" => class, "side" => side})
+
+        _ ->
+          request
+      end
+
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->
         params = rpc(:beamtalk_repl_protocol, :get_params, [msg])
@@ -1093,9 +1144,14 @@ defmodule BtAttach.Workspace do
   # layer so the `{diagnostics, _}` term arrives live (no JSON edge). No session
   # pid is needed — diagnostics are workspace-global parse-only analysis — so
   # `self()` is passed only to satisfy `dispatch/4`'s arity, mirroring
-  # `dispatch_browse/2`. `mode` (BT-2569) selects the parse grammar.
-  defp dispatch_diagnostics(code, mode) do
-    request = %{"op" => "diagnostics", "code" => code, "mode" => mode}
+  # `dispatch_browse/2`. `mode` (BT-2569) selects the parse grammar; a
+  # non-empty `source_path` (BT-4583) selects the file's project scope.
+  defp dispatch_diagnostics(code, mode, source_path) do
+    request =
+      case source_path do
+        "" -> %{"op" => "diagnostics", "code" => code, "mode" => mode}
+        path -> %{"op" => "diagnostics", "code" => code, "mode" => mode, "source_path" => path}
+      end
 
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->

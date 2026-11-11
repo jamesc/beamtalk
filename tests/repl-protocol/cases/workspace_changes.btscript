@@ -54,6 +54,6 @@ Workspace respondsTo: #changes
 (Workspace changes select: [:e | e isOrphan]) isKindOf: List
 // => true
 
-// do: iterates without error (returns ok)
+// do: iterates without error (answers nil, BT-4619)
 Workspace changes do: [:e | e className]
-// => ok
+// => nil

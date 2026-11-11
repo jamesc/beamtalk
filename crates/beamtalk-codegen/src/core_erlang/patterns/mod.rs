@@ -37,7 +37,7 @@ use beamtalk_core::ast::MapPatternKey;
 ///
 /// Shared by `match_lowering::generate_pattern`'s `Pattern::Map` case and
 /// `destructure::generate_pattern_extractions_from_var`'s `Pattern::Map`
-/// case (CLAUDE.md's no-duplicate-implementations rule) — a plain free
+/// case (AGENTS.md's no-duplicate-implementations rule) — a plain free
 /// function (not a `CoreErlangGenerator` associated function) since neither
 /// caller needs generator state to compute it.
 fn map_pattern_key_doc(key: &MapPatternKey) -> Document<'static> {

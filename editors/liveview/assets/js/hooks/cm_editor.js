@@ -125,7 +125,7 @@ export const CmEditor = {
     // the live session via the `hover` event. Always enabled — even on a
     // read-only editor — because hover runs no user code (`:read` capability),
     // so an Observer hovers too, and the method-editor tabs get it for free.
-    extensions.push(backendHover(hoverQuery(this.pushEvent.bind(this))))
+    extensions.push(backendHover(hoverQuery(this.pushEvent.bind(this), this.tabId)))
     // Live parse-only diagnostics (BT-2556): error/warning squiggles sourced
     // from the live compiler via the `diagnostics` event. Only for editable
     // editors — a read-only buffer has nothing to fix, so squiggles would just
@@ -144,7 +144,7 @@ export const CmEditor = {
     // trip, which runs the real `erlc` and surfaces structured errors inline.
     if (!readOnly && this.el.dataset.lintMode !== "erlang") {
       const lintMode = this.el.dataset.lintMode || null
-      extensions.push(backendLint(lintQuery(this.pushEvent.bind(this), lintMode)))
+      extensions.push(backendLint(lintQuery(this.pushEvent.bind(this), lintMode, this.tabId)))
     }
     // Ctrl/Cmd-click go-to-definition (BT-2666): modifier-click a class name or a
     // selector send to open its definition / implementor(s). Skipped for native

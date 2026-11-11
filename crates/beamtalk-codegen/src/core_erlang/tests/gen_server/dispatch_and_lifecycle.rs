@@ -194,6 +194,7 @@ fn test_generate_has_method_lists_primary_class_methods() {
         state: vec![],
         methods: vec![
             MethodDefinition {
+                pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
                 selector: MessageSelector::Unary("increment".into()),
                 parameters: vec![],
                 body: vec![bare(Expression::Literal(
@@ -211,6 +212,7 @@ fn test_generate_has_method_lists_primary_class_methods() {
                 span: Span::new(0, 0),
             },
             MethodDefinition {
+                pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
                 selector: MessageSelector::Keyword(vec![KeywordPart::new(
                     "setValue:",
                     Span::new(0, 0),
@@ -247,6 +249,7 @@ fn test_generate_has_method_lists_primary_class_methods() {
         span: Span::new(0, 0),
     };
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         type_aliases: Vec::new(),
         native_declarations: Vec::new(),
@@ -348,6 +351,7 @@ fn actor_class_def(
 
 fn module_with_class(class: ClassDefinition) -> Module {
     Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         type_aliases: Vec::new(),
         native_declarations: Vec::new(),
@@ -362,6 +366,7 @@ fn module_with_class(class: ClassDefinition) -> Module {
 
 fn unary_method(name: &str) -> MethodDefinition {
     MethodDefinition {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         selector: MessageSelector::Unary(name.into()),
         parameters: vec![],
         body: vec![bare(Expression::Literal(
@@ -387,6 +392,7 @@ fn unary_method(name: &str) -> MethodDefinition {
 /// which does *not* count.
 fn catch_all_dnu_method() -> MethodDefinition {
     MethodDefinition {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         selector: MessageSelector::Keyword(vec![
             KeywordPart::new("doesNotUnderstand:", Span::new(0, 0)),
             KeywordPart::new("args:", Span::new(0, 0)),
@@ -600,5 +606,55 @@ fn test_method_table_with_script_methods_includes_arity() {
     assert!(
         table_body.contains("'binary' => 2"),
         "method_table should list 'binary' with arity 2. Got:\n{table_body}"
+    );
+}
+
+// ── format_status / '__beamtalk_secrets' (BT-4567) ──────────────────────────
+
+#[test]
+fn test_format_status_delegates_to_redaction_runtime() {
+    let code = codegen("Actor subclass: TestActor\n  state: x = 0\n");
+    assert!(
+        code.contains("'format_status'/1, '__beamtalk_secrets'/0"),
+        "Actor modules must export format_status/1 and '__beamtalk_secrets'/0. Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_actor_redaction':'format_status'('test', Status)"),
+        "format_status/1 must delegate to beamtalk_actor_redaction. Got:\n{code}"
+    );
+    // No declarations: empty lists, and no chain past the Actor root.
+    assert!(
+        code.contains("'__beamtalk_secrets'/0 = fun () ->\n    {[], []}"),
+        "An actor declaring nothing has no secrets. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_secrets_metadata_bakes_declared_literals() {
+    let code = codegen(
+        "Actor subclass: Vault\n  state: token = nil\n  \
+         class secretState => #(#token)\n  \
+         class secretSelectors => #(#unlock:, #peek)\n  \
+         unlock: x => x\n  peek => self.token\n",
+    );
+    assert!(
+        code.contains("{['token'], ['unlock:', 'peek']}"),
+        "'__beamtalk_secrets'/0 must answer the declared literals. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_secrets_metadata_chains_to_superclass_module() {
+    let code =
+        codegen("Vault subclass: PinVault\n  state: pin = nil\n  class secretState => #(#pin)\n");
+    assert!(
+        code.contains("let <ParentSecrets> = call 'bt@vault':'__beamtalk_secrets'() in"),
+        "A subclass must chain to its superclass module's secrets. Got:\n{code}"
+    );
+    assert!(
+        code.contains(
+            "call 'beamtalk_actor_redaction':'merge_secrets'(ParentSecrets, ['pin'], [])"
+        ),
+        "A subclass must append its own secrets to its superclass's. Got:\n{code}"
     );
 }

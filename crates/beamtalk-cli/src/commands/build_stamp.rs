@@ -54,6 +54,29 @@ pub(crate) fn current_otp_version() -> Option<&'static str> {
         .as_deref()
 }
 
+/// ADR 0125 §3.1: fail fast when the running OTP major is below the support
+/// window's floor (`otp-support.toml` `min-major`).
+///
+/// The toolchain's `.beam` files are built on `min-major`, and BEAM bytecode
+/// never loads on an older release, so booting a node on the toolchain's code
+/// below the floor dies with ERTS's `requires a more recent Erlang/OTP
+/// version` crash. The paths that must boot such a node (`build`, `check`,
+/// `BeamCompiler::compile_batch`, the workspace node and the foreground REPL
+/// node) call this first, so the user gets the same "unsupported, need N+"
+/// line `beamtalk doctor` prints instead. Fails open (`Ok`) when the OTP
+/// major cannot be probed, matching every other consumer of
+/// [`current_otp_version`]; above the window is only a warning
+/// (`build::warn_if_otp_out_of_window`), since newer releases load older code.
+pub(crate) fn require_supported_otp() -> miette::Result<()> {
+    match super::build::current_otp_major().and_then(beamtalk_cli::otp_support::below_floor_message)
+    {
+        Some(msg) => Err(miette::miette!(
+            "{msg}\n\n  Install a supported Erlang/OTP and run `beamtalk doctor` to check."
+        )),
+        None => Ok(()),
+    }
+}
+
 /// The build major from a compound OTP version string
 /// (`<otp_release>-<erts_version>`, e.g. `"27-15.0.1"` giving `27`) — the
 /// same string [`current_otp_version`] returns, split at its first `-` and
@@ -192,7 +215,7 @@ pub(crate) fn write_stamp(stamp_path: &Utf8Path, otp_release: Option<&str>) {
 /// `built_at` is informational, so second precision is plenty and no timezone
 /// crate is needed. `pub(crate)` (not private) so `release::provenance`'s
 /// own `built_at` field can reuse this instead of a second copy of the same
-/// no-timezone-crate algorithm (CLAUDE.md's no-duplicate-implementations rule).
+/// no-timezone-crate algorithm (AGENTS.md's no-duplicate-implementations rule).
 //
 // `secs / 86_400` is the post-epoch day count: it stays well within `i64`
 // (millions of years), so the `u64 → i64` cast cannot wrap.

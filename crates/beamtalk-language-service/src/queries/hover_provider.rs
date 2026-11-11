@@ -87,8 +87,8 @@ pub fn compute_hover(
     source: &str,
     position: Position,
     hierarchy: &ClassHierarchy,
-    native_types: Option<&NativeTypeRegistry>,
-    alias_registry: Option<&AliasRegistry>,
+    native_types: Option<&Arc<NativeTypeRegistry>>,
+    alias_registry: Option<&Arc<AliasRegistry>>,
     protocol_registry: Option<Arc<ProtocolRegistry>>,
 ) -> Option<HoverInfo> {
     let offset = position.to_byte_offset(source)?;
@@ -120,6 +120,10 @@ pub fn compute_hover(
         };
         (h, type_map)
     };
+    // Below the type pass the lookups only read the registries, so they take
+    // plain references.
+    let native_types = native_types.map(AsRef::as_ref);
+    let alias_registry = alias_registry.map(AsRef::as_ref);
 
     // Find declaration-level symbols (class names, superclasses, standalone method qualifiers)
     if let Some(hover) = find_hover_in_declarations(module, offset_val, hierarchy) {
@@ -1982,7 +1986,7 @@ mod tests {
             Position::new(6, 4),
             &hierarchy,
             None,
-            Some(&registry),
+            Some(&std::sync::Arc::new(registry.clone())),
             None,
         )
         .expect("hover");
@@ -3162,7 +3166,7 @@ mod tests {
             source,
             pos,
             &hierarchy,
-            Some(&registry),
+            Some(&std::sync::Arc::new(registry.clone())),
             None,
             None,
         );
@@ -3232,7 +3236,7 @@ mod tests {
             source,
             pos,
             &hierarchy,
-            Some(&registry),
+            Some(&std::sync::Arc::new(registry.clone())),
             None,
             None,
         );
@@ -3344,7 +3348,7 @@ mod tests {
             pos,
             &hierarchy,
             None,
-            Some(&alias_registry),
+            Some(&std::sync::Arc::new(alias_registry.clone())),
             None,
         );
         let hover = hover.expect("should get hover for alias-typed param reference");
@@ -3407,7 +3411,7 @@ mod tests {
             pos,
             &hierarchy,
             None,
-            Some(&alias_registry),
+            Some(&std::sync::Arc::new(alias_registry.clone())),
             None,
         );
         let hover = hover.expect("should hover on narrowed `policy`");
@@ -3501,7 +3505,7 @@ mod tests {
             pos,
             &hierarchy,
             None,
-            Some(&alias_registry),
+            Some(&std::sync::Arc::new(alias_registry.clone())),
             None,
         );
         let hover = hover.expect("should get hover for alias-typed state field access");

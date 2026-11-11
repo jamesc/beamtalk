@@ -703,6 +703,104 @@ Object subclass: Caller
     );
 }
 
+#[test]
+fn class_objects_in_a_union_are_judged_at_arguments_fields_defaults_and_returns() {
+    // BT-4454: the slot rule applies to each class-object member of a union
+    // value at the other checked sites, not only annotated locals.
+    let source = wire_source(
+        r"
+typed Actor subclass: Caller
+  state: slot :: Wire class | Nil = nil
+  take: w :: Wire class | Nil => w
+  takeStr: s :: String class | Nil => s
+  badArg: flag :: Boolean => self take: (flag ifTrue: [Integer] ifFalse: [nil])
+  badNonProtocolArg: flag :: Boolean => self takeStr: (flag ifTrue: [Integer] ifFalse: [nil])
+  badStore: flag :: Boolean => self.slot := flag ifTrue: [Integer] ifFalse: [nil]
+  badReturn: flag :: Boolean -> Wire class | Nil => flag ifTrue: [Integer] ifFalse: [nil]
+  state: mix :: Behaviour | Integer = 0
+  takeMix: m :: Behaviour | Integer => m
+  mixedArg: flag :: Boolean => self takeMix: (flag ifTrue: [Tcp] ifFalse: [#s])
+  mixedStore: flag :: Boolean => self.mix := flag ifTrue: [Tcp] ifFalse: [#s]
+  fineArg: flag :: Boolean => self take: (flag ifTrue: [Tcp] ifFalse: [Ssl])
+  fineArgNil: flag :: Boolean => self take: (flag ifTrue: [Tcp] ifFalse: [nil])
+  fineStore: flag :: Boolean => self.slot := flag ifTrue: [Tcp] ifFalse: [Ssl]
+  fineReturn: flag :: Boolean -> Wire class | Nil => flag ifTrue: [Tcp] ifFalse: [nil]
+",
+    );
+    let diags = checker_diagnostics(&source);
+    let line_of = |needle: &str| {
+        source[..source.find(needle).expect("fixture line")]
+            .lines()
+            .count()
+    };
+    let at = |needle: &str| -> Vec<&Diagnostic> {
+        diags
+            .iter()
+            .filter(|d| source[..d.span.start() as usize].lines().count() == line_of(needle))
+            .collect()
+    };
+    for (site, needle) in [
+        ("argument", "badArg:"),
+        ("field assignment", "badStore:"),
+        ("return", "badReturn:"),
+    ] {
+        assert!(
+            at(needle).iter().any(|d| d
+                .message
+                .contains("Integer class does not conform to Wire class")),
+            "{site}: a non-conformer in a union reports its non-conformance: {diags:#?}"
+        );
+    }
+    assert!(
+        at("badNonProtocolArg:")
+            .iter()
+            .any(|d| d.message.contains("Integer class")),
+        "a non-protocol class object in a union is refused: {diags:#?}"
+    );
+    for needle in ["mixedArg:", "mixedStore:"] {
+        let mixed = at(needle);
+        assert!(
+            !mixed.is_empty()
+                && mixed
+                    .iter()
+                    .all(|d| d.severity == crate::source_analysis::Severity::Hint
+                        && !d.message.contains("No member")
+                        && !d.hint.as_deref().is_some_and(|h| h.contains("No member"))),
+            "{needle} a conforming class object plus a bad instance is a partial mismatch (hint): {diags:#?}"
+        );
+    }
+    let fine = line_of("fineArg:");
+    assert!(
+        diags
+            .iter()
+            .all(|d| source[..d.span.start() as usize].lines().count() < fine),
+        "conformers in the same union are accepted: {diags:#?}"
+    );
+}
+
+#[test]
+fn class_objects_in_a_union_state_default_are_judged() {
+    let source = wire_source(
+        r"
+Actor subclass: Caller
+  state: bad :: Wire class | Nil = (true ifTrue: [Integer] ifFalse: [nil])
+  state: ok :: Wire class | Nil = (true ifTrue: [Tcp] ifFalse: [nil])
+",
+    );
+    let diags = checker_diagnostics(&source);
+    assert!(
+        diags.iter().any(|d| d
+            .message
+            .contains("Integer class does not conform to Wire class")),
+        "a non-conformer default is refused: {diags:#?}"
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "the conformer default is accepted: {diags:#?}"
+    );
+}
+
 /// BT-4450: a caller that already holds the registry in an `Arc` (the
 /// language service builds one per completion/hover request) shares it with
 /// the checker — no second deep clone of every `ProtocolInfo`.
@@ -970,5 +1068,281 @@ Object subclass: Caller
         msgs.iter()
             .any(|m| m.starts_with("Integer") && m.contains("'bogusSelector'")),
         "block param is typed Integer from the class requirement: {msgs:#?}"
+    );
+}
+
+// ── BT-4490: a class object is judged by the same rule as a protocol ─────
+
+#[test]
+fn class_object_is_checked_for_class_side_return_types() {
+    // `Tcp class>>label -> String` does not refine `Numbered`'s `Integer`, so
+    // `Tcp` must not flow into `Numbered class` any more than `Wire class`
+    // may; `Described` promises an `Object`, which `String` refines.
+    let source = wire_source(
+        r"
+Protocol define: Numbered
+  class label -> Integer
+
+Protocol define: Described
+  class label -> Object
+
+Object subclass: Caller
+  numbered: n :: Numbered class => n label
+  described: d :: Described class => d label
+  run =>
+    self numbered: Tcp
+    self described: Tcp
+",
+    );
+    let diags = checker_diagnostics(&source);
+    let numbered: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(|d| d.message.contains("Numbered class"))
+        .collect();
+    assert_eq!(numbered.len(), 1, "{:#?}", messages(&diags));
+    assert_eq!(
+        numbered[0].message.as_str(),
+        "Tcp class does not conform to Numbered class"
+    );
+    let hint = numbered[0].hint.as_deref().unwrap_or_default();
+    assert!(
+        hint.contains("return type: class label returns String, expected Integer"),
+        "the hint names the mismatch: {hint}"
+    );
+    assert!(
+        !hint.contains("missing:"),
+        "every selector is present: {hint}"
+    );
+    assert!(
+        !messages(&diags)
+            .iter()
+            .any(|m| m.contains("Described class")),
+        "String refines Object: {:#?}",
+        messages(&diags)
+    );
+}
+
+#[test]
+fn provided_selector_return_type_refines_a_requirement() {
+    // `Provides` supplies `name -> String`; `Requires` demands the same, and
+    // `Strict` demands `name -> Integer`. A provision carries its declared
+    // return type, so `Provides class` flows into `Requires class` but not
+    // `Strict class`; `Bare` provides `name` with no declared type, which
+    // promises nothing.
+    let source = r#"
+Protocol define: Requires
+  name -> String
+
+Protocol define: Strict
+  name -> Integer
+
+Protocol define: Provides
+  name -> String => "p"
+
+Protocol define: Bare
+  name => "b"
+
+Object subclass: Caller
+  requires: r :: Requires class => r
+  strict: s :: Strict class => s
+  run: p :: Provides class with: b :: Bare class =>
+    self requires: p
+    self strict: p
+    self requires: b
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert_eq!(
+        msgs.iter().filter(|m| m.contains("Requires class")).count(),
+        1,
+        "only the untyped provision fails Requires: {msgs:#?}"
+    );
+    assert_eq!(
+        msgs.iter().filter(|m| m.contains("Strict class")).count(),
+        1,
+        "a String provision does not refine Integer: {msgs:#?}"
+    );
+}
+
+#[test]
+fn typed_provision_is_not_hidden_by_an_untyped_inherited_requirement() {
+    // `Base` requires an untyped `name`; `Child extending: Base` provides a
+    // `name -> String`. The provision's own type must count.
+    let source = r#"
+Protocol define: Base
+  name
+
+Protocol define: Child
+  extending: Base
+  name -> String => "c"
+
+Protocol define: Requires
+  name -> String
+
+Object subclass: Caller
+  requires: r :: Requires class => r
+  run: c :: Child class => self requires: c
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        !msgs.iter().any(|m| m.contains("Requires class")),
+        "Child's typed provision refines Requires: {msgs:#?}"
+    );
+}
+
+#[test]
+fn class_is_judged_against_a_provisions_return_type() {
+    // `Clash` answers `name -> Integer`, clashing with `Provides`'s
+    // `name -> String` provision; it must not slip through `:: Provides
+    // class` only to reach `Requires class` via `Provides class <: Requires
+    // class`.
+    let source = r#"
+Protocol define: Requires
+  name -> String
+
+Protocol define: Provides
+  name -> String => "p"
+
+sealed Object subclass: Clash
+  name -> Integer => 1
+
+Object subclass: Caller
+  provides: p :: Provides class => p
+  run => self provides: Clash
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        msgs.iter().any(|m| m.contains("Provides class")),
+        "Clash's `name -> Integer` clashes with the provision: {msgs:#?}"
+    );
+}
+
+#[test]
+fn class_cannot_reach_requires_through_a_typed_provision_over_an_untyped_requirement() {
+    // `Base` requires an untyped `name`, `Child extending: Base` provides
+    // `name -> String`. `Clash` (`name -> Integer`) must be refused at
+    // `:: Child class`, or it would reach `Requires class` (String) through
+    // `Child class <: Requires class`.
+    let source = r#"
+Protocol define: Base
+  name
+
+Protocol define: Child
+  extending: Base
+  name -> String => "c"
+
+sealed Object subclass: Clash
+  name -> Integer => 1
+
+Object subclass: Caller
+  child: c :: Child class => c
+  run => self child: Clash
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        msgs.iter().any(|m| m.contains("Child class")),
+        "Clash answers Integer where Child's provision promises String: {msgs:#?}"
+    );
+}
+
+#[test]
+fn narrower_requirement_refines_even_when_a_parent_provision_is_broader() {
+    // `Base` provides `name -> Object`; `Child extending: Base` requires the
+    // narrower `name -> String`. Every `Child` conformer answers a String, so
+    // `Child class <: Requires class` holds.
+    let source = r"
+Protocol define: Base
+  name -> Object => 1
+
+Protocol define: Child
+  extending: Base
+  name -> String
+
+Protocol define: Requires
+  name -> String
+
+Object subclass: Caller
+  requires: r :: Requires class => r
+  run: c :: Child class => self requires: c
+";
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        !msgs.iter().any(|m| m.contains("Requires class")),
+        "{msgs:#?}"
+    );
+}
+
+#[test]
+fn instance_clashing_with_a_provision_return_type_warns_at_the_call_site() {
+    // A provision's declared return type is part of the protocol's type, so
+    // passing a `Clash` instance to `:: Provides` reports the mismatch.
+    let source = r#"
+Protocol define: Provides
+  name -> String => "p"
+
+sealed Object subclass: Clash
+  name -> Integer => 1
+
+Object subclass: Caller
+  take: p :: Provides => p
+  run => self take: Clash new
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        msgs.iter()
+            .any(|m| m.contains("Clash>>name returns Integer")),
+        "{msgs:#?}"
+    );
+}
+
+#[test]
+fn subsumption_judges_the_other_protocols_provision_return_types() {
+    // `Quoted` provides `name -> String`; `Plain` requires `name -> Integer`. `Cee`
+    // (`name -> Integer`) is refused at `:: Quoted class` directly, so it must not
+    // reach it through `Plain class` either.
+    let source = r#"
+Protocol define: Quoted
+  name -> String => "q"
+
+Protocol define: Plain
+  name -> Integer
+
+sealed Object subclass: Cee
+  name -> Integer => 1
+
+Object subclass: Caller
+  q: x :: Quoted class => x
+  viaP: y :: Plain class => self q: y
+  direct => self q: Cee
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert_eq!(
+        msgs.iter().filter(|m| m.contains("Quoted class")).count(),
+        2,
+        "both the direct and the via-P path are refused: {msgs:#?}"
+    );
+}
+
+#[test]
+fn uses_class_overriding_a_provision_wider_is_reported_at_the_call_site_too() {
+    // Pins a deliberate behaviour (BT-4490): the widening is warned about at
+    // the override's definition, and — because the class really answers a
+    // type `Provides` does not promise — at each `:: Provides` call site.
+    let source = r#"
+Protocol define: Provides
+  name -> String => "p"
+
+Object subclass: Widened
+  uses: Provides
+  name -> Object => 1
+
+Object subclass: Caller
+  take: p :: Provides => p
+  run => self take: Widened new
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        msgs.iter()
+            .any(|m| m.contains("Widened>>name returns Object")),
+        "the call site reports the widened provision: {msgs:#?}"
     );
 }

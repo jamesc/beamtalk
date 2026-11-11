@@ -493,11 +493,53 @@ defmodule BtAttach.WorkspaceRpcTest do
       assert Workspace.hover(self(), "Counter") == {:ok, "Counter class docs"}
     end
 
+    test "keyword_selector_at/2 returns the live nav-query value (BT-4455)" do
+      mock_rpc(
+        decode_ok({:beamtalk_repl_ops, :dispatch}, {:value, %{"selector" => "fetch:options:"}})
+      )
+
+      assert Workspace.keyword_selector_at("Fetcher fetch:", %{suffix: " u options: o"}) ==
+               {:value, %{"selector" => "fetch:options:"}}
+    end
+
+    test "keyword_selector_at/2 surfaces a badrpc as unreachable (BT-4455)" do
+      mock_rpc(decode_ok({:beamtalk_repl_ops, :dispatch}, {:badrpc, :mock_scripted}))
+
+      assert Workspace.keyword_selector_at("X a:") == {:error, {:unreachable, :mock_scripted}}
+    end
+
     test "hover/3 forwards the editor context and returns the docs (BT-4343)" do
       mock_rpc(decode_ok({:beamtalk_repl_ops, :dispatch}, {:docs, "fetch:options: docs"}))
 
       assert Workspace.hover(self(), "  options:", %{before: "Fetcher fetch: u\n", suffix: " o"}) ==
                {:ok, "fetch:options: docs"}
+    end
+
+    test "hover/3 sends the edited class and side only when both are given (BT-4463)" do
+      mock_rpc(
+        decode_asserting(
+          fn request ->
+            assert request["class"] == "Counter"
+            assert request["side"] == "class"
+          end,
+          {:docs, "docs"}
+        )
+      )
+
+      assert Workspace.hover(self(), "self size", %{class: "Counter", side: "class"}) ==
+               {:ok, "docs"}
+
+      mock_rpc(
+        decode_asserting(
+          fn request ->
+            refute Map.has_key?(request, "class")
+            refute Map.has_key?(request, "side")
+          end,
+          {:docs, "docs"}
+        )
+      )
+
+      assert Workspace.hover(self(), "self size", %{class: "Counter"}) == {:ok, "docs"}
     end
 
     test "hover/2 propagates a dispatch error" do

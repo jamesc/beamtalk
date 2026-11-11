@@ -19,7 +19,9 @@ use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
 
+pub mod actor_secrets;
 pub mod actor_spawn;
+pub mod alias_expansion;
 pub mod alias_registry;
 mod block_analyzer;
 pub(crate) mod block_context;
@@ -427,8 +429,9 @@ pub struct AnalysisContext<'a> {
     /// means only the current module's own extensions are visible.
     pub cross_file_extensions: Option<&'a crate::compilation::extension_index::ExtensionIndex>,
     /// Whether the current package has dependencies whose extensions are
-    /// not visible here (ADR 0100 Rule 2).
-    pub has_package_dependencies: bool,
+    /// not all visible here (ADR 0100 Rule 2; see
+    /// [`crate::CompilerOptions::dependency_extensions_unknown`]).
+    pub dependency_extensions_unknown: bool,
     /// Whether the module being analysed comes from a `stubs/` directory
     /// (ADR 0075). `declare native:` is only legal there — defaulting to
     /// `false` means any caller that doesn't know about stub files (the
@@ -456,7 +459,7 @@ impl<'a> AnalysisContext<'a> {
 
     /// Applies the subset of [`crate::CompilerOptions`] that semantic
     /// analysis cares about: `stdlib_mode`, `skip_module_expression_lint`,
-    /// `current_package`, `knowledge_scope`, `has_package_dependencies`,
+    /// `current_package`, `knowledge_scope`, `dependency_extensions_unknown`,
     /// `known_erlang_modules`.
     #[must_use]
     pub fn with_options(mut self, options: &'a crate::CompilerOptions) -> Self {
@@ -464,7 +467,7 @@ impl<'a> AnalysisContext<'a> {
         self.skip_module_expression_lint = options.skip_module_expression_lint;
         self.current_package = options.current_package.as_deref();
         self.knowledge_scope = options.knowledge_scope;
-        self.has_package_dependencies = options.has_package_dependencies;
+        self.dependency_extensions_unknown = options.dependency_extensions_unknown;
         self.known_erlang_modules
             .clone_from(&options.known_erlang_modules);
         self
@@ -730,7 +733,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         native_type_registry,
         knowledge_scope,
         cross_file_extensions,
-        has_package_dependencies,
+        dependency_extensions_unknown,
         is_stub_file,
         known_erlang_modules,
     } = ctx;
@@ -804,7 +807,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // module — `(e) foo` must analyse exactly like `e foo`. Cloned only when
     // there is something to expand or peel.
     let has_uses = module.classes.iter().any(|c| !c.uses.is_empty());
-    let module: &Module = if has_uses || normalize::has_parenthesised_operand(module) {
+    let module: &Module = if has_uses || normalize::needs_normalising(module) {
         let mut owned = module.clone();
         if has_uses {
             let (expansion_diags, origins, resolved_uses) =
@@ -852,7 +855,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     result.class_hierarchy.set_knowledge_scope(knowledge_scope);
     result
         .class_hierarchy
-        .set_dependency_extensions_unknown(has_package_dependencies);
+        .set_dependency_extensions_unknown(dependency_extensions_unknown);
 
     // ADR 0071: Stamp current package on AST-derived classes
     if let Some(pkg) = current_package {
@@ -1270,6 +1273,12 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &result.class_hierarchy,
         &mut result.diagnostics,
     );
+    // BT-4567: `class secretState` / `class secretSelectors` declarations
+    actor_secrets::check_actor_secret_declarations(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
     // ADR 0135 §2: class-side supervisor configuration is a compile error
     validators::check_class_side_supervisor_config(
         module,
@@ -1279,6 +1288,12 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
 
     // Native actor validation (ADR 0056)
     validators::check_native_state_fields(module, &result.class_hierarchy, &mut result.diagnostics);
+    // BT-4577: a native actor's instance methods must be `self delegate`
+    validators::check_native_actor_instance_method_bodies(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
     validators::check_native_delegate_return_type(
         module,
         &result.class_hierarchy,
@@ -1387,10 +1402,11 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         );
     }
     // ADR 0107 Phase A: validate `Pattern::Type` class names in
-    // `match:` arms (unknown class, non-leaf class, `Character` exclusion).
+    // `match:` arms (unknown class, abstract class with no subclass, `Character`
+    // exclusion). A class with subclasses is legal (BT-4319).
     // The unknown-class branch is internally gated on `has_cross_file_classes`,
     // same open-world policy as `check_unresolved_classes` above; the
-    // leaf-class and `Character` checks run unconditionally.
+    // abstract-class and `Character` checks run unconditionally.
     validators::check_type_pattern_classes(
         module,
         &result.class_hierarchy,

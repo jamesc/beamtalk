@@ -145,6 +145,36 @@ impl Scope {
             .insert(name.to_string(), binding);
     }
 
+    /// Names that are in scope everywhere (module and method bodies) without
+    /// being declared. `NameResolver::resolve_module` defines exactly these.
+    pub(crate) const BUILTINS: [&'static str; 3] = ["true", "false", "nil"];
+
+    /// Hides the module-level (depth 0) bindings from method bodies (BT-4665).
+    ///
+    /// A method body (in-class or extension) runs outside the module's
+    /// top-level evaluation, so top-level bindings and REPL `known_vars` are
+    /// not readable from it. Only the built-ins `true`/`false`/`nil` stay
+    /// visible. Returns the hidden bindings; pass them to
+    /// [`Scope::restore_module_bindings`] once every method is resolved.
+    ///
+    /// This is the single place that decides what a method body can see from
+    /// the module scope, shared by `NameResolver` and `Analyser`.
+    pub(crate) fn hide_module_bindings(&mut self) -> HashMap<String, Binding> {
+        let module_level = &mut self.levels[0].variables;
+        let mut hidden = std::mem::take(module_level);
+        for builtin in Self::BUILTINS {
+            if let Some(binding) = hidden.remove(builtin) {
+                module_level.insert(builtin.to_string(), binding);
+            }
+        }
+        hidden
+    }
+
+    /// Restores bindings hidden by [`Scope::hide_module_bindings`].
+    pub(crate) fn restore_module_bindings(&mut self, hidden: HashMap<String, Binding>) {
+        self.levels[0].variables.extend(hidden);
+    }
+
     /// Looks up a variable by name, searching from innermost to outermost scope.
     ///
     /// Returns the variable information if found. Also marks the binding as used.

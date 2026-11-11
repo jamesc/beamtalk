@@ -311,7 +311,7 @@ The `#beamtalk_object{}` record is the actor's "calling card" — it can be pass
 
 ### Cascade Semantics
 
-**Deferred to ADR 0044.** Cascade semantics for immutable value objects are a significant design question — Smalltalk cascades (`;`) send multiple messages to the same receiver, but with immutable objects each message returns a new object, making traditional fan-out semantics problematic. The leading candidate is cascade-as-pipeline on value objects (each message sent to the *result* of the previous), which would give BeamTalk Elixir-style `|>` pipelines for free (BT-506). However, the type-dependent semantics (pipeline on values, fan-out on actors), dynamic receiver handling, and interaction with ADR 0039 deserve their own focused ADR.
+**Deferred to a follow-up ADR** (planned as "ADR 0044", a number that went to comments-as-AST-nodes; now ADR 0145, Accepted). Cascade semantics for immutable value objects are a significant design question — Smalltalk cascades (`;`) send multiple messages to the same receiver, but with immutable objects each message returns a new object, making traditional fan-out semantics problematic. The leading candidate at the time was cascade-as-pipeline on value objects (each message sent to the *result* of the previous), which would give BeamTalk Elixir-style `|>` pipelines for free (BT-506). However, the type-dependent semantics (pipeline on values, fan-out on actors), dynamic receiver handling, and interaction with ADR 0039 deserve their own focused ADR. **Outcome:** ADR 0145 (Accepted) did not take this candidate. `;` keeps uniform fan-out for every receiver, chaining on the previous result gets a separate `|>` operator, and a `cascade-drops-update` warning flags value cascades that discard an updated copy.
 
 For the initial implementation of ADR 0042, explicit chaining works correctly and unambiguously:
 
@@ -403,7 +403,7 @@ C# is the closest mainstream precedent for Beamtalk's overall design philosophy.
 
 **Adopted:** Sync-by-default with explicit async opt-in. C#'s `async/await` is the gold standard for this pattern; Beamtalk's `.`/`!` is simpler (no function colouring) but follows the same philosophy.
 
-**Pipeline expressions (ADR 0044).** LINQ is cascade-as-pipeline for C# — each method chains on the result, not the original receiver. LINQ works in expression context (capture the result), not as statement-level mutation. This matches exactly where Beamtalk's pipeline cascade is most powerful: inside blocks and HOMs where the result flows through without rebinding. Anders would say pipeline cascade is an expression-level feature, not a mutation substitute.
+**Pipeline expressions (ADR 0145).** LINQ is cascade-as-pipeline for C# — each method chains on the result, not the original receiver. LINQ works in expression context (capture the result), not as statement-level mutation. This matches exactly where Beamtalk's pipeline cascade is most powerful: inside blocks and HOMs where the result flows through without rebinding. Anders would say pipeline cascade is an expression-level feature, not a mutation substitute.
 
 **Insight adopted:** Focus pipeline cascade on expression contexts (blocks, HOMs, construction) where the result flows naturally. Don't try to make it a statement-level mutation substitute — that's where the rebinding problem bites.
 
@@ -748,8 +748,8 @@ Value type tests using instance variable assignment (`self.slot := value`) must 
 - ADR 0035 (Field-Based Reflection API) — `fieldAt:put:` on value types raises `#beamtalk_error{type => immutable_value}` at runtime (closes the deferred access control question); `fieldAt:`/`fieldNames` API unchanged
 - ADR 0038 (Subclass/ClassBuilder Protocol) — ClassBuilder must recognize `Value` as a root class
 - ADR 0037 (Collection Class Hierarchy) — collection classes (List, Array, Dictionary, Range) must be classified as Value or Actor; value-type collections using `self.slot :=` need migration to `with*:` functional setters
-- ADR 0039 (Syntax Pragmatism vs Smalltalk) — cascade semantics deferred to ADR 0044; ADR 0039's fan-out semantics remain unchanged until then
-- ADR 0044 (Cascade-as-Pipeline, future) — pipeline cascade (`;` chains on return value) is the natural builder pattern for immutable values. **Key design tension:** pipeline cascade does not rebind the original variable, so `p := Point new. p; withX: 5; withY: 4.` leaves `p` unchanged — unlike actors where the PID is stable and state mutates in-place. This means pipeline cascade is most powerful inside **blocks and higher-order messages** where the result flows through without rebinding: `points collect: [:p | p; withX: 5; withY: 4]`. ADR 0044 should evaluate cascade semantics primarily in the context of blocks, HOMs, and expression-level construction — not as a mutation substitute.
+- ADR 0039 (Syntax Pragmatism vs Smalltalk) — cascade semantics deferred to ADR 0145; ADR 0039's fan-out semantics remain unchanged until then
+- ADR 0145 (Cascade Semantics for Immutable Values, Accepted) — settles the cascade question deferred here. `;` keeps uniform fan-out; a separate `|>` operator sends each message to the previous result (`points collect: [:p | p withX: 5 |> withY: 4]`), which gives the builder-style chaining this note anticipated without changing what `;` means; and a `cascade-drops-update` warning flags value cascades such as `p withX: 5; withY: 4` that discard an updated copy. As this note predicted, the chaining form is most useful in blocks, HOMs and expression-level construction, not as a mutation substitute.
 - ADR 0043 (Sync-by-Default Actor Messaging) — `.` vs `!` call/cast syntax split out from this ADR into its own focused decision
 - ADR 0040 (Workspace-Native REPL Commands) — REPL binding semantics preserved
 - ADR 0041 (Universal State-Threading Block Protocol) — scope narrowed to local rebinding and actor slot assignments through blocks; remains active and essential
@@ -762,11 +762,11 @@ Value type tests using instance variable assignment (`self.slot := value`) must 
 - Swift value types: struct vs class distinction, `mutating` keyword as analogous pattern
 - C# struct vs class (Anders Hejlsberg): declaration-site value/reference type choice with compiler enforcement — closest mainstream precedent for Actor/Value split
 - C# async/await: sync-by-default, async opt-in — same philosophy as `.` vs `!` (ADR 0043)
-- C# LINQ: pipeline cascade in expression context — validates blocks/HOMs as the sweet spot for cascade (ADR 0044)
+- C# LINQ: pipeline cascade in expression context — validates blocks/HOMs as the sweet spot for cascade (ADR 0145)
 - GemStone/S: production Smalltalk solves shared state via transactions (MVCC), not processes — no production Smalltalk uses process-per-object
 - Erlang/OTP gen_server: functional state transition model adopted for actors
 - Pony reference capabilities: value vs identity distinction at the type level
 
 ### Related Issues
-- BT-506 — pipeline operator; cascade-as-pipeline candidate deferred to ADR 0044
+- BT-506 — pipeline operator; cascade-as-pipeline candidate deferred to ADR 0145
 - BT-868, BT-900, BT-904, BT-894 — state-threading edge cases that motivated this decision

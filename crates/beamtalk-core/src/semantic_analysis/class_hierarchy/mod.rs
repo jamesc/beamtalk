@@ -85,14 +85,15 @@ pub struct ClassHierarchy {
     /// [`KnowledgeScope::ModuleOnly`]; consulted by the receiver-knowledge
     /// classifier (ADR 0100 Rule 2).
     knowledge_scope: crate::semantic_analysis::receiver_knowledge::KnowledgeScope,
-    /// Whether the compiled package declares dependencies whose extension
-    /// contributions are not yet loaded (pre-WS3 guard).
+    /// Whether the compiled package has dependencies whose extension
+    /// contributions were not all loaded (pre-WS3 guard).
     ///
-    /// Until WS3 (ADR 0070 amendment) ships cross-package extension metadata,
-    /// a dependency can extend *any* class — including `Object`, which every
-    /// receiver inherits from — so no receiver's method surface is provably
-    /// complete. When true (and the scope is `ProjectComplete`), the
-    /// receiver-knowledge classifier keeps every receiver `Open`.
+    /// A dependency can extend *any* class — including `Object`, which every
+    /// receiver inherits from — so while any dependency's extensions are
+    /// unknown no receiver's method surface is provably complete. When true
+    /// (and the scope is `ProjectComplete`), the receiver-knowledge
+    /// classifier keeps every receiver `Open`. Surfaces that load every
+    /// dependency's extensions (ADR 0070 WS3, BT-4608) leave it `false`.
     dependency_extensions_unknown: bool,
     /// The class names more than one package in this compilation's scope
     /// declares (BT-4151/BT-4283), installed by `analyse_full` and the
@@ -265,6 +266,7 @@ impl ClassHierarchy {
                     is_native: false,
                     handle_scope: None,
                     surface_incomplete: false,
+                    in_caller_new1: false,
                     // Synthetic entry: no compiled module exists.
                     is_module_less: true,
                     state: vec![],
@@ -386,9 +388,9 @@ impl ClassHierarchy {
     }
 
     /// Declare that the compiled package has dependencies whose extension
-    /// contributions are not loaded (pre-WS3 guard). Set by
+    /// contributions were not all loaded (pre-WS3 guard). Set by
     /// `analyse_full` from
-    /// `CompilerOptions::has_package_dependencies`.
+    /// `CompilerOptions::dependency_extensions_unknown`.
     pub fn set_dependency_extensions_unknown(&mut self, unknown: bool) {
         self.dependency_extensions_unknown = unknown;
     }
@@ -459,6 +461,17 @@ impl ClassHierarchy {
     /// of every static direct call re-checks.
     #[must_use]
     pub fn runs_class_method_in_caller(&self, class_name: &str, selector: &str) -> bool {
+        if selector == "new:"
+            && self.get_class(class_name).is_some_and(|c| c.in_caller_new1)
+            && self.constructor_chain_allows_in_caller(class_name)
+        {
+            // BT-4501: the class's own explicit `new:` is published out of
+            // `process_bound_class_selectors` (codegen), so it runs in the
+            // caller like any in-caller class method. `in_caller_new1` is the
+            // chain-independent body shape (BT-4640); the chain half is
+            // answered here against this hierarchy.
+            return true;
+        }
         !ClassInfo::is_process_bound_class_selector(selector)
             && !ClassInfo::is_class_var_reflection_selector(selector)
             && !self.chain_has_class_variables(class_name)
@@ -503,7 +516,8 @@ impl ClassHierarchy {
 
     /// Whether `class_name` or any of its ancestors declares class variables
     /// ([`ClassInfo::has_class_variables`]), or the chain cannot be followed to
-    /// its root (an unknown class or superclass, a cycle): any doubt answers
+    /// its root (an unknown class or superclass, a cycle, a superclass-index
+    /// stub from [`Self::add_external_superclasses`]): any doubt answers
     /// `true`, as the runtime's `beamtalk_class_metadata:
     /// chain_has_class_variables/1` answers for an unpublished fact.
     #[must_use]
@@ -517,7 +531,10 @@ impl ClassHierarchy {
             let Some(class) = self.get_class(current) else {
                 return true;
             };
-            if class.has_class_variables() {
+            // A superclass-index stub (`add_external_superclasses`) carries
+            // only name + superclass: its class variables are unknown, not
+            // absent, so it answers `true` like any other doubt (BT-4644).
+            if class.has_class_variables() || class.is_superclass_index_stub() {
                 return true;
             }
             match class.superclass.as_deref() {
@@ -621,6 +638,7 @@ impl ClassHierarchy {
                         // whose chain includes it must never be classified
                         // ClosedComplete.
                         surface_incomplete: true,
+                        in_caller_new1: false,
                         // Stub: no compiled module is known.
                         is_module_less: true,
                         state: Vec::new(),

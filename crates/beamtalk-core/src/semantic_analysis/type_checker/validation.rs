@@ -38,12 +38,25 @@ use ecow::EcoString;
 use super::known_remote;
 use super::sendability;
 use super::type_resolver;
-use super::types::ClassObjectType;
 use super::types::{
     AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass, OverrideReturnWidening,
 };
+use super::types::{ClassObjectType, MetatypeNonconformance};
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
+
+/// How a send resolves on a protocol-typed receiver — see
+/// [`TypeChecker::protocol_send_resolution`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ProtocolSendResolution {
+    /// One of the protocol's own (required or provided) selectors.
+    Protocol,
+    /// Not a protocol selector, but a method every object answers; its
+    /// signature comes from `Object`'s method table.
+    Object,
+    /// Neither — a does-not-understand.
+    Unknown,
+}
 
 /// Outcome of walking a `Union`-typed argument's members against one
 /// expected simple type, via [`TypeChecker::classify_union_members`] +
@@ -54,7 +67,7 @@ use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 /// need the same "skip if unclassifiable, skip if every member is
 /// compatible, otherwise report the incompatible members" decision from a
 /// raw `classify_union_members` call, kept as one implementation rather
-/// than two independently re-derived copies (CLAUDE.md § No duplicate
+/// than two independently re-derived copies (AGENTS.md § No duplicate
 /// implementations). Diagnostic
 /// *message* text still differs per call site (an FFI signature vs. a
 /// declared Beamtalk method), so only the classification — not the
@@ -96,19 +109,35 @@ impl TypeChecker {
     where
         F: Fn(&EcoString) -> bool,
     {
+        Self::classify_union_members_with(members, |_, name| pred(name))
+    }
+
+    /// [`Self::classify_union_members`] with a predicate that also receives
+    /// each member's own type (BT-4607: a protocol-typed state slot judges a
+    /// member by structural conformance, which needs the type, not its name).
+    pub(super) fn classify_union_members_with<F>(
+        members: &[InferredType],
+        pred: F,
+    ) -> Option<(usize, usize, Vec<EcoString>)>
+    where
+        F: Fn(&InferredType, &EcoString) -> bool,
+    {
         // Skip the whole union if any member is non-`Known` (Dynamic/Union/Meta/
         // Never) — we can't reason about those conservatively.
         if members.iter().any(|m| m.as_known().is_none()) {
             return None;
         }
-        let member_names: Vec<EcoString> = members
-            .iter()
-            .map(InferredType::display_annotation)
-            .collect();
-        let compatible = member_names.iter().filter(|m| pred(m)).count();
-        let incompatible: Vec<EcoString> =
-            member_names.iter().filter(|m| !pred(m)).cloned().collect();
-        Some((compatible, member_names.len(), incompatible))
+        let mut compatible = 0;
+        let mut incompatible = Vec::new();
+        for member in members {
+            let name = member.display_annotation();
+            if pred(member, &name) {
+                compatible += 1;
+            } else {
+                incompatible.push(name);
+            }
+        }
+        Some((compatible, members.len(), incompatible))
     }
 
     /// Classifies a `Union` argument's members against `expected`, per
@@ -131,6 +160,81 @@ impl TypeChecker {
                 incompatible,
             }
         }
+    }
+
+    /// BT-4454: the first class-object member (`C class` / `P class`) of a
+    /// union value that [`Self::metatype_assignable_to`] refuses for
+    /// `declared_type`. The one rule for judging class objects inside a
+    /// union, shared by [`Self::detect_assignment_type_mismatch`] (annotated
+    /// locals) and [`Self::union_class_object_diagnostic`] (arguments, fields,
+    /// state defaults, return bodies); `tower` is the caller's own tower
+    /// predicate, as for a bare class object at that site.
+    pub(super) fn refused_class_object<'a>(
+        members: &'a [InferredType],
+        declared_type: &EcoString,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&ProtocolRegistry>,
+        tower: fn(&EcoString, &EcoString, &ClassHierarchy) -> bool,
+    ) -> Option<ClassObjectType<'a>> {
+        members
+            .iter()
+            .filter_map(ClassObjectType::of)
+            .find(|class_object| {
+                !Self::metatype_assignable_to(
+                    *class_object,
+                    declared_type,
+                    hierarchy,
+                    protocol_registry,
+                    tower,
+                )
+            })
+    }
+
+    /// BT-4454: a union value's class-object members are judged by
+    /// [`Self::refused_class_object`]; when one is refused, the diagnostic
+    /// for it (ADR 0144 conformance wording where it applies, else the
+    /// site's own `message`/`hint`, which receive the refused class object).
+    /// Like an annotated local, a refused class object warns even when other
+    /// members fit. `None` when every class-object member is accepted (or
+    /// there is none); the caller then checks the remaining members with
+    /// [`Self::non_class_object_members`] as before.
+    pub(super) fn union_class_object_diagnostic(
+        &self,
+        members: &[InferredType],
+        declared_type: &EcoString,
+        hierarchy: &ClassHierarchy,
+        tower: fn(&EcoString, &EcoString, &ClassHierarchy) -> bool,
+        span: Span,
+        describe: impl FnOnce(ClassObjectType<'_>) -> (String, String),
+    ) -> Option<Diagnostic> {
+        let refused = Self::refused_class_object(
+            members,
+            declared_type,
+            hierarchy,
+            self.protocol_registry.as_deref(),
+            tower,
+        )?;
+        let (message, hint) = describe(refused);
+        Some(Self::metatype_mismatch_diagnostic(
+            refused,
+            declared_type,
+            hierarchy,
+            self.protocol_registry.as_deref(),
+            message,
+            hint,
+            span,
+        ))
+    }
+
+    /// The members of a union value that are not class objects — what the
+    /// pre-BT-4454 checks (`classify_union_members`) still judge once the
+    /// class objects have been accepted by [`Self::refused_class_object`].
+    pub(super) fn non_class_object_members(members: &[InferredType]) -> Vec<InferredType> {
+        members
+            .iter()
+            .filter(|m| ClassObjectType::of(m).is_none())
+            .cloned()
+            .collect()
     }
 
     /// Collect deduplicated missing protocol methods across union members.
@@ -193,65 +297,35 @@ impl TypeChecker {
                 .get_class(class_name)
                 .is_some_and(|info| info.is_sealed);
 
+        // Whether the selector is absent from everything the checker can see
+        // on this class object — no class method, no class-object-protocol
+        // method, no implicit constructor, and no DNU override that would
+        // answer it (BT-4526). Drives both the DNU below and the honest
+        // `Dynamic` reason of the terminal fallback.
+        let selector_absent = !has_class_method
+            && !is_sealed_with_instance_dnu
+            && !hierarchy.has_class_dnu_override(class_name)
+            && !Self::class_chain_resolves(class_name, selector, hierarchy);
+
         // ADR 0100 Rule 1: the completeness-ladder classifier folds
         // in the class-side DNU override and cross-file-parent
         // suppression — only a `ClosedComplete` receiver's absent class-side
         // method is diagnosable.
-        if !has_class_method
-            && !is_sealed_with_instance_dnu
+        let dnu_reported = selector_absent
             && receiver_knowledge::classify_receiver(class_name, hierarchy, true)
-                .is_closed_complete()
-        {
-            // Fall back to the Class→Behaviour→Object→ProtoObject instance-method chain.
-            // At runtime, class objects dispatch through this chain (ADR 0032 Phase 0
-            // fallthrough), so the type checker must model the same path.
-            //
-            // spawn/spawnWith: are still instance methods on Actor but routed
-            // class-side by beamtalk_class_dispatch.erl — they need the bypass.
-            // new/new: are proper class methods on Value and found
-            // via find_class_method through the hierarchy, so no bypass needed.
-            let is_factory_selector = matches!(selector, "spawn" | "spawnWith:");
-            // ADR 0083: `new` / `new:` / `basicNew` are implicitly available on
-            // every *concrete* Object subclass via the runtime's class
-            // instantiation path, even when no explicit class-side `new` is
-            // declared (e.g. a `sealed typed Object subclass`). Suppress the DNU
-            // for these so the implicit-`new` override (previously documented
-            // with `@expect dnu`, e.g. a former singleton accessor) is no longer
-            // needed.
-            //
-            // Excluded:
-            //  * Abstract classes — instantiating them is a genuine error
-            //    (`infer_constructor_type` keeps the result Dynamic for them).
-            //  * Actor subclasses — they are spawned (`spawn` / `spawnWith:`),
-            //    not `new`'d. In the common case this exclusion is now moot for
-            //    `new`/`new:` specifically: actor.bt declares real `class sealed
-            //    new` / `new:`, so `has_class_method` above is already
-            //    `true` and this whole block is skipped before reaching here. It
-            //    stays as defense-in-depth for a partially-unresolved hierarchy
-            //    (e.g. a cross-package actor whose ancestor chain
-            //    `find_class_method` can't see) — see
-            //    `new_on_actor_subclass_no_longer_dnu` for the still-current
-            //    behavior and `test_actor_new_error_in_standalone_method` /
-            //    `check_actor_new_usage` for the actual "use spawn" diagnostic.
-            let is_implicit_constructor = matches!(selector, "new" | "new:" | "basicNew")
-                && !hierarchy.is_abstract(class_name)
-                && !hierarchy.is_actor_subclass(class_name);
-            let has_class_chain_method = hierarchy.resolves_selector("Class", selector)
-                || is_implicit_constructor
-                || (is_factory_selector && hierarchy.resolves_selector(class_name, selector));
-            if !has_class_chain_method {
-                self.emit_unknown_selector_warning(
-                    class_name,
-                    class_name,
-                    selector,
-                    span,
-                    hierarchy,
-                    true,
-                    Severity::Hint,
-                    None,
-                    None,
-                );
-            }
+                .is_closed_complete();
+        if dnu_reported {
+            self.emit_unknown_selector_warning(
+                class_name,
+                class_name,
+                selector,
+                span,
+                hierarchy,
+                true,
+                Severity::Hint,
+                None,
+                None,
+            );
         }
 
         // Infer return type for known factory methods
@@ -336,7 +410,7 @@ impl TypeChecker {
                         // `SelfType` arm) so nested `Self` in the return type
                         // resolves the same way the old `self_type` parameter
                         // did.
-                        return type_resolver::resolve_declared_type(
+                        return type_resolver::resolve_declared_type_in(
                             ret_ty,
                             &type_resolver::merge_substitutions(
                                 &class_subst,
@@ -344,8 +418,9 @@ impl TypeChecker {
                                 Some(&self_type),
                             ),
                             self.protocol_registry.as_deref(),
-                            self.alias_registry.as_ref(),
+                            self.alias_registry.as_deref(),
                             super::TypeStringContext::Substitution,
+                            Some(hierarchy),
                         );
                     }
                 }
@@ -377,9 +452,64 @@ impl TypeChecker {
                         }
                     }
                 }
-                InferredType::Dynamic(DynamicReason::UnannotatedReturn)
+                // BT-4526: an absent selector is not an "unannotated return".
+                // Where the DNU was reported it is the root cause, so the
+                // result is a non-warning `DynamicReceiver` (as on the
+                // instance side); where the surface is open (an unseen
+                // extension might define it), say the selector is unresolved.
+                InferredType::Dynamic(if dnu_reported {
+                    DynamicReason::DynamicReceiver
+                } else if selector_absent {
+                    self.unresolved_selector_sends.insert(span);
+                    DynamicReason::UnresolvedSelector
+                } else {
+                    DynamicReason::UnannotatedReturn
+                })
             }
         }
+    }
+
+    /// Whether a class object answers `selector` without a class method of its
+    /// own: through the `Class → Behaviour → Object → ProtoObject`
+    /// instance-method chain, an implicit constructor, or an actor factory.
+    ///
+    /// At runtime, class objects dispatch through this chain (ADR 0032 Phase 0
+    /// fallthrough), so the type checker must model the same path.
+    ///
+    /// spawn/spawnWith: are still instance methods on Actor but routed
+    /// class-side by `beamtalk_class_dispatch.erl` — they need the bypass.
+    /// new/new: are proper class methods on Value and found via
+    /// `find_class_method` through the hierarchy, so no bypass needed.
+    ///
+    /// ADR 0083: `new` / `new:` / `basicNew` are implicitly available on
+    /// every *concrete* Object subclass via the runtime's class instantiation
+    /// path, even when no explicit class-side `new` is declared (e.g. a
+    /// `sealed typed Object subclass`), so they are not reported as DNU.
+    ///
+    /// Excluded:
+    ///  * Abstract classes — instantiating them is a genuine error
+    ///    (`infer_constructor_type` keeps the result Dynamic for them).
+    ///  * Actor subclasses — they are spawned (`spawn` / `spawnWith:`), not
+    ///    `new`'d. In the common case this exclusion is moot for `new`/`new:`:
+    ///    actor.bt declares real `class sealed new` / `new:`, so the caller's
+    ///    `has_class_method` is already `true`. It stays as defense-in-depth
+    ///    for a partially-unresolved hierarchy (e.g. a cross-package actor
+    ///    whose ancestor chain `find_class_method` can't see) — see
+    ///    `new_on_actor_subclass_no_longer_dnu` for the still-current behavior
+    ///    and `test_actor_new_error_in_standalone_method` /
+    ///    `check_actor_new_usage` for the actual "use spawn" diagnostic.
+    fn class_chain_resolves(
+        class_name: &EcoString,
+        selector: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        let is_factory_selector = matches!(selector, "spawn" | "spawnWith:");
+        let is_implicit_constructor = matches!(selector, "new" | "new:" | "basicNew")
+            && !hierarchy.is_abstract(class_name)
+            && !hierarchy.is_actor_subclass(class_name);
+        hierarchy.resolves_selector("Class", selector)
+            || is_implicit_constructor
+            || (is_factory_selector && hierarchy.resolves_selector(class_name, selector))
     }
 
     /// Build the class-level substitution map for a class-method call.
@@ -568,6 +698,46 @@ impl TypeChecker {
         }
     }
 
+    /// How an instance-side send of `selector` resolves on a receiver typed
+    /// as protocol `name`, or `None` when `name` is not a registered
+    /// protocol (a hierarchy class — including the LSP's synthetic protocol
+    /// entries, which inherit `Object` already — or an unknown name).
+    ///
+    /// A protocol-typed value is still an object (BT-4594): the protocol's
+    /// own selectors (required ∪ provided, through `extending:`) win, then
+    /// the methods every object answers (`Object`/`ProtoObject`). This is
+    /// the one rule both DNU validation ([`Self::check_instance_selector`])
+    /// and inference (the `Known` and union receiver paths) read, so they
+    /// cannot disagree about which selectors a protocol receiver
+    /// understands. An `Object` method's return type comes from `Object`'s
+    /// method table; a send of the protocol's own selector still infers
+    /// `Dynamic` on both paths.
+    pub(super) fn protocol_send_resolution(
+        &self,
+        name: &str,
+        selector: &str,
+        hierarchy: &ClassHierarchy,
+    ) -> Option<ProtocolSendResolution> {
+        if hierarchy.has_class(name) {
+            return None;
+        }
+        let registry = self.protocol_registry.as_deref()?;
+        let info = registry.get(name)?;
+        Some(
+            if info
+                .all_conformance_selectors(registry)
+                .iter()
+                .any(|s| s.as_str() == selector)
+            {
+                ProtocolSendResolution::Protocol
+            } else if hierarchy.resolves_selector(WellKnownClass::Object.as_str(), selector) {
+                ProtocolSendResolution::Object
+            } else {
+                ProtocolSendResolution::Unknown
+            },
+        )
+    }
+
     /// Check if an instance-side selector is valid for a known class.
     pub(super) fn check_instance_selector(
         &mut self,
@@ -596,25 +766,23 @@ impl TypeChecker {
                 class_name
             };
         if !hierarchy.has_class(effective_class) {
-            // If the type is a protocol (from respondsTo: narrowing),
-            // validate the selector against the protocol's required methods.
-            if let Some(ref registry) = self.protocol_registry {
-                if let Some(proto_info) = registry.get(effective_class) {
-                    let required = proto_info.all_required_selectors(registry);
-                    if !required.iter().any(|s| s.as_str() == selector) {
-                        self.emit_unknown_selector_warning(
-                            class_name,
-                            effective_class,
-                            selector,
-                            span,
-                            hierarchy,
-                            false,
-                            Severity::Hint,
-                            None,
-                            None,
-                        );
-                    }
-                }
+            // A protocol-typed receiver (a `:: P` annotation, or
+            // `respondsTo:` narrowing) answers its protocol's selectors and
+            // every `Object` method; anything else is a DNU (BT-4594).
+            if self.protocol_send_resolution(effective_class, selector, hierarchy)
+                == Some(ProtocolSendResolution::Unknown)
+            {
+                self.emit_unknown_selector_warning(
+                    class_name,
+                    effective_class,
+                    selector,
+                    span,
+                    hierarchy,
+                    false,
+                    Severity::Hint,
+                    None,
+                    None,
+                );
             }
             return;
         }
@@ -1159,7 +1327,7 @@ impl TypeChecker {
                 continue;
             };
             let sendability::Tier::HandleScoped(sendability::HandleScope::Process) =
-                sendability::tier_of(value_ty, hierarchy, self.alias_registry.as_ref())
+                sendability::tier_of(value_ty, hierarchy, self.alias_registry.as_deref())
             else {
                 continue;
             };
@@ -1234,7 +1402,7 @@ impl TypeChecker {
         // payload (there is no "receiver" in the remote sense there).
         let node_upgrade_applies = is_actor_message && receiver_known_remote.is_some();
         for (i, arg_ty) in arg_types.iter().enumerate() {
-            let tier = sendability::tier_of(arg_ty, hierarchy, self.alias_registry.as_ref());
+            let tier = sendability::tier_of(arg_ty, hierarchy, self.alias_registry.as_deref());
             let scope = match tier {
                 sendability::Tier::HandleScoped(sendability::HandleScope::Process) => {
                     sendability::HandleScope::Process
@@ -1591,7 +1759,7 @@ impl TypeChecker {
             // alias-typed parameter a silent no-op. Resolve to the
             // structural expansion so the checks below actually validate.
             let (expected_structural, alias_deps) =
-                Self::resolve_alias_structural(expected_ty, self.alias_registry.as_ref());
+                Self::resolve_alias_structural(expected_ty, self.alias_registry.as_deref());
             self.referenced_aliases.extend(alias_deps);
             let is_class_ref_arg = arg_exprs
                 .and_then(|exprs| exprs.get(i))
@@ -1628,7 +1796,7 @@ impl TypeChecker {
                                 &reference,
                                 &HashMap::new(),
                                 None,
-                                self.alias_registry.as_ref(),
+                                self.alias_registry.as_deref(),
                             );
                         self.referenced_aliases.extend(arg_alias_deps);
                         resolved
@@ -1660,10 +1828,18 @@ impl TypeChecker {
                     // still names the alias, silently skipping the guard and
                     // letting `is_type_compatible`'s shortcut accept
                     // any known class instance against a `:: MyAlias` param.
+                    //
+                    // With the shortcut suppressed, a value whose own type is
+                    // `Class` or a subclass of it (e.g. a forwarded `:: Class`
+                    // parameter, BT-4599) is still compatible: check that by
+                    // the nominal chain directly, bypassing the shortcut.
                     let class_shortcut_applies =
                         expected_structural.as_str() == "Class" && !is_class_ref_arg;
-                    let instance_compat = !class_shortcut_applies
-                        && Self::is_type_compatible(actual_ty, &expected_structural, hierarchy);
+                    let instance_compat = if class_shortcut_applies {
+                        InferredType::is_nominal_subtype(hierarchy, actual_ty, "Class")
+                    } else {
+                        Self::is_type_compatible(actual_ty, &expected_structural, hierarchy)
+                    };
                     let class_literal_compat = !instance_compat
                         && is_class_ref_arg
                         && hierarchy.has_class(actual_ty)
@@ -1753,10 +1929,34 @@ impl TypeChecker {
                     }
                 }
                 InferredType::Union { members, .. } => {
-                    // Check every union member against the
-                    // expected type via the shared classification.
-                    let (compat, incompatible) = match Self::classify_union_arg_compat(
+                    // BT-4454: class-object members are judged by the slot
+                    // rule, as a bare class object is above.
+                    let param_pos = i + 1;
+                    if let Some(diag) = self.union_class_object_diagnostic(
                         members,
+                        &expected_structural,
+                        hierarchy,
+                        Self::is_type_compatible,
+                        span,
+                        |class_object| {
+                            (
+                                format!(
+                                    "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {class_object}"
+                                ),
+                                format!(
+                                    "Expected {expected_display} (or a subclass), got {class_object}"
+                                ),
+                            )
+                        },
+                    ) {
+                        self.diagnostics.push(diag);
+                        continue;
+                    }
+                    // Check every other union member against the
+                    // expected type via the shared classification.
+                    let instance_members = Self::non_class_object_members(members);
+                    let (compat, incompatible) = match Self::classify_union_arg_compat(
+                        &instance_members,
                         &expected_structural,
                         hierarchy,
                     ) {
@@ -1767,7 +1967,8 @@ impl TypeChecker {
                             ..
                         } => (compat, incompatible),
                     };
-                    let param_pos = i + 1;
+                    // Accepted class objects are compatible members too.
+                    let compat = compat + (members.len() - instance_members.len());
                     let union_display = arg_ty
                         .display_for_diagnostic()
                         .unwrap_or_else(|| EcoString::from("Dynamic"));
@@ -1860,7 +2061,7 @@ impl TypeChecker {
             expected_declared,
             &class_type_params,
             self.protocol_registry.as_deref(),
-            self.alias_registry.as_ref(),
+            self.alias_registry.as_deref(),
             super::TypeStringContext::Declared,
         );
         self.referenced_aliases.extend(alias_deps);
@@ -1883,7 +2084,7 @@ impl TypeChecker {
             }
             other => list_element(other)?,
         };
-        if Self::element_type_is_unjudged(&element, hierarchy, self.protocol_registry.as_deref()) {
+        if Self::element_type_is_unjudged(&element, hierarchy) {
             return None;
         }
         Some(ListLiteralElements {
@@ -1895,12 +2096,10 @@ impl TypeChecker {
 
     /// Whether a declared list element type is left to the whole-argument
     /// checks ([`Self::list_literal_element_expectation`]): it is `Dynamic`,
-    /// or mentions a type variable placeholder or a protocol anywhere in it.
-    fn element_type_is_unjudged(
-        ty: &InferredType,
-        hierarchy: &ClassHierarchy,
-        protocol_registry: Option<&ProtocolRegistry>,
-    ) -> bool {
+    /// or mentions a type variable placeholder anywhere in it. A protocol
+    /// element type is judged: the per-element rule checks structural
+    /// conformance (BT-4482).
+    fn element_type_is_unjudged(ty: &InferredType, hierarchy: &ClassHierarchy) -> bool {
         match ty {
             InferredType::Dynamic(_) => true,
             InferredType::Known {
@@ -1909,15 +2108,13 @@ impl TypeChecker {
                 ..
             } => {
                 super::is_type_var_placeholder(class_name, hierarchy)
-                    || hierarchy.is_protocol_class(class_name)
-                    || protocol_registry.is_some_and(|r| r.has_protocol(class_name))
-                    || type_args.iter().any(|arg| {
-                        Self::element_type_is_unjudged(arg, hierarchy, protocol_registry)
-                    })
+                    || type_args
+                        .iter()
+                        .any(|arg| Self::element_type_is_unjudged(arg, hierarchy))
             }
             InferredType::Union { members, .. } => members
                 .iter()
-                .any(|member| Self::element_type_is_unjudged(member, hierarchy, protocol_registry)),
+                .any(|member| Self::element_type_is_unjudged(member, hierarchy)),
             InferredType::Meta { .. }
             | InferredType::ProtocolMeta { .. }
             | InferredType::Never
@@ -1982,11 +2179,10 @@ impl TypeChecker {
             ) else {
                 continue;
             };
-            let diag = if let Some((protocol, missing)) = &mismatch.nonconformance {
+            let diag = if let Some(nonconformance) = &mismatch.nonconformance {
                 Self::protocol_metatype_nonconformance_diagnostic(
                     &mismatch.inferred_display,
-                    protocol,
-                    missing,
+                    nonconformance,
                     span,
                 )
             } else {
@@ -2093,7 +2289,7 @@ impl TypeChecker {
                     declared,
                     &type_resolver::SubstitutionMap::new(),
                     None,
-                    self.alias_registry.as_ref(),
+                    self.alias_registry.as_deref(),
                 );
                 self.referenced_aliases.extend(deps);
                 expected
@@ -2464,6 +2660,37 @@ impl TypeChecker {
         if !hierarchy.is_typed(class_name) {
             return;
         }
+
+        // BT-4454: class-object members are judged by the return slot rule
+        // (the same one `check_class_object_return` applies to a bare class
+        // object); the remaining members keep the check below.
+        if !matches!(expected, InferredType::Dynamic(_)) {
+            let declared_type = expected.display_annotation();
+            let expected_display = expected
+                .display_for_diagnostic()
+                .unwrap_or_else(|| InferredType::class_name_for_diagnostic(declared_type.as_str()));
+            let selector = method.selector.name();
+            if let Some(diag) = self.union_class_object_diagnostic(
+                members,
+                &declared_type,
+                hierarchy,
+                Self::is_type_compatible,
+                method.span,
+                |class_object| {
+                    (
+                        format!(
+                            "Method '{selector}' in {class_name} declares return type {expected_display}, but body returns {class_object}"
+                        ),
+                        format!("Declared -> {expected_display}, inferred body type is {class_object}"),
+                    )
+                },
+            ) {
+                self.diagnostics.push(diag);
+                return;
+            }
+        }
+        let instance_members = Self::non_class_object_members(members);
+        let members = instance_members.as_slice();
 
         let mut known_members = Vec::with_capacity(members.len());
         for member in members {
@@ -3022,6 +3249,16 @@ impl TypeChecker {
         // Simple` could ever be a registered alias reference to begin with,
         // matching `state_field_type`'s bare-`EcoString` return —
         // so render the structured type once at this boundary.
+        // BT-4607: the structured slot type, so a protocol-typed slot
+        // (`P`, `P | Nil`, `P1 & P2`) is judged by structural conformance
+        // (`slot_accepts`) rather than by name.
+        let (declared_resolved, _) = type_resolver::resolve_declared_type_with_alias_deps(
+            &declared_type,
+            &type_resolver::SubstitutionMap::new(),
+            self.protocol_registry.as_deref(),
+            self.alias_registry.as_deref(),
+            super::TypeStringContext::Declared,
+        );
         let declared_type: EcoString = declared_type.to_string().into();
         // `ClassHierarchy::state_field_type` predates ADR 0108 and
         // returns a bare `EcoString` with no alias provenance — unlike an
@@ -3045,7 +3282,7 @@ impl TypeChecker {
         // or an alias-typed field falsely rejects every one of its own union
         // members (no "unknown class" escape hatch in `is_assignable_to`).
         let (declared_type, alias_deps) =
-            Self::resolve_alias_structural(&declared_type, self.alias_registry.as_ref());
+            Self::resolve_alias_structural(&declared_type, self.alias_registry.as_deref());
         self.referenced_aliases.extend(alias_deps);
         // BT-4199: an explicit `:: Dynamic` annotation opts the slot out of
         // checking (ADR 0077), same as `check_state_defaults`;
@@ -3058,7 +3295,14 @@ impl TypeChecker {
                 class_name: value_type,
                 ..
             } => {
-                if !Self::is_assignable_to(value_type, &declared_type, hierarchy) {
+                if !Self::slot_accepts(
+                    value_ty,
+                    value_type,
+                    &declared_resolved,
+                    &declared_type,
+                    hierarchy,
+                    self.protocol_registry.as_deref(),
+                ) {
                     // Render `UndefinedObject` as `Nil` in user-facing messages.
                     let declared_display = declared_display.clone();
                     let value_display =
@@ -3096,10 +3340,42 @@ impl TypeChecker {
                 }
             }
             InferredType::Union { members, .. } => {
-                // Check all union members against the declared field type.
+                // BT-4454: class-object members are judged by the slot rule,
+                // as a bare class object is below.
+                let declared_display_for_members = declared_display.clone();
+                if let Some(diag) = self.union_class_object_diagnostic(
+                    members,
+                    &declared_type,
+                    hierarchy,
+                    Self::is_assignable_to,
+                    span,
+                    |class_object| {
+                        (
+                            format!(
+                                "Type mismatch: field `{}` declared as {declared_display_for_members}, got {class_object}",
+                                field.name
+                            ),
+                            format!(
+                                "Expected {declared_display_for_members} but assigning {class_object}"
+                            ),
+                        )
+                    },
+                ) {
+                    self.diagnostics.push(diag);
+                    return;
+                }
+                // Check the other union members against the declared field type.
+                let instance_members = Self::non_class_object_members(members);
                 let Some((compat, total, incompatible)) =
-                    Self::classify_union_members(members, |m| {
-                        Self::is_assignable_to(m, &declared_type, hierarchy)
+                    Self::classify_union_members_with(&instance_members, |member, name| {
+                        Self::slot_accepts(
+                            member,
+                            name,
+                            &declared_resolved,
+                            &declared_type,
+                            hierarchy,
+                            self.protocol_registry.as_deref(),
+                        )
                     })
                 else {
                     return; // Contains Dynamic — skip
@@ -3107,6 +3383,8 @@ impl TypeChecker {
                 if compat == total {
                     return; // All match → pass
                 }
+                // Accepted class objects are compatible members too.
+                let compat = compat + (members.len() - instance_members.len());
                 let union_display = value_ty
                     .display_for_diagnostic()
                     .unwrap_or_else(|| EcoString::from("Dynamic"));
@@ -3380,7 +3658,7 @@ impl TypeChecker {
             .collect();
 
         let empty_registry = AliasRegistry::new();
-        let aliases = self.alias_registry.as_ref().unwrap_or(&empty_registry);
+        let aliases = self.alias_registry.as_deref().unwrap_or(&empty_registry);
 
         // Confidence: a fully-known, locally-visible ancestor chain with no
         // `native:` ancestor is a Warning; anything less certain is a Hint.
@@ -3533,7 +3811,7 @@ impl TypeChecker {
             .collect();
 
         let empty_registry = AliasRegistry::new();
-        let aliases = self.alias_registry.as_ref().unwrap_or(&empty_registry);
+        let aliases = self.alias_registry.as_deref().unwrap_or(&empty_registry);
 
         let summary = hierarchy.all_initialize_assigns(class_name);
         let confident = !summary.incomplete
@@ -3645,7 +3923,7 @@ impl TypeChecker {
         // alias's structural expansion, not the opaque unresolved name, or a
         // valid `spawnWith:` slot value falsely fails the check.
         let (declared_structural, alias_deps) =
-            Self::resolve_alias_structural(declared_ty, self.alias_registry.as_ref());
+            Self::resolve_alias_structural(declared_ty, self.alias_registry.as_deref());
         self.referenced_aliases.extend(alias_deps);
         match &value_ty {
             InferredType::Known {
@@ -3766,8 +4044,8 @@ impl TypeChecker {
                 type_resolver::resolve_type_annotation_with_alias_deps(
                     type_annotation,
                     &type_resolver::SubstitutionMap::new(),
-                    None,
-                    self.alias_registry.as_ref(),
+                    self.protocol_registry.as_deref(),
+                    self.alias_registry.as_deref(),
                 );
             self.referenced_aliases.extend(alias_deps);
             // BT-4032: an explicit `:: Dynamic` annotation opts the slot
@@ -3814,7 +4092,15 @@ impl TypeChecker {
                 InferredType::Known {
                     class_name: value_type,
                     ..
-                } if !Self::is_assignable_to(value_type, &declared_type, hierarchy) => {
+                } if !Self::slot_accepts(
+                    &inferred,
+                    value_type,
+                    &resolved_declared,
+                    &declared_type,
+                    hierarchy,
+                    self.protocol_registry.as_deref(),
+                ) =>
+                {
                     let declared_display = declared_display.clone();
                     // Render `UndefinedObject` as `Nil` in user-facing messages.
                     let value_display =
@@ -3834,11 +4120,42 @@ impl TypeChecker {
                     );
                 }
                 InferredType::Union { members, .. } => {
-                    // Check all union members against the declared field
+                    // BT-4454: class-object members are judged by the slot
+                    // rule, as a bare class object is below.
+                    if let Some(diag) = self.union_class_object_diagnostic(
+                        members,
+                        &declared_type,
+                        hierarchy,
+                        Self::is_assignable_to,
+                        decl.span,
+                        |class_object| {
+                            (
+                                format!(
+                                    "Type mismatch: state `{}` declared as {declared_display}, default is {class_object}",
+                                    decl.name.name
+                                ),
+                                format!(
+                                    "Default value type {class_object} is not compatible with {declared_display}"
+                                ),
+                            )
+                        },
+                    ) {
+                        self.diagnostics.push(diag);
+                        continue;
+                    }
+                    // Check the other union members against the declared field
                     // type, mirroring `check_field_assignment`'s handling.
+                    let instance_members = Self::non_class_object_members(members);
                     let Some((compat, total, incompatible)) =
-                        Self::classify_union_members(members, |m| {
-                            Self::is_assignable_to(m, &declared_type, hierarchy)
+                        Self::classify_union_members_with(&instance_members, |member, name| {
+                            Self::slot_accepts(
+                                member,
+                                name,
+                                &resolved_declared,
+                                &declared_type,
+                                hierarchy,
+                                self.protocol_registry.as_deref(),
+                            )
                         })
                     else {
                         continue; // Contains Dynamic — skip
@@ -3846,6 +4163,8 @@ impl TypeChecker {
                     if compat == total {
                         continue; // All members compatible
                     }
+                    // Accepted class objects are compatible members too.
+                    let compat = compat + (members.len() - instance_members.len());
                     let union_display = inferred
                         .display_for_diagnostic()
                         .unwrap_or_else(|| EcoString::from("Dynamic"));
@@ -3989,11 +4308,20 @@ impl TypeChecker {
                     // A protocol literal is the protocol object, not the
                     // class object of a conformer; `check_conformance` would
                     // wave it through the open-world gate (no hierarchy entry).
+                    // Return types count too (BT-4490), as in
+                    // `subsumes_conformance_to` below: one conformance rule.
                     ClassObjectType::Class(class_name) => {
                         !registry.has_protocol(class_name)
                             && registry
                                 .check_conformance(class_name, declared_base, hierarchy)
                                 .is_ok()
+                            && registry
+                                .conformance_return_type_mismatches(
+                                    class_name,
+                                    declared_base,
+                                    hierarchy,
+                                )
+                                .is_empty()
                     }
                     ClassObjectType::Protocol(protocol_name) => {
                         match (registry.get(protocol_name), registry.get(declared_base)) {
@@ -4038,16 +4366,19 @@ impl TypeChecker {
 
     /// ADR 0144: when a class object `C class` fails
     /// [`Self::metatype_assignable_to`] because of a declared protocol
-    /// metatype part `P class`, the protocol and the selectors `C` is
-    /// missing (as [`ProtocolRegistry::check_conformance`] reports them —
-    /// class-side ones prefixed `class `). `None` when no declared `P class`
-    /// part is involved, so the caller keeps its plain type-mismatch wording.
+    /// metatype part `P class`, the protocol, the selectors `C` is missing
+    /// (as [`ProtocolRegistry::check_conformance`] reports them — class-side
+    /// ones prefixed `class `) and the requirements it answers with an
+    /// incompatible return type (BT-4490,
+    /// [`ProtocolRegistry::conformance_return_type_mismatches`]). `None`
+    /// when no declared `P class` part is the cause, so the caller keeps its
+    /// plain type-mismatch wording.
     pub(super) fn protocol_metatype_nonconformance(
         class_name: &EcoString,
         declared_type: &EcoString,
         hierarchy: &ClassHierarchy,
         protocol_registry: Option<&ProtocolRegistry>,
-    ) -> Option<(EcoString, Vec<EcoString>)> {
+    ) -> Option<MetatypeNonconformance> {
         let registry = protocol_registry?;
         crate::semantic_analysis::string_utils::split_top_level(declared_type, '|')
             .iter()
@@ -4055,10 +4386,19 @@ impl TypeChecker {
             .filter_map(|part| part.trim().strip_suffix(" class").map(str::trim))
             .filter(|base| Self::is_protocol_type(base, hierarchy, registry))
             .find_map(|base| {
-                registry
+                let missing = registry
                     .check_conformance(class_name, base, hierarchy)
                     .err()
-                    .map(|missing| (EcoString::from(base), missing))
+                    .unwrap_or_default();
+                let return_mismatches =
+                    registry.conformance_return_type_mismatches(class_name, base, hierarchy);
+                (!missing.is_empty() || !return_mismatches.is_empty()).then(|| {
+                    MetatypeNonconformance {
+                        protocol: EcoString::from(base),
+                        missing,
+                        return_mismatches,
+                    }
+                })
             })
     }
 
@@ -4086,10 +4426,9 @@ impl TypeChecker {
             ClassObjectType::Protocol(_) => None,
         };
         match nonconformance {
-            Some((protocol, missing)) => Self::protocol_metatype_nonconformance_diagnostic(
+            Some(nonconformance) => Self::protocol_metatype_nonconformance_diagnostic(
                 &value.to_string(),
-                &protocol,
-                &missing,
+                &nonconformance,
                 span,
             ),
             None => Diagnostic::warning(message, span)
@@ -4099,19 +4438,42 @@ impl TypeChecker {
     }
 
     /// The ADR 0144 conformance warning: `<C> class does not conform to <P>
-    /// class`, with the missing selectors (class-side ones prefixed `class `).
+    /// class`, with the missing selectors (class-side ones prefixed `class `)
+    /// and, after them, the requirements answered with an incompatible
+    /// return type (BT-4490).
     pub(super) fn protocol_metatype_nonconformance_diagnostic(
         value_display: &str,
-        protocol: &str,
-        missing: &[EcoString],
+        nonconformance: &MetatypeNonconformance,
         span: Span,
     ) -> Diagnostic {
+        let MetatypeNonconformance {
+            protocol,
+            missing,
+            return_mismatches,
+        } = nonconformance;
+        let mut hint_parts = Vec::new();
+        if !missing.is_empty() {
+            hint_parts.push(format!("missing: {}", missing.join(", ")));
+        }
+        if !return_mismatches.is_empty() {
+            let mismatches: Vec<String> = return_mismatches
+                .iter()
+                .map(|m| {
+                    let side = if m.class_side { "class " } else { "" };
+                    format!(
+                        "{side}{} returns {}, expected {}",
+                        m.selector, m.actual, m.expected
+                    )
+                })
+                .collect();
+            hint_parts.push(format!("return type: {}", mismatches.join(", ")));
+        }
         Diagnostic::warning(
             format!("{value_display} does not conform to {protocol} class"),
             span,
         )
         .with_category(DiagnosticCategory::Type)
-        .with_hint(format!("missing: {}", missing.join(", ")))
+        .with_hint(hint_parts.join("; "))
     }
 
     /// Returns true if `value_type` is assignable to `declared_type`.
@@ -4485,12 +4847,11 @@ impl TypeChecker {
         mismatch: &AssignmentTypeMismatch,
         span: Span,
     ) {
-        if let Some((protocol, missing)) = &mismatch.nonconformance {
+        if let Some(nonconformance) = &mismatch.nonconformance {
             self.diagnostics
                 .push(Self::protocol_metatype_nonconformance_diagnostic(
                     &mismatch.inferred_display,
-                    protocol,
-                    missing,
+                    nonconformance,
                     span,
                 ));
             return;
@@ -4567,15 +4928,30 @@ impl TypeChecker {
     /// Render a [`DynamicInTypedClass`] fact detected by
     /// `inference::post_process_expr_type`.
     pub(super) fn emit_dynamic_in_typed_class(&mut self, fact: &DynamicInTypedClass, span: Span) {
+        // An unresolved selector is not fixed by a type annotation: name the
+        // selector so the diagnostic points at the real problem (BT-4526).
+        let (detail, hint): (EcoString, EcoString) = match &fact.unresolved_selector {
+            Some(selector) => (
+                format!("{} '{selector}'", fact.description).into(),
+                format!(
+                    "No method '{selector}' is visible on the receiver — check the selector, or use `@expect type` if a dependency's extension defines it"
+                )
+                .into(),
+            ),
+            None => (
+                fact.description.into(),
+                "Add a type annotation or use `@expect type` to suppress if intentional".into(),
+            ),
+        };
         self.diagnostics.push(
             Diagnostic::warning(
                 format!(
-                    "expression inferred as Dynamic in typed class `{}` ({})",
-                    fact.class_name, fact.description
+                    "expression inferred as Dynamic in typed class `{}` ({detail})",
+                    fact.class_name
                 ),
                 span,
             )
-            .with_hint("Add a type annotation or use `@expect type` to suppress if intentional")
+            .with_hint(hint)
             .with_category(DiagnosticCategory::Type),
         );
     }

@@ -35,6 +35,48 @@ read_specs_lists_test() ->
     ?assertEqual(1, length(maps:get(params, ReverseSpec))),
     ?assertEqual(<<"List">>, maps:get(return_type, ReverseSpec)).
 
+%% BT-4457: zstd:compress/2 accepts a context as well as a parameter map.
+%% Skipped on OTP < 28, where `zstd' does not exist.
+read_specs_zstd_compress_accepts_context_test() ->
+    case code:which(zstd) of
+        non_existing ->
+            ok;
+        BeamFile ->
+            {ok, Specs} = beamtalk_spec_reader:read_specs(BeamFile),
+            [Spec] = [
+                S
+             || S <- Specs,
+                maps:get(name, S) =:= <<"compress">>,
+                maps:get(arity, S) =:= 2
+            ],
+            [_Data, Opts] = maps:get(params, Spec),
+            ?assertEqual(<<"Dynamic">>, maps:get(type, Opts))
+    end.
+
+%% BT-4457: a clause whose param is a union containing an unresolvable
+%% (opaque) member must also widen the merged position to Dynamic.
+multi_clause_union_with_dynamic_member_widens_to_dynamic_test() ->
+    Forms = [
+        {attribute, 1, export, [{f, 1}]},
+        {attribute, 1, opaque, {ctx, {type, 1, tuple, any}, []}},
+        {attribute, 1, spec,
+            {{f, 1}, [
+                {type, 2, 'fun', [
+                    {type, 2, product, [{type, 2, map, any}]},
+                    {type, 2, ok, []}
+                ]},
+                {type, 3, 'fun', [
+                    {type, 3, product, [
+                        {type, 3, union, [{type, 3, binary, []}, {user_type, 3, ctx, []}]}
+                    ]},
+                    {type, 3, ok, []}
+                ]}
+            ]}}
+    ],
+    [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    [Param] = maps:get(params, Spec),
+    ?assertEqual(<<"Dynamic">>, maps:get(type, Param)).
+
 %% Reading specs from maps.beam succeeds and returns non-empty results.
 read_specs_maps_test() ->
     BeamFile = code:which(maps),
@@ -196,6 +238,25 @@ map_type_tuple_positional_test() ->
     ?assertEqual(
         <<"Tuple(Symbol, Integer, Symbol)">>,
         beamtalk_spec_reader:map_type({type, 0, tuple, Elements})
+    ).
+
+%% BT-4510: `{beamtalk_string, binary()}` (`beamtalk_string:t()`) is a
+%% String's representation, so it maps to String, not Tuple — in a union
+%% too, so `{ok, beamtalk_string:t()}` reads as `Result(String, …)`.
+map_type_string_tag_tuple_is_string_test() ->
+    StringTag = {type, 0, tuple, [{atom, 0, beamtalk_string}, {type, 0, binary, []}]},
+    ?assertEqual(<<"String">>, beamtalk_spec_reader:map_type(StringTag)),
+    Ok = {type, 0, tuple, [{atom, 0, ok}, StringTag]},
+    ?assertEqual(
+        <<"Result(String, Exception) | Symbol">>,
+        beamtalk_spec_reader:map_type({type, 0, union, [Ok, {atom, 0, not_found}]})
+    ),
+    %% Any other 2-tuple headed by an atom stays a Tuple.
+    ?assertEqual(
+        <<"Tuple(Symbol, String | Binary)">>,
+        beamtalk_spec_reader:map_type(
+            {type, 0, tuple, [{atom, 0, other_tag}, {type, 0, binary, []}]}
+        )
     ).
 
 %% A tuple whose every element is uninformative collapses to bare Tuple.
@@ -1141,9 +1202,32 @@ multi_clause_different_returns_test() ->
     ?assertEqual(1, maps:get(arity, Spec)),
     %% Return type is union of both clauses
     ?assertEqual(<<"Boolean | Symbol">>, maps:get(return_type, Spec)),
-    %% Params come from first clause
+    %% Param types are the union across clauses (BT-4457)
     [Param] = maps:get(params, Spec),
-    ?assertEqual(<<"Integer">>, maps:get(type, Param)).
+    ?assertEqual(<<"Integer | Float">>, maps:get(type, Param)).
+
+%% BT-4457: an overloaded spec whose later clause takes an opaque type
+%% (zstd:compress/2 -> `compress_parameters() | context()`) must not narrow
+%% the parameter to the first clause's type.
+multi_clause_opaque_param_widens_to_dynamic_test() ->
+    Forms = [
+        {attribute, 1, export, [{compress, 2}]},
+        {attribute, 1, opaque, {context, {type, 1, tuple, any}, []}},
+        {attribute, 1, spec,
+            {{compress, 2}, [
+                {type, 2, 'fun', [
+                    {type, 2, product, [{type, 2, iodata, []}, {type, 2, map, any}]},
+                    {type, 2, iodata, []}
+                ]},
+                {type, 3, 'fun', [
+                    {type, 3, product, [{type, 3, iodata, []}, {user_type, 3, context, []}]},
+                    {type, 3, iodata, []}
+                ]}
+            ]}}
+    ],
+    [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    [_Data, Opts] = maps:get(params, Spec),
+    ?assertEqual(<<"Dynamic">>, maps:get(type, Opts)).
 
 %% Multi-clause spec: same return types collapse to a single type.
 multi_clause_same_returns_test() ->
@@ -1322,6 +1406,39 @@ read_specs_batch_module_names_test() ->
     Results = beamtalk_spec_reader:read_specs_batch([ListsBeam]),
     [{ModName, _}] = Results,
     ?assertEqual(<<"lists">>, ModName).
+
+%%% ---------------------------------------------------------------
+%%% add_export_only_entries/2 — exports without specs (BT-4574)
+%%% ---------------------------------------------------------------
+
+%% With no specs at all, every export becomes an export-only entry.
+add_export_only_entries_no_specs_test() ->
+    ListsBeam = code:which(lists),
+    Entries = beamtalk_spec_reader:add_export_only_entries(ListsBeam, []),
+    ?assert(
+        lists:member(#{name => <<"reverse">>, arity => 1, export_only => true}, Entries)
+    ),
+    ?assert(lists:all(fun(#{export_only := true}) -> true end, Entries)),
+    ?assertEqual(length(lists:module_info(exports)), length(Entries)).
+
+%% A spec'd export keeps its spec entry and gets no export-only duplicate;
+%% an export without a spec (`module_info/0') is appended.
+add_export_only_entries_skips_specced_test() ->
+    ListsBeam = code:which(lists),
+    {ok, Specs} = beamtalk_spec_reader:read_specs(ListsBeam),
+    Entries = beamtalk_spec_reader:add_export_only_entries(ListsBeam, Specs),
+    ?assertEqual(Specs, lists:sublist(Entries, length(Specs))),
+    ExportOnly = [{N, A} || #{name := N, arity := A, export_only := true} <- Entries],
+    ?assertNot(lists:member({<<"reverse">>, 1}, ExportOnly)),
+    ?assert(lists:member({<<"module_info">>, 0}, ExportOnly)).
+
+%% An unreadable `.beam' leaves the specs unchanged.
+add_export_only_entries_missing_beam_test() ->
+    Specs = [#{name => <<"f">>, arity => 0, params => [], return_type => <<"Integer">>}],
+    ?assertEqual(
+        Specs,
+        beamtalk_spec_reader:add_export_only_entries("missing_bt4574.beam", Specs)
+    ).
 
 %% Parallel batch processing must produce exactly the same results,
 %% in the same order, as a sequential `read_specs/1' map — across a batch large

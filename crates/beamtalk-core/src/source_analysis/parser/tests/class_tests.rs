@@ -1300,6 +1300,24 @@ fn parse_standalone_method_with_field_assignment() {
 }
 
 #[test]
+fn parse_standalone_method_doc_comment_attaches_to_method() {
+    // A `///` block above `Target >> sel` is the method's doc comment, not an
+    // orphaned leading comment (BT-4488).
+    let source = "// License.\n\n/// Answer one.\nCounter >> one => 1";
+    let tokens = lex_with_eof(source);
+    let (module, diagnostics) = parse(tokens);
+    assert!(
+        diagnostics.is_empty(),
+        "Expected no diagnostics, got: {diagnostics:?}"
+    );
+    let method = &module.method_definitions[0].method;
+    assert_eq!(method.doc_comment.as_deref(), Some("Answer one."));
+    assert_eq!(method.comments.leading.len(), 1);
+    assert_eq!(method.comments.leading[0].content, "License.");
+    assert!(method.comments.blank_line_after_comments);
+}
+
+#[test]
 fn parse_standalone_method_with_typed_keyword_param() {
     // is_keyword_method_selector_at must handle `:: Type` typed params
     let source = "Counter >> deposit: amount :: Integer => self";

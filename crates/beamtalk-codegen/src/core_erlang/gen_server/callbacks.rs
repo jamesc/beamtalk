@@ -215,13 +215,7 @@ impl CoreErlangGenerator {
 
         // Check if we have a superclass that's not Actor (base class)
         // When true, we'll call the parent's init to inherit state fields
-        let has_parent_init = if let Some(class) = current_class {
-            class.superclass.as_ref().is_some_and(|s| {
-                !s.name.eq_ignore_ascii_case("Actor") && !s.name.eq_ignore_ascii_case("Object")
-            })
-        } else {
-            false
-        };
+        let has_parent_init = current_class.is_some_and(Self::has_parent_actor_module);
 
         // Check if the class defines an initialize method.
         // If so, dispatch it at the end of init/1 — but only when not called
@@ -1290,7 +1284,7 @@ impl CoreErlangGenerator {
                         " = ",
                         actor_state_call(
                             actor_state_helper::INSTALL,
-                            vec![leaf::var(in_state_var.clone())],
+                            [leaf::var(in_state_var.clone())],
                         ),
                         " in",
                     ],
@@ -1311,7 +1305,7 @@ impl CoreErlangGenerator {
                         " = ",
                         actor_state_call(
                             actor_state_helper::UNINSTALL,
-                            vec![leaf::var(old_state_var.clone())],
+                            [leaf::var(old_state_var.clone())],
                         ),
                         " in",
                     ],
@@ -1643,7 +1637,7 @@ impl CoreErlangGenerator {
             "let _OldState = ",
             actor_state_call(
                 actor_state_helper::INSTALL,
-                vec![leaf::var("State".to_string())],
+                [leaf::var("State".to_string())],
             ),
             " in",
         ]
@@ -1657,7 +1651,7 @@ impl CoreErlangGenerator {
             "let _RestoreOk = ",
             actor_state_call(
                 actor_state_helper::UNINSTALL,
-                vec![leaf::var("_OldState".to_string())],
+                [leaf::var("_OldState".to_string())],
             ),
             " in",
             line(),
@@ -1733,7 +1727,7 @@ impl CoreErlangGenerator {
     /// (6-tuple headed by that atom, `cast` kind) and hands it to
     /// `beamtalk_actor:decode_wire_cast/1` — the single place the tag's
     /// decode/version-check logic lives, shared with
-    /// `beamtalk_actor.erl`'s own `handle_cast/2` (CLAUDE.md "No duplicate
+    /// `beamtalk_actor.erl`'s own `handle_cast/2` (AGENTS.md "No duplicate
     /// implementations"). A decoded envelope re-dispatches, by a recursive
     /// self-call, through the `{'cast', ...}` clause below exactly as if it
     /// had arrived locally; a decode/version failure has already been
@@ -1842,7 +1836,7 @@ impl CoreErlangGenerator {
     /// that atom) and hands it to `beamtalk_actor:decode_wire_call/1` —
     /// the single place the tag's decode/version-check logic lives
     /// (`beamtalk_actor.erl`'s own `handle_call/3` calls the very same
-    /// function for its hand-written `__methods__` path, CLAUDE.md "No
+    /// function for its hand-written `__methods__` path, AGENTS.md "No
     /// duplicate implementations"). A decoded envelope re-dispatches, by a
     /// recursive self-call, through the 3-tuple clause below exactly as if
     /// it had arrived locally; a decode/version failure's ready-made reply
@@ -1992,7 +1986,7 @@ impl CoreErlangGenerator {
     ///
     /// ADR 0126 §5.1/§5.5 (BT-3613): both arms route their payload through
     /// `beamtalk_actor` helpers shared with the hand-written dispatch path
-    /// rather than re-deriving the same logic in codegen (CLAUDE.md "No
+    /// rather than re-deriving the same logic in codegen (AGENTS.md "No
     /// duplicate implementations") — `encode_reply_for/3` wire-encodes the
     /// reply when `From` is on another node (a no-op for a local caller,
     /// so this is byte-identical to before for every existing local-call
@@ -2345,6 +2339,88 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// Whether `class`'s superclass is itself a compiled actor module whose
+    /// generated callbacks (`init/1`'s inherited state, BT-4567's
+    /// `'__beamtalk_secrets'/0`) this class chains to: any superclass other
+    /// than the `Actor`/`Object` roots.
+    fn has_parent_actor_module(class: &ClassDefinition) -> bool {
+        class.superclass.as_ref().is_some_and(|s| {
+            !s.name.eq_ignore_ascii_case("Actor") && !s.name.eq_ignore_ascii_case("Object")
+        })
+    }
+
+    /// BT-4567: generates `format_status/1` and `'__beamtalk_secrets'/0`.
+    ///
+    /// `'__beamtalk_secrets'/0` answers `{Slots, Selectors}`: the class's own
+    /// `class secretState` / `class secretSelectors` literals (read at compile
+    /// time by `beamtalk_core::semantic_analysis::actor_secrets`), appended to
+    /// its superclass module's when the superclass is itself a compiled
+    /// actor. `format_status/1` hands the `gen_server` status to
+    /// `beamtalk_actor_redaction:format_status/2`, which redacts from that
+    /// compiled metadata, so no user code runs on the status or crash path.
+    ///
+    /// ```erlang
+    /// 'format_status'/1 = fun (Status) ->
+    ///     call 'beamtalk_actor_redaction':'format_status'('bt@store', Status)
+    ///
+    /// '__beamtalk_secrets'/0 = fun () ->
+    ///     let <ParentSecrets> = call 'bt@base':'__beamtalk_secrets'() in
+    ///     call 'beamtalk_actor_redaction':'merge_secrets'(ParentSecrets, ['token'], ['login:'])
+    /// ```
+    pub(in crate::core_erlang) fn generate_format_status(
+        &self,
+        module: &Module,
+    ) -> Document<'static> {
+        use beamtalk_core::semantic_analysis::actor_secrets::{SecretList, declared_secrets};
+
+        let current_class = self.current_class(module);
+        let secrets = current_class
+            .map(|c| declared_secrets(module, c))
+            .unwrap_or_default();
+        let atom_list = |list: &SecretList| -> Document<'static> {
+            let atoms = list
+                .names()
+                .iter()
+                .map(|n| leaf::atom(n.name.to_string()))
+                .collect();
+            docvec!["[", Self::join_docs_with_commas(atoms), "]"]
+        };
+        let own_slots = atom_list(&secrets.state);
+        let own_selectors = atom_list(&secrets.selectors);
+
+        let secrets_body = match current_class.filter(|c| Self::has_parent_actor_module(c)) {
+            Some(class) => docvec![
+                "let <ParentSecrets> = call ",
+                leaf::atom(self.compiled_module_name(class.superclass_name())),
+                ":'__beamtalk_secrets'() in",
+                line(),
+                "call 'beamtalk_actor_redaction':'merge_secrets'(ParentSecrets, ",
+                own_slots,
+                ", ",
+                own_selectors,
+                ")",
+            ],
+            None => docvec!["{", own_slots, ", ", own_selectors, "}"],
+        };
+
+        docvec![
+            "'format_status'/1 = fun (Status) ->",
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    "call 'beamtalk_actor_redaction':'format_status'(",
+                    leaf::atom(self.module_name.to_string()),
+                    ", Status)",
+                ]
+            ),
+            "\n\n",
+            "'__beamtalk_secrets'/0 = fun () ->",
+            nest(INDENT, docvec![line(), secrets_body]),
+            "\n",
+        ]
+    }
+
     /// Generates the `code_change/3` callback for hot code reload.
     ///
     /// Delegates to `beamtalk_hot_reload:code_change/3` for state migration.
@@ -2680,6 +2756,7 @@ mod tests {
 
     fn empty_module() -> Module {
         Module {
+            pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
             classes: Vec::new(),
             method_definitions: Vec::new(),
             protocols: Vec::new(),

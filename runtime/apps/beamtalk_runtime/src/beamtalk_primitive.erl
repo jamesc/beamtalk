@@ -15,6 +15,7 @@ See also: docs/internal/design-self-as-object.md Section 3.3
 """.
 -export([
     class_of/1,
+    ensure_class_module_loaded/2,
     string_from_binary/1,
     string_to_binary/1,
     deep_unwrap_strings/1,
@@ -26,6 +27,7 @@ See also: docs/internal/design-self-as-object.md Section 3.3
     class_responds_to/2,
     class_name_to_module/1,
     class_name_from_tag/1,
+    runtime_instance_method/2,
     print_string/1,
     display_string/1,
     process_label/1,
@@ -443,7 +445,7 @@ print_string(X) when is_pid(X) -> beamtalk_opaque_ops:pid_to_string(X);
 print_string(X) when is_port(X) -> beamtalk_opaque_ops:port_to_string(X);
 print_string(X) when is_reference(X) -> beamtalk_opaque_ops:ref_to_string(X);
 print_string(X) ->
-    iolist_to_binary(io_lib:format("~p", [X])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp", [X])).
 
 -doc "Format tagged maps for display.".
 -spec print_string_map(map()) -> binary().
@@ -511,7 +513,7 @@ display_string({beamtalk_string, Bin}) when is_binary(Bin) ->
 display_string(X) when is_binary(X) ->
     case unicode:characters_to_binary(X) of
         Utf8 when is_binary(Utf8) -> Utf8;
-        _ -> iolist_to_binary(io_lib:format("~p", [X]))
+        _ -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [X]))
     end;
 display_string(X) when is_bitstring(X) ->
     bitstring_print_string(X);
@@ -560,7 +562,7 @@ display_string(X) when is_pid(X) ->
 display_string(X) when is_port(X) -> beamtalk_opaque_ops:port_to_string(X);
 display_string(X) when is_reference(X) -> beamtalk_opaque_ops:ref_to_string(X);
 display_string(X) ->
-    iolist_to_binary(io_lib:format("~p", [X])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp", [X])).
 
 -doc """
 Render the kind-headed, positional label for a live process (ADR 0094).
@@ -613,7 +615,7 @@ identity_inner({registered, Name, Node}) when is_atom(Name), is_atom(Node) ->
 identity_inner({global, Name}) when is_atom(Name) ->
     iolist_to_binary([<<"global, ">>, atom_to_binary(Name, utf8)]);
 identity_inner(Other) ->
-    iolist_to_binary(io_lib:format("~tp", [Other])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp", [Other])).
 
 -doc """
 `Block/N` label for a bare fun, `N` being its arity.
@@ -743,7 +745,7 @@ send_bitstring(X, Selector, Args) ->
 -doc "Re-raise a `Bitstring` `does_not_understand` with the bit-size hint.".
 -spec raise_bitstring_dnu(bitstring(), #beamtalk_error{}) -> no_return().
 raise_bitstring_dnu(X, Error) ->
-    Hint = iolist_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
             "a Bitstring is not byte-aligned (~B bits); use 'bitSize'/'toBits', "
             "or 'asBinary' to check alignment",
@@ -1121,14 +1123,55 @@ What is cached, and why that is safe:
   the answer comes with an invalidation. Unloading is checked instead: a hit
   whose module has since been purged (class still registered) is re-derived
   and the entry repaired (`fetch/3`'s validity check).
+
+On top of that, a cacheable answer is memoised in the calling process's
+dictionary as `{Gen, Resolved}`, tagged with the cache generation read before
+the fetch, as `beamtalk_default_method:is_default/2` does (BT-4416). A hit
+costs a generation read, a `get/1` and the purge check rather than the ETS
+read that copies the entry, ~70% of an untyped Value send (BT-4623). Every
+metadata write bumps the generation, so a module move, a reparenting into or
+out of `Exception` (directly or via an ancestor) or a removal turns every
+per-process memo into a miss. An answer `Compute` declines to cache is not
+memoised: `Compute` leaves a `nocache` marker under the memo key, which is
+erased after the fetch.
 """.
 -spec tagged_class_dispatch(atom()) -> exception | {stdlib, atom()} | {value, atom()}.
 tagged_class_dispatch(Class) ->
-    beamtalk_class_derived_cache:fetch(
+    Gen = beamtalk_class_derived_cache:generation(),
+    MemoKey = {?MODULE, tagged_class_dispatch, Class},
+    case get(MemoKey) of
+        {Gen, Resolved} when Gen =/= undefined ->
+            case resolved_module_loaded(Class, Resolved) of
+                true -> Resolved;
+                false -> fetch_tagged_class_dispatch(Class, Gen, MemoKey)
+            end;
+        _ ->
+            fetch_tagged_class_dispatch(Class, Gen, MemoKey)
+    end.
+
+%% The memo miss of tagged_class_dispatch/1: fetch through the derived cache,
+%% then memoise the answer unless Compute ran and declined to cache it.
+-spec fetch_tagged_class_dispatch(atom(), integer() | undefined, term()) ->
+    exception | {stdlib, atom()} | {value, atom()}.
+fetch_tagged_class_dispatch(Class, Gen, MemoKey) ->
+    Resolved = beamtalk_class_derived_cache:fetch(
         {tagged_class_dispatch, Class},
-        fun() -> resolve_tagged_class_dispatch(Class) end,
-        fun(Resolved) -> resolved_module_loaded(Class, Resolved) end
-    ).
+        fun() ->
+            case resolve_tagged_class_dispatch(Class) of
+                {nocache, _} = NoCache ->
+                    put(MemoKey, nocache),
+                    NoCache;
+                Cache ->
+                    Cache
+            end
+        end,
+        fun(R) -> resolved_module_loaded(Class, R) end
+    ),
+    case get(MemoKey) =/= nocache andalso Gen =/= undefined of
+        true -> put(MemoKey, {Gen, Resolved});
+        false -> erase(MemoKey)
+    end,
+    Resolved.
 
 -doc "Uncached derivation behind `tagged_class_dispatch/1`.".
 -spec resolve_tagged_class_dispatch(atom()) ->
@@ -1477,15 +1520,36 @@ registers itself from its module's `on_load`) and module-less classes (whose
 registered "module" is the class name itself) never reach `code_server`.
 """.
 -spec ensure_registered_module_loaded(atom(), atom()) -> atom().
-ensure_registered_module_loaded(Class, Class) ->
-    Class;
-ensure_registered_module_loaded(_Class, Module) ->
+ensure_registered_module_loaded(Class, Module) ->
+    _ = ensure_class_module_loaded(Class, Module),
+    Module.
+
+-doc """
+Ensure a class's registered `Module` is loaded; true when it is loaded after.
+
+A module-less (builder-built) class registers its own name as its "module",
+so there is no `.beam` to find and `code:ensure_loaded/1` would be a
+guaranteed `code_server` miss. Loaded modules never reach `code_server`
+either. Shared by dispatch, instantiation and method lookup (BT-4056).
+
+`Class` may be a thunk so hot-path callers that only hold a class pid pay for
+the class-name lookup only when the module is not loaded (see
+`beamtalk_object_class:class_name_or_undefined/1`, a non-raising ETS read).
+""".
+-spec ensure_class_module_loaded(atom() | fun(() -> atom()), atom()) -> boolean().
+ensure_class_module_loaded(Class, Module) ->
     case erlang:module_loaded(Module) of
         true ->
-            Module;
+            true;
+        false when is_function(Class, 0) ->
+            ensure_class_module_loaded(Class(), Module);
+        false when Module =:= Class ->
+            false;
         false ->
-            _ = code:ensure_loaded(Module),
-            Module
+            case code:ensure_loaded(Module) of
+                {module, Module} -> true;
+                _ -> false
+            end
     end.
 
 -doc """
@@ -1538,7 +1602,7 @@ and `displayString` answer this form: a Bitstring has no text reading.
 """.
 -spec bitstring_print_string(bitstring()) -> binary().
 bitstring_print_string(X) ->
-    iolist_to_binary(io_lib:format("~w", [X])).
+    beamtalk_error:chars_to_binary(io_lib:format("~w", [X])).
 
 -doc """
 Escape string content per the ADR 0138 shared escape mapping: `\\` doubles,

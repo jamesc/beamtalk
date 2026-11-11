@@ -1,0 +1,112 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+name: Corpus Tier
+
+# The Rust corpus tier (ADR 0111/0131 state-threading agreement and corpus
+# proofs): always on a push to main, opt-in on a PR.
+#
+# It used to run in ci.yml on every PR whose paths scripts/ci/corpus-gate.sh
+# matched: about 70% of PRs, at about 33 runner-minutes each (two shards),
+# because most PRs touch the compiler crates or stdlib/. PR wall-clock is
+# dominated by waiting for a free runner, so on a PR it now runs only when
+# the PR carries the `ci:corpus` label (BT-4609). AGENTS.md says when to add
+# it: any change to state-threading codegen or its analysis. Adding the
+# label starts a run; later pushes to a labelled PR re-run it. Main runs it
+# on every merge, and ci-triage.yml triages a red main run, so an unlabelled
+# regression is caught one merge later. Locally, `just ci-changed` still
+# runs the tier whenever corpus-gate.sh matches.
+on:
+  # No path filter on main: a docs-only merge runs it too, which is rare
+  # enough not to be worth a second copy of ci.yml's path list.
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+
+# Same keying as ci.yml: a PR run cancels its superseded run, a push to main
+# is keyed on its SHA and never cancelled. A label event for any other label
+# gets its own group (and the job's `if:` skips it), so it can't cancel a
+# real run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}${{ github.event.action == 'labeled' && github.event.label.name != 'ci:corpus' && '-label-noop' || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # `just test-corpus` (agreement and corpus proofs, ~15 min as one job).
+  # Sharded in two with nextest --partition so the tier fits the PR time
+  # budget; the tests are OS-independent, so Linux only.
+  test-corpus:
+    if: >-
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'ci:corpus') &&
+       (github.event.action != 'labeled' || github.event.label.name == 'ci:corpus'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+
+      # erlc: the repl crate's assembler corpora compile generated Core Erlang.
+      - name: Install Erlang/OTP
+        uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Just
+        uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
+
+      - name: Install cargo-nextest
+        uses: ./.github/actions/install-nextest
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          shared-key: linux-test
+          key: profile-${{ hashFiles('Cargo.toml') }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      # BT-4634: fold_acc_shape_agreement executes its programs (and compares
+      # them with the ForceStateAccFold oracle) only when the Erlang runtime
+      # and compiled stdlib exist; without them it silently degrades to
+      # compile-only. Build them so the agreement check really runs.
+      - name: Cache Erlang/rebar3 artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+        with:
+          path: |
+            ~/.cache/rebar3
+            runtime/_build
+            ~/.rebar3
+          key: ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config', 'runtime/apps/beamtalk_runtime/src/**', 'runtime/apps/beamtalk_runtime/include/**') }}-beam-${{ hashFiles('.tool-versions') }}
+          restore-keys: |
+            ${{ runner.os }}-erlang-${{ hashFiles('runtime/rebar.config') }}-beam-${{ hashFiles('.tool-versions') }}
+            ${{ runner.os }}-erlang-beam-${{ hashFiles('.tool-versions') }}-
+
+      - name: Build Erlang runtime and stdlib
+        run: just build-stdlib
+
+      - name: Rust corpus tier (state-threading agreement and corpus proofs)
+        env:
+          # BT-4641: fail, not skip, if erlc or the runtime is missing.
+          BEAMTALK_REQUIRE_RUNTIME: "1"
+        run: just test-corpus count:${{ matrix.shard }}/2

@@ -1,0 +1,80 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4208: `self error: "x"` inside a block body must raise the user's Error
+// (catchable by `on: Error do:`, with message "x") in every class kind and
+// dispatch context, not an internal `function_clause` error.
+//
+// Fixtures: stdlib/test/fixtures/bt4208server.bt, bt4208actor.bt, bt4208value.bt
+
+TestCase subclass: SelfErrorInBlockTest
+
+  testServerSyncOnDo =>
+    s := Bt4208Server spawn
+    self assert: s caught equals: "x"
+    s stop
+
+  testServerSyncDoInsideOnDo =>
+    s := Bt4208Server spawn
+    self assert: s caughtInDo equals: "x"
+    s stop
+
+  testServerSyncUncaughtDoReachesCaller =>
+    s := Bt4208Server spawn
+    self assert: ([s uncaughtInDo] on: Error do: [:e | e message]) equals: "x"
+    s stop
+
+  testServerCastOnDo =>
+    s := Bt4208Server spawn
+    s castCaught!
+    self assert: s last equals: "x"
+    s stop
+
+  testServerHandleInfoOnDo =>
+    s := Bt4208Server spawn
+    s pid send: #ping
+    50 timesRepeat: [s last isNil ifTrue: [Timer sleep: 10]]
+    self assert: s last equals: "x"
+    s stop
+
+  testActorSyncOnDo =>
+    a := Bt4208Actor spawn
+    self assert: a caught equals: "x"
+    a stop
+
+  testActorSyncDoInsideOnDo =>
+    a := Bt4208Actor spawn
+    self assert: a caughtInDo equals: "x"
+    a stop
+
+  testActorSyncUncaughtDoReachesCaller =>
+    a := Bt4208Actor spawn
+    self assert: ([a uncaughtInDo] on: Error do: [:e | e message]) equals: "x"
+    a stop
+
+  testActorBlockSuperErrorOnDo =>
+    a := Bt4208Actor spawn
+    self assert: a superCaught equals: "x"
+    a stop
+
+  testActorPerformErrorReachesCaller =>
+    a := Bt4208Actor spawn
+    self assert: ([
+      a perform: #error: withArguments: #("x")
+    ] on: Error do: [:e | e message]) equals: "x"
+    a stop
+
+  testActorCastOnDo =>
+    a := Bt4208Actor spawn
+    a castCaught!
+    self assert: a last equals: "x"
+    a stop
+
+  testValueOnDo => self assert: Bt4208Value new caught equals: "x"
+
+  testValueDoInsideOnDo => self assert: Bt4208Value new caughtInDo equals: "x"
+
+  testValueUncaughtDoReachesCaller =>
+    self assert: ([
+      Bt4208Value new uncaughtInDo
+    ] on: Error do: [:e | e message]) equals: "x"

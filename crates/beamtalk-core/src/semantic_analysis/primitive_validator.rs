@@ -64,6 +64,8 @@ pub const STRUCTURAL_INTRINSICS: &[&str] = &[
     "blockValueWithArguments",
     "whileTrue",
     "whileFalse",
+    "unaryWhileTrue",
+    "unaryWhileFalse",
     "repeat",
     // Iteration
     // Note: timesRepeat/toDo/toByDo are not intrinsics

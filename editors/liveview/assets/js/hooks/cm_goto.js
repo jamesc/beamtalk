@@ -11,8 +11,8 @@
 //
 // Resolution happens on the SERVER (the `goto_definition` LiveView event): the
 // extension only detects the modifier-click, identifies the clicked token, and
-// round-trips the same `code` line-prefix the hover op consumes (`Receiver
-// selector`) plus the bare `token`, so the server can decide class vs selector
+// round-trips the same `code` / `before` / `suffix` editor context the hover op
+// consumes plus the bare `token`, so the server can decide class vs selector
 // against the LIVE image (matching `definition_provider.rs`'s class-or-selector
 // resolution, but live rather than on-disk ASTs). Locals/params are left to a
 // future client-side resolve — the core ask is class + selector navigation.
@@ -24,11 +24,7 @@
 
 import { EditorView, Decoration } from "@codemirror/view"
 import { StateField, StateEffect } from "@codemirror/state"
-
-// Identifier characters of a navigable token — class names and unary selectors
-// (matches cm_hover.js's TOKEN). Keyword-selector navigation rides the same
-// line-prefix the server parses, so the bare token need only be the unary part.
-const TOKEN = /[A-Za-z0-9_]/
+import { wordAt, editorContext } from "./cm_token.js"
 
 // Effect + field that hold the currently underlined token range (or null). A
 // StateField keeps the decoration in the editor state so it survives doc/view
@@ -72,23 +68,12 @@ function isModifier(event) {
   return mac ? event.metaKey : event.ctrlKey
 }
 
-// The identifier token at `pos`, as {from, to} — grows left then right over
-// identifier chars (cm_hover.js's wordAt). Empty range (from === to) ⇒ no token.
-function wordAt(state, pos) {
-  const line = state.doc.lineAt(pos)
-  const s = line.text
-  const rel = pos - line.from
-  let start = rel
-  let end = rel
-  while (start > 0 && TOKEN.test(s[start - 1])) start--
-  while (end < s.length && TOKEN.test(s[end])) end++
-  return { from: line.from + start, to: line.from + end }
-}
-
-// Build the go-to-definition extension. `requestGoto({code, token})` fires the
-// LiveView `goto_definition` event with the clicked token's line-prefix (through
-// the token's end — the receiver+selector context the server parses) and the
-// bare token text. The server resolves + opens; nothing comes back to the editor.
+// Build the go-to-definition extension. `requestGoto({code, before, suffix,
+// token})` fires the LiveView `goto_definition` event with the clicked token's
+// line-prefix (through the token's end), the surrounding editor context the
+// hover op also takes, and the bare token text. A keyword part carries its
+// trailing `:` (`fetch:`); the server resolves the send's FULL selector
+// (`fetch:options:`) from that context (BT-4455). The server resolves + opens; nothing comes back to the editor.
 export function gotoDefinition(requestGoto) {
   return [
     gotoLinkField,
@@ -108,10 +93,8 @@ export function gotoDefinition(requestGoto) {
         // so it can test it as a class name. Prevent the default so the
         // modifier-click does not also drag-select or move the caret.
         event.preventDefault()
-        const line = view.state.doc.lineAt(pos)
-        const code = view.state.sliceDoc(line.from, to)
         const token = view.state.sliceDoc(from, to)
-        requestGoto({ code, token })
+        requestGoto({ ...editorContext(view.state, pos, to), token })
         return true
       },
       // While the modifier is held, underline the token under the pointer so the
@@ -170,10 +153,10 @@ function clearLink(view) {
   if (current && current.size) view.dispatch({ effects: setGotoLink.of(null) })
 }
 
-// Wrap a hook's `pushEvent` into the `({code, token}) => void` contract the
+// Wrap a hook's `pushEvent` into the `({code, before, suffix, token}) => void` contract the
 // extension expects. Fire-and-forget: the server resolves the symbol and opens
 // the target (or flashes "no definition found") via its own re-render, so unlike
 // hover/complete there is no reply to await.
 export function gotoQuery(pushEvent) {
-  return ({ code, token }) => pushEvent("goto_definition", { code, token })
+  return (payload) => pushEvent("goto_definition", payload)
 }

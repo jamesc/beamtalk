@@ -199,7 +199,7 @@ run_one({error, EvalMod, ExpectedKind, _VarName, Location}, Bindings) ->
             {Bindings, {pass, Location}};
         %% Other errors
         error:OtherReason ->
-            OtherBin = iolist_to_binary(io_lib:format("~p", [OtherReason])),
+            OtherBin = beamtalk_error:chars_to_binary(io_lib:format("~tp", [OtherReason])),
             ExpectedBin = atom_to_binary(ExpectedKind, utf8),
             {Bindings,
                 {fail, Location, <<"ERROR: ", ExpectedBin/binary>>, <<"ERROR: ", OtherBin/binary>>}};
@@ -286,7 +286,7 @@ format_result(V) when is_list(V) ->
             try
                 iolist_to_binary(json:encode([beamtalk_repl_json:element_to_json(E) || E <- V]))
             catch
-                _:_ -> iolist_to_binary(io_lib:format("~p", [V]))
+                _:_ -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [V]))
             end
     end;
 format_result({beamtalk_supervisor, _, _, _} = Sup) ->
@@ -298,7 +298,7 @@ format_result({beamtalk_future, _} = Future) ->
     Value = beamtalk_future:await(Future),
     format_result(Value);
 format_result(V) ->
-    iolist_to_binary(io_lib:format("~p", [V])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp", [V])).
 
 %% ──────────────────────────────────────────────────────────────────────────
 %% matches_pattern/2 — glob-style wildcard matching

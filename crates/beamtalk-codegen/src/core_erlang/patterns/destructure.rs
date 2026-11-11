@@ -230,7 +230,7 @@ impl CoreErlangGenerator {
                             let elem_var = self.fresh_temp_var("Elem");
                             let guard_ok_var = self.fresh_temp_var("GuardOk");
                             let mismatch_var = self.fresh_temp_var("Mismatch");
-                            let lit_doc = self.generate_literal(lit)?;
+                            let lit_doc = Self::literal_doc(lit);
                             docs.push(docvec![
                                 indent,
                                 leaf::var(elem_var.clone()),
@@ -344,7 +344,7 @@ impl CoreErlangGenerator {
                             let elem_var = self.fresh_temp_var("Elem");
                             let guard_ok_var = self.fresh_temp_var("GuardOk");
                             let mismatch_var = self.fresh_temp_var("Mismatch");
-                            let lit_doc = self.generate_literal(lit)?;
+                            let lit_doc = Self::literal_doc(lit);
                             docs.push(docvec![
                                 indent,
                                 leaf::var(elem_var.clone()),

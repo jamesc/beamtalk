@@ -55,6 +55,8 @@ builder add: item1; add: item2; add: item3; build
 
 **Why keep:** Powerful for builder patterns and fluent APIs. Send multiple messages to the same receiver without repeating it. Worth learning.
 
+`;` keeps its Smalltalk meaning for every receiver, values included: it always fans out to the cascade's receiver ([ADR 0145](ADR/0145-cascade-pipeline-semantics.md)). Chaining on the previous result gets its own operator, `|>` (see [Pipelines](#pipelines-add-) below), and a cascade that drops a value's update draws the `cascade-drops-update` warning.
+
 ### Assignment with `:=`
 
 ```
@@ -373,6 +375,32 @@ A dedicated `type` form also wins on the feature's own terms: the whole point of
 
 `{a. b}` is a syntax error whose hint suggests `{a, b}`.
 
+### Pipelines: Add `|>`
+
+**Smalltalk:** no operator chains messages on the previous result. A chain of keyword messages needs parentheses or temp locals, and the `;` cascade sends every message to the same receiver.
+
+**Beamtalk:** `recv m1 |> m2 |> m3` sends each stage to the previous stage's result. It is exactly `((recv m1) m2) m3` ([ADR 0145](ADR/0145-cascade-pipeline-semantics.md)):
+
+```beamtalk
+// Smalltalk
+self store: ((((st withWebsock: websock)
+  withWebsockState: websock)
+  withWebsocketOptions: opts)
+  withRespState: #upgraded)
+
+// Beamtalk
+self store: (st withWebsock: websock
+  |> withWebsockState: websock
+  |> withWebsocketOptions: opts
+  |> withRespState: #upgraded)
+```
+
+**Why:**
+- **Values made the friction real.** A value's `with*:` setters answer a new instance, so a chain of functional updates is the common case on BEAM, not the rare one. The readable-looking cascade `st withA: 1; withB: 2` compiles, runs and keeps only the last update, and nested parentheses make readers count to see a straight left-to-right chain.
+- **Changing `;` was rejected.** Making `;` chain on values but fan out on actors would make its meaning depend on static types, which a gradually typed language may not have, and three class kinds (ADR 0067) do not split cleanly into "values" and "things mutated in place". `;` keeps its Smalltalk meaning everywhere, and the `cascade-drops-update` warning catches the trap where types are known.
+- **The token is the one BEAM developers know.** Elixir and Gleam read `|>` as "the value on the left flows into the step on the right". The one difference: there it becomes a function's first argument, here the receiver of a message. Cuis Smalltalk made the same split (keep `;`, add a chaining token), spelled `::`, which Beamtalk already uses for type annotations.
+- **It adds no semantics.** The parser builds the nested sends directly, so analysis, codegen and the runtime see nothing new, and `fmt` and reflected source keep `|>` as written.
+
 ---
 
 ## Complete Syntax Summary
@@ -388,6 +416,7 @@ A dedicated `type` form also wins on the feature's own terms: the whole point of
 | Binary message | `a op b` | `3 + 4` |
 | Keyword message | `receiver key: arg` | `array at: 1` |
 | Cascade | `;` | `obj foo; bar; baz` |
+| Pipeline | `\|>` | `p withX: 5 \|> withY: 10` |
 | Block (no args) | `[body]` | `[self doIt]` |
 | Block (with args) | `[:args \| body]` | `[:x :y \| x + y]` |
 | String | `"..."` | `"hello"`, `"Hello, {name}!"` |
@@ -421,6 +450,7 @@ Use parentheses to override: `(2 + 3) * 4`
 | Statement terminator | Required `.` | Optional (newline) |
 | String interpolation | None | `"Hello, {name}!"` |
 | Class definition | `Object subclass: #Counter` (message send) | `Object subclass: Counter` (syntax) |
+| Chaining on the previous result | Parentheses or temp locals | `\|>` pipeline: `p withX: 5 \|> withY: 10` |
 | Keyword messages | ✅ Same | ✅ Same |
 | Blocks | ✅ Same | ✅ Same |
 | Cascades | ✅ Same | ✅ Same |

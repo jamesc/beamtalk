@@ -189,6 +189,14 @@ impl ExtensionIndex {
         }
     }
 
+    /// Rewrites the type signature of every indexed extension in place
+    /// (BT-4615: expanding a dependency's internal aliases at export time).
+    pub fn map_type_infos(&mut self, mut f: impl FnMut(&mut ExtensionTypeInfo)) {
+        for loc in self.entries.values_mut().flatten() {
+            f(&mut loc.type_info);
+        }
+    }
+
     /// Inserts pre-collected entries, e.g. restored from a build cache.
     pub fn add_entries(
         &mut self,

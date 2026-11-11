@@ -69,7 +69,7 @@ impl CoreErlangGenerator {
         let class_name = class.name.name.clone();
         let module_name = self.module_name.clone();
 
-        // Build export list as Documents (CLAUDE.md: use Document/docvec!, never format!)
+        // Build export list as Documents (AGENTS.md: use Document/docvec!, never format!)
         let class_method_exports: Document<'static> = Self::build_class_method_export_doc(module);
         let instance_method_exports = Self::build_supervisor_instance_exports(class);
 
@@ -212,7 +212,7 @@ impl CoreErlangGenerator {
             docs.push(Document::Str("\n"));
         }
 
-        let method_branches = self.generate_dispatch_method_branches(class, &mod_name);
+        let method_branches = Self::generate_dispatch_method_branches(class, &mod_name);
         docs.push(docvec![
             "'dispatch'/3 = fun (Selector, Args, Self) ->\n",
             "    case Selector of\n",

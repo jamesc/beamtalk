@@ -43,19 +43,18 @@
 //!
 //! **Transitive dependencies:** [`resolve_dependency_class_infos`]
 //! walks the full transitive dependency graph — not just the project's own
-//! direct `[dependencies]` table — by recursively reading each discovered
-//! dependency's own `beamtalk.toml` (when its checkout is already present on
-//! disk) and queuing its dependencies in turn. The BFS structure is similar
-//! to `discover_all_dep_roots` in `crate::commands::deps` (the CLI's own
-//! transitive-walk logic for `ensure_deps_resolved`'s freshness checks), but
-//! the two walkers produce different outputs (`ClassInfo` vs `DiscoveredDep`)
-//! and use different error strategies (warn-and-skip vs. return an error), so
-//! their BFS loops remain independent. The *checkout-path resolution* step
-//! (path vs. git/registry dispatch) is the shared primitive and lives in
-//! [`crate::path_util::dep_root_for_source`] — both walkers call it, so that
-//! piece cannot drift. As with direct dependencies, a checkout that hasn't
-//! been fetched yet (missing `_build/deps/<name>/`) is silently skipped
-//! rather than fetched — no network I/O.
+//! direct `[dependencies]` table — with
+//! [`beamtalk_project::dependency_graph::discover_dependency_graph`], which
+//! reads each discovered dependency's own `beamtalk.toml` (when its checkout
+//! is already present on disk) and queues its dependencies in turn. The LSP
+//! uses the same walk (BT-4611), so both see the same graph. The CLI's own
+//! transitive walk for `ensure_deps_resolved` (`discover_all_dep_roots` in
+//! `crate::commands::deps`) reports errors rather than skipping, so it stays
+//! separate, but shares the checkout-path step
+//! ([`beamtalk_project::dependency_graph::dep_root_for_source`]). As with
+//! direct dependencies, a checkout that hasn't been fetched yet (missing
+//! `_build/deps/<name>/`) is silently skipped rather than fetched — no
+//! network I/O.
 //!
 //! **Caching:** the MCP server's `lint`/`diagnostic_summary` tools
 //! call [`resolve_dependency_class_infos`] on *every* request. Without
@@ -68,16 +67,14 @@
 //! replaced by a later `beamtalk build`/re-fetch is detected and
 //! re-resolved. This adds no network I/O or persistent state.
 
-use crate::build_layout::BuildLayout;
 use crate::manifest;
-use crate::path_util::dep_root_for_source;
 use beamtalk_core::ast::ProtocolDefinition;
-use beamtalk_core::compilation::DependencyMap;
 use beamtalk_core::file_walker::FileWalker;
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
+use beamtalk_project::dependency_graph::{dependency_source_dir, discover_dependency_graph};
 use camino::{Utf8Path, Utf8PathBuf};
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::SystemTime;
 use tracing::warn;
@@ -108,24 +105,54 @@ use tracing::warn;
 pub fn resolve_dependency_class_infos(
     project_root: &Utf8Path,
 ) -> (bool, Vec<ClassInfo>, Vec<ProtocolDefinition>) {
-    let (has_package_dependencies, class_infos, protocol_defs, _sources) =
-        resolve_dependency_class_infos_with_sources(project_root);
-    (has_package_dependencies, class_infos, protocol_defs)
+    let scan = resolve_dependency_class_infos_with_sources(project_root);
+    (
+        scan.has_package_dependencies,
+        scan.class_infos,
+        scan.protocol_defs,
+    )
+}
+
+/// Everything [`resolve_dependency_class_infos_with_sources`] reads from the
+/// dependency checkouts on disk.
+#[derive(Debug, Default)]
+pub struct DependencyScan {
+    /// Whether the manifest declares `[dependencies]` — see
+    /// [`resolve_dependency_class_infos`].
+    pub has_package_dependencies: bool,
+    /// Every class defined in a dependency whose checkout is on disk.
+    pub class_infos: Vec<ClassInfo>,
+    /// Every provision-bearing protocol AST from those dependencies.
+    pub protocol_defs: Vec<ProtocolDefinition>,
+    /// The source identity of each protocol in `protocol_defs`.
+    pub protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
+    /// Every dependency's extension methods, merged (ADR 0070 WS3, BT-4608).
+    pub extensions: beamtalk_core::compilation::extension_index::ExtensionIndex,
+    /// Every protocol those dependencies declare, stamped with its package.
+    pub protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    /// Every type alias they declare, `internal` ones included (see
+    /// [`dependency_protocol_alias_infos`]).
+    pub alias_infos: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
+    /// Whether `extensions` holds all of them: every transitive dependency
+    /// was found on disk and scanned completely
+    /// ([`crate::dependency_extensions`]). A dependency that has not been
+    /// fetched yet, whose path is not UTF-8, whose manifest cannot be read
+    /// (its own dependencies are then unknown), or whose source could not be
+    /// read or parsed cleanly leaves this `false`.
+    pub extensions_complete: bool,
+    /// Each scanned dependency's own package-bundled FFI stub directory (ADR
+    /// 0075 layer 2), in compile order — the dependency stub tier MCP `lint`
+    /// types FFI calls with, as `beamtalk lint` does (BT-4643).
+    pub stub_dirs: Vec<crate::ffi_type_registry::DependencyStubsDir>,
 }
 
 /// [`resolve_dependency_class_infos`], also returning the source identity
 /// (path and text) of every carried dependency protocol, first definition
 /// wins — so a diagnostic raised in a flattened provision of a dependency's
-/// trait is reported against that trait's file and line (ADR 0127 §3).
+/// trait is reported against that trait's file and line (ADR 0127 §3) — and
+/// the dependencies' extension methods (ADR 0070 WS3, BT-4608).
 #[must_use]
-pub fn resolve_dependency_class_infos_with_sources(
-    project_root: &Utf8Path,
-) -> (
-    bool,
-    Vec<ClassInfo>,
-    Vec<ProtocolDefinition>,
-    beamtalk_core::semantic_analysis::ProtocolSourceMap,
-) {
+pub fn resolve_dependency_class_infos_with_sources(project_root: &Utf8Path) -> DependencyScan {
     // The dependency flag follows the rule `build`/`lint`/`test` share
     // (a malformed manifest conservatively assumes dependencies).
     let read = manifest::find_manifest_full(project_root);
@@ -133,77 +160,36 @@ pub fn resolve_dependency_class_infos_with_sources(
         manifest::PackageCheckerScope::from_manifest_read(&read).has_package_dependencies;
     let mut protocol_sources = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
     let Ok(Some(parsed)) = read else {
-        return (
+        return DependencyScan {
             has_package_dependencies,
-            Vec::new(),
-            Vec::new(),
             protocol_sources,
-        );
+            ..DependencyScan::default()
+        };
     };
-    let layout = BuildLayout::new(project_root);
     let mut class_infos = Vec::new();
     let mut protocol_defs = Vec::new();
+    let mut protocol_infos = Vec::new();
+    let mut alias_infos = Vec::new();
     let mut scanned: Vec<DiscoveredDep> = Vec::new();
 
-    // BFS over the transitive dependency graph, matching
-    // `discover_all_dep_roots`'s reachability: a queue of
-    // `(declaring_root, deps_to_visit)` pairs, seeded with the project's own
-    // direct `[dependencies]` table. `visited` dedups by name only (not
-    // path), matching the CLI's single-version policy — a diamond dependency
-    // (reached via two different parents) is resolved once.
-    let mut visited: HashSet<String> = HashSet::new();
-    let mut queue: VecDeque<(Utf8PathBuf, DependencyMap)> =
-        VecDeque::from([(project_root.to_path_buf(), parsed.dependencies)]);
-
-    while let Some((declaring_root, deps)) = queue.pop_front() {
-        for (name, spec) in deps {
-            if !visited.insert(name.clone()) {
-                continue; // Already discovered via another path (diamond dep).
-            }
-
-            // Not sandboxed: a `..`-containing or absolute path dep can point
-            // outside `project_root`, matching the trust model of `beamtalk
-            // build`'s own path-dependency resolution — `beamtalk.toml` is
-            // authored by the project owner, not untrusted input. Path deps
-            // are relative to `declaring_root` (the package whose manifest
-            // declared them), not necessarily `project_root`.
-            let dep_root = match dep_root_for_source(&declaring_root, &name, &spec.source, &layout)
-            {
-                Ok(root) => root,
-                Err(path) => {
-                    warn!(dep = %name, path = %path.display(), "Dependency path is not valid UTF-8; skipping");
-                    continue;
-                }
-            };
-
-            if !dep_root.is_dir() {
-                // Not yet fetched/built — best-effort, skip silently. Its own
-                // dependencies (if any) can't be discovered either, since
-                // there's no checkout to read a `beamtalk.toml` from.
-                continue;
-            }
-
-            let scan = scan_dep(&dep_root, &name);
-
-            // Queue this dependency's own dependencies for discovery,
-            // reading whatever checkout is already on disk — still no
-            // network I/O.
-            let dep_manifest_path = dep_root.join("beamtalk.toml");
-            let mut dependencies = Vec::new();
-            if let Ok(dep_parsed) = manifest::parse_manifest_full(&dep_manifest_path) {
-                dependencies = dep_parsed.dependencies.keys().cloned().collect();
-                if !dep_parsed.dependencies.is_empty() {
-                    queue.push_back((dep_root, dep_parsed.dependencies));
-                }
-            }
-
-            if let Some(scan) = scan {
-                scanned.push(DiscoveredDep {
-                    name,
-                    dependencies,
-                    scan,
-                });
-            }
+    // The transitive walk over whatever checkouts are on disk — no network
+    // I/O — shared with the LSP (BT-4611). `all_found` is cleared by any
+    // dependency it cannot fully see.
+    let graph = discover_dependency_graph(project_root, parsed.dependencies);
+    let mut every_dependency_found = graph.all_found;
+    for dep in graph.found {
+        if let Some(scan) = scan_dep(&dep.root, &dep.name) {
+            let stubs_dir = manifest::parse_manifest_full(&dep.root.join("beamtalk.toml"))
+                .ok()
+                .and_then(|dep_manifest| dep_manifest.stubs_dir(&dep.root));
+            scanned.push(DiscoveredDep {
+                name: dep.name,
+                dependencies: dep.dependencies,
+                scan,
+                stubs_dir,
+            });
+        } else {
+            every_dependency_found = false;
         }
     }
 
@@ -229,22 +215,96 @@ pub fn resolve_dependency_class_infos_with_sources(
         dep.scan
             .trait_users
             .flatten(&mut infos, prior_protocol_defs, None);
+        let mut dep_protocol_infos = dep.scan.protocol_infos.clone();
+        crate::dependency_extensions::expand_dependency_class_aliases(
+            &dep.scan.alias_infos,
+            &mut infos,
+            &mut dep_protocol_infos,
+        );
         class_infos.extend(infos);
         beamtalk_core::semantic_analysis::protocol_source::merge_protocol_sources(
             &mut protocol_sources,
             dep.scan.trait_users.protocol_sources().clone(),
         );
+        protocol_infos.extend(dep_protocol_infos);
+        alias_infos.extend(dep.scan.alias_infos.iter().cloned());
         let own_protocol_defs = dep.scan.trait_users.protocol_defs();
         protocol_defs.extend(own_protocol_defs.iter().cloned());
         flattened.push((dep.name.clone(), own_protocol_defs));
     }
 
-    (
+    let stub_dirs = ordered
+        .iter()
+        .filter_map(|dep| {
+            Some(crate::ffi_type_registry::DependencyStubsDir {
+                package: dep.name.clone(),
+                stubs_dir: dep.stubs_dir.clone()?,
+            })
+        })
+        .collect();
+
+    let mut extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
+    let extensions_complete = crate::dependency_extensions::merge_dependency_extensions(
+        ordered.iter().map(|dep| &dep.scan.extensions),
+        &mut extensions,
+    ) && every_dependency_found;
+
+    DependencyScan {
         has_package_dependencies,
         class_infos,
         protocol_defs,
         protocol_sources,
-    )
+        extensions,
+        protocol_infos,
+        alias_infos,
+        extensions_complete,
+        stub_dirs,
+    }
+}
+
+impl From<DependencyScan> for crate::lint_pipeline::DependencyMetadata {
+    fn from(scan: DependencyScan) -> Self {
+        Self {
+            class_infos: scan.class_infos,
+            protocol_infos: scan.protocol_infos,
+            protocol_defs: scan.protocol_defs,
+            protocol_sources: scan.protocol_sources,
+            alias_infos: scan.alias_infos,
+            extensions: scan.extensions,
+            extensions_complete: scan.extensions_complete,
+        }
+    }
+}
+
+/// A dependency module's protocol and type-alias infos, as a consumer
+/// pre-loads them: protocols stamped with `dep_name` so the registry applies
+/// the `uses:` shadowing rule to a bare type annotation too (BT-3941), and
+/// every alias stamped with it, `internal` ones included, so
+/// `AliasRegistry::add_pre_loaded`'s seeding-boundary filter can drop those.
+///
+/// Shared by the build path's dependency index and this module's offline
+/// scan, so both surfaces pre-load the same dependency metadata (BT-4585).
+#[must_use]
+pub fn dependency_protocol_alias_infos(
+    module: &beamtalk_core::ast::Module,
+    dep_name: &str,
+) -> (
+    Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
+) {
+    let mut protocol_infos =
+        beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry::extract_protocol_infos(
+            module,
+        );
+    for info in &mut protocol_infos {
+        info.package = Some(dep_name.into());
+    }
+    let alias_infos =
+        beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::extract_package_alias_infos(
+            module,
+            Some(dep_name),
+        );
+    (protocol_infos, alias_infos)
 }
 
 /// A dependency found on disk by [`resolve_dependency_class_infos`]'s walk.
@@ -253,6 +313,8 @@ struct DiscoveredDep {
     /// Names of its own direct dependencies, from its `beamtalk.toml`.
     dependencies: Vec<String>,
     scan: std::sync::Arc<ScannedDep>,
+    /// Its own `[stubs] path` (ADR 0075 layer 2), if it declares one.
+    stubs_dir: Option<Utf8PathBuf>,
 }
 
 /// `deps` in the order the graph compile (`beamtalk build`) compiles them
@@ -314,6 +376,11 @@ impl DepFingerprint {
 struct ScannedDep {
     class_infos: Vec<ClassInfo>,
     trait_users: beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector,
+    /// The dependency's extension methods (ADR 0070 WS3, BT-4608).
+    extensions: crate::dependency_extensions::DependencyExtensions,
+    /// Its protocols and type aliases ([`dependency_protocol_alias_infos`]).
+    protocol_infos: Vec<beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo>,
+    alias_infos: Vec<beamtalk_core::semantic_analysis::alias_registry::AliasInfo>,
 }
 
 /// A [`ScannedDep`] tagged with the [`DepFingerprint`] it was scanned under.
@@ -338,14 +405,9 @@ static PARSE_CALLS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUs
 /// cached result when the dependency's [`DepFingerprint`] hasn't changed
 /// since the last call. `None` if its source directory can't be walked.
 fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<ScannedDep>> {
-    let src_dir = dep_root.join("src");
-    let search_dir = if src_dir.is_dir() {
-        src_dir.as_path()
-    } else {
-        dep_root
-    };
+    let search_dir = dependency_source_dir(dep_root);
 
-    let files = match FileWalker::source_files().walk(search_dir) {
+    let files = match FileWalker::source_files().walk(&search_dir) {
         Ok(files) => files,
         Err(e) => {
             warn!(dep = %dep_name, error = %e, "Failed to walk dependency source directory");
@@ -365,7 +427,7 @@ fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<Scanne
     let cached = cache
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .get(search_dir)
+        .get(&search_dir)
         .filter(|(cached_fingerprint, _)| *cached_fingerprint == fingerprint)
         .map(|(_, scanned)| std::sync::Arc::clone(scanned));
     if cached.is_some() {
@@ -381,6 +443,9 @@ fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<Scanne
         beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::for_package(
             dep_name,
         );
+    let mut extensions = crate::dependency_extensions::DependencyExtensions::scanning();
+    let mut protocol_infos = Vec::new();
+    let mut alias_infos = Vec::new();
     let mut all_read = true;
     for file in files {
         let source = match std::fs::read_to_string(&file) {
@@ -388,20 +453,37 @@ fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<Scanne
             Err(e) => {
                 warn!(dep = %dep_name, file = %file, error = %e, "Failed to read dependency source file");
                 all_read = false;
+                extensions.mark_unreadable();
                 continue;
             }
         };
 
         let tokens = lex_with_eof(&source);
-        let (module, _parse_diags) = parse(tokens);
+        let (module, parse_diags) = parse(tokens);
         class_infos
             .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
         trait_users.add_source_file(&module, file.as_str(), &source, Some(dep_name));
+        extensions.add_file(&module, file.as_std_path(), &parse_diags);
+        let (module_protocols, module_aliases) = dependency_protocol_alias_infos(&module, dep_name);
+        protocol_infos.extend(module_protocols);
+        alias_infos.extend(module_aliases);
     }
+
+    // BT-4615: the dependency's own `internal type` aliases never reach the
+    // consumer's alias scope, so expand them out of what it exports.
+    // Extensions only: class infos are expanded where they are flattened
+    // (see `scan_dependencies`), since flattening would undo it.
+    crate::dependency_extensions::expand_dependency_extension_aliases(
+        &alias_infos,
+        &mut extensions,
+    );
 
     let scanned = std::sync::Arc::new(ScannedDep {
         class_infos,
         trait_users,
+        extensions,
+        protocol_infos,
+        alias_infos,
     });
     // Only cache a result derived from every file being read successfully —
     // caching a partial result under this fingerprint would make a transient read failure
@@ -483,6 +565,127 @@ mod tests {
         );
     }
 
+    /// ADR 0070 WS3 (BT-4608): the offline scan carries every fetched
+    /// dependency's extension methods, complete when every declared
+    /// dependency was on disk (with a readable manifest, so its own
+    /// dependencies are known) and parsed cleanly.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn dependency_extensions_are_collected_and_complete() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+        );
+        write(
+            tmp.path().join("_build/deps/http/beamtalk.toml").as_path(),
+            "[package]\nname = \"http\"\nversion = \"1.0.0\"\n",
+        );
+        write(
+            tmp.path().join("_build/deps/http/src/ext.bt").as_path(),
+            "Object >> shout -> Integer => 1\nString class >> fromShout => 2\n",
+        );
+
+        let scan = resolve_dependency_class_infos_with_sources(root);
+        assert!(scan.has_package_dependencies);
+        assert!(scan.extensions_complete);
+        assert_eq!(scan.extensions.len(), 2, "{:?}", scan.extensions);
+    }
+
+    /// A transitive dependency's extensions count too: `app` → `http` →
+    /// `json`, where only `json` extends `Object`.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn transitive_dependency_extensions_are_collected() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+        );
+        write(
+            tmp.path().join("_build/deps/http/beamtalk.toml").as_path(),
+            "[package]\nname = \"http\"\nversion = \"1.0.0\"\n\n\
+             [dependencies]\njson = { git = \"https://example.com/json.git\", tag = \"v1.0.0\" }\n",
+        );
+        write(
+            tmp.path().join("_build/deps/http/src/server.bt").as_path(),
+            "Object subclass: Server\n",
+        );
+        write(
+            tmp.path().join("_build/deps/json/beamtalk.toml").as_path(),
+            "[package]\nname = \"json\"\nversion = \"1.0.0\"\n",
+        );
+        write(
+            tmp.path().join("_build/deps/json/src/ext.bt").as_path(),
+            "Object >> toJson -> String => \"json\"\n",
+        );
+
+        let scan = resolve_dependency_class_infos_with_sources(root);
+        assert!(scan.extensions_complete);
+        assert!(
+            scan.extensions
+                .entries()
+                .keys()
+                .any(|key| key.selector == "toJson"),
+            "{:?}",
+            scan.extensions
+        );
+    }
+
+    /// A declared dependency that has not been fetched hides whatever it
+    /// extends, so the extensions are incomplete.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn unfetched_dependency_leaves_extensions_incomplete() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\n\
+             http = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n\
+             json = { git = \"https://example.com/json.git\", tag = \"v1.0.0\" }\n",
+        );
+        // `http` is complete on its own (manifest and clean source), so only
+        // the missing `json` checkout can make the scan incomplete.
+        write(
+            tmp.path().join("_build/deps/http/beamtalk.toml").as_path(),
+            "[package]\nname = \"http\"\nversion = \"1.0.0\"\n",
+        );
+        write(
+            tmp.path().join("_build/deps/http/src/ext.bt").as_path(),
+            "Object >> shout -> Integer => 1\n",
+        );
+
+        let scan = resolve_dependency_class_infos_with_sources(root);
+        assert!(!scan.extensions_complete, "`json` is not on disk");
+        assert_eq!(scan.extensions.len(), 1, "what is on disk is still merged");
+    }
+
+    /// A dependency file with a parse error may have lost an extension.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn dependency_parse_error_leaves_extensions_incomplete() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+        );
+        write(
+            tmp.path().join("_build/deps/http/src/broken.bt").as_path(),
+            "Object >> ((( =>\n",
+        );
+
+        let scan = resolve_dependency_class_infos_with_sources(root);
+        assert!(!scan.extensions_complete);
+    }
+
     /// BT-3673: the offline dependency scan flattens a trait declared in one
     /// of the dependency's files into the `ClassInfo` of its user in another,
     /// so a consumer's typed call to the provided method does not report DNU.
@@ -520,6 +723,45 @@ mod tests {
                 .map(|m| &m.selector)
                 .collect::<Vec<_>>()
         );
+    }
+
+    /// BT-4615: the MCP-lint scanner expands a dependency's `internal type`
+    /// aliases *after* trait flattening, which re-extracts a trait-user's
+    /// `ClassInfo` from its AST. Both the class's own method and a provision
+    /// from the dependency's protocol mention the alias.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn dependency_internal_alias_is_expanded_after_trait_flattening() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+        );
+        let dep_src = tmp.path().join("_build/deps/http/src");
+        write(
+            dep_src.join("tagged.bt").as_path(),
+            "internal type Secret = Integer\n\
+             Protocol define: Tagged\n  name -> String\n\n  tag -> Secret => 1\n",
+        );
+        write(
+            dep_src.join("widget.bt").as_path(),
+            "Object subclass: Widget\n  uses: Tagged\n  name -> String => \"w\"\n  \
+             thing -> Secret => 42\n",
+        );
+
+        let (_, infos, _) = resolve_dependency_class_infos(root);
+        let widget = infos.iter().find(|c| c.name == "Widget").unwrap();
+        for sel in ["thing", "tag"] {
+            let ret = widget
+                .methods
+                .iter()
+                .find(|m| m.selector == sel)
+                .and_then(|m| m.return_type.as_ref())
+                .map(ToString::to_string);
+            assert_eq!(ret.as_deref(), Some("Integer"), "{sel}");
+        }
     }
 
     /// BT-3915: a dependency's `uses: Comparable` of its *own* `Comparable`
@@ -647,6 +889,53 @@ mod tests {
         let (has_deps, infos, _) = resolve_dependency_class_infos(root);
         assert!(has_deps);
         assert!(infos.is_empty());
+    }
+
+    /// BT-4585: the offline scan carries the dependency's protocol and
+    /// type-alias infos — stamped with its package, `internal` aliases
+    /// included for `AliasRegistry::add_pre_loaded` to filter — so MCP
+    /// `lint` pre-loads the same dependency metadata as `beamtalk lint`.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn path_dependency_protocol_and_alias_infos_are_collected() {
+        let tmp = TempDir::new().unwrap();
+        let project_dir = tmp.path().join("app");
+        let root = Utf8Path::from_path(project_dir.as_path()).unwrap();
+        write(
+            project_dir.join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nutils = { path = \"../utils\" }\n",
+        );
+        write(
+            tmp.path().join("utils/src/types.bt").as_path(),
+            "type Status = #active | #inactive\n\
+             internal type Secret = Integer\n\n\
+             Protocol define: Greetable\n  greet -> String\n",
+        );
+
+        let metadata: crate::lint_pipeline::DependencyMetadata =
+            resolve_dependency_class_infos_with_sources(root).into();
+        let greetable = metadata
+            .protocol_infos
+            .iter()
+            .find(|p| p.name == "Greetable")
+            .expect("Greetable protocol info");
+        assert_eq!(greetable.package.as_deref(), Some("utils"));
+        let status = metadata
+            .alias_infos
+            .iter()
+            .find(|a| a.name == "Status")
+            .expect("Status alias info");
+        assert!(!status.is_internal);
+        assert_eq!(status.package.as_deref(), Some("utils"));
+        assert!(
+            metadata
+                .alias_infos
+                .iter()
+                .any(|a| a.name == "Secret" && a.is_internal),
+            "internal aliases are carried for the seeding filter: {:?}",
+            metadata.alias_infos
+        );
     }
 
     #[test]

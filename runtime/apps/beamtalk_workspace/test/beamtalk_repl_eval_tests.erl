@@ -831,36 +831,36 @@ extract_assignment_character_literal_payload_is_not_a_bracket_test() ->
     %% Escaped-payload form (`$\c`) consumes all three characters together.
     ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x := $\\( class")).
 
-%% Regression guard: a string containing
-%% interpolation (`"...{expr}..."`) may itself contain a *nested* string
-%% literal inside the interpolated expression (`lex_interpolation_body`/
-%% `skip_nested_string`, `source_analysis/lexer.rs`) — a single BT string
-%% token can legitimately have more than two `"` characters, with the
-%% interpolated expression's own `.`/`{`/`}`/`"` syntax interleaved.
-%% `skip_string_literal/1` doesn't attempt to mirror that (see its own doc
-%% comment) — it bails conservatively (`unsupported`) the moment it sees an
-%% unescaped `{`, which `has_second_top_level_statement/1` treats as "found
-%% a second statement" so `extract_assignment/1` safely returns `none`
-%% (skips the future-rebinding optimization) rather than mis-pairing quotes
-%% across the interpolation and misreading genuine interpolated code as a
-%% top-level statement boundary.
+%% Regression guard: a string containing interpolation (`"...{expr}..."`)
+%% may itself contain a *nested* string literal inside the interpolated
+%% expression (`lex_interpolation_body`/`skip_nested_string`,
+%% `source_analysis/lexer.rs`). `skip_string_literal/1` mirrors that scan, so
+%% the whole interpolated string is one lexeme and a `.` inside it is never
+%% read as a statement separator.
 extract_assignment_interpolated_string_is_not_mis_parsed_test() ->
-    %% The exact shape from review: a nested string inside the interpolated
-    %% expression, containing what would look like a `.` statement
-    %% separator if the scanner mis-closed the outer string early.
+    %% A nested string inside the interpolated expression, containing what
+    %% would look like a `.` statement separator if the scanner mis-closed the
+    %% outer string early.
     ?assertEqual(
-        none, beamtalk_repl_eval:extract_assignment("x := \"pre {a == \"z. bogus\"} mid\"")
+        {ok, x}, beamtalk_repl_eval:extract_assignment("x := \"pre {a == \"z. bogus\"} mid\"")
     ),
-    %% Plain interpolation, no nested string — still conservatively bails
-    %% (never mis-parsed), since the scanner doesn't try to reason about
-    %% what's inside the interpolation at all.
-    ?assertEqual(none, beamtalk_repl_eval:extract_assignment("x := \"Hello {name}\"")),
+    ?assertEqual({ok, x}, beamtalk_repl_eval:extract_assignment("x := \"Hello {name}\"")),
+    %% A genuine second statement after the interpolated string is still seen.
+    ?assertEqual(
+        none, beamtalk_repl_eval:extract_assignment("x := \"Hello {name}\". y := 2")
+    ),
     %% A plain string with no interpolation at all is unaffected.
     ?assertEqual(
         {ok, x}, beamtalk_repl_eval:extract_assignment("x := \"no interpolation here\"")
     ).
 
-%% (Per CLAUDE.md Essential Rules: a "mirrors" claim across the
+%% An interpolation or nested string left unterminated is `unsupported`.
+skip_string_literal_unterminated_interpolation_test() ->
+    ?assertEqual(unsupported, beamtalk_repl_eval:skip_string_literal("\"a {b")),
+    ?assertEqual(unsupported, beamtalk_repl_eval:skip_string_literal("\"a {b \"c")),
+    ?assertEqual(unsupported, beamtalk_repl_eval:skip_string_literal("\"a {b /* c")).
+
+%% (Per AGENTS.md Essential Rules: a "mirrors" claim across the
 %% Rust/Erlang boundary needs a shared conformance fixture, not
 %% just a comment): `skip_string_literal/1`/`skip_character_literal/1` are
 %% hand-rolled Erlang mirrors of the Rust lexer's `lex_string/0`/
@@ -947,7 +947,7 @@ extract_assignment_block_comment_unbalanced_brace_test() ->
         beamtalk_repl_eval:extract_assignment("alpha := 1 /* note */")
     ).
 
-%% (Per CLAUDE.md Essential Rules: a "mirrors" claim across the
+%% (Per AGENTS.md Essential Rules: a "mirrors" claim across the
 %% Rust/Erlang boundary needs a shared conformance fixture, not just a
 %% comment): `skip_line_comment/1`/`skip_block_comment/1` are hand-rolled
 %% Erlang mirrors of the Rust lexer's `lex_line_comment/0`/

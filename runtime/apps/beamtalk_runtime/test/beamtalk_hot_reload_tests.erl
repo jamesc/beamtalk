@@ -442,7 +442,7 @@ test_field_migration_initialize_class_no_telemetry() ->
 %%
 %% `meck:new('bt@counter', [passthrough])` cannot be used here (or on any
 %% other `bt@...` module): `.bt` classes compile straight to Core Erlang via
-%% `compile:forms(..., [from_core | Opts])` (CLAUDE.md), which never
+%% `compile:forms(..., [from_core | Opts])` (AGENTS.md), which never
 %% produces a real `raw_abstract_v1` abstract-code chunk — the `.beam` still
 %% carries the chunk, but with an empty forms list. meck's
 %% `backup_original/4` reads it unconditionally (regardless of the
@@ -720,7 +720,12 @@ try_change_code_crash_produces_exception_failure_test() ->
         %% harmless to call again here regardless of which branch above ran.
         case is_process_alive(Pid) of
             true ->
-                _ = (catch sys:resume(Pid)),
+                _ =
+                    (try
+                        sys:resume(Pid)
+                    catch
+                        _:_ -> ok
+                    end),
                 unlink(Pid),
                 gen_server:stop(Pid);
             false ->
@@ -755,7 +760,12 @@ try_change_code_failure_leaves_actor_suspended_and_inspectable_test() ->
         %% intact, not lost, not reset.
         ?assertEqual(#{v => 1}, sys:get_state(Pid))
     after
-        _ = (catch sys:resume(Pid)),
+        _ =
+            (try
+                sys:resume(Pid)
+            catch
+                _:_ -> ok
+            end),
         unlink(Pid),
         gen_server:stop(Pid)
     end.

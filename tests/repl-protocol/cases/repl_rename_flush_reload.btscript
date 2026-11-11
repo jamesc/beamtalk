@@ -3,7 +3,7 @@
 
 // BT-3277 (ADR 0114 Phase 5, epic BT-3267 close-out): required e2e validation
 // combining the pieces the epic's earlier waves each exercised separately,
-// per CLAUDE.md's rule that EUnit/BUnit alone are insufficient for
+// per AGENTS.md's rule that EUnit/BUnit alone are insufficient for
 // user-facing features:
 //
 //   - `repl_rename_class_method.btscript` (BT-3276) exercises the

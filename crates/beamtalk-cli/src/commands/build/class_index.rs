@@ -64,8 +64,13 @@ pub(crate) struct ClassIndexResult {
     /// dependency alike (ADR 0127 §3; BT-3625, BT-3663) — so a flattened
     /// dependency method maps its lines to the dependency's own file.
     pub(crate) all_protocol_sources: beamtalk_core::semantic_analysis::ProtocolSourceMap,
-    /// Project-wide standalone extension index from Pass 1.
+    /// Project-wide standalone extension index from Pass 1, with every
+    /// dependency's extensions merged in (ADR 0070 WS3, BT-4608).
     pub(crate) extension_index: beamtalk_core::compilation::extension_index::ExtensionIndex,
+    /// Whether every dependency's extensions were loaded completely
+    /// (`dependency_extensions::merge_dependency_extensions`). Pass 2 lifts
+    /// the pre-WS3 dependency guard only when this holds.
+    pub(crate) dependency_extensions_complete: bool,
     /// Dependency registry for cross-package collision detection.
     pub(crate) dep_registry: beamtalk_core::semantic_analysis::DependencyRegistry,
     /// Cached ASTs from incremental Pass 1, keyed by source file path.
@@ -83,12 +88,13 @@ pub(crate) struct ClassIndexResult {
     /// `IncrementalPass1Result.file_protocol_uses`). Empty for
     /// manifest-less builds, same as `cached_asts`.
     pub(crate) file_protocol_uses: HashMap<Utf8PathBuf, Vec<ecow::EcoString>>,
-    /// Hash of the flattened class surface of every class declared in a file
-    /// with `uses:` lines (BT-3674); empty when the package has none.
+    /// Hash of the cross-file analysis surface — every pre-loaded class
+    /// (trait provisions flattened in), protocol and alias, project and
+    /// dependency alike (`util::analysis_surface_hash`; BT-3674, BT-4336).
     /// `detect_changes` folds it into every file's cache key so an unchanged
-    /// caller of a trait-provided method is re-checked when a provision
+    /// file is re-checked when a signature it may type-check against
     /// changes. Empty for manifest-less builds.
-    pub(crate) trait_surface_hash: String,
+    pub(crate) analysis_surface_hash: String,
 }
 
 /// Phase 5-6: Build the class index (Pass 1) and merge dependency indexes.
@@ -119,7 +125,7 @@ pub(crate) fn build_class_index(
         mut class_module_index,
         class_superclass_index,
         source_class_infos,
-        extension_index,
+        mut extension_index,
         cached_asts,
         force_pass2,
         source_hashes,
@@ -206,6 +212,16 @@ pub(crate) fn build_class_index(
         dep_alias_infos.extend(dep.alias_infos.clone());
     }
 
+    // ADR 0070 WS3 (BT-4608): every dependency's extension methods join the
+    // project's cross-file extension index, so Pass 2's type checker sees
+    // them as part of their target classes' method surfaces. Pass 2 lifts
+    // the pre-WS3 dependency guard only when all of them were complete.
+    let dependency_extensions_complete =
+        beamtalk_cli::dependency_extensions::merge_dependency_extensions(
+            dep_ctx.resolved_deps.iter().map(|dep| &dep.extensions),
+            &mut extension_index,
+        );
+
     // Single unified collection of all ClassInfo from all sources.
     // To add a new .bt source location, add its ClassInfo slice here.
     // The project's own classes come first (`own_class_count` of them).
@@ -278,9 +294,9 @@ pub(crate) fn build_class_index(
     // flattened in, as codegen flattens them (BT-3668). Only manifest builds
     // have Pass 1 infos (and `file_protocol_uses`) to rewrite; a manifest-less
     // build — including `--stdlib-mode` — is a no-op here.
-    let mut trait_surface_hash = String::new();
+    let mut analysis_surface_hash = String::new();
     if let Some(pkg) = package_identity(pkg_manifest, options.stdlib_mode) {
-        let flattened = flatten_trait_user_class_infos(
+        flatten_trait_user_class_infos(
             &mut all_class_infos,
             &file_protocol_uses,
             &cached_asts,
@@ -289,8 +305,35 @@ pub(crate) fn build_class_index(
             env.source_root.as_deref(),
             pkg,
         );
-        trait_surface_hash =
-            crate::commands::util::class_surface_hash(&all_class_infos, &flattened, pkg);
+        // BT-4336: hashed after flattening, over the cross-file context Pass 2
+        // hands `analyse_full` (pre-loaded classes, protocols, aliases and
+        // standalone extensions; the project-known Erlang modules are folded
+        // in by `execute_build_passes`), so any cross-file signature change
+        // re-checks every file instead of replaying stale diagnostics.
+        analysis_surface_hash = crate::commands::util::analysis_surface_hash(
+            &all_class_infos,
+            &all_protocol_infos,
+            &all_alias_infos,
+            &extension_index,
+        );
+        // The dependency guard's final value changes every file's
+        // diagnostics, and can flip without the extension index changing (a
+        // dependency file gains a parse error; diagnostics cached before
+        // dependency extensions were loaded at all), so for a package with
+        // dependencies it is part of the surface too. Folded as the value
+        // analysis will actually use (`beam_compiler` computes it the same
+        // way), so the two cannot drift apart.
+        if options.dependency_extensions_unknown {
+            let guard = beamtalk_cli::dependency_extensions::dependency_extensions_unknown(
+                options.dependency_extensions_unknown,
+                true,
+                dependency_extensions_complete,
+            );
+            analysis_surface_hash = crate::commands::util::sha256_hex(
+                format!("{analysis_surface_hash}\ndependency-extensions-unknown:{guard}")
+                    .as_bytes(),
+            );
+        }
     }
 
     // Taken after trait flattening, which rewrites only project classes'
@@ -307,12 +350,13 @@ pub(crate) fn build_class_index(
         all_protocol_defs,
         all_protocol_sources,
         extension_index,
+        dependency_extensions_complete,
         dep_registry,
         cached_asts,
         force_pass2,
         source_hashes,
         file_protocol_uses,
-        trait_surface_hash,
+        analysis_surface_hash,
     })
 }
 
@@ -330,10 +374,6 @@ pub(crate) fn build_class_index(
 /// project's own classes: a class it maps to another file's module is
 /// `shadowed` there, so this file's provisions are not written into the slot
 /// of the class that wins (BT-3679).
-///
-/// Returns the names of the classes whose `ClassInfo` was replaced (BT-3674),
-/// so the caller can hash exactly the cross-file surface that flattening
-/// contributes.
 pub(crate) fn flatten_trait_user_class_infos(
     all_class_infos: &mut [beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo],
     file_protocol_uses: &HashMap<Utf8PathBuf, Vec<ecow::EcoString>>,
@@ -342,7 +382,7 @@ pub(crate) fn flatten_trait_user_class_infos(
     project_class_module_index: &HashMap<String, String>,
     source_root: Option<&Utf8Path>,
     pkg_name: &str,
-) -> Vec<ecow::EcoString> {
+) {
     let mut user_files: Vec<&Utf8PathBuf> = file_protocol_uses
         .iter()
         .filter(|(_, uses)| !uses.is_empty())
@@ -410,12 +450,15 @@ pub(crate) fn flatten_trait_user_class_infos(
     let modules = user_modules.iter().map(|(module, shadowed)| {
         beamtalk_core::semantic_analysis::trait_expansion::TraitUserModule { module, shadowed }
     });
-    beamtalk_core::semantic_analysis::trait_expansion::flatten_trait_user_class_infos(
-        all_class_infos,
-        modules,
-        protocol_defs.iter().cloned(),
-        Some(pkg_name),
-    )
+    // The replaced classes' names are not needed here: the analysis
+    // surface hash covers every class (BT-4336).
+    let _replaced =
+        beamtalk_core::semantic_analysis::trait_expansion::flatten_trait_user_class_infos(
+            all_class_infos,
+            modules,
+            protocol_defs.iter().cloned(),
+            Some(pkg_name),
+        );
 }
 
 /// Collects `cached_asts`' trait users and carried protocols (in

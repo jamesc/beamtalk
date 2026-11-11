@@ -50,13 +50,13 @@ impl OtpSupportWindow {
         (self.min_major..=self.max_major).contains(&major)
     }
 
-    /// Every major in the window, ascending (e.g. `[27, 28]`).
+    /// Every major in the window, ascending (e.g. `[28, 29]`).
     #[must_use]
     pub fn majors(&self) -> Vec<u32> {
         (self.min_major..=self.max_major).collect()
     }
 
-    /// The window rendered as a human-readable range, e.g. `"27-28"`.
+    /// The window rendered as a human-readable range, e.g. `"28-29"`.
     #[must_use]
     pub fn display_range(&self) -> String {
         if self.min_major == self.max_major {
@@ -112,7 +112,32 @@ pub fn major_from_version_str(version: &str) -> Option<u32> {
     }
 }
 
-/// JSON array of the window's majors as strings, e.g. `["27","28"]` — the
+/// The user-facing message for an OTP major below the window's floor, e.g.
+/// `"Erlang/OTP 27 is unsupported — Beamtalk needs OTP 28+"`; `None` when
+/// `major` is at or above `min-major`.
+///
+/// The toolchain's own `.beam` files are compiled on `min-major` (ADR 0125
+/// §3.1 — `.tool-versions` pins it, enforced by a test below), and BEAM
+/// bytecode never loads on an *older* release (§3.2). So below the floor
+/// is not "untested", it is a guaranteed boot crash (`requires a more recent
+/// Erlang/OTP version`). `beamtalk doctor` reports this message, and the
+/// compile and workspace paths fail fast with it rather than letting the
+/// node crash. Above the window stays a warning:
+/// newer releases load older bytecode.
+#[must_use]
+pub fn below_floor_message(major: u32) -> Option<String> {
+    let floor = window().min_major;
+    if major >= floor {
+        return None;
+    }
+    Some(format!(
+        "Erlang/OTP {major} is unsupported — Beamtalk needs OTP {floor}+ \
+         (supported window {}, declared in otp-support.toml)",
+        window().display_range()
+    ))
+}
+
+/// JSON array of the window's majors as strings, e.g. `["28","29"]` — the
 /// exact shape `just otp-matrix` prints for `ci.yml`'s `matrix.otp`.
 #[must_use]
 pub fn majors_as_json_array() -> String {
@@ -129,7 +154,47 @@ mod tests {
     fn window_reads_declared_bounds() {
         let w = window();
         assert!(w.min_major <= w.max_major);
-        assert_eq!(w.min_major, 27, "ADR 0125 §3.1: minimum is 27");
+        assert!(
+            w.min_major >= 27,
+            "ADR 0125 §3.1: minimum is never below 27"
+        );
+    }
+
+    /// ADR 0125 §3.1: release and nightly artifacts are built on the window's
+    /// **min-major**, because BEAM bytecode loads on later releases but never
+    /// on earlier ones — an artifact built on min-major runs across the whole
+    /// window. Every release/nightly/edge workflow installs the OTP pinned by
+    /// `.tool-versions`, so that pin's major must equal `min-major`. Bumping
+    /// the window without moving the pin (or vice versa) fails here.
+    #[test]
+    fn tool_versions_erlang_pin_is_min_major() {
+        const TOOL_VERSIONS: &str =
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../.tool-versions"));
+        let erlang = TOOL_VERSIONS
+            .lines()
+            .find_map(|l| l.strip_prefix("erlang "))
+            .expect(".tool-versions must pin `erlang`")
+            .trim();
+        assert_eq!(
+            major_from_version_str(erlang),
+            Some(window().min_major),
+            ".tool-versions pins erlang {erlang}, but release artifacts must be built on \
+             otp-support.toml's min-major ({}) — ADR 0125 §3.1",
+            window().min_major
+        );
+    }
+
+    #[test]
+    fn below_floor_message_only_below_min_major() {
+        let w = window();
+        assert_eq!(below_floor_message(w.min_major), None);
+        assert_eq!(below_floor_message(w.max_major + 1), None);
+        let msg = below_floor_message(w.min_major - 1).expect("below floor");
+        assert!(
+            msg.contains(&format!("needs OTP {}+", w.min_major)),
+            "got: {msg}"
+        );
+        assert!(msg.contains("unsupported"), "got: {msg}");
     }
 
     #[test]

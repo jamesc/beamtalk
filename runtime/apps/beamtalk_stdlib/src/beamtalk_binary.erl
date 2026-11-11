@@ -331,7 +331,7 @@ part(Bin, Pos, Len) when is_binary(Bin), is_integer(Pos), is_integer(Len) ->
                     index_out_of_bounds,
                     'Binary',
                     part,
-                    iolist_to_binary(
+                    beamtalk_error:chars_to_binary(
                         io_lib:format(
                             "part(~B, ~B) is out of bounds for binary of size ~B",
                             [Pos, Len, erlang:byte_size(Bin)]
@@ -588,7 +588,8 @@ invalid_utf8_error(Offset) ->
     Error0 = beamtalk_error:new(parse_error, 'Binary'),
     Error1 = beamtalk_error:with_selector(Error0, asString),
     Error2 = beamtalk_error:with_message(
-        Error1, iolist_to_binary(io_lib:format("Invalid UTF-8 at byte offset ~B", [Offset]))
+        Error1,
+        beamtalk_error:chars_to_binary(io_lib:format("Invalid UTF-8 at byte offset ~B", [Offset]))
     ),
     Error3 = beamtalk_error:with_hint(
         Error2, <<"Use asStringUnchecked to skip validation">>

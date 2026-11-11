@@ -156,11 +156,26 @@
 %% (ADR 0126 §5.1) rather than guessing at a decode.
 -define(BT_WIRE_VERSION, 1).
 
+%% @doc BT-3968: the tag on the `handle_continue/2` term carrying an actor's
+%% continuation queue, `{continue, {?BT_CONTINUE_TAG, [{Selector, Args}]}}`
+%% (`beamtalk_actor:add_continue/2`). Shared with `beamtalk_actor_redaction`,
+%% which redacts secret-selector continuations in status and sys logs.
+-define(BT_CONTINUE_TAG, '$bt_continue').
+
+%% @doc BT-3968: process-dictionary key holding an actor's deferred
+%% continuation queue (`self continueWith: #sel` from inside a method) as a
+%% *reversed* list of `{Selector, Args}`, consumed by
+%% `beamtalk_actor:apply_pending_actions/1` once the current gen_server
+%% callback returns — it becomes OTP's `{continue, _}` action. Shared with
+%% `beamtalk_actor_redaction`, which redacts secret-selector entries in a
+%% crash report's process dictionary (BT-4666).
+-define(PENDING_CONTINUE_KEY, '$bt_pending_continue').
+
 %% @doc ADR 0126 §3 timeout (ms) for a bounded `erpc:call/5` to a peer node —
 %% remote spawn/lookup (`beamtalk_actor`), `Node>>shapeManifest`, and
 %% `beamtalk_node_monitor`'s connect-/reload-time shape-skew comparison
 %% (Phase 4) all share this single source of truth rather than each pinning
-%% its own literal (CLAUDE.md "No duplicate implementations").
+%% its own literal (AGENTS.md "No duplicate implementations").
 -define(BT_REMOTE_CALL_TIMEOUT, 5000).
 
 %% BT-3992: how long a starter (`spawn`, a supervisor starting an actor
@@ -199,7 +214,7 @@
 %% might intercept a `throw` (class-side self-sends, instance-side extension
 %% invocation, `tryDo:`, class-variable `protect/1`, JSON encoding) must
 %% relay rather than report them. Single source of truth for the shape check
-%% across the runtime and stdlib apps — per CLAUDE.md's no-duplicate-
+%% across the runtime and stdlib apps — per AGENTS.md's no-duplicate-
 %% implementation rule, a future NLR shape change only needs to land here.
 %% `just lint-nlr-tuple-matches` (scripts/ci/lint-nlr-tuple-matches.sh)
 %% rejects hand-rolled `{'$bt_nlr', ...}` patterns elsewhere in runtime

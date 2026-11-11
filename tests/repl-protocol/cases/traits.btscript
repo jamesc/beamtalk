@@ -76,7 +76,7 @@ DateTime usedProtocols includes: #Comparable
 // (`beamtalk_repl_loader`'s `with_ambient_protocol_sources/1`, BT-3591/
 // BT-3593), not into a bare inline REPL expression. So every protocol and
 // every class using one, below, is written to a temp file (`File
-// tempDirectory`, per CLAUDE.md's cross-platform temp-path rule) and loaded
+// tempDirectory`, per AGENTS.md's cross-platform temp-path rule) and loaded
 // via `Workspace load:` — never defined inline — exactly like BT-3593's own
 // `t_protocol_reload_fanout_reaches_user` EUnit test does. One shared unique
 // suffix (`(Erlang erlang) unique_integer`) keeps every temp path distinct

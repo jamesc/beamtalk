@@ -65,6 +65,8 @@ pub(in crate::core_erlang) struct MethodFrame<'a> {
     prev_selector: Option<String>,
     /// The method span current before `enter` (BT-4059 peel scope).
     prev_method_span: Option<beamtalk_core::source_analysis::Span>,
+    /// The `|>` record current before `enter` (ADR 0145).
+    prev_pipeline_sends: beamtalk_core::ast::PipelineSends,
     /// The method identity current before `enter` (BT-4415 guard keys).
     prev_guard_method: Option<super::guard_returns::MethodKey>,
     boundary: MethodBoundary,
@@ -115,8 +117,11 @@ impl<'a> MethodFrame<'a> {
             .current_method_selector
             .replace(selector_name.to_string());
         let prev_method_span = generator.current_method_span.replace(method.span);
+        let prev_pipeline_sends = std::mem::replace(
+            &mut generator.current_pipeline_sends,
+            method.pipeline_sends.clone(),
+        );
         let guard_method = super::guard_returns::MethodKey::of(method);
-        generator.generated_methods.insert(guard_method.clone());
         let prev_guard_method = generator.current_guard_method.replace(guard_method);
 
         if boundary == MethodBoundary::ClassMethod {
@@ -161,6 +166,7 @@ impl<'a> MethodFrame<'a> {
                 generator,
                 prev_selector,
                 prev_method_span,
+                prev_pipeline_sends,
                 prev_guard_method,
                 boundary,
                 prev_source,
@@ -199,6 +205,7 @@ impl Drop for MethodFrame<'_> {
         }
         self.generator.current_method_selector = self.prev_selector.take();
         self.generator.current_method_span = self.prev_method_span.take();
+        self.generator.current_pipeline_sends = std::mem::take(&mut self.prev_pipeline_sends);
         self.generator.current_guard_method = self.prev_guard_method.take();
         if let Some((text, path)) = self.prev_source.take() {
             self.generator.source_text = text;

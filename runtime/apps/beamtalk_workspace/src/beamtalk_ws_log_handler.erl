@@ -218,48 +218,54 @@ format_event(#{level := Level, msg := Msg, meta := Meta}) ->
     maybe_put(pid, format_pid(Meta), M4).
 
 -spec format_time(map()) -> binary().
-format_time(#{time := Timestamp}) ->
-    Micros = Timestamp rem 1000000,
-    Millis = Micros div 1000,
-    Seconds = Timestamp div 1000000,
-    {{Y, Mo, D}, {H, Mi, S}} = calendar:system_time_to_universal_time(Seconds, second),
-    iolist_to_binary(
-        io_lib:format(
-            "~4..0B-~2..0B-~2..0BT~2..0B:~2..0B:~2..0B.~3..0BZ",
-            [Y, Mo, D, H, Mi, S, Millis]
-        )
-    );
-format_time(_) ->
-    <<"unknown">>.
+format_time(Meta) ->
+    beamtalk_log_format:format_time(Meta).
 
 -spec format_msg(term(), map()) -> binary().
 format_msg({string, Msg}, _Meta) ->
-    iolist_to_binary(Msg);
+    log_text_to_binary(Msg);
 format_msg({report, Report}, Meta) when is_map(Report) ->
     case maps:get(report_cb, Meta, undefined) of
         undefined ->
-            iolist_to_binary(io_lib:format("~tp", [Report]));
+            log_text_to_binary(io_lib:format("~tp", [Report]));
         Fun when is_function(Fun, 1) ->
             {Format, Args} = Fun(Report),
-            iolist_to_binary(io_lib:format(Format, Args));
+            log_text_to_binary(io_lib:format(Format, Args));
         Fun when is_function(Fun, 2) ->
-            iolist_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
+            log_text_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
     end;
 format_msg({report, Report}, Meta) ->
     format_msg_report_list(Report, Meta);
 format_msg({Format, Args}, _Meta) ->
-    iolist_to_binary(io_lib:format(Format, Args)).
+    log_text_to_binary(io_lib:format(Format, Args)).
 
 -spec format_msg_report_list(term(), map()) -> binary().
 format_msg_report_list(Report, Meta) ->
     case maps:get(report_cb, Meta, undefined) of
         undefined ->
-            iolist_to_binary(io_lib:format("~tp", [Report]));
+            log_text_to_binary(io_lib:format("~tp", [Report]));
         Fun when is_function(Fun, 1) ->
             {Format, Args} = Fun(Report),
-            iolist_to_binary(io_lib:format(Format, Args));
+            log_text_to_binary(io_lib:format(Format, Args));
         Fun when is_function(Fun, 2) ->
-            iolist_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
+            log_text_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
+    end.
+
+%% Callers format log text with either `~s` on a UTF-8 binary (bytes surface as
+%% latin1 chars; `iolist_to_binary/1` passes them back through unchanged) or
+%% `~ts` (real codepoints, possibly above 255, where `iolist_to_binary/1` raises
+%% `badarg`; and a crashing `log/2` gets this handler removed by OTP logger).
+%% Keep the byte pass-through when it is valid UTF-8, else encode the codepoints.
+-spec log_text_to_binary(unicode:chardata()) -> binary().
+log_text_to_binary(Chardata) ->
+    try iolist_to_binary(Chardata) of
+        Bin ->
+            case unicode:characters_to_binary(Bin, utf8, utf8) of
+                Valid when is_binary(Valid) -> Bin;
+                _ -> beamtalk_error:chars_to_binary(Chardata)
+            end
+    catch
+        error:badarg -> beamtalk_error:chars_to_binary(Chardata)
     end.
 
 -spec format_domain(map()) -> binary() | undefined.
@@ -282,17 +288,15 @@ format_selector(_) ->
 
 -spec format_mfa(map()) -> binary() | undefined.
 format_mfa(#{mfa := {M, F, A}}) when is_atom(M), is_atom(F), is_integer(A) ->
-    iolist_to_binary(
-        io_lib:format("~s:~s/~B", [atom_to_list(M), atom_to_list(F), A])
+    beamtalk_error:chars_to_binary(
+        io_lib:format("~ts:~ts/~B", [atom_to_list(M), atom_to_list(F), A])
     );
 format_mfa(_) ->
     undefined.
 
 -spec format_pid(map()) -> binary() | undefined.
-format_pid(#{pid := Pid}) when is_pid(Pid) ->
-    list_to_binary(pid_to_list(Pid));
-format_pid(_) ->
-    undefined.
+format_pid(Meta) ->
+    beamtalk_log_format:format_pid(Meta).
 
 -spec maybe_put(atom(), term(), map()) -> map().
 maybe_put(_Key, undefined, Map) ->

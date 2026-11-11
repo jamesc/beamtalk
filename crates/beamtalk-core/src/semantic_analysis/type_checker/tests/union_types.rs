@@ -556,6 +556,7 @@ fn bt3469_union_member_with_cross_file_parent_downgrades_to_open() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     hierarchy.add_from_beam_meta(vec![ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: "PartialA".into(),
         // `MissingAncestor` is never registered — the checker cannot
@@ -798,6 +799,7 @@ fn union_receiver_no_members_respond_returns_dynamic() {
 fn false_or_param_resolves_to_union() {
     // A method with parameter `x :: Integer | False` should infer x as Union.
     let method = MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Keyword(vec![KeywordPart::new("check:", span())]),
         parameters: vec![ParameterDefinition::with_type(
             ident("x"),
@@ -848,6 +850,7 @@ fn false_or_param_resolves_to_union() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: vec![],
         protocols: vec![],
@@ -894,6 +897,7 @@ fn bt3076_union_member_class_of_unregistered_class_still_contributes() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("tag".into()),
             parameters: vec![],
             body: vec![],
@@ -921,6 +925,7 @@ fn bt3076_union_member_class_of_unregistered_class_still_contributes() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![
             make_class("UnionA", TypeAnnotation::Simple(ident("Integer"))),
             make_class(

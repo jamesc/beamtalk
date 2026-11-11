@@ -30,10 +30,68 @@ pub(in crate::server) struct PreloadedFiles {
     /// How much of the budget this walk drew (paths found, before reading),
     /// to subtract from the session-wide remainder (BT-4383).
     pub(in crate::server) budget_used: usize,
-    /// Whether any workspace root has fetched package dependencies
-    /// (`_build/deps/*/src` present). Dependency extension contributions
-    /// are invisible until fetched, so diagnostics must stay conservative.
-    pub(in crate::server) deps_present: bool,
+    /// What this walk learned about the walked roots' dependencies, for the
+    /// pre-WS3 dependency guard (BT-4611).
+    pub(in crate::server) dependencies: DependencyLoad,
+}
+/// One preload walk's dependency loading, for ADR 0100's pre-WS3 guard
+/// (BT-4611). The guard stays on unless every declared transitive dependency
+/// was found on disk and all of its source was preloaded; the caller adds the
+/// last condition, that no preloaded dependency file has a parse error, once
+/// the files are indexed ([`DependencyLoad::extensions_unknown`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::server) struct DependencyLoad {
+    /// Whether any walked root declares dependencies (a manifest whose
+    /// `[dependencies]` can't be read is assumed to).
+    pub(in crate::server) declared: bool,
+    /// Whether every walked root's transitive dependencies were found on
+    /// disk and every one of their source files was read within budget.
+    pub(in crate::server) loaded: bool,
+    /// The dependency source directories the walk preloaded.
+    pub(in crate::server) src_dirs: Vec<PathBuf>,
+}
+impl Default for DependencyLoad {
+    /// No roots walked: nothing declared, so nothing missing.
+    fn default() -> Self {
+        Self {
+            declared: false,
+            loaded: true,
+            src_dirs: Vec::new(),
+        }
+    }
+}
+impl DependencyLoad {
+    /// The guard's verdict, given whether any preloaded dependency file is
+    /// incomplete (parse error) — the CLI's rule,
+    /// [`beamtalk_project::dependency_extensions::dependency_extensions_unknown`].
+    pub(in crate::server) fn extensions_unknown(&self, any_incomplete_file: bool) -> bool {
+        beamtalk_project::dependency_extensions::dependency_extensions_unknown(
+            self.declared,
+            self.loaded,
+            !any_incomplete_file,
+        )
+    }
+}
+/// One dependency of a package root, as found on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::server) struct DependencyDirs {
+    /// The dependency's checkout root.
+    pub(in crate::server) root: PathBuf,
+    /// Where its Beamtalk source lives: `src/`, or the root itself
+    /// ([`beamtalk_project::dependency_graph::dependency_source_dir`]).
+    pub(in crate::server) src: PathBuf,
+}
+/// A package root's declared dependencies, as far as they are on disk.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::server) struct RootDependencies {
+    /// Whether the root's manifest declares any dependency. An unreadable
+    /// or malformed `[dependencies]` table conservatively counts as yes.
+    pub(in crate::server) declared: bool,
+    /// Every transitive dependency found on disk.
+    pub(in crate::server) found: Vec<DependencyDirs>,
+    /// Whether that is all of them: the manifest was read and every
+    /// transitive dependency was found, with a readable manifest.
+    pub(in crate::server) all_found: bool,
 }
 pub(in crate::server) fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
     let mut roots = Vec::new();
@@ -86,20 +144,13 @@ pub(in crate::server) fn package_root_for_file(path: &Path) -> Option<PathBuf> {
     root.join("beamtalk.toml").is_file().then_some(root)
 }
 /// `Some(<pkg>)` when `dir` is a fetched dependency checkout
-/// `<pkg>/_build/deps/<name>` (the layout [`dependency_src_dirs`] walks).
+/// `<pkg>/_build/deps/<name>` (where git and registry dependencies live).
 fn owning_package_of_dependency_checkout(dir: &Path) -> Option<&Path> {
     let deps = dir.parent()?;
     let build = deps.parent()?;
     (deps.file_name()? == "deps" && build.file_name()? == "_build")
         .then(|| build.parent())
         .flatten()
-}
-/// Whether any root has fetched package dependencies — the same signal
-/// [`PreloadedFiles::deps_present`] reports for the roots one preload walked.
-pub(in crate::server) fn any_dependency_src_dirs(roots: &[PathBuf]) -> bool {
-    roots
-        .iter()
-        .any(|root| !dependency_src_dirs(root).is_empty())
 }
 pub(in crate::server) fn configured_stdlib_source_dir(params: &InitializeParams) -> Option<String> {
     params
@@ -180,34 +231,90 @@ pub(in crate::server) fn canonicalize_existing_dir(path: &Path) -> Option<PathBu
 pub(in crate::server) fn path_within_any_root(path: &Path, roots: &[PathBuf]) -> bool {
     roots.iter().any(|root| path.starts_with(root))
 }
-/// Enumerate `_build/deps/<name>/src/` directories for every fetched
-/// dependency under `root`.
+/// The declared dependencies of the package at `root` (BT-4611): its
+/// `beamtalk.toml` `[dependencies]` and theirs, transitively, located on disk
+/// with the walk the CLI's offline dependency scan uses
+/// ([`beamtalk_project::dependency_graph::discover_dependency_graph`]) —
+/// path dependencies at their declared path, git and registry ones under
+/// `_build/deps/<name>/`. Never fetches.
 ///
-/// Filesystem-driven rather than manifest-driven: any directory under
-/// `_build/deps/` with a `src/` subdirectory is treated as a dep. This avoids
-/// adding a `beamtalk-cli` dependency on the LSP just to parse `beamtalk.toml`,
-/// and matches the layout the build system writes.
-pub(in crate::server) fn dependency_src_dirs(root: &Path) -> Vec<PathBuf> {
+/// A root with no `beamtalk.toml` is not a package and has none. One whose
+/// `[dependencies]` can't be read is assumed to have some, none of them
+/// known; its fetched checkouts (`_build/deps/*/`) are still returned so
+/// their classes resolve.
+pub(in crate::server) fn root_dependencies(root: &Path) -> RootDependencies {
+    use beamtalk_project::dependency_graph::{dependency_source_dir, discover_dependency_graph};
+
+    let manifest = root.join("beamtalk.toml");
+    if !manifest.is_file() {
+        return RootDependencies {
+            declared: false,
+            found: Vec::new(),
+            all_found: true,
+        };
+    }
+    let read = camino::Utf8Path::from_path(root).ok_or(()).and_then(|utf8_root| {
+        beamtalk_project::dependencies::read_manifest_dependencies(&utf8_root.join("beamtalk.toml"))
+            .map(|deps| (utf8_root, deps))
+            .map_err(|e| {
+                // `debug`, not `warn`: this runs on every `did_open` (via
+                // `preload_covers`), and `beamtalk build` reports the error.
+                tracing::debug!(root = %root.display(), error = %e, "Cannot read [dependencies]; keeping the dependency guard on");
+            })
+    });
+    let Ok((utf8_root, direct)) = read else {
+        return RootDependencies {
+            declared: true,
+            found: fetched_dependency_checkouts(root),
+            all_found: false,
+        };
+    };
+    let declared = !direct.is_empty();
+    let graph = discover_dependency_graph(utf8_root, direct);
+    RootDependencies {
+        declared,
+        found: graph
+            .found
+            .into_iter()
+            .map(|dep| DependencyDirs {
+                src: dependency_source_dir(&dep.root).into_std_path_buf(),
+                root: dep.root.into_std_path_buf(),
+            })
+            .collect(),
+        all_found: graph.all_found,
+    }
+}
+/// Every fetched checkout under `root/_build/deps/` with a `src/` — the
+/// fallback when the manifest's `[dependencies]` can't be read.
+fn fetched_dependency_checkouts(root: &Path) -> Vec<DependencyDirs> {
     let deps_dir = root.join("_build").join("deps");
     let Ok(entries) = fs::read_dir(&deps_dir) else {
         return Vec::new();
     };
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let dep_path = entry.path();
-        if !dep_path.is_dir() {
-            continue;
-        }
-        let src = dep_path.join("src");
-        if src.is_dir() {
-            out.push(src);
-        }
-    }
-    out.sort_unstable();
+    let mut out: Vec<DependencyDirs> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|dep| dep.join("src").is_dir())
+        .map(|dep| DependencyDirs {
+            src: dep.join("src"),
+            root: dep,
+        })
+        .collect();
+    out.sort_unstable_by(|a, b| a.root.cmp(&b.root));
     out
 }
+/// The source directories of every dependency of `root` found on disk
+/// ([`root_dependencies`]).
+pub(in crate::server) fn dependency_src_dirs(root: &Path) -> Vec<PathBuf> {
+    root_dependencies(root)
+        .found
+        .into_iter()
+        .map(|dep| dep.src)
+        .collect()
+}
 /// Whether `path` lies in a directory [`collect_preload_files`] walks for
-/// some workspace root — `src/`, `test/`, or a fetched dependency's `src/`.
+/// some workspace root — `src/`, `test/`, or a dependency's source directory
+/// (path dependencies included).
 /// Must stay in lockstep with that walk: it decides which closed files keep
 /// their on-disk index entry in `did_close`.
 pub(in crate::server) fn preload_covers(path: &Path, roots: &[PathBuf]) -> bool {
@@ -245,10 +352,11 @@ pub(in crate::server) fn collect_preload_files_within(
     // Before this, the LSP would report spurious `Unresolved class` for every
     // test-to-src reference until the user touched the src file manually.
     //
-    // Also preload `_build/deps/<name>/src/` for each fetched
-    // dependency so references to classes from declared `beamtalk.toml`
-    // dependencies (e.g. `HTTPClient` from the `http` package) resolve
-    // without spurious `Unresolved class` warnings. Dep dirs are walked
+    // Also preload each declared dependency's source ([`root_dependencies`]:
+    // `_build/deps/<name>/src/` for a fetched one, the declared path for a
+    // path dependency) so references to dependency classes (e.g.
+    // `HTTPClient` from the `http` package) resolve without spurious
+    // `Unresolved class` warnings, and their extensions are visible. Dep dirs are walked
     // *after* every workspace root's `src/`/`test/` so that in a multi-root
     // workspace one root's deps cannot exhaust the shared preload budget
     // before later roots' user files are considered.
@@ -271,23 +379,15 @@ pub(in crate::server) fn collect_preload_files_within(
         }
     }
 
-    let mut deps_present = false;
-    for root in &roots {
-        for dep_src in dependency_src_dirs(root) {
-            deps_present = true;
-            if remaining_budget == 0 {
-                break;
-            }
-            if let Ok(found) = preload_walker
-                .clone()
-                .max_files(remaining_budget)
-                .walk_pathbuf(&dep_src)
-            {
-                remaining_budget = remaining_budget.saturating_sub(found.len());
-                user_paths.extend(found);
-            }
-        }
-    }
+    // Every declared dependency's source, path dependencies included
+    // (BT-4611), so their classes and extensions are indexed. Whether that
+    // loading was complete decides the pre-WS3 dependency guard.
+    let (mut dependencies, dependency_paths) = walk_dependency_sources(
+        &roots,
+        &preload_walker,
+        &mut remaining_budget,
+        &mut user_paths,
+    );
 
     let mut stdlib_path_list = Vec::new();
     for dir in &stdlib_dirs {
@@ -316,6 +416,10 @@ pub(in crate::server) fn collect_preload_files_within(
             continue;
         }
         let Ok(content) = fs::read_to_string(&path) else {
+            // An unread dependency file hides whatever extensions it holds.
+            if dependency_paths.contains(&path) {
+                dependencies.loaded = false;
+            }
             continue;
         };
         user_files.push((path, content));
@@ -338,6 +442,62 @@ pub(in crate::server) fn collect_preload_files_within(
         stdlib_files,
         budget_exhausted: remaining_budget == 0,
         budget_used: budget - remaining_budget,
-        deps_present,
+        dependencies,
     }
+}
+/// The dependency half of [`collect_preload_files_within`]: walks every
+/// root's declared dependencies' source directories within
+/// `remaining_budget`, appending their files to `user_paths`. Returns what it
+/// learned for the dependency guard, and the set of dependency files (so an
+/// unreadable one can still mark loading incomplete).
+fn walk_dependency_sources(
+    roots: &[PathBuf],
+    preload_walker: &beamtalk_core::file_walker::FileWalker,
+    remaining_budget: &mut usize,
+    user_paths: &mut Vec<PathBuf>,
+) -> (DependencyLoad, HashSet<PathBuf>) {
+    let mut dependencies = DependencyLoad::default();
+    let mut dependency_paths = HashSet::new();
+    for root in roots {
+        let root_deps = root_dependencies(root);
+        dependencies.declared |= root_deps.declared;
+        dependencies.loaded &= root_deps.all_found;
+        for dep in root_deps.found {
+            if *remaining_budget == 0 {
+                dependencies.loaded = false;
+                break;
+            }
+            match preload_walker
+                .clone()
+                .max_files(*remaining_budget)
+                .walk_pathbuf(&dep.src)
+            {
+                Ok(found) => {
+                    *remaining_budget = remaining_budget.saturating_sub(found.len());
+                    // `stubs/` holds FFI stubs, not source (as in the CLI's
+                    // dependency scan); it is only reachable when the
+                    // dependency has no `src/`.
+                    let stubs = dep.root.join("stubs");
+                    for path in found {
+                        if path.starts_with(&stubs) {
+                            continue;
+                        }
+                        // A non-UTF-8 path can't be indexed.
+                        if path.to_str().is_none() {
+                            dependencies.loaded = false;
+                        }
+                        dependency_paths.insert(path.clone());
+                        user_paths.push(path);
+                    }
+                }
+                Err(_) => dependencies.loaded = false,
+            }
+            dependencies.src_dirs.push(dep.src);
+        }
+    }
+    // A walk that ran the budget down to zero may have been cut short.
+    if *remaining_budget == 0 {
+        dependencies.loaded = false;
+    }
+    (dependencies, dependency_paths)
 }

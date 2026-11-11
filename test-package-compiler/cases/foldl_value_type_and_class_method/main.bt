@@ -1,18 +1,14 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — the excluded TupleAcc
-// cells. ValueType and ClassMethod contexts both fall back to the
-// non-optimized map-shaped `StateAcc` accumulator for foldl list-ops with
-// mutations, confirmed via `BEAMTALK_CODEGEN_DIAGNOSTICS=1`
-// ("StateAcc fallback — not a letrec loop" — both route through the shared
-// `generate_list_do_body_with_threading` compat shim, control_flow/mod.rs:2808,
-// which calls `ThreadingPlan::new(self, body, None)` — `allow_tuple_acc` is
-// hardcoded `false` there, independent of `select_tuple_acc`'s own
-// `ValueType`-only exclusion at control_flow/mod.rs:448-466). This file
-// pins that behaviour for both contexts so a future migration cannot
-// silently start selecting tuple-acc for one of them without the snapshot
-// corpus catching the byte-level change.
+// BT-3130 (ADR 0111 Phase A3): threading-mode matrix — the ValueType and
+// ClassMethod cells. Since BT-4116 a foldl list-op that threads only outer
+// locals takes the TupleAcc convention in these contexts too: a `do:` over a
+// single local folds a bare accumulator (no tuple, no map), `inject:into:`
+// threads its own accumulator. Confirm with `BEAMTALK_CODEGEN_DIAGNOSTICS=1`.
+// Field writes, self-sends, and the other guards in `select_tuple_acc` still
+// fall back to the map-shaped `StateAcc`. This file pins the byte-level shape
+// for both contexts so a future change cannot silently alter it.
 
 Object subclass: FoldValueCtr
 

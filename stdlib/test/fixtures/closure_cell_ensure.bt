@@ -201,3 +201,30 @@ Actor subclass: ClosureCellEnsure
       [i == 2 ifTrue: [^i]] perform: #ensure: withArguments: #(c)
     ]
     0
+
+  // ADR 0146 R1 (BT-4534): a `^` of this method, from a block it passes to
+  // another method of this actor, unwinds through that method's inlined
+  // `ensure:` (a foreign `^` there). Its cleanup's write is in the cell while
+  // the `^` is in flight, so this method's own cleanup, which reads the
+  // cell, sees it.
+  foreignReturnThroughEnsure: rec =>
+    [self runEnsure: [^3]] ensure: [rec record: self.n]
+    0
+
+  runEnsure: blk =>
+    [blk value] ensure: [self.n := 40]
+    0
+
+  // The same where the cleanup writes after a call it brackets: the write
+  // after the call is stored too.
+  foreignReturnThroughEnsureAfterACall: rec =>
+    [self runEnsureAfterACall: [^3]] ensure: [rec record: self.n]
+    0
+
+  runEnsureAfterACall: blk =>
+    [blk value]
+      ensure: [
+        self bump
+        self.n := self.n + 40
+      ]
+    0

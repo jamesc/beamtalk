@@ -21,15 +21,13 @@ module 'nlr_matching_token_value_type' ['new'/0, 'new'/1, 'findFirstOver:in:'/3,
 'findFirstOver:in:'/3 = fun (Self, _threshold@1, _coll@2) ->
     let _NlrToken@3 = call 'erlang':'make_ref'() in
     try
-    let _seq@4 = let _temp@5 = _coll@2 in let _temp@6 = fun (_each@7) -> let _Cond@11 = let _BinLeft@8 = _each@7 in let _BinRight@9 = _threshold@1 in case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft@8), call 'erlang':'is_binary'(_BinLeft@8)) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft@8, _BinRight@9) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@8, '>', [_BinRight@9]) <_BinOpNoMatch@10> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@10}) end in case _Cond@11 of <'true'> when 'true' -> call 'erlang':'throw'({'$bt_nlr', _NlrToken@3, _each@7, Self}) <'false'> when 'true' -> _Cond@11 <_CondNoMatch@12> when 'true' -> call 'beamtalk_message_dispatch':'send'(_Cond@11, 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken@3, _each@7, Self})]) end in case call 'erlang':'is_list'(_temp@5) of <'true'> when 'true' -> call 'lists':'foreach'(_temp@6, _temp@5) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_temp@5, 'do:', [_temp@6]) end in
-    let _BodyResult@13 = 0 in
-    {_BodyResult@13, Self}
-
-    of _NlrResult@14 -> _NlrResult@14
-    catch <_NlrCls@15, _NlrErr@16, _NlrStk@17> ->
-      case {_NlrCls@15, _NlrErr@16} of
-        <{'throw', {'$bt_nlr', _CatchTok@18, _NlrVal@19, _NlrState@20}}> when call 'erlang':'=:='(_CatchTok@18, _NlrToken@3) -> {_NlrVal@19, _NlrState@20}
-        <_OtherPair@21> when 'true' -> primop 'raw_raise'(_NlrCls@15, _NlrErr@16, _NlrStk@17)
+    let _seq@4 = let _temp@5 = _coll@2 in let _temp@6 = fun (_each@7) -> let _Cond@11 = let _BinLeft@8 = _each@7 in let _BinRight@9 = _threshold@1 in case call 'erlang':'or'(call 'erlang':'is_number'(_BinLeft@8), call 'erlang':'is_binary'(_BinLeft@8)) of <'true'> when 'true' -> call 'erlang':'>'(_BinLeft@8, _BinRight@9) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@8, '>', [_BinRight@9]) <_BinOpNoMatch@10> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@10}) end in case _Cond@11 of <'true'> when 'true' -> call 'erlang':'throw'({'$bt_nlr', _NlrToken@3, _each@7, Self}) <'false'> when 'true' -> _Cond@11 <_CondNoMatch@12> when 'true' -> call 'beamtalk_message_dispatch':'send'(_Cond@11, 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken@3, _each@7, Self})]) end in case call 'erlang':'is_list'(_temp@5) of <'true'> when 'true' -> do call 'lists':'foreach'(_temp@6, _temp@5) 'nil' <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_temp@5, 'do:', [_temp@6]) end in
+    0
+    of _NlrResult@13 -> _NlrResult@13
+    catch <_NlrCls@14, _NlrErr@15, _NlrStk@16> ->
+      case {_NlrCls@14, _NlrErr@15} of
+        <{'throw', {'$bt_nlr', _CatchTok@17, _NlrVal@18, _NlrState@19}}> when call 'erlang':'=:='(_CatchTok@17, _NlrToken@3) -> _NlrVal@18
+        <_OtherPair@20> when 'true' -> primop 'raw_raise'(_NlrCls@14, _NlrErr@15, _NlrStk@16)
       end
 
 
@@ -75,7 +73,7 @@ module 'nlr_matching_token_value_type' ['new'/0, 'new'/1, 'findFirstOver:in:'/3,
         <'findFirstOver:in:'> when 'true' ->
             let <DispArg0> = call 'erlang':'hd'(Args) in
             let <DispArg1> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in
-            case call 'nlr_matching_token_value_type':'findFirstOver:in:'(Self, DispArg0, DispArg1) of <{DispR, _DispS}> when 'true' -> DispR end
+            call 'nlr_matching_token_value_type':'findFirstOver:in:'(Self, DispArg0, DispArg1)
         <_Other> when 'true' ->
             %% BT-4260: a memoised verdict picks the direct inherited call.
             case case Selector of
@@ -106,6 +104,7 @@ module 'nlr_matching_token_value_type' ['new'/0, 'new'/1, 'findFirstOver:in:'/3,
                 <'show:'> when 'true' -> 'slow'
                 <'showCr:'> when 'true' -> 'slow'
                 <'subclassResponsibility'> when 'true' -> 'slow'
+                <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
                 <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('NlrValue', Selector)
             end of
@@ -125,7 +124,13 @@ module 'nlr_matching_token_value_type' ['new'/0, 'new'/1, 'findFirstOver:in:'/3,
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     try call 'nlr_matching_token_value_type':'dispatch'(Selector, Args, Self)
     of <D4Result> -> {'reply', D4Result, State}
-    catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}
+    catch <D4Type, D4Error, D4Stack> ->
+        case D4Type of
+            <'error'> when 'true' ->
+                let <D4Built> = primop 'build_stacktrace'(D4Stack) in
+                {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built, ~{}~), State}
+            <_D4Other> when 'true' -> primop 'raw_raise'(D4Type, D4Error, D4Stack)
+        end
 
 
 'has_method'/1 = fun (Selector) ->

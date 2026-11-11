@@ -21,7 +21,7 @@ directly rather than re-implementing module discovery/loading/registration).
 `extract_shapes/2` is invoked by `beamtalk-cli`'s `beamtalk release`
 (`crates/beamtalk-cli/src/commands/release/assembly.rs`) via a single
 `erl -eval`, mirroring how that module already drives `systools:make_script/2`
-— no second ad-hoc spawner (CLAUDE.md). Its two directory-list parameters
+— no second ad-hoc spawner (AGENTS.md). Its two directory-list parameters
 are staged `lib/<app>-<vsn>/ebin` paths (`AppClosure`, `closure.rs`):
 `RuntimeLibDirs` (the runtime closure the extractor needs *loaded* so
 ancestor classes like `Object`/`Actor` resolve, but never emits a shapes.json
@@ -53,7 +53,7 @@ build/live divide:
 The ancestor walk-and-merge itself is `beamtalk_class_metadata:
 flatten_ancestor_map/2` — the one "merge ancestor field maps, closer wins"
 primitive this module shares with `beamtalk_workspace_shape_store`'s live,
-ETS-backed flattening (CLAUDE.md's no-duplicate-implementations rule): only
+ETS-backed flattening (AGENTS.md's no-duplicate-implementations rule): only
 the per-level reader differs (a build-time `__beamtalk_meta/0` read here, a
 live one there).
 
@@ -213,7 +213,7 @@ conformance test: for the same class, this function's result must equal
 flatten via `beamtalk_class_metadata:flatten_ancestor_map/2` and normalise
 via `beamtalk_class_metadata:normalize_field_shape/2`, the two shared-leaf
 primitives this function and that one both call, so the two flatteners
-cannot structurally drift (CLAUDE.md's no-duplicate-implementations rule).
+cannot structurally drift (AGENTS.md's no-duplicate-implementations rule).
 
 `undefined` under the same conditions `class_shape_entry/1` degrades under.
 """.
@@ -319,7 +319,7 @@ Shared per-level reader behind `ancestor_field_types/1`/`ancestor_field_kinds/1`
 — one "read `MetaKey` off a resolved ancestor's meta, or contribute nothing"
 implementation, parameterised by which `__beamtalk_meta/0` key it reads,
 rather than two near-identical copies of the same `resolve_migrations/1`
-call and degrade (CLAUDE.md's no-duplicate-implementations rule). Delegates
+call and degrade (AGENTS.md's no-duplicate-implementations rule). Delegates
 to `beamtalk_shape_migration:resolve_migrations/1`, the same tolerant lookup
 `class_shape_entry/1` itself uses, so an ancestor that cannot be resolved
 (unregistered, no meta) simply contributes no fields at its level — mirrors

@@ -79,13 +79,19 @@ This tells `beamtalk run` to start the package as a supervised OTP application. 
 
 ### `[native]` Section
 
-For packages that depend on hex.pm Erlang packages:
+For packages that depend on Erlang packages from hex.pm or git:
 
 ```toml
 [native.dependencies]
 gun = "~> 2.1"
 cowboy = "2.12.0"
+oidcc = { git = "https://github.com/jamesc/oidcc", branch = "rfc7009-revocation" }
+
+[native.overrides]
+jose = { erl_opts = [] }   # optional rebar3 override
 ```
+
+A git entry takes exactly one of `branch`, `tag` or `rev`. See the [Native Erlang Integration guide](beamtalk-native-erlang.md#git-sources) for git sources and overrides.
 
 Native dependencies are resolved via rebar3 and included on the BEAM code path. See [ADR 0072](ADR/0072-user-erlang-sources-in-packages.md) for details on Erlang interop within packages.
 
@@ -100,7 +106,7 @@ path = "stubs/"
 
 Stubs are `.bt` files containing `declare native: <module>` forms — type-only declarations for Erlang module functions. When a package with a `[stubs]` section is used as a dependency, its stubs are automatically available to consumers.
 
-`beamtalk build` and `beamtalk lint` resolve stubs in precedence order: project-local (`stubs/`) > package-bundled (dependencies' `[stubs]` paths) > distribution (`share/beamtalk/stubs/`, overridden by `BEAMTALK_STUBS_DIR` env var) > auto-extracted from `.beam` files. A stub for a specific function/arity overrides only that function at its layer; all other functions in the module keep their lower-layer types.
+`beamtalk build`, `beamtalk lint` and the MCP `lint` tool resolve stubs in precedence order: project-local (`stubs/`) > package-bundled (dependencies' `[stubs]` paths) > distribution (`share/beamtalk/stubs/`, overridden by `BEAMTALK_STUBS_DIR` env var) > auto-extracted from `.beam` files. A stub for a specific function/arity overrides only that function at its layer; all other functions in the module keep their lower-layer types.
 
 ### `[diagnostics]` Section
 
@@ -116,7 +122,7 @@ deprecation = "warn"
 type = "hint"
 ```
 
-Keys are kebab-case diagnostic categories (`dnu`, `type`, `unused`, `empty-body`, `lint`, `dead-assignment`, `extension-conflict`, `deprecation`, `actor-new`, `visibility`, `unresolved-class`, `unresolved-ffi`, `arity-mismatch`, `shadowed-class`, `type-annotation`, `inheritance`, `sendability`, `native-declaration-location`, `file-class-name-mismatch`, `definite-assignment`, `unguarded-late-read`, `match-arm-block`, `class-state-abroad`, `class-process-ffi`, `class-method-process-resource`, `class-var-reflection-shadowing`, `actor-state-abroad`, `ffi-nested-string`, `handleinfo-no-catch-all`). Values are one of `"off"` (drop the diagnostic entirely), `"lint"`, `"hint"`, `"warn"`, or `"error"` (fails the build unconditionally, independent of `--warnings-as-errors`).
+Keys are kebab-case diagnostic categories (`dnu`, `type`, `unused`, `empty-body`, `lint`, `dead-assignment`, `extension-conflict`, `deprecation`, `actor-new`, `visibility`, `unresolved-class`, `unresolved-ffi`, `arity-mismatch`, `shadowed-class`, `type-annotation`, `inheritance`, `sendability`, `native-declaration-location`, `file-class-name-mismatch`, `definite-assignment`, `unguarded-late-read`, `match-arm-block`, `class-state-abroad`, `class-process-ffi`, `class-method-process-resource`, `class-var-reflection-shadowing`, `actor-state-abroad`, `ffi-nested-string`, `binary-string-compare`, `cascade-drops-update`, `handleinfo-no-catch-all`). Values are one of `"off"` (drop the diagnostic entirely), `"lint"`, `"hint"`, `"warn"`, or `"error"` (fails the build unconditionally, independent of `--warnings-as-errors`).
 
 `definite-assignment` ([ADR 0124](ADR/0124-slots-late-assignment-definite-assignment.md) §6) is the construction-site check that a declared, typed, no-default, non-nilable, non-`late` slot is actually supplied — see [Definite Assignment](beamtalk-language-features.md#definite-assignment-adr-0124) in the language reference. It has no site-level `@expect` category by design (the exemption is the `late` declaration, not an annotation), so this table is the only way to change its severity per project. Because a Value's `Warning` has no runtime backstop the way an Actor's does, `definite-assignment = "error"` is a more attractive escalation for a Value-heavy package than for most other categories here.
 
@@ -125,6 +131,8 @@ Keys are kebab-case diagnostic categories (`dnu`, `type`, `unused`, `empty-body`
 `match-arm-block` warns on a `match:`/`matchExhaustive:` arm whose body is a bare zero-parameter block literal (`#tick -> [ ... ]`): the arm answers the Block as a value and never runs its statements. A match whose every arm is a block literal is read as an intentional dispatch table and stays silent, as do blocks with parameters and `[ ... ] value` arms. The fix is a method call (`#tick -> self tick`) or an in-place evaluation (`#tick -> [ ... ] value`). Suppress a deliberate site with `@expect match_arm_block`.
 
 `class-state-abroad` ([ADR 0130](ADR/0130-class-variables-live-in-the-class-process.md) §5) warns, at the block, where the compiler can see a block literal run outside an invocation of its home class: a block that reads a class variable and is passed to a cast or `Timer after:do:`, handed to an actor (which may keep it), stored or returned (run outside an invocation of the class, it reads the values captured at creation), or a block that writes a class variable (directly, reflectively with `self fieldAt:put:` or `self clearField:`, or through a `self` send that may write) and is passed to another class's class-side method that is not direct-called (anything but a `class sealed` method of a sealed class with no class variables) (the write raises `class_state_unreachable`). It never fires for blocks that stay at home (inlined control flow, same-class class-side higher-order methods, `do:`/`collect:` on a local collection, `on:do:`/`ensure:`, `Result tryDo:`). Suppress a site with `@expect class_state_abroad`, or the whole package with `class-state-abroad = "off"`. Known gaps: cascade messages after the first ([BT-3716](https://linear.app/beamtalk/issue/BT-3716)) and late-bound `self` sends inside a `class sealed` method of an open class ([BT-3717](https://linear.app/beamtalk/issue/BT-3717)) are not inspected.
+
+`cascade-drops-update` ([ADR 0145](ADR/0145-cascade-pipeline-semantics.md) § 3) warns at a non-final cascade message whose receiver is statically a value (a `Value subclass:`, or a built-in such as `Integer`, `String`, `List` or `Dictionary`) and which answers an updated copy (its method is defined on a value class and returns `Self` or that class): `p withX: 5; withY: 10` sends `withY:` to `p`, so the copy `withX:` answered is thrown away. The help suggests the nested form, `(p withX: 5) withY: 10`. It is silent on `Dynamic` and union-typed receivers, actors, and methods inherited from `Object` (`yourself`, `show:`). Suppress an intended fan-out with `@expect cascade_drops_update`.
 
 `handleinfo-no-catch-all` ([ADR 0134](ADR/0134-errors-in-no-reply-handlers-crash-the-actor.md)) warns when a `Server` subclass's `handleInfo:` body is a `match:` with no catch-all arm (an unguarded `_` or bare-variable pattern): `match:` with no matching arm raises `#pattern_mismatch`, so any message no arm names would crash the server. The fix is a `_ -> nil` last arm. Like `unguarded-late-read`, it has no site-level `@expect` category by design — the catch-all arm is the fix, not an annotation.
 
@@ -191,11 +199,11 @@ A registry dependency's row shows the resolved git URL, tag, and locked commit S
 ### Updating Dependencies
 
 ```bash
-beamtalk deps update          # Update all git and registry dependencies
+beamtalk deps update          # Update all git, registry and native dependencies
 beamtalk deps update json     # Update a single dependency
 ```
 
-Advances git dependencies to the latest commit matching their spec (the latest tag, the head of the branch, etc.). For a registry dependency, `deps update` refreshes the registry index and re-resolves the dependency's *already-pinned* version to a fresh commit SHA — picking up a moved tag or a corrected index entry. It does not change which version is pinned; to take a newer release, edit the version string directly in `beamtalk.toml` (`yaml = "0.3.0"`) and run `beamtalk deps update yaml` (or any build) to re-resolve it. Either way, the lockfile is updated.
+Advances git dependencies to the latest commit matching their spec (the latest tag, the head of the branch, etc.). For a registry dependency, `deps update` refreshes the registry index and re-resolves the dependency's *already-pinned* version to a fresh commit SHA — picking up a moved tag or a corrected index entry. It does not change which version is pinned; to take a newer release, edit the version string directly in `beamtalk.toml` (`yaml = "0.3.0"`) and run `beamtalk deps update yaml` (or any build) to re-resolve it. Either way, the lockfile is updated. For native dependencies (`[native.dependencies]`), `deps update` clears their locks so the next build re-resolves them; `deps update <name>` does that for one native package, direct or transitive.
 
 ### Manual Editing
 
@@ -401,6 +409,7 @@ sha = "def456..."
 - **Commit to version control.** The lockfile should be checked into git so all developers and CI use the same dependency versions.
 - **Path dependencies are not locked.** They resolve to whatever is on disk, so they are only reproducible within a single repository checkout.
 - **Registry dependencies lock like git dependencies**, plus the requested `version` field shown above.
+- **Native packages track the dependency graph.** `[[native_package]]` entries are rewritten from rebar3's resolution on each build that has native dependencies. When nothing in the graph declares a native dependency any more (for example, a dependency dropped its native deps), `beamtalk build` prunes the leftover entries, and `beamtalk deps update` clears all native locks so the next build re-resolves them.
 - **Implicit fetch on build.** `beamtalk build`, `beamtalk test`, and `beamtalk repl` automatically fetch and compile dependencies if the lockfile is missing or stale. No separate "deps get" step is needed.
 
 ## Qualified Names (`package@Class`)

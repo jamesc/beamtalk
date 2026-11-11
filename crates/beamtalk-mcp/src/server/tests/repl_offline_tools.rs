@@ -16,11 +16,60 @@ async fn lint_tool_reports_clean_file() {
     let result = mcp
         .lint(Parameters(LintParams {
             path: Some(file.to_str().unwrap().to_string()),
+            warnings_as_errors: None,
         }))
         .await
         .unwrap();
     assert_ne!(result.is_error, Some(true));
     assert!(result.structured_content.is_some());
+}
+
+/// BT-4336: MCP `lint` mirrors CLI `beamtalk lint --warnings-as-errors`.
+/// The same buccaneer-style source the CLI regression uses
+/// (`lint_warnings_as_errors_fails_on_repl_only_dnu`: a DNU hint on a
+/// builtin, which a REPL `load-project` rejects) passes by default and
+/// fails with `warnings_as_errors`.
+#[tokio::test]
+async fn lint_tool_warnings_as_errors_fails_on_repl_only_dnu() {
+    let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
+    let temp = tempfile::TempDir::new().unwrap();
+    let root = temp.path();
+    std::fs::write(
+        root.join("beamtalk.toml"),
+        "[package]\nname = \"recheck_probe\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("src/recheck_probe.bt"),
+        "Value subclass: RecheckProbe\n\n  probe => 42 foo\n",
+    )
+    .unwrap();
+    let path = root.to_str().unwrap().to_string();
+
+    let plain = mcp
+        .lint(Parameters(LintParams {
+            path: Some(path.clone()),
+            warnings_as_errors: None,
+        }))
+        .await
+        .unwrap();
+    assert_ne!(plain.is_error, Some(true), "default MCP lint stays green");
+    let structured = plain.structured_content.expect("structured result");
+    assert_eq!(structured["live_recheck_failures"], 1, "{structured}");
+
+    let strict = mcp
+        .lint(Parameters(LintParams {
+            path: Some(path),
+            warnings_as_errors: Some(true),
+        }))
+        .await
+        .unwrap();
+    assert_eq!(
+        strict.is_error,
+        Some(true),
+        "warnings_as_errors must fail on the REPL-only DNU hint"
+    );
 }
 
 #[tokio::test]
@@ -29,6 +78,7 @@ async fn lint_tool_reports_errors_for_nonexistent_path() {
     let result = mcp
         .lint(Parameters(LintParams {
             path: Some("/nonexistent/path/nope".to_string()),
+            warnings_as_errors: None,
         }))
         .await
         .unwrap();
@@ -55,8 +105,12 @@ async fn diagnostic_summary_tool_runs_offline() {
 
 // --- search_examples / search_classes (offline — no REPL touched) ---
 
+/// The bundled corpus is a build output read from the binary's sysroot
+/// (BT-4614). A test binary under `target/debug/deps/` has no corpus there, so
+/// the tool must say the corpus is missing rather than "no matches"; a binary
+/// that does find one must return results.
 #[tokio::test]
-async fn search_examples_finds_results_for_a_known_topic() {
+async fn search_examples_finds_results_or_reports_a_missing_corpus() {
     let (_fake, mcp) = fake_mcp(respond(serde_json::json!({}))).await;
     let result = mcp
         .search_examples(Parameters(SearchExamplesParams {
@@ -66,7 +120,15 @@ async fn search_examples_finds_results_for_a_known_topic() {
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(false));
-    assert!(!call_text(&result).contains("No examples found"));
+    let text = call_text(&result);
+    match beamtalk_examples::bundled_corpus() {
+        beamtalk_examples::BundledCorpus::Loaded(_) => {
+            assert!(!text.contains("No examples found"), "{text}");
+        }
+        beamtalk_examples::BundledCorpus::Missing { .. } => {
+            assert!(text.contains("bundled example corpus is missing"), "{text}");
+        }
+    }
 }
 
 #[tokio::test]
@@ -335,14 +397,8 @@ async fn connect_refuses_node_with_stale_toolchain_version() {
     // of attaching (tools must not silently fall back to offline mode).
     // Bypasses `fake_mcp` on purpose: that harness models a
     // version-matching node.
-    let responder: beamtalk_repl_protocol::test_support::Responder = Box::new(|request| {
-        vec![text(&serde_json::json!({
-            "id": request.get("id"),
-            "status": ["done"],
-            "ops": {},
-            "versions": {"beamtalk": "0.0.0-stale", "protocol": "0.0"},
-        }))]
-    });
+    let responder: beamtalk_repl_protocol::test_support::Responder =
+        Box::new(|request| vec![describe_reply(request, &stale_versions())]);
     let fake = spawn_ws(HandshakeMode::Ok, "fake-session", responder).await;
     let err = crate::client::ReplClient::connect(fake.port, "test-cookie", None)
         .await
@@ -350,6 +406,53 @@ async fn connect_refuses_node_with_stale_toolchain_version() {
     assert!(err.contains("version mismatch"), "got: {err}");
     assert!(err.contains("0.0.0-stale"), "got: {err}");
     assert!(err.contains("beamtalk workspace stop"), "got: {err}");
+}
+
+#[tokio::test]
+async fn reconnect_fails_when_restarted_node_has_stale_versions() {
+    // BT-4329: the node restarts on the same port with a different
+    // toolchain. Connection 1 is a version-matching node that drops the
+    // socket on the first real request; `send`'s retry reconnects to the
+    // cached port and lands on connection 2, whose `describe` reports stale
+    // versions. `ReplClient::reconnect` must refuse it rather than replay
+    // the request against the stale node.
+    let matching_then_close: beamtalk_repl_protocol::test_support::Responder =
+        Box::new(|request| {
+            if request.get("op").and_then(serde_json::Value::as_str) == Some("describe") {
+                vec![describe_reply(request, &matching_versions())]
+            } else {
+                vec![tokio_tungstenite::tungstenite::Message::Close(None)]
+            }
+        });
+    let stale: beamtalk_repl_protocol::test_support::Responder =
+        Box::new(|request| vec![describe_reply(request, &stale_versions())]);
+    let fake = spawn_sequence(
+        "fake-session",
+        vec![
+            (HandshakeMode::Ok, matching_then_close),
+            (HandshakeMode::Ok, stale),
+        ],
+    )
+    .await;
+
+    let client = crate::client::ReplClient::connect(fake.port, "test-cookie", None)
+        .await
+        .expect("connection 1 is version-matching");
+    let err = client
+        .list_classes(None)
+        .await
+        .expect_err("reconnect against a stale node should fail");
+    assert!(err.contains("version mismatch"), "got: {err}");
+    assert!(err.contains("0.0.0-stale"), "got: {err}");
+
+    // Connection 2 saw only its handshake `auth` and the version-check
+    // `describe` — the retried request never reached the stale node.
+    let second = fake.seen_per_connection[1].lock().await;
+    let ops: Vec<&str> = second
+        .iter()
+        .filter_map(|frame| frame.get("op").and_then(serde_json::Value::as_str))
+        .collect();
+    assert_eq!(ops, ["describe"], "connection 2 frames: {second:?}");
 }
 
 #[tokio::test]

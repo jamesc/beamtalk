@@ -13,7 +13,7 @@ both flatten a class's `field_types`/`field_kinds` via the same two
 shared-leaf primitives (`beamtalk_class_metadata:flatten_ancestor_map/2` and
 `normalize_field_shape/2`). This test pins that they report **structurally
 identical** results for the same registered classes — the invariant
-CLAUDE.md requires ("never write a keep-in-sync comment without a test that
+AGENTS.md requires ("never write a keep-in-sync comment without a test that
 enforces it") — rather than trusting the two call sites to stay aligned by
 convention.
 

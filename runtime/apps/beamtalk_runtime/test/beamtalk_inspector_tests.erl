@@ -544,3 +544,250 @@ beamtalk_nested_integer_list_text_tree_not_coerced_test() ->
     ?assertNotEqual(nomatch, binary:match(Out, <<"#(72, 73)">>)),
     ?assertEqual(nomatch, binary:match(Out, <<"\"HI\""/utf8>>)),
     gen_server:stop(Pid).
+
+%%====================================================================
+%% Registered-name and global pid form classification (ADR 0126 §3/§4)
+%%====================================================================
+
+%% classify/4: {registered, Name} — name IS registered to a live Beamtalk actor.
+classify_registered_name_found_test_() ->
+    RegName = bt_test_inspect_reg_found,
+    {setup,
+        fun() ->
+            Pid = start_actor(point(1, 2)),
+            erlang:register(RegName, Pid),
+            Pid
+        end,
+        fun(Pid) ->
+            try
+                erlang:unregister(RegName)
+            catch
+                _:_ -> ok
+            end,
+            gen_server:stop(Pid)
+        end,
+        fun(_Pid) ->
+            Obj = #beamtalk_object{
+                class = 'TestActor',
+                class_mod = beamtalk_inspector_tests,
+                pid = {registered, RegName}
+            },
+            I = beamtalk_inspector:on(Obj),
+            [?_assertEqual(actor, beamtalk_inspector:kindOf(I))]
+        end}.
+
+%% classify/4: {registered, Name} — name is NOT registered.
+classify_registered_name_not_found_test() ->
+    Obj = #beamtalk_object{
+        class = 'TestActor',
+        class_mod = beamtalk_inspector_tests,
+        pid = {registered, bt_test_inspect_reg_missing_xzz}
+    },
+    I = beamtalk_inspector:on(Obj),
+    ?assertEqual(value, beamtalk_inspector:kindOf(I)).
+
+%% classify/4: {registered, Name, Node} with Node =:= node() — name IS registered.
+classify_node_qualified_registered_name_found_test_() ->
+    RegName = bt_test_inspect_nodeq_found,
+    {setup,
+        fun() ->
+            Pid = start_actor(point(3, 4)),
+            erlang:register(RegName, Pid),
+            Pid
+        end,
+        fun(Pid) ->
+            try
+                erlang:unregister(RegName)
+            catch
+                _:_ -> ok
+            end,
+            gen_server:stop(Pid)
+        end,
+        fun(_Pid) ->
+            Obj = #beamtalk_object{
+                class = 'TestActor',
+                class_mod = beamtalk_inspector_tests,
+                pid = {registered, RegName, node()}
+            },
+            I = beamtalk_inspector:on(Obj),
+            [?_assertEqual(actor, beamtalk_inspector:kindOf(I))]
+        end}.
+
+%% classify/4: {registered, Name, Node} with Node =:= node() — name NOT registered.
+classify_node_qualified_registered_name_not_found_test() ->
+    Obj = #beamtalk_object{
+        class = 'TestActor',
+        class_mod = beamtalk_inspector_tests,
+        pid = {registered, bt_test_inspect_nodeq_missing_xzz, node()}
+    },
+    I = beamtalk_inspector:on(Obj),
+    ?assertEqual(value, beamtalk_inspector:kindOf(I)).
+
+%% classify/4: {registered, Name, Node} with Node =/= node() — remote, always unavailable.
+classify_remote_node_registered_name_test() ->
+    Obj = #beamtalk_object{
+        class = 'TestActor',
+        class_mod = beamtalk_inspector_tests,
+        pid = {registered, bt_test_inspect_remote, 'remote@nonode.invalid'}
+    },
+    I = beamtalk_inspector:on(Obj),
+    ?assertEqual(value, beamtalk_inspector:kindOf(I)).
+
+%% classify/4: {global, Name} — name IS globally registered to a live Beamtalk actor.
+classify_global_name_found_test_() ->
+    GlobalName = bt_test_inspect_global_found,
+    {setup,
+        fun() ->
+            Pid = start_actor(point(5, 6)),
+            yes = global:register_name(GlobalName, Pid),
+            Pid
+        end,
+        fun(Pid) ->
+            global:unregister_name(GlobalName),
+            gen_server:stop(Pid)
+        end,
+        fun(_Pid) ->
+            Obj = #beamtalk_object{
+                class = 'TestActor',
+                class_mod = beamtalk_inspector_tests,
+                pid = {global, GlobalName}
+            },
+            I = beamtalk_inspector:on(Obj),
+            [?_assertEqual(actor, beamtalk_inspector:kindOf(I))]
+        end}.
+
+%% classify/4: {global, Name} — name is NOT globally registered.
+classify_global_name_not_found_test() ->
+    Obj = #beamtalk_object{
+        class = 'TestActor',
+        class_mod = beamtalk_inspector_tests,
+        pid = {global, bt_test_inspect_global_missing_xzz}
+    },
+    I = beamtalk_inspector:on(Obj),
+    ?assertEqual(value, beamtalk_inspector:kindOf(I)).
+
+%%====================================================================
+%% actor_pid/1 — registered-name forms (via is_drillable → fieldsOf)
+%%====================================================================
+
+%% actor_pid/1: {registered, Name} IS registered → drillable field.
+actor_pid_registered_drillable_when_found_test_() ->
+    RegName = bt_test_actorpid_reg_drillable,
+    {setup,
+        fun() ->
+            InnerPid = start_actor(point(1, 2)),
+            erlang:register(RegName, InnerPid),
+            OuterState = #{
+                '$beamtalk_class' => 'Holder',
+                ref => #beamtalk_object{
+                    class = 'TestActor',
+                    class_mod = beamtalk_inspector_tests,
+                    pid = {registered, RegName}
+                }
+            },
+            OuterPid = start_actor(OuterState),
+            {InnerPid, OuterPid}
+        end,
+        fun({InnerPid, OuterPid}) ->
+            try
+                erlang:unregister(RegName)
+            catch
+                _:_ -> ok
+            end,
+            gen_server:stop(InnerPid),
+            gen_server:stop(OuterPid)
+        end,
+        fun({_InnerPid, OuterPid}) ->
+            I = beamtalk_inspector:on(OuterPid),
+            Fields = beamtalk_inspector:fieldsOf(I),
+            [RefF] = [F || F <- Fields, maps:get(name, F) =:= ref],
+            [?_assertEqual(true, maps:get(drillable, RefF))]
+        end}.
+
+%% actor_pid/1: {registered, Name} NOT registered → non-drillable field.
+actor_pid_registered_not_drillable_when_missing_test() ->
+    OuterState = #{
+        '$beamtalk_class' => 'Holder',
+        ref => #beamtalk_object{
+            class = 'TestActor',
+            class_mod = beamtalk_inspector_tests,
+            pid = {registered, bt_test_actorpid_reg_missing_xzz}
+        }
+    },
+    OuterPid = start_actor(OuterState),
+    I = beamtalk_inspector:on(OuterPid),
+    Fields = beamtalk_inspector:fieldsOf(I),
+    [RefF] = [F || F <- Fields, maps:get(name, F) =:= ref],
+    Result = maps:get(drillable, RefF),
+    gen_server:stop(OuterPid),
+    ?assertEqual(false, Result).
+
+%% actor_pid/1: {registered, Name, Node} with Node =:= node() IS registered → drillable.
+actor_pid_node_qualified_drillable_when_found_test_() ->
+    RegName = bt_test_actorpid_nodeq_drillable,
+    {setup,
+        fun() ->
+            InnerPid = start_actor(point(1, 2)),
+            erlang:register(RegName, InnerPid),
+            OuterState = #{
+                '$beamtalk_class' => 'Holder',
+                ref => #beamtalk_object{
+                    class = 'TestActor',
+                    class_mod = beamtalk_inspector_tests,
+                    pid = {registered, RegName, node()}
+                }
+            },
+            OuterPid = start_actor(OuterState),
+            {InnerPid, OuterPid}
+        end,
+        fun({InnerPid, OuterPid}) ->
+            try
+                erlang:unregister(RegName)
+            catch
+                _:_ -> ok
+            end,
+            gen_server:stop(InnerPid),
+            gen_server:stop(OuterPid)
+        end,
+        fun({_InnerPid, OuterPid}) ->
+            I = beamtalk_inspector:on(OuterPid),
+            Fields = beamtalk_inspector:fieldsOf(I),
+            [RefF] = [F || F <- Fields, maps:get(name, F) =:= ref],
+            [?_assertEqual(true, maps:get(drillable, RefF))]
+        end}.
+
+%% actor_pid/1: {registered, Name, Node} with Node =:= node() NOT registered → not drillable.
+actor_pid_node_qualified_not_drillable_when_missing_test() ->
+    OuterState = #{
+        '$beamtalk_class' => 'Holder',
+        ref => #beamtalk_object{
+            class = 'TestActor',
+            class_mod = beamtalk_inspector_tests,
+            pid = {registered, bt_test_actorpid_nodeq_missing_xzz, node()}
+        }
+    },
+    OuterPid = start_actor(OuterState),
+    I = beamtalk_inspector:on(OuterPid),
+    Fields = beamtalk_inspector:fieldsOf(I),
+    [RefF] = [F || F <- Fields, maps:get(name, F) =:= ref],
+    Result = maps:get(drillable, RefF),
+    gen_server:stop(OuterPid),
+    ?assertEqual(false, Result).
+
+%% actor_pid/1: {registered, _Name, _Node} remote node → not_actor, non-drillable.
+actor_pid_remote_node_not_drillable_test() ->
+    OuterState = #{
+        '$beamtalk_class' => 'Holder',
+        ref => #beamtalk_object{
+            class = 'TestActor',
+            class_mod = beamtalk_inspector_tests,
+            pid = {registered, bt_test_actorpid_remote, 'remote@nonode.invalid'}
+        }
+    },
+    OuterPid = start_actor(OuterState),
+    I = beamtalk_inspector:on(OuterPid),
+    Fields = beamtalk_inspector:fieldsOf(I),
+    [RefF] = [F || F <- Fields, maps:get(name, F) =:= ref],
+    Result = maps:get(drillable, RefF),
+    gen_server:stop(OuterPid),
+    ?assertEqual(false, Result).

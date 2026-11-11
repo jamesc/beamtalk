@@ -200,7 +200,7 @@ printString(#{'$beamtalk_class' := 'Node', name := Name}) ->
 fields, migrations}` for every registered project/dependency class on that
 node, fetched via `erpc:call/5` to `beamtalk_release:shape_manifest/0` — the
 exact BT-3575 projection `Beamtalk shapeManifest` exposes locally, never
-re-derived (CLAUDE.md's no-duplicate-implementations rule). The current
+re-derived (AGENTS.md's no-duplicate-implementations rule). The current
 node is special-cased to a direct local call — same as `connect/1` — both
 because it is always allowed (no host policy or network round trip makes
 sense against `self`) and because `erpc:call/5` against `node()` on a
@@ -376,7 +376,7 @@ remote_introspect(Name, Selector, Fun, Args) ->
 
 -spec format_reason(term()) -> binary().
 format_reason(Reason) ->
-    iolist_to_binary(io_lib:format("remote query failed: ~tp", [Reason])).
+    beamtalk_error:chars_to_binary(io_lib:format("remote query failed: ~tp", [Reason])).
 
 -spec introspection_error(atom(), atom(), node(), binary()) -> #beamtalk_error{}.
 introspection_error(Kind, Selector, Name, Hint) ->
@@ -418,7 +418,7 @@ with different policy needs:
   new connection to gate.
 
 Both share this one erpc-and-catch implementation rather than a second copy
-(CLAUDE.md's no-duplicate-implementations rule).
+(AGENTS.md's no-duplicate-implementations rule).
 """.
 -spec remote_shape_manifest(node()) -> {ok, map()} | {error, #beamtalk_error{}}.
 remote_shape_manifest(Name) ->
@@ -544,7 +544,7 @@ remote_manifest_timeout_error(Name) ->
 remote_manifest_error(Name, Reason) ->
     Error0 = beamtalk_error:with_hint(
         beamtalk_error:new(runtime_error, 'Node', shapeManifest),
-        iolist_to_binary(io_lib:format("shapeManifest fetch failed: ~tp", [Reason]))
+        beamtalk_error:chars_to_binary(io_lib:format("shapeManifest fetch failed: ~tp", [Reason]))
     ),
     beamtalk_error:with_details(Error0, #{node => Name}).
 

@@ -882,12 +882,12 @@ class_not_found_error(Class) ->
 %% migration chain runs.
 -spec shape_version_ahead_error(atom(), pos_integer(), pos_integer()) -> #beamtalk_error{}.
 shape_version_ahead_error(Class, SentVersion, KnownVersion) ->
-    %% unicode:characters_to_binary/1, not iolist_to_binary/1 — see
+    %% beamtalk_error:chars_to_binary/1, not iolist_to_binary/1 — see
     %% reconcile_error/2's comment (em dash outside iolist_to_binary's
     %% 0-255 byte range).
-    Hint = unicode:characters_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "~s envelope at shape version ~p is ahead of this node's known version ~p "
+            "~ts envelope at shape version ~p is ahead of this node's known version ~p "
             "— upgrade this node before the sender",
             [Class, SentVersion, KnownVersion]
         )
@@ -902,9 +902,9 @@ shape_version_ahead_error(Class, SentVersion, KnownVersion) ->
 
 -spec step_error(atom(), pos_integer(), atom(), term()) -> #beamtalk_error{}.
 step_error(Class, Step, Selector, Reason) ->
-    Hint = iolist_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "~s class >> ~s raised ~s",
+            "~ts class >> ~ts raised ~ts",
             [Class, Selector, format_step_reason(Reason)]
         )
     ),
@@ -932,12 +932,12 @@ format_step_reason(Reason) ->
 
 -spec reconcile_error(atom(), {typed_field_unset, atom()}) -> #beamtalk_error{}.
 reconcile_error(Class, {typed_field_unset, Field}) ->
-    %% unicode:characters_to_binary/1, not iolist_to_binary/1: the message
+    %% beamtalk_error:chars_to_binary/1, not iolist_to_binary/1: the message
     %% below contains an em dash, a code point outside iolist_to_binary's
     %% 0-255 byte range.
-    Hint = unicode:characters_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "migration left typed field '~s' unset — a migration may not leave a typed slot unset",
+            "migration left typed field '~ts' unset — a migration may not leave a typed slot unset",
             [Field]
         )
     ),
@@ -948,9 +948,9 @@ reconcile_error(Class, {typed_field_unset, Field}) ->
 
 -spec not_serialisable_error(atom(), atom(), binary()) -> #beamtalk_error{}.
 not_serialisable_error(Class, Field, TierLabel) ->
-    %% unicode:characters_to_binary/1 — see reconcile_error/2's comment.
-    Hint = unicode:characters_to_binary(
-        io_lib:format("field '~s' is ~s — not serialisable", [Field, TierLabel])
+    %% beamtalk_error:chars_to_binary/1 — see reconcile_error/2's comment.
+    Hint = beamtalk_error:chars_to_binary(
+        io_lib:format("field '~ts' is ~ts — not serialisable", [Field, TierLabel])
     ),
     beamtalk_error:with_hint(
         beamtalk_error:new(not_serialisable, Class, Field),

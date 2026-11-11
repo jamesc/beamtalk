@@ -15,6 +15,10 @@ Provides two entry points:
   This is an **internal helper** for FFI modules — callers must supply
   structured errors (not bare atoms) before surfacing Results to Beamtalk code.
 
+- `to_tagged_tuple/1` — The inverse: a `Result` tagged map to
+  `{ok, V} | {error, R}`, for native Erlang code that receives a `Result`
+  from a Beamtalk send (BT-4556).
+
 - `tryDo:/1` — Implements the `Result tryDo: block` class method.
   Evaluates a block (Erlang fun), catching any exception and returning
   it as a `Result error:`.
@@ -43,6 +47,7 @@ Field names match the `state:` declarations in `stdlib/src/result.bt`.
 
 -export([
     from_tagged_tuple/1,
+    to_tagged_tuple/1,
     'ok:'/1,
     'makeError:'/1,
     'fromTuple:'/1,
@@ -125,6 +130,30 @@ from_tagged_tuple({error, Reason}) ->
     %% already-wrapped Exception maps pass through unchanged.
     ExObj = beamtalk_exception_handler:ensure_wrapped(Reason),
     #{'$beamtalk_class' => 'Result', 'isOk' => false, 'okValue' => nil, 'errReason' => ExObj}.
+
+-doc """
+Convert a `Result` tagged map to an Erlang `{ok, V} | {error, R}` tuple, the
+inverse of `from_tagged_tuple/1` (BT-4556).
+
+For an ok Result: `{ok, OkValue}`. For an error Result: `{error, ErrReason}`,
+where `ErrReason` is the Result's Exception object as stored (a wrapped
+`#{'$beamtalk_class' := _, error := #beamtalk_error{}}` map for an error built
+by `from_tagged_tuple/1`), so `from_tagged_tuple(to_tagged_tuple(R))` answers
+`R`. Any other term raises `type_error`.
+
+## Examples (Erlang)
+```erlang
+beamtalk_result:to_tagged_tuple(beamtalk_result:from_tagged_tuple({ok, 42}))
+  % => {ok, 42}
+```
+""".
+-spec to_tagged_tuple(t()) -> {ok, term()} | {error, term()}.
+to_tagged_tuple(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := Value}) ->
+    {ok, Value};
+to_tagged_tuple(#{'$beamtalk_class' := 'Result', 'isOk' := false, 'errReason' := Reason}) ->
+    {error, Reason};
+to_tagged_tuple(_) ->
+    beamtalk_error:raise_type_error('Result', to_tagged_tuple, <<"Expected a Result">>).
 
 -doc """
 Implements `Result ok: value` constructor — builds an ok Result.

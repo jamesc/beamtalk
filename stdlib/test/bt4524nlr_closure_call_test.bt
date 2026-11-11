@@ -1,0 +1,69 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4524: a call that may run a block holding a `^` stores the method's
+// state to the cell first (ADR 0146 P0), so the `^`, which carries the cell,
+// keeps the method's earlier field writes. Each shape runs the block as a
+// closure. Fixture: fixtures/bt4524nlr_closure_call_actor.bt.
+
+TestCase subclass: Bt4524NlrClosureCallTest
+
+  testClosureEnsureKeepsTheWrite =>
+    a := Bt4524NlrClosureCallActor spawn
+    self assert: a closureEnsure equals: 2
+    self assert: a currentN equals: 6
+
+  testClosureTimesRepeatKeepsTheWrite =>
+    a := Bt4524NlrClosureCallActor spawn
+    self assert: a closureTimesRepeat equals: 7
+    self assert: a currentN equals: 6
+
+  testClosureToDoKeepsTheWrite =>
+    a := Bt4524NlrClosureCallActor spawn
+    self assert: a closureToDo equals: 1
+    self assert: a currentN equals: 6
+
+  testClosureWhileTrueKeepsTheWrite =>
+    a := Bt4524NlrClosureCallActor spawn
+    self assert: a closureWhileTrue equals: 2
+    self assert: a currentN equals: 6
+
+  testClosureValueKeepsTheWrite =>
+    a := Bt4524NlrClosureCallActor spawn
+    self assert: a closureValue equals: 5
+    self assert: a currentN equals: 6
+
+  testClosureOnDoBodyKeepsTheWrite =>
+    a := Bt4524NlrClosureCallActor spawn
+    self assert: a closureOnDoBody equals: 3
+    self assert: a currentN equals: 6
+
+  testClosureOnDoHandlerKeepsTheWrite =>
+    a := Bt4524NlrClosureCallActor spawn
+    self assert: a closureOnDoHandler equals: 4
+    self assert: a currentN equals: 6
+
+  testCollectionDoKeepsTheWrite =>
+    a := Bt4524NlrClosureCallActor spawn
+    self assert: (a closureDetect: #(1, 2, 3)) equals: 2
+    self assert: a currentN equals: 6
+
+  testNonBooleanIfTrueKeepsTheWrite =>
+    a := Bt4524NlrClosureCallActor spawn
+    self assert: (a nonBooleanIfTrue: NonBooleanCondCalling new) equals: 8
+    self assert: a currentN equals: 6
+
+  testClosureIfNilKeepsTheWrite =>
+    a := Bt4524NlrClosureCallActor spawn
+    self assert: (a closureIfNil: nil) equals: 8
+    self assert: a currentN equals: 6
+
+  testClosureIfNotNilKeepsTheWrite =>
+    a := Bt4524NlrClosureCallActor spawn
+    self assert: (a closureIfNotNil: 9) equals: 9
+    self assert: a currentN equals: 6
+
+  testClosureGuardedOpIfTrueKeepsTheWrite =>
+    a := Bt4524NlrClosureCallActor spawn
+    self assert: (a closureGuardedOpIfTrue: 4) equals: 8
+    self assert: a currentN equals: 6

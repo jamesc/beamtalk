@@ -1,0 +1,132 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4296: the elements of a collection literal, the arguments of a message
+// send and the operands of a binary send evaluate left to right. Each case
+// sends `bump` (which sets the actor's `n` to 1) and then `n` to the same
+// EvalOrderActor in ONE expression, so `n` must read 1. Columns: this
+// TestCase's own (value-type) methods, class methods
+// (stdlib/test/fixtures/eval_order_class.bt), Value methods
+// (stdlib/test/fixtures/eval_order_value.bt) and actor methods
+// (stdlib/test/fixtures/eval_order_actor.bt, and eval_order_actor_child.bt
+// for `super` and actor-closure cases).
+
+TestCase subclass: EvalOrderTest
+
+  pair: x with: y => #[x, y]
+
+  testArrayLiteral =>
+    a := EvalOrderActor spawn
+    self assert: #[a bump, a n] equals: #[1, 1]
+
+  testArrayLiteralWithParens =>
+    a := EvalOrderActor spawn
+    self assert: #[(a bump), a n] equals: #[1, 1]
+
+  testListLiteral =>
+    a := EvalOrderActor spawn
+    self assert: #(a bump, a n) equals: #(1, 1)
+
+  testTupleLiteral =>
+    a := EvalOrderActor spawn
+    self assert: {a bump, a n} equals: {1, 1}
+
+  testMapLiteral =>
+    a := EvalOrderActor spawn
+    self assert: #{
+      #first => a bump,
+      #second => a n
+    } equals: #{#first => 1, #second => 1}
+
+  testMessageArguments =>
+    a := EvalOrderActor spawn
+    self assert: (self pair: a bump with: a n) equals: #[1, 1]
+
+  testActorSendArguments =>
+    a := EvalOrderActor spawn
+    host := EvalOrderActor spawn
+    self assert: (host pair: a bump with: a n) equals: #[1, 1]
+
+  testClassSendArguments =>
+    a := EvalOrderActor spawn
+    self assert: (EvalOrderClass pair: a bump with: a n) equals: #[1, 1]
+
+  testValueSendArguments =>
+    a := EvalOrderActor spawn
+    self assert: (EvalOrderValue new pair: a bump with: a n) equals: #[1, 1]
+
+  testPerformArguments =>
+    a := EvalOrderActor spawn
+    self assert: (self perform: #pair:with: withArguments: #(a bump, a n)) equals: #[1, 1]
+
+  testStringInterpolation =>
+    a := EvalOrderActor spawn
+    self assert: "{a bump} {a n}" equals: "1 1"
+
+  testMapLiteralKeys =>
+    a := EvalOrderActor spawn
+    self assert: #{
+      (a bump) => #first,
+      ((a n) + 10) => #second
+    } equals: #{1 => #first, 11 => #second}
+
+  testCascadeArguments =>
+    a := EvalOrderActor spawn
+    v := EvalOrderValue new
+    self assert: (v yourself; pair: a bump with: a n) equals: #[1, 1]
+
+  testErlangCallArguments =>
+    a := EvalOrderActor spawn
+    // lists:seq(1, 1) is [1]; out of order it would be lists:seq(1, 0), [].
+    self assert: (Erlang lists seq: a bump with: a n) equals: #(1)
+
+  testValueTypeSuperArguments =>
+    a := EvalOrderActor spawn
+    self assert: (EvalOrderValueChild new superArgsOf: a) equals: #[1, 1]
+
+  testBinaryOperands =>
+    a := EvalOrderActor spawn
+    self assert: a bump - a n equals: 0
+
+  testClassMethods =>
+    self assert: (EvalOrderClass arrayOf: EvalOrderActor spawn) equals: #[1, 1]
+    self assert: (EvalOrderClass listOf: EvalOrderActor spawn) equals: #(1, 1)
+    self assert: (EvalOrderClass tupleOf: EvalOrderActor spawn) equals: {1, 1}
+    self assert: (EvalOrderClass mapOf: EvalOrderActor spawn) equals: #{
+      #first => 1,
+      #second => 1
+    }
+    self assert: (EvalOrderClass argsOf: EvalOrderActor spawn) equals: #[1, 1]
+    self assert: (EvalOrderClass binaryOf: EvalOrderActor spawn) equals: 0
+
+  testValueMethods =>
+    v := EvalOrderValue new
+    self assert: (v arrayOf: EvalOrderActor spawn) equals: #[1, 1]
+    self assert: (v listOf: EvalOrderActor spawn) equals: #(1, 1)
+    self assert: (v tupleOf: EvalOrderActor spawn) equals: {1, 1}
+    self assert: (v mapOf: EvalOrderActor spawn) equals: #{
+      #first => 1,
+      #second => 1
+    }
+    self assert: (v argsOf: EvalOrderActor spawn) equals: #[1, 1]
+    self assert: (v binaryOf: EvalOrderActor spawn) equals: 0
+
+  testActorMethods =>
+    host := EvalOrderActor spawn
+    self assert: (host arrayOf: EvalOrderActor spawn) equals: #[1, 1]
+    self assert: (host listOf: EvalOrderActor spawn) equals: #(1, 1)
+    self assert: (host tupleOf: EvalOrderActor spawn) equals: {1, 1}
+    self assert: (host mapOf: EvalOrderActor spawn) equals: #{
+      #first => 1,
+      #second => 1
+    }
+    self assert: (host argsOf: EvalOrderActor spawn) equals: #[1, 1]
+    self assert: (host binaryOf: EvalOrderActor spawn) equals: 0
+
+  testActorSuperArguments =>
+    child := EvalOrderActorChild spawn
+    self assert: (child superArgsOf: EvalOrderActor spawn) equals: #[1, 1]
+    self assert: (child blockSuperArgsOf: EvalOrderActor spawn) equals: #[1, 1]
+
+  testActorClosureFieldReadBeforeWrite =>
+    self assert: EvalOrderActorChild spawn blockFieldThenWrite equals: #[0, 1]

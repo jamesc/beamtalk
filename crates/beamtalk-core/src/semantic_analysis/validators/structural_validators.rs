@@ -419,10 +419,15 @@ const KNOWN_OTP_MODULES: &[&str] = &[
     "string",
     "supervisor",
     "sys",
+    // Not OTP, but a `beamtalk_runtime` application dependency (ADR 0069),
+    // so it is loaded wherever Beamtalk code runs (BT-4480).
+    "telemetry",
     "timer",
     "unicode",
     "uri_string",
     "zlib",
+    // OTP 28+ stdlib (BT-4457).
+    "zstd",
 ];
 
 /// Warn on unresolved Erlang FFI module references.
@@ -754,7 +759,7 @@ mod tests {
             package: None,
             span: test_span(),
 
-            provided_selectors: vec![],
+            provided: vec![],
         });
         let mut diags = Vec::new();
 
@@ -895,8 +900,12 @@ mod tests {
         assert!(is_known_erlang_module("erlang", &empty_known_modules()));
         assert!(is_known_erlang_module("io", &empty_known_modules()));
         assert!(is_known_erlang_module("crypto", &empty_known_modules()));
+        // BT-4480: a runtime application dependency, not OTP.
+        assert!(is_known_erlang_module("telemetry", &empty_known_modules()));
         assert!(is_known_erlang_module("ssl", &empty_known_modules()));
         assert!(is_known_erlang_module("public_key", &empty_known_modules()));
+        // BT-4457: `zstd` ships in OTP 28's stdlib.
+        assert!(is_known_erlang_module("zstd", &empty_known_modules()));
     }
 
     #[test]
@@ -988,12 +997,11 @@ mod tests {
     /// own `native/*.erl`, supplied by the driver) must not warn.
     #[test]
     fn test_ffi_module_accepts_project_known_modules() {
-        let module = empty_module_with_exprs(vec![ffi_proxy("telemetry"), ffi_proxy("my_nif")]);
+        let module = empty_module_with_exprs(vec![ffi_proxy("jsx"), ffi_proxy("my_nif")]);
         let mut diags = Vec::new();
-        let extra: std::collections::HashSet<String> =
-            ["telemetry".to_string(), "my_nif".to_string()]
-                .into_iter()
-                .collect();
+        let extra: std::collections::HashSet<String> = ["jsx".to_string(), "my_nif".to_string()]
+            .into_iter()
+            .collect();
 
         check_unresolved_ffi_modules(&module, &extra, &mut diags);
 
@@ -1007,10 +1015,9 @@ mod tests {
     /// genuinely unknown module still warns.
     #[test]
     fn test_ffi_module_still_warns_on_unknown_with_project_known_set() {
-        let module = empty_module_with_exprs(vec![ffi_proxy("telemetry"), ffi_proxy("typo_mod")]);
+        let module = empty_module_with_exprs(vec![ffi_proxy("jsx"), ffi_proxy("typo_mod")]);
         let mut diags = Vec::new();
-        let extra: std::collections::HashSet<String> =
-            ["telemetry".to_string()].into_iter().collect();
+        let extra: std::collections::HashSet<String> = ["jsx".to_string()].into_iter().collect();
 
         check_unresolved_ffi_modules(&module, &extra, &mut diags);
 
@@ -1347,6 +1354,7 @@ mod tests {
 
     fn make_method(body_expr: Expression) -> MethodDefinition {
         MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("test".into()),
             parameters: vec![],
             body: vec![ExpressionStatement::bare(body_expr)],

@@ -32,7 +32,10 @@ Extracted from beamtalk_repl_server.
     base_protocol_response/1,
     list_class_methods_for_ws/1,
     list_inherited_methods_for_ws/1,
-    resolve_qualified_class_name/1
+    resolve_qualified_class_name/1,
+    %% Shared keyword-send recognizer: hover (here) and the `nav-query`
+    %% `keyword_selector` kind backing editor go-to-definition (BT-4455).
+    keyword_send_at/3
 ]).
 
 -include_lib("kernel/include/logger.hrl").
@@ -58,10 +61,11 @@ Extracted from beamtalk_repl_server.
     %% White-box tests of the receiver classifier, the hover
     %% resolver, and the diagnostics side-effect-free compile path.
     classify_receiver/2,
+    classify_receiver/3,
     hover_docs/4,
+    hover_docs/5,
     hover_markdown/2,
-    keyword_send_at/3,
-    diagnostics_for/2
+    diagnostics_for/3
 ]).
 -endif.
 
@@ -156,6 +160,7 @@ handle_term(<<"hover">>, Params, Msg, SessionPid) ->
     Code = maps:get(<<"code">>, Params, <<>>),
     Before = binary_param(<<"before">>, Params),
     Suffix = binary_param(<<"suffix">>, Params),
+    SelfCtx = self_context(Params),
     case Code of
         <<>> ->
             {docs, <<>>};
@@ -170,7 +175,7 @@ handle_term(<<"hover">>, Params, Msg, SessionPid) ->
             SessionBindings = get_session_bindings(BindingPid),
             WorkspaceBindings = get_workspace_bindings(),
             Bindings = maps:merge(WorkspaceBindings, SessionBindings),
-            {docs, hover_docs(Before, Code, Suffix, Bindings)}
+            {docs, hover_docs(Before, Code, Suffix, Bindings, SelfCtx)}
     end;
 handle_term(<<"diagnostics">>, Params, _Msg, _SessionPid) ->
     %% Parse-only diagnostics for the cockpit CodeMirror editors. `code`
@@ -194,9 +199,14 @@ handle_term(<<"diagnostics">>, Params, _Msg, _SessionPid) ->
     %% "method" and treats everything else as expression mode — so the runtime
     %% behaviour was already correct, but the Erlang boundary was more permissive
     %% than the facade. A non-binary `mode` is passed through unchanged so it
-    %% still degrades to `[]` via the `diagnostics_for/2` catch-all.
+    %% still degrades to `[]` via the `diagnostics_for/3` catch-all.
     Mode = normalize_diagnostics_mode(maps:get(<<"mode">>, Params, <<"expression">>)),
-    {diagnostics, diagnostics_for(Code, Mode)};
+    %% Optional `source_path` (BT-4583): the file a file-backed editor buffer
+    %% edits. The compiler checks the buffer under that file's project scope
+    %% (its `beamtalk.toml` `[diagnostics]` table, cross-file type aliases, FFI
+    %% registry) — the scope `load-project` compiles the same file with. Scratch
+    %% buffers and REPL input send no path and keep the port-process scope.
+    {diagnostics, diagnostics_for(Code, Mode, binary_param(<<"source_path">>, Params))};
 handle_term(<<"reload-findings">>, _Params, _Msg, _SessionPid) ->
     %% (ADR 0105 surface-parity gap): request/response snapshot read
     %% of the live reload-induced findings store, mirroring the
@@ -438,8 +448,8 @@ handle_term(<<"list-classes">>, Params, _Msg, SessionPid) ->
                             class = 'Object',
                             selector = undefined,
                             message = beamtalk_primitive:string_from_binary(
-                                iolist_to_binary(
-                                    io_lib:format("Failed to list classes: ~p", [AllClassesErr])
+                                beamtalk_error:chars_to_binary(
+                                    io_lib:format("Failed to list classes: ~tp", [AllClassesErr])
                                 )
                             ),
                             hint = beamtalk_primitive:string_from_binary(
@@ -736,8 +746,8 @@ compile_class_source(ClassBin, ClassAtom, ClassPid) ->
                 beamtalk_repl_errors:make(
                     runtime_error,
                     ClassAtom,
-                    iolist_to_binary(
-                        io_lib:format("Cannot read source file ~s: ~p", [SourcePath, Reason])
+                    beamtalk_error:chars_to_binary(
+                        io_lib:format("Cannot read source file ~ts: ~tp", [SourcePath, Reason])
                     )
                 )}
     end.
@@ -810,7 +820,7 @@ run_test_op(undefined) ->
                 beamtalk_repl_errors:make(
                     runtime_error,
                     'TestRunner',
-                    iolist_to_binary(io_lib:format("Test run failed: ~p", [Reason]))
+                    beamtalk_error:chars_to_binary(io_lib:format("Test run failed: ~tp", [Reason]))
                 )}
     end;
 run_test_op(ClassName) when is_binary(ClassName) ->
@@ -832,8 +842,8 @@ run_test_op(ClassName) when is_binary(ClassName) ->
                         beamtalk_repl_errors:make(
                             runtime_error,
                             'TestRunner',
-                            iolist_to_binary(
-                                io_lib:format("Test run failed for ~s: ~p", [ClassName, Reason])
+                            beamtalk_error:chars_to_binary(
+                                io_lib:format("Test run failed for ~ts: ~tp", [ClassName, Reason])
                             )
                         )}
             end
@@ -861,8 +871,8 @@ run_test_op_file(FilePath) ->
                 beamtalk_repl_errors:make(
                     runtime_error,
                     'TestRunner',
-                    iolist_to_binary(
-                        io_lib:format("Test run failed for file ~s: ~p", [FilePath, Reason])
+                    beamtalk_error:chars_to_binary(
+                        io_lib:format("Test run failed for file ~ts: ~tp", [FilePath, Reason])
                     )
                 )}
     end.
@@ -1069,35 +1079,51 @@ type_annotation_completions(Prefix, AliasNames) ->
     lists:usort(class_name_completions(Prefix) ++ AliasCompletions).
 
 -doc """
-Compute parse-only diagnostics for an editor buffer.
+Compute parse-only diagnostics for an editor buffer, optionally under the
+project scope of the file it edits.
 
 `Code` is the full buffer source; `Mode` selects the parse grammar
 (`<<"expression">>` for a top-level script, `<<"method">>` for a bare method
-body). Delegates to `beamtalk_compiler:diagnostics/2` — the side-effect-free
+body).
+
+Delegates to `beamtalk_compiler:diagnostics/3` — the side-effect-free
 parse + semantic-check path (the Rust port's `diagnostics` command): it never
 generates code, installs a module, mutates the image, or appends to the
 ChangeLog. Each diagnostic is a map with `message`, `severity`, and byte-offset
 `start`/`end` keys.
+
+`SourcePath` (BT-4583) is the file a file-backed editor buffer edits. A
+non-empty path is forwarded as the compiler's `source_path` option, so a file
+under a `beamtalk.toml` is checked with that project's scope (its
+`[diagnostics]` table, cross-file type aliases, FFI registry) — the scope
+`load-project` gives the same file. `<<>>` (a scratch buffer, REPL input) sends
+no path and keeps the port-process scope. `"method"` mode ignores it.
 
 An empty buffer short-circuits to `[]` (nothing to diagnose). A compiler-port
 failure (`{error, _}` — port down / timed out) also degrades to `[]`: diagnostics
 are advisory and fire on every keystroke, so a transient port hiccup must not
 surface an error to the editor.
 """.
--spec diagnostics_for(binary(), binary()) -> [map()].
-diagnostics_for(<<>>, _Mode) ->
+-spec diagnostics_for(term(), term(), binary()) -> [map()].
+diagnostics_for(<<>>, _Mode, _SourcePath) ->
     [];
-diagnostics_for(Code, Mode) when is_binary(Code), is_binary(Mode) ->
-    case beamtalk_compiler:diagnostics(Code, Mode) of
+diagnostics_for(Code, Mode, SourcePath) when
+    is_binary(Code), is_binary(Mode), is_binary(SourcePath)
+->
+    Options =
+        case SourcePath of
+            <<>> -> #{};
+            _ -> #{source_path => SourcePath}
+        end,
+    case beamtalk_compiler:diagnostics(Code, Mode, Options) of
         {ok, Diagnostics} when is_list(Diagnostics) -> Diagnostics;
         {error, _Reason} -> []
     end;
 %% A non-binary `code`/`mode` (a raw TCP/MCP client can send either as a JSON
 %% number/bool, not just the LiveView surface) degrades to `[]` rather than
 %% crashing the session — diagnostics are advisory and fire on every keystroke,
-%% so this matches the `{error, _}` degradation above and keeps the `binary()`
-%% spec honest at the Erlang boundary.
-diagnostics_for(_, _) ->
+%% so this matches the `{error, _}` degradation above.
+diagnostics_for(_, _, _) ->
     [].
 
 -doc """
@@ -1106,7 +1132,7 @@ Normalise the `diagnostics` `mode` param at the Erlang op boundary.
 Mirrors the Elixir `BtAttach.Facade` (`invoke(:diagnostics, ...)`): a binary
 `mode` of <<"method">> is preserved; any other binary (e.g. <<"foo">>) is
 normalised to the safe default <<"expression">>. A non-binary `mode` is passed
-through unchanged so `diagnostics_for/2`'s catch-all still degrades it to `[]`
+through unchanged so `diagnostics_for/3`'s catch-all still degrades it to `[]`
 (the existing behaviour) rather than silently treating it as expression
 mode.
 """.
@@ -1150,17 +1176,50 @@ degrades to `<<>>`, since hover is advisory. This does not *catch* exceptions �
 an unexpected throw in `beamtalk_repl_docs` propagates and surfaces to the
 `rpc`-attached client as `{badrpc, _}`, which the Elixir layer maps to an empty
 hover, so the system still degrades cleanly.
+
+`SelfCtx` (BT-4463) is `{ClassName, instance | class}` when the hover comes
+from a method editor, so a `self` / `super` receiver resolves against that
+class (see `classify_receiver/3`); `undefined` elsewhere.
 """.
--spec hover_docs(binary(), binary(), binary(), map()) -> binary().
-hover_docs(Before, Code, Suffix, Bindings) ->
+-spec hover_docs(binary(), binary(), binary(), map(), self_context()) -> binary().
+hover_docs(Before, Code, Suffix, Bindings, SelfCtx) ->
     case keyword_send_at(Before, Code, Suffix) of
-        {ok, Receiver, Selector} -> hover_method(Receiver, Selector, Bindings);
+        {ok, Receiver, Selector} -> hover_method(Receiver, Selector, Bindings, SelfCtx);
         none -> <<>>;
-        not_keyword -> hover_token(Code, Bindings)
+        not_keyword -> hover_token(Code, Bindings, SelfCtx)
     end.
 
--spec hover_token(binary(), map()) -> binary().
-hover_token(Code, Bindings) ->
+-ifdef(TEST).
+-doc false.
+-spec hover_docs(binary(), binary(), binary(), map()) -> binary().
+hover_docs(Before, Code, Suffix, Bindings) ->
+    hover_docs(Before, Code, Suffix, Bindings, undefined).
+-endif.
+
+%% The class a method editor edits and which side (`self`'s receiver kind).
+-type self_context() :: undefined | {atom(), instance | class}.
+
+%% Decode the optional `class` / `side` hover params (sent only by method
+%% editors). The class must already be an atom (it is a loaded class), so
+%% client text never creates atoms.
+-spec self_context(map()) -> self_context().
+self_context(Params) ->
+    case {maps:get(<<"class">>, Params, undefined), maps:get(<<"side">>, Params, undefined)} of
+        {Class, Side} when
+            is_binary(Class),
+            Class =/= <<>>,
+            (Side =:= <<"instance">> orelse Side =:= <<"class">>)
+        ->
+            case beamtalk_repl_errors:safe_to_existing_atom(Class) of
+                {ok, ClassName} -> {ClassName, binary_to_existing_atom(Side)};
+                {error, _} -> undefined
+            end;
+        _ ->
+            undefined
+    end.
+
+-spec hover_token(binary(), map(), self_context()) -> binary().
+hover_token(Code, Bindings, SelfCtx) ->
     case parse_receiver_and_prefix(Code) of
         {expression, _ReceiverExpr, Word} ->
             %% Multi-token receiver: only offer hover when the hovered token is
@@ -1175,7 +1234,7 @@ hover_token(Code, Bindings) ->
         {undefined, Word} ->
             hover_class(Word, Bindings);
         {Receiver, Word} ->
-            hover_method(Receiver, Word, Bindings)
+            hover_method(Receiver, Word, Bindings, SelfCtx)
     end.
 
 -doc """
@@ -1465,9 +1524,9 @@ Hover docs for a `Receiver selector` pair, picking the instance-side or
 class-side doc lookup from how the receiver classifies (mirroring how
 `complete` offers class-side vs instance-side selectors for a receiver).
 """.
--spec hover_method(binary(), binary(), map()) -> binary().
-hover_method(Receiver, Selector, Bindings) ->
-    case classify_receiver(Receiver, Bindings) of
+-spec hover_method(binary(), binary(), map(), self_context()) -> binary().
+hover_method(Receiver, Selector, Bindings, SelfCtx) ->
+    case classify_receiver(Receiver, Bindings, SelfCtx) of
         {class, ClassName} ->
             hover_format(method, fun() ->
                 beamtalk_repl_docs:format_method_doc_class_side(ClassName, Selector)
@@ -1546,6 +1605,12 @@ Examples:
   <<"\"hello\" size c">>→ {expression, <<"\"hello\" size">>, <<"c">>}
   <<"s">>               → {undefined, <<"s">>}
   <<>>                  → {undefined, <<>>}
+  <<"\"hi\" size |> ab">> → {expression, <<"\"hi\" size">>, <<"ab">>}
+
+After a pipeline `|>` (ADR 0145) the receiver is the value before the last
+`|>`, so `x m1 |> pre` completes `pre` against `x m1`, as the LSP does
+(`pipeline_receiver_end` in `completion_provider.rs`). Both are pinned to the
+shared corpus `test/fixtures/completion_pipeline_receiver_corpus.json`.
 """.
 -spec parse_receiver_and_prefix(binary()) ->
     {binary() | undefined, binary()} | {expression, binary(), binary()}.
@@ -1561,8 +1626,11 @@ parse_receiver_and_prefix(Line) when is_binary(Line) ->
     {SpaceChars, ReceiverPartRev} = lists:splitwith(
         fun(C) -> C =:= $\s orelse C =:= $\t end, Rest
     ),
-    case SpaceChars of
-        [] ->
+    case {ReceiverPartRev, SpaceChars} of
+        {[$>, $| | BeforePipeRev], _} ->
+            %% `value |> prefix`: completing a pipeline stage (ADR 0145).
+            pipeline_stage_receiver(BeforePipeRev, Prefix);
+        {_, []} ->
             %% No space before prefix — single token, no receiver
             {undefined, Prefix};
         _ ->
@@ -1594,6 +1662,20 @@ parse_receiver_and_prefix(Line) when is_binary(Line) ->
             end
     end.
 
+-doc """
+The receiver and prefix when completing a pipeline stage: `Prefix` follows
+the last `|>`, and `BeforePipeRev` is the reversed text before that `|>`.
+The receiver is whatever `parse_receiver_and_prefix/1` finds at the end of
+that text, as if the cursor sat after it.
+""".
+-spec pipeline_stage_receiver(string(), binary()) ->
+    {binary() | undefined, binary()} | {expression, binary(), binary()}.
+pipeline_stage_receiver(BeforePipeRev, Prefix) ->
+    case parse_receiver_and_prefix(list_to_binary(lists:reverse(BeforePipeRev, " "))) of
+        {expression, ReceiverExpr, <<>>} -> {expression, ReceiverExpr, Prefix};
+        {Receiver, <<>>} -> {Receiver, Prefix}
+    end.
+
 -spec is_identifier_char(char()) -> boolean().
 is_identifier_char(C) ->
     (C >= $a andalso C =< $z) orelse
@@ -1621,6 +1703,7 @@ Examples:
   <<"\"hello\" size">>    → {ok, <<"\"hello\"">>, [size]}
   <<"counter getValue">>  → {ok, <<"counter">>, [getValue]}
   <<"\"hello\" size abs">>→ {ok, <<"\"hello\"">>, [size, abs]}
+  <<"\"hello\" |> size abs">> → {ok, <<"\"hello\"">>, [size, abs]}
   <<"inject: 0 into:">>   → error  (keyword send)
   <<"(myList size)">>     → error  (paren)
 """.
@@ -1628,7 +1711,7 @@ Examples:
 tokenise_send_chain(<<>>) ->
     error;
 tokenise_send_chain(Expr) when is_binary(Expr) ->
-    Parts = [list_to_binary(T) || T <- string:tokens(binary_to_list(Expr), " \t")],
+    Parts = chain_tokens(Expr),
     case Parts of
         [] ->
             error;
@@ -1651,6 +1734,20 @@ tokenise_send_chain(Expr) when is_binary(Expr) ->
                     error
             end
     end.
+
+-doc """
+Split a receiver expression into whitespace-separated tokens for the chain
+tokenisers, dropping each pipeline `|>` token: in a chain of unary and binary
+sends walked left to right, `a m1 |> m2` is the same chain as `a m1 m2`
+(ADR 0145).
+""".
+-spec chain_tokens(binary()) -> [binary()].
+chain_tokens(Expr) ->
+    [
+        list_to_binary(T)
+     || T <- string:tokens(binary_to_list(Expr), " \t"),
+        T =/= "|>"
+    ].
 
 -spec validate_chain_tokens(binary(), [binary()]) -> ok | error.
 validate_chain_tokens(ReceiverToken, Selectors) ->
@@ -1733,7 +1830,7 @@ Examples:
 tokenise_binary_chain(<<>>) ->
     error;
 tokenise_binary_chain(Expr) when is_binary(Expr) ->
-    Parts = [list_to_binary(T) || T <- string:tokens(binary_to_list(Expr), " \t")],
+    Parts = chain_tokens(Expr),
     case Parts of
         [] ->
             error;
@@ -2067,9 +2164,51 @@ Returns {class, ClassName} for class-object receivers (uppercase class names),
 {instance, ClassName} for instance receivers (literals, bindings), or undefined.
 """.
 -spec classify_receiver(binary(), map()) -> {class, atom()} | {instance, atom()} | undefined.
-classify_receiver(<<>>, _Bindings) ->
+classify_receiver(Receiver, Bindings) ->
+    classify_receiver(Receiver, Bindings, undefined).
+
+-doc """
+`classify_receiver/2` that also resolves `self` / `super` against the class a
+method editor edits (BT-4463). `SelfCtx` is `{ClassName, instance | class}`:
+`self` is that class's instance (or the class object itself on the class
+side); `super` is the same on its superclass, `undefined` for a root class.
+Without a context (`undefined`) `self` / `super` are ordinary names.
+""".
+-spec classify_receiver(binary(), map(), self_context()) ->
+    {class, atom()} | {instance, atom()} | undefined.
+classify_receiver(<<"self">>, _Bindings, {ClassName, Side}) ->
+    side_receiver(ClassName, Side);
+classify_receiver(<<"super">>, _Bindings, {ClassName, Side}) ->
+    case superclass_name(ClassName) of
+        {ok, Super} -> side_receiver(Super, Side);
+        none -> undefined
+    end;
+classify_receiver(Receiver, Bindings, _SelfCtx) ->
+    classify_receiver_token(Receiver, Bindings).
+
+-spec side_receiver(atom(), instance | class) -> {class, atom()} | {instance, atom()}.
+side_receiver(ClassName, instance) -> {instance, ClassName};
+side_receiver(ClassName, class) -> {class, ClassName}.
+
+-spec superclass_name(atom()) -> {ok, atom()} | none.
+superclass_name(ClassName) ->
+    try beamtalk_runtime_api:whereis_class(ClassName) of
+        undefined ->
+            none;
+        Pid ->
+            case beamtalk_runtime_api:superclass(Pid) of
+                none -> none;
+                Super when is_atom(Super) -> {ok, Super}
+            end
+    catch
+        _:_ -> none
+    end.
+
+-spec classify_receiver_token(binary(), map()) ->
+    {class, atom()} | {instance, atom()} | undefined.
+classify_receiver_token(<<>>, _Bindings) ->
     undefined;
-classify_receiver(<<H, _/binary>> = Receiver, Bindings) when H >= $A, H =< $Z ->
+classify_receiver_token(<<H, _/binary>> = Receiver, Bindings) when H >= $A, H =< $Z ->
     %% Starts with uppercase — first try class registry, then fall back to bindings.
     %% The fallback handles uppercase global bindings like `Transcript` that are
     %% workspace actors, not class names.
@@ -2091,7 +2230,7 @@ classify_receiver(<<H, _/binary>> = Receiver, Bindings) when H >= $A, H =< $Z ->
         {error, _} ->
             undefined
     end;
-classify_receiver(<<H, _/binary>> = Receiver, _Bindings) when H >= $0, H =< $9 ->
+classify_receiver_token(<<H, _/binary>> = Receiver, _Bindings) when H >= $0, H =< $9 ->
     %% Only treat as Integer when the whole token is digits (guards against
     %% float literals like "3.14" being misclassified as Integer).
     case lists:all(fun(C) -> C >= $0 andalso C =< $9 end, binary_to_list(Receiver)) of
@@ -2103,13 +2242,13 @@ classify_receiver(<<H, _/binary>> = Receiver, _Bindings) when H >= $0, H =< $9 -
         false ->
             undefined
     end;
-classify_receiver(<<$", _/binary>>, _Bindings) ->
+classify_receiver_token(<<$", _/binary>>, _Bindings) ->
     %% String literal — complete String instance methods
     case maybe_class('String') of
         undefined -> undefined;
         ClassName -> {instance, ClassName}
     end;
-classify_receiver(Receiver, Bindings) ->
+classify_receiver_token(Receiver, Bindings) ->
     %% Check for package-qualified class name (e.g. "json@Parser")
     case binary:match(Receiver, <<"@">>) of
         nomatch ->
@@ -2511,9 +2650,10 @@ base_ops() ->
             <<"params">> => [<<"code">>], <<"optional">> => [<<"before">>, <<"suffix">>]
         },
         %% Parse-only diagnostics for the cockpit editors.
-        %% optional `mode` (<<"expression">> | <<"method">>) selects the grammar.
+        %% optional `mode` (<<"expression">> | <<"method">>) selects the grammar;
+        %% optional `source_path` (BT-4583) checks under that file's project scope.
         <<"diagnostics">> => #{
-            <<"params">> => [<<"code">>], <<"optional">> => [<<"mode">>]
+            <<"params">> => [<<"code">>], <<"optional">> => [<<"mode">>, <<"source_path">>]
         },
         <<"test">> => #{<<"params">> => [], <<"optional">> => [<<"class">>, <<"file">>]},
         <<"test-all">> => #{<<"params">> => []},
@@ -2859,7 +2999,7 @@ validate_list_classes_filter(FilterBin) when is_binary(FilterBin) ->
         {error, badarg} -> {error, FilterBin}
     end;
 validate_list_classes_filter(Other) ->
-    {error, iolist_to_binary(io_lib:format("~p", [Other]))}.
+    {error, beamtalk_error:chars_to_binary(io_lib:format("~tp", [Other]))}.
 
 -doc """
 Filter predicate for list-classes op.

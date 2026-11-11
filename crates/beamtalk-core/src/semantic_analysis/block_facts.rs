@@ -1098,7 +1098,7 @@ fn send_may_run_user_code(
         return false;
     }
     match send_user_code(receiver, selector, arguments) {
-        SendUserCode::MayRun => true,
+        SendUserCode::MayRun | SendUserCode::ClosureOperand => true,
         // A collection message is a call only when its block is a closure
         // handed to the runtime. A block that carries something (writes a
         // captured local or a field, or sends to `self`) is lowered in place
@@ -1205,7 +1205,7 @@ fn collect_pattern_bindings(
 ///
 /// `pub(crate)`: also used by [`crate::semantic_analysis::initialize_assigns`]'s
 /// must-analysis (ADR 0124 A2a) — same "is this receiver `self`" question this
-/// may-analysis already answers, imported rather than redefined (CLAUDE.md's
+/// may-analysis already answers, imported rather than redefined (AGENTS.md's
 /// no-duplicate-implementations rule).
 /// Whether `expr` (parentheses looked through) is `self` or `super`: the
 /// receivers whose sends run the object's own methods.
@@ -1279,45 +1279,48 @@ pub fn while_condition_has_synced_user_code_sends(condition: &Expression) -> boo
 ///
 /// The one rule codegen's loop gates read (`condition_has_state_effects`:
 /// `while_loop_threads`, the stateful condition lowering, the actor
-/// statement classifier) and the one the ADR 0131 §6 validator reads through
-/// [`while_condition_writes_thread`].
+/// statement classifier).
 #[must_use]
 pub fn while_condition_has_state_effects(condition: &Expression, in_class_method: bool) -> bool {
     matches!(condition, Expression::Block(block)
         if block_condition_has_state_effects(block, in_class_method))
 }
 
-/// BT-3782/BT-3845: whether an outer-local write in the condition block of a
-/// keyword `whileTrue:`/`whileFalse:` is threaded back to the method in a
-/// compiled (non-REPL) method. It is exactly when codegen compiles the
-/// condition in the loop's own frame and packs its local writes into the
-/// loop's `StateAcc` (`generate_stateful_while_condition`): the `body`
-/// argument is a literal block (only then is the stateful lowering
-/// considered at all) and the condition has state effects
-/// ([`while_condition_has_state_effects`]).
-///
-/// A body that writes a local does **not** extend this: it also selects the
-/// stateful lowering, but with a pure condition the condition is compiled as a
-/// plain block body whose own writes are never packed, so the loop re-reads
-/// the pre-loop value forever (probed for BT-3845:
-/// `[t := t + 1. t < 3] whileTrue: [u := u + 1]` hangs in value-type, actor and
-/// class methods). Such a condition write stays a compile error; pinned by the
-/// `while_condition_*` matrix in `semantic_analysis/tests/local_threading.rs`
-/// and, for the accepted shapes, `stdlib/test/bt3746stateful_while_test.bt`.
-///
-/// BT-4015: codegen now carries a condition's local write whether or not the
-/// condition has a state effect (`while_condition_has_carried_effects`, for the
-/// REPL and legacy workspace block bodies, which this check does not gate).
-/// Accepting such a write in a compiled method too would be a separate change,
-/// proven over the compiled contexts first.
+/// BT-4062: the body block of a keyword `whileTrue:`/`whileFalse:` when it is
+/// lowered in place: a bare block literal. Only then does codegen consider the
+/// stateful lowering (`generate_while_true`/`generate_while_false`), which is
+/// the only lowering that carries a write in the condition; any other body (a
+/// variable, a computed block) takes the simple lowering,
+/// which runs the condition as a plain closure. (The parser drops the
+/// parentheses around a block argument, so `([...])` is a literal.) The one
+/// rule the Phase 0 check
+/// (`Walker`'s `whileTrue:` condition arm) and the codegen loop gates read.
 #[must_use]
-pub fn while_condition_writes_thread(
-    condition: &Block,
-    body: Option<&Expression>,
-    in_class_method: bool,
-) -> bool {
-    matches!(body, Some(Expression::Block(_)))
-        && block_condition_has_state_effects(condition, in_class_method)
+pub fn while_body_block(body: &Expression) -> Option<&Block> {
+    match body {
+        Expression::Block(block) => Some(block),
+        _ => None,
+    }
+}
+
+/// BT-4602: for a keyword `whileTrue:`/`whileFalse:` send (`None` for any
+/// other selector), whether its block literal receiver, the loop's condition,
+/// threads its outer-local writes back to the method: exactly when the body is
+/// a block literal ([`while_body_block`]), in every context. Codegen then
+/// carries the condition's writes in the loop's `StateAcc` (BT-4015); with any
+/// other body the loop runs its condition as a closure (BT-4062).
+///
+/// Callers pass the normalised selector (`ast::normalize`): a unary
+/// `[...] whileTrue` is the keyword loop with an empty body there (BT-4313),
+/// so it always threads. On a raw parse it would answer `None`.
+///
+/// The one rule the ADR 0131 §6 validator (`Escape::ConditionBodyNotLiteral`
+/// on `Some(false)`) and `beamtalk-lint`'s `dead_block_assignment` (no warning
+/// on `Some(true)`) read.
+#[must_use]
+pub fn while_condition_threads(selector: &str, arguments: &[Expression]) -> Option<bool> {
+    matches!(selector, "whileTrue:" | "whileFalse:")
+        .then(|| arguments.first().and_then(while_body_block).is_some())
 }
 
 fn block_condition_has_state_effects(condition: &Block, in_class_method: bool) -> bool {
@@ -1754,6 +1757,11 @@ pub enum LocalThreadingFamily {
 pub struct LocalThreadingConstruct<'a> {
     /// The send's selector.
     pub selector: String,
+    /// The selector as written (`ast::normalize::selector_as_written`):
+    /// `repeat` or a unary `whileTrue`/`whileFalse` for a loop the
+    /// normalising pass canonicalised (BT-4589), else [`Self::selector`]. For
+    /// diagnostics only.
+    pub written_selector: EcoString,
     /// Which construct it is.
     pub family: LocalThreadingFamily,
     /// The construct's block literals, receiver first.
@@ -1831,16 +1839,25 @@ impl LocalThreadingConstruct<'_> {
 pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingConstruct<'_>> {
     use crate::state_threading_selectors::{
         is_conditional_selector, is_exception_selector, is_state_threaded_block_receiver,
-        is_state_threading_keyword_selector, is_state_threading_unary_selector,
-        lookup_block_arg_indices,
+        is_state_threading_keyword_selector, lookup_block_arg_indices,
     };
+    // BT-4603: analysis reads only the normalised tree, where every unary loop
+    // on a parameterless literal block is its keyword loop (BT-4313, BT-4589).
+    // A raw parse would classify its receiver as a loop body, while codegen
+    // lowers it as the keyword loop's condition.
+    let node = expr.unwrap_parens();
+    debug_assert!(
+        !crate::ast::normalize::is_uncanonicalised_loop(node),
+        "local_threading_construct reached an uncanonicalised unary loop; \
+         run `ast::normalize` first"
+    );
     let Expression::MessageSend {
         receiver,
         selector,
         arguments,
         is_cast: false,
         ..
-    } = expr.unwrap_parens()
+    } = node
     else {
         return None;
     };
@@ -1904,10 +1921,10 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
             }
         }
         MessageSelector::Unary(_) => {
-            if is_state_threading_unary_selector(&sel) || sel == "repeat" {
-                blocks.extend(receiver_block);
-                LocalThreadingFamily::Loop
-            } else if is_state_threaded_block_receiver(&sel) {
+            // A literal `[c] whileTrue`/`[b] repeat` reaches analysis as the
+            // keyword loop it is canonicalised to (BT-4313, BT-4589); any
+            // other unary loop send is an ordinary send to `Block` (BT-4603).
+            if is_state_threaded_block_receiver(&sel) {
                 blocks.extend(evaluated_block);
                 LocalThreadingFamily::BlockValue
             } else {
@@ -1920,6 +1937,9 @@ pub fn local_threading_construct(expr: &Expression) -> Option<LocalThreadingCons
         None
     } else {
         Some(LocalThreadingConstruct {
+            written_selector: crate::ast::normalize::selector_as_written(
+                receiver, selector, arguments,
+            ),
             selector: sel,
             family,
             blocks,
@@ -4142,8 +4162,7 @@ pub fn stored_block_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) 
 }
 
 /// Checks if a block is a literal block (not a variable reference).
-#[cfg(test)]
-pub fn is_literal_block(expr: &Expression) -> bool {
+pub(crate) fn is_literal_block(expr: &Expression) -> bool {
     matches!(expr, Expression::Block(_))
 }
 
@@ -5438,13 +5457,66 @@ mod tests {
         assert!(analyze_block(block).local_writes.contains("t"));
     }
 
+    /// BT-4603: a unary loop reaches the classifier only canonicalised. A
+    /// parameterless literal receiver is the keyword loop (its condition is
+    /// the receiver, its body the added empty block, its selector named as
+    /// written); a literal with parameters, or a block value, is an ordinary
+    /// send to `Block` and no construct.
+    #[test]
+    fn unary_loops_reach_the_classifier_only_canonicalised() {
+        for (src, keyword, written) in [
+            ("[i := i + 1. i < 3] whileTrue", "whileTrue:", "whileTrue"),
+            (
+                "[i := i + 1. i >= 3] whileFalse",
+                "whileFalse:",
+                "whileFalse",
+            ),
+            ("[i := i + 1] repeat", "whileTrue:", "repeat"),
+        ] {
+            let mut expr = parse_first_expr(src);
+            crate::ast::normalize::desugar_unary_loops(&mut expr);
+            assert!(
+                !crate::ast::normalize::is_uncanonicalised_loop(&expr),
+                "{src}"
+            );
+            let construct =
+                local_threading_construct(&expr).unwrap_or_else(|| panic!("{src}: not recognized"));
+            assert_eq!(construct.family, LocalThreadingFamily::Loop, "{src}");
+            assert_eq!(construct.selector, keyword, "{src}");
+            assert_eq!(construct.written_selector, written, "{src}");
+        }
+        for src in [
+            "[:k | i := k] whileTrue",
+            "[:k | i := k] repeat",
+            "cond whileTrue",
+            "cond whileFalse",
+            "cond repeat",
+        ] {
+            let mut expr = parse_first_expr(src);
+            crate::ast::normalize::desugar_unary_loops(&mut expr);
+            assert!(local_threading_construct(&expr).is_none(), "{src}");
+        }
+    }
+
+    /// BT-4603: the classifier refuses a raw parse of a unary loop rather
+    /// than classifying its receiver as a loop body, which codegen would lower
+    /// as the keyword loop's condition.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "uncanonicalised unary loop")]
+    fn the_classifier_rejects_a_raw_unary_loop() {
+        let _ = local_threading_construct(&parse_first_expr("[i := i + 1. i < 3] whileTrue"));
+    }
+
     #[test]
     fn local_threading_construct_classifies_every_family() {
         use LocalThreadingFamily::{BlockValue, Conditional, Exception, Fold, Lookup, Loop, TryDo};
         for (src, family, blocks) in [
             ("[i < 3] whileTrue: [i := i + 1]", Loop, 2),
-            ("[i < 3] whileTrue", Loop, 1),
-            ("[i := i + 1] repeat", Loop, 1),
+            // Analysis sees the canonical loop shapes (`ast::normalize`): the
+            // unary loop gains an empty body, `repeat` a `[true]` condition.
+            ("[i < 3] whileTrue", Loop, 2),
+            ("[i := i + 1] repeat", Loop, 2),
             ("3 timesRepeat: [i := i + 1]", Loop, 1),
             ("1 to: 3 do: [:k | i := k]", Loop, 1),
             ("1 to: 9 by: 2 do: [:k | i := k]", Loop, 1),
@@ -5464,7 +5536,8 @@ mod tests {
             ("d at: #k ifAbsentPut: [i := 1]", Lookup, 1),
             ("Result tryDo: [i := 1]", TryDo, 1),
         ] {
-            let expr = parse_first_expr(src);
+            let mut expr = parse_first_expr(src);
+            crate::ast::normalize::desugar_unary_loops(&mut expr);
             let construct =
                 local_threading_construct(&expr).unwrap_or_else(|| panic!("{src}: not recognized"));
             assert_eq!(construct.family, family, "{src}");

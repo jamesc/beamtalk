@@ -1,0 +1,79 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4524: a field write, then a block literal holding a `^` that runs as a
+// closure (the call does not lower it in place). See
+// bt4524nlr_closure_call_test.bt.
+
+Actor subclass: Bt4524NlrClosureCallActor
+  state: n = 0
+
+  closureEnsure =>
+    self.n := 6
+    [^2] ensure: [nil]
+    0
+
+  closureTimesRepeat =>
+    self.n := 6
+    3 timesRepeat: [^7]
+    0
+
+  closureToDo =>
+    self.n := 6
+    1 to: 3 do: [:i | ^i]
+    0
+
+  closureWhileTrue =>
+    self.n := 6
+    [true] whileTrue: [^2]
+    0
+
+  closureValue =>
+    self.n := 6
+    [^5] value
+    0
+
+  closureOnDoBody =>
+    self.n := 6
+    [^3] on: Error do: [:e | 0]
+    0
+
+  closureOnDoHandler =>
+    self.n := 6
+    [Error signal: "x"] on: Error do: [:e | ^4]
+    0
+
+  closureDetect: items =>
+    self.n := 6
+    items do: [:x | x == 2 ifTrue: [^x]]
+    0
+
+  // A non-Boolean receiver's `ifTrue:` runs the block (the inline
+  // conditional's fallback send); the assignment keeps the guard-return
+  // rewrite from turning the `^` into a plain value.
+  nonBooleanIfTrue: cond =>
+    self.n := 6
+    k := cond ifTrue: [^8]
+    k
+
+  // A nil test runs its block as a closure; the assignment keeps the
+  // guard-return rewrite from inlining it.
+  closureIfNil: x =>
+    self.n := 6
+    r := x ifNil: [^8]
+    r
+
+  closureIfNotNil: x =>
+    self.n := 6
+    r := x ifNotNil: [:v | ^v]
+    r
+
+  // A guarded operator (`*`) in the arm keeps the conditional from inlining
+  // pure, so it is a dynamic send running the arm as a closure; the send is
+  // bracketed (`classify_inlined`), and the `^` carries the stored state.
+  closureGuardedOpIfTrue: p =>
+    self.n := 6
+    r := p > 0 ifTrue: [^p * 2]
+    r
+
+  currentN => self.n

@@ -13,7 +13,7 @@ use super::*;
 #[test]
 fn call_target_round_trips_through_item_data() {
     use beamtalk_core::source_analysis::Span;
-    // CLAUDE.md forbids hardcoded `/tmp/`. `unique_temp_dir` keeps
+    // AGENTS.md forbids hardcoded `/tmp/`. `unique_temp_dir` keeps
     // the path Windows-safe and platform-portable; `path_to_uri`
     // turns it into a `file://` URI without a hand-written prefix.
     let temp = unique_temp_dir("beamtalk_lsp_callhier_roundtrip");
@@ -106,7 +106,7 @@ fn serialized_call_target_returns_none_when_data_missing() {
 fn outgoing_calls_for_body_emits_one_per_send_offset_by_body_start() {
     // URI is opaque to the call-hierarchy walker — the test only
     // verifies the returned items, so a generic non-`/tmp/` URI is
-    // sufficient (CLAUDE.md cross-platform temp-path rule).
+    // sufficient (AGENTS.md cross-platform temp-path rule).
     let uri = Url::parse("file:///workspace/counter.bt").expect("url");
     // A simple method body with two sends on the same line, plus one
     // FFI call which must be filtered out.

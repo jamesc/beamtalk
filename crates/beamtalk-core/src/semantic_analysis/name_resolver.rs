@@ -22,6 +22,7 @@ use crate::ast::{
 use crate::ast_walker::cascade_shared_receiver;
 use crate::semantic_analysis::scope::{BindingKind, Scope};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
+use std::collections::HashSet;
 
 /// Where a `super` occurrence sits (BT-4258, [`NameResolver::resolve_super`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +33,8 @@ enum SuperUse {
     FieldAccess,
     /// Anywhere else: `(super) foo`, `x := super`, `^ super`, an argument.
     Value,
+    /// The receiver of a cast: `super foo!` (BT-4318).
+    CastReceiver,
 }
 
 /// Name resolution domain service.
@@ -50,6 +53,9 @@ pub struct NameResolver {
     /// lexical scope depth — such a block IS a class-method body even though it
     /// appears as a cascade argument (possibly at the REPL top level).
     builder_class_method_depth: usize,
+    /// BT-4665: names of module-level bindings hidden from method bodies while
+    /// methods are resolved; used to tailor the `Undefined variable` hint.
+    hidden_module_names: HashSet<String>,
 }
 
 impl NameResolver {
@@ -60,6 +66,7 @@ impl NameResolver {
             scope: Scope::new(),
             diagnostics: Vec::new(),
             builder_class_method_depth: 0,
+            hidden_module_names: HashSet::new(),
         }
     }
 
@@ -94,9 +101,9 @@ impl NameResolver {
     pub fn resolve_module(&mut self, module: &Module) {
         // Define built-in identifiers that are always available
         // These are special values in Beamtalk (true, false, nil)
-        self.scope.define("true", module.span, BindingKind::Local);
-        self.scope.define("false", module.span, BindingKind::Local);
-        self.scope.define("nil", module.span, BindingKind::Local);
+        for name in Scope::BUILTINS {
+            self.scope.define(name, module.span, BindingKind::Local);
+        }
 
         // Resolve top-level expressions
         for (i, stmt) in module.expressions.iter().enumerate() {
@@ -110,10 +117,31 @@ impl NameResolver {
             );
         }
 
+        // BT-4665: method bodies (in-class and extension) cannot read
+        // top-level bindings or REPL `known_vars`, so hide them while the
+        // methods are resolved. Restored below for later phases.
+        let hidden_module_bindings = self.scope.hide_module_bindings();
+        self.hidden_module_names = hidden_module_bindings.keys().cloned().collect();
+
         // Resolve classes
         for class in &module.classes {
             self.resolve_class(class);
         }
+
+        // Resolve extension methods (`Foo >> sel =>`, `Foo class >> sel =>`)
+        // (BT-4658). No class scope: an extension cannot see the target
+        // class's declared state as bare names (it uses `self.field`), so only
+        // `self`, parameters and the built-ins (`true`/`false`/`nil`) are meant
+        // to be in scope. An empty class-level scope keeps the method at depth 2, which
+        // `resolve_super` relies on.
+        for standalone in &module.method_definitions {
+            self.scope.push();
+            self.resolve_method(&standalone.method);
+            self.scope.pop();
+        }
+
+        self.scope.restore_module_bindings(hidden_module_bindings);
+        self.hidden_module_names.clear();
 
         // Note: No unused variable warnings at module scope (depth 0).
         // Module-level variables include built-in identifiers (true, false, nil)
@@ -240,6 +268,18 @@ impl NameResolver {
         }
         let hint = match kind {
             SuperUse::Receiver => return,
+            // BT-4318: a cast posts to a mailbox, but `super` names no process:
+            // it runs the parent class's method in this one, synchronously.
+            SuperUse::CastReceiver => {
+                self.diagnostics.push(
+                    Diagnostic::error("a cast (`!`) cannot be sent to `super`", span).with_hint(
+                        "`super` runs the parent class's method here, synchronously: \
+                         send it without `!` (`super foo`), or cast to `self` \
+                         (`self foo!`) to post it asynchronously",
+                    ),
+                );
+                return;
+            }
             SuperUse::FieldAccess => {
                 "Fields are read and written through `self`, e.g. `self.count`"
             }
@@ -274,12 +314,21 @@ impl NameResolver {
                             id.span,
                         ).with_hint("Move this code into a method definition, or use a class method for class-level logic"));
                     } else {
+                        let hint = if self.hidden_module_names.contains(id.name.as_str()) {
+                            format!(
+                                "`{}` is a top-level binding; method bodies cannot see top-level \
+                                 or REPL variables. Pass it as an argument or store it in a field",
+                                id.name
+                            )
+                        } else {
+                            format!(
+                                "Check the spelling of `{}`, or assign it with `:=` before use",
+                                id.name
+                            )
+                        };
                         self.diagnostics.push(
                             Diagnostic::error(format!("Undefined variable: {}", id.name), id.span)
-                                .with_hint(format!(
-                                    "Check the spelling of `{}`, or assign it with `:=` before use",
-                                    id.name
-                                )),
+                                .with_hint(hint),
                         );
                     }
                 }
@@ -310,12 +359,18 @@ impl NameResolver {
             MessageSend {
                 receiver,
                 arguments,
+                is_cast,
                 ..
             } => {
                 // BT-4258: the receiver of a send is the one place `super` means
                 // something (it picks where the method lookup starts).
                 if let Super(span) = receiver.as_ref() {
-                    self.resolve_super(*span, SuperUse::Receiver);
+                    let kind = if *is_cast {
+                        SuperUse::CastReceiver
+                    } else {
+                        SuperUse::Receiver
+                    };
+                    self.resolve_super(*span, kind);
                 } else {
                     self.resolve_expression(receiver);
                 }
@@ -1163,6 +1218,35 @@ mod tests {
         assert!(
             errors.is_empty(),
             "sessionVar should be defined via known_vars, got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn known_vars_are_hidden_from_method_bodies() {
+        // BT-4665: REPL `known_vars` are readable at top level, not in methods.
+        let module = parse_bt(
+            "sessionVar\nObject subclass: W\n  run => sessionVar\n\nW >> foo => sessionVar\n",
+        );
+        let mut resolver = NameResolver::new();
+        resolver.define_known_vars(&["sessionVar"], Span::new(0, 0));
+        resolver.resolve_module(&module);
+        let errors = resolver
+            .diagnostics()
+            .iter()
+            .filter(|d| d.message.contains("Undefined variable: sessionVar"))
+            .count();
+        assert_eq!(errors, 2, "got: {:?}", resolver.diagnostics());
+        assert!(
+            resolver
+                .diagnostics()
+                .iter()
+                .filter(|d| d.message.contains("Undefined variable: sessionVar"))
+                .all(|d| d
+                    .hint
+                    .as_deref()
+                    .is_some_and(|h| h.contains("top-level binding"))),
+            "hint should explain the hidden binding: {:?}",
+            resolver.diagnostics()
         );
     }
 

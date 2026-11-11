@@ -242,7 +242,7 @@ fn routing_table_rows_without_a_direct_route_say_why() {
 /// path's clause and updates the differential test's rows.
 #[test]
 fn builtin_send_routes_are_the_closed_table() {
-    use super::{BuiltinRoute, SendGuard, builtin_send_route};
+    use super::{BuiltinRoute, SendGuard, StringTagRoute, builtin_send_route};
     let routed: Vec<(&str, BuiltinRoute)> = table::ROUTING_ROWS
         .iter()
         .filter_map(|row| match builtin_send_route(row.class, "frobnicate") {
@@ -253,6 +253,7 @@ fn builtin_send_routes_are_the_closed_table() {
     let route = |guard, target_module| BuiltinRoute {
         guard,
         target_module,
+        string_tag_route: None,
     };
     assert_eq!(
         routed,
@@ -271,6 +272,19 @@ fn builtin_send_routes_are_the_closed_table() {
             (
                 "String",
                 route(SendGuard::Exact(Guard::StringTag), "bt@stdlib@string")
+            ),
+            // BT-4510: a bare binary goes to `Binary`, the `String` tag to
+            // the `String` row's route.
+            (
+                "Binary",
+                BuiltinRoute {
+                    guard: SendGuard::BareBinary,
+                    target_module: "bt@stdlib@binary",
+                    string_tag_route: Some(StringTagRoute {
+                        guard: SendGuard::Exact(Guard::StringTag),
+                        target_module: "bt@stdlib@string",
+                    }),
+                }
             ),
             (
                 "Symbol",
@@ -370,10 +384,6 @@ fn special_selectors_stay_dynamic_one_by_one() {
 #[test]
 fn builtins_without_a_send_route_say_why() {
     use super::{NoBuiltinRoute, builtin_send_route};
-    assert_eq!(
-        builtin_send_route("Binary", "frobnicate"),
-        Some(Err(NoBuiltinRoute::GuardSpansRoutes))
-    );
     for class in [
         "Boolean",
         "Bitstring",
@@ -391,4 +401,28 @@ fn builtins_without_a_send_route_say_why() {
         );
     }
     assert_eq!(builtin_send_route("Point", "frobnicate"), None);
+}
+
+/// BT-4510: a `Binary` send of one of `String`'s special selectors keeps the
+/// bare-binary route but has no `String` half: the dynamic path answers that
+/// selector for a `String` outside `bt@stdlib@string`, so a `String` value
+/// takes the dynamic send.
+#[test]
+fn binary_route_drops_the_string_half_for_string_special_selectors() {
+    use super::{SendGuard, builtin_send_route};
+    let string = table::ROUTING_ROWS
+        .iter()
+        .find(|row| row.class == "String")
+        .expect("the fixture has a String row");
+    for special in string.special_selectors {
+        let Some(Ok(route)) = builtin_send_route("Binary", special) else {
+            panic!("Binary {special} must keep its bare-binary route");
+        };
+        assert_eq!(route.guard, SendGuard::BareBinary);
+        assert_eq!(route.string_tag_route, None, "Binary {special}");
+    }
+    let Some(Ok(route)) = builtin_send_route("Binary", "size") else {
+        panic!("Binary size must be routed");
+    };
+    assert!(route.string_tag_route.is_some());
 }

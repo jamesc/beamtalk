@@ -440,6 +440,116 @@ with_message_tuple_formats_as_binary_test() ->
 
 %%% Tests: generate_message/3 — missing error kinds
 
+%% Chore: `chars_to_binary/1` is the shared encoder for formatted error text.
+chars_to_binary_encodes_utf8_test() ->
+    ?assertEqual(
+        unicode:characters_to_binary("x_\x{3bb}:"),
+        beamtalk_error:chars_to_binary(io_lib:format("~ts", [list_to_atom("x_\x{3bb}:")]))
+    ),
+    ?assertEqual(<<"plain">>, beamtalk_error:chars_to_binary(["pl", <<"ain">>])).
+
+%% Plain `~p` printed UTF-8 bytes as latin1 chars, which `chars_to_binary/1`
+%% then encoded a second time ("cafÃ©"). The swept sites use `~tp`.
+utf8_text_in_term_is_not_double_encoded_test() ->
+    E = beamtalk_error:with_message(
+        beamtalk_error:new(type_error, 'Foo'), {x, <<"caf", 195, 169>>}
+    ),
+    {beamtalk_string, Msg} = E#beamtalk_error.message,
+    ?assertEqual(<<"{x,<<\"caf", 195, 169, "\"/utf8>>}">>, Msg).
+
+%% Chore: hints and `format/1` reasons holding codepoints above 255 don't badarg.
+unicode_hint_and_reason_test() ->
+    %% A name no other test mints: atoms are VM-global, and the proxy tests
+    %% rely on `x_\x{3bb}` not existing yet.
+    Atom = list_to_atom("bt_unicode_hint_\x{3bb}"),
+    E0 = beamtalk_error:new(type_error, 'Foo'),
+    E1 = beamtalk_error:with_hint(E0, {missing, Atom}),
+    ?assertMatch({beamtalk_string, B} when is_binary(B), E1#beamtalk_error.hint),
+    E2 = E0#beamtalk_error{details = #{signal_reason => Atom}},
+    ?assert(is_binary(beamtalk_error:format(E2))).
+
+%% BT-4230: the `Reason:` line renders nested Beamtalk values Beamtalk-style.
+reason_line(Reason) ->
+    E = (beamtalk_error:new(type_error, 'Foo'))#beamtalk_error{
+        message = <<"boom">>, details = #{signal_reason => Reason}
+    },
+    Out = beamtalk_error:format(E),
+    [_, Line] = binary:split(Out, <<"\nReason: ">>),
+    Line.
+
+reason_nested_string_test() ->
+    ?assertEqual(
+        <<"{#io, \"disk full\"}">>,
+        reason_line({io, {beamtalk_string, <<"disk full">>}})
+    ).
+
+reason_symbol_test() ->
+    ?assertEqual(<<"#econnreset">>, reason_line(econnreset)),
+    ?assertEqual(<<"#(#a, nil, true, 3)">>, reason_line([a, nil, true, 3])).
+
+reason_exception_as_reason_test() ->
+    Inner = (beamtalk_error:new(type_error, 'Foo'))#beamtalk_error{message = <<"inner">>},
+    Wrapped = #{
+        '$beamtalk_class' => 'Error',
+        error => Inner,
+        stacktrace => [{lists, seq, 2, [{file, "lists.erl"}, {line, 1}]}]
+    },
+    ?assertEqual(<<"inner">>, reason_line(Wrapped)).
+
+reason_large_is_bounded_test() ->
+    Big = [{beamtalk_string, binary:copy(<<"x">>, 500)} || _ <- lists:seq(1, 10000)],
+    Line = reason_line(Big),
+    ?assert(byte_size(Line) =< 2048 + 3),
+    ?assertEqual(<<"...">>, binary:part(Line, byte_size(Line), -3)),
+    Deep = lists:foldl(fun(_, Acc) -> {Acc} end, leaf, lists:seq(1, 1000)),
+    ?assert(byte_size(reason_line(Deep)) =< 2048 + 3).
+
+%% Shared subterms expand exponentially; the walker's node budget bounds the
+%% work, not just the output.
+reason_shared_subterm_expansion_is_bounded_test() ->
+    L1 = lists:duplicate(50, [x]),
+    L6 = lists:foldl(fun(_, Acc) -> lists:duplicate(50, Acc) end, L1, lists:seq(1, 5)),
+    Line = reason_line(L6),
+    ?assert(byte_size(Line) =< 2048 + 3),
+    Wide = list_to_tuple(lists:seq(1, 100000)),
+    ?assert(byte_size(reason_line(Wide)) =< 2048 + 3).
+
+%% Invalid UTF-8 inside a reason string never raises from the formatter.
+reason_invalid_utf8_does_not_raise_test() ->
+    ?assert(is_binary(reason_line({beamtalk_string, <<255, 254, 253>>}))),
+    ?assert(is_binary(reason_line({io, <<255, 254>>}))),
+    %% improper list / map fallbacks are bounded by chars_limit
+    Shared = lists:foldl(fun(_, Acc) -> lists:duplicate(50, Acc) end, [x], lists:seq(1, 5)),
+    ?assert(byte_size(reason_line([Shared | tail])) =< 2048 + 3),
+    ?assert(byte_size(reason_line(#{k => Shared})) =< 2048 + 3).
+
+%% A huge binary is cut before rendering; a multibyte char at the cut stays valid.
+reason_huge_binary_is_cut_test() ->
+    Big = <<"a", (binary:copy(<<"\x{3bb}"/utf8>>, 100000))/binary>>,
+    Line = reason_line({beamtalk_string, Big}),
+    ?assert(byte_size(Line) =< 2048 + 8),
+    ?assert(is_binary(unicode:characters_to_binary(Line))),
+    ?assertEqual(<<"...">>, binary:part(Line, byte_size(Line), -3)),
+    ?assert(byte_size(reason_line(binary:copy(<<"y">>, 1000000))) =< 2048 + 8).
+
+%% BT-4241: selectors with codepoints above 255 render as UTF-8, not badarg.
+generate_message_unicode_selector_test() ->
+    Sel = list_to_atom("x_\x{3bb}:"),
+    ?assertEqual(
+        unicode:characters_to_binary("Foo does not understand 'x_\x{3bb}:'"),
+        beamtalk_error:generate_message(does_not_understand, 'Foo', Sel)
+    ),
+    ?assertEqual(
+        unicode:characters_to_binary("Foo does not understand 'x_\x{3bb}:'"),
+        beamtalk_error:generate_message(
+            does_not_understand, 'Foo', unicode:characters_to_binary("x_\x{3bb}:")
+        )
+    ),
+    ?assertEqual(
+        unicode:characters_to_binary("Type error in 'x_\x{3bb}:' on Foo"),
+        beamtalk_error:generate_message(type_error, 'Foo', Sel)
+    ).
+
 actor_dead_message_test() ->
     Error1 = beamtalk_error:new(actor_dead, 'Counter'),
     ?assertEqual(
@@ -546,3 +656,21 @@ is_unknown_field_test() ->
     %% Total on non-errors (extract_beamtalk_error/2's undefined passes through).
     ?assertNot(beamtalk_error:is_unknown_field(undefined)),
     ?assertNot(beamtalk_error:is_unknown_field({error, timeout})).
+
+%% BT-4208: only a raw `does_not_understand` record reads as a lookup miss;
+%% any other record, and any already-wrapped exception map (an invoked
+%% method that raised, even with a DNU of its own), is a real error.
+is_does_not_understand_test() ->
+    Dnu = beamtalk_error:new(does_not_understand, 'Integer'),
+    User = beamtalk_error:new(user_error, 'Counter'),
+    ?assert(beamtalk_error:is_does_not_understand(Dnu)),
+    ?assertNot(beamtalk_error:is_does_not_understand(User)),
+    ?assertNot(
+        beamtalk_error:is_does_not_understand(beamtalk_exception_handler:wrap(User))
+    ),
+    ?assertNot(
+        beamtalk_error:is_does_not_understand(beamtalk_exception_handler:wrap(Dnu))
+    ),
+    %% BT-4593: total over any other term.
+    ?assertNot(beamtalk_error:is_does_not_understand(badarith)),
+    ?assertNot(beamtalk_error:is_does_not_understand({some, tuple})).

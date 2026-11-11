@@ -19,6 +19,7 @@ use crate::semantic_analysis::protocol_registry::ProtocolMethodRequirement;
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::type_checker::known_remote;
 use crate::semantic_analysis::type_checker::type_resolver;
+use crate::semantic_analysis::type_checker::validation::ProtocolSendResolution;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{
     DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv, TypeStringContext, narrowing,
@@ -84,27 +85,7 @@ impl TypeChecker {
             )
         );
         let narrowing = if is_branching {
-            Self::detect_narrowing(receiver)
-                .map(|info| self.refine_responds_to_narrowing(info))
-                .map(|info| {
-                    Self::refine_result_narrowing(
-                        info,
-                        env,
-                        hierarchy,
-                        self.alias_registry.as_ref(),
-                        self.protocol_registry.as_deref(),
-                    )
-                })
-                .map(|info| {
-                    Self::refine_singleton_narrowing(
-                        info,
-                        env,
-                        hierarchy,
-                        self.alias_registry.as_ref(),
-                        self.protocol_registry.as_deref(),
-                    )
-                })
-                .map(|info| self.refine_class_narrowing(info, env, hierarchy, span))
+            self.detect_refined_narrowing(receiver, env, hierarchy, span)
         } else {
             None
         };
@@ -130,6 +111,21 @@ impl TypeChecker {
         } else {
             None
         };
+
+        // `Object >> then:` (ADR 0145 § 2, BT-4515): types a literal block's
+        // parameter as the receiver and answers the block's result type. Only
+        // for an instance-side receiver whose every class answers `then:`
+        // with `Object`'s method — a class's own `then:` (a promise, say)
+        // and class-side receivers keep the generic path, as for `ifNil:`.
+        let is_object_then = selector_name == super::super::blocks::THEN_SELECTOR
+            && !Self::is_class_side_receiver(receiver, env)
+            && Self::then_resolves_to_object(&receiver_ty, hierarchy);
+
+        // BT-4636: collect the block arguments' writes to outer locals and join
+        // them into `env` once all arguments are inferred (see
+        // `TypeChecker::defer_block_widening`).
+        let outer_defer = std::mem::replace(&mut self.defer_block_widening, true);
+        let outer_deferred = std::mem::take(&mut self.deferred_block_widenings);
 
         // Infer argument types, applying narrowing to block arguments when detected.
         let arg_types: Vec<InferredType> = if let Some(ref info) = narrowing {
@@ -181,6 +177,8 @@ impl TypeChecker {
                 env,
                 in_abstract_method,
             )
+        } else if is_object_then {
+            self.infer_args_for_then(arguments, &receiver_ty, hierarchy, env, in_abstract_method)
         } else if let (true, Some(var_key), Some(arg)) = (
             // `and:` stays a string comparison rather than a
             // `WellKnownSelector` variant, matching `state_threading_selectors`'s
@@ -213,6 +211,25 @@ impl TypeChecker {
                 env,
                 in_abstract_method,
             )]
+        } else if let (true, Some((var_key, narrowed_ty)), Some(arg)) = (
+            // BT-4635: any other single-variable type test (`isKindOf:`,
+            // `class =`, `respondsTo:`, `isOk`, singleton equality, ...) on
+            // the receiver of `and:` / `or:`. The lazy block runs only when
+            // the test answered true (`and:`) or false (`or:`), so it gets
+            // the same narrowing the matching `ifTrue:` / `ifFalse:` arm
+            // would. `notNil` is handled by the branch above.
+            matches!(selector_name.as_str(), "and:" | "or:"),
+            self.boolean_connective_narrowing(&selector_name, receiver, hierarchy, env, span),
+            arguments.first(),
+        ) {
+            vec![self.infer_block_with_narrowing(
+                arg,
+                &var_key,
+                &narrowed_ty,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )]
         } else {
             self.infer_generic_send_args(
                 arguments,
@@ -224,6 +241,10 @@ impl TypeChecker {
                 in_abstract_method,
             )
         };
+
+        self.defer_block_widening = outer_defer;
+        let deferred = std::mem::replace(&mut self.deferred_block_widenings, outer_deferred);
+        Self::apply_deferred_block_widenings(&deferred, env);
 
         // BT-4444: `[:x :: T | ...] value: arg` — check each argument
         // against the literal's annotated parameter types.
@@ -249,6 +270,17 @@ impl TypeChecker {
                 return InferredType::known(name.name.clone());
             }
             return receiver_ty;
+        }
+
+        // `Object >> then:` (BT-4515) answers its block's result type.
+        if is_object_then {
+            if let (Some(arg), Some(ty)) = (arguments.first(), arg_types.first()) {
+                if Self::then_block_has_one_param(arg) {
+                    if let Some(ty) = Self::block_arg_result_ty(arg, ty) {
+                        return ty;
+                    }
+                }
+            }
         }
 
         // `ifNil:ifNotNil:` / `ifNotNil:ifNil:` return the union of
@@ -356,6 +388,18 @@ impl TypeChecker {
                 );
             }
         }
+
+        // BT-4257: a provably raw Binary compared with, or looked up
+        // against, a String never matches.
+        self.check_binary_string_compare(
+            receiver,
+            &receiver_ty,
+            selector,
+            arguments,
+            &arg_types,
+            span,
+            env,
+        );
 
         // If receiver is a class reference, check class-side methods.
         // Unwrap parens so `(HTTPRouter) foo:` dispatches class-side
@@ -691,12 +735,22 @@ impl TypeChecker {
             // (`#west =:= unionVar`) must fall through to the
             // statically-decidable-comparison hint below rather than
             // short-circuiting on `Symbol`'s `=:=`.
-            let resolve_class: EcoString =
-                if !class_name.contains('|') && !matches!(selector, MessageSelector::Binary(_)) {
-                    EcoString::from(super::super::method_resolution_class(class_name))
-                } else {
-                    class_name.clone()
-                };
+            //
+            // A protocol receiver's non-protocol selector that every object
+            // answers (`printString`, `respondsTo:`) resolves through
+            // `Object`'s method table for its argument and return types
+            // (BT-4594). This includes binary sends: `p = x` on a protocol
+            // receiver infers `Object`'s `Boolean` rather than `Dynamic` —
+            // the singleton exclusion above does not apply.
+            let via_object = self.protocol_send_resolution(class_name, &selector_name, hierarchy)
+                == Some(ProtocolSendResolution::Object);
+            let resolve_class: EcoString = if via_object {
+                EcoString::from(WellKnownClass::Object.as_str())
+            } else if !class_name.contains('|') && !matches!(selector, MessageSelector::Binary(_)) {
+                EcoString::from(super::super::method_resolution_class(class_name))
+            } else {
+                class_name.clone()
+            };
             // Skip argument type check for binary messages only when
             // `check_binary_operand_types` already ran above (the Known/Known
             // case) — it provides more specific warnings for
@@ -779,6 +833,12 @@ impl TypeChecker {
                     // (`obj class new`, `self species withAll:`) route through
                     // `find_class_method`. Pre-0083 this returned `Dynamic`.
                     if matches!(ret_ty, DeclaredType::SelfClass) {
+                        // A protocol receiver's class is some class
+                        // conforming to it: the protocol metatype (ADR 0144),
+                        // not the `Object class` its signature came from.
+                        if via_object {
+                            return InferredType::protocol_meta(class_name.clone());
+                        }
                         // For a singleton receiver, `resolve_class` is
                         // `Symbol` so `#text class` is `Symbol class` (`#text` is a
                         // Symbol at runtime), not a phantom `Meta("#text")`.
@@ -830,7 +890,7 @@ impl TypeChecker {
                         // `Box(Integer)` not bare `Box` (the shared
                         // `resolve_declared_type` resolver's `SelfType` arm reads
                         // this same key — see its doc).
-                        return type_resolver::resolve_declared_type(
+                        return type_resolver::resolve_declared_type_in(
                             ret_ty,
                             &type_resolver::merge_substitutions(
                                 &subst,
@@ -838,8 +898,9 @@ impl TypeChecker {
                                 Some(&receiver_ty),
                             ),
                             self.protocol_registry.as_deref(),
-                            self.alias_registry.as_ref(),
+                            self.alias_registry.as_deref(),
                             TypeStringContext::Substitution,
+                            Some(hierarchy),
                         );
                     }
 
@@ -874,7 +935,7 @@ impl TypeChecker {
                         ret_ty,
                         &type_resolver::SubstitutionMap::new(),
                         self.protocol_registry.as_deref(),
-                        self.alias_registry.as_ref(),
+                        self.alias_registry.as_deref(),
                         TypeStringContext::Declared,
                     );
                 }
@@ -1121,7 +1182,7 @@ impl TypeChecker {
                         Some(&instance_ty),
                     ),
                     self.protocol_registry.as_deref(),
-                    self.alias_registry.as_ref(),
+                    self.alias_registry.as_deref(),
                     TypeStringContext::Declared,
                 ),
             };
@@ -1312,7 +1373,35 @@ impl TypeChecker {
             // `Boolean`) and downgrades genuine non-responder warnings to hints.
             // The original `member_name` (`#foo`) is still used for the
             // user-facing missing-selector message and for `Self`-typed returns.
-            let resolve_name: &str = super::super::method_resolution_class(member_name);
+            //
+            // A protocol member follows the same rule as a bare protocol
+            // receiver (BT-4594), rather than counting as an uncertain
+            // unknown class: one of its own selectors responds with
+            // `Dynamic` (as the bare `Known` path infers it), a method every
+            // object answers resolves through `Object`, and anything else is
+            // a missing member, exactly as DNU validation reports it.
+            let protocol_resolution =
+                self.protocol_send_resolution(member_name, selector, hierarchy);
+            let resolve_name: &str = match protocol_resolution {
+                Some(ProtocolSendResolution::Protocol) => {
+                    responding_count += 1;
+                    return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
+                    continue;
+                }
+                Some(ProtocolSendResolution::Unknown) => {
+                    // Reported missing, but a conformer may override
+                    // `doesNotUnderstand:`, so — like a bare protocol
+                    // receiver — this member caps the union DNU at `Hint`
+                    // and, like every other uncertain member, widens the
+                    // send's type with `Dynamic`.
+                    uncertain_member_count += 1;
+                    missing_names.push(member_name.clone());
+                    return_types.push(InferredType::Dynamic(DynamicReason::DynamicReceiver));
+                    continue;
+                }
+                Some(ProtocolSendResolution::Object) => WellKnownClass::Object.as_str(),
+                None => super::super::method_resolution_class(member_name),
+            };
             // ADR 0100 Rule 1: route this member's completeness
             // classification through the shared classifier instead of
             // re-deriving it — the two checks this replaced (unknown class,
@@ -1340,8 +1429,16 @@ impl TypeChecker {
                             // the concrete union member (was Dynamic pre-0083).
                             // Use `resolve_name` so a singleton member
                             // yields `Symbol class` (`#foo class` is `Symbol` at
-                            // runtime), not a phantom `Meta("#foo")`.
-                            return_types.push(InferredType::meta(EcoString::from(resolve_name)));
+                            // runtime), not a phantom `Meta("#foo")`. A
+                            // protocol member's class is its protocol
+                            // metatype (ADR 0144), as on the bare path.
+                            return_types.push(
+                                if protocol_resolution == Some(ProtocolSendResolution::Object) {
+                                    InferredType::protocol_meta(member_name.clone())
+                                } else {
+                                    InferredType::meta(EcoString::from(resolve_name))
+                                },
+                            );
                         } else if let DeclaredType::ClassOf(meta_class) = ret_ty
                             && hierarchy.has_class(meta_class)
                         {
@@ -1379,7 +1476,7 @@ impl TypeChecker {
                                 // Thread the concrete member type under
                                 // the `Self` subst key (see
                                 // `resolve_declared_type`'s `SelfType` arm).
-                                return_types.push(type_resolver::resolve_declared_type(
+                                return_types.push(type_resolver::resolve_declared_type_in(
                                     ret_ty,
                                     &type_resolver::merge_substitutions(
                                         &subst,
@@ -1387,8 +1484,9 @@ impl TypeChecker {
                                         Some(member),
                                     ),
                                     self.protocol_registry.as_deref(),
-                                    self.alias_registry.as_ref(),
+                                    self.alias_registry.as_deref(),
                                     TypeStringContext::Substitution,
+                                    Some(hierarchy),
                                 ));
                             } else if matches!(ret_ty, DeclaredType::Simple(n) if crate::semantic_analysis::type_checker::is_type_var_placeholder(n, hierarchy))
                             {
@@ -1403,7 +1501,7 @@ impl TypeChecker {
                                     ret_ty,
                                     &type_resolver::SubstitutionMap::new(),
                                     self.protocol_registry.as_deref(),
-                                    self.alias_registry.as_ref(),
+                                    self.alias_registry.as_deref(),
                                     TypeStringContext::Declared,
                                 ));
                             }
@@ -1467,7 +1565,7 @@ impl TypeChecker {
                             ret_ty,
                             &type_resolver::SubstitutionMap::new(),
                             self.protocol_registry.as_deref(),
-                            self.alias_registry.as_ref(),
+                            self.alias_registry.as_deref(),
                             TypeStringContext::Declared,
                         )
                     };

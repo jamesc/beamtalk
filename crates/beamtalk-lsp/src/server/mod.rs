@@ -250,6 +250,12 @@ pub struct Backend {
     /// `did_open` root load — may claim project completeness (ADR 0100
     /// Rule 2).
     preload_coverage_partial: std::sync::atomic::AtomicBool,
+    /// Sticky "some loaded package's dependency extensions are not all
+    /// known" flag — ADR 0100's pre-WS3 guard input (BT-4611). Each preload
+    /// walk (startup, or a `did_open` root load) ORs in its own verdict, so
+    /// one root with incomplete dependency loading keeps the guard on for the
+    /// whole session, as `set_diagnostics_overrides` is whole-session too.
+    dependency_extensions_unknown: std::sync::atomic::AtomicBool,
     /// Test seam (BT-4383): make the next per-root preload walk task fail,
     /// exercising the unregister-and-retry path.
     #[cfg(test)]

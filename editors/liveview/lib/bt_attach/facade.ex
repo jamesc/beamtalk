@@ -164,6 +164,10 @@ defmodule BtAttach.Facade do
     # `callers_of_native_module`, backed by the `beamtalk_xref` reverse FFI
     # index). Pure xref, no user code, safe for the Observer role.
     callers_of_native_module: :read,
+    # BT-4455: go-to-definition's keyword-selector resolver — the same
+    # recognizer cockpit hover uses, exposed as a `nav-query` kind. Pure
+    # text scan, no user code, so `:read` (Observer may navigate).
+    keyword_selector: :read,
     symbols: :read,
     subscribe_transcript: :read,
     subscribe_bindings: :read,
@@ -412,6 +416,17 @@ defmodule BtAttach.Facade do
       else: {:error, :invalid_params}
   end
 
+  # BT-4455: the full keyword selector at a clicked keyword part. `code` /
+  # `before` / `suffix` are the hover op's editor context; a bad shape is
+  # `:invalid_params` with no dist call.
+  defp invoke(:keyword_selector, %{code: code} = params, _ctx) do
+    context = %{before: Map.get(params, :before, ""), suffix: Map.get(params, :suffix, "")}
+
+    if is_binary(code) and is_binary(context.before) and is_binary(context.suffix),
+      do: client().keyword_selector_at(code, context),
+      else: {:error, :invalid_params}
+  end
+
   defp invoke(:implementors, %{selector: selector}, _ctx) do
     if is_binary(selector),
       do: client().implementors_of(selector),
@@ -474,6 +489,17 @@ defmodule BtAttach.Facade do
   defp invoke(:hover, %{session_pid: pid, code: code} = params, _ctx) do
     context = %{before: Map.get(params, :before, ""), suffix: Map.get(params, :suffix, "")}
 
+    # BT-4463: a method editor also names the class (and side) it edits, so
+    # `self` / `super` receivers resolve. Both or neither.
+    context =
+      case params do
+        %{class: class, side: side} when is_binary(class) and is_binary(side) ->
+          Map.merge(context, %{class: class, side: side})
+
+        _ ->
+          context
+      end
+
     if is_pid(pid) and is_binary(code) and is_binary(context.before) and
          is_binary(context.suffix),
        do: client().hover(pid, code, context),
@@ -500,7 +526,15 @@ defmodule BtAttach.Facade do
       # LiveView event whitelist can't push a non-binary into
       # `Workspace.diagnostics/2`'s `is_binary(mode)` guard (BT-2569).
       mode = if Map.get(params, :mode) == "method", do: "method", else: "expression"
-      client().diagnostics(code, mode)
+
+      # `source_path` (BT-4583): the file a file-backed editor buffer edits,
+      # resolved server-side by the caller. Only a non-empty binary is
+      # forwarded; anything else (absent, nil, a non-binary) is a scratch
+      # buffer and takes the path-less call, so today's behaviour is kept.
+      case Map.get(params, :source_path) do
+        path when is_binary(path) and path != "" -> client().diagnostics(code, mode, path)
+        _ -> client().diagnostics(code, mode)
+      end
     else
       {:error, :invalid_params}
     end

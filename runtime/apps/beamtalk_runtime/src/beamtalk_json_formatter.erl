@@ -80,20 +80,8 @@ check_config(_Config) ->
 
 -doc "Format the timestamp from metadata as an ISO 8601 UTC string.".
 -spec format_time(map()) -> binary().
-format_time(#{time := Timestamp}) ->
-    %% Timestamp is in microseconds since epoch
-    Micros = Timestamp rem 1000000,
-    Millis = Micros div 1000,
-    Seconds = Timestamp div 1000000,
-    {{Y, Mo, D}, {H, Mi, S}} = calendar:system_time_to_universal_time(Seconds, second),
-    iolist_to_binary(
-        io_lib:format(
-            "~4..0B-~2..0B-~2..0BT~2..0B:~2..0B:~2..0B.~3..0BZ",
-            [Y, Mo, D, H, Mi, S, Millis]
-        )
-    );
-format_time(_) ->
-    <<"unknown">>.
+format_time(Meta) ->
+    beamtalk_log_format:format_time(Meta).
 
 -doc "Best-effort message extraction for the crash fallback path.".
 -spec format_msg_fallback(term()) -> unicode:chardata().
@@ -332,16 +320,14 @@ report fields — registered names belong in the "name" field, not "mfa".
 """.
 -spec format_mfa(term(), map()) -> binary() | undefined.
 format_mfa(_Msg, #{mfa := {M, F, A}}) ->
-    iolist_to_binary(io_lib:format("~s:~s/~B", [M, F, A]));
+    beamtalk_error:chars_to_binary(io_lib:format("~ts:~ts/~B", [M, F, A]));
 format_mfa(_Msg, _Meta) ->
     undefined.
 
 -doc "Format the PID metadata as a binary.".
 -spec format_pid(map()) -> binary() | undefined.
-format_pid(#{pid := Pid}) when is_pid(Pid) ->
-    list_to_binary(pid_to_list(Pid));
-format_pid(_) ->
-    undefined.
+format_pid(Meta) ->
+    beamtalk_log_format:format_pid(Meta).
 
 -doc """
 Append user-supplied metadata fields that aren't handled by the core formatter.
@@ -444,7 +430,7 @@ user-supplied metadata (e.g. from Beamtalk Dictionary) may use binaries.
 -spec key_to_binary(atom() | binary()) -> binary().
 key_to_binary(Key) when is_atom(Key) -> atom_to_binary(Key, utf8);
 key_to_binary(Key) when is_binary(Key) -> Key;
-key_to_binary(Key) -> iolist_to_binary(io_lib:format("~tp", [Key])).
+key_to_binary(Key) -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [Key])).
 
 -doc "Convert unicode chardata to binary, falling back to latin1 on error.".
 -spec safe_to_binary(unicode:chardata()) -> binary().

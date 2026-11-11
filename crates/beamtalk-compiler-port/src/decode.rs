@@ -252,6 +252,35 @@ pub(crate) fn term_to_slot_kind_map(
     }
 }
 
+/// The constant a `constant_class_methods` value is (BT-4363, BT-4504): the
+/// runtime term a literal body compiles to, decoded back to a
+/// [`ConstantValue`](beamtalk_core::ast::ConstantValue) that compiles to the
+/// same term. The source kind is not always recoverable and need not be: a
+/// `Character` arrives as its `Integer` code point and a `#nil` symbol as
+/// `nil`, which lower to the identical term, so the fold and the runtime's
+/// `=:=` certification agree. Anything else (a bignum, a non-UTF-8 string,
+/// another term) decodes as `None`: no fold, never a wrong one.
+fn term_to_constant_value(term: &Term) -> Option<beamtalk_core::ast::ConstantValue> {
+    use beamtalk_core::ast::ConstantValue;
+    match term {
+        Term::FixInteger(n) => Some(ConstantValue::Integer(i64::from(n.value))),
+        Term::Float(f) => Some(ConstantValue::Float(f.value)),
+        Term::Atom(a) => Some(
+            ConstantValue::from_pseudo_variable(&a.name)
+                .unwrap_or_else(|| ConstantValue::Symbol(a.name.as_str().into())),
+        ),
+        Term::Tuple(t) => match t.elements.as_slice() {
+            [Term::Atom(tag), Term::Binary(bin)] if tag.name == "beamtalk_string" => {
+                std::str::from_utf8(&bin.bytes)
+                    .ok()
+                    .map(|s| ConstantValue::String(s.into()))
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Parse method infos from a `method_info` or `class_method_info` ETF map.
 ///
 /// Each entry: `selector_atom => #{arity => int, param_types => [atom...], return_type => atom}`.
@@ -267,7 +296,7 @@ pub(crate) fn parse_method_infos_from_map(
     let Some(Term::Map(method_map)) = map_get(m, key) else {
         return vec![];
     };
-    // BT-4363: a class-side method certified as an integer-literal body by
+    // BT-4363, BT-4504: a class-side method certified as a literal body by
     // the module's own `constant_class_methods` (generated from its source),
     // so a workspace compile against a loaded class folds it as a batch
     // compile does. The fold stays behind the runtime's constant-value key.
@@ -284,12 +313,8 @@ pub(crate) fn parse_method_infos_from_map(
                 return None;
             };
             let arity = map_get(info_map, "arity").and_then(term_to_usize)?;
-            let constant_value = constants.and_then(|c| {
-                c.map.get(sel_term).and_then(|v| match v {
-                    Term::FixInteger(n) => Some(i64::from(n.value)),
-                    _ => None,
-                })
-            });
+            let constant_value =
+                constants.and_then(|c| c.map.get(sel_term).and_then(term_to_constant_value));
             let return_type = map_get(info_map, "return_type").and_then(term_to_declared_type);
             let param_types = match map_get(info_map, "param_types") {
                 Some(Term::List(list)) => list.elements.iter().map(term_to_declared_type).collect(),
@@ -472,6 +497,7 @@ pub(crate) fn parse_class_info_from_meta_term(
         // BEAM metadata comes from successfully-compiled modules, whose
         // surfaces are complete by construction.
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less,
         is_typed,
         state,
@@ -599,7 +625,7 @@ pub(crate) fn parse_protocol_info_from_meta_term(
         // are invisible to conformance checks until then, same gap as
         // `decode.rs`'s `parse_method_infos_from_map` for `MethodInfo::origin`.
         package: None,
-        provided_selectors: vec![],
+        provided: vec![],
         // Synthetic entry — there is no source span in the live image to
         // point diagnostics at (mirrors ClassInfo's BEAM-metadata-derived
         // entries, which carry no span either).

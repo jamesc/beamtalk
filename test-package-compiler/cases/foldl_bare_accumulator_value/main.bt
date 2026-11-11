@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4116: the fold accumulator shape. A `do:` (or `keysAndValuesDo:`) that
+// threads exactly one outer local folds that local as a bare value; two or
+// more locals fold an N-tuple; `collect:` keeps its `{AccList, ...}` tuple.
+// Context: value.
+
+Value subclass: BareVal
+  state: base = 1
+
+  oneLocal: coll =>
+    sum := 0
+    coll do: [:each | sum := sum + each]
+    sum
+
+  readsField: coll =>
+    sum := 0
+    coll do: [:each | sum := sum + self.base]
+    sum
+
+  twoLocals: coll =>
+    sum := 0
+    count := 0
+    coll do: [:each | sum := sum + each. count := count + 1]
+    sum + count
+

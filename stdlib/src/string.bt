@@ -480,6 +480,21 @@ sealed typed Binary subclass: String
   /// ```
   asInteger -> Integer => @primitive
 
+  /// Parse the string as an integer in the given radix (base).
+  ///
+  /// Radix must be between 2 and 36. Digits above 9 are case-insensitive;
+  /// a leading `-`/`+` sign is accepted. Empty input, bad digits, or an
+  /// out-of-range radix raise — use `Integer parse:radix:` for the
+  /// `Result`-based version.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// "42" asIntegerRadix: 10   // => 42
+  /// "ff" asIntegerRadix: 16   // => 255
+  /// "101" asIntegerRadix: 2   // => 5
+  /// ```
+  asIntegerRadix: radix :: Integer -> Integer => @primitive
+
   /// Parse the string as a float.
   ///
   /// ## Examples
@@ -707,12 +722,6 @@ sealed typed Binary subclass: String
   /// "hello world" urlEncoded    // => "hello%20world"
   /// "a/b+c" urlEncoded          // => "a%2Fb%2Bc"
   /// ```
-  ///
-  /// The underlying FFI spec types the result `binary()` (`String | Binary`),
-  /// but `beamtalk_string:urlEncoded/1` always builds an ASCII string —
-  /// suppress the resulting `String | Binary` vs. declared `String`
-  /// return-type mismatch.
-  @expect type
   urlEncoded -> String => (Erlang beamtalk_string) urlEncoded: self
 
   /// Decode a percent-encoded string.
@@ -729,5 +738,4 @@ sealed typed Binary subclass: String
   /// "hello%20world" urlDecoded  // => "hello world"
   /// "a%2Fb%2Bc" urlDecoded      // => "a/b+c"
   /// ```
-  @expect type
   urlDecoded -> String => (Erlang beamtalk_string) urlDecoded: self

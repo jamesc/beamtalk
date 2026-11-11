@@ -53,6 +53,7 @@ thread_local! {
         const { std::cell::Cell::new(0) };
 }
 
+mod binary_string_compare;
 mod env_key;
 mod exhaustiveness;
 mod inference;
@@ -77,7 +78,11 @@ mod types;
 mod validation;
 pub(crate) mod well_known;
 
-pub use native_type_registry::{FunctionSignature, NativeTypeRegistry, ParamType};
+pub use inference::cascade_drops_update;
+pub use native_type_registry::{
+    FFI_ARG_RUNTIME_GUARDS, FunctionSignature, NativeTypeRegistry, ParamType,
+    ffi_arg_passes_unchanged, ffi_result_passes_unchanged,
+};
 pub use native_types::{
     is_specs_line, is_specs_result_error, is_specs_result_ok, load_native_declarations,
     map_type_name, parse_specs_line,
@@ -410,23 +415,27 @@ pub fn infer_types_and_returns(
 /// [`TypeChecker::check_module_with_protocols_and_aliases`], whose
 /// diagnostics these callers discard. `None` for both registries is
 /// identical to [`infer_types_and_returns`].
+///
+/// All three registries are `Arc`s shared with the caller rather than
+/// deep-cloned per call (BT-4450, BT-4456): the LSP runs this on every
+/// keystroke.
 #[must_use]
 pub fn infer_types_and_returns_with_registries(
     module: &Module,
     hierarchy: &ClassHierarchy,
-    native_type_registry: Option<&NativeTypeRegistry>,
+    native_type_registry: Option<Arc<NativeTypeRegistry>>,
     protocol_registry: Option<Arc<ProtocolRegistry>>,
-    alias_registry: Option<&AliasRegistry>,
+    alias_registry: Option<Arc<AliasRegistry>>,
 ) -> (TypeMap, HashMap<MethodReturnKey, InferredType>) {
     let mut checker = TypeChecker::new();
     if let Some(registry) = native_type_registry {
-        checker.set_native_type_registry(registry.clone());
+        checker.set_native_type_registry(registry);
     }
     if let Some(protocols) = protocol_registry {
         checker.set_protocol_registry(protocols);
     }
     if let Some(aliases) = alias_registry {
-        checker.set_alias_registry(aliases.clone());
+        checker.set_alias_registry(aliases);
     }
     checker.check_module(module, hierarchy);
     (checker.take_type_map(), checker.take_method_return_types())
@@ -454,6 +463,12 @@ pub struct TypeChecker {
     /// expected-type threading through `infer_expr`, so this side channel is
     /// how a declared type reaches the literal.
     pub(super) block_param_pushdown: HashMap<Span, Vec<InferredType>>,
+    /// BT-4526: spans of the sends whose own selector `check_class_side_send`
+    /// found unresolved (`DynamicReason::UnresolvedSelector`). The reason
+    /// flows on through wrappers and through sends that only pass a block's
+    /// result along (`ifTrue:ifFalse:`, `value`), so the typed-class warning
+    /// fires only at a send recorded here — the one that owns the selector.
+    pub(super) unresolved_selector_sends: std::collections::HashSet<Span>,
     pub(super) diagnostics: Vec<Diagnostic>,
     pub(super) type_map: TypeMap,
     pub(super) method_return_types: HashMap<MethodReturnKey, InferredType>,
@@ -500,7 +515,7 @@ pub struct TypeChecker {
     /// running the main type checking pass; `None` means "no aliases in
     /// this compile" and every `Simple` name resolves as an ordinary
     /// nominal class, matching pre-ADR-0108 behaviour.
-    pub(super) alias_registry: Option<AliasRegistry>,
+    pub(super) alias_registry: Option<Arc<AliasRegistry>>,
     /// Every alias name touched while resolving an annotation during this
     /// check (ADR 0108 hot-reload re-check trigger).
     ///
@@ -534,6 +549,22 @@ pub struct TypeChecker {
     /// (`sendability_validators.rs`'s block-argument check) consults this
     /// persisted table instead — see `known_remote::classify`'s doc.
     pub(super) known_remote_spans: HashMap<Span, known_remote::KnownRemote>,
+    /// BT-4257: the locals some block literal in the body being checked
+    /// (a method body, or the module's top-level statements) writes. A block
+    /// may run at any later point, so such a local is never treated as a
+    /// raw `Binary` — see [`binary_string_compare::block_written_locals`].
+    pub(super) block_written_locals: std::collections::HashSet<EcoString>,
+    /// BT-4636: set while a send's arguments are being inferred, so a block
+    /// argument's writes to outer locals are collected in
+    /// [`Self::deferred_block_widenings`] and joined into the environment once
+    /// every argument is done. Sibling arms (`ifTrue:ifFalse:`) are mutually
+    /// exclusive and must not see each other's writes. Cleared on entering a
+    /// block body, whose own sends start a fresh frame.
+    pub(super) defer_block_widening: bool,
+    /// BT-4636: `(local, type the block left it with)` pairs collected while
+    /// [`Self::defer_block_widening`] is set.
+    pub(in crate::semantic_analysis::type_checker) deferred_block_widenings:
+        Vec<inference::blocks::BlockWriteWidening>,
 }
 
 impl TypeChecker {
@@ -552,7 +583,11 @@ impl TypeChecker {
             native_type_registry: None,
             typed_class_context: None,
             known_remote_spans: HashMap::new(),
+            block_written_locals: std::collections::HashSet::new(),
+            defer_block_widening: false,
+            deferred_block_widenings: Vec::new(),
             block_param_pushdown: HashMap::new(),
+            unresolved_selector_sends: std::collections::HashSet::new(),
         }
     }
 
@@ -574,13 +609,17 @@ impl TypeChecker {
             native_type_registry: None,
             typed_class_context: None,
             known_remote_spans: HashMap::new(),
+            block_written_locals: std::collections::HashSet::new(),
+            defer_block_widening: false,
+            deferred_block_widenings: Vec::new(),
             block_param_pushdown: HashMap::new(),
+            unresolved_selector_sends: std::collections::HashSet::new(),
         }
     }
 
     /// Borrows `alias_registry` and `referenced_aliases` together as one
     /// [`type_resolver::ResolutionContext`], so a call site that needs both
-    /// no longer reaches `self.alias_registry.as_ref()` and `&mut
+    /// no longer reaches `self.alias_registry.as_deref()` and `&mut
     /// self.referenced_aliases` (or `self.referenced_aliases.extend`) as two
     /// separate field accesses.
     ///
@@ -593,7 +632,7 @@ impl TypeChecker {
         &mut self,
     ) -> type_resolver::ResolutionContext<'_> {
         type_resolver::ResolutionContext::new(
-            self.alias_registry.as_ref(),
+            self.alias_registry.as_deref(),
             &mut self.referenced_aliases,
         )
     }
@@ -618,8 +657,8 @@ impl TypeChecker {
     /// `resolve_type_annotation` call site (see that field's doc), so
     /// setting it here before calling `check_module` directly is sufficient
     /// — no separate "aliases-only" entry point is needed.
-    pub fn set_alias_registry(&mut self, registry: AliasRegistry) {
-        self.alias_registry = Some(registry);
+    pub fn set_alias_registry(&mut self, registry: impl Into<Arc<AliasRegistry>>) {
+        self.alias_registry = Some(registry.into());
     }
 
     /// Sets the protocol registry for the *base* [`Self::check_module`]
@@ -748,7 +787,7 @@ impl TypeChecker {
         // `self.alias_registry` to resolve alias-named generic type
         // arguments (e.g. `Logger(Small)` where `type Small = Integer`)
         // before checking them against a declared bound.
-        self.alias_registry = Some(alias_registry.clone());
+        self.alias_registry = Some(Arc::new(alias_registry.clone()));
 
         // Run the standard type checking pass first
         self.check_normalised_module(module, hierarchy);
@@ -829,6 +868,11 @@ struct TypeEnv {
     /// `infer_assignment` on every reassignment (including back to a
     /// non-remote value, which clears the entry).
     known_remote: HashMap<EnvKey, known_remote::KnownRemote>,
+    /// BT-4257: locals currently bound to a value that is provably a raw
+    /// `Binary`, never a `String` (see [`binary_string_compare`]). Any write
+    /// to a binding clears its entry; `infer_assignment` re-marks it when
+    /// the right-hand side is itself a raw-Binary producer.
+    raw_binary: std::collections::HashSet<EnvKey>,
 }
 
 impl TypeEnv {
@@ -838,6 +882,7 @@ impl TypeEnv {
             origins: HashMap::new(),
             in_class_method: false,
             known_remote: HashMap::new(),
+            raw_binary: std::collections::HashSet::new(),
         }
     }
 
@@ -857,6 +902,7 @@ impl TypeEnv {
     }
 
     fn set(&mut self, key: EnvKey, ty: InferredType) {
+        self.raw_binary.remove(&key);
         self.bindings.insert(key, ty);
     }
 
@@ -869,6 +915,18 @@ impl TypeEnv {
         self.bindings.remove(key);
         self.origins.remove(key);
         self.known_remote.remove(key);
+        self.raw_binary.remove(key);
+    }
+
+    /// BT-4257: record that the local `key` is bound to a provably raw
+    /// `Binary`. Call after the binding is written — a write clears it.
+    fn mark_raw_binary(&mut self, key: EnvKey) {
+        self.raw_binary.insert(key);
+    }
+
+    /// BT-4257: whether the local `name` is bound to a provably raw `Binary`.
+    fn is_raw_binary_local(&self, name: &str) -> bool {
+        self.raw_binary.contains(&EnvKey::local(name))
     }
 
     /// ADR 0126 §6: mark `key` as known-remote with the given provenance,
@@ -905,6 +963,7 @@ impl TypeEnv {
                 span,
             },
         );
+        self.raw_binary.remove(&key);
         self.bindings.insert(key, ty);
     }
 

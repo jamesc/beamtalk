@@ -28,9 +28,9 @@ use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::Span;
 
-use super::is_generic_type_param;
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeProvenance, TypeStringContext};
+use super::{is_generic_type_param, is_type_var_placeholder};
 
 /// Substitution map from a generic type parameter name to its concrete
 /// [`InferredType`].
@@ -101,7 +101,8 @@ pub(in crate::semantic_analysis) fn merge_substitutions(
 ///   machinery.
 /// * [`TypeAnnotation::Difference`] — `base \ excluded`, resolved through
 ///   [`InferredType::difference`] (ADR 0102 §1) with `hierarchy = None` (this
-///   resolver never consults the class hierarchy — see below), so only the
+///   resolver only consults the class hierarchy for the `Substitution`
+///   placeholder check, never for set operations — see below), so only the
 ///   singleton flavour (`Symbol \ #foo`) and structurally-reducible cases
 ///   normalise; the nominal-class flavour (ADR 0102 §5, `Object \
 ///   Number`) requires a hierarchy and is only produced by narrowing
@@ -225,6 +226,7 @@ pub(in crate::semantic_analysis) fn resolve_declared_type_with_alias_deps(
         protocol_registry,
         alias_registry,
         ctx,
+        None,
         &mut expanding,
         &mut memo,
     );
@@ -238,7 +240,7 @@ pub(in crate::semantic_analysis) fn resolve_declared_type_with_alias_deps(
 /// hot-reload re-check trigger) — as one value.
 ///
 /// Every call site that needs *both* fields previously reached
-/// `self.alias_registry.as_ref()` and `&mut self.referenced_aliases` (or
+/// `self.alias_registry.as_deref()` and `&mut self.referenced_aliases` (or
 /// `self.referenced_aliases.extend(deps)`) as two separate `TypeChecker`
 /// field accesses; `TypeChecker::resolution_context` hands back one value
 /// instead, and [`Self::resolve_type_annotation`] collapses the
@@ -326,6 +328,26 @@ pub(in crate::semantic_analysis) fn resolve_declared_type(
     alias_registry: Option<&AliasRegistry>,
     ctx: TypeStringContext,
 ) -> InferredType {
+    resolve_declared_type_in(dt, subst, protocol_registry, alias_registry, ctx, None)
+}
+
+/// [`resolve_declared_type`] with the class hierarchy in scope (BT-4245).
+///
+/// In [`TypeStringContext::Substitution`] an unbound bare single-letter name
+/// collapses to `Dynamic` only when it is a type-variable placeholder per
+/// [`is_type_var_placeholder`] — i.e. *not* a real class. A user
+/// `Object subclass: E` therefore resolves to `Known(E)` instead of silently
+/// degrading to `Dynamic`. Every substituting production call site must use
+/// this entry point; plain [`resolve_declared_type`] (no hierarchy) falls
+/// back to the shape-only check.
+pub(in crate::semantic_analysis) fn resolve_declared_type_in(
+    dt: &DeclaredType,
+    subst: &SubstitutionMap,
+    protocol_registry: Option<&ProtocolRegistry>,
+    alias_registry: Option<&AliasRegistry>,
+    ctx: TypeStringContext,
+    hierarchy: Option<&ClassHierarchy>,
+) -> InferredType {
     let mut expanding = Vec::new();
     let mut memo = HashMap::new();
     resolve_declared_type_inner(
@@ -334,6 +356,7 @@ pub(in crate::semantic_analysis) fn resolve_declared_type(
         protocol_registry,
         alias_registry,
         ctx,
+        hierarchy,
         &mut expanding,
         &mut memo,
     )
@@ -366,7 +389,7 @@ pub(in crate::semantic_analysis) fn resolve_declared_type(
 /// not prevent this — it only rejects a name that is an *ancestor* of
 /// itself, and `L(n-1)`'s two references here are siblings, not nested.
 /// Since resolution is a pure function of `(declared_type, subst,
-/// alias_registry, ctx)` and neither changes across a single top-level
+/// alias_registry, ctx, hierarchy)` and none changes across a single top-level
 /// [`resolve_declared_type`] call (every recursive call below threads them
 /// unchanged), caching by alias name alone is sound *within* one call: the
 /// first full resolution of a name is reused verbatim for every subsequent
@@ -380,13 +403,14 @@ pub(in crate::semantic_analysis) fn resolve_declared_type(
 /// (e.g. resetting to an empty `SubstitutionMap`, dropping
 /// `protocol_registry`, or always resolving through the `Declared`-context
 /// AST path) — every call site resolves through this one recursion.
-#[allow(clippy::too_many_lines)] // one match arm per DeclaredType variant — see resolve_declared_type's doc
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)] // one match arm per DeclaredType variant — see resolve_declared_type's doc
 fn resolve_declared_type_inner(
     dt: &DeclaredType,
     subst: &SubstitutionMap,
     protocol_registry: Option<&ProtocolRegistry>,
     alias_registry: Option<&AliasRegistry>,
     ctx: TypeStringContext,
+    hierarchy: Option<&ClassHierarchy>,
     expanding: &mut Vec<EcoString>,
     memo: &mut HashMap<EcoString, InferredType>,
 ) -> InferredType {
@@ -437,7 +461,12 @@ fn resolve_declared_type_inner(
             // `Declared`-context callers (`resolve_type_annotation`'s
             // wrapper) never hit this — an unmapped bare param there passes
             // through as a nominal class name.
-            if ctx == TypeStringContext::Substitution && is_generic_type_param(name) {
+            if ctx == TypeStringContext::Substitution
+                && hierarchy.map_or_else(
+                    || is_generic_type_param(name),
+                    |h| is_type_var_placeholder(name, h),
+                )
+            {
                 return InferredType::Dynamic(DynamicReason::Unknown);
             }
             // ADR 0108: alias table comes next in the resolution
@@ -470,6 +499,7 @@ fn resolve_declared_type_inner(
                         protocol_registry,
                         alias_registry,
                         ctx,
+                        hierarchy,
                         expanding,
                         memo,
                     );
@@ -507,6 +537,7 @@ fn resolve_declared_type_inner(
                         protocol_registry,
                         alias_registry,
                         ctx,
+                        hierarchy,
                         expanding,
                         memo,
                     )
@@ -528,6 +559,7 @@ fn resolve_declared_type_inner(
                         protocol_registry,
                         alias_registry,
                         ctx,
+                        hierarchy,
                         expanding,
                         memo,
                     )
@@ -547,6 +579,7 @@ fn resolve_declared_type_inner(
                 protocol_registry,
                 alias_registry,
                 ctx,
+                hierarchy,
                 expanding,
                 memo,
             );
@@ -568,6 +601,7 @@ fn resolve_declared_type_inner(
                 protocol_registry,
                 alias_registry,
                 ctx,
+                hierarchy,
                 expanding,
                 memo,
             );
@@ -577,6 +611,7 @@ fn resolve_declared_type_inner(
                 protocol_registry,
                 alias_registry,
                 ctx,
+                hierarchy,
                 expanding,
                 memo,
             );
@@ -584,8 +619,8 @@ fn resolve_declared_type_inner(
         }
         DeclaredType::Intersection { left, right } => {
             // ADR 0102 §1/§3: `left & right` resolves through the
-            // shared `intersect` set operation. `hierarchy` is `None` (this
-            // resolver never consults it); `protocol_registry` is passed
+            // shared `intersect` set operation. `intersect` gets `None` for its
+            // hierarchy (only the bare-name placeholder check uses it); `protocol_registry` is passed
             // through so class ∩ protocol resolves to the stored
             // `Intersection` instead of falling through to `Never`.
             let left_ty = resolve_declared_type_inner(
@@ -594,6 +629,7 @@ fn resolve_declared_type_inner(
                 protocol_registry,
                 alias_registry,
                 ctx,
+                hierarchy,
                 expanding,
                 memo,
             );
@@ -603,6 +639,7 @@ fn resolve_declared_type_inner(
                 protocol_registry,
                 alias_registry,
                 ctx,
+                hierarchy,
                 expanding,
                 memo,
             );

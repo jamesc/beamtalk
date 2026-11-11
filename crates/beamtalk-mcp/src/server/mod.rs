@@ -41,12 +41,9 @@ mod tests;
 // exercise these pure helpers directly, independent of which `tools::*`
 // family module or `lint` owns them.
 #[cfg(test)]
-pub(crate) use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
+pub(crate) use beamtalk_core::source_analysis::{lex_with_eof, parse};
 #[cfg(test)]
-pub(crate) use lint::{
-    build_native_type_registry, compute_diagnostic_summary, run_lint_structured,
-    run_module_analysis,
-};
+pub(crate) use lint::{compute_diagnostic_summary, run_lint_structured};
 #[cfg(test)]
 pub(crate) use params::*;
 #[cfg(test)]

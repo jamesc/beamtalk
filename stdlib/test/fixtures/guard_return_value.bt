@@ -27,3 +27,9 @@ Value subclass: GuardReturnValue
     self withN: 90
 
   positiveOnly: x :: Integer => 0 < x ifTrue: [^self withN: x]
+
+  // BT-4496: an `and:`/`or:` of Booleans by construction is a Boolean, so
+  // the effectful guards on it compile as direct returns.
+  outside: x :: Integer =>
+    (x < 0 or: [x > 100]) ifTrue: [^self withN: 0]
+    (x =:= 50 and: [x == 50]) ifTrue: [^self withN: 5] ifFalse: [self withN: x]

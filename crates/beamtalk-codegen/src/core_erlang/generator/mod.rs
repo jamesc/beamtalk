@@ -285,6 +285,18 @@ pub struct CoreErlangGenerator {
     /// (`with_local_producer_sites`) and empty everywhere else.
     pub(in crate::core_erlang) local_producer_sites:
         std::collections::HashSet<beamtalk_core::source_analysis::Span>,
+    /// BT-4461: the Core variables that hold a REPL binding as written into
+    /// its frame's bindings map (a slot `Put`, or a `LocalRebind` stepping or
+    /// held in the map). A REPL frame's variable that is not one (a block
+    /// parameter, a handler's `:e`, a `match:` pattern variable) has no key in
+    /// the map, so a producer never re-reads it from there
+    /// (`repl_cached_bindings_written_by`). Variable names are fresh, so the
+    /// set needs no scoping.
+    pub(in crate::core_erlang) repl_map_vars: std::collections::HashSet<String>,
+    /// BT-4499: the block-parameter seeds live at this point of the REPL
+    /// lowering (`seed_repl_params`), undone in a `^` throw's state.
+    pub(in crate::core_erlang) repl_active_seeds:
+        Vec<crate::core_erlang::threaded_expr::ReplParamSeed>,
     /// BT-3910 (ADR 0131 §1): the spans of the value-position local
     /// assignments of the body being lowered (`beamtalk_core`'s
     /// `value_position_assignment_spans`), the producers `threaded_expression`
@@ -343,6 +355,12 @@ pub struct CoreErlangGenerator {
     /// `with_rebind_frame`, the one place frames are entered; read by
     /// `loop_holds_no_whole_state`.
     pub(in crate::core_erlang) in_private_scratch: bool,
+    /// BT-4318: set by `super_send_producer` for the one `generate_super_send`
+    /// call it makes. A `State`-threading `super` send compiled without it
+    /// would leak its `{reply, Result, NewState}` tuple and drop the state
+    /// change, so `generate_super_send` reports it
+    /// (`VerifyError::StateEffectEscapesExpression`).
+    pub(in crate::core_erlang) in_super_send_producer: bool,
     /// Source file path to embed as `beamtalk_source` module attribute.
     /// Set from `CodegenOptions::source_path` before generation begins.
     pub(in crate::core_erlang) source_path: Option<String>,
@@ -446,6 +464,11 @@ pub struct CoreErlangGenerator {
     /// the stdlib (BT-3951). Baked into `__beamtalk_meta/0` as
     /// `overrides_species_construction`.
     pub(in crate::core_erlang) own_overrides_species_construction: bool,
+    /// BT-4475: where a `new:` sent to the class being compiled runs
+    /// (`ClassHierarchy::explicit_class_new1_runs_in_caller`). `InCaller` is
+    /// baked into `__beamtalk_meta/0` by leaving `new:` out of
+    /// `process_bound_class_selectors`.
+    pub(in crate::core_erlang) own_class_new1_routing: super::class_meta::ClassNew1Routing,
     /// REPL-specific codegen state. `Some` when in REPL mode.
     pub(in crate::core_erlang) repl_context: Option<ReplContext>,
     /// Class/actor-specific codegen state. `Some` when compiling a class.
@@ -460,6 +483,16 @@ pub struct CoreErlangGenerator {
     /// check to collect inherited typed-no-default fields.
     pub(in crate::core_erlang) class_hierarchy:
         Option<beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy>,
+    /// BT-4486: the protocols in scope. Filled only on the pre-analysed path;
+    /// `None` otherwise, so protocol-typed sends stay dynamic. Conformers are
+    /// derived per protocol on demand ([`Self::protocol_conformers_of`]).
+    pub(in crate::core_erlang) protocol_registry:
+        Option<beamtalk_core::semantic_analysis::protocol_registry::ProtocolRegistry>,
+    /// BT-4630: memo for [`Self::protocol_conformers_of`], keyed by protocol
+    /// name, so a module without a protocol-typed send never pays the
+    /// protocol × class conformance scan.
+    pub(in crate::core_erlang) protocol_conformers_memo:
+        std::cell::RefCell<std::collections::HashMap<EcoString, std::rc::Rc<Vec<EcoString>>>>,
     /// ADR 0098 Phase 3: producing `BEAMTALK_VERSION`, baked into `__beamtalk_meta`.
     /// Supplied by the CLI; `None` for REPL/test codegen (key omitted).
     pub(in crate::core_erlang) beamtalk_version: Option<EcoString>,
@@ -496,6 +529,11 @@ pub struct CoreErlangGenerator {
     /// unit-test-only paths); `recv_type` degrades safely to `dynamic` in
     /// that case, matching the runtime live-patch path's precedent.
     pub(in crate::core_erlang) type_map: beamtalk_core::semantic_analysis::TypeMap,
+    /// The FFI type registry (ADR 0075) the checker used, when the driver had
+    /// one. Inline FFI lowering asks it whether a call needs the proxy's
+    /// coercion (BT-4485); `None` keeps every call on the proxy.
+    pub(in crate::core_erlang) native_type_registry:
+        Option<std::sync::Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>>,
     /// keys of methods whose `return_type` was set by the return-type
     /// writeback pass (`apply_return_type_writeback_from_map`) rather than
     /// typed by the user — the same map used to build `module`/`module_owned`
@@ -523,6 +561,13 @@ pub struct CoreErlangGenerator {
     /// The [`PeelScope`](beamtalk_core::ast::normalize::PeelScope) a
     /// `ClassBuilder` block method's operands were recorded under (BT-4059).
     pub(in crate::core_erlang) current_method_span: Option<beamtalk_core::source_analysis::Span>,
+    /// The `|>` record (ADR 0145) of the code being generated: the current
+    /// method's (swapped in by `MethodFrame::enter`, restored on drop), or
+    /// the module's outside any method (set by `generate_module_with_warnings`
+    /// and the REPL entries via [`Self::set_pipeline_sends`]). A
+    /// `ClassBuilder` block method's reflected source takes the entries that
+    /// fall inside its block, so it keeps `|>` as written.
+    pub(in crate::core_erlang) current_pipeline_sends: beamtalk_core::ast::PipelineSends,
     /// What codegen's guard-return rewrite changed (BT-4415,
     /// `guard_returns`): the bodies as written, which
     /// [`Self::as_written_method_source`] reflects in place of the rewritten
@@ -538,12 +583,6 @@ pub struct CoreErlangGenerator {
     /// dispatched (see [`Self::unconfirmed_boolean_comparisons`]).
     pub(in crate::core_erlang) boolean_comparison_lowerings:
         std::collections::HashMap<super::guard_returns::GuardConditionKey, bool>,
-    /// Every method whose body this generation entered (`MethodFrame::enter`).
-    /// The guard-return checks hold only for these: a same-file `X >> m`
-    /// extension is runtime-patched, not generated into the class module, so
-    /// its recorded guards are never lowered here.
-    pub(in crate::core_erlang) generated_methods:
-        std::collections::HashSet<super::guard_returns::MethodKey>,
     /// The identity of the method whose body is being generated (set by
     /// `MethodFrame::enter` with [`Self::current_method_span`]): the method
     /// half of a [`super::guard_returns::GuardConditionKey`].
@@ -551,8 +590,8 @@ pub struct CoreErlangGenerator {
 }
 
 /// `method`'s reflected source: its text as written, with the operand
-/// parentheses `peeled` recorded removing in `scope` put back (BT-4059).
-/// Equal to `unparse_method(method)` when nothing was recorded.
+/// parentheses `peeled` recorded removing in `scope` (BT-4059) and the
+/// canonicalised unary loops (BT-4313) put back.
 ///
 /// The one place reflected method source is produced from codegen's
 /// (peeled) tree; [`CoreErlangGenerator::as_written_method_source`] is this
@@ -562,7 +601,8 @@ pub(in crate::core_erlang) fn as_written_method_source(
     peeled: &beamtalk_core::ast::normalize::PeeledParens,
     scope: beamtalk_core::ast::normalize::PeelScope,
 ) -> String {
-    if peeled.is_empty() {
+    if peeled.is_empty() && !beamtalk_core::ast::normalize::method_has_desugared_unary_loop(method)
+    {
         return beamtalk_core::unparse::unparse_method(method);
     }
     let mut written = method.clone();
@@ -624,6 +664,15 @@ impl CoreErlangGenerator {
         self.peeled_parens = peeled;
     }
 
+    /// Records the `|>` record (ADR 0145) of the code outside any method this
+    /// generator compiles, so a `ClassBuilder` block method's reflected
+    /// source keeps `|>` as written.
+    // `pub` — `beamtalk-repl` compiles a module's expressions without the
+    // module, so it passes the module's record here.
+    pub fn set_pipeline_sends(&mut self, pipeline_sends: beamtalk_core::ast::PipelineSends) {
+        self.current_pipeline_sends = pipeline_sends;
+    }
+
     /// Creates a new code generator for the given module name.
     // widened from `pub(crate)` — `beamtalk-repl` constructs its
     // own generator.
@@ -656,12 +705,15 @@ impl CoreErlangGenerator {
             precompiled_subexprs: std::collections::HashMap::new(),
             current_send_span: None,
             local_producer_sites: std::collections::HashSet::new(),
+            repl_map_vars: std::collections::HashSet::new(),
+            repl_active_seeds: Vec::new(),
             value_assign_sites: std::collections::HashSet::new(),
             tier2_evaluated_block_sites: std::collections::HashSet::new(),
             fold_self_slot_consumer: None,
             in_fold_frame: false,
             rebind_frames: std::collections::HashMap::new(),
             in_private_scratch: false,
+            in_super_send_producer: false,
             source_path: None,
             tier2_local_vars: std::collections::HashSet::new(),
             tier2_local_var_captured_mutations: std::collections::HashMap::new(),
@@ -681,21 +733,25 @@ impl CoreErlangGenerator {
             own_stdlib_trait_methods: Vec::new(),
             own_overrides_collection_selector: false,
             own_overrides_species_construction: false,
+            own_class_new1_routing: super::class_meta::ClassNew1Routing::ClassProcess,
             repl_context: Some(ReplContext::new()),
             class_context: Some(ClassContext::new()),
             value_type_context: Some(ValueTypeContext::new()),
             class_hierarchy: None,
+            protocol_registry: None,
+            protocol_conformers_memo: std::cell::RefCell::default(),
             beamtalk_version: None,
             otp_release: None,
             alias_registry: beamtalk_core::semantic_analysis::alias_registry::AliasRegistry::new(),
             type_map: beamtalk_core::semantic_analysis::TypeMap::new(),
+            native_type_registry: None,
             method_return_types_written_back: std::collections::HashMap::new(),
             peeled_parens: beamtalk_core::ast::normalize::PeeledParens::default(),
             current_method_span: None,
+            current_pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
             guard_rewrite: super::guard_returns::GuardRewrite::default(),
             guard_conditions_used: std::collections::HashSet::new(),
             boolean_comparison_lowerings: std::collections::HashMap::new(),
-            generated_methods: std::collections::HashSet::new(),
             current_guard_method: None,
         }
     }

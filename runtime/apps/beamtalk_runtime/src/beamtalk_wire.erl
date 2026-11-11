@@ -108,7 +108,7 @@ decode(Term) ->
 Construct `#beamtalk_error{kind = wire_version_unsupported}` for a
 `'\$beamtalk_wire'`/`'\$beamtalk_wire_reply'` envelope whose leading version
 this node does not recognise (ADR 0126 §5.1) — the one place this error
-shape is built (CLAUDE.md "No duplicate implementations"), called both by
+shape is built (AGENTS.md "No duplicate implementations"), called both by
 `beamtalk_actor`'s call/cast wire-tag dispatch (request direction, `Class =
 unknown`, the message's own `Selector`) and by `beamtalk_future`'s
 `decode_wire_reply/1` (reply direction, `Class = 'Future'`, no `Selector`,
@@ -120,9 +120,9 @@ wire_version_unsupported_error(Class, Selector, SentVersion, ExtraDetails) ->
     beamtalk_error:with_details(
         beamtalk_error:with_hint(
             beamtalk_error:new(wire_version_unsupported, Class, Selector),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "wire envelope version ~p is not supported by this node (known version ~p)",
+                    "wire envelope version ~tp is not supported by this node (known version ~tp)",
                     [SentVersion, ?BT_WIRE_VERSION]
                 )
             )

@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4504: a string constant class-side method a test warms, then
+// shadows with a class-side extension. See constant_class_method_test.bt.
+
+Object subclass: Bt4504ConstExtString
+
+  class answer -> String => "one"

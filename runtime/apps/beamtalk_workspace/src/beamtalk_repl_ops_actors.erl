@@ -78,7 +78,8 @@ handle_term(<<"inspect">>, Params, _Msg, _SessionPid) ->
                                         {inspect, M}
                                 end;
                             _ ->
-                                {inspect, iolist_to_binary(io_lib:format("~p", [State]))}
+                                {inspect,
+                                    beamtalk_error:chars_to_binary(io_lib:format("~tp", [State]))}
                         end
                     catch
                         _:_ ->

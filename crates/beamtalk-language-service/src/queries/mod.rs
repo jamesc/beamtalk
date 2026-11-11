@@ -133,18 +133,18 @@ pub(crate) fn enrich_hierarchy_with_inferred_returns(
     module: &Module,
     hierarchy: &ClassHierarchy,
     native_type_registry: Option<
-        &beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
+        &Arc<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
     >,
     protocol_registry: &Arc<ProtocolRegistry>,
-    alias_registry: Option<&AliasRegistry>,
+    alias_registry: Option<&Arc<AliasRegistry>>,
 ) -> (Option<ClassHierarchy>, TypeMap) {
     let (type_map, inferred) =
         beamtalk_core::semantic_analysis::type_checker::infer_types_and_returns_with_registries(
             module,
             hierarchy,
-            native_type_registry,
+            native_type_registry.map(Arc::clone),
             Some(Arc::clone(protocol_registry)),
-            alias_registry,
+            alias_registry.map(Arc::clone),
         );
     let enriched = if inferred.is_empty() {
         None

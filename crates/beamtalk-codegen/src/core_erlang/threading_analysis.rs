@@ -500,14 +500,15 @@ impl CoreErlangGenerator {
     /// binding; [`Self::loop_condition_written_locals`]) is carried too: a loop
     /// carries the union of what its condition and its body produce, and a
     /// written local is a threaded local of the loop (or, in the REPL, a key of
-    /// the bindings map the loop always carries). In a compiled method the
-    /// Phase 0 check rejects such a write unless the condition also has a
-    /// state effect; it reaches codegen from the REPL and a legacy workspace
-    /// block body. Before, such a condition was a plain closure answering only
-    /// its boolean: the write was lost (the loop re-read the pre-loop value
-    /// forever), or a body that read it read the closure's own variable
-    /// (`erlc`: unbound variable). Like a state effect, a write counts only
-    /// when the loop has something to carry it in (BT-3999).
+    /// the bindings map the loop always carries). BT-4602: the Phase 0 check
+    /// accepts such a write in a compiled method too whenever the body is a
+    /// block literal (`block_facts::while_condition_threads`), proven by
+    /// `while_condition_binding_corpus.rs`. Before, such a condition was a
+    /// plain closure answering only its boolean: the write was lost (the loop
+    /// re-read the pre-loop value forever), or a body that read it read the
+    /// closure's own variable (`erlc`: unbound variable). Like a state effect,
+    /// a write counts only when the loop has something to carry it in
+    /// (BT-3999).
     pub(in crate::core_erlang) fn while_condition_has_carried_effects(
         &self,
         condition: &Expression,

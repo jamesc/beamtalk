@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Passes a String where the dependency's bundled stub declares an Integer.
+/// That stub is the only type source for `parity_dep_cycle_ffi`, so the
+/// mismatch is reported only by a surface that still reads the dependency's
+/// stubs when resolution fails on the cycle.
+Object subclass: Caller
+
+  /// A `Type` warning: a live-recheck failure under `--warnings-as-errors`.
+  mismatch => Erlang parity_dep_cycle_ffi double: "text"

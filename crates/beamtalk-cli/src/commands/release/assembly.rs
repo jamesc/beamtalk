@@ -8,7 +8,7 @@
 //! fresh `lib/<app>-<vsn>/ebin/`; `.rel`, `start.boot`
 //! (`systools:make_script/2`) and `releases/RELEASES`
 //! (`release_handler:create_RELEASES/4`) are produced by a single `erl
-//! -noshell` invocation (no second ad-hoc spawner — CLAUDE.md) — the app
+//! -noshell` invocation (no second ad-hoc spawner — AGENTS.md) — the app
 //! closure itself is entirely Rust-computed (`closure.rs`); the live node
 //! is asked only for what a build machine cannot know statically: the host
 //! OTP's `kernel`/`stdlib`/`sasl`/`crypto` (`+compiler`) versions and the

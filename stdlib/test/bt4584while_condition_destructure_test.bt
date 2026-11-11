@@ -1,0 +1,39 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4584: a destructuring assignment in a `whileTrue:`/`whileFalse:`
+// condition writes each outer local it binds into the map the condition hands
+// back, so the body, the next iteration and the code after the loop read it.
+// Before, the names were bound by plain `let`s that died with the condition
+// closure (the REPL kept the old binding; an actor method failed to compile).
+// The REPL rows are in crates/beamtalk-repl/tests/repl_loop_body_return.rs.
+// Fixtures: fixtures/bt4584while_condition_destructure_{actor,probe}.bt.
+
+TestCase subclass: Bt4584WhileConditionDestructureTest
+
+  testActorAfterLoop =>
+    self assert: Bt4584WhileConditionDestructureActor spawn afterLoop equals: 11
+
+  testActorBodyReads =>
+    self assert: Bt4584WhileConditionDestructureActor spawn bodyReads equals: #[11, 14]
+
+  testActorWhileFalse =>
+    self assert: Bt4584WhileConditionDestructureActor spawn whileFalse equals: 11
+
+  testActorTuple =>
+    self assert: Bt4584WhileConditionDestructureActor spawn tuple equals: 11
+
+  testActorCounterDestructured =>
+    self assert: Bt4584WhileConditionDestructureActor spawn counterDestructured equals: #[3, 8]
+
+  testActorEarlyReturn =>
+    self assert: Bt4584WhileConditionDestructureActor spawn earlyReturn equals: 8
+
+  testValueAfterLoop =>
+    self assert: Bt4584WhileConditionDestructureProbe new afterLoop equals: 11
+
+  testValueBodyReads =>
+    self assert: Bt4584WhileConditionDestructureProbe new bodyReads equals: #[11, 14]
+
+  testValueWhileFalse =>
+    self assert: Bt4584WhileConditionDestructureProbe new whileFalse equals: 11

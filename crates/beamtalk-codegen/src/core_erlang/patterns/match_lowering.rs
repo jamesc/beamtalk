@@ -1693,7 +1693,7 @@ impl CoreErlangGenerator {
                 let var_name = Self::to_core_erlang_var(&id.name);
                 Ok(leaf::var(var_name))
             }
-            Pattern::Literal(lit, _) => self.generate_literal(lit),
+            Pattern::Literal(lit, _) => Ok(Self::literal_doc(lit)),
             Pattern::Tuple { elements, .. } => {
                 let mut parts = vec![Document::Str("{")];
                 for (i, elem) in elements.iter().enumerate() {
@@ -2018,16 +2018,14 @@ impl CoreErlangGenerator {
         expr: &Expression,
     ) -> Result<Document<'static>> {
         match expr {
-            Expression::Literal(lit, _) => self.generate_literal(lit),
+            Expression::Literal(lit, _) => Ok(Self::literal_doc(lit)),
             // Parentheses are transparent in guards (and in segment sizes,
             // which lower through this function): `when: [(x + 1) > 2]`.
             Expression::Parenthesized { expression, .. } => {
                 self.generate_guard_expression(expression)
             }
             Expression::Identifier(id) => match id.name.as_str() {
-                "true" => Ok(Document::Str("'true'")),
-                "false" => Ok(Document::Str("'false'")),
-                "nil" => Ok(Document::Str("'nil'")),
+                name if let Some(doc) = Self::pseudo_variable_doc(name) => Ok(doc),
                 "self" => Ok(leaf::var(self.receiver_var())),
                 _ => {
                     if let Some(var_name) = self.lookup_var(&id.name) {

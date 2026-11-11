@@ -96,6 +96,8 @@ itself.
 
 -include_lib("kernel/include/logger.hrl").
 
+%% BT-4004: bound on waiting for a per-tag lock held by a hung critical section.
+-define(SHADOW_LOCK_TIMEOUT_MS, 60000).
 -define(EXTENSIONS_TABLE, beamtalk_extensions).
 -define(SOURCES_TABLE, beamtalk_extension_sources).
 -define(CONFLICTS_TABLE, beamtalk_extension_conflicts).
@@ -230,7 +232,7 @@ register(Class, Selector, Fun, Owner, Source) when
     %% BT-3669: flag transitions and row writes for one tag are serialized under
     %% a per-tag lock (see `with_shadow_lock/2`), so the `extension` flag is
     %% exactly "some row exists under this tag" whenever the lock is free.
-    with_shadow_lock(Class, fun() ->
+    IsNew = with_shadow_lock(Class, fun() ->
         %% Only class-object tags are read by the guard; instance-side tags
         %% must not churn persistent_term (each erase scans all processes).
         case beamtalk_class_registry:is_class_name(Class) of
@@ -242,11 +244,13 @@ register(Class, Selector, Fun, Owner, Source) when
             [] ->
                 %% New registration
                 ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
-                maybe_store_source(Key, Source);
+                maybe_store_source(Key, Source),
+                true;
             [{Key, _OldFun, OldOwner}] when OldOwner =:= Owner ->
                 %% Same owner updating - no conflict
                 ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
-                maybe_store_source(Key, Source);
+                maybe_store_source(Key, Source),
+                false;
             [{Key, _OldFun, OldOwner}] ->
                 %% Conflict: different owner
                 ?LOG_WARNING(
@@ -262,7 +266,8 @@ register(Class, Selector, Fun, Owner, Source) when
 
                 %% Overwrite (last-writer-wins)
                 ets:insert(?EXTENSIONS_TABLE, {Key, Fun, Owner}),
-                maybe_store_source(Key, Source)
+                maybe_store_source(Key, Source),
+                false
         end
     end),
 
@@ -270,6 +275,9 @@ register(Class, Selector, Fun, Owner, Source) when
     %% `has_method_local/1` consults this table), invalidating cached
     %% defining-method entries.
     beamtalk_class_derived_cache:invalidate(),
+    %% BT-4307: a class-side extension is inherited by the class's
+    %% subclasses; a new row can change what their class sides resolve.
+    class_side_row_changed(Class, IsNew),
 
     %% ADR 0087 Phase 4: maintain the xref index for extension methods
     %% (ADR 0066 open classes). A sourced extension (`register/5` with a binary
@@ -298,9 +306,9 @@ validate_class_side_arity(Class, Selector, Fun) ->
                 arity_mismatch,
                 Class,
                 Selector,
-                iolist_to_binary(
+                beamtalk_error:chars_to_binary(
                     io_lib:format(
-                        "Class-side extension ~p on ~p must be a fun of arity 2, got ~b",
+                        "Class-side extension ~tp on ~tp must be a fun of arity 2, got ~b",
                         [Selector, Class, Arity]
                     )
                 )
@@ -373,13 +381,18 @@ unregister(Class, Selector, ClassSide) when
             false -> Class
         end,
     Key = {EtsClass, Selector},
-    with_shadow_lock(EtsClass, fun() ->
+    %% Removal must not give up (a half-done `purge_class/1` would leave rows
+    %% that reattach to a re-created class): wait for the lock without a bound.
+    Existed = with_shadow_lock(EtsClass, infinity, fun() ->
+        Present = ets:member(?EXTENSIONS_TABLE, Key),
         ets:delete(?EXTENSIONS_TABLE, Key),
         ets:delete(?SOURCES_TABLE, Key),
-        sync_shadow_flag(EtsClass)
+        sync_shadow_flag(EtsClass),
+        Present
     end),
     %% Removal changes resolution the same way installation does.
     beamtalk_class_derived_cache:invalidate(),
+    class_side_row_changed(EtsClass, Existed),
     %% Clear this selector's conflict history too — previously only
     %% purge_class/1's whole-class sweep did this.
     _ = ets:match_delete(?CONFLICTS_TABLE, {Key, '_', '_'}),
@@ -388,6 +401,23 @@ unregister(Class, Selector, ClassSide) when
     %% no-op if the xref gen_server is unavailable.
     safe_xref(fun() -> beamtalk_xref:purge_method(EtsClass, false, Selector) end),
     ok.
+
+%% BT-4307: a class-side extension (a class-object tag) counts as its class's
+%% method for a send to the class or any subclass. When a row appears or goes
+%% away (`Changed`), after the row and the derived cache changed, flush the
+%% `conforms_to/2` cache (its class-method check asks the same lookup) and
+%% erase the subclasses' static call keys. A row replaced in place (an
+%% extension module reloaded) changes neither: both depend only on whether the
+%% row exists. An instance-side tag has no such state.
+-spec class_side_row_changed(atom(), boolean()) -> ok.
+class_side_row_changed(Tag, Changed) ->
+    case Changed andalso beamtalk_class_registry:is_class_name(Tag) of
+        true ->
+            beamtalk_protocol_registry:invalidate_conforms_cache(),
+            beamtalk_class_shadow_flags:invalidate_descendants_of_tag(Tag);
+        false ->
+            ok
+    end.
 
 %% BT-3669: drop the class's "has shadows" flag once its last extension is gone.
 %% Runs under the per-tag lock held by `unregister/3`, and `register/5` also
@@ -406,13 +436,25 @@ for tests that need to hold the lock deterministically.
 """.
 -spec with_shadow_lock(atom(), fun(() -> T)) -> T.
 with_shadow_lock(Tag, Fun) ->
-    %% Only class-object tags (`'Foo class'`) have a flag the guard reads;
-    %% instance-side tags skip the lock (global:trans/4 backs off randomly when
-    %% contended and register/5 runs from parallel -on_load chains). The lock is
-    %% not FIFO-fair; contention is limited to rare same-class-tag writes.
+    with_shadow_lock(
+        Tag, beamtalk_fifo_lock:configured_timeout(shadow_flag, ?SHADOW_LOCK_TIMEOUT_MS), Fun
+    ).
+
+%% Only class-object tags (`'Foo class'`) have a flag the guard reads;
+%% instance-side tags skip the lock (register/5 runs from parallel -on_load
+%% chains). BT-4004: a node-local FIFO lock. `register/5` bounds the wait and
+%% raises a structured error rather than wait forever behind a hung holder;
+%% `unregister/3` passes `infinity`, since a removal that gave up part-way
+%% (e.g. a `purge_class/1` loop) would leave rows behind.
+-spec with_shadow_lock(atom(), timeout(), fun(() -> T)) -> T.
+with_shadow_lock(Tag, Timeout, Fun) ->
     case beamtalk_class_registry:is_class_name(Tag) of
-        true -> global:trans({{?MODULE, shadow_flag, Tag}, self()}, Fun, [node()], infinity);
-        false -> Fun()
+        true ->
+            beamtalk_fifo_lock:with_lock_or_raise(
+                {?MODULE, shadow_flag, Tag}, Timeout, {'Extensions', with_shadow_lock}, Fun
+            );
+        false ->
+            Fun()
     end.
 
 -spec has_any(atom()) -> boolean().
@@ -433,7 +475,7 @@ any conflict history recorded under `Class` in the conflicts table.
 `Class` is the literal ETS key: pass the class name atom to purge instance
 extensions, or `beamtalk_class_registry:class_object_tag/1`'s result to
 purge class-side extensions — the two are stored under separate keys
-(mirrors `class_has_class_method/2`'s lookup convention). Idempotent — a
+(mirrors `beamtalk_class_dispatch:class_understands_class_selector/2`'s lookup convention). Idempotent — a
 class with no extensions is a no-op.
 
 Guards against the tables not existing yet (early bootstrap, or a minimal

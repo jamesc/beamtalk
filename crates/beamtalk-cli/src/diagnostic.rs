@@ -193,7 +193,7 @@ fn render_provision_diagnostics(
 /// lines, and `load_project_stub_registry`'s stub diagnostics).
 ///
 /// Extracted so the JSON schema (`file`/`severity`/`message`/`span_start`/
-/// `span_end`/`hint`/`notes`) is defined once — per CLAUDE.md's "No
+/// `span_end`/`hint`/`notes`) is defined once — per AGENTS.md's "No
 /// duplicate implementations" rule, copy-pasting this shape a second time
 /// would let the two call sites silently drift apart on a future schema
 /// change (a new field, a renamed key).

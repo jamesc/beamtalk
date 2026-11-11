@@ -51,7 +51,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   0091 Decision 3) with `BtAttachWeb.Live.RequestContext` — never a raw
   `BtAttach.Workspace`/`:rpc` call — so this module never reimplements the
   `browse_*`/`senders`/`implementors`/… ops or the RBAC gates they ride
-  (CLAUDE.md no-duplicate-implementations), and reuses `BtAttachWeb.ClassTree`
+  (AGENTS.md no-duplicate-implementations), and reuses `BtAttachWeb.ClassTree`
   directly for the Hierarchy walk rather than duplicating it.
 
   State (`:browser_view`, `:browser_side`, `:browser_source`,
@@ -174,7 +174,8 @@ defmodule BtAttachWeb.Live.SystemBrowser do
                code: code,
                before: string_param(params, "before"),
                suffix: string_param(params, "suffix")
-             },
+             }
+             |> Map.merge(hover_self_context(socket, Map.get(params, "tab_id"))),
              RequestContext.build(socket)
            ) do
         {:ok, docs} when is_binary(docs) -> hover_html(docs)
@@ -211,10 +212,22 @@ defmodule BtAttachWeb.Live.SystemBrowser do
     # default script grammar would false-positive); the Workspace + REPL editors
     # send nothing. Forward the raw client value — the facade normalises it to a
     # known binary ("method" | "expression"), the single boundary for every caller.
+    #
+    # `tab_id` (BT-4583) names the method-editor tab the buffer belongs to. A
+    # file-backed `:def` tab resolves to its class's source file, which rides
+    # the request as `source_path` so the check uses that file's project scope
+    # (`beamtalk.toml` `[diagnostics]` table, cross-file type aliases) — the
+    # scope `load-project` compiles it with. The path is looked up here, never
+    # taken from the client, so a crafted event can't point the compiler at an
+    # arbitrary file. The Workspace + REPL editors send no tab id → no path.
     diagnostics =
       case Facade.dispatch(
              :diagnostics,
-             %{code: code, mode: Map.get(params, "mode")},
+             %{
+               code: code,
+               mode: Map.get(params, "mode"),
+               source_path: diagnostics_source_path(socket, Map.get(params, "tab_id"))
+             },
              RequestContext.build(socket)
            ) do
         {:ok, list} when is_list(list) -> list
@@ -633,8 +646,15 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # than crashing or silently doing nothing — the graceful no-op the AC asks for.
   def handle_event("goto_definition", %{"token" => token} = params, socket)
       when is_binary(token) do
-    code = Map.get(params, "code", "")
-    {:noreply, run_goto_definition(socket, token, code)}
+    # `code` / `before` / `suffix` are the hover op's editor context (BT-4455);
+    # a non-string is treated as absent.
+    context = %{
+      code: string_param(params, "code"),
+      before: string_param(params, "before"),
+      suffix: string_param(params, "suffix")
+    }
+
+    {:noreply, run_goto_definition(socket, token, context)}
   end
 
   def handle_event("goto_definition", _params, socket), do: {:noreply, socket}
@@ -648,6 +668,43 @@ defmodule BtAttachWeb.Live.SystemBrowser do
       _ -> {:noreply, socket}
     end
   end
+
+  # BT-4463: the class and side a method-editor tab edits, so a hovered `self` /
+  # `super` receiver resolves against it. Looked up from the tab id (never
+  # taken from the client), like `diagnostics_source_path/2`. Only a method tab
+  # qualifies: a `:def` tab edits the whole class definition, and the Workspace
+  # + REPL editors have no tab id. Returns `%{}` when there is none.
+  defp hover_self_context(socket, tab_id) when is_binary(tab_id) do
+    case Enum.find(socket.assigns[:tabs] || [], &(&1.id == tab_id)) do
+      %{kind: :method, class: class, side: side}
+      when is_binary(class) and side in ["instance", "class"] ->
+        %{class: class, side: side}
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp hover_self_context(_socket, _tab_id), do: %{}
+
+  # BT-4583: the source file a `diagnostics` request's buffer edits, or `nil`.
+  # Only a class-definition (`:def`) tab is file-backed in expression mode: a
+  # method tab lints in "method" mode, which ignores the path, and the
+  # Workspace/REPL editors are scratch buffers. The class's file comes from the
+  # browser's class rows (`browse-classes` `source_file`); a class with no file
+  # (ClassBuilder, REPL-defined) has none, so it keeps today's scope.
+  defp diagnostics_source_path(socket, tab_id) when is_binary(tab_id) do
+    with %{kind: :def, class: class} <-
+           Enum.find(socket.assigns[:tabs] || [], &(&1.id == tab_id)),
+         %{"source_file" => path} when is_binary(path) and path != "" <-
+           Enum.find(socket.assigns[:browser_classes] || [], &(Map.get(&1, "name") == class)) do
+      path
+    else
+      _ -> nil
+    end
+  end
+
+  defp diagnostics_source_path(_socket, _tab_id), do: nil
 
   # ── System Browser data source (BT-2491, browse ops ADR 0096) ───────────────
   #
@@ -1073,7 +1130,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # (content/meta/clauses); a no-op when the pane is closed (assign is `nil`)
   # or absent. Shared so `MethodEditor`'s `dismiss_native_error` and this
   # module's `dismiss_alias_error` can't drift on the clear-one-field
-  # contract — see CLAUDE.md's no-duplicate-implementations rule. Public:
+  # contract — see AGENTS.md's no-duplicate-implementations rule. Public:
   # `MethodEditor` (which already aliases this module) calls it directly.
   def dismiss_pane_error(socket, key) when is_atom(key) do
     case socket.assigns[key] do
@@ -1386,7 +1443,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # class-then-selector order mirrors the LSP `definition_provider.rs`: a name
   # that is a loaded class is a class reference (→ its definition tab); anything
   # else is treated as a message send (→ its implementor(s)).
-  defp run_goto_definition(socket, token, code) do
+  defp run_goto_definition(socket, token, context) do
     cond do
       # An empty/blank token is a bare no-op (the JS never sends one — it only
       # fires on an identifier — but guard it without even a flash).
@@ -1402,7 +1459,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
         |> assign(nav_popover: nil)
 
       true ->
-        case goto_selector(token, code) do
+        case goto_selector(socket, token, context) do
           nil -> goto_not_found(socket)
           selector -> open_implementor(socket, selector)
         end
@@ -1419,42 +1476,35 @@ defmodule BtAttachWeb.Live.SystemBrowser do
     |> Enum.any?(fn row -> Map.get(row, "name") == token end)
   end
 
-  # The message selector the clicked token denotes, derived from the `code`
-  # line-prefix (the line up to and including the token):
+  # The message selector the clicked token denotes:
   #
-  #   * a KEYWORD send — the prefix ends in `…word:` (optionally with a trailing
-  #     argument the click landed before) — resolves to the maximal trailing run
-  #     of `word:` parts, so clicking any part of `dict at: k put: v` resolves the
-  #     whole `at:put:` selector.
+  #   * a KEYWORD part (the token ends in `:`, e.g. `fetch:` — the editor keeps
+  #     the colon) resolves to the send's FULL keyword selector (`fetch:options:`)
+  #     whichever part was clicked. That is the `keyword_selector` nav-query,
+  #     which runs the SAME recognizer cockpit hover uses (BT-4343), so strings,
+  #     comments, nested brackets and sends split across lines are handled in one
+  #     place. `before`/`suffix` are the editor context around the token.
   #   * otherwise the bare token is a UNARY selector (e.g. `factorial`).
   #
-  # An empty/whitespace token yields nil (no selector to resolve). The result is
-  # only ever fed to the `implementors` nav-query, whose `binary_to_existing_atom`
-  # guard turns an unknown selector into an empty result set — so a wrong guess is
-  # a graceful "no definition", never a crash.
-  defp goto_selector(token, code) when is_binary(code) do
-    case keyword_selector(code) do
-      nil -> if token == "", do: nil, else: token
-      selector -> selector
-    end
-  end
+  # An empty token, or a keyword part whose send does not resolve (inside a
+  # string/comment, an expression receiver), yields nil — "no definition", never
+  # a guess at a partial selector. The result is only ever fed to the
+  # `implementors` nav-query, whose `binary_to_existing_atom` guard turns an
+  # unknown selector into an empty result set, so a wrong guess is a graceful
+  # "no definition", never a crash.
+  defp goto_selector(socket, token, context) do
+    cond do
+      token == "" ->
+        nil
 
-  defp goto_selector(token, _code), do: if(token == "", do: nil, else: token)
+      String.ends_with?(token, ":") ->
+        case Facade.dispatch(:keyword_selector, context, RequestContext.build(socket)) do
+          {:value, %{"selector" => selector}} when is_binary(selector) -> selector
+          _ -> nil
+        end
 
-  # Extract the trailing keyword selector (`word:word:…`) from a line prefix, or
-  # nil when it is not a keyword send. The clicked keyword belongs to the send
-  # that ends the prefix, so we first trim to the trailing segment — everything
-  # after the last statement/grouping breaker (`.`, `;`, brackets, `^`, `|`) —
-  # then join that segment's contiguous `word:` parts. This keeps unrelated sends
-  # earlier on the line out of the selector (e.g. `coll at: i. obj foo: x bar: y`
-  # clicked near `y` resolves to `foo:bar:`, not `at:foo:bar:`).
-  defp keyword_selector(code) do
-    segment = code |> String.split(~r/[.;()\[\]{}^|]/) |> List.last()
-    parts = Regex.scan(~r/([A-Za-z_][A-Za-z0-9_]*):/, segment) |> Enum.map(&Enum.at(&1, 1))
-
-    case parts do
-      [] -> nil
-      _ -> parts |> Enum.map(&(&1 <> ":")) |> Enum.join()
+      true ->
+        token
     end
   end
 

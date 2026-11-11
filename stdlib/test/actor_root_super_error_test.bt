@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4592: a method-root `super` send in an actor whose inherited method
+// raises must raise that error, not `argument_error (badarg)` from unpacking
+// the `{error, E}` answer as a `{reply, Result, NewState}` triple.
+//
+// Fixtures: stdlib/test/fixtures/bt4592base.bt, bt4592actor.bt
+
+TestCase subclass: ActorRootSuperErrorTest
+
+  testRootSuperErrorFromObject =>
+    a := Bt4592Actor spawn
+    self assert: ([a rootSuper] on: Error do: [:e | e message]) equals: "x"
+    a stop
+
+  testRootSuperErrorNotLastStatement =>
+    a := Bt4592Actor spawn
+    self assert: ([
+      a rootSuperNotLast
+    ] on: Error do: [:e | e message]) equals: "x"
+    a stop
+
+  testRootSuperErrorFromCompiledActorSuperclass =>
+    a := Bt4592Actor spawn
+    self assert: ([a boom] on: Error do: [:e | e message]) equals: "base"
+    a stop
+
+  testActorSurvivesRootSuperError =>
+    a := Bt4592Actor spawn
+    [a boom] on: Error do: [:e | e message]
+    self assert: a count equals: 0
+    a stop

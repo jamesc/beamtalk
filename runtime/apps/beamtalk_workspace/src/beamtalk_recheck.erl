@@ -59,7 +59,7 @@ live source sees the *new* signature for free; no explicit per-class
 override is constructed here. `class_hierarchy` is opt-in on `diagnostics/3`
 rather than the `diagnostics/2` default specifically so this module's new
 behaviour does not also change the keystroke-driven cockpit editor's
-diagnostics (`beamtalk_repl_ops_dev:diagnostics_for/2`), which
+diagnostics (`beamtalk_repl_ops_dev:diagnostics_for/3`), which
 stays on the unchanged class-context-free default.
 
 Returned diagnostics are filtered to the ones attributable to *this* reload,
@@ -553,10 +553,15 @@ hierarchy.
 
 ## Why this exists
 
+**BT-4319 note:** a plain `Type` pattern on a class with subclasses is now
+legal, and an arm compiled while the class was leaf falls back to a runtime
+kind-of test, so only the `matchExhaustive:` proof below can be invalidated by
+a first subclass. The "has subclasses" error mentioned below no longer exists.
+
 ADR 0107 Phase A's `Type` pattern (`binding :: ClassName`) and
 `matchExhaustive:`'s residual computation over a closed `Known | Nil` union
 are both restricted to **leaf** classes at compile time
-(`match_validators:validate_type_pattern_class`'s "has subclasses" error;
+(`match_validators:validate_type_pattern_class`, relaxed by BT-4319;
 `is_concrete_leaf_class`). A `matchExhaustive:` site
 proved exhaustive while `SuperclassBin` was leaf has that proof silently
 invalidated the moment a live reload gives it a first subclass — with
@@ -890,8 +895,9 @@ non-`error` `Dnu` or `Type` diagnostic" — the same two categories `trigger/4`
 treats as reload-relevant, minus the selector-name/classification narrowing
 that only makes sense relative to one specific change.
 
-`beamtalk lint --warnings-as-errors` reproduces this verdict in Rust
-(`live_recheck_verdict` in `crates/beamtalk-cli/src/commands/lint.rs`); both
+`beamtalk lint --warnings-as-errors` and MCP `lint` (`warnings_as_errors`)
+reproduce this verdict in Rust (`live_recheck_verdict` in
+`crates/beamtalk-core/src/compilation/diagnostics_policy.rs`); both
 are pinned to `test/fixtures/live_recheck_verdict_conformance.json`
 (BT-4377), so change the fixture, not just one side.
 """.
@@ -1265,7 +1271,7 @@ apply_cap(Candidates, Cap) ->
 cap_note(0) ->
     undefined;
 cap_note(N) ->
-    iolist_to_binary(io_lib:format("~p more not checked", [N])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp more not checked", [N])).
 
 -doc """
 Re-check one candidate caller class: read its live source (never disk — a

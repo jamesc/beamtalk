@@ -1,0 +1,17 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# The dependency half of the `lint_verdict_dep_cycle` parity fixture: it
+# depends back on its consumer (a cycle) and bundles the only type source
+# for `parity_dep_cycle_ffi` as a package stub (ADR 0075 layer 2).
+
+[package]
+name = "parity_lint_verdict_dep_cycle_dep"
+version = "0.1.0"
+description = "Dependency half of the lint_verdict_dep_cycle parity fixture"
+
+[dependencies]
+parity_lint_verdict_dep_cycle = { path = "../lint_verdict_dep_cycle" }
+
+[stubs]
+path = "native_stubs"

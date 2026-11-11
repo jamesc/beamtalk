@@ -66,6 +66,7 @@ module 'self_send_explicit_class_reference' ['new'/0, 'new'/1, 'dispatch'/3, 'di
                 <'show:'> when 'true' -> 'slow'
                 <'showCr:'> when 'true' -> 'slow'
                 <'subclassResponsibility'> when 'true' -> 'slow'
+                <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
                 <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('ExplicitRefOpenClass', Selector)
             end of
@@ -85,7 +86,13 @@ module 'self_send_explicit_class_reference' ['new'/0, 'new'/1, 'dispatch'/3, 'di
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     try call 'self_send_explicit_class_reference':'dispatch'(Selector, Args, Self)
     of <D4Result> -> {'reply', D4Result, State}
-    catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}
+    catch <D4Type, D4Error, D4Stack> ->
+        case D4Type of
+            <'error'> when 'true' ->
+                let <D4Built> = primop 'build_stacktrace'(D4Stack) in
+                {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built, ~{}~), State}
+            <_D4Other> when 'true' -> primop 'raw_raise'(D4Type, D4Error, D4Stack)
+        end
 
 
 'has_method'/1 = fun (Selector) ->

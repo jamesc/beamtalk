@@ -100,7 +100,7 @@ builtin_dispatch('printString', [], #{
 }) ->
     {ok,
         beamtalk_primitive:string_from_binary(
-            iolist_to_binary(io_lib:format("CompiledMethod(~s)", [Sel]))
+            beamtalk_error:chars_to_binary(io_lib:format("CompiledMethod(~ts)", [Sel]))
         )};
 %% asString => same as printString
 builtin_dispatch('asString', [], Value) ->

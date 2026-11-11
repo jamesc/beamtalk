@@ -382,6 +382,7 @@ fn factory_self_new_colon_supplying_every_field_is_clean() {
         span(),
     );
     let mut factory = MethodDefinition {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         selector: MessageSelector::Keyword(vec![
             KeywordPart::new("for:", span()),
             KeywordPart::new("client:", span()),

@@ -29,6 +29,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 
 -export([
     class_send/3,
+    class_send/4,
     handle_class_self_call/1,
     lookup_direct_constructor/3,
     class_super_dispatch/4,
@@ -44,22 +45,32 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     class_understands_class_selector/2,
     class_object_understands/2,
     find_class_method_from_class/2,
+    ancestor_class_side_extension/2,
     in_caller_owner/2,
     class_method_body/2
 ]).
 
 -type selector() :: atom().
 -type class_name() :: atom().
+%% The bound on a class-process `class_method_call`: `default` picks the
+%% per-selector default (`class_method_call_timeout/1`), anything else is
+%% passed to `gen_server:call/3` unchanged (BT-4556).
+-type call_timeout() :: timeout() | default.
 
 %% ADR 0142 (BT-4300): the in-caller class-send path is one call into the
 %% compiled method, plus the guard and memo reads; its helpers are inlined so
 %% the hop costs no extra reductions.
--compile({inline, [in_caller_owner/2, class_method_owner/2, run_in_caller/7]}).
+-compile({inline, [in_caller_owner/2, class_method_owner/2, run_in_caller/7, send_in_caller_or/4]}).
 %% ADR 0142 §2 (BT-4300): a class method the caller may run itself: the
 %% receiving class, its metaclass tag and module, the defining class and
 %% module, and the compiled function name (`class_method_owner/2`).
 -type owner() :: {owner, class_name(), atom(), module(), class_name(), module(), atom()}.
 -export_type([owner/0]).
+%% BT-4307: what the class-side chain walk (`find_class_side_method/3`) finds
+%% first: a class-side extension registered on a class's metaclass tag, or a
+%% class method in its table (compiled or ADR 0084 runtime fun).
+-type class_side_found() ::
+    {extension, class_name(), fun()} | {method, class_name(), module()} | not_found.
 
 -doc """
 Send a message to a class object synchronously (ADR 0013 Phase 1).
@@ -69,7 +80,21 @@ message protocol ({Selector, Args}) to the class process message format.
 Unwraps {ok, Value} / {error, Error} results for seamless integration.
 """.
 -spec class_send(pid() | undefined, atom(), list()) -> term().
-class_send(undefined, Selector, _Args) ->
+class_send(ClassPid, Selector, Args) ->
+    class_send(ClassPid, Selector, Args, default).
+
+-doc """
+`class_send/3` with an explicit bound on the wait for the class process
+(BT-4556): when the send of a class method goes through the class gen_server
+(ADR 0142 declined to run it in the caller), `Timeout` replaces the default
+`class_method_call` timeout (`class_method_call_timeout/1`: 60 s, 5 min for
+test execution); `default` keeps it. A send that runs in the caller has no
+wait to bound, so `Timeout` does not apply to it; neither does it apply to the
+instantiation and supervisor-start selectors (`new`, `new:`, `spawn`,
+`spawnWith:`, `supervise`, ...), which keep their own routes.
+""".
+-spec class_send(pid() | undefined, atom(), list(), call_timeout()) -> term().
+class_send(undefined, Selector, _Args, _Timeout) ->
     Error = beamtalk_error:new(class_not_found, unknown, Selector),
     beamtalk_error:raise(Error);
 %% ADR 0135 §1: `supervise` and the spawn family on a Supervisor or
@@ -77,7 +102,7 @@ class_send(undefined, Selector, _Args) ->
 %% `beamtalk_supervisor:class_start/4`, never in the class gen_server (which
 %% would queue every other send to the class behind the start and deadlock
 %% any child that messages the class while it starts).
-class_send(ClassPid, Selector, Args) when
+class_send(ClassPid, Selector, Args, Timeout) when
     is_pid(ClassPid),
     (Selector =:= supervise orelse Selector =:= spawn orelse Selector =:= 'spawnWith:' orelse
         Selector =:= 'spawnAs:' orelse Selector =:= 'spawnWith:as:')
@@ -86,10 +111,10 @@ class_send(ClassPid, Selector, Args) when
         {ok, ClassName, Module} ->
             beamtalk_supervisor:class_start(ClassName, Module, Selector, Args);
         error ->
-            class_send_plain(ClassPid, Selector, Args)
+            class_send_plain(ClassPid, Selector, Args, Timeout)
     end;
-class_send(ClassPid, Selector, Args) ->
-    class_send_plain(ClassPid, Selector, Args).
+class_send(ClassPid, Selector, Args, Timeout) ->
+    class_send_plain(ClassPid, Selector, Args, Timeout).
 
 %% `{ok, ClassName, Module}` when `ClassPid` is a Supervisor or
 %% DynamicSupervisor class (ETS reads only), else `error`.
@@ -108,20 +133,20 @@ supervisor_start_target(ClassPid) ->
             error
     end.
 
--spec class_send_plain(pid(), atom(), list()) -> term().
+-spec class_send_plain(pid(), atom(), list(), call_timeout()) -> term().
 %% Self-call for instantiation selectors — bypass gen_server to avoid deadlock.
 %% When a class method sends new/new:/spawn/spawnWith: to its own class (ClassPid == self()),
 %% gen_server:call(self(), ...) would deadlock. Instead, perform instantiation directly
 %% using class metadata from the process dictionary (set during init).
-class_send_plain(ClassPid, 'new', Args) when ClassPid =:= self() ->
+class_send_plain(ClassPid, 'new', Args, _Timeout) when ClassPid =:= self() ->
     handle_self_instantiation(new, 'new', Args);
-class_send_plain(ClassPid, 'new:', Args) when ClassPid =:= self() ->
+class_send_plain(ClassPid, 'new:', Args, _Timeout) when ClassPid =:= self() ->
     handle_self_instantiation(new, 'new:', Args);
-class_send_plain(ClassPid, spawn, Args) when ClassPid =:= self() ->
+class_send_plain(ClassPid, spawn, Args, _Timeout) when ClassPid =:= self() ->
     handle_self_instantiation(spawn, spawn, Args);
-class_send_plain(ClassPid, 'spawnWith:', Args) when ClassPid =:= self() ->
+class_send_plain(ClassPid, 'spawnWith:', Args, _Timeout) when ClassPid =:= self() ->
     handle_self_instantiation(spawn, 'spawnWith:', Args);
-class_send_plain(ClassPid, 'new', []) ->
+class_send_plain(ClassPid, 'new', [], _Timeout) ->
     %% an eligible Value builds in the caller via a direct
     %% `Module:new()` call — the same call `handle_new_compiled` would make,
     %% minus the gen_server hop (and its `IsConstructible` cache write, which
@@ -135,27 +160,31 @@ class_send_plain(ClassPid, 'new', []) ->
                 unwrap_class_call(gen_server:call(P, {new, []}))
             end)
     end;
-class_send_plain(ClassPid, 'new:', [Map]) when is_map(Map) ->
-    %% same for `new:` with a map argument, via `Module:new/1`.
-    %% A non-map argument keeps the unguarded clause below, whose gen_server
-    %% path reproduces the legacy fallbacks (see `lookup_direct_constructor/3`).
-    case lookup_direct_constructor(ClassPid, 'new:', [Map]) of
+class_send_plain(ClassPid, 'new:', [Arg], _Timeout) ->
+    %% same for `new:` with a map argument, via `Module:new/1`. A non-map
+    %% argument never builds directly (see `lookup_direct_constructor/3`).
+    %% BT-4475: either way, a class whose own explicit class-side `new:` needs
+    %% nothing from its class process (codegen leaves `new:` out of its
+    %% published process-bound selectors) runs that class method in the
+    %% caller, exactly as the `{new, [Arg]}` handler would have called it
+    %% there (`has_class_new_in_chain`), behind the same guard as every
+    %% in-caller class method. Anything else keeps the gen_server path, which
+    %% reproduces the legacy fallbacks.
+    case lookup_direct_constructor(ClassPid, 'new:', [Arg]) of
         {ok, Module} ->
-            erlang:apply(Module, new, [Map]);
+            erlang:apply(Module, new, [Arg]);
         error ->
-            class_send_with_recovery(ClassPid, 'new:', fun(P) ->
-                unwrap_class_call(gen_server:call(P, {new, [Map]}))
+            send_in_caller_or(ClassPid, 'new:', [Arg], fun() ->
+                class_send_with_recovery(ClassPid, 'new:', fun(P) ->
+                    unwrap_class_call(gen_server:call(P, {new, [Arg]}))
+                end)
             end)
     end;
-class_send_plain(ClassPid, 'new:', [Map]) ->
-    class_send_with_recovery(ClassPid, 'new:', fun(P) ->
-        unwrap_class_call(gen_server:call(P, {new, [Map]}))
-    end);
-class_send_plain(ClassPid, spawn, []) ->
+class_send_plain(ClassPid, spawn, [], _Timeout) ->
     class_send_with_recovery(ClassPid, spawn, fun(P) ->
         unwrap_class_call(gen_server:call(P, {spawn, []}))
     end);
-class_send_plain(ClassPid, 'spawnWith:', [Map]) ->
+class_send_plain(ClassPid, 'spawnWith:', [Map], _Timeout) ->
     class_send_with_recovery(ClassPid, 'spawnWith:', fun(P) ->
         unwrap_class_call(gen_server:call(P, {spawn, [Map]}))
     end);
@@ -186,12 +215,21 @@ class_send_plain(ClassPid, 'spawnWith:', [Map]) ->
 %% Report it the way `handle_metaclass_self_call/2` already reports
 %% the metaclass equivalent. No working path changes: the alternative was an
 %% exit, not a successful call.
-class_send_plain(ClassPid, Selector, Args) ->
+class_send_plain(ClassPid, Selector, Args, Timeout) ->
     %% ADR 0142 §2 (BT-4300): a class method of a class that needs no process
     %% (no class variables anywhere in its chain, not shadowed, a selector
     %% that is not process-bound) runs in the caller. Checked
     %% before the self-call guard: an in-caller call has no gen_server to
     %% deadlock on, so a block re-entering its class answers.
+    send_in_caller_or(ClassPid, Selector, Args, fun() ->
+        class_send_via_process(ClassPid, Selector, Args, Timeout)
+    end).
+
+%% Run `Selector` in the caller when `in_caller_owner/2` names its owner
+%% (ADR 0142 §2-§3), else `Otherwise()`: the one in-caller step of both the
+%% general class-method clause and the `new:` clause (BT-4475).
+-spec send_in_caller_or(pid(), selector(), list(), fun(() -> term())) -> term().
+send_in_caller_or(ClassPid, Selector, Args, Otherwise) ->
     case in_caller_owner(ClassPid, Selector) of
         {owner, ClassName, Tag, Module, DefiningClass, DefiningModule, FunName} ->
             ClassSelf = #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid},
@@ -199,20 +237,20 @@ class_send_plain(ClassPid, Selector, Args) ->
                 ClassSelf, Selector, Args, ClassName, DefiningClass, DefiningModule, FunName
             );
         decline ->
-            class_send_via_process(ClassPid, Selector, Args)
+            Otherwise()
     end.
 
 %% Today's routing for a send the caller may not run itself (ADR 0142 §2).
--spec class_send_via_process(pid(), selector(), list()) -> term().
+-spec class_send_via_process(pid(), selector(), list(), call_timeout()) -> term().
 %% There is no unguarded direct call here (BT-4301): `in_caller_owner/2`
 %% already ran every class method the caller may run, so anything left is a
 %% shadowed method (a class-side extension or ADR 0084 runtime fun the class
 %% process honours), a chain with class variables, or a process-bound selector.
-class_send_via_process(ClassPid, Selector, Args) when ClassPid =:= self() ->
+class_send_via_process(ClassPid, Selector, Args, _Timeout) when ClassPid =:= self() ->
     class_send_from_own_process(Selector, Args);
-class_send_via_process(ClassPid, Selector, Args) ->
+class_send_via_process(ClassPid, Selector, Args, Timeout) ->
     class_send_with_recovery(ClassPid, Selector, fun(P) ->
-        class_send_dispatch(P, Selector, Args)
+        class_send_dispatch(P, Selector, Args, Timeout)
     end).
 
 -doc """
@@ -269,22 +307,25 @@ one class for its whole life, so a hit needs no pid-to-name lookup; a restarted
 class has a new pid (and its `init/1` flushes the cache anyway).
 
 Derived by walking the chain exactly as the class process does
-(`handle_class_method_call/6`): the receiving class's own class-side
-extensions are not consulted here, because any extension on it already makes
-`direct_call_ok/2` false; then its local class methods and its ancestors',
-from the published selector lists, which include ADR 0084 runtime funs, so a
-runtime fun at an ancestor counts as that ancestor's method (and is applied
-from the fun store by `apply_class_method_body/7`). An ancestor's class-side
-extension is not reached, as on the class-process path (BT-4307).
+(`handle_class_method_call/6`), through the one class-side walk
+`find_class_side_method/3`: at the receiving class and each ancestor, a
+class-side extension first, then the class's methods from its published
+selector list, which includes ADR 0084 runtime funs, so a runtime fun at an
+ancestor counts as that ancestor's method (and is applied from the fun store
+by `apply_class_method_body/7`). An extension found first, on the class or an
+ancestor (BT-4307), declines: the class process runs it. (An extension on the
+receiving class also makes `direct_call_ok/2` false.)
 
 `decline` is memoised too (process-bound selector, class-variable reflection
-send, no class method in the chain, class variables declared in the chain or a
-fact unpublished): the next metadata write flushes it. A pid with no
-registered class, or a class with no metadata row, is never memoised. Every
-input is a class-metadata row field whose writers invalidate the cache after
-the write lands: `insert/5`, `merge_identity/5`, `set_runtime_class_methods/2`
+send, an extension answering first, no class method in the chain, class
+variables declared in the chain or a fact unpublished): the next metadata
+write flushes it. A pid with no registered class, or a class with no metadata
+row, is never memoised. Every input is a class-metadata row field or an
+extension-registry row whose writers invalidate the cache after the write
+lands: `insert/5`, `merge_identity/5`, `set_runtime_class_methods/2`
 (selectors, superclass, module), `put_class_variables/2` (the chain's class
-variable facts) and `put_process_bound_selectors/2`.
+variable facts), `put_process_bound_selectors/2`, and
+`beamtalk_extensions:register/5` / `unregister/3` (class-side extensions).
 """.
 -spec class_method_owner(pid(), selector()) -> owner() | decline.
 class_method_owner(ClassPid, Selector) ->
@@ -326,8 +367,8 @@ derive_class_method_owner(ClassName, Selector, ProcessBound) ->
         true ->
             decline;
         false ->
-            case find_class_method_from_class(Selector, ClassName) of
-                {ok, DefiningClass, DefiningModule} ->
+            case find_class_side_method_from_class(Selector, ClassName) of
+                {method, DefiningClass, DefiningModule} ->
                     %% Rule 2, over the whole chain (see
                     %% `beamtalk_class_metadata:chain_has_class_variables/1`).
                     case beamtalk_class_metadata:chain_has_class_variables(ClassName) of
@@ -336,6 +377,10 @@ derive_class_method_owner(ClassName, Selector, ProcessBound) ->
                         true ->
                             decline
                     end;
+                {extension, _Owner, _Fun} ->
+                    %% A class-side extension answers first, on the class or
+                    %% an ancestor (BT-4307): the class process runs it.
+                    decline;
                 not_found ->
                     %% Only the `Class` chain answers: the BT-4073 skip in
                     %% `class_send_dispatch/3` already runs it in the caller.
@@ -369,7 +414,7 @@ context seeding, the mirrored caller pid, the entry group leader, the call
 timeouts) are not recreated: the caller is the context they stand in for.
 
 The outcome is adapted exactly as the class-process path adapts the same
-outcome (`run_with_class_vars/3`'s reply, then `class_method_call/3`), so
+outcome (`run_with_class_vars/3`'s reply, then `class_method_call/4`), so
 every error is raised with the value it has today.
 """.
 -spec run_in_caller(
@@ -424,7 +469,9 @@ brings the fast path back. `new` needs no chain check because `new/0` is
 itself the override slot (a custom `new` compiles to, or delegates from, it),
 so the direct call and the gen_server path reach the same function either
 way; an ancestor's class-side `new` extension does not shadow the class's own
-synthesized `new`, as on the class-process path.
+synthesized `new` (the class's own method is found first, BT-4307). An
+ancestor's class-side `new:` extension does (BT-4588): `chain_has_user_new1/1`
+counts it as that ancestor's user `new:`.
 
 The class, its tag and module (or the decline) are memoised per class pid and
 selector in `beamtalk_class_derived_cache` (`{direct_constructor, ClassPid,
@@ -645,56 +692,93 @@ else a structured `does_not_understand` is raised.
 class_super_dispatch(ClassName, Selector, Args, #beamtalk_object{} = ClassSelf) when
     is_list(Args)
 ->
+    class_side_dispatch_found(
+        ClassName, Selector, Args, find_class_super_method(Selector, ClassName), ClassSelf
+    ).
+
+-doc """
+Apply what a class-side chain walk found (`find_class_side_method/3`) for a
+self-send, a builder self-send or a `super` send (BT-4307): an extension runs
+through `apply_class_self_extension/5` (errors named after the class that
+registered it), a class method through `class_self_dispatch_chain/5`, and
+`not_found` falls through to the class-object protocol there.
+""".
+-spec class_side_dispatch_found(
+    class_name(), selector(), list(), class_side_found(), #beamtalk_object{}
+) -> term() | no_return().
+class_side_dispatch_found(_ClassName, Selector, Args, {extension, Owner, Fun}, ClassSelf) ->
+    apply_class_self_extension(Owner, Fun, Selector, Args, ClassSelf);
+class_side_dispatch_found(ClassName, Selector, Args, {method, Owner, Module}, ClassSelf) ->
+    class_self_dispatch_chain(ClassName, Selector, Args, {ok, Owner, Module}, ClassSelf);
+class_side_dispatch_found(ClassName, Selector, Args, not_found, ClassSelf) ->
+    class_self_dispatch_chain(ClassName, Selector, Args, not_found, ClassSelf).
+
+-doc """
+The ancestor a class-side `super Selector` from `ClassName` resolves to: the
+class-side chain walk (`find_class_side_method/3`) from `ClassName`'s
+superclass.
+""".
+-spec find_class_super_method(selector(), class_name()) -> class_side_found().
+find_class_super_method(Selector, ClassName) ->
+    find_class_side_method(Selector, superclass_from_ets(ClassName), ClassName).
+
+-doc """
+Whether the class-side chain walk from `ClassName`'s superclass
+(`find_class_side_method/3`) finds a class-side extension of `Selector` on an
+ancestor before any class method (BT-4588): what the class process runs for
+`Selector` sent to `ClassName` when `ClassName` itself does not define it.
+`beamtalk_object_class`'s `{new, _}` handler asks it for `new:`, so an
+ancestor's `new:` extension is not hidden by the class's synthesized `new:`.
+""".
+-spec ancestor_class_side_extension(class_name(), selector()) -> boolean().
+ancestor_class_side_extension(ClassName, Selector) ->
     case find_class_super_method(Selector, ClassName) of
-        {extension, AncestorName, AncestorTag} ->
-            case check_class_self_extension(AncestorName, AncestorTag, Selector, Args, ClassSelf) of
-                {ok, Outcome} ->
-                    Outcome;
-                %% Unregistered between the probe and the call: the ancestor's
-                %% own class methods (then its ancestors') answer instead.
-                %% `find_class_method_from_class/2` walks class methods only,
-                %% so a higher ancestor's class-side extension is not
-                %% re-probed on this path. That is harmless: the answer can
-                %% only differ when a higher ancestor also extends `Selector`
-                %% and this send raced a concurrent unregister of the nearer
-                %% one; the walk still starts at `AncestorName` (never
-                %% `ClassName`, so no self-recursion), and the next send sees
-                %% the settled registry through the full probe.
-                not_found ->
-                    class_self_dispatch_chain(
-                        ClassName,
-                        Selector,
-                        Args,
-                        find_class_method_from_class(Selector, AncestorName),
-                        ClassSelf
-                    )
-            end;
-        {method, AncestorName, AncestorModule} ->
-            class_self_dispatch_chain(
-                ClassName, Selector, Args, {ok, AncestorName, AncestorModule}, ClassSelf
-            );
-        not_found ->
-            %% No ancestor class method or extension: the class-object
-            %% protocol answers (`super name`, `super superclass`, BT-4252).
-            class_self_protocol_fallthrough(ClassName, Selector, Args, ClassSelf)
+        {extension, _Owner, _Fun} -> true;
+        _ -> false
     end.
 
 -doc """
-The ancestor a class-side `super Selector` from `ClassName` resolves to,
-walked from `ClassName`'s superclass: `{extension, Ancestor, AncestorTag}`
-when a class-side extension on that ancestor's metaclass tag matches first,
-`{method, Ancestor, Module}` when its class-method table does, else
-`not_found`.
+The class-side chain walk from `ClassName` itself (BT-4307): what an external
+send, a class-side self-send and `respondsTo:` of `Selector` to `ClassName`
+resolve to (`find_class_side_method/3`).
 """.
--spec find_class_super_method(selector(), class_name()) ->
-    {extension, class_name(), atom()} | {method, class_name(), atom()} | not_found.
-find_class_super_method(Selector, ClassName) ->
+-spec find_class_side_method_from_class(selector(), class_name()) -> class_side_found().
+find_class_side_method_from_class(Selector, ClassName) ->
+    find_class_side_method(Selector, ClassName, ClassName).
+
+-doc """
+The one class-side method lookup (BT-4307), walked from `StartName` up the
+superclass chain. At each class, a class-side extension registered on its
+metaclass tag (ADR 0066) is checked before its own class methods (compiled,
+or ADR 0084 runtime funs, which its published selector list includes):
+`{extension, Class, Fun}` when an extension matches first,
+`{method, Class, Module}` when a class-method table does, else `not_found`.
+So an extension on an ancestor counts as that ancestor's method, for a send
+to any of its subclasses, exactly as the instance side inherits extensions.
+
+Shared by every class-side lookup: the external send
+(`handle_class_method_call/6`), the in-caller owner memo
+(`derive_class_method_owner/3`), the class-side self-send
+(`class_self_send/3`, `class_self_dispatch_local/4`), `super`
+(`class_super_dispatch/4`, from the superclass) and `respondsTo:`
+(`class_understands_class_selector/2`). `ClassName` names the receiving class
+in the cycle warning.
+""".
+-spec find_class_side_method(selector(), class_name() | none, class_name()) ->
+    class_side_found().
+find_class_side_method(Selector, StartName, ClassName) ->
+    walk_class_side(Selector, StartName, ClassName, true).
+
+%% The walk behind `find_class_side_method/3` (`Extensions = true`) and
+%% `find_class_method_from_class/2` (`false`, class-method tables only).
+-spec walk_class_side(selector(), class_name() | none, class_name(), boolean()) ->
+    class_side_found().
+walk_class_side(Selector, StartName, ClassName, Extensions) ->
     StepFun = fun(AncestorName, _Depth) ->
-        AncestorTag = receiver_tag(AncestorName),
-        case beamtalk_dispatch:check_extension(AncestorTag, Selector) of
-            {ok, _Fun} ->
-                {found, {extension, AncestorName, AncestorTag}};
-            not_found ->
+        case Extensions andalso class_side_extension(receiver_tag(AncestorName), Selector) of
+            {ok, Fun} ->
+                {found, {extension, AncestorName, Fun}};
+            _ ->
                 case beamtalk_class_metadata:lookup_methods(AncestorName) of
                     {ok, AncestorModule, Selectors} ->
                         case lists:member(Selector, Selectors) of
@@ -706,22 +790,34 @@ find_class_super_method(Selector, ClassName) ->
                 end
         end
     end,
-    case
-        beamtalk_hierarchy:walk_ancestors(
-            superclass_from_ets(ClassName), StepFun, ?MAX_HIERARCHY_DEPTH
-        )
-    of
+    case beamtalk_hierarchy:walk_ancestors(StartName, StepFun, ?MAX_HIERARCHY_DEPTH) of
         {found, Found} ->
             Found;
         not_found ->
             not_found;
         {max_depth_exceeded, CycleAncestor} ->
             ?LOG_WARNING(
-                "find_class_super_method: max hierarchy depth ~p exceeded at ~p (starting from ~p) — possible cycle",
+                "find_class_side_method: max hierarchy depth ~p exceeded at ~p (starting from ~p) — possible cycle",
                 [?MAX_HIERARCHY_DEPTH, CycleAncestor, ClassName],
                 #{domain => [beamtalk, runtime]}
             ),
             not_found
+    end.
+
+%% The class-side extension registered for `Selector` under the metaclass tag
+%% `Tag`, read from the registry only while the tag's raw `extension` shadow
+%% flag is up: `beamtalk_extensions:register/5` raises it before the row is
+%% visible and clears it only after the tag's last row is gone, so once the
+%% flags are authoritative (`is_ready/0`) a lowered flag means no row, and the
+%% lookup pays one `persistent_term` read per class instead of an ETS lookup.
+-spec class_side_extension(atom(), selector()) -> {ok, fun()} | not_found.
+class_side_extension(Tag, Selector) ->
+    case
+        beamtalk_class_shadow_flags:is_ready() andalso
+            not beamtalk_class_shadow_flags:is_set(extension, Tag)
+    of
+        true -> not_found;
+        false -> beamtalk_dispatch:check_extension(Tag, Selector)
     end.
 
 -spec receiver_tag(class_name()) -> atom().
@@ -737,12 +833,13 @@ reference (its metaclass tag, its own module and its registered pid), passed
 as is, so no registry read rebuilds it per send (BT-4301; BT-4300 had looked
 it up with `whereis_class` + `lookup_module` to fix the caller-pid bug).
 
-Checks the receiving class's own class-side extensions first (keyed under its
-metaclass tag; extensions are never inherited, so only that tag is checked),
-mirroring `handle_class_method_call/6`'s extension-before-method order, then
-walks the class-method hierarchy starting at the receiving class itself and
-applies the found `DefiningModule:class_<Selector>` (or runtime class-method
-fun) in the caller's process via `apply_class_method_in_context/6`.
+Walks the class side from the receiving class itself
+(`find_class_side_method/3`): at each class, its class-side extension
+(keyed under its metaclass tag) before its class methods, the order
+`handle_class_method_call/6` uses, so an ancestor's extension counts as that
+ancestor's method (BT-4307). Applies the found extension, or
+`DefiningModule:class_<Selector>` (or runtime class-method fun), in the
+caller's process via `apply_class_method_in_context/6`.
 
 The receiving class is the class named by `ClassSelf`, which for an inherited
 class method is a subclass of the class whose code is running. Starting at
@@ -762,18 +859,9 @@ class_self_send(#beamtalk_object{class = Tag} = ClassSelf, Selector, Args) ->
     %% The receiving class's tag is both the extension key and the receiver's
     %% tag (BT-3766).
     ClassName = beamtalk_primitive:class_name_from_tag(Tag),
-    case check_class_self_extension(ClassName, Tag, Selector, Args, ClassSelf) of
-        {ok, Outcome} ->
-            Outcome;
-        not_found ->
-            class_self_dispatch_chain(
-                ClassName,
-                Selector,
-                Args,
-                find_class_method_from_class(Selector, ClassName),
-                ClassSelf
-            )
-    end.
+    class_side_dispatch_found(
+        ClassName, Selector, Args, find_class_side_method_from_class(Selector, ClassName), ClassSelf
+    ).
 
 -doc """
 Guard for the compiled class-side self-send fast path (BT-3666).
@@ -785,8 +873,10 @@ true -> class_foo(ClassSelf, ...) ; false -> class_self_send(ClassSelf, ...)
 end`. The direct call is only equivalent to the walk when the receiving class
 is exactly the compiling class (`ReceiverTag =:= ClassTag`) AND nothing would
 shadow the compiled method that the walk honours: a class-side extension on the
-class (`check_class_self_extension/5`) or a runtime-installed class-method fun
-(ADR 0084, gated by the per-class `has_runtime_class_methods` flag). The
+class or a runtime-installed class-method fun (ADR 0084, gated by the
+per-class `has_runtime_class_methods` flag). An ancestor's class-side
+extension (BT-4307) never shadows it: the walk reaches the class's own method
+first. The
 `TestCase` run-selector guard (`test_spawn`) is preserved by declining.
 
 Costs one `persistent_term` read for the defining-class receiver (BT-3700: a
@@ -952,9 +1042,9 @@ class_self_dispatch_local(ClassName, Selector, Args, #beamtalk_object{} = ClassS
 ) ->
     term() | no_return().
 class_self_dispatch_local(ClassName, ClassTag, Selector, Args, ClassSelf) ->
-    case check_class_self_extension(ClassName, ClassTag, Selector, Args, ClassSelf) of
-        {ok, Outcome} ->
-            Outcome;
+    case class_side_extension(ClassTag, Selector) of
+        {ok, Fun} ->
+            apply_class_self_extension(ClassName, Fun, Selector, Args, ClassSelf);
         not_found ->
             case beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) of
                 {ok, _Info} ->
@@ -977,59 +1067,47 @@ class_self_dispatch_local(ClassName, ClassTag, Selector, Args, ClassSelf) ->
                     %% Not a local runtime method — walk the chain from the
                     %% class itself: its own compiled method (an own-class
                     %% reference's fallback, BT-4301), then inherited ones,
-                    %% which also resolves inherited runtime funs.
-                    class_self_dispatch_chain(
+                    %% each ancestor's class-side extension before its
+                    %% methods (BT-4307), which also resolves inherited
+                    %% runtime funs.
+                    class_side_dispatch_found(
                         ClassName,
                         Selector,
                         Args,
-                        find_class_method_from_class(Selector, ClassName),
+                        find_class_side_method_from_class(Selector, ClassName),
                         ClassSelf
                     )
             end
     end.
 
 -doc """
-Shared extension-registry probe for `class_self_send/3`,
-`class_self_dispatch_local/4` and `class_super_dispatch/4` — checking whether
-`ClassName`'s metaclass tag has a matching class-side extension
-(`beamtalk_extensions`, ADR 0066) before the caller falls through to its
-local/inherited-method lookups. Mirrors
-`handle_class_method_call/6`'s priority order (extension before
-local method table).
+Run a class-side extension (`beamtalk_extensions`, ADR 0066) found by a
+class-side self-send, builder self-send or `super` send:
+`class_side_dispatch_found/5` (whose chain walk found it on `Owner`, the
+receiving class or an ancestor, BT-4307) and `class_self_dispatch_local/5`
+(the receiving class's own tag, probed first).
 
 Reuses `apply_class_extension_fun/5` for the same calling convention and
 crash-safety as the external-dispatch path (a bad extension body must not
-take down the class's own long-lived gen_server, which this self-send also
-runs inside), then adapts the outcome to the self-dispatch caller shape via
-`unwrap_self_dispatch_outcome/3` — raw value on success, structured raises on
-failure.
+take down the class's own long-lived gen_server, which this self-send may
+also run inside), then adapts the outcome to the self-dispatch caller shape
+via `unwrap_self_dispatch_outcome/3` — raw value on success, structured
+raises on failure, named after `Owner`, the class that registered the
+extension.
 
-Returns `{ok, Outcome}` when an extension matched (`Outcome` already
-unwrapped and ready to return to the codegen call site), or `not_found` so
-the caller proceeds to its own next lookup.
+`ClassSelf` is the live receiver, so the extension body reads the receiver's
+class-variable key and `self` is the receiving class, which is a subclass of
+`Owner` when the extension is inherited.
 """.
--spec check_class_self_extension(
-    class_name(), atom(), selector(), list(), #beamtalk_object{}
-) ->
-    {ok, term()} | not_found | no_return().
-check_class_self_extension(ClassName, ClassTag, Selector, Args, ClassSelf) ->
-    %% `ClassTag` (`ClassName`'s own metaclass tag, derived once by the caller)
-    %% picks the extension; `ClassSelf` is the live receiver, so the extension
-    %% body reads the receiver's class-variable key. Its tag is `ClassTag`
-    %% except for a subclass receiver (`class_self_dispatch_local/4`) or a
-    %% `super` send that found the extension on an ancestor
-    %% (`class_super_dispatch/4`).
-    case beamtalk_dispatch:check_extension(ClassTag, Selector) of
-        {ok, Fun} ->
-            {ok,
-                unwrap_self_dispatch_outcome(
-                    ClassName,
-                    Selector,
-                    apply_class_extension_fun(Fun, ClassSelf, Args, ClassName, Selector)
-                )};
-        not_found ->
-            not_found
-    end.
+-spec apply_class_self_extension(
+    class_name(), fun(), selector(), list(), #beamtalk_object{}
+) -> term() | no_return().
+apply_class_self_extension(Owner, Fun, Selector, Args, ClassSelf) ->
+    unwrap_self_dispatch_outcome(
+        Owner,
+        Selector,
+        apply_class_extension_fun(Fun, ClassSelf, Args, Owner, Selector)
+    ).
 
 -doc "The compiled module backing `ClassName`, for a `ClassSelf` built outside the gen_server state.".
 -spec self_dispatch_module(class_name()) -> atom().
@@ -1078,7 +1156,7 @@ unwrap_self_dispatch_outcome(ClassName, Selector, Outcome) ->
 -spec raise_test_spawn_self_dispatch_unsupported(class_name(), selector()) -> no_return().
 raise_test_spawn_self_dispatch_unsupported(ClassName, Selector) ->
     %% Atom-safe formatting — see note on raise_class_self_dnu/2.
-    Hint = iolist_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
             "Inherited test-execution selector '~ts' cannot be self-sent from "
             "inside a class method on '~ts' — it would deadlock the class "
@@ -1099,7 +1177,7 @@ raise_class_self_dnu(ClassName, Selector) ->
     %% ClassName and Selector are atoms; use ~ts (unicode string) with
     %% atom_to_list/1 rather than ~s, which expects an iolist and raises
     %% badarg on atoms — that would mask the intended does_not_understand.
-    Hint = iolist_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
             "Class '~ts' has no class method '~ts' and no ancestor defines it",
             [atom_to_list(ClassName), atom_to_list(Selector)]
@@ -1117,13 +1195,13 @@ inherited class method and no runtime-installed class-method fun for the
 selector, the `Class`/`Behaviour` method runs in the caller straight away,
 exactly as it would after the gen_server replied `{error, not_found}`.
 """.
--spec class_send_dispatch(pid(), selector(), list()) -> term().
-class_send_dispatch(ClassPid, Selector, Args) ->
+-spec class_send_dispatch(pid(), selector(), list(), call_timeout()) -> term().
+class_send_dispatch(ClassPid, Selector, Args, Timeout) ->
     case class_chain_only_send(ClassPid, Selector, Args) of
         {ok, ClassName, Module} ->
             class_chain_send(ClassPid, ClassName, Module, Selector, Args);
         error ->
-            class_method_call(ClassPid, Selector, Args)
+            class_method_call(ClassPid, Selector, Args, Timeout)
     end.
 
 -doc """
@@ -1200,32 +1278,79 @@ class_chain_send(ClassPid, ClassName, Module, Selector, Args) ->
     end.
 
 -doc "Ask the class process to run a class method (`class_method_call`).".
--spec class_method_call(pid(), selector(), list()) -> term().
-class_method_call(ClassPid, Selector, Args) ->
+-spec class_method_call(pid(), selector(), list(), call_timeout()) -> term().
+class_method_call(ClassPid, Selector, Args, default) ->
+    class_method_call(ClassPid, Selector, Args, class_method_call_timeout(Selector));
+class_method_call(ClassPid, Selector, Args, Timeout) ->
     %% Try user-defined class methods before raising does_not_understand.
-    %% Test execution may take a long time; use longer timeout.
-    %% Class methods can do arbitrary I/O (HTTP, file, database), so the default
-    %% must accommodate network latency.  Test selectors get 5 minutes because a
-    %% full suite can run hundreds of tests sequentially.
-    Timeout =
-        case is_test_execution_selector(Selector) of
-            % 5 minutes for test suites
-            true -> 300000;
-            % 60 seconds — class methods may do network I/O
-            false -> 60000
-        end,
     %% ADR 0081: pass the caller's session context explicitly in the
     %% message instead of having the class gen_server copy our whole process
     %% dictionary via `process_info/2`. We read our own two keys cheaply with
     %% `get/1` here and the receiving clause seeds from the tuple.
-    class_method_result(
-        ClassPid,
+    %% BT-4556: running out of `Timeout` waiting for this class process raises
+    %% the structured `timeout` error an actor send raises, not the raw
+    %% `gen_server:call` exit. Only this call's own timeout is translated: the
+    %% `[ClassPid | _]` match leaves any other exit unchanged.
+    Reply =
+        try
+            gen_server:call(
+                ClassPid, {class_method_call, Selector, Args, local_session_context()}, Timeout
+            )
+        catch
+            exit:{timeout, {gen_server, call, [ClassPid | _]}} ->
+                raise_class_timeout(ClassPid, Selector, Timeout)
+        end,
+    case Reply of
+        {error, Nlr} when ?IS_NLR(Nlr) ->
+            %% A `^` out of a caller-supplied block the class process ran:
+            %% re-thrown as `class_method_result/4` would, and told to the
+            %% test-build commit check as thrown away from home, since the
+            %% block ran in another process (BT-4536). `run_in_caller/7`'s
+            %% `^` never hopped, so it takes `class_method_result/4`'s.
+            beamtalk_actor_state:rethrow_from_away(Nlr);
+        _ ->
+            class_method_result(ClassPid, Selector, Args, Reply)
+    end.
+
+-doc """
+Raise the structured `timeout` error for a class method the class process did
+not answer within `Timeout` milliseconds (BT-4556).
+""".
+-spec raise_class_timeout(pid(), selector(), timeout()) -> no_return().
+raise_class_timeout(ClassPid, Selector, Timeout) ->
+    %% The registry's pid index only: `class_name_safe/1` falls back to a
+    %% `gen_server:call` into the class process, which has just shown it is
+    %% busy.
+    ClassName =
+        case beamtalk_class_registry:class_name_for_pid(ClassPid) of
+            {ok, Name} -> Name;
+            not_found -> unknown
+        end,
+    Error = beamtalk_error:new(
+        timeout,
+        ClassName,
         Selector,
-        Args,
-        gen_server:call(
-            ClassPid, {class_method_call, Selector, Args, local_session_context()}, Timeout
-        )
-    ).
+        <<"The class method may legitimately take longer: send it with a longer timeout">>
+    ),
+    Message = beamtalk_error:chars_to_binary(
+        io_lib:format("Class process did not answer within ~tp ms", [Timeout])
+    ),
+    Error1 = beamtalk_error:with_message(Error, Message),
+    beamtalk_exception_handler:reraise(Error1).
+
+-doc """
+The default bound on a class-process `class_method_call` (BT-4556 exposes an
+override through `class_send/4`). Class methods can do arbitrary I/O (HTTP,
+file, database), so the default must accommodate network latency; test
+selectors get 5 minutes because a full suite can run hundreds of tests
+sequentially.
+""".
+-spec class_method_call_timeout(selector()) -> timeout().
+class_method_call_timeout(Selector) ->
+    case is_test_execution_selector(Selector) of
+        true -> 300000;
+        false -> 60000
+    end.
 
 -doc """
 Interpret a class method's reply (`{ok, Result}`, `{error, _}`), from the
@@ -1358,7 +1483,8 @@ metaclass_send_dispatch(Pid, Selector, Args, Self) ->
             %% `beamtalk_primitive:send/3` routes it here. A plain class literal or
             %% a single `class` send goes through `class_send/3` instead, which is
             %% why this needs its own clause rather than sharing that one.
-            throw(Nlr);
+            %% The block was away from home in the class process (BT-4536).
+            beamtalk_actor_state:rethrow_from_away(Nlr);
         Other ->
             unwrap_class_call(Other)
     end.
@@ -1431,13 +1557,16 @@ before local method table" order. A class-side extension
 (`Target class >> sel => body`, ADR 0066) is read back by both
 `class_method_call` (an ordinary `Target sel` send) and
 `metaclass_method_call` (`Target class sel`), which both funnel through this
-same function (`beamtalk_object_class:dispatch_class_method/5`).
+same function (`beamtalk_object_class:dispatch_class_method/5`). Past the
+local table, the superclass chain is walked by `find_class_side_method/3`,
+which checks each ancestor's class-side extension before its class methods,
+so an ancestor's extension answers a send to its subclass (BT-4307).
 
 Scope: this covers *external* sends (`Target sel` / `Target class sel`). A
 `self someSelector` send from inside another class method of the same
 class — `class_self_send/3` / `class_self_dispatch_local/4`, above —
-goes through `check_class_self_extension/5` instead, which checks the same
-registry under the same priority rule.
+walks the same chain through `find_class_side_method/3`, under the same
+priority rule.
 
 Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
 """.
@@ -1451,7 +1580,7 @@ Returns {reply, Result, NewState} or test_spawn or {error, not_found}.
 ) -> {reply, term(), map()} | test_spawn | {error, not_found}.
 handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, ClassVars) ->
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    case beamtalk_dispatch:check_extension(ClassTag, Selector) of
+    case class_side_extension(ClassTag, Selector) of
         {ok, Fun} ->
             invoke_class_extension(Fun, Args, ClassName, ClassTag, Module, ClassVars, Selector);
         not_found ->
@@ -1462,9 +1591,17 @@ handle_class_method_call(Selector, Args, ClassName, Module, LocalClassMethods, C
                         Selector, Args, ClassName, Module, ClassName, Module, ClassVars
                     );
                 false ->
-                    %% Not found locally — walk the superclass chain for inherited class methods.
-                    case find_class_method_in_chain(Selector, ClassName) of
-                        {ok, DefiningClass, DefiningModule} ->
+                    %% Not found locally — walk the superclass chain, each
+                    %% ancestor's class-side extension before its class
+                    %% methods (BT-4307).
+                    case
+                        find_class_side_method(Selector, superclass_from_ets(ClassName), ClassName)
+                    of
+                        {extension, _Owner, Fun} ->
+                            invoke_class_extension(
+                                Fun, Args, ClassName, ClassTag, Module, ClassVars, Selector
+                            );
+                        {method, DefiningClass, DefiningModule} ->
                             invoke_class_method(
                                 Selector,
                                 Args,
@@ -1490,10 +1627,10 @@ through `beamtalk_class_vars`, not threaded. The entry follows the same
 install / read-back / uninstall protocol as `invoke_class_method/7`
 (`run_with_class_vars/3`). `ClassSelf` mirrors the receiver
 `apply_class_method_in_context/6` builds for a local/inherited class method:
-`class = ClassTag` (the metaclass tag), `class_mod = Module` (this call's own
-compiled module; extensions are never inherited, so there is no separate
-"defining class" indirection), `pid = self()` (the class gen_server this
-handler is already running inside).
+`class = ClassTag` (the receiving class's metaclass tag), `class_mod = Module`
+(the receiving class's own compiled module, also for an extension inherited
+from an ancestor, BT-4307: an extension has no module of its own), `pid =
+self()` (the class gen_server this handler is already running inside).
 
 Like `beamtalk_dispatch:invoke_extension/6`, this catches and converts a
 crashing extension body rather than letting it escape, via
@@ -1899,16 +2036,16 @@ classify_undef(ClassName, DefiningClass, DefiningModule, Selector, FunName, ST) 
 module_not_loaded_hint(ClassName, DefiningClass, DefiningModule) ->
     case ClassName =:= DefiningClass of
         true ->
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "Class '~s' is not registered - the module '~s' may have failed to load",
+                    "Class '~ts' is not registered - the module '~ts' may have failed to load",
                     [ClassName, DefiningModule]
                 )
             );
         false ->
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "Class '~s' inherits this method from '~s' - that class's module '~s' may have failed to load",
+                    "Class '~ts' inherits this method from '~ts' - that class's module '~ts' may have failed to load",
                     [ClassName, DefiningClass, DefiningModule]
                 )
             )
@@ -1918,79 +2055,41 @@ module_not_loaded_hint(ClassName, DefiningClass, DefiningModule) ->
 method_not_found_hint(ClassName, DefiningClass, Selector) ->
     case ClassName =:= DefiningClass of
         true ->
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "Class method '~s' not found on '~s' (arity mismatch or undefined selector)",
+                    "Class method '~ts' not found on '~ts' (arity mismatch or undefined selector)",
                     [Selector, ClassName]
                 )
             );
         false ->
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "Class method '~s' inherited from '~s' not found on '~s' (arity mismatch or undefined selector)",
+                    "Class method '~ts' inherited from '~ts' not found on '~ts' (arity mismatch or undefined selector)",
                     [Selector, DefiningClass, ClassName]
                 )
             )
     end.
 
 -doc """
-Walk the superclass chain to find an inherited class method.
+Walk the class-method tables from `ClassName` itself up the superclass chain,
+ignoring class-side extensions: `{ok, DefiningClass, Module}` for the first
+class whose published selector list (compiled methods and ADR 0084 runtime
+funs) has `Selector`. Used by `performLocally:`
+(`beamtalk_object_class:local_call/3`), which applies only compiled exports.
+Every send path uses `find_class_side_method/3` instead, which also counts
+each class's class-side extensions (BT-4307).
 
-Uses the ETS hierarchy table for O(1) superclass lookup per level and
-the ETS class-methods table for the per-ancestor selector +
-module lookup. The hot path issues no `gen_server:call`s — both tables
-are populated atomically inside `beamtalk_object_class:init/1` before
-the class becomes externally dispatch-visible, so a hierarchy entry
-without a matching methods entry is not reachable from normal dispatch.
-
-Safe to call from within a gen_server `handle_call` because we only walk
-UP the hierarchy (no circular dependency possible).
-
-The walk itself (depth guard, cycle warning, advance-to-superclass)
-is `beamtalk_hierarchy:walk_ancestors/3`; this function supplies only the
-per-ancestor ETS probe.
-""".
--spec find_class_method_in_chain(selector(), class_name()) ->
-    {ok, class_name(), atom()} | not_found.
-find_class_method_in_chain(Selector, ClassName) ->
-    walk_class_method_chain(Selector, superclass_from_ets(ClassName), ClassName).
-
--doc """
-Like `find_class_method_in_chain/2`, but the walk starts at `ClassName`
-itself rather than its superclass (BT-3666): used by a class-side
-self-send, whose receiving class may define the selector directly.
+Uses the ETS hierarchy and class-methods tables only (no `gen_server:call`),
+so it is safe from inside a class's own `handle_call`. The walk itself (depth
+guard, cycle warning, advance-to-superclass) is
+`beamtalk_hierarchy:walk_ancestors/3`.
 """.
 -spec find_class_method_from_class(selector(), class_name()) ->
     {ok, class_name(), atom()} | not_found.
 find_class_method_from_class(Selector, ClassName) ->
-    walk_class_method_chain(Selector, ClassName, ClassName).
-
--spec walk_class_method_chain(selector(), class_name() | none, class_name()) ->
-    {ok, class_name(), atom()} | not_found.
-walk_class_method_chain(Selector, StartName, ClassName) ->
-    StepFun = fun(AncestorName, _Depth) ->
-        case beamtalk_class_metadata:lookup_methods(AncestorName) of
-            {ok, AncestorModule, Selectors} ->
-                case lists:member(Selector, Selectors) of
-                    true -> {found, {AncestorName, AncestorModule}};
-                    false -> {next, superclass_from_ets(AncestorName)}
-                end;
-            not_found ->
-                not_found
-        end
-    end,
-    case beamtalk_hierarchy:walk_ancestors(StartName, StepFun, ?MAX_HIERARCHY_DEPTH) of
-        {found, {AncestorName, AncestorModule}} ->
-            {ok, AncestorName, AncestorModule};
-        not_found ->
-            not_found;
-        {max_depth_exceeded, CycleAncestor} ->
-            ?LOG_WARNING(
-                "find_class_method_in_ancestors: max hierarchy depth ~p exceeded at ~p (starting from ~p) — possible cycle",
-                [?MAX_HIERARCHY_DEPTH, CycleAncestor, ClassName],
-                #{domain => [beamtalk, runtime]}
-            ),
-            not_found
+    case walk_class_side(Selector, ClassName, ClassName, false) of
+        {method, DefiningClass, Module} -> {ok, DefiningClass, Module};
+        not_found -> not_found
     end.
 
 -doc "Read the superclass name from the hierarchy table (no gen_server call).".
@@ -2021,8 +2120,9 @@ class_object_understands(_Receiver, _Selector) ->
 
 -doc """
 Test whether `ClassName`'s own metaclass tag understands `Selector`
-— a class-side extension (ADR 0066), a local or inherited class method, or a
-local runtime-installed (ADR 0084) class method.
+— a class-side extension (ADR 0066) on it or an ancestor (BT-4307), a local
+or inherited class method, or a local runtime-installed (ADR 0084) class
+method.
 
 Backs `beamtalk_object_ops:responds_to_result/3`'s `respondsTo:` on a
 class-object receiver, and `class_chain_only_send/3`'s decision to skip the
@@ -2036,10 +2136,11 @@ so the existing hierarchy-walk reflection helper
 pointed at it directly: there is no such class row to walk from. This
 function instead re-implements "does dispatch find this selector" directly
 against `ClassName`'s own tables, mirroring `handle_class_method_call/6`'s
-priority order (extension, then local, then inherited chain) without
-actually invoking anything.
+priority order (extension, then local, then the inherited chain walked by
+`find_class_side_method/3`, each ancestor's extension before its methods)
+without actually invoking anything.
 
-Extensions are checked via the metaclass tag (matching how they are
+Extensions are checked via each class's metaclass tag (matching how they are
 registered, ADR 0066); local and inherited class methods are checked
 against `ClassName` itself (the real registry entry) since class methods
 belong to the class, not a separate metaclass registry row. Returns `false`
@@ -2052,12 +2153,13 @@ whether `ClassName` itself is currently registered).
 -spec class_understands_class_selector(class_name(), selector()) -> boolean().
 class_understands_class_selector(ClassName, Selector) ->
     ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
-    case beamtalk_dispatch:check_extension(ClassTag, Selector) of
+    case class_side_extension(ClassTag, Selector) of
         {ok, _Fun} ->
             true;
         not_found ->
             has_local_class_method(ClassName, Selector) orelse
-                (find_class_method_in_chain(Selector, ClassName) =/= not_found)
+                (find_class_side_method(Selector, superclass_from_ets(ClassName), ClassName) =/=
+                    not_found)
     end.
 
 -doc """
@@ -2099,7 +2201,7 @@ dynamically-assembled selector) can exceed Erlang's 255-byte atom limit even
 though no *compile-time* selector ever does — `list_to_atom` on the raw
 `"class_" ++ Selector` string would then crash with `system_limit` instead of
 producing a name. This mirrors the compile-time guard in the Rust codegen's
-`safe_class_method_fn_name` (`crates/beamtalk-core/src/codegen/core_erlang/selector_mangler.rs`)
+`safe_class_method_fn_name` (`crates/beamtalk-codegen/src/core_erlang/selector_mangler.rs`)
 byte-for-byte — same 255-byte threshold on `"class_" ++ Selector`, same
 FNV-1a 64-bit hash, same `"class_kw_<16-hex-digits>"` naming scheme — so a
 selector that is long at compile time and the *same* selector text
@@ -2121,9 +2223,9 @@ class_method_fun_name(Selector) ->
     end.
 
 %% Deterministic FNV-1a 64-bit hash — bit-for-bit identical to the Rust
-%% `fnv1a_64` in `selector_mangler.rs` (same offset basis, same prime,
-%% same 64-bit wraparound). No external dependency; ~20 lines is not worth
-%% pulling in a hashing library for.
+%% `fnv1a_64` in `crates/beamtalk-cerl-doc/src/hash.rs` (same offset basis,
+%% same prime, same 64-bit wraparound). No external dependency; ~20 lines is
+%% not worth pulling in a hashing library for.
 -spec fnv1a_64(binary()) -> non_neg_integer().
 fnv1a_64(Data) when is_binary(Data) ->
     fnv1a_64(Data, 16#cbf29ce484222325).
@@ -2365,7 +2467,7 @@ handle_metaclass_self_call(Selector, _Args) ->
     Error0 = beamtalk_error:new(dispatch_error, ClassName, Selector),
     Error1 = beamtalk_error:with_hint(
         Error0,
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format(
                 "'self class ~ts' inside a class method of '~ts' would deadlock "
                 "(gen_server:call to self). Only spawn/new selectors can be "

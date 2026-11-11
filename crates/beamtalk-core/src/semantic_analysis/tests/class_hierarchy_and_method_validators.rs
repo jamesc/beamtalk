@@ -50,6 +50,7 @@ fn test_analyse_hierarchy_includes_user_classes() {
             span: test_span(),
         }],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("increment".into()),
             parameters: vec![],
             body: vec![],
@@ -77,6 +78,7 @@ fn test_analyse_hierarchy_includes_user_classes() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -136,6 +138,7 @@ fn test_analyse_reports_sealed_class_diagnostic() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -469,6 +472,7 @@ fn test_abstract_class_instantiation_error() {
         supervisor_kind: None,
         state: vec![],
         methods: vec![MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector: MessageSelector::Unary("area".into()),
             parameters: vec![],
             body: vec![bare(Expression::Literal(Literal::Integer(42), test_span()))],
@@ -509,6 +513,7 @@ fn test_abstract_class_instantiation_error() {
     };
 
     let module = Module {
+        pipeline_sends: crate::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -535,4 +540,210 @@ fn test_abstract_class_instantiation_error() {
         result.diagnostics
     );
     assert!(abstract_errors[0].message.contains("Shape"));
+}
+
+/// The receiver-arity errors in `src`, which defines one method.
+fn while_receiver_arity_errors(body: &str) -> usize {
+    let src = format!("Object subclass: W\n  run =>\n    x := 0.\n    {body}.\n    x\n");
+    let result = analyse(&crate::semantic_analysis::test_helpers::parse_module(&src));
+    result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("expects its receiver to be a block"))
+        .count()
+}
+
+#[test]
+fn test_while_condition_arity_in_cascade_reported_once() {
+    // BT-4617: the parser folds a cascade's first send into its receiver, so
+    // the block every message is sent to is that send's receiver. A bad
+    // condition is reported once, whichever message is the loop.
+    assert_eq!(
+        while_receiver_arity_errors(
+            "[:y | x < 3] whileTrue: [x := x + 1]; whileFalse: [x := x - 1]"
+        ),
+        1
+    );
+    // The block reaches `whileTrue:` only through the cascade.
+    assert_eq!(
+        while_receiver_arity_errors("[:y | x < 3] value: 1; whileTrue: [x := x + 1]"),
+        1
+    );
+    assert_eq!(
+        while_receiver_arity_errors(
+            "[:y | x < 3] value: 1; whileTrue: [x := x + 1]; whileFalse: [x := x - 1]"
+        ),
+        1
+    );
+}
+
+#[test]
+fn test_cascade_receiver_checks_see_the_cascade_target() {
+    // The parser folds a cascade's first send into its receiver; the
+    // receiver-based checks look at that send's receiver, the object each
+    // cascaded message is sent to.
+    let count = |body: &str, needle: &str| {
+        let src = format!("Object subclass: W\n  run =>\n    {body}\n");
+        analyse(&crate::semantic_analysis::test_helpers::parse_module(&src))
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains(needle))
+            .count()
+    };
+    assert_eq!(
+        count(
+            "Integer printString; new",
+            "Cannot instantiate primitive class"
+        ),
+        1
+    );
+    assert_eq!(
+        count(
+            "42 printString; fieldAt: #x put: 1",
+            "Cannot mutate immutable value"
+        ),
+        1
+    );
+    // The type-aware argument checks use the cascade target's type, not the
+    // first send's result: `at:` on the String is checked, and `at:` on the
+    // Dictionary is not, even though its first `at:` answers a String.
+    assert_eq!(
+        count("\"abc\" size; at: #k", "expects an integer argument"),
+        1
+    );
+    assert_eq!(
+        count(
+            "#{#a => \"x\"} at: #a; at: #b",
+            "expects an integer argument"
+        ),
+        0
+    );
+}
+
+#[test]
+fn test_method_validators_run_on_class_side_methods() {
+    // BT-4645: the analyser walks class-side methods too, so a class method
+    // gets the same method-validator diagnostics as an instance method.
+    let diags = |side: &str, body: &str, needle: &str| {
+        let src = format!("Object subclass: W\n  {side}run =>\n    {body}\n");
+        analyse(&crate::semantic_analysis::test_helpers::parse_module(&src))
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains(needle))
+            .map(|d| d.span)
+            .collect::<Vec<_>>()
+    };
+    let cases = [
+        ("#(1, 2) collect: [:a :b | a]", "expects a block with 1"),
+        (
+            "[:y | true] whileTrue: [nil]",
+            "expects its receiver to be a block",
+        ),
+        ("\"abc\" at: #k", "expects an integer argument"),
+        ("Integer new", "Cannot instantiate primitive class"),
+    ];
+    for (body, needle) in cases {
+        let instance = diags("", body, needle);
+        assert_eq!(instance.len(), 1, "instance side: {body}");
+        // `class ` shifts every span by its own length.
+        let class_side = diags("class ", body, needle);
+        assert_eq!(class_side.len(), 1, "class side: {body}");
+        assert_eq!(
+            class_side[0].start(),
+            instance[0].start() + 6,
+            "class side span: {body}"
+        );
+    }
+}
+
+#[test]
+fn test_extension_methods_get_resolution_and_validators() {
+    // BT-4658: standalone `Foo >> sel =>` / `Foo class >> sel =>` bodies are
+    // analysed like in-class methods, without the class's instance fields.
+    let src = "Object subclass: W\n  state: x :: Integer = 0\n  run => 1\n\n\
+               W >> foo => zzz + 1\n\
+               W class >> baz => qqq\n\
+               W >> fld => x\n\
+               W >> bar => #(1, 2) collect: [:a :b | a]\n\
+               W >> ok: p => super printString\n";
+    let result = analyse(&crate::semantic_analysis::test_helpers::parse_module(src));
+    let count = |needle: &str| {
+        result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains(needle))
+            .count()
+    };
+    assert_eq!(count("Undefined variable: zzz"), 1);
+    assert_eq!(count("Undefined variable: qqq"), 1);
+    assert_eq!(count("Undefined variable: x"), 1, "fields not visible");
+    assert_eq!(count("expects a block with 1"), 1);
+    assert_eq!(count("super can only be used"), 0);
+    assert_eq!(
+        count("Unused parameter `p`"),
+        1,
+        "unused-param lint now covers extensions"
+    );
+}
+
+#[test]
+fn test_well_formed_extension_method_has_no_undefined_variable() {
+    // BT-4658: guard the new path against false positives.
+    let src = "Object subclass: W\n  state: x :: Integer = 0\n  run => 1\n\n\
+               W >> good => self.x + 1\n\
+               W class >> make => self new\n";
+    let result = analyse(&crate::semantic_analysis::test_helpers::parse_module(src));
+    assert!(
+        !result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("Undefined variable")),
+        "{:?}",
+        result.diagnostics
+    );
+}
+
+#[test]
+fn test_method_bodies_do_not_see_top_level_bindings() {
+    // BT-4665: instance, class-side and extension method bodies see only
+    // `self`, parameters, locals and `true`/`false`/`nil` — never top-level
+    // bindings, whether assigned before or after the definitions.
+    let src = "x := 3.\n\
+               Object subclass: W\n  inst => x\n  class cls => x\n\n\
+               W >> ext => x\n\
+               W class >> extCls => x\n\
+               y := 4.\n\
+               W >> later => y\n\
+               W >> builtins: p =>\n  l := p\n  l == nil\n  self == true\n  false == nil\n";
+    let result = analyse(&crate::semantic_analysis::test_helpers::parse_module(src));
+    let count = |needle: &str| {
+        result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains(needle))
+            .count()
+    };
+    assert_eq!(
+        count("Undefined variable: x"),
+        4,
+        "{:?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        count("Undefined variable: y"),
+        1,
+        "{:?}",
+        result.diagnostics
+    );
+    // Top-level code still sees its own bindings.
+    let top = analyse(&crate::semantic_analysis::test_helpers::parse_module(
+        "x := 3.\nx + 1\n",
+    ));
+    assert!(
+        !top.diagnostics
+            .iter()
+            .any(|d| d.message.contains("Undefined variable")),
+        "{:?}",
+        top.diagnostics
+    );
 }

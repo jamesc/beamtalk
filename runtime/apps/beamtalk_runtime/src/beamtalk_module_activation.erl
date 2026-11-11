@@ -54,7 +54,7 @@ source text) are handled via the `on_activate` callback in activation options.
 %% filter a live node's registered classes down to the same "project, not
 %% stdlib" set `releases/<vsn>/shapes.json` uses (BT-3571) — the one
 %% `bt@stdlib@*`-exclusion predicate, not a second copy of the string prefix
-%% check (CLAUDE.md's no-duplicate-implementations rule).
+%% check (AGENTS.md's no-duplicate-implementations rule).
 -export([is_release_class_module/1]).
 
 %% Maximum number of modules activated per ebin directory.

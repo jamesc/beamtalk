@@ -49,6 +49,99 @@ impl TypeChecker {
         }
     }
 
+    /// Bind the variables of a destructuring assignment, typing flat tuple
+    /// patterns from the right-hand side's positional type (BT-4487).
+    ///
+    /// A plain-variable element of a `{a, b}` pattern is typed like
+    /// `t at: i` would be (see `infer_literal_index_tuple_at`), except that an
+    /// `Object`, `Dynamic` or unresolved-generic position binds as
+    /// `Dynamic(Unknown)`: `Object` is never a useful typed-send target.
+    ///
+    /// `Nil` is dropped from the right-hand side (a nil value raises
+    /// `#pattern_mismatch`). The result must be a `Tuple(..)` whose arity
+    /// equals the pattern's, or a union whose every member is one; element
+    /// types are then the per-position union. Anything else (bare `Tuple`,
+    /// arity mismatch, mixed union, non-tuple patterns) falls back to
+    /// [`Self::bind_pattern_vars`]. Wildcard and literal elements bind nothing.
+    pub(in crate::semantic_analysis::type_checker) fn bind_destructure_vars(
+        pattern: &Pattern,
+        value_ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+    ) {
+        // Variables are bound by the fallback first so every name is
+        // defined; typed positions then overwrite their entry.
+        Self::bind_pattern_vars(pattern, env);
+        let Pattern::Tuple { elements, .. } = pattern else {
+            return;
+        };
+        let Some(positions) = Self::tuple_positions(&Self::non_nil_type(value_ty), elements.len())
+        else {
+            return;
+        };
+        for (element, ty) in elements.iter().zip(positions) {
+            if let Pattern::Variable(id) = element {
+                let bound = if Self::is_dynamic_position(&ty, hierarchy) {
+                    InferredType::Dynamic(DynamicReason::Unknown)
+                } else {
+                    ty
+                };
+                env.set_local(id.name.clone(), bound);
+            }
+        }
+    }
+
+    /// Whether a destructured tuple position must bind as `Dynamic`: it is
+    /// `Dynamic`, bare `Object`, or an unresolved type variable — or, for a
+    /// union column, any member is (BT-4628).
+    fn is_dynamic_position(ty: &InferredType, hierarchy: &ClassHierarchy) -> bool {
+        match ty {
+            InferredType::Dynamic(_) => true,
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } => {
+                (class_name == "Object" && type_args.is_empty())
+                    || super::super::types::is_type_var_placeholder(class_name, hierarchy)
+            }
+            InferredType::Union { members, .. } => members
+                .iter()
+                .any(|m| Self::is_dynamic_position(m, hierarchy)),
+            _ => false,
+        }
+    }
+
+    /// Per-position element types of `ty` if it is a `Tuple(..)` of exactly
+    /// `arity` positions, or a union of only such tuples (element-wise union).
+    fn tuple_positions(ty: &InferredType, arity: usize) -> Option<Vec<InferredType>> {
+        match ty {
+            InferredType::Known {
+                class_name,
+                type_args,
+                ..
+            } if class_name == "Tuple" && type_args.len() == arity && arity > 0 => {
+                Some(type_args.clone())
+            }
+            InferredType::Union { members, .. } => {
+                let rows: Vec<Vec<InferredType>> = members
+                    .iter()
+                    .map(|m| Self::tuple_positions(m, arity))
+                    .collect::<Option<_>>()?;
+                Some(
+                    (0..arity)
+                        .map(|i| {
+                            let col: Vec<InferredType> =
+                                rows.iter().map(|r| r[i].clone()).collect();
+                            InferredType::union_of(&col)
+                        })
+                        .collect(),
+                )
+            }
+            _ => None,
+        }
+    }
+
     /// Check whether a block's execution cannot fall through to the enclosing
     /// method's next statement.
     ///
@@ -205,7 +298,7 @@ impl TypeChecker {
             var_key,
             env,
             hierarchy,
-            self.alias_registry.as_ref(),
+            self.alias_registry.as_deref(),
             self.protocol_registry.as_deref(),
         )
     }
@@ -335,7 +428,7 @@ impl TypeChecker {
                 info,
                 env,
                 hierarchy,
-                self.alias_registry.as_ref(),
+                self.alias_registry.as_deref(),
                 self.protocol_registry.as_deref(),
             );
         }
@@ -377,7 +470,7 @@ impl TypeChecker {
                 &info,
                 env,
                 hierarchy,
-                self.alias_registry.as_ref(),
+                self.alias_registry.as_deref(),
                 self.protocol_registry.as_deref(),
             ) else {
                 return;
@@ -674,11 +767,24 @@ impl TypeChecker {
                 // Guard sees `binding`/scrutinee already narrowed
                 // above (ADR 0107: "scope includes the arm's `when:`
                 // guard, not just its body").
+                // BT-4650: widenings queued by the arm guard and body name a local in
+                // `arm_env`, where a pattern variable may shadow an outer
+                // local of the same name. Collect them in a frame of their
+                // own and forward only those that name the outer binding.
+                let outer_deferred = std::mem::take(&mut self.deferred_block_widenings);
                 if let Some(guard) = &arm.guard {
                     self.infer_expr(guard, hierarchy, &mut arm_env, in_abstract_method);
                 }
                 let body_ty =
                     self.infer_expr(&arm.body, hierarchy, &mut arm_env, in_abstract_method);
+                let arm_deferred =
+                    std::mem::replace(&mut self.deferred_block_widenings, outer_deferred);
+                let (bound, _) = crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
+                self.deferred_block_widenings.extend(
+                    arm_deferred
+                        .into_iter()
+                        .filter(|w| !bound.iter().any(|id| id.name == w.name)),
+                );
                 if arm.guard.is_none() {
                     if matches!(arm.pattern, Pattern::Nil(_)) {
                         residual_scrutinee_ty = Self::non_nil_type(&residual_scrutinee_ty);
@@ -698,7 +804,16 @@ impl TypeChecker {
                         );
                     }
                 }
-                body_ty
+                // BT-4458: an arm whose body is a bare `^expr` never produces a
+                // value for the match — it leaves the enclosing method — so it
+                // contributes `Never`, not `expr`'s type. A method whose tail is
+                // this match gets those `^` types back in its return type: see
+                // [`Self::tail_match_return_types`].
+                if Self::is_return_arm(arm) {
+                    InferredType::Never
+                } else {
+                    body_ty
+                }
             })
             .collect();
         if arm_types.is_empty() {
@@ -706,5 +821,39 @@ impl TypeChecker {
         } else {
             InferredType::union_of(&arm_types)
         }
+    }
+
+    /// BT-4458: is `arm`'s body a bare `^expr` (possibly parenthesised)?
+    fn is_return_arm(arm: &MatchArm) -> bool {
+        matches!(arm.body.unwrap_parens(), Expression::Return { .. })
+    }
+
+    /// BT-4458: the types of the `^` arms of a `match:` that is a method
+    /// body's last statement.
+    ///
+    /// Method return inference reads only the last statement's type, and
+    /// [`Self::infer_match`] gives `^` arms `Never`, so without these the
+    /// `^` values would drop out of the method's return type: a mismatch
+    /// against a declared `-> T` would go unreported, and an all-`^` tail
+    /// would infer `-> Never` and make sends to the method count as diverging.
+    pub(in crate::semantic_analysis::type_checker) fn tail_match_return_types(
+        &self,
+        body: &[crate::ast::ExpressionStatement],
+    ) -> Vec<InferredType> {
+        let Some(Expression::Match { arms, .. }) = body.last().map(|s| &s.expression) else {
+            return Vec::new();
+        };
+        arms.iter()
+            .filter(|arm| Self::is_return_arm(arm))
+            // `type_map` never records `Dynamic(Unknown)`; an arm with no entry is
+            // that, not an arm to drop (dropping it would leave an all-`^` tail
+            // as `Never`).
+            .map(|arm| {
+                self.type_map
+                    .get(arm.body.span())
+                    .cloned()
+                    .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown))
+            })
+            .collect()
     }
 }

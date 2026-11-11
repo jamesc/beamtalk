@@ -1,0 +1,26 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0146 / BT-4459 (fixed by BT-4535), driven from a live REPL session: a
+// block `a` created, run by `b`, returns to `a` with the block's
+// creation-time capture (`n = 0`). `a`'s method commits its cell, not that
+// copy, so the write it made after creating the block survives. `b` leaves
+// its callback by the throw and keeps its entry state. See
+// stdlib/test/actor_closure_cell_test.bt for the BUnit coverage.
+
+// @load tests/repl-protocol/fixtures/bt4459_owner.bt
+
+a := Bt4459Owner spawn
+// => _
+
+b := Bt4459Owner spawn
+// => _
+
+a run: b
+// => 1
+
+a n
+// => 5
+
+b n
+// => 0

@@ -284,6 +284,7 @@ fn make_actor_typed_no_default(field_name: &str, ty: TypeAnnotation) -> Module {
         span: s,
     };
     Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -780,6 +781,7 @@ fn test_cross_file_ancestor_nil_typed_fields_excluded_from_validation() {
 
     let ancestor = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: ecow::EcoString::from("BaseActor"),
         superclass: Some(ecow::EcoString::from("Actor")),
@@ -921,6 +923,7 @@ fn test_cross_file_ancestor_late_field_excluded_from_validation() {
 
     let ancestor = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: ecow::EcoString::from("BaseActor"),
         superclass: Some(ecow::EcoString::from("Actor")),

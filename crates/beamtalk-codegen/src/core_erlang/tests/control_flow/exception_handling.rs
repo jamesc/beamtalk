@@ -18,7 +18,7 @@ use super::*;
 // fixtures (with and without a sibling local mutation) and assert the full
 // `Self` threading, not merely that `erlc` accepts the module, so an
 // over-firing rejection turns them red. Deliberately NOT restated as a third,
-// weaker copy here (CLAUDE.md's no-duplicate-implementations rule).
+// weaker copy here (AGENTS.md's no-duplicate-implementations rule).
 //
 // The two cases those fixtures leave open — a loop body with MORE THAN ONE
 // top-level write, and one mixing a threadable top-level write with an

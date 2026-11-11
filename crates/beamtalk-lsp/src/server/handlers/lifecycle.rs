@@ -371,7 +371,7 @@ impl Backend {
                 None
             } else {
                 // Startup preload indexes every file under each
-                // root's `src/`/`test/`/`_build/deps/*/src` regardless of
+                // root's `src/`/`test/` and dependency sources regardless of
                 // whether it is open, so the index is workspace-wide, not
                 // "currently open files". Closing a tab therefore must not
                 // evict the file — that silently removed its classes from

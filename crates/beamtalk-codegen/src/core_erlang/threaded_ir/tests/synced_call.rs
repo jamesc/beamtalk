@@ -24,6 +24,7 @@ fn synced(store: VersionedVar, load: Option<VersionedVar>) -> ThreadedStmt {
         tier2_local_rebinds: Vec::new(),
         on_private_scratch: false,
         fast_path: None,
+        reads: None,
     }
 }
 
@@ -53,6 +54,7 @@ fn a_store_only_synced_call_renders_the_statement_verbatim_after_the_store() {
         tier2_local_rebinds: Vec::new(),
         on_private_scratch: false,
         fast_path: None,
+        reads: None,
     }];
     assert_eq!(
         lower_and_render(&ir).to_pretty_string(),
@@ -110,6 +112,7 @@ fn a_store_only_synced_call_consumes_nothing() {
             tier2_local_rebinds: Vec::new(),
             on_private_scratch: false,
             fast_path: None,
+            reads: None,
         },
         ThreadedStmt::Bind {
             target: state(2, frame),
@@ -183,6 +186,7 @@ fn a_synced_call_on_a_private_scratch_is_reported() {
         tier2_local_rebinds: Vec::new(),
         on_private_scratch: true,
         fast_path: None,
+        reads: None,
     }];
     let errors = verify(&ir);
     assert!(
@@ -261,5 +265,94 @@ fn a_fast_path_on_a_store_only_bracket_is_reported() {
             .iter()
             .any(|e| matches!(e, VerifyError::FastPathOnUnsplittableBracket { .. })),
         "{errors:?}"
+    );
+}
+
+// ── StalePrestore (BT-4612) ──────────────────────────────────────────────
+
+/// The `^`-closure pre-store: a store-only bracket whose `store` is the
+/// rendered name of `State` version `reads`.
+fn prestore(reads: usize) -> ThreadedStmt {
+    ThreadedStmt::SyncedCall {
+        store: VersionedVar::new(
+            VersionPrefix::Gensym(format!("State{reads}")),
+            0,
+            FrameId::ROOT,
+        ),
+        call: call_doc(),
+        result: None,
+        load: None,
+        span: span(),
+        tier2_local_rebinds: Vec::new(),
+        on_private_scratch: false,
+        fast_path: None,
+        reads: Some(state(reads, FrameId::ROOT)),
+    }
+}
+
+/// A pre-store that reads `State` version `reads` after an operand's
+/// self-send stepped `State` from 0 to 1.
+fn prestore_after_step(reads: usize) -> Vec<ThreadedStmt> {
+    let step = ThreadedStmt::Bind {
+        target: state(1, FrameId::ROOT),
+        source: state(0, FrameId::ROOT),
+        op: BindOp::Direct(ValueRef::Literal("'_'")),
+        span: span(),
+    };
+    vec![step, prestore(reads)]
+}
+
+#[test]
+fn a_prestore_older_than_a_state_the_frame_already_bound_is_stale() {
+    // BT-4532's first cut: the dispatch pre-store read `State` before the
+    // operands were threaded.
+    assert_eq!(
+        verify(&prestore_after_step(0)),
+        vec![VerifyError::StalePrestore {
+            reads: state(0, FrameId::ROOT),
+            newest: state(1, FrameId::ROOT),
+            at: span(),
+        }]
+    );
+    assert_eq!(verify(&prestore_after_step(1)), Vec::new());
+}
+
+/// The pre-store is verified on its own, after the version its frame has
+/// bound so far: that version stands for the earlier statement.
+#[test]
+fn a_prestore_older_than_the_state_bound_before_its_slice_is_stale() {
+    let bound = state(3, FrameId::ROOT);
+    assert_eq!(
+        verify_in_scope_after(&[prestore(2)], ScopeKind::Instance, Some(bound.clone())),
+        vec![VerifyError::StalePrestore {
+            reads: state(2, FrameId::ROOT),
+            newest: bound.clone(),
+            at: span(),
+        }]
+    );
+    assert_eq!(
+        verify_in_scope_after(&[prestore(3)], ScopeKind::Instance, Some(bound)),
+        Vec::new()
+    );
+    // Nothing bound before the slice: nothing to compare against.
+    assert_eq!(verify(&[prestore(0)]), Vec::new());
+}
+
+/// The bound version is the slice's top level only: a nested frame's list
+/// starts on its own.
+#[test]
+fn the_state_bound_before_a_slice_does_not_reach_a_nested_frame() {
+    let nested = ThreadedStmt::BranchArm {
+        frame: FrameId::ROOT,
+        threads: Vec::new(),
+        body: vec![prestore(0)],
+    };
+    assert_eq!(
+        verify_in_scope_after(
+            &[nested],
+            ScopeKind::Instance,
+            Some(state(1, FrameId::ROOT))
+        ),
+        Vec::new()
     );
 }

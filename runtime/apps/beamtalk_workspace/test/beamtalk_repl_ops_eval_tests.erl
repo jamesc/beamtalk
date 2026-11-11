@@ -53,7 +53,11 @@ setup_with_stdlib(SessionId) ->
     SessionPid.
 
 teardown(SessionPid) ->
-    catch beamtalk_repl_shell:stop(SessionPid),
+    try
+        beamtalk_repl_shell:stop(SessionPid)
+    catch
+        _:_ -> ok
+    end,
     %% Restore baseline "compiler not running" state so subsequent test modules
     %% that test no-compiler error paths see the expected initial state.
     _ = application:stop(beamtalk_compiler),

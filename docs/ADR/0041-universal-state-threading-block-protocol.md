@@ -5,6 +5,8 @@ Implemented (2026-02-24)
 
 > **Amended by [ADR 0137](0137-actor-closures-see-live-state.md) (2026-10-26, BT-4011 Phase 4), actor closures and `State`.** An actor's closures no longer see only the `State` version current at their creation: inside the actor they read and write the live fields through the process-dictionary cell (`'$bt_actor_state'`), and elsewhere they read their creation-time capture and raise `actor_state_unreachable` on a write. A Tier 1 `fun` still answers one value and still cannot hand `State` back — that is why the cell, not a return channel, carries actor state across calls. The Tier 2 protocol below (captured locals through the `StateAcc` return channel) is unchanged: a Tier 2 block that writes both a local and a field returns the local through `StateAcc` and writes the field to the cell.
 
+> **Amended by [ADR 0146](0146-non-local-return-through-ensure.md) (2026-11-09, epic BT-4533), what an actor's `^` commits.** A `^` throw still carries a state slot. But when it reaches an actor method's boundary at home, the method commits the actor-state cell, not the carried state. The carried state is committed only away from home, where it is the only copy. For actors, the slot is no longer the state of record. The REPL and value types still commit what the throw carries.
+
 ## Context
 
 ### The Composability Problem

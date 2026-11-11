@@ -1,0 +1,88 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4485: an inline FFI call whose Erlang spec proves the result needs no
+// coercion, with scalar arguments, compiles to a direct remote call instead of
+// `beamtalk_erlang_proxy:direct_call/4`. It must answer what the proxy answers
+// and raise the structured error the proxy raises. Each test runs the call both
+// ways: inline (direct) and through `direct_call/3` itself (the proxy path).
+//
+// The calls target `beamtalk_character`, whose specs (`integer() -> integer()`,
+// `integer() -> boolean()`) are in the FFI type table here: `beamtalk test`
+// on stdlib/test reads the runtime's own specs, not OTP's.
+
+TestCase subclass: FfiDirectCallTest
+
+  proxy: fn args: args =>
+    (Erlang beamtalk_erlang_proxy)
+      direct_call: #beamtalk_character
+      fn: fn
+      args: args
+
+  kindAndMessage: aBlock => aBlock on: Error do: [:e | {e kind, e message}]
+
+  testIntegerResult =>
+    self assert: (Erlang beamtalk_character value: 65) equals: 65
+    self assert: (Erlang beamtalk_character value: 65) equals: (self proxy: #value args: #(65))
+    self assert: (Erlang beamtalk_character to_uppercase: 97) equals: 65
+
+  testBooleanResult =>
+    self assert: (Erlang beamtalk_character is_digit: 55) equals: true
+    self assert: (Erlang beamtalk_character is_digit: 55) equals: (self proxy: #is_digit args: #(55))
+
+  // The callee raises a structured error itself: passed through unchanged.
+  testStructuredErrorMatchesProxy =>
+    direct := self kindAndMessage: [Erlang beamtalk_character value: -1]
+    proxied := self kindAndMessage: [self proxy: #value args: #(-1)]
+    self assert: direct equals: proxied
+    self assert: (direct at: 1) equals: #type_error
+
+  // `function_clause` from the callee becomes the proxy's `arity_mismatch`.
+  testFunctionClauseMatchesProxy =>
+    direct := self
+      kindAndMessage: [
+        @expect type
+        Erlang beamtalk_character is_digit: #notAnInteger
+      ]
+    proxied := self kindAndMessage: [
+      self proxy: #is_digit args: #(#notAnInteger)
+    ]
+    self assert: direct equals: proxied
+    self assert: (direct at: 1) equals: #arity_mismatch
+
+  // The inline call really is direct: the stack recorded on the error has no
+  // `beamtalk_erlang_proxy` frame, where the proxy path has one.
+  testInlineCallSkipsTheProxy =>
+    direct := [
+      @expect type
+      Erlang beamtalk_character is_digit: #notAnInteger
+    ] on: Error do: [:e | self proxyFrames: e]
+    proxied := [
+      self proxy: #is_digit args: #(#notAnInteger)
+    ] on: Error do: [:e | self proxyFrames: e]
+    self assert: direct equals: 0
+    self assert: proxied > 0
+
+  proxyFrames: e :: Exception -> Integer =>
+    frames :: List := e details at: #erlang_stacktrace
+    (frames select: [:f | (f at: 1) =:= #beamtalk_erlang_proxy]) size
+
+  digit: x :: Integer => Erlang beamtalk_character is_digit: x
+
+  // Static types are not checked at run time: a String reaching an `Integer`
+  // parameter fails the direct call's runtime guard and goes through the
+  // proxy, so it behaves exactly as the proxied call.
+  testMistypedArgumentFallsBackToTheProxy =>
+    direct := [
+      self perform: #digit: withArguments: #("7")
+    ] on: Error do: [:e | {e kind, self proxyFrames: e}]
+    self assert: (direct at: 1) equals: #arity_mismatch
+    self assert: (direct at: 2) > 0
+    self assert: (self digit: 55) equals: true
+
+  // The direct call as a cascade receiver and inside an `ensure:` block.
+  testDirectCallInCascadeAndEnsure =>
+    cascaded := (Erlang beamtalk_character value: 66) printString; yourself
+    self assert: cascaded equals: 66
+    result := [Erlang beamtalk_character value: 67] ensure: [nil]
+    self assert: result equals: 67

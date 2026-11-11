@@ -992,7 +992,16 @@ test_chain_depth_limit() ->
         ),
         ?assertEqual({error, not_found}, Result)
     after
-        lists:foreach(fun(P) -> catch gen_server:stop(P, normal, 5000) end, Pids)
+        lists:foreach(
+            fun(P) ->
+                try
+                    gen_server:stop(P, normal, 5000)
+                catch
+                    _:_ -> ok
+                end
+            end,
+            Pids
+        )
     end.
 
 %% ETS-missing class (superclass_from_ets returns none) terminates immediately.
@@ -1107,8 +1116,16 @@ test_undef_inherited_module_not_loaded() ->
         {error, #beamtalk_error{hint = Hint}} = Result,
         ?assert(binary:match(element(2, Hint), <<"inherits">>) =/= nomatch)
     after
-        catch gen_server:stop(ChildPid, normal, 5000),
-        catch gen_server:stop(ParentPid, normal, 5000)
+        try
+            gen_server:stop(ChildPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end,
+        try
+            gen_server:stop(ParentPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% Inherited method, defining class module loaded but function absent → does_not_understand.
@@ -1136,8 +1153,16 @@ test_undef_inherited_method_not_found() ->
         {error, #beamtalk_error{hint = Hint}} = Result,
         ?assert(binary:match(element(2, Hint), <<"inherited">>) =/= nomatch)
     after
-        catch gen_server:stop(ChildPid, normal, 5000),
-        catch gen_server:stop(ParentPid, normal, 5000)
+        try
+            gen_server:stop(ChildPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end,
+        try
+            gen_server:stop(ParentPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %%% ============================================================================
@@ -1467,7 +1492,11 @@ test_class_send_spawn_with_map() ->
     after
         case Result of
             #beamtalk_object{pid = ActorPid} when is_pid(ActorPid) ->
-                catch gen_server:stop(ActorPid, normal, 5000);
+                try
+                    gen_server:stop(ActorPid, normal, 5000)
+                catch
+                    _:_ -> ok
+                end;
             _ ->
                 ok
         end
@@ -1494,7 +1523,11 @@ test_class_send_new_colon() ->
         Result = beamtalk_class_dispatch:class_send(Pid, 'new:', [#{}]),
         ?assert(is_map(Result))
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %%% ============================================================================
@@ -1593,7 +1626,11 @@ test_metaclass_method_not_found() ->
         Result = gen_server:call(Pid, {metaclass_method_call, absentSelector, []}),
         ?assertEqual({error, not_found}, Result)
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% metaclass_send to a dead pid raises class_not_found (crash recovery path).
@@ -2018,7 +2055,12 @@ test_self_instantiation_new_branch() ->
     try
         %% Dispatch hits Type=new branch → calls class_self_new which will
         %% itself fail (module doesn't exist), but the branch is covered.
-        _ = (catch beamtalk_class_dispatch:class_send(self(), 'new', [])),
+        _ =
+            (try
+                beamtalk_class_dispatch:class_send(self(), 'new', [])
+            catch
+                _:_ -> ok
+            end),
         ok
     after
         erase(beamtalk_class_name),
@@ -2031,7 +2073,12 @@ test_self_instantiation_spawn_branch() ->
     put(beamtalk_class_module, bt1981_nonexistent_module),
     put(beamtalk_class_is_abstract, false),
     try
-        _ = (catch beamtalk_class_dispatch:class_send(self(), spawn, [])),
+        _ =
+            (try
+                beamtalk_class_dispatch:class_send(self(), spawn, [])
+            catch
+                _:_ -> ok
+            end),
         ok
     after
         erase(beamtalk_class_name),
@@ -2086,7 +2133,11 @@ test_runtime_fun_threads_class_vars() ->
         ?assertEqual(2, beamtalk_class_dispatch:class_send(Pid, bump, [])),
         ?assertEqual(3, beamtalk_class_dispatch:class_send(Pid, bump, []))
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% put_class_method/3 installs a class-method fun on a live class object.
@@ -2107,7 +2158,11 @@ test_put_class_method_live() ->
         ?assert(beamtalk_class_metadata:has_runtime_class_methods(ClassName)),
         ?assertEqual(10, beamtalk_class_dispatch:class_send(Pid, getCount, []))
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% A subclass dispatches a runtime class method defined on an ancestor. The fun
@@ -2144,8 +2199,16 @@ test_inherited_runtime_class_method() ->
         ),
         ?assertNot(beamtalk_class_metadata:has_runtime_class_methods(ChildName))
     after
-        catch gen_server:stop(ChildPid, normal, 5000),
-        catch gen_server:stop(ParentPid, normal, 5000)
+        try
+            gen_server:stop(ChildPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end,
+        try
+            gen_server:stop(ParentPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% A runtime fun installed for a selector that the compiled module also exports
@@ -2165,7 +2228,11 @@ test_runtime_fun_shadows_compiled() ->
         %% fun shadows it.
         ?assertEqual(overridden_value, beamtalk_class_dispatch:class_send(Pid, testSuccess, []))
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% On a class carrying both a runtime fun and a compiled-method reference, the
@@ -2193,7 +2260,11 @@ test_mixed_class_compiled_selector() ->
         ),
         ?assertEqual(test_success_result, beamtalk_class_dispatch:class_send(Pid, testSuccess, []))
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% A class with only compiled-method references keeps the gate flag closed, so
@@ -2214,7 +2285,11 @@ test_compile_only_class_gate_closed() ->
         ),
         ?assertEqual(test_success_result, beamtalk_class_dispatch:class_send(Pid, testSuccess, []))
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% A runtime fun that raises is caught and surfaced as a structured error
@@ -2232,7 +2307,11 @@ test_runtime_fun_raises() ->
     try
         ?assertError(_, beamtalk_class_dispatch:class_send(Pid, boom, []))
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% class_self_dispatch_local/3: the self-send primitive for builder class-method
@@ -2301,8 +2380,16 @@ test_class_self_dispatch_local() ->
             )
         )
     after
-        catch gen_server:stop(ChildPid, normal, 5000),
-        catch gen_server:stop(ParentPid, normal, 5000)
+        try
+            gen_server:stop(ChildPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end,
+        try
+            gen_server:stop(ParentPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %%% ============================================================================
@@ -2474,8 +2561,16 @@ test_class_extension_priority_over_inherited() ->
             beamtalk_extensions:unregister(ChildName, shared, true)
         end
     after
-        catch gen_server:stop(ChildPid, normal, 5000),
-        catch gen_server:stop(ParentPid, normal, 5000)
+        try
+            gen_server:stop(ChildPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end,
+        try
+            gen_server:stop(ParentPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% End-to-end via the real gen_server message: an ordinary `Target sel` send
@@ -2750,8 +2845,16 @@ test_class_self_dispatch_extension_priority_over_inherited() ->
             beamtalk_extensions:unregister(ChildName, shared, true)
         end
     after
-        catch gen_server:stop(ChildPid, normal, 5000),
-        catch gen_server:stop(ParentPid, normal, 5000)
+        try
+            gen_server:stop(ChildPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end,
+        try
+            gen_server:stop(ParentPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% Same priority rule for class_self_dispatch_local/4's own-runtime-method
@@ -2789,7 +2892,11 @@ test_class_self_dispatch_local_extension_priority_over_runtime_fun() ->
             beamtalk_extensions:unregister(ClassName, shared, true)
         end
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %%% ============================================================================
@@ -2844,8 +2951,16 @@ with_super_parent_child(Prefix, Body) ->
     try
         Body(ParentName, ChildName)
     after
-        catch gen_server:stop(ChildPid, normal, 5000),
-        catch gen_server:stop(ParentPid, normal, 5000)
+        try
+            gen_server:stop(ChildPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end,
+        try
+            gen_server:stop(ParentPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 test_class_super_dispatch_skips_own_extension() ->
@@ -3082,7 +3197,11 @@ class_send_not_found_fallthrough_does_not_message_stalled_class_test_() ->
                                 beamtalk_class_registry:resolve_class_object('StallResolveClass')
                             )
                         after
-                            catch unregister(RegName),
+                            try
+                                unregister(RegName)
+                            catch
+                                _:_ -> ok
+                            end,
                             ok = sys:resume(Pid2),
                             exit(Pid2, kill),
                             ets:delete(beamtalk_class_pids, Pid2),

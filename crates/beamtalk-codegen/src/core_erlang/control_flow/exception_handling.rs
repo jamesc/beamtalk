@@ -57,9 +57,10 @@ use super::super::intrinsics::{
 use super::super::synced_call::ActorStateSource;
 use super::super::threaded_expr::ProducerTail;
 use super::super::threaded_ir::{
-    self, BindOp, CatchClause, CatchEntry, CatchStep, EnsureCleanup, EnsureNlrRelay, FrameId,
-    NlrCarry, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind, RenderCtx, RethrowSlot,
-    StateReadSite, ThreadedStmt, TryRegion, ValueRef, VersionPrefix, VersionedVar,
+    self, BindOp, CatchClause, CatchEntry, CatchStep, EnsureCleanup, EnsureForeignNlr,
+    EnsureNlrRelay, ForeignCleanupBody, FrameId, NlrCarry, NlrThrowShape, OnDoCatchVars,
+    RebindFrame, RebindFrameKind, RenderCtx, RethrowSlot, StateReadSite, ThreadedStmt, TryRegion,
+    ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result, block_analysis};
 use super::LocalWrite;
@@ -570,6 +571,29 @@ impl CoreErlangGenerator {
             || (self.is_repl_mode() && self.repl_blocks_write_bindings(&[block]))
     }
 
+    /// Whether an `on:do:`/`ensure:` with operands `receiver` and `other` is
+    /// lowered in place with its state threaded, rather than as closures: a
+    /// block literal operand needs exception threading and both operands are
+    /// block literals (BT-4430's `inlined_exception_blocks`, the one inlining
+    /// rule the analyser's Phase 0 check reads). The one decision
+    /// [`Self::generate_on_do`], [`Self::generate_ensure`] and the bracket
+    /// classifier (`classify_inlined`, BT-4524) read.
+    pub(in crate::core_erlang) fn exception_construct_inlines(
+        &self,
+        receiver: &Expression,
+        other: &Expression,
+    ) -> bool {
+        let needs = |e: &Expression| match e {
+            Expression::Block(b) => self.block_needs_exception_threading(b),
+            _ => false,
+        };
+        (needs(receiver) || needs(other))
+            && beamtalk_core::semantic_analysis::block_facts::inlined_exception_blocks(
+                receiver, other,
+            )
+            .is_some()
+    }
+
     /// Generates `on:do:` — wraps block in try/catch, wraps error as Exception
     /// object and passes to handler block.
     ///
@@ -583,32 +607,13 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let handler_takes_arg = Self::validate_on_do_blocks(receiver, handler)?;
 
-        // Check both blocks for field/state mutations
-        let receiver_needs = if let Expression::Block(b) = receiver {
-            self.block_needs_exception_threading(b)
-        } else {
-            false
-        };
-        let handler_needs = if let Expression::Block(b) = handler {
-            self.block_needs_exception_threading(b)
-        } else {
-            false
-        };
-
-        if receiver_needs || handler_needs {
-            // BT-4430: the one inlining rule the analyser's Phase 0 check reads.
-            if let Some((recv_block, handler_block)) =
+        if self.exception_construct_inlines(receiver, handler)
+            && let Some((recv_block, handler_block)) =
                 beamtalk_core::semantic_analysis::block_facts::inlined_exception_blocks(
                     receiver, handler,
                 )
-            {
-                return self.generate_on_do_with_mutations(
-                    recv_block,
-                    ex_class,
-                    handler_block,
-                    false,
-                );
-            }
+        {
+            return self.generate_on_do_with_mutations(recv_block, ex_class, handler_block, false);
         }
 
         // Simple case: no mutations, use closure-based approach
@@ -619,10 +624,24 @@ impl CoreErlangGenerator {
         let catch_vars = self.fresh_on_do_catch_vars(ex_class_var.clone());
         let ex_obj_var = catch_vars.ex_obj_var.clone();
 
-        // Capture expression outputs (ADR 0018 bridge pattern)
-        let receiver_code = self.expression_doc(receiver)?;
+        // Capture expression outputs (ADR 0018 bridge pattern). BT-4524: the
+        // catch boundary stores the pre-region `State` on entry
+        // (`CellBoundary::PreState`) wherever the cell protocol applies, so a
+        // `^` in either closure carries the method's state: covered. BT-4532:
+        // only the operand that is itself a block literal; a closure nested in
+        // a non-block operand runs as that operand is evaluated, before the
+        // boundary's store, and its own call has to store.
+        let covered = |this: &Self, operand: &Expression| match operand {
+            Expression::Block(block) if this.synced_calls_active() => vec![block.span],
+            _ => Vec::new(),
+        };
+        let receiver_cover = covered(self, receiver);
+        let receiver_code =
+            self.with_nlr_closure_cover(&receiver_cover, |this| this.expression_doc(receiver))?;
         let ex_class_code = self.on_do_filter_doc(ex_class)?;
-        let handler_code = self.expression_doc(handler)?;
+        let handler_cover = covered(self, handler);
+        let handler_code =
+            self.with_nlr_closure_cover(&handler_cover, |this| this.expression_doc(handler))?;
 
         let handler_apply =
             self.make_handler_apply(handler_var.clone(), ex_obj_var, handler_takes_arg);
@@ -1154,27 +1173,13 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         Self::validate_ensure_cleanup(cleanup)?;
 
-        // Check both blocks for field/state mutations
-        let receiver_needs = if let Expression::Block(b) = receiver {
-            self.block_needs_exception_threading(b)
-        } else {
-            false
-        };
-        let cleanup_needs = if let Expression::Block(b) = cleanup {
-            self.block_needs_exception_threading(b)
-        } else {
-            false
-        };
-
-        if receiver_needs || cleanup_needs {
-            // BT-4430: the one inlining rule the analyser's Phase 0 check reads.
-            if let Some((recv_block, cleanup_block)) =
+        if self.exception_construct_inlines(receiver, cleanup)
+            && let Some((recv_block, cleanup_block)) =
                 beamtalk_core::semantic_analysis::block_facts::inlined_exception_blocks(
                     receiver, cleanup,
                 )
-            {
-                return self.generate_ensure_with_mutations(recv_block, cleanup_block, false);
-            }
+        {
+            return self.generate_ensure_with_mutations(recv_block, cleanup_block, false);
         }
 
         // Simple case: no mutations
@@ -1235,9 +1240,9 @@ impl CoreErlangGenerator {
                 stack_var,
                 carried_var: None,
             },
-            (carry, false),
+            (carry, false, self.synced_calls_active()),
             EnsureCleanup::Closure { writes_cell },
-            relay,
+            (relay, None),
             other,
             receiver.span(),
         );
@@ -1584,7 +1589,7 @@ impl CoreErlangGenerator {
             Some(NlrCarry::SelfVt) => error_arm.family_mutated_version.map(|(_, v)| v),
             // A scope's own throw is never foreign: only the
             // `Block>>ensure:` fallback relays a foreign one.
-            Some(NlrCarry::Live | NlrCarry::Foreign) | None => None,
+            Some(NlrCarry::Live) | None => None,
         };
         let writes_cell = self.block_touches_actor_state(cleanup_block);
         let relays = self.scope_nlr_token().is_some()
@@ -1603,19 +1608,79 @@ impl CoreErlangGenerator {
             _ => None,
         };
         self.set_self_version(outer_self);
+        // ADR 0146 R1: where the cell is live, a `^` the relay does not take
+        // (one of another method of this actor, from a block it passed in)
+        // must leave the cell holding the cleanup's final `StateAcc`: the
+        // error path runs the cleanup with write-through off, so its writes
+        // would die with the re-raise. A cleanup that threads no write has
+        // nothing to store.
+        //
+        // BT-4598: where the relay of the scope's own throw already runs the
+        // cleanup from the cell (`cell_store`), the foreign clause shares that
+        // one compiled body instead of compiling the cleanup once more: the
+        // two seeds are the same cell refresh, so their final `StateAcc`
+        // versions are the same too. Each extra copy multiplies a nested
+        // `ensure:` in the cleanup, so the cleanup is compiled 3^depth times,
+        // not 4^depth.
+        let foreign = match &relay {
+            _ if !cell_boundary || cleanup_final.is_none() => None,
+            Some(EnsureNlrRelay {
+                cell_store: true,
+                rethrow: RethrowSlot::Version(version),
+                ..
+            }) => Some(EnsureForeignNlr {
+                body: ForeignCleanupBody::SharedWithRelay,
+                store: Some(*version),
+            }),
+            _ => {
+                let (seed, cleanup) =
+                    self.ensure_cleanup_from_cell(cleanup_block, families, arm, outer_version)?;
+                self.set_self_version(outer_self);
+                Some(EnsureForeignNlr {
+                    body: ForeignCleanupBody::Own {
+                        seed,
+                        cleanup: cleanup.doc,
+                    },
+                    store: Some(cleanup.state_version),
+                })
+            }
+        };
         Ok(self.ensure_catch(
             EnsureCatchTriple {
                 carried_var,
                 ..triple
             },
-            (scope_carry, private_scratch),
+            (scope_carry, private_scratch, cell_boundary),
             EnsureCleanup::Inlined {
                 final_version: cleanup_final,
                 writes_cell,
             },
-            relay,
+            (relay, foreign),
             Document::Vec(other),
             span,
+        ))
+    }
+
+    /// The cleanup of an inlined `ensure:` compiled once more, seeded from the
+    /// actor-state cell (ADR 0137 §5): the cell refresh into `StateAcc` and
+    /// the arm's family seed, then the cleanup's arm. Where a `^` unwinds
+    /// through the `ensure:` with the cell live, the cell holds the state at
+    /// the throw (a `^` stores before it throws, and every clause further in
+    /// stores its own result), so this is the cleanup's entry state for the
+    /// scope's own throw ([`Self::ensure_relay`]) and a foreign one alike.
+    fn ensure_cleanup_from_cell(
+        &mut self,
+        cleanup_block: &Block,
+        families: &ThreadedFamilies,
+        arm: Option<&ArmFrame>,
+        outer_version: usize,
+    ) -> Result<(Document<'static>, ExceptionArm)> {
+        let family_seed = self.seed_exception_arm_family(families, outer_version);
+        let cleanup =
+            self.generate_exception_body_with_threading(cleanup_block, families, arm, None)?;
+        Ok((
+            docvec![Self::ensure_cell_refresh_doc(), family_seed],
+            cleanup,
         ))
     }
 
@@ -1628,7 +1693,7 @@ impl CoreErlangGenerator {
             "let StateAcc = ",
             actor_state_call(
                 actor_state_helper::REFRESH,
-                vec![leaf::var("Self"), leaf::var("StateAcc")]
+                [leaf::var("Self"), leaf::var("StateAcc")]
             ),
             " in "
         ]
@@ -1673,20 +1738,28 @@ impl CoreErlangGenerator {
         };
         let relay = match carry {
             NlrCarry::Bindings | NlrCarry::ActorState => {
-                let seed = if cell_boundary {
-                    Self::ensure_cell_refresh_doc()
+                let (seed, cleanup) = if cell_boundary {
+                    self.ensure_cleanup_from_cell(cleanup_block, families, arm, outer_version)?
                 } else {
-                    docvec!["let StateAcc = ", leaf::var(carried.to_string()), " in "]
+                    let family_seed = self.seed_exception_arm_family(families, outer_version);
+                    let cleanup = self.generate_exception_body_with_threading(
+                        cleanup_block,
+                        families,
+                        arm,
+                        None,
+                    )?;
+                    (
+                        docvec![
+                            "let StateAcc = ",
+                            leaf::var(carried.to_string()),
+                            " in ",
+                            family_seed
+                        ],
+                        cleanup,
+                    )
                 };
-                let family_seed = self.seed_exception_arm_family(families, outer_version);
-                let cleanup = self.generate_exception_body_with_threading(
-                    cleanup_block,
-                    families,
-                    arm,
-                    None,
-                )?;
                 EnsureNlrRelay {
-                    seed: docvec![seed, family_seed],
+                    seed,
                     cleanup: cleanup.doc,
                     cell_store: cell_boundary,
                     rethrow: RethrowSlot::Version(cleanup.state_version),
@@ -1734,12 +1807,6 @@ impl CoreErlangGenerator {
                     cell_store: false,
                     rethrow: RethrowSlot::CellOverCarried,
                 }
-            }
-            NlrCarry::Foreign => {
-                return Err(CodeGenError::Internal(
-                    "an inlined `ensure:` cleanup relays its own scope's `^`, never a foreign one"
-                        .to_string(),
-                ));
             }
         };
         Ok(relay)
@@ -1895,33 +1962,29 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-4429: the catch of `Block>>ensure:`'s structural fallback, an
+    /// The catch of `Block>>ensure:`'s structural fallback, an
     /// [`ThreadedStmt::EnsureCatch`](threaded_ir::ThreadedStmt::EnsureCatch)
-    /// whose relay takes every foreign `^` ([`NlrCarry::Foreign`]).
+    /// with no relay: the cleanup, then the re-raise (BT-4536).
     fn ensure_structural_fallback_catch(&mut self, cleanup_param: &str) -> Document<'static> {
         let type_var = self.fresh_temp_var("Type");
         let error_var = self.fresh_temp_var("Error");
         let stack_var = self.fresh_temp_var("Stack");
-        // BT-4429: every `^` that crosses this catch is foreign (this is the
-        // Block method's frame), so its state kind is known only at run time.
-        // The cleanup is a closure, which writes only the actor-state cell:
-        // the relay resumes the throw with the cell over the carried state
-        // when the throw carried the cell's state (an actor method's or
-        // closure's `^`), and as it came otherwise (`ensure_nlr_relay`).
+        // Every `^` that crosses this catch is foreign (this is the Block
+        // method's frame). The cleanup is a closure, which writes only the
+        // actor-state cell, in place, and the method a `^` returns from
+        // commits the cell (ADR 0146): the throw is re-raised as it came
+        // (`ensure_nlr_relay`). `note_unwound/1` tells the test-build commit
+        // check that the cell may be ahead of it now; for any other
+        // exception it does nothing.
         let cleanup_apply = || docvec!["apply ", leaf::var(cleanup_param.to_string()), " ()"];
-        let relay = EnsureNlrRelay {
-            seed: Document::Nil,
-            cleanup: docvec![
-                "let _ = ",
-                self.annotate_current_send_call(cleanup_apply()),
-                " in"
-            ],
-            cell_store: false,
-            rethrow: RethrowSlot::CellIfCarried,
-        };
         let other = docvec![
             "do ",
             self.annotate_current_send_call(cleanup_apply()),
+            " do ",
+            actor_state_call(
+                actor_state_helper::NOTE_UNWOUND,
+                [leaf::var(error_var.clone())],
+            ),
             " ",
             Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone()),
         ];
@@ -1932,9 +1995,9 @@ impl CoreErlangGenerator {
                 stack_var,
                 carried_var: None,
             },
-            (Some(NlrCarry::Foreign), false),
+            (None, false, false),
             EnsureCleanup::Closure { writes_cell: true },
-            Some(relay),
+            (None, None),
             other,
             beamtalk_core::source_analysis::Span::default(),
         )
@@ -2253,8 +2316,15 @@ impl CoreErlangGenerator {
         // runtime value; lowering one as a statement would emit `let _ =  in`.
         // `collect_body_exprs` is the canonical directive filter.
         let body_exprs = super::super::util::collect_body_exprs(&body.body);
+        // BT-4461: a REPL arm's producer sites that write a binding the arm
+        // holds in a variable (`repl_frame_producer_sites`), read before each
+        // statement is lowered and checked once the arm is built.
+        let mut repl_sites: Vec<(beamtalk_core::source_analysis::Span, Vec<String>)> = Vec::new();
         for (i, &expr) in body_exprs.iter().enumerate() {
             let span = expr.span();
+            if arm.is_none() {
+                repl_sites.extend(self.repl_frame_producer_sites(expr));
+            }
             if i > 0 {
                 // Rule 2: the literal space `generate_exception_body_with_threading_inner`
                 // has always inserted between source-level statements —
@@ -2472,6 +2542,7 @@ impl CoreErlangGenerator {
             "`on:do:`/`ensure:` arm",
             body.span,
         );
+        self.check_repl_frame_producer_sites(&stmts, &repl_sites, body.span);
         let (doc, _) = self.render_branch_arm(stmts, frame, final_state_version, body.span, arm);
         Ok(ExceptionArm {
             doc,

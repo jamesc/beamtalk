@@ -8,19 +8,25 @@
 -moduledoc """
 Ets class implementation — shared in-memory tables via OTP ets.
 
-Ets is an Erlang-backed class wrapping OTP ets tables. Tables are
-named and public by default, enabling cross-actor reads and writes
-without message-passing overhead. The owning process holds the table;
-when the owner terminates, the table is deleted automatically.
-Only the owner process may call `deleteTable/1`.
+Ets is an Erlang-backed class wrapping OTP ets tables. `new:type:` and
+`newOrExisting:type:` make named, public tables for cross-actor reads and
+writes without message-passing overhead. `private:` and `protected:` (BT-4576)
+make unnamed tables for one actor's internal state: no node-global name, and
+other processes cannot read (`private`) or write (`protected`) them. The
+owning process holds the table; when the owner terminates, the table is
+deleted automatically. Any process may call `deleteTable/1` on a public
+(named) table; only the owner may delete a private/protected one.
 
 Ets objects are represented as tagged maps:
 ```
 #{
   '$beamtalk_class' => 'Ets',
-  table => TableName :: atom()
+  table => TableName :: atom() | ets:tid()
 }
 ```
+
+A use the table's protection forbids raises `access_denied`, never a raw
+`badarg` (see `table_fault/2`).
 
 ## Class Methods
 
@@ -28,6 +34,8 @@ Ets objects are represented as tagged maps:
 |---------------|---------------------------------------------------|
 | `new:type:`   | Create a named public ETS table                   |
 | `named:`      | Look up an existing named table by atom name      |
+| `private:`    | Create an unnamed table only the owner may use    |
+| `protected:`  | Create an unnamed table others may only read      |
 
 ## Instance Methods
 
@@ -38,6 +46,7 @@ Ets objects are represented as tagged maps:
 | `lookupIfAbsent:key:block:` | Lookup with default block           |
 | `includesKey:key:` | Test key membership                          |
 | `removeKey:key:`   | Delete an entry; returns nil                 |
+| `removeKey:ifAbsent:` | Atomically remove and answer the value (`ets:take`) |
 | `keys:`            | Return all keys as a List                    |
 | `tableSize:`       | Number of entries                            |
 | `deleteTable:`     | Destroy the table                            |
@@ -57,12 +66,18 @@ Ets objects are represented as tagged maps:
 
 %% Class methods — canonical colon forms (for EUnit tests and Beamtalk dispatch)
 -export(['new:type:'/2, 'named:'/1, 'exists:'/1, 'newOrExisting:type:'/2]).
+-export(['private:'/1, 'protected:'/1]).
 
 %% Instance methods — no-colon forms used by the FFI proxy
 %% The (Erlang beamtalk_ets) dispatch strips the first keyword from the selector
 %% e.g. `lookup: self key: key` → selector `lookup:key:` → function `lookup/2`
--export([lookup/2, insert/3, lookupIfAbsent/3, includesKey/2, removeKey/2]).
+-export([lookup/2, insert/3, lookupIfAbsent/3, includesKey/2, removeKey/2, removeKey/3]).
 -export([keys/1, tableSize/1, deleteTable/1]).
+
+-ifdef(TEST).
+%% Expose the badarg classifier for EUnit (named-table reuse cases).
+-export([badarg_error/2]).
+-endif.
 -export([
     removeAll/1, values/1, keysAndValuesDo/2, asDictionary/1, ifPresent/3, incrementAt/3, updateAt/3
 ]).
@@ -76,10 +91,13 @@ Ets objects are represented as tagged maps:
 -export([beamtalk_ffi_raw_results/0]).
 
 %% FFI shims for class methods: `(Erlang beamtalk_ets) new: name type: t` → `new/2`
--export([new/2, named/1, exists/1, newOrExisting/2]).
+-export([new/2, named/1, exists/1, newOrExisting/2, private/1, protected/1]).
 
 -type t() :: #{'$beamtalk_class' := 'Ets', atom() => term()}.
 -export_type([t/0]).
+
+%% A named table's atom, or an unnamed (`private:`/`protected:`) table's tid.
+-type table() :: atom() | ets:tid().
 
 %%% ============================================================================
 %%% Class Methods
@@ -194,6 +212,39 @@ Raises `type_error` if arguments are not atoms.
         <<"Table type must be a Symbol (#set, #orderedSet, #bag, #duplicateBag)">>
     ).
 
+-doc """
+Create an unnamed `private` ETS table owned by the caller (BT-4576).
+
+Only the owner process may read or write it; any other process gets
+`access_denied`. There is no name, so any number may exist at once and no
+atom is created. The table dies with its owner.
+Raises `type_error` if `TableType` is not a table-type atom.
+""".
+-spec 'private:'(Type :: atom()) -> t().
+'private:'(TableType) -> new_unnamed(private, 'private:', TableType).
+
+-doc """
+Create an unnamed `protected` ETS table owned by the caller (BT-4576).
+
+Any process may read it, but only the owner may write; a write from another
+process raises `access_denied`. The table dies with its owner.
+Raises `type_error` if `TableType` is not a table-type atom.
+""".
+-spec 'protected:'(Type :: atom()) -> t().
+'protected:'(TableType) -> new_unnamed(protected, 'protected:', TableType).
+
+-spec new_unnamed(private | protected, atom(), term()) -> t().
+new_unnamed(Access, Selector, TableType) when is_atom(TableType) ->
+    EtsType = map_table_type_for(Selector, TableType),
+    %% The name atom is ignored for an unnamed table; the tid is the handle.
+    make_ets(ets:new(beamtalk_ets, [EtsType, Access, {keypos, 1}]));
+new_unnamed(_Access, Selector, _TableType) ->
+    beamtalk_error:raise_type_error(
+        'Ets',
+        Selector,
+        <<"Table type must be a Symbol (#set, #orderedSet, #bag, #duplicateBag)">>
+    ).
+
 %%% ============================================================================
 %%% Instance Methods
 %%%
@@ -216,7 +267,7 @@ lookup(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
             [] -> nil
         end
     catch
-        error:badarg -> stale_table_error('lookup:key:', TableName)
+        error:badarg -> badarg_error('lookup:key:', TableName)
     end;
 lookup(_Self, _Key) ->
     beamtalk_error:raise_type_error('Ets', 'at:', <<"Receiver must be an Ets instance">>).
@@ -245,7 +296,7 @@ insert(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Value) ->
         ets:insert(TableName, {Key, Value}),
         nil
     catch
-        error:badarg -> stale_table_error('insert:key:value:', TableName)
+        error:badarg -> badarg_error('insert:key:value:', TableName)
     end;
 insert(_Self, _Key, _Value) ->
     beamtalk_error:raise_type_error('Ets', 'at:put:', <<"Receiver must be an Ets instance">>).
@@ -270,7 +321,7 @@ includesKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
     try
         ets:member(TableName, Key)
     catch
-        error:badarg -> stale_table_error('includesKey:key:', TableName)
+        error:badarg -> badarg_error('includesKey:key:', TableName)
     end;
 includesKey(_Self, _Key) ->
     beamtalk_error:raise_type_error('Ets', 'includesKey:', <<"Receiver must be an Ets instance">>).
@@ -282,10 +333,35 @@ removeKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
         ets:delete(TableName, Key),
         nil
     catch
-        error:badarg -> stale_table_error('removeKey:key:', TableName)
+        error:badarg -> badarg_error('removeKey:key:', TableName)
     end;
 removeKey(_Self, _Key) ->
     beamtalk_error:raise_type_error('Ets', 'removeKey:', <<"Receiver must be an Ets instance">>).
+
+-doc """
+Atomically remove the entry for Key and answer its value (`ets:take/2`); if
+the key is absent, evaluate Block and answer its result. No other process can
+observe or take the value in between, so this suits single-use tokens.
+
+For bag/duplicate_bag tables every entry for Key is removed and the first
+stored value is answered.
+""".
+-spec removeKey(t(), Key :: term(), Block :: function()) -> term().
+removeKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) when
+    is_function(Block, 0)
+->
+    case guarded(TableName, 'removeKey:ifAbsent:', fun() -> ets:take(TableName, Key) end) of
+        [{_K, Value} | _] -> Value;
+        [] -> call_block(Block, [], 'removeKey:ifAbsent:')
+    end;
+removeKey(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
+    beamtalk_error:raise_type_error(
+        'Ets', 'removeKey:ifAbsent:', <<"Second argument must be a Block">>
+    );
+removeKey(_Self, _Key, _Block) ->
+    beamtalk_error:raise_type_error(
+        'Ets', 'removeKey:ifAbsent:', <<"Receiver must be an Ets instance">>
+    ).
 
 -doc """
 Return all unique keys in the table as a List.
@@ -298,7 +374,7 @@ keys(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
     try
         lists:usort(ets:select(TableName, [{{'$1', '_'}, [], ['$1']}]))
     catch
-        error:badarg -> stale_table_error('keys:', TableName)
+        error:badarg -> badarg_error('keys:', TableName)
     end;
 keys(_Self) ->
     beamtalk_error:raise_type_error('Ets', 'keys', <<"Receiver must be an Ets instance">>).
@@ -310,9 +386,19 @@ Named `tableSize` to avoid shadowing the deprecated `erlang:size/1` BIF.
 """.
 -spec tableSize(t()) -> non_neg_integer().
 tableSize(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
-    case ets:info(TableName, size) of
-        undefined -> stale_table_error('tableSize:', TableName);
-        Size -> Size
+    %% `ets:info/2` answers even across a `private` boundary, so check access
+    %% explicitly rather than relying on a `badarg`.
+    case table_fault(TableName, read) of
+        stale ->
+            stale_table_error('tableSize:', TableName);
+        access_denied ->
+            access_denied_error('tableSize:', TableName);
+        ok ->
+            %% The table may be deleted between the probe and this read.
+            case ets:info(TableName, size) of
+                undefined -> stale_table_error('tableSize:', TableName);
+                Size -> Size
+            end
     end;
 tableSize(_Self) ->
     beamtalk_error:raise_type_error('Ets', 'size', <<"Receiver must be an Ets instance">>).
@@ -329,14 +415,14 @@ deleteTable(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
         nil
     catch
         error:badarg ->
-            beamtalk_error:raise(
-                beamtalk_error:new(
-                    permission_error,
-                    'Ets',
-                    'delete',
-                    <<"Caller is not the owner of the ETS table, or the table has already been deleted">>
-                )
-            )
+            %% ETS lets any process delete a public table and only the owner
+            %% a protected/private one: the same rule as a write, so the
+            %% `write` classification applies. A named table's name can be
+            %% reused before the probe; a replacement the caller could delete
+            %% (its own, or public) means the original is gone (`stale_table`),
+            %% and one it cannot delete gives `access_denied`, the stated
+            %% default since it cannot be told apart from the original.
+            badarg_error('delete', TableName)
     end;
 deleteTable(_Self) ->
     beamtalk_error:raise_type_error('Ets', 'delete', <<"Receiver must be an Ets instance">>).
@@ -363,7 +449,7 @@ removeAll(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
         ets:delete_all_objects(TableName),
         nil
     catch
-        error:badarg -> stale_table_error('removeAll', TableName)
+        error:badarg -> badarg_error('removeAll', TableName)
     end;
 removeAll(_Self) ->
     beamtalk_error:raise_type_error('Ets', 'removeAll', <<"Receiver must be an Ets instance">>).
@@ -481,12 +567,12 @@ Yield the scheduler before retrying a lost compare-and-swap, so a writer that
 keeps losing on a hot key gives the winners room to finish. The retry bound is
 unchanged.
 """.
--spec retry_update(atom(), term(), function(), pos_integer()) -> term().
+-spec retry_update(table(), term(), function(), pos_integer()) -> term().
 retry_update(TableName, Key, Block, Retries) ->
     erlang:yield(),
     update_loop(TableName, Key, Block, Retries - 1).
 
--spec update_loop(atom(), term(), function(), non_neg_integer()) -> term().
+-spec update_loop(table(), term(), function(), non_neg_integer()) -> term().
 update_loop(TableName, Key, _Block, 0) ->
     beamtalk_error:raise(
         beamtalk_error:with_details(
@@ -534,12 +620,12 @@ is gone. Any other `badarg` becomes a structured `type_error`, so a raw
 `badarg` never escapes to the FFI proxy's charlist retry (which would re-run
 the operation under a different key).
 """.
--spec guarded(atom(), atom(), fun(() -> term())) -> term().
+-spec guarded(table(), atom(), fun(() -> term())) -> term().
 guarded(TableName, Selector, Fun) ->
     guarded(TableName, Selector, Fun, <<"ETS operation rejected its arguments">>).
 
 -doc "As `guarded/3`, with the message used for a `type_error` when the table is not stale.".
--spec guarded(atom(), atom(), fun(() -> term()), binary()) -> term().
+-spec guarded(table(), atom(), fun(() -> term()), binary()) -> term().
 guarded(TableName, Selector, Fun, BadArgMessage) ->
     %% bt-catcher-audit: not-applicable-no-block - Fun is always an internal ETS operation
     %% closure built in this module, never a Beamtalk block.
@@ -547,10 +633,12 @@ guarded(TableName, Selector, Fun, BadArgMessage) ->
         Fun()
     catch
         error:badarg ->
-            case ets:whereis(TableName) of
-                undefined ->
+            case table_fault(TableName, write) of
+                stale ->
                     stale_table_error(Selector, TableName);
-                _ ->
+                access_denied ->
+                    access_denied_error(Selector, TableName);
+                ok ->
                     beamtalk_error:raise_type_error('Ets', Selector, BadArgMessage)
             end
     end.
@@ -613,8 +701,14 @@ has_match_variable(_) ->
     false.
 
 -doc "Raise a structured error unless the table holds one entry per key.".
--spec require_unique_keys(atom(), atom()) -> ok.
+-spec require_unique_keys(table(), atom()) -> ok.
 require_unique_keys(TableName, Selector) ->
+    %% `ets:info/2` answers across a protection boundary; deny a caller that
+    %% may not write before revealing the table type in an error.
+    case table_fault(TableName, write) of
+        access_denied -> access_denied_error(Selector, TableName);
+        _ -> ok
+    end,
     case ets:info(TableName, type) of
         T when T =:= set; T =:= ordered_set ->
             ok;
@@ -634,7 +728,7 @@ require_unique_keys(TableName, Selector) ->
             )
     end.
 
--spec entries(atom(), atom()) -> [{term(), term()}].
+-spec entries(table(), atom()) -> [{term(), term()}].
 entries(TableName, Selector) ->
     guarded(TableName, Selector, fun() -> ets:tab2list(TableName) end).
 
@@ -666,6 +760,14 @@ FFI shim for newOrExisting:type: — called via (Erlang beamtalk_ets) newOrExist
 -spec newOrExisting(atom(), Type :: atom()) -> t().
 newOrExisting(Name, TableType) -> 'newOrExisting:type:'(Name, TableType).
 
+-doc "FFI shim for private: — called via `Ets private: type` (`self delegate`).".
+-spec private(Type :: atom()) -> t().
+private(TableType) -> 'private:'(TableType).
+
+-doc "FFI shim for protected: — called via `Ets protected: type` (`self delegate`).".
+-spec protected(Type :: atom()) -> t().
+protected(TableType) -> 'protected:'(TableType).
+
 %%% ============================================================================
 %%% Internal Helpers
 %%% ============================================================================
@@ -676,7 +778,7 @@ Build a structured error for a stale or deleted ETS table.
 Used when an ETS operation raises `error:badarg` because the table no
 longer exists (owner terminated or `deleteTable/1` was called).
 """.
--spec stale_table_error(atom(), atom()) -> no_return().
+-spec stale_table_error(atom(), table()) -> no_return().
 stale_table_error(Selector, TableName) ->
     beamtalk_error:raise(
         beamtalk_error:new(
@@ -685,13 +787,81 @@ stale_table_error(Selector, TableName) ->
             Selector,
             iolist_to_binary([
                 <<"ETS table is stale or has been deleted: ">>,
-                atom_to_binary(TableName, utf8)
+                table_label(TableName)
             ])
         )
     ).
 
--doc "Build an Ets tagged map for the given table name.".
--spec make_ets(atom()) -> t().
+-doc "Raise `access_denied`: the caller is not the owner of a private/protected table.".
+-spec access_denied_error(atom(), table()) -> no_return().
+access_denied_error(Selector, TableName) ->
+    Hint =
+        case ets:info(TableName, protection) of
+            protected ->
+                <<"This table is protected: other processes may read it, but only its owner may write">>;
+            private ->
+                <<"This table is private: only the process that created it may use it">>;
+            _ ->
+                <<"Only the process that created this table may do this">>
+        end,
+    beamtalk_error:raise(
+        beamtalk_error:with_hint(
+            beamtalk_error:new(
+                access_denied,
+                'Ets',
+                Selector,
+                iolist_to_binary([
+                    <<"ETS table is not accessible from this process: ">>,
+                    table_label(TableName)
+                ])
+            ),
+            Hint
+        )
+    ).
+
+-doc """
+Raise the structured error for an ETS operation that failed with `badarg` on
+a direct (non-`guarded/3`) path: `access_denied` when the table's protection
+forbids the caller, otherwise `stale_table` (the historical meaning).
+""".
+-spec badarg_error(atom(), table()) -> no_return().
+badarg_error(Selector, TableName) ->
+    case table_fault(TableName, write) of
+        access_denied -> access_denied_error(Selector, TableName);
+        _ -> stale_table_error(Selector, TableName)
+    end.
+
+-doc """
+Why an operation of kind `read` or `write` on the table may fail for the
+calling process: `stale` (gone), `access_denied` (protection forbids it) or
+`ok`. `ets:info/2` works on any table regardless of protection.
+
+`write` is the conservative choice after a `badarg`: a non-owner's read of a
+`protected` table cannot fail on access, so a `badarg` there came from a write.
+""".
+-spec table_fault(table(), read | write) -> stale | access_denied | ok.
+table_fault(TableName, Kind) ->
+    case ets:info(TableName, owner) of
+        undefined ->
+            stale;
+        Owner when Owner =:= self() ->
+            ok;
+        _Other ->
+            case {ets:info(TableName, protection), Kind} of
+                {public, _} -> ok;
+                {protected, read} -> ok;
+                {undefined, _} -> stale;
+                _ -> access_denied
+            end
+    end.
+
+-doc "A table's name for error messages; unnamed tables do not expose their tid.".
+-spec table_label(table()) -> binary().
+table_label(TableName) when is_atom(TableName) -> atom_to_binary(TableName, utf8);
+table_label(_Tid) -> <<"(unnamed table)">>.
+
+-doc "Build an Ets tagged map for the given table name or (unnamed) tid.".
+-spec make_ets(table()) -> t().
 make_ets(Name) ->
     #{'$beamtalk_class' => 'Ets', table => Name}.
 

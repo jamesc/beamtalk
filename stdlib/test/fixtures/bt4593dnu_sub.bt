@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4593: a Bt4593Base subclass with a `doesNotUnderstand:args:` override.
+// A real error raised by an inherited method must reach the caller's
+// handler, never this override.
+
+Bt4593Base subclass: Bt4593DnuSub
+
+  doesNotUnderstand: selector args: _arguments => selector
+
+  caught => [self error: "x"] on: Error do: [:e | e message]

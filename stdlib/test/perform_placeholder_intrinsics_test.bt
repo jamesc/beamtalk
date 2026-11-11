@@ -37,10 +37,8 @@ TestCase subclass: PerformPlaceholderIntrinsicsTest
 
   testReflectionViaPerformOnClassObject =>
     self assert: (ValuePoint perform: #respondsTo: withArguments: #(#name)) equals: (ValuePoint respondsTo: #name)
-    // A class object has no instance fields. Compared with a literal: the
-    // direct `ValuePoint fieldNames` send mis-lowers for a class object
-    // (it `sync_send`s to the class process): BT-4470.
-    self assert: (ValuePoint perform: #fieldNames) equals: #()
+    // A class object has no instance fields (BT-4470).
+    self assert: (ValuePoint perform: #fieldNames) equals: ValuePoint fieldNames
     self assert: (ValuePoint perform: #hasField: withArguments: #(#x)) equals: (ValuePoint hasField: #x)
 
   testPerformViaPerformOnValueInstance =>

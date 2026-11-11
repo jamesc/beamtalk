@@ -35,6 +35,7 @@ use beamtalk_core::ast::{
     BinarySegment, ClassDefinition, ClassKind, Expression, MethodDefinition, Module,
     declared_shape_migrations,
 };
+use beamtalk_core::ast_walker::{for_each_expr_seq, walk_expression};
 use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
 use beamtalk_core::semantic_analysis::protocol_registry::ProtocolMethodRequirement;
 use beamtalk_core::semantic_analysis::type_checker::TypeMap;
@@ -42,7 +43,7 @@ use beamtalk_core::semantic_analysis::type_checker::native_type_registry::Native
 use beamtalk_core::semantic_analysis::{
     AliasRegistry, ClassHierarchy, InferredType, ProtocolRegistry,
 };
-use beamtalk_core::source_analysis::Span;
+use beamtalk_core::source_analysis::{Span, TokenKind, lex};
 use ecow::EcoString;
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -139,7 +140,7 @@ pub fn compute_completions(
     position: Position,
     hierarchy: &ClassHierarchy,
     current_package: Option<&str>,
-    native_types: Option<&NativeTypeRegistry>,
+    native_types: Option<&Arc<NativeTypeRegistry>>,
 ) -> Vec<Completion> {
     compute_completions_with_registries(
         module,
@@ -182,8 +183,8 @@ pub fn compute_completions_with_registries(
     position: Position,
     hierarchy: &ClassHierarchy,
     current_package: Option<&str>,
-    native_types: Option<&NativeTypeRegistry>,
-    alias_registry: Option<&AliasRegistry>,
+    native_types: Option<&Arc<NativeTypeRegistry>>,
+    alias_registry: Option<&Arc<AliasRegistry>>,
     protocol_registry: Option<Arc<ProtocolRegistry>>,
 ) -> Vec<Completion> {
     // Validate position is within bounds
@@ -195,7 +196,7 @@ pub fn compute_completions_with_registries(
     // Check for Erlang module context first — if we're completing
     // after "Erlang" or "Erlang <module>", return specialized completions
     if let Some(erlang_completions) =
-        compute_erlang_completions(module, source, offset, native_types)
+        compute_erlang_completions(module, source, offset, native_types.map(AsRef::as_ref))
     {
         return erlang_completions;
     }
@@ -236,8 +237,17 @@ pub fn compute_completions_with_registries(
         };
         (h, type_map)
     };
-    // Try to find receiver type at cursor for type-filtered completions
-    let receiver_type = find_receiver_type(module, offset, &type_map);
+    // Below the type pass the lookups only read the registries, so they take
+    // plain references.
+    let alias_registry = alias_registry.map(AsRef::as_ref);
+    // Try to find receiver type at cursor for type-filtered completions.
+    // Right after `|>` (or a partial selector after it) the receiver is the
+    // pipeline value before the `|>`, not whatever expression precedes the
+    // cursor (ADR 0145 § 2, consequence 3).
+    let receiver_type = match pipeline_receiver_end(source, offset) {
+        Some(end) => find_pipeline_receiver_type(module, end, &type_map),
+        None => find_receiver_type(module, offset, &type_map),
+    };
     // Add keyword completions (context-aware for field:/state: by class kind)
     add_keyword_completions(&mut completions, &context, hierarchy);
     // Add identifiers from the current scope (including method-local variables)
@@ -950,6 +960,82 @@ fn find_receiver_type(module: &Module, offset: u32, type_map: &TypeMap) -> Optio
     }
     None
 }
+/// If the cursor completes a pipeline stage, the byte offset where the value
+/// piped into that stage ends.
+///
+/// This works on tokens, not the AST (ADR 0145 § 2, consequence 3): the parser
+/// desugars `|>` into nested sends, and a `|>` with no stage after it yet
+/// leaves no send behind. A stage is being completed when the last token
+/// before the cursor is a `PipeGt`, or an identifier ending at the cursor (a
+/// partial selector) right after a `PipeGt`. The answer is the end of the
+/// token before that `|>`.
+fn pipeline_receiver_end(source: &str, offset: u32) -> Option<u32> {
+    let before = source.get(..offset as usize)?;
+    let tokens = lex(before);
+    let mut rev = tokens.iter().rev();
+    let mut last = rev.next()?;
+    if matches!(last.kind(), TokenKind::Identifier(_)) && last.span().end() == offset {
+        last = rev.next()?;
+    }
+    if !matches!(last.kind(), TokenKind::PipeGt) {
+        return None;
+    }
+    rev.next().map(|token| token.span().end())
+}
+
+/// The receiver side of the pipeline value that ends at `end`: the outermost
+/// expression ending there, since `|>` binds looser than every message
+/// (`a at: 1 |> m` sends `m` to `a at: 1`, not to `1`).
+///
+/// An assignment or return is never a pipeline's value (it binds looser
+/// still), so the walk looks through them.
+fn find_pipeline_receiver_type(
+    module: &Module,
+    end: u32,
+    type_map: &TypeMap,
+) -> Option<ReceiverSide> {
+    // The walk is pre-order, so the first match is the outermost one.
+    let mut found: Option<Option<ReceiverSide>> = None;
+    for_each_expr_seq(module, |body| {
+        for stmt in body {
+            if found.is_some() {
+                return;
+            }
+            walk_expression(&stmt.expression, &mut |expr| {
+                if found.is_none()
+                    && expr.span().end() == end
+                    && !matches!(
+                        expr,
+                        Expression::Assignment { .. } | Expression::Return { .. }
+                    )
+                {
+                    found = Some(receiver_side_of_expr(expr, type_map));
+                }
+            });
+        }
+    });
+    found.flatten()
+}
+
+/// The completion [`ReceiverSide`] of `expr` itself, as the receiver of the
+/// next message: a class reference (or `SomeClass class`) offers class-side
+/// methods, anything else its inferred type.
+fn receiver_side_of_expr(expr: &Expression, type_map: &TypeMap) -> Option<ReceiverSide> {
+    match expr {
+        Expression::ClassReference { name, .. } => Some(ReceiverSide::Class(name.name.clone())),
+        // `SomeClass class <TAB>` — `class` sent to a ClassReference stays on class-side
+        Expression::MessageSend {
+            receiver, selector, ..
+        } if selector.name() == "class" => match canonical_operand(receiver) {
+            Expression::ClassReference { name, .. } => Some(ReceiverSide::Class(name.name.clone())),
+            _ => type_of_parsed(type_map, expr).and_then(receiver_side_of_type),
+        },
+        // A removed operand wrapper has no type-map entry of its own
+        // (BT-4237): `type_of_parsed` completes it as its inner expression.
+        _ => type_of_parsed(type_map, expr).and_then(receiver_side_of_type),
+    }
+}
+
 /// Map an inferred type to the completion [`ReceiverSide`] for the value it
 /// describes: a `Known` instance offers instance-side methods, while a `Meta`
 /// metatype (a class object, ADR 0083) offers class-side methods, and a
@@ -988,7 +1074,6 @@ fn find_receiver_in_expr(
         // If cursor is right after a message send, the result type is the receiver
         Expression::MessageSend {
             receiver,
-            selector,
             arguments,
             span,
             ..
@@ -1004,13 +1089,7 @@ fn find_receiver_in_expr(
             }
             // If cursor is just after the message send span, use the send's result type
             if offset >= span.end() && offset <= span.end() + 1 {
-                // `SomeClass class <TAB>` — `class` sent to a ClassReference stays on class-side
-                if selector.name() == "class" {
-                    if let Expression::ClassReference { name, .. } = canonical_operand(receiver) {
-                        return Some(ReceiverSide::Class(name.name.clone()));
-                    }
-                }
-                return type_map.get(*span).and_then(receiver_side_of_type);
+                return receiver_side_of_expr(expr, type_map);
             }
             None
         }
@@ -1022,18 +1101,11 @@ fn find_receiver_in_expr(
                 None
             }
         }
-        // If cursor is right after a class reference, use class-side methods
-        Expression::ClassReference { name, span, .. } => {
+        // If cursor is right after a class reference, use class-side methods;
+        // after a literal, its type.
+        Expression::ClassReference { span, .. } | Expression::Literal(_, span) => {
             if offset >= span.end() && offset <= span.end() + 1 {
-                Some(ReceiverSide::Class(name.name.clone()))
-            } else {
-                None
-            }
-        }
-        // If cursor is after a literal, use its type
-        Expression::Literal(_, span) => {
-            if offset >= span.end() && offset <= span.end() + 1 {
-                type_map.get(*span).and_then(receiver_side_of_type)
+                receiver_side_of_expr(expr, type_map)
             } else {
                 None
             }
@@ -1055,9 +1127,7 @@ fn find_receiver_in_expr(
         // Recurse into parenthesized
         Expression::Parenthesized { expression, span } => {
             if offset >= span.end() && offset <= span.end() + 1 {
-                // A removed operand wrapper has no type-map entry of its own
-                // (BT-4237): it completes as its inner expression.
-                type_of_parsed(type_map, expr).and_then(receiver_side_of_type)
+                receiver_side_of_expr(expr, type_map)
             } else {
                 find_receiver_in_expr(expression, offset, type_map)
             }
@@ -2285,8 +2355,14 @@ mod tests {
         );
         #[expect(clippy::cast_possible_truncation, reason = "test source < 4GB")]
         let position = Position::new(0, source.len() as u32);
-        let completions =
-            compute_completions(&module, source, position, &hierarchy, None, Some(&registry));
+        let completions = compute_completions(
+            &module,
+            source,
+            position,
+            &hierarchy,
+            None,
+            Some(&std::sync::Arc::new(registry.clone())),
+        );
         let reverse = completions.iter().find(|c| c.label == "reverse:");
         assert!(reverse.is_some(), "Should find reverse: completion");
         let detail = reverse.unwrap().detail.as_deref().unwrap_or("");
@@ -2333,6 +2409,147 @@ mod tests {
             completions.iter().map(|c| &c.label).collect::<Vec<_>>()
         );
     }
+    // --- Pipeline `|>` completion (ADR 0145, BT-4518) ---
+    //
+    // Completion right after `|>`, or after a partial selector in a stage,
+    // offers the selectors of the value piped into the stage. `Integer#abs`
+    // marks Integer completions; `String#trimLeft` marks String ones.
+
+    /// Completion labels at the end of `source`.
+    fn labels_at_end(source: &str) -> Vec<String> {
+        let line = source.matches('\n').count();
+        let last = source.rsplit('\n').next().unwrap_or(source);
+        let col = last.chars().count();
+        completions_at(
+            source,
+            Position::new(u32::try_from(line).unwrap(), u32::try_from(col).unwrap()),
+        )
+        .into_iter()
+        .map(|c| c.label.to_string())
+        .collect()
+    }
+
+    fn assert_offers_integer_not_string(source: &str) {
+        let labels = labels_at_end(source);
+        assert!(
+            labels.iter().any(|l| l == "abs"),
+            "{source:?}: should offer Integer#abs. Got: {labels:?}"
+        );
+        assert!(
+            !labels.iter().any(|l| l == "trimLeft"),
+            "{source:?}: should be filtered to Integer. Got: {labels:?}"
+        );
+    }
+
+    fn assert_offers_string_not_integer(source: &str) {
+        let labels = labels_at_end(source);
+        assert!(
+            labels.iter().any(|l| l == "trimLeft"),
+            "{source:?}: should offer String#trimLeft. Got: {labels:?}"
+        );
+        assert!(
+            !labels.iter().any(|l| l == "abs"),
+            "{source:?}: should be filtered to String. Got: {labels:?}"
+        );
+    }
+
+    /// Conformance: completing a pipeline stage, the LSP and the live
+    /// `complete` op (`parse_receiver_and_prefix/1` in
+    /// `beamtalk_repl_ops_dev.erl`, shared by the REPL, MCP and LiveView)
+    /// agree on the stage's receiver — the value before the last `|>`. Both
+    /// assert the cases in the shared corpus; the Erlang side in
+    /// `pipeline_receiver_matches_shared_corpus_test`.
+    #[test]
+    fn pipeline_receiver_matches_shared_corpus() {
+        let path = beamtalk_workspace::cargo_workspace_root!().join(
+            "runtime/apps/beamtalk_workspace/test/fixtures/completion_pipeline_receiver_corpus.json",
+        );
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read corpus {}: {e}", path.display()));
+        let cases: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("corpus is a JSON array");
+        assert!(!cases.is_empty(), "corpus must have cases");
+        for case in &cases {
+            let field = |key: &str| case[key].as_str().expect("string field");
+            let (line, receiver, prefix) = (field("line"), field("receiver"), field("prefix"));
+            let offset = u32::try_from(line.len()).unwrap();
+            let end = pipeline_receiver_end(line, offset)
+                .unwrap_or_else(|| panic!("{line:?}: not seen as a pipeline stage"));
+            assert_eq!(
+                line[..end as usize].trim_start(),
+                receiver,
+                "{line:?}: receiver"
+            );
+            assert!(line.ends_with(prefix), "{line:?}: prefix {prefix:?}");
+        }
+    }
+
+    #[test]
+    fn pipeline_receiver_end_ignores_lines_without_a_trailing_pipe() {
+        for line in [
+            r#""hello" size "#,
+            r#""hello" size ab"#,
+            r#""hello" |> size "#,
+        ] {
+            let offset = u32::try_from(line.len()).unwrap();
+            assert_eq!(pipeline_receiver_end(line, offset), None, "{line:?}");
+        }
+    }
+
+    #[test]
+    fn pipeline_completion_right_after_pipe() {
+        assert_offers_integer_not_string(r#""hello" size |> "#);
+        assert_offers_integer_not_string(r#""hello" size |>"#);
+        assert_offers_string_not_integer(r#""hello" |> "#);
+    }
+
+    #[test]
+    fn pipeline_completion_after_partial_selector_in_stage() {
+        assert_offers_integer_not_string(r#""hello" size |> ab"#);
+        assert_offers_string_not_integer(r#""hello" |> tri"#);
+    }
+
+    #[test]
+    fn pipeline_completion_after_multi_stage_pipeline() {
+        assert_offers_integer_not_string(r#""hello" size |> abs |> "#);
+        assert_offers_integer_not_string(r#""hello" reverse |> size |> neg"#);
+        // A multi-message stage: the stage's value is `("hello" size) abs`.
+        assert_offers_integer_not_string(r#""hello" |> size abs |> "#);
+    }
+
+    #[test]
+    fn pipeline_completion_uses_whole_keyword_stage_not_its_last_argument() {
+        // `|>` binds looser than a keyword message, so the stage receives
+        // `"hello" take: 2` (a String), not `2`.
+        assert_offers_string_not_integer(r#""hello" take: 2 |> "#);
+        assert_offers_string_not_integer(r#"s := "hello" take: 2 |> tri"#);
+    }
+
+    #[test]
+    fn pipeline_completion_on_a_continuation_line() {
+        assert_offers_integer_not_string("x := \"hello\" size\n  |> ");
+        assert_offers_integer_not_string("x := \"hello\" size |>\n  ab");
+    }
+
+    #[test]
+    fn pipeline_completion_inside_method_body() {
+        assert_offers_integer_not_string("Object subclass: Box\n  run => \"hello\" size |> ab");
+    }
+
+    #[test]
+    fn pipeline_completion_inside_block() {
+        assert_offers_integer_not_string("b := [:s :: String | s size |> ");
+    }
+
+    #[test]
+    fn pipeline_completion_class_reference_offers_class_side() {
+        let labels = labels_at_end("Integer |> ");
+        assert!(
+            !labels.iter().any(|l| l == "abs"),
+            "a class reference before `|>` completes class-side. Got: {labels:?}"
+        );
+    }
+
     #[test]
     fn chain_resolution_stdlib_two_hop_chain_offers_typed_completions() {
         // `"hello" size abs ` → Integer#abs -> Integer → should offer Integer methods again
@@ -2656,6 +2873,7 @@ mod tests {
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,
+                in_caller_new1: false,
                 is_module_less: false,
                 name: EcoString::from("SecretHelper"),
                 superclass: Some(EcoString::from("Object")),
@@ -2706,6 +2924,7 @@ mod tests {
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,
+                in_caller_new1: false,
                 is_module_less: false,
                 name: EcoString::from("InternalHelper"),
                 superclass: Some(EcoString::from("Object")),
@@ -2756,6 +2975,7 @@ mod tests {
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,
+                in_caller_new1: false,
                 is_module_less: false,
                 name: EcoString::from("InternalHelper"),
                 superclass: Some(EcoString::from("Object")),
@@ -2799,6 +3019,7 @@ mod tests {
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,
+                in_caller_new1: false,
                 is_module_less: false,
                 name: EcoString::from("RemoteService"),
                 superclass: Some(EcoString::from("Object")),
@@ -2890,6 +3111,7 @@ mod tests {
         use std::collections::HashMap;
         let internal_class = beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: EcoString::from("InternalClass"),
             superclass: Some(EcoString::from("Object")),
@@ -2932,6 +3154,7 @@ mod tests {
         );
         let public_class = beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: EcoString::from("PublicClass"),
             is_internal: false,
@@ -2957,6 +3180,7 @@ mod tests {
         hierarchy.add_from_beam_meta(vec![
             beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,
+                in_caller_new1: false,
                 is_module_less: false,
                 name: EcoString::from("RemoteService"),
                 superclass: Some(EcoString::from("Object")),
@@ -3210,7 +3434,7 @@ mod tests {
             &hierarchy,
             None,
             None,
-            Some(&alias_registry),
+            Some(&std::sync::Arc::new(alias_registry.clone())),
             None,
         );
 
@@ -3266,7 +3490,7 @@ mod tests {
             &hierarchy,
             None,
             None,
-            Some(&alias_registry),
+            Some(&std::sync::Arc::new(alias_registry.clone())),
             None,
         );
 
@@ -3324,7 +3548,7 @@ mod tests {
             &hierarchy,
             Some("my_pkg"),
             None,
-            Some(&alias_registry),
+            Some(&std::sync::Arc::new(alias_registry.clone())),
             None,
         );
 

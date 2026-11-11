@@ -192,8 +192,11 @@ pub struct SimpleLanguageService {
     /// finishes within its file budget; stays `false` if the budget was
     /// exhausted (coverage would be partial).
     project_complete: bool,
-    /// Whether the workspace has package dependencies (pre-WS3 guard).
-    has_package_dependencies: bool,
+    /// ADR 0100's pre-WS3 dependency guard input
+    /// (`CompilerOptions::dependency_extensions_unknown`): whether some
+    /// workspace package declares dependencies whose extensions were not all
+    /// loaded. Decided by the LSP server with the CLI's rule (BT-4611).
+    dependency_extensions_unknown: bool,
     /// Per-category diagnostic severity overrides from the workspace's
     /// `beamtalk.toml` `[diagnostics]` section (ADR 0100 Rule 3).
     /// Empty (the default) preserves today's Rule 1 completeness-ladder
@@ -265,7 +268,7 @@ impl SimpleLanguageService {
             native_types: None,
             known_erlang_modules: std::collections::HashSet::new(),
             project_complete: false,
-            has_package_dependencies: false,
+            dependency_extensions_unknown: false,
             diagnostics_overrides:
                 beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
             preload_in_progress: false,
@@ -284,7 +287,7 @@ impl SimpleLanguageService {
             native_types: None,
             known_erlang_modules: std::collections::HashSet::new(),
             project_complete: false,
-            has_package_dependencies: false,
+            dependency_extensions_unknown: false,
             diagnostics_overrides:
                 beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
             preload_in_progress: false,
@@ -314,13 +317,29 @@ impl SimpleLanguageService {
         self.project_complete
     }
 
-    /// Declare whether the workspace has package dependencies.
-    ///
-    /// Pre-WS3, dependency extension contributions are invisible, so when
-    /// true (and the project is complete) the receiver-knowledge classifier
-    /// keeps every receiver `Open`.
-    pub fn set_has_package_dependencies(&mut self, has_deps: bool) {
-        self.has_package_dependencies = has_deps;
+    /// Declare whether some dependency's extension methods may be missing
+    /// from the index (ADR 0100's pre-WS3 guard). When true (and the project
+    /// is complete) the receiver-knowledge classifier keeps every receiver
+    /// `Open`. The LSP server decides it with the CLI's rule,
+    /// `beamtalk_project::dependency_extensions::dependency_extensions_unknown`
+    /// (BT-4611).
+    pub fn set_dependency_extensions_unknown(&mut self, unknown: bool) {
+        self.dependency_extensions_unknown = unknown;
+    }
+
+    /// Whether any indexed file under one of `dirs` is incomplete as a
+    /// dependency source: it had a parse error, or its class hierarchy could
+    /// not be built (so its extensions were never indexed). The same per-file
+    /// rule the CLI's dependency scan applies
+    /// (`DependencyExtensions::file_is_complete`, BT-4611).
+    #[must_use]
+    pub fn any_incomplete_file_under(&self, dirs: &[std::path::PathBuf]) -> bool {
+        self.files.iter().any(|(path, data)| {
+            dirs.iter().any(|dir| path.as_std_path().starts_with(dir))
+                && !beamtalk_project::dependency_extensions::DependencyExtensions::file_is_complete(
+                    &data.diagnostics,
+                )
+        })
     }
 
     /// Declare whether the LSP server's startup workspace preload is
@@ -1867,7 +1886,11 @@ impl LanguageService for SimpleLanguageService {
                     options.knowledge_scope =
                         beamtalk_core::semantic_analysis::KnowledgeScope::ProjectComplete;
                 }
-                options.has_package_dependencies = self.has_package_dependencies;
+                // Dependency sources are indexed like project files, so their
+                // extensions are in `cross_file_extensions` below; the server
+                // keeps the pre-WS3 guard on unless that loading was complete
+                // (BT-4611, the CLI's rule).
+                options.dependency_extensions_unknown = self.dependency_extensions_unknown;
                 // BT-4022: project-known Erlang modules (hex-dep/native
                 // ebins + own `native/*.erl`, set by the LSP server at
                 // startup) so the `unresolved_ffi` check agrees with
@@ -1971,8 +1994,8 @@ impl LanguageService for SimpleLanguageService {
             position,
             self.project_index.hierarchy(),
             current_package.as_deref(),
-            self.native_types.as_deref(),
-            Some(self.project_index.alias_registry()),
+            self.native_types.as_ref(),
+            Some(self.project_index.alias_registry_arc()),
             Some(protocol_registry),
         )
     }
@@ -1994,8 +2017,8 @@ impl LanguageService for SimpleLanguageService {
             &file_data.source,
             position,
             self.project_index.hierarchy(),
-            self.native_types.as_deref(),
-            Some(self.project_index.alias_registry()),
+            self.native_types.as_ref(),
+            Some(self.project_index.alias_registry_arc()),
             Some(protocol_registry),
         )
     }
@@ -2013,9 +2036,9 @@ impl LanguageService for SimpleLanguageService {
             &file_data.source,
             position,
             self.project_index.hierarchy(),
-            self.native_types.as_deref(),
+            self.native_types.as_ref(),
             Some(protocol_registry),
-            Some(self.project_index.alias_registry()),
+            Some(self.project_index.alias_registry_arc()),
         )
     }
 

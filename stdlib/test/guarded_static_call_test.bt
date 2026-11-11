@@ -180,9 +180,12 @@ TestCase subclass: GuardedStaticCallTest
     self assert: GscWarmChild whoRuns equals: me
 
   // (e) After the class process is killed and the class monitor restarts it,
-  // the callee's `ClassSelf` holds the new pid.
+  // the callee's `ClassSelf` holds the new pid. A class object taken before the
+  // kill still answers through the restarted process (BT-4552: the eager
+  // restart must not forget the dead pid's class name).
   testRestartedClassProcessIsTheNewClassSelf =>
     oldPid := Erlang beamtalk_class_registry whereis_class: #GscRestart
+    stale := self lookUp: #GscRestart
     self assert: (Erlang erlang element: 4 of: GscRestart me) equals: oldPid
     Erlang erlang exit: oldPid with: #kill
     newPid := self
@@ -192,6 +195,8 @@ TestCase subclass: GuardedStaticCallTest
     self deny: newPid =:= oldPid
     self assert: (Erlang erlang element: 4 of: GscRestart me) equals: newPid
     self assert: (Erlang erlang element: 4 of: (self lookUp: #GscRestart) me) equals: newPid
+    self assert: (Erlang erlang element: 4 of: stale) equals: oldPid
+    self assert: stale name equals: #GscRestart
 
   // The registered pid of class `name` once it is a live pid other than
   // `oldPid`, polling every 10 ms up to `tries` times.

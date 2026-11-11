@@ -195,6 +195,18 @@ fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Documen
             unwrap_self(),
             ")"
         ]),
+        // BT-4544: radix-aware counterpart to `asInteger` (raises like it —
+        // use `Integer parse:radix:` for the `Result`-based version).
+        "asIntegerRadix:" => {
+            let radix = param(params, 0, "_Radix");
+            Some(docvec![
+                "call 'erlang':'binary_to_integer'(",
+                unwrap_self(),
+                ", ",
+                leaf::var(radix.to_string()),
+                ")"
+            ])
+        }
         "asFloat" => Some(docvec![
             "call 'erlang':'binary_to_float'(",
             unwrap_self(),
@@ -730,6 +742,18 @@ mod tests {
         assert_eq!(
             result,
             Some("call 'erlang':'binary_to_float'(call 'beamtalk_primitive':'string_to_binary'(Self))".to_string())
+        );
+    }
+
+    #[test]
+    fn test_as_integer_radix() {
+        let result = doc_to_string(generate_string_bif(
+            "asIntegerRadix:",
+            &["Radix".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'erlang':'binary_to_integer'(call 'beamtalk_primitive':'string_to_binary'(Self), Radix)".to_string())
         );
     }
 

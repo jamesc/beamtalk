@@ -323,7 +323,7 @@ diagnostics_missing_code_returns_empty_term_test() ->
 
 diagnostics_non_binary_mode_returns_empty_term_test() ->
     %% A non-binary `mode` (a raw TCP/MCP client could send a JSON
-    %% number) degrades to [] at the Erlang boundary via the diagnostics_for/2
+    %% number) degrades to [] at the Erlang boundary via the diagnostics_for/3
     %% catch-all, rather than crashing the session. No compiler/port call is made,
     %% so this is covered without a running workspace.
     Msg = make_msg(<<"diagnostics">>, <<"dg-4">>, undefined),
@@ -348,7 +348,7 @@ diagnostics_empty_code_encodes_done_status_test() ->
 %% The Erlang op boundary normalises an unknown-binary `mode` to
 %% <<"expression">>, mirroring the Elixir BtAttach.Facade (anything but
 %% "method" -> "expression"). A non-binary `mode` is passed through unchanged so
-%% diagnostics_for/2's catch-all still degrades it to []. These are
+%% diagnostics_for/3's catch-all still degrades it to []. These are
 %% white-box checks of the pure normaliser, so no compiler/port is needed.
 %%====================================================================
 
@@ -383,7 +383,7 @@ diagnostics_empty_binary_mode_normalised_to_expression_test() ->
 
 diagnostics_non_binary_mode_passed_through_unchanged_test() ->
     %% A non-binary mode is NOT normalised — it is passed through so the
-    %% diagnostics_for/2 catch-all degrades it to [], rather than being
+    %% diagnostics_for/3 catch-all degrades it to [], rather than being
     %% silently coerced into expression mode.
     ?assertEqual(
         42,
@@ -395,7 +395,7 @@ diagnostics_non_binary_mode_passed_through_unchanged_test() ->
     ).
 
 %%====================================================================
-%% diagnostics_for/2's `{ok, Diagnostics}` success branch: the
+%% diagnostics_for/3's `{ok, Diagnostics}` success branch: the
 %% compiler port has to be running to answer at all (the `{error, _}`
 %% degrade-to-`[]` branch above already covers the port-down case).
 %%====================================================================
@@ -408,12 +408,75 @@ diagnostics_for_success_returns_diagnostics_list_test() ->
         {ok, [_ | _]} -> timer:sleep(200);
         _ -> ok
     end,
-    Result = beamtalk_repl_ops_dev:diagnostics_for(<<"1 + 1">>, <<"expression">>),
+    Result = beamtalk_repl_ops_dev:diagnostics_for(<<"1 + 1">>, <<"expression">>, <<>>),
     %% Leave the app the way this test found it (mirrors
     %% beamtalk_repl_eval_tests.erl's eval_teardown/1 discipline) — later
     %% no-compiler-running tests in the shared EUnit node depend on it.
     _ = application:stop(beamtalk_compiler),
     ?assert(is_list(Result)).
+
+%%====================================================================
+%% BT-4583: the `diagnostics` op's optional `source_path` param checks the
+%% buffer under that file's project scope. A project whose `beamtalk.toml`
+%% sets `[diagnostics] type = "error"` turns a type mismatch the path-less
+%% (scratch-buffer) request reports as a warning into an error — the same
+%% severity `load-project` fails the file on.
+%%====================================================================
+
+diagnostics_op_source_path_applies_project_table_test() ->
+    application:ensure_all_started(compiler),
+    StartResult = application:ensure_all_started(beamtalk_compiler),
+    case StartResult of
+        {ok, [_ | _]} -> timer:sleep(200);
+        _ -> ok
+    end,
+    Root = filename:join(
+        binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
+        "bt4583_" ++ integer_to_list(erlang:unique_integer([positive]))
+    ),
+    SourcePath = filename:join([Root, "src", "bad.bt"]),
+    ok = filelib:ensure_dir(SourcePath),
+    Source = <<"typed Value subclass: Bad\n  field: n :: Integer = \"oops\"\n">>,
+    try
+        ok = file:write_file(
+            filename:join(Root, "beamtalk.toml"),
+            <<
+                "[package]\nname = \"bt4583\"\nversion = \"0.1.0\"\n\n"
+                "[diagnostics]\ntype = \"error\"\n"
+            >>
+        ),
+        ok = file:write_file(SourcePath, Source),
+        Msg = make_msg(<<"diagnostics">>, <<"dg-sp">>, undefined),
+        {diagnostics, Scoped} = beamtalk_repl_ops_dev:handle_term(
+            <<"diagnostics">>,
+            #{
+                <<"code">> => Source,
+                <<"source_path">> => unicode:characters_to_binary(SourcePath)
+            },
+            Msg,
+            self()
+        ),
+        {diagnostics, Unscoped} = beamtalk_repl_ops_dev:handle_term(
+            <<"diagnostics">>, #{<<"code">> => Source}, Msg, self()
+        ),
+        %% A non-binary path is ignored, like an absent one.
+        {diagnostics, NonBinary} = beamtalk_repl_ops_dev:handle_term(
+            <<"diagnostics">>, #{<<"code">> => Source, <<"source_path">> => 42}, Msg, self()
+        ),
+        ?assertEqual([<<"error">>], mismatch_severities(Scoped)),
+        ?assertNotEqual([<<"error">>], mismatch_severities(Unscoped)),
+        ?assertEqual(mismatch_severities(Unscoped), mismatch_severities(NonBinary))
+    after
+        file:del_dir_r(Root),
+        _ = application:stop(beamtalk_compiler)
+    end.
+
+mismatch_severities(Diagnostics) ->
+    [
+        Severity
+     || #{message := Message, severity := Severity} <- Diagnostics,
+        binary:match(Message, <<"declared as Integer">>) =/= nomatch
+    ].
 
 %%====================================================================
 %% handle/4 -- show-codegen class+selector
@@ -713,8 +776,32 @@ keyword_send_unresolvable_receiver_is_none_test() ->
     ?assertEqual(none, kw(<<"x > 0 ifTrue:">>, <<" [1]">>)),
     %% Cascade continuation: no receiver token in this segment.
     ?assertEqual(none, kw(<<"t show: 1; show:">>, <<" 2">>)),
-    %% An interpolated string makes the line unscannable.
-    ?assertEqual(none, kw(<<"t show: \"{x}\" with:">>, <<" 1">>)).
+    %% An unterminated interpolation makes the text unscannable.
+    ?assertEqual(none, kw(<<"t show: \"{x with:">>, <<" 1">>)).
+
+keyword_send_interpolated_strings_are_scanned_test() ->
+    %% BT-4463: an interpolated string is one opaque lexeme, so every keyword
+    %% of the send resolves — before, around, or after the string.
+    ?assertEqual(
+        {ok, <<"Transcript">>, <<"show:with:">>},
+        kw(<<"Transcript show: \"Hi {name}\" with:">>, <<" x">>)
+    ),
+    ?assertEqual(
+        {ok, <<"Transcript">>, <<"show:with:">>},
+        kw(<<"Transcript show:">>, <<" \"Hi {name}\" with: x">>)
+    ),
+    %% Nested string and brace inside the interpolation.
+    ?assertEqual(
+        {ok, <<"t">>, <<"show:with:">>},
+        kw(<<"t show:">>, <<" \"a {b at: \"k: \"} {c}\" with: 1">>)
+    ),
+    %% An interpolated string on an earlier line does not hide the send below.
+    ?assertEqual(
+        {ok, <<"d">>, <<"at:put:">>},
+        kw(<<"x := \"{y}\".\nd at:">>, <<" 1 put: 2">>)
+    ),
+    %% A keyword-looking `…:` inside an interpolated string is not a send.
+    ?assertEqual(none, kw(<<"t show: \"{x} a:">>, <<" b\"">>)).
 
 keyword_send_non_keyword_tokens_test() ->
     ?assertEqual(not_keyword, kw(<<"Integer">>, <<>>)),
@@ -785,6 +872,69 @@ hover_docs_keyword_send_unclassifiable_receiver_is_empty_test() ->
 hover_docs_keyword_send_class_receiver_test() ->
     Docs = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"Integer max:">>, <<" 3">>, #{}),
     ?assert(is_binary(Docs)).
+
+%%====================================================================
+%% self / super receivers in a method editor (BT-4463)
+%%====================================================================
+
+classify_receiver_self_resolves_against_edited_class_test() ->
+    ?assertEqual(
+        {instance, 'Integer'},
+        beamtalk_repl_ops_dev:classify_receiver(<<"self">>, #{}, {'Integer', instance})
+    ),
+    ?assertEqual(
+        {class, 'Integer'},
+        beamtalk_repl_ops_dev:classify_receiver(<<"self">>, #{}, {'Integer', class})
+    ).
+
+classify_receiver_super_resolves_against_superclass_test() ->
+    Super = beamtalk_runtime_api:superclass(beamtalk_runtime_api:whereis_class('Integer')),
+    ?assert(is_atom(Super) andalso Super =/= none),
+    ?assertEqual(
+        {instance, Super},
+        beamtalk_repl_ops_dev:classify_receiver(<<"super">>, #{}, {'Integer', instance})
+    ),
+    ?assertEqual(
+        {class, Super},
+        beamtalk_repl_ops_dev:classify_receiver(<<"super">>, #{}, {'Integer', class})
+    ).
+
+classify_receiver_super_of_root_class_is_undefined_test() ->
+    ?assertEqual(
+        undefined,
+        beamtalk_repl_ops_dev:classify_receiver(<<"super">>, #{}, {'ProtoObject', instance})
+    ).
+
+classify_receiver_self_without_context_is_an_ordinary_name_test() ->
+    ?assertEqual(undefined, beamtalk_repl_ops_dev:classify_receiver(<<"self">>, #{})),
+    ?assertEqual(
+        undefined, beamtalk_repl_ops_dev:classify_receiver(<<"self">>, #{}, undefined)
+    ).
+
+hover_docs_self_unary_and_keyword_match_a_literal_receiver_test() ->
+    Ctx = {'Integer', instance},
+    %% Unary: `self factorial` hovers exactly what `42 factorial` does.
+    Expected = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"42 factorial">>, <<>>, #{}),
+    ?assertNotEqual(<<>>, Expected),
+    ?assertEqual(
+        Expected,
+        beamtalk_repl_ops_dev:hover_docs(<<>>, <<"self factorial">>, <<>>, #{}, Ctx)
+    ),
+    %% Keyword: `self max:` resolves like `42 max:`.
+    ExpectedKw = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"42 max:">>, <<" 3">>, #{}),
+    ?assertEqual(
+        ExpectedKw,
+        beamtalk_repl_ops_dev:hover_docs(<<>>, <<"self max:">>, <<" 3">>, #{}, Ctx)
+    ),
+    %% No editor class: `self` stays unresolved.
+    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_docs(<<>>, <<"self factorial">>, <<>>, #{})).
+
+hover_docs_class_side_self_hovers_class_methods_test() ->
+    Expected = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"Integer new">>, <<>>, #{}),
+    ?assertEqual(
+        Expected,
+        beamtalk_repl_ops_dev:hover_docs(<<>>, <<"self new">>, <<>>, #{}, {'Integer', class})
+    ).
 
 %%====================================================================
 %% classify_receiver/2's remaining branches: the empty receiver, an
@@ -2267,7 +2417,11 @@ setup_session() ->
     Pid.
 
 teardown_session(Pid) ->
-    catch beamtalk_repl_shell:stop(Pid),
+    try
+        beamtalk_repl_shell:stop(Pid)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 session_show_codegen_code_path(Pid) ->
@@ -2380,8 +2534,14 @@ with_findings_store(TestFun) ->
         TestFun()
     after
         case Started of
-            true -> catch gen_server:stop(beamtalk_workspace_findings_store);
-            false -> ok
+            true ->
+                try
+                    gen_server:stop(beamtalk_workspace_findings_store)
+                catch
+                    _:_ -> ok
+                end;
+            false ->
+                ok
         end
     end.
 
@@ -2537,4 +2697,61 @@ load_keyword_vocabulary_corpus() ->
         "test",
         "fixtures",
         "completion_keyword_vocabulary_corpus.json"
+    ]).
+
+%%====================================================================
+%% Pipeline `|>` completion (ADR 0145, BT-4518)
+%%====================================================================
+
+%% Conformance: completing a pipeline stage, the REPL/MCP/LiveView engine
+%% (`parse_receiver_and_prefix/1`) and the Rust LSP (`pipeline_receiver_end`
+%% in `crates/beamtalk-language-service/src/queries/completion_provider.rs`)
+%% must agree on the stage's receiver: the value before the last `|>`. Both
+%% assert the cases in the shared corpus; the Rust side in
+%% `pipeline_receiver_matches_shared_corpus`.
+pipeline_receiver_matches_shared_corpus_test() ->
+    Cases = load_pipeline_receiver_corpus(),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(Case) ->
+            Line = maps:get(<<"line">>, Case),
+            Expected = {maps:get(<<"receiver">>, Case), maps:get(<<"prefix">>, Case)},
+            Actual =
+                case beamtalk_repl_ops_dev:parse_receiver_and_prefix(Line) of
+                    {expression, Receiver, Prefix} -> {Receiver, Prefix};
+                    {Receiver, Prefix} -> {Receiver, Prefix}
+                end,
+            ?assertEqual(Expected, Actual, {corpus_mismatch, Line})
+        end,
+        Cases
+    ).
+
+pipeline_with_nothing_before_has_no_receiver_test() ->
+    ?assertEqual(
+        {undefined, <<"ab">>}, beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"|> ab">>)
+    ).
+
+tokenise_send_chain_drops_pipeline_tokens_test() ->
+    %% `"hello" |> size abs` is the unary chain `"hello" size abs`, so it
+    %% resolves without the compiler port.
+    ?assertEqual(
+        {ok, <<"\"hello\"">>, [size, abs]},
+        beamtalk_repl_ops_dev:tokenise_send_chain(<<"\"hello\" |> size |> abs">>)
+    ).
+
+tokenise_binary_chain_drops_pipeline_tokens_test() ->
+    ?assertEqual(
+        {ok, <<"x">>, [{binary, '+'}, {unary, abs}]},
+        beamtalk_repl_ops_dev:tokenise_binary_chain(<<"x + 1 |> abs">>)
+    ).
+
+%% Load the shared pipeline-receiver conformance corpus from the repo tree.
+load_pipeline_receiver_corpus() ->
+    beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_workspace",
+        "test",
+        "fixtures",
+        "completion_pipeline_receiver_corpus.json"
     ]).

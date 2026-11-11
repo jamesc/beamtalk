@@ -66,10 +66,10 @@ File writeAll: _userPath contents: _userSource
 // => Result ok: nil
 
 Workspace load: _demoPath
-// => _
+// => ["Bt3271StaleRenameDemo"]
 
 Workspace load: _userPath
-// => _
+// => ["Bt3271StaleRenameDemoUser"]
 
 // ===========================================================================
 // STEP 2 — renameTo: RECORDS THE REWRITE (IN MEMORY ONLY — NO DISK WRITE YET)
@@ -161,10 +161,10 @@ Bt3271StaleRenameDemoUser removeFromSystem
 // => nil
 
 (Erlang file) delete: _demoPath
-// => _
+// => Result ok: nil
 
 (Erlang file) delete: _userPath
-// => _
+// => Result ok: nil
 
 (Erlang file) del_dir: _projDir
 // => Result ok: nil

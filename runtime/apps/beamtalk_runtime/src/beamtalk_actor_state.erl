@@ -43,12 +43,14 @@ code that still answers `{reply, R, NewState}` (native methods, ADR 0066
 instance-side extension funs, `beamtalk_actor:dispatch/4`): it stores
 `NewState` in the cell so the callback can `take/0` it. `protect/1` is the
 rollback for runtime catchers that continue after an error: it restores the
-cell to its value at entry before re-raising.
+cell to its value at entry before re-raising. A `^` that reaches its actor
+method commits the cell, not the copy the throw carries (`commit/2`, ADR 0146).
 
 ## Dependencies
 
-It depends on `beamtalk_error`, and on `beamtalk_dispatch` and `beamtalk_actor`
-only for `super_send/5` and `refresh/2`, which call them.
+It depends on `beamtalk_error` and `beamtalk_tagged_map`, and on
+`beamtalk_dispatch` and `beamtalk_actor` only for `super_send/5`, `refresh/2`
+and the test-build check in `commit/2`, which call them.
 """.
 
 -include("beamtalk.hrl").
@@ -66,9 +68,13 @@ only for `super_send/5` and `refresh/2`, which call them.
     get/2,
     get/3,
     view/2,
-    nlr_state/2,
+    commit/2,
+    store_unwound/2,
+    note_unwound/1,
+    rethrow_from_away/1,
+    enable_commit_check/1,
+    init_commit_check/0,
     refresh/2,
-    refresh_carried/2,
     call_foreign/3,
     super_send/5,
     put/3,
@@ -76,17 +82,24 @@ only for `super_send/5` and `refresh/2`, which call them.
     has/3,
     clear/2,
     capture/2,
-    protect/1
+    protect/1,
+    map_cell_entry/2
 ]).
 
 -export_type([cell/0, capture/0, adapted/0]).
 
 -define(CELL, '$bt_actor_state').
-%% BT-4448: the key `nlr_state/2` stamps on the state an away closure's `^`
-%% carries, holding the pid of the actor the closure belongs to. A `__local__`
-%% key, so the committed state never keeps it (`beamtalk_actor:strip_local_temps/1`);
-%% the `$` keeps it apart from every threaded local (`__local__<name>`).
--define(AWAY_OWNER, '__local__$nlr_away_owner').
+%% ADR 0146 (BT-4535): the persistent_term switch for the test-build check in
+%% `commit/2`, and the process-dictionary note the check reads (BT-4536): the
+%% carried states of the in-flight `^` throws whose carried state is not
+%% expected to equal the cell when they reach their method, each spent by the
+%% commit of its own throw. A throw is noted when a cleanup may have put the
+%% cell ahead of it (`note_unwound/1`), or when it was thrown away from home:
+%% it reached this process from the one it was thrown in
+%% (`rethrow_from_away/1`), or left an away `super_send/5`.
+-define(CHECK_COMMIT, {?MODULE, check_commit}).
+-define(EXCUSED, '$bt_nlr_commit_excused').
+-define(CHECK_ENV, "BEAMTALK_CHECK_NLR_COMMIT").
 
 -type cell() :: {pid() | tuple(), map()} | undefined.
 -type capture() :: none | map().
@@ -104,6 +117,7 @@ what was there before (`undefined`, or an enclosing callback's cell) for
 -spec install(map()) -> cell().
 install(State) when is_map(State) ->
     Old = erlang:get(?CELL),
+    forget_excused(Old),
     erlang:put(?CELL, {self(), State}),
     Old.
 
@@ -118,10 +132,31 @@ take() ->
         _ -> raise_no_cell(take)
     end.
 
+-doc """
+BT-4666: apply `Fun` to every actor state map a process-dictionary entry
+holds: the cell (`{Key, {Owner, Map}}`), and the carried states the
+test-build commit check notes as excused (`'$bt_nlr_commit_excused'`, see
+note_unwound/1). Any other entry is answered unchanged. Lets
+`beamtalk_actor_redaction`'s crash-report filter redact secret slots in
+state still held in the dictionary, without knowing these keys or shapes.
+""".
+-spec map_cell_entry(term(), fun((map()) -> map())) -> term().
+map_cell_entry({?CELL, {Owner, State}}, Fun) when is_map(State) ->
+    {?CELL, {Owner, Fun(State)}};
+map_cell_entry({?EXCUSED, Carried}, Fun) when is_list(Carried) ->
+    {?EXCUSED, [map_if_state(C, Fun) || C <- Carried]};
+map_cell_entry(Entry, _Fun) ->
+    Entry.
+
+-spec map_if_state(term(), fun((map()) -> map())) -> term().
+map_if_state(State, Fun) when is_map(State) -> Fun(State);
+map_if_state(Other, _Fun) -> Other.
+
 -doc "Restore the value `install/1` returned: erase the cell, or put the enclosing one back.".
 -spec uninstall(cell()) -> ok.
 uninstall(undefined) ->
     erlang:erase(?CELL),
+    forget_excused(undefined),
     ok;
 uninstall({_, _} = Old) ->
     erlang:put(?CELL, Old),
@@ -233,19 +268,201 @@ view(Self, Capture) ->
     end.
 
 -doc """
-The state an actor closure's `^` throw carries: the cell at home, as `view/2`.
-Away it is the creation-time `Capture` stamped with the pid of the closure's
-own actor (BT-4448). Actor state maps hold no pid, so without the stamp the
-capture of one actor equals another same-class actor's cell whenever their
-fields do; `refresh_carried/2` reads the stamp so that a `^` thrown from a
-closure of another actor is never resumed with this actor's cell.
+ADR 0146: the state an actor method commits when a `^` of its own reaches its
+NLR boundary (`{'reply', Value, commit(Self, Carried)}`). The cell is the one
+place the actor's fields live, so at home the commit is the cell as it stands:
+a cleanup's writes made while the `^` unwound are there, and the throw's own
+`__local__` keys are dead at the method boundary, so none is merged back (as
+`refresh/2` would). Away (an away `super_send/5` runs the method in another
+process, or no callback of this actor is running here) there is no cell of this
+actor's, and the commit is `Carried` unchanged, so `super_send/5`'s
+illegal-write check still sees what the method answered. Ownership is
+`at_home/1`'s; nothing compares two state maps to decide it.
+
+When the test-build check is on (`enable_commit_check/1`, or the
+`BEAMTALK_CHECK_NLR_COMMIT` environment variable at runtime start) a commit at
+home also asserts the invariant the cell commit relies on: the cell is current
+whenever a `^` starts. A `^` thrown at home stores its state to the cell (or
+carries the cell) as it throws, so on reaching its boundary its carried fields
+equal the cell unless something put the cell ahead on the way: an `ensure:`
+cleanup that wrote the cell while the `^` unwound (`note_unwound/1`). A `^`
+thrown away from home carries its creation-time capture and is not checked.
+Whether it was is decided by process identity, never by anything in the state
+map: it reached this process from the process it was thrown in
+(`rethrow_from_away/1`), or it left an away `super_send/5`, which runs under
+another actor's cell. Any other difference raises `actor_nlr_stale_cell`.
 """.
--spec nlr_state(#beamtalk_object{}, capture()) -> map().
-nlr_state(Self, Capture) ->
+-spec commit(#beamtalk_object{}, term()) -> term().
+commit(Self, Carried) ->
     case at_home(Self) of
-        {true, State} -> State;
-        false -> (away_capture(Self, '_', Capture))#{?AWAY_OWNER => owner_of(Self)}
+        {true, Cell} ->
+            case persistent_term:get(?CHECK_COMMIT, false) of
+                false -> Cell;
+                true -> check_commit(Self, Cell, Carried)
+            end;
+        false ->
+            Carried
     end.
+
+-doc """
+ADR 0146 R1: store the writes an inlined `ensure:` cleanup made while `Throw`, a
+`^` of another method of this actor, unwound through it, as `store/1` does. The
+throw is re-raised as it came, so the cell is now ahead of the state it
+carries, which `note_unwound/1` tells the test-build check in `commit/2`.
+""".
+-spec store_unwound(term(), map()) -> ok.
+store_unwound(Throw, State) when is_map(State) ->
+    note_unwound(Throw),
+    store(State).
+
+-doc """
+Re-throw `Nlr`, a `^` another process threw on this one's behalf and answered
+here (a block run by another actor or by a class's process; BT-3582). No
+actor's block is at home outside its actor's own process, so the block was away
+when it threw and its `^` carries the block's creation-time capture, not this
+process's cell. The test-build check in `commit/2` is told so (BT-4536): the
+throw is recognised as away by process identity, not by a mark in the state map.
+""".
+-spec rethrow_from_away(term()) -> no_return().
+rethrow_from_away(Nlr) ->
+    note_unwound(Nlr),
+    throw(Nlr).
+
+-doc """
+Tell the test-build check in `commit/2` that a cleanup may have put the cell
+ahead of `Throw`, a `^` re-raised as it came after the cleanup ran: an inlined
+`ensure:`'s foreign clause (`store_unwound/2`), or `Block>>ensure:` reached
+dynamically (`perform:`), whose closure cleanup writes the cell in place
+(BT-4536). A no-op for anything but a state-carrying `$bt_nlr` throw, outside
+a callback, and when the check is off.
+
+The note is the throw's carried state, and only the commit of a throw carrying
+that exact term spends it. A throw noted twice (a `^` through two such
+cleanups) is noted once, so no note outlives its throw to excuse a later
+commit. Nor does a note outlive the callback it was made in: `install/1` and
+`uninstall/1` drop every note at a top-level callback's entry and exit, so a
+throw that left by another way (an error, a REPL or class-method boundary, the
+`gen_server` exception path) cannot excuse a later commit. Two throws in
+flight at once with equal carried states share one note: the first commit
+spends it, and the other is checked as if it was never noted.
+""".
+-spec note_unwound(term()) -> ok.
+note_unwound(Throw) when ?IS_NLR(Throw), tuple_size(Throw) =:= 4 ->
+    case persistent_term:get(?CHECK_COMMIT, false) andalso installed() of
+        true ->
+            Carried = element(4, Throw),
+            Excused =
+                case erlang:get(?EXCUSED) of
+                    List when is_list(List) -> List;
+                    _ -> []
+                end,
+            case lists:member(Carried, Excused) of
+                true -> ok;
+                false -> erlang:put(?EXCUSED, [Carried | Excused])
+            end,
+            ok;
+        false ->
+            ok
+    end;
+note_unwound(_Throw) ->
+    ok.
+
+%% Spends the note left for the throw carrying `Carried`.
+-spec take_excused(term()) -> boolean().
+take_excused(Carried) ->
+    case erlang:get(?EXCUSED) of
+        List when is_list(List) ->
+            case lists:member(Carried, List) of
+                true ->
+                    case lists:delete(Carried, List) of
+                        [] -> erlang:erase(?EXCUSED);
+                        Rest -> erlang:put(?EXCUSED, Rest)
+                    end,
+                    true;
+                false ->
+                    false
+            end;
+        _ ->
+            false
+    end.
+
+%% A top-level callback (no enclosing cell) starts and ends with no note: no
+%% throw outlives the callback it unwound in.
+-spec forget_excused(cell()) -> ok.
+forget_excused(undefined) ->
+    _ = erlang:erase(?EXCUSED),
+    ok;
+forget_excused(_Enclosing) ->
+    ok.
+
+-doc """
+Switch the test-build check in `commit/2` on (when the `BEAMTALK_CHECK_NLR_COMMIT`
+environment variable is set to anything but `0` or the empty string) at
+runtime start (`beamtalk_runtime_app`). Leaves it as it is otherwise, so no
+`persistent_term` write happens in a build that does not ask for the check.
+""".
+-spec init_commit_check() -> ok.
+init_commit_check() ->
+    case os:getenv(?CHECK_ENV) of
+        false -> ok;
+        "" -> ok;
+        "0" -> ok;
+        _ -> enable_commit_check(true)
+    end.
+
+-doc """
+Switch the test-build check in `commit/2` on or off. A `persistent_term`
+write, so never on a hot path: at runtime start (`init_commit_check/0`) or in
+a test.
+""".
+-spec enable_commit_check(boolean()) -> ok.
+enable_commit_check(true) ->
+    persistent_term:put(?CHECK_COMMIT, true);
+enable_commit_check(false) ->
+    _ = persistent_term:erase(?CHECK_COMMIT),
+    ok.
+
+-spec check_commit(#beamtalk_object{}, map(), term()) -> map().
+check_commit(Self, Cell, Carried) ->
+    Excused = take_excused(Carried),
+    case
+        Excused orelse not is_map(Carried) orelse
+            beamtalk_actor:strip_local_temps(Carried) =:= beamtalk_actor:strip_local_temps(Cell)
+    of
+        true -> Cell;
+        false -> raise_stale_cell(Self, Cell, Carried)
+    end.
+
+-spec raise_stale_cell(#beamtalk_object{}, map(), map()) -> no_return().
+raise_stale_cell(#beamtalk_object{class = Class}, Cell, Carried) ->
+    Fields = beamtalk_actor:strip_local_temps(Carried),
+    Stale = lists:sort([
+        K
+     || K <- maps:keys(maps:merge(Fields, Cell)),
+        not beamtalk_tagged_map:is_local_temp_key(K),
+        maps:get(K, Fields, '$absent') =/= maps:get(K, Cell, '$absent')
+    ]),
+    Error0 = beamtalk_error:new(actor_nlr_stale_cell, Class),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        beamtalk_error:chars_to_binary(
+            io_lib:format(
+                "~ts's state cell was stale when a `^` reached its method: the throw carried "
+                "fields the cell did not hold (~tp)",
+                [Class, Stale]
+            )
+        )
+    ),
+    Error2 = beamtalk_error:with_details(Error1, #{fields => Stale}),
+    beamtalk_error:raise(
+        beamtalk_error:with_hint(
+            Error2,
+            <<
+                "Compiler invariant (ADR 0146): the cell is current whenever a `^` starts. "
+                "A ThreadedIr lowering let a `^` start without storing the method's state."
+            >>
+        )
+    ).
 
 -doc """
 Run a `dispatch/4` exit that is not a compiled Beamtalk method (ADR 0137 §2): a
@@ -287,25 +504,16 @@ reflect_cell(Entry, {error, Reason, Answered}) when is_map(Answered) ->
 reflect_cell(_Entry, Answer) ->
     Answer.
 
-%% States are compared without the `nlr_state/2` stamp (BT-4448): a compiled
-%% callee that caught its own away closure's `^` answers that closure's capture
-%% stamped, which is the same version as an unstamped `Entry`.
 -spec reflect_state(map(), map()) -> map().
 reflect_state(Entry, Answered) ->
     case erlang:get(?CELL) of
-        {_, Cell} when is_map(Cell) ->
-            case {unstamped(Cell), unstamped(Answered), unstamped(Entry)} of
-                {C, A, E} when C =/= E, C =/= A, A =:= E -> Cell;
-                {C, A, E} when C =/= E, C =/= A -> raise_conflict(Entry);
-                _ -> Answered
-            end;
+        {_, Cell} when is_map(Cell), Cell =/= Entry, Cell =/= Answered, Answered =:= Entry ->
+            Cell;
+        {_, Cell} when is_map(Cell), Cell =/= Entry, Cell =/= Answered ->
+            raise_conflict(Entry);
         _ ->
             Answered
     end.
-
--spec unstamped(map()) -> map().
-unstamped(State) ->
-    maps:remove(?AWAY_OWNER, State).
 
 -spec raise_conflict(map()) -> no_return().
 raise_conflict(Entry) ->
@@ -313,9 +521,9 @@ raise_conflict(Entry) ->
     Error0 = beamtalk_error:new(actor_state_conflict, Class),
     Error1 = beamtalk_error:with_message(
         Error0,
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format(
-                "~s's state was changed twice by one call: a block it ran wrote a field "
+                "~ts's state was changed twice by one call: a block it ran wrote a field "
                 "and the method also answered a different state",
                 [Class]
             )
@@ -346,43 +554,6 @@ refresh(Self, Acc) ->
     end.
 
 -doc """
-BT-4429: the state a `^` throw resumes with after `Block>>ensure:` reached
-dynamically (`perform:`) ran its cleanup. That catch runs in the Block method,
-so it cannot know what the throw carries: an actor method's or closure's state
-(the cell, which the `^` stored or read just before it threw), the REPL's
-bindings, or a value type's `Self`. `Snapshot` is the cell as `snapshot/0`
-answered it before the cleanup ran. When the cell was this process's actor's
-own and `Carried` is that cell's state (its `__local__` scratch keys aside),
-answer `Carried` with its fields replaced by the cell as the cleanup left it,
-as `refresh/2` does. Otherwise `Carried` holds no state a cleanup closure can
-write (no closure assigns a REPL binding or a value type's field), so answer it
-unchanged.
-
-Equal fields alone do not make `Carried` the cell's (BT-4448): a closure of
-another actor of the same class, run here away from home, carries its own
-actor's capture, which can equal this cell. `nlr_state/2` stamps that capture
-with its actor's pid, and a `Carried` stamped with any actor but the cell's
-owner is answered unchanged, so it goes back to its own boundary as it came.
-""".
--spec refresh_carried(cell(), term()) -> term().
-refresh_carried({Owner, Before}, Carried) when Owner =:= self(), is_map(Carried) ->
-    case
-        maps:get(?AWAY_OWNER, Carried, Owner) =:= Owner andalso
-            beamtalk_actor:strip_local_temps(Carried) =:=
-                beamtalk_actor:strip_local_temps(Before)
-    of
-        true ->
-            case erlang:get(?CELL) of
-                {Owner, Cell} when is_map(Cell) -> cell_over(Cell, Carried);
-                _ -> Carried
-            end;
-        false ->
-            Carried
-    end;
-refresh_carried(_Snapshot, Carried) ->
-    Carried.
-
--doc """
 A `super` send from a block: run the superclass method of `Class` for `Selector`
 against the cell at home (storing its new state back, answering its value);
 away, against the creation-time `Capture`, where a method that changes state
@@ -392,13 +563,12 @@ raises `actor_state_unreachable` (a block abroad cannot write the actor).
 super_send(Self, Capture, Class, Selector, Args) ->
     case at_home(Self) of
         {true, State} ->
-            case beamtalk_dispatch:super(Selector, Args, Self, State, Class) of
-                {reply, Result, NewState} ->
-                    store(NewState),
-                    Result;
-                {error, Error} ->
-                    beamtalk_error:raise(Error)
-            end;
+            %% `super_reply/5` re-raises an `{error, E}` answer, in either shape
+            %% (BT-4208, BT-4592).
+            {reply, Result, NewState} =
+                beamtalk_dispatch:super_reply(Selector, Args, Self, State, Class),
+            store(NewState),
+            Result;
         false ->
             State = away_capture(Self, Selector, Capture),
             %% The superclass code stores to this process's cell (`call_foreign/3`,
@@ -406,13 +576,21 @@ super_send(Self, Capture, Class, Selector, Args) ->
             %% so a block of the host actor running inside the call is away
             %% (its `at_home/1` sees another owner's state) and reads its
             %% creation-time capture instead of another actor's fields. The
-            %% host's own cell is restored afterwards.
+            %% host's own cell is restored afterwards. A `^` that leaves the
+            %% call was thrown under that other cell, away from its home: the
+            %% test-build check in `commit/2` is told so (BT-4536).
             Saved = snapshot(),
             erlang:put(?CELL, {owner_of(Self), State}),
-            try beamtalk_dispatch:super(Selector, Args, Self, State, Class) of
+            try beamtalk_dispatch:super_reply(Selector, Args, Self, State, Class) of
                 {reply, Result, State} -> Result;
-                {reply, _Result, _Changed} -> raise_unreachable(Self, Selector, write);
-                {error, Error} -> beamtalk_error:raise(Error)
+                {reply, _Result, _Changed} -> raise_unreachable(Self, Selector, write)
+            catch
+                throw:Nlr:Stack when ?IS_NLR(Nlr) ->
+                    %% Load-bearing, not a duplicate of the `after`: `note_unwound/1`
+                    %% needs `installed()` to see the host's cell, not the borrowed one.
+                    uninstall(Saved),
+                    note_unwound(Nlr),
+                    erlang:raise(throw, Nlr, Stack)
             after
                 uninstall(Saved)
             end
@@ -515,15 +693,15 @@ raise_unreachable(#beamtalk_object{class = Class}, Name, Mode) ->
             read -> "read";
             write -> "written"
         end,
-    Message = iolist_to_binary(
-        io_lib:format("~s's state field ~s cannot be ~s from this process", [Class, Name, Verb])
+    Message = beamtalk_error:chars_to_binary(
+        io_lib:format("~ts's state field ~ts cannot be ~ts from this process", [Class, Name, Verb])
     ),
-    Hint = iolist_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "A block that accesses ~s's state ran outside ~s's own process (it was sent "
+            "A block that accesses ~ts's state ran outside ~ts's own process (it was sent "
             "to another actor, a Timer or a Future, or run after the method returned). "
-            "A block can read ~s's fields anywhere, as the values they had when the block "
-            "was made, but can only write them inside ~s's own methods: send ~s a message "
+            "A block can read ~ts's fields anywhere, as the values they had when the block "
+            "was made, but can only write them inside ~ts's own methods: send ~ts a message "
             "instead.",
             [Class, Class, Class, Class, Class]
         )

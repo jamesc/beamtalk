@@ -168,6 +168,21 @@ TestCase subclass: ErrorMethodTest
     self assert: cls asString equals: "Integer"
     self assert: cls asString class equals: String
 
+  // BT-4227: a raw Erlang throw/exit carries no class — errorClass answers nil,
+  // never the `#undefined` sentinel Symbol.
+  testErrorClassNilForRawThrow =>
+    self assert: ([
+      (Erlang erlang) throw: #oops
+    ] on: ThrowError do: [:e | e errorClass]) equals: nil
+    self assert: ([
+      (Erlang erlang) throw: #oops
+    ] on: Exception do: [:e | e errorClass isNil]) equals: true
+
+  testErrorClassNilForRawExit =>
+    self assert: ([
+      (Erlang erlang) exit: #bye
+    ] on: Exception do: [:e | e errorClass]) equals: nil
+
   testExceptionDisplayString =>
     // displayString on an Exception delegates to printString
     self assert: ([

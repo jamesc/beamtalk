@@ -3,7 +3,7 @@
 
 [package]
 name = "beamtalk-cerl-doc"
-description = "Shared leaf: Core Erlang Document/leaf/docvec! pretty-printing API (ADR 0089, ADR 0117)"
+description = "Shared leaf: Core Erlang Document/leaf/docvec! pretty-printing API and FNV-1a hash utility (ADR 0089, ADR 0117)"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

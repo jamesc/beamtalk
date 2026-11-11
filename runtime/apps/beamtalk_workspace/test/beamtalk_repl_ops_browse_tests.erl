@@ -274,10 +274,20 @@ delegate_setup() ->
     #{xref => XrefPid, class_name => ClassName, class => {ClassName, Pid, Owned}}.
 
 delegate_cleanup(#{class := {Name, Pid, Owned}}) ->
-    catch beamtalk_xref:purge_class(Name),
+    try
+        beamtalk_xref:purge_class(Name)
+    catch
+        _:_ -> ok
+    end,
     case Owned of
-        true -> catch gen_server:stop(Pid);
-        false -> ok
+        true ->
+            try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end;
+        false ->
+            ok
     end,
     ok.
 
@@ -324,7 +334,7 @@ delegate_tests(#{class_name := ClassName}) ->
 %% Beamtalk-compiled native-backed stdlib class (`Subprocess`), not the
 %% hand-written `beamtalk_test_native_facade` test double the suite above
 %% uses. Beamtalk's Core Erlang codegen compiles straight to Core Erlang and
-%% feeds it to `compile:forms(..., [from_core | Opts])` (CLAUDE.md), which
+%% feeds it to `compile:forms(..., [from_core | Opts])` (AGENTS.md), which
 %% never runs the abstract-form `sys_pre_expand` compiler pass that
 %% auto-injects `module_info/0,1` — so a real compiled `bt@stdlib@subprocess`
 %% facade module has no `module_info/1`, unlike `beamtalk_test_native_facade`
@@ -1238,10 +1248,18 @@ browse_cleanup(#{class := {Name, Pid, Owned}}) ->
     %% Purge only this fixture's class from the xref index — never a global
     %% `ets:delete_all_objects` that would wipe a concurrently-populated index.
     %% `purge_class/1` is idempotent.
-    catch beamtalk_xref:purge_class(Name),
+    try
+        beamtalk_xref:purge_class(Name)
+    catch
+        _:_ -> ok
+    end,
     case Owned of
         true ->
-            catch gen_server:stop(Pid);
+            try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end;
         false ->
             ok
     end,
@@ -1488,10 +1506,20 @@ browse_tests(#{class_name := Class}) ->
                 ),
                 ?assertEqual(true, maps:get(<<"typed">>, Value))
             after
-                catch beamtalk_xref:purge_class(TypedName),
+                try
+                    beamtalk_xref:purge_class(TypedName)
+                catch
+                    _:_ -> ok
+                end,
                 case Owned of
-                    true -> catch gen_server:stop(TypedPid);
-                    false -> ok
+                    true ->
+                        try
+                            gen_server:stop(TypedPid)
+                        catch
+                            _:_ -> ok
+                        end;
+                    false ->
+                        ok
                 end
             end
         end},
@@ -2086,11 +2114,25 @@ protocol_setup() ->
     }.
 
 protocol_cleanup(#{proto_name := Name, class := {_, Pid, Owned}}) ->
-    catch ets:delete(beamtalk_protocol_registry, Name),
-    catch beamtalk_xref:purge_class(Name),
+    try
+        ets:delete(beamtalk_protocol_registry, Name)
+    catch
+        _:_ -> ok
+    end,
+    try
+        beamtalk_xref:purge_class(Name)
+    catch
+        _:_ -> ok
+    end,
     case Owned of
-        true -> catch gen_server:stop(Pid);
-        false -> ok
+        true ->
+            try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end;
+        false ->
+            ok
     end,
     ok.
 

@@ -220,7 +220,7 @@ impl CoreErlangGenerator {
             return Ok(doc);
         }
         match expr {
-            Expression::Literal(lit, _) => self.generate_literal(lit),
+            Expression::Literal(lit, _) => Ok(Self::literal_doc(lit)),
             Expression::Identifier(id) => self.generate_identifier(id),
             // BT-4074: a package qualifier (`pkg@Foo`) selects nothing at
             // runtime — the class process is registered under the bare name —
@@ -420,8 +420,7 @@ impl CoreErlangGenerator {
                     // `ensure:` cleanup) sees every write made before it.
                     // BT-4122: a merged Tier 2 fun stores its merged map too
                     // (it holds no versions, so the active check misses it).
-                    let throw_doc = if self.synced_calls_active() || self.tier2_merged_fun.is_some()
-                    {
+                    let throw_doc = if self.nlr_throw_stores_cell() {
                         docvec![
                             "let _ = ",
                             threaded_ir::cell_put_call(state_doc),

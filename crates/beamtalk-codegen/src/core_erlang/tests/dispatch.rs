@@ -452,6 +452,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
     };
 
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         type_aliases: Vec::new(),
         native_declarations: Vec::new(),
@@ -2462,9 +2463,13 @@ fn has_sync_send_for_selector(code: &str, selector: &str) -> bool {
 }
 
 #[test]
-fn test_field_names_actor_uses_sync_send() {
-    // fieldNames on an actor receiver must use sync_send, not async_send + future.
-    // Assertion is selector-specific: checks sync_send includes the 'fieldNames' atom.
+fn test_field_names_routes_through_message_dispatch() {
+    // fieldNames on a non-self receiver must go through
+    // beamtalk_message_dispatch:send/3, which sync_sends actors (never
+    // async_send + future), class_sends class objects, and answers primitive
+    // values in-process. It must never pull `element(4, R)` from a receiver
+    // it merely assumed to be an actor (BT-4264: badarg on Integer, Binary,
+    // Bitstring, List, ...).
     let src = concat!(
         "Actor subclass: Srv\n",
         "  state: x = 0\n\n",
@@ -2473,8 +2478,12 @@ fn test_field_names_actor_uses_sync_send() {
     );
     let code = codegen_source(src);
     assert!(
-        has_sync_send_for_selector(&code, "'fieldNames'"),
-        "fieldNames on actor must call sync_send with 'fieldNames' selector. Got:\n{code}"
+        has_message_dispatch_send_for_selector(&code, "'fieldNames'"),
+        "fieldNames must delegate to beamtalk_message_dispatch:send. Got:\n{code}"
+    );
+    assert!(
+        !has_sync_send_for_selector(&code, "'fieldNames'"),
+        "fieldNames must not sync_send an unclassified receiver. Got:\n{code}"
     );
     assert!(
         !code.contains("'async_send'"),
@@ -4013,6 +4022,7 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
         span: Span::new(0, 0),
     };
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         type_aliases: Vec::new(),
         native_declarations: Vec::new(),
@@ -4113,6 +4123,7 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
         span: Span::new(0, 0),
     };
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -4194,6 +4205,7 @@ fn test_spawn_with_args_validates_map_argument() {
         span: Span::new(0, 0),
     };
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -4334,6 +4346,7 @@ fn test_class_method_super_uses_class_super_dispatch() {
             );
             assert!(
                 !code.contains("'beamtalk_dispatch':'super'")
+                    && !code.contains("'beamtalk_dispatch':'super_reply'")
                     && !code.contains("'beamtalk_dispatch':'super_value'"),
                 "class-side `super` must not take the instance super path:\n{src}\n{code}"
             );
@@ -4405,7 +4418,8 @@ fn test_class_side_extension_super_is_keyed_on_the_target() {
             );
             assert!(
                 !code.contains("class_super_dispatch'('Host'")
-                    && !code.contains("'beamtalk_dispatch':'super'"),
+                    && !code.contains("'beamtalk_dispatch':'super'")
+                    && !code.contains("'beamtalk_dispatch':'super_reply'"),
                 "extension `super` must not use the host class or the instance path:\n{src}\n{code}"
             );
             assert_compiles_through_erlc("test", &code);
@@ -4935,6 +4949,194 @@ fn test_explicit_ffi_class_new_bakes_direct_new() {
     assert!(
         !basic.contains("'direct_constructors' => ['new'"),
         "`self basicNew` must not bake a direct `new` verdict. Got:\n{basic}"
+    );
+}
+
+/// BT-4475: an explicit class-side `new:` forwarding to one of the class's
+/// own in-caller class methods leaves `new:` out of the class's published
+/// `process_bound_class_selectors`, so a `new:` send takes the ADR 0142
+/// in-caller path; any other `new:` keeps the full list.
+#[test]
+fn test_explicit_forwarding_class_new1_is_not_process_bound() {
+    let full = "'process_bound_class_selectors' => ['new', 'new:', ";
+    let without = "'process_bound_class_selectors' => ['new', 'startLink', ";
+    let code = codegen_source(
+        "Object subclass: Bag2\n\n  class withAll: xs => (Erlang lists) reverse: xs\n\n  class new: xs => self withAll: xs\n",
+    );
+    assert!(
+        code.contains(without) && !code.contains(full),
+        "a forwarding `new:` is not process-bound. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
+    let basic = codegen_source("Object subclass: Tag\n\n  class new: xs => self basicNew\n");
+    assert!(
+        basic.contains(full),
+        "`self basicNew` keeps `new:` process-bound. Got:\n{basic}"
+    );
+}
+
+/// BT-4501: the compile-time rule and the published per-class list agree.
+/// For every stdlib class, `ClassHierarchy::runs_class_method_in_caller(c,
+/// "new:")` (read by block-escape analysis, `actor-state-abroad` and the
+/// class-method FFI lints, here through the generated builtin snapshot a
+/// referencing module sees) is `true` exactly when codegen leaves `new:` out
+/// of that class's `process_bound_class_selectors`.
+#[test]
+fn test_runs_class_method_in_caller_new1_agrees_with_published_list_over_stdlib() {
+    use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/src");
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut in_caller = Vec::new();
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&dir).expect("read stdlib/src") {
+        let path = entry.expect("dir entry").path();
+        if path.extension().is_none_or(|e| e != "bt") {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path).expect("read stdlib source");
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
+        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+        let [class] = module.classes.as_slice() else {
+            continue;
+        };
+        let name = class.name.name.as_str();
+        let Ok(code) = crate::core_erlang::generate_module(
+            &module,
+            crate::core_erlang::CodegenOptions::new("test"),
+        ) else {
+            continue;
+        };
+        let list = code
+            .lines()
+            .find_map(|l| l.split("'process_bound_class_selectors' => [").nth(1))
+            .and_then(|rest| rest.split(']').next())
+            .unwrap_or_else(|| panic!("{name}: no process_bound_class_selectors in meta"));
+        let published_bound = list.split(", ").any(|s| s == "'new:'");
+        let rule = hierarchy.runs_class_method_in_caller(name, "new:");
+        assert_eq!(
+            rule,
+            !published_bound,
+            "{name}: runs_class_method_in_caller(\"new:\") = {rule}, but codegen {} `new:` \
+             from process_bound_class_selectors",
+            if published_bound { "keeps" } else { "omits" }
+        );
+        if rule {
+            in_caller.push(name.to_string());
+        }
+        checked += 1;
+    }
+    assert!(checked > 50, "expected to check the stdlib, got {checked}");
+    in_caller.sort();
+    assert_eq!(in_caller, ["Array", "List", "Set", "Tuple"]);
+}
+
+/// BT-4640: with the superclass in a sibling file, a caller file that only has
+/// the Pass 1 `ClassInfo`s (and, for the `add_external_superclasses` branch,
+/// just the superclass index) answers `runs_class_method_in_caller(c, "new:")`
+/// exactly as the defining module's codegen publishes
+/// `process_bound_class_selectors`.
+#[test]
+fn test_new1_verdict_agrees_across_files_with_sibling_parent() {
+    use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+    use std::collections::HashMap;
+    let parse = |src: &str| {
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+        beamtalk_core::source_analysis::parse(tokens).0
+    };
+    let fwd_src = "Base subclass: Fwd\n  class withAll: xs => (Erlang lists) reverse: xs\n  class new: xs => self withAll: xs\n";
+    let fwd = parse(fwd_src);
+    let published_bound = |code: &str| {
+        let list = code
+            .lines()
+            .find_map(|l| l.split("'process_bound_class_selectors' => [").nth(1))
+            .and_then(|rest| rest.split(']').next())
+            .expect("process_bound_class_selectors in meta");
+        list.split(", ").any(|s| s == "'new:'")
+    };
+    let index: HashMap<String, String> = HashMap::from([
+        ("Fwd".to_string(), "Base".to_string()),
+        ("Base".to_string(), "Object".to_string()),
+    ]);
+    let cases = [
+        ("Object subclass: Base\n", true),
+        ("Object subclass: Base\n  classState: n = 0\n", false),
+        ("Actor subclass: Base\n", false),
+        ("Value subclass: Base\n", true),
+    ];
+    for (base_src, with_infos_expected) in cases {
+        let base = parse(base_src);
+        for use_infos in [true, false] {
+            // Defining module's codegen.
+            let mut options = crate::core_erlang::CodegenOptions::new("test")
+                .with_class_superclass_index(index.clone());
+            if use_infos {
+                options = options.with_class_hierarchy(ClassHierarchy::extract_class_infos(&base));
+            }
+            let code = crate::core_erlang::generate_module(&fwd, options).expect("codegen");
+            let codegen_in_caller = !published_bound(&code);
+            // A sibling caller's view: its own module, plus the same injection.
+            let caller = parse("Object subclass: Caller\n");
+            let (h, _) = ClassHierarchy::build(&caller);
+            let mut h = h.expect("hierarchy");
+            let mut infos = ClassHierarchy::extract_class_infos(&fwd);
+            if use_infos {
+                infos.extend(ClassHierarchy::extract_class_infos(&base));
+            }
+            h.add_from_beam_meta(infos);
+            h.add_external_superclasses(&index);
+            assert_eq!(
+                h.runs_class_method_in_caller("Fwd", "new:"),
+                codegen_in_caller,
+                "use_infos={use_infos}, base={base_src}"
+            );
+            if use_infos {
+                assert_eq!(codegen_in_caller, with_infos_expected, "{base_src}");
+            }
+        }
+    }
+}
+
+/// BT-4644: a superclass-index stub ancestor (`add_external_superclasses`)
+/// has unknown class variables, so `chain_has_class_variables` answers `true`
+/// and neither codegen nor analysis treats the subclass's explicit `new:` as
+/// in-caller. Both must agree through the self-sufficient `generate_module`
+/// path with a sibling superclass known only from `class_superclass_index`.
+#[test]
+fn test_stub_ancestor_new1_is_process_bound_and_verdicts_agree() {
+    use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+    let src = "Sibling subclass: Kid\n  class new: xs => (Erlang lists) reverse: xs\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+    let mut index = std::collections::HashMap::new();
+    index.insert("Sibling".to_string(), "Object".to_string());
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("kid").with_class_superclass_index(index.clone()),
+    )
+    .expect("codegen");
+    let list = code
+        .lines()
+        .find_map(|l| l.split("'process_bound_class_selectors' => [").nth(1))
+        .and_then(|rest| rest.split(']').next())
+        .expect("process_bound_class_selectors in meta");
+    let published_bound = list.split(", ").any(|s| s == "'new:'");
+    assert!(
+        published_bound,
+        "stub ancestor must keep `new:` bound: {list}"
+    );
+
+    // Analysis side, as `generate_module` builds it: register `Kid`, inject
+    // the index stub, then ask about `Kid`.
+    let (built, _) = ClassHierarchy::build(&module);
+    let mut hierarchy = built.expect("hierarchy builds");
+    let _ = hierarchy.add_external_superclasses(&index);
+    assert!(hierarchy.chain_has_class_variables("Sibling"));
+    assert!(hierarchy.chain_has_class_variables("Kid"));
+    assert!(!hierarchy.runs_class_method_in_caller("Sibling", "foo"));
+    assert_eq!(
+        hierarchy.runs_class_method_in_caller("Kid", "new:"),
+        !published_bound,
+        "analysis and codegen must agree on Kid's new:"
     );
 }
 

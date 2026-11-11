@@ -423,6 +423,37 @@ defmodule BtAttachWeb.Live.SystemBrowserTest do
       end
     end
 
+    test "hover sends a method tab's class and side, never a client-supplied one (BT-4463)" do
+      method_tab = %{
+        id: "method:Counter:class:make",
+        kind: :method,
+        class: "Counter",
+        side: "class",
+        selector: "make"
+      }
+
+      socket = base_socket(%{tabs: [def_tab("def:Other", "Other"), method_tab]})
+
+      for {tab_id, expected} <- [
+            {"method:Counter:class:make", %{class: "Counter", side: "class"}},
+            # A class-definition tab, an unknown tab and no tab id carry none.
+            {"def:Other", %{}},
+            {"nope", %{}},
+            {nil, %{}}
+          ] do
+        params = %{"code" => "self make", "class" => "Evil", "side" => "instance"}
+        params = if tab_id, do: Map.put(params, "tab_id", tab_id), else: params
+
+        assert {:reply, %{"hover" => _}, ^socket} =
+                 SystemBrowser.handle_event("hover", params, socket)
+
+        assert {:hover, _pid, "self make", context} =
+                 StubWorkspaceClient.calls() |> Enum.find(&match?({:hover, _, _, _}, &1))
+
+        assert Map.take(context, [:class, :side]) == expected
+      end
+    end
+
     test "hover renders the docs Markdown to escaped HTML (BT-4344)" do
       socket = base_socket()
 
@@ -462,6 +493,45 @@ defmodule BtAttachWeb.Live.SystemBrowserTest do
 
       assert {:reply, %{"diagnostics" => []}, ^socket} =
                SystemBrowser.handle_event("diagnostics", %{"code" => "3 + 4"}, socket)
+    end
+
+    test "a :def tab's diagnostics carry its class's source file (BT-4583)" do
+      socket =
+        base_socket(%{
+          tabs: [def_tab("def:Counter", "Counter")],
+          active_tab: "def:Counter",
+          browser_classes: [%{"name" => "Counter", "source_file" => "/proj/src/counter.bt"}]
+        })
+
+      assert {:reply, %{"diagnostics" => [%{"message" => "scope: /proj/src/counter.bt"}]}, _} =
+               SystemBrowser.handle_event(
+                 "diagnostics",
+                 %{"code" => "Object subclass: Counter", "tab_id" => "def:Counter"},
+                 socket
+               )
+    end
+
+    test "method tabs, unknown tabs and file-less classes send no source path (BT-4583)" do
+      socket =
+        base_socket(%{
+          tabs: [
+            def_tab("def:Scratch", "Scratch"),
+            method_tab("method:Counter:instance:increment", "Counter", "increment")
+          ],
+          browser_classes: [
+            %{"name" => "Counter", "source_file" => "/proj/src/counter.bt"},
+            %{"name" => "Scratch", "source_file" => nil}
+          ]
+        })
+
+      for tab_id <- ["def:Scratch", "method:Counter:instance:increment", "def:Nope", 42] do
+        assert {:reply, %{"diagnostics" => []}, _} =
+                 SystemBrowser.handle_event(
+                   "diagnostics",
+                   %{"code" => "x", "tab_id" => tab_id},
+                   socket
+                 )
+      end
     end
   end
 

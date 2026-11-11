@@ -15,7 +15,7 @@ dynamic-class branch).
 Extracted from `beamtalk_behaviour_intrinsics_rename_to_tests`'s
 own `register_dynamic_class/1`, once `beamtalk_repl_compiler_rename_freshness_tests`
 needed the identical fixture — same "copied once, extracted on the second
-use" precedent `beamtalk_test_corpus`'s own moduledoc documents (CLAUDE.md's
+use" precedent `beamtalk_test_corpus`'s own moduledoc documents (AGENTS.md's
 no-duplicate-implementations rule).
 """.
 

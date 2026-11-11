@@ -11,7 +11,6 @@ use crate::decode::{
     extract_protocol_registry,
 };
 use crate::diagnostics::{Warning, collect_warnings, filter_error_diagnostics};
-use crate::registry::diagnostics_overrides;
 use crate::respond::{
     diagnostic_error_response, error_response, format_codegen_error, method_definition_ok_response,
     method_signature_terms, ok_response, with_verifier_warnings,
@@ -73,6 +72,12 @@ pub(crate) fn parse_and_check_expression(
     let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
 
     let known_var_refs: Vec<&str> = known_vars.iter().map(String::as_str).collect();
+    // REPL input — a bare expression or an inline class/protocol typed at
+    // the prompt — belongs to no file's project, so it always analyses under
+    // the legacy scope, even if the request names a `source_path` (BT-4322,
+    // BT-4325). Only file-backed requests (`compile`, `compile_method`,
+    // `diagnostics` with a path) take a project scope.
+    let scope = crate::project_context::RequestScope::for_source(None, None);
     let (mut all_diagnostics, analysis) =
         beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_analysis(
             &module,
@@ -86,10 +91,9 @@ pub(crate) fn parse_and_check_expression(
             // cannot itself carry a `uses:` referencing a protocol outside
             // its own module, so there is nothing to thread here yet.
             Vec::new(),
-            pre_loaded_aliases,
-            diagnostics_overrides(),
-            // REPL-typed expressions carry no file project — see BT-4322.
-            &beamtalk_core::semantic_analysis::ProjectAnalysisContext::default(),
+            scope.aliases(pre_loaded_aliases),
+            scope.diagnostics_table(),
+            scope.analysis_project(),
         );
 
     let options = beamtalk_core::CompilerOptions::default();
@@ -275,6 +279,7 @@ pub(crate) fn handle_compile_expression_with_options(
         .collect();
     match beamtalk_repl::codegen::generate_repl_expressions_surfacing_verifier(
         &expressions,
+        &module.pipeline_sends,
         &module_name,
         class_module_index,
         Some(&analysis.class_hierarchy),
@@ -372,6 +377,7 @@ pub(crate) fn handle_compile_expression_trace_with_options(
         .collect();
     match beamtalk_repl::codegen::generate_repl_expressions_traced_surfacing_verifier(
         &expressions,
+        &module.pipeline_sends,
         &source,
         &module_name,
         class_module_index,

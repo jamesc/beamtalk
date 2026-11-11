@@ -95,6 +95,8 @@ that the Behaviour/Class libraries can rely on.
     objectIsKindOf/2,
     primitiveIsKindOf/2,
     isKindOfBuiltin/3,
+    %% BT-4319: `binding :: Class` match arm on a class with subclasses
+    valueIsKindOfClass/2,
     %% ADR 0036: Metaclass primitives
     metaclassThisClass/1,
     metaclassSuperclass/1,
@@ -145,7 +147,7 @@ that the Behaviour/Class libraries can rely on.
     %% `beamtalk_workspace` already depends on `beamtalk_runtime` at compile
     %% time, so no `erlang:apply/3` indirection is needed here, unlike the
     %% reverse direction this module's other cross-app calls use) rather
-    %% than duplicating its whereis/stop/purge sequence (CLAUDE.md's
+    %% than duplicating its whereis/stop/purge sequence (AGENTS.md's
     %% no-duplicate-implementations rule).
     install_class_rename/3
 ]).
@@ -986,6 +988,25 @@ primitiveIsKindOf(Receiver, Behaviour) ->
     beamtalk_primitive:send(Receiver, 'isKindOf:', [Behaviour]).
 
 -doc """
+Runtime test behind a `binding :: Class` match arm where `Class` has subclasses
+(BT-4319, ADR 0107 Phase B): is `Value`'s class `Class` or a (transitive)
+subclass of it?
+
+Answers `Value isKindOf: Class` for an instance of any representation, from the
+class table (`beamtalk_class_derived_cache:inherits_from/2`), without sending a
+message: a match arm must not run user code or call into a class process. An
+unregistered class name answers `false`.
+
+A future answers `false` without being awaited, so a pending or rejected future
+never blocks or raises inside an arm test (the same as an exact-class arm).
+""".
+-spec valueIsKindOfClass(term(), atom()) -> boolean().
+valueIsKindOfClass({beamtalk_future, _}, Class) when is_atom(Class) ->
+    false;
+valueIsKindOfClass(Value, Class) when is_atom(Class) ->
+    beamtalk_class_derived_cache:inherits_from(beamtalk_primitive:class_of(Value), Class).
+
+-doc """
 `Receiver isKindOf: Behaviour` where `Behaviour` is a class literal the
 compiler resolved to a sealed built-in with an exact representation test
 (BT-4473), and `TestAnswer` is that test applied to `Receiver` — the same test
@@ -1577,7 +1598,7 @@ funs; see `block.bt`) — called directly here, exactly as
 `beamtalk_actor.erl`'s `onExit:` callback calls its own block argument.
 
 Unlike a block argument received by a *locally-defined* class method (which
-runs inside that class's own gen_server call, per CLAUDE.md's "Blocks into
+runs inside that class's own gen_server call, per AGENTS.md's "Blocks into
 class methods" rule), this primitive — like every `Behaviour` tower
 primitive — is itself reached via the Class -> Behaviour chain-walk
 fallthrough (`beamtalk_dispatch:lookup/5`) when sent to a class object,
@@ -1858,8 +1879,8 @@ remove_local_method(ClassName, Selector, Side) ->
             beamtalk_error:raise(Structured);
         {error, Reason} ->
             Error0 = beamtalk_error:new(runtime_error, ClassName, Selector),
-            Msg = iolist_to_binary(
-                io_lib:format("Could not remove method: ~p", [Reason])
+            Msg = beamtalk_error:chars_to_binary(
+                io_lib:format("Could not remove method: ~tp", [Reason])
             ),
             beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
     end.
@@ -2188,7 +2209,7 @@ rename_rewrite_failed_error(OldName, no_sites) ->
     );
 rename_rewrite_failed_error(OldName, Reason) ->
     Error0 = beamtalk_error:new(runtime_error, OldName),
-    Msg = iolist_to_binary(io_lib:format("Could not rename class: ~p", [Reason])),
+    Msg = beamtalk_error:chars_to_binary(io_lib:format("Could not rename class: ~tp", [Reason])),
     beamtalk_error:with_message(Error0, Msg).
 
 %% A dynamic class's identity move committed AFTER `validate_class_sites/4`
@@ -2201,11 +2222,11 @@ rename_rewrite_failed_error(OldName, Reason) ->
 -spec rename_partial_failure_error(atom(), atom(), term()) -> #beamtalk_error{}.
 rename_partial_failure_error(OldName, NewName, Reason) ->
     Error0 = beamtalk_error:new(runtime_error, OldName),
-    Msg = iolist_to_binary(
+    Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "Renamed ~p to ~p, but rewriting its reference sites failed after "
+            "Renamed ~tp to ~tp, but rewriting its reference sites failed after "
             "validation passed (partial state — the class's own identity has "
-            "already moved; investigate before retrying): ~p",
+            "already moved; investigate before retrying): ~tp",
             [OldName, NewName, Reason]
         )
     ),
@@ -2554,9 +2575,9 @@ install_class_rename(OldName, NewName, #{not_flushable_reason := <<"dynamic">>})
             Pid;
         {error, Reason} ->
             Error0 = beamtalk_error:new(runtime_error, OldName),
-            Msg = iolist_to_binary(
+            Msg = beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "The dynamic class's own registration could not move, so no reference sites were rewritten: ~p",
+                    "The dynamic class's own registration could not move, so no reference sites were rewritten: ~tp",
                     [
                         Reason
                     ]
@@ -2590,9 +2611,9 @@ install_class_rename(OldName, NewName, _Classification) ->
 -spec rename_install_incomplete_error(atom(), atom()) -> #beamtalk_error{}.
 rename_install_incomplete_error(OldName, NewName) ->
     Error0 = beamtalk_error:new(runtime_error, OldName),
-    Msg = iolist_to_binary(
+    Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "renameTo: reported success but '~p' was never installed under '~p'; "
+            "renameTo: reported success but '~tp' was never installed under '~tp'; "
             "the old class was left untouched",
             [OldName, NewName]
         )
@@ -2769,8 +2790,8 @@ classReload(Self) ->
                     beamtalk_error:raise(StructuredError);
                 {error, Reason} ->
                     Error0 = beamtalk_error:new(reload_failed, ClassName),
-                    Msg = iolist_to_binary(
-                        io_lib:format("Reload failed: ~p", [Reason])
+                    Msg = beamtalk_error:chars_to_binary(
+                        io_lib:format("Reload failed: ~tp", [Reason])
                     ),
                     beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
             end
@@ -2824,7 +2845,9 @@ require_method_capability(Op, ClassName, Selector) ->
                 true -> "~ts";
                 false -> "~tp"
             end,
-        iolist_to_binary(io_lib:format("~ts >> " ++ SelectorFormat, [ClassName, Selector]))
+        beamtalk_error:chars_to_binary(
+            io_lib:format("~ts >> " ++ SelectorFormat, [ClassName, Selector])
+        )
     end).
 
 %% `Class <Suffix>` subject for a class-level capability refusal, built lazily.
@@ -2862,8 +2885,8 @@ do_compile_source(Self, Selector, Source, Intent) ->
             Self;
         {error, Reason} ->
             Error0 = beamtalk_error:new(compile_failed, ClassName),
-            Msg = iolist_to_binary(
-                io_lib:format("Could not compile method: ~p", [Reason])
+            Msg = beamtalk_error:chars_to_binary(
+                io_lib:format("Could not compile method: ~tp", [Reason])
             ),
             beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
     end.
@@ -2909,8 +2932,8 @@ classPrecheckCompileSource(Self, Selector, Source) ->
             precheck_result_to_dictionary(Result);
         {error, Reason} ->
             Error0 = beamtalk_error:new(compile_failed, ClassName),
-            Msg = iolist_to_binary(
-                io_lib:format("Could not precheck method: ~p", [Reason])
+            Msg = beamtalk_error:chars_to_binary(
+                io_lib:format("Could not precheck method: ~tp", [Reason])
             ),
             beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg))
     end.
@@ -2927,8 +2950,8 @@ ensure_precheck_source_binary(Source, _ClassName) when is_binary(Source) ->
     Source;
 ensure_precheck_source_binary(Source, ClassName) ->
     Error0 = beamtalk_error:new(type_error, ClassName),
-    Msg = iolist_to_binary(
-        io_lib:format("precheckCompile:source: expects a String body, got: ~p", [Source])
+    Msg = beamtalk_error:chars_to_binary(
+        io_lib:format("precheckCompile:source: expects a String body, got: ~tp", [Source])
     ),
     beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg)).
 
@@ -3017,8 +3040,8 @@ ensure_source_binary(_Selector, Source, _Intent, _ClassName) when is_binary(Sour
 ensure_source_binary(_Selector, Source, Intent, ClassName) ->
     Error0 = beamtalk_error:new(type_error, ClassName),
     SelectorName = intent_selector(Intent),
-    Msg = iolist_to_binary(
-        io_lib:format("~s expects a String body, got: ~p", [SelectorName, Source])
+    Msg = beamtalk_error:chars_to_binary(
+        io_lib:format("~ts expects a String body, got: ~tp", [SelectorName, Source])
     ),
     beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg)).
 
@@ -3427,7 +3450,7 @@ rename_selector_rewrite_failed_error(ClassName, OldSelectorBin, no_sites) ->
     beamtalk_error:with_message(Error0, Msg);
 rename_selector_rewrite_failed_error(ClassName, _OldSelectorBin, Reason) ->
     Error0 = beamtalk_error:new(runtime_error, ClassName),
-    Msg = iolist_to_binary(io_lib:format("Could not rename selector: ~p", [Reason])),
+    Msg = beamtalk_error:chars_to_binary(io_lib:format("Could not rename selector: ~tp", [Reason])),
     beamtalk_error:with_message(Error0, Msg).
 
 %%% ----------------------------------------------------------------------------
@@ -4210,8 +4233,8 @@ ensure_code_step(_ClassName, _Module, _Step, true) ->
     ok;
 ensure_code_step(ClassName, Module, Step, false) ->
     Error0 = beamtalk_error:new(runtime_error, ClassName),
-    Msg = iolist_to_binary(
-        io_lib:format("Failed to ~p module ~p during unload", [Step, Module])
+    Msg = beamtalk_error:chars_to_binary(
+        io_lib:format("Failed to ~tp module ~tp during unload", [Step, Module])
     ),
     beamtalk_error:raise(beamtalk_error:with_message(Error0, Msg)).
 

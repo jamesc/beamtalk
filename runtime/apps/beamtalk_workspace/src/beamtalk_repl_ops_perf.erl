@@ -82,8 +82,8 @@ do_handle_term(<<"export-traces">>, Params, _Msg, _SessionPid) ->
                 <<"count">> => Count
             }};
         {error, Reason} ->
-            ErrMsg = iolist_to_binary(
-                io_lib:format("Failed to export traces: ~p", [Reason])
+            ErrMsg = beamtalk_error:chars_to_binary(
+                io_lib:format("Failed to export traces: ~tp", [Reason])
             ),
             error(#beamtalk_error{
                 kind = io_error,
@@ -152,8 +152,8 @@ build_trace_filter_opts(Params) ->
                 kind = invalid_argument,
                 class = 'Tracing',
                 message = beamtalk_primitive:string_from_binary(
-                    iolist_to_binary(
-                        io_lib:format("Invalid min_duration_ns: ~p", [BadNs])
+                    beamtalk_error:chars_to_binary(
+                        io_lib:format("Invalid min_duration_ns: ~tp", [BadNs])
                     )
                 ),
                 hint = beamtalk_primitive:string_from_binary(

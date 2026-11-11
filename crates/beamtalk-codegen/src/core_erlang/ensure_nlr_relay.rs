@@ -33,22 +33,37 @@
 //!   binding cannot be stored, ADR 0133) or a value type's `Self` (a closure
 //!   cannot assign its fields), so there nothing is relayed.
 //! - **A `^` of another scope** (a block created by another method) carries
-//!   that scope's state, not this one's: it takes the error path and is
-//!   re-raised as it came.
+//!   that scope's state, not this one's, and is re-raised as it came. Where
+//!   the actor-state cell is live (an actor instance method's threaded body)
+//!   it takes the foreign clause (ADR 0146 R1, [`EnsureForeignNlr`]): the
+//!   cleanup runs from the cell and its final `StateAcc` is stored to the
+//!   cell before the re-raise, so a scope that unwinds by a `^` it does not
+//!   own leaves the cell holding its final version. The error path cannot:
+//!   it runs with write-through off, so its writes die with the re-raise.
+//!   Elsewhere (a class method running in its caller, ADR 0142, a value
+//!   type, the REPL) there is no actor `State` to store, and in a closure the
+//!   state already is the cell; there it takes the error path. Where the
+//!   scope's own throw also has a relay, that relay runs the same cleanup
+//!   from the same cell refresh, so the two share one compiled body (BT-4598,
+//!   [`ForeignCleanupBody::SharedWithRelay`]): one `$bt_nlr` clause runs the
+//!   cleanup, then the scope's own throw stores and resumes with the
+//!   cleanup's `StateAcc` and any other is stored with `store_unwound/2` and
+//!   re-raised. The own throw keeps its resumed state even though an actor
+//!   method's boundary commits the cell (ADR 0146, BT-4535): away from home
+//!   (an away `super_send/5`) that commit answers the carried state.
 //! - **`Block>>ensure:` reached dynamically** (`perform:`, BT-4429). Its
 //!   structural-fallback body runs in the Block method, where every `^` is of
-//!   another scope and its state kind is known only at run time
-//!   ([`NlrCarry::Foreign`]). The cleanup is a closure, so it writes only the
-//!   cell: the relay matches every `$bt_nlr` throw, snapshots the cell before
-//!   the cleanup, and resumes the throw with the cell over the carried state
-//!   when the carried state was the cell's
-//!   (`beamtalk_actor_state:refresh_carried/2`,
-//!   [`RethrowSlot::CellIfCarried`]); any other state (the REPL's bindings, a
-//!   value type's `Self`, another actor's state) a closure cannot write, and
-//!   resumes as it came. "Was the cell's" is decided by identity, not by
-//!   equal fields (BT-4448): a closure of another actor of the same class,
-//!   run here away from home, carries its own actor's capture stamped with
-//!   that actor (`beamtalk_actor_state:nlr_state/2`), never this cell.
+//!   another scope. The cleanup is a closure, so it writes only the cell, in
+//!   place, and the method a `^` returns from commits the cell, not the copy
+//!   the throw carries (ADR 0146): the catch is plain, the cleanup and then
+//!   the re-raise of the throw as it came (BT-4536). Away from home there is
+//!   no cell of the actor's for a closure to write, and the REPL's bindings
+//!   and a value type's `Self` no closure writes. The one thing the catch
+//!   adds is `beamtalk_actor_state:note_unwound/1`, which tells the
+//!   test-build commit check that the cell may now be ahead of the throw.
+//!   (BT-4429 and BT-4448 relayed every throw here with the cell over the
+//!   carried state, deciding whose cell it was by an owner stamp in the
+//!   state map; ADR 0146 decides it once, at the commit, by identity.)
 //!
 //! The same holds at every nesting: a statement, a conditional arm, a loop or
 //! fold body, an `on:do:` arm or another `ensure:` cleanup (whose relay hands
@@ -66,8 +81,8 @@
 
 use super::generator::CoreErlangGenerator;
 use super::threaded_ir::{
-    self, EnsureCatchVars, EnsureCleanup, EnsureNlrRelay, NlrCarry, RenderCtx, RethrowSlot,
-    ThreadedStmt, TokenId,
+    self, EnsureCatchVars, EnsureCleanup, EnsureForeignNlr, EnsureNlrRelay, ForeignCleanupBody,
+    NlrCarry, RenderCtx, ThreadedStmt, TokenId,
 };
 use beamtalk_cerl_doc::Document;
 use beamtalk_core::source_analysis::Span;
@@ -88,29 +103,55 @@ impl CoreErlangGenerator {
     /// Builds, verifies and renders the catch of a compiled `ensure:`
     /// ([`ThreadedStmt::EnsureCatch`]): `other` is the error path (the cleanup
     /// and the re-raise), `relay` the `$bt_nlr` clause for the scope's own
-    /// throw, `carry` what that throw carries (with whether the construct's
-    /// scratch map is private, which the verifier reads to exempt it) and
-    /// `cleanup` how the cleanup runs (inlined, ending at a version of the
-    /// carried family, or as a closure). The single owner of every compiled `ensure:` catch.
+    /// throw, `foreign` (ADR 0146 R1) the one every other `$bt_nlr` throw
+    /// takes where the actor-state cell is live (`cell_live`), `carry` what
+    /// the scope's throw carries (with whether the construct's scratch map is
+    /// private, which the verifier reads to exempt it) and `cleanup` how the
+    /// cleanup runs (inlined, ending at a version of the carried family, or
+    /// as a closure). The single owner of every compiled `ensure:` catch.
     pub(in crate::core_erlang) fn ensure_catch(
         &mut self,
         triple: EnsureCatchTriple,
-        (carry, private_scratch): (Option<NlrCarry>, bool),
+        (carry, private_scratch, cell_live): (Option<NlrCarry>, bool, bool),
         cleanup: EnsureCleanup,
-        relay: Option<EnsureNlrRelay>,
+        (relay, foreign): (Option<EnsureNlrRelay>, Option<EnsureForeignNlr>),
         other: Document<'static>,
         span: Span,
     ) -> Document<'static> {
+        let foreign = match fault::active() {
+            // The catch before ADR 0146 R1: a foreign `^` takes the error
+            // path, whose cleanup's writes die with the re-raise.
+            Some(fault::RelayFault::ForeignOnErrorPath) => None,
+            // With the relay off, a foreign clause that shared its cleanup
+            // (BT-4598) keeps it as its own, as it compiled before sharing.
+            Some(fault::RelayFault::NoRelay) => {
+                foreign.map(|foreign| match (&foreign.body, &relay) {
+                    (ForeignCleanupBody::SharedWithRelay, Some(relay)) => EnsureForeignNlr {
+                        body: ForeignCleanupBody::Own {
+                            seed: relay.seed.clone(),
+                            cleanup: relay.cleanup.clone(),
+                        },
+                        ..foreign
+                    },
+                    _ => foreign,
+                })
+            }
+            _ => foreign,
+        };
         let relay = match fault::active() {
-            None => relay,
+            None | Some(fault::RelayFault::ForeignOnErrorPath) => relay,
             Some(fault::RelayFault::NoRelay) => None,
             // The relay before review: a cell-carried throw resumed with what
             // a `^` at this site would carry, rebuilt from the site's bindings.
             #[cfg(any(test, feature = "test"))]
             Some(fault::RelayFault::RebuildAtSite) => relay.map(|relay| {
-                if relay.rethrow == RethrowSlot::CellOverCarried && carry == Some(NlrCarry::Live) {
+                if relay.rethrow == threaded_ir::RethrowSlot::CellOverCarried
+                    && carry == Some(NlrCarry::Live)
+                {
                     EnsureNlrRelay {
-                        rethrow: RethrowSlot::SiteState(self.nlr_throw_state_doc(span)),
+                        rethrow: threaded_ir::RethrowSlot::SiteState(
+                            self.nlr_throw_state_doc(span),
+                        ),
                         ..relay
                     }
                 } else {
@@ -135,12 +176,15 @@ impl CoreErlangGenerator {
                 Some(var) => var,
                 None => nlr_var(self, "EnsureCarried"),
             },
-            other_pair_var: nlr_var(self, "EnsureOther"),
-            cell_snapshot_var: match &relay {
-                Some(relay) if relay.rethrow == RethrowSlot::CellIfCarried => {
-                    self.fresh_temp_var("EnsureCellSnap")
-                }
-                _ => String::new(),
+            other_pair_var: if relay.is_some() || foreign.is_some() {
+                self.fresh_temp_var("EnsureOther")
+            } else {
+                String::new()
+            },
+            foreign_nlr_var: if foreign.is_some() {
+                self.fresh_temp_var("EnsureForeignNlr")
+            } else {
+                String::new()
             },
             type_var: triple.type_var,
             error_var: triple.error_var,
@@ -153,6 +197,8 @@ impl CoreErlangGenerator {
             private_scratch,
             cleanup,
             relay,
+            cell_live,
+            foreign,
             other,
             span,
         }];
@@ -175,6 +221,8 @@ impl CoreErlangGenerator {
 
 /// Test-only: compiles `ensure:` with its `$bt_nlr` relay as it was before a
 /// fix, so [`VerifyError::EnsureCleanupLostOnNlr`](super::threaded_ir::VerifyError::EnsureCleanupLostOnNlr)
+/// (and, for the foreign clause,
+/// [`VerifyError::EnsureForeignCleanupNotStored`](super::threaded_ir::VerifyError::EnsureForeignCleanupNotStored))
 /// can be shown to fire on a real compile
 /// (`beamtalk-repl/tests/repl_loop_body_return.rs`,
 /// `tests/ensure_relay_corpus.rs`). Compiled for this crate's tests and for
@@ -198,6 +246,11 @@ pub mod fault {
         /// it builds.
         #[cfg(any(test, feature = "test"))]
         RebuildAtSite,
+        /// ADR 0146 R1: no foreign clause. A `^` of another method of the
+        /// same actor takes the error path, which runs the cleanup with
+        /// write-through off and re-raises, so the cleanup's writes never
+        /// reach the cell (`VerifyError::EnsureForeignCleanupNotStored`).
+        ForeignOnErrorPath,
     }
 
     #[cfg(any(test, feature = "test"))]

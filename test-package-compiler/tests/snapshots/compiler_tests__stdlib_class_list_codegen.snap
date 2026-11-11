@@ -106,41 +106,39 @@ call 'beamtalk_list':'from_to'(Self, _start@35, _end@36)
     let _NlrToken@38 = call 'erlang':'make_ref'() in
     try
     let _seq@39 = let _temp@40 = Self in let _temp@41 = case call 'erlang':'is_list'(_temp@40) of <'true'> when 'true' -> _temp@40 <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(_temp@40) end in let _temp@42 = 0 in let _temp@43 = fun (Each@, I@) -> let NewI@ = let _BinLeft@44 = I@ in let _BinRight@45 = 1 in case call 'erlang':'is_number'(_BinLeft@44) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@44, _BinRight@45) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@44, '+', [_BinRight@45]) <_BinOpNoMatch@46> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@46}) end in let _Unit = let _Cond@47 = call 'erlang':'=:='(Each@, _item@37) in case _Cond@47 of <'true'> when 'true' -> call 'erlang':'throw'({'$bt_nlr', _NlrToken@38, NewI@, Self}) <'false'> when 'true' -> _Cond@47 <_CondNoMatch@48> when 'true' -> call 'beamtalk_message_dispatch':'send'(_Cond@47, 'ifTrue:', [fun () -> call 'erlang':'throw'({'$bt_nlr', _NlrToken@38, NewI@, Self})]) end in NewI@ in call 'lists':'foldl'(_temp@43, _temp@42, _temp@41) in
-    let _BodyResult@49 = 'nil' in
-    {_BodyResult@49, Self}
-
-    of _NlrResult@50 -> _NlrResult@50
-    catch <_NlrCls@51, _NlrErr@52, _NlrStk@53> ->
-      case {_NlrCls@51, _NlrErr@52} of
-        <{'throw', {'$bt_nlr', _CatchTok@54, _NlrVal@55, _NlrState@56}}> when call 'erlang':'=:='(_CatchTok@54, _NlrToken@38) -> {_NlrVal@55, _NlrState@56}
-        <_OtherPair@57> when 'true' -> primop 'raw_raise'(_NlrCls@51, _NlrErr@52, _NlrStk@53)
+    'nil'
+    of _NlrResult@49 -> _NlrResult@49
+    catch <_NlrCls@50, _NlrErr@51, _NlrStk@52> ->
+      case {_NlrCls@50, _NlrErr@51} of
+        <{'throw', {'$bt_nlr', _CatchTok@53, _NlrVal@54, _NlrState@55}}> when call 'erlang':'=:='(_CatchTok@53, _NlrToken@38) -> _NlrVal@54
+        <_OtherPair@56> when 'true' -> primop 'raw_raise'(_NlrCls@50, _NlrErr@51, _NlrStk@52)
       end
 
 
-'eachWithIndex:'/2 = fun (Self, _block@58) ->
-    let _seq@59 = let _temp@60 = Self in let _temp@61 = case call 'erlang':'is_list'(_temp@60) of <'true'> when 'true' -> _temp@60 <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(_temp@60) end in let _temp@62 = 0 in let _temp@63 = fun (Each@, I@) -> let NewI@ = let _BinLeft@64 = I@ in let _BinRight@65 = 1 in case call 'erlang':'is_number'(_BinLeft@64) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@64, _BinRight@65) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@64, '+', [_BinRight@65]) <_BinOpNoMatch@66> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@66}) end in let _Unit = let _ValRecv@67 = _block@58 in let _ValArg@68 = Each@ in let _ValArg@69 = NewI@ in case call 'erlang':'is_function'(_ValRecv@67, 2) of 'true' when 'true' -> apply _ValRecv@67 (_ValArg@68, _ValArg@69) 'false' when 'true' -> case call 'erlang':'is_function'(_ValRecv@67, 3) of 'true' when 'true' -> let _Err@70 = call 'beamtalk_error':'new'('stateful_block_dispatch', 'Block') in let _Err@71 = call 'beamtalk_error':'with_selector'(_Err@70, 'value:value:') in let _Err@72 = call 'beamtalk_error':'with_hint'(_Err@71, #{#<87>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<44>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<47>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']])}#) in call 'beamtalk_error':'raise'(_Err@72) 'false' when 'true' -> case call 'erlang':'is_function'(_ValRecv@67) of 'true' when 'true' -> apply _ValRecv@67 (_ValArg@68, _ValArg@69) 'false' when 'true' -> call 'beamtalk_message_dispatch':'send'(_ValRecv@67, 'value:value:', [_ValArg@68, _ValArg@69]) end end end in NewI@ in call 'lists':'foldl'(_temp@63, _temp@62, _temp@61) in
+'eachWithIndex:'/2 = fun (Self, _block@57) ->
+    let _seq@58 = let _temp@59 = Self in let _temp@60 = case call 'erlang':'is_list'(_temp@59) of <'true'> when 'true' -> _temp@59 <'false'> when 'true' -> call 'beamtalk_collection':'to_list'(_temp@59) end in let _temp@61 = 0 in let _temp@62 = fun (Each@, I@) -> let NewI@ = let _BinLeft@63 = I@ in let _BinRight@64 = 1 in case call 'erlang':'is_number'(_BinLeft@63) of <'true'> when 'true' -> call 'erlang':'+'(_BinLeft@63, _BinRight@64) <'false'> when 'true' -> call 'beamtalk_message_dispatch':'send'(_BinLeft@63, '+', [_BinRight@64]) <_BinOpNoMatch@65> when 'true' -> call 'erlang':'error'({'case_clause', _BinOpNoMatch@65}) end in let _Unit = let _ValRecv@66 = _block@57 in let _ValArg@67 = Each@ in let _ValArg@68 = NewI@ in case call 'erlang':'is_function'(_ValRecv@66, 2) of 'true' when 'true' -> apply _ValRecv@66 (_ValArg@67, _ValArg@68) 'false' when 'true' -> case call 'erlang':'is_function'(_ValRecv@66, 3) of 'true' when 'true' -> let _Err@69 = call 'beamtalk_error':'new'('stateful_block_dispatch', 'Block') in let _Err@70 = call 'beamtalk_error':'with_selector'(_Err@69, 'value:value:') in let _Err@71 = call 'beamtalk_error':'with_hint'(_Err@70, #{#<87>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<103>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<44>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<117>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<98>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<107>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<108>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<118>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<101>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<102>(8,1,'integer',['unsigned'|['big']]),#<111>(8,1,'integer',['unsigned'|['big']]),#<114>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<58>(8,1,'integer',['unsigned'|['big']]),#<47>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<121>(8,1,'integer',['unsigned'|['big']]),#<110>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<109>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<32>(8,1,'integer',['unsigned'|['big']]),#<100>(8,1,'integer',['unsigned'|['big']]),#<105>(8,1,'integer',['unsigned'|['big']]),#<115>(8,1,'integer',['unsigned'|['big']]),#<112>(8,1,'integer',['unsigned'|['big']]),#<97>(8,1,'integer',['unsigned'|['big']]),#<116>(8,1,'integer',['unsigned'|['big']]),#<99>(8,1,'integer',['unsigned'|['big']]),#<104>(8,1,'integer',['unsigned'|['big']])}#) in call 'beamtalk_error':'raise'(_Err@71) 'false' when 'true' -> case call 'erlang':'is_function'(_ValRecv@66) of 'true' when 'true' -> apply _ValRecv@66 (_ValArg@67, _ValArg@68) 'false' when 'true' -> call 'beamtalk_message_dispatch':'send'(_ValRecv@66, 'value:value:', [_ValArg@67, _ValArg@68]) end end end in NewI@ in call 'lists':'foldl'(_temp@62, _temp@61, _temp@60) in
     'nil'
 
-'zip:'/2 = fun (Self, _other@73) ->
-call 'beamtalk_list':'zip'(Self, _other@73)
+'zip:'/2 = fun (Self, _other@72) ->
+call 'beamtalk_list':'zip'(Self, _other@72)
 
-'groupBy:'/2 = fun (Self, _block@74) ->
-call 'beamtalk_list':'group_by'(Self, _block@74)
+'groupBy:'/2 = fun (Self, _block@73) ->
+call 'beamtalk_list':'group_by'(Self, _block@73)
 
-'partition:'/2 = fun (Self, _block@75) ->
-call 'beamtalk_list':'partition'(Self, _block@75)
+'partition:'/2 = fun (Self, _block@74) ->
+call 'beamtalk_list':'partition'(Self, _block@74)
 
-'takeWhile:'/2 = fun (Self, _block@76) ->
-call 'lists':'takewhile'(_block@76, Self)
+'takeWhile:'/2 = fun (Self, _block@75) ->
+call 'lists':'takewhile'(_block@75, Self)
 
-'dropWhile:'/2 = fun (Self, _block@77) ->
-call 'lists':'dropwhile'(_block@77, Self)
+'dropWhile:'/2 = fun (Self, _block@76) ->
+call 'lists':'dropwhile'(_block@76, Self)
 
-'intersperse:'/2 = fun (Self, _separator@78) ->
-call 'beamtalk_list':'intersperse'(Self, _separator@78)
+'intersperse:'/2 = fun (Self, _separator@77) ->
+call 'beamtalk_list':'intersperse'(Self, _separator@77)
 
-'add:'/2 = fun (Self, _item@79) ->
-call 'erlang':'++'(Self, [_item@79|[]])
+'add:'/2 = fun (Self, _item@78) ->
+call 'erlang':'++'(Self, [_item@78|[]])
 
 'dispatch'/3 = fun (Selector, Args, Self) ->
     case Selector of
@@ -258,7 +256,7 @@ call 'erlang':'++'(Self, [_item@79|[]])
             call 'stdlib_class_list':'from:to:'(Self, DispArg0, DispArg1)
         <'indexOf:'> when 'true' ->
             let <DispArg0> = call 'erlang':'hd'(Args) in
-            case call 'stdlib_class_list':'indexOf:'(Self, DispArg0) of <{DispR, _DispS}> when 'true' -> DispR end
+            call 'stdlib_class_list':'indexOf:'(Self, DispArg0)
         <'eachWithIndex:'> when 'true' ->
             let <DispArg0> = call 'erlang':'hd'(Args) in
             call 'stdlib_class_list':'eachWithIndex:'(Self, DispArg0)
@@ -313,6 +311,7 @@ call 'erlang':'++'(Self, [_item@79|[]])
                 <'show:'> when 'true' -> 'slow'
                 <'showCr:'> when 'true' -> 'slow'
                 <'subclassResponsibility'> when 'true' -> 'slow'
+                <'then:'> when 'true' -> 'slow'
                 <'yourself'> when 'true' -> 'slow'
                 <_> when 'true' -> call 'beamtalk_dispatch':'inherited_target'('List', Selector)
             end of
@@ -332,7 +331,13 @@ call 'erlang':'++'(Self, [_item@79|[]])
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
     try call 'stdlib_class_list':'dispatch'(Selector, Args, Self)
     of <D4Result> -> {'reply', D4Result, State}
-    catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}
+    catch <D4Type, D4Error, D4Stack> ->
+        case D4Type of
+            <'error'> when 'true' ->
+                let <D4Built> = primop 'build_stacktrace'(D4Stack) in
+                {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built, ~{}~), State}
+            <_D4Other> when 'true' -> primop 'raw_raise'(D4Type, D4Error, D4Stack)
+        end
 
 
 'has_method'/1 = fun (Selector) ->

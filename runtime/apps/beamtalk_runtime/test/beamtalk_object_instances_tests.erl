@@ -423,10 +423,9 @@ ets_table_ownership_test_() ->
                 Owner = proplists:get_value(owner, TableInfo),
                 ?assertEqual(Pid, Owner),
 
-                %% This confirms that when the gen_server crashes (without supervisor),
-                %% the ETS table will be automatically deleted by the VM.
-                %% In production with supervision, the supervisor would restart
-                %% the gen_server and it would recreate the table in init/1.
+                %% On a crash the table passes to beamtalk_ets_heir (when it is
+                %% running) and the restarted server reclaims it (BT-4123,
+                %% pinned in beamtalk_ets_heir_tests).
                 ok
             end)
         ]

@@ -1477,7 +1477,8 @@ dynamic_init_reads_per_instance_config_test() ->
                 ?assertEqual(
                     {
                         {dictionary, '$beamtalk_child_class'},
-                        {'BT3963DynChildSup', bt3963_child_mod}
+                        %% BT-4502: the entry carries the cached spawn kind.
+                        {'BT3963DynChildSup', bt3963_child_mod, supervisor}
                     },
                     erlang:process_info(P1, {dictionary, '$beamtalk_child_class'})
                 ),
@@ -2222,7 +2223,11 @@ start_honours_exit_signals_from_existing_links_test() ->
             after 0 -> ok
             end
         after
-            catch gen_server:stop(SupPid)
+            try
+                gen_server:stop(SupPid)
+            catch
+                _:_ -> ok
+            end
         end
     end).
 
@@ -2263,8 +2268,16 @@ spawn_starts_independent_unlinked_listed_instances_test() ->
             %% ... and `pg` drops a stopped one.
             wait_until(fun() -> not lists:member(PA, beamtalk_supervisor:instance_pids()) end)
         after
-            catch gen_server:stop(PA),
-            catch gen_server:stop(PB)
+            try
+                gen_server:stop(PA)
+            catch
+                _:_ -> ok
+            end,
+            try
+                gen_server:stop(PB)
+            catch
+                _:_ -> ok
+            end
         end
     end).
 
@@ -2393,7 +2406,11 @@ supervise_waiter_behind_hung_start_gets_bounded_error_test() ->
                     beamtalk_supervisor:supervise('BT3963Sup', ?BT3963_MOD)
                 )
             after
-                catch gen_server:stop(SupPid)
+                try
+                    gen_server:stop(SupPid)
+                catch
+                    _:_ -> ok
+                end
             end
         end)
     after
@@ -3943,7 +3960,11 @@ bt1990_cleanup_name(Name) ->
         undefined ->
             ok;
         _ ->
-            catch erlang:unregister(Name),
+            try
+                erlang:unregister(Name)
+            catch
+                _:_ -> ok
+            end,
             ok
     end.
 
@@ -4627,7 +4648,11 @@ concurrent_supervise(HookOutcome) ->
                     _:_ -> ok
                 end
         end,
-        catch gen_server:stop(ClassPid, normal, 5000),
+        try
+            gen_server:stop(ClassPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end,
         beamtalk_supervisor_test_helper:reset()
     end.
 
@@ -4686,7 +4711,11 @@ orphaned_init_gate_is_reclaimed_test() ->
     after
         application:unset_env(beamtalk_runtime, init_wait_timeout_ms),
         ets:delete(beamtalk_supervisor_init_gates, Sup),
-        catch exit(Sup, kill)
+        try
+            exit(Sup, kill)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% BT-3759 review: waiter rows left after the gate was released must neither
@@ -4704,7 +4733,11 @@ stray_waiter_rows_do_not_hold_gate_test() ->
     after
         application:unset_env(beamtalk_runtime, init_wait_timeout_ms),
         ets:delete(beamtalk_supervisor_init_gates, Sup),
-        catch gen_event:stop(Sup)
+        try
+            gen_event:stop(Sup)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %%====================================================================
@@ -4788,10 +4821,103 @@ bt4033_failing_initialize_on_restart_counts_against_intensity_test() ->
         %% the supervisor shuts down instead of trying again.
         ?assertEqual(3, counters:get(Starts, 1))
     after
-        catch exit(SupPid, kill),
+        try
+            exit(SupPid, kill)
+        catch
+            _:_ -> ok
+        end,
         receive
             {'EXIT', SupPid, _} -> ok
         after 1000 -> ok
         end,
         process_flag(trap_exit, OldTrap)
+    end.
+
+%%====================================================================
+%% BT-4502: cached spawn kind + single dictionary read on the start path
+%%====================================================================
+
+%% Record a `dynamic_init/3`-style entry with a cached spawn kind (3-tuple).
+set_child_class_with_kind(SupPid, Obj, Kind) ->
+    {Name, Module} = child_class_entry(Obj),
+    _ = sys:replace_state(SupPid, fun(S) ->
+        put('$beamtalk_child_class', {Name, Module, Kind}),
+        S
+    end),
+    ok.
+
+startChild_cached_kind_actor_test() ->
+    SupPid = start_dynamic_supervisor_with_nullary_child(),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT4502ActorWorker'),
+    set_child_class_with_kind(SupPid, ChildClassObj, actor),
+    try
+        Self = {beamtalk_supervisor, 'BT4502Sup', ?MODULE, SupPid},
+        ?assertMatch(
+            {ok, {beamtalk_object, 'BT4502ActorWorker', ?MODULE, _}},
+            beamtalk_supervisor:startChild(Self)
+        )
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+startChild_cached_kind_supervisor_test() ->
+    %% A cached `supervisor` kind wraps the child as a supervisor tuple without
+    %% any class metadata (the class here has no metadata row at all).
+    SupPid = start_dynamic_supervisor_with_nullary_child(),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT4502SupWorker'),
+    set_child_class_with_kind(SupPid, ChildClassObj, supervisor),
+    try
+        Self = {beamtalk_supervisor, 'BT4502Sup', ?MODULE, SupPid},
+        ?assertMatch(
+            {ok, {beamtalk_supervisor, 'BT4502SupWorker', ?MODULE, _}},
+            beamtalk_supervisor:startChild(Self)
+        )
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+startChild_old_format_entry_test() ->
+    %% Pre-BT-4502 2-tuple entry (no cached kind) keeps working.
+    SupPid = start_dynamic_supervisor_with_nullary_child(),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT4502OldWorker'),
+    set_child_class(SupPid, ChildClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT4502Sup', ?MODULE, SupPid},
+        ?assertMatch(
+            {ok, {beamtalk_object, 'BT4502OldWorker', ?MODULE, _}},
+            beamtalk_supervisor:startChild(Self)
+        )
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+startChild_cached_kind_capped_test() ->
+    %% Cap refusal and slot release are unchanged on the single-read path.
+    SupPid = start_enforced_capped_dynamic_supervisor(1),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT4502CapWorker'),
+    set_child_class_with_kind(SupPid, ChildClassObj, actor),
+    try
+        Self = {beamtalk_supervisor, 'BT4502CapSup', ?MODULE, SupPid},
+        {ok, Child} = beamtalk_supervisor:startChild(Self),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = max_children}}, beamtalk_supervisor:startChild(Self)
+        ),
+        ok = supervisor:terminate_child(SupPid, element(4, Child)),
+        wait_until_count(Self, 0),
+        ?assertMatch({ok, _}, beamtalk_supervisor:startChild(Self))
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+wait_until_count(Self, N) ->
+    case beamtalk_supervisor:countChildren(Self) of
+        {ok, N} ->
+            ok;
+        _ ->
+            timer:sleep(10),
+            wait_until_count(Self, N)
     end.

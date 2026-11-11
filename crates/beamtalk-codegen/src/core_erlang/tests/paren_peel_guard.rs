@@ -118,7 +118,7 @@ const CEILINGS: &[(&str, usize)] = &[
         "beamtalk-codegen/src/core_erlang/patterns/match_lowering.rs",
         5,
     ),
-    ("beamtalk-codegen/src/core_erlang/sequencing.rs", 3),
+    ("beamtalk-codegen/src/core_erlang/sequencing.rs", 4),
     ("beamtalk-codegen/src/core_erlang/synced_call.rs", 8),
     ("beamtalk-codegen/src/core_erlang/threaded_expr.rs", 14),
     ("beamtalk-codegen/src/core_erlang/threading_analysis.rs", 3),
@@ -142,16 +142,23 @@ const CEILINGS: &[(&str, usize)] = &[
     // `operand_loop_constructs` (BT-4310): a statement, its assignment or `^`
     // value, and a cascade's shared receiver.
     ("beamtalk-core/src/semantic_analysis/block_facts.rs", 38),
+    // BT-4257: `is_raw_binary`, read on assignment values and send operands
+    // alike.
+    (
+        "beamtalk-core/src/semantic_analysis/type_checker/binary_string_compare.rs",
+        1,
+    ),
     // A block literal stashed for a declared `Block(...)` return or local
     // (a return / assignment value).
     (
         "beamtalk-core/src/semantic_analysis/type_checker/inference/blocks.rs",
         1,
     ),
-    // A `match:` scrutinee.
+    // A `match:` scrutinee, and a `match:` arm body (BT-4458: a bare `^expr`
+    // arm, possibly parenthesised, contributes `Never`).
     (
         "beamtalk-core/src/semantic_analysis/type_checker/inference/flow.rs",
-        1,
+        2,
     ),
     // Cascade shared receivers (`infer_cascade`'s dispatch receiver) and
     // `(super)`: `is_class_side_receiver`.
@@ -196,11 +203,10 @@ const CEILINGS: &[(&str, usize)] = &[
         "beamtalk-core/src/semantic_analysis/validators/class_state_abroad.rs",
         3,
     ),
-    // Shared predicates over statements, assignment values and receivers, and
-    // the cascade's folded first send.
+    // Shared predicates over statements, assignment values and receivers.
     (
         "beamtalk-core/src/semantic_analysis/validators/lint_validators.rs",
-        9,
+        7,
     ),
     // Constructs judged in any position (`expr` itself), the `Parenthesized`
     // arm, statements, cascade receivers (`nlr_cause`'s `check_send`, a

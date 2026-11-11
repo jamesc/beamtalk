@@ -1,31 +1,85 @@
-<!-- Short index for agents. For full details, see docs/agents/expanded.md -->
-# AGENTS.md - Beamtalk Agent Quick Reference
+# AGENTS.md - Beamtalk
 
-This file is a compact one-page index for AI coding agents. For full, detailed guidance, examples, and workflows see [`docs/agents/expanded.md`](docs/agents/expanded.md).
+Instructions for AI coding agents. For full, detailed guidance, examples, and workflows see [`docs/agents/expanded.md`](docs/agents/expanded.md).
+
+Beamtalk is a Smalltalk/Newspeak-inspired language compiling to BEAM via Rust. The compiler generates Core Erlang, compiled to BEAM bytecode via erlc.
+
+**Repo:** Owner: `jamesc`, Repo: `beamtalk`
 
 ## Essential Rules
 
-- **Repo values (use for API calls):** Owner: `jamesc`, Repo: `beamtalk`.
-- **Syntax verification:** Always verify Beamtalk syntax in `docs/beamtalk-language-features.md`, `examples/`, or `tests/` before using it.
-- **No duplicate implementations:** Grep for an existing implementation before writing a new helper/list/table; import or extract, don't copy. A "keep in sync"/"mirrors" comment needs a test enforcing it, not just prose. See [expanded doc](docs/agents/expanded.md#duplication--drift-prevention).
-- **Structured errors:** Use `#beamtalk_error{}` for all user-facing/public API errors. Internal runtime helpers (`runtime/**/*.erl`) may use `{ok, Value} | {error, Reason}` if translated at public API boundaries.
-- **Blocks into class methods:** A class method, and any block passed into it, runs in the caller unless its class or any ancestor declares class variables, or the selector is process-bound (`new`, `spawn`, `startLink`, …) (ADR 0142). Otherwise it runs in the class's gen_server: values and `^` cross fine; process-local side effects (process dictionary, `self()`) do not, and messaging the same class back raises `dispatch_error`. See [expanded doc](docs/agents/expanded.md#blocks-passed-into-class-methods).
-- **CI checklist:** Use `just ci` for full checks; quick commands: `just build`, `just test`, `just test-stdlib`, `just test-repl-protocol`.
-- **Agent shortcuts:** You may run `just`, `cargo`, `rustc`, `rustfmt`, and `git` without asking.
+- **Verify Beamtalk syntax** before writing any new `.bt` or Erlang FFI code: grep for 3+ existing examples (`examples/`, `stdlib/`, `tests/`), then confirm against `docs/beamtalk-language-features.md`. Never invent syntax or guess from Smalltalk memory.
+- **No duplicate implementations:** Before writing a helper/list/table, grep for an existing implementation of the same rule and import or extract it — never copy. "Module X sits below Y in the dependency graph" is not a reason to duplicate; extract a shared leaf module below both instead. Never write a "keep in sync"/"mirrors" comment without a test that enforces the invariant. A rule crossing the Rust/Erlang boundary needs a shared conformance fixture or code generation, not a comment. See `docs/development/architecture-principles.md` § Duplication & the Shared-Leaf-Module Pattern.
+- **Codegen:** All Core Erlang codegen uses the `Document` / `docvec!` + typed-leaf API (`leaf::atom`, `leaf::var`, `leaf::string_lit`, `leaf::int_lit`, `leaf::fname`, `leaf::binary_lit`, …). Never use `format!()` or string concatenation for Core Erlang fragments — not even atoms, arities, or map keys. See `docs/ADR/0089-typed-document-leaves.md`.
+- **State-threading codegen:** Loops, conditionals, exception handling (`on:do:`/`ensure:`), list-op accumulators, gen_server actor-state routing, Tier 2 stateful-block bodies, outer-local rebinds (a `ThreadedValue` prelude family decided by the one recognizer `threaded_locals_of`, ADR 0131) and NLR boundaries all lower through `ThreadedIr` as the emission input, verified by its `verify()` (`crates/beamtalk-codegen/src/core_erlang/threaded_ir.rs`). General expression codegen stays AST-directed. Class variables are not a threading family (ADR 0130): they are written in place in the class process via `beamtalk_class_vars`; the only class-variable node is the `on:do:` catch boundary (`OnDoCatch`, `VerifyError::CatchWithoutClassVarRestore`). A violated invariant is a `VerifyError`, reported via the shared `report_threaded_ir_verify_errors` helper — never add a new ad-hoc `debug_assert!` at a state-threading call site. **A state-threading fix is general or it is not a fix:** state the invariant for every scope kind, fix it in the `ThreadedIr` node lowering that owns the scope (never a per-call-site sync/refresh/commit or a new runtime reconciliation mechanism), add the `VerifyError` that fails on the repro before the fix, and prove it over a generated corpus rather than the repro; `PIN-BUG` tests cite an open issue and a fix flips every pin for it. See `docs/agents/expanded.md` § State-Threading Codegen, `docs/development/debugging.md` § ThreadedIr verifier and `docs/ADR/0111-lowered-ir-verifier-for-state-threading.md`.
+- **Opt-in CI labels:** Some checks run on a PR only when it carries their label, so add it when you open the PR (`gh pr create --label ...`) or as soon as the diff qualifies. Add **`ci:corpus`** (the Rust corpus tier, ~33 runner-min) when the PR changes state-threading lowering or the analysis that feeds it. That covers `ThreadedIr` (`threaded_ir/`) and the codegen for loops, conditionals, `on:do:`/`ensure:`, blocks, NLR, actor state, value-type `self` and outer-local rebinds (`control_flow/`, `blocks/`, `nlr*.rs`, `synced_call.rs`, `gen_server/`, …), plus `threaded_locals_of` and block facts in `beamtalk-core`. It also covers any state-threading or `PIN-BUG` fix and any new or changed `*_corpus`/`*agreement*` test. Add **`ci:core-diff`** for a codegen refactor meant to leave generated Core Erlang unchanged, or **`core-diff:enforce`** to fail on any diff. Neither is needed for stdlib-only, runtime, CLI, LSP, parser, type-checker or docs changes. Main runs the corpus tier on every merge, so a missed label shows up as a red main one merge later; when unsure, add it. Run `just test-corpus` locally either way. See `docs/development/testing-strategy.md` § Opt-in CI checks.
+- **Type annotations:** `::` (double-colon), never single `:`. E.g. `state: x :: Integer = 0`, `param :: Type -> ReturnType =>`.
+- **Returns (`^`):** Use `^` only for early/non-local returns, never on the last expression. Inside a block, `^` exits the *enclosing method* immediately (standard Smalltalk semantics, via throw/catch in codegen).
+- **Structured errors:** Use `#beamtalk_error{}` for all user-facing/public API errors. Internal helpers (e.g. `runtime/**/*.erl`) may use `{ok, V} | {error, R}` if translated at public boundaries.
+- **No image mechanics:** Keep Smalltalk's vocabulary, drop mechanisms that assume one live image. In new code, never add REPL-injected names, bootstrap-set class-variable singletons, or anything whose meaning differs between REPL, `beamtalk run`, `beamtalk test` and releases. Stateless services are sealed class-side facades; `current` must ask the runtime at call time; context-bound services raise a structured error, never `nil`. The existing `WorkspaceInterface`/`TranscriptStream` singletons predate this rule and will be removed as ADR 0129 (Accepted) is implemented; don't copy their pattern. See `docs/beamtalk-principles.md` §4.
+- **DNU:** An unrecognised message raises `does_not_understand` (`#beamtalk_error{}`). Use `respondsTo:` to check before calling.
+- **Blocks into class methods:** A class method, and any block passed into it, runs in the caller unless its class or any ancestor declares class variables, or the selector is process-bound (`new`, `spawn`, `startLink`, …); sealing plays no part (ADR 0142). In the caller, `self()`, the process dictionary and any resource the method creates are the caller's, and nothing is serialised. Otherwise it runs in the class's gen_server: values and `^` cross that boundary, process-local side effects do not, and messaging the same class back raises `dispatch_error`. Class variables (ADR 0130): a block reads and writes them live only when it runs at home (inside an invocation of its own class); anywhere else it reads the values captured at creation and a write raises `class_state_unreachable`. See `docs/beamtalk-language-features.md` § Passing Blocks Through Class Methods.
+- **Erlang logging:** OTP logger macros (`?LOG_ERROR`, …), never `io:format` or `logger:error()`. Set `domain` metadata in `init/1` via `logger:set_process_metadata(#{domain => [beamtalk, runtime]})` (`[beamtalk, stdlib]` for stdlib) so all calls inherit it.
+- **License headers:** All source **code** files (`.rs`, `.erl`, `.bt`, `.hrl`) need `Copyright 2026 James Casey` / `SPDX-License-Identifier: Apache-2.0`. Not on `.md` files.
+- **Test assertions:** Every expression in test files needs a `// =>` assertion (even `// => _`) — no assertion means no execution.
+- **Cross-platform temp paths:** Never hardcode `/tmp/`. Use `File tempDirectory` (BT) / `beamtalk_file:'tempDirectory'()` (Erlang) and concatenate, or prefer relative temp filenames in runtime EUnit tests. See `docs/development/testing-strategy.md`.
+- **Generated files:** Before editing `.app.src` or other generated artifacts, check if a build step owns them — `build_stdlib.rs` generates `beamtalk_stdlib.app.src`, so edit the generator.
+- **REPL output:** Confirm with the user before changing any REPL display value, prompt format, or output behaviour — it's usually intentional and covered by e2e tests.
+- **Surface parity:** When adding/modifying operations on any surface (CLI, REPL, MCP, LSP), update `docs/development/surface-parity.md`. Operations not labelled `surface-specific` must produce equivalent output across surfaces.
 
-## Issue Workflow
+## CI Commands
 
-Create Linear issues with context and acceptance criteria. Always set labels: `agent-state`, `item-area`, `issue-type`, `item-size`. Establish blocking relationships for dependencies. See [expanded doc](docs/agents/expanded.md#work-tracking) for label lists, GraphQL examples, and issue templates.
+```bash
+just ci          # Full CI checks
+just build       # Build Rust + Erlang runtime
+just test        # Rust fast tier + stdlib + BUnit + runtime tests
+just test-corpus # Rust slow tier: state-threading agreement/corpus proofs (~10 min); run when touching compiler crates (CI: `ci:corpus` label)
+just test-stdlib # Compiled language feature tests (~14s)
+just test-bunit  # BUnit TestCase tests
+just verify-threaded-ir  # ThreadedIr verify() over full stdlib + bootstrap-test corpus
+just test-repl-protocol  # REPL TCP-protocol tests (~50s)
+just fmt         # Format all code
+just clippy      # Lints (warnings = errors)
+just dialyzer    # Erlang type checking
+```
 
-## Key Links
+You may run `just`, `cargo`, `rustc`, `rustfmt`, and `git` without asking.
+
+## Test Organization
+
+| Test needs... | Where |
+|---|---|
+| Bootstrap primitives (arithmetic, booleans, equality, strings) | `stdlib/bootstrap-test/*.btscript` |
+| Language features (collections, closures, regex, actors, etc.) | `stdlib/test/*.bt` (BUnit) |
+| Stateful tests with setUp/tearDown | `stdlib/test/*.bt` (BUnit) |
+| Workspace bindings, REPL commands, variable persistence | `tests/repl-protocol/cases/*.btscript` |
+
+Prefer `stdlib/test/*.bt` (BUnit TestCase) for new tests. Use `stdlib/bootstrap-test/` only for bootstrap-critical primitives.
+
+## Architecture
+
+- **DDD contexts:** Language Service, Compilation, Runtime, REPL.
+- **Dependencies flow down only** — `beamtalk-core` (Compilation: `ast`, `source_analysis`, `unparse`, `semantic_analysis`, `compilation`) never imports `beamtalk-cli`, `beamtalk-lsp`, `beamtalk-codegen` (Code Generation), or `beamtalk-language-service` (Language Service: `queries` + `language_service`) — the latter two depend on `beamtalk-core`, never the reverse, and it's cargo-enforced (a wrong-direction edge is a cyclic-package-dependency compile error). See `docs/development/architecture-principles.md` §1 and `docs/ADR/0117-beamtalk-core-crate-split.md`.
+- **Never** panic/`unwrap()` on user input, or add deps without justification.
+- **Always** return `(Result, Vec<Diagnostic>)` for user-facing operations.
+
+## Workflow
+
+- **Versioning & releases:** `VERSION` at repo root is the single source of truth; everything derives from it at build time. Don't hand-edit derived version strings. Full process: `docs/development/releasing.md`.
+- **Issues (Linear):** Project prefix `BT`. Always set labels `agent-state`, `item-area`, `issue-type`, `item-size`, and blocking relationships for dependencies. Include context, acceptance criteria, files to modify, and references. See `docs/agents/expanded.md` § Work Tracking for label lists and templates.
+- **Scope control:** Fix inline — formatting/typos in files you're touching, test failures from your changes. File follow-up issues for unrelated bugs, optimizations, or refactors not required for the task.
+
+## Key References
 
 | Resource | Location |
 |----------|----------|
-| Full agent guidelines | [`docs/agents/expanded.md`](docs/agents/expanded.md) |
-| Language spec | [`docs/beamtalk-language-features.md`](docs/beamtalk-language-features.md) |
-| Architecture principles | [`docs/development/architecture-principles.md`](docs/development/architecture-principles.md) |
-| Rust guidelines | [`docs/development/rust-guidelines.md`](docs/development/rust-guidelines.md) |
-| Erlang guidelines | [`docs/development/erlang-guidelines.md`](docs/development/erlang-guidelines.md) |
-| Common tasks | [`docs/development/common-tasks.md`](docs/development/common-tasks.md) |
-| Debugging | [`docs/development/debugging.md`](docs/development/debugging.md) |
-| ADRs | [`docs/ADR/`](docs/ADR/) |
+| Full agent guidelines | `docs/agents/expanded.md` |
+| Language spec | `docs/beamtalk-language-features.md` |
+| Architecture principles | `docs/development/architecture-principles.md` |
+| Rust guidelines | `docs/development/rust-guidelines.md` |
+| Erlang guidelines | `docs/development/erlang-guidelines.md` |
+| Common tasks | `docs/development/common-tasks.md` |
+| Debugging | `docs/development/debugging.md` |
+| Surface parity | `docs/development/surface-parity.md` |
+| Releasing | `docs/development/releasing.md` |
+| ADRs | `docs/ADR/` |

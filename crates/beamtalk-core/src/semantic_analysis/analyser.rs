@@ -61,10 +61,24 @@ impl Analyser {
             self.analyse_expression(&stmt.expression, None);
         }
 
+        // BT-4665: same method-level view of the module scope as
+        // `NameResolver::resolve_module` (shared `Scope::hide_module_bindings`).
+        let hidden_module_bindings = self.scope.hide_module_bindings();
+
         // Analyse classes
         for class in &module.classes {
             self.analyse_class(class);
         }
+
+        // Analyse extension method bodies (BT-4658), mirroring
+        // `NameResolver::resolve_module`: no class scope, so no instance fields.
+        for standalone in &module.method_definitions {
+            self.scope.push(); // empty class-level scope, as in the resolver
+            self.analyse_method(&standalone.method);
+            self.scope.pop();
+        }
+
+        self.scope.restore_module_bindings(hidden_module_bindings);
     }
 
     fn analyse_class(&mut self, class: &crate::ast::ClassDefinition) {
@@ -76,8 +90,10 @@ impl Analyser {
                 .define(&state.name.name, state.span, BindingKind::InstanceField);
         }
 
-        // Analyse methods
-        for method in &class.methods {
+        // Analyse instance and class-side methods alike, so method validators
+        // (block arity, literal-argument checks) cover class methods too
+        // (BT-4645). Same scope shape as `NameResolver::resolve_class`.
+        for method in class.methods.iter().chain(&class.class_methods) {
             self.analyse_method(method);
         }
 
@@ -186,6 +202,9 @@ impl Analyser {
                     let receiver_type = self.type_map.get(receiver.span());
                     let diagnostics = validator.validate(selector, arguments, receiver_type, *span);
                     self.result.diagnostics.extend(diagnostics);
+                    self.result
+                        .diagnostics
+                        .extend(validator.validate_receiver(selector, receiver));
                 }
 
                 // Run receiver-based validators
@@ -221,13 +240,33 @@ impl Analyser {
                 receiver, messages, ..
             } => {
                 self.analyse_expression(receiver, None);
+                // The parser folds the first send into `receiver`, so the
+                // object every cascade message is sent to is that send's own
+                // receiver: the receiver-based checks below look at it. Report
+                // a bad loop condition once: the first send's own
+                // check (in `analyse_expression` above) may already have.
+                let (cascade_target, mut receiver_reported) = match receiver.as_ref() {
+                    MessageSend {
+                        receiver: target,
+                        selector: first_selector,
+                        ..
+                    } => (
+                        target.as_ref(),
+                        self.method_validators
+                            .get(&first_selector.name())
+                            .is_some_and(|v| {
+                                !v.validate_receiver(first_selector, target).is_empty()
+                            }),
+                    ),
+                    other => (other, false),
+                };
                 for msg in messages {
                     // Apply selector-based context detection for cascade messages
                     let selector_str = msg.selector.name();
 
                     // Run method-specific validators for cascade messages
                     if let Some(validator) = self.method_validators.get(&selector_str) {
-                        let receiver_type = self.type_map.get(receiver.span());
+                        let receiver_type = self.type_map.get(cascade_target.span());
                         let diagnostics = validator.validate(
                             &msg.selector,
                             &msg.arguments,
@@ -235,18 +274,24 @@ impl Analyser {
                             msg.span,
                         );
                         self.result.diagnostics.extend(diagnostics);
+                        if !receiver_reported {
+                            let receiver_diags =
+                                validator.validate_receiver(&msg.selector, cascade_target);
+                            receiver_reported = !receiver_diags.is_empty();
+                            self.result.diagnostics.extend(receiver_diags);
+                        }
                     }
 
                     // Run receiver-based validators for cascade messages
                     if let Some(diag) = method_validators::validate_primitive_instantiation(
-                        receiver,
+                        cascade_target,
                         &selector_str,
                         msg.span,
                     ) {
                         self.result.diagnostics.push(diag);
                     }
                     if let Some(diag) = method_validators::validate_immutable_mutation(
-                        receiver,
+                        cascade_target,
                         &selector_str,
                         msg.span,
                     ) {

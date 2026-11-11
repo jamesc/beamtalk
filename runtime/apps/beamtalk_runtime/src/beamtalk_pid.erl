@@ -14,7 +14,7 @@ remote-safe answer, and before this module that guard was duplicated —
 `beamtalk_announcements:subscriber_alive/1` grew a `node(Pid) =:= node()`
 clause for BT-2530, and `beamtalk_actor.erl` carried six raw
 `is_process_alive/1` call sites that still crashed on a remote pid. This is
-the single leaf module both route through (CLAUDE.md "No duplicate
+the single leaf module both route through (AGENTS.md "No duplicate
 implementations"): `beamtalk_announcements:subscriber_alive/1` delegates
 here, and every `is_process_alive/1` guard in `beamtalk_actor.erl` calls
 `is_alive/1` instead.
@@ -55,7 +55,7 @@ by construction, `global:whereis_name/1` resolves it the same way from
 every connected node, so there is no "origin" to stamp), and an ordinary
 pid (already node-qualified natively by BEAM) all pass through unchanged.
 
-The single leaf both cross-node actor-ref paths route through (CLAUDE.md
+The single leaf both cross-node actor-ref paths route through (AGENTS.md
 "No duplicate implementations"): `beamtalk_wire`'s generic term walk
 (`encode_beamtalk_object/2`, for an actor ref the walk meets directly) and
 `beamtalk_shape_migration`'s `sendable_ref`-tier field packing (for an

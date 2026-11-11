@@ -20,11 +20,22 @@
 //! checked.  Complex receiver expressions (e.g. `(foo bar) baz`) are skipped
 //! because they may have side effects and are not straightforward to extract
 //! into a single cascade receiver.
+//!
+//! A run on a value receiver whose sends answer updated copies
+//! (`p withX: 1. p withY: 2. p withZ: 3.`) is not suggested: the cascade it
+//! would become is exactly what the `cascade-drops-update` warning flags
+//! (ADR 0145 § 3). The run is skipped when any send but the last draws that
+//! warning, judged by the same predicate the type checker uses
+//! ([`cascade_drops_update`]) against the module's inferred receiver types.
+
+use std::cell::OnceCell;
 
 use crate::{LintContext, LintPass};
 use beamtalk_core::ast::{
     BinarySegment, Block, Expression, ExpressionStatement, Identifier, Module,
 };
+use beamtalk_core::semantic_analysis::type_checker::cascade_drops_update;
+use beamtalk_core::semantic_analysis::{ClassHierarchy, TypeMap, infer_types};
 use beamtalk_core::source_analysis::Diagnostic;
 
 /// Lint pass that warns on 3+ consecutive message sends to the same simple
@@ -32,7 +43,12 @@ use beamtalk_core::source_analysis::Diagnostic;
 pub(crate) struct CascadeCandidatePass;
 
 impl LintPass for CascadeCandidatePass {
-    fn check(&self, module: &Module, _ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
+    fn check(&self, module: &Module, ctx: &LintContext<'_>, diagnostics: &mut Vec<Diagnostic>) {
+        let types = Types {
+            module,
+            hierarchy: ctx.hierarchy,
+            map: OnceCell::new(),
+        };
         // Skip module.expressions — top-level sequences are used in bootstrap-test
         // files as individual test assertions (each paired with its own `// =>`
         // comment). Converting those to a cascade would change the semantics
@@ -50,12 +66,44 @@ impl LintPass for CascadeCandidatePass {
                 continue;
             }
             for method in class.methods.iter().chain(class.class_methods.iter()) {
-                check_sequence(&method.body, diagnostics);
+                check_sequence(&method.body, &types, diagnostics);
             }
         }
         for standalone in &module.method_definitions {
-            check_sequence(&standalone.method.body, diagnostics);
+            check_sequence(&standalone.method.body, &types, diagnostics);
         }
+    }
+}
+
+/// The module's inferred types, computed on first use: only a candidate run
+/// needs them, so a module with none never pays for type inference.
+struct Types<'a> {
+    module: &'a Module,
+    hierarchy: &'a ClassHierarchy,
+    map: OnceCell<TypeMap>,
+}
+
+impl Types<'_> {
+    /// Whether turning `run` (sends to one simple receiver) into a cascade
+    /// would draw the `cascade-drops-update` warning: some send but the last
+    /// answers an updated copy of a value receiver.
+    fn cascade_would_drop_update(&self, run: &[ExpressionStatement]) -> bool {
+        let Some((_last, non_final)) = run.split_last() else {
+            return false;
+        };
+        non_final.iter().any(|stmt| {
+            let Expression::MessageSend {
+                receiver, selector, ..
+            } = &stmt.expression
+            else {
+                return false;
+            };
+            let map = self
+                .map
+                .get_or_init(|| infer_types(self.module, self.hierarchy, None));
+            map.get(receiver.span())
+                .is_some_and(|ty| cascade_drops_update(self.hierarchy, ty, &selector.name()))
+        })
     }
 }
 
@@ -84,7 +132,11 @@ fn simple_receiver_name(expr: &Expression) -> Option<&str> {
 
 /// Check a flat sequence of statements for runs of 3+ consecutive sends to
 /// the same simple receiver, then recurse into nested expressions.
-fn check_sequence(exprs: &[ExpressionStatement], diagnostics: &mut Vec<Diagnostic>) {
+fn check_sequence(
+    exprs: &[ExpressionStatement],
+    types: &Types<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
     let mut i = 0;
     while i < exprs.len() {
         if let Some(recv) = simple_receiver_name(&exprs[i].expression) {
@@ -99,7 +151,10 @@ fn check_sequence(exprs: &[ExpressionStatement], diagnostics: &mut Vec<Diagnosti
             // readability and debuggability.  Cascading them would merge
             // logically-distinct operations and make test failures harder to
             // isolate.
-            if run_len >= 3 && recv != "self" {
+            if run_len >= 3
+                && recv != "self"
+                && !types.cascade_would_drop_update(&exprs[run_start..i])
+            {
                 let first_span = exprs[run_start].expression.span();
                 let last_span = exprs[i - 1].expression.span();
                 let span = first_span.merge(last_span);
@@ -118,10 +173,10 @@ fn check_sequence(exprs: &[ExpressionStatement], diagnostics: &mut Vec<Diagnosti
             }
             // Recurse into each expression in the run
             for stmt in &exprs[run_start..i] {
-                recurse(&stmt.expression, diagnostics);
+                recurse(&stmt.expression, types, diagnostics);
             }
         } else {
-            recurse(&exprs[i].expression, diagnostics);
+            recurse(&exprs[i].expression, types, diagnostics);
             i += 1;
         }
     }
@@ -129,10 +184,10 @@ fn check_sequence(exprs: &[ExpressionStatement], diagnostics: &mut Vec<Diagnosti
 
 /// Recurse into nested statement sequences (block bodies, etc.) that may
 /// themselves contain cascade candidates.
-fn recurse(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
+fn recurse(expr: &Expression, types: &Types<'_>, diagnostics: &mut Vec<Diagnostic>) {
     match expr {
         Expression::Block(Block { body, .. }) => {
-            check_sequence(body, diagnostics);
+            check_sequence(body, types, diagnostics);
         }
 
         Expression::MessageSend {
@@ -140,82 +195,82 @@ fn recurse(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
             arguments,
             ..
         } => {
-            recurse(receiver, diagnostics);
+            recurse(receiver, types, diagnostics);
             for arg in arguments {
-                recurse(arg, diagnostics);
+                recurse(arg, types, diagnostics);
             }
         }
 
         Expression::Assignment { target, value, .. } => {
-            recurse(target, diagnostics);
-            recurse(value, diagnostics);
+            recurse(target, types, diagnostics);
+            recurse(value, types, diagnostics);
         }
 
         Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
-            recurse(value, diagnostics);
+            recurse(value, types, diagnostics);
         }
 
         Expression::Cascade {
             receiver, messages, ..
         } => {
-            recurse(receiver, diagnostics);
+            recurse(receiver, types, diagnostics);
             for msg in messages {
                 for arg in &msg.arguments {
-                    recurse(arg, diagnostics);
+                    recurse(arg, types, diagnostics);
                 }
             }
         }
 
         Expression::Parenthesized { expression, .. } => {
-            recurse(expression, diagnostics);
+            recurse(expression, types, diagnostics);
         }
 
         Expression::FieldAccess { receiver, .. } => {
-            recurse(receiver, diagnostics);
+            recurse(receiver, types, diagnostics);
         }
 
         Expression::Match { value, arms, .. } => {
-            recurse(value, diagnostics);
+            recurse(value, types, diagnostics);
             for arm in arms {
                 if let Some(guard) = &arm.guard {
-                    recurse(guard, diagnostics);
+                    recurse(guard, types, diagnostics);
                 }
-                recurse(&arm.body, diagnostics);
+                recurse(&arm.body, types, diagnostics);
             }
         }
 
         Expression::MapLiteral { pairs, .. } => {
             for pair in pairs {
-                recurse(&pair.key, diagnostics);
-                recurse(&pair.value, diagnostics);
+                recurse(&pair.key, types, diagnostics);
+                recurse(&pair.value, types, diagnostics);
             }
         }
 
         Expression::ListLiteral { elements, tail, .. } => {
             for elem in elements {
-                recurse(elem, diagnostics);
+                recurse(elem, types, diagnostics);
             }
             if let Some(t) = tail {
-                recurse(t, diagnostics);
+                recurse(t, types, diagnostics);
             }
         }
 
         Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
             for elem in elements {
-                recurse(elem, diagnostics);
+                recurse(elem, types, diagnostics);
             }
         }
 
         Expression::StringInterpolation { segments, .. } => {
             for seg in segments {
                 if let beamtalk_core::ast::StringSegment::Interpolation(e) = seg {
-                    recurse(e, diagnostics);
+                    recurse(e, types, diagnostics);
                 }
             }
         }
         Expression::BinaryConstruction { segments, .. } => {
             for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                recurse(e, diagnostics);
+                recurse(e, types, diagnostics);
             }
         }
 
@@ -404,5 +459,37 @@ mod tests {
             1,
             "class method body should be checked, got: {diags:?}"
         );
+    }
+
+    #[test]
+    fn value_run_that_would_drop_updates_not_flagged() {
+        // BT-4512 (ADR 0145 § 3): as a cascade, `p withX: 1; withY: 2;
+        // withZ: 3` would draw `cascade-drops-update`, so the lint must not
+        // suggest it.
+        let diags = lint(
+            "Value subclass: Point\n  field: x :: Integer = 0\n  field: y :: Integer = 0\n  field: z :: Integer = 0\n\nObject subclass: Foo\n  run: p :: Point =>\n    p withX: 1\n    p withY: 2\n    p withZ: 3\n",
+        );
+        assert!(
+            diags.is_empty(),
+            "a run the cascade-drops-update warning would flag should NOT be suggested, got: {diags:?}"
+        );
+    }
+
+    #[test]
+    fn dictionary_run_that_would_drop_updates_not_flagged() {
+        let diags = lint(
+            "Object subclass: Foo\n  run: d :: Dictionary =>\n    d at: #a put: 1\n    d at: #b put: 2\n    d at: #c put: 3\n",
+        );
+        assert!(diags.is_empty(), "got: {diags:?}");
+    }
+
+    #[test]
+    fn value_run_answering_other_types_still_flagged() {
+        // Sends that do not answer an updated copy (`printString`, `x`) cascade
+        // safely, so the suggestion stands.
+        let diags = lint(
+            "Value subclass: Point\n  field: x :: Integer = 0\n\nObject subclass: Foo\n  run: p :: Point =>\n    p printString\n    p x\n    p withX: 3\n",
+        );
+        assert_eq!(diags.len(), 1, "got: {diags:?}");
     }
 }

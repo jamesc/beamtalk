@@ -13,13 +13,14 @@
 
 use std::collections::HashMap;
 
-use super::super::{CodeGenContext, CoreErlangGenerator};
+use super::super::nlr::NlrArmShape;
+use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     BindOp, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCleanup,
-    EnsureNlrRelay, FoldCarry, FrameId, LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape,
-    OnDoCatchVars, RebindFrame, RebindFrameKind, RebindLowering, RebindShape, RethrowSlot,
-    StateAccFallbackReason, ThreadedStmt, ThreadingMode, UserCodeRegion, ValueRef, VersionPrefix,
-    VersionedVar,
+    EnsureForeignNlr, EnsureNlrRelay, FoldAccShape, FoldCarry, ForeignCleanupBody, FrameId,
+    LOCAL_STATE_KEY_PREFIX, NlrCarry, NlrThrowShape, OnDoCatchVars, RebindFrame, RebindFrameKind,
+    RebindLowering, RebindShape, RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadingMode,
+    UserCodeRegion, ValueRef, VersionPrefix, VersionedVar,
 };
 use beamtalk_core::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
@@ -79,22 +80,34 @@ pub(in crate::core_erlang) enum VerifyError {
         at: Span,
     },
 
-    /// Invariant class 2: `select_tuple_acc`'s `ValueType`-context
-    /// exclusion (`control_flow/mod.rs`'s `select_tuple_acc`), pinned
-    /// structurally. `ValueType` methods have no actor `State` `gen_server`
-    /// variable to reference — `TupleAcc` mode is unconditionally
-    /// unavailable there, and this fires if a future change to
-    /// `select_tuple_acc`'s guard ordering ever lets `use_tuple_acc` become
-    /// `true` in a `ValueType` context. Regression-pinning (see ADR
-    /// §Verifier honesty) — `select_tuple_acc`'s own early-return already
-    /// makes this unreachable today.
-    ///
-    /// `#[cfg(test)]`: this variant's sole constructor
-    /// ([`verify_tuple_acc_value_type_exclusion`]) is itself test-only —
-    /// see that function's doc comment for why production never reaches
-    /// it structurally.
-    #[cfg(test)]
-    TupleAccInValueTypeContext { at: Span },
+    /// BT-4116 (replaces the retired `ValueType`-context rule, invariant
+    /// class 2): a tuple-accumulator fold whose plan also threads a family
+    /// (`Self`, ...). The tuple accumulator carries locals only; a family
+    /// rides the map path (`select_tuple_acc`'s `field_writes` guard).
+    TupleAccWithFamily { at: Span },
+
+    /// BT-4116: a `TupleAccUnpack` node's `shape` disagrees with its
+    /// enclosing `TupleAcc` mode's (`element` on a bare value, or the whole
+    /// tuple bound to one local).
+    UnpackShapeMismatch {
+        mode: FoldAccShape,
+        node: FoldAccShape,
+        at: Span,
+    },
+
+    /// BT-4116: a [`FoldAccShape::Bare`] unpack with other than exactly one
+    /// target (`render_tuple_acc_unpack` would bind each to the whole value).
+    BareAccTargets { targets: usize, at: Span },
+
+    /// BT-4116: the fold's accumulator statement disagrees with its mode's
+    /// [`FoldAccShape`] — a bare value where the mode unpacks a tuple, or a
+    /// tuple where it unpacks a bare value (the next iteration would read
+    /// the wrong shape).
+    FoldAccShapeMismatch {
+        mode: FoldAccShape,
+        found: FoldCarry,
+        at: Span,
+    },
 
     /// Invariant class 3: the recursive inter-construct fallback
     /// invariant `list_op_needs_stateacc_fallback_recursive` encodes
@@ -336,6 +349,28 @@ pub(in crate::core_erlang) enum VerifyError {
         at: Span,
     },
 
+    /// BT-4612: a store-only [`ThreadedStmt::SyncedCall`] stores `State`
+    /// version `reads` (its `reads`) while an earlier statement of the same
+    /// frame already bound the newer version `newest`: the store was read
+    /// before a step that precedes it, so the cell it fills misses that
+    /// step's field writes, and a `^` thrown from a closure the call runs
+    /// carries the stale cell out of the method (the `^`-closure pre-store
+    /// read before the call's operands were threaded, BT-4532). The same
+    /// check as [`Self::StaleConstructSeed`], over every statement list at
+    /// every nesting level, including the frame's `State` bound before a
+    /// verified slice ([`verify_in_scope_after`]).
+    ///
+    /// Today the pre-store's builder takes `reads` and the frame's bound
+    /// version from the same `frame_state_version()` read with no frame step
+    /// in between, so this cannot fire on shipped code. It guards a future
+    /// builder that reads the store earlier; only the test-only
+    /// `FAULT_PRESTORE_READS_BEFORE_OPERANDS` makes it fire now.
+    StalePrestore {
+        reads: VersionedVar,
+        newest: VersionedVar,
+        at: Span,
+    },
+
     /// ADR 0133 Phase 3 (BT-3911), [`Self::ConstructFamilyDropped`] extended
     /// to the `Local` family: a [`ThreadedStmt::BranchArm`]'s body writes the
     /// scratch-map slot of a local (a `Put` of its `__local__` key) that the
@@ -462,27 +497,60 @@ pub(in crate::core_erlang) enum VerifyError {
     /// producer sites.
     ConstructCarrierInPlace { at: Span },
 
-    /// BT-4460 (ADR 0131 §2): a construct that threads the locals `locals`
-    /// (`threaded_locals_of` names them) reached its frame through the legacy
-    /// reread, a [`ThreadedStmt::StateCarrierReread`] after an opaque
+    /// BT-4460 / BT-4462 (ADR 0131 §2): a construct that threads the locals
+    /// `locals` (`threaded_locals_of` names them) was compiled in place, a
+    /// [`ThreadedStmt::ConstructLocalsInPlace`] after an opaque
     /// `element(2, ...)` extraction of its state carrier, instead of a
     /// [`ThreadedStmt::ConstructTuple`] and one [`ThreadedStmt::LocalRebind`]
-    /// per local. The construct was compiled in place: its writes ride in
-    /// the carrier's scratch keys, which the arm then folds into the frame's
-    /// `State` (an actor's arm-local `__local__` key leaks into the actor's
-    /// state), and no frame rule decides how each local is rebound. The repro
-    /// is an actor method's `c ifTrue: [m := 0. c ifTrue: [m := 5. 7]
-    /// ifFalse: [0]. m] ifFalse: [0]`, whose plain arm registered only loop
-    /// and fold sites, so the nested conditional was not a producer there.
-    /// Every frame registers every producer at its sites, so no reread is
-    /// legitimate; reported by [`VerifyWalk::walk_stmt`] wherever one is.
-    ConstructLocalsRereadOpaquely { locals: Vec<String>, at: Span },
+    /// per local. Its writes ride in the carrier's scratch keys, which the
+    /// frame then folds into its own `State` (an actor's arm-local
+    /// `__local__` key leaks into the actor's state), and no frame rule
+    /// rebinds the locals, so later statements read their pre-construct
+    /// values. The repro is an actor method's `c ifTrue: [m := 0. c ifTrue:
+    /// [m := 5. 7] ifFalse: [0]. m] ifFalse: [0]`, whose plain arm (before
+    /// BT-4460) registered only loop and fold sites, so the nested
+    /// conditional was not a producer there. Until BT-4462 the frame reread
+    /// each local out of the carrier (the legacy write-back); that reread is
+    /// deleted, so this finding is the only thing standing between such a
+    /// shape and a silently dropped write. Every frame registers every
+    /// producer at its sites, so no accepted program reaches it; reported by
+    /// [`VerifyWalk::walk_stmt`] wherever one is.
+    ConstructLocalsNotRebound { locals: Vec<String>, at: Span },
+
+    /// BT-4461 (ADR 0131 §2, the `MethodBody (REPL)` row): a REPL frame other
+    /// than the root (a conditional arm, an `on:do:`/`ensure:` block) holds
+    /// the bindings it has written in Core variables, and a construct at one
+    /// of its producer sites writes `locals`, some of them, but its
+    /// [`ThreadedStmt::ConstructTuple`] leaves them out of `threads` (BT-4461): the producer
+    /// adopted the bindings map whole (`element(2, carrier)`) and no
+    /// [`ThreadedStmt::LocalRebind`] read them back out of it, so the
+    /// frame's later reads answer the value from before the construct, and
+    /// a loop of the construct that reads them never sees its own writes. The
+    /// repros were `c ifTrue: [m := 1. c ifTrue: [m := 5] ifFalse: [nil]. m]
+    /// ifFalse: [0]`, answering 1, and `c ifTrue: [m := 1. [m < 5]
+    /// whileTrue: [m := m + 1]. m] ifFalse: [0]`, which never ended. Checked
+    /// by [`verify_repl_producer_sites_threaded`] in every REPL frame that
+    /// registers its producer sites.
+    ReplCachedBindingStale { locals: Vec<String>, at: Span },
 
     /// An [`ThreadedStmt::NlrThrow`] with no slot version, in **every** scope:
     /// it would render `{'$bt_nlr', Tok, Val, {}}`, an empty tuple no catch
     /// unpacks. A throw always carries the state its boundary hands back (the
     /// scope's own single state).
     NlrThrowWithoutSlot { at: Span },
+
+    /// ADR 0146 (BT-4535): an [`ThreadedStmt::NlrThrow`] where the
+    /// actor-state cell is live (`cell_live`, an actor instance method's
+    /// threaded body) that does not store its state to the cell before it
+    /// throws. Invariant, in every scope kind whose state lives in the cell:
+    /// the cell is current whenever a `^` starts, because the method's NLR
+    /// boundary commits the cell, not the copy the throw carries, and a
+    /// cleanup the throw runs reads the cell. The repro: `flag ifTrue:
+    /// [^(self.count := self.count + 10)]` (BT-3495's arm lowering) threw
+    /// the written `State` without storing it, so the boundary committed
+    /// the cell from before the write; found by the test-build check in
+    /// `beamtalk_actor_state:commit/2` over `BUnit`.
+    NlrThrowWithoutCellStore { at: Span },
 
     /// BT-4288 / BT-4312: a REPL `^` run in place (`beamtalk-core`'s
     /// `block_facts::repl_eval_returns`: at the root, in a conditional arm,
@@ -501,6 +569,38 @@ pub(in crate::core_erlang) enum VerifyError {
     /// loop or fold whose body held a `^` (BT-4288) and every non-final root
     /// or arm `^` (BT-4312).
     ReplReturnWithoutBoundary { at: Span },
+
+    /// BT-4503: an [`ThreadedStmt::NlrCatch`] in a value-type or class-method
+    /// scope whose catch arm answers anything but the bare value
+    /// ([`NlrArmShape`](crate::core_erlang::nlr::NlrArmShape)). Invariant, per
+    /// scope kind: the function an NLR boundary closes answers what its
+    /// callers take as the send's result. A value-type method (or value-type
+    /// extension fun) and a class method answer the bare value: `dispatch/3`'s
+    /// arm, the own-module typed direct call of the function (BT-4473) and
+    /// the runtime's extension apply
+    /// (`beamtalk_dispatch:apply_extension_by_arity/4`) all take the return
+    /// as is. An actor method answers the `gen_server` reply and a REPL eval its
+    /// `{Value, Bindings}` pair; those scopes are not constrained here. The
+    /// repro: every value-type method with a block `^` answered `{Result,
+    /// Self}`, which only its own `dispatch/3` arm and the BT-4473 direct
+    /// call unwrapped, so a value-type
+    /// extension with a block `^` answered the pair to the sender.
+    MethodNlrAnswersPair { boundary: NlrBoundary, at: Span },
+
+    /// ADR 0146 (BT-4535): an [`ThreadedStmt::NlrCatch`] whose actor reply
+    /// commits the state the throw carries (`{'reply', Value, State}`)
+    /// instead of the actor's cell (`{'reply', Value,
+    /// beamtalk_actor_state:commit(Self, State)}`,
+    /// [`NlrArmShape::Reply`]). Invariant, in every scope kind: a `^` that
+    /// reaches an actor method's boundary commits the cell, the one place the
+    /// actor's fields live; the throw's copy is not the state of record. The
+    /// copy misses whatever was written to the cell after the `^` started (an
+    /// `ensure:` cleanup of another method it unwound through, ADR 0146 R1)
+    /// and, for a block the actor created and another actor ran, is the
+    /// block's creation-time capture, so the actor lost every write it made
+    /// after creating the block. The repro was BT-4459: `blk := [^1]. self.n
+    /// := 5. peer call: blk` left `n` at its value before the write.
+    ActorNlrCommitBypassesCell { at: Span },
 
     /// BT-4312: an [`ThreadedStmt::EnsureCatch`] whose cleanup a `^` of the
     /// scope runs drops the cleanup's writes. Invariant, in every scope kind:
@@ -527,10 +627,34 @@ pub(in crate::core_erlang) enum VerifyError {
     /// `w := 0. [^5] ensure: [w := 9]` at the REPL left `w` at 0 once
     /// BT-4312 made that `^` a throw (BT-4288's loop-body `^` had the same
     /// gap); an actor method's `[^1] ensure: [self.n := 9]` never kept `n`,
-    /// nor did `c := [self.n := 9]. [^1] ensure: c`, nor (BT-4429) the same
-    /// sent with `perform:`, whose `Block>>ensure:` fallback relays every
-    /// foreign throw ([`NlrCarry::Foreign`]).
+    /// nor did `c := [self.n := 9]. [^1] ensure: c`. A `^` foreign to the
+    /// `ensure:` (no `token`), such as every one through `Block>>ensure:`
+    /// reached with `perform:`, owes no relay: a closure cleanup writes only
+    /// the actor-state cell, which the `^`'s method commits (ADR 0146;
+    /// [`VerifyError::ActorNlrCommitBypassesCell`]).
     EnsureCleanupLostOnNlr { defect: EnsureRelayDefect, at: Span },
+
+    /// ADR 0146 R1: where the actor-state cell is live (an actor instance
+    /// method's threaded body), the clause a foreign `$bt_nlr` takes through
+    /// an [`ThreadedStmt::EnsureCatch`] does not store the cleanup's final
+    /// `StateAcc` to the cell. Invariant, for every scope kind: a `^` is
+    /// never an error for its owner, so every unwinding exit of a scope that
+    /// threads actor `State` leaves the cell holding that scope's final
+    /// version. `EnsureCatch` is the only node that runs user code while
+    /// unwinding, so the rule is its: a `^` of another method of the same
+    /// actor (from a block it passed in) that unwinds through an inlined
+    /// cleanup which advanced `StateAcc` must find the cleanup's final
+    /// version in the cell. Scopes with no actor `State` (a class method
+    /// running in its caller, ADR 0142; a value type; the REPL) and a
+    /// closure, whose state already is the cell, have no obligation
+    /// (`cell_live` is false). The repro: a method calls `self run: [^3]`,
+    /// where `run:` does `[blk value] ensure: [self.n := 40]`; the `^` took
+    /// the error path, whose cleanup runs with write-through off, so `n`
+    /// kept its old value.
+    EnsureForeignCleanupNotStored {
+        defect: ForeignStoreDefect,
+        at: Span,
+    },
 
     /// BT-4002: a [`ThreadedStmt::ConditionalLoop`]'s condition advanced
     /// `family` (its `condition_families`), but no `Bind` of that family in
@@ -554,6 +678,21 @@ pub(in crate::core_erlang) enum VerifyError {
     /// (`erlc`: unbound variable).
     ConditionFamilyNotCarried { family: VersionPrefix, at: Span },
 
+    /// BT-4584: [`Self::ConditionFamilyNotCarried`]'s converse inside the
+    /// condition closure. A carried `whileTrue:`/`whileFalse:` condition hands
+    /// its `StateAcc` map back to the loop (`ConditionHandBack`), so a statement
+    /// of it that writes `local` (an outer local, in the REPL a binding, of the
+    /// condition's `Local` families: `name := ...` or a destructuring
+    /// `#(a, b) := ...`) must `Put` it into that map at its own span. Without
+    /// the `Put` the hand-back is well-formed but the map lacks the write: the
+    /// name was bound by a plain `let` that dies with the closure, so the body,
+    /// the next iteration and the code after the loop read the old value
+    /// (`[x := x + 1. #(w, b) := #(w + x, 0). x < 3] whileTrue: [nil]` at the
+    /// REPL left `w` at 5, not 11), `erlc`-clean. Applies to every carried
+    /// condition in every scope kind; checked by
+    /// [`verify_condition_writes_in_map`].
+    ConditionWriteNotInMap { local: String, at: Span },
+
     /// ADR 0137 §2 (Phase 2a, BT-4020): a call that may run user code in this
     /// process (a non-inlined `value`-family call, a send with a block
     /// argument, a send to an in-process or unknown receiver, an Erlang FFI
@@ -567,6 +706,34 @@ pub(in crate::core_erlang) enum VerifyError {
     /// emitter, because the sends in an unbracketed region are exactly the
     /// ones that are not in the IR to be walked.
     UnbracketedUserCodeSend {
+        selector: String,
+        region: UserCodeRegion,
+        at: Span,
+    },
+
+    /// BT-4524 (ADR 0146 P0, the `SyncedCall` rule for a `^`): a block
+    /// literal holding a `^` of this scope was compiled as an actor closure
+    /// for a call (`selector`) that stores nothing to the cell first: the
+    /// send was classified `UserCodeCall::No` outside every bracket window,
+    /// and no conditional-fallback pre-store or `on:do:` entry store covers
+    /// it. The closure's `^` carries the cell (`view`), which then holds
+    /// an older version than the method's `State`, so the method's earlier
+    /// field writes are lost (`self.n := 6. [^2] ensure: [nil]` left `n` at
+    /// 0; so did `timesRepeat:`, `to:do:`, `whileTrue:`, `[^2] value` and a
+    /// non-Boolean receiver's `ifTrue:`). The invariant: a call that may run
+    /// a block holding a `^` of the current scope stores the threaded state
+    /// first. Recorded by the send emitter (`note_send`, the operands) and
+    /// checked where the block becomes a closure (`with_actor_closure`), so
+    /// an operand the lowering inlines is never a finding. A store covers
+    /// only the block literals it stores for (`with_nlr_closure_cover`,
+    /// BT-4532), never a closure of another send nested in an operand.
+    ///
+    /// BT-4532 (ADR 0146): the same rule for every operand that may be a
+    /// block. A send that runs as a closure something other than a block
+    /// literal (a block variable or parameter, any expression:
+    /// `SendUserCode::ClosureOperand`) and is left unbracketed is itself the
+    /// finding, at the send: the value may hold a `^` of this method.
+    UnbracketedNlrClosure {
         selector: String,
         region: UserCodeRegion,
         at: Span,
@@ -616,6 +783,27 @@ pub(in crate::core_erlang) enum VerifyError {
     /// non-bracketing loop is still seen by a bracketing ancestor. A write
     /// inside an actor closure goes through the cell view and records nothing.
     FieldWriteInBracketedLoop { at: Span },
+
+    /// BT-4523 (ADR 0146 P0): a `^` was lowered in the body or condition of a
+    /// hybrid-params loop, or of a nested loop that holds no whole `State` and
+    /// so hands its uses outward. A `^` inside a nested loop or fold that
+    /// threads a whole `State` (`StateAcc`) records nothing here; mode
+    /// selection keeps such a body out of hybrid mode instead, because
+    /// `facts::block_has_nlr` looks inside nested blocks. A hybrid loop holds
+    /// every field it writes in a fun parameter
+    /// (`_NField`), so the `State` in scope is the loop-entry map; the `^`
+    /// stores that map to the cell and carries it in its throw, dropping
+    /// every write the loop made so far (`1 to: 5 do: [:i | self.n := i.
+    /// i == 3 ifTrue: [^i]]` answered 3 and left `n` at 0). The invariant,
+    /// for every loop mode: a `^` in a loop body stores and carries a state
+    /// that includes every field written so far. `StateAcc` threads the whole
+    /// `State`; direct-params and tuple-accumulator bodies write no field
+    /// (mode selection, checked by `FieldWriteInBracketedLoop`); a hybrid body
+    /// therefore admits no `^`. The `^`'s state read is recorded on the
+    /// innermost loop marker (`actor_state_read_source`,
+    /// `StateReadSite::NlrThrowState`), and each hybrid lowering checks its
+    /// marker before checkout.
+    NlrThrowInHybridLoop { at: Span },
 
     /// BT-4180 (ADR 0137 §4b): an actor-state read source emitted inside a
     /// **bracketed region** (the body and condition of a stateless loop
@@ -708,7 +896,7 @@ pub(in crate::core_erlang) fn verify_tuple_acc_state_reads(
     reads: &[String],
     at: Span,
 ) -> Vec<VerifyError> {
-    if !matches!(mode, ThreadingMode::TupleAcc(_)) {
+    if !matches!(mode, ThreadingMode::TupleAcc(..)) {
         return Vec::new();
     }
     let mut errors: Vec<VerifyError> = Vec::new();
@@ -812,6 +1000,25 @@ pub(in crate::core_erlang) enum EnsureRelayDefect {
     RebuildsCarriedStateAtSite,
 }
 
+/// What is wrong with an [`ThreadedStmt::EnsureCatch`]'s foreign `$bt_nlr`
+/// clause ([`VerifyError::EnsureForeignCleanupNotStored`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum ForeignStoreDefect {
+    /// There is no foreign clause: the throw takes the error path.
+    NoClause,
+    /// The clause stores nothing to the cell.
+    NoStore,
+    /// The clause stores a `StateAcc` version other than the cleanup's final
+    /// one.
+    StoresStaleVersion { stored: usize, expected: usize },
+    /// BT-4598: the clause shares the relay's cleanup
+    /// ([`ForeignCleanupBody::SharedWithRelay`]) but there is no relay of the
+    /// scope's own throw that runs it from the cell (no token, no relay, or
+    /// one that neither stores to the cell nor resumes with a `StateAcc`
+    /// version), so the clause has no cleanup to run.
+    SharedWithoutCellRelay,
+}
+
 /// What is wrong with an [`ThreadedStmt::OnDoCatch`] node
 /// ([`VerifyError::CatchWithoutClassVarRestore`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -911,7 +1118,7 @@ pub(in crate::core_erlang) enum StateRestoreDefect {
 /// Checks `ir` against the invariants documented on each [`VerifyError`]
 /// variant. Returns an empty `Vec` when `ir` is well-formed.
 ///
-/// **Failure behavior** (per ADR 0111 §The verifier / CLAUDE.md error-recovery
+/// **Failure behavior** (per ADR 0111 §The verifier / AGENTS.md error-recovery
 /// rules): this function never panics — callers in debug/CI treat a non-empty
 /// result as a hard failure; release callers must degrade a non-empty result
 /// to an internal-error diagnostic, never a panic or a refusal to compile.
@@ -932,6 +1139,20 @@ pub(in crate::core_erlang) fn verify(ir: &[ThreadedStmt]) -> Vec<VerifyError> {
 pub(in crate::core_erlang) fn verify_in_scope(
     ir: &[ThreadedStmt],
     scope: ScopeKind,
+) -> Vec<VerifyError> {
+    verify_in_scope_after(ir, scope, None)
+}
+
+/// BT-4612: [`verify_in_scope`] for a slice that runs after its root frame
+/// has already bound `State` version `bound_before` (a node the generator
+/// builds and renders on its own, mid-frame: the `^`-closure pre-store). The
+/// slice's top-level statements are checked against that version as if an
+/// earlier statement of the list had bound it
+/// ([`VerifyError::StalePrestore`], [`VerifyError::StaleConstructSeed`]).
+pub(in crate::core_erlang) fn verify_in_scope_after(
+    ir: &[ThreadedStmt],
+    scope: ScopeKind,
+    bound_before: Option<VersionedVar>,
 ) -> Vec<VerifyError> {
     let mut producers: HashMap<VersionedVar, usize> = HashMap::new();
     let mut consumers: HashMap<VersionedVar, usize> = HashMap::new();
@@ -973,6 +1194,7 @@ pub(in crate::core_erlang) fn verify_in_scope(
         mode_stack: Vec::new(),
         rebind_frames: Vec::new(),
         scope,
+        bound_before,
         errors: &mut errors,
     };
     walk.walk(ir);
@@ -1040,6 +1262,20 @@ pub(in crate::core_erlang) fn verify_fold_family_carried(
     }
 }
 
+/// BT-4116: [`VerifyError::TupleAccWithFamily`] — a tuple-accumulator fold
+/// must thread no family.
+pub(in crate::core_erlang) fn verify_tuple_acc_no_family(
+    mode: &ThreadingMode,
+    families_empty: bool,
+    at: Span,
+) -> Vec<VerifyError> {
+    if matches!(mode, ThreadingMode::TupleAcc(..)) && !families_empty {
+        vec![VerifyError::TupleAccWithFamily { at }]
+    } else {
+        Vec::new()
+    }
+}
+
 /// BT-3863, [`VerifyError::FoldLocalsNotCarried`] over one fold lambda body
 /// (the statement list of a `Foldl*` `Threaded` node with `mode`, threading
 /// `threads`): when it threads any local, its last statement must be the
@@ -1061,8 +1297,25 @@ pub(in crate::core_erlang) fn verify_fold_locals_carried(
         Some(ThreadedStmt::FoldAccumulator { carry, span, .. }) => (Some(carry), *span),
         _ => (None, at),
     };
+    if let (ThreadingMode::TupleAcc(_, shape), Some(carry)) = (mode, found) {
+        let carry_shape = match carry {
+            FoldCarry::Locals(_) => Some(FoldAccShape::Tuple),
+            FoldCarry::BareLocal(_) => Some(FoldAccShape::Bare),
+            _ => None,
+        };
+        if carry_shape.is_some_and(|c| c != *shape) {
+            return vec![VerifyError::FoldAccShapeMismatch {
+                mode: *shape,
+                found: carry.clone(),
+                at,
+            }];
+        }
+    }
     let carried = match (mode, found) {
-        (ThreadingMode::TupleAcc(_), Some(FoldCarry::Locals(locals))) => locals == threads,
+        (ThreadingMode::TupleAcc(..), Some(FoldCarry::Locals(locals))) => locals == threads,
+        (ThreadingMode::TupleAcc(..), Some(FoldCarry::BareLocal(local))) => {
+            threads.len() == 1 && threads[0] == *local
+        }
         (ThreadingMode::StateAcc(_), Some(FoldCarry::StateMap)) => true,
         _ => false,
     };
@@ -1094,18 +1347,7 @@ pub(in crate::core_erlang) fn verify_producer_sites_threaded(
     body: &[ThreadedStmt],
     sites: &[(Span, Vec<String>)],
 ) -> Vec<VerifyError> {
-    sites
-        .iter()
-        .filter(|(site, locals)| {
-            !body.iter().any(|stmt| match stmt {
-                ThreadedStmt::ConstructTuple { threads, span, .. } => {
-                    span.start() >= site.start()
-                        && span.end() <= site.end()
-                        && locals.iter().all(|l| threads.contains(l))
-                }
-                _ => false,
-            })
-        })
+    unthreaded_sites(body, sites)
         .map(|(site, locals)| {
             if locals.is_empty() {
                 VerifyError::ConstructCarrierInPlace { at: *site }
@@ -1115,6 +1357,46 @@ pub(in crate::core_erlang) fn verify_producer_sites_threaded(
                     at: *site,
                 }
             }
+        })
+        .collect()
+}
+
+/// The `(site, locals)` of `sites` with no [`ThreadedStmt::ConstructTuple`] in
+/// `body` inside the site's span threading every one of `locals`: the one
+/// matcher of [`verify_producer_sites_threaded`] and
+/// [`verify_repl_producer_sites_threaded`].
+fn unthreaded_sites<'s>(
+    body: &'s [ThreadedStmt],
+    sites: &'s [(Span, Vec<String>)],
+) -> impl Iterator<Item = &'s (Span, Vec<String>)> {
+    sites.iter().filter(|(site, locals)| {
+        !body.iter().any(|stmt| match stmt {
+            ThreadedStmt::ConstructTuple { threads, span, .. } => {
+                span.start() >= site.start()
+                    && span.end() <= site.end()
+                    && locals.iter().all(|l| threads.contains(l))
+            }
+            _ => false,
+        })
+    })
+}
+
+/// BT-4461, [`VerifyError::ReplCachedBindingStale`] over one REPL frame's
+/// statement list: each `(site, locals)` of `sites` (a producer site of the
+/// frame whose construct writes `locals`, bindings the frame holds in Core
+/// variables) must have a [`ThreadedStmt::ConstructTuple`] in `body` inside the
+/// site's span whose `threads` lists every one of `locals`, and so (by
+/// [`VerifyError::ThreadedLocalDropped`]) one [`ThreadedStmt::LocalRebind`]
+/// each. The sites are read off the AST and the generator's scope before the
+/// statement is lowered; the nodes off the lowered IR.
+pub(in crate::core_erlang) fn verify_repl_producer_sites_threaded(
+    body: &[ThreadedStmt],
+    sites: &[(Span, Vec<String>)],
+) -> Vec<VerifyError> {
+    unthreaded_sites(body, sites)
+        .map(|(site, locals)| VerifyError::ReplCachedBindingStale {
+            locals: locals.clone(),
+            at: *site,
         })
         .collect()
 }
@@ -1185,7 +1467,7 @@ fn collect_producer_consumer_counts(
             | ThreadedStmt::OnDoCatch { .. }
             | ThreadedStmt::EnsureCatch { .. }
             | ThreadedStmt::ConstructTuple { .. }
-            | ThreadedStmt::StateCarrierReread { .. }
+            | ThreadedStmt::ConstructLocalsInPlace { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
         }
     }
@@ -1263,6 +1545,49 @@ fn condition_families_not_carried(
         .collect()
 }
 
+/// BT-4584: a statement of a carried loop condition that writes outer
+/// locals: its span, and each local with its scratch-map key (the binding
+/// name in the REPL, the `__local__` key in a method).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(in crate::core_erlang) struct ConditionWriteSite {
+    pub(in crate::core_erlang) span: Span,
+    pub(in crate::core_erlang) writes: Vec<(String, String)>,
+}
+
+/// BT-4584, [`VerifyError::ConditionWriteNotInMap`] over one carried loop
+/// condition's lowered statements (`body`, the condition frame's own list):
+/// each local of each `site` must be written into the frame's map by a
+/// top-level `Bind` whose op is a `Put` of the local's key, inside the site's
+/// span. The sites are read off the AST before the condition is lowered; the
+/// `Put`s off the lowered IR.
+pub(in crate::core_erlang) fn verify_condition_writes_in_map(
+    body: &[ThreadedStmt],
+    sites: &[ConditionWriteSite],
+) -> Vec<VerifyError> {
+    sites
+        .iter()
+        .flat_map(|site| {
+            site.writes
+                .iter()
+                .filter(|(_, key)| {
+                    !body.iter().any(|stmt| {
+                        matches!(
+                            stmt,
+                            ThreadedStmt::Bind { op: BindOp::Put { field, .. }, span, .. }
+                                if field == key
+                                    && span.start() >= site.span.start()
+                                    && span.end() <= site.span.end()
+                        )
+                    })
+                })
+                .map(|(local, _)| VerifyError::ConditionWriteNotInMap {
+                    local: local.clone(),
+                    at: site.span,
+                })
+        })
+        .collect()
+}
+
 /// Second pass: walks `ir` tracking the active frame/mode nesting, checking
 /// [`VerifyError::UnboundVersion`] and [`VerifyError::ThreadingModeUnpackMismatch`]
 /// (`NonLinearVersion` is fully determined by the first pass's counts and
@@ -1277,6 +1602,10 @@ struct VerifyWalk<'a> {
     /// method root ([`RebindFrame::implicit_root`]).
     rebind_frames: Vec<RebindFrame>,
     scope: ScopeKind,
+    /// BT-4612: the root frame's `State` bound before the slice
+    /// ([`verify_in_scope_after`]), taken by the first statement list
+    /// checked (the slice's top level).
+    bound_before: Option<VersionedVar>,
     errors: &'a mut Vec<VerifyError>,
 }
 
@@ -1453,14 +1782,37 @@ impl VerifyWalk<'_> {
     ///   `map`.
     /// - [`VerifyError::StaleConstructSeed`]: a `ConstructTuple`'s
     ///   `scratch_base` in this frame is no older than the last such step.
+    /// - [`VerifyError::StalePrestore`] (BT-4612): a `SyncedCall`'s `reads`
+    ///   in this frame is no older than the last such step, read before the
+    ///   node's own reload (if any) steps the frame.
     ///
     /// A list that has not stepped the map yet inherits its current version
-    /// from outside the list, which these checks do not reconstruct.
+    /// from outside the list, which these checks reconstruct only for the
+    /// top-level list of a slice verified with the frame's `State` bound
+    /// before it ([`verify_in_scope_after`]).
     fn check_frame_state_reads(&mut self, stmts: &[ThreadedStmt]) {
         let frame = self.enclosing_frame().frame;
         let own_state = |v: &VersionedVar| v.prefix == VersionPrefix::State && v.frame == frame;
-        let mut current: Option<&VersionedVar> = None;
+        // Only the first list walked (the slice's top level) runs after the
+        // bound `State`; every nested list is a frame or region of its own.
+        let bound_before = self.bound_before.take();
+        let mut current: Option<&VersionedVar> = bound_before.as_ref();
         for stmt in stmts {
+            if let ThreadedStmt::SyncedCall {
+                reads: Some(reads),
+                span,
+                ..
+            } = stmt
+                && let Some(newest) = current
+                && own_state(reads)
+                && reads.version < newest.version
+            {
+                self.errors.push(VerifyError::StalePrestore {
+                    reads: reads.clone(),
+                    newest: newest.clone(),
+                    at: *span,
+                });
+            }
             match stmt {
                 ThreadedStmt::Bind { target, .. }
                 | ThreadedStmt::SyncedCall {
@@ -1744,8 +2096,9 @@ impl VerifyWalk<'_> {
                 self.mode_stack.pop();
                 self.frame_stack.pop();
             }
-            // Opaque by design: `NlrCatch` has no body field (`render`
-            // treats the rest of the slice as its body); a `Statement` is
+            // Opaque by design: a `NlrCatch` has no body field (`render`
+            // treats the rest of the slice as its body, walked as siblings);
+            // a `Statement` is
             // ordinary AST-directed codegen with no state-threading content
             // of its own (see the variant's doc comment).
             //
@@ -1758,21 +2111,36 @@ impl VerifyWalk<'_> {
             //
             // BT-4015: a `ConditionHandBack` is checked against its loop's
             // `condition_families` by `condition_families_not_carried`.
-            ThreadedStmt::NlrCatch { .. }
-            | ThreadedStmt::Statement(..)
+            // BT-4503: the boundary of a value-type or class-method function
+            // answers the bare value its callers take as the send's result.
+            ThreadedStmt::NlrCatch { boundary, span, .. } => {
+                if matches!(self.scope, ScopeKind::ValueType | ScopeKind::ClassMethod)
+                    && boundary.arm_shape() != NlrArmShape::Value
+                {
+                    self.errors.push(VerifyError::MethodNlrAnswersPair {
+                        boundary: boundary.clone(),
+                        at: *span,
+                    });
+                }
+                // ADR 0146: an actor method's boundary commits the cell.
+                if boundary.arm_shape() == NlrArmShape::CarriedReply {
+                    self.errors
+                        .push(VerifyError::ActorNlrCommitBypassesCell { at: *span });
+                }
+            }
+            ThreadedStmt::Statement(..)
             | ThreadedStmt::FoldAccumulator { .. }
             | ThreadedStmt::ConditionHandBack { .. }
             | ThreadedStmt::ConstructTuple { .. }
             | ThreadedStmt::DiscardLocals { .. } => {}
-            // BT-4460: a construct's locals reread out of its state carrier
-            // rather than rebound by its producer.
-            ThreadedStmt::StateCarrierReread { locals, span, .. } => {
+            // BT-4460 / BT-4462: a construct compiled in place whose locals
+            // no producer rebinds.
+            ThreadedStmt::ConstructLocalsInPlace { locals, span } => {
                 if !locals.is_empty() {
-                    self.errors
-                        .push(VerifyError::ConstructLocalsRereadOpaquely {
-                            locals: locals.clone(),
-                            at: *span,
-                        });
+                    self.errors.push(VerifyError::ConstructLocalsNotRebound {
+                        locals: locals.clone(),
+                        at: *span,
+                    });
                 }
             }
             // ADR 0137: the bracket reads `store` and binds `load` in the
@@ -1809,11 +2177,20 @@ impl VerifyWalk<'_> {
             // ADR 0041 §State-Carrying NLR: a `^` throw reads its slot
             // versions and value like a `Return` reads its own.
             ThreadedStmt::NlrThrow {
-                value, slot, span, ..
+                value,
+                slot,
+                cell_live,
+                cell_store,
+                span,
+                ..
             } => {
                 if slot.is_empty() {
                     self.errors
                         .push(VerifyError::NlrThrowWithoutSlot { at: *span });
+                }
+                if *cell_live && !*cell_store {
+                    self.errors
+                        .push(VerifyError::NlrThrowWithoutCellStore { at: *span });
                 }
                 for v in slot {
                     self.check_use(v, *span);
@@ -1893,6 +2270,8 @@ impl VerifyWalk<'_> {
                 private_scratch,
                 cleanup,
                 relay,
+                cell_live,
+                foreign,
                 span,
                 ..
             } => {
@@ -1903,6 +2282,15 @@ impl VerifyWalk<'_> {
                     self.errors
                         .push(VerifyError::EnsureCleanupLostOnNlr { defect, at: *span });
                 }
+                if let Some(defect) = check_ensure_foreign_store(
+                    *cell_live,
+                    *cleanup,
+                    foreign.as_ref(),
+                    token.is_some().then_some(relay.as_ref()).flatten(),
+                ) {
+                    self.errors
+                        .push(VerifyError::EnsureForeignCleanupNotStored { defect, at: *span });
+                }
             }
             ThreadedStmt::Return(value, state, span) => {
                 self.check_use(state, *span);
@@ -1912,14 +2300,33 @@ impl VerifyWalk<'_> {
                 }
             }
             ThreadedStmt::TupleAccUnpack {
-                gate_slots, span, ..
+                gate_slots,
+                shape,
+                targets,
+                span,
+                ..
             } => {
+                // BT-4116: a bare accumulator IS its one local; a bare unpack
+                // of several targets would bind each to the whole accumulator.
+                if *shape == FoldAccShape::Bare && targets.len() != 1 {
+                    self.errors.push(VerifyError::BareAccTargets {
+                        targets: targets.len(),
+                        at: *span,
+                    });
+                }
                 // Mirrors the `BindOp::Unpack` check above (invariant class 1:
                 // legal only inside `TupleAcc` mode), plus invariant class 4:
                 // the node's own `gate_slots` must match the enclosing mode's.
                 if let Some(mode) = self.mode_stack.last() {
                     match mode {
-                        ThreadingMode::TupleAcc(mode_gate_slots) => {
+                        ThreadingMode::TupleAcc(mode_gate_slots, mode_shape) => {
+                            if *mode_shape != *shape {
+                                self.errors.push(VerifyError::UnpackShapeMismatch {
+                                    mode: *mode_shape,
+                                    node: *shape,
+                                    at: *span,
+                                });
+                            }
                             if *mode_gate_slots != *gate_slots {
                                 self.errors.push(VerifyError::EarlyExitGateSlotMismatch {
                                     mode_gate_slots: *mode_gate_slots,
@@ -1955,25 +2362,18 @@ impl VerifyWalk<'_> {
 /// where the state lives in the cell, any cleanup that may write the cell
 /// writes it. A result in the cell is the carried state with the cell's
 /// fields over it, never one rebuilt from the `ensure:` site's bindings.
-/// A foreign throw (BT-4429, `Block>>ensure:` reached dynamically) has no
-/// token of the scope to match and a state kind known only at run time: a
-/// cleanup that may write the cell resumes it with the cell over the carried
-/// state when that state is the cell's.
+/// A foreign throw is not the scope's to relay: an inlined cleanup's writes
+/// reach the cell through the foreign clause
+/// ([`check_ensure_foreign_store`]) and a closure's are made in the cell, which
+/// the throw's own method commits (ADR 0146).
 fn check_ensure_relay(
     has_token: bool,
     carry: Option<NlrCarry>,
     cleanup: EnsureCleanup,
     relay: Option<&EnsureNlrRelay>,
 ) -> Option<EnsureRelayDefect> {
-    let carry = carry.filter(|carry| has_token || *carry == NlrCarry::Foreign)?;
+    let carry = carry.filter(|_| has_token)?;
     let expected = match (carry, cleanup) {
-        (
-            NlrCarry::Foreign,
-            EnsureCleanup::Inlined {
-                writes_cell: true, ..
-            }
-            | EnsureCleanup::Closure { writes_cell: true },
-        ) => RethrowSlot::CellIfCarried,
         (
             NlrCarry::Live,
             EnsureCleanup::Inlined {
@@ -2003,6 +2403,46 @@ fn check_ensure_relay(
             Some(EnsureRelayDefect::RebuildsCarriedStateAtSite)
         }
         _ => Some(EnsureRelayDefect::RethrowsStaleState),
+    }
+}
+
+/// ADR 0146 R1 obligation of one [`ThreadedStmt::EnsureCatch`]: where the
+/// actor-state cell is live and the cleanup is inlined and advances
+/// `StateAcc` (`final_version`), the clause a foreign `$bt_nlr` takes stores
+/// that final version to the cell. A cleanup applied as a closure writes the
+/// cell in place and owes nothing; one that threads no write has nothing to
+/// store. BT-4598: a clause that shares the relay's cleanup
+/// ([`ForeignCleanupBody::SharedWithRelay`]) needs a relay of the scope's own
+/// throw (`own_relay`, `None` where the scope has no token) that runs it from
+/// the cell, whatever the cleanup: without one it has nothing to run.
+fn check_ensure_foreign_store(
+    cell_live: bool,
+    cleanup: EnsureCleanup,
+    foreign: Option<&EnsureForeignNlr>,
+    own_relay: Option<&EnsureNlrRelay>,
+) -> Option<ForeignStoreDefect> {
+    if foreign.is_some_and(|foreign| foreign.body == ForeignCleanupBody::SharedWithRelay)
+        && !own_relay.is_some_and(|relay| {
+            relay.cell_store && matches!(relay.rethrow, RethrowSlot::Version(_))
+        })
+    {
+        return Some(ForeignStoreDefect::SharedWithoutCellRelay);
+    }
+    let EnsureCleanup::Inlined {
+        final_version: Some(expected),
+        ..
+    } = cleanup
+    else {
+        return None;
+    };
+    if !cell_live {
+        return None;
+    }
+    match foreign.map(|foreign| foreign.store) {
+        None => Some(ForeignStoreDefect::NoClause),
+        Some(None) => Some(ForeignStoreDefect::NoStore),
+        Some(Some(stored)) if stored == expected => None,
+        Some(Some(stored)) => Some(ForeignStoreDefect::StoresStaleVersion { stored, expected }),
     }
 }
 
@@ -2212,8 +2652,19 @@ impl CoreErlangGenerator {
         verify_in_scope(ir, self.threaded_scope())
     }
 
+    /// BT-4612: [`Self::verify_threaded_ir`] for a slice rendered mid-frame,
+    /// after the frame bound `State` version `bound_before`
+    /// ([`verify_in_scope_after`]).
+    pub(in crate::core_erlang) fn verify_threaded_ir_after(
+        &self,
+        ir: &[ThreadedStmt],
+        bound_before: VersionedVar,
+    ) -> Vec<VerifyError> {
+        verify_in_scope_after(ir, self.threaded_scope(), Some(bound_before))
+    }
+
     /// Shared failure-reporting path for every `ThreadedIr` production
-    /// invariant check (ADR 0111 §The verifier / CLAUDE.md's "never panic
+    /// invariant check (ADR 0111 §The verifier / AGENTS.md's "never panic
     /// on user input" rule): hard-fails in debug/CI via `debug_assert!`,
     /// exactly as the deleted `debug_assert!`s this migration's checks
     /// replace did; in release builds (where `debug_assert!` is compiled
@@ -2223,7 +2674,7 @@ impl CoreErlangGenerator {
     /// invariant check in `control_flow`, `expressions.rs`,
     /// `dispatch_codegen.rs`, and `gen_server/methods.rs` — each consolidated
     /// onto this one helper instead of an independently-added copy
-    /// (CLAUDE.md's no-duplicate-implementations rule).
+    /// (AGENTS.md's no-duplicate-implementations rule).
     ///
     /// Moved here (out of `control_flow/mod.rs`) together with
     /// [`StateAccFallbackReason`] to remove a `threaded_ir → control_flow`

@@ -201,6 +201,30 @@ fn escaping_block_messages_name_the_shape() {
     }
 }
 
+/// BT-4515 (ADR 0145 § 2): `then:` is an ordinary `Object` message, not a
+/// construct the compiler threads a local through, so a literal block passed
+/// to it that assigns a captured local is an escaping block — with or without
+/// `|>` in front, and in every method context. The fix is a temp local.
+#[test]
+fn a_writing_block_passed_to_then_is_an_escaping_block() {
+    let message = "`t` is assigned in a block passed to `then:`, which is not a construct the \
+                   compiler threads it through";
+    for body in [
+        "3 then: [:v | t := t + v]\nt",
+        "#(1, 2) |> then: [:xs | t := xs size]\nt",
+    ] {
+        for src in [in_class(body), in_value(body), in_actor(body)] {
+            let diags = adr0131_diagnostics(&src);
+            let s6 = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
+            assert_eq!(s6.len(), 1, "{src}: {diags:?}");
+            assert_eq!(s6[0].message.as_str(), message, "{src}");
+        }
+    }
+    // A block that only reads the captured local is fine.
+    let src = in_class("x := 3 then: [:v | t + v]\nx");
+    assert!(adr0131_diagnostics(&src).is_empty(), "{src}");
+}
+
 /// BT-4283: a block passed to a class reference whose name another package in
 /// scope also declares escapes to a class method: the name is one last-wins
 /// runtime class, so the stateless `CvA` this unit declares need not be the
@@ -247,7 +271,7 @@ fn escaping_block_note_lists_exactly_the_threading_constructs() {
         assert!(
             crate::state_threading_selectors::is_state_threading_keyword_selector(bare)
                 || crate::state_threading_selectors::is_state_threaded_block_receiver(bare)
-                || crate::state_threading_selectors::is_state_threading_unary_selector(bare)
+                || crate::ast::normalize::written_unary_loop_selectors().contains(&bare)
                 || crate::state_threading_selectors::is_dictionary_inline_lookup(bare)
                 || crate::state_threading_selectors::is_try_do_selector(bare),
             "{selector} is not a threading construct"
@@ -2078,9 +2102,10 @@ fn probe_diagnostics(context: &str, container: &str, target: &str, kind: &str) -
 }
 
 /// BT-3913: the retired statement-position probe matrix. Every `ok` row is
-/// accepted; every `bad` row is rejected by a permanent diagnostic (the
-/// loop-condition cells by the `whileTrue:`/`whileFalse:` condition check,
-/// which does not thread an assignment in its condition). The block-local
+/// accepted; every `bad` row is rejected by a permanent diagnostic. (None is
+/// left: the last, the loop-condition cells, became `ok` when a
+/// `whileTrue:`/`whileFalse:` condition's write started threading in compiled
+/// methods, BT-4602, re-measured on a BEAM.) The block-local
 /// cells (targets `local` and `dlocal`) were `gap` lines until BT-3776
 /// measured them; the only `gap` lines left are two REPL method-body rows
 /// (unmeasured, BT-3823), which this test does not judge. Whether an
@@ -3672,21 +3697,21 @@ fn closure_local_loop_in_a_protected_body_does_not_unbind_the_producers() {
     }
 }
 
-/// BT-3782: a keyword `whileTrue:`/`whileFalse:` CONDITION block that writes an
-/// outer local has a return channel only where codegen lowers it through the
-/// loop's `StateAcc` — a state-effecting condition (a self-send) with a literal
-/// body in a value-type or actor method. Every other combination compiled to a
-/// Tier 2 closure called with the wrong arity (value-type, actor) or a hang
-/// (class methods). Generated over context x selector x condition x body.
+/// BT-3782 / BT-4602: a keyword `whileTrue:`/`whileFalse:` CONDITION block that
+/// writes an outer local threads it back exactly when the loop's body is a block
+/// literal, in every method context and whatever the body or the condition
+/// does: codegen carries the condition's writes in the loop's `StateAcc`
+/// (BT-4015), proven by `while_condition_binding_corpus.rs`. Before BT-4602 the
+/// write threaded only where the condition also had a state effect outside a
+/// class method. The decision is the shared leaf
+/// `block_facts::while_condition_threads`; the accepted shapes run in
+/// `stdlib/test/bt3746stateful_while_test.bt` and
+/// `stdlib/test/bt4313unary_while_test.bt`.
 ///
-/// BT-3845: a body that writes a local (or sends to `self`) also selects the
-/// stateful lowering, but a pure condition is then compiled as a plain block
-/// body whose write is never packed (probed: the loop hangs), so it stays
-/// rejected; the decision is the shared leaf
-/// `block_facts::while_condition_writes_thread`. The accepted shapes run in
-/// `stdlib/test/bt3746stateful_while_test.bt`.
+/// BT-4062: a body that is not a block literal is rejected in every context,
+/// the REPL included, with its own message (`block_facts::while_body_block`).
 #[test]
-fn while_condition_outer_local_write_is_rejected_unless_codegen_threads_it() {
+fn while_condition_outer_local_write_threads_with_a_literal_body() {
     type Wrap = fn(&str) -> String;
     let contexts: [(&str, Wrap); 3] = [
         ("class", in_class),
@@ -3695,13 +3720,14 @@ fn while_condition_outer_local_write_is_rejected_unless_codegen_threads_it() {
     ];
     let selectors = [("whileTrue:", "t < 3"), ("whileFalse:", "t >= 3")];
     let conditions = [
-        // (shape, has state effects)
-        ("t := t + 1. {c}", false),
-        ("t := t + 1. self check: t. {c}", true),
-        ("t := t + 1. self.n := t. {c}", true),
+        "t := t + 1. {c}",
+        "(t := t + 1). {c}",
+        "t := t + 1. self check: t. {c}",
+        "t := t + 1. self.n := t. {c}",
     ];
     let bodies = [
         // (body, literal block)
+        ("[]", true),
         ("[nil]", true),
         ("body", false),
         ("[u := u + 1]", true),
@@ -3710,7 +3736,7 @@ fn while_condition_outer_local_write_is_rejected_unless_codegen_threads_it() {
     let mut checked = 0;
     for (ctx_name, wrap) in contexts {
         for (selector, cmp) in selectors {
-            for (cond_shape, effects) in conditions {
+            for cond_shape in conditions {
                 for (body, literal) in bodies {
                     let cond = cond_shape.replace("{c}", cmp);
                     let source = wrap(&format!(
@@ -3718,10 +3744,17 @@ fn while_condition_outer_local_write_is_rejected_unless_codegen_threads_it() {
                     ));
                     let diags = adr0131_diagnostics(&source);
                     let errors = of_category(&diags, DiagnosticCategory::Tier2BlockNoReturnChannel);
-                    let threads = ctx_name != "class" && effects && literal;
                     assert_eq!(
                         errors.is_empty(),
-                        threads,
+                        literal,
+                        "{ctx_name} {selector} cond=[{cond}] body={body}: {diags:?}"
+                    );
+                    // BT-4062: a non-literal body is named as the reason.
+                    assert_eq!(
+                        errors
+                            .iter()
+                            .any(|d| d.message.contains("whose body is not a block literal")),
+                        !literal,
                         "{ctx_name} {selector} cond=[{cond}] body={body}: {diags:?}"
                     );
                     checked += 1;
@@ -3729,7 +3762,123 @@ fn while_condition_outer_local_write_is_rejected_unless_codegen_threads_it() {
             }
         }
     }
-    assert_eq!(checked, 72);
+    assert_eq!(checked, 120);
+}
+
+/// BT-4313 / BT-4602: the unary `[c] whileTrue` / `[c] whileFalse` is
+/// canonicalised to `[c] whileTrue: []` (`ast::normalize::desugar_unary_loops`),
+/// so its condition write gets exactly the keyword loop's verdict: threaded in
+/// every context, whatever the condition does. Before BT-4602 it was rejected
+/// unless the condition had a state effect outside a class method, which
+/// rejected the most common way the loop is written
+/// (`[t := t + 1. t < 3] whileTrue`).
+#[test]
+fn unary_while_condition_write_has_the_keyword_loop_verdict() {
+    type Wrap = fn(&str) -> String;
+    let contexts: [(&str, Wrap); 3] = [
+        ("class", in_class),
+        ("value", in_value),
+        ("actor", in_actor),
+    ];
+    let selectors = [("whileTrue", "t < 3"), ("whileFalse", "t >= 3")];
+    let conditions = [
+        "t := t + 1. {c}",
+        "(t := t + 1) < 10 and: [{c}]",
+        "t := t + 1. self check: t. {c}",
+        "t := t + 1. self.n := t. {c}",
+        "(t > 0) ifTrue: [u := t]. t := t + 1. {c}",
+    ];
+    let mut checked = 0;
+    for (ctx_name, wrap) in contexts {
+        for (selector, cmp) in selectors {
+            for cond_shape in conditions {
+                let cond = cond_shape.replace("{c}", cmp);
+                let verdict = |send: &str| {
+                    let source = wrap(&format!("u := 0\n[{cond}] {send}\n#[t, u]"));
+                    adr0131_diagnostics(&source)
+                };
+                let unary = verdict(selector);
+                assert!(
+                    unary.is_empty(),
+                    "{ctx_name} [{cond}] {selector}: {unary:?}"
+                );
+                let keyword = verdict(&format!("{selector}: []"));
+                assert!(
+                    keyword.is_empty(),
+                    "{ctx_name} [{cond}] {selector}: []: {keyword:?}"
+                );
+                checked += 1;
+            }
+        }
+    }
+    assert_eq!(checked, 30);
+}
+
+/// BT-4589: a `repeat` is canonicalised to `[true] whileTrue: [...]`
+/// (`ast::normalize::desugar_unary_loops`), and a unary `whileTrue` to
+/// `whileTrue: []`; a diagnostic about either names the selector as written,
+/// in a construct-position error and in a cascade escape.
+#[test]
+fn canonicalised_loop_diagnostics_name_the_written_selector() {
+    let cases = [
+        (
+            in_actor(
+                "x := 0\n#(1, 2) do: [:e | y := ([x := x + 1. x > 3 ifTrue: [^x]] repeat) printString]\nx",
+            ),
+            "`repeat` writes outer local `x`",
+        ),
+        (
+            in_actor(
+                "x := 0\n#(1, 2) do: [:e | y := ([x := x + 1. x < 3] whileTrue) printString]\nx",
+            ),
+            "`whileTrue` writes outer local `x`",
+        ),
+        (
+            in_class("x := 0\n[x := x + 1. x > 3 ifTrue: [^x]] repeat; yourself\nx"),
+            "(`repeat`)",
+        ),
+        // BT-4603: the cascade's shared receiver block, the unary loop's
+        // condition (BT-4602 review repro).
+        (
+            in_class("x := 0\n[x := x + 1. x < 3] whileTrue; yourself\nx"),
+            "(`whileTrue`)",
+        ),
+        (
+            in_value("x := 0\n[x := x + 1. x >= 3] whileFalse; yourself\nx"),
+            "(`whileFalse`)",
+        ),
+    ];
+    for (source, expected) in cases {
+        let diags = adr0131_diagnostics(&source);
+        assert!(!diags.is_empty(), "{source}: no diagnostic");
+        // (A unary loop's help may show the keyword loop to write instead.)
+        for d in &diags {
+            assert!(!d.message.contains("whileTrue:"), "{source}: {}", d.message);
+            assert!(
+                !d.message.contains("whileFalse:"),
+                "{source}: {}",
+                d.message
+            );
+        }
+        // A cascade's receiver block is told to answer the new value as the
+        // receiver, in the selector as written (BT-4603).
+        if source.contains("; yourself") && !source.contains("repeat") {
+            let hint = diags
+                .iter()
+                .find_map(|d| d.hint.as_deref())
+                .unwrap_or_default()
+                .to_string();
+            assert!(hint.contains("+ 1] while"), "{source}: {hint}");
+            assert!(
+                !hint.contains("whileTrue:") && !hint.contains("whileFalse:"),
+                "{hint}"
+            );
+        }
+        assert!(
+            diags.iter().any(|d| d.message.contains(expected)),
+            "{source}: {diags:?}"
+        );
+    }
 }
 
 /// BT-3782: a condition that only reads outer locals, and a loop body that

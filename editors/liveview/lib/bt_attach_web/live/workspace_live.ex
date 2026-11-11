@@ -425,6 +425,7 @@ defmodule BtAttachWeb.WorkspaceLive do
       # while staying in the DOM (the value is still assertable in tests).
       |> assign(:eval_seq, 0)
       |> assign(:output, nil)
+      |> assign(:eval_warnings, nil)
       |> assign(:error, nil)
       |> assign(:expr, "3 + 4")
       # Workspace dock active tab (BT-2490): Workspace | REPL | Transcript |
@@ -3512,6 +3513,15 @@ defmodule BtAttachWeb.WorkspaceLive do
                          crafted eval from an Observer is refused by the facade and
                          its "Not authorized" message must still show (the form
                          itself is owner-gated away). --%>
+                    <.notice
+                      :if={@eval_warnings}
+                      variant={:warn}
+                      multiline
+                      message={@eval_warnings}
+                      dismiss_attrs={
+                        %{"phx-click" => "dismiss_notice", "phx-value-key" => "eval_warnings"}
+                      }
+                    />
                     <.notice
                       :if={@output}
                       variant={:plain}

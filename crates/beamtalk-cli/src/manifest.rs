@@ -19,36 +19,109 @@
 //! invisible to the binary crate, producing a confusing "private item"
 //! error far from this file.
 
-use beamtalk_core::compilation::{
-    DependencyMap, DependencySource, DependencySpec, GitReference, parse_diagnostics_table,
-};
+use beamtalk_core::compilation::{DependencyMap, GitReference, parse_diagnostics_table};
+#[cfg(test)]
+use beamtalk_core::compilation::{DependencySource, DependencySpec};
 #[cfg(test)]
 use beamtalk_core::source_analysis::DiagnosticCategory;
-use camino::Utf8Path;
+#[cfg(test)]
+use std::path::PathBuf;
+// `[dependencies]` parsing and package-name validation live in
+// `beamtalk-project` so the LSP shares them (BT-4611); re-exported so
+// existing `manifest::…` call sites are unchanged.
+pub use beamtalk_project::dependencies::{
+    TomlDependency, git_reference_from_fields, parse_dependencies, read_manifest_dependencies,
+    validate_exact_version, validate_registry_dependency, value_type_name,
+};
+#[cfg(test)]
+use beamtalk_project::package_name::{ERLANG_APPS, RESERVED_NAMES};
+pub use beamtalk_project::package_name::{
+    PackageNameError, format_name_error, suggest_package_name, validate_package_name,
+};
+use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
-use std::path::PathBuf;
 
-/// A map of native (hex.pm) dependency names to their version constraints.
+/// A map of native dependency names to their declarations.
 pub type NativeDependencyMap = BTreeMap<String, NativeDependency>;
 
-/// A native (hex.pm) dependency with a version constraint.
+/// A map of rebar3 override targets (dependency names) to their overrides.
+pub type NativeOverrideMap = BTreeMap<String, NativeOverride>;
+
+/// A native (Erlang) dependency declared in `[native.dependencies]`.
 ///
-/// Declared in the `[native.dependencies]` section of `beamtalk.toml`.
-/// Version constraints follow hex.pm conventions:
-/// - `"~> 2.1"` — `>= 2.1.0 and < 3.0.0`
-/// - `"~> 2.1.0"` — `>= 2.1.0 and < 2.2.0`
-/// - `">= 1.0.0 and < 2.0.0"` — explicit range
-/// - `"2.12.0"` — exact version
+/// Either a hex.pm version constraint (`gun = "~> 2.1"`) or a git source
+/// (`oidcc = { git = "...", branch = "..." }`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NativeDependency {
-    /// The hex package name.
+    /// The Erlang application / hex package name.
     pub name: String,
-    /// The version constraint string (passed through to rebar.config verbatim).
-    pub constraint: String,
+    /// Where rebar3 fetches the dependency from.
+    pub source: NativeSource,
+}
+
+impl NativeDependency {
+    /// The hex version constraint, or `None` for a git dependency.
+    pub fn hex_constraint(&self) -> Option<&str> {
+        match &self.source {
+            NativeSource::Hex { constraint } => Some(constraint),
+            NativeSource::Git { .. } => None,
+        }
+    }
+}
+
+/// The source of a native dependency.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NativeSource {
+    /// A hex.pm package with a version constraint.
+    ///
+    /// Version constraints follow hex.pm conventions:
+    /// - `"~> 2.1"` — `>= 2.1.0 and < 3.0.0`
+    /// - `"~> 2.1.0"` — `>= 2.1.0 and < 2.2.0`
+    /// - `">= 1.0.0 and < 2.0.0"` — explicit range
+    /// - `"2.12.0"` — exact version
+    Hex {
+        /// The version constraint string (passed through to rebar.config verbatim).
+        constraint: String,
+    },
+    /// A git repository checked out at a tag, branch or commit.
+    Git {
+        /// The git repository URL.
+        url: String,
+        /// The tag, branch or commit to check out.
+        reference: GitReference,
+    },
+}
+
+impl fmt::Display for NativeSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Hex { constraint } => write!(f, "hex \"{constraint}\""),
+            Self::Git { url, reference } => {
+                write!(f, "git {url}")?;
+                match reference {
+                    GitReference::Tag(tag) => write!(f, " (tag: {tag})"),
+                    GitReference::Branch(branch) => write!(f, " (branch: {branch})"),
+                    GitReference::Rev(rev) => write!(f, " (rev: {rev})"),
+                }
+            }
+        }
+    }
+}
+
+/// A rebar3 override declared in `[native.overrides]`.
+///
+/// Emitted as `{override, Dep, [{erl_opts, [...]}]}`, which replaces the
+/// dependency's own `erl_opts` — e.g. to drop a `warnings_as_errors` that
+/// breaks the build on a newer OTP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeOverride {
+    /// Replacement `erl_opts` for the dependency, as Erlang atom names
+    /// (e.g. `debug_info`).
+    pub erl_opts: Vec<String>,
 }
 
 /// The top-level manifest structure parsed from `beamtalk.toml`.
@@ -93,13 +166,18 @@ pub struct Manifest {
 
 /// The `[native]` section of `beamtalk.toml`.
 ///
-/// Contains an optional `dependencies` sub-table declaring hex.pm package
-/// dependencies for native Erlang code.
+/// Contains an optional `dependencies` sub-table declaring hex.pm or git
+/// dependencies for native Erlang code, and an optional `overrides`
+/// sub-table of rebar3 overrides.
 #[derive(Debug, Deserialize, Default)]
 struct NativeSection {
-    /// The `[native.dependencies]` table — hex package name to version constraint.
+    /// The `[native.dependencies]` table — dependency name to a hex version
+    /// constraint string or a git source table.
     #[serde(default)]
     dependencies: Option<toml::Value>,
+    /// The `[native.overrides]` table — dependency name to rebar3 overrides.
+    #[serde(default)]
+    overrides: Option<toml::Value>,
 }
 
 /// The `[registry]` section of `beamtalk.toml`.
@@ -137,28 +215,6 @@ pub struct RegistryConfig {
 pub struct StubsConfig {
     /// Path to the package's stub directory, relative to the package root.
     pub path: String,
-}
-
-/// A dependency entry as it appears in `beamtalk.toml`.
-///
-/// Supports three forms:
-/// - `name = "1.2.3"` — registry dependency at an exact version
-/// - `name = { path = "..." }` — local path dependency
-/// - `name = { git = "...", tag/branch/rev = "..." }` — git dependency
-#[derive(Debug, Deserialize, Clone)]
-#[serde(deny_unknown_fields)]
-#[allow(dead_code)] // Constructed by serde deserialization
-pub struct TomlDependency {
-    /// Local filesystem path to the dependency.
-    pub path: Option<String>,
-    /// Git repository URL.
-    pub git: Option<String>,
-    /// Git tag to check out.
-    pub tag: Option<String>,
-    /// Git branch to check out.
-    pub branch: Option<String>,
-    /// Git commit SHA to check out.
-    pub rev: Option<String>,
 }
 
 /// OTP application configuration from the `[application]` section of `beamtalk.toml`.
@@ -418,228 +474,6 @@ pub struct PackageManifest {
     pub strict_deps: bool,
 }
 
-/// Validate and convert a single TOML dependency entry into a [`DependencySpec`].
-///
-/// Returns a helpful error message if the entry is malformed.
-fn validate_dependency(name: &str, dep: &TomlDependency) -> Result<DependencySpec> {
-    // Validate the dependency name uses package naming rules
-    if let Err(e) = validate_package_name(name) {
-        miette::bail!(
-            "Invalid dependency name '{name}': {}",
-            format_name_error(name, &e)
-        );
-    }
-
-    let has_path = dep.path.is_some();
-    let has_git = dep.git.is_some();
-    let has_git_ref = dep.tag.is_some() || dep.branch.is_some() || dep.rev.is_some();
-
-    // Must have exactly one source type
-    if has_path && has_git {
-        miette::bail!("Dependency '{name}' specifies both 'path' and 'git' — use one or the other");
-    }
-
-    if !has_path && !has_git {
-        miette::bail!("Dependency '{name}' must specify either 'path' or 'git' as a source");
-    }
-
-    // Path deps must not have git ref fields
-    if has_path && has_git_ref {
-        miette::bail!(
-            "Dependency '{name}' is a path dependency — 'tag', 'branch', and 'rev' are only valid for git dependencies"
-        );
-    }
-
-    let source = if let Some(path) = &dep.path {
-        DependencySource::Path {
-            path: PathBuf::from(path),
-        }
-    } else {
-        let url = dep.git.as_ref().unwrap().clone();
-
-        // Count git ref specifiers — at most one allowed
-        let ref_count = u8::from(dep.tag.is_some())
-            + u8::from(dep.branch.is_some())
-            + u8::from(dep.rev.is_some());
-        if ref_count > 1 {
-            miette::bail!(
-                "Dependency '{name}' specifies multiple git references — use exactly one of 'tag', 'branch', or 'rev'"
-            );
-        }
-
-        let reference = if let Some(tag) = &dep.tag {
-            GitReference::Tag(tag.clone())
-        } else if let Some(branch) = &dep.branch {
-            GitReference::Branch(branch.clone())
-        } else if let Some(rev) = &dep.rev {
-            GitReference::Rev(rev.clone())
-        } else {
-            miette::bail!(
-                "Dependency '{name}' is a git dependency but has no ref — specify 'tag', 'branch', or 'rev'"
-            );
-        };
-
-        DependencySource::Git { url, reference }
-    };
-
-    Ok(DependencySpec {
-        name: name.to_string(),
-        source,
-    })
-}
-
-/// Validate a bare-string registry dependency (`name = "1.2.3"`).
-///
-/// Registry dependencies pin an exact `major.minor.patch` version — version
-/// ranges are deliberately not supported, so the resolved graph is always
-/// reproducible without a constraint solver.
-///
-/// `pub` (rather than crate-private) so `deps add --version` (in the
-/// `beamtalk` binary crate that depends on this lib crate) can validate a
-/// user-supplied version up front, with the identical error a manual
-/// `beamtalk.toml` edit would get, before touching the registry index.
-///
-/// # Errors
-///
-/// Returns an error if `name` is not a valid package name, or `version` is
-/// not an exact `major.minor.patch` version.
-pub fn validate_registry_dependency(name: &str, version: &str) -> Result<DependencySpec> {
-    if let Err(e) = validate_package_name(name) {
-        miette::bail!(
-            "Invalid dependency name '{name}': {}",
-            format_name_error(name, &e)
-        );
-    }
-
-    if let Err(reason) = validate_exact_version(version) {
-        miette::bail!(
-            "Dependency '{name}' has an invalid version '{version}' — {reason}\n\n  \
-             Registry dependencies must pin an exact version, e.g.\n    \
-             {name} = \"1.2.3\"\n\n  \
-             For version ranges or a specific branch, use a git dependency instead:\n    \
-             {name} = {{ git = \"https://...\", tag = \"v1.2.3\" }}"
-        );
-    }
-
-    Ok(DependencySpec {
-        name: name.to_string(),
-        source: DependencySource::Registry {
-            version: version.to_string(),
-        },
-    })
-}
-
-/// Validate an exact `major.minor.patch` version string.
-///
-/// Every segment must be a non-empty run of ASCII digits. Returns a short
-/// human-readable reason on failure (the caller adds the surrounding context).
-///
-/// `pub` so `commands::version` (`beamtalk version X.Y.Z`) can apply
-/// the same exact-version rule a registry dependency's version is held to,
-/// rather than duplicating it.
-///
-/// # Errors
-///
-/// Returns `Err` with a short human-readable reason if `version` is not a
-/// valid `major.minor.patch` string (empty, has surrounding whitespace, uses
-/// a range operator, has the wrong number of segments, a non-numeric
-/// segment, or a segment with a leading zero).
-pub fn validate_exact_version(version: &str) -> Result<(), String> {
-    if version.is_empty() {
-        return Err("the version is empty".to_string());
-    }
-
-    if version.trim() != version {
-        return Err("the version has leading or trailing whitespace".to_string());
-    }
-
-    // Reject range/constraint operators with a targeted message rather than
-    // the generic "not major.minor.patch" one.
-    for op in ["~>", ">=", "<=", ">", "<", "=", "^", "*"] {
-        if version.starts_with(op) {
-            return Err(format!(
-                "version ranges are not supported (found '{op}'), only exact versions"
-            ));
-        }
-    }
-
-    let segments: Vec<&str> = version.split('.').collect();
-    if segments.len() != 3 {
-        return Err(format!(
-            "expected exactly three segments (major.minor.patch), found {}",
-            segments.len()
-        ));
-    }
-
-    for segment in &segments {
-        if segment.is_empty() {
-            return Err("a version segment is empty".to_string());
-        }
-        if !segment.bytes().all(|b| b.is_ascii_digit()) {
-            return Err(format!(
-                "version segment '{segment}' is not a non-negative integer"
-            ));
-        }
-        // `01.0.0` and `1.0.0` name the same release but would be pinned as two
-        // different strings in the lockfile, so only the canonical spelling is
-        // accepted.
-        if segment.len() > 1 && segment.starts_with('0') {
-            return Err(format!(
-                "version segment '{segment}' has a leading zero — write it as '{}'",
-                segment.trim_start_matches('0')
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-/// Parse and validate the `[dependencies]` section of a manifest.
-///
-/// Returns an empty map if the section is missing or empty.
-fn parse_dependencies(deps: Option<&toml::Value>) -> Result<DependencyMap> {
-    let Some(raw_value) = deps else {
-        return Ok(BTreeMap::new());
-    };
-
-    // The [dependencies] section must be a TOML table
-    let table = raw_value.as_table().ok_or_else(|| {
-        miette::miette!(
-            "[dependencies] must be a table, not a {}",
-            value_type_name(raw_value)
-        )
-    })?;
-
-    if table.is_empty() {
-        return Ok(BTreeMap::new());
-    }
-
-    let mut result = DependencyMap::new();
-    for (name, value) in table {
-        // A bare string is a registry dependency: `name = "1.2.3"`.
-        let spec = if let Some(version) = value.as_str() {
-            validate_registry_dependency(name, version)?
-        } else {
-            // Otherwise the entry must be an inline table like { path = "..." }
-            let dep: TomlDependency =
-                value
-                    .clone()
-                    .try_into()
-                    .into_diagnostic()
-                    .wrap_err_with(|| {
-                        format!(
-                            "Dependency '{name}' has an invalid format — expected a version string \
-                         like \"1.2.3\", or a table with 'path' or 'git' keys"
-                        )
-                    })?;
-
-            validate_dependency(name, &dep)?
-        };
-        result.insert(name.clone(), spec);
-    }
-    Ok(result)
-}
-
 /// Validate a hex.pm version constraint string.
 ///
 /// Accepted forms:
@@ -687,6 +521,91 @@ fn validate_hex_constraint(constraint: &str) -> Result<(), String> {
     }
 
     validate_single_constraint(trimmed)
+}
+
+/// Whether a resolved hex `version` satisfies a `constraint` already
+/// accepted by [`validate_hex_constraint`] (hex.pm semantics: `~> 2.1` is
+/// `>= 2.1.0 and < 3.0.0`, `~> 2.1.0` is `>= 2.1.0 and < 2.2.0`).
+///
+/// A pre-release version (`2.1.0-rc.1`) sorts before its release and never
+/// matches a bare `~>` or exact constraint, so a lock holding one is simply
+/// re-resolved. Returns `false` for anything unparseable.
+pub fn hex_constraint_matches(constraint: &str, version: &str) -> bool {
+    let Some(version) = HexVersion::parse(version) else {
+        return false;
+    };
+    constraint
+        .trim()
+        .split(" and ")
+        .all(|part| single_constraint_matches(part.trim(), &version))
+}
+
+/// A hex version for comparison: numeric `major.minor.patch` (missing
+/// segments are 0) plus whether it is a release (pre-releases sort first).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct HexVersion {
+    numbers: [u64; 3],
+    is_release: bool,
+}
+
+impl HexVersion {
+    fn parse(version: &str) -> Option<Self> {
+        let version = version.trim();
+        // Build metadata never affects precedence.
+        let version = version.split('+').next()?;
+        let (core, pre) = match version.split_once('-') {
+            Some((core, pre)) => (core, Some(pre)),
+            None => (version, None),
+        };
+        let mut numbers = [0; 3];
+        let mut count = 0;
+        for (slot, segment) in numbers.iter_mut().zip(core.split('.')) {
+            *slot = segment.parse().ok()?;
+            count += 1;
+        }
+        if count == 0 || core.split('.').count() > 3 {
+            return None;
+        }
+        Some(Self {
+            numbers,
+            is_release: pre.is_none(),
+        })
+    }
+
+    fn release(numbers: [u64; 3]) -> Self {
+        Self {
+            numbers,
+            is_release: true,
+        }
+    }
+}
+
+fn single_constraint_matches(s: &str, version: &HexVersion) -> bool {
+    let bound = |rest: &str| HexVersion::parse(rest);
+    if let Some(rest) = s.strip_prefix("~>") {
+        let rest = rest.trim();
+        let Some(lower) = bound(rest) else {
+            return false;
+        };
+        let [major, minor, _] = lower.numbers;
+        // `~> X.Y` allows any X.*; `~> X.Y.Z` allows any X.Y.*.
+        let upper = if rest.split('.').count() >= 3 {
+            [major, minor + 1, 0]
+        } else {
+            [major + 1, 0, 0]
+        };
+        version.is_release && *version >= lower && *version < HexVersion::release(upper)
+    } else if let Some(rest) = s.strip_prefix(">=") {
+        bound(rest).is_some_and(|b| *version >= b)
+    } else if let Some(rest) = s.strip_prefix("<=") {
+        bound(rest).is_some_and(|b| *version <= b)
+    } else if let Some(rest) = s.strip_prefix('>') {
+        bound(rest).is_some_and(|b| *version > b)
+    } else if let Some(rest) = s.strip_prefix('<') {
+        bound(rest).is_some_and(|b| *version < b)
+    } else {
+        bound(s).is_some_and(|b| *version == b)
+    }
 }
 
 /// Validate a single (non-compound) version constraint.
@@ -765,74 +684,212 @@ fn validate_version_string(version: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Parse and validate the `[native.dependencies]` section of a manifest.
+/// A git source in `[native.dependencies]`:
+/// `name = { git = "...", tag/branch/rev = "..." }`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TomlNativeGitDependency {
+    git: String,
+    tag: Option<String>,
+    branch: Option<String>,
+    rev: Option<String>,
+}
+
+/// An entry in `[native.overrides]`: `name = { erl_opts = [...] }`.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TomlNativeOverride {
+    erl_opts: Vec<String>,
+}
+
+/// Validate a native dependency (or override target) name.
 ///
-/// Returns an empty map if the section is missing or empty.
-fn parse_native_dependencies(native: Option<&NativeSection>) -> Result<NativeDependencyMap> {
-    let Some(section) = native else {
-        return Ok(BTreeMap::new());
-    };
+/// Hex package / OTP application names use lowercase letters, digits and
+/// underscores, so they are also valid unquoted Erlang atoms in the
+/// generated `rebar.config`.
+fn validate_native_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        miette::bail!("Native dependency name must not be empty");
+    }
+    if !name.starts_with(|c: char| c.is_ascii_lowercase()) {
+        miette::bail!("Native dependency '{name}' must start with a lowercase letter");
+    }
+    for c in name.chars() {
+        if !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
+            miette::bail!(
+                "Native dependency '{name}' contains invalid character '{c}' — \
+                 hex package names must contain only lowercase letters, digits, and underscores"
+            );
+        }
+    }
+    Ok(())
+}
 
-    let Some(raw_value) = &section.dependencies else {
-        return Ok(BTreeMap::new());
+/// Return the `[native]` sub-table `key` as a TOML table, or `None` when the
+/// section or sub-table is absent.
+fn native_subtable<'a>(
+    raw_value: Option<&'a toml::Value>,
+    key: &str,
+) -> Result<Option<&'a toml::Table>> {
+    let Some(raw_value) = raw_value else {
+        return Ok(None);
     };
-
-    let table = raw_value.as_table().ok_or_else(|| {
+    raw_value.as_table().map(Some).ok_or_else(|| {
         miette::miette!(
-            "[native.dependencies] must be a table, not a {}",
+            "[native.{key}] must be a table, not a {}",
             value_type_name(raw_value)
         )
-    })?;
+    })
+}
 
-    if table.is_empty() {
+/// Parse and validate the `[native.dependencies]` section of a manifest.
+///
+/// Each entry is either a hex version-constraint string or a git source
+/// table with exactly one of `tag`, `branch` or `rev`. Returns an empty map
+/// if the section is missing or empty.
+fn parse_native_dependencies(native: Option<&NativeSection>) -> Result<NativeDependencyMap> {
+    let raw = native.and_then(|section| section.dependencies.as_ref());
+    let Some(table) = native_subtable(raw, "dependencies")? else {
         return Ok(BTreeMap::new());
-    }
+    };
 
     let mut result = NativeDependencyMap::new();
     for (name, value) in table {
-        // Validate the package name: hex package names use lowercase + underscores
-        if name.is_empty() {
-            miette::bail!("Native dependency name must not be empty");
-        }
-        if !name.starts_with(|c: char| c.is_ascii_lowercase()) {
-            miette::bail!("Native dependency '{name}' must start with a lowercase letter");
-        }
-        for c in name.chars() {
-            if !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
-                miette::bail!(
-                    "Native dependency '{name}' contains invalid character '{c}' — \
-                     hex package names must contain only lowercase letters, digits, and underscores"
-                );
+        validate_native_name(name)?;
+
+        let source = match value {
+            toml::Value::String(constraint) => {
+                // Validate the constraint syntax (use trimmed value)
+                let normalized = constraint.trim();
+                if let Err(msg) = validate_hex_constraint(normalized) {
+                    miette::bail!(
+                        "Native dependency '{name}' has an invalid version constraint \
+                         '{constraint}': {msg}"
+                    );
+                }
+                NativeSource::Hex {
+                    constraint: normalized.to_string(),
+                }
             }
-        }
-
-        // Value must be a string (the version constraint)
-        let constraint = value.as_str().ok_or_else(|| {
-            miette::miette!(
-                "Native dependency '{name}' must be a version constraint string, not a {}",
-                value_type_name(value)
-            )
-        })?;
-
-        // Validate the constraint syntax (use trimmed value)
-        let normalized = constraint.trim();
-        if let Err(msg) = validate_hex_constraint(normalized) {
-            miette::bail!(
-                "Native dependency '{name}' has an invalid version constraint \
-                 '{constraint}': {msg}"
-            );
-        }
+            toml::Value::Table(fields) => parse_native_git_source(name, fields)?,
+            other => miette::bail!(
+                "Native dependency '{name}' must be a version constraint string or a git \
+                 table like {{ git = \"https://...\", tag = \"v1.0.0\" }}, not a {}",
+                value_type_name(other)
+            ),
+        };
 
         result.insert(
             name.clone(),
             NativeDependency {
                 name: name.clone(),
-                constraint: normalized.to_string(),
+                source,
             },
         );
     }
 
     Ok(result)
+}
+
+/// Parse a native git source table (`{ git = "...", branch = "..." }`).
+fn parse_native_git_source(name: &str, fields: &toml::Table) -> Result<NativeSource> {
+    // rebar3 spells a commit pin `{ref, Sha}`; the manifest uses `rev` for
+    // both [dependencies] and [native.dependencies], so point at it.
+    if fields.contains_key("ref") {
+        miette::bail!(
+            "Native dependency '{name}' uses 'ref' — pin a commit with 'rev' instead \
+             (the same key [dependencies] uses)"
+        );
+    }
+    if !fields.contains_key("git") {
+        miette::bail!(
+            "Native dependency '{name}' is a table but has no 'git' URL — hex dependencies \
+             are written as a version string, e.g. {name} = \"~> 1.0\""
+        );
+    }
+
+    let dep: TomlNativeGitDependency = toml::Value::Table(fields.clone())
+        .try_into()
+        .into_diagnostic()
+        .wrap_err_with(|| {
+            format!(
+                "Native dependency '{name}' has an invalid git source — expected \
+                 {{ git = \"https://...\", tag/branch/rev = \"...\" }}"
+            )
+        })?;
+
+    let url = dep.git.trim();
+    if url.is_empty() {
+        miette::bail!("Native dependency '{name}' has an empty 'git' URL");
+    }
+
+    let reference = git_reference_from_fields(
+        &format!("Native dependency '{name}'"),
+        dep.tag.as_ref(),
+        dep.branch.as_ref(),
+        dep.rev.as_ref(),
+    )?;
+
+    Ok(NativeSource::Git {
+        url: url.to_string(),
+        reference,
+    })
+}
+
+/// Parse and validate the `[native.overrides]` section of a manifest.
+///
+/// Each entry names a native dependency (direct or transitive) and gives the
+/// rebar3 overrides to apply to it. Only `erl_opts` is supported, as a list
+/// of Erlang atom names. Returns an empty map if the section is missing.
+fn parse_native_overrides(native: Option<&NativeSection>) -> Result<NativeOverrideMap> {
+    let raw = native.and_then(|section| section.overrides.as_ref());
+    let Some(table) = native_subtable(raw, "overrides")? else {
+        return Ok(BTreeMap::new());
+    };
+
+    let mut result = NativeOverrideMap::new();
+    for (name, value) in table {
+        validate_native_name(name)?;
+
+        let entry: TomlNativeOverride =
+            value
+                .clone()
+                .try_into()
+                .into_diagnostic()
+                .wrap_err_with(|| {
+                    format!(
+                        "Native override '{name}' has an invalid format — expected a table \
+                     like {{ erl_opts = [\"debug_info\"] }}"
+                    )
+                })?;
+
+        for opt in &entry.erl_opts {
+            if !is_plain_erlang_atom(opt) {
+                miette::bail!(
+                    "Native override '{name}' has an invalid erl_opts entry '{opt}' — \
+                     only plain atoms such as \"debug_info\" or \"nowarn_export_all\" \
+                     are supported"
+                );
+            }
+        }
+
+        result.insert(
+            name.clone(),
+            NativeOverride {
+                erl_opts: entry.erl_opts,
+            },
+        );
+    }
+
+    Ok(result)
+}
+
+/// Whether `s` is an Erlang atom that needs no quoting
+/// (`[a-z][A-Za-z0-9_@]*`).
+fn is_plain_erlang_atom(s: &str) -> bool {
+    s.starts_with(|c: char| c.is_ascii_lowercase())
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '@')
 }
 
 // ADR 0100 Rule 3: `DiagnosticSeverityOverride` and
@@ -850,19 +907,6 @@ fn parse_native_dependencies(native: Option<&NativeSection>) -> Result<NativeDep
 // *without* `cfg(test)`, so the re-export must be unconditional.
 pub use beamtalk_core::compilation::DiagnosticSeverityOverride;
 pub use beamtalk_core::compilation::DiagnosticsTable;
-
-/// Return a human-readable TOML type name for error messages.
-fn value_type_name(value: &toml::Value) -> &'static str {
-    match value {
-        toml::Value::String(_) => "string",
-        toml::Value::Integer(_) => "integer",
-        toml::Value::Float(_) => "float",
-        toml::Value::Boolean(_) => "boolean",
-        toml::Value::Datetime(_) => "datetime",
-        toml::Value::Array(_) => "array",
-        toml::Value::Table(_) => "table",
-    }
-}
 
 /// Read and deserialize a `beamtalk.toml` file into a raw [`Manifest`].
 ///
@@ -887,10 +931,12 @@ pub struct ParsedManifest {
     pub application: Option<ApplicationConfig>,
     /// The parsed and validated dependencies (empty if `[dependencies]` is absent).
     pub dependencies: DependencyMap,
-    /// The parsed and validated native (hex) dependencies (empty if
+    /// The parsed and validated native (hex or git) dependencies (empty if
     /// `[native.dependencies]` is absent).
-    #[allow(dead_code)] // Used by tests; will be used for rebar.config generation
     pub native_dependencies: NativeDependencyMap,
+    /// The parsed and validated rebar3 overrides (empty if
+    /// `[native.overrides]` is absent).
+    pub native_overrides: NativeOverrideMap,
     /// The parsed and validated `[diagnostics]` severity overrides (ADR 0100
     /// Rule 3; empty if the section is absent).
     pub diagnostics: DiagnosticsTable,
@@ -902,6 +948,19 @@ pub struct ParsedManifest {
     pub stubs: Option<StubsConfig>,
     /// The `[release]` section (ADR 0125 §1.2), defaulted when absent.
     pub release: ReleaseConfig,
+}
+
+impl ParsedManifest {
+    /// This package's own package-bundled FFI type stubs directory (ADR 0075
+    /// layer 2), its `[stubs] path` resolved against `package_root` — `None`
+    /// if it declares no `[stubs]` section. Shared by dependency resolution
+    /// and the offline dependency scan MCP `lint` uses (BT-4643).
+    #[must_use]
+    pub fn stubs_dir(&self, package_root: &Utf8Path) -> Option<Utf8PathBuf> {
+        self.stubs
+            .as_ref()
+            .map(|stubs| package_root.join(&stubs.path))
+    }
 }
 
 /// Parse a `beamtalk.toml` manifest file.
@@ -947,6 +1006,9 @@ pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
     let native_dependencies = parse_native_dependencies(manifest.native.as_ref())
         .wrap_err_with(|| format!("Failed to parse [native.dependencies] in '{path}'"))?;
 
+    let native_overrides = parse_native_overrides(manifest.native.as_ref())
+        .wrap_err_with(|| format!("Failed to parse [native.overrides] in '{path}'"))?;
+
     let diagnostics = parse_diagnostics_table(manifest.diagnostics.as_ref())
         .wrap_err_with(|| format!("Failed to parse [diagnostics] in '{path}'"))?;
 
@@ -958,6 +1020,7 @@ pub fn parse_manifest_full(path: &Utf8Path) -> Result<ParsedManifest> {
         application: manifest.application,
         dependencies,
         native_dependencies,
+        native_overrides,
         diagnostics,
         registry: manifest.registry,
         stubs: manifest.stubs,
@@ -1128,200 +1191,9 @@ pub fn find_application_config(project_root: &Utf8Path) -> Result<Option<Applica
     Ok(manifest.application)
 }
 
-/// Format a package name validation error with an optional suggestion.
-pub fn format_name_error(name: &str, error: &PackageNameError) -> String {
-    let msg = format!("Invalid package name '{name}': {error}");
-    match suggest_package_name(name) {
-        Some(s) => format!("{msg} (try '{s}')"),
-        None => msg,
-    }
-}
-
-/// Reserved beamtalk package names that conflict with core components.
-const RESERVED_NAMES: &[&str] = &[
-    "beamtalk",
-    "stdlib",
-    "kernel",
-    "runtime",
-    "workspace",
-    "compiler",
-];
-
-/// Erlang standard application names that would conflict with OTP.
-const ERLANG_APPS: &[&str] = &[
-    "common_test",
-    "crypto",
-    "dialyzer",
-    "eunit",
-    "inets",
-    "mnesia",
-    "observer",
-    "public_key",
-    "sasl",
-    "ssh",
-    "ssl",
-    "tools",
-    "xmerl",
-];
-
-/// Error returned when a package name is invalid.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PackageNameError {
-    Empty,
-    TooLong(usize),
-    StartsWithNonLetter(char),
-    InvalidCharacter(char),
-    ReservedName,
-    ErlangAppConflict,
-}
-
-impl fmt::Display for PackageNameError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Empty => write!(f, "package name must not be empty"),
-            Self::TooLong(len) => {
-                write!(f, "package name is too long ({len} chars, max 64)")
-            }
-            Self::StartsWithNonLetter(c) => {
-                write!(
-                    f,
-                    "package name must start with a lowercase letter, found '{c}'"
-                )
-            }
-            Self::InvalidCharacter(c) => {
-                write!(
-                    f,
-                    "package name must contain only lowercase letters, digits, and underscores — found '{c}'"
-                )
-            }
-            Self::ReservedName => {
-                write!(
-                    f,
-                    "is a reserved package name (conflicts with Beamtalk core)"
-                )
-            }
-            Self::ErlangAppConflict => {
-                write!(f, "conflicts with an Erlang/OTP standard application")
-            }
-        }
-    }
-}
-
-/// Validate a package name according to ADR 0026 §8.
-///
-/// Package names must be:
-/// - Lowercase ASCII letters, digits, and underscores only
-/// - Start with a letter
-/// - 1–64 characters
-/// - Not a reserved Beamtalk name
-/// - Not an Erlang standard application name
-///
-/// # Errors
-///
-/// Returns a [`PackageNameError`] describing which rule `name` violates.
-///
-/// # Panics
-///
-/// Never panics: the internal `.unwrap()` on the first character is only
-/// reached after the preceding empty-name check has already returned.
-pub fn validate_package_name(name: &str) -> Result<(), PackageNameError> {
-    if name.is_empty() {
-        return Err(PackageNameError::Empty);
-    }
-
-    if name.len() > 64 {
-        return Err(PackageNameError::TooLong(name.len()));
-    }
-
-    let first = name.chars().next().unwrap();
-    if !first.is_ascii_lowercase() {
-        return Err(PackageNameError::StartsWithNonLetter(first));
-    }
-
-    for c in name.chars() {
-        if !(c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
-            return Err(PackageNameError::InvalidCharacter(c));
-        }
-    }
-
-    if RESERVED_NAMES.contains(&name) {
-        return Err(PackageNameError::ReservedName);
-    }
-
-    if ERLANG_APPS.contains(&name) {
-        return Err(PackageNameError::ErlangAppConflict);
-    }
-
-    Ok(())
-}
-
-/// Suggest a corrected package name from an invalid one.
-///
-/// Converts CamelCase to `snake_case`, replaces non-alphanumeric chars with
-/// underscores, strips leading non-letter chars, and collapses consecutive
-/// underscores. Returns `None` if no reasonable suggestion can be made.
-pub fn suggest_package_name(name: &str) -> Option<String> {
-    // Insert underscores before uppercase letters (CamelCase → snake_case)
-    let mut expanded = String::new();
-    let mut prev_char: Option<char> = None;
-    for c in name.chars() {
-        if c.is_ascii_uppercase() {
-            if let Some(p) = prev_char {
-                if p.is_ascii_lowercase() || p.is_ascii_digit() {
-                    expanded.push('_');
-                }
-            }
-        }
-        expanded.push(c);
-        prev_char = Some(c);
-    }
-
-    let suggested: String = expanded
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '_'
-            }
-        })
-        .collect();
-
-    // Strip leading non-letter characters
-    let suggested = suggested.trim_start_matches(|c: char| !c.is_ascii_lowercase());
-
-    // Collapse consecutive underscores and trim trailing ones
-    let mut result = String::new();
-    let mut prev_underscore = false;
-    for c in suggested.chars() {
-        if c == '_' {
-            if !prev_underscore {
-                result.push(c);
-            }
-            prev_underscore = true;
-        } else {
-            result.push(c);
-            prev_underscore = false;
-        }
-    }
-    let result = result.trim_end_matches('_').to_string();
-
-    if result.is_empty() || result == name {
-        return None;
-    }
-
-    // Only suggest if the suggestion is actually valid
-    if validate_package_name(&result).is_ok() {
-        Some(result)
-    } else {
-        None
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use camino::Utf8PathBuf;
     use tempfile::TempDir;
 
     fn write_manifest(dir: &TempDir, content: &str) -> Utf8PathBuf {
@@ -2586,10 +2458,10 @@ cowboy = "~> 2.12"
         assert_eq!(manifest.native_dependencies.len(), 2);
         let gun = &manifest.native_dependencies["gun"];
         assert_eq!(gun.name, "gun");
-        assert_eq!(gun.constraint, "~> 2.1");
+        assert_eq!(gun.hex_constraint(), Some("~> 2.1"));
         let cowboy = &manifest.native_dependencies["cowboy"];
         assert_eq!(cowboy.name, "cowboy");
-        assert_eq!(cowboy.constraint, "~> 2.12");
+        assert_eq!(cowboy.hex_constraint(), Some("~> 2.12"));
     }
 
     #[test]
@@ -2608,7 +2480,10 @@ jason = "~> 1.4.0"
         );
 
         let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
-        assert_eq!(manifest.native_dependencies["jason"].constraint, "~> 1.4.0");
+        assert_eq!(
+            manifest.native_dependencies["jason"].hex_constraint(),
+            Some("~> 1.4.0")
+        );
     }
 
     #[test]
@@ -2627,7 +2502,10 @@ cowboy = "2.12.0"
         );
 
         let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
-        assert_eq!(manifest.native_dependencies["cowboy"].constraint, "2.12.0");
+        assert_eq!(
+            manifest.native_dependencies["cowboy"].hex_constraint(),
+            Some("2.12.0")
+        );
     }
 
     #[test]
@@ -2647,8 +2525,8 @@ ranch = ">= 1.0.0 and < 2.0.0"
 
         let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
         assert_eq!(
-            manifest.native_dependencies["ranch"].constraint,
-            ">= 1.0.0 and < 2.0.0"
+            manifest.native_dependencies["ranch"].hex_constraint(),
+            Some(">= 1.0.0 and < 2.0.0")
         );
     }
 
@@ -2672,10 +2550,22 @@ dep_lt = "< 2.0.0"
 
         let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
         assert_eq!(manifest.native_dependencies.len(), 4);
-        assert_eq!(manifest.native_dependencies["dep_ge"].constraint, ">= 1.0");
-        assert_eq!(manifest.native_dependencies["dep_gt"].constraint, "> 1.0");
-        assert_eq!(manifest.native_dependencies["dep_le"].constraint, "<= 3.0");
-        assert_eq!(manifest.native_dependencies["dep_lt"].constraint, "< 2.0.0");
+        assert_eq!(
+            manifest.native_dependencies["dep_ge"].hex_constraint(),
+            Some(">= 1.0")
+        );
+        assert_eq!(
+            manifest.native_dependencies["dep_gt"].hex_constraint(),
+            Some("> 1.0")
+        );
+        assert_eq!(
+            manifest.native_dependencies["dep_le"].hex_constraint(),
+            Some("<= 3.0")
+        );
+        assert_eq!(
+            manifest.native_dependencies["dep_lt"].hex_constraint(),
+            Some("< 2.0.0")
+        );
     }
 
     #[test]
@@ -2731,7 +2621,7 @@ gun = 42
         assert!(result.is_err());
         let err = format!("{:?}", result.unwrap_err());
         assert!(
-            err.contains("version constraint string"),
+            err.contains("version constraint string or a git"),
             "should mention string type: {err}"
         );
     }
@@ -2929,6 +2819,183 @@ gun = "~> 2.1"
         assert!(manifest.native_dependencies.contains_key("gun"));
     }
 
+    // --- BT-4555: native git sources and [native.overrides] ---
+
+    fn parse_native_toml(native: &str) -> Result<ParsedManifest> {
+        let temp = TempDir::new().unwrap();
+        let path = write_manifest(
+            &temp,
+            &format!("[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n\n{native}"),
+        );
+        parse_manifest_full(&path.join("beamtalk.toml"))
+    }
+
+    fn native_err(native: &str) -> String {
+        format!("{:?}", parse_native_toml(native).unwrap_err())
+    }
+
+    #[test]
+    fn test_parse_native_git_dep_branch_tag_rev() {
+        let manifest = parse_native_toml(
+            r#"
+[native.dependencies]
+oidcc = { git = "https://github.com/jamesc/oidcc", branch = "rfc7009-revocation" }
+jose = { git = "https://github.com/potatosalad/erlang-jose", tag = "1.11.10" }
+yamerl = { git = "https://github.com/yakaz/yamerl", rev = "abc1234" }
+gun = "~> 2.1"
+"#,
+        )
+        .unwrap();
+
+        let deps = &manifest.native_dependencies;
+        assert_eq!(
+            deps["oidcc"].source,
+            NativeSource::Git {
+                url: "https://github.com/jamesc/oidcc".to_string(),
+                reference: GitReference::Branch("rfc7009-revocation".to_string()),
+            }
+        );
+        assert_eq!(
+            deps["jose"].source,
+            NativeSource::Git {
+                url: "https://github.com/potatosalad/erlang-jose".to_string(),
+                reference: GitReference::Tag("1.11.10".to_string()),
+            }
+        );
+        assert_eq!(
+            deps["yamerl"].source,
+            NativeSource::Git {
+                url: "https://github.com/yakaz/yamerl".to_string(),
+                reference: GitReference::Rev("abc1234".to_string()),
+            }
+        );
+        assert_eq!(deps["oidcc"].hex_constraint(), None);
+        assert_eq!(deps["gun"].hex_constraint(), Some("~> 2.1"));
+    }
+
+    #[test]
+    fn test_reject_native_git_dep_without_ref() {
+        let err = native_err(
+            "[native.dependencies]\noidcc = { git = \"https://github.com/jamesc/oidcc\" }\n",
+        );
+        assert!(
+            err.contains("Native dependency 'oidcc' is a git dependency but has no ref"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_native_git_dep_multiple_refs() {
+        let err = native_err(
+            "[native.dependencies]\noidcc = { git = \"https://x/oidcc\", branch = \"main\", tag = \"v1\" }\n",
+        );
+        assert!(err.contains("specifies multiple git references"), "{err}");
+    }
+
+    #[test]
+    fn test_reject_native_git_dep_ref_key_points_at_rev() {
+        let err = native_err(
+            "[native.dependencies]\noidcc = { git = \"https://x/oidcc\", ref = \"abc\" }\n",
+        );
+        assert!(err.contains("pin a commit with 'rev' instead"), "{err}");
+    }
+
+    #[test]
+    fn test_reject_native_table_without_git() {
+        let err = native_err("[native.dependencies]\noidcc = { version = \"3.0.0\" }\n");
+        assert!(err.contains("has no 'git' URL"), "{err}");
+    }
+
+    #[test]
+    fn test_reject_native_git_dep_unknown_key() {
+        let err = native_err(
+            "[native.dependencies]\noidcc = { git = \"https://x/oidcc\", branch = \"main\", path = \"../x\" }\n",
+        );
+        assert!(err.contains("invalid git source"), "{err}");
+    }
+
+    #[test]
+    fn test_reject_native_git_dep_empty_url() {
+        let err = native_err("[native.dependencies]\noidcc = { git = \" \", branch = \"main\" }\n");
+        assert!(err.contains("empty 'git' URL"), "{err}");
+    }
+
+    #[test]
+    fn test_parse_native_overrides() {
+        let manifest = parse_native_toml(
+            r#"
+[native.dependencies]
+oidcc = "~> 3.0"
+
+[native.overrides]
+jose = { erl_opts = [] }
+cowlib = { erl_opts = ["debug_info", "nowarn_export_all"] }
+"#,
+        )
+        .unwrap();
+
+        assert_eq!(manifest.native_overrides.len(), 2);
+        assert_eq!(
+            manifest.native_overrides["jose"].erl_opts,
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            manifest.native_overrides["cowlib"].erl_opts,
+            vec!["debug_info".to_string(), "nowarn_export_all".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_no_native_overrides_section() {
+        let manifest = parse_native_toml("[native.dependencies]\ngun = \"~> 2.1\"\n").unwrap();
+        assert!(manifest.native_overrides.is_empty());
+    }
+
+    #[test]
+    fn test_reject_native_override_non_atom_erl_opt() {
+        let err = native_err("[native.overrides]\njose = { erl_opts = [\"{d, 'X'}\"] }\n");
+        assert!(err.contains("invalid erl_opts entry"), "{err}");
+    }
+
+    #[test]
+    fn test_reject_native_override_unknown_key() {
+        let err = native_err("[native.overrides]\njose = { deps = [] }\n");
+        assert!(
+            err.contains("Native override 'jose' has an invalid format"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn test_reject_native_override_without_erl_opts() {
+        let err = native_err("[native.overrides]\njose = {}\n");
+        assert!(
+            err.contains("Native override 'jose' has an invalid format"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_native_git_dep_trims_url() {
+        let manifest = parse_native_toml(
+            "[native.dependencies]\noidcc = { git = \" https://x/oidcc \", branch = \"main\" }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            manifest.native_dependencies["oidcc"].source,
+            NativeSource::Git {
+                url: "https://x/oidcc".to_string(),
+                reference: GitReference::Branch("main".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn test_reject_native_override_invalid_name() {
+        let err = native_err("[native.overrides]\nJose = { erl_opts = [] }\n");
+        assert!(err.contains("must start with a lowercase letter"), "{err}");
+    }
+
     #[test]
     fn test_packages_without_native_deps_unaffected() {
         // A manifest with only regular dependencies should still parse correctly
@@ -2950,6 +3017,34 @@ utils = { path = "../utils" }
         let manifest = parse_manifest_full(&path.join("beamtalk.toml")).unwrap();
         assert_eq!(manifest.dependencies.len(), 2);
         assert!(manifest.native_dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_hex_constraint_matches() {
+        let cases = [
+            ("~> 2.1", "2.1.0", true),
+            ("~> 2.1", "2.9.3", true),
+            ("~> 2.1", "3.0.0", false),
+            ("~> 2.1", "2.0.9", false),
+            ("~> 2.1.0", "2.1.7", true),
+            ("~> 2.1.0", "2.2.0", false),
+            ("~> 2.1", "2.2.0-rc.1", false),
+            ("2.12.0", "2.12.0", true),
+            ("2.12", "2.12.0", true),
+            ("2.12.0", "2.12.1", false),
+            (">= 1.0.0 and < 2.0.0", "1.5.0", true),
+            (">= 1.0.0 and < 2.0.0", "2.0.0", false),
+            ("> 1.0", "1.0.0", false),
+            ("<= 3.0", "3.0.0", true),
+            ("~> 2.1", "not-a-version", false),
+        ];
+        for (constraint, version, expected) in cases {
+            assert_eq!(
+                hex_constraint_matches(constraint, version),
+                expected,
+                "{constraint} vs {version}"
+            );
+        }
     }
 
     // --- Hex constraint validation unit tests ---

@@ -50,6 +50,7 @@ impl CoreErlangGenerator {
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Do)
             .with_value_self_slot(self, body)?;
         self.emit_loop_convention_diagnostic(&plan, body.span);
+        let discard = self.take_discarded_fold(body.span);
 
         // Add is_list guard for non-list collection types.
         let list_var = self.fresh_temp_var("temp");
@@ -140,8 +141,8 @@ impl CoreErlangGenerator {
             } else {
                 // Re-pack updated locals into StateAcc so the outer method-body
                 // threading (`maps:get` in `lower_body_exprs_with_reply`) can extract them.
-                let (repack_doc, stateacc) =
-                    plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+                let tail =
+                    plan.closed_fold_tail_doc(self, extract_doc, guarded_op_bracket, discard);
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -152,11 +153,7 @@ impl CoreErlangGenerator {
                     ", ",
                     leaf::var(safe_list_var),
                     ") in ",
-                    extract_doc,
-                    repack_doc,
-                    "{'nil', ",
-                    leaf::var(stateacc),
-                    "}",
+                    tail,
                 ]
             };
             docs.push(result_doc);

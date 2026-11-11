@@ -8,7 +8,7 @@
 # `Workspace globals`; `Beamtalk globals` and `SystemNavigation default` are gone.
 #
 # Historical records are exempt: ADRs (docs/ADR/), the changelog, and the
-# generated example corpora (regenerate those, do not edit them). CLAUDE.md
+# generated example corpora (regenerate those, do not edit them). AGENTS.md
 # names the retired singletons in a "don't copy this" rule, and this script
 # holds the patterns themselves. The class_side_facades REPL case is exempt
 # because it asserts that `Beamtalk globals` raises does_not_understand.
@@ -25,8 +25,7 @@ PATTERN='BeamtalkInterface|WorkspaceInterface|TranscriptStream current|Beamtalk 
 hits="$(git grep -nE "$PATTERN" -- . \
     ':(exclude)docs/ADR/' \
     ':(exclude)CHANGELOG.md' \
-    ':(exclude)CLAUDE.md' \
-    ':(exclude)crates/beamtalk-examples/corpus.json' \
+    ':(exclude)AGENTS.md' \
     ':(exclude)crates/beamtalk-examples/class_corpus.json' \
     ':(exclude)scripts/ci/lint-removed-facade-names.sh' \
     ':(exclude)tests/repl-protocol/cases/class_side_facades.btscript' || true)"

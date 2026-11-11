@@ -8,8 +8,8 @@
 //! and one `LocalRebind` per local land in the arm. Before the fix a plain arm
 //! registered only loop and fold sites, so in an actor method such a construct
 //! was compiled in place and the arm reread its locals out of the construct's
-//! state carrier (`push_control_flow_threaded_var_rereads`), which
-//! `VerifyError::ConstructLocalsRereadOpaquely` now reports.
+//! state carrier (the legacy write-back BT-4462 deleted).
+//! `VerifyError::ConstructLocalsNotRebound` reports such a construct.
 //!
 //! The corpus is the generated `BUnit` grid's own fixtures
 //! (`scripts/gen-bt4460-plain-arm-nested-grid.py`): nested selector x
@@ -17,7 +17,7 @@
 //! `Object` class-side methods. Each method is compiled on its own: every one
 //! is clean, and with the plain arm's producer sites withheld
 //! (`PlainArmOpaqueProducers`) every actor cell that writes the arm-local as a
-//! statement reports the reread.
+//! statement reports the construct compiled in place.
 
 use super::verifier_report;
 use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
@@ -107,16 +107,16 @@ fn the_repro_passes_the_verifier() {
 }
 
 #[test]
-fn the_pre_bt4460_arm_rule_rereads_the_repro_opaquely() {
+fn the_pre_bt4460_arm_rule_compiles_the_repro_in_place() {
     let report = verifier_report(repro(), Some(LocalRebindFault::ArmLoopOrFoldSitesOnly))
-        .expect("the reread is a verifier finding");
+        .expect("the in-place construct is a verifier finding");
     assert!(
-        report.contains("ConstructLocalsRereadOpaquely") && report.contains("\"m\""),
-        "expected ConstructLocalsRereadOpaquely for `m`, got: {report}"
+        report.contains("ConstructLocalsNotRebound") && report.contains("\"m\""),
+        "expected ConstructLocalsNotRebound for `m`, got: {report}"
     );
 }
 
-/// Every method of every grid fixture compiles clean: no reread is reached
+/// Every method of every grid fixture compiles clean: no construct writing a local is compiled in place
 /// and every arm's producer sites are threaded.
 #[test]
 fn every_grid_method_compiles_clean() {
@@ -141,10 +141,10 @@ fn every_grid_method_compiles_clean() {
 
 /// The grid's nested selectors whose receiver is the plain variable `c` or
 /// `z`, or a block literal: as a non-last statement of a plain arm, the
-/// pre-BT-4460 arm compiled them in place (C10) and reread their locals. The
+/// pre-BT-4460 arm compiled them in place (C10). The
 /// others (`ifFalse:` and `or:` on `c not`, a `match:`) were lowered another
-/// way before BT-4460 too and never reached the reread.
-const REREAD_BEFORE_BT4460: &[&str] = &[
+/// way before BT-4460 too and never reached C10.
+const IN_PLACE_BEFORE_BT4460: &[&str] = &[
     "ifTrue_ifFalse_",
     "ifTrue_",
     "ifNil_ifNotNil_",
@@ -158,7 +158,7 @@ const REREAD_BEFORE_BT4460: &[&str] = &[
 /// With the plain-arm rule before BT-4460 restored (a plain arm registers and
 /// checks only its loop and fold sites), every actor cell whose nested
 /// construct writes the arm-local as a non-last statement of the plain arm
-/// reaches the reread ([`REREAD_BEFORE_BT4460`]), and the verifier reports
+/// is compiled in place ([`IN_PLACE_BEFORE_BT4460`]), and the verifier reports
 /// it. As an assignment's value or the arm's last expression the construct
 /// never reached it. Nothing else is reported.
 #[test]
@@ -167,7 +167,7 @@ fn the_pre_bt4460_arm_rule_is_reported_over_the_corpus() {
     let mut missed = Vec::new();
     for cell in cells(ACTOR).into_iter().filter(|c| c.name.ends_with("Arm")) {
         let expected = cell.name.contains("_nonlast_")
-            && REREAD_BEFORE_BT4460.iter().any(|selector| {
+            && IN_PLACE_BEFORE_BT4460.iter().any(|selector| {
                 cell.name
                     .strip_prefix(selector)
                     .is_some_and(|rest| rest.starts_with("nonlast_"))
@@ -178,11 +178,15 @@ fn the_pre_bt4460_arm_rule_is_reported_over_the_corpus() {
         ) {
             Some(report) => {
                 assert!(
-                    report.contains("ConstructLocalsRereadOpaquely"),
+                    report.contains("ConstructLocalsNotRebound"),
                     "unexpected finding for {}: {report}",
                     cell.name
                 );
-                assert!(expected, "{} reported the reread: {report}", cell.name);
+                assert!(
+                    expected,
+                    "{} reported an in-place construct: {report}",
+                    cell.name
+                );
                 reported += 1;
             }
             None if expected => missed.push(cell.name),
@@ -191,9 +195,12 @@ fn the_pre_bt4460_arm_rule_is_reported_over_the_corpus() {
     }
     assert!(
         missed.is_empty(),
-        "{} cells did not report the reread: {}",
+        "{} cells did not report the in-place construct: {}",
         missed.len(),
         missed.join(", ")
     );
-    assert!(reported >= 40, "only {reported} cells reported the reread");
+    assert!(
+        reported >= 40,
+        "only {reported} cells reported the in-place construct"
+    );
 }

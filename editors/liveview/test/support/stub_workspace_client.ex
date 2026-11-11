@@ -1301,6 +1301,19 @@ defmodule BtAttachWeb.StubWorkspaceClient do
     {:value, %{"sites" => rows}}
   end
 
+  # BT-4455: go-to-definition's keyword-selector resolver. The stub joins the
+  # keyword parts of the (single-line) send around the clicked token, which is
+  # enough to drive the LiveView flow; the real recognizer is covered by the
+  # Erlang `nav-query` tests.
+  def keyword_selector_at(code, context \\ %{}) do
+    text = code <> Map.get(context, :suffix, "")
+
+    case Regex.scan(~r/([A-Za-z_][A-Za-z0-9_]*:)(?!=)/, text) do
+      [] -> {:value, %{"selector" => nil}}
+      parts -> {:value, %{"selector" => parts |> Enum.map(&Enum.at(&1, 1)) |> Enum.join()}}
+    end
+  end
+
   @doc """
   Test helper (BT-2666): seed the `implementors_of/1` rows for a selector. Each
   row is a `{class, side, selector}` site map in the `nav-query` shape (`"class"`,
@@ -1415,7 +1428,9 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # block, a method's `///` doc-comment as authored. `Fetcher` hovers a method
   # whose doc-comment has an `## Options` section (and author text that must be
   # escaped, not interpreted).
-  def hover(_pid, code, _context \\ %{}) do
+  def hover(pid, code, context \\ %{}) do
+    record({:hover, pid, code, context})
+
     cond do
       String.contains?(code, "Fetcher") ->
         {:ok,
@@ -1438,6 +1453,13 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # `BtAttachWeb.Live.SystemBrowser`'s `diagnostics` event has something to
   # dispatch to without a real workspace node.
   def diagnostics(_code, _mode), do: {:ok, []}
+
+  # BT-4583: with a `source_path` the stub answers one info diagnostic naming
+  # the path, so a LiveView test can see which file the request was scoped to.
+  def diagnostics(_code, _mode, source_path),
+    do:
+      {:ok,
+       [%{"from" => 0, "to" => 0, "severity" => "info", "message" => "scope: " <> source_path}]}
 
   # ── Supervision tree ─────────────────────────────────────────────────────
 

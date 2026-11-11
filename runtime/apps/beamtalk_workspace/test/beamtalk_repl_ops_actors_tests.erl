@@ -203,6 +203,10 @@ handle_term_inspect_live_tagged_actor_returns_inspect_map_term_test() ->
             ?assertNot(maps:is_key('$beamtalk_class', Fields)),
             ?assertNot(maps:is_key('__methods__', Fields))
         after
-            catch gen_server:stop(ActorPid)
+            try
+                gen_server:stop(ActorPid)
+            catch
+                _:_ -> ok
+            end
         end
     end).

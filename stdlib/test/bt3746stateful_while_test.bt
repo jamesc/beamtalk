@@ -7,9 +7,9 @@
 // answer 3. A stateful condition (one that sends to `self`) in a value-type
 // or actor method packs its write through the loop's `StateAcc`; the shared
 // pack/unpack gate (`while_loop_threads`) must include it, or the loop
-// produces a tuple nobody unpacks. A plain condition write, or any condition
-// write in a class method, crashed or hung and is a compile error (BT-3782,
-// ADR 0131 §6; pinned in `semantic_analysis/tests/local_threading.rs`).
+// produces a tuple nobody unpacks. A plain condition write, and any condition
+// write in a class method, threads too since BT-4602 (the rows of
+// `bt4313unary_while_test.bt`); before, it was a compile error (BT-3782).
 // Fixtures: fixtures/bt3746stateful_while_{value,actor}.bt.
 
 TestCase subclass: Bt3746StatefulWhileTest
@@ -27,7 +27,7 @@ TestCase subclass: Bt3746StatefulWhileTest
     self assert: Bt3746StatefulWhileActor spawn runEmptyBody equals: 3
 
   // BT-3845: every other shape the ADR 0131 §6 validator accepts
-  // (`block_facts::while_condition_writes_thread`) threads at runtime.
+  // (`block_facts::while_condition_threads`) threads at runtime.
   testValueTypeStatefulWhileFalse =>
     self assert: Bt3746StatefulWhileValue new runWhileFalse equals: #[3, 2]
 

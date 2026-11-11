@@ -318,7 +318,7 @@ impl TypeChecker {
                                 ann,
                                 &subst,
                                 Some(protocol_registry),
-                                self.alias_registry.as_ref(),
+                                self.alias_registry.as_deref(),
                             );
                         self.referenced_aliases.extend(deps);
                     }
@@ -328,7 +328,7 @@ impl TypeChecker {
                         ann,
                         &subst,
                         Some(protocol_registry),
-                        self.alias_registry.as_ref(),
+                        self.alias_registry.as_deref(),
                     );
                     self.referenced_aliases.extend(deps);
                 }
@@ -427,7 +427,7 @@ impl TypeChecker {
                         p,
                         &super::type_resolver::SubstitutionMap::new(),
                         None,
-                        self.alias_registry.as_ref(),
+                        self.alias_registry.as_deref(),
                     );
                     self.referenced_aliases.extend(deps);
                     type_args.push(ty);
@@ -584,7 +584,7 @@ impl TypeChecker {
                 type_annotation,
                 &super::type_resolver::SubstitutionMap::new(),
                 None,
-                self.alias_registry.as_ref(),
+                self.alias_registry.as_deref(),
             );
         self.referenced_aliases.extend(alias_deps);
         let declared_type = resolved_declared.display_annotation();

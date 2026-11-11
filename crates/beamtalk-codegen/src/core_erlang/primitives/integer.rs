@@ -5,7 +5,7 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
-use super::{binary_bif, generate_comparison_bif, power_bif, wrap_string_result};
+use super::{binary_bif, generate_comparison_bif, param, power_bif, wrap_string_result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -28,6 +28,23 @@ pub(crate) fn generate_integer_bif(selector: &str, params: &[String]) -> Option<
             "call 'erlang':'integer_to_binary'(Self)",
         ))),
         "asFloat" => Some(Document::Str("call 'erlang':'float'(Self)")),
+        // BT-4544: class-side fallible parse (the `Result`-based counterpart
+        // to `String>>asInteger`/`asIntegerRadix:`); accepts a `String` or a
+        // bare `Binary`. Cross-module like `String>>stream` is to
+        // `beamtalk_stream`. The Erlang helper keeps a plain atom name:
+        // colon-named callees have no precedent in `@primitive` codegen
+        // (only the `self delegate` path uses them, e.g. `parse:format:`).
+        "parse:radix:" => {
+            let text = param(params, 0, "_Text");
+            let base = param(params, 1, "_Base");
+            Some(docvec![
+                "call 'beamtalk_string':'parse_integer'(",
+                leaf::var(text.to_string()),
+                ", ",
+                leaf::var(base.to_string()),
+                ")"
+            ])
+        }
         // Bitwise operations
         "bitAnd:" => binary_bif("band", params),
         "bitOr:" => binary_bif("bor", params),
@@ -231,6 +248,18 @@ mod tests {
     fn test_as_float() {
         let result = doc_to_string(generate_integer_bif("asFloat", &[]));
         assert_eq!(result, Some("call 'erlang':'float'(Self)".to_string()));
+    }
+
+    #[test]
+    fn test_parse_radix() {
+        let result = doc_to_string(generate_integer_bif(
+            "parse:radix:",
+            &["Text".to_string(), "Base".to_string()],
+        ));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'parse_integer'(Text, Base)".to_string())
+        );
     }
 
     // Bitwise operations

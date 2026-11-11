@@ -1,0 +1,15 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0145 (BT-4514): an actor receiver for `|>` pipelines. `add:` answers
+// the actor itself, so `c add: 1 |> add: 2` sends both messages to it.
+// See pipeline_test.bt.
+
+Actor subclass: PipelineCounter
+  state: total = 0
+
+  add: n =>
+    self.total := self.total + n
+    self
+
+  total => self.total

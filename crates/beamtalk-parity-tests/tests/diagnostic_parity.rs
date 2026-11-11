@@ -24,6 +24,8 @@
 //! | `unreadable_package`         | unreadable extraction file (Unix only) |
 //! | `native_declaration_location`| misplaced `declare native:` block |
 //! | `escaping_block_assignment`  | ADR 0133 escaping-block assignment |
+//! | `lint_verdict_parity`        | CLI/MCP lint verdict parity (BT-4585) |
+//! | `lint_verdict_erl`           | `.erl` lint counted on both lint surfaces (BT-4585) |
 //!
 //! Each fixture is checked four ways. A minimum diagnostic count is
 //! locked in **per surface** so legitimate-but-bounded divergences (e.g.
@@ -99,6 +101,15 @@ async fn diagnostic_parity_corpus() {
         // Always restore permissions before the next case so a failure
         // doesn't leave the staging directory un-removable.
         staged.restore_permissions();
+    }
+
+    // BT-4585: CLI `beamtalk lint` and MCP `lint` share one pipeline, so
+    // their diagnostics, gate counts and verdicts must be identical, not
+    // just meet a lower bound.
+    for case in lint_verdict_cases() {
+        if let Err(e) = run_lint_verdict_case(&case, &corpus_root, &mut mcp).await {
+            failures.push(format!("[{}] {e}", case.name));
+        }
     }
 
     mcp.close().await;
@@ -311,6 +322,224 @@ fn corpus_cases() -> Vec<CorpusCase> {
             why: "BT-3902: the ADR 0133 escaping-block diagnostic must be reported on every surface",
         },
     ]
+}
+
+/// A fixture whose CLI `beamtalk lint` and MCP `lint` results must be
+/// identical (BT-4585): same diagnostic total, same Lint-severity and
+/// live-recheck counts, and the same verdict with and without
+/// warnings-as-errors. The expected values pin the fixture so a change that
+/// moves both surfaces together is still noticed.
+struct LintVerdictCase {
+    /// Fixture directory name under `tests/parity/diagnostics/`.
+    name: &'static str,
+    /// Diagnostics reported (`.bt` and `.erl`).
+    total: usize,
+    /// Lint-severity diagnostics, `.erl` findings included.
+    lint: usize,
+    /// Live-recheck failures (any `Error`, non-error `Dnu`/`Type`).
+    live_recheck: usize,
+    /// Whether plain `lint` fails.
+    fails: bool,
+    /// Whether `lint` with warnings-as-errors fails.
+    fails_warnings_as_errors: bool,
+}
+
+fn lint_verdict_cases() -> Vec<LintVerdictCase> {
+    vec![
+        // A cross-file extension, alias and protocol lint clean in
+        // `greeter.bt`; `caller.bt` misuses them: a DNU, a value that does
+        // not conform to the sibling protocol, and one outside the sibling
+        // alias. The last two need the pre-loaded protocol and alias infos
+        // MCP used not to pass, so before BT-4585 MCP reported 1, not 3.
+        LintVerdictCase {
+            name: "lint_verdict_parity",
+            total: 3,
+            lint: 0,
+            live_recheck: 3,
+            fails: false,
+            fails_warnings_as_errors: true,
+        },
+        // The native module's missing `-moduledoc` is a Lint finding.
+        LintVerdictCase {
+            name: "lint_verdict_erl",
+            total: 1,
+            lint: 1,
+            live_recheck: 0,
+            fails: true,
+            fails_warnings_as_errors: true,
+        },
+        // A String passed where the project's `stubs/` tier declares an
+        // Integer: a `Type` warning only a surface that merges the stub
+        // tiers into its FFI registry reports. Before BT-4643 MCP built the
+        // registry from auto-extracted specs alone and reported 0.
+        LintVerdictCase {
+            name: "lint_verdict_stub",
+            total: 1,
+            lint: 0,
+            live_recheck: 1,
+            fails: false,
+            fails_warnings_as_errors: true,
+        },
+        // A dependency (`../lint_verdict_dep_cycle_dep`) that depends back on
+        // the package, so CLI dependency resolution fails on the cycle; its
+        // bundled stub is the only type source for the FFI call. The CLI
+        // used to drop every dependency then and report no mismatch; it now
+        // falls back to the on-disk scan MCP uses. The two warnings are the
+        // stub-typed argument mismatch (`Type`, live-recheck) and the
+        // stub-only module being unknown to the FFI module list.
+        LintVerdictCase {
+            name: "lint_verdict_dep_cycle",
+            total: 2,
+            lint: 0,
+            live_recheck: 1,
+            fails: false,
+            fails_warnings_as_errors: true,
+        },
+    ]
+}
+
+/// The gate counts and verdicts one surface reported for a
+/// [`LintVerdictCase`].
+#[derive(Debug, PartialEq, Eq)]
+struct LintVerdict {
+    total: usize,
+    lint: usize,
+    live_recheck: usize,
+    fails: bool,
+    fails_warnings_as_errors: bool,
+}
+
+async fn run_lint_verdict_case(
+    case: &LintVerdictCase,
+    corpus_root: &Path,
+    mcp: &mut McpDriver,
+) -> Result<(), String> {
+    let root = corpus_root.join(case.name);
+    let expected = LintVerdict {
+        total: case.total,
+        lint: case.lint,
+        live_recheck: case.live_recheck,
+        fails: case.fails,
+        fails_warnings_as_errors: case.fails_warnings_as_errors,
+    };
+    let cli = cli_lint_verdict(&root)?;
+    let mcp = mcp_lint_verdict(mcp, &root).await?;
+    if cli != mcp || cli != expected {
+        return Err(format!(
+            "lint verdicts differ:\n    cli      = {cli:?}\n    mcp      = {mcp:?}\n    expected = {expected:?}"
+        ));
+    }
+    Ok(())
+}
+
+/// CLI `beamtalk lint --format json`, run with and without
+/// `--warnings-as-errors`. The JSON stream has one line per diagnostic
+/// (`.erl` findings included) before the summary line. The live-recheck
+/// count is not in the stream, so it is recomputed from the reported
+/// severities and categories the way the gate counts it: any `error`, or a
+/// `Dnu`/`Type` diagnostic — taken from the summary's category totals.
+fn cli_lint_verdict(path: &Path) -> Result<LintVerdict, String> {
+    let bin = beamtalk_binary("beamtalk")?;
+    let run = |extra: &[&str]| {
+        Command::new(&bin)
+            .args(["lint", "--format", "json"])
+            .args(extra)
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .map_err(|e| format!("spawn beamtalk lint: {e}"))
+    };
+    let plain = run(&[])?;
+    let strict = run(&["--warnings-as-errors"])?;
+
+    let stdout = String::from_utf8_lossy(&plain.stdout);
+    let mut total = 0;
+    let mut lint = 0;
+    let mut live_recheck = 0;
+    for line in stdout.lines().filter(|l| !l.trim().is_empty()) {
+        let v: serde_json::Value =
+            serde_json::from_str(line).map_err(|e| format!("parse cli json line `{line}`: {e}"))?;
+        if v.get("type").and_then(serde_json::Value::as_str) == Some("summary") {
+            let categories = v.get("totals_by_category").cloned().unwrap_or_default();
+            let category_count = |name: &str, field: &str| {
+                categories
+                    .get(name)
+                    .and_then(|c| c.get(field))
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0)
+            };
+            let errors = v
+                .pointer("/totals_by_severity/error")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            let non_error_dnu_type: u64 = ["Dnu", "Type"]
+                .iter()
+                .map(|c| category_count(c, "total") - category_count(c, "error"))
+                .sum();
+            live_recheck = usize::try_from(errors + non_error_dnu_type).unwrap_or(usize::MAX);
+            continue;
+        }
+        total += 1;
+        if v.get("severity").and_then(serde_json::Value::as_str) == Some("lint") {
+            lint += 1;
+        }
+    }
+    Ok(LintVerdict {
+        total,
+        lint,
+        live_recheck,
+        fails: !plain.status.success(),
+        fails_warnings_as_errors: !strict.status.success(),
+    })
+}
+
+/// MCP `lint`. Its plain call fails (`is_error`) only on errors, by
+/// design, but it carries the CLI's gate counts, so the plain CLI verdict is
+/// read from `lint_failures`; with `warnings_as_errors` its `is_error` is
+/// the CLI gate itself (BT-4336).
+async fn mcp_lint_verdict(mcp: &mut McpDriver, path: &Path) -> Result<LintVerdict, String> {
+    let path = path.to_string_lossy();
+    let (body, _) = mcp_lint_call(mcp, &path, false).await?;
+    let (_, fails_warnings_as_errors) = mcp_lint_call(mcp, &path, true).await?;
+    let count = |field: &str| {
+        body.get(field)
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|n| usize::try_from(n).ok())
+            .ok_or_else(|| format!("mcp lint result has no `{field}`: {body}"))
+    };
+    let lint = count("lint_failures")?;
+    Ok(LintVerdict {
+        total: count("total")?,
+        lint,
+        live_recheck: count("live_recheck_failures")?,
+        fails: lint > 0,
+        fails_warnings_as_errors,
+    })
+}
+
+/// One MCP `lint` call: its JSON body and `is_error`.
+async fn mcp_lint_call(
+    mcp: &mut McpDriver,
+    path: &str,
+    warnings_as_errors: bool,
+) -> Result<(serde_json::Value, bool), String> {
+    let result = mcp
+        .call_tool(
+            "lint",
+            serde_json::json!({"path": path, "warnings_as_errors": warnings_as_errors}),
+        )
+        .await
+        .map_err(|e| format!("mcp lint: {e}"))?;
+    let text = extract_text(&result);
+    let body: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("parse mcp lint text `{text}`: {e}"))?;
+    let is_error = result
+        .get("isError")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    Ok((body, is_error))
 }
 
 /// A staged fixture with its target paths fully resolved.

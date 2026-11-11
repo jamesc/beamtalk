@@ -46,9 +46,9 @@ at(Tuple, Idx) ->
     Error1 = beamtalk_error:with_selector(Error0, 'at:'),
     Error2 = beamtalk_error:with_hint(
         Error1,
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format(
-                "Index ~p is out of bounds for tuple of size ~p (1-based indexing)",
+                "Index ~tp is out of bounds for tuple of size ~tp (1-based indexing)",
                 [Idx, tuple_size(Tuple)]
             )
         )

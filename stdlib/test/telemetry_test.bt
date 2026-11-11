@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-4025: the Telemetry facade (ADR 0069 amendment) — execute:, span:,
-// attach:/attach:toAll:/detach: over the bundled `telemetry` library.
+// attach:/attach:toAll:/detach:/hasHandlers: over the bundled `telemetry` library.
 //
 // Beamtalk handlers record what they receive in an Ets table: a handler runs
 // in the emitting process (here, the test process) and, being a stored block,
@@ -54,7 +54,6 @@ TestCase subclass: TelemetryTest
     self assert: (msg at: 1) equals: #(#bt4025, #erl)
     self assert: (msg at: 3) equals: #{#count => 3}
     self assert: (msg at: 4) equals: #{#key => "k", "str" => 1}
-    @expect unresolved_ffi
     Erlang telemetry detach: ref
     collector stop
 
@@ -114,7 +113,6 @@ TestCase subclass: TelemetryTest
       equals: #done
     names := collector received collect: [:m | m at: 1]
     self assert: names equals: #(#(#bt4025, #espan, #start), #(#bt4025, #espan, #stop))
-    @expect unresolved_ffi
     Erlang telemetry detach: ref
     collector stop
 
@@ -215,6 +213,35 @@ TestCase subclass: TelemetryTest
     self assert: (Telemetry detach: #telemetryTest) equals: nil
     self assert: (Telemetry detach: #telemetryTest) equals: nil
     self assert: (Telemetry detach: #neverAttached) equals: nil
+
+  // === hasHandlers: (BT-4480) ===
+  testHasHandlersFollowsAttachAndDetach =>
+    self assert: (Telemetry hasHandlers: #(#bt4480, #req)) equals: false
+    (Telemetry
+      attach: #telemetryTest
+      to: #(#bt4480, #req, #stop)
+      do: [:e :m :md | nil]) unwrap
+    self assert: (Telemetry hasHandlers: #(#bt4480, #req)) equals: true
+    self assert: (Telemetry hasHandlers: #(#bt4480, #req, #stop)) equals: true
+    self assert: (Telemetry hasHandlers: #(#bt4480, #other)) equals: false
+    Telemetry detach: #telemetryTest
+    self assert: (Telemetry hasHandlers: #(#bt4480, #req)) equals: false
+
+  testHasHandlersSeesErlangHandlers =>
+    collector := TelemetryEventCollector spawn
+    @expect unresolved_ffi
+    ref := Erlang telemetry_test attach_event_handlers: collector pid with: #(#(#bt4480, #erl, #start))
+    self assert: (Telemetry hasHandlers: #(#bt4480, #erl)) equals: true
+    Erlang telemetry detach: ref
+    self assert: (Telemetry hasHandlers: #(#bt4480, #erl)) equals: false
+    collector stop
+
+  testHasHandlersEmptyPrefixIsTypeError =>
+    self should: [Telemetry hasHandlers: #()] raise: #type_error
+
+  testHasHandlersBadPrefixIsTypeError =>
+    @expect type
+    self should: [Telemetry hasHandlers: 42] raise: #type_error
 
   testDetachBadIdIsTypeError =>
     @expect type

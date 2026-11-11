@@ -151,7 +151,7 @@ cleanup, so the exit still propagates.
             Err0 = beamtalk_error:new(program_exit, 'Program', 'exit:'),
             Err1 = beamtalk_error:with_message(
                 Err0,
-                iolist_to_binary(
+                beamtalk_error:chars_to_binary(
                     io_lib:format("Program exit: ~B with no program or workspace to end", [Code])
                 )
             ),

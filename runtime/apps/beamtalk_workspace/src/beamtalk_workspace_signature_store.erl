@@ -296,4 +296,4 @@ meta_type_to_binary({generic, Base, Params}) when is_atom(Base), is_list(Params)
 meta_type_to_binary(Other) ->
     %% Defensive fallback for a shape this module doesn't recognise — never
     %% crash the capture hook over a cosmetic rendering gap.
-    iolist_to_binary(io_lib:format("~p", [Other])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp", [Other])).

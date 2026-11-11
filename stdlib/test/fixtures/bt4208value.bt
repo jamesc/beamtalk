@@ -1,0 +1,16 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4208 fixtures: `self error:` inside a block body (an `on:do:` receiver
+// or a `do:` body) in a Server, a plain Actor and a Value class, reached
+// from a sync method, a cast and (Server) `handleInfo:`.
+// See stdlib/test/self_error_in_block_test.bt.
+
+Value subclass: Bt4208Value
+
+  caught => [self error: "x"] on: Error do: [:e | e message]
+
+  caughtInDo =>
+    [#(1, 2) do: [:_ | self error: "x"]] on: Error do: [:e | e message]
+
+  uncaughtInDo => #(1, 2) do: [:_ | self error: "x"]

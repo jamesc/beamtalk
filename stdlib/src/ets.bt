@@ -3,19 +3,35 @@
 /// The ETS table type — see the "Table Types" section on `Ets` for the
 /// semantics of each member.
 type EtsTableType = #set | #orderedSet | #bag | #duplicateBag
-/// Ets — shared in-memory table for actor state sharing.
+/// Ets — in-memory key/value table, shared between actors or private to one.
 ///
 /// `Ets` is not a `Collection`, but it `uses: Enumerable(V)`: iteration and
 /// query methods (`do:`, `select:`, `collect:`, `inject:into:`, …) run over a
 /// snapshot of the values. `size`, `isEmpty` and `isNotEmpty` are answered
 /// directly from the table without copying it.
 ///
-/// Wraps OTP ets tables with a Beamtalk-friendly API. Tables are named and
-/// public by default, enabling cross-actor reads and writes without
-/// message-passing overhead.
+/// Wraps OTP ets tables with a Beamtalk-friendly API.
 ///
 /// ETS tables are owned by the creating process. When the owner terminates,
 /// the table is deleted automatically unless an heir is configured.
+///
+/// ## Constructors
+///
+/// | Constructor                 | Name     | Who may read / write        | Use for                              |
+/// |-----------------------------|----------|-----------------------------|--------------------------------------|
+/// | `new:type:`                 | global   | any process / any process   | State shared between actors          |
+/// | `newOrExisting:type:`       | global   | any process / any process   | Shared state that may already exist  |
+/// | `private:`                  | none     | owner only / owner only     | One actor's internal state, secrets  |
+/// | `protected:`                | none     | any process / owner only    | One writer, many concurrent readers  |
+///
+/// A named table's name is global to the node, so two instances of the same
+/// actor cannot each create `#cache`. Unnamed tables have no such clash: make
+/// one per actor in `initialize` and keep it in a field typed `:: Ets`. They
+/// are reached only through the `Ets` value, never by `named:`.
+///
+/// Using an unnamed table from a process its protection forbids raises
+/// `access_denied`. A private table's contents are also hidden from other
+/// processes' inspection, and printing an `Ets` never shows its contents.
 ///
 /// ## Table Types
 ///
@@ -46,6 +62,17 @@ type EtsTableType = #set | #orderedSet | #bag | #duplicateBag
 /// shared := Ets named: #sharedCache
 /// shared at: "counter" put: 1
 /// ```
+///
+/// ## Actor-Internal State
+/// ```beamtalk
+/// Actor subclass: SessionStore
+///   state: table :: Ets
+///   initialize -> Nil =>
+///     self.table := Ets private: #set
+///     nil
+///   remember: id state: s => self.table at: id put: s
+///   claim: id => self.table removeKey: id ifAbsent: [nil]
+/// ```
 typed Object subclass: Ets(K, V) native: beamtalk_ets
   handleScope: #node
   uses: Enumerable(V) excluding: #(#size, #isEmpty, #isNotEmpty)
@@ -73,6 +100,41 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// ```
   class sealed new: name :: Symbol type: tableType :: EtsTableType -> Ets =>
     self delegate
+
+  /// Create an unnamed, private ETS table owned by the caller (class method).
+  ///
+  /// Only the creating process may read or write it; any other process gets
+  /// `access_denied`. There is no node-global name, so every caller (for
+  /// example each instance of an actor) gets its own table and no atom is
+  /// created. The table is deleted when its owner terminates. Use it for an
+  /// actor's internal state, especially secrets such as tokens or nonces.
+  ///
+  /// The owner is the process that runs this call: create the table in the
+  /// long-lived actor that will use it (e.g. in `initialize`). Each REPL
+  /// input runs in a short-lived process, so a table created at the REPL is
+  /// deleted when that input finishes. A class method of a class
+  /// with class variables runs in the class's process, so a table made there
+  /// belongs to that process and callers get `access_denied`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// // Both lines must run in the same process (one REPL input or one method body).
+  /// secrets := Ets private: #set
+  /// secrets at: "nonce" put: "abc"
+  /// ```
+  class sealed private: tableType :: EtsTableType -> Ets => self delegate
+
+  /// Create an unnamed, protected ETS table owned by the caller (class method).
+  ///
+  /// Any process holding the `Ets` may read it, but only the creating process
+  /// may write; a write from another process raises `access_denied`. The
+  /// table is deleted when its owner terminates.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// published := Ets protected: #set
+  /// ```
+  class sealed protected: tableType :: EtsTableType -> Ets => self delegate
 
   // === Class-side lookup ===
 
@@ -237,6 +299,22 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
   /// ```
   removeKey: key :: K -> Nil => self delegate
 
+  /// Atomically remove the entry for `key` and answer its value; if `key` is
+  /// absent, evaluate `block` and answer its result.
+  ///
+  /// Backed by `ets:take/2`: no other process can read or take the value
+  /// in between, so this suits single-use values such as one-time tokens.
+  /// For `#bag` and `#duplicateBag` every entry for `key` is removed and the
+  /// first stored value is answered.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// cache at: "token" put: 7
+  /// cache removeKey: "token" ifAbsent: [nil]    // => 7
+  /// cache removeKey: "token" ifAbsent: [nil]    // => nil
+  /// ```
+  removeKey: key :: K ifAbsent: block :: Block(V) -> V => self delegate
+
   /// Return all keys in the table as a `List`.
   ///
   /// Order is unspecified for `#set` and `#bag` tables.
@@ -330,7 +408,10 @@ typed Object subclass: Ets(K, V) native: beamtalk_ets
 
   /// Destroy the table, freeing all memory. Returns `nil`.
   ///
-  /// Only the process that created the table (the owner) may call `delete`.
+  /// Any process may delete a named (public) table. Only the process that
+  /// created a `private:`/`protected:` table (the owner) may delete it; any
+  /// other process raises `access_denied`. Deleting a table that is already
+  /// gone raises `stale_table`, for named and unnamed tables alike.
   /// After calling `delete`, this `Ets` instance is no longer valid.
   /// Any further operations on the deleted table will raise an error.
   ///

@@ -371,7 +371,14 @@ impl<'src> Lexer<'src> {
             }
             '|' => {
                 self.advance();
-                TokenKind::Pipe
+                // `|>` is the pipeline operator (ADR 0145) only when the two
+                // characters are adjacent; `| >` stays `Pipe` then `>`.
+                if self.peek_char() == Some('>') {
+                    self.advance();
+                    TokenKind::PipeGt
+                } else {
+                    TokenKind::Pipe
+                }
             }
 
             // Colon or assignment
@@ -2188,6 +2195,86 @@ mod tests {
     }
 
     #[test]
+    fn lex_pipe_gt_when_adjacent() {
+        // ADR 0145: `|>` is one token only when `|` and `>` are adjacent.
+        assert_eq!(
+            lex_kinds("x foo |> bar"),
+            vec![
+                TokenKind::Identifier("x".into()),
+                TokenKind::Identifier("foo".into()),
+                TokenKind::PipeGt,
+                TokenKind::Identifier("bar".into()),
+            ]
+        );
+        assert_eq!(
+            lex_kinds("x|>bar"),
+            vec![
+                TokenKind::Identifier("x".into()),
+                TokenKind::PipeGt,
+                TokenKind::Identifier("bar".into()),
+            ]
+        );
+    }
+
+    #[test]
+    fn lex_pipe_space_gt_stays_pipe_then_binary() {
+        assert_eq!(
+            lex_kinds("| >"),
+            vec![TokenKind::Pipe, TokenKind::BinarySelector(">".into())]
+        );
+    }
+
+    #[test]
+    fn lex_existing_pipe_uses_unchanged_by_pipe_gt() {
+        // Block parameters, including a body that compares with `>`.
+        assert_eq!(
+            lex_kinds("[:x | x > 1]"),
+            vec![
+                TokenKind::LeftBracket,
+                TokenKind::Colon,
+                TokenKind::Identifier("x".into()),
+                TokenKind::Pipe,
+                TokenKind::Identifier("x".into()),
+                TokenKind::BinarySelector(">".into()),
+                TokenKind::Integer("1".into()),
+                TokenKind::RightBracket,
+            ]
+        );
+        // Temporaries.
+        assert_eq!(
+            lex_kinds("| a b |"),
+            vec![
+                TokenKind::Pipe,
+                TokenKind::Identifier("a".into()),
+                TokenKind::Identifier("b".into()),
+                TokenKind::Pipe,
+            ]
+        );
+        // Union types (ADR 0102).
+        assert_eq!(
+            lex_kinds("x :: A | B"),
+            vec![
+                TokenKind::Identifier("x".into()),
+                TokenKind::DoubleColon,
+                TokenKind::Identifier("A".into()),
+                TokenKind::Pipe,
+                TokenKind::Identifier("B".into()),
+            ]
+        );
+        // List cons.
+        assert_eq!(
+            lex_kinds("#(h | t)"),
+            vec![
+                TokenKind::ListOpen,
+                TokenKind::Identifier("h".into()),
+                TokenKind::Pipe,
+                TokenKind::Identifier("t".into()),
+                TokenKind::RightParen,
+            ]
+        );
+    }
+
+    #[test]
     fn lex_preserves_trivia() {
         let tokens = lex("  x  ");
         assert_eq!(tokens.len(), 1);
@@ -2845,8 +2932,18 @@ mod tests {
                 "expected a {kind} token for {source:?}, got {:?} ({why})",
                 tokens[0].kind()
             );
+            // An interpolated string lexes as `StringStart … StringEnd`; the
+            // literal's extent ends with the `StringEnd` token.
+            let last = if matches!(tokens[0].kind(), TokenKind::StringStart(_)) {
+                tokens
+                    .iter()
+                    .find(|t| matches!(t.kind(), TokenKind::StringEnd(_)))
+                    .unwrap_or_else(|| panic!("no StringEnd for {source:?} ({why})"))
+            } else {
+                &tokens[0]
+            };
             assert_eq!(
-                u64::from(tokens[0].span().end()),
+                u64::from(last.span().end()),
                 expected_end,
                 "span-end mismatch for {source:?} ({why})"
             );

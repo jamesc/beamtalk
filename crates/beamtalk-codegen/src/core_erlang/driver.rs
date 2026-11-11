@@ -102,7 +102,7 @@ pub fn generate_module_with_warnings(
     // the generator, so reflected method source keeps them as written.
     let peeled_storage;
     let mut peeled_parens = normalize::PeeledParens::default();
-    let module: &Module = if normalize::has_parenthesised_operand(module) {
+    let module: &Module = if normalize::needs_normalising(module) {
         let mut owned = module.clone();
         peeled_parens = normalize::peel_operand_parens_recording(&mut owned);
         peeled_storage = owned;
@@ -116,6 +116,7 @@ pub fn generate_module_with_warnings(
         CoreErlangGenerator::new(&options.module_name)
     };
     generator.peeled_parens = peeled_parens;
+    generator.current_pipeline_sends = module.pipeline_sends.clone();
     generator.source_text = options.source_text;
     generator.set_stdlib_mode(options.stdlib_mode);
     generator.protocol_sources = options.protocol_sources;
@@ -126,6 +127,9 @@ pub fn generate_module_with_warnings(
         generator.register_own_class_module(&class.name.name);
     }
     generator.source_path = options.source_path;
+    generator
+        .native_type_registry
+        .clone_from(&options.native_type_registry);
     // ADR 0098 Phase 3: bake the producing-toolchain identity into `__beamtalk_meta`.
     generator.beamtalk_version = options.beamtalk_version.map(EcoString::from);
     generator.otp_release = options.otp_release.map(EcoString::from);
@@ -144,8 +148,10 @@ pub fn generate_module_with_warnings(
     // return-type inference below sees flattened provisions) and its origins.
     let mut self_flattened: Option<Module> = None;
     let self_flattened_origins;
+    let mut protocol_registry = None;
     let (mut hierarchy, analysis_handed_off, mut driver_method_return_types) =
         if let Some(analysis) = options.analysis {
+            protocol_registry = Some(analysis.protocol_registry);
             generator.set_stdlib_protocol_uses(analysis.stdlib_protocol_uses);
             generator.semantic_facts = analysis.semantic_facts;
             // Carry the driver's already-computed `TypeMap` through
@@ -362,6 +368,9 @@ pub fn generate_module_with_warnings(
     // (auto-chained initialize dispatch in handle_continue and inherited
     // typed-no-default field validation).
     generator.class_hierarchy = Some(hierarchy.clone());
+    // BT-4486/BT-4630: protocol conformers are computed lazily per protocol
+    // from this registry and the hierarchy.
+    generator.protocol_registry = protocol_registry;
 
     // BT-4232: codegen matches send operands directly, without peeling, so the
     // module it generates from must be canonical. Test builds check it here,
@@ -457,7 +466,7 @@ fn flatten_uses_self_sufficient(
     // BT-4059: `module` was peeled at codegen's entry, but the provisions just
     // spliced in were not; peel them too, adding what is removed to the
     // generator's record.
-    if normalize::has_parenthesised_operand(&owned) {
+    if normalize::needs_normalising(&owned) {
         let spliced = normalize::peel_operand_parens_recording(&mut owned);
         generator.peeled_parens.extend(spliced);
     }
@@ -502,6 +511,11 @@ impl CoreErlangGenerator {
                 self.overrides_collection_selector_for(hierarchy, class);
             self.own_overrides_species_construction =
                 self.overrides_species_construction_for(hierarchy, class);
+            self.own_class_new1_routing = if hierarchy.explicit_class_new1_runs_in_caller(class) {
+                super::class_meta::ClassNew1Routing::InCaller
+            } else {
+                super::class_meta::ClassNew1Routing::ClassProcess
+            };
         }
     }
 

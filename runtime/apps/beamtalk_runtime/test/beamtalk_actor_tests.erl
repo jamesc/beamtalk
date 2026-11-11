@@ -21,6 +21,7 @@ Tests all actor behaviors:
 
 %% Logger handler callback for the stacktrace-capture tests below
 -export([log/2]).
+-export([bt4657_wait/0, init/1]).
 %% BT-3582: `fun ?MODULE:F/A` external fun refs stored in `__methods__` maps
 %% resolve through the module's export table at call time, same as
 %% test_wirecheck_actor.erl's method funs — must be exported.
@@ -644,7 +645,8 @@ instance_side_extension_crash_test() ->
         %% The caller gets a clean structured error, not a raw exit.
         Result2 = gen_server:call(Counter, {bt3199CrashExt, []}),
         ?assertMatch(
-            {error, #beamtalk_error{kind = runtime_error, selector = bt3199CrashExt}}, Result2
+            {error, #{error := #beamtalk_error{kind = runtime_error, selector = bt3199CrashExt}}},
+            Result2
         ),
 
         %% The actor survives and keeps processing messages normally.
@@ -2013,8 +2015,14 @@ safe_spawn_links_caller_when_supervisor_spawn_context_set_test() ->
 
 unregister_if_alive(Name) ->
     case erlang:whereis(Name) of
-        undefined -> ok;
-        Pid when is_pid(Pid) -> catch gen_server:stop(Pid)
+        undefined ->
+            ok;
+        Pid when is_pid(Pid) ->
+            try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end
     end.
 
 await_initialize_preserves_full_stop_reason_test() ->
@@ -2403,7 +2411,11 @@ safe_spawn_restores_trap_exit_test() ->
         try
             ?assertEqual(false, process_flag(trap_exit, false))
         after
-            catch gen_server:stop(Pid)
+            try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end
         end
     after
         process_flag(trap_exit, OldTrap)
@@ -2455,7 +2467,7 @@ collect_log_with_stacktrace(ExpectedMsg, Timeout) ->
 -doc """
 Collect log events until we find one matching `ExpectedMsg` whose metadata
 carries `MetaKey`, returning `{ok, Value}` for that key. Shared by every
-`log/2`-handler test in this module (CLAUDE.md's no-duplicate-implementations
+`log/2`-handler test in this module (AGENTS.md's no-duplicate-implementations
 rule) — `collect_log_with_stacktrace/2` is this with `MetaKey = stacktrace`.
 """.
 collect_log_meta(ExpectedMsg, MetaKey, Timeout) ->
@@ -3069,8 +3081,14 @@ sync_send_onExit_with_kill_reason_test() ->
 %% Helper: cleanup a name if registered (used in test teardown).
 cleanup_name(Name) ->
     case erlang:whereis(Name) of
-        undefined -> ok;
-        _ -> catch erlang:unregister(Name)
+        undefined ->
+            ok;
+        _ ->
+            try
+                erlang:unregister(Name)
+            catch
+                _:_ -> ok
+            end
     end.
 
 is_beamtalk_actor_true_for_actor_test() ->
@@ -3490,7 +3508,11 @@ ffi_unregister_does_not_touch_replacement_test() ->
             %% Step 4: replacement must still be registered under `Name`.
             ?assertEqual(Replacement, erlang:whereis(Name))
         after
-            catch erlang:unregister(Name),
+            try
+                erlang:unregister(Name)
+            catch
+                _:_ -> ok
+            end,
             Replacement ! stop
         end
     after
@@ -3724,6 +3746,43 @@ async_send_watcher_cleans_up_on_normal_completion_test() ->
 %%% {error, ...} tuples; this is covered by the existing compat_self_dispatch_*
 %%% tests. We add a direct coverage test via dispatch/4 returning an error
 %%% and then manually invoking the unwrapping path.
+
+%% BT-4525 (ADR 0146 R3): a `^` that unwound a self-dispatched callee
+%% (`safe_dispatch` answers `{error, Nlr, EntryState}`) is re-thrown unchanged
+%% as a throw, and the cell keeps the callee's writes instead of being rewound
+%% to the entry state.
+bt4525_unwrap_dispatch_result_rethrows_nlr_without_store_test() ->
+    Callee = #{x => 5},
+    Entry = #{x => 0},
+    Nlr = {'$bt_nlr', make_ref(), 3, Callee},
+    beamtalk_actor_state:install(Callee),
+    try
+        Caught =
+            try beamtalk_actor:unwrap_dispatch_result({error, Nlr, Entry}) of
+                Other -> {returned, Other}
+            catch
+                Class:Reason -> {Class, Reason}
+            end,
+        ?assertEqual({throw, Nlr}, Caught),
+        ?assertEqual(Callee, beamtalk_actor_state:take())
+    after
+        beamtalk_actor_state:uninstall(undefined)
+    end.
+
+%% Control: an ordinary dispatch error still stores the state it carries and
+%% raises (the non-NLR path is unchanged).
+bt4525_unwrap_dispatch_result_error_still_stores_test() ->
+    Entry = #{x => 0},
+    beamtalk_actor_state:install(#{x => 5}),
+    try
+        ?assertError(
+            _,
+            beamtalk_actor:unwrap_dispatch_result({error, {error, boom, []}, Entry})
+        ),
+        ?assertEqual(Entry, beamtalk_actor_state:take())
+    after
+        beamtalk_actor_state:uninstall(undefined)
+    end.
 
 dispatch_user_method_type_error_for_non_function_value_test() ->
     %% The `{ok, _NotAFunction}` branch in dispatch_user_method returns a
@@ -4435,6 +4494,99 @@ pid_class_name_returns_nil_on_non_beamtalk_pid_test() ->
         Pid ! stop
     end.
 
+%% BT-4657: a `native:` actor's backing process carries no marker; its class
+%% comes from the backing-module index via `'$initial_call'`.
+init(_) ->
+    bt4657_wait().
+
+bt4657_wait() ->
+    receive
+        stop ->
+            ok;
+        %% BT-4664: a fake class process answers the hierarchy walk's
+        %% `superclass` call as a root class.
+        {'$gen_call', From, superclass} ->
+            gen_server:reply(From, none),
+            bt4657_wait()
+    end.
+
+pid_class_name_native_backing_module_test() ->
+    beamtalk_class_registry:ensure_backing_module_index_table(),
+    Live = 'Bt4657LiveClass',
+    Other = 'Bt4657OtherLiveClass',
+    Stale = 'Bt4657StaleClass',
+    Backing = ?MODULE,
+    Pid = proc_lib:spawn(?MODULE, init, [x]),
+    %% A helper the backing module starts with proc_lib is not its gen_server.
+    Helper = proc_lib:spawn(?MODULE, bt4657_wait, []),
+    %% proc_lib sets '$initial_call' inside the new process; wait for it.
+    ok = wait_for_initial_call(Pid, 100),
+    ok = wait_for_initial_call(Helper, 100),
+    LivePid = spawn(fun bt4657_wait/0),
+    OtherPid = spawn(fun bt4657_wait/0),
+    register(beamtalk_class_registry_name(Live), LivePid),
+    register(beamtalk_class_registry_name(Other), OtherPid),
+    try
+        %% A stale row (class process gone) is ignored.
+        ets:insert(beamtalk_backing_module_index, {Backing, Stale, self()}),
+        ets:insert(beamtalk_backing_module_index, {Backing, Live, LivePid}),
+        ?assertEqual(Live, beamtalk_actor:pid_class_name(Pid)),
+        ?assertEqual(nil, beamtalk_actor:pid_class_name(Helper)),
+        %% Two live classes sharing the module are ambiguous.
+        ets:insert(beamtalk_backing_module_index, {Backing, Other, OtherPid}),
+        ?assertEqual(nil, beamtalk_actor:pid_class_name(Pid)),
+        %% BT-4664: the candidates stay visible, and `named:` resolves
+        %% through them instead of reporting a non-Beamtalk process.
+        ?assertEqual(lists:sort([Live, Other]), beamtalk_actor:pid_class_candidates(Pid)),
+        ?assertEqual([], beamtalk_actor:pid_class_candidates(Helper)),
+        Name = bt4664_shared_native,
+        register(Name, Pid),
+        try
+            %% Receiver is one of the sharing classes: it is resolved (the
+            %% fake class has no loaded module, so it stops at that check).
+            {error, MatchErr} = beamtalk_actor:named_lookup(local, Other, Name, 'named:'),
+            ?assertMatch(#beamtalk_error{kind = wrong_class}, MatchErr),
+            ?assertNotEqual(nomatch, binary:match(bt4664_hint(MatchErr), <<"no loaded module">>)),
+            %% Receiver is not among them: the error names the candidates.
+            {error, SharedErr} = beamtalk_actor:named_lookup(
+                local, 'Bt4664Unrelated', Name, 'named:'
+            ),
+            Hint = bt4664_hint(SharedErr),
+            ?assertNotEqual(nomatch, binary:match(Hint, <<"backing module is shared">>)),
+            ?assertNotEqual(nomatch, binary:match(Hint, atom_to_binary(Live))),
+            ?assertNotEqual(nomatch, binary:match(Hint, atom_to_binary(Other))),
+            ?assertEqual(nomatch, binary:match(Hint, <<"non-Beamtalk">>))
+        after
+            unregister(Name)
+        end
+    after
+        ets:match_delete(beamtalk_backing_module_index, {Backing, '_', '_'}),
+        unregister(beamtalk_class_registry_name(Live)),
+        unregister(beamtalk_class_registry_name(Other)),
+        Pid ! stop,
+        Helper ! stop,
+        LivePid ! stop,
+        OtherPid ! stop
+    end.
+
+bt4664_hint(#beamtalk_error{hint = {beamtalk_string, Bin}}) -> Bin;
+bt4664_hint(#beamtalk_error{hint = Bin}) when is_binary(Bin) -> Bin.
+
+wait_for_initial_call(_Pid, 0) ->
+    timeout;
+wait_for_initial_call(Pid, N) ->
+    {dictionary, Dict} = erlang:process_info(Pid, dictionary),
+    case lists:keymember('$initial_call', 1, Dict) of
+        true ->
+            ok;
+        false ->
+            timer:sleep(10),
+            wait_for_initial_call(Pid, N - 1)
+    end.
+
+beamtalk_class_registry_name(ClassName) ->
+    beamtalk_class_registry:registry_name(ClassName).
+
 registered_name_for_pid_returns_nil_when_unregistered_test() ->
     Pid = spawn(fun() ->
         receive
@@ -4458,7 +4610,11 @@ registered_name_for_pid_returns_name_when_registered_test() ->
     try
         ?assertEqual(Name, beamtalk_actor:registered_name_for_pid(Pid))
     after
-        catch erlang:unregister(Name),
+        try
+            erlang:unregister(Name)
+        catch
+            _:_ -> ok
+        end,
         Pid ! stop
     end.
 

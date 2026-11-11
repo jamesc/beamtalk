@@ -14,7 +14,11 @@ use std::path::PathBuf;
 use tracing::{debug, info, instrument};
 
 use crate::commands::build_layout::BuildLayout;
-use crate::commands::manifest::{self, NativeDependencyMap};
+use crate::commands::deps::lockfile::{NativeLockSource, NativePackageLock};
+use crate::commands::manifest::{
+    self, NativeDependency, NativeDependencyMap, NativeOverrideMap, NativeSource,
+};
+use beamtalk_core::compilation::GitReference;
 
 use super::environment::{BuildEnvironment, DependencyContext};
 
@@ -44,24 +48,46 @@ pub(crate) fn compile_native_sources(
     // Moved after Pass 1 so the generated beamtalk_classes.hrl is available.
     let native_result = if pkg_manifest.is_some() && dep_ctx.has_native_deps {
         // Path B: rebar3 handles both hex deps and native/*.erl
-        let native_deps = &env.full_manifest.as_ref().unwrap().native_dependencies;
+        let full_manifest = env.full_manifest.as_ref().unwrap();
 
         // Aggregate native dependencies from all packages in the dependency graph
-        let aggregated = aggregate_native_dependencies(native_deps, &dep_ctx.resolved_deps);
+        let aggregated = aggregate_native_dependencies(
+            &full_manifest.native_dependencies,
+            &full_manifest.native_overrides,
+            &dep_ctx.resolved_deps,
+        );
+        for warning in &aggregated.warnings {
+            eprintln!("warning: {warning}");
+        }
 
         let rebar3_result = compile_with_rebar3(
             &env.project_root,
-            &aggregated,
+            &aggregated.dependencies,
+            &aggregated.overrides,
             false,
             &dep_ctx.resolved_deps,
         )?;
         eprintln!(
             "Compiled native deps via rebar3 ({} package(s), {} ebin dir(s))",
-            aggregated.len(),
+            aggregated.dependencies.len(),
             rebar3_result.ebin_paths.len()
         );
         Some(rebar3_result)
     } else if pkg_manifest.is_some() {
+        // Nothing in the dependency graph declares a native dependency, so
+        // any `[[native_package]]` entries left in beamtalk.lock (e.g. from a
+        // dependency that has since dropped its native deps) are orphans.
+        // The runtime boots every locked native package, so they must go
+        // (BT-4549).
+        let pruned =
+            crate::commands::deps::lockfile::Lockfile::prune_native_packages(&env.project_root)?;
+        if !pruned.is_empty() {
+            eprintln!(
+                "Pruned orphaned native package lock(s) from beamtalk.lock: {}",
+                pruned.join(", ")
+            );
+        }
+
         // Path A: compile native/*.erl directly via erlc (no hex deps).
         // Uses compile_native_erlang_with_deps to also compile transitive
         // BT dependency native sources (same as Path B's post-rebar3 step).
@@ -327,20 +353,52 @@ pub(crate) struct Rebar3Result {
     pub module_names: Vec<String>,
 }
 
-/// Aggregate native (hex) dependencies from the root package and all
-/// resolved Beamtalk dependencies in the dependency graph.
+/// Native dependencies and rebar3 overrides aggregated across the whole
+/// Beamtalk dependency graph.
+#[derive(Debug, Default)]
+pub(crate) struct AggregatedNative {
+    /// Every native dependency, first declaration wins.
+    pub dependencies: NativeDependencyMap,
+    /// Every rebar3 override, first declaration wins.
+    pub overrides: NativeOverrideMap,
+    /// One message per conflicting redeclaration that was dropped
+    /// (ADR 0073 "Native dep version conflicts").
+    pub warnings: Vec<String>,
+}
+
+/// Aggregate native dependencies and rebar3 overrides from the root package
+/// and all resolved Beamtalk dependencies in the dependency graph.
 ///
-/// ADR 0072 §5: Because BEAM has a flat module namespace, all hex deps
+/// ADR 0072 §5: Because BEAM has a flat module namespace, all native deps
 /// across all packages must be resolved in a single rebar3 invocation.
-/// Constraints from different packages for the same hex dep are both
-/// included — rebar3's resolver handles the intersection.
+/// The root package is consulted first, then dependencies in resolution
+/// order; the first declaration of a name wins. ADR 0073: when a later
+/// package declares the same name with a different source (another hex
+/// constraint, or git vs hex), the later declaration is dropped and a
+/// warning naming both packages is recorded.
 pub(crate) fn aggregate_native_dependencies(
     root_native_deps: &NativeDependencyMap,
+    root_overrides: &NativeOverrideMap,
     resolved_bt_deps: &[crate::commands::deps::path::ResolvedDependency],
-) -> NativeDependencyMap {
-    let mut aggregated = root_native_deps.clone();
+) -> AggregatedNative {
+    const ROOT: &str = "the root package";
 
-    // Walk each resolved Beamtalk dependency and collect its [native.dependencies]
+    let mut aggregated = AggregatedNative {
+        dependencies: root_native_deps.clone(),
+        overrides: root_overrides.clone(),
+        warnings: Vec::new(),
+    };
+    // Which package each kept entry came from, for conflict warnings.
+    let mut dep_origin: HashMap<String, String> = root_native_deps
+        .keys()
+        .map(|name| (name.clone(), ROOT.to_string()))
+        .collect();
+    let mut override_origin: HashMap<String, String> = root_overrides
+        .keys()
+        .map(|name| (name.clone(), ROOT.to_string()))
+        .collect();
+
+    // Walk each resolved Beamtalk dependency and collect its [native] section
     for dep in resolved_bt_deps {
         let manifest_path = dep.root.join("beamtalk.toml");
         if !manifest_path.exists() {
@@ -353,26 +411,252 @@ pub(crate) fn aggregate_native_dependencies(
             );
             continue;
         };
+        let origin = format!("package '{}'", dep.name);
+
         for (name, native_dep) in &parsed.native_dependencies {
-            if !aggregated.contains_key(name) {
-                debug!(
-                    dep = %dep.name,
-                    hex_pkg = %name,
-                    constraint = %native_dep.constraint,
-                    "Aggregating native dependency from transitive package"
-                );
-                aggregated.insert(name.clone(), native_dep.clone());
+            match aggregated.dependencies.get(name) {
+                None => {
+                    debug!(
+                        dep = %dep.name,
+                        native_pkg = %name,
+                        source = %native_dep.source,
+                        "Aggregating native dependency from transitive package"
+                    );
+                    aggregated
+                        .dependencies
+                        .insert(name.clone(), native_dep.clone());
+                    dep_origin.insert(name.clone(), origin.clone());
+                }
+                Some(kept) if kept.source != native_dep.source => {
+                    aggregated.warnings.push(format!(
+                        "native dependency '{name}' is declared as {} by {} but as {} by {origin} \
+                         — using {}",
+                        kept.source, dep_origin[name], native_dep.source, kept.source
+                    ));
+                }
+                Some(_) => {}
             }
-            // If the same hex dep is already present (from root or another dep),
-            // we keep the first constraint. rebar3 resolves transitive deps
-            // itself; duplicates in the deps list are not supported.
+        }
+
+        for (name, native_override) in &parsed.native_overrides {
+            match aggregated.overrides.get(name) {
+                None => {
+                    aggregated
+                        .overrides
+                        .insert(name.clone(), native_override.clone());
+                    override_origin.insert(name.clone(), origin.clone());
+                }
+                Some(kept) if kept != native_override => {
+                    aggregated.warnings.push(format!(
+                        "native override for '{name}' differs between {} and {origin} \
+                         — using the one from {}",
+                        override_origin[name], override_origin[name]
+                    ));
+                }
+                Some(_) => {}
+            }
         }
     }
 
     aggregated
 }
 
-/// Generate a `rebar.config` file for compiling hex dependencies.
+/// Render one `{deps, [...]}` entry for `rebar.config` from the manifest.
+///
+/// Pinning to locked versions and commits is done by the generated
+/// `rebar.lock` (see [`prepare_rebar_lock`]), which rebar3 prefers over
+/// `rebar.config`.
+fn rebar_dep_entry(dep: &NativeDependency) -> String {
+    use crate::beam_compiler::escape_erlang_string;
+
+    let name = &dep.name;
+    match &dep.source {
+        NativeSource::Hex { constraint } => {
+            format!("    {{{name}, \"{}\"}}", escape_erlang_string(constraint))
+        }
+        NativeSource::Git { url, reference } => {
+            let (kind, value) = match reference {
+                GitReference::Tag(tag) => ("tag", tag),
+                GitReference::Branch(branch) => ("branch", branch),
+                GitReference::Rev(rev) => ("ref", rev),
+            };
+            format!(
+                "    {{{name}, {{git, \"{}\", {{{kind}, \"{}\"}}}}}}",
+                escape_erlang_string(url),
+                escape_erlang_string(value)
+            )
+        }
+    }
+}
+
+/// Whether a direct dependency's `beamtalk.lock` entry still satisfies the
+/// manifest: a hex version within the constraint, or a git commit resolved
+/// from the same URL and tag/branch/rev.
+fn lock_entry_is_current(dep: &NativeDependency, lock: Option<&NativePackageLock>) -> bool {
+    match (&dep.source, lock.map(|lock| &lock.source)) {
+        (
+            NativeSource::Hex { constraint },
+            Some(NativeLockSource::Hex {
+                package, version, ..
+            }),
+        ) => package == &dep.name && manifest::hex_constraint_matches(constraint, version),
+        (
+            NativeSource::Git { url, reference },
+            Some(NativeLockSource::Git {
+                url: locked_url,
+                reference: Some(locked_reference),
+                ..
+            }),
+        ) => url == locked_url && reference == locked_reference,
+        _ => false,
+    }
+}
+
+/// How `beamtalk.lock` relates to the manifest's native dependencies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NativeLockState {
+    /// Every direct dependency's entry is current and no locked direct
+    /// dependency has been removed: pin everything.
+    Current,
+    /// Some direct dependencies changed, were added or removed. Only the
+    /// named direct dependencies are still current and stay pinned;
+    /// everything else (including all transitive dependencies) re-resolves.
+    Partial(Vec<String>),
+}
+
+/// Classify `beamtalk.lock`'s native entries against the manifest.
+pub(crate) fn native_lock_state(
+    native_deps: &NativeDependencyMap,
+    locks: &std::collections::BTreeMap<String, NativePackageLock>,
+) -> NativeLockState {
+    let kept: Vec<String> = native_deps
+        .values()
+        .filter(|dep| lock_entry_is_current(dep, locks.get(&dep.name)))
+        .map(|dep| dep.name.clone())
+        .collect();
+    let removed_direct = locks
+        .values()
+        .any(|lock| lock.level == Some(0) && !native_deps.contains_key(&lock.name));
+    if kept.len() == native_deps.len() && !removed_direct {
+        NativeLockState::Current
+    } else {
+        NativeLockState::Partial(kept)
+    }
+}
+
+/// Make rebar3's own lock state match `beamtalk.lock` before `rebar3 compile`.
+///
+/// rebar3 never re-fetches an existing checkout because `rebar.config`
+/// changed — only a `rebar.lock` entry moves one — and it keeps checkouts
+/// and lock entries for dependencies nothing needs any more. So:
+///
+/// - **Current** ([`native_lock_state`]): write `rebar.lock` from all of
+///   `beamtalk.lock`, pinning every locked package (direct and transitive),
+///   including on a fresh checkout.
+/// - **Partial** (a direct dependency's constraint or git source changed, or
+///   one was added or removed): pin only the still-current direct
+///   dependencies, and delete every other checkout so rebar3 resolves it
+///   afresh from `rebar.config`. Transitive dependencies re-resolve too —
+///   `beamtalk.lock` does not record which direct dependency needs them.
+/// - **No lock / `force_resolve`** (`beamtalk deps update` clears the native
+///   locks): the same with nothing pinned.
+///
+/// Returns whether the build re-resolves anything.
+pub(crate) fn prepare_rebar_lock(
+    layout: &BuildLayout,
+    native_deps: &NativeDependencyMap,
+    locks: Option<&std::collections::BTreeMap<String, NativePackageLock>>,
+    force_resolve: bool,
+) -> Result<bool> {
+    use crate::commands::deps::lockfile::render_rebar_lock;
+
+    let empty = std::collections::BTreeMap::new();
+    let locks = locks.filter(|_| !force_resolve).unwrap_or(&empty);
+    let rebar_lock = layout.native_dir().join("rebar.lock");
+    let is_direct = |name: &str| native_deps.contains_key(name);
+
+    let kept = match native_lock_state(native_deps, locks) {
+        NativeLockState::Current => {
+            info!("Using pinned native package versions from beamtalk.lock");
+            write_rebar_lock(&rebar_lock, &render_rebar_lock(locks.values(), &is_direct))?;
+            return Ok(false);
+        }
+        NativeLockState::Partial(kept) => kept,
+    };
+
+    info!(
+        pinned = ?kept,
+        "Native dependencies changed or unlocked — re-resolving the rest via rebar3"
+    );
+    // Kept entries are direct dependencies: pin them at level 0.
+    let pinned = kept
+        .iter()
+        .filter_map(|name| locks.get(name))
+        .map(|lock| lock.clone().at_level(0));
+    let pinned: Vec<NativePackageLock> = pinned.collect();
+    write_rebar_lock(&rebar_lock, &render_rebar_lock(&pinned, &is_direct))?;
+
+    // Delete every checkout that is not pinned, so rebar3 fetches it afresh
+    // (or not at all, once nothing needs it).
+    let lib_dir = layout.rebar_lib_dir();
+    if lib_dir.exists() {
+        let entries = fs::read_dir(&lib_dir)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to read native deps directory '{lib_dir}'"))?;
+        for entry in entries.flatten() {
+            let keep = entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| kept.iter().any(|k| k == name));
+            if !keep {
+                let path = entry.path();
+                let removed = if path.is_dir() {
+                    fs::remove_dir_all(&path)
+                } else {
+                    fs::remove_file(&path)
+                };
+                removed.into_diagnostic().wrap_err_with(|| {
+                    format!("Failed to remove stale native dep '{}'", path.display())
+                })?;
+            }
+        }
+    }
+    Ok(true)
+}
+
+fn write_rebar_lock(path: &Utf8Path, content: &str) -> Result<()> {
+    fs::write(path, content)
+        .into_diagnostic()
+        .wrap_err_with(|| format!("Failed to write rebar.lock at '{path}'"))
+}
+
+/// Record which git reference each direct git dependency's lock entry was
+/// resolved from — rebar.lock only knows the commit. Lets
+/// [`native_lock_state`] spot a later branch/tag/rev change.
+fn record_manifest_reference(pkg: &mut NativePackageLock, native_deps: &NativeDependencyMap) {
+    if let (
+        NativeLockSource::Git { url, reference, .. },
+        Some(NativeSource::Git {
+            url: manifest_url,
+            reference: manifest_reference,
+        }),
+    ) = (
+        &mut pkg.source,
+        native_deps.get(&pkg.name).map(|dep| &dep.source),
+    ) {
+        if url == manifest_url {
+            *reference = Some(manifest_reference.clone());
+        }
+    }
+}
+
+/// Test-only environment variable (BT-4582): base URL of a local hex
+/// repository that replaces `repo.hex.pm` in the generated `rebar.config`.
+/// The repository need not be signed; verification is disabled for it, so
+/// only debug builds honour it.
+const TEST_HEX_REPO_URL_ENV: &str = "BEAMTALK_TEST_HEX_REPO_URL";
+
+/// Generate a `rebar.config` file for compiling native dependencies.
 ///
 /// The generated file lives at `_build/dev/native/rebar.config` and is a
 /// build artifact — it should not be checked in.
@@ -381,19 +665,20 @@ pub(crate) fn aggregate_native_dependencies(
 /// (it has no `--config` flag). We run rebar3 from `_build/dev/native/`
 /// so the config lives there.
 ///
-/// When `locked_versions` is provided (from `beamtalk.lock`), the generated
-/// config uses exact pinned versions instead of constraints for reproducible
-/// builds (ADR 0072 §5).
+/// The config carries the manifest's constraints and git references;
+/// locked versions are pinned through `rebar.lock` instead
+/// ([`prepare_rebar_lock`], ADR 0072 §5).
 ///
-/// Note: rebar3 only handles hex deps. Native `.erl` files from the project
-/// and transitive BT dependencies are compiled separately via `erlc` in
-/// [`compile_native_erlang_with_deps`].
+/// `overrides` (from `[native.overrides]`) are emitted as rebar3
+/// `{overrides, [{override, Dep, Opts}]}`.
+///
+/// Note: rebar3 only handles native deps. Native `.erl` files from the
+/// project and transitive BT dependencies are compiled separately via `erlc`
+/// in [`compile_native_erlang_with_deps`].
 pub(crate) fn generate_rebar_config(
     project_root: &Utf8Path,
     native_deps: &NativeDependencyMap,
-    locked_versions: Option<
-        &std::collections::BTreeMap<String, crate::commands::deps::lockfile::NativePackageLock>,
-    >,
+    overrides: &NativeOverrideMap,
 ) -> Result<Utf8PathBuf> {
     let layout = BuildLayout::new(project_root);
     let rebar_dir = layout.native_dir();
@@ -406,30 +691,56 @@ pub(crate) fn generate_rebar_config(
     let mut config = String::new();
     config.push_str("%% Auto-generated by beamtalk build — do not edit\n");
 
-    // Generate {deps, [...]}.
-    // When we have locked versions, use exact pinned versions for reproducibility.
-    // Otherwise, use the constraint strings from beamtalk.toml.
+    // Generate {deps, [...]} from the manifest.
     config.push_str("{deps, [\n");
-    let dep_entries: Vec<String> = native_deps
-        .iter()
-        .map(|(name, dep)| {
-            if let Some(locks) = locked_versions {
-                if let Some(lock) = locks.get(name) {
-                    return format!("    {{{name}, \"{}\"}}", lock.version);
-                }
-            }
-            format!("    {{{name}, \"{}\"}}", dep.constraint)
-        })
-        .collect();
+    let dep_entries: Vec<String> = native_deps.values().map(rebar_dep_entry).collect();
     config.push_str(&dep_entries.join(",\n"));
     config.push_str("\n]}.\n");
 
-    // rebar3 only handles hex deps — native/*.erl files are compiled
+    // rebar3 only handles native deps — native/*.erl files are compiled
     // separately via erlc after rebar3 finishes (see compile_native_erlang_with_deps).
     // This avoids rebar3 project discovery issues: rebar3 won't compile
     // src_dirs sources without a top-level .app.src, and generating one
     // creates conflicts with the package's own .app file.
     config.push_str("{erl_opts, [debug_info]}.\n");
+
+    // [native.overrides] → {overrides, [{override, Dep, [{erl_opts, [...]}]}]}.
+    // Names and erl_opts are validated as plain atoms by the manifest parser.
+    let override_entries: Vec<String> = overrides
+        .iter()
+        .map(|(name, native_override)| {
+            format!(
+                "    {{override, {name}, [{{erl_opts, [{}]}}]}}",
+                native_override.erl_opts.join(", ")
+            )
+        })
+        .collect();
+    if !override_entries.is_empty() {
+        config.push_str("{overrides, [\n");
+        config.push_str(&override_entries.join(",\n"));
+        config.push_str("\n]}.\n");
+    }
+
+    // Test-only: point the default `hexpm` repo at a local, unsigned hex
+    // repository so end-to-end tests run offline (BT-4582).
+    // Debug builds only: the hook disables signature verification, so
+    // shipped (release) binaries must not honour it.
+    let test_repo_url = if cfg!(debug_assertions) {
+        std::env::var(TEST_HEX_REPO_URL_ENV).ok()
+    } else {
+        None
+    };
+    if let Some(url) = test_repo_url {
+        if !url.is_empty() {
+            use crate::beam_compiler::escape_erlang_string;
+            let _ = writeln!(
+                config,
+                "{{hex, [{{repos, [#{{name => <<\"hexpm\">>, repo_url => <<\"{}\">>, \
+                 repo_verify => false, repo_verify_origin => false}}]}}]}}.",
+                escape_erlang_string(&url)
+            );
+        }
+    }
 
     debug!(path = %config_path, "Writing rebar.config");
     fs::write(&config_path, &config)
@@ -455,6 +766,7 @@ pub(crate) fn generate_rebar_config(
 fn compile_with_rebar3(
     project_root: &Utf8Path,
     native_deps: &NativeDependencyMap,
+    overrides: &NativeOverrideMap,
     force_resolve: bool,
     resolved_bt_deps: &[crate::commands::deps::path::ResolvedDependency],
 ) -> Result<Rebar3Result> {
@@ -462,26 +774,28 @@ fn compile_with_rebar3(
 
     let rebar3 = rebar3_path()?;
 
-    // Read existing lockfile to check for pinned native versions
-    let existing_lock = Lockfile::read(project_root)?;
-    let locked_versions = if force_resolve {
-        None
-    } else {
-        existing_lock
-            .as_ref()
-            .filter(|l| l.has_native_packages())
-            .map(|l| &l.native_packages)
-    };
+    // Serialise native builds of this project: preparing the lock deletes
+    // checkouts another build (CLI alongside the LSP, say) may be compiling.
+    let _native_build_lock = crate::commands::dir_lock::lock_dir(
+        &BuildLayout::new(project_root).native_dir(),
+        "native build",
+    )?;
 
-    if locked_versions.is_some() {
-        info!("Using pinned native package versions from beamtalk.lock");
-    }
+    let existing_lock = Lockfile::read(project_root)?;
 
     // Generate the rebar.config in _build/dev/native/
-    let config_path = generate_rebar_config(project_root, native_deps, locked_versions)?;
+    let config_path = generate_rebar_config(project_root, native_deps, overrides)?;
 
     let rebar_layout = BuildLayout::new(project_root);
     let rebar_base_dir = rebar_layout.native_dir();
+
+    // Align rebar3's rebar.lock and checkouts with beamtalk.lock.
+    let re_resolving = prepare_rebar_lock(
+        &rebar_layout,
+        native_deps,
+        existing_lock.as_ref().map(|lock| &lock.native_packages),
+        force_resolve,
+    )?;
 
     info!(
         rebar3 = %rebar3.display(),
@@ -491,24 +805,46 @@ fn compile_with_rebar3(
         "Invoking rebar3 compile"
     );
 
-    let mut cmd = std::process::Command::new(&rebar3);
-    cmd.arg("compile");
-    // rebar3 reads rebar.config from cwd — run from _build/dev/native/
-    cmd.current_dir(rebar_base_dir.as_std_path());
-    // Keep all rebar3 output in the same build directory.
     // REBAR_BASE_DIR must be absolute — rebar3 resolves it relative to cwd,
     // and cwd is already rebar_base_dir, so a relative path would nest.
     let abs_base_dir = std::fs::canonicalize(rebar_base_dir.as_std_path())
         .into_diagnostic()
         .wrap_err("Failed to canonicalize rebar base dir")?;
-    cmd.env("REBAR_BASE_DIR", &abs_base_dir);
+    let rebar3_command = |subcommand: &str| {
+        let mut cmd = std::process::Command::new(&rebar3);
+        cmd.arg(subcommand);
+        // rebar3 reads rebar.config from cwd — run from _build/dev/native/
+        cmd.current_dir(rebar_base_dir.as_std_path());
+        // Keep all rebar3 output in the same build directory.
+        cmd.env("REBAR_BASE_DIR", &abs_base_dir);
+        cmd
+    };
 
-    let output = cmd.output().into_diagnostic().wrap_err_with(|| {
-        format!(
-            "Failed to run rebar3 compile (tried '{}').\nIs Erlang/OTP installed?",
-            rebar3.display()
-        )
-    })?;
+    // rebar3 resolves a constraint from its cached package index and only
+    // refreshes it on a miss, so a re-resolve (`beamtalk deps update`, a
+    // changed constraint) would otherwise keep landing on the version it
+    // cached at the previous build. Best effort: with no network rebar3
+    // still compiles from its cache.
+    if re_resolving {
+        match rebar3_command("update").output() {
+            Ok(out) if out.status.success() => debug!("Refreshed rebar3 package index"),
+            Ok(out) => debug!(
+                status = %out.status,
+                "rebar3 update failed; resolving from the cached package index"
+            ),
+            Err(error) => debug!(%error, "rebar3 update could not run"),
+        }
+    }
+
+    let output = rebar3_command("compile")
+        .output()
+        .into_diagnostic()
+        .wrap_err_with(|| {
+            format!(
+                "Failed to run rebar3 compile (tried '{}').\nIs Erlang/OTP installed?",
+                rebar3.display()
+            )
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -530,10 +866,11 @@ fn compile_with_rebar3(
         let mut lockfile = existing_lock.unwrap_or_default();
         // Replace all native entries with the freshly resolved set
         lockfile.clear_native_packages();
-        for pkg in resolved_native {
+        for mut pkg in resolved_native {
+            record_manifest_reference(&mut pkg, native_deps);
             info!(
                 name = %pkg.name,
-                version = %pkg.version,
+                source = ?pkg.source,
                 "Locking native package"
             );
             lockfile.insert_native(pkg);

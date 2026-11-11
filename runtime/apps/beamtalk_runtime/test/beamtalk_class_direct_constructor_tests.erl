@@ -18,6 +18,7 @@ Keyword constructors are ordinary class methods: the in-caller path of ADR
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include("beamtalk.hrl").
 
 %% Logger handler callback for the BT-4126 stale-verdict warning tests.
 -export([log/2]).
@@ -59,7 +60,11 @@ start_class_with_module(Name, Module, Superclass, Meta) ->
     Pid.
 
 stop_class(Pid) ->
-    catch gen_server:stop(Pid, normal, 5000),
+    try
+        gen_server:stop(Pid, normal, 5000)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 direct_constructor_test_() ->
@@ -594,7 +599,11 @@ static_new_key_test_() ->
                 ?assertNotEqual(false, ctor_target(Name)),
                 ?assertEqual(self(), beamtalk_class_dispatch:class_send(Pid, new, []))
             after
-                catch beamtalk_extensions:unregister(Name, new, true),
+                try
+                    beamtalk_extensions:unregister(Name, new, true)
+                catch
+                    _:_ -> ok
+                end,
                 stop_class(Pid)
             end
         end},
@@ -722,6 +731,100 @@ indirect_value_subclass_test_() ->
                     [stop_class(P) || P <- [Leaf, Mid]]
                 end
             end},
+        {"an ancestor's class-side new: extension answers a descendant's new: on every path",
+            fun() ->
+                %% BT-4588: the extension counts as Mid's class-side `new:`
+                %% (BT-4307), like a compiled or runtime-fun `new:` on Mid.
+                %% Rooted at Object, whose chain exports no `class_new:`
+                %% (Value's does, which already sent a Value's `{new, [Map]}`
+                %% through the class-side walk), so the class process's own
+                %% handler must see the ancestor's extension itself.
+                Mid = start_subclass('BT4588Mid', 'Object', #{
+                    direct_constructors => [new, 'new:'], defines_user_class_new1 => false
+                }),
+                Leaf = start_subclass('BT4588Leaf', 'BT4588Mid', #{
+                    direct_constructors => [new, 'new:'], defines_user_class_new1 => false
+                }),
+                MidTag = beamtalk_class_registry:class_object_tag('BT4588Mid'),
+                try
+                    ?assertNot(beamtalk_class_metadata:chain_has_user_new1('BT4588Leaf')),
+                    ?assertEqual(
+                        {self(), #{a => 1}},
+                        beamtalk_class_dispatch:class_send(Leaf, 'new:', [#{a => 1}])
+                    ),
+                    ok = beamtalk_extensions:register(
+                        MidTag,
+                        'new:',
+                        fun([Map], #beamtalk_object{class = Tag}) -> {from_extension, Tag, Map} end,
+                        test
+                    ),
+                    LeafTag = beamtalk_class_registry:class_object_tag('BT4588Leaf'),
+                    try
+                        %% Registering flushed the memoised verdict.
+                        ?assert(beamtalk_class_metadata:chain_has_user_new1('BT4588Leaf')),
+                        ?assertEqual(
+                            error,
+                            beamtalk_class_dispatch:lookup_direct_constructor(
+                                Leaf, 'new:', [#{a => 1}]
+                            )
+                        ),
+                        %% The dynamic send, and the class process's own
+                        %% `{new, [Map]}` handler, run the extension with the
+                        %% receiving subclass as `self`.
+                        ?assertEqual(
+                            {from_extension, LeafTag, #{a => 1}},
+                            beamtalk_class_dispatch:class_send(Leaf, 'new:', [#{a => 1}])
+                        ),
+                        ?assertEqual(
+                            {ok, {from_extension, LeafTag, #{a => 1}}},
+                            gen_server:call(Leaf, {new, [#{a => 1}]})
+                        ),
+                        %% `new` is untouched: Leaf's own `new/0` stays direct.
+                        ?assertEqual(self(), beamtalk_class_dispatch:class_send(Leaf, new, []))
+                    after
+                        beamtalk_extensions:unregister('BT4588Mid', 'new:', true)
+                    end,
+                    %% Removing it flushes the verdict again: direct once more.
+                    ?assertNot(beamtalk_class_metadata:chain_has_user_new1('BT4588Leaf')),
+                    ?assertMatch(
+                        {ok, _},
+                        beamtalk_class_dispatch:lookup_direct_constructor(Leaf, 'new:', [#{a => 1}])
+                    ),
+                    ?assertEqual(
+                        {self(), #{a => 1}},
+                        beamtalk_class_dispatch:class_send(Leaf, 'new:', [#{a => 1}])
+                    )
+                after
+                    [stop_class(P) || P <- [Leaf, Mid]]
+                end
+            end},
+        {"an ancestor's class-side new extension does not shadow a descendant's own new", fun() ->
+            %% BT-4588: the descendant's synthesized `new` is its own
+            %% class-side method, found before an ancestor's extension.
+            Mid = start_subclass('BT4588NewMid', 'Value', #{
+                direct_constructors => [new, 'new:'], defines_user_class_new1 => false
+            }),
+            Leaf = start_subclass('BT4588NewLeaf', 'BT4588NewMid', #{
+                direct_constructors => [new, 'new:'], defines_user_class_new1 => false
+            }),
+            MidTag = beamtalk_class_registry:class_object_tag('BT4588NewMid'),
+            ok = beamtalk_extensions:register(
+                MidTag, new, fun([], _ClassSelf) -> from_extension end, test
+            ),
+            try
+                ?assertEqual(from_extension, beamtalk_class_dispatch:class_send(Mid, new, [])),
+                ?assertMatch(
+                    {ok, _}, beamtalk_class_dispatch:lookup_direct_constructor(Leaf, new, [])
+                ),
+                ?assertEqual(self(), beamtalk_class_dispatch:class_send(Leaf, new, [])),
+                %% The class process builds through Leaf's own `new/0`,
+                %% which answers the builder's pid: the class process.
+                ?assertEqual({ok, Leaf}, gen_server:call(Leaf, {new, []}))
+            after
+                beamtalk_extensions:unregister('BT4588NewMid', new, true),
+                [stop_class(P) || P <- [Leaf, Mid]]
+            end
+        end},
         {"the compiled stdlib publishes the facts that let Bag's dynamic new: build in the caller",
             fun() ->
                 %% Over the real compiled stdlib chain, not a fixture: if
@@ -784,6 +887,114 @@ explicit_class_new_test_() ->
             end}
         ]
     ]}.
+
+%% BT-4475: a stdlib class whose own explicit `class new:` forwards to one of
+%% its own in-caller class methods (`self withAll: elements`) publishes no
+%% `new:` among its process-bound selectors, so `X new: aList` runs that
+%% class method in the caller and the class process sees no message at all.
+explicit_class_new1_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end,
+        [
+            {atom_to_list(Class) ++ " new: makes no call into its class process", fun() ->
+                assert_new1_in_caller(Class, Module, Check)
+            end}
+         || {Class, Module, Check} <- [
+                {'List', 'bt@stdlib@list', fun(R) -> R =:= [1, 2] end},
+                {'Tuple', 'bt@stdlib@tuple', fun(R) -> R =:= {1, 2} end},
+                {'Set', 'bt@stdlib@set', fun(R) ->
+                    beamtalk_primitive:class_of(R) =:= 'Set' andalso
+                        beamtalk_primitive:send(R, size, []) =:= 2
+                end},
+                {'Array', 'bt@stdlib@array', fun(R) ->
+                    beamtalk_primitive:class_of(R) =:= 'Array' andalso
+                        beamtalk_primitive:send(R, size, []) =:= 2
+                end}
+            ]
+        ] ++
+            [
+                %% `AtomicCounter new:` is `self delegate` creating a named ETS
+                %% table owned by whichever process runs it: it keeps the class
+                %% process (`explicit_class_constructor_builds_in_caller`).
+                {"AtomicCounter new: keeps its class process", fun() ->
+                    {module, _} = code:ensure_loaded('bt@stdlib@atomic_counter'),
+                    {ok, Bound} =
+                        beamtalk_class_metadata:lookup_process_bound_selectors('AtomicCounter'),
+                    ?assert(lists:member('new:', Bound)),
+                    Pid = beamtalk_class_registry:whereis_class('AtomicCounter'),
+                    ?assertEqual(decline, beamtalk_class_dispatch:in_caller_owner(Pid, 'new:'))
+                end},
+                %% The in-caller path raises what the forwarded method raises,
+                %% exactly as the class process's `{new, [Arg]}` handler did.
+                {"new: with a bad argument answers or raises exactly what withAll: does", fun() ->
+                    Outcomes = [
+                        {Class, outcome(Class, 'new:', [42]), outcome(Class, 'withAll:', [42])}
+                     || Class <- ['List', 'Set', 'Array', 'Tuple']
+                    ],
+                    [
+                        ?assertEqual({Class, WithAll}, {Class, New})
+                     || {Class, New, WithAll} <- Outcomes
+                    ],
+                    %% At least one of them raises, so the error path is covered.
+                    ?assert(
+                        lists:any(fun({_, New, _}) -> element(1, New) =/= returned end, Outcomes)
+                    )
+                end},
+                %% A class-side `new:` extension shadows the in-caller method: the
+                %% send reaches the class process, which answers the extension.
+                {"a class-side new: extension on List is honoured by the class process", fun() ->
+                    {module, _} = code:ensure_loaded('bt@stdlib@list'),
+                    Pid = beamtalk_class_registry:whereis_class('List'),
+                    Tag = beamtalk_class_registry:class_object_tag('List'),
+                    ok = beamtalk_extensions:register(
+                        Tag, 'new:', fun(_Args, _ClassSelf) -> from_extension end, test
+                    ),
+                    ok = sys:statistics(Pid, true),
+                    try
+                        ?assertEqual(decline, beamtalk_class_dispatch:in_caller_owner(Pid, 'new:')),
+                        Before = messages_in(Pid),
+                        ?assertEqual(
+                            from_extension, beamtalk_class_dispatch:class_send(Pid, 'new:', [[1]])
+                        ),
+                        ?assert(messages_in(Pid) > Before)
+                    after
+                        sys:statistics(Pid, false),
+                        beamtalk_extensions:unregister('List', 'new:', true)
+                    end,
+                    ?assertEqual([1], beamtalk_class_dispatch:class_send(Pid, 'new:', [[1]]))
+                end}
+            ]}.
+
+%% What a class-side send answers, or the class and kind of what it raises.
+outcome(Class, Selector, Args) ->
+    Pid = beamtalk_class_registry:whereis_class(Class),
+    try beamtalk_class_dispatch:class_send(Pid, Selector, Args) of
+        V -> {returned, V}
+    catch
+        Kind:#{error := #beamtalk_error{kind = ErrKind}} -> {Kind, ErrKind};
+        Kind:Reason -> {Kind, Reason}
+    end.
+
+assert_new1_in_caller(Class, Module, Check) ->
+    {module, Module} = code:ensure_loaded(Module),
+    {ok, Bound} = beamtalk_class_metadata:lookup_process_bound_selectors(Class),
+    ?assertNot(lists:member('new:', Bound)),
+    Pid = beamtalk_class_registry:whereis_class(Class),
+    ?assertMatch(
+        {owner, Class, _, Module, Class, Module, 'class_new:'},
+        beamtalk_class_dispatch:in_caller_owner(Pid, 'new:')
+    ),
+    ok = sys:statistics(Pid, true),
+    try
+        Before = messages_in(Pid),
+        Results = [
+            beamtalk_class_dispatch:class_send(Pid, 'new:', [[1, 2]])
+         || _ <- lists:seq(1, 100)
+        ],
+        ?assertEqual(Before, messages_in(Pid)),
+        ?assert(lists:all(Check, Results))
+    after
+        sys:statistics(Pid, false)
+    end.
 
 assert_new_in_caller(Class, Module, Check) ->
     {module, Module} = code:ensure_loaded(Module),

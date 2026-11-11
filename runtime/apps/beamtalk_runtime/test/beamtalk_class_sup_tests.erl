@@ -108,8 +108,14 @@ teardown(#{
         false -> ok
     end,
     case RestoreMonitor of
-        true -> catch supervisor:restart_child(beamtalk_runtime_sup, beamtalk_class_monitor);
-        false -> ok
+        true ->
+            try
+                supervisor:restart_child(beamtalk_runtime_sup, beamtalk_class_monitor)
+            catch
+                _:_ -> ok
+            end;
+        false ->
+            ok
     end,
     ok.
 
@@ -277,6 +283,43 @@ eager_restart_test_() ->
         ]
     end}.
 
+%% BT-4622: a callback exception runs terminate/2 (unlike a kill), but it is
+%% still a crash: the monitor restarts the class under its name and module,
+%% and the dead pid keeps naming it for a class object taken before the crash.
+callback_crash_restart_test_() ->
+    {setup, fun setup/0, fun teardown/1, fun(_) ->
+        [
+            {"class process crashing in handle_call is eagerly restarted",
+                {timeout, 30, fun() ->
+                    Name = 'SupTest3236Crash',
+                    {ok, OldPid} = beamtalk_object_class:start(Name, minimal_class_info()),
+                    {ok, Module} = beamtalk_class_metadata:lookup_module(Name),
+                    MRef = erlang:monitor(process, OldPid),
+                    ?assertExit(_, gen_server:call(OldPid, bt4622_no_such_call)),
+                    receive
+                        {'DOWN', MRef, process, OldPid, _} -> ok
+                    after 5000 -> ?assert(false)
+                    end,
+                    ?assertEqual(
+                        ok,
+                        wait_until(fun() ->
+                            case beamtalk_class_registry:whereis_class(Name) of
+                                undefined -> false;
+                                NewPid -> NewPid =/= OldPid
+                            end
+                        end)
+                    ),
+                    NewPid = beamtalk_class_registry:whereis_class(Name),
+                    ?assertEqual({ok, Module}, beamtalk_class_metadata:lookup_module(Name)),
+                    ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(NewPid)),
+                    %% `liveClassName/1` of a class object taken before the crash.
+                    ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(OldPid)),
+                    %% Lazy recovery from the old pid finds the restarted class.
+                    ?assertEqual({ok, NewPid}, beamtalk_class_registry:restart_class(Name))
+                end}}
+        ]
+    end}.
+
 deliberate_stop_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -371,7 +414,11 @@ fallback_without_sup_test_() ->
             end,
             case RestoreSup of
                 true ->
-                    catch supervisor:restart_child(beamtalk_runtime_sup, beamtalk_class_sup);
+                    try
+                        supervisor:restart_child(beamtalk_runtime_sup, beamtalk_class_sup)
+                    catch
+                        _:_ -> ok
+                    end;
                 false ->
                     ok
             end

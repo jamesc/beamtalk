@@ -109,7 +109,7 @@ dead_stats(PidBin) ->
 format_mfa(undefined) ->
     nil;
 format_mfa({M, F, A}) when is_atom(M), is_atom(F), is_integer(A) ->
-    iolist_to_binary(io_lib:format("~ts:~ts/~B", [M, F, A]));
+    beamtalk_error:chars_to_binary(io_lib:format("~ts:~ts/~B", [M, F, A]));
 format_mfa(_) ->
     nil.
 

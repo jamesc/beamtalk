@@ -66,11 +66,11 @@ counters first isSupervisor
 // => false
 
 // ===========================================================================
-// WALK — do: visits nodes and returns the tree (chainable)
+// WALK — do: visits nodes and answers nil, like every stdlib do: (BT-4515)
 // ===========================================================================
 
-(tree do: [:n | n kind]) class
-// => SupervisionTree
+(tree do: [:n | n kind]) isNil
+// => true
 
 // nodes exposes the flat record list.
 tree nodes isEmpty

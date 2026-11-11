@@ -7,7 +7,7 @@
 
 use super::*;
 
-const TUPLE: ThreadingMode = ThreadingMode::TupleAcc(0);
+const TUPLE: ThreadingMode = ThreadingMode::TupleAcc(0, FoldAccShape::Tuple);
 
 fn map_mode() -> ThreadingMode {
     ThreadingMode::StateAcc(StateAccFallbackReason::ControlFlowMutations)

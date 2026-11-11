@@ -9,10 +9,10 @@
 //!
 //! split out of `control_flow/mod.rs`, no logic changes.
 
-use super::super::synced_call::field_writes_block_stateless_loops;
+use super::super::synced_call::{field_writes_block_stateless_loops, nlr_blocks_hybrid_loops};
 use super::super::threaded_ir::{
-    ClassMethodDefect, FrameId, RebindFrame, RebindFrameKind, StateAccFallbackReason,
-    ThreadingMode, VerifyError, VersionPrefix, VersionedVar,
+    ClassMethodDefect, FoldAccShape, FoldCarry, FrameId, RebindFrame, RebindFrameKind,
+    StateAccFallbackReason, ThreadingMode, VerifyError, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenContext, CoreErlangGenerator, block_analysis};
 use super::analysis::ThreadedFamilies;
@@ -107,7 +107,8 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     /// no complex control flow that generates `StateAcc`-dependent code).
     ///
     /// Eliminates per-iteration `maps:get` / `maps:put` for locally-threaded vars.
-    /// The accumulator becomes `{Var1, Var2, ..., VarN}` (for `do:`) or
+    /// The accumulator becomes `{Var1, Var2, ..., VarN}` (for `do:`; the bare
+    /// local itself when exactly one is threaded, see `fold_acc_shape`) or
     /// `{FoldAcc, Var1, ..., VarN}` (for `collect:` / `inject:`).
     pub use_tuple_acc: bool,
     /// the `TupleAcc` mode's canonical leading gate-slot count,
@@ -118,6 +119,9 @@ pub(in crate::core_erlang) struct ThreadingPlan {
     /// `node_gate_slots`) — see
     /// [`threaded_ir::build_tuple_acc_unpack`]'s doc comment.
     pub tuple_acc_gate_slots: usize,
+    /// BT-4116: `Bare` iff the fold is a plain `do:` (no gate slots) threading
+    /// exactly one local; see [`FoldAccShape`]. Only meaningful with `use_tuple_acc`.
+    pub fold_acc_shape: FoldAccShape,
     /// When `true`, use full-extract direct-params for letrec loops.
     ///
     /// Set when the loop body has BOTH local variable mutations AND actor field mutations
@@ -251,6 +255,11 @@ struct BodyEffects {
     has_conditional_threaded_writes: bool,
     /// Last expression in body is a `DestructureAssignment`.
     last_is_destructure: bool,
+    /// BT-4523: the body or condition holds a `^` (nested blocks included,
+    /// `facts::block_has_nlr`). A hybrid loop keeps the fields it
+    /// writes in parameters, so its `State` omits them; a `^` stores and
+    /// carries a `State`, so such a body is never hybrid.
+    has_nlr: bool,
 }
 
 /// Whether a `whileTrue:`/`whileFalse:` `condition` expression has state
@@ -260,7 +269,7 @@ struct BodyEffects {
 /// a condition-only mutation must route a trivially-pure body to the
 /// mutation-threading path too — see `generate_while_true`/
 /// `generate_while_false`) shares one implementation with `ThreadingPlan`'s
-/// own gate, per CLAUDE.md's no-duplicate-implementations rule.
+/// own gate, per AGENTS.md's no-duplicate-implementations rule.
 ///
 /// A class method threads no family at all (ADR 0130 §3: a class-variable
 /// write is an in-place `put` and a self-send rebinds nothing), so nothing
@@ -277,8 +286,13 @@ struct BodyEffects {
 ///
 /// The rule itself is the `beamtalk-core` leaf
 /// [`while_condition_has_state_effects`](beamtalk_core::semantic_analysis::block_facts::while_condition_has_state_effects),
-/// which the ADR 0131 §6 validator reads too (BT-3845), so the validator's
-/// "this condition write threads" and this lowering cannot disagree.
+/// for the state effect; BT-4015 adds a condition's own outer-local writes
+/// (`loop_condition_written_locals`). The ADR 0131 §6 validator accepts such a
+/// write whenever the body is a block literal (BT-4602,
+/// `block_facts::while_condition_threads`); that the two agree is checked at
+/// lowering time, not by construction: a plain loop whose condition writes an
+/// outer local fails `verify()` (`ConditionFamilyNotCarried`), over the
+/// generated rows of `while_condition_binding_corpus.rs`.
 ///
 /// BT-3999: an effect counts only when the loop carries it (a threaded local or
 /// the scope's ambient carrier), the condition-side twin of BT-3834's
@@ -420,6 +434,12 @@ impl BodyEffects {
         let has_guarded_operator = generator.block_contains_guarded_operator(body)
             || condition.is_some_and(|c| generator.expr_contains_guarded_operator(c));
 
+        let has_nlr = beamtalk_core::semantic_analysis::facts::block_has_nlr(body)
+            || condition.is_some_and(|c| {
+                matches!(c, Expression::Block(cond)
+                    if beamtalk_core::semantic_analysis::facts::block_has_nlr(cond))
+            });
+
         Self {
             cond_has_state_effects,
             body_has_synced_sends,
@@ -430,6 +450,7 @@ impl BodyEffects {
             has_cf_mutations,
             has_conditional_threaded_writes,
             last_is_destructure,
+            has_nlr,
         }
     }
 }
@@ -557,17 +578,11 @@ impl ThreadingPlan {
             &effects,
         );
 
-        // ADR 0111 Phase C, invariant class 2: no runtime
-        // check here anymore — `select_tuple_acc`'s own `matches!(context,
-        // CodeGenContext::ValueType)` early return (above) already makes
-        // `use_tuple_acc && context_is_value_type` unconditionally
-        // unreachable BY INSPECTION of that one function, the same
-        // already-structural shape found for
-        // `ThreadingModeUnpackMismatch`. `VerifyError::TupleAccInValueTypeContext`,
-        // `threaded_ir::verify_tuple_acc_value_type_exclusion`, and their
-        // hand-built-IR unit tests remain as regression pins (ADR 0111
-        // §Verifier honesty) — only this now-tautological production call
-        // site is gone.
+        // BT-4116: `select_tuple_acc` no longer excludes `ValueType` (a value
+        // type's fold bodies read fields from `Self`, not an actor `State`).
+        // What it still guarantees is checked by the verifier: a tuple-acc
+        // plan threads no family (`TupleAccWithFamily`) and its accumulator
+        // statement has its mode's shape (`FoldAccShapeMismatch`).
 
         // ADR 0111 Phase C, invariant class 3: likewise
         // no runtime check here — `select_direct_params`'s own
@@ -636,6 +651,15 @@ impl ThreadingPlan {
         // whatever `index_offset` a later `generate_foldl_loop_body` call
         // computes its own `node_gate_slots` from.
         let tuple_acc_gate_slots = tuple_acc_kind.map_or(0, ListOpKind::gate_slots);
+        let fold_acc_shape = if use_tuple_acc
+            && matches!(tuple_acc_kind, Some(ListOpKind::Do))
+            && tuple_acc_gate_slots == 0
+            && threaded_locals.len() == 1
+        {
+            FoldAccShape::Bare
+        } else {
+            FoldAccShape::Tuple
+        };
 
         // Whether this Letrec loop body threads a value-type `Self` mutation
         // through its own recursive tail call. Letrec-shaped plans only
@@ -669,6 +693,7 @@ impl ThreadingPlan {
             use_direct_params,
             use_tuple_acc,
             tuple_acc_gate_slots,
+            fold_acc_shape,
             use_hybrid_params,
             readonly_fields,
             fallback_reason,
@@ -686,7 +711,7 @@ impl ThreadingPlan {
     /// and `use_hybrid_params` (a letrec loop) is ever set.
     pub(in crate::core_erlang) fn threading_mode(&self) -> ThreadingMode {
         if self.use_tuple_acc {
-            ThreadingMode::TupleAcc(self.tuple_acc_gate_slots)
+            ThreadingMode::TupleAcc(self.tuple_acc_gate_slots, self.fold_acc_shape)
         } else if self.use_direct_params {
             ThreadingMode::DirectParams
         } else if self.use_hybrid_params {
@@ -886,12 +911,40 @@ impl ThreadingPlan {
             && !effects.has_nested_counted_loop_mutation
     }
 
+    /// Test-only fault injection (BT-4116): the `ForceStateAccFold` oracle
+    /// build disables the tuple/bare accumulator for every fold.
+    fn force_stateacc_fold() -> bool {
+        #[cfg(test)]
+        {
+            super::super::threaded_expr::fault::active()
+                == Some(super::super::threaded_expr::fault::LocalRebindFault::ForceStateAccFold)
+        }
+        #[cfg(not(test))]
+        {
+            false
+        }
+    }
+
+    /// Test-only fault injection (BT-4116): `BareFoldTupleRepack` makes a
+    /// bare-shaped fold repack its accumulator as a one-element tuple.
+    pub(super) fn bare_fold_tuple_repack_faulted() -> bool {
+        #[cfg(test)]
+        {
+            super::super::threaded_expr::fault::active()
+                == Some(super::super::threaded_expr::fault::LocalRebindFault::BareFoldTupleRepack)
+        }
+        #[cfg(not(test))]
+        {
+            false
+        }
+    }
+
     /// Select tuple accumulator for foldl list-ops when eligible: body has
     /// only simple local var mutations — no field writes, self-sends, tier-2 assignments,
     /// complex control flow, conditional threaded writes, or destructure-as-last-expr.
     ///
-    /// `ValueType` methods have no `State` `gen_server` variable in scope; tuple-acc would
-    /// reference an unbound variable — always fall through to the map-acc path.
+    /// BT-4116: allowed in `ValueType` context too, except for a body that writes a
+    /// field (its `Self` rides the `{Acc, Self}` map path, BT-3827).
     fn select_tuple_acc(
         allow_tuple_acc: bool,
         threaded_locals: &[String],
@@ -899,9 +952,14 @@ impl ThreadingPlan {
         body_analysis: &block_analysis::BlockMutationAnalysis,
         effects: &BodyEffects,
     ) -> bool {
+        // BT-3827: a value-type body that writes a field carries `Self` in a
+        // `{Acc, Self}` wrapper (the map path); the tuple accumulator carries
+        // locals only.
         if !allow_tuple_acc
+            || Self::force_stateacc_fold()
             || threaded_locals.is_empty()
-            || matches!(context, CodeGenContext::ValueType)
+            || (matches!(context, CodeGenContext::ValueType)
+                && !body_analysis.field_writes.is_empty())
         {
             return false;
         }
@@ -986,6 +1044,10 @@ impl ThreadingPlan {
             // fields, which a hybrid loop holds in parameters that advance
             // past the entry `State` — unbracketable, so thread instead.
             && !effects.has_guarded_operator
+            // BT-4523: a `^` stores and carries a whole `State` (ADR 0146
+            // P0); a hybrid loop's `State` omits the fields its parameters
+            // hold, so the throw would drop every write the loop made.
+            && !(effects.has_nlr && nlr_blocks_hybrid_loops())
     }
 
     /// Determine why `StateAcc` fallback was chosen (if no optimized mode was selected).
@@ -1043,6 +1105,10 @@ impl ThreadingPlan {
             // BT-4121: a hybrid body with a guarded operator falls back to
             // `StateAcc` (a hybrid loop cannot bracket its slow path).
             StateAccFallbackReason::GuardedOperator
+        } else if effects.has_nlr && !body_analysis.field_writes.is_empty() {
+            // BT-4523: a hybrid body with a `^` threads `StateAcc` (the
+            // throw stores and carries a whole `State`).
+            StateAccFallbackReason::NonLocalReturn
         } else if effects.last_is_destructure {
             StateAccFallbackReason::DestructureAsLastExpr
         } else if body_analysis.has_self_sends {
@@ -1516,7 +1582,31 @@ impl ThreadingPlan {
         if self.threaded_locals.is_empty() {
             return Document::Str("{}");
         }
-        docvec!["{", self.current_vars_doc(generator), "}"]
+        self.acc_repack_doc(generator)
+    }
+
+    /// The [`FoldCarry`] a tuple-acc fold's accumulator statement carries.
+    pub fn fold_carry(&self) -> FoldCarry {
+        match (self.fold_acc_shape, self.threaded_locals.as_slice()) {
+            (FoldAccShape::Bare, [local]) if !Self::bare_fold_tuple_repack_faulted() => {
+                FoldCarry::BareLocal(local.clone())
+            }
+            _ => FoldCarry::Locals(self.threaded_locals.clone()),
+        }
+    }
+
+    /// The `do:`-shaped accumulator value over the current bindings of the
+    /// threaded locals: the one local itself for [`FoldAccShape::Bare`],
+    /// else `{Var1, ..., VarN}`. Used for the fold's initial value and
+    /// every per-iteration repack of a gate-slot-free (`do:`) fold.
+    pub fn acc_repack_doc(&self, generator: &CoreErlangGenerator) -> Document<'static> {
+        match self.fold_acc_shape {
+            FoldAccShape::Bare if Self::bare_fold_tuple_repack_faulted() => {
+                docvec!["{", self.current_vars_doc(generator), "}"]
+            }
+            FoldAccShape::Bare => self.current_vars_doc(generator),
+            FoldAccShape::Tuple => docvec!["{", self.current_vars_doc(generator), "}"],
+        }
     }
 
     /// Returns element-extraction code after foldl completes for tuple mode as a `Document`.
@@ -1537,6 +1627,16 @@ impl ThreadingPlan {
                 .lookup_var(var_name)
                 .cloned()
                 .unwrap_or_else(|| CoreErlangGenerator::to_core_erlang_var(var_name));
+            if self.fold_acc_shape == FoldAccShape::Bare {
+                docs.push(docvec![
+                    "let ",
+                    leaf::var(core_var),
+                    " = ",
+                    leaf::var(final_acc_var.to_string()),
+                    " in ",
+                ]);
+                continue;
+            }
             let idx = index_offset + i;
             docs.push(docvec![
                 "let ",
@@ -1654,6 +1754,32 @@ impl ThreadingPlan {
             current = pack_var;
         }
         (Document::Vec(docs), current)
+    }
+
+    /// The tail of a closed tuple/bare `do:`-style fold, after the `foldl`
+    /// call has bound `extract_doc`'s `FoldResult`. Normally the extracted
+    /// locals are repacked into the `{'nil', Map}` carrier the producer site
+    /// unpacks. BT-4629: when `discard` (the producer's locals are never read
+    /// again, `LoopMode::discarded_fold_block`) and no guarded-op bracket owes
+    /// a cell take, nothing reads the map, so the carrier is just `{'nil'}`.
+    pub fn closed_fold_tail_doc(
+        &self,
+        generator: &mut CoreErlangGenerator,
+        extract_doc: Document<'static>,
+        guarded_op_bracket: bool,
+        discard: bool,
+    ) -> Document<'static> {
+        if discard && !guarded_op_bracket {
+            return docvec!["{'nil'}"];
+        }
+        let (repack_doc, stateacc) = self.append_repack_stateacc_doc(generator, guarded_op_bracket);
+        docvec![
+            extract_doc,
+            repack_doc,
+            "{'nil', ",
+            leaf::var(stateacc),
+            "}"
+        ]
     }
 }
 

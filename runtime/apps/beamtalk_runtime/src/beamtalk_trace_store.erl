@@ -792,7 +792,13 @@ reset_aggregates_after_upgrade() ->
         true ->
             ?LOG_INFO("Resetting pre-BT-4103 aggregate tables", #{}),
             lists:foreach(
-                fun(T) -> catch ets:delete(T) end,
+                fun(T) ->
+                    try
+                        ets:delete(T)
+                    catch
+                        _:_ -> ok
+                    end
+                end,
                 ?RETIRED_AGG_TABLES ++
                     [?AGG_CLASS_STATS, ?AGG_PID, ?AGG_PID_KEYS, ?AGG_FREE_SLOTS]
             ),
@@ -816,7 +822,12 @@ reset_free_slots_after_upgrade() ->
                 ordered_set ->
                     ok;
                 _ ->
-                    _ = catch ets:delete(?AGG_FREE_SLOTS),
+                    _ =
+                        try
+                            ets:delete(?AGG_FREE_SLOTS)
+                        catch
+                            _:_ -> ok
+                        end,
                     ok
             end
     end.
@@ -1155,7 +1166,9 @@ grow_counters() ->
 -doc """
 Resolve the class atom from the instance registry, else `unknown`: one
 lookup on its pid-keyed index (BT-4113), the same as
-`beamtalk_actor:lookup_class/1`.
+`beamtalk_actor:lookup_class/1`. `unknown` also covers a lost index (the
+registry server and `beamtalk_ets_heir` both down, BT-4123); a registry
+crash alone keeps it, since the restarted server reclaims it from the heir.
 """.
 -spec class_from_registry(pid()) -> atom().
 class_from_registry(Pid) ->
@@ -1418,7 +1431,7 @@ do_export_traces(Opts) ->
                     _ when is_atom(V) -> atom_to_binary(V, utf8);
                     _ when is_integer(V) -> V;
                     _ when is_binary(V) -> V;
-                    _ -> iolist_to_binary(io_lib:format("~p", [V]))
+                    _ -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [V]))
                 end,
             Acc#{BinKey => BinVal}
         end,
@@ -1426,7 +1439,7 @@ do_export_traces(Opts) ->
         FilterParams
     ),
     {{Year, Month, Day}, {Hour, Min, Sec}} = calendar:universal_time(),
-    TimestampBin = iolist_to_binary(
+    TimestampBin = beamtalk_error:chars_to_binary(
         io_lib:format(
             "~4..0B-~2..0B-~2..0BT~2..0B:~2..0B:~2..0BZ",
             [Year, Month, Day, Hour, Min, Sec]
@@ -1526,7 +1539,7 @@ sanitize_metadata(Meta) ->
                 case K of
                     _ when is_atom(K) -> atom_to_binary(K, utf8);
                     _ when is_binary(K) -> K;
-                    _ -> iolist_to_binary(io_lib:format("~p", [K]))
+                    _ -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [K]))
                 end,
             Acc#{BinKey => sanitize_value(V)}
         end,
@@ -1571,7 +1584,7 @@ sanitize_value(V) when is_pid(V) -> list_to_binary(pid_to_list(V));
 sanitize_value(V) when is_list(V) -> [sanitize_value(E) || E <- V];
 sanitize_value(V) when is_map(V) -> sanitize_metadata(V);
 sanitize_value(V) ->
-    iolist_to_binary(io_lib:format("~p", [V])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp", [V])).
 
 -doc """
 Get aggregate stats, optionally filtered by Pid.
@@ -1793,7 +1806,10 @@ do_bottlenecks(Limit) ->
                 beamtalk_instance_registry
             )
         catch
-            %% Registry table missing (partial harness): no actors to report.
+            %% Registry table missing: a partial harness, or the table was
+            %% genuinely lost (registry server and `beamtalk_ets_heir` both
+            %% down, BT-4123) — no actors to report. A registry crash alone
+            %% keeps the table: it survives under the heir and is reclaimed.
             error:badarg -> []
         end
     ),
@@ -1896,7 +1912,7 @@ to_bt_keys(Map) when is_map(Map) ->
                 case K of
                     _ when is_atom(K) -> atom_to_binary(K, utf8);
                     _ when is_binary(K) -> K;
-                    _ -> iolist_to_binary(io_lib:format("~p", [K]))
+                    _ -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [K]))
                 end,
             Acc#{beamtalk_primitive:string_from_binary(RawKey) => to_bt_value(V)}
         end,

@@ -114,3 +114,22 @@ type RestartStrategy = #permanent | #transient | #temporary
 
 :complete restartPolicy ::
 // => INCLUDES:RestartStrategy
+
+// ===========================================================================
+// PIPELINE STAGES (ADR 0145, BT-4518)
+// ===========================================================================
+// Completing a stage after `|>` offers the selectors of the value before the
+// last `|>`, the same candidates the LSP offers. Partial-selector cases are in
+// beamtalk_repl_ops_dev_tests.erl (this harness always appends a space).
+
+// `"hello" size |> <TAB>` — the stage receives an Integer.
+:complete "hello" size |>
+// => INCLUDES:abs
+
+// A unary pipeline resolves through the chain tokenisers.
+:complete "hello" |> size |> abs |>
+// => INCLUDES:isEven
+
+// A keyword stage is one value: the stage receives the Array, not the block.
+:complete #[1, 2, 3] collect: [:x | x * 2] |>
+// => INCLUDES:size
