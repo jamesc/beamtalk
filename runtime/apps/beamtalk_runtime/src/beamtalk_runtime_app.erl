@@ -162,4 +162,9 @@ verify_metaclass_self_grounding() ->
 -doc "Stop the Beamtalk runtime application.".
 -spec stop(term()) -> ok.
 stop(_State) ->
-    beamtalk_actor_redaction:remove_crash_report_filter().
+    %% BT-4666: the crash-report filter stays installed. Actors spawned
+    %% unlinked (`Module:spawn/0`) can outlive the runtime's supervision
+    %% tree, and removing the filter would let their crash reports through
+    %% raw. It ignores every other event, and installing it again on the
+    %% next start is a no-op.
+    ok.

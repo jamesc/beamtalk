@@ -72,7 +72,7 @@ A `perform:` send naming a secret selector, at any depth of nested
 -include("beamtalk.hrl").
 
 -export([format_status/2, merge_secrets/3, redacted/0]).
--export([install_crash_report_filter/0, remove_crash_report_filter/0, crash_report_filter/2]).
+-export([install_crash_report_filter/0, crash_report_filter/2]).
 
 -define(REDACTED, <<"[redacted]">>).
 
@@ -148,7 +148,9 @@ fail_closed(Status) ->
 -doc """
 Install the logger primary filter that redacts the `proc_lib` crash report
 of a crashing actor (see crash_report_filter/2). Called once when the
-runtime application starts; installing it again is a no-op.
+runtime application starts; installing it again is a no-op. It is never
+removed: actors can outlive the runtime application, and their crash reports
+must stay redacted.
 """.
 -spec install_crash_report_filter() -> ok.
 install_crash_report_filter() ->
@@ -156,12 +158,6 @@ install_crash_report_filter() ->
         ok -> ok;
         {error, {already_exist, _}} -> ok
     end.
-
--doc "Remove the filter install_crash_report_filter/0 installed.".
--spec remove_crash_report_filter() -> ok.
-remove_crash_report_filter() ->
-    _ = logger:remove_primary_filter(?CRASH_FILTER_ID),
-    ok.
 
 -doc """
 Logger primary filter for the `proc_lib` crash report (`label =>
