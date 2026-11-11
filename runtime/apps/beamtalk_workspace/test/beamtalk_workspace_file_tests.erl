@@ -261,12 +261,8 @@ changelog_log_rewrite_does_not_touch_a_foreign_fixed_tmp_test() ->
 %% A crashed write's stale temp file under changes/ or changes/sources/ is
 %% swept when the ChangeLog starts; a fresh one is left alone.
 changelog_start_sweeps_stale_temps_test() ->
-    Unique = beamtalk_test_unique:id(),
-    WorkspaceId = list_to_binary("test-ws-file-sweep-" ++ Unique),
-    Home = filename:join(temp_dir(), "bt-wsfile-home-" ++ Unique),
-    OldHome = os:getenv("HOME"),
-    true = os:putenv("HOME", Home),
-    try
+    WorkspaceId = list_to_binary("test-ws-file-sweep-" ++ beamtalk_test_unique:id()),
+    with_home(fun(_Home) ->
         ChangesDir = beamtalk_workspace_changelog:changes_dir(WorkspaceId),
         SourcesDir = filename:join(ChangesDir, "sources"),
         ok = filelib:ensure_path(SourcesDir),
@@ -283,13 +279,7 @@ changelog_start_sweeps_stale_temps_test() ->
         ?assertNot(filelib:is_regular(StaleLog)),
         ?assertNot(filelib:is_regular(StaleSource)),
         ?assert(filelib:is_regular(Fresh))
-    after
-        case OldHome of
-            false -> os:unsetenv("HOME");
-            _ -> os:putenv("HOME", OldHome)
-        end,
-        _ = file:del_dir_r(Home)
-    end.
+    end).
 
 %%====================================================================
 %% Helpers
@@ -307,17 +297,26 @@ with_dir(Fun) ->
 %% A `beamtalk_workspace_changelog` server for a fresh workspace under a
 %% throwaway `HOME`, as `beamtalk_workspace_flush_tests` sets one up.
 with_changelog(Fun) ->
-    Unique = beamtalk_test_unique:id(),
-    WorkspaceId = list_to_binary("test-ws-file-" ++ Unique),
-    Home = filename:join(temp_dir(), "bt-wsfile-home-" ++ Unique),
+    WorkspaceId = list_to_binary("test-ws-file-" ++ beamtalk_test_unique:id()),
+    with_home(fun(Home) ->
+        {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
+        try
+            Fun(WorkspaceId, Home)
+        after
+            stop(Pid)
+        end
+    end).
+
+%% Run `Fun(Home)` with `HOME` pointing at a fresh throwaway directory, then
+%% restore `HOME` and delete the directory.
+with_home(Fun) ->
+    Home = filename:join(temp_dir(), "bt-wsfile-home-" ++ beamtalk_test_unique:id()),
     ok = filelib:ensure_path(Home),
     OldHome = os:getenv("HOME"),
     true = os:putenv("HOME", Home),
-    {ok, Pid} = beamtalk_workspace_changelog:start_link(#{workspace_id => WorkspaceId}),
     try
-        Fun(WorkspaceId, Home)
+        Fun(Home)
     after
-        stop(Pid),
         case OldHome of
             false -> os:unsetenv("HOME");
             _ -> os:putenv("HOME", OldHome)

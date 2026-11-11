@@ -32,9 +32,16 @@ A leaf module: it calls only OTP.
     temp_path/1,
     write_temp/2,
     atomic_write/3,
+    sweep_stale_temps/1,
     sweep_stale_temps/2,
+    sweep_stale_temps_in/1,
     sweep_stale_temps_in/2
 ]).
+
+%% How old a `temp_path/1` leftover must be before a sweep deletes it. A live
+%% writer renames its temp file within moments of writing it, so a file this
+%% old can only be a crashed writer's. The one value every workspace sweep uses.
+-define(STALE_TEMP_SECONDS, 3600).
 
 -doc """
 True iff `Path` is `Root` itself or lies beneath it.
@@ -224,3 +231,13 @@ older_than(File, Now, MaxAgeSeconds) ->
         {ok, #file_info{type = regular, mtime = MTime}} -> Now - MTime > MaxAgeSeconds;
         _ -> false
     end.
+
+-doc "`sweep_stale_temps/2` with the workspace's one staleness threshold (an hour).".
+-spec sweep_stale_temps(string()) -> [string()].
+sweep_stale_temps(Path) ->
+    sweep_stale_temps(Path, ?STALE_TEMP_SECONDS).
+
+-doc "`sweep_stale_temps_in/2` with the workspace's one staleness threshold (an hour).".
+-spec sweep_stale_temps_in(file:filename()) -> [string()].
+sweep_stale_temps_in(Dir) ->
+    sweep_stale_temps_in(Dir, ?STALE_TEMP_SECONDS).

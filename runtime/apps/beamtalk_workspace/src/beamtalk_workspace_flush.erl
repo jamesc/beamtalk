@@ -2635,18 +2635,12 @@ commit(#prepared{op = move, tmp = Tmp, file = NewPath, old_file = OldPath}) ->
 commit(#prepared{op = move_noop}) ->
     ok.
 
-%% How old a `<file>.<unique>.tmp` must be before a successful commit to
-%% `<file>` sweeps it as a crashed attempt's leftover. A live flush renames
-%% its staging file within moments of writing it, so an hour can only be an
-%% abandoned one.
--define(STALE_STAGING_SECONDS, 3600).
-
 %% After a successful staging rename into `File`, sweep stale staging files a
 %% crashed earlier attempt left next to it (see the moduledoc's "Atomicity
 %% (single-file)" section). Best effort: never turns a commit into a failure.
 -spec after_rename(ok | {error, term()}, binary()) -> ok | {error, term()}.
 after_rename(ok, File) ->
-    _ = beamtalk_workspace_file:sweep_stale_temps(binary_to_list(File), ?STALE_STAGING_SECONDS),
+    _ = beamtalk_workspace_file:sweep_stale_temps(binary_to_list(File)),
     ok;
 after_rename({error, _} = Err, _File) ->
     Err.

@@ -2008,11 +2008,6 @@ truncate_log(State) ->
     _ = write_file_atomic(State#state.log_path, <<>>),
     ok.
 
-%% How old a `<file>.<unique>.tmp` under `changes/` must be before startup
-%% sweeps it. A live write renames its temp file within moments, so an hour can
-%% only be a crashed one's (the rule `beamtalk_workspace_flush` uses too).
--define(STALE_TEMP_SECONDS, 3600).
-
 %% Delete temp files a crashed `write_file_atomic/2` left in `changes/` or
 %% `changes/sources/`. Unique temp names mean nothing else ever overwrites or
 %% removes them. Best effort; a missing directory is fine.
@@ -2020,10 +2015,8 @@ truncate_log(State) ->
 sweep_stale_temps(undefined) ->
     ok;
 sweep_stale_temps(ChangesDir) ->
-    _ = beamtalk_workspace_file:sweep_stale_temps_in(ChangesDir, ?STALE_TEMP_SECONDS),
-    _ = beamtalk_workspace_file:sweep_stale_temps_in(
-        filename:join(ChangesDir, "sources"), ?STALE_TEMP_SECONDS
-    ),
+    _ = beamtalk_workspace_file:sweep_stale_temps_in(ChangesDir),
+    _ = beamtalk_workspace_file:sweep_stale_temps_in(filename:join(ChangesDir, "sources")),
     ok.
 
 %% Write Data to Path via a sibling temp file + atomic rename so readers never
