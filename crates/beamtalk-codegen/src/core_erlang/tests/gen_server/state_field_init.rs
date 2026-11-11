@@ -120,7 +120,8 @@ fn fallback_state_fields_emitted_when_class_identity_absent() {
 
     let fields = generator
         .generate_initial_state_fields(&module)
-        .expect("fallback path should succeed");
+        .expect("fallback path should succeed")
+        .fields;
 
     let text = fields
         .iter()
@@ -160,7 +161,8 @@ fn fallback_skips_late_defaultless_slot_too() {
 
     let fields = generator
         .generate_initial_state_fields(&module)
-        .expect("fallback path should succeed");
+        .expect("fallback path should succeed")
+        .fields;
 
     let text = fields
         .iter()

@@ -292,6 +292,8 @@ impl CoreErlangGenerator {
 
             // Get this class's own state fields
             let own_state_fields = self.generate_own_state_fields(module)?;
+            let (own_prelude, own_state_fields) =
+                (own_state_fields.prelude, own_state_fields.fields);
 
             let doc = docvec![
                 "'init'/1 = fun (InitArgs) ->",
@@ -328,6 +330,7 @@ impl CoreErlangGenerator {
                                         line(),
                                         "%% Merge parent state with the fields declared by this class",
                                         line(),
+                                        own_prelude,
                                         "let ChildFields = ~{",
                                         nest(
                                             INDENT,
@@ -385,6 +388,8 @@ impl CoreErlangGenerator {
         } else {
             // No parent, or parent is Actor base class - generate normal init
             let initial_state_fields = self.generate_initial_state_fields(module)?;
+            let (initial_prelude, initial_state_fields) =
+                (initial_state_fields.prelude, initial_state_fields.fields);
 
             let doc = docvec![
                 "'init'/1 = fun (InitArgs) ->",
@@ -399,6 +404,7 @@ impl CoreErlangGenerator {
                         // the leaf class's marker.
                         Self::beamtalk_actor_marker_doc(&class_name, traps_exit),
                         line(),
+                        initial_prelude,
                         "let DefaultState = ~{",
                         nest(
                             INDENT,

@@ -610,6 +610,22 @@ spawn_zero_uses_default_state_test() ->
 
 ---
 
+### 7a. Operand-order check (BT-4591)
+
+Core Erlang leaves operand evaluation order unspecified: erlc evaluates a list
+cell's tail before its head and a map literal's last pair first. In debug
+builds the codegen driver (`generate_module_with_warnings`; the REPL assembler
+drives its own generator and is not scanned) scans every module it generates
+(`core_erlang/operand_order_check.rs`) and reports a `RacingOperands`
+verifier finding for any list cell or map literal holding two or more operands
+that can run code (a `call`/`apply`/`primop`, not a variable or literal; pure
+projections such as `erlang:element` over variables are exempt). Because it
+runs inside the compiler, `just test-stdlib`, `just test-bunit` (the
+`verify-threaded-ir` corpus) and every codegen unit test enforce it.
+It scans list cells and map literals only (not tuple elements or direct `call`
+argument lists). `tests/racing_operand_corpus.rs` proves it fails on a
+reintroduced in-place builder (`LocalRebindFault::OperandsInPlace`).
+
 ### 7b. Corpus `.core` Diff Harness (BT-3509)
 
 Proves a codegen refactor is byte-identical (or shows exactly its intended

@@ -501,25 +501,34 @@ impl CoreErlangGenerator {
         &mut self,
         class_variables: &[StateDeclaration],
     ) -> Result<Document<'static>> {
-        let mut parts: Vec<Document<'static>> = Vec::new();
-        for cv in class_variables {
+        // BT-4591: defaults that run code are bound in source order ahead of the
+        // map (`thread_default_values`), so the document is `[let ... in ] ~{..}~`.
+        let vars: Vec<&StateDeclaration> = class_variables
+            .iter()
             // ADR 0124 §2/B2: a defaultless `late classState:` slot is
             // omitted from the map entirely, not emitted as `'nil'` — see
             // `omit_late_defaultless_slot`.
-            if omit_late_defaultless_slot(cv) {
-                continue;
-            }
+            .filter(|cv| !omit_late_defaultless_slot(cv))
+            .collect();
+        self.class_var_map_doc(&vars)
+    }
+
+    /// The `[let FieldDefaultN = .. in ] ~{ 'name' => value, .. }~` document of
+    /// `classState:` initial values, shared by the class registry and the
+    /// native-actor facade.
+    pub(super) fn class_var_map_doc(
+        &mut self,
+        vars: &[&StateDeclaration],
+    ) -> Result<Document<'static>> {
+        let (prelude, values) = self.thread_default_values(vars)?;
+        let mut parts: Vec<Document<'static>> = Vec::new();
+        for (cv, val) in vars.iter().zip(values) {
             if !parts.is_empty() {
                 parts.push(Document::Str(", "));
             }
-            let val = if let Some(ref default_value) = cv.default_value {
-                self.expression_doc(default_value)?
-            } else {
-                Document::Str("'nil'")
-            };
             parts.push(docvec![leaf::atom(cv.name.name.to_string()), " => ", val,]);
         }
-        Ok(Document::Vec(parts))
+        Ok(docvec![prelude, "~{", Document::Vec(parts), "}~"])
     }
 
     /// Builds the `_BuilderState` map and register call block for a single class
@@ -604,9 +613,9 @@ impl CoreErlangGenerator {
                     state_var_xref_doc,
                     ",",
                     line(),
-                    "'classState' => ~{",
+                    "'classState' => ",
                     class_vars_doc,
-                    "}~,",
+                    ",",
                     line(),
                     "'classDoc' => ",
                     class_doc_value,

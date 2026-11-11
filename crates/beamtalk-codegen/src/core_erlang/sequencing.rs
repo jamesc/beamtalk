@@ -376,6 +376,15 @@ impl CoreErlangGenerator {
     /// (`close`-style rendering always produces a valid, self-contained
     /// `Document`). For class-method-context dispatch sites, use
     /// [`Self::thread_args`] instead and splice the returned prelude.
+    ///
+    /// BT-4591: the arguments are compiled in place, which is safe only because
+    /// every caller's arguments are already sequenced (an actor-context send is
+    /// sync-bracketed; a `super` send's are pre-sequenced by `sequence_children`).
+    /// `operand_order_check` proves it for the shapes that pack the arguments
+    /// into a `[..]` list (runtime dispatch and `super`): it fails any generated
+    /// module (the stdlib / bootstrap corpus included, in debug builds) whose
+    /// list holds two operands that run code. It does not scan a direct
+    /// `call 'm':'f'(A, B)` argument list.
     pub(super) fn capture_argument_list_doc(
         &mut self,
         arguments: &[Expression],
@@ -506,7 +515,8 @@ impl CoreErlangGenerator {
     /// map literal evaluates its last operand first). `None` when at most one
     /// operand may: it has nothing to race with.
     ///
-    /// A field read is stable outside an actor closure: it reads a `State` or
+    /// A field read is stable outside an actor closure (a class variable read is
+    /// stable against another read, but not against a send, BT-4591): it reads a `State` or
     /// `Self` version, and a sibling that writes the field is a prelude
     /// producer `subexpr_needs_prelude` already sequences. Exempting it keeps
     /// `self.a + self.b` free of temps (the BT-4279 fast path needs an empty
@@ -514,19 +524,45 @@ impl CoreErlangGenerator {
     /// a live cell lookup that a sibling `blk value` writing the field through
     /// the cell changes, so there it races like any send.
     pub(super) fn last_racing_operand(&self, exprs: &[&Expression]) -> Option<usize> {
+        // BT-4591 fault: the in-place list builder BT-4296 removed.
+        #[cfg(test)]
+        if super::threaded_expr::fault::active()
+            == Some(super::threaded_expr::fault::LocalRebindFault::OperandsInPlace)
+        {
+            return None;
+        }
         let stable_field_reads = !self.in_cell_closure();
-        let mut racing = exprs
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| {
-                let inner = e.unwrap_parens();
-                let stable_field_read =
-                    stable_field_reads && matches!(inner, Expression::FieldAccess { .. });
-                !(Self::is_trivial_subexpr(inner) || stable_field_read)
-            })
-            .map(|(i, _)| i);
-        racing.next()?;
-        racing.next_back()
+        // `runs`: may run code or observe code a sibling runs. `class_var`: a
+        // class variable read (`self.n` in a class method), a live
+        // process-dictionary lookup that a sibling *send* may write (ADR 0130)
+        // but that two reads cannot disturb: it races only alongside an operand
+        // that runs code, so `self.a + self.b` stays free of temps (BT-4279).
+        let mut runs: Vec<usize> = Vec::new();
+        let mut class_var: Vec<usize> = Vec::new();
+        for (i, e) in exprs.iter().enumerate() {
+            let inner = e.unwrap_parens();
+            if Self::is_trivial_subexpr(inner) {
+                continue;
+            }
+            match inner {
+                Expression::FieldAccess {
+                    receiver, field, ..
+                } if stable_field_reads => {
+                    if self.is_class_var_field_read(receiver, field) {
+                        class_var.push(i);
+                    }
+                }
+                _ => runs.push(i),
+            }
+        }
+        if runs.is_empty() || runs.len() + class_var.len() < 2 {
+            return None;
+        }
+        runs.last()
+            .into_iter()
+            .chain(class_var.last())
+            .max()
+            .copied()
     }
 
     /// Threads `exprs` via [`Self::thread_subexprs`] and returns

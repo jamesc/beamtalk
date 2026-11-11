@@ -637,22 +637,12 @@ impl CoreErlangGenerator {
             // Class variable initial values. ADR 0124 §2/B2: a defaultless
             // `late classState:` slot is omitted from the map entirely — see
             // `omit_late_defaultless_slot`.
-            let mut class_var_parts: Vec<Document<'static>> = Vec::new();
-            for cv in &class.class_variables {
-                if omit_late_defaultless_slot(cv) {
-                    continue;
-                }
-                if !class_var_parts.is_empty() {
-                    class_var_parts.push(Document::Str(", "));
-                }
-                let val = if let Some(ref default_value) = cv.default_value {
-                    self.expression_doc(default_value)?
-                } else {
-                    Document::Str("'nil'")
-                };
-                class_var_parts.push(docvec![leaf::atom(cv.name.name.to_string()), " => ", val,]);
-            }
-            let class_vars_doc = Document::Vec(class_var_parts);
+            let class_vars: Vec<&beamtalk_core::ast::StateDeclaration> = class
+                .class_variables
+                .iter()
+                .filter(|cv| !omit_late_defaultless_slot(cv))
+                .collect();
+            let class_vars_doc = self.class_var_map_doc(&class_vars)?;
 
             // Class-level doc comment
             let class_doc_value: Document<'static> = if let Some(ref doc) = class.doc_comment {
@@ -728,9 +718,9 @@ impl CoreErlangGenerator {
                         method_xref_doc,
                         ",",
                         line(),
-                        "'classState' => ~{",
+                        "'classState' => ",
                         class_vars_doc,
-                        "}~,",
+                        ",",
                         line(),
                         "'classDoc' => ",
                         class_doc_value,

@@ -630,13 +630,11 @@ impl CoreErlangGenerator {
                     "'$beamtalk_class' => ",
                     leaf::atom(class_name.clone()),
                 ]);
-                for field in &class.state {
-                    let default_code: Document<'static> =
-                        if let Some(default_value) = &field.default_value {
-                            self.expression_doc(default_value)?
-                        } else {
-                            leaf::atom("nil")
-                        };
+                // BT-4591: defaults that run code are bound in source order.
+                let states: Vec<&beamtalk_core::ast::StateDeclaration> =
+                    class.state.iter().collect();
+                let (prelude, values) = self.thread_default_values(&states)?;
+                for (field, default_code) in class.state.iter().zip(values) {
                     own_field_parts.push(docvec![
                         leaf::atom(field.name.name.clone()),
                         " => ",
@@ -648,7 +646,9 @@ impl CoreErlangGenerator {
                     "    let ParentState = call ",
                     leaf::atom(super_mod),
                     ":'new'() in\n",
-                    "    call 'maps':'merge'(ParentState, ~{",
+                    "    ",
+                    prelude,
+                    "call 'maps':'merge'(ParentState, ~{",
                     join(own_field_parts, &Document::Str(", ")),
                     "}~)\n",
                     "\n",
@@ -659,14 +659,11 @@ impl CoreErlangGenerator {
         // Direct Value subclass: build a flat map with all own fields.
         let mut field_parts: Vec<Document<'static>> = Vec::new();
 
-        // Add each field with its default value
-        for field in &class.state {
-            let default_code: Document<'static> = if let Some(default_value) = &field.default_value
-            {
-                self.expression_doc(default_value)?
-            } else {
-                leaf::atom("nil")
-            };
+        // Add each field with its default value. BT-4591: defaults that run
+        // code are bound in source order ahead of the map.
+        let states: Vec<&beamtalk_core::ast::StateDeclaration> = class.state.iter().collect();
+        let (prelude, values) = self.thread_default_values(&states)?;
+        for (field, default_code) in class.state.iter().zip(values) {
             field_parts.push(docvec![
                 ", ",
                 leaf::atom(field.name.name.clone()),
@@ -677,7 +674,9 @@ impl CoreErlangGenerator {
 
         Ok(docvec![
             "'new'/0 = fun () ->\n",
-            "    ~{'$beamtalk_class' => '",
+            "    ",
+            prelude,
+            "~{'$beamtalk_class' => '",
             leaf::var(class_name),
             "'",
             concat(field_parts),
