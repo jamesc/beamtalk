@@ -1,0 +1,16 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+# Lint-verdict parity fixture (BT-4643 follow-up): the path dependency
+# `../lint_verdict_dep_cycle_dep` depends back on this package, so CLI
+# `beamtalk lint`'s dependency resolution fails on the cycle. The CLI then
+# falls back to the checkouts on disk, the offline scan MCP `lint` always
+# uses, so both still type the FFI call through the dependency's stubs.
+
+[package]
+name = "parity_lint_verdict_dep_cycle"
+version = "0.1.0"
+description = "CLI/MCP lint parity fixture: dependency cycle (BT-4643)"
+
+[dependencies]
+parity_lint_verdict_dep_cycle_dep = { path = "../lint_verdict_dep_cycle_dep" }

@@ -150,7 +150,8 @@ same scope as `build`.
   stub tiers included, and for `stdlib/src` targets from the stdlib's
   runtime specs (BT-4643). One input stays surface-specific: MCP reads
   dependencies, and their stubs, only from checkouts already on disk (it
-  never fetches).
+  never fetches). When the CLI cannot resolve its dependencies (a network
+  error, a dependency cycle), it reads those same checkouts instead.
 - `beamtalk build` re-checks a byte-identical file when a signature it
   type-checks against changes elsewhere (BT-4336): every pre-loaded class
   (project and dependency, trait provisions flattened in), protocol and
