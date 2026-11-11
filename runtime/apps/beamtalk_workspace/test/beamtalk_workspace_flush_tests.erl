@@ -438,7 +438,7 @@ single_method_splice_writes_atomically(#{proj_dir := ProjDir}) ->
         ?_assertEqual([], maps:get(conflicts, Summary)),
         ?_assertEqual(Expected, Final),
         %% No .tmp left over after rename.
-        ?_assertEqual(false, filelib:is_regular(File ++ ".tmp"))
+        ?_assertEqual(false, has_staging_file(File))
     ].
 
 %% Regression: editing a doc-commented, indented method and flushing must
@@ -749,8 +749,8 @@ conflict_leaves_no_tmp_files(#{proj_dir := ProjDir}) ->
     ok = file:write_file(File2, <<"Object subclass: Widget\n  render => '!'\nend\n">>),
     {ok, _Summary} = beamtalk_workspace_flush:flush(),
     [
-        ?_assertEqual(false, filelib:is_regular(File1 ++ ".tmp")),
-        ?_assertEqual(false, filelib:is_regular(File2 ++ ".tmp")),
+        ?_assertEqual(false, has_staging_file(File1)),
+        ?_assertEqual(false, has_staging_file(File2)),
         %% File1 must be unchanged because the *whole flush* aborted in Phase A.
         ?_assertEqual({ok, Original1}, file:read_file(File1))
     ].
@@ -922,7 +922,7 @@ new_class_target_is_directory_is_conflict(#{proj_dir := ProjDir}) ->
         ?_assert(lists:member(Seq, maps:get(seqs, hd(Conflicts)))),
         %% Directory remains as-is — no .tmp left behind either.
         ?_assertEqual(true, filelib:is_dir(File)),
-        ?_assertEqual(false, filelib:is_regular(File ++ ".tmp"))
+        ?_assertEqual(false, has_staging_file(File))
     ].
 
 %% Fix #3: when mark_flushed/1 returns {error, _} after successful renames,
@@ -2241,8 +2241,8 @@ rename_class_moves_file_rewrites_declaration_and_reference(#{proj_dir := ProjDir
         ?_assert(lists:member(list_to_binary(NewPath), Files)),
         ?_assert(lists:member(list_to_binary(RefPath), Files)),
         ?_assert(entry_flushed(Seq)),
-        ?_assertEqual(false, filelib:is_regular(NewPath ++ ".tmp")),
-        ?_assertEqual(false, filelib:is_regular(RefPath ++ ".tmp"))
+        ?_assertEqual(false, has_staging_file(NewPath)),
+        ?_assertEqual(false, has_staging_file(RefPath))
     ].
 
 %% Regression: `new_path` already existing as an
@@ -2279,7 +2279,7 @@ rename_class_new_path_exists_as_unrelated_file_is_conflict(#{proj_dir := ProjDir
         %% is untouched too (whole batch aborted), and no .tmp is left behind.
         ?_assertEqual({ok, UnrelatedContent}, file:read_file(NewPath)),
         ?_assertEqual({ok, OldSource}, file:read_file(OldPath)),
-        ?_assertEqual(false, filelib:is_regular(NewPath ++ ".tmp")),
+        ?_assertEqual(false, has_staging_file(NewPath)),
         ?_assertNot(entry_flushed(Seq))
     ].
 
@@ -2378,7 +2378,7 @@ rename_class_self_reference_move_noop_after_old_path_gone(#{proj_dir := ProjDir}
         %% a redundant re-splice against the wrong (unshifted) offset.
         ?_assertEqual(ExpectedBody, NewBodyAfter),
         ?_assert(entry_flushed(Seq)),
-        ?_assertEqual(false, filelib:is_regular(NewPath ++ ".tmp"))
+        ?_assertEqual(false, has_staging_file(NewPath))
     ].
 
 %% Forced Phase A staleness on the declaration span: a Phase A failure
@@ -2422,8 +2422,8 @@ rename_class_external_edit_on_declaration_aborts_with_no_partial_writes(#{proj_d
         ?_assert(length(Conflicts) >= 1),
         ?_assertEqual(<<"external_edit">>, maps:get(reason, hd(Conflicts))),
         ?_assertEqual(false, filelib:is_regular(NewPath)),
-        ?_assertEqual(false, filelib:is_regular(NewPath ++ ".tmp")),
-        ?_assertEqual(false, filelib:is_regular(RefPath ++ ".tmp")),
+        ?_assertEqual(false, has_staging_file(NewPath)),
+        ?_assertEqual(false, has_staging_file(RefPath)),
         ?_assertEqual({ok, ExternalEdit}, file:read_file(OldPath)),
         ?_assertEqual({ok, RefSource}, file:read_file(RefPath)),
         ?_assertNot(entry_flushed(Seq))
@@ -2471,7 +2471,7 @@ rename_class_external_edit_on_reference_site_aborts_with_no_partial_writes(#{
         %% The move's OWN splice was valid — it must still be rolled back
         %% (no `.tmp`, `old_path` untouched) once the sibling site conflicts.
         ?_assertEqual(false, filelib:is_regular(NewPath)),
-        ?_assertEqual(false, filelib:is_regular(NewPath ++ ".tmp")),
+        ?_assertEqual(false, has_staging_file(NewPath)),
         ?_assertEqual({ok, OldSource}, file:read_file(OldPath)),
         ?_assertEqual({ok, ExternalEdit}, file:read_file(RefPath)),
         ?_assertNot(entry_flushed(Seq))
@@ -2584,7 +2584,7 @@ rename_class_two_renames_colliding_on_new_path_is_conflict(#{proj_dir := ProjDir
         ?_assertEqual(true, filelib:is_regular(OldPath1)),
         ?_assertEqual(true, filelib:is_regular(OldPath2)),
         ?_assertEqual(false, filelib:is_regular(SharedNewPath)),
-        ?_assertEqual(false, filelib:is_regular(SharedNewPath ++ ".tmp")),
+        ?_assertEqual(false, has_staging_file(SharedNewPath)),
         ?_assertNot(entry_flushed(Seq1)),
         ?_assertNot(entry_flushed(Seq2))
     ].
@@ -2632,7 +2632,7 @@ rename_class_new_path_collides_with_other_rename_old_path_is_conflict(#{proj_dir
         ?_assertEqual(true, filelib:is_regular(OldPath1)),
         ?_assertEqual({ok, OldSource2}, file:read_file(SharedPath)),
         ?_assertEqual(false, filelib:is_regular(NewPath2)),
-        ?_assertEqual(false, filelib:is_regular(SharedPath ++ ".tmp")),
+        ?_assertEqual(false, has_staging_file(SharedPath)),
         ?_assertNot(entry_flushed(Seq1)),
         ?_assertNot(entry_flushed(Seq2))
     ].
@@ -2883,9 +2883,9 @@ rename_class_resumes_after_simulated_partial_phase_b(#{proj_dir := ProjDir}) ->
             <<"Object subclass: Gadget\n  makeCounter => Accumulator new\nend\n">>, RefBody2After
         ),
         ?_assert(entry_flushed(Seq)),
-        ?_assertEqual(false, filelib:is_regular(NewPath ++ ".tmp")),
-        ?_assertEqual(false, filelib:is_regular(RefPath1 ++ ".tmp")),
-        ?_assertEqual(false, filelib:is_regular(RefPath2 ++ ".tmp"))
+        ?_assertEqual(false, has_staging_file(NewPath)),
+        ?_assertEqual(false, has_staging_file(RefPath1)),
+        ?_assertEqual(false, has_staging_file(RefPath2))
     ].
 
 %%====================================================================
@@ -3013,8 +3013,8 @@ rename_method_rewrites_definition_and_confirmed_senders(#{proj_dir := ProjDir}) 
         ?_assert(lists:member(list_to_binary(SubFile), Files)),
         ?_assertNot(lists:member(list_to_binary(CandidatePath), Files)),
         ?_assert(entry_flushed(Seq)),
-        ?_assertEqual(false, filelib:is_regular(DefFile ++ ".tmp")),
-        ?_assertEqual(false, filelib:is_regular(SubFile ++ ".tmp"))
+        ?_assertEqual(false, has_staging_file(DefFile)),
+        ?_assertEqual(false, has_staging_file(SubFile))
     ].
 
 %% Explicit acceptance-criteria coverage: `candidate_sites` must never be
@@ -3045,7 +3045,7 @@ rename_method_candidate_sites_are_never_written(#{proj_dir := ProjDir}) ->
     {ok, _Summary} = beamtalk_workspace_flush:flush_including_destructive(),
     [
         ?_assertEqual({ok, CandidateSource}, file:read_file(CandidatePath)),
-        ?_assertEqual(false, filelib:is_regular(CandidatePath ++ ".tmp"))
+        ?_assertEqual(false, has_staging_file(CandidatePath))
     ].
 
 %% Acceptance criterion: "A Phase A failure (a confirmed site's span no
@@ -3089,8 +3089,8 @@ rename_method_external_edit_on_confirmed_site_aborts_whole_batch(#{proj_dir := P
         %% The whole batch aborted: DefFile is untouched even though its own
         %% splice would have staged cleanly in isolation.
         ?_assertEqual({ok, DefSource}, file:read_file(DefFile)),
-        ?_assertEqual(false, filelib:is_regular(DefFile ++ ".tmp")),
-        ?_assertEqual(false, filelib:is_regular(SubFile ++ ".tmp")),
+        ?_assertEqual(false, has_staging_file(DefFile)),
+        ?_assertEqual(false, has_staging_file(SubFile)),
         ?_assertNot(entry_flushed(Seq))
     ].
 
@@ -4084,3 +4084,26 @@ announce_flush_completed_empty_is_silent_test() ->
     after
         beamtalk_announcements:unsubscribe(SubRef)
     end.
+
+has_staging_file_sees_unique_and_legacy_names_test() ->
+    Dir = "has_staging_file_test_dir",
+    ok = filelib:ensure_path(Dir),
+    File = filename:join(Dir, "a.bt"),
+    try
+        ?assertEqual(false, has_staging_file(File)),
+        ok = file:write_file(File ++ ".42.tmp", <<>>),
+        ?assert(has_staging_file(File)),
+        ok = file:delete(File ++ ".42.tmp"),
+        ok = file:write_file(File ++ ".tmp", <<>>),
+        ?assert(has_staging_file(File))
+    after
+        _ = file:del_dir_r(Dir)
+    end.
+
+%% True when a write to `File` left a staging file behind: the legacy fixed
+%% `<File>.tmp` or a `beamtalk_workspace_file` unique `<File>.<N>.tmp`
+%% (BT-4683). Checking only `<File>.tmp` can no longer fail now that staging
+%% uses unique names.
+has_staging_file(File) ->
+    filelib:is_regular(File ++ ".tmp") orelse
+        filelib:wildcard(filename:basename(File) ++ ".*.tmp", filename:dirname(File)) =/= [].
