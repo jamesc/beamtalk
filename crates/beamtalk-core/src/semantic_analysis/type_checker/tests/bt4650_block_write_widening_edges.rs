@@ -120,3 +120,13 @@ fn cascade_receiver_block_write_is_visible_to_sibling_argument() {
         "cascade receiver was deferred: {diags:#?}"
     );
 }
+
+#[test]
+fn widening_drops_node_hint_when_same_class_arms_disagree_on_the_node() {
+    // Same class on both sides, so the types match and the widening takes the
+    // early-exit path rather than the join path.
+    let src = remote_probe("    items do: [:e | remote := (Worker spawnOn: other) unwrap]\n")
+        .replace("with: items", "with: other :: Node with: items");
+    let remote = last_read_remote(&src).expect("fact kept");
+    assert_eq!(remote.node_hint, None);
+}

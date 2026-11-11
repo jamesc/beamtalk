@@ -1702,8 +1702,9 @@ impl TypeChecker {
             let mut arms = vec![before.clone()];
             arms.extend(writes.iter().map(|w| w.ty.clone()));
             if arms.iter().skip(1).all(|ty| *ty == before) {
-                if remote.is_none() {
-                    env.clear_known_remote(&key);
+                match remote {
+                    Some(remote) => env.mark_known_remote(key, remote),
+                    None => env.clear_known_remote(&key),
                 }
                 continue;
             }
