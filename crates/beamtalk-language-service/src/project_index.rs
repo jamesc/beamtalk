@@ -700,7 +700,6 @@ impl ProjectIndex {
     /// other files. This method restores the first definition found, using
     /// deterministic (sorted by path) iteration order.
     fn remerge_classes(&mut self, names: &[EcoString]) {
-        self.protocol_registry_cache.clear();
         // Sort file paths for deterministic conflict resolution
         let mut sorted_paths: Vec<&Utf8PathBuf> = self.file_hierarchies.keys().collect();
         sorted_paths.sort();
@@ -1574,6 +1573,47 @@ mod tests {
         let after = index.protocol_registry_for(&file, &edited);
         assert!(!Arc::ptr_eq(&before, &after));
         assert!(after.has_protocol("Wire"));
+    }
+
+    /// BT-4456: every mutator that changes what `protocol_registry_for` reads
+    /// (`merged_hierarchy`, `file_protocols`, the stdlib/package
+    /// classification) must drop the cache, so removing any one `clear()`
+    /// fails here.
+    #[test]
+    fn every_protocol_registry_input_mutator_invalidates_the_cache() {
+        let module = parse(lex_with_eof("Protocol define: Mine\n  label -> String\n")).0;
+        let file = Utf8PathBuf::from("src/Own.bt");
+        let other = Utf8PathBuf::from("src/Other.bt");
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut index = ProjectIndex::new();
+
+        let assert_invalidated =
+            |index: &mut ProjectIndex, what: &str, mutate: &dyn Fn(&mut ProjectIndex)| {
+                let before = index.protocol_registry_for(&file, &module);
+                assert!(
+                    Arc::ptr_eq(&before, &index.protocol_registry_for(&file, &module)),
+                    "{what}: expected a cache hit before mutating"
+                );
+                mutate(index);
+                assert!(
+                    !Arc::ptr_eq(&before, &index.protocol_registry_for(&file, &module)),
+                    "{what} must invalidate the protocol registry cache"
+                );
+            };
+
+        assert_invalidated(&mut index, "update_file", &|i| {
+            i.update_file(other.clone(), &hierarchy);
+        });
+        assert_invalidated(&mut index, "update_file_protocols", &|i| {
+            i.update_file_protocols(other.clone(), Vec::new());
+        });
+        assert_invalidated(&mut index, "remove_file", &|i| i.remove_file(&other));
+        assert_invalidated(&mut index, "set_root_packages", &|i| {
+            i.set_root_packages(vec![(Utf8PathBuf::from("root"), EcoString::from("pkg"))]);
+        });
+        assert_invalidated(&mut index, "mark_stdlib_file", &|i| {
+            i.mark_stdlib_file(other.clone());
+        });
     }
 
     /// BT-4456: a cloned index starts with an empty cache rather than
