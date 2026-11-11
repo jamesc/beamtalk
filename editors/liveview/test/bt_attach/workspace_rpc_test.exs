@@ -515,6 +515,33 @@ defmodule BtAttach.WorkspaceRpcTest do
                {:ok, "fetch:options: docs"}
     end
 
+    test "hover/3 sends the edited class and side only when both are given (BT-4463)" do
+      mock_rpc(
+        decode_asserting(
+          fn request ->
+            assert request["class"] == "Counter"
+            assert request["side"] == "class"
+          end,
+          {:docs, "docs"}
+        )
+      )
+
+      assert Workspace.hover(self(), "self size", %{class: "Counter", side: "class"}) ==
+               {:ok, "docs"}
+
+      mock_rpc(
+        decode_asserting(
+          fn request ->
+            refute Map.has_key?(request, "class")
+            refute Map.has_key?(request, "side")
+          end,
+          {:docs, "docs"}
+        )
+      )
+
+      assert Workspace.hover(self(), "self size", %{class: "Counter"}) == {:ok, "docs"}
+    end
+
     test "hover/2 propagates a dispatch error" do
       mock_rpc(decode_ok({:beamtalk_repl_ops, :dispatch}, {:error, :unresolved}))
       assert Workspace.hover(self(), "x") == {:error, :unresolved}

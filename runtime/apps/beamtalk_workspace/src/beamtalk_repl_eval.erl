@@ -1968,36 +1968,26 @@ scan_for_second_top_level_statement([_ | Rest], Depth) ->
 -doc """
 Skips one string literal starting at the opening `"`, returning
 `{ok, Rest}` with the characters immediately after its closing `"`, or
-`unsupported` if the string contains string interpolation.
+`unsupported` if the string is malformed beyond what the lexer would accept
+(an interpolation or nested string left unterminated).
 
-Mirrors `lex_string/0` (`source_analysis/lexer.rs`) for the common,
-non-interpolated case: `""` (doubled delimiter) is a literal `"` inside the
-string, and `\` escapes whatever character follows it — including another
-`\` or a `"` — so that pair is always consumed together and never
-independently reopens/closes the string. An unterminated string (malformed
-input that would already have failed compilation before reaching here)
-returns `{ok, []}`.
+Mirrors `lex_string/0` (`source_analysis/lexer.rs`): `""` (doubled delimiter)
+is a literal `"` inside the string, and `\` escapes whatever character
+follows it — including another `\`, a `"`, or a `{` — so that pair is always
+consumed together and never independently reopens/closes the string. An
+unterminated plain string (malformed input that would already have failed
+compilation before reaching here) returns `{ok, []}`.
 
-An unescaped `{` starts a string interpolation (`lex_interpolation_body`),
-whose body is an arbitrary expression that may itself contain a *nested*
-string literal (`skip_nested_string`) — i.e. a single BT string token can
-legitimately contain more than two `"` characters, with the interpolated
-expression's own `.`/`{`/`}`/`"` syntax interleaved. Faithfully mirroring
-that (brace depth, nested strings, comments, doubled `{{}}`, all inside one
-string) is real lexer logic this heuristic scanner isn't worth duplicating
-for what is only a display/future-rebinding optimization — so it bails out
-via `unsupported` instead of risking a wrong guess at the string's real
-extent (which could mis-pair quotes across the interpolation and produce
-an incorrect statement-boundary read either way). The caller
-(`scan_for_second_top_level_statement/2`) treats `unsupported` the same as
-a confirmed second statement — safe, since `extract_assignment/1`'s only
-use of a `none` result is to skip an optimization, never to corrupt a
-binding.
+An unescaped `{` starts a string interpolation, skipped by
+`skip_interpolation_body/1`, a mirror of `lex_interpolation_body` (brace
+depth, nested strings, comments, character literals, backslash pairs, the
+empty `{}` and doubled `{{ … }}` forms). A single BT string token can thus
+contain more than two `"` characters.
 
 Conformance-tested against the real Rust lexer via the shared corpus
 `runtime/apps/beamtalk_workspace/test/fixtures/
-string_and_character_literal_span_corpus.json` for the non-interpolated
-case — see
+string_and_character_literal_span_corpus.json`, interpolated cases included —
+see
 `beamtalk_repl_eval_tests:string_and_character_literal_span_matches_shared_corpus_test/0`
 and `source_analysis::lexer::tests::string_and_character_literal_span_matches_shared_corpus`.
 """.
@@ -2008,8 +1998,11 @@ skip_string_literal([$" | Rest]) ->
 -spec skip_string_literal_body(string()) -> {ok, string()} | unsupported.
 skip_string_literal_body([]) ->
     {ok, []};
-skip_string_literal_body([${ | _Rest]) ->
-    unsupported;
+skip_string_literal_body([${ | Rest]) ->
+    case skip_interpolation_body(Rest) of
+        {ok, After} -> skip_string_literal_body(After);
+        unsupported -> unsupported
+    end;
 skip_string_literal_body([$", $" | Rest]) ->
     skip_string_literal_body(Rest);
 skip_string_literal_body([$" | Rest]) ->
@@ -2020,6 +2013,80 @@ skip_string_literal_body([$\\]) ->
     {ok, []};
 skip_string_literal_body([_ | Rest]) ->
     skip_string_literal_body(Rest).
+
+%% Mirror of `lex_interpolation_body` (`source_analysis/lexer.rs`): `Chars`
+%% starts just after the interpolation's opening `{`; returns the characters
+%% after its matching `}`. Unterminated input is `unsupported`.
+-spec skip_interpolation_body(string()) -> {ok, string()} | unsupported.
+skip_interpolation_body([${ | _] = Chars) ->
+    %% Doubled `{{`: `skip_doubled_braces` consumes to the matching depth-0
+    %% `}` counting only braces (no strings or comments).
+    skip_doubled_braces(Chars, 1);
+skip_interpolation_body(Chars) ->
+    case lists:dropwhile(fun(C) -> lists:member(C, " \t\r\n") end, Chars) of
+        [$} | Rest] ->
+            %% Empty `{}` (whitespace only): the lexer reports an error token
+            %% but its extent still ends at this `}`.
+            {ok, Rest};
+        _ ->
+            skip_interpolation_chars(Chars, 1)
+    end.
+
+-spec skip_doubled_braces(string(), non_neg_integer()) -> {ok, string()} | unsupported.
+skip_doubled_braces(Rest, 0) -> {ok, Rest};
+skip_doubled_braces([], _Depth) -> unsupported;
+skip_doubled_braces([${ | Rest], Depth) -> skip_doubled_braces(Rest, Depth + 1);
+skip_doubled_braces([$} | Rest], Depth) -> skip_doubled_braces(Rest, Depth - 1);
+skip_doubled_braces([_ | Rest], Depth) -> skip_doubled_braces(Rest, Depth).
+
+-spec skip_interpolation_chars(string(), pos_integer()) -> {ok, string()} | unsupported.
+skip_interpolation_chars([], _Depth) ->
+    unsupported;
+skip_interpolation_chars([$" | Rest], Depth) ->
+    case skip_nested_string(Rest) of
+        {ok, After} -> skip_interpolation_chars(After, Depth);
+        unsupported -> unsupported
+    end;
+skip_interpolation_chars([${ | Rest], Depth) ->
+    skip_interpolation_chars(Rest, Depth + 1);
+skip_interpolation_chars([$/, $/ | _] = Chars, Depth) ->
+    skip_interpolation_chars(skip_line_comment(Chars), Depth);
+skip_interpolation_chars([$/, $* | _] = Chars, Depth) ->
+    case skip_block_comment_terminated(Chars) of
+        {ok, After} -> skip_interpolation_chars(After, Depth);
+        unsupported -> unsupported
+    end;
+skip_interpolation_chars([$$ | _] = Chars, Depth) ->
+    skip_interpolation_chars(skip_character_literal(Chars), Depth);
+skip_interpolation_chars([$} | Rest], 1) ->
+    {ok, Rest};
+skip_interpolation_chars([$} | Rest], Depth) ->
+    skip_interpolation_chars(Rest, Depth - 1);
+skip_interpolation_chars([$\\, _ | Rest], Depth) ->
+    skip_interpolation_chars(Rest, Depth);
+skip_interpolation_chars([_ | Rest], Depth) ->
+    skip_interpolation_chars(Rest, Depth).
+
+%% Mirror of `skip_nested_string` (`source_analysis/lexer.rs`): `Chars` starts
+%% just after the nested string's opening `"`. EOF before the closing quote is
+%% `unsupported` (the lexer treats that `"` as the outer string's close and
+%% reports an error).
+-spec skip_nested_string(string()) -> {ok, string()} | unsupported.
+skip_nested_string([]) -> unsupported;
+skip_nested_string([$", $" | Rest]) -> skip_nested_string(Rest);
+skip_nested_string([$" | Rest]) -> {ok, Rest};
+skip_nested_string([$\\, _ | Rest]) -> skip_nested_string(Rest);
+skip_nested_string([_ | Rest]) -> skip_nested_string(Rest).
+
+%% A `/* ... */` comment that must be terminated (inside an interpolation the
+%% lexer treats EOF there as incomplete input).
+-spec skip_block_comment_terminated(string()) -> {ok, string()} | unsupported.
+skip_block_comment_terminated([$/, $* | Rest]) -> block_comment_end(Rest).
+
+-spec block_comment_end(string()) -> {ok, string()} | unsupported.
+block_comment_end([]) -> unsupported;
+block_comment_end([$*, $/ | Rest]) -> {ok, Rest};
+block_comment_end([_ | Rest]) -> block_comment_end(Rest).
 
 -doc """
 Skips one character literal starting at `$`, returning the characters

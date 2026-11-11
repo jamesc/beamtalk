@@ -2932,8 +2932,18 @@ mod tests {
                 "expected a {kind} token for {source:?}, got {:?} ({why})",
                 tokens[0].kind()
             );
+            // An interpolated string lexes as `StringStart … StringEnd`; the
+            // literal's extent ends with the `StringEnd` token.
+            let last = if matches!(tokens[0].kind(), TokenKind::StringStart(_)) {
+                tokens
+                    .iter()
+                    .find(|t| matches!(t.kind(), TokenKind::StringEnd(_)))
+                    .unwrap_or_else(|| panic!("no StringEnd for {source:?} ({why})"))
+            } else {
+                &tokens[0]
+            };
             assert_eq!(
-                u64::from(tokens[0].span().end()),
+                u64::from(last.span().end()),
                 expected_end,
                 "span-end mismatch for {source:?} ({why})"
             );

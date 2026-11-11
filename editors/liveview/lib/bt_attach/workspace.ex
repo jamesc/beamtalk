@@ -739,11 +739,18 @@ defmodule BtAttach.Workspace do
   send — possibly split across lines — to resolve its full keyword selector
   (`fetch:options:`). Both default to `""`.
 
+  `context` may also carry `:class` and `:side` (`"instance"` | `"class"`) —
+  the class a method editor edits (BT-4463). A `self` / `super` receiver then
+  resolves against that class (`super` against its superclass); without them
+  `self` / `super` do not resolve.
+
   Returns the formatted markdown as `{:ok, String.t()}` (`""` when nothing
   resolves — the client then shows no tooltip), or `{:error, reason}` on a
   dispatch failure — JSON never crosses the Attach path here either.
   """
-  @spec hover(pid(), String.t(), %{optional(:before | :suffix) => String.t()}) ::
+  @spec hover(pid(), String.t(), %{
+          optional(:before | :suffix | :class | :side) => String.t()
+        }) ::
           {:ok, String.t()} | {:error, term()}
   def hover(session_pid, code, context \\ %{})
       when is_pid(session_pid) and is_binary(code) and is_map(context) do
@@ -1111,6 +1118,16 @@ defmodule BtAttach.Workspace do
       "before" => Map.get(context, :before, ""),
       "suffix" => Map.get(context, :suffix, "")
     }
+
+    # BT-4463: the edited method's class, only when a method editor sent one.
+    request =
+      case context do
+        %{class: class, side: side} when is_binary(class) and is_binary(side) ->
+          Map.merge(request, %{"class" => class, "side" => side})
+
+        _ ->
+          request
+      end
 
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->

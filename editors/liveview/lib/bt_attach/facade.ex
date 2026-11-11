@@ -489,6 +489,17 @@ defmodule BtAttach.Facade do
   defp invoke(:hover, %{session_pid: pid, code: code} = params, _ctx) do
     context = %{before: Map.get(params, :before, ""), suffix: Map.get(params, :suffix, "")}
 
+    # BT-4463: a method editor also names the class (and side) it edits, so
+    # `self` / `super` receivers resolve. Both or neither.
+    context =
+      case params do
+        %{class: class, side: side} when is_binary(class) and is_binary(side) ->
+          Map.merge(context, %{class: class, side: side})
+
+        _ ->
+          context
+      end
+
     if is_pid(pid) and is_binary(code) and is_binary(context.before) and
          is_binary(context.suffix),
        do: client().hover(pid, code, context),

@@ -174,7 +174,8 @@ defmodule BtAttachWeb.Live.SystemBrowser do
                code: code,
                before: string_param(params, "before"),
                suffix: string_param(params, "suffix")
-             },
+             }
+             |> Map.merge(hover_self_context(socket, Map.get(params, "tab_id"))),
              RequestContext.build(socket)
            ) do
         {:ok, docs} when is_binary(docs) -> hover_html(docs)
@@ -667,6 +668,24 @@ defmodule BtAttachWeb.Live.SystemBrowser do
       _ -> {:noreply, socket}
     end
   end
+
+  # BT-4463: the class and side a method-editor tab edits, so a hovered `self` /
+  # `super` receiver resolves against it. Looked up from the tab id (never
+  # taken from the client), like `diagnostics_source_path/2`. Only a method tab
+  # qualifies: a `:def` tab edits the whole class definition, and the Workspace
+  # + REPL editors have no tab id. Returns `%{}` when there is none.
+  defp hover_self_context(socket, tab_id) when is_binary(tab_id) do
+    case Enum.find(socket.assigns[:tabs] || [], &(&1.id == tab_id)) do
+      %{kind: :method, class: class, side: side}
+      when is_binary(class) and side in ["instance", "class"] ->
+        %{class: class, side: side}
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp hover_self_context(_socket, _tab_id), do: %{}
 
   # BT-4583: the source file a `diagnostics` request's buffer edits, or `nil`.
   # Only a class-definition (`:def`) tab is file-backed in expression mode: a

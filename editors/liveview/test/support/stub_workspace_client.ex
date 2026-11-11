@@ -1428,7 +1428,9 @@ defmodule BtAttachWeb.StubWorkspaceClient do
   # block, a method's `///` doc-comment as authored. `Fetcher` hovers a method
   # whose doc-comment has an `## Options` section (and author text that must be
   # escaped, not interpreted).
-  def hover(_pid, code, _context \\ %{}) do
+  def hover(pid, code, context \\ %{}) do
+    record({:hover, pid, code, context})
+
     cond do
       String.contains?(code, "Fetcher") ->
         {:ok,
