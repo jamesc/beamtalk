@@ -6599,8 +6599,9 @@ registered_name_for_pid(Pid) when is_pid(Pid) ->
 %%
 %% A `native:` actor's backing gen_server (ADR 0056) has no marker; its class
 %% comes from the `'$initial_call'` fallback (`native_pid_class_name/1`,
-%% BT-4657), so native actors also get a class label in the inspector and in
-%% process navigation.
+%% BT-4657), so native actors also get a class label in the inspector and are
+%% resolvable via `named:` / `allRegistered`. (Process navigation still
+%% classifies via the marker-only `is_beamtalk_actor/1`.)
 %%
 %% Local-pid only: `erlang:process_info/2` raises `badarg` for a pid on
 %% another node. `pid_class_name_remote_safe/1` below is the node-aware
@@ -6626,7 +6627,7 @@ pid_class_name(Pid) ->
 -spec native_pid_class_name(list()) -> atom() | nil.
 native_pid_class_name(Dict) ->
     case lists:keyfind('$initial_call', 1, Dict) of
-        {'$initial_call', {Backing, _, _}} when is_atom(Backing) ->
+        {'$initial_call', {Backing, init, 1}} when is_atom(Backing) ->
             %% The index can hold a stale row for a class whose process died
             %% (`forget_backing_module_entries/2`), so keep live classes only.
             Live = [

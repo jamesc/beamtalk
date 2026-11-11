@@ -21,7 +21,7 @@ Tests all actor behaviors:
 
 %% Logger handler callback for the stacktrace-capture tests below
 -export([log/2]).
--export([bt4657_wait/0]).
+-export([bt4657_wait/0, init/1]).
 %% BT-3582: `fun ?MODULE:F/A` external fun refs stored in `__methods__` maps
 %% resolve through the module's export table at call time, same as
 %% test_wirecheck_actor.erl's method funs — must be exported.
@@ -4476,6 +4476,9 @@ pid_class_name_returns_nil_on_non_beamtalk_pid_test() ->
 
 %% BT-4657: a `native:` actor's backing process carries no marker; its class
 %% comes from the backing-module index via `'$initial_call'`.
+init(_) ->
+    bt4657_wait().
+
 bt4657_wait() ->
     receive
         stop -> ok
@@ -4487,9 +4490,12 @@ pid_class_name_native_backing_module_test() ->
     Other = 'Bt4657OtherLiveClass',
     Stale = 'Bt4657StaleClass',
     Backing = ?MODULE,
-    Pid = proc_lib:spawn(?MODULE, bt4657_wait, []),
+    Pid = proc_lib:spawn(?MODULE, init, [x]),
+    %% A helper the backing module starts with proc_lib is not its gen_server.
+    Helper = proc_lib:spawn(?MODULE, bt4657_wait, []),
     %% proc_lib sets '$initial_call' inside the new process; wait for it.
     ok = wait_for_initial_call(Pid, 100),
+    ok = wait_for_initial_call(Helper, 100),
     LivePid = spawn(fun bt4657_wait/0),
     OtherPid = spawn(fun bt4657_wait/0),
     register(beamtalk_class_registry_name(Live), LivePid),
@@ -4499,6 +4505,7 @@ pid_class_name_native_backing_module_test() ->
         ets:insert(beamtalk_backing_module_index, {Backing, Stale, self()}),
         ets:insert(beamtalk_backing_module_index, {Backing, Live, LivePid}),
         ?assertEqual(Live, beamtalk_actor:pid_class_name(Pid)),
+        ?assertEqual(nil, beamtalk_actor:pid_class_name(Helper)),
         %% Two live classes sharing the module are ambiguous.
         ets:insert(beamtalk_backing_module_index, {Backing, Other, OtherPid}),
         ?assertEqual(nil, beamtalk_actor:pid_class_name(Pid))
@@ -4507,6 +4514,7 @@ pid_class_name_native_backing_module_test() ->
         unregister(beamtalk_class_registry_name(Live)),
         unregister(beamtalk_class_registry_name(Other)),
         Pid ! stop,
+        Helper ! stop,
         LivePid ! stop,
         OtherPid ! stop
     end.
