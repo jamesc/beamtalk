@@ -726,7 +726,7 @@ static_call_ref(Key, ClassName, Selector, Arity) ->
             case
                 runs_compiled_function(ClassName, DefiningClass, Selector) andalso
                     erlang:function_exported(Module, FunName, Arity) andalso
-                    key_body_holds(Key, ClassName, Module, Selector)
+                    key_body_holds(Key, ClassName, DefiningClass, Selector)
             of
                 true -> #beamtalk_object{class = Tag, class_mod = ClassModule, pid = Pid};
                 false -> false
@@ -751,22 +751,21 @@ key_target({Module, FunName, Tag}) when is_atom(Module), is_atom(FunName), is_at
 %% BT-4270: a caller-safe raise key's hit path does not call `Module:FunName`;
 %% it raises in the caller through `Primitive`, as that method's body would.
 %% So the key also needs the body to be exactly that primitive, which the
-%% defining module's own generated metadata says
-%% (`'caller_safe_class_primitives' => #{Selector => Primitive}`, decided by
-%% the compiler from the method source). Read at install only, from the code
-%% current then: a reload that changes the body publishes its metadata write
-%% and then erases the key, and any install after the erase reads the new
-%% code's metadata.
--spec key_body_holds(static_call_key(), atom(), module(), atom()) -> boolean().
-key_body_holds({caller_safe_raise, Primitive, _, _, _}, _ClassName, Module, Selector) ->
-    %% bt-catcher-audit: not-applicable-no-block - a generated __beamtalk_meta/0 getter
-    try Module:'__beamtalk_meta'() of
-        #{caller_safe_class_primitives := #{Selector := Primitive}} -> true;
+%% defining class's published metadata row says (`caller_safe_class_primitives`,
+%% decided by the compiler from the method source). BT-4493: read from the
+%% row, not from `Module:'__beamtalk_meta'()`: a reload erases keys inside the
+%% new module's `-on_load`, while the old code is still current, so the
+%% module's meta would certify the old body. The row is written from the new
+%% meta, and a change erases the keys (descendants' included).
+-spec key_body_holds(static_call_key(), atom(), atom(), atom()) -> boolean().
+key_body_holds({caller_safe_raise, Primitive, _, _, _}, _ClassName, DefiningClass, Selector) ->
+    case
+        maps:find(Selector, beamtalk_class_metadata:lookup_caller_safe_primitives(DefiningClass))
+    of
+        {ok, Primitive} -> true;
         _ -> false
-    catch
-        error:undef -> false
     end;
-key_body_holds({constant_value, Value, _, _, _}, ClassName, _Module, Selector) ->
+key_body_holds({constant_value, Value, _, _, _}, ClassName, _DefiningClass, Selector) ->
     %% BT-4363: the hit path answers `Value` without calling the method, so
     %% the body must be exactly that literal (any scalar kind, BT-4504), as
     %% the class's published metadata row says (`constant_class_methods`, generated from the method
