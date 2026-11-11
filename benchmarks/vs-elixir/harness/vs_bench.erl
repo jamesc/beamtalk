@@ -878,7 +878,14 @@ inv_shape(Load, N, K, Rounds) ->
             Load, N, K, length(Keys), Rounds, median(Times), lists:min(Times), median(WarmTimes)
         ])
     after
-        [try gen_server:stop(P, normal, 5000) catch _:_ -> ok end|| P <- [Root | SubPids]]
+        [
+            try
+                gen_server:stop(P, normal, 5000)
+            catch
+                _:_ -> ok
+            end
+         || P <- [Root | SubPids]
+        ]
     end.
 
 %% A runnable process that never blocks (one per scheduler: a busy node).
