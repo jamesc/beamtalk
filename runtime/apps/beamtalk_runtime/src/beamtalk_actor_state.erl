@@ -153,6 +153,7 @@ map_cell_entry({?EXCUSED, Carried}, Fun) when is_list(Carried) ->
 map_cell_entry(Entry, _Fun) ->
     Entry.
 
+-spec map_if_state(term(), fun((map()) -> map())) -> term().
 map_if_state(State, Fun) when is_map(State) -> Fun(State);
 map_if_state(Other, _Fun) -> Other.
 
