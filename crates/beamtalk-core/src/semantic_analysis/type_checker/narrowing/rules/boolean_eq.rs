@@ -36,9 +36,11 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
     };
     // `equality_operator_is_negated` is the single definition of the
     // equality-operator set. Only the positive spellings are narrowed: the
-    // matching branch is the boolean class. A negated spelling (`/=`, `=/=`)
-    // is sound only when `x` is known to be a `Boolean`, which this rule
-    // cannot assume, so it is rejected here rather than by a hardcoded list.
+    // matching branch is the boolean class. The negated spellings (`/=`,
+    // `=/=`) are left out on purpose, not because they are unsound (they are
+    // the same `KindOf` test with the branches swapped) but because nothing
+    // needs them yet; supporting them means carrying a `negated` flag through
+    // `ClassTestInfo`, as `singleton_eq` does.
     if equality_operator_is_negated(op.as_str())? {
         return None;
     }

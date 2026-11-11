@@ -97,10 +97,18 @@ typed Object subclass: Repro
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
 
-/// Negated spellings are not narrowed (they would be unsound for non-Booleans).
+/// Negated spellings are deliberately not narrowed. An `ifFalse: [^0]` guard
+/// is the one that would narrow `False` out if `/=` were recognised, so the
+/// diagnostic here proves it is not (an `ifTrue:` guard would pass either way).
 #[test]
 fn bt4638_negated_spelling_does_not_narrow() {
-    let diags = type_diagnostics(&guard_source("Integer | False", "(x /= false)"));
+    let source = r"
+typed Object subclass: Repro
+  class go: x :: Integer | False -> Integer =>
+    (x /= false) ifFalse: [^0]
+    x + 1
+";
+    let diags = type_diagnostics(source);
     assert!(
         !diags.is_empty(),
         "`/=` is not recognised, so `False` is still possible; expected a diagnostic"
