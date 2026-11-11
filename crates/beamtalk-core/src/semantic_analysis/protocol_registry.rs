@@ -325,7 +325,10 @@ impl ProtocolInfo {
     /// requirement here too, with its declared return type (BT-4490): a
     /// conformer must answer it, and it is the protocol's own body that
     /// supplies the type, so `P` providing `name -> String` subsumes `Q`
-    /// requiring `name -> String`. A return type naming a type parameter of
+    /// requiring `name -> String`. The same goes for `other`'s side: its
+    /// provisions' declared return types are judged like its requirements',
+    /// matching [`ProtocolRegistry::conformance_return_type_mismatches`]. A
+    /// return type naming a type parameter of
     /// either protocol has no substitution context here and is not judged.
     #[must_use]
     pub fn subsumes_conformance_to(
