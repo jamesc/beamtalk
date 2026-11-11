@@ -655,3 +655,50 @@ fn test_method_validators_run_on_class_side_methods() {
         );
     }
 }
+
+#[test]
+fn test_extension_methods_get_resolution_and_validators() {
+    // BT-4658: standalone `Foo >> sel =>` / `Foo class >> sel =>` bodies are
+    // analysed like in-class methods, without the class's instance fields.
+    let src = "Object subclass: W\n  state: x :: Integer = 0\n  run => 1\n\n\
+               W >> foo => zzz + 1\n\
+               W class >> baz => qqq\n\
+               W >> fld => x\n\
+               W >> bar => #(1, 2) collect: [:a :b | a]\n\
+               W >> ok: p => super printString\n";
+    let result = analyse(&crate::semantic_analysis::test_helpers::parse_module(src));
+    let count = |needle: &str| {
+        result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains(needle))
+            .count()
+    };
+    assert_eq!(count("Undefined variable: zzz"), 1);
+    assert_eq!(count("Undefined variable: qqq"), 1);
+    assert_eq!(count("Undefined variable: x"), 1, "fields not visible");
+    assert_eq!(count("expects a block with 1"), 1);
+    assert_eq!(count("super can only be used"), 0);
+    assert_eq!(
+        count("Unused parameter `p`"),
+        1,
+        "unused-param lint now covers extensions"
+    );
+}
+
+#[test]
+fn test_well_formed_extension_method_has_no_undefined_variable() {
+    // BT-4658: guard the new path against false positives.
+    let src = "Object subclass: W\n  state: x :: Integer = 0\n  run => 1\n\n\
+               W >> good => self.x + 1\n\
+               W class >> make => self new\n";
+    let result = analyse(&crate::semantic_analysis::test_helpers::parse_module(src));
+    assert!(
+        !result
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("Undefined variable")),
+        "{:?}",
+        result.diagnostics
+    );
+}
