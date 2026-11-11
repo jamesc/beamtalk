@@ -702,3 +702,48 @@ fn test_well_formed_extension_method_has_no_undefined_variable() {
         result.diagnostics
     );
 }
+
+#[test]
+fn test_method_bodies_do_not_see_top_level_bindings() {
+    // BT-4665: instance, class-side and extension method bodies see only
+    // `self`, parameters, locals and `true`/`false`/`nil` — never top-level
+    // bindings, whether assigned before or after the definitions.
+    let src = "x := 3.\n\
+               Object subclass: W\n  inst => x\n  class cls => x\n\n\
+               W >> ext => x\n\
+               W class >> extCls => x\n\
+               y := 4.\n\
+               W >> later => y\n\
+               W >> builtins: p =>\n  l := p\n  l == nil\n  self == true\n  false == nil\n";
+    let result = analyse(&crate::semantic_analysis::test_helpers::parse_module(src));
+    let count = |needle: &str| {
+        result
+            .diagnostics
+            .iter()
+            .filter(|d| d.message.contains(needle))
+            .count()
+    };
+    assert_eq!(
+        count("Undefined variable: x"),
+        4,
+        "{:?}",
+        result.diagnostics
+    );
+    assert_eq!(
+        count("Undefined variable: y"),
+        1,
+        "{:?}",
+        result.diagnostics
+    );
+    // Top-level code still sees its own bindings.
+    let top = analyse(&crate::semantic_analysis::test_helpers::parse_module(
+        "x := 3.\nx + 1\n",
+    ));
+    assert!(
+        !top.diagnostics
+            .iter()
+            .any(|d| d.message.contains("Undefined variable")),
+        "{:?}",
+        top.diagnostics
+    );
+}

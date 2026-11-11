@@ -6145,6 +6145,8 @@ Beamtalk-callable method — and the reload-time tooling findings (§4).
 The `>>` syntax adds methods to existing classes without redefining them (ADR 0066).
 Extensions work on any class including built-in value types.
 
+A method body, in a class or an extension, sees only `self`, its parameters, its own locals and `true`/`false`/`nil`. Top-level bindings and REPL variables are not visible inside it: pass them as arguments or store them in a field (BT-4665).
+
 ```beamtalk
 // Instance method
 String >> shout => self uppercase ++ "!"

@@ -61,6 +61,10 @@ impl Analyser {
             self.analyse_expression(&stmt.expression, None);
         }
 
+        // BT-4665: same method-level view of the module scope as
+        // `NameResolver::resolve_module` (shared `Scope::hide_module_bindings`).
+        let hidden_module_bindings = self.scope.hide_module_bindings();
+
         // Analyse classes
         for class in &module.classes {
             self.analyse_class(class);
@@ -73,6 +77,8 @@ impl Analyser {
             self.analyse_method(&standalone.method);
             self.scope.pop();
         }
+
+        self.scope.restore_module_bindings(hidden_module_bindings);
     }
 
     fn analyse_class(&mut self, class: &crate::ast::ClassDefinition) {
