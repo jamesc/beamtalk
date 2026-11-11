@@ -2079,7 +2079,33 @@ impl CoreErlangGenerator {
         } else {
             None
         };
-        let lowered = self.lower_inline_control_flow(expr, tail, root_producer_locals.is_some())?;
+        // BT-4499: a block parameter a REPL conditional writes joins the
+        // bindings map for the construct (and leaves it after), as for any
+        // binding its frame holds in a variable. Only a construct that will be
+        // lowered here is seeded.
+        let lowers_here =
+            root_producer_locals.is_some() || self.inline_control_flow_needs_threading(expr);
+        let params = if lowers_here {
+            self.repl_param_bindings_written_by(expr)
+        } else {
+            Vec::new()
+        };
+        let frame = self.current_frame();
+        let (seed_prelude, seeds) = self.seed_repl_params(&params, frame, expr.span());
+        let mut lowered =
+            self.lower_inline_control_flow(expr, tail, root_producer_locals.is_some())?;
+        if !seeds.is_empty() {
+            let Some(tv) = lowered.as_mut() else {
+                return Err(CodeGenError::Internal(
+                    "a REPL conditional seeded its block parameters but was not lowered"
+                        .to_string(),
+                ));
+            };
+            let mut prelude = seed_prelude;
+            prelude.append(&mut tv.prelude);
+            prelude.extend(self.unseed_repl_params(&seeds, frame, expr.span()));
+            tv.prelude = prelude;
+        }
         if let Some(tv) = &lowered {
             self.report_rebinds_visible(&tv.prelude, expr.span());
         }

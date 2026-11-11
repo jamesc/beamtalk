@@ -117,22 +117,54 @@ def rejected(outer, writer, position):
     return position == "assigned" or writer == "match"
 
 
-# A block parameter the frame reassigns is bound to a variable but is never a
-# key of the bindings map, so a nested writer leaves it to the frame's own
-# lowering (the adversarial review of BT-4461: hiding or re-reading one raised
-# `undefined_variable` or `badkey`). name -> (input, answer)
+# A block parameter a nested construct reassigns (BT-4499). The frame binds the
+# parameter to a Core variable but it is never a key of the bindings map, so the
+# producer seeds it into the map before the construct, reads it back out after
+# and restores the key (a workspace binding of the same name stays). name ->
+# (input, answer). Each cell then reads the parameter's name back: the
+# parameter must not leak into the workspace bindings, and a workspace binding
+# the parameter shadows keeps its value.
 PARAMETER_WRITES = {
-    # These are no-regression cells: the loop never runs, or the arm that
-    # writes the parameter is not taken. A parameter write that does run is
-    # lost (or its loop never ends) in the REPL before and after BT-4461:
-    # BT-4499.
-    "foldParamLoop": ("#(5, 6) inject: 0 into: [:a :i | [i < 3] whileTrue: [i := i + 1]. a + i]", "11"),
-    "foldParamConditional": (
+    # No-regression cells: the loop never runs, or the arm that writes the
+    # parameter is not taken.
+    "foldParamLoopSkipped": ("#(5, 6) inject: 0 into: [:a :i | [i < 3] whileTrue: [i := i + 1]. a + i]", "11"),
+    "foldParamConditionalSkipped": (
         "#(1, 2) inject: 0 into: [:a :i | (i > 5) ifTrue: [i := 0] ifFalse: [nil]. a + i]",
         "3",
     ),
-    "foldAccumulatorLoop": ("#(1, 2) inject: 0 into: [:acc :x | 1 to: 0 do: [:k | acc := acc + k]. acc + x]", "3"),
-    "ifNotNilParamLoop": ("7 ifNotNil: [:v | [v < 5] whileTrue: [v := v + 1]. v]", "7"),
+    "foldAccumulatorLoopSkipped": (
+        "#(1, 2) inject: 0 into: [:acc :x | 1 to: 0 do: [:k | acc := acc + k]. acc + x]",
+        "3",
+    ),
+    "ifNotNilParamLoopSkipped": ("7 ifNotNil: [:v | [v < 5] whileTrue: [v := v + 1]. v]", "7"),
+    # The write runs.
+    "foldAccumulatorLoop": ("#(1, 2) inject: 0 into: [:acc :x | 1 to: x do: [:k | acc := acc + k]. acc]", "4"),
+    "foldParamConditional": (
+        "#(1, 7) inject: 0 into: [:a :i | (i > 5) ifTrue: [i := 0] ifFalse: [nil]. a + i]",
+        "1",
+    ),
+    "foldParamLoop": ("#(1, 5) inject: 0 into: [:a :i | [i < 3] whileTrue: [i := i + 1]. a + i]", "8"),
+    "ifNotNilParamLoop": ("7 ifNotNil: [:v | [v < 9] whileTrue: [v := v + 1]. v]", "9"),
+    "doParamLoop": ("#(1, 2) do: [:e | [e < 3] whileTrue: [e := e + 1]]", WILD),
+    "foldParamTwice": (
+        "#(1, 5) inject: 0 into: [:a :i | [i < 3] whileTrue: [i := i + 1]. (i > 5) ifTrue: [i := 0] ifFalse: [nil]. a + i]",
+        "8",
+    ),
+}
+
+# name -> (shadowed workspace binding name, input, answer): the workspace binds
+# the parameter's name first; the input must leave that binding alone.
+SHADOWED_PARAMETER_WRITES = {
+    "foldParamLoopShadows": (
+        "i",
+        "#(1, 5) inject: 0 into: [:a :i | [i < 3] whileTrue: [i := i + 1]. a + i]",
+        "8",
+    ),
+    "foldParamConditionalShadows": (
+        "i",
+        "#(1, 7) inject: 0 into: [:a :i | (i > 5) ifTrue: [i := 0] ifFalse: [nil]. a + i]",
+        "1",
+    ),
 }
 
 
@@ -207,6 +239,20 @@ def main():
             f"// parameter / {name} / - / none",
             f"r := {source}",
             f"// => {answer}",
+            "",
+        ]
+        count += 1
+    for name, (shadowed, source, answer) in SHADOWED_PARAMETER_WRITES.items():
+        out += [
+            f"// parameter / {name} / - / shadowed",
+            f"{shadowed} := 10",
+            "// => 10",
+            "",
+            f"r := {source}",
+            f"// => {answer}",
+            "",
+            shadowed,
+            "// => 10",
             "",
         ]
         count += 1

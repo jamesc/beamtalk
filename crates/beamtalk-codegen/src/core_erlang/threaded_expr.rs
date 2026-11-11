@@ -128,6 +128,10 @@ pub(super) mod fault {
         /// lowered with the scratch-map `Put` every assignment used to get,
         /// whatever the frame carries (`ArmLocalPutNotCarried`).
         PutUncarriedLocal,
+        /// BT-4499: a REPL producer does not seed a block parameter it writes
+        /// into the bindings map, so the frame keeps reading the parameter's
+        /// variable (`ReplCachedBindingStale`).
+        ReplParamsNotSeeded,
         /// BT-3910: the producer gate for a value-position local assignment
         /// answers `false`, so the assignment reaches the value-only lowering
         /// (`UnthreadedLocalAssignment`).
@@ -446,6 +450,14 @@ pub(super) struct ThreadedExpr {
     /// Last expression vs explicit `^`-return (same post-construct treatment).
     #[allow(dead_code)]
     pub(super) position: ThreadingPosition,
+}
+
+/// BT-4499: a block parameter [`CoreErlangGenerator::seed_repl_params`] put in
+/// the REPL bindings map for one construct: its binding and the Core variable
+/// that holds the key's previous entry (`maps:find/2`).
+pub(in crate::core_erlang) struct ReplParamSeed {
+    local: String,
+    previous: String,
 }
 
 impl CoreErlangGenerator {
@@ -1581,6 +1593,10 @@ impl CoreErlangGenerator {
         frame: FrameId,
     ) -> Result<(Vec<ThreadedStmt>, ValueRef)> {
         let span = expr.span();
+        // BT-4499: a block parameter the construct writes joins the bindings
+        // map for the construct (and leaves it after).
+        let params = self.repl_param_bindings_written_by(expr);
+        let (seed_prelude, seeds) = self.seed_repl_params(&params, frame, span);
         let cached = self.repl_producer_cached_bindings(expr);
         let dropped = self.drop_cached_repl_bindings(&cached);
         let enclosing = self.repl_loop_mutated();
@@ -1598,7 +1614,19 @@ impl CoreErlangGenerator {
             for (local, var) in &dropped {
                 self.bind_var(local, var);
             }
-            return Ok((Vec::new(), ValueRef::Doc(doc)));
+            if seeds.is_empty() {
+                return Ok((Vec::new(), ValueRef::Doc(doc)));
+            }
+            // The value reads the seeded map, so it is evaluated before the
+            // seeds are undone.
+            let result = self.fresh_temp_var("Value");
+            let mut prelude = seed_prelude;
+            prelude.push(ThreadedStmt::Statement(
+                docvec!["let ", leaf::var(result.clone()), " = ", doc, " in "],
+                span,
+            ));
+            prelude.extend(self.unseed_repl_params(&seeds, frame, span));
+            return Ok((prelude, ValueRef::Var(result)));
         }
         // BT-3823 review: recorded only once the carrier exists, so an
         // agreement test counts a REPL site as lowered only when its bindings
@@ -1630,8 +1658,11 @@ impl CoreErlangGenerator {
             op: BindOp::Direct(ValueRef::Doc(element(2, &carrier))),
             span,
         };
-        let prelude =
+        let adoption =
             self.repl_adoption_prelude(&carrier, doc, &cached, vec![adopt], frame, span)?;
+        let mut prelude = seed_prelude;
+        prelude.extend(adoption);
+        prelude.extend(self.unseed_repl_params(&seeds, frame, span));
         Ok((prelude, ValueRef::Doc(element(1, &carrier))))
     }
 
@@ -1645,6 +1676,15 @@ impl CoreErlangGenerator {
     /// REPL frame's producer site check ([`Self::repl_frame_producer_sites`]),
     /// so the two agree.
     pub(super) fn repl_cached_bindings_written_by(&self, expr: &Expression) -> Vec<String> {
+        let mut names = self.repl_written_locals(expr);
+        names.retain(|local| self.holds_repl_map_binding(local));
+        names
+    }
+
+    /// BT-4499: the locals a REPL construct `expr` writes (sorted, no
+    /// duplicates), before the frame's own variables are consulted. Empty
+    /// outside the REPL.
+    fn repl_written_locals(&self, expr: &Expression) -> Vec<String> {
         if !self.is_repl_mode() {
             return Vec::new();
         }
@@ -1659,17 +1699,162 @@ impl CoreErlangGenerator {
         }
         names.sort();
         names.dedup();
-        names.retain(|local| self.holds_repl_map_binding(local));
+        names
+    }
+
+    /// BT-4499: the bindings a REPL construct `expr` writes that the frame holds
+    /// in a Core variable, whether or not that variable mirrors a key of the
+    /// bindings map: what the frame's producer site check
+    /// ([`Self::repl_frame_producer_sites`]) requires the construct to thread.
+    pub(super) fn repl_frame_bindings_written_by(&self, expr: &Expression) -> Vec<String> {
+        let mut names = self.repl_written_locals(expr);
+        names.retain(|local| self.lookup_var(local).is_some());
+        names
+    }
+
+    /// BT-4499: the bindings `expr` writes that the frame holds in a variable
+    /// that is not a key of the bindings map: a block parameter (a fold's `:i`
+    /// or `:acc`, an `ifNotNil:` `:v`) or a block temporary. The construct
+    /// reads and writes the bindings map, so these are seeded into it first
+    /// ([`Self::seed_repl_params`]).
+    pub(super) fn repl_param_bindings_written_by(&self, expr: &Expression) -> Vec<String> {
+        #[cfg(test)]
+        if fault::active() == Some(fault::LocalRebindFault::ReplParamsNotSeeded) {
+            return Vec::new();
+        }
+        let mut names = self.repl_written_locals(expr);
+        names.retain(|local| {
+            self.lookup_var(local)
+                .is_some_and(|var| !self.repl_map_vars.contains(var))
+        });
         names
     }
 
     /// BT-4461: whether the frame holds `local` in a Core variable that mirrors
     /// its key in the bindings map ([`Self::repl_map_vars`]). A block
-    /// parameter is bound to a variable too, but is never a map key, so a
-    /// producer that writes one leaves it to the frame's own lowering.
+    /// parameter is bound to a variable too, but is not a map key until
+    /// [`Self::seed_repl_params`] puts it there for the construct that writes it.
     fn holds_repl_map_binding(&self, local: &str) -> bool {
         self.lookup_var(local)
             .is_some_and(|var| self.repl_map_vars.contains(var))
+    }
+
+    /// BT-4499: makes each of `params` (block parameters a REPL construct
+    /// writes, [`Self::repl_param_bindings_written_by`]) a member of the
+    /// frame's bindings map for the duration of the construct, so the
+    /// construct's loop condition and body read it from the map they thread and
+    /// the frame reads it back out of the adopted map, as for any binding the
+    /// frame holds in a variable ([`Self::repl_cached_bindings_written_by`]).
+    /// Answers the prelude, which saves the key's previous entry (a workspace
+    /// binding the parameter shadows) and `Put`s the parameter, and the seeds
+    /// [`Self::unseed_repl_params`] undoes. The parameter is a map-mirroring
+    /// variable from here on.
+    pub(super) fn seed_repl_params(
+        &mut self,
+        params: &[String],
+        frame: FrameId,
+        span: Span,
+    ) -> (Vec<ThreadedStmt>, Vec<ReplParamSeed>) {
+        let mut prelude = Vec::new();
+        let mut seeds = Vec::new();
+        for local in params {
+            let Some(original) = self.lookup_var(local).cloned() else {
+                continue;
+            };
+            let previous = self.fresh_temp_var("Previous");
+            prelude.push(ThreadedStmt::Statement(
+                docvec![
+                    "let ",
+                    leaf::var(previous.clone()),
+                    " = call 'maps':'find'(",
+                    leaf::atom(local.clone()),
+                    ", ",
+                    leaf::var(self.current_state_var()),
+                    ") in ",
+                ],
+                span,
+            ));
+            let repl_root = frame == FrameId::ROOT;
+            let enclosing = if repl_root {
+                RebindFrame::implicit_root()
+            } else {
+                match self.rebind_frame_of(frame) {
+                    Ok(enclosing) => enclosing,
+                    Err(_) => RebindFrame::implicit_root(),
+                }
+            };
+            let enclosing = enclosing.with_repl_binding(local);
+            let carrier = self.fresh_temp_var("Param");
+            let slot = ThreadedLocalSlot {
+                local: local.clone(),
+                slot: CarrierSlot::Whole,
+                value_var: self.fresh_temp_var(local),
+            };
+            let rebind = threaded_ir::build_local_threading_prelude(
+                &enclosing,
+                &carrier,
+                leaf::var(original.clone()),
+                std::slice::from_ref(&slot),
+                Vec::new(),
+                span,
+                |slot, shape| self.mint_rebind_lowering(slot, shape, frame),
+            );
+            self.note_repl_map_rebinds(&rebind);
+            prelude.extend(rebind);
+            self.bind_var(local, &slot.value_var);
+            seeds.push(ReplParamSeed {
+                local: local.clone(),
+                previous,
+            });
+        }
+        (prelude, seeds)
+    }
+
+    /// BT-4499: ends the seeds [`Self::seed_repl_params`] made, after their
+    /// construct: each parameter's key goes back to what it held before (the
+    /// workspace binding the parameter shadows, or no key), so a parameter
+    /// never leaks into the workspace bindings, and the parameter's variable no
+    /// longer mirrors a key.
+    pub(super) fn unseed_repl_params(
+        &mut self,
+        seeds: &[ReplParamSeed],
+        frame: FrameId,
+        span: Span,
+    ) -> Vec<ThreadedStmt> {
+        let mut prelude = Vec::new();
+        for seed in seeds {
+            if let Some(var) = self.lookup_var(&seed.local).cloned() {
+                self.repl_map_vars.remove(&var);
+            }
+            let source_version = self.state_version();
+            let state = self.current_state_var();
+            let _ = self.next_state_var();
+            let saved = self.fresh_temp_var("Saved");
+            let restore = docvec![
+                "case ",
+                leaf::var(seed.previous.clone()),
+                " of <{'ok', ",
+                leaf::var(saved.clone()),
+                "}> when 'true' -> call 'maps':'put'(",
+                leaf::atom(seed.local.clone()),
+                ", ",
+                leaf::var(saved),
+                ", ",
+                leaf::var(state.clone()),
+                ") <'error'> when 'true' -> call 'maps':'remove'(",
+                leaf::atom(seed.local.clone()),
+                ", ",
+                leaf::var(state),
+                ") end",
+            ];
+            prelude.push(ThreadedStmt::Bind {
+                target: VersionedVar::new(VersionPrefix::State, self.state_version(), frame),
+                source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                op: BindOp::Direct(ValueRef::Doc(restore)),
+                span,
+            });
+        }
+        prelude
     }
 
     /// BT-4461: records the variables of `prelude`'s `LocalRebind`s that step
@@ -2250,7 +2435,7 @@ impl CoreErlangGenerator {
             .into_iter()
             .filter(|site| self.local_producer_locals(site).is_some())
             .filter_map(|site| {
-                let cached = self.repl_cached_bindings_written_by(site);
+                let cached = self.repl_frame_bindings_written_by(site);
                 // A paren-wrapped site's span holds its construct's.
                 (!cached.is_empty()).then(|| (site.span(), cached))
             })

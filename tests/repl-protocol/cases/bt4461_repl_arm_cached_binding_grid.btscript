@@ -9474,18 +9474,62 @@ r := #(1, 2) inject: 0 into: [:a :i | m := 1. 3 timesRepeat: [m := m + 10]. a + 
 m
 // => 31
 
-// parameter / foldParamLoop / - / none
+// parameter / foldParamLoopSkipped / - / none
 r := #(5, 6) inject: 0 into: [:a :i | [i < 3] whileTrue: [i := i + 1]. a + i]
 // => 11
 
-// parameter / foldParamConditional / - / none
+// parameter / foldParamConditionalSkipped / - / none
 r := #(1, 2) inject: 0 into: [:a :i | (i > 5) ifTrue: [i := 0] ifFalse: [nil]. a + i]
 // => 3
 
-// parameter / foldAccumulatorLoop / - / none
+// parameter / foldAccumulatorLoopSkipped / - / none
 r := #(1, 2) inject: 0 into: [:acc :x | 1 to: 0 do: [:k | acc := acc + k]. acc + x]
 // => 3
 
-// parameter / ifNotNilParamLoop / - / none
+// parameter / ifNotNilParamLoopSkipped / - / none
 r := 7 ifNotNil: [:v | [v < 5] whileTrue: [v := v + 1]. v]
 // => 7
+
+// parameter / foldAccumulatorLoop / - / none
+r := #(1, 2) inject: 0 into: [:acc :x | 1 to: x do: [:k | acc := acc + k]. acc]
+// => 4
+
+// parameter / foldParamConditional / - / none
+r := #(1, 7) inject: 0 into: [:a :i | (i > 5) ifTrue: [i := 0] ifFalse: [nil]. a + i]
+// => 1
+
+// parameter / foldParamLoop / - / none
+r := #(1, 5) inject: 0 into: [:a :i | [i < 3] whileTrue: [i := i + 1]. a + i]
+// => 8
+
+// parameter / ifNotNilParamLoop / - / none
+r := 7 ifNotNil: [:v | [v < 9] whileTrue: [v := v + 1]. v]
+// => 9
+
+// parameter / doParamLoop / - / none
+r := #(1, 2) do: [:e | [e < 3] whileTrue: [e := e + 1]]
+// => _
+
+// parameter / foldParamTwice / - / none
+r := #(1, 5) inject: 0 into: [:a :i | [i < 3] whileTrue: [i := i + 1]. (i > 5) ifTrue: [i := 0] ifFalse: [nil]. a + i]
+// => 8
+
+// parameter / foldParamLoopShadows / - / shadowed
+i := 10
+// => 10
+
+r := #(1, 5) inject: 0 into: [:a :i | [i < 3] whileTrue: [i := i + 1]. a + i]
+// => 8
+
+i
+// => 10
+
+// parameter / foldParamConditionalShadows / - / shadowed
+i := 10
+// => 10
+
+r := #(1, 7) inject: 0 into: [:a :i | (i > 5) ifTrue: [i := 0] ifFalse: [nil]. a + i]
+// => 1
+
+i
+// => 10

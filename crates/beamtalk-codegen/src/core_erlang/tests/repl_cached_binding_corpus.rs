@@ -187,3 +187,36 @@ fn the_pre_bt4461_repl_producers_are_reported_over_the_grid() {
         "only {reported} cells reported the stale binding"
     );
 }
+
+/// BT-4499: the issue's repros, a nested construct writing an enclosing block
+/// parameter. The frame binds the parameter to a variable that is not a key of
+/// the bindings map, so the construct's write was dropped (or its loop never
+/// ended) until the parameter was seeded into the map for the construct.
+const PARAMETER_REPROS: &[&str] = &[
+    "r := #(1, 2) inject: 0 into: [:acc :x | 1 to: x do: [:k | acc := acc + k]. acc]",
+    "r := #(1, 7) inject: 0 into: [:a :i | (i > 5) ifTrue: [i := 0] ifFalse: [nil]. a + i]",
+    "r := #(1, 5) inject: 0 into: [:a :i | [i < 3] whileTrue: [i := i + 1]. a + i]",
+    "r := 7 ifNotNil: [:v | [v < 9] whileTrue: [v := v + 1]. v]",
+];
+
+#[test]
+fn the_parameter_repros_pass_the_verifier() {
+    for repro in PARAMETER_REPROS {
+        assert_eq!(repl_verifier_report(repro, None), None, "{repro}");
+    }
+}
+
+/// With the parameter left out of the bindings map (`ReplParamsNotSeeded`) the
+/// construct threads nothing for it, and `ReplCachedBindingStale` names the
+/// parameter.
+#[test]
+fn an_unseeded_parameter_is_reported_stale() {
+    for repro in PARAMETER_REPROS {
+        let report = repl_verifier_report(repro, Some(LocalRebindFault::ReplParamsNotSeeded))
+            .unwrap_or_else(|| panic!("no verifier finding for {repro}"));
+        assert!(
+            report.contains("ReplCachedBindingStale"),
+            "expected ReplCachedBindingStale in {repro}, got: {report}"
+        );
+    }
+}
