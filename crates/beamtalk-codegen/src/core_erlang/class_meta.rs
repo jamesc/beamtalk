@@ -829,11 +829,19 @@ impl CoreErlangGenerator {
                 entries.push((field.clone(), 0, return_type, vec![], sealed, false));
             }
             for field in &auto.setters {
+                let param_type = class
+                    .state
+                    .iter()
+                    .find(|slot| slot.name.name == field.as_str())
+                    .and_then(beamtalk_core::synthetic_selectors::synthesized_copy_param_type)
+                    .map_or(MetaTypeRepr::None, |dt| {
+                        Self::declared_type_to_meta_repr(&dt, type_params)
+                    });
                 entries.push((
                     AutoSlotMethods::with_star_selector(field),
                     1,
                     Self::synthesized_copy_return_repr(class),
-                    vec![MetaTypeRepr::None],
+                    vec![param_type],
                     sealed,
                     false,
                 ));

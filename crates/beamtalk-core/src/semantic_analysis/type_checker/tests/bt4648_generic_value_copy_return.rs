@@ -130,3 +130,45 @@ fn with_star_on_subclass_instance_answers_the_subclass() {
     assert_eq!(hits.len(), 1, "{diags:#?}");
     assert!(hits[0].message.contains("body returns Sub"), "{hits:#?}");
 }
+
+fn argument_mismatches(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
+    diags
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type) && d.message.contains("expects"))
+        .collect()
+}
+
+/// With the copy typed `Box(Integer)`, its argument is checked against the
+/// substituted field type: a `String` into `Box(Integer)` warns, so
+/// `(b withItem: 'hi') item` can't silently infer `Integer`.
+#[test]
+fn with_star_argument_checked_against_type_argument() {
+    let diags = check(&format!(
+        "{BOX}Object subclass: User\n  run: b :: Box(Integer) => b withItem: \"hi\"\n"
+    ));
+    let hits = argument_mismatches(&diags);
+    assert_eq!(hits.len(), 1, "{diags:#?}");
+    assert!(
+        hits[0].message.contains("Integer") && hits[0].message.contains("String"),
+        "{hits:#?}"
+    );
+}
+
+/// A matching argument passes.
+#[test]
+fn with_star_matching_argument_no_warning() {
+    let diags = check(&format!(
+        "{BOX}Object subclass: User\n  run: b :: Box(Integer) => b withItem: 3\n"
+    ));
+    assert!(argument_mismatches(&diags).is_empty(), "{diags:#?}");
+}
+
+/// A non-generic class checks the argument against the field's own type.
+#[test]
+fn with_star_argument_checked_on_plain_value_class() {
+    let diags = check(
+        "Value subclass: Point\n  field: x :: Integer = 0\n\
+         Object subclass: User\n  run: p :: Point => p withX: \"a\"\n",
+    );
+    assert_eq!(argument_mismatches(&diags).len(), 1, "{diags:#?}");
+}
