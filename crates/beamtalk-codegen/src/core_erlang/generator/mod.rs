@@ -115,14 +115,14 @@ pub struct CoreErlangGenerator {
     pub(in crate::core_erlang) state_threading: VersionCounter,
     /// Whether we're inside a loop body (use `StateAcc` instead of `State`)
     pub(in crate::core_erlang) in_loop_body: bool,
-    /// BT-4070: while a stateful loop-condition tail lowers, the
-    /// pure-boolean gate declines (see
-    /// `try_generate_pure_boolean_conditional`): the tail value splices
-    /// into the `{Bool, StateAcc[, Self]}` hand-back tuple, where a bare
-    /// `case` breaks erlc's `beam_clean` (`undefined_label`) in complex
-    /// nestings. Set and restored synchronously around the tail lowering
-    /// only; never persists across methods. The underlying erlc trigger is
-    /// not yet root-caused — see BT-4202.
+    /// While the non-Boolean fallback closures of a pure-inline conditional
+    /// lower (`boolean_fallback_send`), the pure-boolean gate declines (see
+    /// `try_generate_pure_boolean_conditional`): inlining inside them would
+    /// duplicate nested blocks exponentially. Set and restored synchronously
+    /// around that lowering only; never persists across methods. (BT-4202:
+    /// stateful `whileTrue:` condition tails no longer set it — the erlc
+    /// `beam_clean` crash they worked around is fixed by
+    /// `case_clause_fallback` on the loop's boolean `case`.)
     pub(in crate::core_erlang) decline_pure_boolean_inline: bool,
     /// ADR 0111 Addendum 5, §Branch-context version discipline:
     /// monotonic counter minting a fresh [`threaded_ir::FrameId`] per

@@ -529,7 +529,12 @@ impl CoreErlangGenerator {
                 &ctx,
             )
         };
-        let exit_arm = docvec![exit_arm_atom, exit_arm_tuple, " end "];
+        let exit_arm = docvec![
+            exit_arm_atom,
+            exit_arm_tuple,
+            self.case_clause_fallback("_CondBad"),
+            " end "
+        ];
 
         let mut produces = vec![VersionedVar::new(VersionPrefix::State, 0, frame)];
         for param in &family_params {
@@ -682,15 +687,10 @@ impl CoreErlangGenerator {
                     stmts.push(ThreadedStmt::Statement(doc, span));
                 }
             }
-            // BT-4070: the tail value splices into the hand-back tuple, so
-            // the pure-boolean gate declines while it lowers (see
-            // `decline_pure_boolean_inline`): the tail keeps today's
-            // dynamic dispatch, byte for byte.
-            let prev_decline = std::mem::replace(&mut this.decline_pure_boolean_inline, true);
-            let tail_out =
-                this.lower_stateful_while_condition_tail(tail, frame, carry_self, &mut stmts);
-            this.decline_pure_boolean_inline = prev_decline;
-            tail_out?;
+            // BT-4202: the tail may pure-inline like any other conditional;
+            // the loop's `case _CondBool` carries `case_clause_fallback`, so
+            // a provably-failing tail branch no longer crashes `beam_clean`.
+            this.lower_stateful_while_condition_tail(tail, frame, carry_self, &mut stmts)?;
             Ok::<_, CodeGenError>(stmts)
         })?;
         self.check_family_only_operand_sites(
@@ -1031,7 +1031,12 @@ impl CoreErlangGenerator {
         } else {
             "<'false'> when 'true' -> "
         };
-        let exit_arm = docvec![exit_atom, exit_stateacc, " end "];
+        let exit_arm = docvec![
+            exit_atom,
+            exit_stateacc,
+            self.case_clause_fallback("_CondBad"),
+            " end "
+        ];
 
         let produces: Vec<VersionedVar> = plan
             .threaded_locals
@@ -1194,7 +1199,12 @@ impl CoreErlangGenerator {
         } else {
             "<'false'> when 'true' -> "
         };
-        let exit_arm = docvec![exit_atom, exit_stateacc, " end "];
+        let exit_arm = docvec![
+            exit_atom,
+            exit_stateacc,
+            self.case_clause_fallback("_CondBad"),
+            " end "
+        ];
 
         let produces: Vec<VersionedVar> =
             plan.threaded_locals

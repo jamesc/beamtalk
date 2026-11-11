@@ -517,11 +517,11 @@ fn guarded_operator_in_actor_receiver_still_inlines() {
 }
 
 #[test]
-fn stateful_while_condition_tail_keeps_dynamic_dispatch() {
-    // BT-4070: a stateful while-condition tail keeps today's dynamic
-    // dispatch: its value splices into the `{Bool, StateAcc[, Self]}`
-    // hand-back tuple, where a bare `case` breaks erlc's `beam_clean`
-    // (`undefined_label`) in complex nestings. Shape minimized from
+fn stateful_while_condition_tail_pure_inlines() {
+    // BT-4202: a stateful while-condition tail pure-inlines like any other
+    // conditional. The loop's `case _CondBool` carries a catch-all, which
+    // avoids the OTP 28 `beam_clean` crash (BT-4070 had declined inlining
+    // here as a workaround). Shape minimized from
     // `while_condition_carrier_corpus` run70/run139.
     let src = concat!(
         "Value subclass: Probe\n",
@@ -531,15 +531,11 @@ fn stateful_while_condition_tail_keeps_dynamic_dispatch() {
         "    0\n",
     );
     let code = compile(src, "bt@probe_splice_while_carry");
-    eprintln!("decline while-carry:\n{code}");
+    eprintln!("inline while-carry:\n{code}");
 
     assert!(
-        !code.contains("CondNoMatch"),
-        "condition tail must not pure-inline. Got:\n{code}"
-    );
-    assert!(
-        code.contains("beamtalk_message_dispatch':'send'"),
-        "condition tail must keep the dynamic send. Got:\n{code}"
+        code.contains("CondNoMatch"),
+        "condition tail must pure-inline. Got:\n{code}"
     );
     assert_compiles_through_erlc("bt@probe_splice_while_carry", &code);
 }
@@ -557,18 +553,18 @@ fn stateful_while_condition_full_shape_compiles() {
         "    [^loc0] value\n",
     );
     let code = compile(src, "bt@probe_splice_while_full");
-    eprintln!("decline while-full:\n{code}");
+    eprintln!("inline while-full:\n{code}");
 
     assert!(
-        !code.contains("CondNoMatch"),
-        "condition tail must not pure-inline. Got:\n{code}"
+        code.contains("CondNoMatch"),
+        "condition tail must pure-inline. Got:\n{code}"
     );
     assert_compiles_through_erlc("bt@probe_splice_while_full", &code);
 }
 
 #[test]
-fn stateful_while_condition_plain_tuple_keeps_dynamic_dispatch() {
-    // Same decline on the `{Value, StateAcc}` (no `Self` slot) path: a
+fn stateful_while_condition_plain_tuple_pure_inlines() {
+    // Same inlining on the `{Value, StateAcc}` (no `Self` slot) path: a
     // local-threading condition with a pure tail.
     let src = concat!(
         "Value subclass: Probe\n",
@@ -580,11 +576,11 @@ fn stateful_while_condition_plain_tuple_keeps_dynamic_dispatch() {
         "    t\n",
     );
     let code = compile(src, "bt@probe_splice_while_plain");
-    eprintln!("decline while-plain:\n{code}");
+    eprintln!("inline while-plain:\n{code}");
 
     assert!(
-        !code.contains("CondNoMatch"),
-        "condition tail must not pure-inline. Got:\n{code}"
+        code.contains("CondNoMatch"),
+        "condition tail must pure-inline. Got:\n{code}"
     );
     assert_compiles_through_erlc("bt@probe_splice_while_plain", &code);
 }
@@ -592,7 +588,7 @@ fn stateful_while_condition_plain_tuple_keeps_dynamic_dispatch() {
 #[test]
 fn mutation_arm_tail_still_inlines() {
     // A mutation arm whose tail is a pure conditional (C13 closer) keeps
-    // inlining: only stateful loop-condition tails decline.
+    // inlining.
     let src = concat!(
         "Actor subclass: Ctr\n",
         "  state: x = 0\n\n",
@@ -616,8 +612,7 @@ fn mutation_arm_tail_still_inlines() {
 #[test]
 fn vt_arm_tail_still_inlines() {
     // A value-type mutation arm in value position whose tail is a pure
-    // conditional keeps inlining: only stateful loop-condition tails
-    // decline.
+    // conditional keeps inlining.
     let src = concat!(
         "Value subclass: Probe\n",
         "  field: m = 0\n",
@@ -774,5 +769,68 @@ fn dedup_append_keeps_lowering_specific_findings() {
     assert!(
         kept.contains(&verifier_finding),
         "lowering-specific finding must survive dedup, got {kept:?}"
+    );
+}
+
+#[test]
+fn boolean_only_case_with_failing_branch_needs_catch_all() {
+    // BT-4202: pins an OTP 28 `erlc` bug. A boolean-only `case` with no
+    // catch-all whose scrutinee has a branch that provably matches neither
+    // clause crashes `beam_clean` (`Internal consistency check failed`,
+    // `{jump,{f,0}}`; the `undefined_label` family). `case_clause_fallback`
+    // on the loop's `case _CondBool` is the workaround. If the first
+    // assertion starts failing, a newer OTP fixed the bug and the pin can go.
+    use std::process::Command;
+
+    fn erlc_ok(name: &str, core: &str) -> Option<(bool, String)> {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(format!("{name}.core"));
+        std::fs::write(&file, core).unwrap();
+        match Command::new("erlc")
+            .arg("+from_core")
+            .arg("-o")
+            .arg(dir.path())
+            .arg(&file)
+            .output()
+        {
+            Ok(o) => Some((
+                o.status.success(),
+                format!(
+                    "{}{}",
+                    String::from_utf8_lossy(&o.stdout),
+                    String::from_utf8_lossy(&o.stderr)
+                ),
+            )),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => panic!("failed to invoke erlc: {e}"),
+        }
+    }
+
+    let build = |fallback: &str| {
+        format!(
+            "module 'q1' ['run'/1]\n  attributes []\n'run'/1 = fun (Self) ->\n  case case call 'foo':'bar'() of\n         <'true'> when 'true' -> 'a'\n         <N> when 'true' -> call 'foo':'send'(1)\n       end of\n    <'false'> when 'true' -> 'k'\n    <'true'> when 'true' -> 'nil'\n{fallback}  end\nend\n"
+        )
+    };
+    let Some((without, out)) = erlc_ok("q1", &build("")) else {
+        println!("Skipping: erlc not in PATH");
+        return;
+    };
+    assert!(
+        !without,
+        "erlc now compiles a catch-all-less boolean case with a failing branch: \
+         the OTP bug behind BT-4202 is fixed; the loop fallback clause is no longer needed"
+    );
+    assert!(
+        out.contains("consistency") || out.contains("undefined_label"),
+        "expected the beam_clean crash, got: {out}"
+    );
+    assert_eq!(
+        erlc_ok(
+            "q1",
+            &build("    <M> when 'true' -> call 'erlang':'error'({'case_clause', M})\n")
+        )
+        .map(|r| r.0),
+        Some(true),
+        "the catch-all clause must make the Core compile"
     );
 }
