@@ -383,6 +383,7 @@ fn factory_self_new_colon_supplying_every_field_is_clean() {
     );
     let mut factory = MethodDefinition {
         pipeline_sends: crate::ast::PipelineSends::default(),
+        literal_comments: crate::ast::LiteralComments::default(),
         selector: MessageSelector::Keyword(vec![
             KeywordPart::new("for:", span()),
             KeywordPart::new("client:", span()),

@@ -373,6 +373,7 @@ fn test_self_available_in_method_bodies() {
 
     let get_value_method = MethodDefinition {
         pipeline_sends: crate::ast::PipelineSends::default(),
+        literal_comments: crate::ast::LiteralComments::default(),
         selector: MessageSelector::Unary("getValue".into()),
         parameters: vec![],
         body: vec![bare(Expression::FieldAccess {
@@ -430,6 +431,7 @@ fn test_self_available_in_method_bodies() {
 
     let module = Module {
         pipeline_sends: crate::ast::PipelineSends::default(),
+        literal_comments: crate::ast::LiteralComments::default(),
         classes: vec![class_def],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
