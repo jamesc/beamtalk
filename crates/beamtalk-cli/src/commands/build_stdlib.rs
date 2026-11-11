@@ -19,8 +19,7 @@ use crate::commands::app_file;
 use crate::commands::build::build_alias_metadata;
 use crate::commands::util::format_sorted_atom_list;
 use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
-use beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType;
-use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
+use beamtalk_core::semantic_analysis::class_hierarchy::{DeclaredType, MethodInfo};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use std::collections::BTreeSet;
@@ -723,70 +722,9 @@ fn module_name_from_path(path: &Utf8Path) -> Result<String> {
     Ok(format!("bt@stdlib@{snake}"))
 }
 
-/// Extract native type specs from runtime `.beam` files for FFI type inference.
-///
-/// Discovers `.beam` files from the runtime and stdlib Erlang ebin directories
-/// and extracts their `-spec` attributes. Returns `None` if no specs could be
-/// extracted (e.g., runtime not yet compiled).
-pub(crate) fn extract_stdlib_type_specs() -> Option<NativeTypeRegistry> {
-    use crate::beam_compiler;
-    use beamtalk_cli::repl_startup;
-
-    // Use the same runtime discovery as the build worker so paths stay in sync
-    // with the runtime layout (dev vs installed).
-    let (runtime_dir, layout): (std::path::PathBuf, _) =
-        if let Ok(result) = repl_startup::find_runtime_dir_with_layout() {
-            result
-        } else {
-            debug!("Runtime not found — skipping FFI type spec extraction");
-            return None;
-        };
-    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
-
-    // Collect ebin directories that contain Erlang FFI modules with -spec attributes.
-    // Convert from std PathBuf to camino Utf8PathBuf (required by beam_compiler API).
-    let mut ebin_dirs: Vec<Utf8PathBuf> = Vec::new();
-    let candidates: Vec<std::path::PathBuf> = vec![
-        paths.runtime_ebin,
-        paths.stdlib_erlang_ebin,
-        paths.workspace_ebin,
-        paths.compiler_ebin,
-    ];
-    for dir in candidates {
-        if dir.exists() {
-            if let Ok(utf8) = Utf8PathBuf::from_path_buf(dir) {
-                ebin_dirs.push(utf8);
-            }
-        }
-    }
-
-    let beam_files = beam_compiler::discover_dependency_beam_files(&ebin_dirs);
-    if beam_files.is_empty() {
-        debug!("No runtime .beam files found for stdlib FFI type specs");
-        return None;
-    }
-
-    // Cache directory under the runtime _build to avoid re-extracting specs
-    let cache_dir: Utf8PathBuf = Utf8PathBuf::from_path_buf(runtime_dir.join("_build/type_cache"))
-        .unwrap_or_else(|p| Utf8PathBuf::from(p.to_string_lossy().as_ref()));
-
-    match beam_compiler::extract_beam_specs(&beam_files, &cache_dir) {
-        Ok(registry) => {
-            if registry.module_count() > 0 {
-                info!(
-                    modules = registry.module_count(),
-                    functions = registry.function_count(),
-                    "Extracted FFI type specs for stdlib build"
-                );
-            }
-            Some(registry)
-        }
-        Err(e) => {
-            debug!("Failed to extract type specs for stdlib build: {e}");
-            None
-        }
-    }
-}
+/// The stdlib's FFI type registry, from the runtime's own `.beam` specs —
+/// shared with `beamtalk lint` and MCP `lint` through the lib target.
+pub(crate) use beamtalk_cli::native_type_specs::extract_stdlib_type_specs;
 
 /// Compile a single stdlib `.bt` file to Core Erlang.
 fn compile_stdlib_file(
@@ -881,12 +819,18 @@ struct ClassMeta {
     /// `Value subclass:`). Set by [`mark_value_subclasses`] once every file's
     /// metadata is collected; it gates the `auto_ctors` anchor.
     is_value_subclass: bool,
+    /// BT-4501: the body shape of this class's explicit class-side `new:`
+    /// (`ClassHierarchy::explicit_class_constructor_shape`), published as
+    /// `ClassInfo::in_caller_new1`. `runs_class_method_in_caller` adds the
+    /// chain half, so a module that only references the class reads the same
+    /// answer codegen acted on.
+    in_caller_new1: bool,
 }
 
 /// Sort class metadata by class name — every generated-artifact writer
 /// (`generate_builtins_rs`, `generate_erlang_builtins_hrl`) needs the same
 /// deterministic ordering so the checked-in `.rs`/`.hrl` files are stable
-/// across regenerations. Single implementation per CLAUDE.md's
+/// across regenerations. Single implementation per AGENTS.md's
 /// "No duplicate implementations" rule.
 fn sorted_by_class_name(class_metadata: &[ClassMeta]) -> Vec<&ClassMeta> {
     let mut sorted: Vec<&ClassMeta> = class_metadata.iter().collect();
@@ -930,9 +874,9 @@ struct MethodMeta {
     /// Quoted `@primitive "<name>"` when that is the whole body (BT-4115,
     /// `MethodInfo::primitive`).
     primitive: Option<String>,
-    /// The integer when that literal is the whole body (BT-4363,
+    /// The scalar literal when it is the whole body (BT-4363, BT-4504,
     /// `MethodInfo::constant_value`).
-    constant_value: Option<i64>,
+    constant_value: Option<beamtalk_core::ast::ConstantValue>,
 }
 
 /// Simplified method kind for code generation.
@@ -957,8 +901,9 @@ impl MethodKindMeta {
     }
 }
 
-/// Convert an AST method definition to `MethodMeta`.
-fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
+/// Convert an AST method definition to `MethodMeta`; `class_side` selects the
+/// side's constant rule ([`MethodInfo::recorded_constant`]).
+fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition, class_side: bool) -> MethodMeta {
     MethodMeta {
         selector: m.selector.name().to_string(),
         arity: m.selector.arity(),
@@ -974,7 +919,7 @@ fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition) -> MethodMeta {
             .collect(),
         doc: m.doc_comment.clone(),
         primitive: m.quoted_primitive_name().map(ToString::to_string),
-        constant_value: m.literal_integer_body(),
+        constant_value: MethodInfo::recorded_constant(m, class_side),
     }
 }
 
@@ -1021,7 +966,9 @@ fn synthesize_value_auto_methods(
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: slot.type_annotation.as_ref().map(DeclaredType::from),
+                return_type: beamtalk_core::synthetic_selectors::synthesized_getter_return_type(
+                    slot,
+                ),
                 param_types: vec![],
                 doc: Some(getter_doc),
                 primitive: None,
@@ -1032,7 +979,7 @@ fn synthesize_value_auto_methods(
         // Auto functional updater: `withFieldName:` → Self type
         let with_sel = beamtalk_core::synthetic_selectors::with_star_selector(slot_name);
         if !user_selectors.contains(&with_sel) {
-            let param_type = slot.type_annotation.as_ref().map(DeclaredType::from);
+            let param_type = beamtalk_core::synthetic_selectors::synthesized_copy_param_type(slot);
             let setter_doc = format!(
                 "Returns a new `{class_name}` with `{slot_name}` set to the given value.\n\n*(compiler-generated)*"
             );
@@ -1043,7 +990,9 @@ fn synthesize_value_auto_methods(
                 is_sealed: false,
                 is_internal: false,
                 spawns_block: false,
-                return_type: Some(DeclaredType::simple(class_name)),
+                return_type: Some(
+                    beamtalk_core::synthetic_selectors::synthesized_copy_return_type(),
+                ),
                 param_types: vec![param_type],
                 doc: Some(setter_doc),
                 primitive: None,
@@ -1084,7 +1033,9 @@ fn synthesize_value_auto_methods(
         is_sealed: false,
         is_internal: false,
         spawns_block: false,
-        return_type: Some(DeclaredType::simple(class_name)),
+        return_type: Some(
+            beamtalk_core::synthetic_selectors::synthesized_constructor_return_type(class_name),
+        ),
         param_types,
         doc: Some(ctor_doc),
         primitive: None,
@@ -1490,9 +1441,16 @@ fn extract_class_metadata(
         );
     }
 
-    let mut methods: Vec<MethodMeta> = class.methods.iter().map(method_def_to_meta).collect();
-    let mut class_methods: Vec<MethodMeta> =
-        class.class_methods.iter().map(method_def_to_meta).collect();
+    let mut methods: Vec<MethodMeta> = class
+        .methods
+        .iter()
+        .map(|m| method_def_to_meta(m, false))
+        .collect();
+    let mut class_methods: Vec<MethodMeta> = class
+        .class_methods
+        .iter()
+        .map(|m| method_def_to_meta(m, true))
+        .collect();
 
     let state = class
         .state
@@ -1599,6 +1557,20 @@ fn extract_class_metadata(
         .map(DeclaredType::from)
         .collect();
 
+    // BT-4501: the explicit-`new:` verdict needs the AST, so it is decided
+    // here and persisted (the same rule codegen publishes in
+    // `process_bound_class_selectors`).
+    let in_caller_new1 = {
+        let (hierarchy, _) =
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build_with_options(
+                &module, true,
+            );
+        hierarchy
+            .ok()
+            .and_then(|h| h.get_class(&class_name).map(|c| c.in_caller_new1))
+            .unwrap_or(false)
+    };
+
     Ok(ClassMeta {
         module_name: module_name.to_string(),
         class_name,
@@ -1625,6 +1597,7 @@ fn extract_class_metadata(
         auto_kw,
         // Decided across files by `mark_value_subclasses`.
         is_value_subclass: false,
+        in_caller_new1,
     })
 }
 
@@ -1812,7 +1785,7 @@ const GENERATED_SUPERVISOR_CONFIG_HRL_PATH: &str =
 /// hardcoded `GENERATED_*_PATH` constant internally — is also what makes this
 /// unit-testable: real call sites still pass the hardcoded constants, but
 /// tests can point `dest` at a temp file instead of risking a write into the
-/// real checked-in generated files (see CLAUDE.md's "Generated files" rule).
+/// real checked-in generated files (see AGENTS.md's "Generated files" rule).
 fn write_generated_file_if_changed(dest: &Utf8Path, content: &str) -> Result<()> {
     let needs_write = match fs::read_to_string(dest) {
         Ok(existing) => existing != content,
@@ -1899,7 +1872,7 @@ fn generate_builtins_rs(
          use super::super::{\n\
          \x20   AutoConstructors, ClassInfo, ClassVarInfo, DeclaredType, MethodInfo, SuperclassTypeArg,\n\
          };\n\
-         use crate::ast::{MethodKind, SlotKind};\n\
+         use crate::ast::{ConstantValue, MethodKind, SlotKind};\n\
          use ecow::EcoString;\n\
          use std::collections::{BTreeSet, HashMap};\n\
          \n",
@@ -2021,7 +1994,7 @@ fn generate_erlang_builtins_hrl(class_metadata: &[ClassMeta]) -> Result<()> {
 /// Generate `beamtalk_class_vars_keys.hrl` from codegen's `class_var_keys` leaf
 /// (ADR 0130 §2): the class-variable process-dictionary key shape the inlined
 /// reads and writes codegen emits and `beamtalk_class_vars.erl` must agree on,
-/// rendered from one Rust source instead of copied (CLAUDE.md shared-fixture rule).
+/// rendered from one Rust source instead of copied (AGENTS.md shared-fixture rule).
 fn generate_class_vars_keys_hrl() -> Result<()> {
     let dest = Utf8PathBuf::from(GENERATED_CLASS_VARS_KEYS_HRL_PATH);
     write_generated_file_if_changed(
@@ -2076,6 +2049,7 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
          \x20           is_native: {is_native},\n\
          \x20           handle_scope: {handle_scope},\n\
          \x20           surface_incomplete: false,\n\
+         \x20           in_caller_new1: {in_caller_new1},\n\
          \x20           is_module_less: false,\n",
         func = class_info_fn_name(&meta.class_name),
         name = meta.class_name,
@@ -2084,6 +2058,7 @@ fn generate_class_entry(code: &mut String, meta: &ClassMeta) {
         typed = meta.modifiers.is_typed,
         is_value = meta.superclass_name == "Value",
         is_native = meta.modifiers.is_native,
+        in_caller_new1 = meta.in_caller_new1,
         // ADR 0103: emit the declared handle scope so it survives regeneration.
         handle_scope = meta
             .handle_scope
@@ -2458,6 +2433,23 @@ fn rust_str_lit_into(s: &str) -> String {
     format!("{}.into()", rust_str_lit(s))
 }
 
+/// The Rust expression that rebuilds `value` in `generated_builtins.rs`
+/// (BT-4504). `{:?}` of an `f64` and a `char` is a valid Rust literal of the
+/// same value (parsed literals are finite).
+fn constant_value_to_rust_expr(value: &beamtalk_core::ast::ConstantValue) -> String {
+    use beamtalk_core::ast::ConstantValue;
+    match value {
+        ConstantValue::Integer(n) => format!("ConstantValue::Integer({n})"),
+        ConstantValue::Float(f) => format!("ConstantValue::Float({f:?})"),
+        ConstantValue::String(s) => format!("ConstantValue::String({})", rust_str_lit_into(s)),
+        ConstantValue::Symbol(s) => format!("ConstantValue::Symbol({})", rust_str_lit_into(s)),
+        ConstantValue::Character(c) => format!("ConstantValue::Character({c:?})"),
+        ConstantValue::Nil => "ConstantValue::Nil".to_string(),
+        ConstantValue::True => "ConstantValue::True".to_string(),
+        ConstantValue::False => "ConstantValue::False".to_string(),
+    }
+}
+
 /// Generate a method list field (`methods` or `class_methods`).
 fn generate_method_list(
     code: &mut String,
@@ -2499,8 +2491,8 @@ fn generate_method_list(
             Some(name) => format!("Some({}.into())", rust_str_lit(name)),
             None => "None".to_string(),
         };
-        let constant_value_expr = match m.constant_value {
-            Some(value) => format!("Some({value})"),
+        let constant_value_expr = match &m.constant_value {
+            Some(value) => format!("Some({})", constant_value_to_rust_expr(value)),
             None => "None".to_string(),
         };
         let _ = writeln!(
@@ -3380,6 +3372,7 @@ mod tests {
             handle_scope: None,
             auto_kw: None,
             is_value_subclass: false,
+            in_caller_new1: false,
         }
     }
 
@@ -3591,6 +3584,7 @@ mod tests {
             handle_scope: None,
             auto_kw: None,
             is_value_subclass: false,
+            in_caller_new1: false,
         };
         let mut code = String::new();
         generate_class_entry(&mut code, &meta);
@@ -3699,6 +3693,7 @@ mod tests {
                 handle_scope: None,
                 auto_kw: None,
                 is_value_subclass: false,
+                in_caller_new1: false,
             },
             ClassMeta {
                 module_name: "bt@stdlib@alpha".to_string(),
@@ -3723,6 +3718,7 @@ mod tests {
                 handle_scope: None,
                 auto_kw: None,
                 is_value_subclass: false,
+                in_caller_new1: false,
             },
         ];
 
@@ -4351,7 +4347,7 @@ mod tests {
     // `generate_builtins_rs`/`generate_erlang_builtins_hrl` themselves still
     // write to the real hardcoded `GENERATED_BUILTINS_PATH`/
     // `GENERATED_BUILTINS_HRL_PATH` constants and aren't unit-tested directly
-    // (per CLAUDE.md's "Generated files" rule; their orchestration is covered
+    // (per AGENTS.md's "Generated files" rule; their orchestration is covered
     // separately). This shared helper is
     // where the "only write if changed" and write-error branches actually
     // live, and it takes `dest` as a parameter, so tests exercise it against
@@ -4690,7 +4686,7 @@ mod tests {
             .find(|m| m.selector == "withValue:")
             .expect("auto functional updater should be generated");
         assert_eq!(setter.arity, 1);
-        assert_eq!(setter.return_type, Some(DeclaredType::simple("Wrapper")));
+        assert_eq!(setter.return_type, Some(DeclaredType::SelfType));
 
         let ctor = meta
             .class_methods
@@ -4896,6 +4892,7 @@ mod tests {
             handle_scope: None,
             auto_kw: None,
             is_value_subclass: false,
+            in_caller_new1: false,
         };
         let mut code = String::new();
         generate_class_entry(&mut code, &meta);

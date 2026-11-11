@@ -126,7 +126,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0097](0097-desktop-attach-client-node-per-workspace.md) | Desktop Attach Client — One Front Node per Workspace | Accepted (in progress — verified on macOS, Linux/Windows pending) | 2026-06-13 |
 | [0098](0098-build-artifact-provenance.md) | Build Artifact Provenance and Version-Based Staleness Invalidation | Implemented | 2026-06-23 |
 | [0099](0099-cli-application-story.md) | CLI Application Story — Console, Arguments, Exit, and Packaging | Implemented | 2026-06-26 |
-| [0100](0100-open-world-diagnostic-policy.md) | Open-World Diagnostic Policy for Unresolved Selectors and Classes | Implemented (WS3 cross-package metadata pending) | 2026-06-27 |
+| [0100](0100-open-world-diagnostic-policy.md) | Open-World Diagnostic Policy for Unresolved Selectors and Classes | Implemented | 2026-06-27 |
 | [0101](0101-unified-erlang-interop-native-objects.md) | Unified Erlang Interop — `native:` for Stateless Objects, Wrap-by-Default FFI, Clean `@primitive`/`@intrinsic`/`native:` Split | Implemented | 2026-06-28 |
 | [0102](0102-set-theoretic-type-operators.md) | Set-Theoretic Type Operators (Intersection and Negation) for Narrowing and Atom Exhaustiveness | Implemented (Phases 1, 2, 4, 5; Phase 1b deferred) | 2026-07-06 |
 | [0103](0103-sendability-typing-from-class-kinds.md) | Sendability Typing from Class Kinds | Implemented (Phases 0–3) | 2026-07-05 |
@@ -171,6 +171,8 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0142](0142-class-process-owns-only-class-state.md) | The Class Process Only Owns Class State — Stateless Class Methods Run in the Caller | Implemented (2026-10-30) | 2026-10-29 |
 | [0143](0143-binary-construction-syntax.md) | Binary Construction Syntax — Reuse `<<...>>` in Expression Position | Accepted | 2026-11-01 |
 | [0144](0144-class-side-protocol-types.md) | Class-Side Protocol Types — `P class` Means "a Class Conforming to `P`" | Implemented | 2026-11-04 |
+| [0145](0145-cascade-pipeline-semantics.md) | Cascade Semantics for Immutable Values — Keep `;` Fan-Out, Add a `\|>` Pipeline | Accepted | 2026-11-06 |
+| [0146](0146-non-local-return-through-ensure.md) | A `^` Commits the Actor's Cell, Not a Copy | Accepted | 2026-11-06 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

@@ -362,6 +362,25 @@ fn block_argument_hints_at_known_remote_receiver() {
 }
 
 #[test]
+fn then_block_hints_at_known_remote_receiver() {
+    // `Object >> then:` (BT-4515) types its block specially, but a block sent
+    // to a known-remote actor must still get the ADR 0126 §6 hint.
+    let src = "Actor subclass: Worker\n  ping => 1\n\n\
+         Object subclass: Main\n  \
+         run: node :: Node =>\n    \
+         remote :: Worker := (Worker spawnOn: node) unwrap\n    \
+         remote then: [:w | w]\n";
+    let diags = check_source_full(src);
+    let hints = block_hints(&sendability(&diags));
+    assert_eq!(hints.len(), 1, "expected one hint, got: {diags:?}");
+    assert_eq!(
+        hints[0].severity,
+        Severity::Hint,
+        "must be Hint, not Warning"
+    );
+}
+
+#[test]
 fn block_argument_silent_at_non_remote_receiver() {
     let src = "Actor subclass: Worker\n  runBlock: b => b value\n\n\
          Object subclass: Main\n  \

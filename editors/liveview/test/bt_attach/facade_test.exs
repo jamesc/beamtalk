@@ -99,6 +99,12 @@ defmodule BtAttach.FacadeTest do
         record({:diagnostics, code, mode}) &&
           {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
 
+    # BT-4583: a file-backed buffer also names its source file.
+    def diagnostics(code, mode, source_path),
+      do:
+        record({:diagnostics, code, mode, source_path}) &&
+          {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
+
     # BT-2557: test-runner pane — discovery + run.
     def list_tests,
       do: record({:list_tests}) && {:ok, [%{"class" => "FooTest", "selectors" => ["testOne"]}]}
@@ -649,6 +655,23 @@ defmodule BtAttach.FacadeTest do
       assert {:diagnostics, "x", "expression"} in calls
       refute {:diagnostics, "x", "bogus"} in calls
       refute {:diagnostics, "x", 42} in calls
+    end
+
+    test "a non-empty source_path rides the call for a file-backed buffer (BT-4583)" do
+      assert Facade.dispatch(:diagnostics, %{code: "x", source_path: "/p/src/a.bt"}) ==
+               {:ok, [%{"from" => 0, "to" => 3, "severity" => "error", "message" => "boom"}]}
+
+      assert {:diagnostics, "x", "expression", "/p/src/a.bt"} in RecordingClient.calls()
+    end
+
+    test "a nil, empty or non-binary source_path takes the path-less call (BT-4583)" do
+      for path <- [nil, "", 42] do
+        assert {:ok, _} = Facade.dispatch(:diagnostics, %{code: "x", source_path: path})
+      end
+
+      calls = RecordingClient.calls()
+      assert Enum.count(calls, &(&1 == {:diagnostics, "x", "expression"})) == 3
+      refute Enum.any?(calls, &match?({:diagnostics, _, _, _}, &1))
     end
 
     test "a bad shape is invalid params, with no dist call" do

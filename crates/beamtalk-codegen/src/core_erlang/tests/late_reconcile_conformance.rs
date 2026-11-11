@@ -4,7 +4,7 @@
 //! Cross-boundary conformance fixture for ADR 0124 §8/B9's `late`-slot
 //! reconcile decision table (BT-3556).
 //!
-//! CLAUDE.md's duplication rule: "A rule crossing the Rust/Erlang boundary
+//! AGENTS.md's duplication rule: "A rule crossing the Rust/Erlang boundary
 //! needs a shared conformance fixture or code generation, not a comment."
 //! `beamtalk_shape_migration:reconcile_declared/7` (Erlang) decides a
 //! declared-but-absent field's reconcile outcome from three pieces of

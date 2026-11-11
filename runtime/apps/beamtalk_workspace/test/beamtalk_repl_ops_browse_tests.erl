@@ -324,7 +324,7 @@ delegate_tests(#{class_name := ClassName}) ->
 %% Beamtalk-compiled native-backed stdlib class (`Subprocess`), not the
 %% hand-written `beamtalk_test_native_facade` test double the suite above
 %% uses. Beamtalk's Core Erlang codegen compiles straight to Core Erlang and
-%% feeds it to `compile:forms(..., [from_core | Opts])` (CLAUDE.md), which
+%% feeds it to `compile:forms(..., [from_core | Opts])` (AGENTS.md), which
 %% never runs the abstract-form `sys_pre_expand` compiler pass that
 %% auto-injects `module_info/0,1` — so a real compiled `bt@stdlib@subprocess`
 %% facade module has no `module_info/1`, unlike `beamtalk_test_native_facade`

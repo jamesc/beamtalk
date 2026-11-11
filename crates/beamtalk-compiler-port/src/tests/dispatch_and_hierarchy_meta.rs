@@ -545,13 +545,16 @@ fn module_less_decodes_from_meta_module_key() {
 }
 
 /// BT-4363: a class-side method that the module's own
-/// `'constant_class_methods'` certifies as an integer-literal body arrives as
+/// `'constant_class_methods'` certifies as a literal body arrives as
 /// `MethodInfo::constant_value`, so a workspace compile against a loaded class
 /// folds a class-literal send of it as a batch compile does. Instance methods
-/// and uncertified class methods carry none.
+/// and uncertified class methods carry none. BT-4504: every scalar literal
+/// kind decodes from the term it compiles to; a term no literal compiles to
+/// decodes as no constant.
 #[test]
 fn constant_class_methods_survive_etf_meta() {
-    use eetf::{FixInteger, List};
+    use beamtalk_core::ast::ConstantValue;
+    use eetf::{Binary, FixInteger, Float, List, Tuple};
 
     let method = || {
         Term::from(Map::from([
@@ -559,6 +562,24 @@ fn constant_class_methods_survive_etf_meta() {
             (atom("param_types"), Term::from(List::from(vec![]))),
         ]))
     };
+    let string = |s: &str| {
+        Term::from(Tuple::from(vec![
+            atom("beamtalk_string"),
+            Term::from(Binary::from(s.as_bytes())),
+        ]))
+    };
+    let selectors = [
+        "protocolError",
+        "computed",
+        "real",
+        "text",
+        "symbolic",
+        "none",
+        "yes",
+        "no",
+        "list",
+        "badString",
+    ];
     let meta_map = Map::from([
         (atom("class"), atom("Errs")),
         (atom("superclass"), atom("Object")),
@@ -570,17 +591,38 @@ fn constant_class_methods_survive_etf_meta() {
         ),
         (
             atom("class_method_info"),
-            Term::from(Map::from([
-                (atom("protocolError"), method()),
-                (atom("computed"), method()),
-            ])),
+            Term::from(Map::from(
+                selectors
+                    .iter()
+                    .map(|sel| (atom(sel), method()))
+                    .collect::<std::collections::HashMap<_, _>>(),
+            )),
         ),
         (
             atom("constant_class_methods"),
-            Term::from(Map::from([(
-                atom("protocolError"),
-                Term::from(FixInteger::from(-3)),
-            )])),
+            Term::from(Map::from([
+                (atom("protocolError"), Term::from(FixInteger::from(-3))),
+                (
+                    atom("real"),
+                    Term::from(Float::try_from(1.5).expect("finite")),
+                ),
+                (atom("text"), string("hi")),
+                (atom("symbolic"), atom("one")),
+                (atom("none"), atom("nil")),
+                (atom("yes"), atom("true")),
+                (atom("no"), atom("false")),
+                (
+                    atom("list"),
+                    Term::from(List::from(vec![Term::from(FixInteger::from(1))])),
+                ),
+                (
+                    atom("badString"),
+                    Term::from(Tuple::from(vec![
+                        atom("beamtalk_string"),
+                        Term::from(Binary::from(&[0xff_u8][..])),
+                    ])),
+                ),
+            ])),
         ),
     ]);
     let classes = parse_class_hierarchy_from_term(&Term::from(Map::from([(
@@ -594,8 +636,21 @@ fn constant_class_methods_survive_etf_meta() {
             .find(|m| m.selector == sel)
             .unwrap_or_else(|| panic!("class method {sel}"))
             .constant_value
+            .clone()
     };
-    assert_eq!(class_method("protocolError"), Some(-3));
-    assert_eq!(class_method("computed"), None);
+    for (sel, expected) in [
+        ("protocolError", Some(ConstantValue::Integer(-3))),
+        ("computed", None),
+        ("real", Some(ConstantValue::Float(1.5))),
+        ("text", Some(ConstantValue::String("hi".into()))),
+        ("symbolic", Some(ConstantValue::Symbol("one".into()))),
+        ("none", Some(ConstantValue::Nil)),
+        ("yes", Some(ConstantValue::True)),
+        ("no", Some(ConstantValue::False)),
+        ("list", None),
+        ("badString", None),
+    ] {
+        assert_eq!(class_method(sel), expected, "class method {sel}");
+    }
     assert_eq!(info.methods[0].constant_value, None);
 }

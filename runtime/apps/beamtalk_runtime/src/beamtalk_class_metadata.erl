@@ -136,9 +136,14 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% direct-construction eligibility set for dynamic `new`/`new:`.
     put_direct_constructors/2,
     lookup_direct_constructors/1,
-    %% BT-4363: certified integer-literal class-side bodies.
+    %% BT-4363: certified literal class-side bodies (BT-4504: every scalar
+    %% literal kind).
     put_constant_class_methods/2,
     lookup_constant_class_methods/1,
+    %% BT-4493: certified caller-safe signal primitives (the raise key's row).
+    put_caller_safe_primitives/2,
+    lookup_caller_safe_primitives/1,
+    is_constant_value/1,
     lookup_direct_constructor/2,
     %% BT-4409: the per-class `new:` fact and its run-time chain walk.
     put_defines_user_class_new1/2,
@@ -182,10 +187,19 @@ a table deleted between an existence check and the op (teardown/shutdown).
 %% (`beamtalk_workspace_shape_store`) and the build-time, disk-derived
 %% flattener (`beamtalk_release_shapes`, ADR 0125 §2.2) produce, so a
 %% conformance test can assert their outputs are structurally identical for
-%% the same class (CLAUDE.md's no-duplicate-implementations rule — this is
+%% the same class (AGENTS.md's no-duplicate-implementations rule — this is
 %% the shared leaf both apps depend on, `beamtalk_workspace` -> `beamtalk_runtime`).
 -type field_shape() :: #{binary() => {DeclaredType :: binary(), Kind :: binary()}}.
 -export_type([field_shape/0]).
+
+%% BT-4363, BT-4504: the term a class-side method whose whole body is one
+%% scalar literal compiles to, as `constant_class_methods` publishes it and a
+%% constant-value static call key carries it: an Integer or a Character (its
+%% code point), a Float, a String (`{beamtalk_string, Bin}`, BT-4170), or a
+%% Symbol, `nil`, `true` or `false` (an atom). Compound literals are not
+%% constants. See `is_constant_value/1`.
+-type constant_value() :: integer() | float() | atom() | {beamtalk_string, binary()}.
+-export_type([constant_value/0]).
 
 -record(class_metadata, {
     name :: class_name(),
@@ -252,13 +266,22 @@ a table deleted between an existence check and the op (teardown/shutdown).
     process_bound_selectors :: [selector()] | undefined,
     %% BT-4363: `constant_class_methods` from the compiled module's
     %% `__beamtalk_meta/0`, each class-side selector whose whole body is one
-    %% integer literal mapped to that integer. Written only by
+    %% scalar literal mapped to the term it compiles to (BT-4504,
+    %% `constant_value()`). Written only by
     %% `put_constant_class_methods/2`; `#{}` for dynamic classes and modules
     %% compiled before the key existed. A constant-value static call key is
     %% certified against this row, not against the module's own
     %% `__beamtalk_meta/0`: a reload publishes it from the new module's meta
     %% while the old code is still current (`-on_load`).
-    constant_class_methods = #{} :: #{selector() => integer()},
+    constant_class_methods = #{} :: #{selector() => constant_value()},
+    %% BT-4493: `caller_safe_class_primitives` from the compiled module's
+    %% `__beamtalk_meta/0`, each class-side selector whose whole body is one
+    %% caller-safe signal primitive. Written only by
+    %% `put_caller_safe_primitives/2`; `#{}` for dynamic classes and modules
+    %% compiled before the key existed. A caller-safe raise static call key is
+    %% certified against this row of the defining class, not against the
+    %% module's own `__beamtalk_meta/0` (the old code during `-on_load`).
+    caller_safe_primitives = #{} :: #{selector() => atom()},
     %% BT-4262: the class doc (ADR 0033), mirrored from the class process like
     %% the reflection state above, so `doc` answers without a `gen_server:call`
     %% into the class (which cannot answer from inside its own process, or
@@ -812,7 +835,7 @@ so a caller that wants the flattened whole merges the result with its own
 map itself (`maps:merge(AncestorMap, OwnMap)`).
 
 This is the one ancestor walk-and-merge primitive every per-class-level-map
-flattener in this codebase shares (CLAUDE.md's no-duplicate-implementations
+flattener in this codebase shares (AGENTS.md's no-duplicate-implementations
 rule): `beamtalk_workspace_shape_store`'s live, ETS-backed `field_types`/
 `field_kinds` flattening and `beamtalk_release_shapes`'s build-time,
 disk-derived flattening (ADR 0125 §2.2/§3.4) both call this with a different
@@ -1009,7 +1032,7 @@ Zip a flattened `field_types` map with its matching `field_kinds` map into a
 dynamic/ClassBuilder-built level) defaults to `eager`. This is the shared
 leaf both `beamtalk_workspace_shape_store:normalize_shape/2` (live) and
 `beamtalk_release_shapes` (build-time, ADR 0125 §2.2/§3.4, BT-3574)
-delegate to, rather than each keeping its own copy of this zip (CLAUDE.md's
+delegate to, rather than each keeping its own copy of this zip (AGENTS.md's
 no-duplicate-implementations rule) — see `field_type_to_binary/1`/
 `field_kind_to_binary/1`, this function's two per-value normalisers.
 """.
@@ -1363,10 +1386,11 @@ put_direct_constructors(Name, Ctors) when is_list(Ctors) ->
     end.
 
 -doc """
-Store a class's certified integer-literal class-side bodies (BT-4363).
+Store a class's certified literal class-side bodies (BT-4363, BT-4504).
 
 `Constants` is the `constant_class_methods` value from the class's
-`__beamtalk_meta/0` (`#{Selector => Integer}`); pass `#{}` to clear it.
+`__beamtalk_meta/0` (`#{Selector => constant_value()}`); pass `#{}` to clear
+it.
 Updates the existing row in place; a no-op when no row exists.
 
 A change, once written, erases the class's static call keys
@@ -1378,7 +1402,7 @@ that read the old row is erased and one after the write reads the new row.
 A reload publishes this map after its own invalidations, from the new
 module's meta, while the old code may still be current.
 """.
--spec put_constant_class_methods(class_name(), #{selector() => integer()}) -> ok.
+-spec put_constant_class_methods(class_name(), #{selector() => constant_value()}) -> ok.
 put_constant_class_methods(Name, Constants) when is_map(Constants) ->
     new(),
     case field(Name, #class_metadata.constant_class_methods) of
@@ -1396,13 +1420,63 @@ put_constant_class_methods(Name, Constants) when is_map(Constants) ->
             beamtalk_class_shadow_flags:invalidate(Name)
     end.
 
--doc "A class's certified integer-literal class-side bodies (`#{}` when none or unknown).".
--spec lookup_constant_class_methods(class_name()) -> #{selector() => integer()}.
+-doc """
+Store a class's certified caller-safe signal primitives (BT-4493):
+`caller_safe_class_primitives` from its `__beamtalk_meta/0`
+(`#{Selector => Primitive}`); `#{}` clears it. Updates the existing row in
+place; a no-op when no row exists.
+
+A change erases the class's static call keys, and its descendants'
+(`beamtalk_class_shadow_flags:invalidate/1`), since a caller-safe raise key
+sits on the inheriting class. A key is installed only while the defining
+class's row maps its selector to the key's primitive, re-read under the tag
+lock the erase also takes. A reload publishes this map from the new module's
+meta while the old code may still be current (`-on_load`).
+""".
+-spec put_caller_safe_primitives(class_name(), #{selector() => atom()}) -> ok.
+put_caller_safe_primitives(Name, Primitives) when is_map(Primitives) ->
+    new(),
+    case field(Name, #class_metadata.caller_safe_primitives) of
+        Primitives ->
+            ok;
+        _ ->
+            try
+                ets:update_element(
+                    ?TABLE, Name, {#class_metadata.caller_safe_primitives, Primitives}
+                ),
+                ok
+            catch
+                error:badarg -> ok
+            end,
+            beamtalk_class_shadow_flags:invalidate(Name)
+    end.
+
+-doc "A class's certified caller-safe primitives (`#{}` when none or unknown).".
+-spec lookup_caller_safe_primitives(class_name()) -> #{selector() => atom()}.
+lookup_caller_safe_primitives(Name) ->
+    case field(Name, #class_metadata.caller_safe_primitives) of
+        Primitives when is_map(Primitives) -> Primitives;
+        _ -> #{}
+    end.
+
+-doc "A class's certified literal class-side bodies (`#{}` when none or unknown).".
+-spec lookup_constant_class_methods(class_name()) -> #{selector() => constant_value()}.
 lookup_constant_class_methods(Name) ->
     case field(Name, #class_metadata.constant_class_methods) of
         Constants when is_map(Constants) -> Constants;
         _ -> #{}
     end.
+
+-doc """
+Whether `Term` is a `constant_value()` (BT-4504): the shape of a scalar
+literal's compiled term. The registration sync keeps only such entries of a
+module's `constant_class_methods`, so a malformed meta value never certifies
+a key.
+""".
+-spec is_constant_value(term()) -> boolean().
+is_constant_value(V) when is_integer(V); is_float(V); is_atom(V) -> true;
+is_constant_value({beamtalk_string, Bin}) when is_binary(Bin) -> true;
+is_constant_value(_) -> false.
 
 -doc """
 Publish whether `Name` itself defines a class-side `new:` that is user code
@@ -1455,7 +1529,10 @@ Walks the ancestors' published `defines_user_class_new1` facts
 is already in its baked `direct_constructors` (and an own ADR 0084 runtime fun
 already turns the class's direct paths off). An ancestor's runtime-installed
 `new:` fun (`put_class_method`) counts as a user `new:` too: the class-process
-path runs it (`handle_class_method_call/6` finds it in the chain). Fails
+path runs it (`handle_class_method_call/6` finds it in the chain). So does a
+class-side extension of `new:` registered on an ancestor (BT-4588): it counts
+as that ancestor's class method (BT-4307), and the class-process path runs it
+(`beamtalk_object_class:constructor_shadowed/2`). Fails
 closed (`true`) on any
 doubt: a missing row, a missing superclass link, an unpublished fact (an older
 module or a dynamic ancestor) or a hierarchy cycle. `Value`'s fact is `false`
@@ -1466,8 +1543,9 @@ not this question.
 Memoised as `{chain_has_user_new1, Name}` in `beamtalk_class_derived_cache`,
 whose generation counter every class-metadata write bumps (each fact write,
 `put_defines_user_class_new1/2`, and each superclass link write, `insert/5`
-and `merge_identity/5`), so an answer derived before an ancestor's write is
-never served after it.
+and `merge_identity/5`), as does each class-side extension row that appears
+or goes away (`beamtalk_extensions:register/5`, `unregister/3`), so an answer
+derived before an ancestor's write is never served after it.
 """.
 -spec chain_has_user_new1(class_name()) -> boolean().
 chain_has_user_new1(Name) ->
@@ -1483,7 +1561,10 @@ ancestors_have_user_new1(Start) ->
     StepFun = fun(Class, _Depth) ->
         case
             lookup_class_method_fun(Class, 'new:') =:= error andalso
-                lookup_defines_user_class_new1(Class) =:= false
+                lookup_defines_user_class_new1(Class) =:= false andalso
+                beamtalk_dispatch:check_extension(
+                    beamtalk_class_registry:class_object_tag(Class), 'new:'
+                ) =:= not_found
         of
             true ->
                 case lookup_superclass(Class) of

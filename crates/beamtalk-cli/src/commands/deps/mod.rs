@@ -186,19 +186,20 @@ struct DiscoveredDep {
 /// Used by both `deps_are_fresh` and `collect_fresh_deps` to handle the full
 /// transitive graph rather than just direct deps.
 ///
-/// Note: `dependency_classes.rs`'s offline MCP `lint`/`diagnostic_summary`
-/// dependency-class resolution performs a similar BFS but cannot call this
-/// function directly (it lives in the library crate while this module is
-/// binary-only). The checkout-path resolution step — the shared primitive
+/// Note: the offline walk shared by MCP `lint`/`diagnostic_summary` and the
+/// LSP ([`beamtalk_project::dependency_graph::discover_dependency_graph`])
+/// performs a similar BFS, but skips what it cannot find where this one
+/// reports an error, and records stubs and via-chains this one needs. The
+/// checkout-path resolution step — the shared primitive
 /// that determines *where* each dep lives on disk — is extracted into
-/// [`beamtalk_cli::path_util::dep_root_for_source`] and called by both
-/// walkers, so that piece cannot drift between them.
+/// [`beamtalk_project::dependency_graph::dep_root_for_source`] and called by
+/// both walkers, so that piece cannot drift between them.
 fn discover_all_dep_roots(
     project_root: &Utf8Path,
     manifest: &manifest::ParsedManifest,
 ) -> Result<Vec<DiscoveredDep>> {
-    use beamtalk_cli::path_util::dep_root_for_source;
     use beamtalk_core::compilation::DependencySource;
+    use beamtalk_project::dependency_graph::dep_root_for_source;
 
     let layout = BuildLayout::new(project_root);
     let direct_names: std::collections::HashSet<&str> =
@@ -224,13 +225,14 @@ fn discover_all_dep_roots(
             }
 
             let is_path_dep = matches!(spec.source, DependencySource::Path { .. });
-            let dep_root = dep_root_for_source(&parent_root, dep_name, &spec.source, &layout)
-                .map_err(|path| {
-                    miette::miette!(
-                        "Dependency '{dep_name}' has a non-UTF-8 path: {}",
-                        path.display()
-                    )
-                })?;
+            let dep_root =
+                dep_root_for_source(&parent_root, dep_name, &spec.source, &layout.deps_dir())
+                    .map_err(|path| {
+                        miette::miette!(
+                            "Dependency '{dep_name}' has a non-UTF-8 path: {}",
+                            path.display()
+                        )
+                    })?;
 
             let is_direct = direct_names.contains(dep_name.as_str());
 
@@ -239,9 +241,7 @@ fn discover_all_dep_roots(
             // stubs) can be recorded alongside it.
             let dep_manifest_path = dep_root.join("beamtalk.toml");
             let dep_parsed = manifest::parse_manifest_full(&dep_manifest_path).ok();
-            let stubs_dir = dep_parsed
-                .as_ref()
-                .and_then(|m| path::resolve_dep_stubs_dir(m, &dep_root));
+            let stubs_dir = dep_parsed.as_ref().and_then(|m| m.stubs_dir(&dep_root));
 
             result.push(DiscoveredDep {
                 name: dep_name.clone(),
@@ -317,6 +317,7 @@ fn collect_fresh_deps(
             protocol_defs,
             alias_infos,
             protocol_sources,
+            extensions,
         ) = path::with_dependency_closure(&mut resolved, &dependencies, &dep.name, |prior| {
             path::build_dep_class_index(&dep.root, &dep.name, prior)
         })?;
@@ -341,6 +342,7 @@ fn collect_fresh_deps(
             is_direct: dep.is_direct,
             via_chain: dep.via_chain.clone(),
             stubs_dir: dep.stubs_dir.clone(),
+            extensions,
         });
     }
 
@@ -698,7 +700,7 @@ fn newest_bt_mtime(dir: &std::path::Path) -> Option<std::time::SystemTime> {
 /// Accessible from child modules (`path`, `graph`, …) via
 /// `use super::super::test_support::*`.
 #[cfg(test)]
-pub(super) mod test_support {
+pub(crate) mod test_support {
     use std::fs;
 
     /// Write a minimal `beamtalk.toml` into `dir`.
@@ -712,6 +714,54 @@ pub(super) mod test_support {
         let src_dir = dir.join("src");
         fs::create_dir_all(&src_dir).unwrap();
         fs::write(src_dir.join(filename), content).unwrap();
+    }
+
+    /// Writes `<root>/consumer/` (with `consumer_files` under `src/`, and
+    /// `consumer_manifest_extra` appended to its manifest) depending on a path
+    /// dependency `<root>/producer/` (with `producer_files` under `src/`).
+    /// Fakes the producer's compiled state so `ensure_deps_resolved` takes
+    /// the fresh, no-compile path (`collect_fresh_deps` →
+    /// `build_dep_class_index`) — fast, and needs no Erlang toolchain.
+    /// Returns the consumer root.
+    pub fn consumer_with_fresh_path_dependency(
+        root: &camino::Utf8Path,
+        producer_files: &[(&str, &str)],
+        consumer_manifest_extra: &str,
+        consumer_files: &[(&str, &str)],
+    ) -> camino::Utf8PathBuf {
+        let producer = root.join("producer");
+        fs::create_dir_all(&producer).unwrap();
+        write_manifest(producer.as_std_path(), "producer", "0.1.0", "");
+        for (name, content) in producer_files {
+            write_source(producer.as_std_path(), name, content);
+        }
+
+        let consumer = root.join("consumer");
+        fs::create_dir_all(&consumer).unwrap();
+        write_manifest(
+            consumer.as_std_path(),
+            "consumer",
+            "0.1.0",
+            &format!(
+                "[dependencies]\nproducer = {{ path = \"../producer\" }}\n\n{consumer_manifest_extra}"
+            ),
+        );
+        for (name, content) in consumer_files {
+            write_source(consumer.as_std_path(), name, content);
+        }
+
+        let layout = crate::commands::build_layout::BuildLayout::new(&consumer);
+        let ebin_dir = layout.dep_ebin_dir("producer");
+        fs::create_dir_all(&ebin_dir).unwrap();
+        for (name, _) in producer_files {
+            let stem = name.trim_end_matches(".bt");
+            fs::write(ebin_dir.join(format!("bt@producer@{stem}.beam")), b"BEAM").unwrap();
+        }
+        crate::commands::build_stamp::write_stamp(
+            &layout.dep_stamp_path("producer"),
+            crate::commands::build_stamp::current_otp_version(),
+        );
+        consumer
     }
 }
 
@@ -1401,6 +1451,7 @@ mod tests {
             is_direct: true,
             via_chain: Vec::new(),
             stubs_dir: None,
+            extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
         }];
 
         clean_stale_deps(&root, &resolved).unwrap();
@@ -1436,6 +1487,7 @@ mod tests {
                 is_direct: true,
                 via_chain: Vec::new(),
                 stubs_dir: None,
+                extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
             },
             path::ResolvedDependency {
                 name: "b".to_string(),
@@ -1450,6 +1502,7 @@ mod tests {
                 is_direct: true,
                 via_chain: Vec::new(),
                 stubs_dir: None,
+                extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
             },
         ];
 

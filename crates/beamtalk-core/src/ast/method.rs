@@ -15,6 +15,99 @@ use super::expression::{
     ExpectCategory, Expression, Identifier, Literal, MessageSelector, TypeAnnotation,
 };
 
+/// A literal a method body can be exactly, and that a class-literal send of
+/// the method may answer in place (BT-4363, BT-4504): every literal kind with
+/// a single typed Core Erlang leaf. Compound literals (`#(...)` lists, maps,
+/// arrays) are not constants here.
+///
+/// The runtime certifies a folded send by exact equality (`=:=`) of the
+/// value the call site answers with the one the class's metadata row
+/// publishes, so the value is compared as the term it compiles to: `Float`
+/// compares by bit pattern (`1.0` is not `1`, and `0.0` is not `-0.0`).
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ConstantValue {
+    /// `42`
+    Integer(i64),
+    /// `1.5`
+    Float(f64),
+    /// `"text"`
+    String(EcoString),
+    /// `#name`
+    Symbol(EcoString),
+    /// `$a`
+    Character(char),
+    /// `nil`
+    Nil,
+    /// `true`
+    True,
+    /// `false`
+    False,
+}
+
+impl PartialEq for ConstantValue {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Integer(a), Self::Integer(b)) => a == b,
+            (Self::Float(a), Self::Float(b)) => a.to_bits() == b.to_bits(),
+            (Self::String(a), Self::String(b)) | (Self::Symbol(a), Self::Symbol(b)) => a == b,
+            (Self::Character(a), Self::Character(b)) => a == b,
+            (Self::Nil, Self::Nil) | (Self::True, Self::True) | (Self::False, Self::False) => true,
+            _ => false,
+        }
+    }
+}
+
+// Bit-pattern float equality is reflexive, so this is a full equivalence.
+impl Eq for ConstantValue {}
+
+impl ConstantValue {
+    /// The constant a scalar literal is; `None` for a compound literal.
+    #[must_use]
+    pub fn from_literal(literal: &Literal) -> Option<Self> {
+        match literal {
+            Literal::Integer(value) => Some(Self::Integer(*value)),
+            Literal::Float(value) => Some(Self::Float(*value)),
+            Literal::String(value) => Some(Self::String(value.clone())),
+            Literal::Symbol(value) => Some(Self::Symbol(value.clone())),
+            Literal::Character(value) => Some(Self::Character(*value)),
+            Literal::List(_) => None,
+        }
+    }
+
+    /// The constant a reserved pseudo-variable (`nil`, `true`, `false`) is.
+    #[must_use]
+    pub fn from_pseudo_variable(name: &str) -> Option<Self> {
+        match name {
+            "nil" => Some(Self::Nil),
+            "true" => Some(Self::True),
+            "false" => Some(Self::False),
+            _ => None,
+        }
+    }
+
+    /// The literal this constant is written as, so codegen lowers it through
+    /// the one literal lowering, or `Err` with the name of the reserved
+    /// pseudo-variable (`nil`, `true`, `false`) it is written as.
+    ///
+    /// # Errors
+    ///
+    /// `Err(name)` for [`Self::Nil`], [`Self::True`] and [`Self::False`],
+    /// which are pseudo-variables rather than literals.
+    pub fn as_literal(&self) -> Result<Literal, &'static str> {
+        match self {
+            Self::Integer(value) => Ok(Literal::Integer(*value)),
+            Self::Float(value) => Ok(Literal::Float(*value)),
+            Self::String(value) => Ok(Literal::String(value.clone())),
+            Self::Symbol(value) => Ok(Literal::Symbol(value.clone())),
+            Self::Character(value) => Ok(Literal::Character(*value)),
+            Self::Nil => Err("nil"),
+            Self::True => Err("true"),
+            Self::False => Err("false"),
+        }
+    }
+}
+
 /// Modifier flags for a method definition.
 ///
 /// All flags default to `false` and kind defaults to `Primary`,
@@ -125,6 +218,9 @@ pub struct MethodDefinition {
     pub comments: CommentAttachment,
     /// Doc comment attached to this method (`///` lines).
     pub doc_comment: Option<String>,
+    /// The sends in this method's body that were written with `|>`
+    /// (ADR 0145), so the unparser can print the body as written.
+    pub pipeline_sends: super::PipelineSends,
     /// Source location.
     pub span: Span,
 }
@@ -186,18 +282,22 @@ impl MethodDefinition {
         }
     }
 
-    /// The integer when the method body is exactly one integer literal (the
-    /// named-constant idiom, `class protocolError => 1`), else `None`.
+    /// The literal when the method body is exactly one literal of a kind
+    /// [`ConstantValue`] covers (the named-constant idiom, `class
+    /// protocolError => 1`, `class tag => #tag`, `class name => "x"`), else
+    /// `None`.
     ///
     /// Codegen certifies it in the defining module's `__beamtalk_meta/0`
     /// (`constant_class_methods`) and a class-literal send of the selector
     /// answers it behind a static call key that the runtime installs only
-    /// while that metadata still maps the selector to this value (BT-4363).
+    /// while that metadata still maps the selector to this value (BT-4363,
+    /// generalised from integers in BT-4504).
     #[must_use]
-    pub fn literal_integer_body(&self) -> Option<i64> {
+    pub fn literal_constant_body(&self) -> Option<ConstantValue> {
         match self.body.as_slice() {
             [stmt] => match &stmt.expression {
-                Expression::Literal(Literal::Integer(value), _) => Some(*value),
+                Expression::Literal(literal, _) => ConstantValue::from_literal(literal),
+                Expression::Identifier(id) => ConstantValue::from_pseudo_variable(&id.name),
                 _ => None,
             },
             _ => None,
@@ -224,6 +324,7 @@ impl MethodDefinition {
             expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
+            pipeline_sends: super::PipelineSends::default(),
             span,
         }
     }
@@ -249,6 +350,7 @@ impl MethodDefinition {
             expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
+            pipeline_sends: super::PipelineSends::default(),
             span,
         }
     }
@@ -275,6 +377,7 @@ impl MethodDefinition {
             expect: None,
             comments: CommentAttachment::default(),
             doc_comment: None,
+            pipeline_sends: super::PipelineSends::default(),
             span,
         }
     }
@@ -282,10 +385,11 @@ impl MethodDefinition {
 
 #[cfg(test)]
 mod tests {
+    use super::ConstantValue;
     use crate::source_analysis::{lex_with_eof, parse};
 
-    /// `literal_integer_body` of the class-side `selector` of the one class in `src`.
-    fn class_method_constant(src: &str, selector: &str) -> Option<i64> {
+    /// `literal_constant_body` of the class-side `selector` of the one class in `src`.
+    fn class_method_constant(src: &str, selector: &str) -> Option<ConstantValue> {
         let (module, diagnostics) = parse(lex_with_eof(src));
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         module.classes[0]
@@ -293,23 +397,68 @@ mod tests {
             .iter()
             .find(|m| m.selector.name() == selector)
             .expect("method")
-            .literal_integer_body()
+            .literal_constant_body()
     }
 
     #[test]
-    fn literal_integer_body_is_only_a_lone_integer_literal() {
+    fn literal_constant_body_is_only_a_lone_scalar_literal() {
         let src = "Object subclass: Errs\n  \
                    class one => 1\n  \
                    class minus => -7\n  \
                    class sum => 1 + 1\n  \
                    class float => 1.5\n  \
+                   class str => \"hi\"\n  \
                    class sym => #one\n  \
+                   class char => $a\n  \
+                   class none => nil\n  \
+                   class yes => true\n  \
+                   class no => false\n  \
+                   class list => #(1, 2)\n  \
+                   class interp => \"a{1}\"\n  \
+                   class selfish => self\n  \
                    class two =>\n    1\n    2\n";
-        assert_eq!(class_method_constant(src, "one"), Some(1));
-        assert_eq!(class_method_constant(src, "minus"), Some(-7));
+        assert_eq!(
+            class_method_constant(src, "one"),
+            Some(ConstantValue::Integer(1))
+        );
+        assert_eq!(
+            class_method_constant(src, "minus"),
+            Some(ConstantValue::Integer(-7))
+        );
         assert_eq!(class_method_constant(src, "sum"), None);
-        assert_eq!(class_method_constant(src, "float"), None);
-        assert_eq!(class_method_constant(src, "sym"), None);
+        assert_eq!(
+            class_method_constant(src, "float"),
+            Some(ConstantValue::Float(1.5))
+        );
+        assert_eq!(
+            class_method_constant(src, "str"),
+            Some(ConstantValue::String("hi".into()))
+        );
+        assert_eq!(
+            class_method_constant(src, "sym"),
+            Some(ConstantValue::Symbol("one".into()))
+        );
+        assert_eq!(
+            class_method_constant(src, "char"),
+            Some(ConstantValue::Character('a'))
+        );
+        assert_eq!(class_method_constant(src, "none"), Some(ConstantValue::Nil));
+        assert_eq!(class_method_constant(src, "yes"), Some(ConstantValue::True));
+        assert_eq!(class_method_constant(src, "no"), Some(ConstantValue::False));
+        assert_eq!(class_method_constant(src, "list"), None);
+        assert_eq!(class_method_constant(src, "interp"), None);
+        assert_eq!(class_method_constant(src, "selfish"), None);
         assert_eq!(class_method_constant(src, "two"), None);
+    }
+
+    #[test]
+    fn constant_values_compare_as_the_terms_they_compile_to() {
+        assert_ne!(ConstantValue::Integer(1), ConstantValue::Float(1.0));
+        assert_ne!(ConstantValue::Float(0.0), ConstantValue::Float(-0.0));
+        assert_eq!(ConstantValue::Float(1.5), ConstantValue::Float(1.5));
+        assert_ne!(
+            ConstantValue::String("a".into()),
+            ConstantValue::Symbol("a".into())
+        );
     }
 }

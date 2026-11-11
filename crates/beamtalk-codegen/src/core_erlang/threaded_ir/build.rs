@@ -12,8 +12,9 @@
 use super::super::CoreErlangGenerator;
 use super::emit::{RenderCtx, render, render_value};
 use super::ir::{
-    AccParam, BindOp, CarrierSlot, CloseContext, FrameId, RebindFrame, RebindLowering, RebindShape,
-    ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef, VersionPrefix, VersionedVar,
+    AccParam, BindOp, CarrierSlot, CloseContext, FoldAccShape, FrameId, RebindFrame,
+    RebindLowering, RebindShape, ThreadedStmt, ThreadedValue, ThreadingMode, ValueRef,
+    VersionPrefix, VersionedVar,
 };
 use super::verify::{ScopeKind, VerifyError, verify_in_scope};
 use beamtalk_cerl_doc::Document;
@@ -66,6 +67,7 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
     param_name: &str,
     mode_gate_slots: usize,
     node_gate_slots: usize,
+    shape: FoldAccShape,
     threaded_locals: &[String],
     span: Span,
 ) -> (ThreadedStmt, Vec<VersionedVar>) {
@@ -80,12 +82,13 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
         })
         .collect();
     let stmt = ThreadedStmt::Threaded {
-        mode: ThreadingMode::TupleAcc(mode_gate_slots),
+        mode: ThreadingMode::TupleAcc(mode_gate_slots, shape),
         frame,
         threads: threaded_locals.to_vec(),
         body: vec![ThreadedStmt::TupleAccUnpack {
             param,
             gate_slots: node_gate_slots,
+            shape,
             targets: targets.clone(),
             frame,
             span,
@@ -102,9 +105,8 @@ pub(in crate::core_erlang) fn build_tuple_acc_unpack(
 /// 0111 Addendum 4: `gen_server/methods.rs`'s
 /// `lower_body_exprs_with_reply` output — real `Bind`s interleaved with
 /// opaque [`ThreadedStmt::Statement`]s) whose opaque statements may have
-/// advanced the `State` version counter invisibly: a `super` send or
-/// Tier-2 helper (`emit_super_send_open`,
-/// `generate_field_assignment_open`, …) calls `next_state_var` inside its
+/// advanced the `State` version counter invisibly: a Tier-2 helper
+/// (`generate_field_assignment_open`, …) calls `next_state_var` inside its
 /// own shared, multi-module `Document` builder, so the version step it
 /// produces has no `Bind` node in this body's IR.
 ///
@@ -154,7 +156,7 @@ pub(in crate::core_erlang) fn verify_body_with_opaque_version_gaps(
 /// node before verifying — `control_flow::body::generate_foldl_loop_body`'s
 /// merged `Threaded` node, whose body lives at its own non-`ROOT` frame, not
 /// a flat method-level fixture — can reuse the identical technique instead
-/// of re-deriving it at a hardcoded [`FrameId::ROOT`] (CLAUDE.md's
+/// of re-deriving it at a hardcoded [`FrameId::ROOT`] (AGENTS.md's
 /// no-duplicate-implementations rule). `verify_body_with_opaque_version_gaps`
 /// itself is unchanged in behavior: `frame: FrameId::ROOT` reproduces
 /// exactly what it always built inline.
@@ -231,7 +233,7 @@ fn backfill_opaque_version_gap(
 /// [`backfill_opaque_version_gap`] and [`verify_simple_bind`] both need to
 /// give [`VerifyWalk::check_use`]'s frame-flow rule a producing `Bind` for
 /// version history a fixture can't otherwise see (one shared loop, per
-/// CLAUDE.md's no-duplicate-implementations rule).
+/// AGENTS.md's no-duplicate-implementations rule).
 fn backfill_version_chain(
     prefix: &VersionPrefix,
     frame: FrameId,

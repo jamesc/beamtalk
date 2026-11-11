@@ -34,12 +34,14 @@ use crate::semantic_analysis::type_checker::{
 use ecow::EcoString;
 
 mod assignment;
-mod blocks;
+pub(super) mod blocks;
 mod cascade;
 mod flow;
 mod generics;
 mod literals;
 mod send;
+
+pub use cascade::cascade_drops_update;
 
 /// The class whose method table answers for a `Known` type name.
 ///
@@ -230,6 +232,8 @@ impl TypeChecker {
         }
 
         // Check top-level expressions last — method return types are now available.
+        self.block_written_locals =
+            super::binary_string_compare::block_written_locals(&module.expressions);
         self.infer_stmts(&module.expressions, hierarchy, &mut env, false);
     }
 
@@ -393,6 +397,8 @@ impl TypeChecker {
             &mut ctx,
         );
         self.stash_return_position_block_pushdown(method);
+        self.block_written_locals =
+            super::binary_string_compare::block_written_locals(&method.body);
         let body_type = self.infer_stmts(&method.body, hierarchy, &mut method_env, is_abstract);
         // BT-4235: on the value-type body path a trailing `self.x := v` answers
         // the updated `self` (BT-833), with or without statement-level
@@ -896,8 +902,8 @@ impl TypeChecker {
             }
             // Destructure assignment — infer value type, bind pattern variables into TypeEnv
             Expression::DestructureAssignment { pattern, value, .. } => {
-                self.infer_expr(value, hierarchy, env, in_abstract_method);
-                Self::bind_pattern_vars(pattern, env);
+                let value_ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
+                Self::bind_destructure_vars(pattern, &value_ty, hierarchy, env);
                 InferredType::Dynamic(DynamicReason::Unknown)
             }
         };
@@ -930,9 +936,12 @@ impl TypeChecker {
         // "Dynamic in typed class" warning is pure data (see
         // `detect_dynamic_in_typed_class`); rendering it as a diagnostic is
         // `validation.rs`'s job.
-        if let Some(fact) =
-            Self::detect_dynamic_in_typed_class(ty, self.typed_class_context.as_ref())
-        {
+        if let Some(fact) = Self::detect_dynamic_in_typed_class(
+            expr,
+            ty,
+            self.typed_class_context.as_ref(),
+            &self.unresolved_selector_sends,
+        ) {
             self.emit_dynamic_in_typed_class(&fact, expr.span());
         }
     }
@@ -951,8 +960,10 @@ impl TypeChecker {
     /// that already has one), and not `DynamicBranch` (a branch join whose
     /// `Dynamic` arm already warned at its own source, BT-4207).
     fn detect_dynamic_in_typed_class(
+        expr: &Expression,
         ty: &InferredType,
         typed_class_context: Option<&EcoString>,
+        unresolved_selector_sends: &std::collections::HashSet<crate::source_analysis::Span>,
     ) -> Option<DynamicInTypedClass> {
         let InferredType::Dynamic(reason) = ty else {
             return None;
@@ -969,9 +980,26 @@ impl TypeChecker {
         }
         let class_name = typed_class_context?.clone();
         let description = reason.description()?;
+        // `UnresolvedSelector` warns once, at the send that owns the
+        // selector (BT-4526). The reason flows on through wrappers (`(…)`,
+        // `x := …`, a cascade, whose type is its first send's) and through
+        // sends that only pass a block's result along (`ifTrue:ifFalse:`,
+        // `value`); none of those may repeat it, least of all under their
+        // own, resolved selector. Ownership is positive: the span that
+        // `check_class_side_send` recorded when it produced the reason.
+        let unresolved_selector = match (reason, expr) {
+            (DynamicReason::UnresolvedSelector, Expression::MessageSend { selector, span, .. })
+                if unresolved_selector_sends.contains(span) =>
+            {
+                Some(selector.name())
+            }
+            (DynamicReason::UnresolvedSelector, _) => return None,
+            _ => None,
+        };
         Some(DynamicInTypedClass {
             class_name,
             description,
+            unresolved_selector,
         })
     }
 

@@ -32,6 +32,11 @@ defmodule VeBench do
 
   alias VeBench.{Area, Counter, Helpers, Math, Point, Sub}
 
+  # Named constants as module attributes (rows 3k-3m).
+  @protocol_error 1
+  @name "protocol error"
+  @tag :protocol_error
+
   # === Fixtures ===
 
   def point, do: %Point{x: 1, y: 2}
@@ -39,6 +44,8 @@ defmodule VeBench do
   def sub, do: %Sub{}
   def counter, do: elem(Counter.start(), 1)
   def sub_counter, do: elem(VeBench.SubCounter.start(), 1)
+  def pool, do: elem(DynamicSupervisor.start_link(strategy: :one_for_one), 1)
+  def capped_pool, do: elem(DynamicSupervisor.start_link(strategy: :one_for_one, max_children: 8), 1)
   def adder, do: fn x -> x + 1 end
   def list100, do: Enum.to_list(1..100)
   def dict, do: %{a: 1, b: 2, k: 3}
@@ -70,6 +77,15 @@ defmodule VeBench do
   defbench(:remote_call, _, do: Math.double(21))
   defbench(:dyn_remote_call, mod, do: mod.double(21))
 
+  # Rows 3k-3m: a named constant as a remote call, and as a module attribute
+  # (inlined at compile time, what a folded constant send aims for).
+  defbench(:remote_const_int, _, do: Math.protocol_error())
+  defbench(:remote_const_string, _, do: Math.name())
+  defbench(:remote_const_atom, _, do: Math.tag())
+  defbench(:module_attr_int, _, do: @protocol_error)
+  defbench(:module_attr_string, _, do: @name)
+  defbench(:module_attr_atom, _, do: @tag)
+
   # === 4. Dynamic dispatch ===
 
   defbench(:protocol, s, do: Area.area(s))
@@ -90,6 +106,19 @@ defmodule VeBench do
   defbench(:enum_each, l, do: Enum.each(l, fn e -> e end))
   defbench(:enum_map, l, do: Enum.map(l, fn e -> e * 2 end))
   defbench(:lists_foldl, l, do: :lists.foldl(fn e, acc -> acc + e end, 0, l))
+
+  # === 15. DynamicSupervisor start_child + terminate_child (BT-4502) ===
+
+  def pool_start_terminate(n, pool), do: pool_loop(1, n, pool)
+
+  defp pool_loop(i, n, pool) when i <= n do
+    spec = %{id: Counter, start: {Counter, :start_link, [0]}, restart: :temporary}
+    {:ok, child} = DynamicSupervisor.start_child(pool, spec)
+    :ok = DynamicSupervisor.terminate_child(pool, child)
+    pool_loop(i + 1, n, pool)
+  end
+
+  defp pool_loop(_i, _n, pool), do: DynamicSupervisor.count_children(pool).active
 
   # === 7. GenServer ===
 

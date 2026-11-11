@@ -664,7 +664,7 @@ traversal: `beamtalk_class_registry:all_subclasses/1`'s existing transitive
 `direct_subclasses/1` closure for the descendant half, and
 `beamtalk_hierarchy:walk_ancestors/3` (the same generic
 depth-guarded superclass-chain walker `beamtalk_class_dispatch:
-find_class_method_in_chain/2` already uses) over `beamtalk_class_metadata:
+find_class_side_method/3` already uses) over `beamtalk_class_metadata:
 lookup_superclass/1` reads for the ancestor half — pure ETS, no
 `gen_server:call`.
 

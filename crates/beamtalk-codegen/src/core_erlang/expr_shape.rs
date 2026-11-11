@@ -12,7 +12,7 @@
 //! so on. None of these are dispatch-specific; they previously lived in
 //! `dispatch_codegen.rs` only because dispatch was the first (and widest)
 //! caller. "Module X sits below Y in the dependency graph" is not a reason
-//! to duplicate a classifier rather than extract it (CLAUDE.md).
+//! to duplicate a classifier rather than extract it (AGENTS.md).
 //!
 //! Each predicate is a plain function over `&Expression` (plus [`ShapeCtx`]
 //! for the handful that need a borrowed slice of generator state —
@@ -243,7 +243,7 @@ pub(super) fn is_field_assignment(expr: &Expression) -> bool {
 /// diagnostic — would otherwise have to re-destructure the same shape by hand,
 /// and a later widening of one copy (say, to accept an aliased `self`) would
 /// silently turn a rejection into a no-op rather than a compile error
-/// (CLAUDE.md's no-duplicate-implementations rule).
+/// (AGENTS.md's no-duplicate-implementations rule).
 pub(super) fn field_assignment_name(expr: &Expression) -> Option<&str> {
     let Expression::Assignment { target, .. } = expr else {
         return None;
@@ -480,7 +480,7 @@ pub(super) fn binary_send_dispatches_to_self(
 /// the receiver is a bare `self` without owning an `Expression::MessageSend`
 /// node to hand back (a cascade message, whose selector/arguments come from
 /// `CascadeMessage` — see `util.rs`'s `cascade_self_dispatch_messages`) can
-/// reuse the exact same rule instead of copying it (CLAUDE.md: no duplicate
+/// reuse the exact same rule instead of copying it (AGENTS.md: no duplicate
 /// implementations).
 ///
 /// Excludes selectors that are intercepted by handlers before

@@ -49,7 +49,7 @@ defmodule BtAttachWeb.Live.TestRunner do
   0091 Decision 3) with `BtAttachWeb.Live.RequestContext` — never a raw
   `BtAttach.Workspace`/`:rpc` call — so this module never reimplements the
   `list_tests`/`run_tests`/`load_tests` ops or the RBAC gates they ride
-  (CLAUDE.md no-duplicate-implementations).
+  (AGENTS.md no-duplicate-implementations).
 
   State (`:test_classes`, `:test_results`, `:tests_error`, `:tests_error_owner`,
   `:tests_running`, `:tests_discover_keep_error`) stays on the LiveView's own socket —

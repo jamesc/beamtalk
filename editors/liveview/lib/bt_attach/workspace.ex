@@ -776,8 +776,21 @@ defmodule BtAttach.Workspace do
   a method has no class context here, so semantic checks run on Compile.
   """
   @spec diagnostics(String.t(), String.t()) :: {:ok, [map()]} | {:error, term()}
-  def diagnostics(code, mode) when is_binary(code) and is_binary(mode) do
-    case dispatch_diagnostics(code, mode) do
+  def diagnostics(code, mode) when is_binary(code) and is_binary(mode),
+    do: diagnostics(code, mode, "")
+
+  @doc """
+  Like `diagnostics/2`, but `source_path` (BT-4583) names the file the buffer
+  edits. A non-empty path rides the op's `source_path` param, so the compiler
+  checks the buffer under that file's project scope — its `beamtalk.toml`
+  `[diagnostics]` table, cross-file type aliases and FFI registry, the scope
+  `load-project` compiles the same file with. `""` sends no path (a scratch
+  buffer), keeping today's behaviour. `"method"` mode ignores the path.
+  """
+  @spec diagnostics(String.t(), String.t(), String.t()) :: {:ok, [map()]} | {:error, term()}
+  def diagnostics(code, mode, source_path)
+      when is_binary(code) and is_binary(mode) and is_binary(source_path) do
+    case dispatch_diagnostics(code, mode, source_path) do
       {:diagnostics, list} when is_list(list) ->
         {:ok, Enum.map(list, &normalize_diagnostic/1)}
 
@@ -1093,9 +1106,14 @@ defmodule BtAttach.Workspace do
   # layer so the `{diagnostics, _}` term arrives live (no JSON edge). No session
   # pid is needed — diagnostics are workspace-global parse-only analysis — so
   # `self()` is passed only to satisfy `dispatch/4`'s arity, mirroring
-  # `dispatch_browse/2`. `mode` (BT-2569) selects the parse grammar.
-  defp dispatch_diagnostics(code, mode) do
-    request = %{"op" => "diagnostics", "code" => code, "mode" => mode}
+  # `dispatch_browse/2`. `mode` (BT-2569) selects the parse grammar; a
+  # non-empty `source_path` (BT-4583) selects the file's project scope.
+  defp dispatch_diagnostics(code, mode, source_path) do
+    request =
+      case source_path do
+        "" -> %{"op" => "diagnostics", "code" => code, "mode" => mode}
+        path -> %{"op" => "diagnostics", "code" => code, "mode" => mode, "source_path" => path}
+      end
 
     case rpc(:beamtalk_repl_protocol, :decode, [encode_json(request)]) do
       {:ok, msg} ->

@@ -100,18 +100,21 @@ pub(super) use ir::RebindFrameKind;
 pub(super) use ir::STATIC_LOOP_FNS;
 pub(super) use ir::{
     BindOp, CatchClause, CatchEntry, CatchStep, CellBoundary, EnsureCatchVars, EnsureCleanup,
-    EnsureNlrRelay, FastPath, FoldCarry, FrameId, LoopCounter, NlrCarry, NlrThrowShape,
-    OnDoCatchVars, RethrowSlot, StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode,
-    TokenId, TryRegion, UserCodeRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
+    EnsureForeignNlr, EnsureNlrRelay, FastPath, FoldAccShape, FoldCarry, ForeignCleanupBody,
+    FrameId, LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars, RethrowSlot,
+    StateAccFallbackReason, ThreadedStmt, ThreadedValue, ThreadingMode, TokenId, TryRegion,
+    UserCodeRegion, ValueRef, VersionCounter, VersionPrefix, VersionedVar,
 };
 pub(super) use ir::{COUNTED_LOOP_FN, LOOP_FN_STEM, REPEAT_LOOP_FN, WHILE_LOOP_FN};
 pub(super) use ir::{CarrierSlot, RebindFrame, RebindLowering, RebindShape};
 // The one family slot order and the `'__local__'` key prefix.
 pub(super) use ir::{LOCAL_STATE_KEY_PREFIX, canonical_families};
 pub(super) use verify::{
-    ClassMethodDefect, SequencedSibling, StaleReadDefect, StateReadSite, StateRestoreDefect,
-    VerifyError, verify_bind_frames, verify_fold_family_carried, verify_fold_locals_carried,
-    verify_producer_sites_threaded, verify_sibling_reads, verify_tuple_acc_state_reads,
+    ClassMethodDefect, ConditionWriteSite, SequencedSibling, StaleReadDefect, StateReadSite,
+    StateRestoreDefect, VerifyError, verify_bind_frames, verify_condition_writes_in_map,
+    verify_fold_family_carried, verify_fold_locals_carried, verify_producer_sites_threaded,
+    verify_repl_producer_sites_threaded, verify_sibling_reads, verify_tuple_acc_no_family,
+    verify_tuple_acc_state_reads,
 };
 
 // `AccParam`/`CloseContext` have no production caller by name
@@ -127,7 +130,8 @@ pub(super) use verify::{
 pub(super) use ir::{AccParam, CloseContext};
 #[cfg(test)]
 pub(super) use verify::{
-    CatchRestoreDefect, EnsureRelayDefect, ScopeKind, verify, verify_in_scope,
+    CatchRestoreDefect, EnsureRelayDefect, ForeignStoreDefect, ScopeKind, verify, verify_in_scope,
+    verify_in_scope_after,
 };
 
 // Test-only: brings the ambient names `threaded_ir.rs`'s own top-level

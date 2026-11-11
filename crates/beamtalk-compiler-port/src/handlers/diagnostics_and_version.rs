@@ -11,7 +11,7 @@ use crate::decode::{
     extract_class_hierarchy, extract_known_type_aliases, extract_protocol_registry,
 };
 use crate::diagnostics::{DiagInfo, diag_category};
-use crate::registry::diagnostics_overrides;
+use crate::project_context::RequestScope;
 use crate::respond::{diagnostics_ok_response, error_response};
 
 /// Handle a `diagnostics` request (syntax/semantic check only).
@@ -50,6 +50,15 @@ use crate::respond::{diagnostics_ok_response, error_response};
 /// the real protocol names (and their required selectors) lets the existing
 /// filter in `analyse_full` drop the synthetic class entry
 /// the same way it already does for the LSP's `ProjectIndex` path.
+///
+/// The optional `source_path` field (BT-4325) names the file the buffer
+/// edits. Under a manifest, the check runs with that file's project scope —
+/// its `[diagnostics]` table, cross-file and dependency `type` aliases, and
+/// FFI registry — resolved by the same [`RequestScope`] `compile` uses, so
+/// the editor reports what `load_project` reports for the same file. No
+/// path (a scratch buffer, a REPL expression) or a manifest-less file keeps
+/// the legacy scope (port-process cwd table, no registry, session aliases
+/// only). `"method"` mode is parse-only and ignores it.
 pub(crate) fn handle_diagnostics(request: &Map) -> Term {
     let Some(source) = map_get(request, "source").and_then(term_to_string) else {
         return error_response(&["Missing or invalid 'source' field".to_string()]);
@@ -71,16 +80,29 @@ pub(crate) fn handle_diagnostics(request: &Map) -> Term {
         // candidate class referencing a live-redefined alias would resolve
         // it as an unknown nominal class instead of picking up the
         // redefinition, defeating the whole point of re-checking it.
-        let pre_loaded_aliases = extract_known_type_aliases(request);
-        beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_referenced_aliases(
-            &module,
-            parse_diagnostics,
-            &[],
-            pre_class_hierarchy,
-            pre_loaded_protocols,
-            pre_loaded_aliases,
-            diagnostics_overrides(),
-        )
+        let session_aliases = extract_known_type_aliases(request);
+        // Keystroke path: no `project_batch`, so each request re-verifies
+        // the memoized scope (re-reads the manifest, walks and stats the
+        // project's inputs); the alias re-parse and registry load re-run
+        // only when a fingerprint changed. The buffer is its whole file, so
+        // the saved copy's own aliases give way to the buffer's.
+        let source_path = map_get(request, "source_path").and_then(term_to_string);
+        let scope = RequestScope::for_source(source_path.as_deref(), None);
+        let (diagnostics, analysis) =
+            beamtalk_language_service::queries::diagnostic_provider::compute_diagnostics_and_analysis(
+                &module,
+                parse_diagnostics,
+                &[],
+                pre_class_hierarchy,
+                pre_loaded_protocols,
+                // Diagnostics-only: no codegen follows, so no flattened
+                // output a missing cross-file protocol AST could corrupt.
+                Vec::new(),
+                scope.whole_file_aliases(session_aliases),
+                scope.diagnostics_table(),
+                scope.analysis_project(),
+            );
+        (diagnostics, analysis.referenced_aliases)
     };
 
     let all_diags: Vec<DiagInfo> = diagnostics.iter().map(diag_info).collect();

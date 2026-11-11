@@ -20,6 +20,8 @@ Tests cover:
 - tableSize/1 — entry count
 - deleteTable/1 — table destruction
 - FFI shims: new/2, named/1
+- private:/1, protected:/1 — unnamed tables and access_denied (BT-4576)
+- removeKey/3 — atomic remove-and-answer via ets:take (BT-4576)
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -721,10 +723,11 @@ stale_table_delete_test() ->
         _:_ -> ok
     end),
     Table = beamtalk_ets:'new:type:'(bt_ets_test_stale_delete, set),
-    %% Delete the underlying table directly, then verify deleteTable raises permission_error
+    %% Delete the underlying table directly, then verify deleteTable raises stale_table
+    %% (the same kind as an unnamed table and every other operation; BT-4604).
     ets:delete(bt_ets_test_stale_delete),
     ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = permission_error, class = 'Ets'}},
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_table, class = 'Ets'}},
         beamtalk_ets:deleteTable(Table)
     ).
 
@@ -988,3 +991,204 @@ bt3836_user_values_are_not_result_coerced_test() ->
 
 bt3836_raw_results_marker_test() ->
     ?assert(beamtalk_ets:beamtalk_ffi_raw_results()).
+
+%%% ============================================================================
+%%% BT-4576: unnamed private/protected tables, removeKey/3 (ets:take)
+%%% ============================================================================
+
+-doc "Run Fun in a fresh process and answer its result or the caught error.".
+in_other_process(Fun) ->
+    Parent = self(),
+    Ref = make_ref(),
+    spawn(fun() ->
+        Parent !
+            {Ref,
+                try
+                    {ok, Fun()}
+                catch
+                    error:E -> {error, E}
+                end}
+    end),
+    receive
+        {Ref, R} -> R
+    after 5000 -> error(timeout)
+    end.
+
+-define(assertAccessDenied(Result),
+    ?assertMatch(
+        {error, #{error := #beamtalk_error{kind = access_denied, class = 'Ets'}}}, Result
+    )
+).
+
+bt4576_private_table_is_unnamed_and_owner_usable_test() ->
+    T = beamtalk_ets:'private:'(set),
+    #{'$beamtalk_class' := 'Ets', table := Tid} = T,
+    ?assertNot(is_atom(Tid)),
+    ?assertEqual(private, ets:info(Tid, protection)),
+    ?assertEqual(nil, beamtalk_ets:insert(T, k, v)),
+    ?assertEqual(v, beamtalk_ets:lookup(T, k)),
+    ?assertEqual(1, beamtalk_ets:tableSize(T)),
+    %% Two private tables coexist independently.
+    T2 = beamtalk_ets:private(orderedSet),
+    ?assertEqual(nil, beamtalk_ets:lookup(T2, k)),
+    beamtalk_ets:deleteTable(T),
+    beamtalk_ets:deleteTable(T2).
+
+bt4576_private_table_denies_other_processes_test() ->
+    T = beamtalk_ets:'private:'(set),
+    beamtalk_ets:insert(T, k, secret),
+    ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:lookup(T, k) end)),
+    ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:insert(T, k, x) end)),
+    ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:tableSize(T) end)),
+    ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:values(T) end)),
+    ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:includesKey(T, k) end)),
+    ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:removeAll(T) end)),
+    ?assertAccessDenied(
+        in_other_process(fun() -> beamtalk_ets:updateAt(T, k, fun(V) -> V end) end)
+    ),
+    ?assertAccessDenied(
+        in_other_process(fun() -> beamtalk_ets:removeKey(T, k, fun() -> nil end) end)
+    ),
+    {error, #{error := Err}} = in_other_process(fun() -> beamtalk_ets:keys(T) end),
+    ?assertMatch(#beamtalk_error{kind = access_denied}, Err),
+    ?assertNotEqual(undefined, Err#beamtalk_error.hint),
+    ?assertEqual(secret, beamtalk_ets:lookup(T, k)),
+    beamtalk_ets:deleteTable(T).
+
+bt4576_protected_table_allows_other_readers_only_test() ->
+    T = beamtalk_ets:'protected:'(set),
+    beamtalk_ets:insert(T, k, 1),
+    ?assertEqual({ok, 1}, in_other_process(fun() -> beamtalk_ets:lookup(T, k) end)),
+    ?assertEqual({ok, 1}, in_other_process(fun() -> beamtalk_ets:tableSize(T) end)),
+    ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:insert(T, k, 2) end)),
+    ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:incrementAt(T, k, 1) end)),
+    ?assertEqual(1, beamtalk_ets:lookup(T, k)),
+    beamtalk_ets:deleteTable(T).
+
+bt4576_delete_unnamed_table_errors_test() ->
+    T = beamtalk_ets:'protected:'(set),
+    %% Only the owner may delete, even a table others may read.
+    ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:deleteTable(T) end)),
+    ?assertEqual(nil, beamtalk_ets:deleteTable(T)),
+    ?assertError(
+        #{error := #beamtalk_error{kind = stale_table}}, beamtalk_ets:deleteTable(T)
+    ).
+
+-doc "Run Body, then delete the named table Name whether or not Body failed.".
+with_named_table_cleanup(Name, Body) ->
+    try
+        Body()
+    after
+        catch ets:delete(Name)
+    end.
+
+bt4604_delete_named_public_table_by_non_owner_succeeds_test() ->
+    %% Named tables are public, and ETS lets any process delete a public table.
+    with_named_table_cleanup(bt4604_named_public_delete, fun() ->
+        T = beamtalk_ets:'new:type:'(bt4604_named_public_delete, set),
+        ?assertEqual({ok, nil}, in_other_process(fun() -> beamtalk_ets:deleteTable(T) end)),
+        ?assertError(
+            #{error := #beamtalk_error{kind = stale_table, class = 'Ets'}},
+            beamtalk_ets:deleteTable(T)
+        )
+    end).
+
+bt4604_delete_named_protected_table_by_non_owner_is_access_denied_test() ->
+    %% A name re-created by another process as a protected table: the caller
+    %% may not delete it, so the error is access_denied, not permission_error.
+    with_named_table_cleanup(bt4604_named_protected, fun() ->
+        ets:new(bt4604_named_protected, [named_table, protected]),
+        T = #{'$beamtalk_class' => 'Ets', table => bt4604_named_protected},
+        ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:deleteTable(T) end)),
+        ?assertEqual(nil, beamtalk_ets:deleteTable(T))
+    end).
+
+-define(assertDeleteFault(Kind, Name),
+    ?assertError(
+        #{error := #beamtalk_error{kind = Kind, class = 'Ets'}},
+        beamtalk_ets:badarg_error('delete', Name)
+    )
+).
+
+bt4604_delete_badarg_name_reuse_test() ->
+    with_named_table_cleanup(bt4604_reuse, fun() ->
+        %% A failed delete is classified by probing the name, which may by
+        %% then hold a replacement table. No table under the name: stale.
+        ?assertDeleteFault(stale_table, bt4604_reuse),
+        %% The caller owns the table now under the name, so the one it failed
+        %% to delete was a predecessor that is gone: stale.
+        ets:new(bt4604_reuse, [named_table, protected]),
+        ?assertDeleteFault(stale_table, bt4604_reuse),
+        %% Another process owns a protected table under the name:
+        %% access_denied (the stated default; the original and a replacement
+        %% look the same).
+        ?assertAccessDenied(
+            in_other_process(fun() -> beamtalk_ets:badarg_error('delete', bt4604_reuse) end)
+        ),
+        ets:delete(bt4604_reuse),
+        %% A public replacement owned by another process: the caller could
+        %% have deleted it, so the failed delete hit a table that is gone.
+        ets:new(bt4604_reuse, [named_table, public]),
+        ?assertMatch(
+            {error, #{error := #beamtalk_error{kind = stale_table}}},
+            in_other_process(fun() -> beamtalk_ets:badarg_error('delete', bt4604_reuse) end)
+        )
+    end).
+
+bt4576_deleted_private_table_is_stale_test() ->
+    T = beamtalk_ets:'private:'(set),
+    beamtalk_ets:deleteTable(T),
+    ?assertError(
+        #{error := #beamtalk_error{kind = stale_table}}, beamtalk_ets:lookup(T, k)
+    ),
+    ?assertError(
+        #{error := #beamtalk_error{kind = stale_table}}, beamtalk_ets:tableSize(T)
+    ).
+
+bt4576_private_rejects_bad_type_test() ->
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, selector = 'private:'}},
+        beamtalk_ets:'private:'(nope)
+    ),
+    ?assertError(
+        #{error := #beamtalk_error{kind = type_error, selector = 'protected:'}},
+        beamtalk_ets:'protected:'(<<"set">>)
+    ).
+
+bt4576_remove_key_if_absent_takes_value_test() ->
+    with_table(bt_ets_test_take, fun(T) ->
+        beamtalk_ets:insert(T, k, 7),
+        ?assertEqual(7, beamtalk_ets:removeKey(T, k, fun() -> nil end)),
+        ?assertNot(beamtalk_ets:includesKey(T, k)),
+        ?assertEqual(absent, beamtalk_ets:removeKey(T, k, fun() -> absent end)),
+        ?assertError(
+            #{error := #beamtalk_error{kind = type_error}},
+            beamtalk_ets:removeKey(T, k, not_a_block)
+        )
+    end).
+
+bt4576_atomic_ops_on_private_bag_deny_before_type_check_test() ->
+    %% A non-owner must get access_denied, not unsupported_table_type (which
+    %% would reveal the table type).
+    T = beamtalk_ets:'private:'(bag),
+    ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:incrementAt(T, k, 1) end)),
+    beamtalk_ets:deleteTable(T).
+
+bt4576_protected_table_bulk_reads_from_other_process_test() ->
+    T = beamtalk_ets:'protected:'(set),
+    beamtalk_ets:insert(T, k, 1),
+    ?assertEqual({ok, [k]}, in_other_process(fun() -> beamtalk_ets:keys(T) end)),
+    ?assertEqual({ok, [1]}, in_other_process(fun() -> beamtalk_ets:values(T) end)),
+    ?assertEqual({ok, #{k => 1}}, in_other_process(fun() -> beamtalk_ets:asDictionary(T) end)),
+    ?assertEqual(
+        {ok, 2}, in_other_process(fun() -> beamtalk_ets:ifPresent(T, k, fun(V) -> V + 1 end) end)
+    ),
+    beamtalk_ets:deleteTable(T).
+
+bt4576_remove_key_if_absent_on_bag_removes_all_entries_test() ->
+    T = beamtalk_ets:'private:'(duplicateBag),
+    #{table := Tid} = T,
+    ets:insert(Tid, [{k, a}, {k, b}]),
+    ?assertEqual(a, beamtalk_ets:removeKey(T, k, fun() -> nil end)),
+    ?assertNot(beamtalk_ets:includesKey(T, k)),
+    beamtalk_ets:deleteTable(T).

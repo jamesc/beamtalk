@@ -1,20 +1,28 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! Shared naming authority for compiler-synthesized `Value subclass:` methods.
+//! Shared naming and signature authority for compiler-synthesized
+//! `Value subclass:` methods.
 //!
 //! `Value` classes get auto-generated slot accessors, `with<Field>:` copy-setters,
-//! and a keyword constructor (ADR 0042). The *names* of those selectors are a
-//! convention that must agree across three consumers:
+//! and a keyword constructor (ADR 0042). The *names* of those selectors, and
+//! the return types they are recorded with, are a convention that must agree
+//! across the consumers:
 //!
 //! - **codegen** (`value_type_codegen`, `gen_server::methods`) — emits the Core
-//!   Erlang functions and their exports.
+//!   Erlang functions and their exports, and records them in the class's
+//!   `__beamtalk_meta` `method_info` (which is how the REPL and other
+//!   cross-file compiles see an already-loaded class).
 //! - **`class_hierarchy`** — synthesizes matching [`MethodInfo`](crate::semantic_analysis::MethodInfo)
 //!   entries so the type checker and LSP know the methods exist before codegen runs.
 //!
-//! Keeping the selector-name computation here (rather than duplicating it in each
-//! consumer) makes this module the single source of truth and removes the drift
-//! risk that previously existed between codegen and the hierarchy.
+//! Keeping the selector-name and return-type computation here (rather than
+//! duplicating it in each consumer) makes this module the single source of
+//! truth and removes the drift risk that previously existed between codegen
+//! and the hierarchy.
+
+use crate::ast::StateDeclaration;
+use crate::semantic_analysis::class_hierarchy::DeclaredType;
 
 /// Computes the `with*:` copy-setter selector name for a slot field.
 ///
@@ -100,6 +108,60 @@ pub fn synthesized_keyword_constructor<'a>(
     } else {
         Some(sel)
     }
+}
+
+/// The declared return type of a synthesized `with<Field>:` copy-setter:
+/// `Self`, since the copy is `maps:put` on the receiver and keeps its class.
+///
+/// `Self` rather than the bare class name, so a generic value class keeps
+/// its type arguments through a copy: on `b :: Box(Integer)`,
+/// `b withItem: 3` is `Box(Integer)` and `(b withItem: 3) item` is
+/// `Integer`, where a bare `Box` would drop them (BT-4648). On a subclass
+/// instance the copy is that subclass. The flat `'Self'` rendering
+/// round-trips through `__beamtalk_meta` (`DeclaredType::parse`).
+///
+/// Read by the hierarchy's synthesized `MethodInfo`s, the stdlib builtins
+/// generator (`build_stdlib`) and codegen's `__beamtalk_meta` `method_info`
+/// entries, so a class seen through its loaded BEAM metadata (the REPL's
+/// view of an earlier input) records the same return types as one built
+/// from its AST (BT-4621) — the `cascade-drops-update` warning, for one,
+/// reads them.
+#[must_use]
+pub fn synthesized_copy_return_type() -> DeclaredType {
+    DeclaredType::SelfType
+}
+
+/// The declared return type of the synthesized keyword constructor on the
+/// value class `class_name`: the class itself, not `Self`. The constructor
+/// ignores its class-self argument and always builds an instance of the
+/// defining class, so a subclass that inherits it (`Sub item: 3`) gets a
+/// `class_name` instance, which `Self` would mistype as the subclass
+/// (BT-4648). A class-side send has no receiver type arguments to keep.
+/// Read by the same consumers as [`synthesized_copy_return_type`].
+#[must_use]
+pub fn synthesized_constructor_return_type(class_name: &str) -> DeclaredType {
+    DeclaredType::simple(class_name)
+}
+
+/// The declared return type of the synthesized getter for `slot`: the
+/// field's declared type, or none when the field is untyped. Read by the
+/// same consumers as [`synthesized_copy_return_type`].
+#[must_use]
+pub fn synthesized_getter_return_type(slot: &StateDeclaration) -> Option<DeclaredType> {
+    slot.type_annotation.as_ref().map(DeclaredType::from)
+}
+
+/// The declared parameter type of the synthesized `with<Field>:` copy-setter
+/// for `slot`: the field's declared type, or none when the field is untyped.
+///
+/// With the copy typed `Self` ([`synthesized_copy_return_type`]), its argument
+/// must be checked against the field type too — over the receiver's type
+/// arguments on a generic class — or `(b withItem: 'hi') item` on
+/// `b :: Box(Integer)` would infer `Integer` for a `String` (BT-4648). Read by
+/// the same consumers as [`synthesized_copy_return_type`].
+#[must_use]
+pub fn synthesized_copy_param_type(slot: &StateDeclaration) -> Option<DeclaredType> {
+    synthesized_getter_return_type(slot)
 }
 
 #[cfg(test)]

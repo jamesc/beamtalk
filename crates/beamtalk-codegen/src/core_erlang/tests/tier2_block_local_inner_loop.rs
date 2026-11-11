@@ -183,8 +183,16 @@ fn every_corpus_program_compiles_clean() {
 }
 
 /// With the producer sites withheld, every corpus program in which a construct
-/// threads a block-local is reported as `ProducerSiteNotThreaded` and nothing
-/// else; a program the fault leaves clean has no producer site to lose.
+/// threads a block-local is reported as `ProducerSiteNotThreaded`; a program
+/// the fault leaves clean has no producer site to lose.
+///
+/// BT-4462: the withheld constructs were the last programs to reach the legacy
+/// reread of a construct's locals out of its state carrier (an assignment's
+/// value compiled in place, C3b). That reread is deleted, so nothing but the
+/// producer threads those writes: the frame's site check reports the missing
+/// producer first, and the in-place construct itself would be
+/// `ConstructLocalsNotRebound` (`evaluated_block_grid_corpus.rs` and
+/// `plain_arm_nested_construct_corpus.rs` observe that finding directly).
 #[test]
 fn the_fault_is_reported_over_the_generated_corpus() {
     let mut reported = 0;

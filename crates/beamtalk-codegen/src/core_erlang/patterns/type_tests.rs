@@ -258,6 +258,7 @@ impl CoreErlangGenerator {
                 let test = self.tuple_without_reserved_head_test(var);
                 Self::branch_on_test(test, success, rest)
             }
+            SendGuard::BareBinary => Self::wrap_bif_test(var, "is_binary", success, rest),
         }
     }
 

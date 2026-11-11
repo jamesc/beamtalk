@@ -396,6 +396,17 @@ load_raise_module(Module, CallerSafe) ->
         Module, compile_module(Module, [{class_testSelf, 1}, {'__beamtalk_meta', 0}], Body)
     ).
 
+%% A class on `Module` whose registration publishes `CallerSafe` (BT-4493).
+start_raise_class(Name, Module, CallerSafe) ->
+    {ok, Pid} = beamtalk_object_class:start(Name, #{
+        superclass => none,
+        module => Module,
+        class_methods => #{testSelf => #{arity => 0}},
+        class_state => #{},
+        meta => maps:put(caller_safe_class_primitives, CallerSafe, ?STATIC_META)
+    }),
+    Pid.
+
 %% A class module defining `class_testSelf/1` whose metadata maps selectors to
 %% their integer-literal bodies as `Constants` does (BT-4363).
 load_constant_module(Module, Constants) ->
@@ -433,6 +444,182 @@ reload_constant_class(Name, Module, Constants) ->
         meta => constant_meta(Constants)
     }),
     ok.
+
+%% BT-4363's constant-value key cases, repeated for each literal kind a
+%% class-side body can be (BT-4504): `V1` and `V2` are two distinct values of
+%% that kind, as the terms the compiler publishes in `constant_class_methods`
+%% (an Integer, a String as `{beamtalk_string, Bin}`, a Symbol as an atom,
+%% and the rest).
+constant_value_kinds_test_() ->
+    Kinds = [
+        {"integer", 1, 2},
+        {"float", 1.5, 2.5},
+        {"string", {beamtalk_string, <<"one">>}, {beamtalk_string, <<"two">>}},
+        {"symbol", one, two},
+        {"nil/true", nil, true}
+    ],
+    {setup, fun setup_runtime/0, fun teardown_runtime/1,
+        lists:flatmap(fun constant_value_cases/1, Kinds) ++
+            [
+                {"a constant-value key is exact: an integer row never certifies a float",
+                    fun constant_value_is_exact/0},
+                {"registration publishes only constant-shaped values",
+                    fun constant_row_keeps_only_constant_values/0}
+            ]}.
+
+constant_value_cases({Kind, V1, V2}) ->
+    Suffix = [C || C <- Kind, C =/= $/],
+    Mod = fun(Stem) -> list_to_atom("bt4504_" ++ Stem ++ "_" ++ Suffix) end,
+    Cls = fun(Stem) -> list_to_atom("Bt4504" ++ Stem ++ Suffix) end,
+    Tag = fun(Name) -> list_to_atom(atom_to_list(Name) ++ " class") end,
+    [
+        {
+            Kind ++
+                ": a constant-value key needs the class's published metadata to certify the literal",
+            fun() ->
+                %% BT-4363: the hit arm answers the literal without calling the
+                %% method, so the key also needs the body to be exactly that
+                %% literal, which the class's published metadata row certifies.
+                M = Mod("constant_module"),
+                Name = Cls("Const"),
+                T = Tag(Name),
+                load_constant_module(M, #{testSelf => V1}),
+                Pid = start_constant_class(Name, M, #{testSelf => V1}),
+                try
+                    Key = {constant_value, V1, M, class_testSelf, T},
+                    ?assertMatch(
+                        #beamtalk_object{class = T, pid = Pid}, target(Name, Key, testSelf)
+                    ),
+                    ?assertMatch(#beamtalk_object{}, key_value(Key)),
+                    %% A key naming another value than the body's declines.
+                    ?assertNot(target(Name, {constant_value, V2, M, class_testSelf, T}, testSelf)),
+                    %% A reload whose body is another literal erases the key,
+                    %% and the new row no longer certifies the old value.
+                    ok = reload_constant_class(Name, M, #{testSelf => V2}),
+                    ?assertNot(key_value(Key)),
+                    ?assertNot(target(Name, Key, testSelf)),
+                    ?assertMatch(
+                        #beamtalk_object{},
+                        target(Name, {constant_value, V2, M, class_testSelf, T}, testSelf)
+                    ),
+                    %% A reload whose body is no longer a literal at all.
+                    ok = reload_constant_class(Name, M, #{}),
+                    ?assertNot(key_value({constant_value, V2, M, class_testSelf, T})),
+                    ?assertNot(target(Name, {constant_value, V2, M, class_testSelf, T}, testSelf))
+                after
+                    stop_static_class(Pid)
+                end
+            end
+        },
+        {
+            Kind ++
+                ": a constant-value key is certified by the published row, not the current code",
+            fun() ->
+                %% BT-4363: a reload erases the class's keys inside the new
+                %% module's `-on_load`, while the OLD code (and its old
+                %% `__beamtalk_meta/0`) is still current. An install racing
+                %% that window must not certify the old literal: it is checked
+                %% against the row the reload publishes from the new meta.
+                %% Here the loaded code still says `V1` while the published row
+                %% says `V2`.
+                M = Mod("constant_window_module"),
+                Name = Cls("ConstWindow"),
+                T = Tag(Name),
+                load_constant_module(M, #{testSelf => V1}),
+                Pid = start_constant_class(Name, M, #{testSelf => V1}),
+                try
+                    Old = {constant_value, V1, M, class_testSelf, T},
+                    ?assertMatch(#beamtalk_object{}, target(Name, Old, testSelf)),
+                    ok = beamtalk_class_metadata:put_constant_class_methods(Name, #{
+                        testSelf => V2
+                    }),
+                    %% The publish erased the installed key, and the old
+                    %% literal no longer installs although the loaded code
+                    %% still says `V1`.
+                    ?assertNot(key_value(Old)),
+                    ?assertNot(target(Name, Old, testSelf)),
+                    ?assertNot(key_value(Old))
+                after
+                    stop_static_class(Pid)
+                end
+            end
+        },
+        {
+            Kind ++ ": a runtime fun or an extension of the selector erases a constant-value key",
+            fun() ->
+                M = Mod("constant_shadow_module"),
+                Name = Cls("ConstShadow"),
+                T = Tag(Name),
+                load_constant_module(M, #{testSelf => V1}),
+                Pid = start_constant_class(Name, M, #{testSelf => V1}),
+                Key = {constant_value, V1, M, class_testSelf, T},
+                try
+                    ?assertMatch(#beamtalk_object{}, target(Name, Key, testSelf)),
+                    %% `put_class_method` (ADR 0084 runtime fun).
+                    ok = beamtalk_object_class:put_class_method(
+                        Pid, testSelf, fun(_ClassSelf) -> from_runtime_fun end
+                    ),
+                    ?assertNot(key_value(Key)),
+                    ?assertNot(target(Name, Key, testSelf)),
+                    ?assertEqual(
+                        from_runtime_fun, beamtalk_class_dispatch:class_send(Pid, testSelf, [])
+                    ),
+                    ?assertEqual(removed, beamtalk_object_class:remove_class_method(Pid, testSelf)),
+                    ?assertMatch(#beamtalk_object{}, target(Name, Key, testSelf)),
+                    %% A class-side extension.
+                    ok = beamtalk_extensions:register(T, testSelf, noop_fun(), bt4504),
+                    ?assertNot(key_value(Key)),
+                    ?assertNot(target(Name, Key, testSelf)),
+                    ok = beamtalk_extensions:unregister(Name, testSelf, true),
+                    ?assertMatch(#beamtalk_object{}, target(Name, Key, testSelf))
+                after
+                    beamtalk_extensions:unregister(Name, testSelf, true),
+                    stop_static_class(Pid)
+                end
+            end
+        }
+    ].
+
+%% BT-4504: the row and the key compare with `=:=`, so an integer body never
+%% certifies a call site compiled against the float of the same magnitude.
+constant_value_is_exact() ->
+    Mod = bt4504_constant_exact_module,
+    Name = 'Bt4504ConstExact',
+    Tag = 'Bt4504ConstExact class',
+    load_constant_module(Mod, #{testSelf => 1}),
+    Pid = start_constant_class(Name, Mod, #{testSelf => 1}),
+    try
+        ?assertNot(target(Name, {constant_value, 1.0, Mod, class_testSelf, Tag}, testSelf)),
+        ?assertMatch(
+            #beamtalk_object{},
+            target(Name, {constant_value, 1, Mod, class_testSelf, Tag}, testSelf)
+        )
+    after
+        stop_static_class(Pid)
+    end.
+
+%% BT-4504: a registration publishes a module's `constant_class_methods`
+%% entries only when the value has a literal's compiled shape
+%% (`beamtalk_class_metadata:is_constant_value/1`).
+constant_row_keeps_only_constant_values() ->
+    Mod = bt4504_constant_shape_module,
+    Name = 'Bt4504ConstShape',
+    Good = #{
+        int => 1,
+        real => 1.5,
+        text => {beamtalk_string, <<"hi">>},
+        sym => one,
+        none => nil
+    },
+    Bad = #{list => [1, 2], tuple => {other, <<"x">>}, bin => <<"raw">>},
+    Constants = maps:merge(Good, Bad),
+    load_constant_module(Mod, Constants),
+    Pid = start_constant_class(Name, Mod, Constants),
+    try
+        ?assertEqual(Good, beamtalk_class_metadata:lookup_constant_class_methods(Name))
+    after
+        stop_static_class(Pid)
+    end.
 
 %% A subclass that defines no class methods of its own: every class-side send
 %% to it resolves to `Superclass`'s (BT-4270).
@@ -916,7 +1103,7 @@ static_call_target_test_() ->
             %% primitive, which the defining module's metadata lists.
             Mod = bt4270_raise_root_module,
             load_raise_module(Mod, #{testSelf => classSignal}),
-            Root = start_class_on('Bt4270RaiseRoot', none, Mod),
+            Root = start_raise_class('Bt4270RaiseRoot', Mod, #{testSelf => classSignal}),
             Leaf = start_inheriting_class('Bt4270RaiseLeaf', 'Bt4270RaiseRoot'),
             try
                 Key =
@@ -932,10 +1119,10 @@ static_call_target_test_() ->
                         'Bt4270RaiseLeaf class'},
                 ?assertNot(target('Bt4270RaiseLeaf', OtherPrimitive, testSelf)),
                 %% A reload whose new body is no longer the primitive: the
-                %% reload's registration erases the key, and the new code's
-                %% metadata no longer certifies it.
+                %% reload publishes the new row, which erases the key and no
+                %% longer certifies it.
                 load_raise_module(Mod, #{}),
-                ok = beamtalk_class_shadow_flags:invalidate('Bt4270RaiseRoot'),
+                ok = beamtalk_class_metadata:put_caller_safe_primitives('Bt4270RaiseRoot', #{}),
                 ?assertNot(key_value(Key)),
                 ?assertNot(target('Bt4270RaiseLeaf', Key, testSelf)),
                 ?assertNot(key_value(Key))
@@ -944,6 +1131,31 @@ static_call_target_test_() ->
                 stop_static_class(Root)
             end
         end},
+        {"a caller-safe raise key is certified by the published row, not the current code", fun() ->
+                %% BT-4493: during a reload's `-on_load` the old code (and its
+                %% `__beamtalk_meta/0`) is still current. The loaded code here
+                %% still says `classSignal`, but the published row says
+                %% otherwise, so the key declines.
+                Mod = bt4493_raise_window_module,
+                load_raise_module(Mod, #{testSelf => classSignal}),
+                Root = start_raise_class('Bt4493RaiseRoot', Mod, #{testSelf => classSignal}),
+                Leaf = start_inheriting_class('Bt4493RaiseLeaf', 'Bt4493RaiseRoot'),
+                try
+                    Key =
+                        {caller_safe_raise, classSignal, Mod, class_testSelf,
+                            'Bt4493RaiseLeaf class'},
+                    ?assertMatch(#beamtalk_object{}, target('Bt4493RaiseLeaf', Key, testSelf)),
+                    ?assertMatch(#beamtalk_object{}, key_value(Key)),
+                    %% The publish erases the descendant's installed key.
+                    ok = beamtalk_class_metadata:put_caller_safe_primitives('Bt4493RaiseRoot', #{}),
+                    ?assertNot(key_value(Key)),
+                    ?assertNot(target('Bt4493RaiseLeaf', Key, testSelf)),
+                    ?assertNot(key_value(Key))
+                after
+                    stop_static_class(Leaf),
+                    stop_static_class(Root)
+                end
+            end},
         {"a caller-safe raise key declines a module with no such metadata", fun() ->
             with_static_class('Bt4270NoMeta', fun(_Pid) ->
                 Key =
@@ -953,101 +1165,6 @@ static_call_target_test_() ->
                 %% The direct-call key of the same function still installs.
                 _ = warm('Bt4270NoMeta', _Pid)
             end)
-        end},
-        {"a constant-value key needs the class's published metadata to certify the literal",
-            fun() ->
-                %% BT-4363: the hit arm answers the literal without calling the
-                %% method, so the key also needs the body to be exactly that
-                %% literal, which the class's published metadata row certifies.
-                Mod = bt4363_constant_module,
-                Name = 'Bt4363Const',
-                Tag = 'Bt4363Const class',
-                load_constant_module(Mod, #{testSelf => 1}),
-                Pid = start_constant_class(Name, Mod, #{testSelf => 1}),
-                try
-                    Key = {constant_value, 1, Mod, class_testSelf, Tag},
-                    ?assertMatch(
-                        #beamtalk_object{class = Tag, pid = Pid}, target(Name, Key, testSelf)
-                    ),
-                    ?assertMatch(#beamtalk_object{}, key_value(Key)),
-                    %% A key naming another value than the body's declines.
-                    ?assertNot(
-                        target(Name, {constant_value, 2, Mod, class_testSelf, Tag}, testSelf)
-                    ),
-                    %% A reload whose body is another literal erases the key,
-                    %% and the new row no longer certifies the old value.
-                    ok = reload_constant_class(Name, Mod, #{testSelf => 2}),
-                    ?assertNot(key_value(Key)),
-                    ?assertNot(target(Name, Key, testSelf)),
-                    ?assertMatch(
-                        #beamtalk_object{},
-                        target(Name, {constant_value, 2, Mod, class_testSelf, Tag}, testSelf)
-                    ),
-                    %% A reload whose body is no longer a literal at all.
-                    ok = reload_constant_class(Name, Mod, #{}),
-                    ?assertNot(key_value({constant_value, 2, Mod, class_testSelf, Tag})),
-                    ?assertNot(
-                        target(Name, {constant_value, 2, Mod, class_testSelf, Tag}, testSelf)
-                    )
-                after
-                    stop_static_class(Pid)
-                end
-            end},
-        {"a constant-value key is certified by the published row, not the current code", fun() ->
-            %% BT-4363: a reload erases the class's keys inside the new
-            %% module's `-on_load`, while the OLD code (and its old
-            %% `__beamtalk_meta/0`) is still current. An install racing that
-            %% window must not certify the old literal: it is checked against
-            %% the row the reload publishes from the new meta. Here the
-            %% loaded code still says `1` while the published row says `2`.
-            Mod = bt4363_constant_window_module,
-            Name = 'Bt4363ConstWindow',
-            Tag = 'Bt4363ConstWindow class',
-            load_constant_module(Mod, #{testSelf => 1}),
-            Pid = start_constant_class(Name, Mod, #{testSelf => 1}),
-            try
-                Old = {constant_value, 1, Mod, class_testSelf, Tag},
-                ?assertMatch(#beamtalk_object{}, target(Name, Old, testSelf)),
-                ok = beamtalk_class_metadata:put_constant_class_methods(Name, #{testSelf => 2}),
-                %% The publish erased the installed key, and the old literal
-                %% no longer installs although the loaded code still says `1`.
-                ?assertNot(key_value(Old)),
-                ?assertNot(target(Name, Old, testSelf)),
-                ?assertNot(key_value(Old))
-            after
-                stop_static_class(Pid)
-            end
-        end},
-        {"a runtime fun or an extension of the selector erases a constant-value key", fun() ->
-            Mod = bt4363_constant_shadow_module,
-            Name = 'Bt4363ConstShadow',
-            Tag = 'Bt4363ConstShadow class',
-            load_constant_module(Mod, #{testSelf => 1}),
-            Pid = start_constant_class(Name, Mod, #{testSelf => 1}),
-            Key = {constant_value, 1, Mod, class_testSelf, Tag},
-            try
-                ?assertMatch(#beamtalk_object{}, target(Name, Key, testSelf)),
-                %% `put_class_method` (ADR 0084 runtime fun).
-                ok = beamtalk_object_class:put_class_method(
-                    Pid, testSelf, fun(_ClassSelf) -> from_runtime_fun end
-                ),
-                ?assertNot(key_value(Key)),
-                ?assertNot(target(Name, Key, testSelf)),
-                ?assertEqual(
-                    from_runtime_fun, beamtalk_class_dispatch:class_send(Pid, testSelf, [])
-                ),
-                ?assertEqual(removed, beamtalk_object_class:remove_class_method(Pid, testSelf)),
-                ?assertMatch(#beamtalk_object{}, target(Name, Key, testSelf)),
-                %% A class-side extension.
-                ok = beamtalk_extensions:register(Tag, testSelf, noop_fun(), bt4363),
-                ?assertNot(key_value(Key)),
-                ?assertNot(target(Name, Key, testSelf)),
-                ok = beamtalk_extensions:unregister(Name, testSelf, true),
-                ?assertMatch(#beamtalk_object{}, target(Name, Key, testSelf))
-            after
-                beamtalk_extensions:unregister(Name, testSelf, true),
-                stop_static_class(Pid)
-            end
         end},
         {"a constant-value key declines a class that publishes no constants", fun() ->
             %% The module's own metadata certifies the literal, but the class

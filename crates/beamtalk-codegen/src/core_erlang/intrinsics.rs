@@ -170,6 +170,17 @@ fn not_nil_apply(block_var: &str, recv_var: &str, block_takes_arg: bool) -> Docu
     }
 }
 
+/// The shape [`CoreErlangGenerator::pure_boolean_shape`] lowers a boolean
+/// conditional as, inline with a non-Boolean fallback send.
+pub(in crate::core_erlang) enum PureBooleanShape<'a> {
+    /// `ifTrue:`, `ifFalse:`, `and:`, `or:` with one literal block.
+    Solo(SoloBoolean, &'a Block),
+    /// `R not`.
+    Not,
+    /// `ifTrue:ifFalse:` with two literal blocks.
+    IfTrueIfFalse(&'a Block, &'a Block),
+}
+
 impl CoreErlangGenerator {
     /// Tries to generate code for Block evaluation and loop intrinsics.
     ///
@@ -228,6 +239,50 @@ impl CoreErlangGenerator {
         }
     }
 
+    /// BT-4510: whether a `value`/`value:`… send leaves the block intrinsic to
+    /// the typed send path, because the receiver's trusted static type is a
+    /// class other than `Block` that has a guarded direct route
+    /// ([`Self::typed_send_target`]): `aResult value` is `Result>>value`, not
+    /// block evaluation, and the intrinsic's `is_function` tests and dynamic
+    /// fallback would send it through `beamtalk_message_dispatch:send/3`
+    /// every time. A value that is a fun after all (a lying annotation)
+    /// misses the route's guard, which rejects every fun, and takes the
+    /// dynamic send, which evaluates the block as the intrinsic's fallback
+    /// would — except a Tier 2 (arity-1, stateful) fun, which the intrinsic
+    /// rejects with `stateful_block_dispatch` and the dynamic send rejects
+    /// with its own error. Block literals and `Block`-typed receivers keep
+    /// the intrinsic.
+    ///
+    /// BT-4630: a *protocol*-typed receiver never yields, decided on the
+    /// static class being a protocol rather than on the target's shape: a
+    /// protocol with one guardable conformer resolves to `Tagged`, yet a real
+    /// `Block` may conform structurally and is never an arm, so yielding would
+    /// forfeit the inline apply (and `stateful_block_dispatch` for Tier 2).
+    fn block_value_yields_to_typed_send(
+        &self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+    ) -> bool {
+        if matches!(receiver, Expression::Block(_)) {
+            return false;
+        }
+        let Ok(class) = self.trusted_static_class(receiver) else {
+            return false;
+        };
+        class.as_str() != "Block"
+            // A protocol-typed receiver may be a real block (`Block` is never
+            // a tagged arm), whatever shape its target resolves to.
+            && !self.is_protocol_class(class.as_str())
+            && self.typed_send_target(receiver, selector).is_ok()
+    }
+
+    /// Whether `class` names a protocol in scope.
+    fn is_protocol_class(&self, class: &str) -> bool {
+        self.protocol_registry
+            .as_ref()
+            .is_some_and(|r| r.has_protocol(class))
+    }
+
     /// Generates code for unary `value` message on a block receiver.
     ///
     /// When the receiver is a block literal, use fast inline apply.
@@ -259,6 +314,9 @@ impl CoreErlangGenerator {
                 )));
             }
         }
+        if self.block_value_yields_to_typed_send(receiver, selector) {
+            return Ok(None);
+        }
         // BT-3881: a block literal of another arity is applied, never
         // inlined, so it raises `badarity` (in the REPL and in a method).
         if let Some(block) =
@@ -282,6 +340,8 @@ impl CoreErlangGenerator {
         let doc = if matches!(receiver, Expression::Block { .. }) {
             self.generate_block_value_call(receiver, &[])?
         } else {
+            // BT-4596: the non-fun fallback below is a dynamic site.
+            self.report_block_value_fallback(receiver, selector);
             // Hoist open-scope receiver (e.g. class method self-send).
             let mut seq = self.sequence_call(&[receiver], "ValRecv")?;
             let recv_doc = seq.next();
@@ -405,9 +465,8 @@ impl CoreErlangGenerator {
             // valueWithArguments: (call-site-intercepted @intrinsic,
             // was previously a bare @primitive with no access to the calling
             // method's state — see stdlib/src/block.bt).
-            "valueWithArguments:" if arguments.len() == 1 => {
-                self.try_generate_block_value_with_arguments_keyword(receiver, &arguments[0])
-            }
+            "valueWithArguments:" if arguments.len() == 1 => self
+                .try_generate_block_value_with_arguments_keyword(receiver, selector, &arguments[0]),
 
             _ => Ok(None),
         }
@@ -429,6 +488,7 @@ impl CoreErlangGenerator {
     fn try_generate_block_value_with_arguments_keyword(
         &mut self,
         receiver: &Expression,
+        selector: &MessageSelector,
         args_expr: &Expression,
     ) -> Result<Option<Document<'static>>> {
         // A bare class name as receiver is a class-method send, not
@@ -461,6 +521,8 @@ impl CoreErlangGenerator {
             ];
             return Ok(Some(doc));
         }
+        // The non-fun fallback is a dynamic site (BT-4596).
+        self.report_block_value_fallback(receiver, selector);
         let doc = self.generate_block_value_with_arguments_call(receiver, args_expr)?;
         Ok(Some(doc))
     }
@@ -482,6 +544,9 @@ impl CoreErlangGenerator {
                     receiver, selector, arguments, tuple_doc,
                 )));
             }
+        }
+        if self.block_value_yields_to_typed_send(receiver, selector) {
+            return Ok(None);
         }
         // BT-3881: a block literal of another arity is applied, never
         // inlined, so it raises `badarity` (in the REPL and in a method).
@@ -520,7 +585,9 @@ impl CoreErlangGenerator {
         if matches!(receiver, Expression::ClassReference { .. }) {
             return Ok(None);
         }
-        // Unknown receiver → runtime is_function guard with fallback
+        // Unknown receiver → runtime is_function guard with fallback, a
+        // dynamic site (BT-4596).
+        self.report_block_value_fallback(receiver, selector);
         let doc = self.generate_value_keyword_guard(receiver, arguments, selector_name)?;
         Ok(Some(doc))
     }
@@ -2611,7 +2678,7 @@ impl CoreErlangGenerator {
     /// **DDD Context:** Object Protocol — Object Reflection
     ///
     /// - `respondsTo:` — Check if object responds to a selector
-    /// - `fieldNames` — Get list of instance variable names (actors only)
+    /// - `fieldNames` — Get list of instance variable names (empty for primitive values)
     /// - `fieldAt:` — Read instance variable by name
     /// - `fieldAt:put:` — Write instance variable by name
     /// - `hasField:` — Presence test for a named field (ADR 0124 §1/B4); never raises
@@ -2653,28 +2720,29 @@ impl CoreErlangGenerator {
             let mut seq = self.sequence_call(&[receiver], "FNames")?;
             let recv_doc = seq.next();
             let receiver_var = self.fresh_var("Receiver");
-            let pid_var = self.fresh_var("Pid");
 
-            // If receiver is a map (value object or stdlib tagged map),
-            // delegate to beamtalk_primitive:send which routes through the
-            // correct dispatch/3 for the receiver's class kind.
-            // Actor (tuple) receivers use sync_send (ADR-0043).
+            // Every receiver kind goes through
+            // `beamtalk_message_dispatch:send/3`, the same router the dynamic
+            // `perform: #fieldNames` path uses, so the two cannot disagree:
+            // its `classify_receiver` sends an actor `sync_send` (ADR 0043),
+            // a class object `class_send` (BT-4470), and every other value —
+            // maps (value objects, tagged stdlib maps) and raw BEAM terms
+            // (Integer, Binary, Bitstring, List, ...) — `beamtalk_primitive:send`.
+            // Guessing "not a map ⇒ actor" here sent `element(4, R)` a
+            // non-tuple and raised `badarg` (BT-4264). The call is nested in
+            // a `let`, so it carries its own line annotation (BT-4356).
+            let dispatch_call = self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(receiver_var.clone()),
+                ", 'fieldNames', [])",
+            ]);
             let call_doc = docvec![
                 "let ",
-                leaf::var(receiver_var.clone()),
+                leaf::var(receiver_var),
                 " = ",
                 recv_doc,
-                " in case call 'erlang':'is_map'(",
-                leaf::var(receiver_var.clone()),
-                ") of <'true'> when 'true' -> call 'beamtalk_primitive':'send'(",
-                leaf::var(receiver_var.clone()),
-                ", 'fieldNames', []) <_> when 'true' -> let ",
-                leaf::var(pid_var.clone()),
-                " = call 'erlang':'element'(4, ",
-                leaf::var(receiver_var),
-                ") in call 'beamtalk_actor':'sync_send'(",
-                leaf::var(pid_var),
-                ", 'fieldNames', []) end",
+                " in ",
+                dispatch_call,
             ];
             return Ok(Some(seq.close(self, call_doc, "FNamesRes")));
         }
@@ -3382,7 +3450,8 @@ impl CoreErlangGenerator {
     /// stateful loop-condition tail — see the field's doc comment).
     ///
     /// Never fires in an actor instance method when a branch block holds a
-    /// guarded operator (see [`Self::pure_blocks_hold_guarded_operator`]): the
+    /// guarded operator or another call codegen brackets (see
+    /// [`Self::pure_blocks_hold_bracketed_call`]): the
     /// arm compiles via `generate_block_body`, whose closure frame carries
     /// the `Loop(DirectParams)` kind — and the ADR 0137 bracket machinery
     /// reads that kind as a stateless loop, so the operator's slow path
@@ -3396,19 +3465,52 @@ impl CoreErlangGenerator {
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Option<Document<'static>>> {
+        let Some(shape) = self.pure_boolean_shape(receiver, selector, arguments) else {
+            return Ok(None);
+        };
+        let doc = match shape {
+            PureBooleanShape::Solo(sel, block) => {
+                self.generate_solo_boolean_pure(sel, receiver, block)?
+            }
+            PureBooleanShape::Not => self.generate_pure_boolean_case(
+                receiver,
+                "not",
+                PureArm::Answer(SoloAnswer::Literal(false)),
+                PureArm::Answer(SoloAnswer::Literal(true)),
+                &[],
+            )?,
+            PureBooleanShape::IfTrueIfFalse(true_block, false_block) => {
+                self.generate_if_true_if_false_pure(receiver, true_block, false_block)?
+            }
+        };
+        Ok(Some(doc))
+    }
+
+    /// The gates of [`Self::try_generate_pure_boolean_conditional`]: the shape
+    /// it lowers `receiver selector arguments` as, or `None` when it declines
+    /// (the send then takes the mutation path or dynamic dispatch). The one
+    /// decision the lowering and the bracket classifier read (BT-4524:
+    /// `classify_inlined` brackets a conditional this declines whose blocks
+    /// hold a `^` and thread nothing, because it runs them as closures).
+    pub(in crate::core_erlang) fn pure_boolean_shape<'a>(
+        &self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        arguments: &'a [Expression],
+    ) -> Option<PureBooleanShape<'a>> {
         // A stateful loop-condition tail keeps today's dynamic dispatch:
         // its value splices into the `{Bool, StateAcc[, Self]}` hand-back
         // tuple, where a bare `case` breaks erlc's `beam_clean`
         // (`undefined_label`) in complex nestings (corpus run70/run139).
         if self.decline_pure_boolean_inline {
-            return Ok(None);
+            return None;
         }
         // A `self`/`super`/class receiver keeps today's dispatch (see the
         // doc comment). Parens are transparent here — this is a receiver
         // classification, not the block-argument shape match below.
         match receiver.unwrap_parens() {
-            Expression::Super(_) | Expression::ClassReference { .. } => return Ok(None),
-            recv if super::expr_shape::is_self_identifier(recv) => return Ok(None),
+            Expression::Super(_) | Expression::ClassReference { .. } => return None,
+            recv if super::expr_shape::is_self_identifier(recv) => return None,
             _ => {}
         }
 
@@ -3422,15 +3524,14 @@ impl CoreErlangGenerator {
                     if let Expression::Block(block) = &arguments[0] {
                         if block.parameters.is_empty()
                             && !self.and_or_needs_mutation_threading(receiver, block)
-                            && !self.pure_blocks_hold_guarded_operator(&[block])
+                            && !self.pure_blocks_hold_bracketed_call(&[block])
                         {
                             let sel = if kw == "and:" {
                                 SoloBoolean::And
                             } else {
                                 SoloBoolean::Or
                             };
-                            let doc = self.generate_solo_boolean_pure(sel, receiver, block)?;
-                            return Ok(Some(doc));
+                            return Some(PureBooleanShape::Solo(sel, block));
                         }
                     }
                 }
@@ -3443,13 +3544,7 @@ impl CoreErlangGenerator {
         // other receiver takes the wildcard arm's ordinary send.
         if let MessageSelector::Unary(name) = selector {
             if name.as_str() == "not" && arguments.is_empty() {
-                return Ok(Some(self.generate_pure_boolean_case(
-                    receiver,
-                    "not",
-                    PureArm::Answer(SoloAnswer::Literal(false)),
-                    PureArm::Answer(SoloAnswer::Literal(true)),
-                    &[],
-                )?));
+                return Some(PureBooleanShape::Not);
             }
         }
 
@@ -3458,13 +3553,9 @@ impl CoreErlangGenerator {
                 if let Expression::Block(block) = &arguments[0] {
                     if block.parameters.is_empty()
                         && !self.conditional_needs_mutation_threading(receiver, &[block])
-                        && !self.pure_blocks_hold_guarded_operator(&[block])
+                        && !self.pure_blocks_hold_bracketed_call(&[block])
                     {
-                        return Ok(Some(self.generate_solo_boolean_pure(
-                            SoloBoolean::IfTrue,
-                            receiver,
-                            block,
-                        )?));
+                        return Some(PureBooleanShape::Solo(SoloBoolean::IfTrue, block));
                     }
                 }
             }
@@ -3472,13 +3563,9 @@ impl CoreErlangGenerator {
                 if let Expression::Block(block) = &arguments[0] {
                     if block.parameters.is_empty()
                         && !self.conditional_needs_mutation_threading(receiver, &[block])
-                        && !self.pure_blocks_hold_guarded_operator(&[block])
+                        && !self.pure_blocks_hold_bracketed_call(&[block])
                     {
-                        return Ok(Some(self.generate_solo_boolean_pure(
-                            SoloBoolean::IfFalse,
-                            receiver,
-                            block,
-                        )?));
+                        return Some(PureBooleanShape::Solo(SoloBoolean::IfFalse, block));
                     }
                 }
             }
@@ -3492,34 +3579,43 @@ impl CoreErlangGenerator {
                             receiver,
                             &[true_block, false_block],
                         )
-                        && !self.pure_blocks_hold_guarded_operator(&[true_block, false_block])
+                        && !self.pure_blocks_hold_bracketed_call(&[true_block, false_block])
                     {
-                        return Ok(Some(self.generate_if_true_if_false_pure(
-                            receiver,
-                            true_block,
-                            false_block,
-                        )?));
+                        return Some(PureBooleanShape::IfTrueIfFalse(true_block, false_block));
                     }
                 }
             }
             _ => {}
         }
 
-        Ok(None)
+        None
     }
 
     /// BT-4070: whether pure-inline must decline `blocks` here — an actor
-    /// instance method (where calls are bracketed) with a guarded operator
-    /// in a branch. Read off [`Self::block_contains_guarded_operator`], the
+    /// instance method (where calls are bracketed) with a guarded operator,
+    /// or another call codegen brackets (BT-4524, below), in a branch.
+    /// Read off [`Self::block_contains_guarded_operator`], the
     /// same classifier the send emitter exempts, so the two cannot disagree
     /// about what an operator is; the scope is the enclosing method's (the
     /// arm's own scope starts empty — the arity gate admits no block
     /// parameters — so lookups resolve identically when the arm lowers).
-    fn pure_blocks_hold_guarded_operator(&self, blocks: &[&Block]) -> bool {
+    ///
+    /// BT-4524: the same holds for a call codegen brackets that the block
+    /// analysis does not see as user code (a loop, an evaluated block or a
+    /// closure `ensure:` running a block that holds a `^`,
+    /// `classify_loop`/`classify_inlined`): it too would sit in that
+    /// closure frame with no `State` to store, so the conditional declines
+    /// pure-inline ([`Self::expr_holds_bracketed_call`], the probe loop mode
+    /// selection asks).
+    fn pure_blocks_hold_bracketed_call(&self, blocks: &[&Block]) -> bool {
         self.synced_calls_active()
-            && blocks
-                .iter()
-                .any(|block| self.block_contains_guarded_operator(block))
+            && blocks.iter().any(|block| {
+                self.block_contains_guarded_operator(block)
+                    || block
+                        .body
+                        .iter()
+                        .any(|s| self.expr_holds_bracketed_call(&s.expression))
+            })
     }
 
     /// Whether a nil-testing conditional (`ifNil:`, `ifNotNil:`, the two-arm
@@ -3558,7 +3654,7 @@ impl CoreErlangGenerator {
     /// numbering (`unbound variable 'State1'` from `core_lint` on a fixture
     /// combining `((self recordOnce: x) and: [true]) ifTrue:ifFalse:` with a
     /// mutation-threaded `and:`/`or:`). The two decisions must
-    /// agree on exactly the same predicate — CLAUDE.md's
+    /// agree on exactly the same predicate — AGENTS.md's
     /// no-duplicate-implementations rule — so `compile_conditional_receiver`
     /// special-cases this shape itself using this same gate.
     pub(in crate::core_erlang) fn and_or_needs_mutation_threading(

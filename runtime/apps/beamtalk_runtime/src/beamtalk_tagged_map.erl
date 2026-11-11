@@ -33,7 +33,7 @@ See also: beamtalk_object For Object base class reflection using tagged maps.
 -export([class_of/1, class_of/2, is_tagged/1, is_builtin_collection/1]).
 
 %% Internal field management
--export([internal_fields/0, user_field_keys/1]).
+-export([internal_fields/0, user_field_keys/1, is_local_temp_key/1]).
 
 %% Canonical Array representation readers (ADR 0090)
 -export([array_data/1, array_to_list/1, array_size/1]).
@@ -179,12 +179,34 @@ internal_fields() ->
 -doc """
 Returns only user-visible field keys from a tagged map state.
 
-Filters out all internal fields (class, class_mod, methods, registry_pid).
+Filters out all internal fields (class, class_mod, methods, registry_pid) and
+the codegen-internal `__local__` scratch keys (`is_local_temp_key/1`), so
+`printString`, `fieldNames` and the inspector never show a threaded local a
+state map can carry (BT-4459).
 """.
 -spec user_field_keys(map()) -> [atom()].
 user_field_keys(State) when is_map(State) ->
     Internals = internal_fields(),
-    [K || K <- maps:keys(State), not lists:member(K, Internals)].
+    [
+        K
+     || K <- maps:keys(State), not lists:member(K, Internals), not is_local_temp_key(K)
+    ].
+
+-doc """
+Whether `Key` is a codegen-internal `__local__`-prefixed scratch key: an outer
+local an actor method packs into its `State` map while threading it through a
+desugared construct (`__local__<name>`). Never a user-visible field: the committed actor
+state never keeps one (`beamtalk_actor:strip_local_temps/1`), and reflection
+skips them (`user_field_keys/1`).
+""".
+-spec is_local_temp_key(term()) -> boolean().
+is_local_temp_key(Key) when is_atom(Key) ->
+    case atom_to_binary(Key, utf8) of
+        <<"__local__", _/binary>> -> true;
+        _ -> false
+    end;
+is_local_temp_key(_Key) ->
+    false.
 
 %%% ============================================================================
 %%% Array Representation Readers (ADR 0090)

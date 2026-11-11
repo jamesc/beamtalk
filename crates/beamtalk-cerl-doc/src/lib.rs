@@ -16,6 +16,12 @@
 //! `docs/development/architecture-principles.md` §6 and
 //! `docs/ADR/0117-beamtalk-core-crate-split.md`, Decision step 4.
 //!
+//! The [`hash`] module provides a FNV-1a 64-bit hash shared by
+//! `beamtalk-codegen` (long-selector atom mangling) and `beamtalk-build`
+//! (spec-mapping stamp). It has no dependency on Core Erlang output and lives
+//! here because `beamtalk-cerl-doc` is the only zero-dependency shared leaf
+//! below both consumers.
+//!
 //! # Example
 //!
 //! ```
@@ -33,6 +39,7 @@
 
 pub mod binary;
 pub mod escape;
+pub mod hash;
 pub mod leaf;
 
 /// Indentation width used throughout Core Erlang generation.

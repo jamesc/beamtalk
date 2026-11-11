@@ -34,8 +34,10 @@
 //! This module handles the common pre-order-visitor pattern.
 
 use crate::ast::{
-    BinarySegment, Expression, ExpressionStatement, MessageSelector, Module, StringSegment,
+    BinarySegment, CascadeMessage, Expression, ExpressionStatement, MessageSelector, Module,
+    Pattern, StringSegment,
 };
+use crate::source_analysis::Span;
 
 // ── Module-level iterators ────────────────────────────────────────────────────
 
@@ -101,7 +103,7 @@ pub fn expression_contains_block(expr: &Expression) -> bool {
 /// walk to find a `self.field :=` write buried in a loop-body statement's
 /// nested block, and re-deriving a second exhaustive `Expression` match there
 /// is exactly the "silent-miss on a new variant" duplication this module
-/// exists to prevent (CLAUDE.md's no-duplicate-implementations rule).
+/// exists to prevent (AGENTS.md's no-duplicate-implementations rule).
 pub fn walk_expression<F>(expr: &Expression, f: &mut F)
 where
     F: FnMut(&Expression),
@@ -205,7 +207,7 @@ where
 ///
 /// Kept in exact variant-for-variant lockstep with [`walk_expression`] — a
 /// new `Expression` variant must be added to both, or a pass relying on
-/// either silently stops seeing it (CLAUDE.md's no-duplicate-implementations
+/// either silently stops seeing it (AGENTS.md's no-duplicate-implementations
 /// rule: this is the one walk both the read-only and mutating passes share,
 /// not two independently-maintained traversals).
 pub fn walk_expression_mut<F>(expr: &mut Expression, f: &mut F)
@@ -307,6 +309,71 @@ where
     }
 }
 
+// ── Pattern walker ───────────────────────────────────────────────────────────
+
+/// Recursively walks a [`Pattern`] tree, calling `f` on every [`Expression`]
+/// embedded in it.
+///
+/// Today the only expression slot in `Pattern` is `BinarySegment::size`.  The
+/// walker is defensive: it traverses all container variants (Tuple, Array,
+/// List, Map, Constructor, Binary) so that future grammar extensions that add
+/// expression slots elsewhere do not silently regress any pass built on this
+/// function.
+///
+/// `pub` (not `pub(crate)`): `beamtalk-language-service` query passes call
+/// this from their own crate and cannot use `pub(crate)`.
+pub fn walk_pattern<F>(pattern: &Pattern, f: &mut F)
+where
+    F: FnMut(&Expression),
+{
+    match pattern {
+        Pattern::Binary { segments, .. } => {
+            for segment in segments {
+                walk_pattern(&segment.value, f);
+                if let Some(size) = &segment.size {
+                    f(size);
+                }
+            }
+        }
+        Pattern::Tuple { elements, .. } => {
+            for element in elements {
+                walk_pattern(element, f);
+            }
+        }
+        Pattern::Array { elements, rest, .. } => {
+            for element in elements {
+                walk_pattern(element, f);
+            }
+            if let Some(rest_pattern) = rest {
+                walk_pattern(rest_pattern, f);
+            }
+        }
+        Pattern::List { elements, tail, .. } => {
+            for element in elements {
+                walk_pattern(element, f);
+            }
+            if let Some(tail_pattern) = tail {
+                walk_pattern(tail_pattern, f);
+            }
+        }
+        Pattern::Map { pairs, .. } => {
+            for pair in pairs {
+                walk_pattern(&pair.value, f);
+            }
+        }
+        Pattern::Constructor { keywords, .. } => {
+            for (_selector, inner) in keywords {
+                walk_pattern(inner, f);
+            }
+        }
+        Pattern::Wildcard(..)
+        | Pattern::Literal(..)
+        | Pattern::Variable(..)
+        | Pattern::Nil(..)
+        | Pattern::Type { .. } => {}
+    }
+}
+
 // ── Cascade-expanding send iterator ──────────────────────────────────────────
 
 /// Where a [`SendRef`] sits relative to a cascade.
@@ -337,6 +404,12 @@ pub struct SendRef<'a> {
     pub is_cast: bool,
     /// Whether, and where, the send is a cascade message.
     pub site: SendSite,
+    /// Where a diagnostic about this send is reported: the whole send for a
+    /// plain or folded-first cascade send, the message's own span for a later
+    /// cascade message (which has no node of its own). The type checker's
+    /// `cascade-drops-update` and the `setUp` lint both read this, so they
+    /// agree on where a dropped message is (BT-4573).
+    pub span: Span,
 }
 
 /// The one receiver every message of a cascade is sent to.
@@ -366,38 +439,49 @@ pub fn cascade_shared_receiver(receiver: &Expression) -> &Expression {
 /// "what is sent to what" goes through this (or [`walk_sends`]), so none of
 /// them can forget the later messages again (BT-3716, BT-3761).
 pub fn cascade_sends(expr: &Expression) -> impl Iterator<Item = SendRef<'_>> {
-    let (first, later) = match expr {
+    let parts = match expr {
         Expression::Cascade {
             receiver, messages, ..
-        } => {
-            let shared = cascade_shared_receiver(receiver);
-            let first = match receiver.as_ref() {
-                Expression::MessageSend {
-                    selector,
-                    arguments,
-                    is_cast,
-                    ..
-                } => Some(SendRef {
-                    receiver: shared,
-                    selector,
-                    arguments,
-                    is_cast: *is_cast,
-                    site: SendSite::CascadeFirst,
-                }),
-                _ => None,
-            };
-            let later = messages.iter().map(move |msg| SendRef {
-                receiver: shared,
-                selector: &msg.selector,
-                arguments: &msg.arguments,
-                is_cast: false,
-                site: SendSite::CascadeLater,
-            });
-            (first, Some(later))
-        }
-        _ => (None, None),
+        } => Some(cascade_part_sends(receiver, messages)),
+        _ => None,
     };
-    first.into_iter().chain(later.into_iter().flatten())
+    parts.into_iter().flatten()
+}
+
+/// [`cascade_sends`] for a cascade already taken apart into its `receiver`
+/// (the folded first `MessageSend`, or a bare receiver) and its later
+/// `messages`, as the type checker holds it.
+pub fn cascade_part_sends<'a>(
+    receiver: &'a Expression,
+    messages: &'a [CascadeMessage],
+) -> impl Iterator<Item = SendRef<'a>> {
+    let shared = cascade_shared_receiver(receiver);
+    let first = match receiver {
+        Expression::MessageSend {
+            selector,
+            arguments,
+            is_cast,
+            span,
+            ..
+        } => Some(SendRef {
+            receiver: shared,
+            selector,
+            arguments,
+            is_cast: *is_cast,
+            site: SendSite::CascadeFirst,
+            span: *span,
+        }),
+        _ => None,
+    };
+    let later = messages.iter().map(move |msg| SendRef {
+        receiver: shared,
+        selector: &msg.selector,
+        arguments: &msg.arguments,
+        is_cast: false,
+        site: SendSite::CascadeLater,
+        span: msg.span,
+    });
+    first.into_iter().chain(later)
 }
 
 /// One step of [`walk_expression_and_sends`].
@@ -440,7 +524,7 @@ where
                 selector,
                 arguments,
                 is_cast,
-                ..
+                span,
             } if !cascade_firsts.contains(&std::ptr::from_ref(e)) => {
                 f(WalkEvent::Send(SendRef {
                     receiver,
@@ -448,6 +532,7 @@ where
                     arguments,
                     is_cast: *is_cast,
                     site: SendSite::Plain,
+                    span: *span,
                 }));
             }
             _ => {}

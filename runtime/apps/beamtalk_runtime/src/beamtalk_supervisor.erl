@@ -1023,7 +1023,7 @@ dynamic_init(Module, ClassName, Args) ->
     ChildShutdown = config_result(
         check_child_shutdown(ClassName, read_config(Self, ClassName, childShutdown))
     ),
-    ChildClassEntry = child_class_entry(ClassName, ChildClass),
+    ChildClassEntry = child_class_entry_with_kind(child_class_entry(ClassName, ChildClass)),
     %% BT-3964/BT-4068: OTP's `supervisor` has no `max_children` flag (that is
     %% Elixir's DynamicSupervisor). `init/1` runs in the supervisor process,
     %% so the limit is stashed in its process dictionary: it lives exactly as
@@ -1208,6 +1208,18 @@ config_result({error, #beamtalk_error{} = Error}) -> exit(Error).
 
 %% Resolve a DynamicSupervisor's `childClass` value to the
 %% `{ChildClassName, ChildModule}` entry stored for `pool_child_class/1`.
+%% BT-4502: cache the child's spawn kind next to the entry so `wrap_child/4`
+%% skips the `spawn_kind/1` superclass walk on every start. Only a definitive
+%% kind is cached; `unknown` (class not loaded yet) keeps the 2-tuple entry, which
+%% `pool_child_entry/1` still reads and `wrap_child/4` resolves on demand.
+-spec child_class_entry_with_kind({atom(), module()}) ->
+    {atom(), module()} | {atom(), module(), supervisor | actor | none}.
+child_class_entry_with_kind({ChildClass, ChildModule} = Entry) ->
+    case spawn_kind(ChildClass) of
+        unknown -> Entry;
+        Kind -> {ChildClass, ChildModule, Kind}
+    end.
+
 -spec child_class_entry(atom(), term()) -> {atom(), module()}.
 child_class_entry(ClassName, ChildClass) ->
     case is_tuple(ChildClass) andalso beamtalk_class_registry:is_class_object(ChildClass) of
@@ -1878,12 +1890,12 @@ tagged tuple into a Beamtalk `Result` for the stdlib method body.
 startChild(Self) ->
     SupPid = element(4, Self),
     SupClass = element(2, Self),
-    with_pool_child_class(Self, startChild, fun(ChildClass, ChildModule) ->
-        with_child_capacity(SupClass, startChild, SupPid, [], fun(StartArgs) ->
+    with_pool_child(Self, startChild, fun(ChildClass, ChildModule, ChildKind, MaxChildren) ->
+        with_child_capacity(SupClass, startChild, SupPid, MaxChildren, [], fun(StartArgs) ->
             case supervisor:start_child(SupPid, StartArgs) of
                 {error, {?MAX_CHILDREN_REFUSED, _}} = Refused ->
                     %% BT-4068: at the cap — pass through untouched for
-                    %% `with_child_capacity/5` to map to `max_children`
+                    %% `with_child_capacity/6` to map to `max_children`
                     %% (a debug log, no crash announcement).
                     Refused;
                 {ok, ChildPid} ->
@@ -1895,7 +1907,7 @@ startChild(Self) ->
                         domain => [beamtalk, runtime]
                     }),
                     announce_child_added(SupClass, ChildClass, ChildPid),
-                    {ok, wrap_child(ChildClass, ChildModule, ChildPid)};
+                    {ok, wrap_child(ChildClass, ChildModule, ChildKind, ChildPid)};
                 {error, Reason} ->
                     ?LOG_ERROR("DynamicSupervisor child start failed", #{
                         supervisor => SupClass,
@@ -1929,12 +1941,12 @@ wraps this into a Beamtalk `Result` for the stdlib method body.
 startChild(Self, Args) ->
     SupPid = element(4, Self),
     SupClass = element(2, Self),
-    with_pool_child_class(Self, 'startChild:', fun(ChildClass, ChildModule) ->
-        with_child_capacity(SupClass, 'startChild:', SupPid, [Args], fun(StartArgs) ->
+    with_pool_child(Self, 'startChild:', fun(ChildClass, ChildModule, ChildKind, MaxChildren) ->
+        with_child_capacity(SupClass, 'startChild:', SupPid, MaxChildren, [Args], fun(StartArgs) ->
             case supervisor:start_child(SupPid, StartArgs) of
                 {error, {?MAX_CHILDREN_REFUSED, _}} = Refused ->
                     %% BT-4068: at the cap — pass through untouched for
-                    %% `with_child_capacity/5` to map to `max_children`
+                    %% `with_child_capacity/6` to map to `max_children`
                     %% (a debug log, no crash announcement).
                     Refused;
                 {ok, ChildPid} ->
@@ -1946,7 +1958,7 @@ startChild(Self, Args) ->
                         domain => [beamtalk, runtime]
                     }),
                     announce_child_added(SupClass, ChildClass, ChildPid),
-                    {ok, wrap_child(ChildClass, ChildModule, ChildPid)};
+                    {ok, wrap_child(ChildClass, ChildModule, ChildKind, ChildPid)};
                 {error, Reason} ->
                     ?LOG_ERROR("DynamicSupervisor child start failed", #{
                         supervisor => SupClass,
@@ -1988,12 +2000,14 @@ supervisor handle returns `{error, #beamtalk_error{kind = stale_handle}}`.
 startChild(Self, Args, Name) ->
     SupPid = element(4, Self),
     SupClass = element(2, Self),
-    with_pool_child_class(Self, 'startChild:name:', fun(ChildClass, ChildModule) ->
-        with_child_capacity(SupClass, 'startChild:name:', SupPid, [Args, Name], fun(StartArgs) ->
+    with_pool_child(Self, 'startChild:name:', fun(ChildClass, ChildModule, ChildKind, MaxChildren) ->
+        with_child_capacity(SupClass, 'startChild:name:', SupPid, MaxChildren, [Args, Name], fun(
+            StartArgs
+        ) ->
             case supervisor:start_child(SupPid, StartArgs) of
                 {error, {?MAX_CHILDREN_REFUSED, _}} = Refused ->
                     %% BT-4068: at the cap — pass through untouched for
-                    %% `with_child_capacity/5` to map to `max_children`
+                    %% `with_child_capacity/6` to map to `max_children`
                     %% (a debug log, no crash announcement).
                     Refused;
                 {ok, ChildPid} ->
@@ -2006,7 +2020,7 @@ startChild(Self, Args, Name) ->
                         domain => [beamtalk, runtime]
                     }),
                     announce_child_added(SupClass, ChildClass, ChildPid),
-                    {ok, wrap_child(ChildClass, ChildModule, ChildPid)};
+                    {ok, wrap_child(ChildClass, ChildModule, ChildKind, ChildPid)};
                 {error, #beamtalk_error{} = Err} ->
                     %% `'spawnAs'/3` already returns a structured error for
                     %% name_registered/type_error/reserved_name — re-attribute
@@ -2115,7 +2129,8 @@ Stop the supervisor and all its children, waiting up to `Ms` milliseconds.
 
 Called from `stopWithin:` on Supervisor and DynamicSupervisor instances
 (sealed, BT-4047) via the `stopWithinResult:` FFI seam. Uses
-`gen_server:stop/3` since supervisors are OTP gen_servers.
+`beamtalk_stop:stop/3`, the `gen_server:stop/3` contract without its
+negative-wait `timeout_value` error on very short waits (BT-4494).
 
 Returns `{ok, nil}` once the supervisor has stopped; `{error, BtError}` with:
 * `kind = timeout` when the shutdown overruns the wait — the caller gets
@@ -2142,7 +2157,7 @@ stopWithin(Self, Ms) ->
                 %% reaches `with_live_supervisor/3` (`stale_handle`) and
                 %% anything else propagates, as in `stop/1`.
                 try
-                    gen_server:stop(Pid, normal, Timeout),
+                    beamtalk_stop:stop(Pid, normal, Timeout),
                     {ok, nil}
                 catch
                     exit:timeout ->
@@ -2847,6 +2862,13 @@ Both are the same linked, trap-exit, init-ack-awaited start
 supervisor see the child's exit. The answer is `{ok, Pid}` or `{error,
 Reason}` — never `ignore`, which the actor start converts to `{error,
 ignore}`.
+
+A `native:` actor child (ADR 0056, BT-4577) goes through the same calls:
+`ChildModule` is then its facade, which has no `init/1`, and those
+`beamtalk_actor` starts resolve the facade's backing module and start it
+with `BackingModule:start_link(Args)` instead, as the facade's own `spawn/1`
+does (`beamtalk_actor:safe_start_native/4`). A named native child is
+registered just after it started.
 """.
 -spec start_actor_child(module(), term()) -> {ok, pid()} | {error, term()}.
 start_actor_child(ChildModule, Args) ->
@@ -3357,6 +3379,16 @@ use the supervisor dispatch path rather than the actor/gen_server path.
 """.
 -spec wrap_child(atom(), module(), pid()) -> tuple().
 wrap_child(ChildClass, ChildModule, ChildPid) ->
+    wrap_child(ChildClass, ChildModule, unknown, ChildPid).
+
+%% As `wrap_child/3`, with the child's spawn kind when the pool cached it at
+%% `dynamic_init/3` (BT-4502): a known kind skips the superclass walk.
+-spec wrap_child(atom(), module(), supervisor | actor | none | unknown, pid()) -> tuple().
+wrap_child(ChildClass, ChildModule, supervisor, ChildPid) ->
+    {beamtalk_supervisor, ChildClass, ChildModule, ChildPid};
+wrap_child(ChildClass, ChildModule, Kind, ChildPid) when Kind =:= actor; Kind =:= none ->
+    {beamtalk_object, ChildClass, ChildModule, ChildPid};
+wrap_child(ChildClass, ChildModule, _Unknown, ChildPid) ->
     case is_supervisor(ChildClass) of
         true -> {beamtalk_supervisor, ChildClass, ChildModule, ChildPid};
         false -> {beamtalk_object, ChildClass, ChildModule, ChildPid}
@@ -3417,7 +3449,7 @@ announce_supervision(EventClass, Fields) ->
             ok;
         _Pid ->
             try
-                beamtalk_announcements:system_announce(EventClass, Fields)
+                beamtalk_announcements:system_announce_running(EventClass, Fields)
             catch
                 _:_ -> ok
             end
@@ -3483,7 +3515,7 @@ with_live_supervisor(Self, Selector, Fun) ->
 %% as `gen_server:call` and `proc_lib:stop` exit), or `none` for a bare reason.
 %% A target-less shape (bare `noproc`/`timeout`/`noconnection`, an `erpc`
 %% error) is assumed to be the supervisor's own: today only `gen_server:stop/1`
-%% (`stop/1`) and `gen_server:stop/3` (`stopWithin/2`, whose `timeout` exit is
+%% (`stop/1`) and `beamtalk_stop:stop/3` (`stopWithin/2`, whose `timeout` exit is
 %% caught inside its own fun) raise one inside `with_live_supervisor/3`. A
 %% `Fun` that makes its own target-less call (an `erpc` to another node, say)
 %% must catch it itself.
@@ -3659,6 +3691,69 @@ with_pool_child_class(Self, Selector, Fun) ->
     end).
 
 -doc """
+Like `with_pool_child_class/3` for the start path: `Fun(ChildClass, ChildModule,
+Kind, Max)`, where `Kind` is the cached spawn kind (or `unknown`) and `Max` the
+`maxChildren` limit. For a local supervisor both dictionary entries come from a
+single `process_info/2` (BT-4502); a remote or self supervisor falls back to
+`pool_child_class/1` and `max_children/1`.
+""".
+-spec with_pool_child(tuple(), atom(), fun((atom(), module(), atom(), term()) -> Result)) ->
+    Result | {error, #beamtalk_error{}}
+when
+    Result :: term().
+with_pool_child({beamtalk_supervisor, _SupClass, _Module, SupPid} = Self, Selector, Fun) ->
+    with_live_supervisor(Self, Selector, fun() ->
+        case pool_child_config(Self) of
+            {ok, {ChildClass, ChildModule, Kind}, Max} ->
+                Fun(ChildClass, ChildModule, Kind, Max);
+            {slow, _} ->
+                slow_pool_child(Self, SupPid, Selector, Fun)
+        end
+    end).
+
+-spec slow_pool_child(tuple(), pid(), atom(), fun((atom(), module(), atom(), term()) -> Result)) ->
+    Result | {error, #beamtalk_error{}}
+when
+    Result :: term().
+slow_pool_child(Self, SupPid, Selector, Fun) ->
+    case pool_child_class(Self) of
+        {ok, {ChildClass, ChildModule}} ->
+            Fun(ChildClass, ChildModule, unknown, max_children(SupPid));
+        {error, #beamtalk_error{} = Error} ->
+            {error, Error#beamtalk_error{selector = Selector}}
+    end.
+
+-spec pool_child_config(tuple()) ->
+    {ok, {atom(), module(), atom()}, non_neg_integer() | infinity} | {slow, term()}.
+pool_child_config({beamtalk_supervisor, _SupClass, _Module, SupPid}) when
+    is_pid(SupPid), SupPid =/= self(), node(SupPid) =:= node()
+->
+    case
+        erlang:process_info(SupPid, [
+            {dictionary, ?CHILD_CLASS_KEY}, {dictionary, ?MAX_CHILDREN_KEY}
+        ])
+    of
+        [
+            {{dictionary, ?CHILD_CLASS_KEY}, {ChildClass, ChildModule, Kind}},
+            {{dictionary, ?MAX_CHILDREN_KEY}, Max}
+        ] when is_atom(ChildClass), is_atom(ChildModule), is_atom(Kind) ->
+            {ok, {ChildClass, ChildModule, Kind}, normalise_max(Max)};
+        [
+            {{dictionary, ?CHILD_CLASS_KEY}, {ChildClass, ChildModule}},
+            {{dictionary, ?MAX_CHILDREN_KEY}, Max}
+        ] when is_atom(ChildClass), is_atom(ChildModule) ->
+            {ok, {ChildClass, ChildModule, unknown}, normalise_max(Max)};
+        Other ->
+            {slow, Other}
+    end;
+pool_child_config(_Self) ->
+    {slow, remote_or_self}.
+
+-spec normalise_max(term()) -> non_neg_integer() | infinity.
+normalise_max(Max) when is_integer(Max) -> Max;
+normalise_max(_) -> infinity.
+
+-doc """
 Resolve a DynamicSupervisor's child class as `{ChildClassName, ChildModule}`
 (ADR 0135 §2).
 
@@ -3674,6 +3769,8 @@ consulted: configuration is per instance.
 pool_child_class({beamtalk_supervisor, SupClass, _Module, SupPid} = Self) ->
     case sup_dictionary_value(SupPid, ?CHILD_CLASS_KEY) of
         {ok, {ChildClass, ChildModule}} ->
+            {ok, {ChildClass, ChildModule}};
+        {ok, {ChildClass, ChildModule, _Kind}} ->
             {ok, {ChildClass, ChildModule}};
         undefined ->
             child_class_from_children(SupClass, SupPid);
@@ -3752,12 +3849,14 @@ Rejections log at debug: hitting the cap is expected back-pressure under load,
 and logging every refused start would flood the log exactly when the system
 is busiest.
 """.
--spec with_child_capacity(atom(), atom(), pid(), [term()], fun(([term()]) -> Result)) ->
+-spec with_child_capacity(
+    atom(), atom(), pid(), non_neg_integer() | infinity, [term()], fun(([term()]) -> Result)
+) ->
     Result | {error, #beamtalk_error{}}
 when
     Result :: term().
-with_child_capacity(SupClass, Selector, SupPid, ExtraArgs, StartFun) ->
-    case max_children(SupPid) of
+with_child_capacity(SupClass, Selector, SupPid, MaxChildren, ExtraArgs, StartFun) ->
+    case MaxChildren of
         infinity ->
             StartFun(ExtraArgs);
         Max ->
@@ -3767,7 +3866,12 @@ with_child_capacity(SupClass, Selector, SupPid, ExtraArgs, StartFun) ->
                     %% A dead pool's table is already gone; the
                     %% `supervisor:start_child/2` below then exits and
                     %% `with_live_supervisor/3` reports `stale_handle`.
-                    _ = catch ets:insert(Tid, {{manual, Token}}),
+                    _ =
+                        try
+                            ets:insert(Tid, {{manual, Token}})
+                        catch
+                            _:_ -> ok
+                        end,
                     case StartFun([Token | ExtraArgs]) of
                         {error, {?MAX_CHILDREN_REFUSED, Limit}} ->
                             max_children_error(SupClass, Selector, Limit);
@@ -3923,7 +4027,12 @@ spawn_monitor_for_capacity(Tid) ->
 
 -spec stop_child_capacity_monitor(term()) -> ok.
 stop_child_capacity_monitor(MonPid) when is_pid(MonPid) ->
-    _ = catch exit(MonPid, kill),
+    _ =
+        try
+            exit(MonPid, kill)
+        catch
+            _:_ -> ok
+        end,
     ok;
 stop_child_capacity_monitor(_) ->
     ok.
@@ -3979,9 +4088,20 @@ out) could never wedge the counter negative and fail the pool open.
 """.
 -spec release_child_slot(ets:tid(), pid()) -> ok.
 release_child_slot(Tid, Pid) ->
-    case catch ets:take(Tid, {child, Pid}) of
+    Taken =
+        try
+            ets:take(Tid, {child, Pid})
+        catch
+            _:_ -> []
+        end,
+    case Taken of
         [_] ->
-            _ = catch ets:update_counter(Tid, count, {2, -1, 0, 0}),
+            _ =
+                try
+                    ets:update_counter(Tid, count, {2, -1, 0, 0})
+                catch
+                    _:_ -> ok
+                end,
             ok;
         _ ->
             ok

@@ -104,6 +104,26 @@ pub mod test_support {
         module
     }
 
+    /// `value`'s `Debug` form with every span erased, so two trees that
+    /// differ only in source positions compare equal.
+    pub fn without_spans(value: &impl std::fmt::Debug) -> String {
+        let debug = format!("{value:?}");
+        let mut out = String::with_capacity(debug.len());
+        let mut rest = debug.as_str();
+        while let Some(at) = rest.find("Span { start: ") {
+            out.push_str(&rest[..at]);
+            out.push_str("Span");
+            match rest[at..].find('}') {
+                Some(close) => rest = &rest[at + close + 1..],
+                None => {
+                    rest = "";
+                }
+            }
+        }
+        out.push_str(rest);
+        out
+    }
+
     /// Parses `source` and returns the [`Module`] AST, discarding all
     /// diagnostics without assertion.
     ///
@@ -576,9 +596,8 @@ pub mod test_support {
     /// The condition is a self-send, a self-send `and:` a block, or any
     /// expression; the body is a statement sequence that may assign an outer
     /// local (a prelude `locN :=` whose name is already in scope) and `^`.
-    /// The condition is a single expression: a condition that writes an outer
-    /// local with no state effect is a compile error (BT-3782), not a shape
-    /// codegen lowers.
+    /// The condition is a single expression (a condition that writes an outer
+    /// local is `while_condition_binding_corpus.rs`'s, BT-4602).
     fn arb_while_loop(depth: u32, scope: Vec<EcoStr>) -> BoxedStrategy<Expression> {
         let self_send_and =
             (arb_self_send(), arb_expr(depth - 1, scope.clone())).prop_map(|(send, rhs)| {

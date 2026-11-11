@@ -49,6 +49,7 @@ fn test_meta_type_params_in_meta_map() {
         TypeParamDecl::unbounded(Identifier::new("E", s())),
     ];
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -77,6 +78,7 @@ fn test_meta_type_params_in_meta_map() {
 /// Helper: build a single-class module from an actor class (ADR 0098 tests).
 fn module_with(class: ClassDefinition) -> Module {
     Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -189,6 +191,7 @@ fn test_meta_provenance_version_only_when_otp_unknown() {
 fn test_meta_type_params_empty_for_non_generic() {
     let class = make_actor_class("Counter");
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -218,6 +221,7 @@ fn test_meta_type_params_empty_for_non_generic() {
 fn test_meta_map_includes_package_name() {
     let class = make_actor_class("Counter");
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -247,6 +251,7 @@ fn test_meta_map_includes_package_name() {
 fn test_meta_map_package_none_without_package() {
     let class = make_actor_class("Counter");
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -276,6 +281,7 @@ fn test_meta_map_package_none_without_package() {
 fn test_meta_map_includes_kind_actor() {
     let class = make_actor_class("Counter");
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -306,6 +312,7 @@ fn test_meta_map_includes_kind_value() {
     let mut class = make_actor_class("Point");
     class.class_kind = ClassKind::Value;
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -353,6 +360,7 @@ fn test_extract_package_from_module_name() {
 fn test_meta_map_visibility_public_by_default() {
     let class = make_actor_class("Counter");
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -383,6 +391,7 @@ fn test_meta_map_visibility_internal() {
     let mut class = make_actor_class("Helper");
     class.is_internal = true;
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -948,4 +957,69 @@ fn test_meta_caller_safe_class_primitives_lists_only_primitive_signal_bodies() {
         !output.contains("'caller_safe_class_primitives'"),
         "omitted for a class with none. Got: {output}"
     );
+}
+
+/// BT-4621: the `method_info` entries codegen writes for a value class's
+/// synthesized getters, `with*:` setters and keyword constructor carry the
+/// same return types as the `MethodInfo`s the class hierarchy synthesizes
+/// from the AST. The REPL types an earlier input's class from this
+/// metadata, so a drift here hides it from `cascade-drops-update` and every
+/// other check that reads a synthesized method's return type.
+#[test]
+fn test_meta_synthesized_value_methods_agree_with_hierarchy() {
+    let cases = [
+        "Value subclass: Pt\n  field: x :: Integer = 0\n  field: y = 0\n",
+        "Value subclass: Box(T)\n  field: item :: T = nil\n  field: tags :: List(T) = #()\n",
+        "Value subclass: Pt\n  field: x :: Integer = 0\n  withX: v -> Pt => self\n",
+    ];
+    for src in cases {
+        let module = beamtalk_core::test_helpers::test_support::parse_bt(src);
+        let class = module.classes.first().expect("fixture declares a class");
+        let hierarchy =
+            beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy::build(&module)
+                .0
+                .expect("fixture hierarchy should build");
+        let info = hierarchy
+            .get_class(class.name.name.as_str())
+            .expect("class should be present");
+        let auto = compute_auto_slot_methods(class);
+        let instance =
+            CoreErlangGenerator::meta_instance_method_entries(class, &module, auto.as_ref(), false);
+        let class_side = CoreErlangGenerator::meta_class_method_entries(
+            class,
+            &module,
+            auto.as_ref(),
+            false,
+            false,
+        );
+        let check =
+            |methods: &[beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo],
+             entries: &[MethodInfoEntry]| {
+                for method in methods.iter().filter(|m| {
+                    m.doc
+                        .as_deref()
+                        .is_some_and(|d| d.contains("compiler-generated"))
+                }) {
+                    let entry = entries
+                        .iter()
+                        .find(|e| e.0 == method.selector.as_str())
+                        .unwrap_or_else(|| {
+                            panic!("{src}: no meta entry for `{}`", method.selector)
+                        });
+                    let expected = method
+                        .return_type
+                        .as_ref()
+                        .map_or(MetaTypeRepr::None, |rt| {
+                            CoreErlangGenerator::declared_type_to_meta_repr(rt, &class.type_params)
+                        });
+                    assert_eq!(
+                        entry.2, expected,
+                        "{src}: return type of synthesized `{}`",
+                        method.selector
+                    );
+                }
+            };
+        check(&info.methods, &instance);
+        check(&info.class_methods, &class_side);
+    }
 }

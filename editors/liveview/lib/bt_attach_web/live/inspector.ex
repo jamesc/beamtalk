@@ -41,7 +41,7 @@ defmodule BtAttachWeb.Live.Inspector do
   0091 Decision 3) with the RBAC-relevant `BtAttachWeb.Live.RequestContext` —
   never a raw `BtAttach.Workspace`/`:rpc` call — so this module never
   reimplements the read-surface `inspect`/`subscribe_object`/`pid_stats` ops
-  or the RBAC gate `eval` already rides for poke (CLAUDE.md
+  or the RBAC gate `eval` already rides for poke (AGENTS.md
   no-duplicate-implementations).
   """
 

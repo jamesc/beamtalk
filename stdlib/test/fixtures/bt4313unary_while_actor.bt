@@ -1,0 +1,58 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4313: the unary `[...] whileTrue` / `[...] whileFalse` loops in actor
+// methods, and the counter the other rows' conditions send to. See
+// stdlib/test/bt4313unary_while_test.bt.
+
+Actor subclass: Bt4313UnaryWhileActor
+  state: n = 0
+
+  fieldWhileTrue =>
+    [
+      self.n := self.n + 1
+      self.n < 3
+    ] whileTrue
+    self.n
+
+  fieldWhileFalse =>
+    [
+      self.n := self.n + 2
+      self.n >= 6
+    ] whileFalse
+    self.n
+
+  selfSendWhileTrue =>
+    [self bump < 4] whileTrue
+    self.n
+
+  localWhileTrue =>
+    t := 0
+    [
+      t := t + 1
+      t < 3
+    ] whileTrue
+    t
+
+  localWhileFalse =>
+    t := 10
+    [
+      t := t - 1
+      t <= 4
+    ] whileFalse
+    t
+
+  localConditionAndBody =>
+    t := 0
+    u := 0
+    [
+      t := t + 1
+      t < 5
+    ] whileTrue: [u := u + t]
+    #(t, u)
+
+  bump =>
+    self.n := self.n + 1
+    self.n
+
+  count => self.n

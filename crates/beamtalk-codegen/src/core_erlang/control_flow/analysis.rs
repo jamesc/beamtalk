@@ -305,7 +305,7 @@ impl CoreErlangGenerator {
     /// `ThreadingPlan::threads_value_self`) and the value-type loop-open
     /// consumers in `value_type_codegen.rs`, so the routing decision and the
     /// tuple-shape decision can never independently drift out of sync
-    /// (CLAUDE.md's no-duplicate-implementations rule).
+    /// (AGENTS.md's no-duplicate-implementations rule).
     ///
     /// **Accepted scope limit, inherited from that same narrowing:** a field
     /// write buried inside a NESTED construct in the loop body — most
@@ -532,7 +532,7 @@ impl CoreErlangGenerator {
     /// Shaped as a `Result`-returning rejection helper (rather than a
     /// predicate each call site turns into an error itself): it is the single
     /// place that turns a positive match into the diagnostic, so the `Letrec`
-    /// and `Foldl*` call sites cannot drift out of sync (CLAUDE.md's
+    /// and `Foldl*` call sites cannot drift out of sync (AGENTS.md's
     /// no-duplicate-implementations rule).
     pub(in crate::core_erlang) fn reject_unthreadable_value_self_field_write(
         &self,

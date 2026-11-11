@@ -639,6 +639,7 @@ mod tests {
 
     fn empty_module() -> Module {
         Module {
+            pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
             classes: vec![],
             method_definitions: vec![],
             protocols: vec![],
@@ -677,6 +678,7 @@ mod tests {
             span: Span::new(0, 0),
         };
         Module {
+            pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
             classes: vec![class],
             method_definitions: vec![],
             protocols: vec![],

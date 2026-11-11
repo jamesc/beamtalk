@@ -746,12 +746,12 @@ run_all_ffi_wrapper_test() ->
     %% resolve_module('TcStub') → bt@tc_stub (loaded test helper)
     ClassRef = {class_object, 'TcStub class'},
     Result = beamtalk_test_case:runAll(ClassRef),
-    ?assert(is_binary(Result)).
+    ?assertMatch({beamtalk_string, B} when is_binary(B), Result).
 
 %% Line 1133: runClass(ClassRef, TestName) → ffi_extract_class_name → run_single/2
 run_class_ffi_wrapper_test() ->
     ClassRef = {class_object, 'TcStub class'},
-    Result = beamtalk_test_case:runClass(ClassRef, testStubPass),
+    {beamtalk_string, Result} = beamtalk_test_case:runClass(ClassRef, testStubPass),
     ?assert(is_binary(Result)),
     ?assertNotEqual(nomatch, binary:match(Result, <<"passed">>)).
 

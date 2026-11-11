@@ -410,7 +410,7 @@ mod tests {
     #[test]
     fn nav_site_to_location_uses_absolute_path_as_is() {
         // Use a real temp file so the test is portable (Windows CI matrix
-        // doesn't have /etc/hostname; CLAUDE.md also forbids hardcoded /tmp).
+        // doesn't have /etc/hostname; AGENTS.md also forbids hardcoded /tmp).
         let tmp = tempfile::NamedTempFile::new().expect("create temp file");
         let path_str = tmp.path().to_str().expect("utf8 temp path").to_string();
         let s = site("Counter", 7, Some(&path_str));

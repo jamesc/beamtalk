@@ -463,6 +463,45 @@ defmodule BtAttachWeb.Live.SystemBrowserTest do
       assert {:reply, %{"diagnostics" => []}, ^socket} =
                SystemBrowser.handle_event("diagnostics", %{"code" => "3 + 4"}, socket)
     end
+
+    test "a :def tab's diagnostics carry its class's source file (BT-4583)" do
+      socket =
+        base_socket(%{
+          tabs: [def_tab("def:Counter", "Counter")],
+          active_tab: "def:Counter",
+          browser_classes: [%{"name" => "Counter", "source_file" => "/proj/src/counter.bt"}]
+        })
+
+      assert {:reply, %{"diagnostics" => [%{"message" => "scope: /proj/src/counter.bt"}]}, _} =
+               SystemBrowser.handle_event(
+                 "diagnostics",
+                 %{"code" => "Object subclass: Counter", "tab_id" => "def:Counter"},
+                 socket
+               )
+    end
+
+    test "method tabs, unknown tabs and file-less classes send no source path (BT-4583)" do
+      socket =
+        base_socket(%{
+          tabs: [
+            def_tab("def:Scratch", "Scratch"),
+            method_tab("method:Counter:instance:increment", "Counter", "increment")
+          ],
+          browser_classes: [
+            %{"name" => "Counter", "source_file" => "/proj/src/counter.bt"},
+            %{"name" => "Scratch", "source_file" => nil}
+          ]
+        })
+
+      for tab_id <- ["def:Scratch", "method:Counter:instance:increment", "def:Nope", 42] do
+        assert {:reply, %{"diagnostics" => []}, _} =
+                 SystemBrowser.handle_event(
+                   "diagnostics",
+                   %{"code" => "x", "tab_id" => tab_id},
+                   socket
+                 )
+      end
+    end
   end
 
   describe "source-navigation: senders / implementors" do

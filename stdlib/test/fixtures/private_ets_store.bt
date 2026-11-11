@@ -1,0 +1,23 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4576: an actor keeping its state in a private, unnamed Ets table.
+// Each instance owns its own table, so two instances never clash on a name.
+
+Actor subclass: PrivateEtsStore
+  state: table :: Ets
+
+  initialize -> Nil =>
+    self.table := Ets private: #set
+    nil
+
+  remember: key :: String value: value :: Object -> Nil =>
+    self.table at: key put: value
+    nil
+
+  recall: key :: String -> Object => self.table at: key
+
+  claim: key :: String -> Object => self.table removeKey: key ifAbsent: [nil]
+
+  // Leaks the handle on purpose so a test can show it is unusable outside.
+  leakTable -> Ets => self.table

@@ -17,7 +17,7 @@
 //! corpus) and is **returned** or **stored** by that method:
 //!
 //! | [`EscapeShape`]        | Source shape                                       |
-//! |------------------------|----------------------------------------------------|
+//! |------------------------|----------------------------------------------------|  
 //! | `Returned`             | last statement of the method, or `^ [...]`         |
 //! | `StoredLocal`          | `name := [...]`                                    |
 //! | `StoredClassVar`       | `self.name := [...]`                               |
@@ -355,6 +355,62 @@ mod tests {
         let scan = scan_corpus(&[dir.path().to_path_buf()]);
         assert_eq!(scan.files.len(), 1);
         assert_eq!(scan.unparsed.len(), 0);
+    }
+
+    #[test]
+    fn parse_bad_source_returns_none() {
+        // Exercises the early-return path in `parse_corpus_source` when the
+        // source has parse errors; named without `_corpus` so it is not
+        // excluded from the coverage filterset (test(/agreement|_corpus/)).
+        let result = parse_corpus_source("bad.bt", "Object subclass: Foo\n  class bad => [\n");
+        assert!(
+            result.is_none(),
+            "expected None for a source with parse errors"
+        );
+    }
+
+    #[test]
+    fn scan_bad_bt_file_lands_in_unparsed() {
+        // A file whose content fails to parse must end up in `unparsed`, not
+        // `files` (the `None` arm of the `parse_corpus_source` match in `scan_corpus`).
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(
+            dir.path().join("bad.bt"),
+            "Object subclass: Foo\n  class bad => [\n",
+        )
+        .expect("write");
+        let scan = scan_corpus(&[dir.path().to_path_buf()]);
+        assert_eq!(scan.files.len(), 0, "broken file must not appear in files");
+        assert_eq!(scan.unparsed.len(), 1, "broken file must land in unparsed");
+    }
+
+    #[test]
+    fn class_with_no_class_vars_is_skipped_in_escape_scan() {
+        // A class with no classState declarations contributes no vars; the
+        // `vars.is_empty()` early-continue in `escaping_class_var_closures`
+        // must be exercised and return no sites.
+        let src = "Object subclass: Foo\n  class pure => [self doSomething]\n";
+        assert!(
+            shapes(src).is_empty(),
+            "no escape sites expected for a class with no class variables"
+        );
+    }
+
+    #[test]
+    fn cyclic_inheritance_does_not_loop() {
+        // Construct a cycle in the superclass map by giving two classes each
+        // other as superclass; `class_vars_of` must hit its seen-set cycle
+        // guard and break rather than looping forever.
+        let a = parse_corpus_source(
+            "a.bt",
+            "B subclass: A\n  classState: x = 0\n  class reader => [self.x]\n",
+        )
+        .expect("parses");
+        let b =
+            parse_corpus_source("b.bt", "A subclass: B\n  classState: y = 0\n").expect("parses");
+        // Must complete (not hang) and return sites without panicking.
+        let sites = escaping_class_var_closures(&[a, b]);
+        assert!(!sites.is_empty(), "expected at least one escape site");
     }
 
     #[test]

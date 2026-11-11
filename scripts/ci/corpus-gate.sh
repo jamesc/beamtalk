@@ -5,8 +5,10 @@
 # The one gate for the Rust corpus tier (`just test-corpus`: the ADR 0111/0131
 # state-threading agreement and corpus proofs, ~13 min on 4 cores). Reads
 # changed paths on stdin, one per line, and exits 0 when any of them can change
-# the tier's verdict, 1 otherwise. `just ci-changed` and ci.yml's Linux `check`
-# job both call it, so the path list lives here and nowhere else.
+# the tier's verdict, 1 otherwise. `just ci-changed` calls it, so the path
+# list lives here and nowhere else. CI no longer gates on it: on a PR the
+# tier runs only with the `ci:corpus` label, and always on main (corpus.yml,
+# BT-4609); AGENTS.md says when to add the label.
 #
 # The tier's tests call the compiler in-process (beamtalk-core, beamtalk-codegen,
 # beamtalk-repl; the `corpus_tests` filterset in the Justfile is scoped to those

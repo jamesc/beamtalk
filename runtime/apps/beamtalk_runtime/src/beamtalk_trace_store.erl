@@ -792,7 +792,13 @@ reset_aggregates_after_upgrade() ->
         true ->
             ?LOG_INFO("Resetting pre-BT-4103 aggregate tables", #{}),
             lists:foreach(
-                fun(T) -> catch ets:delete(T) end,
+                fun(T) ->
+                    try
+                        ets:delete(T)
+                    catch
+                        _:_ -> ok
+                    end
+                end,
                 ?RETIRED_AGG_TABLES ++
                     [?AGG_CLASS_STATS, ?AGG_PID, ?AGG_PID_KEYS, ?AGG_FREE_SLOTS]
             ),
@@ -816,7 +822,12 @@ reset_free_slots_after_upgrade() ->
                 ordered_set ->
                     ok;
                 _ ->
-                    _ = catch ets:delete(?AGG_FREE_SLOTS),
+                    _ =
+                        try
+                            ets:delete(?AGG_FREE_SLOTS)
+                        catch
+                            _:_ -> ok
+                        end,
                     ok
             end
     end.
@@ -1155,7 +1166,9 @@ grow_counters() ->
 -doc """
 Resolve the class atom from the instance registry, else `unknown`: one
 lookup on its pid-keyed index (BT-4113), the same as
-`beamtalk_actor:lookup_class/1`.
+`beamtalk_actor:lookup_class/1`. `unknown` also covers a lost index (the
+registry server and `beamtalk_ets_heir` both down, BT-4123); a registry
+crash alone keeps it, since the restarted server reclaims it from the heir.
 """.
 -spec class_from_registry(pid()) -> atom().
 class_from_registry(Pid) ->
@@ -1793,7 +1806,10 @@ do_bottlenecks(Limit) ->
                 beamtalk_instance_registry
             )
         catch
-            %% Registry table missing (partial harness): no actors to report.
+            %% Registry table missing: a partial harness, or the table was
+            %% genuinely lost (registry server and `beamtalk_ets_heir` both
+            %% down, BT-4123) — no actors to report. A registry crash alone
+            %% keeps the table: it survives under the heir and is reclaimed.
             error:badarg -> []
         end
     ),

@@ -68,7 +68,6 @@ use super::LocalWrite;
 use super::StateAccFallbackReason;
 use super::analysis::ThreadedFamilies;
 use super::family_slots::{self, FamilyVersionStep};
-use crate::core_erlang::threading_analysis::ThreadedLocals;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -119,7 +118,7 @@ impl FieldWriteSite {
     /// `if matches!(context, CodeGenContext::ValueType) { .. } else { .. }`
     /// copies (`expressions.rs`'s `generate_field_assignment`,
     /// `dispatch_codegen.rs`'s `generate_field_assignment_open`, and this
-    /// module's own `lower_field_assignment_bind`) — CLAUDE.md's
+    /// module's own `lower_field_assignment_bind`) — AGENTS.md's
     /// no-duplicate-implementations rule applied to the very axis this
     /// issue unifies.
     pub(in crate::core_erlang) fn for_context(context: CodeGenContext) -> Self {
@@ -674,7 +673,7 @@ impl CoreErlangGenerator {
     /// `State`/`StateAcc` stays in scope inside the `case`), and `value` is the receiver's own
     /// boolean/nil value to test. Shared by all the `generate_*_with_mutations`
     /// generators below (previously each hand-duplicated this exact match —
-    /// CLAUDE.md's no-duplicate-implementations rule). `frame` is the
+    /// AGENTS.md's no-duplicate-implementations rule). `frame` is the
     /// caller's own current frame ([`CoreErlangGenerator::current_frame`]),
     /// tagging every real `Bind` this prelude carries with the SAME frame
     /// identity the caller's own `case` construct uses.
@@ -883,7 +882,7 @@ impl CoreErlangGenerator {
         self.rebind_frames.get(&frame).is_some_and(|rebind| {
             matches!(
                 rebind.kind,
-                RebindFrameKind::Loop(ThreadingMode::DirectParams | ThreadingMode::TupleAcc(_))
+                RebindFrameKind::Loop(ThreadingMode::DirectParams | ThreadingMode::TupleAcc(..))
             )
         })
     }
@@ -977,6 +976,25 @@ impl CoreErlangGenerator {
             Vec::new()
         };
         let family_binds = self.extract_state_family(&carrier, frame, span);
+        // BT-4461: in the REPL the construct adopts the bindings map whole; the
+        // bindings its frame holds in variables that it writes are read back
+        // out of that map (`repl_adoption_prelude`).
+        let cached = if rebinds_locals {
+            Vec::new()
+        } else {
+            self.repl_producer_cached_bindings_of_blocks(arms)
+        };
+        if !cached.is_empty() {
+            let prelude = self.repl_adoption_prelude(
+                &carrier,
+                tuple_doc,
+                &cached,
+                family_binds,
+                frame,
+                span,
+            )?;
+            return Ok(ThreadedValue { prelude, value });
+        }
         if !rebinds_locals {
             let mut prelude = vec![ThreadedStmt::Statement(
                 docvec!["let ", leaf::var(carrier.clone()), " = ", tuple_doc, " in "],
@@ -1721,7 +1739,7 @@ impl CoreErlangGenerator {
         let cond_var = self.fresh_temp_var("Cond");
         let true_doc = self.pure_arm_doc(true_arm, &cond_var)?;
         let false_doc = self.pure_arm_doc(false_arm, &cond_var)?;
-        let fallback = self.boolean_fallback_send(&cond_var, selector_atom, blocks)?;
+        let fallback = self.boolean_fallback_send(&cond_var, selector_atom, blocks, false)?;
         let no_match_var = self.fresh_temp_var("CondNoMatch");
 
         Ok(docvec![
@@ -1765,22 +1783,59 @@ impl CoreErlangGenerator {
     /// reported, and `add_codegen_warning` does not dedup, while
     /// lowering-specific findings are kept (see
     /// `dedup_append_codegen_warnings`).
+    ///
+    /// BT-4524 (ADR 0146 P0): a block holding a `^` that goes as a closure
+    /// carries the cell in its throw, so the send stores first: `bracketed`
+    /// when the caller wraps it in a `SyncedCall`
+    /// ([`Self::mutation_boolean_fallback_clause`]), else a pre-store of the
+    /// state an inline `^` here would store
+    /// ([`CoreErlangGenerator::nlr_closure_prestore`]).
     pub(in crate::core_erlang) fn boolean_fallback_send(
         &mut self,
         cond_var: &str,
         selector_atom: &str,
         blocks: &[&Block],
+        bracketed: bool,
     ) -> Result<Document<'static>> {
+        let at = blocks.first().map(|b| b.span).unwrap_or_default();
+        // The send's `^`-holding arms that go as closures are checked
+        // whichever path lowered the conditional (the mutation path never
+        // reaches `note_send`): uncovered, each is an `UnbracketedNlrClosure`.
+        // An arm passed as a raising stub never becomes a closure, so it is
+        // not recorded (BT-4532).
+        let closure_arms: Vec<&Block> = blocks
+            .iter()
+            .copied()
+            .filter(|block| self.fallback_passes_closure(block))
+            .collect();
+        self.note_nlr_blocks(closure_arms.iter().copied(), selector_atom);
+        let prestore = if bracketed {
+            None
+        } else {
+            self.nlr_closure_prestore(&closure_arms, at)
+        };
+        let cover: Vec<_> = if bracketed || prestore.is_some() {
+            closure_arms.iter().map(|block| block.span).collect()
+        } else {
+            Vec::new()
+        };
         let prev = std::mem::replace(&mut self.decline_pure_boolean_inline, true);
         let warn_len = self.codegen_warnings.len();
-        let closures: Result<Vec<_>> = blocks
-            .iter()
-            .map(|block| self.fallback_block_doc(block, selector_atom))
-            .collect();
+        let closures: Result<Vec<_>> = self.with_nlr_closure_cover(&cover, |this| {
+            blocks
+                .iter()
+                .map(|block| this.fallback_block_doc(block, selector_atom))
+                .collect()
+        });
         self.decline_pure_boolean_inline = prev;
         let new_warnings = self.codegen_warnings.split_off(warn_len);
         self.dedup_append_codegen_warnings(new_warnings);
-        Ok(self.runtime_send_call(leaf::var(cond_var.to_string()), selector_atom, closures?))
+        let send =
+            self.runtime_send_call(leaf::var(cond_var.to_string()), selector_atom, closures?);
+        Ok(match prestore {
+            Some(prestore) => self.nlr_closure_prestored_call(prestore, send),
+            None => send,
+        })
     }
 
     /// BT-4244: one block argument of [`Self::boolean_fallback_send`]: the
@@ -1866,15 +1921,17 @@ impl CoreErlangGenerator {
         blocks: &[&Block],
         base_state: &str,
     ) -> Result<Document<'static>> {
-        let send = self.boolean_fallback_send(cond_var, selector_atom, blocks)?;
-        let span = blocks.first().map(|b| b.span).unwrap_or_default();
-        let no_match_var = self.fresh_temp_var("CondNoMatch");
         // Bracket only when a block passed as a real closure touches the
-        // actor's state: a stub touches nothing.
+        // actor's state: a stub touches nothing. Decided before the send is
+        // compiled, so a `^` in a bracketed closure needs no pre-store of its
+        // own (BT-4524).
         let brackets = self.conditional_fallback_brackets()
             && blocks.iter().any(|block| {
                 self.fallback_passes_closure(block) && self.block_touches_actor_state(block)
             });
+        let send = self.boolean_fallback_send(cond_var, selector_atom, blocks, brackets)?;
+        let span = blocks.first().map(|b| b.span).unwrap_or_default();
+        let no_match_var = self.fresh_temp_var("CondNoMatch");
         let body = if brackets {
             let bracket = self.bracket_conditional_fallback(send, base_state, span);
             let tuple = self.conditional_baseline_tuple(leaf::var(bracket.result), &bracket.state);
@@ -2052,6 +2109,28 @@ impl CoreErlangGenerator {
             // one `BranchArm` frame per arm, like a conditional's blocks.
             if root_producer && !self.is_repl_mode() {
                 return Ok(Some(self.generate_match_producer(value, arms, span, tail)?));
+            }
+            // BT-4461: a REPL `match:` adopts the bindings map whole, like the
+            // REPL's other producers, so the bindings its frame holds in
+            // variables that it writes are read out of that map
+            // (`repl_adoption_prelude`).
+            let cached = self.repl_producer_cached_bindings(expr);
+            if !cached.is_empty() {
+                let frame = self.current_frame();
+                let _ = self.drop_cached_repl_bindings(&cached);
+                let tuple_doc = self.generate_match(value, arms)?;
+                let carrier = self.fresh_temp_var("CF");
+                let adopt = self.extract_state_family(&carrier, frame, span);
+                let prelude =
+                    self.repl_adoption_prelude(&carrier, tuple_doc, &cached, adopt, frame, span)?;
+                return Ok(Some(ThreadedValue {
+                    prelude,
+                    value: ValueRef::Doc(docvec![
+                        "call 'erlang':'element'(1, ",
+                        leaf::var(carrier),
+                        ")",
+                    ]),
+                }));
             }
             let frame = self.current_frame();
             let tuple_doc = self.generate_match(value, arms)?;
@@ -2506,7 +2585,7 @@ impl CoreErlangGenerator {
                 span,
             );
             self.bind_var(&id.name, &val_var);
-            self.push_control_flow_threaded_var_rereads(value, span, stmts);
+            stmts.extend(self.construct_locals_in_place(value, span));
             return Ok(val_var);
         }
 
@@ -2606,6 +2685,10 @@ impl CoreErlangGenerator {
         let target_version = self.state_version();
         let target = VersionedVar::new(VersionPrefix::State, target_version, frame);
         let op = if slot {
+            // BT-4461: the binding's variable now mirrors its map key.
+            if self.is_repl_mode() {
+                self.repl_map_vars.insert(val_var.to_string());
+            }
             BindOp::Put {
                 field: state_key,
                 value: ValueRef::Var(val_var.to_string()),
@@ -2675,7 +2758,7 @@ impl CoreErlangGenerator {
     /// carrier became the operand's value (`ConstructCarrierInPlace`); and a
     /// nested construct writing an arm-local was compiled in place and its
     /// locals reread out of its state carrier
-    /// (`ConstructLocalsRereadOpaquely`), which in an actor left the
+    /// (`ConstructLocalsNotRebound`), which in an actor left the
     /// arm-local's scratch key in the actor's state and crashed a loop in a
     /// nested `on:do:`/`ensure:` body (`invalid argument`).
     ///
@@ -2800,6 +2883,9 @@ impl CoreErlangGenerator {
         // lowered arm once it is built: the rule a Tier 2 block body and the
         // loop and fold bodies apply to their own statements (BT-3939).
         let mut producer_sites: Vec<(Span, Vec<String>)> = Vec::new();
+        // BT-4461: a REPL arm's producer sites that write a binding the arm
+        // holds in a variable, checked the same way once the arm is built.
+        let mut repl_sites: Vec<(Span, Vec<String>)> = Vec::new();
 
         for (i, expr) in body.iter().enumerate() {
             // BT-3838: a NON-last arm statement's value is discarded, so `(s)` is exactly `s`
@@ -2811,6 +2897,8 @@ impl CoreErlangGenerator {
             };
             if arm.is_some() {
                 producer_sites.extend(self.frame_producer_sites(expr, false, true));
+            } else {
+                repl_sites.extend(self.repl_frame_producer_sites(expr));
             }
             // Classified with the shared classifier just before the statement
             // is lowered, so a local bound earlier in this arm is live when a
@@ -2900,21 +2988,15 @@ impl CoreErlangGenerator {
                             )
                         })?;
                         let new_state = self.current_state_var();
-                        let throw_var = self.fresh_temp_var("NlrThrow");
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                "let ",
-                                leaf::var(throw_var.clone()),
-                                " = call 'erlang':'throw'({'$bt_nlr', ",
-                                leaf::var(nlr_token),
-                                ", ",
-                                dispatch_value_doc,
-                                ", ",
-                                leaf::var(new_state),
-                                "}) in ",
-                            ],
+                        // BT-4535: the node stores `new_state` to the cell
+                        // before the throw where the cell is live.
+                        let (throw, throw_var) = self.nlr_throw_stmt(
+                            nlr_token,
+                            ValueRef::Doc(dispatch_value_doc),
+                            new_state,
                             span,
-                        ));
+                        );
+                        stmts.push(throw);
                         if is_last {
                             last_result = Some(ValueRef::Var(throw_var));
                         }
@@ -2944,21 +3026,14 @@ impl CoreErlangGenerator {
                             )
                         })?;
                         let new_state = self.current_state_var();
-                        let throw_var = self.fresh_temp_var("NlrThrow");
-                        stmts.push(ThreadedStmt::Statement(
-                            docvec![
-                                "let ",
-                                leaf::var(throw_var.clone()),
-                                " = call 'erlang':'throw'({'$bt_nlr', ",
-                                leaf::var(nlr_token),
-                                ", ",
-                                leaf::var(field_val_var),
-                                ", ",
-                                leaf::var(new_state),
-                                "}) in ",
-                            ],
+                        // BT-4535: as above.
+                        let (throw, throw_var) = self.nlr_throw_stmt(
+                            nlr_token,
+                            ValueRef::Var(field_val_var),
+                            new_state,
                             span,
-                        ));
+                        );
+                        stmts.push(throw);
                         if is_last {
                             last_result = Some(ValueRef::Var(throw_var));
                         }
@@ -3142,7 +3217,7 @@ impl CoreErlangGenerator {
                                 },
                                 span,
                             });
-                            self.push_control_flow_threaded_var_rereads(value, span, &mut stmts);
+                            stmts.extend(self.construct_locals_in_place(value, span));
                             if is_last {
                                 last_result = Some(ValueRef::Var(val_var));
                             }
@@ -3307,11 +3382,7 @@ impl CoreErlangGenerator {
                             ])),
                             span,
                         });
-                        self.push_control_flow_threaded_var_rereads(
-                            &arguments[1],
-                            span,
-                            &mut stmts,
-                        );
+                        stmts.extend(self.construct_locals_in_place(&arguments[1], span));
                         if is_last {
                             last_result = Some(ValueRef::Var(val_var));
                         }
@@ -3387,7 +3458,7 @@ impl CoreErlangGenerator {
                             ])),
                             span,
                         });
-                        self.push_control_flow_threaded_var_rereads(value, span, &mut stmts);
+                        stmts.extend(self.construct_locals_in_place(value, span));
                         // BT-4439: each name is written to the arm's slot.
                         let _ = self.lower_destructure_bind_from_var(
                             pattern,
@@ -3493,13 +3564,11 @@ impl CoreErlangGenerator {
                             ])),
                             span,
                         });
-                        // BT-4460: unreachable with a non-empty set in a method
-                        // arm (every arm registers a nested construct writing
-                        // an arm-local as a producer, lowered above); the
-                        // verifier reports a reread that carries a local
-                        // (`ConstructLocalsRereadOpaquely`). Removed with the
-                        // helper by BT-4462.
-                        self.push_control_flow_threaded_var_rereads(expr, span, &mut stmts);
+                        // BT-4460 / BT-4462: a construct reaching here threads
+                        // no local (every arm registers a nested construct
+                        // writing an arm-local as a producer, lowered above);
+                        // one that does is `ConstructLocalsNotRebound`.
+                        stmts.extend(self.construct_locals_in_place(expr, span));
                     }
                 }
                 // C11 — a Tier 2 `value(:...)` call on a stored
@@ -3687,6 +3756,7 @@ impl CoreErlangGenerator {
             "a conditional, match: or handler arm's producer must be lowered as a producer",
             block.span,
         );
+        self.check_repl_frame_producer_sites(&stmts, &repl_sites, block.span);
 
         // C13 — the arm closer: {<result>, <final_state>}.
         let final_version = self.state_version();
@@ -3700,48 +3770,6 @@ impl CoreErlangGenerator {
 
         self.pop_scope();
         Ok(self.render_branch_arm(stmts, frame, final_version, block.span, arm))
-    }
-
-    /// ADR 0111 Addendum 5 (rebind idiom, shared by C6/C8/
-    /// C9/C10): rebinds each of a nested control-flow construct's threaded
-    /// `__local__` captured vars from the just-produced state, appending
-    /// one `Statement` (or none, if there are no threaded vars) to `stmts`.
-    /// A rebind read is never itself a version mutation (Rule 1) — always a
-    /// `Statement`, never a `Bind`.
-    ///
-    /// ADR 0131 Phase 3c (BT-3822): reached only from an arm that compiled a
-    /// nested construct writing a local *of that arm* in place instead of
-    /// lowering it as a producer. Since BT-4460 every arm frame, a plain arm
-    /// included (`generate_plain_arm`), registers that construct as a
-    /// producer, so a method arm never gets here: the reread is a
-    /// [`ThreadedStmt::StateCarrierReread`], which the verifier reports
-    /// wherever it carries a local (`ConstructLocalsRereadOpaquely`), so
-    /// `just verify-threaded-ir` and the BT-4460 grid assert it is
-    /// unreachable. The helper and its callers go with BT-4462.
-    fn push_control_flow_threaded_var_rereads(
-        &mut self,
-        source_expr: &Expression,
-        span: Span,
-        stmts: &mut Vec<ThreadedStmt>,
-    ) {
-        let Some(threaded_vars) = self
-            .threaded_locals_of(source_expr)
-            .and_then(ThreadedLocals::into_lowered)
-        else {
-            return;
-        };
-        let new_state_name = self.current_state_var();
-        let re_reads = self.rebind_threaded_vars_from_state(&threaded_vars, &new_state_name);
-        if !re_reads.is_empty() {
-            // BT-4460: typed, so the verifier reports the construct whose
-            // locals reached the arm without a `LocalRebind`
-            // (`ConstructLocalsRereadOpaquely`).
-            stmts.push(ThreadedStmt::StateCarrierReread {
-                locals: threaded_vars,
-                doc: Document::Vec(re_reads),
-                span,
-            });
-        }
     }
 
     /// ADR 0111 Addendum 5, Rule 3: wraps a branch arm's real `Bind`/`Statement`

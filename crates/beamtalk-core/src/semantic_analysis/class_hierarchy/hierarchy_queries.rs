@@ -696,84 +696,186 @@ impl ClassHierarchy {
 
     /// BT-4464: whether `class`'s own explicit class-side `new` may build in
     /// the caller, the explicit-constructor counterpart of the synthesized
-    /// `new0` verdict of [`Self::direct_constructors`].
+    /// `new0` verdict of [`Self::direct_constructors`]: the `new` case of
+    /// [`Self::explicit_class_constructor_builds_in_caller`].
     ///
     /// A class that defines `class new => <body>` (and no instance-side
     /// `new`) compiles a `new/0` that delegates to the body
     /// (`generate_delegating_new` in codegen: `class_new('undefined')`), and
     /// the class process's `{new, []}` handler only ever calls that `new/0`.
-    /// So the class process adds nothing but a serialisation point whenever
-    /// the body does not need it: the body is a single statement that is
-    ///
-    /// - `self delegate` on a `native:` class (lowered to
-    ///   `beamtalk_erlang_proxy:native_call/5` on the backing module), or
-    /// - a direct `(Erlang mod) fn` FFI call whose arguments are all literals
-    ///   and which is not a row of the curated class-method FFI table read by
-    ///   the `class-process-ffi` / `class-method-process-resource` lints
-    ///   (`ets new:`, `erlang self`, `spawn_link`, `gen_udp open:`, ...):
-    ///   those keep the class process, which owns what they create. FFI
-    ///   outside that table is not recognised, exactly as for the lints,
-    ///   and runs in the caller like any other in-caller class method,
-    ///
-    /// so it reads no `self`, no class variable and nothing from the class
-    /// process's dictionary (`basicNew` does, which is why a body sending to
-    /// `self` is never eligible). The class must also be concrete, compile as
-    /// a non-actor, have a fully known surface and no class variables in its
-    /// chain. Like the synthesized verdict this only makes the class eligible
-    /// to *try* the direct path: codegen bakes it into `direct_constructors`
-    /// and every direct `new` is guarded at run time (BT-4409,
-    /// `beamtalk_class_dispatch:lookup_direct_constructor/3`), so a class-side
-    /// extension or ADR 0084 runtime fun of `new` still reaches the class
-    /// process. As for any in-caller class method (ADR 0142), a resource the
-    /// FFI creates belongs to the caller.
+    /// Codegen bakes the verdict into `direct_constructors` and every direct
+    /// `new` is guarded at run time (BT-4409,
+    /// `beamtalk_class_dispatch:lookup_direct_constructor/3`).
     #[must_use]
     pub fn explicit_class_new_builds_in_caller(&self, class: &ClassDefinition) -> bool {
-        fn primary_new(
-            methods: &[crate::ast::MethodDefinition],
-        ) -> Option<&crate::ast::MethodDefinition> {
+        self.explicit_class_constructor_builds_in_caller(class, "new")
+    }
+
+    /// BT-4475: whether `class`'s own explicit class-side `new:` may run in
+    /// the caller as an ordinary class method: the `new:` case of
+    /// [`Self::explicit_class_constructor_builds_in_caller`].
+    ///
+    /// `new:` with a non-map argument has no direct constructor
+    /// (`Module:new/1` is the synthesized map initialiser), and the class
+    /// process's `{new, [Arg]}` handler only calls the class method `new:`
+    /// (`has_class_new_in_chain`). So codegen drops `new:` from this class's
+    /// published `process_bound_class_selectors`, and a `new:` send takes the
+    /// ADR 0142 in-caller path (`beamtalk_class_dispatch:in_caller_owner/2`)
+    /// with the real class reference as `self`, behind the same run-time
+    /// guard (`beamtalk_class_shadow_flags:direct_call_ok/2`) as every
+    /// in-caller class method. The published list only ever speaks for the
+    /// receiving class: a subclass inheriting this `new:` publishes its own,
+    /// complete list and keeps the class process.
+    #[must_use]
+    pub fn explicit_class_new1_runs_in_caller(&self, class: &ClassDefinition) -> bool {
+        self.explicit_class_constructor_builds_in_caller(class, "new:")
+    }
+
+    /// The one rule behind [`Self::explicit_class_new_builds_in_caller`]
+    /// (`new`, BT-4464) and [`Self::explicit_class_new1_runs_in_caller`]
+    /// (`new:`, BT-4475): whether `class`'s own explicit class-side
+    /// `selector` needs nothing from the class process. Both selectors are
+    /// process-bound (ADR 0142 rule 3), yet the class process adds nothing
+    /// but a serialisation point whenever the body does not need it: the body
+    /// is a single statement that is
+    ///
+    /// - (`new` only) `self delegate` on a `native:` class (lowered to
+    ///   `beamtalk_erlang_proxy:native_call/5` on the backing module). Not
+    ///   for `new:`: no `new:` delegate qualifies today, and the one in the
+    ///   stdlib (`AtomicCounter new:`) creates a named ETS table owned by
+    ///   whichever process runs it, which must stay the class process;
+    /// - a direct `(Erlang mod) fn` FFI call whose arguments are all literals
+    ///   (or, for `new:`, the method's own parameter) and which is not a row
+    ///   of the curated class-method FFI table read by the
+    ///   `class-process-ffi` / `class-method-process-resource` lints
+    ///   (`ets new:`, `erlang self`, `spawn_link`, `gen_udp open:`, ...):
+    ///   those keep the class process, which owns what they create. FFI
+    ///   outside that table is not recognised, exactly as for the lints, and
+    ///   runs in the caller like any other in-caller class method;
+    /// - (`new:` only) a send to `self`, with literal or parameter
+    ///   arguments, of one of the class's own class methods that already runs
+    ///   in the caller ([`Self::is_direct_call_eligible`]: not process-bound,
+    ///   no class variables in the chain) and whose own body passes this test
+    ///   one level down: a plain FFI forward as above, or its own selector
+    ///   primitive (`class withAll: list => @primitive`, the target of the
+    ///   `List class new: elements => self withAll: elements` shape). The
+    ///   target's body is checked, not just its routing: a target that is
+    ///   `self delegate` or a process-sensitive FFI call would hand what it
+    ///   creates to the caller exactly as a direct one would. A forward to a
+    ///   forward is not recognised. `new` cannot forward to `self`: its
+    ///   direct path is the `new/0` delegate, whose `self` is `undefined`;
+    ///
+    /// so it reads no class variable and nothing from the class process's
+    /// dictionary (`basicNew` does, which is why `self basicNew` is never
+    /// eligible). The class must also be concrete, compile as a non-actor,
+    /// have a fully known surface, no instance-side method of the same
+    /// selector and no class variables in its chain. This only makes the
+    /// class eligible to *try* the in-caller path: a class-side extension or
+    /// ADR 0084 runtime fun of the selector still reaches the class process
+    /// through the run-time guard. As for any in-caller class method
+    /// (ADR 0142), a resource the body creates belongs to the caller.
+    #[must_use]
+    pub fn explicit_class_constructor_builds_in_caller(
+        &self,
+        class: &ClassDefinition,
+        selector: &str,
+    ) -> bool {
+        Self::explicit_class_constructor_shape(class, selector)
+            && self.constructor_chain_allows_in_caller(&class.name.name)
+    }
+
+    /// The chain-dependent half of
+    /// [`Self::explicit_class_constructor_builds_in_caller`], and the one place
+    /// the rule lives: no class variables in the chain, not an actor, a fully
+    /// known surface. Evaluated at query time against whatever hierarchy is in
+    /// hand, so a sibling-file ancestor injected later is seen (BT-4640); both
+    /// codegen (through that method) and cross-file callers
+    /// ([`Self::runs_class_method_in_caller`], from the published
+    /// [`ClassInfo::in_caller_new1`] shape) call it. `supervisor_kind` and
+    /// `is_abstract` are AST facts already folded into the shape.
+    pub(super) fn constructor_chain_allows_in_caller(&self, class_name: &str) -> bool {
+        let Some(info) = self.get_class(class_name) else {
+            return false;
+        };
+        !info.surface_incomplete
+            && !self.chain_has_class_variables(class_name)
+            && match self.resolve_class_kind(class_name) {
+                ClassKind::Actor => false,
+                ClassKind::Value => true,
+                ClassKind::Object => !self.has_cross_file_parent(class_name),
+            }
+    }
+
+    /// The chain-independent half of
+    /// [`Self::explicit_class_constructor_builds_in_caller`]: everything
+    /// decided by `class`'s own AST (BT-4640). It is what `from_class_definition`
+    /// publishes as [`ClassInfo::in_caller_new1`] for `new:`, so it survives
+    /// Pass 1 extraction and cross-file callers combine it with their own view
+    /// of the chain ([`Self::constructor_chain_allows_in_caller`]).
+    #[must_use]
+    pub fn explicit_class_constructor_shape(class: &ClassDefinition, selector: &str) -> bool {
+        use crate::ast::Expression;
+        fn primary<'m>(
+            methods: &'m [crate::ast::MethodDefinition],
+            selector: &str,
+        ) -> Option<&'m crate::ast::MethodDefinition> {
             methods
                 .iter()
-                .find(|m| m.kind == MethodKind::Primary && m.selector.name() == "new")
+                .find(|m| m.kind == MethodKind::Primary && m.selector.name() == selector)
         }
-        let class_name = class.name.name.as_str();
-        if class.is_abstract
-            || self.compiles_as_actor(class)
-            || self.chain_has_class_variables(class_name)
-            || self
-                .get_class(class_name)
-                .is_none_or(|info| info.surface_incomplete)
-        {
+        let keyword = match selector {
+            "new" => false,
+            "new:" => true,
+            _ => return false,
+        };
+        if class.is_abstract || class.supervisor_kind.is_some() {
             return false;
         }
-        if primary_new(&class.methods).is_some() {
+        if primary(&class.methods, selector).is_some() {
             return false;
         }
-        let Some(new_method) = primary_new(&class.class_methods) else {
+        let Some(method) = primary(&class.class_methods, selector) else {
             return false;
         };
-        if class.backing_module.is_some() && new_method.is_self_delegate() {
+        if !keyword && class.backing_module.is_some() && method.is_self_delegate() {
             return true;
         }
-        let [stmt] = new_method.body.as_slice() else {
+        let [stmt] = method.body.as_slice() else {
             return false;
         };
-        match &stmt.expression {
-            crate::ast::Expression::MessageSend {
-                receiver,
-                selector,
-                arguments,
-                ..
-            } => {
-                crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some_and(|module| {
-                    !crate::semantic_analysis::validators::ffi_call_is_process_sensitive(
-                        module, selector,
-                    )
-                }) && arguments
-                    .iter()
-                    .all(|arg| matches!(arg, crate::ast::Expression::Literal(..)))
-            }
-            _ => false,
+        if plain_ffi_forward(method, &stmt.expression, keyword) {
+            return true;
         }
+        // `new:` only: `self <sel> <args>`, `<sel>` one of the class's own
+        // in-caller class methods whose own body passes the same test one
+        // level down (a plain FFI forward, or its selector primitive). Never
+        // further: a forward to a forward is not recognised.
+        let Expression::MessageSend {
+            receiver,
+            selector: sent,
+            arguments,
+            ..
+        } = &stmt.expression
+        else {
+            return false;
+        };
+        let sent = sent.name();
+        keyword
+            && matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+            && arguments
+                .iter()
+                .all(|arg| plain_argument(method, arg, keyword))
+            && !ClassInfo::is_process_bound_class_selector(&sent)
+            && !ClassInfo::is_class_var_reflection_selector(&sent)
+            && primary(&class.class_methods, &sent).is_some_and(|target| {
+                matches!(target.body.as_slice(), [only] if
+                plain_ffi_forward(target, &only.expression, true)
+                || matches!(&only.expression, Expression::Primitive {
+                    is_inferred: true,
+                    is_intrinsic: false,
+                    ..
+                }))
+            })
     }
 
     /// Whether any ancestor of the named class defines a class-side `new:`
@@ -888,8 +990,8 @@ impl ClassHierarchy {
                     is_sealed: false,
                     is_internal: false,
                     spawns_block: false,
-                    return_type: Some(DeclaredType::simple(class_name.clone())),
-                    param_types: vec![None],
+                    return_type: Some(crate::synthetic_selectors::synthesized_copy_return_type()),
+                    param_types: vec![slot_type.clone()],
                     doc: Some(EcoString::from("*(compiler-generated)*")),
                     origin: None,
                     primitive: None,
@@ -919,7 +1021,9 @@ impl ClassHierarchy {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            return_type: Some(DeclaredType::simple(class_name.clone())),
+            return_type: Some(
+                crate::synthetic_selectors::synthesized_constructor_return_type(class_name),
+            ),
             param_types: vec![None; slots.len()],
             doc: Some(EcoString::from("*(compiler-generated)*")),
             origin: None,
@@ -1025,7 +1129,7 @@ impl ClassHierarchy {
 
     /// Shared superclass-chain walk behind [`Self::state_field_type`],
     /// [`Self::state_field_kind`], [`Self::class_variable_kind`] and
-    /// [`Self::class_variable_type`] (CLAUDE.md "No duplicate
+    /// [`Self::class_variable_type`] (AGENTS.md "No duplicate
     /// implementations": these four used to each hand-roll the identical
     /// `visited`/`current` cycle-guarded loop below).
     ///
@@ -1293,7 +1397,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     is_internal: false,
                     spawns_block: false,
-                    return_type: slot.type_annotation.as_ref().map(DeclaredType::from),
+                    return_type: crate::synthetic_selectors::synthesized_getter_return_type(slot),
                     param_types: vec![],
                     doc: Some(getter_doc.into()),
                     origin: None,
@@ -1317,8 +1421,10 @@ impl ClassHierarchy {
                     is_sealed: false,
                     is_internal: false,
                     spawns_block: false,
-                    return_type: Some(DeclaredType::simple(class_name.clone())),
-                    param_types: vec![None],
+                    return_type: Some(crate::synthetic_selectors::synthesized_copy_return_type()),
+                    param_types: vec![crate::synthetic_selectors::synthesized_copy_param_type(
+                        slot,
+                    )],
                     doc: Some(setter_doc.into()),
                     origin: None,
                     primitive: None,
@@ -1356,7 +1462,9 @@ impl ClassHierarchy {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            return_type: Some(DeclaredType::simple(class_name.clone())),
+            return_type: Some(
+                crate::synthetic_selectors::synthesized_constructor_return_type(&class_name),
+            ),
             param_types: vec![None; arity],
             doc: Some(ctor_doc.into()),
             origin: None,
@@ -1403,4 +1511,46 @@ pub(super) enum KeywordDecision {
     /// The class side already holds the selector (a user method or an
     /// earlier synthesis): not derivable, so no anchor.
     Ambiguous,
+}
+
+/// An argument of a constructor forward that reads nothing: a literal, or
+/// (when `params_ok`, for `new:`) one of `method`'s own parameters
+/// (`ClassHierarchy::explicit_class_constructor_builds_in_caller`).
+fn plain_argument(
+    method: &crate::ast::MethodDefinition,
+    arg: &crate::ast::Expression,
+    params_ok: bool,
+) -> bool {
+    match arg {
+        crate::ast::Expression::Literal(..) => true,
+        crate::ast::Expression::Identifier(id) => {
+            params_ok && method.parameters.iter().any(|p| p.name.name == id.name)
+        }
+        _ => false,
+    }
+}
+
+/// Whether `expr`, the whole body of `method`, is a direct `(Erlang mod) fn`
+/// call with plain arguments ([`plain_argument`]) that is not a row of the
+/// curated process-sensitive class-method FFI table
+/// (`ClassHierarchy::explicit_class_constructor_builds_in_caller`).
+fn plain_ffi_forward(
+    method: &crate::ast::MethodDefinition,
+    expr: &crate::ast::Expression,
+    params_ok: bool,
+) -> bool {
+    let crate::ast::Expression::MessageSend {
+        receiver,
+        selector,
+        arguments,
+        ..
+    } = expr
+    else {
+        return false;
+    };
+    crate::ffi_receiver::erlang_module_of_receiver(receiver).is_some_and(|module| {
+        !crate::semantic_analysis::validators::ffi_call_is_process_sensitive(module, selector)
+    }) && arguments
+        .iter()
+        .all(|arg| plain_argument(method, arg, params_ok))
 }

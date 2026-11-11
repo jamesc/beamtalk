@@ -78,6 +78,18 @@ sealed typed Collection subclass: Binary native: beamtalk_binary
   class sealed withAll: elements :: List -> Binary =>
     Binary fromIolist: elements
 
+  /// Answer the empty binary (class method).
+  ///
+  /// The canonical spelling for a zero-byte binary — prefer it over
+  /// `Binary fromBytes: #()`. Inherited by `String`, where it still
+  /// answers a `Binary` (use `""` for an empty `String`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Binary empty size   // => 0
+  /// ```
+  class sealed empty -> Binary => Binary fromBytes: #()
+
   /// Deserialize a binary and return both the value and bytes consumed.
   ///
   /// Returns a tuple of (value, bytesConsumed). Useful for parsing

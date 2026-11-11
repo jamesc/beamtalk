@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Beamtalk for GitHub",
+  "description": "Syntax-highlights Beamtalk (.bt, .btscript, ```beamtalk) on GitHub using the official Beamtalk TextMate grammar.",
+  "version": "0.1.0",
+  "icons": { "128": "icon.png" },
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://github.com/*", "https://gist.github.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "minimum_chrome_version": "105"
+}

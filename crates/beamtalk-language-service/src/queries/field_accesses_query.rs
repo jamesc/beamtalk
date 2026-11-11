@@ -49,6 +49,7 @@
 //! Callers treat "no accesses found" identically to "could not parse".
 
 use beamtalk_core::ast::{BinarySegment, Expression, Pattern, StringSegment};
+use beamtalk_core::ast_walker::walk_pattern;
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
@@ -304,52 +305,9 @@ fn collect_pattern_access_lines(
     source: &str,
     lines: &mut Vec<u32>,
 ) {
-    match pattern {
-        Pattern::Binary { segments, .. } => {
-            for segment in segments {
-                collect_pattern_access_lines(&segment.value, field_name, kind, source, lines);
-                if let Some(size) = &segment.size {
-                    collect_access_lines(size, field_name, kind, source, lines);
-                }
-            }
-        }
-        Pattern::Tuple { elements, .. } => {
-            for element in elements {
-                collect_pattern_access_lines(element, field_name, kind, source, lines);
-            }
-        }
-        Pattern::Array { elements, rest, .. } => {
-            for element in elements {
-                collect_pattern_access_lines(element, field_name, kind, source, lines);
-            }
-            if let Some(rest_pattern) = rest {
-                collect_pattern_access_lines(rest_pattern, field_name, kind, source, lines);
-            }
-        }
-        Pattern::List { elements, tail, .. } => {
-            for element in elements {
-                collect_pattern_access_lines(element, field_name, kind, source, lines);
-            }
-            if let Some(tail_pattern) = tail {
-                collect_pattern_access_lines(tail_pattern, field_name, kind, source, lines);
-            }
-        }
-        Pattern::Map { pairs, .. } => {
-            for pair in pairs {
-                collect_pattern_access_lines(&pair.value, field_name, kind, source, lines);
-            }
-        }
-        Pattern::Constructor { keywords, .. } => {
-            for (_selector, inner) in keywords {
-                collect_pattern_access_lines(inner, field_name, kind, source, lines);
-            }
-        }
-        Pattern::Wildcard(..)
-        | Pattern::Literal(..)
-        | Pattern::Variable(..)
-        | Pattern::Nil(..)
-        | Pattern::Type { .. } => {}
-    }
+    walk_pattern(pattern, &mut |expr| {
+        collect_access_lines(expr, field_name, kind, source, lines);
+    });
 }
 
 /// Determine the line number to report for a matching access. Uses the span of

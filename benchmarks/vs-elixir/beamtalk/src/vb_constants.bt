@@ -1,0 +1,13 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Class-side methods whose whole body is one literal (the named-constant
+// idiom): a class-literal send answers the literal in place behind its
+// constant-value key (BT-4363 for integers, BT-4504 for every scalar kind).
+sealed Object subclass: VbConstants
+
+  class sealed protocolError -> Integer => 1
+
+  class sealed name -> String => "protocol error"
+
+  class sealed tag -> Symbol => #protocolError

@@ -503,8 +503,10 @@ fn shorten_git_url(url: &str) -> String {
 /// pinned version to a fresh SHA (picks up a moved tag or a corrected index
 /// entry — the pinned version itself never changes; bumping it is a manifest
 /// edit).
-/// For native (hex) deps: clears locked versions so the next build
-/// re-resolves against hex.pm via rebar3 (ADR 0072 Phase 2).
+/// For native deps (hex.pm and git, ADR 0072 Phase 2): clears the locked
+/// versions so the next build re-resolves via rebar3 — all of them, or just
+/// the named one (direct or transitive). Native locks are cleared whenever
+/// `beamtalk.lock` has any, including ones only a dependency declares.
 fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
     let manifest_path = project_root.join("beamtalk.toml");
     let manifest = manifest::parse_manifest_full(&manifest_path)?;
@@ -534,11 +536,14 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
         })
         .collect();
 
-    let has_native_deps = !manifest.native_dependencies.is_empty();
+    let has_native_locks = Lockfile::read(project_root)?.is_some_and(|l| l.has_native_packages());
 
     if let Some(target_name) = name {
         // Update a single dep — check existence before emptiness
         if !manifest.dependencies.contains_key(target_name) {
+            if unlock_native_package(project_root, target_name)? {
+                return Ok(());
+            }
             miette::bail!("Dependency '{target_name}' not found in beamtalk.toml");
         }
 
@@ -570,7 +575,7 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
         // Update all git and registry deps
         let has_git_deps = !git_deps.is_empty();
         let has_registry_deps = !registry_deps.is_empty();
-        if !has_git_deps && !has_registry_deps && !has_native_deps {
+        if !has_git_deps && !has_registry_deps && !has_native_locks {
             println!("No git, registry, or native dependencies to update");
             return Ok(());
         }
@@ -599,21 +604,53 @@ fn run_update(project_root: &Utf8Path, name: Option<&str>) -> Result<()> {
         }
 
         // Clear native package locks so the next build re-resolves via rebar3
-        if has_native_deps {
+        if has_native_locks {
             let mut lockfile = Lockfile::read(project_root)?.unwrap_or_default();
-            if lockfile.has_native_packages() {
-                lockfile.clear_native_packages();
-                lockfile.write(project_root)?;
-                println!(
-                    "Cleared native package locks — next build will re-resolve against hex.pm"
-                );
-            } else {
-                println!("No native packages locked — next build will resolve against hex.pm");
-            }
+            lockfile.clear_native_packages();
+            lockfile.write(project_root)?;
+            println!("Cleared native package locks — next build will re-resolve via rebar3");
         }
     }
 
     Ok(())
+}
+
+/// Unlock one native package (direct or transitive) so the next build
+/// re-resolves it: drop its `beamtalk.lock` entry and its rebar3 checkout —
+/// rebar3 keeps an existing checkout that no `rebar.lock` entry moves.
+/// Returns `false` if no native package of that name is locked.
+fn unlock_native_package(project_root: &Utf8Path, name: &str) -> Result<bool> {
+    let is_locked = |lockfile: &Option<Lockfile>| {
+        lockfile
+            .as_ref()
+            .is_some_and(|l| l.get_native(name).is_some())
+    };
+    // Cheap check first, so an unknown name never creates `_build/`.
+    if !is_locked(&Lockfile::read(project_root)?) {
+        return Ok(false);
+    }
+
+    let layout = crate::commands::build_layout::BuildLayout::new(project_root);
+    // Same lock a build's native step holds while it rewrites `beamtalk.lock`
+    // and touches the checkouts; read the lockfile again under it.
+    let _native_build_lock =
+        crate::commands::dir_lock::lock_dir(&layout.native_dir(), "native build")?;
+    let Some(mut lockfile) = Lockfile::read(project_root)? else {
+        return Ok(false);
+    };
+    if lockfile.native_packages.remove(name).is_none() {
+        return Ok(false);
+    }
+
+    let checkout = layout.rebar_lib_dir().join(name);
+    if checkout.exists() {
+        std::fs::remove_dir_all(&checkout)
+            .into_diagnostic()
+            .wrap_err_with(|| format!("Failed to remove native checkout '{checkout}'"))?;
+    }
+    lockfile.write(project_root)?;
+    println!("Unlocked native package '{name}' — next build will re-resolve it via rebar3");
+    Ok(true)
 }
 
 /// Update a single git dependency: re-fetch, resolve SHA, update lockfile.
@@ -1344,6 +1381,49 @@ utils = { path = \"utils\" }
 
         let result = run_update(&root, None);
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_update_unlocks_single_native_package() {
+        use super::super::lockfile::NativePackageLock;
+
+        let (_dir, root) = create_project("my_app");
+        let mut lockfile = Lockfile::new();
+        lockfile.insert_native(NativePackageLock::hex("gun", "2.1.0", "A").at_level(0));
+        lockfile.insert_native(NativePackageLock::hex("cowlib", "2.13.0", "B").at_level(1));
+        lockfile.write(&root).unwrap();
+        let checkout = crate::commands::build_layout::BuildLayout::new(&root)
+            .rebar_lib_dir()
+            .join("cowlib");
+        std::fs::create_dir_all(&checkout).unwrap();
+
+        // `cowlib` is transitive — not in beamtalk.toml — but can be unlocked.
+        run_update(&root, Some("cowlib")).unwrap();
+
+        let lockfile = Lockfile::read(&root).unwrap().unwrap();
+        assert!(lockfile.get_native("cowlib").is_none());
+        assert!(lockfile.get_native("gun").is_some());
+        assert!(!checkout.exists(), "the stale checkout must be removed");
+    }
+
+    /// Native locks are cleared even when only a dependency (not the root
+    /// manifest) declares native dependencies.
+    #[test]
+    fn test_update_clears_native_locks_without_root_native_deps() {
+        use super::super::lockfile::NativePackageLock;
+
+        let (_dir, root) = create_project("my_app");
+        let mut lockfile = Lockfile::new();
+        lockfile.insert_native(NativePackageLock::hex("gun", "2.1.0", "A").at_level(0));
+        lockfile.write(&root).unwrap();
+
+        run_update(&root, None).unwrap();
+
+        assert!(
+            Lockfile::read(&root)
+                .unwrap()
+                .is_none_or(|l| !l.has_native_packages())
+        );
     }
 
     #[test]

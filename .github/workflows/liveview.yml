@@ -140,7 +140,7 @@ jobs:
           fi
           echo "total=${total}" >> "$GITHUB_OUTPUT"
 
-      # Shared with ci.yml's `publish-coverage` job (rust/erlang-coverage.json,
+      # Shared with coverage.yml's `publish-coverage` job (rust/erlang-coverage.json,
       # from its coverage-rust/coverage-erlang legs) — see
       # scripts/ci/publish-coverage-badge.sh for the retry/worktree rationale
       # (PR #3549 review: dedupe the two near-identical copies).

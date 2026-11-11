@@ -50,7 +50,14 @@ fn compile_failure(context: grid::Context, src: &str, probes: &[&str]) -> Option
         generate_module_surfacing_verifier(&module, CodegenOptions::new("test"))
     }));
     match generated {
-        Err(_) => Some("debug ThreadedIr verifier / codegen panic".to_string()),
+        Err(payload) => Some(format!(
+            "debug ThreadedIr verifier / codegen panic: {}",
+            payload
+                .downcast_ref::<String>()
+                .map(String::as_str)
+                .or_else(|| payload.downcast_ref::<&str>().copied())
+                .unwrap_or("<non-string panic>")
+        )),
         Ok(Err(e)) => Some(format!("codegen error: {e}")),
         Ok(Ok((_, verifier))) if !verifier.is_empty() => Some(format!(
             "ThreadedIr verifier diagnostic(s): {}",
@@ -193,6 +200,12 @@ fn every_evaluated_block_grid_corpus_pin_names_a_cell() {
 /// fail verified codegen, and no class or value-type cell does (the fault
 /// gates the actor producer only). One module per host and context, as in the
 /// corpus.
+///
+/// BT-4462: the failure is the block compiled in place with the locals it
+/// writes unrebound (`ConstructLocalsNotRebound`). Before BT-4462 the arm
+/// reread those locals out of the block's state carrier (the legacy
+/// write-back); with that deleted, the producer is the only thing that
+/// threads the writes, and its absence is reported, not papered over.
 #[test]
 fn the_evaluated_block_grid_corpus_fails_without_the_bt3982_producer() {
     for host in ["method", "arm", "collect", "protected"] {
@@ -202,7 +215,11 @@ fn the_evaluated_block_grid_corpus_fails_without_the_bt3982_producer() {
                 compile_batch_failure(&cells, context, &compile_failure)
             });
             if context == grid::Context::Actor {
-                assert!(failure.is_some(), "{host}: the actor cells compile");
+                let failure = failure.unwrap_or_else(|| panic!("{host}: the actor cells compile"));
+                assert!(
+                    failure.contains("ConstructLocalsNotRebound"),
+                    "{host}: expected the block compiled in place, got: {failure}"
+                );
             } else {
                 assert_eq!(failure, None, "{host} ({context:?})");
             }

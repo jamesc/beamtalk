@@ -16,11 +16,7 @@ fn write_package_with_dep(root: &Path, name: &str, app_class: &str, dep_class: &
     let dep_src = root.join("_build").join("deps").join("dep").join("src");
     fs::create_dir_all(&src).expect("create src dir");
     fs::create_dir_all(&dep_src).expect("create dep src dir");
-    fs::write(
-        root.join("beamtalk.toml"),
-        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
-    )
-    .expect("write manifest");
+    write_manifest_with_git_deps(root, name, &["dep"]);
     fs::write(
         dep_src.join(format!("{dep_class}.bt")),
         format!("Object subclass: {dep_class}"),

@@ -1733,7 +1733,7 @@ impl CoreErlangGenerator {
     /// (6-tuple headed by that atom, `cast` kind) and hands it to
     /// `beamtalk_actor:decode_wire_cast/1` — the single place the tag's
     /// decode/version-check logic lives, shared with
-    /// `beamtalk_actor.erl`'s own `handle_cast/2` (CLAUDE.md "No duplicate
+    /// `beamtalk_actor.erl`'s own `handle_cast/2` (AGENTS.md "No duplicate
     /// implementations"). A decoded envelope re-dispatches, by a recursive
     /// self-call, through the `{'cast', ...}` clause below exactly as if it
     /// had arrived locally; a decode/version failure has already been
@@ -1842,7 +1842,7 @@ impl CoreErlangGenerator {
     /// that atom) and hands it to `beamtalk_actor:decode_wire_call/1` —
     /// the single place the tag's decode/version-check logic lives
     /// (`beamtalk_actor.erl`'s own `handle_call/3` calls the very same
-    /// function for its hand-written `__methods__` path, CLAUDE.md "No
+    /// function for its hand-written `__methods__` path, AGENTS.md "No
     /// duplicate implementations"). A decoded envelope re-dispatches, by a
     /// recursive self-call, through the 3-tuple clause below exactly as if
     /// it had arrived locally; a decode/version failure's ready-made reply
@@ -1992,7 +1992,7 @@ impl CoreErlangGenerator {
     ///
     /// ADR 0126 §5.1/§5.5 (BT-3613): both arms route their payload through
     /// `beamtalk_actor` helpers shared with the hand-written dispatch path
-    /// rather than re-deriving the same logic in codegen (CLAUDE.md "No
+    /// rather than re-deriving the same logic in codegen (AGENTS.md "No
     /// duplicate implementations") — `encode_reply_for/3` wire-encodes the
     /// reply when `From` is on another node (a no-op for a local caller,
     /// so this is byte-identical to before for every existing local-call
@@ -2680,6 +2680,7 @@ mod tests {
 
     fn empty_module() -> Module {
         Module {
+            pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
             classes: Vec::new(),
             method_definitions: Vec::new(),
             protocols: Vec::new(),

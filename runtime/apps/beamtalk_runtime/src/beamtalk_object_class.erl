@@ -51,6 +51,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     shape_version/1,
     class_name/1,
     class_name_safe/1,
+    class_name_or_undefined/1,
     module_name/1,
     module_name_safe/1,
     superclass_safe/1,
@@ -60,6 +61,7 @@ and join the `beamtalk_classes` pg group for enumeration.
     local_instance_method_infos_safe/1,
     compiled_method_safe/3,
     class_send/3,
+    class_send/4,
     local_call/3,
     set_class_var/3,
     has_class_var/2,
@@ -441,6 +443,24 @@ class_name_safe(ClassPid) ->
     end.
 
 -doc """
+Registered class name from the pure ETS reverse index only, or `undefined`.
+
+Never sends a message, so unlike `class_name_safe/1` it cannot exit `noproc`
+when the class stops mid-probe. Used as the class-name thunk of
+`beamtalk_primitive:ensure_class_module_loaded/2`: `undefined` never equals a
+module, so a miss falls back to the plain `code:ensure_loaded/1` probe
+(BT-4627).
+""".
+-spec class_name_or_undefined(pid()) -> class_name() | undefined.
+class_name_or_undefined(ClassPid) when ClassPid =:= self() ->
+    get(beamtalk_class_name);
+class_name_or_undefined(ClassPid) ->
+    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
+        {ok, ClassName} -> ClassName;
+        not_found -> undefined
+    end.
+
+-doc """
 Get the module name.
 
 If called from within the class gen_server itself (self-call), read
@@ -481,10 +501,11 @@ raises on a dead process — `beamtalk_class_pids`' reverse index is
 deliberately kept for a process killed via an untrappable `kill` (it skips
 `terminate/2`, so the ETS rows this function reads survive "for auto-restart
 recovery"), so it will resolve a plausible module for that class name
-instead of signalling death. Ordinary graceful death (`gen_server:stop`,
-a trapped crash, supervisor shutdown) still runs `terminate/2` first, which
-clears both ETS rows, so this function correctly falls back to
-`module_name/1` and preserves the noproc/timeout contract in that case.
+instead of signalling death. The same holds for a callback-exception crash
+(BT-4622): `terminate/2` keeps the rows of a crashed class for restart. A
+deliberate stop (`gen_server:stop`, supervisor shutdown) still runs
+`terminate/2`'s removal teardown first, which clears both ETS rows, so this
+function correctly falls back to `module_name/1` and preserves the noproc/timeout contract in that case.
 """.
 -spec module_name_safe(pid()) -> atom().
 module_name_safe(ClassPid) when ClassPid =:= self() ->
@@ -739,6 +760,15 @@ class_send(ClassPid, Selector, Args) ->
     beamtalk_class_dispatch:class_send(ClassPid, Selector, Args).
 
 -doc """
+`class_send/3` with an explicit bound on the wait for the class process
+(BT-4556). Delegates to `beamtalk_class_dispatch:class_send/4`, whose doc says
+which sends the bound applies to.
+""".
+-spec class_send(pid() | undefined, atom(), list(), timeout()) -> term().
+class_send(ClassPid, Selector, Args, Timeout) ->
+    beamtalk_class_dispatch:class_send(ClassPid, Selector, Args, Timeout).
+
+-doc """
 Execute a class method in the caller's process.
 
 Resolves `Selector` through the class-method chain starting at the receiving
@@ -903,8 +933,12 @@ probe_local_method(ClassPid, Selector, EnsureLoaded, ResolveFun) ->
                     false;
                 ModuleName ->
                     case EnsureLoaded of
-                        true -> _ = code:ensure_loaded(ModuleName);
-                        false -> ok
+                        true ->
+                            _ = beamtalk_primitive:ensure_class_module_loaded(
+                                fun() -> class_name_or_undefined(ClassPid) end, ModuleName
+                            );
+                        false ->
+                            ok
                     end,
                     Fun = ResolveFun(ModuleName),
                     case erlang:function_exported(ModuleName, Fun, 1) of
@@ -1145,14 +1179,16 @@ init({ClassName, ClassInfo}) ->
     sync_identity(ClassName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create),
     sync_direct_constructors(ClassName, Meta),
     sync_constant_class_methods(ClassName, Meta),
+    sync_caller_safe_primitives(ClassName, Meta),
     sync_class_process_facts(ClassName, Meta, maps:get(class_state, ClassInfo, #{})),
 
-    %% Clear any runtime class-method funs left behind by a *hard*
-    %% crash of the previous incarnation of this class process — a hard crash
-    %% skips terminate/2 (see module_name_safe/1's doc), so the funs table rows
-    %% from before the crash can otherwise survive into the restarted process
-    %% even though sync_identity/6 above just created a fresh row with the gate
-    %% off. Mirrors the reload path in apply_class_info/2. A no-op for a class
+    %% Clear any runtime class-method funs left behind by a crash of the
+    %% previous incarnation of this class process — a crash keeps the class's
+    %% metadata (an untrappable kill skips terminate/2, and terminate/2 keeps
+    %% it for a callback exception; see module_name_safe/1's doc), so the funs
+    %% table rows from before the crash can otherwise survive into the
+    %% restarted process even though sync_identity/6 above just created a
+    %% fresh row with the gate off. Mirrors the reload path in apply_class_info/2. A no-op for a class
     %% that never crashed (nothing to clear).
     beamtalk_class_metadata:delete_class_method_funs(ClassName),
 
@@ -1540,7 +1576,13 @@ handle_call(
     %% unreachable under either name. Caught and rolled back here instead,
     %% so the caller gets the same clean `{error, {already_registered, _}}`
     %% `rename/2`'s pre-check is meant to produce.
-    case catch erlang:register(NewRegName, self()) of
+    Registered =
+        try
+            erlang:register(NewRegName, self())
+        catch
+            _:_ -> false
+        end,
+    case Registered of
         true ->
             put(beamtalk_class_name, NewName),
             sync_identity(
@@ -1572,13 +1614,17 @@ handle_call(
                 end
             ),
             beamtalk_class_registry:record_class_pid(self(), NewName),
+            %% BT-4552: kept dead incarnations follow the rename, so a class
+            %% object taken before both recovers to this class, and none is
+            %% left naming `OldName` for a later, unrelated class of that name.
+            beamtalk_class_registry:rename_class_pids(OldName, NewName),
             beamtalk_class_registry:record_loaded_class(NewName, self()),
             beamtalk_class_metadata:delete(OldName),
             _ = beamtalk_class_registry:forget_loaded_class(OldName, self()),
             beamtalk_class_monitor:unwatch(OldName),
             beamtalk_class_monitor:watch(NewName, self()),
             {reply, ok, State#class_state{name = NewName}};
-        {'EXIT', _Reason} ->
+        false ->
             %% Residual gap, not closed here (review feedback on PR #3523):
             %% this rollback assumes `OldRegName` is still free. Another
             %% process registering under `OldRegName` in the narrow window
@@ -1965,7 +2011,40 @@ handle_cast(
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, #class_state{name = ClassName}) ->
+terminate(Reason, #class_state{name = ClassName}) ->
+    %% BT-4622: only a deliberate stop (removeFromSystem, rename, reload:
+    %% `gen_server:stop/1`) removes the class. A callback exception is a
+    %% crash, like an untrappable kill (which skips this callback): the
+    %% metadata and reverse-index rows stay so `beamtalk_class_monitor` (or
+    %% lazy recovery on the next send) can restart the class, no
+    %% `ClassRemoved` is announced, and pg and the pid-keyed indexes are left
+    %% to their readers' liveness filters, as after a kill.
+    case beamtalk_class_registry:is_deliberate_stop(Reason) of
+        true -> remove_class_registration(ClassName);
+        false -> ok
+    end,
+    %% Drop this class's classVars live-snapshot row, whatever the reason.
+    %% It is keyed by this pid and only read through a live class pid
+    %% (`beamtalk_class_vars`), so a row for a dead/reloaded pid could never
+    %% be read again — pure accumulation for the life of the node across
+    %% hot-reload, a core dev workflow. A restart starts from fresh class
+    %% variables anyway.
+    _ =
+        (try
+            beamtalk_class_registry:forget_class_state_snapshot(self())
+        catch
+            _:_ -> ok
+        end),
+    ok.
+
+-doc """
+The removal teardown `terminate/2` runs for a deliberate stop
+(`beamtalk_class_registry:is_deliberate_stop/1`): announce `ClassRemoved`
+and drop the class's metadata, reverse-index, pg, loaded-class and
+backing-module entries, so the class is gone from every registry.
+""".
+-spec remove_class_registration(class_name()) -> ok.
+remove_class_registration(ClassName) ->
     %% ADR 0093 §2: Announce ClassRemoved on the system bus as the class
     %% process shuts down (e.g. removeFromSystem). The event carries only the
     %% class name, so it is independent of the metadata-row deletion below.
@@ -1981,11 +2060,16 @@ terminate(_Reason, #class_state{name = ClassName}) ->
         catch
             _:_ -> ok
         end),
-    %% Clean up pid reverse index. Only cleaned on graceful shutdown —
-    %% on crash, the entry intentionally survives for auto-restart recovery.
+    %% Clean up the pid reverse index with the metadata row above: the class
+    %% is removed and its rows must not keep naming it. A crash (callback
+    %% exception or untrappable kill) keeps them for auto-restart recovery,
+    %% including after the restart (BT-4552, BT-4622, `restart_class/1`).
+    %% The class's dead incarnations go with it, so a removed class answers
+    %% `nil` from `beamtalk_interface:liveClassName/1` however many times it
+    %% crashed.
     _ =
         (try
-            ets:delete(beamtalk_class_pids, self())
+            beamtalk_class_registry:forget_class_pids(self(), ClassName)
         catch
             _:_ -> ok
         end),
@@ -1997,8 +2081,8 @@ terminate(_Reason, #class_state{name = ClassName}) ->
         end),
     %% Drop this class from the fast loaded-class name index. Guarded
     %% on self() inside forget_loaded_class/2 so a reload that already recorded
-    %% a replacement pid is not clobbered. On a hard crash this does not run;
-    %% the reader's is_process_alive/1 filter drops the dead row instead.
+    %% a replacement pid is not clobbered. On a crash this does not run; the
+    %% reader's is_process_alive/1 filter drops the dead row instead.
     _ =
         (try
             beamtalk_class_registry:forget_loaded_class(ClassName, self())
@@ -2011,18 +2095,6 @@ terminate(_Reason, #class_state{name = ClassName}) ->
     _ =
         (try
             beamtalk_class_registry:forget_backing_module_entries(ClassName, self())
-        catch
-            _:_ -> ok
-        end),
-    %% Drop this class's classVars live-snapshot
-    %% row. Pid-keyed like beamtalk_loaded_classes/beamtalk_backing_module_index
-    %% above (not name-keyed like beamtalk_class_pids, which is deliberately
-    %% kept forever), so an uncleaned row for a dead/reloaded pid could never
-    %% be read again — pure accumulation for the life of the node across
-    %% hot-reload, a core dev workflow.
-    _ =
-        (try
-            beamtalk_class_registry:forget_class_state_snapshot(self())
         catch
             _:_ -> ok
         end),
@@ -2459,16 +2531,30 @@ like any other class method (`handle_class_method_call/6`, which checks the
 extension first) instead of the synthesized constructor, so a constructor
 shadowed after a caller warmed up is honoured on the path the caller falls
 back to. The raw shadow flags (`beamtalk_class_shadow_flags:is_shadowed/2`,
-one `persistent_term` read each) pre-screen the common unshadowed class. Only
-the class's own shadows count: an ancestor's class-side `new` extension does
-not shadow the class's synthesized `new`, as on the class-process lookup.
+one `persistent_term` read each) pre-screen the common unshadowed class. For
+`new`, only the class's own shadows count: an ancestor's class-side `new`
+extension does not shadow the class's synthesized `new`, which is the class's
+own class-side method, found before an ancestor's extension (BT-4307).
+
+`new:` differs (BT-4588): an ancestor's class-side extension of `new:` counts
+as that ancestor's class-side `new:`, exactly as its compiled `class new:`
+(`has_class_new_in_chain/2`) or its runtime fun does, so a descendant's
+synthesized `new:` does not hide it. The direct path declines it through
+`beamtalk_class_metadata:chain_has_user_new1/1`; this answers it on the path
+the caller falls back to, as the class-side chain walk finds it
+(`beamtalk_class_dispatch:ancestor_class_side_extension/2`). The memoised
+`chain_has_user_new1/1`, `true` whenever an ancestor has a `new:` extension,
+pre-screens the walk, so the common class pays one cache read.
 """.
 -spec constructor_shadowed(class_name(), selector()) -> boolean().
 constructor_shadowed(ClassName, Selector) ->
     Tag = beamtalk_class_registry:class_object_tag(ClassName),
-    beamtalk_class_shadow_flags:is_shadowed(Tag, ClassName) andalso
+    (beamtalk_class_shadow_flags:is_shadowed(Tag, ClassName) andalso
         (beamtalk_dispatch:check_extension(Tag, Selector) =/= not_found orelse
-            beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) =/= error).
+            beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) =/= error)) orelse
+        (Selector =:= 'new:' andalso
+            beamtalk_class_metadata:chain_has_user_new1(ClassName) andalso
+            beamtalk_class_dispatch:ancestor_class_side_extension(ClassName, 'new:')).
 
 -doc """
 Check whether `class_new:/2` is exported anywhere in the superclass chain.
@@ -2737,9 +2823,10 @@ sync_direct_constructors(ClassName, Meta) ->
     beamtalk_class_metadata:put_direct_constructors(ClassName, Ctors).
 
 -doc """
-Publish the class's certified integer-literal class-side bodies (BT-4363):
+Publish the class's certified literal class-side bodies (BT-4363, BT-4504):
 `constant_class_methods` from its `__beamtalk_meta/0`, keeping only
-`Selector => Integer` entries; `#{}` when absent (a ClassBuilder class, an
+`Selector => constant_value()` entries
+(`beamtalk_class_metadata:is_constant_value/1`); `#{}` when absent (a ClassBuilder class, an
 older module). A constant-value static call key is certified against it.
 """.
 -spec sync_constant_class_methods(class_name(), map()) -> ok.
@@ -2747,11 +2834,34 @@ sync_constant_class_methods(ClassName, Meta) ->
     Constants =
         case maps:get(constant_class_methods, Meta, #{}) of
             M when is_map(M) ->
-                maps:filter(fun(K, V) -> is_atom(K) andalso is_integer(V) end, M);
+                maps:filter(
+                    fun(K, V) ->
+                        is_atom(K) andalso beamtalk_class_metadata:is_constant_value(V)
+                    end,
+                    M
+                );
             _ ->
                 #{}
         end,
     beamtalk_class_metadata:put_constant_class_methods(ClassName, Constants).
+
+-doc """
+Publish the class's caller-safe signal primitives (BT-4493):
+`caller_safe_class_primitives` from its `__beamtalk_meta/0`, keeping only
+`Selector => Primitive` atom entries; `#{}` when absent. A caller-safe raise
+static call key is certified against it, not against the module's own meta,
+which is the old code during a reload's `-on_load`.
+""".
+-spec sync_caller_safe_primitives(class_name(), map()) -> ok.
+sync_caller_safe_primitives(ClassName, Meta) ->
+    Primitives =
+        case maps:get(caller_safe_class_primitives, Meta, #{}) of
+            M when is_map(M) ->
+                maps:filter(fun(K, V) -> is_atom(K) andalso is_atom(V) end, M);
+            _ ->
+                #{}
+        end,
+    beamtalk_class_metadata:put_caller_safe_primitives(ClassName, Primitives).
 
 -doc """
 Publish the class-variable fact and the process-bound selector list (ADR 0142
@@ -3188,6 +3298,8 @@ apply_class_info(State, ClassInfo) ->
     %% class's static call keys on a change), so a constant-value key never
     %% certifies a literal from the old code still current during `-on_load`.
     sync_constant_class_methods(State#class_state.name, Meta),
+    %% BT-4493: likewise the caller-safe raise primitives.
+    sync_caller_safe_primitives(State#class_state.name, Meta),
     %% BT-4126: the sync above re-bakes only this class's own row; say so when
     %% the reload leaves descendants' baked `direct_constructors` behind their
     %% ancestors (informational: their dynamic `new:` re-checks the chain at

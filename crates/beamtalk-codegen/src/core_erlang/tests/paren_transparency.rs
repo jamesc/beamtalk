@@ -257,7 +257,7 @@ fn wrapped(module: &Module, id: MethodId, pick: &dyn Fn(usize) -> bool) -> Modul
 ///   source (an added `( … )` can move a line break when it is re-printed).
 ///   The rest of each xref row — selectors, receiver kinds, types — is
 ///   compared: the xref walk peels operand parentheses like the compiler.
-fn without_reflected_text(code: &str) -> String {
+pub(super) fn without_reflected_text(code: &str) -> String {
     without_xref_lines(&without_binaries(code))
 }
 
@@ -907,7 +907,7 @@ fn reflected_method_source_keeps_operand_parens_as_written() {
 
 /// `'selector' => #{source}#`: how `source` appears as a reflected-source map
 /// entry in generated Core Erlang.
-fn source_entry(selector: &str, source: &str) -> String {
+pub(super) fn source_entry(selector: &str, source: &str) -> String {
     format!(
         "'{selector}' => #{{{}}}#",
         beamtalk_cerl_doc::binary::binary_byte_segments(source)

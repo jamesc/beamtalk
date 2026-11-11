@@ -196,3 +196,41 @@ fn merged_fun_ensure_relay_keeps_the_locals_the_return_carried() {
         "the relay must not re-flush `count` from the `ensure:` site:\n{relay}"
     );
 }
+
+/// BT-4535: an arm `^` that the conditional lowering builds as a
+/// `ThreadedStmt::NlrThrow` (BT-3495's `^(self.f := ...)`, BT-3374's
+/// `^self foo`) never runs inside a merged Tier 2 fun: the merged body is
+/// cell-mode, so the arm's field write and self-send go through the cell and
+/// its `^` takes the generic `Return` lowering, whose throw carries the
+/// merged map (`nlr_throw_state_doc`'s `Tier2Merged` slot: `take/0`, then the
+/// captured locals flushed). The merged fun's every throw carries that map,
+/// in every arm shape and receiver.
+#[test]
+fn merged_fun_arm_returns_carry_the_merged_map() {
+    for ret in ["^(self.n := self.n + 10)", "^(self bump)", "^self.n"] {
+        for cond in [
+            "flag ifTrue: [RET]",
+            "flag ifFalse: [RET]",
+            "flag ifTrue: [RET] ifFalse: [self.n := 1]",
+            "(flag == true) ifTrue: [RET]",
+        ] {
+            let stmt = cond.replace("RET", ret);
+            let src = format!(
+                "{PREAMBLE}  bump => self.n := self.n + 1\n\n  run: flag =>\n    count := 0\n    b := [count := count + 1. self.n := self.n + 1. {stmt}. count]\n    b value\n    count\n"
+            );
+            let out = compile(&src);
+            let body = out
+                .split("fun (StateAcc) ->")
+                .nth(1)
+                .unwrap_or_else(|| panic!("{stmt}: no merged fun:\n{out}"));
+            assert!(
+                body.contains("_T2Nlr"),
+                "{stmt}: the merged fun's `^` carries the merged map:\n{out}"
+            );
+            assert!(
+                !body.contains("_NlrThrow"),
+                "{stmt}: an arm `NlrThrow` ran inside the merged fun:\n{out}"
+            );
+        }
+    }
+}

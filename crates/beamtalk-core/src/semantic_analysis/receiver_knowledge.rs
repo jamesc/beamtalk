@@ -145,12 +145,14 @@ pub fn classify_receiver(
         return ReceiverKnowledge::Open;
     }
 
-    // ADR 0100 Rule 2, pre-WS3 guard: until cross-package
-    // extension metadata is loaded (WS3, ADR 0070 amendment), a dependency
-    // can extend *any* class — including `Object`, which every receiver's
-    // chain reaches — so a package with dependencies has no receiver whose
-    // surface is provably complete. Only applied under `ProjectComplete`:
-    // `ModuleOnly` contexts (REPL, isolated files) keep today's behaviour.
+    // ADR 0100 Rule 2, pre-WS3 guard: a dependency can extend *any*
+    // class — including `Object`, which every receiver's chain reaches — so
+    // while any dependency's extensions are not loaded (WS3, ADR 0070
+    // amendment; BT-4608) no receiver's surface is provably complete. Once
+    // the orchestrator has loaded every dependency's extensions into the
+    // cross-file extension index, the flag is clear and resolution replaces
+    // the suppression. Only applied under `ProjectComplete`: `ModuleOnly`
+    // contexts (REPL, isolated files) keep today's behaviour.
     if hierarchy.knowledge_scope() == KnowledgeScope::ProjectComplete
         && hierarchy.dependency_extensions_unknown()
     {
@@ -194,6 +196,7 @@ mod tests {
     fn base_class_info(name: &str, superclass: &str) -> ClassInfo {
         ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: eco(name),
             superclass: Some(eco(superclass)),
@@ -354,8 +357,8 @@ mod tests {
     #[test]
     fn dependency_guard_opens_everything_under_project_complete() {
         // Pre-WS3 guard: a dependency can extend any class
-        // (including Object), so with deps present no receiver's surface is
-        // provably complete.
+        // (including Object), so while any dependency's extensions are
+        // unknown no receiver's surface is provably complete.
         let mut hierarchy = ClassHierarchy::with_builtins();
         hierarchy.add_from_beam_meta(vec![base_class_info("LocalThing", "Object")]);
         hierarchy.set_knowledge_scope(KnowledgeScope::ProjectComplete);
@@ -372,7 +375,9 @@ mod tests {
 
     #[test]
     fn no_dependencies_stays_closed_complete_under_project_complete() {
-        // Dependency-free packages get full Hint precision.
+        // Dependency-free packages — and packages whose every dependency's
+        // extensions were loaded (BT-4608), which leave the flag clear —
+        // get full Hint precision.
         let mut hierarchy = ClassHierarchy::with_builtins();
         hierarchy.add_from_beam_meta(vec![base_class_info("LocalThing", "Object")]);
         hierarchy.set_knowledge_scope(KnowledgeScope::ProjectComplete);

@@ -4,7 +4,7 @@
 #
 # Publishes one or more shields.io endpoint-format coverage-badge JSON files
 # to the shared `badges` orphan branch, via a git worktree so the caller's
-# own checkout is never disturbed. ci.yml's `publish-coverage` job (the
+# own checkout is never disturbed. coverage.yml's `publish-coverage` job (the
 # rust/erlang badges from its coverage-rust/coverage-erlang legs) and
 # liveview.yml's `coverage` job (elixir) both call this — they can publish
 # around the same time, so a plain fetch+commit+push can hit a non-fast-

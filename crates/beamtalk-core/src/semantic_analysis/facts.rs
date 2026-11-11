@@ -44,8 +44,7 @@ pub enum DispatchKind {
 /// sub-expressions' facts (seeing through parentheses and into non-closure
 /// sub-expressions) plus any effect the node itself directly produces. A
 /// `Block` argument at a message-send position that
-/// [`crate::state_threading_selectors::is_state_threading_keyword_selector`]/
-/// [`crate::state_threading_selectors::is_state_threading_unary_selector`]
+/// [`crate::state_threading_selectors::is_state_threading_keyword_selector`]
 /// does not recognize as an inline (state-threading) block argument is a
 /// **closure boundary**: the block's own subtree still gets its own fact
 /// (keyed by its span, so a caller inspecting the block's body directly —
@@ -355,8 +354,12 @@ fn expr_has_block_nlr(expr: &Expression, inside_block: bool) -> bool {
     }
 }
 
-/// Returns `true` if the block body contains a `^` (Return) expression anywhere inside it.
-fn block_has_nlr(block: &Block) -> bool {
+/// Returns `true` if the block body contains a `^` (Return) expression anywhere inside it,
+/// nested blocks included: running the block may end the enclosing method (or REPL eval).
+/// The one recognizer codegen's loop-mode selection (BT-4523) and call bracketing (BT-4524)
+/// ask, besides [`body_has_block_nlr`].
+#[must_use]
+pub fn block_has_nlr(block: &Block) -> bool {
     block
         .body
         .iter()
@@ -625,10 +628,10 @@ fn classify_dispatch(
             let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
             crate::state_threading_selectors::is_state_threading_keyword_selector(sel.as_str())
         }
-        MessageSelector::Unary(name) => {
-            crate::state_threading_selectors::is_state_threading_unary_selector(name.as_str())
-        }
-        MessageSelector::Binary(_) => false,
+        // BT-4603: a unary loop on a parameterless literal block is the
+        // keyword loop once normalised (`ast::normalize`); any other unary
+        // `whileTrue`/`whileFalse`/`repeat` is an ordinary send to `Block`.
+        MessageSelector::Unary(_) | MessageSelector::Binary(_) => false,
     };
 
     if is_control_flow {
@@ -708,8 +711,6 @@ fn compute_state_effects(
             let selector_name = selector.name();
             let inline_block_arg =
                 crate::state_threading_selectors::is_state_threading_keyword_selector(
-                    selector_name.as_str(),
-                ) || crate::state_threading_selectors::is_state_threading_unary_selector(
                     selector_name.as_str(),
                 );
             for arg in arguments {
@@ -923,9 +924,21 @@ mod tests {
         );
     }
 
+    /// BT-4603: a unary loop that reaches dispatch classification is never a
+    /// loop: a literal parameterless receiver is the keyword loop once
+    /// normalised, and anything else is an ordinary send to `Block`.
     #[test]
-    fn classify_control_flow_unary() {
-        let sel = MessageSelector::Unary("whileTrue".into());
+    fn a_unary_loop_send_is_not_control_flow() {
+        for name in ["whileTrue", "whileFalse", "repeat"] {
+            let sel = MessageSelector::Unary(name.into());
+            assert_eq!(
+                classify_dispatch(&ident("cond"), &sel, false),
+                DispatchKind::Unknown,
+                "{name}"
+            );
+        }
+        // The canonical loop is.
+        let sel = MessageSelector::Keyword(vec![KeywordPart::new("whileTrue:", ts())]);
         let block_expr = Expression::Block(empty_block(ts()));
         assert_eq!(
             classify_dispatch(&block_expr, &sel, false),

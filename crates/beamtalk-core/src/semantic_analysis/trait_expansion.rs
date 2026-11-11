@@ -1226,6 +1226,8 @@ fn substitute_provision(
         expect: method.expect.clone(),
         comments: method.comments.clone(),
         doc_comment: method.doc_comment.clone(),
+        // Body spans are unchanged, so the `|>` record still matches.
+        pipeline_sends: method.pipeline_sends.clone(),
         // Kept as the protocol's own span for now — full source-identity
         // carry (diagnostics/BEAM line annotations pointing at the
         // protocol file) is ADR 0127 §3's "Source locations", BT-3590.

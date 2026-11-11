@@ -80,6 +80,7 @@ impl CoreErlangGenerator {
                 acc_param_name,
                 plan.tuple_acc_gate_slots,
                 node_gate_slots,
+                plan.fold_acc_shape,
                 &plan.threaded_locals,
                 span,
             );
@@ -191,8 +192,13 @@ impl CoreErlangGenerator {
             stmts.extend(this.lower_foldl_body(body, plan, kind, frame)?);
             // BT-3863: checked before `carry_fold_families` wraps the
             // accumulator in the `Self` family's `Return`.
-            let locals_errors =
+            let mut locals_errors =
                 threaded_ir::verify_fold_locals_carried(&stmts, &mode, &plan.threaded_locals, span);
+            locals_errors.extend(threaded_ir::verify_tuple_acc_no_family(
+                &mode,
+                plan.threaded_families().as_slice().is_empty(),
+                span,
+            ));
             Self::carry_fold_families(&mut stmts, family_params, frame)?;
             let final_state_version = this.state_version();
             let node = ThreadedStmt::Threaded {
@@ -536,11 +542,15 @@ impl CoreErlangGenerator {
         // BT-4014: the producer sites of this frame's statements, checked
         // against the lowered body (`ProducerSiteNotThreaded`).
         let mut producer_sites = Vec::new();
+        // BT-4461: in the REPL, the sites that write a binding the body holds
+        // in a variable (`ReplCachedBindingStale`).
+        let mut repl_sites = Vec::new();
 
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
             let span = expr.span();
             producer_sites.extend(self.frame_producer_sites(expr, false, false));
+            repl_sites.extend(self.repl_frame_producer_sites(expr));
 
             // A nested loop/fold statement whose own body threads a
             // value-type `Self` mutation must be rejected ahead of every
@@ -598,6 +608,7 @@ impl CoreErlangGenerator {
             }
         }
         self.verify_frame_producer_sites(&stmts, &producer_sites, filtered_body);
+        self.check_repl_frame_producer_sites(&stmts, &repl_sites, Self::body_span(filtered_body));
         Ok(stmts)
     }
 
@@ -809,6 +820,9 @@ impl CoreErlangGenerator {
         // gate-split fault registers no sites (the check it exercises is
         // `FoldLocalsNotCarried`).
         let mut producer_sites = Vec::new();
+        // BT-4461: in the REPL, the sites that write a binding the body holds
+        // in a variable (`ReplCachedBindingStale`).
+        let mut repl_sites = Vec::new();
 
         for (i, expr) in filtered_body.iter().enumerate() {
             let is_last = i == filtered_body.len() - 1;
@@ -816,6 +830,7 @@ impl CoreErlangGenerator {
             if !gate_split {
                 producer_sites.extend(self.frame_producer_sites(expr, true, false));
             }
+            repl_sites.extend(self.repl_frame_producer_sites(expr));
 
             // `expr` is a top-level statement of THIS loop/fold's own body. A
             // nested Letrec loop whose own body threads a value-type `Self`
@@ -1079,12 +1094,16 @@ impl CoreErlangGenerator {
                 // nested within collect:/select:/etc. are silently lost.
                 has_mutations = true;
                 let tuple_var = self.fresh_temp_var("CondResult");
-                // the vars THIS construct itself threads, read before
+                // BT-4462: the locals THIS construct threads, read before
                 // `generate_expression` below (which may push/pop scopes) so
-                // the lookup reflects this statement's own captured set.
-                let inner_threaded_vars = self
-                    .threaded_locals_of(expr)
-                    .and_then(ThreadedLocals::into_lowered);
+                // the lookup reflects this statement's own captured set. Every
+                // construct that threads a local of this body is a producer
+                // here (`local_producer_locals` / `fold_statement_threads_ahead`
+                // above), so an accepted program reaches this unwrap only with
+                // none; one that threads a local is reported
+                // (`ConstructLocalsNotRebound`) rather than reread out of the
+                // carrier, the legacy write-back BT-4462 deleted.
+                let in_place = self.construct_locals_in_place(expr, span);
                 let doc = self.generate_expression(expr)?;
                 let new_state = self.next_state_var();
                 stmts.push(ThreadedStmt::Statement(
@@ -1094,35 +1113,14 @@ impl CoreErlangGenerator {
                         " = ",
                         doc,
                         " in let ",
-                        leaf::var(new_state.clone()),
+                        leaf::var(new_state),
                         " = call 'erlang':'element'(2, ",
                         leaf::var(tuple_var.clone()),
                         ") in ",
                     ],
                     span,
                 ));
-                // a non-last (or last) ensure:/on:do:/ifNotNil:/nested-loop
-                // statement here only bumps the StateAcc *version pointer* above —
-                // it does NOT rebind the specific local vars it threads. Both
-                // StateAcc (map) mode and tuple-acc mode bind each threaded local
-                // to a FIXED Core Erlang variable once per iteration (see
-                // `generate_unpack_at_iteration_start`/`generate_foldl_loop_body`),
-                // not via a live re-lookup through the state pointer — so without
-                // this, any read of the var later in the SAME block invocation
-                // (e.g. the next statement) would see the stale pre-statement
-                // value instead of what this construct just wrote. Shares
-                // `rebind_threaded_vars_from_state` with `conditionals.rs`'s
-                // `push_control_flow_threaded_var_rereads`, which does the same
-                // rebind for the `ThreadedIr`-rendered conditional-arm path.
-                // BT-4460 leaves this fold-body reread an opaque `Statement`: only
-                // the arm reread (`push_control_flow_threaded_var_rereads`) is
-                // shown unreachable and typed `StateCarrierReread`; this one
-                // goes with the legacy helpers in BT-4462.
-                if let Some(inner_vars) = inner_threaded_vars {
-                    for d in self.rebind_threaded_vars_from_state(&inner_vars, &new_state) {
-                        stmts.push(ThreadedStmt::Statement(d, span));
-                    }
-                }
+                stmts.extend(in_place);
                 if is_last {
                     match kind {
                         BodyKind::FoldlDo => {
@@ -1234,7 +1232,7 @@ impl CoreErlangGenerator {
                     // Tuple mode — repack current var bindings into the result tuple.
                     let vars_doc = plan.current_vars_doc(self);
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             "case ",
                             condition_doc,
@@ -1282,7 +1280,7 @@ impl CoreErlangGenerator {
                     if *is_all {
                         // allSatisfy: pred=false → set BoolAcc to false; pred=true → keep
                         stmts.push(Self::fold_accumulator(
-                            FoldCarry::Locals(plan.threaded_locals.clone()),
+                            plan.fold_carry(),
                             docvec![
                                 "case ",
                                 leaf::var(pv.clone()),
@@ -1297,7 +1295,7 @@ impl CoreErlangGenerator {
                     } else {
                         // anySatisfy: pred=true → set BoolAcc to true; pred=false → keep
                         stmts.push(Self::fold_accumulator(
-                            FoldCarry::Locals(plan.threaded_locals.clone()),
+                            plan.fold_carry(),
                             docvec![
                                 "case ",
                                 leaf::var(pv.clone()),
@@ -1358,7 +1356,7 @@ impl CoreErlangGenerator {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             "case ",
                             leaf::var(pv.clone()),
@@ -1404,7 +1402,7 @@ impl CoreErlangGenerator {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             "case ",
                             leaf::var(pv.clone()),
@@ -1447,7 +1445,7 @@ impl CoreErlangGenerator {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             "case StillTaking of \
                              <'false'> when 'true' -> {AccList, 'false', ",
@@ -1500,7 +1498,7 @@ impl CoreErlangGenerator {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             "case StillDropping of \
                              <'false'> when 'true' -> {[",
@@ -1556,7 +1554,7 @@ impl CoreErlangGenerator {
                 if plan.use_tuple_acc {
                     let vars_doc = plan.current_vars_doc(self);
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             "case ",
                             leaf::var(pv.clone()),
@@ -1612,7 +1610,7 @@ impl CoreErlangGenerator {
                     let new_list_var = self.fresh_temp_var("NewList");
                     let new_map_var = self.fresh_temp_var("NewMap");
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             "let ",
                             leaf::var(existing_var.clone()),
@@ -1708,6 +1706,7 @@ impl CoreErlangGenerator {
         }
 
         self.verify_frame_producer_sites(&stmts, &producer_sites, &filtered_body);
+        self.check_repl_frame_producer_sites(&stmts, &repl_sites, Self::body_span(&filtered_body));
         Ok(stmts)
     }
 
@@ -1724,13 +1723,19 @@ impl CoreErlangGenerator {
         body: &[&Expression],
     ) {
         let errors = super::super::threaded_ir::verify_producer_sites_threaded(stmts, sites);
-        let at = body.first().map_or_else(Default::default, |e| e.span());
+        let at = Self::body_span(body);
         self.report_threaded_ir_verify_errors(
             &errors,
             "loop or fold body's local-threading producer whose rebinds are not spliced into \
              the body",
             at,
         );
+    }
+
+    /// The span a loop or fold body's verifier findings are reported at: its
+    /// first statement's.
+    fn body_span(body: &[&Expression]) -> beamtalk_core::source_analysis::Span {
+        body.first().map_or_else(Default::default, |e| e.span())
     }
 
     // ── Body finalizer helpers (called from lower_foldl_body) ────────────────
@@ -1985,14 +1990,14 @@ impl CoreErlangGenerator {
             match kind {
                 BodyKind::FoldlDo => {
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
-                        docvec![" {", vars_doc, "}"],
+                        plan.fold_carry(),
+                        plan.acc_repack_doc(self),
                         span,
                     ));
                 }
                 BodyKind::FoldlCollect => {
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![
                             " {[",
                             leaf::var(val.to_string()),
@@ -2027,7 +2032,7 @@ impl CoreErlangGenerator {
                 }
                 BodyKind::FoldlInject => {
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::Locals(plan.threaded_locals.clone()),
+                        plan.fold_carry(),
                         docvec![" {", leaf::var(val.to_string()), ", ", vars_doc, "}",],
                         span,
                     ));
@@ -2281,8 +2286,8 @@ impl CoreErlangGenerator {
                         if plan.use_tuple_acc {
                             // Repack threaded locals as tuple.
                             stmts.push(Self::fold_accumulator(
-                                FoldCarry::Locals(plan.threaded_locals.clone()),
-                                docvec!["{", plan.current_vars_doc(self), "}"],
+                                plan.fold_carry(),
+                                plan.acc_repack_doc(self),
                                 span,
                             ));
                         } else {
@@ -2316,7 +2321,7 @@ impl CoreErlangGenerator {
                         // Tuple mode — repack current vars.
                         let vars_doc = plan.current_vars_doc(self);
                         stmts.push(Self::fold_accumulator(
-                            FoldCarry::Locals(plan.threaded_locals.clone()),
+                            plan.fold_carry(),
                             docvec!["{[", leaf::var(result_var), " | AccList], ", vars_doc, "}",],
                             span,
                         ));
@@ -2382,7 +2387,7 @@ impl CoreErlangGenerator {
                         // Tuple mode — repack current vars.
                         let vars_doc = plan.current_vars_doc(self);
                         stmts.push(Self::fold_accumulator(
-                            FoldCarry::Locals(plan.threaded_locals.clone()),
+                            plan.fold_carry(),
                             docvec!["{", leaf::var(acc_var), ", ", vars_doc, "}",],
                             span,
                         ));

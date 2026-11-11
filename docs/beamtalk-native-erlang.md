@@ -119,6 +119,17 @@ hint[ffi-nested-string]: Strings nested in this argument reach lists:member/2 as
 
 A `self delegate` method on a `native:` `Object` gets the same hint at each such declared parameter, since its arguments cross the same boundary. The hint is silent for a top-level `String` (the boundary unwraps it), for `Dynamic` or unknown element types (no warning without evidence, ADR 0100), and for Beamtalk-owned modules. A call that only stores or reshuffles its data (`lists:reverse/1`) is harmless; suppress the hint there with `@expect ffi_nested_string`, or package-wide with `ffi-nested-string = "off"` under `[diagnostics]` in `beamtalk.toml`.
 
+### Calls compiled without the proxy
+
+Most FFI calls run through `beamtalk_erlang_proxy`, which unwraps `String` arguments, coerces the result (charlists, `ok`/`error` → `Result`) and turns Erlang errors into structured ones. When the function's `-spec` in the FFI type table proves none of that changes anything, the compiler emits a plain remote call instead (BT-4485). That needs both of these:
+
+- **The result** is made only of types the proxy returns unchanged: `Integer`, `Float`, `Number`, `Boolean`, `nil`, `Pid`, `Dictionary`, `Block`, or a literal atom other than `ok`/`error`. A result of `atom()`, `binary()`, a list, a tuple, `term()` or `ok | {error, _}` keeps the proxy.
+- **Every argument's static type** is a scalar: `Integer`, `Float`, `Number`, `Boolean`, `nil`, `Pid` or `Symbol`. A `String`, collection, block or untyped argument keeps the proxy.
+
+Static types aren't checked at run time, so the direct call also checks each argument (`is_number`, `is_atom` or `is_pid`) and goes through the proxy when one fails. It raises the same structured errors: its error path hands the exception to the proxy's classifier, `badarg` retry included.
+
+Only a `-spec` extracted from a `.beam` proves a call; a hand-written stub signature never removes a coercion. Only first-party specs prove a result: OTP, the runtime's `beamtalk_*` modules, and the package's own `native/` modules. Specs from path/git Beamtalk dependencies and hex/rebar3 dependencies never do, because Dialyzer specs are not enforced: a wrong third-party `-spec` (say `integer()` on a function that returns `{ok, X}`) would otherwise change what the call returns. Calls into dependency modules stay on the proxy. A project build reads OTP, `native/` and dependency specs (dependencies for type checking only), while `beamtalk build-stdlib` and `beamtalk test` on `stdlib/` read only the runtime's own modules. When a spec change adds or removes a proof, `beamtalk build` recompiles the callers. A call the table can't prove behaves exactly as before.
+
 FFI is the right choice when:
 - You need to call a handful of Erlang functions
 - The Erlang module is stateless or manages its own state externally
@@ -249,7 +260,21 @@ Actor subclass: DatabasePool native: my_db_pool
 
 ### How It Works
 
-The `native:` keyword on `subclass:` tells the compiler to generate a **facade module** instead of a full gen_server. Methods with `=> self delegate` bodies are compiled into dispatch calls that forward through `beamtalk_actor:sync_send/3` to the backing gen_server. Methods with full Beamtalk bodies (like `connect:` above) compile normally.
+The `native:` keyword on `subclass:` tells the compiler to generate a **facade module** instead of a full gen_server. Methods with `=> self delegate` bodies are compiled into dispatch calls that forward through `beamtalk_actor:sync_send/3` to the backing gen_server.
+
+The two sides of a native actor follow different rules:
+
+- **Instance methods must be `=> self delegate`.** The facade forwards every instance message to the backing gen_server, so a Beamtalk body would never run. Declaring one is a compile error:
+
+  ```beamtalk
+  doubled => self count * 2
+  // error: Instance method `doubled` of native actor `DatabasePool` must be `self delegate`
+  // help:  ... Make the body `self delegate`, or move the Beamtalk logic into a class method.
+  ```
+
+- **Class methods compile normally.** A class method with a Beamtalk body (like `connect:` above) runs on the class side as for any other class, so put Beamtalk logic there.
+
+Every start path reaches the backing module's `start_link/1`. That covers `spawn`, `spawnWith:`, `spawnAs:`, `spawnWith:as:`, and supervisor children declared with `supervisionSpec` (plain, `withArgs:`, `withName:`, or a `DynamicSupervisor` pool). The runtime looks the backing module up from the facade's class metadata. A named start registers the process just after `start_link/1` returns, because the backing `start_link/1` takes no name. A name that is already taken is refused before `start_link/1` runs. The backing `start_link/1` must link the new process to its caller, as `gen_server:start_link/3` does: that link is what a supervisor restarts on.
 
 The result is that callers interact with `DatabasePool` using standard Beamtalk message sends — they never see the Erlang gen_server behind it:
 
@@ -349,6 +374,87 @@ handle_event({call, From}, {Selector, Args, PropCtx}, State, Data) when is_map(P
 handle_event({call, From}, {'readLine', []}, _State, Data) ->
     {keep_state, Data, [{reply, From, {ok, read_line(Data)}}]}.
 ```
+
+## Calling Beamtalk from native code
+
+Native code sometimes has to call back into Beamtalk: an Erlang library takes a callback module, and that module must use a Beamtalk class to do its work. `beamtalk_native_api` is the supported Erlang API for this direction (BT-4556). Every other runtime module, and calling a compiled `bt@...` module's `class_*` functions directly, is internal and may change without notice.
+
+| Function | Does |
+|---|---|
+| `send(Receiver, Selector, Args)` | Send a message to any Beamtalk object (an instance, an actor or a class object) and return the result. Raises what the method raises. |
+| `send(Receiver, Selector, Args, Timeout)` | The same, with a bound on the wait for another process (see below). |
+| `class_named(Name)` | `{ok, Class}` for a loaded class, or `{error, #beamtalk_error{kind = class_not_found}}`. |
+| `string_from_binary(Bin)` / `string_to_binary(Str)` | Convert between UTF-8 binaries and Beamtalk `String`s. |
+| `result_from_tuple(Tuple)` / `result_to_tuple(Result)` | Convert between `{ok, V} \| {error, R}` and Beamtalk `Result`s. |
+
+Selectors are atoms spelled as in Beamtalk (`size`, `'at:put:'`, `'request:url:options:'`), and `Args` has one element per keyword part.
+
+### Example: an adapter handed a class object
+
+Pass the class from Beamtalk rather than looking it up by name. The Beamtalk side then decides exactly which class the native code uses, and a test can hand in a stub:
+
+```beamtalk
+Object subclass: OAuthClient
+
+  /// Configure the Erlang OIDC library to make its HTTP requests through `HTTPClient`.
+  class configure -> Object =>
+    (Erlang oauth_http_adapter) start: HTTPClient
+```
+
+The FFI passes the class object to Erlang unchanged. The adapter keeps it and sends to it:
+
+```erlang
+-module(oauth_http_adapter).
+-export([start/1, request/4]).
+
+start(HttpClient) ->
+    persistent_term:put({?MODULE, http_client}, HttpClient),
+    ok.
+
+%% Called by the Erlang library for every HTTP request.
+request(Method, Url, Headers, TimeoutMs) ->
+    HttpClient = persistent_term:get({?MODULE, http_client}),
+    Options = #{
+        headers => [[beamtalk_native_api:string_from_binary(K),
+                     beamtalk_native_api:string_from_binary(V)] || {K, V} <- Headers],
+        timeout => TimeoutMs
+    },
+    Result = beamtalk_native_api:send(
+        HttpClient,
+        'request:url:options:',
+        [Method, beamtalk_native_api:string_from_binary(Url), Options],
+        TimeoutMs + 5000
+    ),
+    case beamtalk_native_api:result_to_tuple(Result) of
+        {ok, Response} ->
+            Status = beamtalk_native_api:send(Response, status, []),
+            Body = beamtalk_native_api:string_to_binary(
+                beamtalk_native_api:send(Response, body, [])
+            ),
+            {ok, {Status, Body}};
+        {error, Reason} ->
+            {error, Reason}
+    end.
+```
+
+`class_named('HTTPClient')` works too, when nothing on the Beamtalk side can pass the class in.
+
+### Where a class-side send runs
+
+A class-side send from Erlang follows the same rule as one from Beamtalk (ADR 0142). It runs **in the caller**, the native code's own process, when neither the class nor any ancestor declares class variables, nothing shadows the class method (no class-side extension or runtime-installed method), and the selector is not process-bound (`new`, `new:`, `spawn`, `spawnWith:`, `startLink`, ...). There is no class-process hop and no timeout: a 30 s HTTP request takes 30 s.
+
+Otherwise the class method runs **in the class's process** and the caller waits for the answer. `send/3` waits up to the default class-method call timeout, 60 seconds. For a method that may take longer, use `send/4`: its `Timeout` (milliseconds or `infinity`) replaces the default. Running out of it raises a structured `timeout` error (`#beamtalk_error{kind = timeout}`). `send/4`'s `Timeout` also bounds the wait for an actor instance's answer. It does not limit a send that runs in the caller, or a send to a value: there is no other process to wait for.
+
+Which path a send takes can change at run time: loading a class-side extension, or redefining the class with class variables, moves its class methods into the class process. If a long call must not time out, pass a `send/4` timeout either way.
+
+### Values at the boundary
+
+Most Beamtalk values are the Erlang terms you would expect: integers, floats, atoms (Symbols), `true`, `false`, `nil`, lists, maps and tuples cross unchanged. Two need the helpers:
+
+- **`String`** is `{beamtalk_string, Binary}`. Wrap every text argument with `string_from_binary/1`, which rejects bytes that are not UTF-8, and unwrap text results with `string_to_binary/1`, which rejects a bare binary (a Beamtalk `Binary`, not a `String`). This applies at every depth: Strings nested in a map's values or a list's elements are tagged too. Nothing unwraps them for you in this direction. [Strings at the FFI boundary](#strings-at-the-ffi-boundary) describes the opposite direction, where Beamtalk calls Erlang. A native module named `beamtalk_*` gets no unwrapping there either, so its String arguments arrive tagged.
+- **`Result`** is a tagged map. `result_to_tuple/1` answers `{ok, Value}` or `{error, Reason}`, where `Reason` is the Result's Exception object (`#{error := #beamtalk_error{}}` for a structured error). `result_from_tuple/1` builds one for Beamtalk; pass a `#beamtalk_error{}` as the error reason, so `unwrap` re-raises something meaningful.
+
+Other Beamtalk objects (value-class instances, actors, class objects) are opaque: read them by sending messages (`send(Response, status, [])`), not by matching their representation.
 
 ## The `generate native` Stub Generator
 
@@ -455,6 +561,29 @@ Constraints follow hex.pm conventions:
 | `">= 1.0.0 and < 2.0.0"` | Explicit range |
 | `"2.12.0"` | Exact version |
 
+### Git Sources
+
+A native dependency can come from a git repository instead of hex.pm — for example, to build against a fork branch before a fix is released:
+
+```toml
+[native.dependencies]
+oidcc = { git = "https://github.com/jamesc/oidcc", branch = "rfc7009-revocation" }
+jose = "~> 1.11"
+```
+
+Give exactly one of `branch`, `tag` or `rev` (a commit SHA), the same keys a git entry in `[dependencies]` takes. The generated `rebar.config` gets `{oidcc, {git, Url, {branch, B}}}` (or `{tag, T}` / `{ref, Sha}`). The first build records the resolved commit SHA in `beamtalk.lock`, and later builds use that commit until `beamtalk deps update` clears the native locks — a branch that moves on is not followed until then. Changing the URL or the `branch`/`tag`/`rev` in `beamtalk.toml` re-resolves on the next build.
+
+### rebar3 Overrides
+
+Some Erlang dependencies need their compile options replaced to build — for example, `jose` sets `warnings_as_errors`, which fails on OTP 27+. `[native.overrides]` maps to rebar3's `{overrides, [{override, Dep, Opts}]}`:
+
+```toml
+[native.overrides]
+jose = { erl_opts = [] }
+```
+
+Only `erl_opts` is supported, as a list of plain atom names (`["debug_info", "nowarn_export_all"]`). An override replaces the dependency's own `erl_opts`. The target can be a direct or transitive native dependency.
+
 ### How the Build Works
 
 `beamtalk build` handles native Erlang compilation automatically using one of two paths, selected by whether `[native.dependencies]` is present:
@@ -487,9 +616,9 @@ Object subclass: FastJson
 
 ### Dependency Resolution
 
-All native dependencies across the entire Beamtalk dependency graph are resolved together. `beamtalk build` collects `[native.dependencies]` from every transitive package and passes them to a single rebar3 invocation. Resolved versions are pinned in `beamtalk.lock` for reproducible builds.
+All native dependencies across the entire Beamtalk dependency graph are resolved together. `beamtalk build` collects `[native.dependencies]` from every transitive package and passes them to a single rebar3 invocation. Resolved versions — including transitive dependencies — are pinned in `beamtalk.lock` for reproducible builds, also on a fresh clone. Changing a dependency's constraint (so the locked version no longer satisfies it) or git source in `beamtalk.toml` re-resolves that dependency on the next build; other direct dependencies stay pinned, while transitive ones re-resolve. `beamtalk deps update` re-resolves everything, and `beamtalk deps update <name>` re-resolves one native package.
 
-This top-level resolution is required by BEAM's flat module namespace — only one version of any module can be loaded at a time. If two packages declare different constraints for the same hex package, rebar3's constraint solver finds a version satisfying both (or reports a conflict).
+This top-level resolution is required by BEAM's flat module namespace — only one version of any module can be loaded at a time. Each native dependency name goes into `rebar.config` once: the root package's declaration wins, then the first dependency that declares it. If another package declares the same name differently (a different hex constraint, or git in one package and hex in another), `beamtalk build` keeps the first declaration and prints a warning naming both packages. `[native.overrides]` aggregate the same way, so a library's overrides also apply when an application depends on it.
 
 ## Compilation and Build Integration
 
@@ -708,8 +837,9 @@ beamtalk test
 | Wrap a few utility functions as class methods | `Object subclass:` with inline FFI calls |
 | Actor with OTP gen_server control | `Actor subclass: … native: module` + `self delegate` |
 | Actor with Beamtalk-only logic | Standard `Actor subclass:` (no `native:`) |
-| Hex.pm package dependency | `[native.dependencies]` in `beamtalk.toml` |
+| Hex.pm or git Erlang dependency | `[native.dependencies]` in `beamtalk.toml` |
 | Port, NIF, or raw process | Per-method `(Erlang module)` FFI |
+| Native Erlang code calling a Beamtalk object | `beamtalk_native_api:send/3,4` (see [Calling Beamtalk from native code](#calling-beamtalk-from-native-code)) |
 
 ### `self delegate` vs FFI in Native Actors
 

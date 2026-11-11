@@ -1477,7 +1477,8 @@ dynamic_init_reads_per_instance_config_test() ->
                 ?assertEqual(
                     {
                         {dictionary, '$beamtalk_child_class'},
-                        {'BT3963DynChildSup', bt3963_child_mod}
+                        %% BT-4502: the entry carries the cached spawn kind.
+                        {'BT3963DynChildSup', bt3963_child_mod, supervisor}
                     },
                     erlang:process_info(P1, {dictionary, '$beamtalk_child_class'})
                 ),
@@ -4794,4 +4795,93 @@ bt4033_failing_initialize_on_restart_counts_against_intensity_test() ->
         after 1000 -> ok
         end,
         process_flag(trap_exit, OldTrap)
+    end.
+
+%%====================================================================
+%% BT-4502: cached spawn kind + single dictionary read on the start path
+%%====================================================================
+
+%% Record a `dynamic_init/3`-style entry with a cached spawn kind (3-tuple).
+set_child_class_with_kind(SupPid, Obj, Kind) ->
+    {Name, Module} = child_class_entry(Obj),
+    _ = sys:replace_state(SupPid, fun(S) ->
+        put('$beamtalk_child_class', {Name, Module, Kind}),
+        S
+    end),
+    ok.
+
+startChild_cached_kind_actor_test() ->
+    SupPid = start_dynamic_supervisor_with_nullary_child(),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT4502ActorWorker'),
+    set_child_class_with_kind(SupPid, ChildClassObj, actor),
+    try
+        Self = {beamtalk_supervisor, 'BT4502Sup', ?MODULE, SupPid},
+        ?assertMatch(
+            {ok, {beamtalk_object, 'BT4502ActorWorker', ?MODULE, _}},
+            beamtalk_supervisor:startChild(Self)
+        )
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+startChild_cached_kind_supervisor_test() ->
+    %% A cached `supervisor` kind wraps the child as a supervisor tuple without
+    %% any class metadata (the class here has no metadata row at all).
+    SupPid = start_dynamic_supervisor_with_nullary_child(),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT4502SupWorker'),
+    set_child_class_with_kind(SupPid, ChildClassObj, supervisor),
+    try
+        Self = {beamtalk_supervisor, 'BT4502Sup', ?MODULE, SupPid},
+        ?assertMatch(
+            {ok, {beamtalk_supervisor, 'BT4502SupWorker', ?MODULE, _}},
+            beamtalk_supervisor:startChild(Self)
+        )
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+startChild_old_format_entry_test() ->
+    %% Pre-BT-4502 2-tuple entry (no cached kind) keeps working.
+    SupPid = start_dynamic_supervisor_with_nullary_child(),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT4502OldWorker'),
+    set_child_class(SupPid, ChildClassObj),
+    try
+        Self = {beamtalk_supervisor, 'BT4502Sup', ?MODULE, SupPid},
+        ?assertMatch(
+            {ok, {beamtalk_object, 'BT4502OldWorker', ?MODULE, _}},
+            beamtalk_supervisor:startChild(Self)
+        )
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+startChild_cached_kind_capped_test() ->
+    %% Cap refusal and slot release are unchanged on the single-read path.
+    SupPid = start_enforced_capped_dynamic_supervisor(1),
+    {ChildClassPid, ChildClassObj} = make_child_class_for_startchild('BT4502CapWorker'),
+    set_child_class_with_kind(SupPid, ChildClassObj, actor),
+    try
+        Self = {beamtalk_supervisor, 'BT4502CapSup', ?MODULE, SupPid},
+        {ok, Child} = beamtalk_supervisor:startChild(Self),
+        ?assertMatch(
+            {error, #beamtalk_error{kind = max_children}}, beamtalk_supervisor:startChild(Self)
+        ),
+        ok = supervisor:terminate_child(SupPid, element(4, Child)),
+        wait_until_count(Self, 0),
+        ?assertMatch({ok, _}, beamtalk_supervisor:startChild(Self))
+    after
+        ChildClassPid ! stop,
+        gen_server:stop(SupPid)
+    end.
+
+wait_until_count(Self, N) ->
+    case beamtalk_supervisor:countChildren(Self) of
+        {ok, N} ->
+            ok;
+        _ ->
+            timer:sleep(10),
+            wait_until_count(Self, N)
     end.

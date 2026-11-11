@@ -37,7 +37,7 @@
 //! gets the 3-arity state-threading shape.
 
 use super::super::method_frame::{MethodBoundary, MethodFrame};
-use super::super::{CodeGenContext, CoreErlangGenerator, NlrBoundary, Result};
+use super::super::{CodeGenContext, CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{MethodKind, Module, StandaloneMethodDefinition};
@@ -301,33 +301,28 @@ impl CoreErlangGenerator {
         let fun_doc_result: Result<Document<'static>> = match boundary {
             MethodBoundary::ValueType => {
                 let body = super::super::util::collect_body_exprs(&method.body);
-                let has_nlr = nlr_token_var.is_some();
                 let body_result = if body.is_empty() {
-                    Ok(frame.generate_vt_empty_body(has_nlr))
+                    Ok(Self::generate_vt_empty_body())
                 } else {
-                    frame.generate_vt_body_exprs(&body, has_nlr)
+                    frame.generate_vt_body_exprs(&body)
                 };
                 frame.set_current_nlr_token(None);
                 body_result.map(|body_parts| {
-                    let body_doc = Document::Vec(body_parts);
-                    if let Some(token_var) = &nlr_token_var {
-                        let catch_vars = frame.wrap_value_type_body_with_nlr_catch(token_var);
-                        docvec![
-                            "fun (_ExtArgs, Self) ->",
-                            nest(INDENT, docvec![line(), arg_prelude]),
-                            "\n",
-                            catch_vars.format_try_prefix(),
-                            body_doc,
-                            catch_vars.format_catch_suffix(&NlrBoundary::ValueType),
-                        ]
-                    } else {
-                        docvec![
-                            "fun (_ExtArgs, Self) ->",
-                            nest(INDENT, docvec![line(), arg_prelude]),
-                            "\n",
-                            body_doc,
-                        ]
-                    }
+                    // BT-4503: the runtime applies a value-type extension
+                    // fun as `fun(Args, Self) -> Result`
+                    // (`beamtalk_dispatch:apply_extension_by_arity/4`), so it
+                    // answers the bare value, `^` or not.
+                    let body_doc = frame.value_type_nlr_boundary_doc(
+                        Document::Vec(body_parts),
+                        nlr_token_var.as_deref(),
+                        method.span,
+                    );
+                    docvec![
+                        "fun (_ExtArgs, Self) ->",
+                        nest(INDENT, docvec![line(), arg_prelude]),
+                        "\n",
+                        body_doc,
+                    ]
                 })
             }
             MethodBoundary::Actor => {

@@ -1,0 +1,40 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4313: the unary `[...] whileTrue` / `[...] whileFalse` loops in class
+// methods. See stdlib/test/bt4313unary_while_test.bt.
+
+Object subclass: Bt4313UnaryWhileClassProbe
+
+  class countUpWith: counter =>
+    [counter bump < 3] whileTrue
+    counter count
+
+  class countUntilWith: counter =>
+    [counter bump >= 5] whileFalse
+    counter count
+
+  class localWhileTrue =>
+    t := 0
+    [
+      t := t + 1
+      t < 3
+    ] whileTrue
+    t
+
+  class localWhileFalse =>
+    t := 10
+    [
+      t := t - 1
+      t <= 4
+    ] whileFalse
+    t
+
+  class localConditionAndBody =>
+    t := 0
+    u := 0
+    [
+      t := t + 1
+      t < 5
+    ] whileTrue: [u := u + t]
+    #(t, u)

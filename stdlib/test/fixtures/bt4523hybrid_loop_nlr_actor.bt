@@ -1,0 +1,71 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4523: a `^` in a loop that writes a field and threads a local (the shape
+// that lowered hybrid-params, holding the field in a loop parameter). See
+// bt4523hybrid_loop_nlr_test.bt.
+
+Actor subclass: Bt4523HybridLoopNlrActor
+  state: n = 0
+  state: seen = -1
+
+  countedLoopReturn =>
+    k := 0
+    1
+      to: 5
+      do: [:i |
+        self.n := i
+        k := i
+        i == 3 ifTrue: [^k]
+      ]
+    k
+
+  countedLoopReturnThroughEnsure =>
+    k := 0
+    [
+      1
+        to: 5
+        do: [:i |
+          self.n := i
+          k := i
+          i == 3 ifTrue: [^k]
+        ]
+    ] ensure: [self.seen := self.n]
+    k
+
+  // The loops below stay free of guarded operators (`==` is a bare BIF), the
+  // shape that lowered hybrid; a loop `+` would thread the whole state anyway.
+  whileLoopReturn =>
+    k := 0
+    [true]
+      whileTrue: [
+        self.n := 4
+        k := 4
+        k == 4 ifTrue: [^k]
+      ]
+    k
+
+  timesRepeatReturn =>
+    k := 0
+    5
+      timesRepeat: [
+        self.n := 7
+        k := 7
+        k == 7 ifTrue: [^k]
+      ]
+    k
+
+  countedLoopReturnBeforeWrite =>
+    k := 0
+    1
+      to: 5
+      do: [:i |
+        k := i
+        i == 3 ifTrue: [^k]
+        self.n := i
+      ]
+    k
+
+  currentN => self.n
+
+  currentSeen => self.seen

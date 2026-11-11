@@ -1,0 +1,25 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0145 (BT-4514): methods written with `|>`. Untyped parameters are
+// `Dynamic` receivers, and reflected source shows the `|>` as written.
+// See pipeline_test.bt.
+
+Value subclass: PipelineHost
+
+  shifted: p => p withX: 5 |> withY: 10
+
+  sortedKeys: d => d |> keys sort
+
+  smallestKey: d => d keys |> sort at: 1
+
+  sizePlusOne: xs => xs |> size + 1
+
+  sizeUnlessEmpty: xs =>
+    xs isEmpty ifFalse: [^xs |> size]
+    0
+
+  // A final keyword stage stops at the next method header.
+  firstOf: xs => xs reversed |> at: 1
+
+  afterFirstOf => 1

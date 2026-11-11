@@ -67,7 +67,9 @@ Actor subclass: TransparentProxy
   targetClass => self.target class
 
   // ProtoObject's doesNotUnderstand:args: catches unknown messages
-  // This is called when TransparentProxy receives a message it doesn't have
+  // This is called when TransparentProxy receives a message it doesn't have.
+  // Messages inherited from Object (`class`, `printString`, `then:`, ...)
+  // are understood, so they answer on the proxy rather than being forwarded.
   doesNotUnderstand: selector args: arguments =>
     // Use ProtoObject's perform:withArguments: for dynamic dispatch
     // This sends the message to the target as if we called it directly

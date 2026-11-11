@@ -25,6 +25,7 @@ fn clean_effects() -> BodyEffects {
         has_cf_mutations: false,
         has_conditional_threaded_writes: false,
         last_is_destructure: false,
+        has_nlr: false,
     }
 }
 
@@ -73,6 +74,7 @@ fn make_plan(
         use_direct_params,
         use_tuple_acc,
         tuple_acc_gate_slots: 0,
+        fold_acc_shape: FoldAccShape::Tuple,
         use_hybrid_params,
         readonly_fields,
         fallback_reason: StateAccFallbackReason::None,
@@ -388,11 +390,11 @@ fn select_tuple_acc_empty_threaded() {
 }
 
 #[test]
-fn select_tuple_acc_blocked_by_value_type_context() {
+fn select_tuple_acc_allowed_in_value_type_context() {
     let threaded = vec!["x".to_string()];
     let analysis = clean_body_analysis();
     let effects = clean_effects();
-    assert!(!ThreadingPlan::select_tuple_acc(
+    assert!(ThreadingPlan::select_tuple_acc(
         true,
         &threaded,
         CodeGenContext::ValueType,
@@ -612,6 +614,34 @@ fn select_hybrid_params_blocked_by_class_method() {
         &effects,
         &generator
     ));
+}
+
+#[test]
+fn select_hybrid_params_blocked_by_nlr() {
+    // BT-4523: a `^` stores and carries a whole `State`; a hybrid loop's
+    // `State` omits the fields its parameters hold.
+    let threaded = vec!["x".to_string()];
+    let analysis = body_with_field_writes(&["n"]);
+    let mut effects = clean_effects();
+    effects.has_nlr = true;
+    assert!(!ThreadingPlan::select_hybrid_params(
+        true,
+        &threaded,
+        CodeGenContext::Actor,
+        false,
+        &analysis,
+        &effects,
+        &plain_generator()
+    ));
+    let reason = ThreadingPlan::determine_fallback_reason(
+        false,
+        true,
+        &threaded,
+        CodeGenContext::Actor,
+        &analysis,
+        &effects,
+    );
+    assert!(matches!(reason, StateAccFallbackReason::NonLocalReturn));
 }
 
 // ─── determine_fallback_reason tests ────────────────────────────────────────
@@ -968,4 +998,49 @@ fn letrec_self_sends_falls_back_to_stateacc() {
         &effects,
     );
     assert!(matches!(reason, StateAccFallbackReason::SelfSendInBody));
+}
+
+// ─── closed_fold_tail_doc (BT-4647) ─────────────────────────────────────────
+
+fn closed_tail(guarded_op_bracket: bool, discard: bool) -> String {
+    let mut generator = plain_generator();
+    let plan = make_plan(
+        vec!["x".into()],
+        KeyStyle::LocalPrefixed,
+        false,
+        true,
+        false,
+        vec![],
+        vec![],
+    );
+    plan.closed_fold_tail_doc(
+        &mut generator,
+        Document::Str("EXTRACT "),
+        guarded_op_bracket,
+        discard,
+    )
+    .to_pretty_string()
+}
+
+#[test]
+fn closed_fold_tail_discarded_without_bracket_is_bare_carrier() {
+    assert_eq!(closed_tail(false, true), "{'nil'}");
+}
+
+#[test]
+fn closed_fold_tail_keeps_repack_unless_discarded() {
+    let tail = closed_tail(false, false);
+    assert!(
+        tail.starts_with("EXTRACT ") && tail.contains("{'nil', "),
+        "a non-discarded fold repacks its carrier. Got: {tail}"
+    );
+}
+
+#[test]
+fn closed_fold_tail_guarded_op_bracket_keeps_repack_even_when_discarded() {
+    let tail = closed_tail(true, true);
+    assert!(
+        tail.contains("{'nil', ") && tail.contains("'take'"),
+        "a guarded-op bracket owes a cell take, so the repack stays. Got: {tail}"
+    );
 }

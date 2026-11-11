@@ -155,7 +155,8 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 %% beamtalk_object_class, beamtalk_actor, beamtalk_supervisor) at the triggering
 %% action, after the action's metadata writes commit.
 -export([
-    system_announce/2
+    system_announce/2,
+    system_announce_running/2
 ]).
 
 %% gen_server callbacks
@@ -386,7 +387,9 @@ matching subscriptions from the by-class index at each level, and sends a direct
 subscriber. Returns `ok` immediately (fire-and-forget).
 
 MRO matching: subscribe to `UIEvent` and you receive `ButtonClicked`.
-The walk happens at announce time, so live hierarchy changes are respected. Each
+The walk happens at announce time, so live hierarchy changes are respected. (Only
+the system bus, `system_announce_running/2`, pre-filters subscribed classes with the
+cached `beamtalk_class_derived_cache:inherits_from/2`.) Each
 delivered message carries `EventClass` — the *announced* class — not the ancestor
 the subscription matched on.
 
@@ -531,18 +534,60 @@ row is absent (`not_found` — e.g. a class removed mid-walk), and at the
 """.
 -spec collect_matching(announcer_ref(), announcement_class()) -> [sub_ref()].
 collect_matching(AnnouncerRef, EventClass) ->
-    Refs = walk_collect(AnnouncerRef, EventClass, EventClass, sets:new([{version, 2}]), [], 0),
+    case subscribed_classes(AnnouncerRef) of
+        [] -> [];
+        Classes -> walk_matching(AnnouncerRef, EventClass, Classes)
+    end.
+
+-doc """
+Walk `EventClass`'s superclass chain collecting subscriptions on the classes in
+`Subscribed`, nearest-ancestor-first, de-duplicated per `SubRef`. `Subscribed`
+may be a pre-filtered set (see `matching_classes/2`); classes outside it are
+not read from the index.
+""".
+-spec walk_matching(announcer_ref(), announcement_class(), [announcement_class()]) ->
+    [sub_ref()].
+walk_matching(AnnouncerRef, EventClass, Classes) ->
+    Subscribed = sets:from_list(Classes, [{version, 2}]),
+    Refs = walk_collect(
+        AnnouncerRef, EventClass, EventClass, Subscribed, sets:new([{version, 2}]), [], 0
+    ),
     lists:reverse(Refs).
+
+-doc """
+The subset of `Classes` (de-duplicated) that `EventClass` is, or descends from.
+An unregistered `EventClass` still matches an exact subscription, because
+`inherits_from(X, X)` is true.
+""".
+-spec matching_classes(announcement_class(), [announcement_class()]) -> [announcement_class()].
+matching_classes(EventClass, Classes) ->
+    [C || C <- lists:usort(Classes), beamtalk_class_derived_cache:inherits_from(EventClass, C)].
+
+-doc """
+Classes with at least one subscription on `AnnouncerRef`. The by-class index is
+an `ordered_set` keyed `{AnnouncerRef, Class, SubRef}`, so this is a prefix range
+scan, not a table scan. Not cached: subscribe / unsubscribe / claim keep the
+index current, so nothing needs invalidating.
+""".
+-spec subscribed_classes(announcer_ref()) -> [announcement_class()].
+subscribed_classes(AnnouncerRef) ->
+    case ets:whereis(?BY_CLASS_TABLE) of
+        undefined ->
+            [];
+        _ ->
+            ets:select(?BY_CLASS_TABLE, [{{{AnnouncerRef, '$1', '_'}}, [], ['$1']}])
+    end.
 
 -spec walk_collect(
     announcer_ref(),
     announcement_class(),
     announcement_class(),
+    sets:set(announcement_class()),
     sets:set(sub_ref()),
     [sub_ref()],
     non_neg_integer()
 ) -> [sub_ref()].
-walk_collect(_AnnouncerRef, _CurrentClass, EventClass, _Seen, Acc, Depth) when
+walk_collect(_AnnouncerRef, _CurrentClass, EventClass, _Subscribed, _Seen, Acc, Depth) when
     Depth > ?MAX_HIERARCHY_DEPTH
 ->
     %% Runs in the *announcing* caller's process (dispatch is caller-side), not the
@@ -556,10 +601,15 @@ walk_collect(_AnnouncerRef, _CurrentClass, EventClass, _Seen, Acc, Depth) when
         domain => [beamtalk, announcements]
     }),
     Acc;
-walk_collect(AnnouncerRef, CurrentClass, EventClass, Seen, Acc, Depth) ->
+walk_collect(AnnouncerRef, CurrentClass, EventClass, Subscribed, Seen, Acc, Depth) ->
     %% Gather every subscription registered against `AnnouncerRef`+`CurrentClass`,
     %% skipping any SubRef already seen on this walk (per-subscription de-dup).
-    IndexRows = ets:match_object(?BY_CLASS_TABLE, {{AnnouncerRef, CurrentClass, '_'}}),
+    %% The index is only read at levels whose class has a subscription.
+    IndexRows =
+        case sets:is_element(CurrentClass, Subscribed) of
+            true -> ets:match_object(?BY_CLASS_TABLE, {{AnnouncerRef, CurrentClass, '_'}});
+            false -> []
+        end,
     {Seen1, Acc1} = lists:foldl(
         fun({{_Ann, _Class, SubRef}}, {SeenAcc, RefAcc}) ->
             case sets:is_element(SubRef, SeenAcc) of
@@ -577,7 +627,7 @@ walk_collect(AnnouncerRef, CurrentClass, EventClass, Seen, Acc, Depth) ->
         {ok, none} ->
             Acc1;
         {ok, Super} ->
-            walk_collect(AnnouncerRef, Super, EventClass, Seen1, Acc1, Depth + 1);
+            walk_collect(AnnouncerRef, Super, EventClass, Subscribed, Seen1, Acc1, Depth + 1);
         not_found ->
             Acc1
     end.
@@ -620,7 +670,7 @@ delivery path must call this instead of `is_process_alive/1` directly.
 Delegates to `beamtalk_pid:is_alive/1` (ADR 0126 §7.3), the shared leaf
 module extracted from this exact guard so `beamtalk_actor.erl`'s six
 `is_process_alive/1` call sites route through the same logic instead of a
-second copy (CLAUDE.md "No duplicate implementations").
+second copy (AGENTS.md "No duplicate implementations").
 """.
 -spec subscriber_alive(pid()) -> boolean().
 subscriber_alive(SubscriberPid) ->
@@ -1422,6 +1472,13 @@ announcer match.
 """.
 -spec dispatch_veneer_async(announcer_ref(), announcement_class(), term()) -> ok.
 dispatch_veneer_async(AnnouncerRef, EventClass, Event) ->
+    dispatch_refs(collect_matching(AnnouncerRef, EventClass), EventClass, Event).
+
+-doc """
+Deliver `Event` to each of `Refs` (already matched; no re-filtering).
+""".
+-spec dispatch_refs([sub_ref()], announcement_class(), term()) -> ok.
+dispatch_refs(Refs, EventClass, Event) ->
     lists:foreach(
         fun(SubRef) ->
             case claim_row(SubRef) of
@@ -1436,7 +1493,7 @@ dispatch_veneer_async(AnnouncerRef, EventClass, Event) ->
                     ok
             end
         end,
-        collect_matching(AnnouncerRef, EventClass)
+        Refs
     ),
     ok.
 
@@ -1494,8 +1551,24 @@ started is started on demand via `ensure_started/0`. Returns `ok`.
 -spec system_announce(announcement_class(), map()) -> ok.
 system_announce(EventClass, Fields) when is_atom(EventClass), is_map(Fields) ->
     ensure_started(),
-    Event = Fields#{'$beamtalk_class' => EventClass},
-    dispatch_veneer_async(?SYSTEM_ANNOUNCER_REF, EventClass, Event).
+    system_announce_running(EventClass, Fields).
+
+-doc """
+Like `system_announce/2` but without `ensure_started/0`, for callers that already
+checked the announcements worker is running. Returns before building the event
+when no system-bus subscription can match `EventClass` (no subscribers, or only
+unrelated classes such as the node monitor's `ClassLoaded`), without a class-chain walk.
+""".
+-spec system_announce_running(announcement_class(), map()) -> ok.
+system_announce_running(EventClass, Fields) when is_atom(EventClass), is_map(Fields) ->
+    case matching_classes(EventClass, subscribed_classes(?SYSTEM_ANNOUNCER_REF)) of
+        [] ->
+            ok;
+        Matching ->
+            Event = Fields#{'$beamtalk_class' => EventClass},
+            Refs = walk_matching(?SYSTEM_ANNOUNCER_REF, EventClass, Matching),
+            dispatch_refs(Refs, EventClass, Event)
+    end.
 
 -doc """
 Announce an event synchronously on a specific announcer (default 5s timeout).

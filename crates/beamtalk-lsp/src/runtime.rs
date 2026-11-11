@@ -1667,12 +1667,10 @@ mod tests {
         // models a version-matching node. A stale node is refused with a
         // rebuild hint instead of silently serving stale compiles.
         let stale: Responder = Box::new(|request| {
-            vec![text(&json!({
-                "id": request["id"],
-                "status": ["done"],
-                "ops": {},
-                "versions": {"beamtalk": "0.0.0-stale", "protocol": "0.0"},
-            }))]
+            vec![beamtalk_repl_protocol::test_support::describe_reply(
+                request,
+                &beamtalk_repl_protocol::test_support::stale_versions(),
+            )]
         });
         let ws = beamtalk_repl_protocol::test_support::spawn(Handshake::Ok, "", stale).await;
         let sinks = Sinks::new();

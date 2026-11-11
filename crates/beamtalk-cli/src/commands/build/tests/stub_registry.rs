@@ -12,7 +12,7 @@ fn load_project_stub_registry_none_when_no_stubs_dir() {
     let temp = TempDir::new().unwrap();
     let project_path = create_test_project(&temp);
 
-    assert!(load_project_stub_registry(&project_path, None, Some(OutputFormat::Text)).is_none());
+    assert!(load_project_stub_registry(&project_path, None).is_none());
 }
 
 #[test]
@@ -23,7 +23,7 @@ fn load_project_stub_registry_none_when_stubs_dir_has_no_bt_files() {
     fs::create_dir_all(&stubs_path).unwrap();
     write_test_file(&stubs_path.join("README.md"), "not a stub");
 
-    assert!(load_project_stub_registry(&project_path, None, Some(OutputFormat::Text)).is_none());
+    assert!(load_project_stub_registry(&project_path, None).is_none());
 }
 
 #[test]
@@ -37,11 +37,9 @@ fn load_project_stub_registry_populates_registry_from_stub_file() {
         "declare native: lists\n  reverse: list :: List -> List\n",
     );
 
-    let StubLayer {
-        registry,
-        diagnostics: diags,
-        ..
-    } = load_project_stub_registry(&project_path, None, Some(OutputFormat::Text)).unwrap();
+    let layer = load_project_stub_registry(&project_path, None).unwrap();
+    let diags: Vec<_> = layer.diagnostics().collect();
+    let registry = &layer.registry;
 
     assert!(diags.is_empty());
     let sig = registry.lookup("lists", "reverse", 1).unwrap();
@@ -66,8 +64,7 @@ fn load_project_stub_registry_combines_multiple_files_for_same_module() {
         "declare native: lists\n  sort: list -> List\n",
     );
 
-    let StubLayer { registry, .. } =
-        load_project_stub_registry(&project_path, None, Some(OutputFormat::Text)).unwrap();
+    let StubLayer { registry, .. } = load_project_stub_registry(&project_path, None).unwrap();
 
     assert_eq!(registry.module_functions("lists").unwrap().len(), 2);
     assert!(registry.lookup("lists", "reverse", 1).is_some());
@@ -104,12 +101,9 @@ fn load_project_stub_registry_flags_version_drift_against_auto_extract() {
         ],
     );
 
-    let StubLayer {
-        registry,
-        diagnostics: diags,
-        ..
-    } = load_project_stub_registry(&project_path, Some(&auto_extract), Some(OutputFormat::Text))
-        .unwrap();
+    let layer = load_project_stub_registry(&project_path, Some(&auto_extract)).unwrap();
+    let diags: Vec<_> = layer.diagnostics().collect();
+    let registry = &layer.registry;
 
     // `bogus/1` isn't a real `lists` export — one drift warning.
     assert_eq!(diags.len(), 1);
@@ -133,10 +127,8 @@ fn load_project_stub_registry_no_drift_for_module_unknown_to_auto_extract() {
     );
     let auto_extract = beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::new();
 
-    let StubLayer {
-        diagnostics: diags, ..
-    } = load_project_stub_registry(&project_path, Some(&auto_extract), Some(OutputFormat::Text))
-        .unwrap();
+    let layer = load_project_stub_registry(&project_path, Some(&auto_extract)).unwrap();
+    let diags: Vec<_> = layer.diagnostics().collect();
 
     assert!(diags.is_empty());
 }
@@ -228,19 +220,9 @@ fn stub_resolution_order_project_over_package_over_distribution_over_auto_extrac
         &dep_stubs_dir.join("sample_mod.bt"),
         "declare native: sample_mod\n  thing: x -> PackageMarker\n",
     );
-    let resolved_deps = vec![crate::commands::deps::path::ResolvedDependency {
-        name: "dep_pkg".to_string(),
-        root: dep_root.clone(),
-        ebin_path: dep_root.join("ebin"),
-        class_module_index: HashMap::new(),
-        class_infos: Vec::new(),
-        protocol_infos: Vec::new(),
-        protocol_defs: Vec::new(),
-        protocol_sources: std::collections::HashMap::default(),
-        alias_infos: Vec::new(),
-        is_direct: true,
-        via_chain: Vec::new(),
-        stubs_dir: Some(dep_stubs_dir),
+    let resolved_deps = vec![DependencyStubsDir {
+        package: "dep_pkg".to_string(),
+        stubs_dir: dep_stubs_dir,
     }];
 
     // Layer 1 (highest precedence): project-local stubs.
@@ -266,13 +248,8 @@ fn stub_resolution_order_project_over_package_over_distribution_over_auto_extrac
     let StubLayer {
         registry: dist_layer,
         ..
-    } = load_dependency_stub_registries(
-        &[],
-        Some(dist_dir.as_path()),
-        Some(&auto_extract),
-        Some(OutputFormat::Text),
-    )
-    .unwrap();
+    } = load_dependency_stub_registries(&[], Some(dist_dir.as_path()), Some(&auto_extract))
+        .unwrap();
     let mut merged = auto_extract.clone();
     merged.apply_overrides(dist_layer);
     assert_eq!(marker(&merged), "DistMarker");
@@ -285,7 +262,6 @@ fn stub_resolution_order_project_over_package_over_distribution_over_auto_extrac
         &resolved_deps,
         Some(dist_dir.as_path()),
         Some(&auto_extract),
-        Some(OutputFormat::Text),
     )
     .unwrap();
     let mut merged = auto_extract.clone();
@@ -296,8 +272,7 @@ fn stub_resolution_order_project_over_package_over_distribution_over_auto_extrac
     let StubLayer {
         registry: project_layer,
         ..
-    } = load_project_stub_registry(&project_path, Some(&auto_extract), Some(OutputFormat::Text))
-        .unwrap();
+    } = load_project_stub_registry(&project_path, Some(&auto_extract)).unwrap();
     merged.apply_overrides(project_layer);
     assert_eq!(marker(&merged), "ProjectMarker");
 }
@@ -328,40 +303,18 @@ fn load_dependency_stub_registries_flags_collision_between_sibling_package_stubs
     );
 
     let resolved_deps = vec![
-        crate::commands::deps::path::ResolvedDependency {
-            name: "dep_a".to_string(),
-            root: alpha_dep_root.clone(),
-            ebin_path: alpha_dep_root.join("ebin"),
-            class_module_index: HashMap::new(),
-            class_infos: Vec::new(),
-            protocol_infos: Vec::new(),
-            protocol_defs: Vec::new(),
-            protocol_sources: std::collections::HashMap::default(),
-            alias_infos: Vec::new(),
-            is_direct: true,
-            via_chain: Vec::new(),
-            stubs_dir: Some(alpha_dep_stubs),
+        DependencyStubsDir {
+            package: "dep_a".to_string(),
+            stubs_dir: alpha_dep_stubs,
         },
-        crate::commands::deps::path::ResolvedDependency {
-            name: "dep_b".to_string(),
-            root: beta_dep_root.clone(),
-            ebin_path: beta_dep_root.join("ebin"),
-            class_module_index: HashMap::new(),
-            class_infos: Vec::new(),
-            protocol_infos: Vec::new(),
-            protocol_defs: Vec::new(),
-            protocol_sources: std::collections::HashMap::default(),
-            alias_infos: Vec::new(),
-            is_direct: true,
-            via_chain: Vec::new(),
-            stubs_dir: Some(beta_dep_stubs),
+        DependencyStubsDir {
+            package: "dep_b".to_string(),
+            stubs_dir: beta_dep_stubs,
         },
     ];
 
-    let StubLayer {
-        diagnostics: diags, ..
-    } = load_dependency_stub_registries(&resolved_deps, None, None, Some(OutputFormat::Text))
-        .unwrap();
+    let layer = load_dependency_stub_registries(&resolved_deps, None, None).unwrap();
+    let diags: Vec<_> = layer.diagnostics().collect();
 
     assert_eq!(
         diags.len(),
@@ -400,44 +353,49 @@ fn load_dependency_stub_registries_no_collision_for_disjoint_functions() {
     );
 
     let resolved_deps = vec![
-        crate::commands::deps::path::ResolvedDependency {
-            name: "dep_a".to_string(),
-            root: alpha_dep_root.clone(),
-            ebin_path: alpha_dep_root.join("ebin"),
-            class_module_index: HashMap::new(),
-            class_infos: Vec::new(),
-            protocol_infos: Vec::new(),
-            protocol_defs: Vec::new(),
-            protocol_sources: std::collections::HashMap::default(),
-            alias_infos: Vec::new(),
-            is_direct: true,
-            via_chain: Vec::new(),
-            stubs_dir: Some(alpha_dep_stubs),
+        DependencyStubsDir {
+            package: "dep_a".to_string(),
+            stubs_dir: alpha_dep_stubs,
         },
-        crate::commands::deps::path::ResolvedDependency {
-            name: "dep_b".to_string(),
-            root: beta_dep_root.clone(),
-            ebin_path: beta_dep_root.join("ebin"),
-            class_module_index: HashMap::new(),
-            class_infos: Vec::new(),
-            protocol_infos: Vec::new(),
-            protocol_defs: Vec::new(),
-            protocol_sources: std::collections::HashMap::default(),
-            alias_infos: Vec::new(),
-            is_direct: true,
-            via_chain: Vec::new(),
-            stubs_dir: Some(beta_dep_stubs),
+        DependencyStubsDir {
+            package: "dep_b".to_string(),
+            stubs_dir: beta_dep_stubs,
         },
     ];
 
-    let StubLayer {
-        registry,
-        diagnostics: diags,
-        ..
-    } = load_dependency_stub_registries(&resolved_deps, None, None, Some(OutputFormat::Text))
-        .unwrap();
+    let layer = load_dependency_stub_registries(&resolved_deps, None, None).unwrap();
+    let diags: Vec<_> = layer.diagnostics().collect();
+    let registry = &layer.registry;
 
     assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
     assert!(registry.lookup("shared_mod", "a_thing", 1).is_some());
     assert!(registry.lookup("shared_mod", "b_thing", 1).is_some());
+}
+
+#[test]
+fn test_build_fails_on_broken_stub_file() {
+    // BT-4550: a syntax-broken `stubs/` file yields error-severity
+    // diagnostics — the build must fail instead of exiting 0 with errors
+    // in its summary.
+    let temp = TempDir::new().unwrap();
+    let project_path = create_test_project(&temp);
+    let src_path = project_path.join("src");
+    write_test_file(&src_path.join("main.bt"), "main := [42].");
+    write_test_file(
+        &project_path.join("beamtalk.toml"),
+        "[package]\nname = \"my_app\"\nversion = \"0.1.0\"\n",
+    );
+    let stubs_path = project_path.join("stubs");
+    fs::create_dir_all(&stubs_path).unwrap();
+    write_test_file(
+        &stubs_path.join("lists.bt"),
+        "class Foo { @@@@invalid syntax }",
+    );
+
+    let err = build(project_path.as_str(), &default_options(), true)
+        .expect_err("build should fail on broken stub file");
+    assert!(
+        format!("{err:?}").contains("stub declarations contain errors"),
+        "unexpected error: {err:?}"
+    );
 }

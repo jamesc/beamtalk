@@ -7,26 +7,26 @@
 // `{Value, State}` pair. Fixture: fixtures/bt4276fold_in_closure.bt.
 
 TestCase subclass: Bt4276FoldInClosureTest
+  field: actor = nil
+
+  setUp => self.actor := Bt4276FoldInClosure spawn
+
+  tearDown => self.actor isNil ifFalse: [self.actor stop]
 
   testInjectInClosureRunInLoop =>
-    a := Bt4276FoldInClosure spawn
-    self assert: a injectInClosureRunInLoop equals: 9
-    self assert: a n equals: 4
+    self assert: self.actor injectInClosureRunInLoop equals: 9
+    self assert: self.actor n equals: 4
 
   testInjectInClosuresRunAfterLoop =>
-    a := Bt4276FoldInClosure spawn
-    self assert: a injectInClosuresRunAfterLoop equals: #(4, 9)
-    self assert: a n equals: 4
+    self assert: self.actor injectInClosuresRunAfterLoop equals: #(4, 9)
+    self assert: self.actor n equals: 4
 
   testDoReceiverInClosure =>
-    a := Bt4276FoldInClosure spawn
-    self assert: a doReceiverInClosure equals: 4
+    self assert: self.actor doReceiverInClosure equals: 4
 
   testCollectWritingFieldInClosure =>
-    a := Bt4276FoldInClosure spawn
-    self assert: a collectWritingFieldInClosure equals: 4
+    self assert: self.actor collectWritingFieldInClosure equals: 4
 
   testInjectInClosurePassedToMethod =>
-    a := Bt4276FoldInClosure spawn
-    self assert: a injectInClosurePassedToMethod equals: 17
-    self assert: a n equals: 8
+    self assert: self.actor injectInClosurePassedToMethod equals: 17
+    self assert: self.actor n equals: 8

@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0145 (BT-4514): a value receiver for `|>` pipelines. Its generated
+// `withX:`/`withY:` answer updated copies, so a pipeline must send each stage
+// to the previous stage's result. See pipeline_test.bt.
+
+Value subclass: PipelinePoint
+  field: x :: Integer = 0
+  field: y :: Integer = 0

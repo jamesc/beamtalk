@@ -23,6 +23,8 @@
 //! - [`value_immutable_slot_hint_conformance`] — BT-4273: the Value
 //!   `immutable_value` slot hint fixture, asserted against
 //!   `beamtalk_primitive_tests.erl`
+//! - [`typed_protocol`] — BT-4486: sends to protocol-typed receivers become
+//!   multi-arm class-tag guards over the protocol's known conformers
 //! - [`typed_sealed`] — BT-4069: sends to sealed-Value-typed receivers
 //!   compiling to a guarded direct `Module:dispatch/3` call
 
@@ -167,6 +169,27 @@ pub(crate) fn codegen_named(src: &str, module_name: &str) -> String {
     .expect("codegen should succeed")
 }
 
+/// Asserts that `src` parses with no diagnostics at all.
+///
+/// [`codegen_named`] discards parse diagnostics and emits whatever survived
+/// error recovery, so a source typo (`=` is not an operator; `=:=` is) silently
+/// drops statements and lets agreement/corpus tests pass vacuously. Corpus and
+/// agreement tests call this on every generated program first. The rule is
+/// "any diagnostic" (warnings included): generated rows are meant to be
+/// well-formed, so anything the parser flags is a generator slip.
+pub(crate) fn assert_parses(src: &str) {
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (_, diags) = beamtalk_core::source_analysis::parse(tokens);
+    assert!(
+        diags.is_empty(),
+        "program has parse diagnostics {:?}:\n{src}",
+        diags
+            .iter()
+            .map(|d| d.message.to_string())
+            .collect::<Vec<_>>()
+    );
+}
+
 /// Parse `src` as a single-class Beamtalk module and run codegen in workspace mode.
 ///
 /// Shared by control-flow and dispatch test modules to avoid copy-pasting this
@@ -281,6 +304,7 @@ pub(crate) fn make_value_subclass_point() -> Module {
         span: Span::new(0, 0),
     };
     Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -317,14 +341,17 @@ mod evaluated_block_producer;
 mod expect_directive_statement;
 mod expressions;
 mod ffi_conditional_selector_corpus;
+mod ffi_direct_call;
 mod field_assignment_value_position;
 mod field_write_sites;
+mod fold_acc_shape_agreement;
 mod fold_locals_carried_corpus;
 mod fresh_temp_namespace;
 mod gen_server;
 mod guard_returns;
 mod guarded_op_loops;
 mod hybrid_field_rebind_corpus;
+mod hybrid_loop_nlr_corpus;
 mod inline_block_local_in_loop_corpus;
 mod late_reconcile_conformance;
 mod local_assignment_producer;
@@ -341,16 +368,21 @@ mod match_fallthrough_sharing;
 mod match_scrutinee_state_corpus;
 mod module_info;
 mod nlr;
+mod nlr_closure_call_corpus;
+mod operand_evaluation_order;
 mod paren_peel_guard;
 mod paren_transparency;
+mod pipeline;
 mod plain_arm_nested_construct_corpus;
 mod primitives;
 mod protocol_registration_conformance;
 mod recv_type;
+mod repl_cached_binding_corpus;
 mod residual_dynamic_sends;
 mod shadowed_class_direct_calls;
 mod sibling_snapshot;
 mod stale_read_sites;
+mod super_send_value_position_corpus;
 mod supervisor;
 mod synced_call_sites_corpus;
 mod synced_calls;
@@ -361,6 +393,7 @@ mod tier2_block_local_inner_loop;
 mod tier2_merge;
 mod trait_flattening;
 mod tuple_acc_state_read_corpus;
+mod typed_protocol;
 mod typed_sealed;
 mod value_immutable_slot_hint_conformance;
 mod value_inherited_target;

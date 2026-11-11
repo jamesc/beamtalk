@@ -5,6 +5,8 @@ Accepted (2026-10-18); Proposed 2026-10-18
 
 > **Amended by [ADR 0137](0137-actor-closures-see-live-state.md) (2026-10-26, BT-4011 Phase 4), the actor-state halves of the escaping-block rule.** An escaping block may now assign `self.field` (the BT-3922 actor half is deleted), a block that reads `self.field` and is passed to a self-send or stored is no longer rejected (BT-3952 is deleted), and a self-send or aliased self-send in a block keeps its state change (BT-3936, BT-3985, BT-3998 are deleted): inside the actor the block sees the live fields, elsewhere it reads its creation-time capture and a write raises `actor_state_unreachable`. The escaping class-variable assignment goes with the field half (ADR 0137 resolved question 2; ADR 0130's runtime already handles it). The local-threading rules are unchanged — an escaping block may still read but not assign a captured local (`Tier2BlockNoReturnChannel`), and the §Decision rule still governs locals and value-type fields. The `actor-state-abroad` lint warns where a field-touching block runs away from home.
 
+> **Amended (2026-11-06, BT-4430): `on:do:` and `ensure:` are in place only when both operands are block literals.** See the amendment under §Decision.
+
 Decides between two destinations for the state-threading compiler. If accepted
 as written, this ADR **supersedes ADR 0132** (callee-side threaded entry points)
 and **ADR 0128** (opaque-callable fold threading for collection HOMs), and
@@ -238,6 +240,24 @@ non-literal callable handed to a collection message): the existing
 block stored first and then laundered through FFI is not such a case: storing
 a block that assigns a captured local or a field is already an error (BT-3902,
 BT-3922), so no writing block exists to launder.
+
+**Amendment (2026-11-06, BT-4430): `on:do:` and `ensure:` are in place only
+when both operands are block literals.** The rule above counts a block literal
+as in place when it is the direct argument of a control construct, and
+`on:do:`/`ensure:` are on that list. A half-literal send such as
+`b ensure: [t := 9]` or `[t := 9] ensure: c` meets that wording, but codegen
+runs the whole send as a closure when either operand is a block value
+(`generate_ensure`, `control_flow/exception_handling.rs`;
+`block_facts::inlined_exception_blocks`), so the literal half escapes with it
+and its write would be dropped. BT-4430 (#4844) made the analyser reject such a
+write with this ADR's message; this amendment makes that the rule. Threading
+the literal half anyway would make "in place" depend on the other operand and
+would need a one-literal-arm variant of every exception producer. The rewrite
+is one wrapper, `[b value] ensure: [t := 9]`, and the error says so. A `^` or a
+read in such a block is unaffected, and an actor field write is accepted (it
+writes the live cell, ADR 0137). Tests:
+`tests/repl-protocol/cases/bt4430_ensure_stored_receiver.btscript` and the
+analyser tests added by #4844.
 
 **Amendment (BT-3936): a self-send in a closure that changes actor state.**
 A block that assigns nothing can still contain `self record: x`, where

@@ -97,6 +97,12 @@ rows() ->
             'shadowedClassMethod:', none, [{remote_call, none}]},
         {"3j", dispatch, "as 3i, class in a variable / mod.fun(arg)", 50000, 'dynClassMethod:c:',
             shadowed_math_class, [{dyn_remote_call, shadowed_math_class}, {remote_call, none}]},
+        {"3k", dispatch, "integer class-side constant: Errs protocolError / Mod.const()", 200000,
+            'intConstant:', none, [{remote_const_int, none}, {module_attr_int, none}]},
+        {"3l", dispatch, "string class-side constant: Errs name / Mod.const()", 200000,
+            'stringConstant:', none, [{remote_const_string, none}, {module_attr_string, none}]},
+        {"3m", dispatch, "symbol class-side constant: Errs tag / Mod.const()", 200000,
+            'symbolConstant:', none, [{remote_const_atom, none}, {module_attr_atom, none}]},
         {"4a", dispatch, "untyped receiver: o x / o.x", 200000, 'dynGetter:o:', point, [
             {getter_dot, point}
         ]},
@@ -193,7 +199,14 @@ rows() ->
             {tuple_elem, tuple}
         ]},
         {"14b", machinery, "class reference: last := VbPoint / Point", 50000, 'classReference:',
-            none, [{module_ref, none}]}
+            none, [{module_ref, none}]},
+        {"15a", machinery, "DynamicSupervisor startChild + terminateChild / start_child + terminate_child",
+            2000, 'poolStartTerminate:pool:', bt_pool, [{pool_start_terminate, ex_pool}]},
+        {"15b", machinery,
+            "capped (maxChildren: 8) DynamicSupervisor startChild + terminateChild / max_children: 8",
+            2000, 'cappedPoolStartTerminate:pool:', bt_capped_pool, [
+                {pool_start_terminate, ex_capped_pool}
+            ]}
     ].
 
 %%====================================================================
@@ -223,6 +236,10 @@ fixtures() ->
         ex_ok => {none, ?EX:ok_result()},
         bt_counter => {Bt(counter), none},
         ex_counter => {none, ?EX:counter()},
+        bt_pool => {Bt(pool), none},
+        ex_pool => {none, ?EX:pool()},
+        bt_capped_pool => {Bt(cappedPool), none},
+        ex_capped_pool => {none, ?EX:capped_pool()},
         counter => {Bt(counter), ?EX:counter()},
         sub_counter => {Bt(subCounter), ?EX:sub_counter()}
     }.
@@ -540,14 +557,19 @@ compiles_to("3i") ->
     "guarded direct call whose key is never installed: no target in the class's static call map -> static_call_target/4 declines (extension) -> whereis_class + class_send runs the extension (BT-4431)";
 compiles_to("3j") ->
     "send(C, 'double:', [21]) -> class_send runs the extension (control for 3i, BT-4431)";
-compiles_to("4a") -> "send(O, x, []) -> classify, tagged-map class lookup (ETS + cache), Mod:dispatch/3 (untyped receiver stays dynamic)";
+compiles_to("3k") ->
+    "folded constant: one persistent_term:get of the class's static call key, its {constant_value, 1, Mod, Fun, Tag} key matched in the map, then the literal 1 in place (BT-4363)";
+compiles_to("3l") ->
+    "folded constant, as 3k: the key and the hit arm carry the tagged {'beamtalk_string', <<...>>} term (BT-4504)";
+compiles_to("3m") -> "folded constant, as 3k: the key and the hit arm carry the atom (BT-4504)";
+compiles_to("4a") -> "send(O, x, []) -> classify, tagged-map class lookup (per-process memo, BT-4623), Mod:dispatch/3 (untyped receiver stays dynamic)";
 compiles_to("4b") -> "send(O, area, []), same path as 4a";
 compiles_to("4c") -> "send(S, area, []), same path as 4a (open class stays dynamic)";
 compiles_to("5a") -> "send(S, base, []): VbSub:dispatch/3 misses, extensions lookup, VbBase:dispatch/3";
 compiles_to("5b") -> "send(S, viaSelf, []), then `self base` is a second full send";
 compiles_to("5c") -> "send(S, 'hasField:', [v]) -> beamtalk_reflection:has_field/2";
 compiles_to("6a") -> "is_function(Blk, 1) guard, then apply Blk(41)";
-compiles_to("6b") -> "lists:foldl over a fun that maps:get/maps:put `sum` in a state map; + with coercion try";
+compiles_to("6b") -> "lists:foldl over a fun whose accumulator is the bare `sum` (BT-4116); + with coercion try";
 compiles_to("6c") -> "is_list guard, lists:foreach(fun)";
 compiles_to("6d") -> "is_list guard, lists:map(fun); * with is_number guard";
 compiles_to("6e") -> "is_list guard, lists:foldl(fun); + with coercion try";
@@ -574,7 +596,10 @@ compiles_to("11d") -> "send(Bool, 'ifTrue:ifFalse:', [fun, fun]) -> True:dispatc
 compiles_to("12a") -> "typed receiver (BT-4127): is_map + tag guard, erlang:whereis + class-object tuple with the pinned module; untyped: beamtalk_primitive:class_of_object derived-cache hit";
 compiles_to("12b") -> "class ref built per call (whereis_class + module_name_safe) + send(P, 'isKindOf:') -> direct objectIsKindOf/2 call (no FFI proxy, BT-4410): one memoised {is_kind_of, C, B} lookup (BT-4221)";
 compiles_to("12c") -> "as 12b, but the String literal bakes its module (whereis only, no module_name_safe, BT-4411) and String:dispatch/3 takes the memoised inherited_target verdict {value, Object, ...} straight to Object:dispatch/3 (BT-4260; no per-level extensions walk)";
-compiles_to("13a") -> "direct_call/4 ('erlang', 'phash2', [A], 'stock'): mode precomputed (BT-4153), integer fast path";
+compiles_to("15a") -> "DynamicSupervisor:startChild -> beamtalk_supervisor:startChild (pool class + maxChildren read from the supervisor dictionary, supervisor:start_child, SupervisionChildAdded/ActorSpawned announcements skipped when no system-bus subscription can match (no matching subscriber)) + terminateChild";
+compiles_to("15b") -> "as 15a, with the atomic maxChildren cap: capacity token, monitor and slot release per child";
+compiles_to("13a") ->
+    "direct erlang:phash2(A) in a try (BT-4485), behind an is_number/is_atom/is_pid argument guard: the spec proves the Integer result needs no coercion; errors go to ffi_call_raised/8";
 compiles_to("13b") -> "direct_call/4 ('erlang', 'integer_to_binary', [A], 'stock'): binary fast path";
 compiles_to("13c") -> "direct_call/4 ('maps', 'find', [K, D], 'stock'): mode precomputed, {ok, V} still wraps to Result";
 compiles_to("13d") -> "direct_call/4 ('vs_bench', 'ffi_ok', [], 'stock'): mode precomputed, ok still wraps to Result";

@@ -31,7 +31,7 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
-        let receiver_ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
+        let receiver_ty = self.infer_send_receiver(receiver, hierarchy, env, in_abstract_method);
         self.infer_message_send_with_receiver_ty(
             receiver,
             receiver_ty,
@@ -42,6 +42,24 @@ impl TypeChecker {
             env,
             in_abstract_method,
         )
+    }
+
+    /// Infer a send's receiver expression (shared by plain sends and cascades).
+    ///
+    /// BT-4650: the receiver is evaluated before the send's arguments, so a
+    /// block in it (`[i := "x". 1] value`) writes through to `env` at once
+    /// rather than joining an enclosing send's deferred arms.
+    pub(in crate::semantic_analysis::type_checker) fn infer_send_receiver(
+        &mut self,
+        receiver: &Expression,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> InferredType {
+        let outer_defer = std::mem::take(&mut self.defer_block_widening);
+        let ty = self.infer_expr(receiver, hierarchy, env, in_abstract_method);
+        self.defer_block_widening = outer_defer;
+        ty
     }
 
     /// Infer argument types via the generic block-context path (class-side

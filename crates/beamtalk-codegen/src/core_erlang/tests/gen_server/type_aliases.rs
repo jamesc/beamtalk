@@ -17,6 +17,7 @@ fn generate_module_with_pre_class_hierarchy_does_not_panic() {
 
     let pre_class = ClassInfo {
         surface_incomplete: false,
+        in_caller_new1: false,
         is_module_less: false,
         name: ecow::EcoString::from("Helper"),
         superclass: Some(ecow::EcoString::from("Object")),
@@ -101,6 +102,7 @@ fn test_value_subclass_typed_fields_emit_type_alias() {
         span: Span::new(0, 0),
     };
     let module = Module {
+        pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),

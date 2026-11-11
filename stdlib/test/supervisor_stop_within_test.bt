@@ -79,6 +79,18 @@ TestCase subclass: SupervisorStopWithinTest
     self waitForDeathOf: sup
     self deny: sup isAlive
 
+  // BT-4494: with a 1 ms wait the supervisor's stop reply lands at or past
+  // the deadline, where OTP's gen_server:stop/3 raised error:timeout_value
+  // (a 0 ms wait hit the same path only rarely).
+  testStopWithinOneMsTimesOut =>
+    sup := (Bt4047PatientSup supervise) unwrap
+    result := sup stopWithin: 1
+    self assert: result isError
+    self assert: result error kind equals: #timeout
+    self waitForDeathOf: sup
+    self deny: sup isAlive
+    self assert: (self table at: #terminated) equals: #shutdown
+
   testStopWithinDeadSupervisorGivesStaleHandle =>
     sup := (Bt4047PatientSup supervise) unwrap
     sup stop
@@ -102,6 +114,17 @@ TestCase subclass: SupervisorStopWithinTest
     self assert: result isError
     self assert: result error kind equals: #timeout
     self assert: pool isAlive
+    self waitForDeathOf: pool
+    self deny: pool isAlive
+    self assert: (self table at: #terminated) equals: #shutdown
+
+  // BT-4494: see testStopWithinOneMsTimesOut.
+  testDynamicStopWithinOneMsTimesOut =>
+    pool := (Bt4047PatientPool supervise) unwrap
+    (pool startChild: #{#tableName => #bt4047Shutdown}) unwrap
+    result := pool stopWithin: 1
+    self assert: result isError
+    self assert: result error kind equals: #timeout
     self waitForDeathOf: pool
     self deny: pool isAlive
     self assert: (self table at: #terminated) equals: #shutdown

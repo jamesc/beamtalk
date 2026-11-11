@@ -11,8 +11,8 @@ owned by Rust (`ClassInfo::process_bound_class_selectors`) and reaches the
 runtime as `process_bound_class_selectors` in every compiled class's
 `__beamtalk_meta/0`. The runtime keeps no copy of the list, but
 `beamtalk_class_dispatch` routes part of it with hard-coded clauses (the
-`spawn`/`new` clauses of `class_send_plain/3` and
-`handle_metaclass_self_call/2`, the Supervisor guard of `class_send/3`, and the
+`spawn`/`new` clauses of `class_send_plain/4` and
+`handle_metaclass_self_call/2`, the Supervisor guard of `class_send/4`, and the
 TestCase run-selector check in `class_self_direct_ok/4`). This conformance test
 pins every selector those clauses name to the generated list, by reading the
 clauses' own abstract code, so a clause added in Erlang without the Rust list
@@ -98,14 +98,14 @@ process_bound_selectors_test_() ->
                 beamtalk_class_metadata:lookup_process_bound_selectors('Object')
             )
         end},
-        {"class_send_plain/3's dedicated selector clauses are in the generated list", fun() ->
-            assert_pinned(class_send_plain, head_atoms(class_send_plain, 3, 2))
+        {"class_send_plain/4's dedicated selector clauses are in the generated list", fun() ->
+            assert_pinned(class_send_plain, head_atoms(class_send_plain, 4, 2))
         end},
         {"handle_metaclass_self_call/2's clauses are in the generated list", fun() ->
             assert_pinned(handle_metaclass_self_call, head_atoms(handle_metaclass_self_call, 2, 1))
         end},
-        {"class_send/3's Supervisor routing selectors are in the generated list", fun() ->
-            assert_pinned(class_send, guard_atoms(class_send, 3, 'Selector'))
+        {"class_send/4's Supervisor routing selectors are in the generated list", fun() ->
+            assert_pinned(class_send, guard_atoms(class_send, 4, 'Selector'))
         end},
         {"the TestCase run selectors are in the generated list", fun() ->
             assert_pinned(is_test_execution_selector, test_run_selectors())

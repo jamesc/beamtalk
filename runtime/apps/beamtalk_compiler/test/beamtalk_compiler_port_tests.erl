@@ -924,3 +924,341 @@ reindent_method_source_on_closed_port_test() ->
             )
         )
     end).
+
+%%% ---------------------------------------------------------------
+%%% port_transport_errors — exit_status and decode-error paths
+%%%
+%%% Two fake-port escripts exercise the two live error arms in every
+%%% public function's receive loop without a 30-second timeout:
+%%%
+%%%   beamtalk_fake_compiler_port_exit.escript  — reads one framed
+%%%     request then exits with status 1, triggering the
+%%%     {Port, {exit_status, Status}} arm.
+%%%
+%%%   beamtalk_fake_compiler_port_garbage.escript — reads one framed
+%%%     request then replies with <<255,255,255,255>>, which is not a
+%%%     valid ETF term, triggering the `catch error:badarg' arm.
+%%%
+%%% Functions in the compile_expression family return
+%%%   {error, [#{message := <<"...">>}]} for transport errors.
+%%% Functions in the resolve_method_span family return
+%%%   {error, port_error, <<"...">>} for the same errors.
+%%% ---------------------------------------------------------------
+
+escript_bin() ->
+    ErlDir = filename:dirname(os:find_executable("erl")),
+    filename:join(ErlDir, "escript").
+
+fake_port_path(Name) ->
+    filename:join([
+        beamtalk_test_corpus:project_root(),
+        "runtime",
+        "apps",
+        "beamtalk_compiler",
+        "test",
+        Name
+    ]).
+
+open_exit_port() ->
+    open_port({spawn_executable, escript_bin()}, [
+        {args, [fake_port_path("beamtalk_fake_compiler_port_exit.escript")]},
+        {packet, 4},
+        binary,
+        exit_status,
+        use_stdio
+    ]).
+
+open_garbage_port() ->
+    open_port({spawn_executable, escript_bin()}, [
+        {args, [fake_port_path("beamtalk_fake_compiler_port_garbage.escript")]},
+        {packet, 4},
+        binary,
+        exit_status,
+        use_stdio
+    ]).
+
+with_exit_port(Fun) ->
+    Port = open_exit_port(),
+    Fun(Port).
+
+with_garbage_port(Fun) ->
+    Port = open_garbage_port(),
+    Fun(Port).
+
+%%% — exit_status arm — compile_expression family
+
+compile_expression_port_exit_test() ->
+    with_exit_port(fun(Port) ->
+        ?assertMatch(
+            {error, [#{message := <<"Compiler port exited unexpectedly">>}]},
+            beamtalk_compiler_port:compile_expression(Port, <<"1">>, <<"m">>, [])
+        )
+    end).
+
+compile_expression_trace_port_exit_test() ->
+    with_exit_port(fun(Port) ->
+        ?assertMatch(
+            {error, [#{message := <<"Compiler port exited unexpectedly">>}]},
+            beamtalk_compiler_port:compile_expression_trace(Port, <<"1">>, <<"m">>, [])
+        )
+    end).
+
+find_senders_in_source_port_exit_test() ->
+    with_exit_port(fun(Port) ->
+        ?assertMatch(
+            {error, [#{message := <<"Compiler port exited unexpectedly">>}]},
+            beamtalk_compiler_port:find_senders_in_source(Port, span_fixture(), printNl)
+        )
+    end).
+
+find_all_sends_in_source_port_exit_test() ->
+    with_exit_port(fun(Port) ->
+        ?assertMatch(
+            {error, [#{message := <<"Compiler port exited unexpectedly">>}]},
+            beamtalk_compiler_port:find_all_sends_in_source(Port, span_fixture())
+        )
+    end).
+
+find_announce_sites_in_source_port_exit_test() ->
+    with_exit_port(fun(Port) ->
+        ?assertMatch(
+            {error, [#{message := <<"Compiler port exited unexpectedly">>}]},
+            beamtalk_compiler_port:find_announce_sites_in_source(Port, span_fixture())
+        )
+    end).
+
+find_references_to_in_source_port_exit_test() ->
+    with_exit_port(fun(Port) ->
+        ?assertMatch(
+            {error, [#{message := <<"Compiler port exited unexpectedly">>}]},
+            beamtalk_compiler_port:find_references_to_in_source(Port, span_fixture(), 'SpanCounter')
+        )
+    end).
+
+find_ffi_sites_in_source_port_exit_test() ->
+    with_exit_port(fun(Port) ->
+        ?assertMatch(
+            {error, [#{message := <<"Compiler port exited unexpectedly">>}]},
+            beamtalk_compiler_port:find_ffi_sites_in_source(
+                Port, span_fixture(), lists, reverse, any
+            )
+        )
+    end).
+
+%%% — exit_status arm — resolve_method_span family
+
+resolve_method_span_port_exit_test() ->
+    with_exit_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port exited unexpectedly">>},
+            beamtalk_compiler_port:resolve_method_span(
+                Port, span_fixture(), <<"SpanCounter">>, <<"increment">>, instance
+            )
+        )
+    end).
+
+resolve_class_span_port_exit_test() ->
+    with_exit_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port exited unexpectedly">>},
+            beamtalk_compiler_port:resolve_class_span(Port, state_fixture(), <<"Counter">>)
+        )
+    end).
+
+categorize_methods_port_exit_test() ->
+    with_exit_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port exited unexpectedly">>},
+            beamtalk_compiler_port:categorize_methods(Port, span_fixture(), <<"SpanCounter">>)
+        )
+    end).
+
+class_state_field_defaults_port_exit_test() ->
+    with_exit_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port exited unexpectedly">>},
+            beamtalk_compiler_port:class_state_field_defaults(
+                Port, state_fixture(), <<"Counter">>
+            )
+        )
+    end).
+
+reindent_method_source_port_exit_test() ->
+    with_exit_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port exited unexpectedly">>},
+            beamtalk_compiler_port:reindent_method_source(
+                Port, <<"increment => ok">>, <<"  ">>
+            )
+        )
+    end).
+
+find_selector_send_spans_port_exit_test() ->
+    with_exit_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port exited unexpectedly">>},
+            beamtalk_compiler_port:find_selector_send_spans(
+                Port, span_fixture(), <<"increment">>, <<"run">>
+            )
+        )
+    end).
+
+find_definition_selector_spans_port_exit_test() ->
+    with_exit_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port exited unexpectedly">>},
+            beamtalk_compiler_port:find_definition_selector_spans(
+                Port, span_fixture(), <<"SpanCounter">>, <<"increment">>, <<"run">>, instance
+            )
+        )
+    end).
+
+build_class_module_index_in_source_port_exit_test() ->
+    with_exit_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port exited unexpectedly">>},
+            beamtalk_compiler_port:build_class_module_index_in_source(
+                Port, span_fixture(), <<"lib/span_counter.bt">>, <<"myapp">>
+            )
+        )
+    end).
+
+%%% — decode-error arm — compile_expression family
+
+compile_expression_port_garbage_test() ->
+    with_garbage_port(fun(Port) ->
+        ?assertMatch(
+            {error, [#{message := <<"Compiler port response is malformed">>}]},
+            beamtalk_compiler_port:compile_expression(Port, <<"1">>, <<"m">>, [])
+        )
+    end).
+
+compile_expression_trace_port_garbage_test() ->
+    with_garbage_port(fun(Port) ->
+        ?assertMatch(
+            {error, [#{message := <<"Compiler port response is malformed">>}]},
+            beamtalk_compiler_port:compile_expression_trace(Port, <<"1">>, <<"m">>, [])
+        )
+    end).
+
+find_senders_in_source_port_garbage_test() ->
+    with_garbage_port(fun(Port) ->
+        ?assertMatch(
+            {error, [#{message := <<"Compiler port response is malformed">>}]},
+            beamtalk_compiler_port:find_senders_in_source(Port, span_fixture(), printNl)
+        )
+    end).
+
+find_all_sends_in_source_port_garbage_test() ->
+    with_garbage_port(fun(Port) ->
+        ?assertMatch(
+            {error, [#{message := <<"Compiler port response is malformed">>}]},
+            beamtalk_compiler_port:find_all_sends_in_source(Port, span_fixture())
+        )
+    end).
+
+find_announce_sites_in_source_port_garbage_test() ->
+    with_garbage_port(fun(Port) ->
+        ?assertMatch(
+            {error, [#{message := <<"Compiler port response is malformed">>}]},
+            beamtalk_compiler_port:find_announce_sites_in_source(Port, span_fixture())
+        )
+    end).
+
+find_references_to_in_source_port_garbage_test() ->
+    with_garbage_port(fun(Port) ->
+        ?assertMatch(
+            {error, [#{message := <<"Compiler port response is malformed">>}]},
+            beamtalk_compiler_port:find_references_to_in_source(
+                Port, span_fixture(), 'SpanCounter'
+            )
+        )
+    end).
+
+find_ffi_sites_in_source_port_garbage_test() ->
+    with_garbage_port(fun(Port) ->
+        ?assertMatch(
+            {error, [#{message := <<"Compiler port response is malformed">>}]},
+            beamtalk_compiler_port:find_ffi_sites_in_source(
+                Port, span_fixture(), lists, reverse, any
+            )
+        )
+    end).
+
+%%% — decode-error arm — resolve_method_span family
+
+resolve_method_span_port_garbage_test() ->
+    with_garbage_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port response is malformed">>},
+            beamtalk_compiler_port:resolve_method_span(
+                Port, span_fixture(), <<"SpanCounter">>, <<"increment">>, instance
+            )
+        )
+    end).
+
+resolve_class_span_port_garbage_test() ->
+    with_garbage_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port response is malformed">>},
+            beamtalk_compiler_port:resolve_class_span(Port, state_fixture(), <<"Counter">>)
+        )
+    end).
+
+categorize_methods_port_garbage_test() ->
+    with_garbage_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port response is malformed">>},
+            beamtalk_compiler_port:categorize_methods(Port, span_fixture(), <<"SpanCounter">>)
+        )
+    end).
+
+class_state_field_defaults_port_garbage_test() ->
+    with_garbage_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port response is malformed">>},
+            beamtalk_compiler_port:class_state_field_defaults(
+                Port, state_fixture(), <<"Counter">>
+            )
+        )
+    end).
+
+reindent_method_source_port_garbage_test() ->
+    with_garbage_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port response is malformed">>},
+            beamtalk_compiler_port:reindent_method_source(
+                Port, <<"increment => ok">>, <<"  ">>
+            )
+        )
+    end).
+
+find_selector_send_spans_port_garbage_test() ->
+    with_garbage_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port response is malformed">>},
+            beamtalk_compiler_port:find_selector_send_spans(
+                Port, span_fixture(), <<"increment">>, <<"run">>
+            )
+        )
+    end).
+
+find_definition_selector_spans_port_garbage_test() ->
+    with_garbage_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port response is malformed">>},
+            beamtalk_compiler_port:find_definition_selector_spans(
+                Port, span_fixture(), <<"SpanCounter">>, <<"increment">>, <<"run">>, instance
+            )
+        )
+    end).
+
+build_class_module_index_in_source_port_garbage_test() ->
+    with_garbage_port(fun(Port) ->
+        ?assertMatch(
+            {error, port_error, <<"Compiler port response is malformed">>},
+            beamtalk_compiler_port:build_class_module_index_in_source(
+                Port, span_fixture(), <<"lib/span_counter.bt">>, <<"myapp">>
+            )
+        )
+    end).

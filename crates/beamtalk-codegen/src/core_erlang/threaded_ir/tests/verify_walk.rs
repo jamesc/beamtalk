@@ -721,11 +721,12 @@ fn verify_condition_hand_back_does_not_carry_self() {
     );
 }
 
-// ── BT-4460: ConstructLocalsRereadOpaquely ──────────────────────────
+// ── BT-4460 / BT-4462: ConstructLocalsNotRebound ─────────────────────
 
 /// An arm that extracts a nested construct's state carrier with an opaque
-/// `element(2, ...)` `Bind`, then rereads the construct's locals out of it.
-fn reread_arm(locals: &[&str]) -> Vec<ThreadedStmt> {
+/// `element(2, ...)` `Bind` and marks the construct as compiled in place
+/// with `locals` unrebound.
+fn in_place_arm(locals: &[&str]) -> Vec<ThreadedStmt> {
     let frame = FrameId::new(1);
     vec![build_branch_arm(
         frame,
@@ -738,9 +739,8 @@ fn reread_arm(locals: &[&str]) -> Vec<ThreadedStmt> {
                 op: BindOp::Direct(ValueRef::Doc(docvec!["call 'erlang':'element'(2, _Tuple)"])),
                 span: span(),
             },
-            ThreadedStmt::StateCarrierReread {
+            ThreadedStmt::ConstructLocalsInPlace {
                 locals: locals.iter().map(ToString::to_string).collect(),
-                doc: docvec!["let M = call 'maps':'get'('__local__m', StateAcc1) in "],
                 span: Span::new(3, 9),
             },
             ThreadedStmt::Return(
@@ -753,10 +753,10 @@ fn reread_arm(locals: &[&str]) -> Vec<ThreadedStmt> {
 }
 
 #[test]
-fn a_construct_reread_of_its_locals_is_reported() {
+fn a_construct_compiled_in_place_with_locals_is_reported() {
     assert_eq!(
-        verify(&reread_arm(&["m"])),
-        vec![VerifyError::ConstructLocalsRereadOpaquely {
+        verify(&in_place_arm(&["m"])),
+        vec![VerifyError::ConstructLocalsNotRebound {
             locals: vec!["m".to_string()],
             at: Span::new(3, 9),
         }]
@@ -764,15 +764,14 @@ fn a_construct_reread_of_its_locals_is_reported() {
 }
 
 #[test]
-fn a_reread_of_no_locals_is_silent() {
-    assert_eq!(verify(&reread_arm(&[])), Vec::new());
+fn a_construct_compiled_in_place_with_no_locals_is_silent() {
+    assert_eq!(verify(&in_place_arm(&[])), Vec::new());
 }
 
+/// BT-4462: the marker renders nothing; the legacy reread it once carried is
+/// deleted.
 #[test]
-fn the_reread_renders_its_document_verbatim() {
-    let text = lower_and_render(&reread_arm(&["m"])).to_pretty_string();
-    assert!(
-        text.contains("let M = call 'maps':'get'('__local__m', StateAcc1) in "),
-        "{text}"
-    );
+fn a_construct_compiled_in_place_renders_no_reread() {
+    let text = lower_and_render(&in_place_arm(&["m"])).to_pretty_string();
+    assert!(!text.contains("'__local__m'"), "{text}");
 }

@@ -78,6 +78,13 @@ pub enum ExpectCategory {
     /// Suppress ffi-nested-string hints — a `String` nested in a collection
     /// argument to a stock Erlang call reaches it tagged (BT-4243).
     FfiNestedString,
+    /// Suppress binary-string-compare hints — a provable raw `Binary`
+    /// compared with, or looked up against, a `String` (BT-4257).
+    BinaryStringCompare,
+    /// Suppress cascade-drops-update warnings — a non-final cascade message
+    /// on a value receiver whose updated copy the cascade discards
+    /// (ADR 0145 § 3, BT-4512).
+    CascadeDropsUpdate,
     /// Deprecated, parse-only (ADR 0130 §Migration Path): the stored-closure
     /// advisory it suppressed no longer exists, so nothing produces a matching
     /// diagnostic. The name is still accepted so existing
@@ -116,6 +123,8 @@ impl ExpectCategory {
             "class_var_reflection_shadowing" => Some(Self::ClassVarReflectionShadowing),
             "actor_state_abroad" => Some(Self::ActorStateAbroad),
             "ffi_nested_string" => Some(Self::FfiNestedString),
+            "binary_string_compare" => Some(Self::BinaryStringCompare),
+            "cascade_drops_update" => Some(Self::CascadeDropsUpdate),
             "stored_closure" => Some(Self::StoredClosure),
             "all" => Some(Self::All),
             _ => None,
@@ -148,6 +157,8 @@ impl ExpectCategory {
             Self::ClassVarReflectionShadowing => "class_var_reflection_shadowing",
             Self::ActorStateAbroad => "actor_state_abroad",
             Self::FfiNestedString => "ffi_nested_string",
+            Self::BinaryStringCompare => "binary_string_compare",
+            Self::CascadeDropsUpdate => "cascade_drops_update",
             Self::StoredClosure => "stored_closure",
             Self::All => "all",
         }
@@ -180,6 +191,8 @@ impl ExpectCategory {
             "class_var_reflection_shadowing",
             "actor_state_abroad",
             "ffi_nested_string",
+            "binary_string_compare",
+            "cascade_drops_update",
             "all",
         ]
     }

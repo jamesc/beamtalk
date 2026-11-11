@@ -7,15 +7,36 @@ use std::path::{Path, PathBuf};
 
 use beamtalk_core::ast::{ClassDefinition, Module};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
-use beamtalk_examples::{Corpus, CorpusEntry};
+use beamtalk_examples::{Corpus, CorpusEntry, bundled_corpus_path};
 use pulldown_cmark::{CodeBlockKind, Event, Tag, TagEnd};
 
+/// The learning guide: its `.md` chapters and its `fixtures/` feed the corpus.
+const LEARNING_DOCS_DIR: &str = "docs/learning";
+
+/// The language reference: its fenced `beamtalk` blocks feed the corpus.
+const LANGUAGE_FEATURES_DOC: &str = "docs/beamtalk-language-features.md";
+
+/// Usage: `build-corpus [STAGING_SYSROOT]`.
+///
+/// Writes the corpus to `STAGING_SYSROOT/share/beamtalk/corpus.json`
+/// ([`bundled_corpus_path`]). The staging sysroot defaults to cargo's target
+/// directory (`$CARGO_TARGET_DIR`, else the repo's `target/`), where the dev
+/// binaries in `target/debug/` and `target/release/` find it and
+/// `just install` copies it from. The corpus is a build output, never
+/// checked in (BT-4614).
 fn main() {
     let root = find_repo_root();
+    let staging_sysroot = std::env::args_os()
+        .nth(1)
+        .or_else(|| std::env::var_os("CARGO_TARGET_DIR"))
+        .map_or_else(|| root.join("target"), PathBuf::from);
     let corpus = generate_corpus(&root);
     let json = serde_json::to_string_pretty(&corpus).expect("serialization must succeed");
 
-    let output_path = root.join("crates/beamtalk-examples/corpus.json");
+    let output_path = bundled_corpus_path(&staging_sysroot);
+    if let Some(dir) = output_path.parent() {
+        fs::create_dir_all(dir).expect("failed to create the corpus output directory");
+    }
     fs::write(&output_path, format!("{json}\n")).expect("failed to write corpus.json");
 
     eprintln!(
@@ -37,7 +58,12 @@ fn generate_corpus(root: &Path) -> Corpus {
     // .bt fixture files — whole-file entries
     extract_bt_dir(root, "stdlib/test/fixtures", None, &mut entries);
     extract_bt_dir(root, "tests/repl-protocol/fixtures", None, &mut entries);
-    extract_bt_dir(root, "docs/learning/fixtures", None, &mut entries);
+    extract_bt_dir(
+        root,
+        &format!("{LEARNING_DOCS_DIR}/fixtures"),
+        None,
+        &mut entries,
+    );
 
     // .bt test files — whole-file entries (tests show how to *use* patterns)
     extract_bt_dir(root, "stdlib/test", Some("/fixtures/"), &mut entries);
@@ -46,10 +72,10 @@ fn generate_corpus(root: &Path) -> Corpus {
     extract_bt_dir(root, "examples", None, &mut entries);
 
     // .md learning docs — extract fenced beamtalk code blocks
-    extract_md_files(root, "docs/learning", &mut entries);
+    extract_md_files(root, LEARNING_DOCS_DIR, &mut entries);
 
     // beamtalk-language-features.md
-    let lang_features = root.join("docs/beamtalk-language-features.md");
+    let lang_features = root.join(LANGUAGE_FEATURES_DOC);
     if lang_features.exists() {
         extract_md_code_blocks(root, &lang_features, &mut entries);
     }
@@ -515,13 +541,56 @@ fn add_synonym_tags(entries: &mut [CorpusEntry]) {
 mod tests {
     use super::*;
 
+    /// Every corpus source under `docs/`, as a GitHub Actions path pattern.
+    ///
+    /// `ci.yml` ignores `docs/**` and must put each of these back: `just
+    /// build` runs `build-corpus` over them, which fails on a duplicate entry
+    /// ID, so a doc-only change to one must still build in CI before it
+    /// merges (BT-4554, BT-4614). `docs_corpus_sources_trigger_full_ci`
+    /// enforces it.
+    const DOCS_CORPUS_SOURCE_PATTERNS: &[&str] = &["docs/learning/**", LANGUAGE_FEATURES_DOC];
+
+    /// Count `- '<pattern>'` list items in a workflow file's `paths:` filters.
+    fn path_filter_count(workflow: &str, pattern: &str) -> usize {
+        let item = format!("- '{pattern}'");
+        workflow.lines().filter(|l| l.trim() == item).count()
+    }
+
+    /// A doc-only PR that edits a corpus source under `docs/` must run
+    /// `ci.yml`, whose `just build` regenerates the corpus from it. Each
+    /// source must be re-included after `!docs/**` in both of `ci.yml`'s
+    /// triggers.
+    #[test]
+    fn docs_corpus_sources_trigger_full_ci() {
+        let learning = format!("{LEARNING_DOCS_DIR}/**");
+        for source in [learning.as_str(), LANGUAGE_FEATURES_DOC] {
+            assert!(
+                DOCS_CORPUS_SOURCE_PATTERNS.contains(&source),
+                "corpus source {source} is missing from DOCS_CORPUS_SOURCE_PATTERNS"
+            );
+        }
+
+        let root = find_repo_root();
+        let ci = fs::read_to_string(root.join(".github/workflows/ci.yml"))
+            .unwrap_or_else(|e| panic!("cannot read ci.yml: {e}"));
+
+        for pattern in DOCS_CORPUS_SOURCE_PATTERNS {
+            assert_eq!(
+                path_filter_count(&ci, pattern),
+                2,
+                "ci.yml must re-include '{pattern}' after '!docs/**' in both its \
+                 push and pull_request paths, or a PR editing it skips the build \
+                 that regenerates the corpus from it"
+            );
+        }
+    }
+
     /// Regression guard: two back-to-back builds of the same source
     /// tree must serialize identically — entries sorted by id, tags sorted+
     /// deduped, no hash-collection field leaking iteration order. This pins the
-    /// in-process invariant (the ordering logic); the *cross-process* guarantee
-    /// — a fresh process producing the same bytes — is enforced separately by the
-    /// `check-corpus` CI gate, which regenerates `corpus.json` and diffs it
-    /// against the committed copy.
+    /// in-process invariant (the ordering logic). The corpus is a build output
+    /// rather than a checked-in file (BT-4614), so nothing compares it across
+    /// processes; this test is what keeps it reproducible.
     #[test]
     fn corpus_generation_is_deterministic() {
         let root = find_repo_root();

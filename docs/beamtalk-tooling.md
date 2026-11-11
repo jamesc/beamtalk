@@ -141,22 +141,41 @@ same scope as `build`.
   `runtime/apps/beamtalk_workspace/test/fixtures/live_recheck_verdict_conformance.json`.
   `just ci` does not run this gate; add `beamtalk lint --warnings-as-errors`
   to your own project's CI to get the REPL verdict there. The MCP `lint`
-  tool applies the same table but has no `--warnings-as-errors` flag.
+  tool applies the same table and takes the same gate as an optional
+  `warnings_as_errors` flag, classified by the same shared rule
+  (`diagnostics_policy::is_live_recheck_failure`; BT-4336). Both surfaces
+  run the same analysis pipeline (`beamtalk_cli::lint_pipeline`, BT-4585),
+  `.erl` linting included, so they report the same diagnostics and
+  verdict. Both build the FFI type registry the same way too, ADR 0075
+  stub tiers included, and for `stdlib/src` targets from the stdlib's
+  runtime specs (BT-4643). One input stays surface-specific: MCP reads
+  dependencies, and their stubs, only from checkouts already on disk (it
+  never fetches).
+- `beamtalk build` re-checks a byte-identical file when a signature it
+  type-checks against changes elsewhere (BT-4336): every pre-loaded class
+  (project and dependency, trait provisions flattened in), protocol and
+  type alias, plus every standalone extension method and the project-known
+  Erlang modules, is hashed into each file's incremental cache key, so a
+  dependent is recompiled — and its diagnostics recomputed — rather than
+  replayed from the cache against the old signature. Doc-comment edits and
+  line shifts leave the hash alone; any signature change rebuilds the whole
+  package (per-file edges: BT-4586).
 
 Intentionally surface-specific behaviour (not parity bugs):
 
 - Plain `beamtalk lint` failing only on lint-severity diagnostics is by
   design; use the flag for the type/DNU verdict.
-- `beamtalk build` replays cached diagnostics for unchanged files
-  (content-hash incremental cache); `beamtalk build --force` or the
-  cache-free `lint` gate re-sweeps everything.
+- `beamtalk build` replays cached diagnostics for a file whose content
+  and cross-file analysis surface are both unchanged; `beamtalk build
+  --force` or the cache-free `lint` gate re-sweeps everything.
 - The compiler-port `diagnostics/3` entry (keystroke squiggles, recheck
   round-trips) runs without on-disk project context (no FFI registry or
   manifest package — BT-4322), while the batch paths load both. FFI-heavy
   code can therefore still read stricter in the REPL than in `build`; that
-  residual gap tracks BT-4322, not this policy.
-- The MCP `lint` tool (`crates/beamtalk-mcp`) is a separate implementation
-  with its own options plumbing and is not covered by the CLI flag.
+  residual gap is tracked by BT-4325.
+- MCP `lint` without `warnings_as_errors` fails only on `Error`
+  diagnostics, not on Lint-severity ones as plain `beamtalk lint` does; its
+  `lint_failures` count carries the plain-CLI verdict.
 
 ### Build Artifact Layout (`BuildLayout`)
 
@@ -244,6 +263,24 @@ The Beamtalk compiler (`beamtalk-core`, written in Rust) runs as an OTP Port man
 - **Supervised lifecycle** — The compiler port is restarted automatically on crash. No orphaned socket files or manual recovery.
 - **Cross-platform** — OTP Ports work on all platforms (Linux, macOS, Windows). No Unix-specific IPC.
 - **Stateless port** — The Rust compiler binary is a pure function: source code + metadata in, Core Erlang out. All session state (class cache, known variables) lives in the Erlang gen_server and is injected per request via ETF (Erlang Term Format) over length-prefixed frames.
+
+## Check
+
+`beamtalk check` runs the full analysis pipeline — lexing, parsing, type inference, annotation and `@expect` handling, cross-file alias/protocol resolution, and visibility checks — and fails on the same error diagnostics `beamtalk build` emits for those phases, without emitting any output files.
+
+```bash
+beamtalk check              # Check the current project
+beamtalk check path/to/dir  # Check a specific directory
+beamtalk check path/to/file.bt  # Check a single file
+```
+
+**What it runs:** Pass 1 indexing plus the full semantic-analysis pipeline over every source file. It checks all files instead of stopping at the first failure.
+
+**What it skips:** No `.core` or `.beam` files are written, native Erlang sources are not compiled, the post-codegen verifier does not run, and no OTP packaging (`.app` file, corpus) is produced.
+
+**FFI caveat:** FFI and native-module checks see only already-built artifacts (from a prior `beamtalk build`). A passing `beamtalk check` does not guarantee `beamtalk build` succeeds.
+
+**Exit codes:** 0 for success, 1 if any file produces an error-severity diagnostic.
 
 ## Releases (ADR 0125)
 
@@ -463,6 +500,9 @@ ERROR: Cannot remove stdlib class
 == Integer < Number ==
 Instance methods:
   + - * / ...
+Class methods:
+  parse: text :: Binary radix: base :: Integer -> Result(Integer, Error) [sealed]
+...
 
 > :help Integer +
 == Integer >> + ==
@@ -965,7 +1005,7 @@ All MCP tools map to the same `Workspace` and `Beamtalk` APIs available in the R
 The [Beamtalk VS Code extension](https://github.com/jamesc/beamtalk/tree/main/editors/vscode) connects to the live workspace and provides:
 
 - **Syntax highlighting** for `.bt` files
-- **LSP integration** — diagnostics, completions, go-to-definition, find references (`includeDeclaration`-aware), go-to-implementation, call hierarchy (incoming/outgoing), type hierarchy (supertypes/subtypes), document symbols, and workspace symbol search. References, implementation, incoming call hierarchy, and document/workspace symbols can delegate to the runtime via the `delegateToRuntime` flag for live results (REPL-loaded classes with no source file appear in workspace symbols, marked `(no source file)`); type hierarchy and outgoing call hierarchy always answer from in-process indexes (the `ClassHierarchy` index and method-body AST walker respectively). The LSP preloads classes from `_build/deps/*/src/` on a best-effort basis (bounded by the preload budget), reducing most false-positive `Unresolved class` warnings for dependency types.
+- **LSP integration** — diagnostics, completions, go-to-definition, find references (`includeDeclaration`-aware), go-to-implementation, call hierarchy (incoming/outgoing), type hierarchy (supertypes/subtypes), document symbols, workspace symbol search, hover, and signature help. Hover and signature help surface Options parameter docs (names, types and doc comments) while typing keyword sends. Sends to a `P class`-typed receiver show class-side protocol provisions in completions and signature help. References, implementation, incoming call hierarchy, and document/workspace symbols can delegate to the runtime via the `delegateToRuntime` flag for live results (REPL-loaded classes with no source file appear in workspace symbols, marked `(no source file)`); type hierarchy and outgoing call hierarchy always answer from in-process indexes (the `ClassHierarchy` index and method-body AST walker respectively). The LSP preloads the source of every dependency declared in `beamtalk.toml`, transitively and including path dependencies (bounded by the preload budget), so dependency classes resolve and dependency extensions are visible: when every dependency loaded completely, does-not-understand hints work in a package with dependencies just as in `beamtalk build`.
 - **Workspace tree view** — live actors, loaded classes, and session bindings in the sidebar
 - **Transcript view** — real-time output from the workspace
 - **Inspector panels** — inspect live actor state

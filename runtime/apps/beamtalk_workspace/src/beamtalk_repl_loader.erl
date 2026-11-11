@@ -636,7 +636,7 @@ there instead of migrating it a second time.
 -spec trigger_hot_reload(atom(), [map()]) -> ok.
 trigger_hot_reload(ModuleName, Classes) ->
     ReloadedNames = sets:from_list(
-        [N || ClassMap <- Classes, (N = resolve_class_name(ClassMap)) =/= undefined],
+        [N || ClassMap <- Classes, N <- [resolve_class_name(ClassMap)], N =/= undefined],
         [{version, 2}]
     ),
     lists:foreach(
@@ -2653,7 +2653,7 @@ pending source fails to compile — a `{compile_error, ...}` from this
 advisory-only precheck is swallowed to `{ok, []}` rather than surfaced as a
 blocking error, since a syntactically-broken pending edit already gets its
 own diagnostics from the editor's live parse-diagnostics op
-(`beamtalk_repl_ops_dev:diagnostics_for/2`) — this precheck adding a second,
+(`beamtalk_repl_ops_dev:diagnostics_for/3`) — this precheck adding a second,
 differently-worded compile-failure report would be redundant, not helpful.
 
 The baseline is `beamtalk_workspace_shape_store:previous/1`, which an
@@ -2901,7 +2901,7 @@ splice_out_span(Source, Span) ->
     splice_replace(Source, Span, <<>>).
 
 %% Replace the bytes `[start, end)' in `Source' with `NewText', joining the
-%% surrounding text. Shared leaf primitive (CLAUDE.md's no-duplicate-
+%% surrounding text. Shared leaf primitive (AGENTS.md's no-duplicate-
 %% implementations rule) behind both `splice_out_span/2` (removal — ADR 0112)
 %% and `rewrite_sites/2`'s per-site splice (ADR 0114).
 -spec splice_replace(binary(), rewrite_span(), binary()) -> binary().

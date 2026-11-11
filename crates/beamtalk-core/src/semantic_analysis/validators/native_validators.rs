@@ -7,10 +7,11 @@
 //!
 //! Validators for `native:` classes:
 //! - State field rejection for native actors
+//! - Beamtalk-bodied instance method rejection for native actors (BT-4577)
 //! - Delegate return type warnings
 //! - Reserved-word backing-function check for native Objects
 
-use crate::ast::{MessageSelector, Module};
+use crate::ast::{MessageSelector, MethodDefinition, Module};
 use crate::semantic_analysis::ClassHierarchy;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory};
 
@@ -71,6 +72,70 @@ pub(crate) fn check_native_state_fields(
             }
         }
     }
+}
+
+/// BT-4577: error if a `native:` *actor* declares an instance method whose
+/// body is not exactly `self delegate`.
+///
+/// A native actor's facade forwards every instance selector to its backing
+/// `gen_server` (ADR 0056), so a Beamtalk instance-method body would never
+/// run. The method used to be dropped silently. Compiling it to run in the
+/// caller instead was rejected: a native actor's instance methods would then
+/// be split between the caller and the process. Class methods are exempt:
+/// they run on the class side and compile normally.
+///
+/// Native *Objects* (ADR 0101) are not actors and are not checked here.
+pub(crate) fn check_native_actor_instance_method_bodies(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let is_native_actor = |class_name: &str| {
+        hierarchy.is_native(class_name) && hierarchy.is_actor_subclass(class_name)
+    };
+
+    for class in &module.classes {
+        let class_name = class.name.name.as_str();
+        if class.backing_module.is_none() || !hierarchy.is_actor_subclass(class_name) {
+            continue;
+        }
+        for method in class.methods.iter().filter(|m| !m.is_self_delegate()) {
+            emit_native_actor_instance_body_error(class_name, method, diagnostics);
+        }
+    }
+
+    // Standalone (Tonel-style) definitions: `MyActor >> sel => ...`.
+    for standalone in &module.method_definitions {
+        let class_name = standalone.class_name.name.as_str();
+        if !standalone.is_class_method
+            && is_native_actor(class_name)
+            && !standalone.method.is_self_delegate()
+        {
+            emit_native_actor_instance_body_error(class_name, &standalone.method, diagnostics);
+        }
+    }
+}
+
+fn emit_native_actor_instance_body_error(
+    class_name: &str,
+    method: &MethodDefinition,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    diagnostics.push(
+        Diagnostic::error(
+            format!(
+                "Instance method `{}` of native actor `{class_name}` must be `self delegate`",
+                method.selector.name()
+            ),
+            method.head_span(),
+        )
+        .with_hint(
+            "A native actor's instance methods are handled by its backing gen_server, so a \
+             Beamtalk body would never run. Make the body `self delegate`, or move the \
+             Beamtalk logic into a class method."
+                .to_string(),
+        ),
+    );
 }
 
 /// Warn if a `self delegate` method has no return type annotation.
@@ -497,6 +562,76 @@ mod tests {
         assert!(
             diagnostics.is_empty(),
             "Expected native Actors to be exempt from the reserved-word check, got: {diagnostics:?}"
+        );
+    }
+
+    // ── BT-4577: Beamtalk-bodied instance methods on native actors ─────────────
+
+    fn instance_body_diagnostics(src: &str) -> Vec<Diagnostic> {
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let mut diagnostics = Vec::new();
+        check_native_actor_instance_method_bodies(&module, &hierarchy, &mut diagnostics);
+        diagnostics
+    }
+
+    /// A Beamtalk-bodied instance method on a native actor is a compile error
+    /// whose message and hint name `self delegate` and the class-method route.
+    #[test]
+    fn native_actor_beamtalk_instance_method_is_error() {
+        let diagnostics = instance_body_diagnostics(
+            "Actor subclass: MyActor native: my_mod\n  \
+             count -> Integer => self delegate\n  \
+             doubled => self count * 2",
+        );
+        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+        let diag = &diagnostics[0];
+        assert_eq!(diag.severity, Severity::Error);
+        assert!(diag.message.contains("`doubled`"), "{}", diag.message);
+        assert!(diag.message.contains("`MyActor`"), "{}", diag.message);
+        assert!(diag.message.contains("self delegate"), "{}", diag.message);
+        let hint = diag.hint.as_deref().unwrap_or_default();
+        assert!(hint.contains("class method"), "{hint}");
+    }
+
+    /// Class methods with Beamtalk bodies keep compiling on a native actor.
+    #[test]
+    fn native_actor_beamtalk_class_method_ok() {
+        let diagnostics = instance_body_diagnostics(
+            "Actor subclass: MyActor native: my_mod\n  \
+             count -> Integer => self delegate\n  \
+             class start: n :: Integer => self spawnWith: #{#n => n}",
+        );
+        assert!(diagnostics.is_empty(), "got: {diagnostics:?}");
+    }
+
+    /// A standalone (Tonel-style) instance method on a native actor is checked
+    /// too; a standalone class method is not.
+    #[test]
+    fn native_actor_standalone_instance_method_is_error() {
+        let diagnostics = instance_body_diagnostics(
+            "Actor subclass: MyActor native: my_mod\n  \
+             count -> Integer => self delegate\n\
+             MyActor >> doubled => self count * 2\n\
+             MyActor class >> make => self spawn",
+        );
+        assert_eq!(diagnostics.len(), 1, "got: {diagnostics:?}");
+        assert!(diagnostics[0].message.contains("`doubled`"));
+    }
+
+    /// Ordinary actors and native Objects are out of scope.
+    #[test]
+    fn non_native_actor_and_native_object_ok() {
+        assert!(instance_body_diagnostics("Actor subclass: Plain\n  doubled => 2").is_empty());
+        assert!(
+            instance_body_diagnostics(
+                "Object subclass: MyObj native: my_mod\n  \
+                 size -> Integer => self delegate\n  \
+                 doubled => self size * 2"
+            )
+            .is_empty()
         );
     }
 }

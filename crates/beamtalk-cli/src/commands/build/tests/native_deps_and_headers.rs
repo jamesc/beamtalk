@@ -4,7 +4,7 @@
 //! Transitive native-dependency detection (ADR 0072), class-header generation, and `validate_native_class_references` checks.
 
 use super::*;
-use crate::commands::manifest::{self, NativeDependencyMap};
+use crate::commands::manifest::{self, NativeDependencyMap, NativeOverrideMap};
 
 // ---- Transitive native dependency detection tests (ADR 0072) ----
 
@@ -39,6 +39,7 @@ fn make_resolved_dep(
         is_direct: true,
         via_chain: Vec::new(),
         stubs_dir: None,
+        extensions: beamtalk_cli::dependency_extensions::DependencyExtensions::default(),
     }
 }
 
@@ -54,15 +55,22 @@ fn test_aggregate_native_deps_from_transitive_dep() {
     let root_deps = NativeDependencyMap::new(); // root has NO native deps
     let resolved = [make_resolved_dep(temp.path(), "http")];
 
-    let aggregated = aggregate_native_dependencies(&root_deps, &resolved);
+    let aggregated =
+        aggregate_native_dependencies(&root_deps, &NativeOverrideMap::new(), &resolved);
 
     assert_eq!(
-        aggregated.len(),
+        aggregated.dependencies.len(),
         2,
         "Should aggregate 2 native deps from transitive dep"
     );
-    assert_eq!(aggregated["cowboy"].constraint, "~> 2.12");
-    assert_eq!(aggregated["gun"].constraint, "~> 2.1");
+    assert_eq!(
+        aggregated.dependencies["cowboy"].hex_constraint(),
+        Some("~> 2.12")
+    );
+    assert_eq!(
+        aggregated.dependencies["gun"].hex_constraint(),
+        Some("~> 2.1")
+    );
 }
 
 #[test]
@@ -75,18 +83,86 @@ fn test_aggregate_native_deps_root_takes_precedence() {
         "cowboy".to_string(),
         manifest::NativeDependency {
             name: "cowboy".to_string(),
-            constraint: "~> 2.12".to_string(),
+            source: manifest::NativeSource::Hex {
+                constraint: "~> 2.12".to_string(),
+            },
         },
     );
 
     let resolved = [make_resolved_dep(temp.path(), "http")];
-    let aggregated = aggregate_native_dependencies(&root_deps, &resolved);
+    let aggregated =
+        aggregate_native_dependencies(&root_deps, &NativeOverrideMap::new(), &resolved);
 
-    assert_eq!(aggregated.len(), 1);
+    assert_eq!(aggregated.dependencies.len(), 1);
     assert_eq!(
-        aggregated["cowboy"].constraint, "~> 2.12",
+        aggregated.dependencies["cowboy"].hex_constraint(),
+        Some("~> 2.12"),
         "Root constraint should take precedence over transitive dep"
     );
+}
+
+/// BT-4555 / ADR 0073: a git source in one package and a hex constraint in
+/// another for the same name keeps the first and warns, naming both.
+#[test]
+fn test_aggregate_native_deps_warns_on_git_vs_hex() {
+    let temp = TempDir::new().unwrap();
+    let oauth_dir = temp.path().join("oauth");
+    fs::create_dir_all(&oauth_dir).unwrap();
+    fs::write(
+        oauth_dir.join("beamtalk.toml"),
+        "[package]\nname = \"oauth\"\nversion = \"0.1.0\"\n\n\
+         [native.dependencies]\n\
+         oidcc = { git = \"https://github.com/jamesc/oidcc\", branch = \"rfc7009-revocation\" }\n\n\
+         [native.overrides]\n\
+         jose = { erl_opts = [] }\n",
+    )
+    .unwrap();
+    write_dep_manifest(temp.path(), "other", &[("oidcc", "~> 3.6")]);
+
+    let resolved = [
+        make_resolved_dep(temp.path(), "oauth"),
+        make_resolved_dep(temp.path(), "other"),
+    ];
+    let aggregated = aggregate_native_dependencies(
+        &NativeDependencyMap::new(),
+        &NativeOverrideMap::new(),
+        &resolved,
+    );
+
+    assert_eq!(aggregated.dependencies["oidcc"].hex_constraint(), None);
+    assert_eq!(
+        aggregated.overrides.len(),
+        1,
+        "transitive overrides aggregate"
+    );
+    assert_eq!(aggregated.warnings.len(), 1, "{:?}", aggregated.warnings);
+    let warning = &aggregated.warnings[0];
+    assert!(warning.contains("'oidcc'"), "{warning}");
+    assert!(warning.contains("package 'oauth'"), "{warning}");
+    assert!(warning.contains("package 'other'"), "{warning}");
+    assert!(warning.contains("hex \"~> 3.6\""), "{warning}");
+    assert!(
+        warning.contains("git https://github.com/jamesc/oidcc (branch: rfc7009-revocation)"),
+        "{warning}"
+    );
+}
+
+#[test]
+fn test_aggregate_native_deps_identical_declarations_do_not_warn() {
+    let temp = TempDir::new().unwrap();
+    write_dep_manifest(temp.path(), "a", &[("gun", "~> 2.1")]);
+    write_dep_manifest(temp.path(), "b", &[("gun", "~> 2.1")]);
+
+    let resolved = [
+        make_resolved_dep(temp.path(), "a"),
+        make_resolved_dep(temp.path(), "b"),
+    ];
+    let aggregated = aggregate_native_dependencies(
+        &NativeDependencyMap::new(),
+        &NativeOverrideMap::new(),
+        &resolved,
+    );
+    assert!(aggregated.warnings.is_empty(), "{:?}", aggregated.warnings);
 }
 
 #[test]
@@ -97,9 +173,13 @@ fn test_aggregate_native_deps_dep_without_manifest() {
 
     let root_deps = NativeDependencyMap::new();
     let resolved = [make_resolved_dep(temp.path(), "orphan")];
-    let aggregated = aggregate_native_dependencies(&root_deps, &resolved);
+    let aggregated =
+        aggregate_native_dependencies(&root_deps, &NativeOverrideMap::new(), &resolved);
 
-    assert!(aggregated.is_empty(), "Should skip deps without manifests");
+    assert!(
+        aggregated.dependencies.is_empty(),
+        "Should skip deps without manifests"
+    );
 }
 
 #[test]

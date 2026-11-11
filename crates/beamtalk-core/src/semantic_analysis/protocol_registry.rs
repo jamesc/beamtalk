@@ -1179,6 +1179,7 @@ mod tests {
                         MessageSelector::Unary(sel.into())
                     };
                     MethodDefinition {
+                        pipeline_sends: crate::ast::PipelineSends::default(),
                         selector,
                         parameters: vec![],
                         body: vec![ExpressionStatement::bare(
@@ -1219,6 +1220,7 @@ mod tests {
             MessageSelector::Binary(sel.into())
         };
         MethodDefinition {
+            pipeline_sends: crate::ast::PipelineSends::default(),
             selector,
             parameters: (0..arity)
                 .map(|i| ParameterDefinition::new(ident(&format!("arg{i}"))))
@@ -1695,6 +1697,7 @@ Value subclass: Version
         let mut hierarchy = ClassHierarchy::with_builtins();
         let gadget = ClassInfo {
             surface_incomplete: false,
+            in_caller_new1: false,
             is_module_less: false,
             name: "Gadget".into(),
             superclass: Some("Object".into()),
@@ -1780,6 +1783,7 @@ Value subclass: Version
             let mut h = ClassHierarchy::with_builtins();
             h.add_from_beam_meta(vec![ClassInfo {
                 surface_incomplete: false,
+                in_caller_new1: false,
                 is_module_less: false,
                 name: "Gadget".into(),
                 superclass: Some("Object".into()),
@@ -2110,6 +2114,7 @@ Value subclass: Version
             "Printable".into(),
             crate::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,
+                in_caller_new1: false,
                 is_module_less: false,
                 name: "Printable".into(),
                 superclass: Some("Protocol".into()),
@@ -2183,6 +2188,7 @@ Value subclass: Version
             "Tickable".into(),
             crate::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,
+                in_caller_new1: false,
                 is_module_less: false,
                 name: "Tickable".into(),
                 superclass: Some("Protocol".into()),

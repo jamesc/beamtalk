@@ -184,7 +184,9 @@ pub fn assignment_threading_constructs() -> AssignmentThreadingConstructs {
     let mut control: Vec<&'static str> =
         CONDITIONAL_WELL_KNOWN.iter().map(|w| w.as_str()).collect();
     control.extend(CONTROL_KEYWORD_SELECTORS);
-    control.extend(UNARY_LOOP_SELECTORS);
+    // The unary loops as written: analysis sees them as the keyword loops
+    // they are canonicalised to (BT-4313, BT-4589), but users write them.
+    control.extend(crate::ast::normalize::written_unary_loop_selectors());
     control.push(WellKnownSelector::OnDo.as_str());
     // `tryDo:` threads only when sent to the `Result` class (ADR 0131 §5).
     control.push("Result tryDo:");
@@ -211,16 +213,6 @@ pub fn assignment_threading_constructs() -> AssignmentThreadingConstructs {
         collection,
     }
 }
-
-/// Returns `true` if `sel` is a state-threading unary selector.
-#[must_use]
-pub fn is_state_threading_unary_selector(sel: &str) -> bool {
-    UNARY_LOOP_SELECTORS.contains(&sel)
-}
-
-/// The state-threading unary selectors: the loops whose receiver block is the
-/// body.
-const UNARY_LOOP_SELECTORS: &[&str] = &["whileTrue", "whileFalse", "timesRepeat"];
 
 /// Returns `true` if `sel` is an exception-handling selector (`on:do:` or `ensure:`).
 ///
@@ -354,15 +346,9 @@ pub fn is_state_threaded_block_arg(selector: &str, arg_index: usize) -> bool {
 /// through `thread_value_call_receiver` — a runtime `apply`, never inlined);
 /// `repeat` and the unary `whileTrue`/`whileFalse` (no receiver inlining
 /// path in codegen today); and the keyword `whileTrue:`/`whileFalse:`
-/// CONDITION block — ADR 0118 phase 3 routes a condition-only self-send or
-/// field write through `generate_while_loop_with_mutations`, but a plain
-/// outer-*local* write in the condition (`[i := i + 1. i < 3] whileTrue:
-/// [nil]` in a Value/`TestCase` context) still compiles the condition as a
-/// Tier 2 closure and crashes at runtime with "function expects 1 arguments
-/// but was called with 0" (BT-3782). ADR 0131 §6 rejects that shape at
-/// compile time (`Walker::while_condition_threads`), so it never reaches
-/// codegen; it stays out of this table until the condition is lowered as a
-/// producer (BT-3743). A block
+/// CONDITION block, which threads its writes only when the loop's body is a
+/// block literal (BT-4602, `block_facts::while_condition_threads`): a rule of
+/// the send, not of the selector alone, so it is not a row of this table. A block
 /// literal that is merely *stored* and later sent `value` is not a literal
 /// receiver at all and is likewise outside this table — `beamtalk-lint`'s
 /// `DeadAssignment` check keeps flagging it.
@@ -629,9 +615,20 @@ pub enum SendUserCode {
     LoopOrClosureCall,
     /// Anything else: bracket it. This is the default (ADR 0137 §2): a
     /// primitive that takes a block or can dispatch to user code for some
-    /// argument, a non-inlined `value`, `perform:`, a send to an unknown or
-    /// in-process receiver, an FFI call.
+    /// argument, `perform:`, a send to an unknown or in-process receiver, an
+    /// FFI call.
     MayRun,
+    /// BT-4532 (ADR 0146): one of the constructs above (an evaluated block,
+    /// a loop, a collection message, a conditional, `on:do:`/`ensure:`) given
+    /// something other than a block literal where it runs a block
+    /// (`blk value`, `5 timesRepeat: blk`, `xs do: blk`, `x ifTrue: blk`).
+    /// The call runs whatever that value is as a closure in this process, so
+    /// it may be any block: one that touches this actor's state (ADR 0137),
+    /// or one holding a `^` of the method, whose throw carries the cell
+    /// (ADR 0146). A call into user code, like [`Self::MayRun`]; named apart
+    /// so codegen's verifier can check that no such call is left unbracketed
+    /// (`VerifyError::UnbracketedNlrClosure`).
+    ClosureOperand,
 }
 
 /// Classifies the send `receiver selector arguments`. A receiver of `self`
@@ -674,7 +671,7 @@ pub fn send_user_code(
             return if is_block(receiver) {
                 SendUserCode::LoopOrClosureCall
             } else {
-                SendUserCode::MayRun
+                SendUserCode::ClosureOperand
             };
         }
     }
@@ -690,6 +687,7 @@ pub fn send_user_code(
     if COLLECTION_KEYWORD_SELECTORS.contains(&name) {
         return match opaque_fold_callable_arg(name, arguments) {
             Some(callable) if is_block(callable) => SendUserCode::InlinedOrClosureCall,
+            Some(_) => SendUserCode::ClosureOperand,
             // `eachWithIndex:`/`do:separatedBy:`/... take their blocks by position.
             None if !arguments.is_empty() && arguments.iter().all(is_block) => {
                 SendUserCode::InlinedOrClosureCall
@@ -697,27 +695,27 @@ pub fn send_user_code(
             _ => SendUserCode::MayRun,
         };
     }
-    if is_state_threading_keyword_selector(name)
-        || is_state_threading_unary_selector(name)
-        || name == "repeat"
+    // BT-4603: a unary `whileTrue`/`whileFalse`/`repeat` sent to a
+    // parameterless literal block is canonicalised to a keyword loop before
+    // anything classifies it (`ast::normalize`, BT-4313/BT-4589). Any that
+    // reaches here (a block value, or a literal block with parameters) is an
+    // ordinary send to `Block`, which runs its receiver as a closure in this
+    // process.
+    if matches!(selector, MessageSelector::Unary(_))
+        && crate::ast::normalize::written_unary_loop_selectors().contains(&name)
     {
+        return SendUserCode::ClosureOperand;
+    }
+    if is_state_threading_keyword_selector(name) {
         // Loops and `ensure:`/`on:do:` run their receiver block in place.
         let receiver_inlined = !(is_state_threaded_block_receiver(name)
-            || matches!(
-                name,
-                "whileTrue:"
-                    | "whileFalse:"
-                    | "whileTrue"
-                    | "whileFalse"
-                    | "timesRepeat"
-                    | "repeat"
-            ))
+            || matches!(name, "whileTrue:" | "whileFalse:"))
             || is_block(receiver);
         let args_inlined = state_threaded_block_arg_indices(name)
             .iter()
             .all(|&i| arguments.get(i).is_some_and(is_block));
         return if !(receiver_inlined && args_inlined) {
-            SendUserCode::MayRun
+            SendUserCode::ClosureOperand
         } else if is_loop_selector(name) {
             SendUserCode::LoopOrClosureCall
         } else {
@@ -732,15 +730,7 @@ pub fn send_user_code(
 fn is_loop_selector(name: &str) -> bool {
     matches!(
         name,
-        "whileTrue:"
-            | "whileFalse:"
-            | "whileTrue"
-            | "whileFalse"
-            | "timesRepeat:"
-            | "timesRepeat"
-            | "repeat"
-            | "to:do:"
-            | "to:by:do:"
+        "whileTrue:" | "whileFalse:" | "timesRepeat:" | "to:do:" | "to:by:do:"
     )
 }
 
@@ -961,11 +951,12 @@ mod tests {
     }
 
     #[test]
-    fn unary_selectors() {
-        assert!(is_state_threading_unary_selector("whileTrue"));
-        assert!(is_state_threading_unary_selector("whileFalse"));
-        assert!(is_state_threading_unary_selector("timesRepeat"));
-        assert!(!is_state_threading_unary_selector("do:"));
+    fn the_construct_note_names_the_unary_loops_as_written() {
+        let control = assignment_threading_constructs().control;
+        for sel in ["whileTrue", "whileFalse", "repeat"] {
+            assert!(control.contains(&sel), "{sel:?} missing from {control:?}");
+        }
+        assert!(!control.contains(&"timesRepeat"), "{control:?}");
     }
 
     #[test]
@@ -1275,9 +1266,12 @@ mod tests {
 
     // ─── ADR 0137 (BT-4020): `send_user_code` ───────────────────────────────
 
+    /// Classifies the first expression of `src` as every caller sees it: on
+    /// the normalised tree (`[x] repeat` is `[true] whileTrue: [x]`).
     fn classify(src: &str) -> SendUserCode {
         use crate::source_analysis::{lex_with_eof, parse};
-        let (module, _) = parse(lex_with_eof(src));
+        let (mut module, _) = parse(lex_with_eof(src));
+        crate::ast::normalize::peel_operand_parens(&mut module);
         let expr = &module.expressions[0].expression;
         let Expression::MessageSend {
             receiver,
@@ -1345,12 +1339,14 @@ mod tests {
             "1 to: 3 do: [:i | i]",
             "1 to: 9 by: 2 do: [:i | i]",
             "[x] repeat",
+            "[x] whileTrue",
+            "[x] whileFalse",
             "[1] value",
             "[:a | a] value: 1",
         ] {
             assert_eq!(classify(src), SendUserCode::LoopOrClosureCall, "{src}");
         }
-        assert_eq!(classify("5 timesRepeat: b"), SendUserCode::MayRun);
+        assert_eq!(classify("5 timesRepeat: b"), SendUserCode::ClosureOperand);
     }
 
     #[test]
@@ -1365,8 +1361,10 @@ mod tests {
         }
     }
 
+    /// BT-4532: a construct given a value where it runs a block runs that
+    /// value as a closure, whatever block it is.
     #[test]
-    fn the_same_constructs_with_a_non_literal_block_are_calls() {
+    fn the_same_constructs_with_a_non_literal_block_run_it_as_a_closure() {
         for src in [
             "x ifTrue: blk",
             "xs do: blk",
@@ -1374,8 +1372,23 @@ mod tests {
             "blk value: 1",
             "xs inject: 0 into: blk",
             "5 timesRepeat: blk",
+            "1 to: 3 do: blk",
+            "blk whileTrue: [x]",
+            "[x] whileTrue: blk",
+            "blk repeat",
+            // BT-4603: a unary loop that is not canonicalised is an
+            // ordinary send to `Block`, never a loop.
+            "blk whileTrue",
+            "blk whileFalse",
+            "[:a | a] whileTrue",
+            "[:a | a] repeat",
+            "blk ensure: [x]",
+            "[x] ensure: blk",
+            "[x] on: Error do: handler",
+            "blk on: Error do: [:e | 0]",
+            "(p foo) value",
         ] {
-            assert_eq!(classify(src), SendUserCode::MayRun, "{src}");
+            assert_eq!(classify(src), SendUserCode::ClosureOperand, "{src}");
         }
     }
 

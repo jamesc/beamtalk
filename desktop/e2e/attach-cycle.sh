@@ -55,7 +55,7 @@ command -v curl >/dev/null 2>&1 || fail "curl is required to poll /readiness"
 
 FRONT_PID=""
 DEAD_FRONT_PID=""
-# mktemp, not a hardcoded /tmp/ path (repo convention — see CLAUDE.md's
+# mktemp, not a hardcoded /tmp/ path (repo convention — see AGENTS.md's
 # cross-platform temp-path rule) — TMPDIR-aware and collision-free.
 READINESS_BODY_FILE="$(mktemp)"
 

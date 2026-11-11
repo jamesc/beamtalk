@@ -48,6 +48,11 @@ end
 
 defmodule VeBench.Math do
   def double(x), do: x * 2
+
+  # Named constants (rows 3k-3m).
+  def protocol_error, do: 1
+  def name, do: "protocol error"
+  def tag, do: :protocol_error
 end
 
 defmodule VeBench.Helpers do
@@ -58,6 +63,7 @@ defmodule VeBench.Counter do
   use GenServer
 
   def start, do: GenServer.start(__MODULE__, 0)
+  def start_link(n), do: GenServer.start_link(__MODULE__, n)
 
   @impl true
   def init(n), do: {:ok, n}

@@ -1,0 +1,124 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// The verify policies `Tls clientOptions:alpn:verify:` accepts.
+type TlsVerify = #verify_peer | #verify_none
+
+/// Tls — secure-default TLS client options builder.
+///
+/// A stateless namespace of class methods — there are no Tls instances.
+/// Assembles the `ssl:connect` option list for a TLS client: `verify_peer`
+/// against the system CA bundle, the HTTPS hostname check, SNI as a
+/// charlist (omitted for IP literals, which must not appear in SNI), and
+/// ALPN offering the given protocols as Binaries (OTP `ssl` compares them
+/// against raw binaries; tagged Strings never match).
+///
+/// The builder owns the OTP-version compat so clients stop re-deriving it:
+/// CA lookup uses `public_key:cacerts_get/0` (OTP 25+ and a readable OS
+/// trust store); a failure raises a structured `Error` instead of a bare
+/// `does_not_understand`, keeping the raw OTP reason for a trust-store
+/// failure. The toolchain floor (`otp-support.toml`) is above OTP 25, so the
+/// pre-25 path is defensive. Building the list needs
+/// no started applications; starting `ssl` stays with the connecting code,
+/// exactly as before.
+///
+/// ## BEAM Mapping
+/// `clientOptions:alpn:`/`clientOptions:alpn:verify:` build the same shapes
+/// `HTTPClient>>tlsOptionsFor:` hand-rolled (BT-4530) and `MintHTTP1/2>>connectTls:`
+/// builds with `#verify_none`: `{verify, Mode}`, `{cacerts, ...}`,
+/// `{alpn_advertised_protocols, ...}`, `{customize_hostname_check, ...}`,
+/// `{server_name_indication, ...}`, over `#binary, {packet, raw}, {active, false}`.
+/// `sniOf:` answers the SNI charlist (nil for IP literals), `systemCacerts`
+/// answers `public_key:cacerts_get/0` untouched.
+///
+/// ## Examples
+/// ```beamtalk
+/// (Tls clientOptions: "example.com" alpn: #("h2") verify: #verify_none) size
+/// // => 6
+/// (Tls clientOptions: "127.0.0.1" alpn: #("h2") verify: #verify_none) size
+/// // => 5
+/// (Tls clientOptions: "example.com" alpn: #("h2")) size
+/// // => 8
+/// ```
+sealed typed Object subclass: Tls
+
+  /// Secure-default client options for `host` offering `protos` over ALPN:
+  /// `verify_peer` against the system CAs, the HTTPS hostname check, and
+  /// SNI as a charlist (omitted for IP literals).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Tls clientOptions: "example.com" alpn: #("h2")) size
+  /// // => 8
+  /// ```
+  class sealed clientOptions: host :: String alpn: protos :: List(String) -> List(Object) =>
+    self
+      clientOptions: host
+      alpn: protos
+      verify: #verify_peer
+
+  /// Same, with an explicit verify policy: `#verify_peer` verifies against
+  /// the system CAs (the secure default above); `#verify_none` skips
+  /// verification and all CA material, keeping mint's current default and
+  /// test setup working — the opt-out is loud by being explicit. Anything
+  /// else raises an `Error`. `host` takes the unbracketed form (`::1`,
+  /// never `[::1]`): brackets fail the IP-literal test and would be sent
+  /// as SNI, which must not carry an IP.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// (Tls clientOptions: "example.com" alpn: #("h2") verify: #verify_none) size
+  /// // => 6
+  /// ```
+  class sealed clientOptions: host :: String alpn: protos :: List(String) verify: mode :: TlsVerify -> List(Object) =>
+    alpn := protos collect: [:proto | Binary fromIolist: proto]
+    base :: List(Object) := #(#binary, {#packet, #raw}, {#active, false}, {#verify, mode})
+    mode =:= #verify_peer
+      ifTrue: [base := base ++ #({#cacerts, self systemCacerts})]
+      ifFalse: [
+        mode =:= #verify_none ifFalse: [
+          Error signal: "verify must be #verify_peer or #verify_none" reason: mode
+        ]
+      ]
+    base := base ++ #({#alpn_advertised_protocols, alpn})
+    mode =:= #verify_peer
+      ifTrue: [
+        // Untyped stock-OTP FFI (no spec for pkix_verify_hostname_match_fun/1):
+        // the fun is intentionally Dynamic; its placement is pinned by TlsTest.
+        @expect type
+        matchfun :: Dynamic := (Erlang public_key) pkix_verify_hostname_match_fun: #https
+        base := base ++ #({#customize_hostname_check, #({#match_fun, matchfun})})
+      ]
+    sni := self sniOf: host
+    sni isNil ifTrue: [^base]
+    base ++ #({#server_name_indication, sni})
+
+  /// The system CA certificates for `verify_peer`: `public_key:cacerts_get/0`
+  /// passed through untouched, whatever shape the running OTP returns. A
+  /// failure answers an `Error`: pre-OTP-25 raises `does_not_understand`
+  /// (no such function — the toolchain floor is above OTP 25, so that path is
+  /// defensive), while on OTP 25+ the getter itself raises when the OS
+  /// trust store is missing or unreadable. The raw OTP reason is kept
+  /// for the trust-store failure (BT-4236); the `does_not_understand`
+  /// record carries no reason term.
+  class internal sealed systemCacerts -> List(Object) =>
+    // Untyped stock-OTP FFI (no spec for cacerts_get/0): intentionally
+    // Dynamic; the entry's presence is pinned by TlsTest.
+    @expect type
+    certs :: Dynamic := [(Erlang public_key) cacerts_get]
+      on: Error
+      do: [:e |
+        Error signal: "could not load system CA certificates (public_key:cacerts_get/0 needs OTP 25+ and a readable OS trust store)" reason: e reason
+      ]
+    certs
+
+  /// The SNI value for a DNS-name `host`, nil for an IP literal (either
+  /// family: SNI must not carry an IP). A charlist: OTP `ssl` rejects a
+  /// Binary `server_name_indication`.
+  class internal sealed sniOf: host :: String -> List(Integer) | Nil =>
+    // Untyped stock-OTP FFI (no spec for parse_address/1): intentionally
+    // Dynamic; only isOk is read, and both outcomes are pinned by TlsTest.
+    @expect type
+    parsed :: Dynamic := (Erlang inet) parse_address: (host asCharlist)
+    parsed isOk ifTrue: [^nil]
+    host asCharlist

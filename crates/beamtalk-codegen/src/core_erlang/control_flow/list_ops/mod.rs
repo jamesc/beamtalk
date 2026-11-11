@@ -446,6 +446,24 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         let selector = list_op_selector(operation);
 
+        let list_call = docvec![
+            "call 'lists':",
+            leaf::atom(operation.to_string()),
+            "(",
+            leaf::var(body_var.clone()),
+            ", ",
+            leaf::var(list_var.clone()),
+            ")",
+        ];
+        // BT-4619: `lists:foreach/2` answers `ok`, but `do:` is declared
+        // `-> Nil` (and the runtime primitive answers `nil`), so the inlined
+        // `do:` sequences the call and answers `'nil'`.
+        let list_call = if operation == "foreach" {
+            docvec!["do ", list_call, " ", leaf::atom("nil")]
+        } else {
+            list_call
+        };
+
         docvec![
             "let ",
             leaf::var(list_var.clone()),
@@ -457,13 +475,9 @@ impl CoreErlangGenerator {
             body_code,
             " in case call 'erlang':'is_list'(",
             leaf::var(list_var.clone()),
-            ") of <'true'> when 'true' -> call 'lists':",
-            leaf::atom(operation.to_string()),
-            "(",
-            leaf::var(body_var.clone()),
-            ", ",
-            leaf::var(list_var.clone()),
-            ") <'false'> when 'true' -> ",
+            ") of <'true'> when 'true' -> ",
+            list_call,
+            " <'false'> when 'true' -> ",
             // BT-4366: the fallback send is nested in the list-type `case`, so the
             // call node carries the send's line itself.
             self.annotate_current_send_call(docvec![

@@ -138,6 +138,23 @@ sealed typed Object subclass: Telemetry native: beamtalk_telemetry
   class internal sealed attachMany: handlerId :: Symbol | String to: eventNames :: List(List(Symbol)) do: handler :: Block(List(Symbol), Dictionary, Dictionary, Object) -> Result(Nil, Error) =>
     self delegate
 
+  /// Answer whether any handler is attached to an event under `eventPrefix`.
+  ///
+  /// `true` when `telemetry:list_handlers/1` finds at least one handler for
+  /// an event name that starts with `eventPrefix`: Beamtalk handlers attached
+  /// here and Erlang or Elixir ones alike. An emitter can use it to skip a
+  /// span's timestamps and metadata when nobody listens. `eventPrefix` must
+  /// be a non-empty List of Symbols, as for `span:metadata:do:`; anything
+  /// else raises a `TypeError` (kind `#type_error`).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Telemetry hasHandlers: #(#myapp, #nobodyListens)
+  /// // => false
+  /// ```
+  class sealed hasHandlers: eventPrefix :: List(Symbol) -> Boolean =>
+    self delegate
+
   /// Detach a handler. Idempotent: detaching an unknown id answers nil too.
   /// The runtime's own handlers (`Tracing`'s) are refused with `#reserved_name`.
   /// Detaching the last handler on an actor-dispatch event switches those

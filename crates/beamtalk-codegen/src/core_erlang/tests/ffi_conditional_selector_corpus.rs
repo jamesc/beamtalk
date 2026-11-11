@@ -26,7 +26,7 @@
 //! block arguments, which do lower as a conditional): every row passes the debug
 //! verifier and the sequencing check, and compiles through `erlc`.
 
-use super::{assert_compiles_through_erlc, codegen};
+use super::{assert_compiles_through_erlc, assert_parses, codegen};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Sends with a conditional selector, over an argument `{A}` that is not a
@@ -135,12 +135,6 @@ fn method(i: usize, body: &str, write: &str) -> String {
         "  m{i}: c =>\n    x := 0\n    {}\n    x\n",
         body.replace("{W}", write)
     )
-}
-
-fn assert_parses(src: &str) {
-    let (_, diags) =
-        beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(src));
-    assert!(diags.is_empty(), "malformed corpus row:\n{src}\n{diags:?}");
 }
 
 fn passes(src: &str) -> bool {

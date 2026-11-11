@@ -107,6 +107,13 @@ so it runs for ALL spawn paths — direct, supervised, and named.
 | withClassMethod: supervisor child | start_child_via_class_method/4 → factory's `self spawn`/`spawnWith:`/`spawnAs:`/`spawnWith:as:` → safe_spawn/2 or safe_spawn_named/5, linked | Supervised | Yes |
 | dynamic_object | gen_server:start_link(?MODULE, ...) | Internal | No (by design) |
 
+A `native:` actor's facade module (ADR 0056) has no `init/1`. Its own
+`spawn/0,1` calls `BackingModule:start_link/1`. When one of the paths above
+is handed the facade instead (a supervised child, `spawnAs:`),
+`safe_spawn_linked/2` and `safe_spawn_named/5` start the backing module the
+same way (`safe_start_native/4`, BT-4577). There is no Beamtalk
+`initialize` to await.
+
 unnamed `Module:spawn/0,1` (via `beamtalk_actor:safe_spawn/2`)
 spawns unlinked in the common case — the caller (which can be a class
 gen_server for dynamic dispatch, or a class method body for `self spawn`)
@@ -286,13 +293,15 @@ handle_getValue([], State) ->
 %% stuck local one, rather than hanging indefinitely (erpc's own default).
 %% `?BT_REMOTE_CALL_TIMEOUT` itself now lives in beamtalk.hrl — shared with
 %% `beamtalk_node`/`beamtalk_node_monitor` (Phase 4) rather than a second
-%% literal (CLAUDE.md "No duplicate implementations").
+%% literal (AGENTS.md "No duplicate implementations").
 
 %% Public API
 -export([start_link/2, start_link/3, start_link_supervised/3, register_spawned/4]).
 -export([await_initialize/1, await_initialize/2, await_initialize/3, safe_spawn/2]).
 %% BT-4033: the awaited linked start of an anonymous supervised actor child.
 -export([safe_spawn_linked/2]).
+%% BT-4577: the backing module of a `native:` actor's facade, or `none`.
+-export([native_backing_module/1]).
 %% BT-4104: an anonymous start that leaves the caller monitoring the actor,
 %% with the monitor created atomically with the process.
 -export([safe_spawn_monitored/2]).
@@ -352,6 +361,8 @@ handle_getValue([], State) ->
 -export([dispatch/3]).
 -ifdef(TEST).
 -export([intrinsic_selector/1, request_continuation/4]).
+%% BT-4525: the self-dispatch unwrap, driven directly on a `$bt_nlr` result.
+-export([unwrap_dispatch_result/1]).
 -endif.
 
 %% BT-3967 / BT-3968: deferred pending actions. Every gen_server callback
@@ -395,7 +406,7 @@ handle_getValue([], State) ->
 %% recognition/decode helpers shared by this module's own handle_call/3 and
 %% handle_cast/2 clauses AND every compiled actor's generated
 %% handle_call/3 / handle_cast/2 (crates/beamtalk-codegen/.../gen_server/
-%% callbacks.rs) — the one place that logic lives (CLAUDE.md "No duplicate
+%% callbacks.rs) — the one place that logic lives (AGENTS.md "No duplicate
 %% implementations"). encode_reply_for/3 and
 %% maybe_reclassify_compiled_dispatch_error/2 close the same gap on the
 %% reply/error side for generated dispatch.
@@ -968,9 +979,14 @@ sys-based wait (`await_initialize/3`).
 """.
 -spec safe_spawn_linked(module(), term()) -> {ok, pid()} | {error, term()}.
 safe_spawn_linked(Module, InitArgs) ->
-    start_link_and_await(
-        fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs, linked
-    ).
+    case native_backing_module(Module) of
+        none ->
+            start_link_and_await(
+                fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs, linked
+            );
+        Backing ->
+            safe_start_native(Backing, InitArgs, none, linked)
+    end.
 
 -doc """
 Spawn a named actor with trap_exit + initialize synchronization, per
@@ -1029,11 +1045,20 @@ function's doc for why the caller cannot do it after.
 """.
 -spec safe_spawn_named(local | global, link_mode(), atom(), module(), map()) ->
     {ok, pid()} | {error, term()}.
-safe_spawn_named(local, Link, Name, Module, InitArgs) ->
+safe_spawn_named(Scope, Link, Name, Module, InitArgs) ->
+    case native_backing_module(Module) of
+        none -> safe_spawn_gen_named(Scope, Link, Name, Module, InitArgs);
+        Backing -> safe_start_native(Backing, InitArgs, {Scope, Name}, Link)
+    end.
+
+%% `safe_spawn_named/5` for a compiled (non-`native:`) actor module.
+-spec safe_spawn_gen_named(local | global, link_mode(), atom(), module(), map()) ->
+    {ok, pid()} | {error, term()}.
+safe_spawn_gen_named(local, Link, Name, Module, InitArgs) ->
     start_link_and_await(
         fun(Args) -> gen_server:start_link({local, Name}, Module, Args, []) end, InitArgs, Link
     );
-safe_spawn_named(global, Link, Name, Module, InitArgs) ->
+safe_spawn_gen_named(global, Link, Name, Module, InitArgs) ->
     case
         start_link_and_await(
             fun(Args) -> gen_server:start_link(Module, Args, []) end, InitArgs, Link
@@ -1049,6 +1074,169 @@ safe_spawn_named(global, Link, Name, Module, InitArgs) ->
             end;
         {error, Reason} ->
             {error, Reason}
+    end.
+
+-doc """
+BT-4577: the backing module of a `native:` actor class's facade module
+(ADR 0056), or `none` for any other module (a compiled actor, a hand-written
+gen_server).
+
+A `native:` actor compiles to a facade with no `init/1`; its process is the
+backing module's, started by `BackingModule:start_link(Config)` — what the
+facade's own generated `spawn/1` calls. The facade publishes that module as
+`backing_module` in `__beamtalk_meta/0`, read here through
+`beamtalk_class_registry:meta_backing_module/1`, so every start path that
+is handed the class's module (`safe_spawn_linked/2`, `safe_spawn_named/5`,
+and through them a supervisor's actor child, `beamtalk_supervisor:
+start_actor_child/2,3`) starts the backing module instead of calling
+`gen_server:start_link` on the facade (`undef` `init/1`).
+""".
+-spec native_backing_module(module()) -> module() | none.
+native_backing_module(Module) ->
+    _ = code:ensure_loaded(Module),
+    case erlang:function_exported(Module, '__beamtalk_meta', 0) of
+        true -> beamtalk_class_registry:meta_backing_module(Module:'__beamtalk_meta'());
+        false -> none
+    end.
+
+-doc """
+BT-4577: start a `native:` actor's backing module, linked, as
+`safe_spawn_linked/2` (`Registration = none`) and `safe_spawn_named/5`
+(`{local | global, Name}`) do for a compiled actor.
+
+The start is `BackingModule:start_link(Config)`, the same call the facade's
+`spawn/1` makes, on the same map `Config` (anything else is a `#type_error`,
+as the facade raises). There is no Beamtalk `initialize` to await and no
+init-ack target to add: the backing module's own `init/1` has run when
+`start_link` returns. Exits are trapped around the start so a backing
+`init/1` that fails is answered as `{error, Reason}` instead of killing the
+caller.
+
+The backing `start_link/1` takes no name, so a named start registers the
+pid after it started — `register/2` for `local`, `global:register_name/3`
+with `resolve_global_conflict/3` for `global` (as the compiled-actor `global`
+path already does). A name already held is refused before the start, so the
+backing `init/1` and its side effects (a port, an OS process) do not run for
+nothing; a start that loses the race to another holder is stopped
+(`stop_unregistered_native/1`). Either way the answer is `{error,
+{already_started, Holder}}`, which `spawn_named_scoped/5` turns into
+`#name_registered`. A registration that fails with no holder (the backing
+process registered itself under another name, or already died) is
+`{error, {register_failed, Name}}`. `Link = unlinked` drops the start link
+before exits stop being trapped (`maybe_unlink_started/2`).
+
+The backing `start_link/1` must link the new process to its caller, as
+`gen_server:start_link/3` does (ADR 0056): that link is what a supervisor
+restarts on.
+""".
+-spec safe_start_native(module(), term(), none | {local | global, atom()}, link_mode()) ->
+    {ok, pid()} | {error, term()}.
+safe_start_native(_Backing, Config, _Registration, _Link) when not is_map(Config) ->
+    {error,
+        beamtalk_error:with_hint(
+            beamtalk_error:new(type_error, 'Actor', 'spawnWith:'),
+            <<"spawnWith: expects a Dictionary argument">>
+        )};
+safe_start_native(Backing, Config, Registration, Link) ->
+    case name_holder(Registration) of
+        undefined -> start_native_trapped(Backing, Config, Registration, Link);
+        Holder -> {error, {already_started, Holder}}
+    end.
+
+%% The pid already holding a named start's name, or `undefined`.
+%%
+%% A local name is released atomically when its process exits. A global name
+%% is not: `global:whereis_name/1` reads global's table, whose row for a dead
+%% process goes only once the global name server has handled its `'DOWN'`,
+%% so a supervisor restarting a crashed `#global` child can still see the dead
+%% pid. A dead holder on this node counts as none, so the restart is not
+%% refused; a name that really is taken is still refused after the start by
+%% `register_native_started/2`.
+-spec name_holder(none | {local | global, atom()}) -> pid() | port() | undefined.
+name_holder(none) ->
+    undefined;
+name_holder({local, Name}) ->
+    whereis(Name);
+name_holder({global, Name}) ->
+    case global:whereis_name(Name) of
+        Pid when is_pid(Pid), node(Pid) =:= node() ->
+            case is_process_alive(Pid) of
+                true -> Pid;
+                false -> undefined
+            end;
+        Other ->
+            Other
+    end.
+
+-spec start_native_trapped(module(), map(), none | {local | global, atom()}, link_mode()) ->
+    {ok, pid()} | {error, term()}.
+start_native_trapped(Backing, Config, Registration, Link) ->
+    OldTrap = erlang:process_flag(trap_exit, true),
+    Result =
+        %% bt-catcher-audit: not-applicable-no-block - Backing:start_link/1
+        %% is a hand-written Erlang start function, never a Beamtalk block
+        try Backing:start_link(Config) of
+            {ok, Pid} when is_pid(Pid) -> register_native_started(Registration, Pid);
+            {error, Reason} -> {error, Reason};
+            ignore -> {error, ignore};
+            Other -> {error, {bad_start_link_return, Other}}
+        catch
+            _:CrashReason -> {error, CrashReason}
+        end,
+    case Result of
+        {ok, Started} -> ok = maybe_unlink_started(Link, Started);
+        {error, _} -> ok
+    end,
+    erlang:process_flag(trap_exit, OldTrap),
+    Result.
+
+%% BT-4577: register a just-started native actor under its name, or stop it
+%% when the name cannot be registered.
+-spec register_native_started(none | {local | global, atom()}, pid()) ->
+    {ok, pid()} | {error, {already_started, pid() | port()} | {register_failed, atom()}}.
+register_native_started(none, Pid) ->
+    {ok, Pid};
+register_native_started({local, Name} = Registration, Pid) ->
+    try register(Name, Pid) of
+        true -> {ok, Pid}
+    catch
+        error:badarg -> refuse_unregistered_native(Registration, Pid)
+    end;
+register_native_started({global, Name} = Registration, Pid) ->
+    case global:register_name(Name, Pid, fun ?MODULE:resolve_global_conflict/3) of
+        yes -> {ok, Pid};
+        no -> refuse_unregistered_native(Registration, Pid)
+    end.
+
+%% A registration failed: stop the new process, and name the holder when the
+%% name really is taken.
+-spec refuse_unregistered_native({local | global, atom()}, pid()) ->
+    {error, {already_started, pid() | port()} | {register_failed, atom()}}.
+refuse_unregistered_native({_Scope, Name} = Registration, Pid) ->
+    ok = stop_unregistered_native(Pid),
+    case name_holder(Registration) of
+        undefined -> {error, {register_failed, Name}};
+        Holder -> {error, {already_started, Holder}}
+    end.
+
+%% Stop a native actor whose name could not be registered. Called with exits
+%% trapped: the start link is removed and any `'EXIT'` it already delivered is
+%% dropped, then the process is asked to shut down (running `terminate/2` if
+%% it traps exits, so it can release what its `init/1` opened) and killed if
+%% it is still alive after 5 s. It is awaited through a monitor, since the
+%% backing `start_link` is not guaranteed to link.
+-spec stop_unregistered_native(pid()) -> ok.
+stop_unregistered_native(Pid) ->
+    ok = maybe_unlink_started(unlinked, Pid),
+    MonRef = erlang:monitor(process, Pid),
+    exit(Pid, shutdown),
+    receive
+        {'DOWN', MonRef, process, Pid, _} -> ok
+    after 5000 ->
+        exit(Pid, kill),
+        receive
+            {'DOWN', MonRef, process, Pid, _} -> ok
+        end
     end.
 
 -doc """
@@ -1825,7 +2013,10 @@ sync_call(ActorPid, Selector, Args, CallTimeout, Class) ->
                     %% method unwinds as it would have without the
                     %% process hop — same relay shape as
                     %% beamtalk_class_dispatch.erl's class-method hops.
-                    throw(Nlr);
+                    %% The block was away from home in ActorPid, which
+                    %% `rethrow_from_away/1` tells the test-build commit
+                    %% check (BT-4536).
+                    beamtalk_actor_state:rethrow_from_away(Nlr);
                 {error, Error} ->
                     beamtalk_exception_handler:reraise(Error);
                 DirectValue ->
@@ -2102,10 +2293,19 @@ self_dispatch(Selector, Args) ->
 -doc """
 Unwrap a dispatch result, update pdict state, and return the value.
 Used by self_dispatch/2 to avoid repeating the put/error pattern.
+
+A `^` that unwound the callee (`safe_dispatch` answers `{error, Nlr,
+EntryState}`) is re-thrown unchanged, with no store to the cell (ADR 0146 R3,
+BT-4525): the cell already holds the callee's writes (every compiled method
+stores before a call that may run the block), and storing `EntryState` would
+rewind it; turning the throw into an error would stop the owner's method
+boundary from catching it.
 """.
 -spec unwrap_dispatch_result(
     {reply, term(), map()} | {noreply, map()} | {error, term(), map()}
 ) -> term().
+unwrap_dispatch_result({error, Nlr, _EntryState}) when ?IS_NLR(Nlr) ->
+    throw(Nlr);
 unwrap_dispatch_result(DispatchResult) ->
     case beamtalk_actor_state:adapt(DispatchResult) of
         {reply, Result} ->
@@ -2384,7 +2584,8 @@ kill_and_wait(ActorPid) ->
 BT-3967: stop `ActorPid` with `Reason`, shared by `stop`, `stopWith:` and
 `stopWith:timeout:` on both the sync and async send paths.
 
-From another process this is `gen_server:stop(ActorPid, Reason, Timeout)`;
+From another process this is `beamtalk_stop:stop(ActorPid, Reason, Timeout)`
+(the `gen_server:stop/3` contract, BT-4494);
 an already-dead actor counts as stopped (idempotent `stop`). From inside the
 actor's own process — `self stopWith:` from a method, or an aliased self —
 `gen_server:stop/3` would fail with `calling_self`, so the stop is deferred
@@ -2392,7 +2593,7 @@ instead: request_deferred_stop/1 records it and the enclosing gen_server
 callback returns `{stop, Reason, ...}` once the current dispatch finishes
 (see apply_pending_actions/1).
 
-Returns `ok`, or `{exit, ExitReason}` when `gen_server:stop/3` itself
+Returns `ok`, or `{exit, ExitReason}` when the stop itself
 exited (timeout, or the actor died with some other reason first).
 """.
 -spec stop_actor(pid(), term(), timeout()) -> ok | {exit, term()}.
@@ -2413,7 +2614,9 @@ stop_actor(ActorPid, Reason, Timeout) ->
 
 -spec stop_external(pid(), term(), timeout()) -> ok | {exit, term()}.
 stop_external(ActorPid, Reason, Timeout) ->
-    try gen_server:stop(ActorPid, Reason, Timeout) of
+    %% Not gen_server:stop/3: it raises error:timeout_value when the stop
+    %% reply lands at a very short deadline (BT-4494).
+    try beamtalk_stop:stop(ActorPid, Reason, Timeout) of
         ok -> ok
     catch
         exit:noproc ->
@@ -3636,7 +3839,7 @@ maybe_reject_future(FuturePid, Reason) ->
 Construct `#beamtalk_error{kind = wire_version_unsupported}` for a
 `'\$beamtalk_wire'` envelope whose leading version this node does not
 recognise (ADR 0126 §5.1) — request direction, via the shared
-`beamtalk_wire:wire_version_unsupported_error/4` (CLAUDE.md "No duplicate
+`beamtalk_wire:wire_version_unsupported_error/4` (AGENTS.md "No duplicate
 implementations"; `beamtalk_future:decode_wire_reply/1` builds the
 reply-direction counterpart through the same constructor).
 """.
@@ -3646,7 +3849,7 @@ wire_version_unsupported_error(Selector, SentVersion) ->
 
 -doc """
 Recognise and decode a `'\$beamtalk_wire'` call envelope (ADR 0126 §5.1) —
-the single place this decode/version-check logic lives (CLAUDE.md "No
+the single place this decode/version-check logic lives (AGENTS.md "No
 duplicate implementations"), called both by this module's own
 `handle_call/3` wire clause and by every compiled actor's generated
 `handle_call/3` (`crates/beamtalk-codegen/src/core_erlang/gen_server/
@@ -3913,7 +4116,7 @@ do_announce_actor_lifecycle(EventClass, Fields) ->
             ok;
         _Pid ->
             try
-                beamtalk_announcements:system_announce(EventClass, Fields)
+                beamtalk_announcements:system_announce_running(EventClass, Fields)
             catch
                 _:_ -> ok
             end
@@ -4019,7 +4222,7 @@ leak path never surfaces as a watched-actor changed slot.
 changed_state_keys(OldState, NewState) ->
     InternalKeys = ['__methods__', beamtalk_tagged_map:class_key(), '__class_mod__'],
     AllKeys = lists:usort(maps:keys(OldState) ++ maps:keys(NewState)),
-    UserKeys = [K || K <- AllKeys -- InternalKeys, not is_local_temp_key(K)],
+    UserKeys = [K || K <- AllKeys -- InternalKeys, not beamtalk_tagged_map:is_local_temp_key(K)],
     [
         K
      || K <- UserKeys, maps:get(K, OldState, '__absent__') =/= maps:get(K, NewState, '__absent__')
@@ -4043,19 +4246,10 @@ case for a method that threads nothing.
 """.
 -spec strip_local_temps(map()) -> map().
 strip_local_temps(State) ->
-    case [K || K <- maps:keys(State), is_local_temp_key(K)] of
+    case [K || K <- maps:keys(State), beamtalk_tagged_map:is_local_temp_key(K)] of
         [] -> State;
         LocalKeys -> maps:without(LocalKeys, State)
     end.
-
--spec is_local_temp_key(term()) -> boolean().
-is_local_temp_key(Key) when is_atom(Key) ->
-    case atom_to_binary(Key, utf8) of
-        <<"__local__", _/binary>> -> true;
-        _ -> false
-    end;
-is_local_temp_key(_Key) ->
-    false.
 
 -doc """
 Construct a Self reference (#beamtalk_object{}) from the actor's state.
@@ -4315,6 +4509,12 @@ dispatch_via_hierarchy(Selector, Args, Self, State) ->
         {error, Error} ->
             {error, Error, State}
     catch
+        throw:Nlr when ?IS_NLR(Nlr) ->
+            %% BT-4593: the walk re-raises a `^` from an invoked method
+            %% instead of wrapping it. Relay it as the reply, exactly as
+            %% dispatch_user_method/4 does for an own method, so a `^` aimed
+            %% at a caller in another process never escapes handle_call.
+            {error, Nlr, State};
         exit:{noproc, _} ->
             %% Class registry not available (e.g., in unit tests without bootstrap)
             object_fallback(Selector, Args, Self, State, ClassName);
@@ -4424,7 +4624,7 @@ error (`generate_safe_dispatch`'s catch, `{Type, Reason, Stacktrace}`) as
 stale-block shape `maybe_remote_code_mismatch/3` already identifies for the
 hand-written `__methods__` dispatch path (`wrap_method_error/6`, ADR 0126
 §5.5) — reuses that one check rather than re-deriving the same badfun/undef
-identification a second time for generated dispatch (CLAUDE.md "No
+identification a second time for generated dispatch (AGENTS.md "No
 duplicate implementations"). `Args` is the dispatched method's own argument
 list, exactly as `wrap_method_error/6` receives it.
 
@@ -4819,7 +5019,7 @@ Spawn an actor under a cluster-globally registered name (arity 3, ADR 0126
 OTP `global` (`safe_spawn_named(global, ...)`) instead of the local process
 registry. Same reserved-name blocklist, same `#beamtalk_error{}` shapes —
 `spawn_named_scoped/4` is the single shared implementation behind both this
-and `'spawnAs'/3` (CLAUDE.md "No duplicate implementations").
+and `'spawnAs'/3` (AGENTS.md "No duplicate implementations").
 """.
 -spec 'spawnAsGlobal'(term(), term(), term()) -> {ok, pid()} | {error, term()}.
 'spawnAsGlobal'(Name, Module, Args) when is_atom(Name), is_atom(Module) ->
@@ -5860,7 +6060,7 @@ remote_spawn_with_target(ClassName, NameOrUndefined, WireInitArgs) ->
 
 -doc """
 Shared connect-policy-check + `erpc:call/5` + catch-mapping for
-`remote_spawn/4` and `remote_spawn_with/5` (CLAUDE.md "No duplicate
+`remote_spawn/4` and `remote_spawn_with/5` (AGENTS.md "No duplicate
 implementations") — the two differ only in which target function `erpc`
 invokes on the remote node and what, if anything, is computed (and may
 itself fail, e.g. `remote_spawn_with/5`'s wire-encode) as that target
@@ -6667,7 +6867,11 @@ stop_global_conflict_loser(Loser) ->
             gen_server:stop(Loser, {shutdown, global_name_conflict}, ?BT_REMOTE_CALL_TIMEOUT)
         catch
             _:_ ->
-                catch exit(Loser, kill)
+                try
+                    exit(Loser, kill)
+                catch
+                    _:_ -> ok
+                end
         end
     end),
     ok.

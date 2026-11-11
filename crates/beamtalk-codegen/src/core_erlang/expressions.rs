@@ -26,8 +26,8 @@ use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{
-    CascadeMessage, Expression, Identifier, Literal, MapPair, MessageSelector, SlotKind,
-    StringSegment,
+    CascadeMessage, ConstantValue, Expression, Identifier, Literal, MapPair, MessageSelector,
+    SlotKind, StringSegment,
 };
 use beamtalk_core::source_analysis::Span;
 
@@ -48,34 +48,56 @@ fn guarded_op_live_field_read_doc(field_name: &str) -> Document<'static> {
 }
 
 impl CoreErlangGenerator {
-    /// Generates code for a literal value.
+    /// Generates code for a literal value: the Core Erlang term a Beamtalk
+    /// literal is.
     ///
-    /// Maps Beamtalk literals to Core Erlang:
     /// - Integers: `42` → `42`
     /// - Floats: `3.14` → `3.14`
     /// - Strings: `"hello"` → tagged `{'beamtalk_string', #{#<104>(8,1,...), ...}#}` (BT-4170)
     /// - Symbols: `#foo` → atom `'foo'`
     /// - Characters: `$a` → integer `97`
     /// - Arrays: `[1, 2, 3]` → list `[1, 2, 3]`
-    #[allow(clippy::self_only_used_in_recursion)] // &self needed for method resolution
-    pub(super) fn generate_literal(&self, lit: &Literal) -> Result<Document<'static>> {
+    pub(super) fn literal_doc(lit: &Literal) -> Document<'static> {
         match lit {
-            Literal::Integer(n) => Ok(leaf::int_lit(*n)),
-            Literal::Float(f) => Ok(leaf::float_lit(*f)),
-            Literal::String(s) => Ok(leaf::tagged_string_lit(s)),
-            Literal::Symbol(s) => Ok(leaf::atom(s.to_string())),
-            Literal::Character(c) => Ok(leaf::int_lit(i64::from(*c as u32))),
+            Literal::Integer(n) => leaf::int_lit(*n),
+            Literal::Float(f) => leaf::float_lit(*f),
+            Literal::String(s) => leaf::tagged_string_lit(s),
+            Literal::Symbol(s) => leaf::atom(s.to_string()),
+            Literal::Character(c) => leaf::int_lit(i64::from(*c as u32)),
             Literal::List(elements) => {
                 let mut parts: Vec<Document<'static>> = vec![Document::Str("[")];
                 for (i, elem) in elements.iter().enumerate() {
                     if i > 0 {
                         parts.push(Document::Str(", "));
                     }
-                    parts.push(self.generate_literal(elem)?);
+                    parts.push(Self::literal_doc(elem));
                 }
                 parts.push(Document::Str("]"));
-                Ok(Document::Vec(parts))
+                Document::Vec(parts)
             }
+        }
+    }
+
+    /// The atom a reserved pseudo-variable (`true`, `false`, `nil`) is, or
+    /// `None` for any other name.
+    pub(super) fn pseudo_variable_doc(name: &str) -> Option<Document<'static>> {
+        match name {
+            "true" => Some(Document::Str("'true'")),
+            "false" => Some(Document::Str("'false'")),
+            "nil" => Some(Document::Str("'nil'")),
+            _ => None,
+        }
+    }
+
+    /// The Core Erlang term a constant method body is (BT-4363, BT-4504):
+    /// lowered exactly as the body's own literal or pseudo-variable is
+    /// ([`Self::literal_doc`], [`Self::pseudo_variable_doc`]), so a folded
+    /// send and the `constant_class_methods` row answer the term the method
+    /// itself returns.
+    pub(super) fn constant_value_doc(value: &ConstantValue) -> Document<'static> {
+        match value.as_literal() {
+            Ok(literal) => Self::literal_doc(&literal),
+            Err(name) => Self::pseudo_variable_doc(name).unwrap_or_else(|| leaf::atom(name)),
         }
     }
 
@@ -117,7 +139,8 @@ impl CoreErlangGenerator {
                 }
                 StringSegment::Interpolation(expr) => {
                     let expr_doc = self.expression_doc(expr)?;
-                    let (chain_prefix, reference) = self.interpolation_segment_chain(expr_doc);
+                    let (chain_prefix, reference) =
+                        self.interpolation_segment_chain(expr_doc, expr);
                     let_bindings.push(chain_prefix);
                     binary_parts.push(reference);
                 }
@@ -148,7 +171,7 @@ impl CoreErlangGenerator {
     /// One interpolation segment's `let`-chain prefix (value →
     /// `displayString` dispatch → `display_string`) and its binary-part
     /// reference — the two pieces every consumer needs, kept in one place
-    /// per CLAUDE.md's no-duplicate-implementations rule:
+    /// per AGENTS.md's no-duplicate-implementations rule:
     /// [`Self::generate_string_interpolation`]'s all-inline compile
     /// (`value_doc` from a fresh `self.expression_doc(expr)`) and
     /// [`Self::threaded_string_interpolation`]'s threaded one (`value_doc`
@@ -157,19 +180,34 @@ impl CoreErlangGenerator {
     /// like every other opaque `Statement`/preamble fragment this
     /// generator builds) so callers concatenate it directly ahead of
     /// whatever comes next.
+    ///
+    /// BT-4510: the `displayString` send is the same decision as a
+    /// user-written `expr displayString` ([`Self::typed_send_target`]): a
+    /// segment whose static type has a guarded direct route (`String`,
+    /// `Integer`, a tagged Value class, …) calls that class's `dispatch/3`
+    /// behind its guard; any other segment sends dynamically.
     fn interpolation_segment_chain(
         &mut self,
         value_doc: Document<'static>,
+        expr: &Expression,
     ) -> (Document<'static>, Document<'static>) {
         let interp_var = self.fresh_temp_var("interpExpr");
         let raw_str_var = self.fresh_temp_var("interpRaw");
         let str_var = self.fresh_temp_var("interpStr");
 
-        let display_string_call = self.annotate_current_send_call(docvec![
-            "call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(interp_var.clone()),
-            ", 'displayString', [])"
-        ]);
+        let display_string = MessageSelector::Unary("displayString".into());
+        let display_string_call = if let Ok(target) = self.typed_send_target(expr, &display_string)
+        {
+            self.guarded_send_on_vars(&target, "displayString", &interp_var, &[])
+        } else {
+            // BT-4596: the segment's `displayString` is a dynamic site.
+            self.report_dynamic_site(expr, &display_string);
+            self.annotate_current_send_call(docvec![
+                "call 'beamtalk_message_dispatch':'send'(",
+                leaf::var(interp_var.clone()),
+                ", 'displayString', [])"
+            ])
+        };
         // Evaluate the expression
         let prefix = docvec![
             "let ",
@@ -258,7 +296,8 @@ impl CoreErlangGenerator {
                     } else {
                         self.expression_doc(expr)?
                     };
-                    let (chain_prefix, reference) = self.interpolation_segment_chain(value_doc);
+                    let (chain_prefix, reference) =
+                        self.interpolation_segment_chain(value_doc, expr);
                     if i <= k {
                         prelude.push(ThreadedStmt::Statement(chain_prefix, span));
                     } else {
@@ -314,10 +353,10 @@ impl CoreErlangGenerator {
     ///    - **Repl context**: `State` from bindings
     pub(super) fn generate_identifier(&mut self, id: &Identifier) -> Result<Document<'static>> {
         // Handle special reserved identifiers as atoms
+        if let Some(atom) = Self::pseudo_variable_doc(id.name.as_str()) {
+            return Ok(atom);
+        }
         match id.name.as_str() {
-            "true" => Ok(Document::Str("'true'")),
-            "false" => Ok(Document::Str("'false'")),
-            "nil" => Ok(Document::Str("'nil'")),
             "self" => {
                 if self.lookup_var("self").is_none() && self.context == super::CodeGenContext::Repl
                 {
@@ -395,7 +434,7 @@ impl CoreErlangGenerator {
                             // `current_field_read_state_var` already applies
                             // the StateAcc-in-loop-body/hybrid-State*/BT-3562
                             // direct-params-capture rules — see its own doc
-                            // comment (CLAUDE.md: no duplicate "mirrors" of
+                            // comment (AGENTS.md: no duplicate "mirrors" of
                             // that same rule here).
                             self.actor_state_read_var(StateReadSite::ImplicitFieldRead, id.span)
                         }
@@ -603,7 +642,7 @@ impl CoreErlangGenerator {
     /// `call 'beamtalk_error':'raise'(...)` for the `'error'` (absent-key)
     /// arm of [`Self::generate_late_field_read`]. Reuses the shared
     /// `beamtalk_error:'new'` → `'with_selector'` → `'with_hint'` chain
-    /// (`errors.rs`) rather than hand-rolling it, per CLAUDE.md's
+    /// (`errors.rs`) rather than hand-rolling it, per AGENTS.md's
     /// no-duplicate-implementations rule.
     fn generate_uninitialized_state_raise(
         &mut self,
@@ -928,7 +967,7 @@ impl CoreErlangGenerator {
     /// `pub(super)`: also reused by `dispatch_codegen.rs`'s
     /// `generate_field_assignment_open` plain-`State` branch, the sibling
     /// "open" (non-last-position) mint site — same check, same reasoning, no
-    /// reason to hand-roll a second copy (CLAUDE.md's no-duplicate-implementations rule).
+    /// reason to hand-roll a second copy (AGENTS.md's no-duplicate-implementations rule).
     pub(super) fn check_simple_field_bind_invariant(
         &mut self,
         prefix: super::threaded_ir::VersionPrefix,
@@ -1069,6 +1108,7 @@ impl CoreErlangGenerator {
             messages,
             &self.peeled_parens,
             self.current_peel_scope(),
+            &self.current_pipeline_sends,
         );
         let messages: &[CascadeMessage] = augmented.as_deref().unwrap_or(messages);
 
@@ -1196,6 +1236,9 @@ impl CoreErlangGenerator {
                     _ => self.generate_cascade_args(arguments, &mut docs)?,
                 };
 
+            // BT-4596: every cascade message is a dynamic send, reported at
+            // its own line.
+            self.report_cascade_send(underlying_receiver, selector, msg_span);
             let mut send: Vec<Document<'static>> = vec![docvec![
                 "call 'beamtalk_message_dispatch':'send'(",
                 leaf::var(receiver_var.clone()),
@@ -1263,7 +1306,9 @@ impl CoreErlangGenerator {
             || beamtalk_core::source_analysis::Span::new(0, 0),
             beamtalk_core::ast::Expression::span,
         );
-        Ok(self.hoist_cascade_splits(splits, docs, span))
+        let exprs: Vec<&Expression> = arguments.iter().collect();
+        let racing = self.last_racing_operand(&exprs).is_some();
+        Ok(self.hoist_cascade_splits(splits, docs, span, racing))
     }
 
     /// Splits one cascade argument into its `(prelude, value)` pair through
@@ -1287,13 +1332,18 @@ impl CoreErlangGenerator {
     /// over already-split arguments: when any carries a prelude, every
     /// prelude is spliced into `docs` (plain values bound to fresh temps) so
     /// a `StateN` rebind stays in scope for later cascade messages.
+    ///
+    /// BT-4296: `racing` ([`Self::last_racing_operand`]) hoists them all too
+    /// when two or more operands may run code, since the list (or map) the
+    /// docs land in would otherwise evaluate them last-first.
     pub(super) fn hoist_cascade_splits(
         &mut self,
         splits: Vec<(Vec<ThreadedStmt>, Document<'static>)>,
         docs: &mut Vec<ThreadedStmt>,
         span: beamtalk_core::source_analysis::Span,
+        racing: bool,
     ) -> Vec<Document<'static>> {
-        let any_hoisted = splits.iter().any(|(prelude, _)| !prelude.is_empty());
+        let any_hoisted = racing || splits.iter().any(|(prelude, _)| !prelude.is_empty());
         if !any_hoisted {
             return splits.into_iter().map(|(_, doc)| doc).collect();
         }

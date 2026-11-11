@@ -337,7 +337,11 @@ run_git_in(Selector, Args, Dir) ->
                 beamtalk_exec_port:spawn_child(Port, ChildId, <<"git">>, Args, #{dir => Dir}),
                 collect(Selector, Port, ChildId)
             after
-                catch beamtalk_exec_port:close(Port),
+                try
+                    beamtalk_exec_port:close(Port)
+                catch
+                    _:_ -> ok
+                end,
                 %% Drain any trailing {Port, _} messages (e.g. the one-shot exec
                 %% binary's own {exit_status} delivered after the child's {exit},
                 %% or messages from a timed-out child) so they never linger in the

@@ -158,7 +158,7 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 ### Binary (`stdlib/src/binary.bt`)
 
 **Class:** `Binary` — superclass: `Collection` — `@sealed typed` ([ADR 0086](ADR/0086-string-subclass-of-binary.md))
-**Methods:** 22/22 implemented (100%)
+**Methods:** 23/23 implemented (100%)
 **Note:** Byte-level data and serialization. Parent of String. Maps to Erlang `binary()`.
 
 | Selector | Mechanism | Status | Notes |
@@ -171,6 +171,7 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 | `class fromBase64:` | pure BT (Erlang FFI) | ✅ | Decode a standard (RFC 4648 §4) base64 string |
 | `class fromBase64Url:` | pure BT (Erlang FFI) | ✅ | Decode a URL-safe (RFC 4648 §5) base64 string |
 | `class fromHex:` | pure BT (Erlang FFI) | ✅ | Decode a hexadecimal string |
+| `class empty` | pure BT | ✅ | Canonical empty binary (BT-4544; `Binary fromBytes: #()`) |
 | `size` | @primitive selector | ✅ | Byte count |
 | `bitSize` | native delegate | ✅ | Bit count (8 × byte count); shared with `Bitstring` (ADR 0141) |
 | `do:` | @primitive selector | ✅ | Iterate bytes |
@@ -231,7 +232,7 @@ _Note:_ `new` and `new:` have moved to `Value` (see below). Object subclasses wi
 ### Integer (`stdlib/src/integer.bt`)
 
 **Class:** `Integer` — superclass: `Number` — `@sealed`
-**Methods:** 55/55 implemented (100%)
+**Methods:** 56/56 implemented (100%)
 **Note:** `**` is Integer-only (see [Pharo Comparison](#pharo-comparison-notable-gaps) below) — `Float` has the
 equivalent `raisedTo:` but no separate `**` operator.
 
@@ -292,11 +293,12 @@ equivalent `raisedTo:` but no separate `**` operator.
 | `log10` | @primitive selector | ✅ | `Number>>log` (base 10) |
 | `exp` | @primitive selector | ✅ | `Number>>exp` |
 | `raisedTo:` | @primitive selector | ✅ | `Number>>raisedTo:` |
+| `class parse:radix:` | @primitive selector | ✅ | `Integer` parse (BT-4544; `Result`-based counterpart to `String>>asIntegerRadix:`, accepts `String` or `Binary`) |
 
 ### String (`stdlib/src/string.bt`)
 
 **Class:** `String` — superclass: `Binary` — `@sealed` ([ADR 0086](ADR/0086-string-subclass-of-binary.md))
-**Methods:** 69/69 implemented (100%)
+**Methods:** 70/70 implemented (100%)
 **Correction (BT-2976):** the real selector for substring search is `includesSubstring:`, and the real selector
 for grapheme iteration is `do:` (`each:`/`includes:` were internal `@primitive` dispatch-table tag strings in
 the source, not the public Beamtalk selector — the previous revision of this table listed the internal tag as
@@ -352,6 +354,7 @@ if it were the callable method name).
 | `isDigit` | @primitive selector | ✅ | `String>>isAllDigits` |
 | `isAlpha` | @primitive selector | ✅ | `String>>isAllLetters` |
 | `asInteger` | @primitive selector | ✅ | `String>>asInteger` |
+| `asIntegerRadix:` | @primitive selector | ✅ | Radix-aware parse, raising (BT-4544; `Result` variant: `Integer parse:radix:`) |
 | `asFloat` | @primitive selector | ✅ | `String>>asFloat` |
 | `asAtom` | @primitive selector | ✅ | N/A (BEAM-specific) |
 | `asList` | @primitive selector | ✅ | `String>>asArray` |
@@ -1047,6 +1050,7 @@ The following stdlib `.bt` classes exist but have not yet received a full method
 | `Time` | `Object` | `time.bt` | Time operations |
 | `TimeoutProxy` | `Object` | `timeout_proxy.bt` | Timeout wrapper |
 | `Timer` | `Object` | `timer.bt` | Timer operations |
+| `Tls` | `Object` | `tls.bt` | Secure-default TLS client options builder (BT-4551) |
 | `Tracing` | `Object` | `tracing.bt` | Actor observability |
 | `Transcript` | `Object` | `transcript.bt` | Class-side facade: the REPL's shared log; Logger elsewhere (ADR 0129 §5) |
 | `TranscriptStream` | `Actor` | `transcript_stream.bt` | Workspace-internal transcript buffer and subscribers behind `Transcript` |

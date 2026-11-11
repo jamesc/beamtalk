@@ -5,7 +5,7 @@
 // `late`-slot validation suite this issue's acceptance criteria names.
 //
 // Most of the ground this file's acceptance criteria lists is already
-// covered, one BUnit file per landed issue (CLAUDE.md's no-duplicate-
+// covered, one BUnit file per landed issue (AGENTS.md's no-duplicate-
 // implementations rule — a second copy of an existing assertion is not
 // "more coverage"):
 //   - read/raise (absent, injected `nil`), assign then read, the

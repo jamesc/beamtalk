@@ -167,6 +167,61 @@ TestCase subclass: ActorClosureCellTest
     self assert: c performedCleanupInALoopAfterReturn equals: 2
     self assert: c n equals: 2
 
+  // ADR 0146 (BT-4535, fixes BT-4459): a block this actor created, run by
+  // another actor, returns here with its creation-time capture. The method
+  // commits the cell, so the write made after the block's creation is kept.
+  testAwayBlocksReturnKeepsTheOwnersWritesSinceItsCreation =>
+    a := ClosureCellOwner spawn
+    b := ClosureCellOwner spawn
+    self assert: (a run: b) equals: 1
+    self assert: a n equals: 5
+    // The `^` leaves `b`'s callback by a throw, so `b` keeps its entry state.
+    self assert: b n equals: 0
+
+  // The same through a `perform:`ed `ensure:` in the owner: the write after
+  // the block's creation, then the cleanup's.
+  testAwayBlocksReturnThroughAPerformedEnsureKeepsBothWrites =>
+    a := ClosureCellOwner spawn
+    b := ClosureCellOwner spawn
+    self assert: (a runThroughPerformedEnsure: b) equals: 1
+    self assert: a n equals: 6
+    self assert: b n equals: 0
+
+  // A foreign `^` through another method's inlined `ensure: [self.n := 40]`:
+  // the cleanup stored its write to the cell (ADR 0146 R1) and the method
+  // commits the cell.
+  testForeignReturnThroughAnInlinedEnsureCommitsTheCleanupsWrite =>
+    a := ClosureCellOwner spawn
+    self assert: a foreignReturnThroughEnsure equals: 3
+    self assert: a n equals: 40
+
+  // BT-4598: an `ensure:` whose relay and foreign clause share one compiled
+  // cleanup keeps the cleanup's write for its own `^` and a foreign one.
+  testOwnAndForeignReturnsThroughOneEnsureKeepTheCleanupsWrite =>
+    a := ClosureCellOwner spawn
+    self assert: a ownReturnThroughSharedEnsure equals: 5
+    self assert: a n equals: 10
+    self assert: a foreignReturnThroughSharedEnsure equals: 3
+    self assert: a n equals: 20
+
+  // ADR 0146 R1 (BT-4534): a `^` from a block passed to another method of
+  // the same actor unwinds through that method's inlined `ensure:`; the
+  // cleanup's write is in the cell while the `^` is in flight, so the
+  // owner's own cleanup reads it, and the owner commits it (BT-4535).
+  testForeignReturnLeavesTheCleanupsWriteInTheCell =>
+    c := ClosureCellEnsure spawn
+    rec := ClosureCellRecorder spawn
+    self assert: (c foreignReturnThroughEnsure: rec) equals: 3
+    self assert: rec last equals: 40
+    self assert: c n equals: 40
+
+  testForeignReturnLeavesTheCleanupsWriteAfterACallInTheCell =>
+    c := ClosureCellEnsure spawn
+    rec := ClosureCellRecorder spawn
+    self assert: (c foreignReturnThroughEnsureAfterACall: rec) equals: 3
+    self assert: rec last equals: 41
+    self assert: c n equals: 41
+
   testEnsureCleanupSeesTheBodysLexicalWritesAfterAnError =>
     c := ClosureCellEnsure spawn
     rec := ClosureCellRecorder spawn
@@ -296,6 +351,27 @@ TestCase subclass: ActorClosureCellTest
     // The `^` leaves `b`'s callback by a throw, so `b` keeps its entry state.
     self assert: b n equals: 0
     self assert: a n equals: 0
+
+  // BT-4536: an away `super` to a method whose own `^` runs a writing
+  // `ensure:` cleanup. The `^` carries the cleanup's write to the method's
+  // boundary, whose commit answers it away, so the `super` send's
+  // illegal-write check sees the write and raises.
+  testAwaySuperReturnThroughAWritingEnsureRaises =>
+    a := ClosureCellSuperChild spawn
+    b := ClosureCellSuperChild spawn
+    self should: [
+      b runBlock: a writingEnsureBlock
+    ] raise: #actor_state_unreachable
+    self assert: a n equals: 0
+    self assert: b n equals: 0
+
+  // The control: a cleanup that writes nothing returns the `^`'s value.
+  testAwaySuperReturnThroughAQuietEnsureAnswers =>
+    a := ClosureCellSuperChild spawn
+    b := ClosureCellSuperChild spawn
+    self assert: (b runBlock: a quietEnsureBlock) equals: 1
+    self assert: a n equals: 0
+    self assert: b n equals: 0
 
   // A self-send from a host block running inside an away `super` cannot be
   // served (the host's callback is blocked in that call): it raises

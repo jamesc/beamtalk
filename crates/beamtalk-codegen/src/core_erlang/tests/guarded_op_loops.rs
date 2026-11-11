@@ -98,11 +98,13 @@ fn do_loop_with_guarded_op_brackets() {
     // woven into the exit pack.
     assert_eq!(stores(&out), 2, "stores:\n{out}");
     assert_eq!(takes(&out), 1, "takes:\n{out}");
-    // The loop keeps its tuple-accumulator parameters (a tuple seed, not a
-    // packed `StateAcc` map).
+    // The loop keeps its accumulator parameters (a bare seed, not a packed
+    // `StateAcc` map).
     assert!(
-        out.contains("call 'lists':'foldl'(") && out.contains("{Acc@}"),
-        "tuple-acc foldl kept:\n{out}"
+        out.contains("call 'lists':'foldl'(")
+            && out.contains(", Acc@, ")
+            && !out.contains("{Acc@}"),
+        "bare-acc foldl kept:\n{out}"
     );
 }
 
@@ -127,8 +129,8 @@ fn numeric_loop_keeps_direct_params() {
     ));
     assert_eq!(takes(&out), 1, "takes:\n{out}");
     assert!(
-        out.contains("{Acc@}"),
-        "tuple-accumulator seed kept:\n{out}"
+        out.contains(", Acc@, ") && !out.contains("{Acc@}"),
+        "bare-accumulator seed kept (no tuple, no map threading):\n{out}"
     );
     assert_eq!(brackets(&out), 0, "no per-operator bracket:\n{out}");
 }

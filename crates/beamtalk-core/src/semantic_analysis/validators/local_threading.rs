@@ -118,8 +118,8 @@ impl fmt::Display for MethodContext {
 /// places.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConstructKind {
-    /// `whileTrue:`, `whileFalse:`, `repeat` and the unary `whileTrue`/
-    /// `whileFalse`.
+    /// `whileTrue:`, `whileFalse:` and the unary `whileTrue`/`whileFalse`
+    /// (a literal `repeat` is canonicalised to `whileTrue:`, BT-4589).
     Loop,
     /// `to:do:`, `to:by:do:`, `timesRepeat:` and the unary `timesRepeat`.
     CountedLoop,
@@ -167,8 +167,10 @@ impl ConstructKind {
     fn of(selector: &str, handler_writes: bool) -> Self {
         use crate::state_threading_selectors::{is_exception_selector, is_try_do_selector};
         match selector {
-            "whileTrue:" | "whileFalse:" | "whileTrue" | "whileFalse" | "repeat" => Self::Loop,
-            "to:do:" | "to:by:do:" | "timesRepeat:" | "timesRepeat" => Self::CountedLoop,
+            // The unary loops reach here as the keyword loops they are
+            // canonicalised to (`ast::normalize`, BT-4313, BT-4603).
+            "whileTrue:" | "whileFalse:" => Self::Loop,
+            "to:do:" | "to:by:do:" | "timesRepeat:" => Self::CountedLoop,
             "do:" => Self::Do,
             "keysAndValuesDo:" | "doWithKey:" => Self::KeyedDo,
             "anySatisfy:" | "allSatisfy:" => Self::Satisfy,
@@ -1406,9 +1408,13 @@ enum Escape {
     /// An argument of an Erlang FFI send (`Erlang <module> <selector>`): the
     /// block is handed to Erlang as a plain fun (BT-3917).
     Ffi(EcoString, EcoString),
-    /// An argument or the receiver of a cascade message: a cascade sends every
-    /// message through ordinary dispatch.
+    /// An argument of a cascade message: a cascade sends every message
+    /// through ordinary dispatch.
     Cascade(EcoString),
+    /// The shared receiver of a cascade, named by its first message as
+    /// written (BT-4603: `[...] whileTrue; yourself`, not the `whileTrue:` it
+    /// is canonicalised to).
+    CascadeReceiver(EcoString),
     /// The receiver of this selector, which does not run its receiver block in
     /// place.
     Receiver(EcoString),
@@ -1416,9 +1422,10 @@ enum Escape {
     /// is not a block literal: the compiler runs its literal block as a closure
     /// (BT-4430, `block_facts::exception_send_inlined`).
     ExceptionNotInlined(EcoString),
-    /// The condition of a `whileTrue:`/`whileFalse:` whose loop does not
-    /// thread a condition write here (BT-3782).
-    Condition(EcoString),
+    /// The condition of a `whileTrue:`/`whileFalse:` whose body is not a block
+    /// literal: the loop runs its condition as a closure in every context
+    /// (BT-4062, `block_facts::while_body_block`).
+    ConditionBodyNotLiteral(EcoString),
 }
 
 impl Escape {
@@ -1451,15 +1458,15 @@ impl Escape {
             Self::Ffi(module, selector) => {
                 format!("passed to Erlang `{module}` `{selector}`, which calls it as a plain fun")
             }
-            Self::Cascade(selector) => format!(
+            Self::Cascade(selector) | Self::CascadeReceiver(selector) => format!(
                 "sent in a cascade (`{selector}`), which the compiler does not thread it through"
             ),
             Self::Receiver(selector) => format!(
                 "sent `{selector}`, which is not a construct the compiler threads it through"
             ),
-            Self::Condition(selector) => format!(
-                "used as the condition of `{selector}`, which does not thread an assignment in \
-                 its condition here"
+            Self::ConditionBodyNotLiteral(selector) => format!(
+                "used as the condition of a `{selector}` whose body is not a block literal, \
+                 which the compiler runs as a closure and does not thread it through"
             ),
             Self::ExceptionNotInlined(selector) => format!(
                 "of an `{selector}` whose blocks are not all written in place, which the compiler \
@@ -1505,13 +1512,13 @@ impl Escape {
                  or return the new value from the block and use the Erlang call's result \
                  (`rs := Erlang lists map: [:e | ... {name} + e] with: xs`)"
             ),
-            Self::Receiver(selector) => format!(
+            Self::Receiver(selector) | Self::CascadeReceiver(selector) => format!(
                 "return the new value from the block and assign it where it is called: \
                  `{name} := [... {name} + 1] {selector}`"
             ),
-            Self::Condition(selector) => format!(
-                "assign `{name}` in the loop body instead: `[{name} < limit] {selector} [{name} := \
-                 {name} + 1]`"
+            Self::ConditionBodyNotLiteral(selector) => format!(
+                "write the loop body directly, wrapping a block value in a literal \
+                 (`[...] {selector} [body value]`), or assign `{name}` in a literal loop body"
             ),
             Self::ExceptionNotInlined(selector) => format!(
                 "write both blocks of the `{selector}` directly, wrapping a block value in a \
@@ -2019,7 +2026,12 @@ impl<'d> Walker<'d> {
                     // selector.
                     // The shared receiver is evaluated once: check it once.
                     if let Expression::Block(block) = shared.unwrap_parens() {
-                        self.report_literal(block, &Escape::Cascade(selector.name()));
+                        self.report_literal(
+                            block,
+                            &Escape::CascadeReceiver(crate::ast::normalize::selector_as_written(
+                                shared, selector, arguments,
+                            )),
+                        );
                     }
                     self.check_send(shared, selector, arguments, false, false, false);
                     for msg in messages {
@@ -2597,11 +2609,14 @@ impl<'d> Walker<'d> {
         {
             return;
         }
-        let hint = Self::construct_hint(&selector, position, &first.name);
+        // A canonicalised loop (`repeat`, a unary `whileTrue`) is named as
+        // written (BT-4589).
+        let written = construct.written_selector.clone();
+        let hint = Self::construct_hint(&written, position, &first.name);
         self.diagnostics.push(
             Diagnostic::error(
                 format!(
-                    "`{selector}` writes outer local `{name}`, but as {position} in {context} \
+                    "`{written}` writes outer local `{name}`, but as {position} in {context} \
                      the write is not threaded back (BT-3913)",
                     name = first.name,
                     context = self.context,
@@ -2743,15 +2758,26 @@ impl<'d> Walker<'d> {
         // receiver once itself, so `inlined: false` skips it here.
         if inlined {
             match receiver {
-                // BT-3782: a `whileTrue:`/`whileFalse:` CONDITION block has a
-                // return channel only where codegen lowers it through the
-                // loop's `StateAcc` (`while_loop_threads`).
+                // BT-4062: a `whileTrue:`/`whileFalse:` whose body is not a
+                // block literal takes codegen's simple lowering in every
+                // context (the REPL included), whose condition is a plain
+                // closure: its write is lost (the loop never ends) or, as a
+                // Tier 2 block, applied with the wrong arity.
                 Expression::Block(block)
-                    if matches!(sel.as_str(), "whileTrue:" | "whileFalse:")
-                        && !self.while_condition_threads(block, arguments) =>
+                    if crate::semantic_analysis::block_facts::while_condition_threads(
+                        &sel, arguments,
+                    ) == Some(false) =>
                 {
-                    self.report_literal(block, &Escape::Condition(sel.clone()));
+                    self.report_literal(block, &Escape::ConditionBodyNotLiteral(sel.clone()));
                 }
+                // BT-4602: with a literal body a `whileTrue:`/`whileFalse:`
+                // CONDITION block threads its outer-local writes in every
+                // context, the unary `[...] whileTrue` (canonicalised to
+                // `whileTrue: []`, BT-4313) included: codegen carries them in
+                // the loop's `StateAcc` (BT-4015,
+                // `while_condition_has_carried_effects`), and the verifier's
+                // `ConditionFamilyNotCarried` fails a loop that drops one
+                // (`while_condition_binding_corpus.rs`).
                 // BT-3884: a block literal sent a `value`-family selector of
                 // another arity (`[t := t + 1] value: 1`) is applied, never
                 // inlined ([`block_literal_of_other_arity`]): the send raises
@@ -2800,7 +2826,10 @@ impl<'d> Walker<'d> {
         } else if inlined {
             self.passed_escape(receiver, &sel)
         } else {
-            Escape::Cascade(sel.clone())
+            // A canonicalised loop is named as written (BT-4589).
+            Escape::Cascade(crate::ast::normalize::selector_as_written(
+                receiver, selector, arguments,
+            ))
         };
         for (index, arg) in arguments.iter().enumerate() {
             if matches!(arg, Expression::Block(_))
@@ -2915,27 +2944,6 @@ impl<'d> Walker<'d> {
                 ))
                 .with_category(DiagnosticCategory::UnthreadedLocalWrite),
             );
-        }
-    }
-
-    /// Whether codegen threads an outer-local write in the condition block of
-    /// a keyword `whileTrue:`/`whileFalse:` (BT-3782): the shared leaf
-    /// [`while_condition_writes_thread`](crate::semantic_analysis::block_facts::while_condition_writes_thread),
-    /// whose condition half is the predicate codegen's loop gates call
-    /// (BT-3845). Every other condition is compiled as a Tier 2 closure that
-    /// is called with the wrong arity, or as a plain block body whose write
-    /// is never packed (the loop hangs); a top-level expression is left to
-    /// the REPL's own handling.
-    fn while_condition_threads(&self, cond: &Block, arguments: &[Expression]) -> bool {
-        match self.context {
-            Repl => true,
-            Class | ValueType | Actor => {
-                crate::semantic_analysis::block_facts::while_condition_writes_thread(
-                    cond,
-                    arguments.first(),
-                    self.context == Class,
-                )
-            }
         }
     }
 
@@ -3140,10 +3148,12 @@ fn is_section1_selector(selector: &str) -> bool {
 
 /// Whether a block literal *receiver* of `selector` is inlined: a block
 /// `value` send, a loop's condition, or a protected body. A keyword
-/// `whileTrue:`/`whileFalse:` condition is narrowed first by
-/// `while_condition_threads` (BT-3782).
+/// `whileTrue:`/`whileFalse:` condition is narrowed first to a loop whose body
+/// is a block literal (BT-4062, `Escape::ConditionBodyNotLiteral`); with one,
+/// its writes thread in every context (BT-4602). A unary `[...] whileTrue` or
+/// `[...] repeat` is that keyword loop once normalised; a unary loop sent to a
+/// literal block with parameters stays an ordinary send (BT-4603).
 fn receiver_has_channel(selector: &str) -> bool {
     crate::state_threading_selectors::is_state_threaded_block_receiver(selector)
-        || crate::state_threading_selectors::is_state_threading_unary_selector(selector)
-        || matches!(selector, "whileTrue:" | "whileFalse:" | "repeat")
+        || matches!(selector, "whileTrue:" | "whileFalse:")
 }

@@ -156,8 +156,11 @@ keys (the same per-class map), so a `class signal:` override, a class-side
 extension, a runtime fun or a reload of the class or an ancestor takes it away.
 
 BT-4363: a class-literal send of a class-side method whose whole body is one
-integer literal (`Errors protocolError` with `class protocolError => 1`) is
-keyed `{constant_value, Value, Module, FunName, Tag}`. Its hit path answers
+scalar literal (`Errors protocolError` with `class protocolError => 1`; since
+BT-4504 any of integer, float, string, symbol, character, `nil`, `true`,
+`false`) is keyed `{constant_value, Value, Module, FunName, Tag}`, `Value`
+being the term the literal compiles to
+(`beamtalk_class_metadata:constant_value()`). Its hit path answers
 `Value` in place instead of calling `Module:FunName`. Besides the four facts
 above, the key needs the body to be exactly that literal: the class's metadata
 row maps the selector to `Value` (`constant_class_methods`, published from the
@@ -191,7 +194,8 @@ the class's tag lock, records the tag in the per-tag index
 added (a target already present is never rewritten). Every erase of the
 class's derived key (`erase_direct_flag/1`: `set/2`, `set_class_vars/2`,
 `invalidate/1`, and through `invalidate/1` an ancestor's write) also erases
-the class's per-class static call key, unconditionally (it may outlive a
+the class's per-class static call key (as does an ancestor gaining or losing a
+class-side extension, `invalidate_descendants_of_tag/1`, BT-4307), unconditionally (it may outlive a
 derived key another path erased), so every target is gone wherever the
 dynamic answer could change. Targets are never erased one at a time: any
 write that could change one class's answer erases the whole map, and the next
@@ -256,6 +260,7 @@ actual transitions write (set when unset, erase when set); both are rare
     is_direct_flag_set/1,
     direct_flag_value/1,
     invalidate/1,
+    invalidate_descendants_of_tag/1,
     erase_all_static_call_keys/0,
     set_class_vars/2,
     mark_ready/0,
@@ -286,11 +291,11 @@ actual transitions write (set when unset, erase when set); both are rare
 %% (BT-4270).
 %% `{constant_value, Value, Module, FunName, Tag}` keys a class-literal send
 %% that answers `Value` in place while `Module:FunName`'s body is still exactly
-%% that integer literal (BT-4363).
+%% that literal (BT-4363; any scalar literal kind since BT-4504).
 -type static_call_key() ::
     {module(), atom(), atom()}
     | {caller_safe_raise, atom(), module(), atom(), atom()}
-    | {constant_value, integer(), module(), atom(), atom()}.
+    | {constant_value, beamtalk_class_metadata:constant_value(), module(), atom(), atom()}.
 -export_type([kind/0, derived/0, static_call_key/0]).
 
 -spec key(kind(), atom()) -> {beamtalk_class_shadow, kind(), atom()}.
@@ -330,6 +335,12 @@ class_tag(class_vars, Name) -> beamtalk_class_registry:class_object_tag(Name).
 -spec erase_direct_flag(atom()) -> ok.
 erase_direct_flag(Tag) ->
     erase_if_present(Tag),
+    erase_static_calls(Tag).
+
+%% Erase the class's per-class static call key (BT-4442) and forget its tag in
+%% the index. Runs only under the tag lock.
+-spec erase_static_calls(atom()) -> ok.
+erase_static_calls(Tag) ->
     %% No atom, no key: a class no call site ever warmed creates no atom here.
     try binary_to_existing_atom(static_calls_key_name(Tag)) of
         StaticCallsKey -> erase_if_present(StaticCallsKey)
@@ -394,6 +405,44 @@ called from inside `with_tag_lock/2`.
 invalidate(ClassName) ->
     erase_class_flag(ClassName),
     erase_descendant_flags(ClassName).
+
+-doc """
+Erase the static call keys of every descendant of the class tagged `Tag`, each
+under its own tag lock (BT-4307). Called by `beamtalk_extensions:register/5`
+and `unregister/3` when a class-side extension row under `Tag` appears or goes
+away, after the row is written and the derived-fact cache is flushed: an
+ancestor's class-side extension counts as that ancestor's method for a send
+to a descendant, so it can change the descendant's in-caller owner
+(`beamtalk_class_dispatch:in_caller_owner/2`), and with it whether a static
+call key whose owner is inherited (BT-4270's caller-safe raise) may stay
+installed. A key for a method the descendant defines itself cannot change
+(its own method is found before an ancestor's extension), but the whole
+per-class map goes, as every eraser does. The descendant's derived flag stays:
+it reads only the class's own shadows and its chain's class variables, never
+an ancestor's extension. The class's own keys are erased by `set/2` already.
+
+Erase-after-write, as `invalidate/1` is for descendants: between the row
+write and the erase, a descendant's warmed static call may still take its old
+key once. The lock is taken for each descendant even when it has no key, for
+the reason `invalidate/1` gives (an install in flight may have validated
+before the write and not have put yet). A tag that names no loaded class, or
+a class with no descendants, erases nothing. Must never be called from inside
+`with_tag_lock/2`.
+""".
+-spec invalidate_descendants_of_tag(atom()) -> ok.
+invalidate_descendants_of_tag(Tag) ->
+    case beamtalk_primitive:class_name_from_tag(Tag) of
+        undefined ->
+            ok;
+        ClassName ->
+            lists:foreach(
+                fun(Descendant) ->
+                    DescendantTag = beamtalk_class_registry:class_object_tag(Descendant),
+                    with_tag_lock(DescendantTag, fun() -> erase_static_calls(DescendantTag) end)
+                end,
+                beamtalk_class_registry:all_subclasses(ClassName)
+            )
+    end.
 
 -doc """
 Erase every class's derived key and static call keys, each under its tag lock
@@ -677,7 +726,7 @@ static_call_ref(Key, ClassName, Selector, Arity) ->
             case
                 runs_compiled_function(ClassName, DefiningClass, Selector) andalso
                     erlang:function_exported(Module, FunName, Arity) andalso
-                    key_body_holds(Key, ClassName, Module, Selector)
+                    key_body_holds(Key, ClassName, DefiningClass, Selector)
             of
                 true -> #beamtalk_object{class = Tag, class_mod = ClassModule, pid = Pid};
                 false -> false
@@ -692,8 +741,8 @@ key_target({caller_safe_raise, Primitive, Module, FunName, Tag}) when
     is_atom(Primitive), is_atom(Module), is_atom(FunName), is_atom(Tag)
 ->
     {Module, FunName, Tag};
-key_target({constant_value, Value, Module, FunName, Tag}) when
-    is_integer(Value), is_atom(Module), is_atom(FunName), is_atom(Tag)
+key_target({constant_value, _Value, Module, FunName, Tag}) when
+    is_atom(Module), is_atom(FunName), is_atom(Tag)
 ->
     {Module, FunName, Tag};
 key_target({Module, FunName, Tag}) when is_atom(Module), is_atom(FunName), is_atom(Tag) ->
@@ -702,25 +751,24 @@ key_target({Module, FunName, Tag}) when is_atom(Module), is_atom(FunName), is_at
 %% BT-4270: a caller-safe raise key's hit path does not call `Module:FunName`;
 %% it raises in the caller through `Primitive`, as that method's body would.
 %% So the key also needs the body to be exactly that primitive, which the
-%% defining module's own generated metadata says
-%% (`'caller_safe_class_primitives' => #{Selector => Primitive}`, decided by
-%% the compiler from the method source). Read at install only, from the code
-%% current then: a reload that changes the body publishes its metadata write
-%% and then erases the key, and any install after the erase reads the new
-%% code's metadata.
--spec key_body_holds(static_call_key(), atom(), module(), atom()) -> boolean().
-key_body_holds({caller_safe_raise, Primitive, _, _, _}, _ClassName, Module, Selector) ->
-    %% bt-catcher-audit: not-applicable-no-block - a generated __beamtalk_meta/0 getter
-    try Module:'__beamtalk_meta'() of
-        #{caller_safe_class_primitives := #{Selector := Primitive}} -> true;
+%% defining class's published metadata row says (`caller_safe_class_primitives`,
+%% decided by the compiler from the method source). BT-4493: read from the
+%% row, not from `Module:'__beamtalk_meta'()`: a reload erases keys inside the
+%% new module's `-on_load`, while the old code is still current, so the
+%% module's meta would certify the old body. The row is written from the new
+%% meta, and a change erases the keys (descendants' included).
+-spec key_body_holds(static_call_key(), atom(), atom(), atom()) -> boolean().
+key_body_holds({caller_safe_raise, Primitive, _, _, _}, _ClassName, DefiningClass, Selector) ->
+    case
+        maps:find(Selector, beamtalk_class_metadata:lookup_caller_safe_primitives(DefiningClass))
+    of
+        {ok, Primitive} -> true;
         _ -> false
-    catch
-        error:undef -> false
     end;
-key_body_holds({constant_value, Value, _, _, _}, ClassName, _Module, Selector) ->
+key_body_holds({constant_value, Value, _, _, _}, ClassName, _DefiningClass, Selector) ->
     %% BT-4363: the hit path answers `Value` without calling the method, so
-    %% the body must be exactly that integer literal, as the class's published
-    %% metadata row says (`constant_class_methods`, generated from the method
+    %% the body must be exactly that literal (any scalar kind, BT-4504), as
+    %% the class's published metadata row says (`constant_class_methods`, generated from the method
     %% source; the key's own class defines it, the owner check above holds).
     %% Read from the row, not from `Module:'__beamtalk_meta'()`: a reload
     %% erases this class's keys inside the new module's `-on_load`, while the
@@ -728,7 +776,7 @@ key_body_holds({constant_value, Value, _, _, _}, ClassName, _Module, Selector) -
     %% old literal and outlive the reload. The reload publishes the row from
     %% the new meta and erases again on a change
     %% (`beamtalk_class_metadata:put_constant_class_methods/2`). `=:=`: `1`
-    %% never certifies `1.0`.
+    %% never certifies `1.0`, nor `$a` (97) a float `97.0`.
     case maps:find(Selector, beamtalk_class_metadata:lookup_constant_class_methods(ClassName)) of
         {ok, Certified} -> Certified =:= Value;
         error -> false

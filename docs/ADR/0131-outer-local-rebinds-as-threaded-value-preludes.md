@@ -40,7 +40,7 @@ Every phase above is merged and the user-facing behaviour is documented in `beam
 What remains, in priority order, verified against the code on `main` at the time of writing:
 
 1. **[BT-3841](https://linear.app/beamtalk/issue/BT-3841) (Done, closed as duplicate of [BT-3913](https://linear.app/beamtalk/issue/BT-3913)): the Phase 0 position diagnostic is retired.** It was `DENY_SET`/`ALLOW_SET` in `crates/beamtalk-core/src/semantic_analysis/validators/local_threading.rs`, category `UnmigratedLocalThreading`. ADR 0133 Phase 3 lowered every remaining statement shape through frames; the 733-shape oracle reports zero silent drops and zero `erlc` failures (statement probes 6124 right / 0 wrong / 18 `erlc`, the 18 rejected by the permanent `whileTrue:`/`whileFalse:` condition check). Every statement is now accepted; at operand positions only producer sites are. Phase 5a ([BT-3751](https://linear.app/beamtalk/issue/BT-3751)) bypassed it and ran every shape it rejects on a BEAM: of 733 measured statement shapes, 552 silently answer wrong, 43 fail `erlc`, and 138 answer right (rejected only because the table's rows are coarser than the measurement). Deleting it would turn compile errors into silent wrong answers, so it stays; BT-3841 retires it as the items below make the remaining shapes producers. The Phase 5a table row's "drop the diagnostic" is therefore BT-3841's work, not Phase 5a's. The §6 diagnostic (a Tier 2 block with no return channel) is permanent and is not part of this.
-2. **[BT-3833](https://linear.app/beamtalk/issue/BT-3833): three legacy write-back paths are still alive**: the `push_control_flow_threaded_var_rereads`/`rebind_threaded_vars_from_state` pair for a conditional arm that is not a producer but whose nested loop writes an arm-local; `lower_foldl_body`'s write-back for a non-producer nested list-op that writes a local; and the control-flow-with-mutations guard in `try_generate_block_local_plain_let`. The "delete the remaining write-back paths" goal of Phases 3b and 3c is therefore only partly met.
+2. **[BT-3833](https://linear.app/beamtalk/issue/BT-3833) (Done, [BT-4462](https://linear.app/beamtalk/issue/BT-4462)): the three legacy write-back paths are gone.** They were the `push_control_flow_threaded_var_rereads`/`rebind_threaded_vars_from_state` pair for a conditional arm that is not a producer but whose nested loop writes an arm-local; `lower_foldl_body`'s write-back for a non-producer nested list-op that writes a local; and the control-flow-with-mutations guard in `try_generate_block_local_plain_let`, which fed that write-back. Once [BT-4460](https://linear.app/beamtalk/issue/BT-4460) made every arm frame register every producer and [BT-4461](https://linear.app/beamtalk/issue/BT-4461) did the same for REPL frames, an instrumented probe found the rereads reached only by fault-injection tests, and BT-4462 deleted both helpers. A construct an arm or fold body still compiles in place (its `{Value, State}` carrier unwrapped by an opaque `element(2, ...)`) is one that threads no local; one that does is a `ThreadedStmt::ConstructLocalsInPlace` marker that renders nothing and that the verifier reports as `ConstructLocalsNotRebound`. The plain-let guard stays as an unwrap only: it sends a non-producer construct that threads no local (an actor list-op that only sends to `self`) to the C3b unwrap, and no longer to a reread of other locals.
 3. **[BT-3839](https://linear.app/beamtalk/issue/BT-3839)** (done): a `Dictionary` lookup whose handler writes an outer local is a producer in a loop or fold body in class, value-type and actor methods (`keys do: [:k | d at: k ifAbsent: [misses := misses + 1. 0]]`), under the same site rule as a conditional (an actor fold body's value-bearing sites stay errors, `is_actor_fold_value_site`). A lookup inside a closure that is not inlined keeps its §6 error ([BT-3862](https://linear.app/beamtalk/issue/BT-3862)), and a `detect:ifNone:` handler write in an actor loop or fold body is a producer there since [BT-3911](https://linear.app/beamtalk/issue/BT-3911) ([BT-3861](https://linear.app/beamtalk/issue/BT-3861) done as its duplicate); class and value-type methods lower it since BT-3841. The verifier check that a fold body returns its accumulator is [BT-3863](https://linear.app/beamtalk/issue/BT-3863).
 4. **[BT-3823](https://linear.app/beamtalk/issue/BT-3823)** (Done, [#4346](https://github.com/jamesc/beamtalk/pull/4346)): REPL conditional arms, `on:do:`/`ensure:` blocks, `Result tryDo:` blocks and evaluated block literals are producer frames (the o7/o8 REPL pins flipped). Still open from it: a construct inside a REPL loop or fold body ([BT-3876](https://linear.app/beamtalk/issue/BT-3876)), `match:` arms as producers ([BT-3875](https://linear.app/beamtalk/issue/BT-3875); a `match:` arm write is the value-position compile error of [BT-3864](https://linear.app/beamtalk/issue/BT-3864)), and a block literal sent a `value` selector of another arity at the REPL root ([BT-3881](https://linear.app/beamtalk/issue/BT-3881)).
 5. **[BT-3753](https://linear.app/beamtalk/issue/BT-3753)** (Done, [#4232](https://github.com/jamesc/beamtalk/pull/4232)): added the statement-position rows to the Phase 0 check; the `DENY_SET` rows it introduced are retired with item 1, not separately.
@@ -177,6 +177,8 @@ position that works has its own hand-written rebind:
 | Loop body, plain `let` fast path | `try_generate_block_local_plain_let`, with four "fall back if…" guards (Tier 2 call, control-flow-with-mutations, BT-3493 field write, REPL) |
 | Nested value-type `do:` | `lower_nested_vt_do` write-back (BT-3718) |
 | `ensure:` cleanup | `rebind_threaded_vars_from_state` (BT-3718) |
+
+This table is the inventory when the ADR was written. Every rebind it names is gone: BT-4462 deleted the last of them (`push_control_flow_threaded_var_rereads` and `rebind_threaded_vars_from_state`), and the plain-`let` control-flow-with-mutations guard survives only as an unwrap (status item 2).
 
 Every row is a fix for a position someone hit (BT-912, BT-2342, BT-2349,
 BT-2358, BT-2814, BT-3162, BT-3428, BT-3492, BT-3493, BT-3718). A position
@@ -524,7 +526,9 @@ helpers, `emit_actor_threaded_assign_rhs_stmts`'s raw-tuple path,
 `push_threaded_var_rebinds`, `push_control_flow_threaded_var_rereads`, the
 `direct_params_list_op_result` side channel, the "control-flow-with-mutations"
 guard in `try_generate_block_local_plain_let`, `lower_nested_vt_do`'s
-write-back and `rebind_threaded_vars_from_state`.
+write-back and `rebind_threaded_vars_from_state`. (Done: BT-4462 deleted the
+last two rereads; the plain-`let` guard stays as an unwrap of a construct
+that threads no local, never a reread.)
 
 **Last position does not discard, except at the method root.** A
 construct in last position of a *loop body, branch arm, Tier 2 block body
@@ -575,9 +579,12 @@ own map.
 **What Phase 3c deletes, and what it keeps.** The `direct_params_list_op_result`
 side channel and the list-op branches that fed it are deleted (a list op in a
 direct-params body is a producer, lowered with `with_cleared_direct_params_loop`).
-Three write-backs stay (BT-3833), each reachable from a program Phase 0 accepts today and
+Three write-backs stayed (BT-3833), each reachable from a program Phase 0 accepted then and
 none from a conditional in a loop or fold body (probed: removing each one
-silently dropped the write):
+silently dropped the write). **BT-4462 deleted all three** once BT-4460 and
+BT-4461 made every arm and REPL frame a producer frame (see item 2 of the
+status list above); a construct compiled in place that threads a local is now
+the verifier's `ConstructLocalsNotRebound`, not a reread:
 
 - `push_control_flow_threaded_var_rereads` (and its helper
   `rebind_threaded_vars_from_state`): the arm of a conditional that is not a

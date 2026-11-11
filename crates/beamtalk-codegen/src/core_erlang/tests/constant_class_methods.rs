@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! BT-4363: a class-literal send of a class-side method whose whole body is
-//! one integer literal answers the literal in place, but only behind a
+//! one scalar literal (BT-4504: integer, float, string, symbol, character,
+//! `nil`, `true`, `false`) answers the literal in place, but only behind a
 //! run-time key, `{constant_value, Value, Module, Fun, Tag}`: the runtime
 //! installs it only while a direct call would run that compiled method and
 //! the class's published `constant_class_methods` metadata still maps the
@@ -10,6 +11,7 @@
 //! a later extension, runtime fun, `removeSelector:` or reload is honoured.
 
 use super::codegen;
+use beamtalk_cerl_doc::leaf;
 
 const SRC: &str = "\
 Object subclass: Caller
@@ -17,7 +19,15 @@ Object subclass: Caller
   negative => Errs negative
   keyword: y => Errs code: y
   computed => Errs computed
+  listy => Errs listy
+  interpolated => Errs interpolated
+  real => Errs real
+  text => Errs text
   symbolic => Errs symbolic
+  letter => Errs letter
+  none => Errs none
+  yes => Errs yes
+  no => Errs no
   inherited => SubErrs protocolError
   stateful => Stateful answer
 
@@ -26,7 +36,15 @@ Object subclass: Errs
   class negative => -7
   class code: x => 9
   class computed => 40 + 2
+  class listy => #(1, 2)
+  class interpolated => \"a{1}\"
+  class real => 1.5
+  class text => \"hi\"
   class symbolic => #one
+  class letter => $a
+  class none => nil
+  class yes => true
+  class no => false
   class withState => 3
 
 Errs subclass: SubErrs
@@ -43,7 +61,14 @@ Object subclass: Errs
   class negative => -7
   class code: x => 9
   class computed => 40 + 2
+  class listy => #(1, 2)
+  class real => 1.5
+  class text => \"hi\"
   class symbolic => #one
+  class letter => $a
+  class none => nil
+  class yes => true
+  class no => false
   class withState => 3
 ";
 
@@ -75,10 +100,21 @@ fn hit_arm(body: &str) -> &str {
 #[test]
 fn constant_sends_answer_the_literal_only_behind_a_constant_value_key() {
     let out = codegen(SRC);
+    // BT-4504: each kind as the term its literal compiles to — a string is
+    // the tagged `{'beamtalk_string', …}` (BT-4170), a symbol/`nil`/`true`/
+    // `false` an atom, a character its code point.
+    let text = leaf::tagged_string_lit("hi").to_pretty_string();
     for (method, value, fun, arity) in [
         ("constant", "1", "class_protocolError", 1),
         ("negative", "-7", "class_negative", 1),
         ("keyword:", "9", "class_code:", 2),
+        ("real", "1.5", "class_real", 1),
+        ("text", text.as_str(), "class_text", 1),
+        ("symbolic", "'one'", "class_symbolic", 1),
+        ("letter", "97", "class_letter", 1),
+        ("none", "'nil'", "class_none", 1),
+        ("yes", "'true'", "class_yes", 1),
+        ("no", "'false'", "class_no", 1),
     ] {
         let body = function_body(&out, method);
         let key = format!("{{'constant_value', {value}, 'bt@errs', '{fun}', 'Errs class'}}");
@@ -123,9 +159,11 @@ fn a_keyword_constant_still_evaluates_its_argument_once() {
 #[test]
 fn non_literal_bodies_keep_the_guarded_direct_call() {
     let out = codegen(SRC);
+    // A compound literal or an interpolated string is not a constant.
     for (method, fun) in [
         ("computed", "class_computed"),
-        ("symbolic", "class_symbolic"),
+        ("listy", "class_listy"),
+        ("interpolated", "class_interpolated"),
     ] {
         let body = function_body(&out, method);
         assert!(
@@ -159,13 +197,18 @@ fn inherited_or_class_process_constants_are_not_folded() {
 }
 
 #[test]
-fn the_defining_module_certifies_only_integer_literal_bodies() {
+fn the_defining_module_certifies_only_scalar_literal_bodies() {
     let out = codegen(ERRS);
+    let text = leaf::tagged_string_lit("hi").to_pretty_string();
+    let expected = format!(
+        "'constant_class_methods' => ~{{'protocolError' => 1, 'negative' => -7, 'code:' => 9, \
+         'real' => 1.5, 'text' => {text}, 'symbolic' => 'one', 'letter' => 97, 'none' => 'nil', \
+         'yes' => 'true', 'no' => 'false', 'withState' => 3}}~"
+    );
     assert!(
-        out.contains(
-            "'constant_class_methods' => ~{'protocolError' => 1, 'negative' => -7, 'code:' => 9, 'withState' => 3}~"
-        ),
-        "only integer-literal class-side bodies are certified. Got:\n{out}"
+        out.contains(&expected),
+        "only scalar-literal class-side bodies are certified, as the terms they compile to. \
+         Expected:\n{expected}\nGot:\n{out}"
     );
     let plain = codegen("Object subclass: Plain\n  class answer => 40 + 2\n");
     assert!(

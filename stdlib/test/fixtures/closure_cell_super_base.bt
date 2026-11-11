@@ -15,3 +15,15 @@ Actor subclass: ClosureCellSuperBase
   // Runs a block handed in: an away `super` send through this method runs the
   // block while another actor's state is installed in the host's cell.
   apply: blk => blk value
+
+  // BT-4536: a `^` of this method through its own `ensure:`. Run by an away
+  // `super` send, the method's commit answers the state the `^` carries, so
+  // a cleanup that writes is an illegal write there, and one that does not
+  // is not.
+  returnThroughWritingEnsure =>
+    [^1] ensure: [self.n := 9]
+    0
+
+  returnThroughQuietEnsure =>
+    [^1] ensure: [nil]
+    0

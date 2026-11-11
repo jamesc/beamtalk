@@ -412,6 +412,21 @@ mod tests {
         )
     }
 
+    /// BT-4612: no parameter of a marked primitive is declared a block. The
+    /// `^`-closure rule does not rest on this (BT-4633): an annotation is not
+    /// checked at run time, so a caller may still pass a block literal, and a
+    /// `no_user_code` send records none of its block operands whatever they
+    /// are (`send_runs_no_operand`).
+    #[test]
+    fn no_user_code_parameters_exclude_blocks() {
+        assert!(
+            !NO_USER_CODE_PARAMETER_TYPES
+                .iter()
+                .any(|ty| ty.contains("Block")),
+            "{NO_USER_CODE_PARAMETER_TYPES:?}"
+        );
+    }
+
     #[test]
     fn test_no_user_code_mark_rejects_untyped_and_open_parameters() {
         let mut table = PrimitiveBindingTable::new();

@@ -61,8 +61,9 @@ enum Iteration {
 }
 
 /// The loop kinds: the loop with `{S}` for its body, and how `x` is bound.
-/// The unary `[...] whileTrue`/`whileFalse` are left out: at the REPL they
-/// raise `does_not_understand` whatever their body (BT-4313).
+/// The unary `[...] whileTrue`/`whileFalse` run `{S}` in their receiver,
+/// which is condition and body at once (BT-4313); the `whileTrue:` row after
+/// them runs it in the condition of the keyword loop they canonicalise to.
 const LOOPS: &[(&str, Iteration)] = &[
     ("#(1, 2, 3) do: [:x | {S}]", Iteration::Param),
     ("#(1, 2, 3) collect: [:x | {S}. x]", Iteration::Param),
@@ -88,6 +89,12 @@ const LOOPS: &[(&str, Iteration)] = &[
     ("3 timesRepeat: [x := x + 1. {S}]", Iteration::Binding),
     ("[x < 3] whileTrue: [x := x + 1. {S}]", Iteration::Binding),
     ("[x >= 3] whileFalse: [x := x + 1. {S}]", Iteration::Binding),
+    ("[x := x + 1. {S}. x < 3] whileTrue", Iteration::Binding),
+    ("[x := x + 1. {S}. x >= 3] whileFalse", Iteration::Binding),
+    (
+        "[x := x + 1. {S}. x < 3] whileTrue: [nil]",
+        Iteration::Binding,
+    ),
 ];
 
 /// What one position of the `^` does in one iteration: the next `w`, and the
@@ -636,6 +643,7 @@ fn verifier_report(src: &str) -> String {
     match catch_unwind(AssertUnwindSafe(|| {
         generate_repl_expressions_surfacing_verifier(
             &expressions,
+            &beamtalk_core::ast::PipelineSends::default(),
             "bt4288_off",
             HashMap::new(),
             None,

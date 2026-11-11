@@ -200,7 +200,7 @@ printString(#{'$beamtalk_class' := 'Node', name := Name}) ->
 fields, migrations}` for every registered project/dependency class on that
 node, fetched via `erpc:call/5` to `beamtalk_release:shape_manifest/0` — the
 exact BT-3575 projection `Beamtalk shapeManifest` exposes locally, never
-re-derived (CLAUDE.md's no-duplicate-implementations rule). The current
+re-derived (AGENTS.md's no-duplicate-implementations rule). The current
 node is special-cased to a direct local call — same as `connect/1` — both
 because it is always allowed (no host policy or network round trip makes
 sense against `self`) and because `erpc:call/5` against `node()` on a
@@ -418,7 +418,7 @@ with different policy needs:
   new connection to gate.
 
 Both share this one erpc-and-catch implementation rather than a second copy
-(CLAUDE.md's no-duplicate-implementations rule).
+(AGENTS.md's no-duplicate-implementations rule).
 """.
 -spec remote_shape_manifest(node()) -> {ok, map()} | {error, #beamtalk_error{}}.
 remote_shape_manifest(Name) ->

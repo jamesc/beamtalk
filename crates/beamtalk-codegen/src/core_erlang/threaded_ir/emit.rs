@@ -10,9 +10,10 @@ use super::super::actor_state_access::{actor_state_call, actor_state_helper};
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     AccParam, BindOp, CallSiteLine, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary,
-    EnsureCatchVars, EnsureNlrRelay, FastPath, FrameId, LOOP_FN_STEM, LoopCounter, NlrCarry,
-    NlrThrowShape, OnDoCatchVars, RebindLowering, RethrowSlot, ThreadedStmt, ThreadingMode,
-    TokenId, TryRegion, ValueRef, VersionPrefix, VersionedVar,
+    EnsureCatchVars, EnsureForeignNlr, EnsureNlrRelay, FastPath, FoldAccShape, ForeignCleanupBody,
+    FrameId, LOOP_FN_STEM, LoopCounter, NlrCarry, NlrThrowShape, OnDoCatchVars, RebindLowering,
+    RethrowSlot, ThreadedStmt, ThreadingMode, TokenId, TryRegion, ValueRef, VersionPrefix,
+    VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
@@ -22,7 +23,7 @@ use beamtalk_cerl_doc::{Document, join, leaf};
 /// Loop-context flags captured/restored around rendering a nested
 /// [`ThreadedStmt::Threaded`] body — see [`RenderCtx::with_loop_context`].
 /// Mirrors `CoreErlangGenerator::in_loop_body`/`in_hybrid_loop` exactly (a
-/// third, boolean-pair copy would be a duplication CLAUDE.md's
+/// third, boolean-pair copy would be a duplication AGENTS.md's
 /// no-duplicate-implementations rule forbids; this type only names the pair
 /// [`RenderCtx`] threads, it never becomes a second source of truth for
 /// their values — [`RenderCtx::with_loop_context`] always reads/writes them
@@ -45,7 +46,7 @@ struct LoopContextFlags {
 /// Chosen because it lets NLR-catch rendering reuse
 /// [`CoreErlangGenerator::wrap_body_with_nlr_catch`] verbatim — the exact
 /// function every real NLR try/catch in the codebase already goes through
-/// — instead of re-deriving its scaffolding a second time (CLAUDE.md: "A
+/// — instead of re-deriving its scaffolding a second time (AGENTS.md: "A
 /// rule crossing the Rust/Erlang boundary needs a shared conformance
 /// fixture or code generation, not a comment"; the same logic applies
 /// within Rust here — reuse beats a parallel copy that could drift). The
@@ -203,9 +204,10 @@ pub(in crate::core_erlang) fn render(
             ThreadedStmt::TupleAccUnpack {
                 param,
                 gate_slots,
+                shape,
                 targets,
                 ..
-            } => docs.push(render_tuple_acc_unpack(param, *gate_slots, targets)),
+            } => docs.push(render_tuple_acc_unpack(param, *gate_slots, *shape, targets)),
             ThreadedStmt::ConditionalLoop {
                 fn_name,
                 mode,
@@ -240,10 +242,7 @@ pub(in crate::core_erlang) fn render(
             // ADR 0111 Addendum 4: opaque AST-directed statement, emitted
             // verbatim. The doc carries its own trailing glue; this loop
             // adds no separator, and rendering mints nothing.
-            //
-            // BT-4460: the legacy reread renders like a `Statement`; its
-            // `locals` are for the verifier.
-            ThreadedStmt::Statement(doc, _) | ThreadedStmt::StateCarrierReread { doc, .. } => {
+            ThreadedStmt::Statement(doc, _) => {
                 docs.push(doc.clone());
             }
             // BT-3863: the fold accumulator renders like a `Statement`; its
@@ -281,6 +280,7 @@ pub(in crate::core_erlang) fn render(
                 token,
                 carry,
                 relay,
+                foreign,
                 other,
                 ..
             } => docs.push(render_ensure_catch(
@@ -288,6 +288,7 @@ pub(in crate::core_erlang) fn render(
                 token.as_ref(),
                 *carry,
                 relay.as_ref(),
+                foreign.as_ref(),
                 other,
             )),
             ThreadedStmt::ConstructTuple { carrier, doc, .. } => docs.push(docvec![
@@ -314,7 +315,9 @@ pub(in crate::core_erlang) fn render(
             )),
             // ADR 0131 §2: the method root's one legitimate drop. The
             // consumer reads `element(1, carrier)` itself; nothing to bind.
-            ThreadedStmt::DiscardLocals { .. } => {}
+            // BT-4462: a construct compiled in place renders nothing either;
+            // its `locals` are for the verifier (`ConstructLocalsNotRebound`).
+            ThreadedStmt::DiscardLocals { .. } | ThreadedStmt::ConstructLocalsInPlace { .. } => {}
             // ADR 0131 §2: frame nodes. Each `LocalRebind` in `body` already
             // carries the lowering its enclosing frame chose, so a frame
             // renders straight-line like any other sequence (an `NlrCatch`
@@ -377,8 +380,27 @@ pub(in crate::core_erlang) fn take_cell_store_emitted() -> bool {
 /// is installed (a nested away `super_send/5`) does not claim that state for
 /// the host process.
 pub(in crate::core_erlang) fn cell_put_call(state: Document<'static>) -> Document<'static> {
+    cell_store_call(actor_state_helper::STORE, vec![state])
+}
+
+/// ADR 0146 R1 / BT-4535: `call 'beamtalk_actor_state':'store_unwound'(<throw>,
+/// <state>)`, the store of an `ensure:` foreign clause ([`EnsureForeignNlr`]):
+/// the cleanup's writes, made while `throw` (a `^` of another scope) unwinds
+/// through it. That throw is re-raised as it came, so the cell is now ahead
+/// of the state it carries, which `store_unwound/2` tells the test-build
+/// check in `beamtalk_actor_state:commit/2` for that throw only. Otherwise a
+/// [`cell_put_call`].
+pub(in crate::core_erlang) fn cell_put_unwound_call(
+    throw: Document<'static>,
+    state: Document<'static>,
+) -> Document<'static> {
+    cell_store_call(actor_state_helper::STORE_UNWOUND, vec![throw, state])
+}
+
+/// Every cell store, marking it for [`take_cell_store_emitted`].
+fn cell_store_call(helper: (&'static str, u32), args: Vec<Document<'static>>) -> Document<'static> {
     CELL_STORE_EMITTED.with(|c| c.set(true));
-    actor_state_call(actor_state_helper::STORE, vec![state])
+    actor_state_call(helper, args)
 }
 
 /// `call 'beamtalk_actor_state':'take'()`: the one emitter of every cell
@@ -488,13 +510,15 @@ fn render_fast_path_synced_call(
 
 /// Renders one [`ThreadedStmt::NlrThrow`]: `let R = call
 /// 'erlang':'throw'({'$bt_nlr', Tok, Val, Slot}) in`, where `Slot` is the one
-/// slot version bare, or every slot version as a tuple in order.
+/// slot version bare, or every slot version as a tuple in order; with
+/// `cell_store`, after `let _ = beamtalk_actor_state:store(Slot) in`.
 fn render_nlr_throw(stmt: &ThreadedStmt, ctx: &RenderCtx) -> Document<'static> {
     let ThreadedStmt::NlrThrow {
         token,
         value,
         slot,
         result_var,
+        cell_store,
         ..
     } = stmt
     else {
@@ -515,7 +539,14 @@ fn render_nlr_throw(stmt: &ThreadedStmt, ctx: &RenderCtx) -> Document<'static> {
             Document::Vec(parts)
         }
     };
+    // ADR 0137 §5 / ADR 0146: the cell is current whenever a `^` starts.
+    let store = if *cell_store {
+        docvec!["let _ = ", cell_put_call(slot_doc.clone()), " in "]
+    } else {
+        Document::Nil
+    };
     docvec![
+        store,
         "let ",
         leaf::var(result_var.clone()),
         " = call 'erlang':'throw'({'$bt_nlr', ",
@@ -724,14 +755,19 @@ fn render_on_do_catch(
 /// Renders one [`ThreadedStmt::EnsureCatch`]: `catch <Type, Error, Stack> ->`
 /// and, with a relay, a `case` whose first clause matches the scope's own
 /// `$bt_nlr` throw, runs the relay's cleanup from the state it carries and
-/// resumes the throw with the cleanup's result; every other exception (and a
-/// foreign token's throw) takes `other`. Without a relay the catch is `other`
-/// alone, the shape every `ensure:` had before BT-4312.
+/// resumes the throw with the cleanup's result; with a foreign clause (ADR
+/// 0146 R1) every other `$bt_nlr` throw runs the cleanup, stores its final
+/// `StateAcc` to the cell and is re-raised unchanged; every other exception
+/// takes `other`. With neither the catch is `other` alone, the shape every
+/// `ensure:` had before BT-4312. A foreign clause that shares the relay's
+/// cleanup ([`ForeignCleanupBody::SharedWithRelay`], BT-4598) renders the two
+/// as one clause ([`render_ensure_shared_clause`]).
 fn render_ensure_catch(
     vars: &EnsureCatchVars,
     token: Option<&TokenId>,
     carry: Option<NlrCarry>,
     relay: Option<&EnsureNlrRelay>,
+    foreign: Option<&EnsureForeignNlr>,
     other: &Document<'static>,
 ) -> Document<'static> {
     let head = docvec![
@@ -743,63 +779,43 @@ fn render_ensure_catch(
         leaf::var(vars.stack_var.clone()),
         "> -> ",
     ];
-    let (Some(relay), Some(carry)) = (relay, carry) else {
-        return docvec![head, other.clone()];
-    };
-    // The scope's own throw matches its token; a foreign one (BT-4429) is
-    // every `$bt_nlr` throw that reaches the catch.
-    let guard = match (carry, token) {
-        (NlrCarry::Foreign, _) => leaf::atom("true"),
-        (_, Some(token)) => docvec![
-            "call 'erlang':'=:='(",
-            leaf::var(vars.nlr_tok_var.clone()),
-            ", ",
-            leaf::var(token.name().to_string()),
-            ")",
-        ],
-        (_, None) => return docvec![head, other.clone()],
-    };
-    let rethrow = match &relay.rethrow {
-        RethrowSlot::Version(version) => {
-            let family = match carry {
-                NlrCarry::SelfVt => "Self",
-                NlrCarry::Bindings | NlrCarry::ActorState | NlrCarry::Live | NlrCarry::Foreign => {
-                    "StateAcc"
-                }
-            };
-            leaf::var(super::super::util::versioned_var(family, *version))
+    let relay = relay.zip(carry);
+    let nlr_clauses = if let (
+        Some((relay, carry)),
+        Some(
+            foreign @ EnsureForeignNlr {
+                body: ForeignCleanupBody::SharedWithRelay,
+                ..
+            },
+        ),
+    ) = (relay, foreign)
+    {
+        Some(render_ensure_shared_clause(
+            vars, token, carry, relay, foreign,
+        ))
+    } else {
+        let relay_clause =
+            relay.and_then(|(relay, carry)| render_ensure_relay_clause(vars, token, carry, relay));
+        // A shared foreign clause with no relay has no cleanup to run
+        // (`verify`'s `SharedWithoutCellRelay`): such a throw takes `other`.
+        let foreign_clause = foreign.and_then(|foreign| match &foreign.body {
+            ForeignCleanupBody::Own { seed, cleanup } => Some(render_ensure_foreign_clause(
+                vars,
+                docvec![seed.clone(), cleanup.clone(), " "],
+                foreign,
+            )),
+            ForeignCleanupBody::SharedWithRelay => None,
+        });
+        match (relay_clause, foreign_clause) {
+            (None, None) => None,
+            (relay_clause, foreign_clause) => Some(docvec![
+                relay_clause.unwrap_or(Document::Nil),
+                foreign_clause.unwrap_or(Document::Nil),
+            ]),
         }
-        RethrowSlot::CellOverCarried => actor_state_call(
-            actor_state_helper::REFRESH,
-            vec![leaf::var("Self"), leaf::var(vars.nlr_carried_var.clone())],
-        ),
-        RethrowSlot::CellIfCarried => actor_state_call(
-            actor_state_helper::REFRESH_CARRIED,
-            vec![
-                leaf::var(vars.cell_snapshot_var.clone()),
-                leaf::var(vars.nlr_carried_var.clone()),
-            ],
-        ),
-        #[cfg(any(test, feature = "test"))]
-        RethrowSlot::SiteState(doc) => doc.clone(),
     };
-    // `refresh_carried/2` compares the carried state with the cell as it was
-    // before the cleanup wrote it.
-    let snapshot = if relay.rethrow == RethrowSlot::CellIfCarried {
-        docvec![
-            "let ",
-            leaf::var(vars.cell_snapshot_var.clone()),
-            " = ",
-            actor_state_call(actor_state_helper::SNAPSHOT, vec![]),
-            " in ",
-        ]
-    } else {
-        Document::Nil
-    };
-    let store = if relay.cell_store {
-        docvec!["let _ = ", cell_put_call(rethrow.clone()), " in "]
-    } else {
-        Document::Nil
+    let Some(nlr_clauses) = nlr_clauses else {
+        return docvec![head, other.clone()];
     };
     docvec![
         head,
@@ -807,19 +823,164 @@ fn render_ensure_catch(
         leaf::var(vars.type_var.clone()),
         ", ",
         leaf::var(vars.error_var.clone()),
-        "} of <{'throw', {'$bt_nlr', ",
+        "} of ",
+        nlr_clauses,
+        "<",
+        leaf::var(vars.other_pair_var.clone()),
+        "> when 'true' -> ",
+        other.clone(),
+        " end",
+    ]
+}
+
+/// The `$bt_nlr` clause head every foreign clause shares: a throw of either
+/// shape, bound to [`EnsureCatchVars::foreign_nlr_var`].
+fn foreign_clause_head(vars: &EnsureCatchVars) -> Document<'static> {
+    docvec![
+        "<{'throw', ",
+        leaf::var(vars.foreign_nlr_var.clone()),
+        "}> when call 'erlang':'=:='(call 'erlang':'element'(1, ",
+        leaf::var(vars.foreign_nlr_var.clone()),
+        "), ",
+        leaf::atom("$bt_nlr"),
+        ") -> ",
+    ]
+}
+
+/// The end of a foreign clause, once the cleanup has run: the store of its
+/// final `StateAcc` (`store_unwound/2`, so the test-build commit check knows
+/// the cell is ahead of that throw), then the re-raise of the throw as it
+/// came.
+fn foreign_reraise(vars: &EnsureCatchVars, foreign: &EnsureForeignNlr) -> Document<'static> {
+    let store = match foreign.store {
+        Some(version) => docvec![
+            "let _ = ",
+            cell_put_unwound_call(
+                leaf::var(vars.foreign_nlr_var.clone()),
+                leaf::var(super::super::util::versioned_var("StateAcc", version)),
+            ),
+            " in ",
+        ],
+        None => Document::Nil,
+    };
+    docvec![
+        store,
+        CoreErlangGenerator::emit_raw_raise(
+            vars.type_var.clone(),
+            vars.error_var.clone(),
+            vars.stack_var.clone(),
+        ),
+    ]
+}
+
+/// ADR 0146 R1: the [`EnsureForeignNlr`] clause of an `ensure:` catch: a
+/// `$bt_nlr` throw of either shape the relay did not take runs the cleanup
+/// (`cleanup`: its seed and code, followed by a space) from the cell, stores
+/// its final `StateAcc` to the cell, and is re-raised as it came. Followed by
+/// a space.
+fn render_ensure_foreign_clause(
+    vars: &EnsureCatchVars,
+    cleanup: Document<'static>,
+    foreign: &EnsureForeignNlr,
+) -> Document<'static> {
+    docvec![
+        foreign_clause_head(vars),
+        cleanup,
+        foreign_reraise(vars, foreign),
+        " ",
+    ]
+}
+
+/// BT-4598: the relay and the foreign clause of an `ensure:` catch as one
+/// `$bt_nlr` clause ([`ForeignCleanupBody::SharedWithRelay`]): every `$bt_nlr`
+/// throw runs the relay's cleanup once, from the cell, then the scope's own
+/// throw resumes as the relay resumes it and any other stores the cleanup's
+/// final `StateAcc` and is re-raised as it came. Followed by a space.
+fn render_ensure_shared_clause(
+    vars: &EnsureCatchVars,
+    token: Option<&TokenId>,
+    carry: NlrCarry,
+    relay: &EnsureNlrRelay,
+    foreign: &EnsureForeignNlr,
+) -> Document<'static> {
+    // With no token of the scope (`verify`'s `SharedWithoutCellRelay`)
+    // every throw is foreign.
+    let guard = relay_guard(vars, token).unwrap_or_else(|| leaf::atom("false"));
+    let resume = relay_resume(vars, carry, relay);
+    docvec![
+        foreign_clause_head(vars),
+        relay.seed.clone(),
+        relay.cleanup.clone(),
+        " case ",
+        leaf::var(vars.foreign_nlr_var.clone()),
+        " of ",
+        relay_pattern(vars),
+        " when ",
+        guard,
+        " -> ",
+        resume,
+        "<_> when 'true' -> ",
+        foreign_reraise(vars, foreign),
+        " end ",
+    ]
+}
+
+/// The guard of a relay clause: the scope's own throw matches its token.
+/// `None` when no throw of the scope can reach it.
+fn relay_guard(vars: &EnsureCatchVars, token: Option<&TokenId>) -> Option<Document<'static>> {
+    token.map(|token| {
+        docvec![
+            "call 'erlang':'=:='(",
+            leaf::var(vars.nlr_tok_var.clone()),
+            ", ",
+            leaf::var(token.name().to_string()),
+            ")",
+        ]
+    })
+}
+
+/// `{'$bt_nlr', Tok, Val, Carried}`, the throw a relay takes.
+fn relay_pattern(vars: &EnsureCatchVars) -> Document<'static> {
+    docvec![
+        "{'$bt_nlr', ",
         leaf::var(vars.nlr_tok_var.clone()),
         ", ",
         leaf::var(vars.nlr_val_var.clone()),
         ", ",
         leaf::var(vars.nlr_carried_var.clone()),
-        "}}> when ",
-        guard,
-        " -> ",
-        snapshot,
-        relay.seed.clone(),
-        relay.cleanup.clone(),
-        " ",
+        "}",
+    ]
+}
+
+/// A relay's end, once its seed and cleanup have run: the store of the
+/// re-thrown state (`cell_store`) and the throw resumed with it. Followed by
+/// a space.
+fn relay_resume(
+    vars: &EnsureCatchVars,
+    carry: NlrCarry,
+    relay: &EnsureNlrRelay,
+) -> Document<'static> {
+    let rethrow = match &relay.rethrow {
+        RethrowSlot::Version(version) => {
+            let family = match carry {
+                NlrCarry::SelfVt => "Self",
+                NlrCarry::Bindings | NlrCarry::ActorState | NlrCarry::Live => "StateAcc",
+            };
+            leaf::var(super::super::util::versioned_var(family, *version))
+        }
+        RethrowSlot::CellOverCarried => actor_state_call(
+            actor_state_helper::REFRESH,
+            vec![leaf::var("Self"), leaf::var(vars.nlr_carried_var.clone())],
+        ),
+        #[cfg(any(test, feature = "test"))]
+        RethrowSlot::SiteState(doc) => doc.clone(),
+    };
+    let store = if relay.cell_store {
+        docvec!["let _ = ", cell_put_call(rethrow.clone()), " in "]
+    } else {
+        Document::Nil
+    };
+    docvec![
         store,
         "call 'erlang':'throw'({'$bt_nlr', ",
         leaf::var(vars.nlr_tok_var.clone()),
@@ -827,12 +988,32 @@ fn render_ensure_catch(
         leaf::var(vars.nlr_val_var.clone()),
         ", ",
         rethrow,
-        "}) <",
-        leaf::var(vars.other_pair_var.clone()),
-        "> when 'true' -> ",
-        other.clone(),
-        " end",
+        "}) ",
     ]
+}
+
+/// The relay clause of an `ensure:` catch: the scope's own `$bt_nlr` throw
+/// runs the relay's cleanup and resumes with its result. `None` when no
+/// throw of the scope can reach it. Followed by a space.
+fn render_ensure_relay_clause(
+    vars: &EnsureCatchVars,
+    token: Option<&TokenId>,
+    carry: NlrCarry,
+    relay: &EnsureNlrRelay,
+) -> Option<Document<'static>> {
+    let guard = relay_guard(vars, token)?;
+    let resume = relay_resume(vars, carry, relay);
+    Some(docvec![
+        "<{'throw', ",
+        relay_pattern(vars),
+        "}> when ",
+        guard,
+        " -> ",
+        relay.seed.clone(),
+        relay.cleanup.clone(),
+        " ",
+        resume,
+    ])
 }
 
 fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static> {
@@ -930,7 +1111,7 @@ fn render_threaded(
                 None,
             )
         }
-        ThreadingMode::TupleAcc(_) | ThreadingMode::StateAcc(_) => render(body, ctx),
+        ThreadingMode::TupleAcc(..) | ThreadingMode::StateAcc(_) => render(body, ctx),
     }
 }
 
@@ -986,7 +1167,7 @@ struct ConditionalLoopHeader<'a> {
 /// skeleton (`header: None`) and [`ConditionalLoop`](ThreadedStmt::ConditionalLoop)'s
 /// real condition/case-split skeleton (`header: Some(ConditionalLoopHeader { .. })`,
 /// ADR 0118 phase 3) share one implementation instead of two
-/// near-duplicates (CLAUDE.md's no-duplicate-implementations rule applies
+/// near-duplicates (AGENTS.md's no-duplicate-implementations rule applies
 /// within this file, not just across the Rust/Erlang boundary).
 ///
 /// `fn_name` is already resolved by the caller — the bare shape mints it via
@@ -1320,7 +1501,7 @@ fn render_conditional_loop(
             in_loop_body: true,
             in_hybrid_loop: false,
         }),
-        ThreadingMode::DirectParams | ThreadingMode::TupleAcc(_) => None,
+        ThreadingMode::DirectParams | ThreadingMode::TupleAcc(..) => None,
     };
     render_loop_skeleton(
         fn_name,
@@ -1351,9 +1532,23 @@ fn render_conditional_loop(
 fn render_tuple_acc_unpack(
     param: &AccParam,
     gate_slots: usize,
+    shape: FoldAccShape,
     targets: &[VersionedVar],
 ) -> Document<'static> {
     let mut docs: Vec<Document<'static>> = Vec::new();
+    if shape == FoldAccShape::Bare {
+        // BT-4116: the accumulator IS the one threaded local.
+        for target in targets {
+            docs.push(docvec![
+                "let ",
+                leaf::var(target.render_name()),
+                " = ",
+                leaf::var(param.0.clone()),
+                " in ",
+            ]);
+        }
+        return Document::Vec(docs);
+    }
     for (i, target) in targets.iter().enumerate() {
         let idx = gate_slots + 1 + i;
         docs.push(docvec![
@@ -1494,7 +1689,7 @@ mod cell_helper_conformance {
     /// in one place (`actor_state_helper::ALL`), which the one emitter
     /// references, so the list cannot drift from what is actually emitted.
     /// All `-export` blocks in the module are collected, so a helper moved
-    /// to a second block is still found (CLAUDE.md). Edit the Erlang module
+    /// to a second block is still found (AGENTS.md). Edit the Erlang module
     /// (the owner) when this fails.
     #[test]
     fn the_runtime_exports_every_emitted_cell_helper() {

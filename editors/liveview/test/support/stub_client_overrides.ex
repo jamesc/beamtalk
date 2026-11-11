@@ -24,7 +24,7 @@ defmodule BtAttachWeb.StubClientOverrides do
   to `BtAttachWeb.StubWorkspaceClient` for every exported name/arity the using
   module did NOT define itself, so the overrides ARE the whole test double —
   and the shared stub stays the single implementation of the happy path
-  (CLAUDE.md no-duplicate-implementations) rather than each failure test
+  (AGENTS.md no-duplicate-implementations) rather than each failure test
   growing its own copy.
 
   The using module keeps the stub's per-test `Agent` state, so the usual

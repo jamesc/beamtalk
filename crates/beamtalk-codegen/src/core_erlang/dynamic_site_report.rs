@@ -21,14 +21,40 @@
 //! ```
 //!
 //! The word after `reason: ` is a stable token (`untyped`, `builtin`,
-//! `supervisor`, `abstract`, `root`, `actor`, `exception`, …) for counting
+//! `supervisor`, `abstract`, `root`, `actor`, `exception`, `cascade`, …) for counting
 //! sites by reason.
+//!
+//! ## Coverage
+//!
+//! Reported ([`CoreErlangGenerator::report_dynamic_site`]): every written
+//! send that falls through to the generic dispatch, each cascade message
+//! (always reason `cascade`, with the receiver's gate as detail — removing
+//! the gate would not make it static),
+//! each string-interpolation segment's `displayString` without a guarded
+//! route, and the block `value`/`value:`…/`valueWithArguments:` intrinsics'
+//! non-fun fallback unless the receiver is typed `Block`
+//! ([`CoreErlangGenerator::report_block_value_fallback`], BT-4596).
+//!
+//! Not reported, though they emit `send/3`:
+//!
+//! * miss arms behind a guard — the guarded direct call's, a binary
+//!   operator's non-number fallback, the list-op intrinsics' `is_list`
+//!   fallback (`do:`, `collect:`, `anySatisfy:`, …) and an inlined
+//!   `ifTrue:`/`ifFalse:` on a non-boolean: the guard is the typed path;
+//! * the `perform:` family (`perform:`, `perform:withArguments:`,
+//!   `perform:withArguments:timeout:`): the selector is a runtime value, so
+//!   there is no static send to report;
+//! * reflective intrinsics with their own handling (`fieldNames`,
+//!   `fieldAt:`, `fieldAt:put:`) and `error:`'s class-side probe;
+//! * the `at:` sends a pattern match or destructuring assignment makes on
+//!   an array it binds from.
 
 use super::CoreErlangGenerator;
 use super::dispatch_codegen::{StaysDynamic, supervisor_family_root};
 use super::routing::{self, NoBuiltinRoute};
 use beamtalk_core::ast::{ClassKind, Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::{InferredType, TypeProvenance};
+use beamtalk_core::source_analysis::Span;
 
 /// How the receiver's static type reads in the report.
 fn describe_type(ty: Option<&InferredType>, kind: Option<ClassKind>) -> String {
@@ -80,19 +106,95 @@ fn describe_routed(class: &str, why: NoBuiltinRoute) -> String {
         NoBuiltinRoute::SpecialSelector(selector) => {
             format!("builtin — {class}: the dynamic path answers '{selector}' outside {target}")
         }
-        NoBuiltinRoute::GuardSpansRoutes => format!(
-            "builtin — {class}: its representation test also admits values routed away from {target}"
-        ),
     }
 }
 
+/// Which kind of `send/3` site a report entry is for.
+#[derive(Clone, Copy)]
+enum SiteKind {
+    /// A send that could have taken the `typed_guarded` handler's path.
+    Send,
+    /// A cascade message, which always sends dynamically.
+    Cascade,
+}
+
 impl CoreErlangGenerator {
+    /// Emits the dynamic-site report entry for `receiver selector` when
+    /// diagnostics are on: the receiver's static type and the
+    /// [`StaysDynamic`] gate that kept the send dynamic. The one emitter for
+    /// every `send/3` site the report covers, written or compiler-made.
+    pub(in crate::core_erlang) fn report_dynamic_site(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+    ) {
+        self.emit_dynamic_site(receiver, selector, receiver.span(), SiteKind::Send);
+    }
+
+    /// BT-4596: the report entry for one cascade message, located at the
+    /// message (`span`) rather than the shared receiver, so each message
+    /// reports its own line (BT-4392). A cascade always sends dynamically,
+    /// whatever its receiver's type, so its reason is always `cascade`, with
+    /// the receiver's gate (if any) as detail.
+    pub(in crate::core_erlang) fn report_cascade_send(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        span: Span,
+    ) {
+        self.emit_dynamic_site(receiver, selector, span, SiteKind::Cascade);
+    }
+
+    fn emit_dynamic_site(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+        span: Span,
+        kind: SiteKind,
+    ) {
+        if !self.codegen_diagnostics_enabled {
+            return;
+        }
+        let line_info = self
+            .span_to_line(span)
+            .map_or(String::new(), |l| format!(" at line {l}"));
+        let description = self.dynamic_site_description(receiver, selector, kind);
+        self.emit_codegen_diagnostic(
+            format!(
+                "Send '{}'{line_info}: dynamic dispatch ({description})",
+                selector.name()
+            ),
+            span,
+        );
+    }
+
+    /// BT-4596: the report entry for a block `value`/`value:`/
+    /// `valueWithArguments:` intrinsic's non-fun fallback. A receiver whose
+    /// trusted static type is `Block` is not a dynamic site: the
+    /// `is_function` test is its guard and the fallback only a miss arm, as
+    /// in a guarded direct call. Any other receiver reaches the fallback
+    /// whenever it is not a fun, so it is reported like a written send.
+    pub(in crate::core_erlang) fn report_block_value_fallback(
+        &mut self,
+        receiver: &Expression,
+        selector: &MessageSelector,
+    ) {
+        if self
+            .trusted_static_class(receiver)
+            .is_ok_and(|class| class.as_str() == "Block")
+        {
+            return;
+        }
+        self.report_dynamic_site(receiver, selector);
+    }
+
     /// The `(receiver: …; reason: …)` part of a dynamic-dispatch hint for
     /// `receiver selector`.
-    pub(in crate::core_erlang) fn dynamic_site_description(
+    fn dynamic_site_description(
         &self,
         receiver: &Expression,
         selector: &MessageSelector,
+        site: SiteKind,
     ) -> String {
         let ty = self.type_map.get(receiver.span());
         let class_name = match ty {
@@ -105,11 +207,21 @@ impl CoreErlangGenerator {
                 .filter(|h| h.get_class(class).is_some())
                 .map(|h| h.resolve_class_kind(class))
         });
-        let reason = match self.typed_send_target(receiver, selector) {
+        let gate = self.typed_send_target(receiver, selector).err();
+        let reason = match (site, gate) {
+            // A cascade stays dynamic whatever its receiver's gate, so the
+            // token is `cascade`; the gate is only detail.
+            (SiteKind::Cascade, None) => {
+                "cascade — every cascade message dispatches dynamically".to_string()
+            }
+            (SiteKind::Cascade, Some(gate)) => format!(
+                "cascade — every cascade message dispatches dynamically (receiver gate: {})",
+                self.describe_gate(&gate, class_name)
+            ),
             // The `typed_guarded` handler would have claimed this send had it
             // reached `HANDLERS`; a dynamic send here came another way.
-            Ok(_) => "eligible — a guarded direct call applies, but this send site bypassed the typed_guarded handler".to_string(),
-            Err(gate) => self.describe_gate(&gate, class_name),
+            (SiteKind::Send, None) => "eligible — a guarded direct call applies, but this send site bypassed the typed_guarded handler".to_string(),
+            (SiteKind::Send, Some(gate)) => self.describe_gate(&gate, class_name),
         };
         format!("receiver: {}; reason: {reason}", describe_type(ty, kind))
     }
@@ -146,6 +258,13 @@ impl CoreErlangGenerator {
             StaysDynamic::CrossFileParent => {
                 format!("cross-file-parent — {class}'s ancestry is not fully known")
             }
+            StaysDynamic::ProtocolNoConformers => {
+                format!("protocol — no known conformer of {class} is a guardable tagged class")
+            }
+            StaysDynamic::ProtocolTooManyConformers => format!(
+                "protocol-too-many — {class} has more than {} guardable conformers",
+                super::dispatch_codegen::MAX_PROTOCOL_ARMS
+            ),
         }
     }
 

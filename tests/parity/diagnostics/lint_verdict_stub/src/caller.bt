@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// Passes a String where the project stub declares an Integer. The stub is
+/// the only type source for `parity_lint_stub_ffi`, so the mismatch is
+/// reported only by a surface that merges the `stubs/` tier.
+Object subclass: Caller
+
+  /// A `Type` warning: a live-recheck failure under `--warnings-as-errors`.
+  mismatch => Erlang parity_lint_stub_ffi double: "text"

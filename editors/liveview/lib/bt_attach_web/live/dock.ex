@@ -31,7 +31,7 @@ defmodule BtAttachWeb.Live.Dock do
   Every workspace read/write goes through `BtAttach.Facade.dispatch/3` (ADR
   0091 Decision 3) with `BtAttachWeb.Live.RequestContext` — never a raw
   `BtAttach.Workspace`/`:rpc` call — so this module never reimplements the
-  `eval`/`changes`/`git_*` ops or the RBAC gates they ride (CLAUDE.md
+  `eval`/`changes`/`git_*` ops or the RBAC gates they ride (AGENTS.md
   no-duplicate-implementations).
 
   **Transcript** has no events of its own (a push-only stream driven by

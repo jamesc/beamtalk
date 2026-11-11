@@ -1348,7 +1348,7 @@ spawn_test_execution(Selector, Args, ClassName, TestModule, FlatMethods, From) -
                 maps:from_keys(test_class_selectors(ClassName), true), FlatMethods
             ),
             Result = execute_tests(Selector, Args, ClassName, TestModule, AllMethods),
-            gen_server:reply(From, {ok, Result})
+            gen_server:reply(From, {ok, ffi_string(Result)})
         catch
             C:E:ST ->
                 Error =
@@ -1385,10 +1385,15 @@ spawn_test_execution(Selector, Args, ClassName, TestModule, FlatMethods, From) -
 should(Block, ErrorKind) -> should_raise(Block, ErrorKind).
 
 %% runAll: → runAll/1 (ClassSelf tuple → extract class name → run_all/1)
-runAll(ClassRef) -> run_all(ffi_extract_class_name(ClassRef)).
+runAll(ClassRef) -> ffi_string(run_all(ffi_extract_class_name(ClassRef))).
 
 %% runClass:withTest: → runClass/2 (ClassSelf tuple + test name → run_single/2)
-runClass(ClassRef, TestName) -> run_single(ffi_extract_class_name(ClassRef), TestName).
+runClass(ClassRef, TestName) ->
+    ffi_string(run_single(ffi_extract_class_name(ClassRef), TestName)).
+
+%% The Beamtalk methods declare `-> String` (BT-4308), and a String is the
+%% tagged `{beamtalk_string, Bin}` at run time, not a raw binary.
+ffi_string(Bin) when is_binary(Bin) -> {beamtalk_string, Bin}.
 
 %% skipTest: → skipTest/1
 %%

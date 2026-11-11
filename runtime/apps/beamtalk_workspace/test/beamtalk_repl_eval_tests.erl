@@ -860,7 +860,7 @@ extract_assignment_interpolated_string_is_not_mis_parsed_test() ->
         {ok, x}, beamtalk_repl_eval:extract_assignment("x := \"no interpolation here\"")
     ).
 
-%% (Per CLAUDE.md Essential Rules: a "mirrors" claim across the
+%% (Per AGENTS.md Essential Rules: a "mirrors" claim across the
 %% Rust/Erlang boundary needs a shared conformance fixture, not
 %% just a comment): `skip_string_literal/1`/`skip_character_literal/1` are
 %% hand-rolled Erlang mirrors of the Rust lexer's `lex_string/0`/
@@ -947,7 +947,7 @@ extract_assignment_block_comment_unbalanced_brace_test() ->
         beamtalk_repl_eval:extract_assignment("alpha := 1 /* note */")
     ).
 
-%% (Per CLAUDE.md Essential Rules: a "mirrors" claim across the
+%% (Per AGENTS.md Essential Rules: a "mirrors" claim across the
 %% Rust/Erlang boundary needs a shared conformance fixture, not just a
 %% comment): `skip_line_comment/1`/`skip_block_comment/1` are hand-rolled
 %% Erlang mirrors of the Rust lexer's `lex_line_comment/0`/

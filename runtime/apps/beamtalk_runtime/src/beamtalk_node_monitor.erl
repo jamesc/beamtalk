@@ -270,7 +270,7 @@ subscribe_class_loaded() ->
 -doc """
 Connect-time shape-manifest comparison (ADR 0126 §5.3): fetch `PeerNode`'s
 manifest via `erpc` (`beamtalk_node:remote_shape_manifest/1` — the same
-helper `Node>>shapeManifest` uses, CLAUDE.md's no-duplicate-implementations
+helper `Node>>shapeManifest` uses, AGENTS.md's no-duplicate-implementations
 rule) and compare every class shared with this node's own
 `beamtalk_release:shape_manifest/0` (the BT-3575 projection, never
 re-derived). One `NodeShapeSkew` per class whose `version` differs;

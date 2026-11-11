@@ -38,11 +38,12 @@ use super::super::threaded_ir::{
     ValueRef, VersionPrefix, VersionedVar,
 };
 use super::super::{CodeGenError, CoreErlangGenerator, Result};
-use super::ThreadingPlan;
 use super::family_slots::append_family_slots;
+use super::{LocalWrite, ThreadingPlan};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, join, leaf};
 use beamtalk_core::ast::{Block, Expression};
+use beamtalk_core::semantic_analysis::extract_pattern_bindings;
 
 /// Result of pre-extracting hybrid loop fields: pre-extraction docs, readonly params, mutated params.
 ///
@@ -52,6 +53,35 @@ type HybridFieldExtraction = (
     Vec<(String, String)>,
     Vec<(String, String)>,
 );
+
+/// Validates that both blocks of a `whileTrue:`/`whileFalse:` loop take no
+/// arguments: the condition (receiver) and the body (argument). The loop
+/// evaluates each with no arguments, so a literal block with parameters is a
+/// compile-time [`CodeGenError::BlockArityError`] rather than a loop that
+/// silently drops them (BT-4617). A non-literal block's arity is unknown here.
+fn validate_while_block_arities(
+    condition: &Expression,
+    body: &Expression,
+    selector: &str,
+) -> Result<()> {
+    let example_condition = if selector == "whileFalse:" {
+        "x >= 10"
+    } else {
+        "x < 10"
+    };
+    for (block, role) in [(condition, "condition (receiver)"), (body, "body")] {
+        validate_block_arity_exact(
+            block,
+            0,
+            selector,
+            &format!(
+                "Fix: The {role} block must take no arguments:\n\
+                 \x20 [{example_condition}] {selector} [x := x + 1]"
+            ),
+        )?;
+    }
+    Ok(())
+}
 
 impl CoreErlangGenerator {
     /// Whether a `whileTrue:`/`whileFalse:` with a literal `body` block is
@@ -77,21 +107,16 @@ impl CoreErlangGenerator {
         condition: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
-        // Validate body block arity (must be 0-arg)
-        validate_block_arity_exact(
-            body,
-            0,
-            "whileTrue:",
-            "Fix: The body block must take no arguments:\n\
-             \x20 [x < 10] whileTrue: [x := x + 1]",
-        )?;
+        validate_while_block_arities(condition, body, "whileTrue:")?;
 
         // BT-4002: a condition field write the loop cannot carry is rejected
         // as the same write in the body is.
         self.reject_unthreadable_condition_field_writes(condition)?;
 
         // Check if body is a literal block (enables mutation analysis)
-        if let Expression::Block(body_block) = body {
+        if let Some(body_block) =
+            beamtalk_core::semantic_analysis::block_facts::while_body_block(body)
+        {
             // ADR 0118 phase 3: a condition-only self-send/field
             // write (`whileTrue: [nil]` with a mutating CONDITION) must also
             // route here — the stateful lowering keeps the condition in the
@@ -132,21 +157,16 @@ impl CoreErlangGenerator {
         condition: &Expression,
         body: &Expression,
     ) -> Result<Document<'static>> {
-        // Validate body block arity (must be 0-arg)
-        validate_block_arity_exact(
-            body,
-            0,
-            "whileFalse:",
-            "Fix: The body block must take no arguments:\n\
-             \x20 [x > 0] whileFalse: [x := x + 1]",
-        )?;
+        validate_while_block_arities(condition, body, "whileFalse:")?;
 
         // BT-4002: a condition field write the loop cannot carry is rejected
         // as the same write in the body is.
         self.reject_unthreadable_condition_field_writes(condition)?;
 
         // Check if body is a literal block (enables mutation analysis)
-        if let Expression::Block(body_block) = body {
+        if let Some(body_block) =
+            beamtalk_core::semantic_analysis::block_facts::while_body_block(body)
+        {
             // ADR 0118 phase 3: see the analogous comment in
             // `generate_while_true`.
             if self.while_loop_threads(condition, body_block) {
@@ -191,6 +211,29 @@ impl CoreErlangGenerator {
         } else {
             ("'true'", "'false'")
         };
+
+        // BT-4602: this lowering runs the condition as a plain closure, so an
+        // outer local it writes dies with the closure (the loop re-reads the
+        // pre-loop value forever). A condition that writes one must take the
+        // stateful lowering (`while_loop_threads` via
+        // `while_condition_has_carried_effects`), or Phase 0 must reject it
+        // (a body that is not a block literal, `Escape::ConditionBodyNotLiteral`).
+        // This is the `ConditionalLoop` check's twin for the loop that builds no
+        // node: without it a gate that wrongly answered `false` would compile
+        // silently.
+        let dropped: Vec<threaded_ir::VerifyError> = self
+            .loop_condition_written_locals(condition)
+            .into_iter()
+            .map(|name| threaded_ir::VerifyError::ConditionFamilyNotCarried {
+                family: VersionPrefix::Local(name),
+                at: condition.span(),
+            })
+            .collect();
+        self.report_threaded_ir_verify_errors(
+            &dropped,
+            "plain loop whose condition writes an outer local",
+            condition.span(),
+        );
 
         let loop_fn = self.fresh_temp_var(threaded_ir::LOOP_FN_STEM);
         let cond_var = self.fresh_temp_var("CondFun");
@@ -629,6 +672,11 @@ impl CoreErlangGenerator {
         // an operand another lowering compiles (`family_only_operand_site_exprs`)
         // are checked against the lowered frame, as a loop body's sites are.
         let family_sites = self.family_only_operand_sites_of(&filtered);
+        // BT-4584: the condition's local-write sites, each checked for the
+        // `Put` that carries its write in the map the closure hands back. Read
+        // before the condition is lowered, as `loop_condition_written_locals`
+        // requires (a name the condition binds is not an outer one).
+        let write_sites = self.condition_local_write_sites(condition, rest);
         let stmts = self.with_body_producer_sites(&filtered, false, false, |this| {
             let mut stmts: Vec<ThreadedStmt> = Vec::new();
             for expr in rest {
@@ -644,6 +692,23 @@ impl CoreErlangGenerator {
                     // iteration's read (the loop's own exit condition never
                     // advances).
                     let _ = this.lower_local_var_assignment_bind(expr, frame, span, &mut stmts)?;
+                } else if let Expression::DestructureAssignment { pattern, value, .. } = expr
+                    && !Self::condition_destructure_plain_fault()
+                {
+                    // BT-4584: each name is written as the branch above writes
+                    // `name := ...` here, a `Put` into the condition's
+                    // `StateAcc` (`LocalWrite::Slot`), so the map the closure
+                    // hands back carries it. Before, the statement took the
+                    // generic branch below: plain `let`s that died with the
+                    // closure (`ConditionWriteNotInMap`).
+                    let _ = this.lower_destructure_bind(
+                        pattern,
+                        value,
+                        frame,
+                        span,
+                        &mut stmts,
+                        &|_| LocalWrite::Slot,
+                    )?;
                 } else if this.is_field_assignment(expr) && this.in_actor_instance_context() {
                     // An actor field write steps the frame's `State` by a
                     // `Bind`, as a loop body's does, so the statements after
@@ -704,6 +769,7 @@ impl CoreErlangGenerator {
         // loop's own plan records: a loop that threads no local but carries
         // `SelfVt` (`NoThreadedLocals`) carries it through the loop's own
         // parameters, not through this closure.
+        let mut errors = threaded_ir::verify_condition_writes_in_map(&stmts, &write_sites);
         let wrapper = vec![ThreadedStmt::Threaded {
             mode: ThreadingMode::StateAcc(StateAccFallbackReason::ConditionStateEffects),
             frame,
@@ -712,7 +778,7 @@ impl CoreErlangGenerator {
             produces: Vec::new(),
             span: condition.span(),
         }];
-        let errors = self.verify_threaded_ir(&wrapper);
+        errors.extend(self.verify_threaded_ir(&wrapper));
         self.report_threaded_ir_verify_errors(
             &errors,
             "while condition ThreadedIr must be well-formed",
@@ -720,6 +786,66 @@ impl CoreErlangGenerator {
         );
         let mut ctx = threaded_ir::RenderCtx::new(self);
         Ok(threaded_ir::render(&wrapper, &mut ctx))
+    }
+
+    /// BT-4584: the local-write sites of a carried while condition's
+    /// statements before its tail (`rest`): each statement that assigns
+    /// (`name := ...`) or destructures (`#(a, b) := ...`) a local the
+    /// condition writes for the loop ([`Self::loop_condition_written_locals`],
+    /// the condition's `Local` families), with each such name and its
+    /// scratch-map key. The condition hands its `StateAcc` back to the loop,
+    /// so each site must `Put` each name into it
+    /// ([`threaded_ir::verify_condition_writes_in_map`]).
+    fn condition_local_write_sites(
+        &self,
+        condition: &Expression,
+        rest: &[&Expression],
+    ) -> Vec<threaded_ir::ConditionWriteSite> {
+        let written = self.loop_condition_written_locals(condition);
+        rest.iter()
+            .filter_map(|expr| {
+                let names: Vec<String> = match expr {
+                    Expression::Assignment { target, .. } => match target.as_ref() {
+                        Expression::Identifier(id) => vec![id.name.to_string()],
+                        _ => Vec::new(),
+                    },
+                    Expression::DestructureAssignment { pattern, .. } => {
+                        extract_pattern_bindings(pattern)
+                            .0
+                            .into_iter()
+                            .map(|id| id.name.to_string())
+                            .collect()
+                    }
+                    _ => Vec::new(),
+                };
+                let writes: Vec<(String, String)> = names
+                    .into_iter()
+                    .filter(|name| written.contains(name))
+                    .map(|name| {
+                        let key = self.local_scratch_key(&name);
+                        (name, key)
+                    })
+                    .collect();
+                (!writes.is_empty()).then(|| threaded_ir::ConditionWriteSite {
+                    span: expr.span(),
+                    writes,
+                })
+            })
+            .collect()
+    }
+
+    /// Test-only fault injection (BT-4584): a destructuring statement of a
+    /// carried while condition takes the generic statement lowering, as
+    /// before BT-4584, so `ConditionWriteNotInMap` is shown to fire on a real
+    /// compile (`tests/while_condition_binding_corpus.rs`).
+    fn condition_destructure_plain_fault() -> bool {
+        #[cfg(test)]
+        if super::super::threaded_expr::fault::active()
+            == Some(super::super::threaded_expr::fault::LocalRebindFault::ConditionDestructurePlain)
+        {
+            return true;
+        }
+        false
     }
 
     /// The tail (boolean) statement of a carried while condition — see
@@ -1178,7 +1304,8 @@ impl CoreErlangGenerator {
 
         // BT-4121: check out the marker (loud when the mode selection
         // missed a guarded operator; a hybrid loop never brackets).
-        self.checkout_guarded_op_loop(self.pop_guarded_op_loop(), true, body.span);
+        // BT-4523: and report a `^` lowered in it (`NlrThrowInHybridLoop`).
+        let nlr_errors = self.checkout_hybrid_loop(body.span);
 
         let exit_stateacc = plan.generate_exit_stateacc_full_extract(
             &local_param_names,
@@ -1232,7 +1359,8 @@ impl CoreErlangGenerator {
             entry_line: self.current_send_call_site_line(),
             span: body.span,
         }];
-        let errors = self.verify_threaded_ir(&ir);
+        let mut errors = self.verify_threaded_ir(&ir);
+        errors.extend(nlr_errors);
         self.report_threaded_ir_verify_errors(&errors, "while hybrid ConditionalLoop", body.span);
         let rendered = {
             let mut ctx = threaded_ir::RenderCtx::new(self);
@@ -1392,7 +1520,9 @@ impl CoreErlangGenerator {
     }
 
     /// Generates the fallback method body for `whileTrue`/`whileFalse`
-    /// — Block's `whileTrue:`/`whileFalse:`. Reached only when something
+    /// — Block's `whileTrue:`/`whileFalse:` — and, with `body == false`,
+    /// for `unaryWhileTrue`/`unaryWhileFalse` — Block's unary
+    /// `whileTrue`/`whileFalse` (BT-4313). Reached only when something
     /// bypasses the call-site interception these selectors normally get (e.g.
     /// `perform:`/`perform:withArguments:`) — the same gap already closed for
     /// Block's `value*` family. See
@@ -1411,6 +1541,7 @@ impl CoreErlangGenerator {
         intrinsic_name: &str,
         negate: bool,
         real_selector: &str,
+        body: bool,
         class_name: &str,
     ) -> Document<'static> {
         let self_var = if self.in_class_method() {
@@ -1418,23 +1549,30 @@ impl CoreErlangGenerator {
         } else {
             "Self"
         };
-        let body_param = self
-            .current_method_params
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "BodyBlock".to_string());
+        // BT-4313: the unary `whileTrue`/`whileFalse` (`body == false`) take
+        // no body block: the receiver is the body too.
+        let body_param = body.then(|| {
+            self.current_method_params
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "BodyBlock".to_string())
+        });
 
         let runtime_module =
             super::super::primitive_bindings::PrimitiveBindingTable::runtime_module_for_class(
                 class_name,
             );
+        let placeholder_args = match &body_param {
+            Some(param) => leaf::var(param.clone()),
+            None => Document::Str(""),
+        };
         let placeholder_branch = docvec![
             "call ",
             leaf::atom(runtime_module),
             ":'dispatch'(",
             leaf::atom(intrinsic_name),
             ", [",
-            leaf::var(body_param.clone()),
+            placeholder_args,
             "], ",
             Document::Str(self_var),
             ")",
@@ -1446,6 +1584,14 @@ impl CoreErlangGenerator {
             ("'true'", "'false'")
         };
         let loop_fn = self.fresh_temp_var(threaded_ir::LOOP_FN_STEM);
+        let body_step = match &body_param {
+            Some(param) => docvec![
+                "let _ = ",
+                self.annotate_current_send_call(docvec!["apply ", leaf::var(param.clone()), " ()"]),
+                " in ",
+            ],
+            None => Document::Str(""),
+        };
         let tier1_loop = docvec![
             "letrec ",
             leaf::fname(loop_fn.clone(), 0),
@@ -1453,13 +1599,9 @@ impl CoreErlangGenerator {
             self.annotate_current_send_call(docvec!["apply ", Document::Str(self_var), " ()"]),
             " of <",
             continue_atom,
-            "> when 'true' -> let _ = ",
-            self.annotate_current_send_call(docvec![
-                "apply ",
-                leaf::var(body_param.clone()),
-                " ()"
-            ]),
-            " in apply ",
+            "> when 'true' -> ",
+            body_step,
+            "apply ",
             leaf::fname(loop_fn.clone(), 0),
             " () <",
             exit_atom,
@@ -1469,24 +1611,16 @@ impl CoreErlangGenerator {
             self.annotate_current_send_call(docvec!["apply ", leaf::fname(loop_fn, 0), " ()"]),
         ];
 
-        let body_stateful_error = self.generate_stateful_block_dispatch_error(
-            real_selector,
-            class_name,
-            STATEFUL_BLOCK_DISPATCH_HINT,
-        );
-        let body_tier_check = docvec![
-            "case call 'erlang':'is_function'(",
-            leaf::var(body_param.clone()),
-            ", 0) of <'true'> when 'true' -> ",
-            tier1_loop,
-            " <'false'> when 'true' -> case call 'erlang':'is_function'(",
-            leaf::var(body_param),
-            ", 1) of <'true'> when 'true' -> ",
-            body_stateful_error,
-            " <'false'> when 'true' -> ",
-            placeholder_branch.clone(),
-            " end end",
-        ];
+        let body_tier_check = match body_param {
+            None => tier1_loop,
+            Some(body_param) => self.while_fallback_body_tier_check(
+                &body_param,
+                tier1_loop,
+                placeholder_branch.clone(),
+                real_selector,
+                class_name,
+            ),
+        };
 
         let self_stateful_error = self.generate_stateful_block_dispatch_error(
             real_selector,
@@ -1502,6 +1636,38 @@ impl CoreErlangGenerator {
             Document::Str(self_var),
             ", 1) of <'true'> when 'true' -> ",
             self_stateful_error,
+            " <'false'> when 'true' -> ",
+            placeholder_branch,
+            " end end",
+        ]
+    }
+
+    /// The body half of [`Self::generate_while_structural_fallback`]'s tier
+    /// check: `tier1_loop` when the body block `body_param` is Tier 1, the
+    /// `stateful_block_dispatch` error when it is Tier 2, `placeholder_branch`
+    /// for a non-block body.
+    fn while_fallback_body_tier_check(
+        &mut self,
+        body_param: &str,
+        tier1_loop: Document<'static>,
+        placeholder_branch: Document<'static>,
+        real_selector: &str,
+        class_name: &str,
+    ) -> Document<'static> {
+        let body_stateful_error = self.generate_stateful_block_dispatch_error(
+            real_selector,
+            class_name,
+            STATEFUL_BLOCK_DISPATCH_HINT,
+        );
+        docvec![
+            "case call 'erlang':'is_function'(",
+            leaf::var(body_param.to_string()),
+            ", 0) of <'true'> when 'true' -> ",
+            tier1_loop,
+            " <'false'> when 'true' -> case call 'erlang':'is_function'(",
+            leaf::var(body_param.to_string()),
+            ", 1) of <'true'> when 'true' -> ",
+            body_stateful_error,
             " <'false'> when 'true' -> ",
             placeholder_branch,
             " end end",
@@ -1571,6 +1737,54 @@ impl CoreErlangGenerator {
 #[cfg(test)]
 mod tests {
     use crate::core_erlang::tests::codegen;
+
+    /// BT-4617: a literal condition block with parameters is rejected, in
+    /// every method kind, by the same check as a body block with parameters.
+    #[test]
+    fn test_while_condition_with_parameters_is_block_arity_error() {
+        let methods = [
+            ("Object subclass: W\n  class run =>\n", "class"),
+            ("Value subclass: W\n  run =>\n", "value-type"),
+            ("Actor subclass: W\n  run =>\n", "actor"),
+        ];
+        let loops = [
+            (
+                "[:y | x < 3] whileTrue: [x := x + 1]",
+                "whileTrue:",
+                "condition",
+            ),
+            (
+                "[:y | x > 3] whileFalse: [x := x + 1]",
+                "whileFalse:",
+                "condition",
+            ),
+            ("[x < 3] whileTrue: [:y | x := x + 1]", "whileTrue:", "body"),
+        ];
+        for (header, kind) in methods {
+            for (loop_src, expected_selector, role) in loops {
+                let src = format!("{header}    x := 0.\n    {loop_src}.\n    x\n");
+                let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
+                let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+                let result = crate::core_erlang::generate_module(
+                    &module,
+                    crate::core_erlang::CodegenOptions::new("test"),
+                );
+                match result {
+                    Err(crate::core_erlang::CodeGenError::BlockArityError {
+                        selector,
+                        actual,
+                        hint,
+                        ..
+                    }) => {
+                        assert_eq!(selector, expected_selector, "{kind}: {loop_src}");
+                        assert_eq!(actual, 1, "{kind}: {loop_src}");
+                        assert!(hint.contains(role), "{kind}: {loop_src}: {hint}");
+                    }
+                    other => panic!("{kind}: {loop_src}: expected BlockArityError, got {other:?}"),
+                }
+            }
+        }
+    }
 
     #[test]
     fn test_while_true_simple_generates_letrec() {

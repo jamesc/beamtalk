@@ -27,6 +27,14 @@ use crate::semantic_analysis::type_checker::{
 };
 use crate::source_analysis::Span;
 
+/// The `then:` selector (`Object >> then:`, ADR 0145 § 2, BT-4515).
+///
+/// A string, not a `WellKnownSelector` variant, for the reason `and:` is one
+/// in `send/receiver.rs`: `then:` is an ordinary self-hosted `Object` method
+/// that neither the type checker nor codegen intrinsifies; only its
+/// block-parameter typing is special.
+pub(in crate::semantic_analysis::type_checker) const THEN_SELECTOR: &str = "then:";
+
 impl TypeChecker {
     /// Infer argument types for `on:do:` with exception class propagation.
     ///
@@ -226,6 +234,155 @@ impl TypeChecker {
         )
     }
 
+    /// Whether a `then:` sent to a value of `receiver_ty` is answered by
+    /// `Object >> then:` (ADR 0145 § 2, BT-4515) for every class the type
+    /// admits.
+    ///
+    /// `then:` is not `sealed`, so a class may define its own (a promise
+    /// whose block takes the resolved value, not the receiver). The
+    /// [`Self::infer_args_for_then`] rule only describes `Object`'s method,
+    /// so it applies only when every member of the receiver's type resolves
+    /// `then:` to `Object`. A `Dynamic` receiver, a protocol type, or a
+    /// class that overrides `then:` keeps the generic send path.
+    ///
+    /// The receiver's static class is not enough on its own: a value typed
+    /// as a superclass may at run time be an instance of a known subclass
+    /// that overrides `then:` (`TimeoutProxy` under `Actor`, say). So the
+    /// rule also requires every known subclass to resolve `then:` to
+    /// `Object`. "Known" means visible in this compilation's hierarchy: a
+    /// downstream package's subclass that overrides `then:` is not seen.
+    /// That only affects advisory types and warnings, never codegen, since
+    /// `then:` is never inlined.
+    pub(in crate::semantic_analysis::type_checker) fn then_resolves_to_object(
+        receiver_ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        match receiver_ty {
+            InferredType::Known { class_name, .. } => {
+                let resolves_to_object = |class: &str| {
+                    hierarchy
+                        .find_method(class, THEN_SELECTOR)
+                        .is_some_and(|m| m.defined_in.as_str() == WellKnownClass::Object.as_str())
+                };
+                let class = super::method_resolution_class(class_name);
+                // A known subclass overrides `then:` exactly when some class
+                // below `class` defines its own. Only the (few) classes that
+                // define `then:` locally need their superclass chain walked:
+                // O(classes x depth), not a walk of the whole subtree.
+                let overridden_below = || {
+                    hierarchy.class_names().any(|name| {
+                        name.as_str() != WellKnownClass::Object.as_str()
+                            && hierarchy.get_class(name).is_some_and(|info| {
+                                info.methods.iter().any(|m| {
+                                    m.selector.as_str() == THEN_SELECTOR
+                                        && m.defined_in.as_str() == name.as_str()
+                                })
+                            })
+                            && hierarchy
+                                .superclass_chain(name)
+                                .iter()
+                                .any(|ancestor| ancestor.as_str() == class)
+                    })
+                };
+                resolves_to_object(class) && !overridden_below()
+            }
+            InferredType::Union { members, .. } => {
+                !members.is_empty()
+                    && members
+                        .iter()
+                        .all(|m| Self::then_resolves_to_object(m, hierarchy))
+            }
+            _ => false,
+        }
+    }
+
+    /// Infer the argument of `Object >> then:` (ADR 0145 § 2, BT-4515):
+    /// a literal block's first parameter is typed as the receiver's type,
+    /// so a `|>` pipeline that continues inside or after the block keeps
+    /// its types. Modelled on [`Self::infer_if_not_nil_block`], without the
+    /// nil narrowing: `then:` evaluates its block for every receiver, `nil`
+    /// included.
+    ///
+    /// Only called when [`Self::then_resolves_to_object`] holds. A non-block
+    /// argument takes the normal expression inference path; the send's
+    /// result type is then read from its `Block(..., R)` type by
+    /// [`Self::block_arg_result_ty`] if it has one.
+    pub(in crate::semantic_analysis::type_checker) fn infer_args_for_then(
+        &mut self,
+        arguments: &[Expression],
+        receiver_ty: &InferredType,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> Vec<InferredType> {
+        arguments
+            .iter()
+            .map(|arg| {
+                let Expression::Block(block) = arg else {
+                    return self.infer_expr(arg, hierarchy, env, in_abstract_method);
+                };
+                // `Object >> then:` sends `value:`, so a well-formed block has
+                // one parameter; any beyond the first stay `Dynamic`, as in
+                // `infer_if_not_nil_block`. A zero-arity block still goes
+                // through the typed-param helper so its `Block(R)` type
+                // carries the body's result type.
+                let param_types: Vec<InferredType> = block
+                    .parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| {
+                        if i == 0 {
+                            receiver_ty.clone()
+                        } else {
+                            InferredType::Dynamic(DynamicReason::UnannotatedParam)
+                        }
+                    })
+                    .collect();
+                self.infer_block_with_typed_params(
+                    block,
+                    arg.span(),
+                    &param_types,
+                    hierarchy,
+                    env,
+                    in_abstract_method,
+                )
+            })
+            .collect()
+    }
+
+    /// The result type of evaluating a block argument: the last type-arg of
+    /// its `Block(..., R)` type, or `Never` when it is a block literal that
+    /// holds a non-local return (`^`) anywhere inside it (including nested
+    /// sub-expressions like `[[^1] value]` or `foo: (^bar)`), since that
+    /// exits the enclosing method before the value is observed.
+    ///
+    /// Returns `None` when `ty` is not a `Block(...)` type with type-args
+    /// (e.g. the caller passed a symbol or a bare `Block`), so the caller
+    /// falls back to the generic method-lookup path. Shared by the
+    /// `ifNil:`/`ifNotNil:` family and `then:`.
+    pub(in crate::semantic_analysis::type_checker) fn block_arg_result_ty(
+        arg: &Expression,
+        ty: &InferredType,
+    ) -> Option<InferredType> {
+        let InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } = ty
+        else {
+            return None;
+        };
+        if class_name.as_str() != "Block" {
+            return None;
+        }
+        if let Expression::Block(block) = arg {
+            if block_has_any_return(block) {
+                return Some(InferredType::Never);
+            }
+        }
+        type_args.last().cloned()
+    }
+
     /// Compute the return type of `ifNil:ifNotNil:` /
     /// `ifNotNil:ifNil:` as the union of both branch bodies' return types.
     ///
@@ -246,31 +403,9 @@ impl TypeChecker {
         if arg_types.len() < 2 || arguments.len() < 2 {
             return None;
         }
-        let branch_ret = |arg: &Expression, ty: &InferredType| -> Option<InferredType> {
-            let InferredType::Known {
-                class_name,
-                type_args,
-                ..
-            } = ty
-            else {
-                return None;
-            };
-            if class_name.as_str() != "Block" {
-                return None;
-            }
-            // Non-local `^` anywhere inside the branch (including nested
-            // sub-expressions like `[[^1] value]` or `foo: (^bar)`) exits
-            // the method before the expression value is observed — treat
-            // the branch as Never so `union_of` skips it.
-            if let Expression::Block(block) = arg {
-                if block_has_any_return(block) {
-                    return Some(InferredType::Never);
-                }
-            }
-            type_args.last().cloned()
-        };
-        let a = branch_ret(&arguments[0], &arg_types[0])?;
-        let b = branch_ret(&arguments[1], &arg_types[1])?;
+        // A branch with a non-local `^` is `Never`, so `union_of` skips it.
+        let a = Self::block_arg_result_ty(&arguments[0], &arg_types[0])?;
+        let b = Self::block_arg_result_ty(&arguments[1], &arg_types[1])?;
         Some(InferredType::union_of(&[a, b]))
     }
 
@@ -326,28 +461,7 @@ impl TypeChecker {
             return None;
         }
 
-        let arg = arguments.first()?;
-        let ty = arg_types.first()?;
-        let InferredType::Known {
-            class_name,
-            type_args,
-            ..
-        } = ty
-        else {
-            return None;
-        };
-        if class_name.as_str() != "Block" {
-            return None;
-        }
-        let block_ret = if let Expression::Block(block) = arg {
-            if block_has_any_return(block) {
-                InferredType::Never
-            } else {
-                type_args.last().cloned()?
-            }
-        } else {
-            type_args.last().cloned()?
-        };
+        let block_ret = Self::block_arg_result_ty(arguments.first()?, arg_types.first()?)?;
 
         let self_branch = match WellKnownSelector::from_name(selector_name) {
             Some(WellKnownSelector::IfNil) => {
@@ -818,8 +932,15 @@ impl TypeChecker {
                 block_env.set_local(param.name.clone(), param_ty.clone());
                 block_param_types.push(param_ty);
             }
+            let deferring = std::mem::take(&mut self.defer_block_widening);
             let body_ty =
                 self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
+            self.defer_block_widening = deferring;
+            // BT-4636: a write inside a narrowing arm (`found isNil ifTrue:
+            // [found := e]`) is joined into the enclosing scope too, so it
+            // reaches the method scope through the `do:` block around it.
+            // `before` is read from the un-narrowed `env`.
+            self.widen_outer_locals_written_by_block(block, &block_env, env, deferring);
             // Build `Block(P1, ..., Pn, R)` so downstream generic inference
             // (e.g. `infer_method_local_params` matching `Block(R) -> R`) can
             // recover the block's return type.
@@ -1440,7 +1561,11 @@ impl TypeChecker {
         for (param, ty) in block.parameters.iter().zip(resolved.iter()) {
             block_env.set_local(param.name.clone(), ty.clone());
         }
+        // A block body starts a fresh send frame (see `defer_block_widening`).
+        let deferring = std::mem::take(&mut self.defer_block_widening);
         let body_ty = self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
+        self.defer_block_widening = deferring;
+        self.widen_outer_locals_written_by_block(block, &block_env, env, deferring);
         // A block whose body ends in a top-level non-local return
         // (`^expr`) never produces a *local* value — it diverges out of the
         // enclosing method entirely, and `^expr`'s type naturally matches
@@ -1480,6 +1605,118 @@ impl TypeChecker {
         };
         self.type_map.insert(block_span, ty.clone());
         ty
+    }
+
+    /// BT-4636: a block's writes to an outer local are threaded back to the
+    /// enclosing scope at runtime, but the block body is inferred in a child
+    /// environment that is then dropped, so `found := nil. xs do: [:e | found
+    /// := e]` left `found` typed `UndefinedObject` afterwards. Widen each outer
+    /// local the block writes to the join of its type before the block and the
+    /// type the block leaves it with (`String | Nil`), using the same
+    /// [`Self::join_branch_arms`] the arms' result types use. The block may run
+    /// zero times, so the prior type always stays a member. Nested blocks apply
+    /// the same rule to their own parent, so a write under `ifFalse: [...]`
+    /// inside a `do:` block reaches the method scope one level at a time.
+    ///
+    /// While `deferring` (the block is an argument of a send) the pair is
+    /// queued instead, and [`Self::apply_deferred_block_widenings`] joins all
+    /// of the send's arms at once. A block stored in a local is widened where
+    /// it is defined, which is approximate: it does not track a later
+    /// reassignment before the block runs.
+    fn widen_outer_locals_written_by_block(
+        &mut self,
+        block: &crate::ast::Block,
+        block_env: &TypeEnv,
+        env: &mut TypeEnv,
+        deferring: bool,
+    ) {
+        // A block ending in a top-level `^` never returns to the code after
+        // the send, so its writes cannot be seen there (the same rule that
+        // gives it a `Never` body type).
+        if block_has_return(block) {
+            return;
+        }
+        let writes = crate::semantic_analysis::block_facts::outer_local_writes(block, &|name| {
+            env.get_local(name).is_some()
+        });
+        for write in writes {
+            if !matches!(
+                write.kind,
+                crate::semantic_analysis::block_facts::WriteKind::Local
+            ) {
+                continue;
+            }
+            let Some(after) = block_env.get_local(&write.name) else {
+                continue;
+            };
+            let widening = BlockWriteWidening {
+                remote: block_env.known_remote(&EnvKey::local(write.name.clone())),
+                name: write.name,
+                ty: after,
+            };
+            if deferring {
+                self.deferred_block_widenings.push(widening);
+            } else {
+                Self::apply_deferred_block_widenings(&[widening], env);
+            }
+        }
+    }
+
+    /// Join each deferred block write into `env`: the local's current type
+    /// joined with every type the send's arms left it with.
+    pub(in crate::semantic_analysis::type_checker) fn apply_deferred_block_widenings(
+        deferred: &[BlockWriteWidening],
+        env: &mut TypeEnv,
+    ) {
+        let mut names: Vec<&ecow::EcoString> = Vec::new();
+        for w in deferred {
+            if !names.contains(&&w.name) {
+                names.push(&w.name);
+            }
+        }
+        for name in names {
+            let Some(before) = env.get_local(name) else {
+                continue;
+            };
+            let key = EnvKey::local(name.clone());
+            let writes: Vec<&BlockWriteWidening> =
+                deferred.iter().filter(|w| w.name == *name).collect();
+            // ADR 0126 §6: the known-remote fact survives only when the
+            // binding and every arm are known-remote; otherwise a stale fact
+            // would describe a value the local may no longer hold.
+            // `node_hint` names the node the local was spawned on, so it is
+            // kept only when the binding and every arm agree on it; otherwise
+            // the fact stays with no hint and the diagnostic says "there".
+            let remote = env.known_remote(&key).and_then(|binding| {
+                let mut node_hint = binding.node_hint;
+                for w in &writes {
+                    let arm = w.remote.as_ref()?;
+                    if arm.node_hint != node_hint {
+                        node_hint = None;
+                    }
+                }
+                Some(
+                    crate::semantic_analysis::type_checker::known_remote::KnownRemote { node_hint },
+                )
+            });
+            let mut arms = vec![before.clone()];
+            arms.extend(writes.iter().map(|w| w.ty.clone()));
+            if arms.iter().skip(1).all(|ty| *ty == before) {
+                match remote {
+                    Some(remote) => env.mark_known_remote(key, remote),
+                    None => env.clear_known_remote(&key),
+                }
+                continue;
+            }
+            let joined = Self::join_branch_arms(&arms);
+            // The old origin note and flow facts (raw-Binary) described the
+            // earlier binding, not this union: drop them.
+            env.remove(&key);
+            env.set_local(name.clone(), joined);
+            if let Some(remote) = remote {
+                env.mark_known_remote(key, remote);
+            }
+        }
     }
 
     /// Resolve each parameter's type for a block literal (BT-4102 Decision A):
@@ -1713,4 +1950,15 @@ impl TypeChecker {
             _ => false,
         }
     }
+}
+
+/// BT-4636: one outer local a block writes — the type the block leaves it
+/// with and its known-remote fact (ADR 0126 §6) — queued until every arm of
+/// the enclosing send is inferred.
+#[derive(Debug, Clone)]
+pub(in crate::semantic_analysis::type_checker) struct BlockWriteWidening {
+    pub(in crate::semantic_analysis::type_checker) name: ecow::EcoString,
+    pub(in crate::semantic_analysis::type_checker) ty: InferredType,
+    pub(in crate::semantic_analysis::type_checker) remote:
+        Option<crate::semantic_analysis::type_checker::known_remote::KnownRemote>,
 }

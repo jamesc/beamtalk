@@ -14,7 +14,9 @@ fn report(src: &str) -> Vec<String> {
     let (module, _) = beamtalk_core::source_analysis::parse(tokens);
     let result = crate::core_erlang::generate_module_with_warnings(
         &module,
-        crate::core_erlang::CodegenOptions::new("test").with_codegen_diagnostics(true),
+        crate::core_erlang::CodegenOptions::new("test")
+            .with_source(src)
+            .with_codegen_diagnostics(true),
     )
     .expect("codegen should succeed");
     result
@@ -120,16 +122,13 @@ fn string_and_pid_ordinary_selectors_are_converted() {
 }
 
 #[test]
-fn builtin_whose_guard_spans_routes_reports_why() {
-    let hint = hint_for(
-        "Object subclass: Caller\n  run: b :: Binary => b frobnicate\n",
-        "frobnicate",
-    );
+fn binary_sends_are_converted() {
+    // BT-4510: `Binary`'s two routes (a bare binary, the `String` tag) are
+    // both guarded, so a `Binary` send is no longer a dynamic site.
+    let hints = report("Object subclass: Caller\n  run: b :: Binary => b frobnicate\n");
     assert!(
-        hint.contains(
-            "reason: builtin — Binary: its representation test also admits values routed away from bt@stdlib@binary"
-        ),
-        "{hint}"
+        !hints.iter().any(|h| h.starts_with("Send 'frobnicate'")),
+        "{hints:?}"
     );
 }
 
@@ -350,4 +349,145 @@ fn alias_of_a_union_stays_dynamic() {
         hints.iter().any(|h| h.starts_with("Send 'frobnicate'")),
         "{hints:?}"
     );
+}
+
+/// BT-4486: a protocol-typed send names the protocol gate it failed.
+#[test]
+fn protocol_without_guardable_conformers_reports_protocol_gate() {
+    let hints = report_full(concat!(
+        "Object subclass: Caller\n",
+        "  run: n :: Namer => n protoLabel\n\n",
+        "Protocol define: Namer\n  protoLabel -> String\n",
+    ));
+    assert!(
+        hints.iter().any(|h| h.starts_with("Send 'protoLabel'")
+            && h.contains("protocol — no known conformer of Namer")),
+        "got {hints:?}"
+    );
+}
+
+#[test]
+fn protocol_with_too_many_conformers_reports_the_cap() {
+    let mut src = String::from(concat!(
+        "Object subclass: Caller\n",
+        "  run: n :: Namer => n protoLabel\n\n",
+        "Protocol define: Namer\n  protoLabel -> String\n\n",
+    ));
+    for i in 1..=5 {
+        src.push_str("sealed Value subclass: A");
+        src.push_str(&i.to_string());
+        src.push_str("\n  protoLabel -> String => \"a\"\n\n");
+    }
+    let hints = report_full(&src);
+    assert!(
+        hints
+            .iter()
+            .any(|h| h.starts_with("Send 'protoLabel'") && h.contains("protocol-too-many")),
+        "got {hints:?}"
+    );
+}
+
+// BT-4596: compiler-made dynamic sends — the block `value` intrinsic's
+// non-fun fallback and each interpolation segment's `displayString` — are
+// reported like written sends.
+
+#[test]
+fn untyped_block_value_fallback_is_reported() {
+    let hint = hint_for("Object subclass: Caller\n  run: b => b value\n", "value");
+    assert!(hint.contains("reason: untyped"), "{hint}");
+}
+
+#[test]
+fn untyped_block_value_keyword_fallback_is_reported() {
+    let hint = hint_for(
+        "Object subclass: Caller\n  run: b => b value: 1 value: 2\n",
+        "value:value:",
+    );
+    assert!(hint.contains("reason: untyped"), "{hint}");
+}
+
+#[test]
+fn untyped_value_with_arguments_fallback_is_reported() {
+    let hint = hint_for(
+        "Object subclass: Caller\n  run: b => b valueWithArguments: #(1)\n",
+        "valueWithArguments:",
+    );
+    assert!(hint.contains("reason: untyped"), "{hint}");
+}
+
+#[test]
+fn block_typed_and_literal_value_sends_are_not_reported() {
+    // A `Block`-typed receiver's `is_function` test is its guard, and a
+    // block literal never reaches the fallback.
+    let hints = report(concat!(
+        "Object subclass: Caller\n",
+        "  run: b :: Block => b value\n",
+        "  go: b :: Block => b value: 1\n",
+        "  lit => [:x | x] value: 1\n",
+    ));
+    assert!(
+        !hints.iter().any(|h| h.starts_with("Send 'value")),
+        "{hints:?}"
+    );
+}
+
+#[test]
+fn untyped_interpolation_segment_is_reported() {
+    let hint = hint_for(
+        "Object subclass: Caller\n  run: x => \"got {x}\"\n",
+        "displayString",
+    );
+    assert!(hint.contains("reason: untyped"), "{hint}");
+}
+
+#[test]
+fn typed_interpolation_segment_is_not_reported() {
+    let hints = report("Object subclass: Caller\n  run: n :: Integer => \"got {n}\"\n");
+    assert!(
+        !hints.iter().any(|h| h.starts_with("Send 'displayString'")),
+        "{hints:?}"
+    );
+}
+
+#[test]
+fn cascade_messages_are_reported() {
+    let hints = report("Object subclass: Caller\n  run: x => x foo; bar\n");
+    for selector in ["foo", "bar"] {
+        assert!(
+            hints
+                .iter()
+                .any(|h| h.starts_with(&format!("Send '{selector}'"))
+                    && h.contains("reason: cascade")
+                    && h.contains("(receiver gate: untyped)")),
+            "{selector}: {hints:?}"
+        );
+    }
+}
+
+#[test]
+fn multi_line_cascade_reports_each_message_line() {
+    let hints = report("Object subclass: Caller\n  run: x =>\n    x foo;\n      bar;\n      baz\n");
+    for (selector, line) in [("foo", 3), ("bar", 4), ("baz", 5)] {
+        let needle = format!("Send '{selector}' at line {line}:");
+        assert!(
+            hints.iter().any(|h| h.starts_with(&needle)),
+            "{needle}: {hints:?}"
+        );
+    }
+}
+
+#[test]
+fn typed_cascade_receiver_reports_cascade() {
+    // A receiver a guarded direct call would cover still sends dynamically
+    // in a cascade; the reason says so rather than reading as a gap.
+    let hints = report("Object subclass: Caller\n  run: n :: Integer => n printString; abs\n");
+    for selector in ["printString", "abs"] {
+        assert!(
+            hints
+                .iter()
+                .any(|h| h.starts_with(&format!("Send '{selector}'"))
+                    && h.contains("reason: cascade")),
+            "{selector}: {hints:?}"
+        );
+    }
 }

@@ -277,6 +277,11 @@ pub fn start_detached_node(
     extra_code_paths: &[PathBuf],
     config: &super::WorkspaceConfig<'_>,
 ) -> Result<NodeInfo> {
+    // ADR 0125 §3.1: the workspace node loads the toolchain's `.beam` files,
+    // which do not load below the support window's floor — fail fast with
+    // `beamtalk doctor`'s message instead of a detached-node boot crash.
+    crate::commands::build_stamp::require_supported_otp()?;
+
     let node_name = format!("beamtalk_workspace_{workspace_id}@localhost");
     let cookie = read_workspace_cookie(workspace_id)?;
 

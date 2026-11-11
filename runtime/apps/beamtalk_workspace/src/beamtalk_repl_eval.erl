@@ -272,7 +272,7 @@ Render `:help <Alias>` output (ADR 0108 Phase 8).
 blank line and the indented doc text, then a blank line and
 `Declared in: <declared_in>`. `declared_in` is `<<"REPL">>` for a
 session-declared alias (this issue's chosen convention, flagged in the PR
-description for maintainer sign-off per CLAUDE.md's REPL-output rule,
+description for maintainer sign-off per AGENTS.md's REPL-output rule,
 alongside the `type` declaration's own echo-value decision) or
 `<<"stdlib">>` for one seeded from stdlib's own compiled declarations
 (`beamtalk_repl_state:stdlib_alias_table/0`) — same sign-off flag, chosen to
@@ -315,7 +315,7 @@ handle_type_alias_definition(AliasInfo, Warnings, State) ->
     ),
     beamtalk_repl_loader:spawn_alias_change_recheck([Name]),
     %% REPL display-value decision (flagged in the PR description for
-    %% maintainer sign-off per CLAUDE.md's REPL-output rule): echo the
+    %% maintainer sign-off per AGENTS.md's REPL-output rule): echo the
     %% declared name as a plain binary. BT-4167: binaries (Strings) now
     %% display quoted (`"Direction"`), distinct from bare class names
     %% (`Counter`) — the alias echo is a String value, not a class
@@ -809,7 +809,7 @@ repopulate_class_sources(Path, ClassNames) ->
 
 -spec class_name_binaries([map()]) -> [binary()].
 class_name_binaries(ClassNames) ->
-    [Bin || Entry <- ClassNames, (Bin = class_name_binary(Entry)) =/= undefined].
+    [Bin || Entry <- ClassNames, Bin <- [class_name_binary(Entry)], Bin =/= undefined].
 
 %% Extract a class name as a binary from a reload payload entry, mirroring the
 %% defensive shape-matching in `handle_load_after_native/1` (atom | binary |
@@ -1159,7 +1159,7 @@ stdlib gate is now conditional on `StdlibPolicy`:
   classes — flushability, not refusal, is enforced later at the ChangeLog
   layer, not here.
 
-One shared code path for both policies (CLAUDE.md's no-duplicate-
+One shared code path for both policies (AGENTS.md's no-duplicate-
 implementations rule) — only the gate decision forks. `StdlibPolicy` is
 matched exhaustively (`refuse_stdlib` / `allow_stdlib` only) rather than via a
 catch-all `_` clause, so an unrecognised policy atom fails loudly

@@ -40,6 +40,7 @@ impl CoreErlangGenerator {
                 .class_hierarchy
                 .as_ref()
                 .map(|h| h.defines_user_class_new1(&self.class_name())),
+            class_new1_routing: self.own_class_new1_routing,
         }
     }
 
@@ -600,6 +601,12 @@ impl CoreErlangGenerator {
     /// Looks up a variable binding in the current scope stack.
     pub(in crate::core_erlang) fn lookup_var(&self, name: &str) -> Option<&String> {
         self.var_context.lookup(name)
+    }
+
+    /// Hides `name` in the current scope (until the scope is popped or `name`
+    /// is bound again), answering the Core Erlang variable it was bound to.
+    pub(in crate::core_erlang) fn hide_var(&mut self, name: &str) -> Option<String> {
+        self.var_context.hide(name)
     }
 
     /// Binds an identifier to a Core Erlang variable name in the current scope.

@@ -82,10 +82,11 @@ pub(in crate::core_erlang) mod actor_state_helper {
     pub const RESTORE: (&str, u32) = ("restore", 2);
     pub const CALL_FOREIGN: (&str, u32) = ("call_foreign", 3);
     pub const REFRESH: (&str, u32) = ("refresh", 2);
-    pub const REFRESH_CARRIED: (&str, u32) = ("refresh_carried", 2);
     pub const CAPTURE: (&str, u32) = ("capture", 2);
     pub const VIEW: (&str, u32) = ("view", 2);
-    pub const NLR_STATE: (&str, u32) = ("nlr_state", 2);
+    pub const COMMIT: (&str, u32) = ("commit", 2);
+    pub const STORE_UNWOUND: (&str, u32) = ("store_unwound", 2);
+    pub const NOTE_UNWOUND: (&str, u32) = ("note_unwound", 1);
     pub const GET: (&str, u32) = ("get", 3);
     pub const PUT: (&str, u32) = ("put", 3);
     pub const SUPER_SEND: (&str, u32) = ("super_send", 5);
@@ -101,10 +102,11 @@ pub(in crate::core_erlang) mod actor_state_helper {
         RESTORE,
         CALL_FOREIGN,
         REFRESH,
-        REFRESH_CARRIED,
         CAPTURE,
         VIEW,
-        NLR_STATE,
+        COMMIT,
+        STORE_UNWOUND,
+        NOTE_UNWOUND,
         GET,
         PUT,
         SUPER_SEND,
@@ -219,6 +221,11 @@ impl CoreErlangGenerator {
         if !self.cell_closures_apply() {
             return build_fun(self);
         }
+        if self.actor_closure.is_none() {
+            // BT-4524: a method-level closure holding a `^` must be run by a
+            // call that stored the method's state first.
+            self.check_nlr_closure(at);
+        }
         if let Some(outer) = self.actor_closure.clone() {
             let capture = self.fresh_temp_var("ASCapture");
             let inner = ActorClosure::new(capture.clone());
@@ -279,18 +286,6 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn cell_view_doc(&self) -> Document<'static> {
         actor_state_call(
             actor_state_helper::VIEW,
-            vec![leaf::var("Self"), self.closure_capture_doc()],
-        )
-    }
-
-    /// `beamtalk_actor_state:nlr_state(Self, Capture)`: the state an actor
-    /// closure's `^` throw carries. The cell at home; away the creation-time
-    /// capture stamped with its own actor, so a dynamic `Block>>ensure:` relay
-    /// in another actor of the same class never takes that actor's cell for
-    /// it (BT-4448, `refresh_carried/2`).
-    pub(in crate::core_erlang) fn cell_nlr_state_doc(&self) -> Document<'static> {
-        actor_state_call(
-            actor_state_helper::NLR_STATE,
             vec![leaf::var("Self"), self.closure_capture_doc()],
         )
     }

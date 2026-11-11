@@ -52,6 +52,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Do);
         self.emit_loop_convention_diagnostic(&plan, body.span);
+        let discard = self.take_discarded_fold(body.span);
 
         let dict_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -127,8 +128,8 @@ impl CoreErlangGenerator {
                     extract_doc,
                 ]
             } else {
-                let (repack_doc, stateacc) =
-                    plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+                let tail =
+                    plan.closed_fold_tail_doc(self, extract_doc, guarded_op_bracket, discard);
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -139,11 +140,7 @@ impl CoreErlangGenerator {
                     ", ",
                     leaf::var(values_var),
                     ") in ",
-                    extract_doc,
-                    repack_doc,
-                    "{'nil', ",
-                    leaf::var(stateacc),
-                    "}",
+                    tail,
                 ]
             };
             docs.push(result_doc);
@@ -268,6 +265,7 @@ impl CoreErlangGenerator {
     ) -> Result<Document<'static>> {
         let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Do);
         self.emit_loop_convention_diagnostic(&plan, body.span);
+        let discard = self.take_discarded_fold(body.span);
 
         let dict_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -366,8 +364,8 @@ impl CoreErlangGenerator {
                     extract_doc,
                 ]
             } else {
-                let (repack_doc, stateacc) =
-                    plan.append_repack_stateacc_doc(self, guarded_op_bracket);
+                let tail =
+                    plan.closed_fold_tail_doc(self, extract_doc, guarded_op_bracket, discard);
                 docvec![
                     " in let ",
                     leaf::var(fold_result.clone()),
@@ -378,11 +376,7 @@ impl CoreErlangGenerator {
                     ", ",
                     leaf::var(pairs_var),
                     ") in ",
-                    extract_doc,
-                    repack_doc,
-                    "{'nil', ",
-                    leaf::var(stateacc),
-                    "}",
+                    tail,
                 ]
             };
             docs.push(result_doc);
@@ -501,10 +495,10 @@ mod tests {
             code.contains("'lists':'foldl'"),
             "dict do: with local mutation should use lists:foldl. Got:\n{code}"
         );
-        // Tuple-accumulator: element(1, ...) reads the threaded local inside the lambda.
+        // BT-4116: a single threaded local is a bare accumulator — no tuple.
         assert!(
-            code.contains("'erlang':'element'(1,"),
-            "dict do: tuple-acc path should use element(1, ...) to read the threaded local. Got:\n{code}"
+            !code.contains("'erlang':'element'(1,"),
+            "dict do: single-local path should use a bare accumulator. Got:\n{code}"
         );
         // Exactly one maps:get for the outer extraction after the loop (not inside the lambda).
         let get_count = code.matches("maps':'get'('__local__total'").count();
@@ -765,7 +759,7 @@ mod tests {
 
     #[test]
     fn test_dict_do_value_type_with_local_mutation_emits_nil_result() {
-        // ValueType context + dict do: + local mutation uses the map-acc path in
+        // ValueType context + dict do: + local mutation folds a bare accumulator (BT-4116; the closed form still repacks a map, see BT-4629) in
         // generate_dict_do_with_mutations. When threaded_locals is non-empty and
         // context is ValueType, the result suffix is the atom 'nil' rather than
         // {'nil', FoldResult} (covers lines 204-205 of dict_ops.rs).
@@ -785,15 +779,17 @@ mod tests {
             code.contains("'lists':'foldl'"),
             "ValueType dict do: with local mutation must use lists:foldl. Got:\n{code}"
         );
+        // BT-4116: the lambda unpacks the bare accumulator (`Total = AccSt`); the
+        // per-call `{'nil', Map}` repack after the fold is a follow-up.
         assert!(
-            code.contains("maps':'get'('__local__total'"),
-            "ValueType dict do: map-acc path should extract local via maps:get. Got:\n{code}"
+            code.contains("let Total@ = _AccSt@") && !code.contains("'erlang':'element'(1, _AccSt"),
+            "ValueType dict do: single-local path should fold a bare accumulator. Got:\n{code}"
         );
     }
 
     #[test]
     fn test_dict_do_with_key_value_type_with_local_mutation_answers_the_carrier() {
-        // ValueType context + doWithKey: + local mutation uses the map-acc path in
+        // ValueType context + doWithKey: + local mutation folds a bare accumulator (BT-4116; the closed form still repacks a map, see BT-4629) in
         // generate_dict_do_with_key_mutations. Like `do:` (BT-3796) the closed form
         // answers the `{nil, FoldResult}` carrier that the producer site unpacks
         // (BT-3841), not a bare `nil`.
@@ -814,12 +810,14 @@ mod tests {
             code.contains("'lists':'foldl'"),
             "ValueType doWithKey: with local mutation must use lists:foldl. Got:\n{code}"
         );
+        // BT-4116: the lambda unpacks the bare accumulator (`Total = AccSt`); the
+        // per-call `{'nil', Map}` repack after the fold is a follow-up.
         assert!(
-            code.contains("maps':'get'('__local__total'"),
-            "ValueType doWithKey: map-acc path should extract local via maps:get. Got:\n{code}"
+            code.contains("let Total@ = _AccSt@") && !code.contains("'erlang':'element'(1, _AccSt"),
+            "ValueType doWithKey: single-local path should fold a bare accumulator. Got:\n{code}"
         );
         assert!(
-            code.contains("{'nil', _FoldResult"),
+            code.contains("{'nil', _PkSt"),
             "ValueType doWithKey: closed form answers the carrier. Got:\n{code}"
         );
     }
@@ -859,5 +857,50 @@ mod tests {
                 );
             }
         }
+    }
+
+    // BT-4647: pins BT-4629's discarded-fold repack drop for the dict folds. A
+    // closed `do:` / `doWithKey:` that is the method root's last expression
+    // answers a bare `{'nil'}` carrier: nothing reads the locals back, so no
+    // `maps:put` of `'__local__total'` and no `{'nil', Map}`.
+    #[test]
+    fn test_dict_do_discarded_locals_answer_bare_carrier() {
+        for send in [
+            "#{#a => 1, #b => 2} do: [:v | total := total + v]",
+            "#{#a => 1, #b => 2} doWithKey: [:k :v | total := total + v]",
+        ] {
+            let src = format!(
+                "Value subclass: V\n  state: dummy = 0\n\n  run =>\n    total := 0\n    {send}\n"
+            );
+            let code = codegen(&src);
+            assert!(
+                code.contains("{'nil'} in let _ThreadedValue"),
+                "discarded `{send}` should answer a bare carrier. Got:\n{code}"
+            );
+            assert!(
+                !code.contains("{'nil', ") && !code.contains("'__local__total'"),
+                "discarded `{send}` must not repack locals into a map. Got:\n{code}"
+            );
+        }
+    }
+
+    // BT-4647: a dict fold whose tail is read afterwards is not discarded: it
+    // must keep the `{'nil', ...}` carrier (the producer unpacks the local).
+    #[test]
+    fn test_dict_do_read_afterwards_keeps_carrier() {
+        let src = concat!(
+            "Value subclass: V\n",
+            "  state: dummy = 0\n\n",
+            "  run =>\n",
+            "    total := 0\n",
+            "    #{#a => 1, #b => 2} do: [:v | total := total + v]\n",
+            "    total\n",
+        );
+        let code = codegen(src);
+        assert!(
+            code.contains("let Total@ = _FoldResult@")
+                && !code.contains("{'nil'} in let _ThreadedValue"),
+            "a dict do: whose local is read afterwards must not drop its carrier. Got:\n{code}"
+        );
     }
 }

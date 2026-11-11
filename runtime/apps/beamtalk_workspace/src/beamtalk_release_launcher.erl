@@ -156,15 +156,23 @@ do_eval_main(ClassStr, SelectorStr, RestArgs) ->
                 {script_exit, Code} ->
                     beamtalk_script_harness:stop_node(Code);
                 {error, Err} ->
-                    catch io:put_chars(
-                        standard_error, [beamtalk_error:format_safe(Err, []), $\n]
-                    ),
+                    try
+                        io:put_chars(
+                            standard_error, [beamtalk_error:format_safe(Err, []), $\n]
+                        )
+                    catch
+                        _:_ -> ok
+                    end,
                     %% The entry's call chain can fail (e.g. time out) while an
                     %% actor's `Program exit: N` graceful stop is in flight.
                     beamtalk_script_harness:halt_unless_stopping(1)
             end;
         {error, Err} ->
-            catch io:put_chars(standard_error, [beamtalk_error:format_safe(Err, []), $\n]),
+            try
+                io:put_chars(standard_error, [beamtalk_error:format_safe(Err, []), $\n])
+            catch
+                _:_ -> ok
+            end,
             erlang:halt(1)
     end.
 
@@ -213,9 +221,13 @@ rpc_client_main() ->
                 {script_exit, Code} ->
                     erlang:halt(Code);
                 {error, Err} ->
-                    catch io:put_chars(
-                        standard_error, [beamtalk_error:format_safe(Err, []), $\n]
-                    ),
+                    try
+                        io:put_chars(
+                            standard_error, [beamtalk_error:format_safe(Err, []), $\n]
+                        )
+                    catch
+                        _:_ -> ok
+                    end,
                     erlang:halt(1);
                 {badrpc, nodedown} ->
                     io:format(

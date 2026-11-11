@@ -16,7 +16,7 @@ use std::fmt::Write as FmtWrite;
 
 use super::control_flow::analysis::ThreadedFamilies;
 use super::control_flow::family_slots::{self, FamilyVersionStep};
-use super::control_flow::{BodyKind, SoloBoolean, ThreadingPlan};
+use super::control_flow::{BodyKind, ListOpKind, SoloBoolean, ThreadingPlan};
 use super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
 use super::intrinsics::validate_block_arity_exact;
 use super::method_frame::{MethodBoundary, MethodFrame};
@@ -24,7 +24,7 @@ use super::module_shell::core_module;
 use super::spec_codegen;
 use super::threaded_ir::{
     CarrierSlot, FrameId, RebindLowering, RenderCtx, ThreadedLocalSlot, ThreadedStmt,
-    ThreadedValue, ValueRef, VersionPrefix, VersionedVar, build_family_construct_tuple,
+    ThreadedValue, TokenId, ValueRef, VersionPrefix, VersionedVar, build_family_construct_tuple,
     build_family_local_threading_prelude,
 };
 use super::util::ClassIdentity;
@@ -204,15 +204,14 @@ pub(in crate::core_erlang) const DISPATCH_PREFIX_SELECTORS: &[&str] = &[
     "perform:withArguments:",
 ];
 
-/// BT-4473: how an own-class `dispatch/3` method arm calls its function:
-/// `Module:'selector'(Self, Arg1, …)`, unwrapping a `{Result, State}` pair
-/// when the method has a block non-local return.
+/// BT-4473: an own-class `dispatch/3` method arm, which calls its function
+/// as `Module:'selector'(Self, Arg1, …)` and answers its return as is
+/// (BT-4503: a value-type method function answers the send's result, block
+/// `^` or not).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) struct OwnDispatchArm {
     /// The selector's argument count (the function's arity less `Self`).
     pub(in crate::core_erlang) arity: usize,
-    /// Whether the function answers a `{Result, State}` pair.
-    pub(in crate::core_erlang) nlr_pair: bool,
 }
 
 /// How many constructors the `instantiation_error` hint names before
@@ -1113,7 +1112,7 @@ impl CoreErlangGenerator {
                 // checked the block's value is not one).
                 let mut parts = Vec::new();
                 let operands = self.hoist_vt_operand_producers(stmt, &mut parts)?;
-                self.emit_vt_body_expr(stmt, &kind, 1, false, false, &mut parts)?;
+                self.emit_vt_body_expr(stmt, &kind, 1, false, &mut parts)?;
                 if let Some(scope) = operands {
                     self.finish_precompiled_scope(scope)?;
                 }
@@ -1265,15 +1264,12 @@ impl CoreErlangGenerator {
         VtBodyExprKind::Pure
     }
 
-    /// Emit a "last expression" in a value-type method body.
-    ///
-    /// When NLR is active, wraps the expression in a `{Result, Self{N}}` tuple.
-    /// Otherwise, emits the expression value directly (with proper indentation).
+    /// Emit a "last expression" in a value-type method body: the expression's
+    /// value, which is the method's (BT-4503: with or without a block `^`).
     pub(in crate::core_erlang) fn emit_vt_last_expr(
         &mut self,
         expr: &Expression,
         index: usize,
-        has_nlr: bool,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<()> {
         // A last expression that is a local-threading construct —
@@ -1286,39 +1282,20 @@ impl CoreErlangGenerator {
         if self.emit_threaded_last(
             expr,
             super::threaded_expr::ThreadingPosition::Last,
-            super::threaded_expr::ThreadingBoundary::ValueType { has_nlr },
+            super::threaded_expr::ThreadingBoundary::ValueType,
             body_parts,
         )? {
             return Ok(());
         }
 
-        if has_nlr {
-            // NLR methods return {Result, Self{N}} tuple so
-            // the normal and NLR catch paths produce the same shape.
-            let tmp = self.fresh_temp_var("BodyResult");
-            let val_doc = self.expression_doc(expr)?;
-            let final_self = self.current_self_var();
-            body_parts.push(docvec![
-                "    let ",
-                leaf::var(tmp.clone()),
-                " = ",
-                val_doc,
-                " in\n    {",
-                leaf::var(tmp),
-                ", ",
-                leaf::var(final_self),
-                "}\n",
-            ]);
-        } else {
-            // ADR 0089: splice the expression Document directly. The typed
-            // leaves the expression is built from carry the Core Erlang structure, so
-            // there is no raw rendered fragment to re-wrap in `leaf::var`.
-            let expr_doc = self.expression_doc(expr)?;
-            if index > 0 {
-                body_parts.push(Document::Str("    "));
-            }
-            body_parts.push(expr_doc);
+        // ADR 0089: splice the expression Document directly. The typed
+        // leaves the expression is built from carry the Core Erlang structure, so
+        // there is no raw rendered fragment to re-wrap in `leaf::var`.
+        let expr_doc = self.expression_doc(expr)?;
+        if index > 0 {
+            body_parts.push(Document::Str("    "));
         }
+        body_parts.push(expr_doc);
         Ok(())
     }
 
@@ -1335,7 +1312,7 @@ impl CoreErlangGenerator {
     /// sites (BT-3506: [`Self::emit_vt_exception_tuple_unwrap_to_var`],
     /// [`Self::generate_vt_exception_construct_open`],
     /// [`Self::emit_vt_exception_assign_rhs`]) — so none of the six can
-    /// independently drift on which family maps to which rebind (CLAUDE.md's
+    /// independently drift on which family maps to which rebind (AGENTS.md's
     /// no-duplicate-implementations rule).
     ///
     /// `families` is the caller's own [`ThreadedFamilies`] answer for the
@@ -1437,19 +1414,9 @@ impl CoreErlangGenerator {
             || self.is_foldl_list_op_with_vt_local_threading(expr)
     }
 
-    /// Generate a fallback body for an empty value-type method.
-    ///
-    /// Returns `{nil, Self}` when NLR is active, `nil` otherwise.
-    pub(in crate::core_erlang) fn generate_vt_empty_body(
-        &self,
-        has_nlr: bool,
-    ) -> Vec<Document<'static>> {
-        if has_nlr {
-            let final_self = self.current_self_var();
-            vec![docvec!["    {'nil', ", leaf::var(final_self), "}\n",]]
-        } else {
-            vec![docvec!["    nil\n"]]
-        }
+    /// Generate a fallback body for an empty value-type method: `nil`.
+    pub(in crate::core_erlang) fn generate_vt_empty_body() -> Vec<Document<'static>> {
+        vec![docvec!["    nil\n"]]
     }
 
     /// Generate classified body expressions for a value-type method.
@@ -1461,11 +1428,8 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn generate_vt_body_exprs(
         &mut self,
         body: &[&Expression],
-        has_nlr: bool,
     ) -> Result<Vec<Document<'static>>> {
-        self.with_local_producer_sites(body, |this| {
-            this.generate_vt_body_exprs_in_sites(body, has_nlr)
-        })
+        self.with_local_producer_sites(body, |this| this.generate_vt_body_exprs_in_sites(body))
     }
 
     /// [`Self::generate_vt_body_exprs`] once the method body's local-producer
@@ -1474,7 +1438,6 @@ impl CoreErlangGenerator {
     fn generate_vt_body_exprs_in_sites(
         &mut self,
         body: &[&Expression],
-        has_nlr: bool,
     ) -> Result<Vec<Document<'static>>> {
         let mut body_parts: Vec<Document<'static>> = Vec::with_capacity(body.len());
         let body_len = body.len();
@@ -1510,12 +1473,12 @@ impl CoreErlangGenerator {
                     let doc = self.verified_root_prelude_doc(&stmts, expr.span());
                     body_parts.push(docvec!["    ", doc, "\n"]);
                     if is_last && matches!(kind, VtBodyExprKind::FieldAssignment) {
-                        body_parts.push(self.vt_updated_self_tail(has_nlr));
+                        body_parts.push(self.vt_updated_self_tail());
                     } else if is_last {
                         body_parts.push(self.threading_result_tail(
                             &result_var,
                             None,
-                            super::threaded_expr::ThreadingBoundary::ValueType { has_nlr },
+                            super::threaded_expr::ThreadingBoundary::ValueType,
                         ));
                     }
                     continue;
@@ -1562,37 +1525,18 @@ impl CoreErlangGenerator {
                         body_parts.push(self.threading_result_tail(
                             &result_var,
                             None,
-                            super::threaded_expr::ThreadingBoundary::ValueType { has_nlr },
+                            super::threaded_expr::ThreadingBoundary::ValueType,
                         ));
                         break;
                     }
                     // BT-3816: a conditional / loop `^` value whose receiver holds a
                     // field write is sequenced ahead of the return.
                     let operands = self.hoist_vt_operand_producers(value, &mut body_parts)?;
-                    if has_nlr {
-                        // NLR methods return {Result, Self{N}} tuple so
-                        // the normal and NLR catch paths produce the same shape.
-                        let tmp = self.fresh_temp_var("EarlyResult");
-                        let val_doc = self.expression_doc(value)?;
-                        let final_self = self.current_self_var();
-                        body_parts.push(docvec![
-                            "    let ",
-                            leaf::var(tmp.clone()),
-                            " = ",
-                            val_doc,
-                            " in\n    {",
-                            leaf::var(tmp),
-                            ", ",
-                            leaf::var(final_self),
-                            "}\n",
-                        ]);
-                    } else {
-                        let expr_doc = self.expression_doc(value)?;
-                        if i > 0 {
-                            body_parts.push(Document::Str("    "));
-                        }
-                        body_parts.push(expr_doc);
+                    let expr_doc = self.expression_doc(value)?;
+                    if i > 0 {
+                        body_parts.push(Document::Str("    "));
                     }
+                    body_parts.push(expr_doc);
                     if let Some(scope) = operands {
                         self.finish_precompiled_scope(scope)?;
                     }
@@ -1601,7 +1545,7 @@ impl CoreErlangGenerator {
             }
 
             let operands = self.hoist_vt_operand_producers(expr, &mut body_parts)?;
-            self.emit_vt_body_expr(expr, &kind, i, is_last, has_nlr, &mut body_parts)?;
+            self.emit_vt_body_expr(expr, &kind, i, is_last, &mut body_parts)?;
             if let Some(scope) = operands {
                 self.finish_precompiled_scope(scope)?;
             }
@@ -1611,22 +1555,9 @@ impl CoreErlangGenerator {
     }
 
     /// The tail of a method whose last statement is a field assignment: the
-    /// updated `Self`, not the assigned value (`{Self{N}, Self{N}}` when the
-    /// method has a non-local return, so the normal and NLR catch paths
-    /// produce the same shape).
-    fn vt_updated_self_tail(&self, has_nlr: bool) -> Document<'static> {
-        let final_self = self.current_self_var();
-        if has_nlr {
-            docvec![
-                "    {",
-                leaf::var(final_self.clone()),
-                ", ",
-                leaf::var(final_self),
-                "}\n",
-            ]
-        } else {
-            docvec!["    ", leaf::var(final_self), "\n"]
-        }
+    /// updated `Self`, not the assigned value.
+    fn vt_updated_self_tail(&self) -> Document<'static> {
+        docvec!["    ", leaf::var(self.current_self_var()), "\n"]
     }
 
     /// Emit code for a single classified value-type body expression.
@@ -1643,7 +1574,6 @@ impl CoreErlangGenerator {
         kind: &VtBodyExprKind,
         index: usize,
         is_last: bool,
-        has_nlr: bool,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<()> {
         match kind {
@@ -1655,12 +1585,12 @@ impl CoreErlangGenerator {
                 let doc = self.generate_vt_field_assignment_open(expr)?;
                 body_parts.push(doc);
                 if is_last {
-                    body_parts.push(self.vt_updated_self_tail(has_nlr));
+                    body_parts.push(self.vt_updated_self_tail());
                 }
             }
             VtBodyExprKind::LocalAssignment => {
                 if is_last {
-                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                    self.emit_vt_last_expr(expr, index, body_parts)?;
                 } else {
                     // Local variable assignment — create a proper Core Erlang
                     // let binding so the variable is accessible in subsequent expressions.
@@ -1689,23 +1619,11 @@ impl CoreErlangGenerator {
                         self.generate_destructure_bindings_with_value(pattern, value)?;
                     if is_last {
                         // BT-3889: a destructuring assignment evaluates to its
-                        // right-hand side, the method's value (the `{Value,
-                        // Self}` pair when the method has a `^` in a block).
+                        // right-hand side, the method's value.
                         for d in binding_docs {
                             body_parts.push(docvec!["    ", d]);
                         }
-                        if has_nlr {
-                            let final_self = self.current_self_var();
-                            body_parts.push(docvec![
-                                "    {",
-                                leaf::var(rhs_var),
-                                ", ",
-                                leaf::var(final_self),
-                                "}\n",
-                            ]);
-                        } else {
-                            body_parts.push(docvec!["    ", leaf::var(rhs_var), "\n"]);
-                        }
+                        body_parts.push(docvec!["    ", leaf::var(rhs_var), "\n"]);
                     } else {
                         for d in binding_docs {
                             body_parts.push(d);
@@ -1716,7 +1634,7 @@ impl CoreErlangGenerator {
             VtBodyExprKind::DoWithLocalThreading => {
                 // Non-last `do:` loop that mutates captured outer locals.
                 if is_last {
-                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                    self.emit_vt_last_expr(expr, index, body_parts)?;
                 } else {
                     let doc = self.generate_value_type_do_open(expr)?;
                     body_parts.push(doc);
@@ -1733,7 +1651,7 @@ impl CoreErlangGenerator {
                 // unified `emit_threaded_last` emitter, so the dedicated `emit_vt_conditional_last`
                 // wrapper is redundant.
                 if is_last {
-                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                    self.emit_vt_last_expr(expr, index, body_parts)?;
                 } else {
                     let doc = self.generate_vt_conditional_open(expr)?;
                     body_parts.push(doc);
@@ -1754,7 +1672,7 @@ impl CoreErlangGenerator {
                 // for why a clean compile error is the right answer there
                 // rather than a half-threaded one.
                 if is_last {
-                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                    self.emit_vt_last_expr(expr, index, body_parts)?;
                 } else {
                     let doc = self.generate_vt_conditional_open(expr)?;
                     body_parts.push(doc);
@@ -1763,7 +1681,7 @@ impl CoreErlangGenerator {
             VtBodyExprKind::WhileWithLocalThreading => {
                 // Non-last whileTrue:/whileFalse: with captured local mutations.
                 if is_last {
-                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                    self.emit_vt_last_expr(expr, index, body_parts)?;
                 } else {
                     let doc = self.generate_vt_while_open(expr)?;
                     body_parts.push(doc);
@@ -1778,7 +1696,7 @@ impl CoreErlangGenerator {
                 // as a follow-up; today's fixtures/tests only exercise this in
                 // non-last position, same as this issue's repro shapes.
                 if is_last {
-                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                    self.emit_vt_last_expr(expr, index, body_parts)?;
                 } else {
                     let doc = self.generate_vt_exception_construct_open(expr)?;
                     body_parts.push(doc);
@@ -1788,7 +1706,7 @@ impl CoreErlangGenerator {
                 // to:do:/to:by:do:/timesRepeat: with captured local mutations.
                 // In last position emit_vt_last_expr unwraps the {'nil', StateAcc} tuple.
                 if is_last {
-                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                    self.emit_vt_last_expr(expr, index, body_parts)?;
                 } else {
                     let doc = self.generate_vt_counted_loop_open(expr)?;
                     body_parts.push(doc);
@@ -1800,7 +1718,7 @@ impl CoreErlangGenerator {
                 // meaningful result. In last position emit_vt_last_expr unwraps element 1;
                 // in non-last position we extract the threaded locals (discarding the value).
                 if is_last {
-                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                    self.emit_vt_last_expr(expr, index, body_parts)?;
                 } else {
                     let doc = self.generate_vt_foldl_list_op_open(expr)?;
                     body_parts.push(doc);
@@ -1809,7 +1727,7 @@ impl CoreErlangGenerator {
             VtBodyExprKind::BlockWithCapturedMutations(mutations) => {
                 // Non-last block value with captured mutations.
                 if is_last {
-                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                    self.emit_vt_last_expr(expr, index, body_parts)?;
                 } else {
                     let doc = self.generate_vt_block_value_open(expr, mutations)?;
                     body_parts.push(doc);
@@ -1817,7 +1735,7 @@ impl CoreErlangGenerator {
             }
             VtBodyExprKind::Pure => {
                 if is_last {
-                    self.emit_vt_last_expr(expr, index, has_nlr, body_parts)?;
+                    self.emit_vt_last_expr(expr, index, body_parts)?;
                 } else {
                     // Non-last expressions: wrap in let to sequence side effects
                     let tmp_var = self.fresh_temp_var("seq");
@@ -1886,6 +1804,43 @@ impl CoreErlangGenerator {
         ]
     }
 
+    /// BT-4503: a value-type function body (a method's or a value-type
+    /// extension fun's) inside its NLR boundary when `token` is set (a block
+    /// of it holds a `^`), else the body as is. The boundary lowers through
+    /// `ThreadedIr` as a [`ThreadedStmt::NlrCatch`] of
+    /// [`NlrBoundary::ValueType`] closing the body, verified in the
+    /// value-type scope (`VerifyError::MethodNlrAnswersPair`) and rendered by
+    /// the one NLR catch template. Its catch arm answers the bare value, as
+    /// the body does, so the function answers exactly what a send of it
+    /// answers.
+    pub(in crate::core_erlang) fn value_type_nlr_boundary_doc(
+        &mut self,
+        body: Document<'static>,
+        token: Option<&str>,
+        span: beamtalk_core::source_analysis::Span,
+    ) -> Document<'static> {
+        let Some(token) = token else {
+            return body;
+        };
+        let stmts = [
+            ThreadedStmt::NlrCatch {
+                boundary: NlrBoundary::ValueType,
+                token: TokenId::new(token),
+                frame: FrameId::ROOT,
+                span,
+            },
+            ThreadedStmt::Statement(body, span),
+        ];
+        let errors = self.verify_threaded_ir(&stmts);
+        self.report_threaded_ir_verify_errors(
+            &errors,
+            "a value-type method's NLR boundary must answer the bare value",
+            span,
+        );
+        let mut ctx = super::threaded_ir::RenderCtx::new(self);
+        super::threaded_ir::render(&stmts, &mut ctx)
+    }
+
     pub(super) fn generate_value_type_method(
         &mut self,
         method: &MethodDefinition,
@@ -1945,17 +1900,15 @@ impl CoreErlangGenerator {
         // @expect directives — they are compile-time only and generate no code.
         let body = super::util::collect_body_exprs(&method.body);
 
-        let has_nlr = nlr_token_var.is_some();
-
         // If filtering leaves no executable expressions, emit a safe fallback to
         // avoid generating an empty Core Erlang function body which would be
         // syntactically invalid (e.g., `fun (...) ->\n\n`).
         // Capture the result so cleanup runs unconditionally before the `?`
         // below propagates an error, same as on the success path.
         let body_result = if body.is_empty() {
-            Ok(frame.generate_vt_empty_body(has_nlr))
+            Ok(Self::generate_vt_empty_body())
         } else {
-            frame.generate_vt_body_exprs(&body, has_nlr)
+            frame.generate_vt_body_exprs(&body)
         };
 
         frame.set_current_nlr_token(None);
@@ -1977,23 +1930,15 @@ impl CoreErlangGenerator {
         // Annotating only the body would create invalid double-annotation when the body
         // is itself a single annotated MessageSend expression: `( ( e -| [...] ) -| [...] )`.
 
-        // Wrap the method body in try/catch to catch non-local
+        // Wrap the method body in its NLR boundary to catch non-local
         // returns thrown by ^ inside block closures.
-        let body_doc = Document::Vec(body_parts);
+        let body_doc = self.value_type_nlr_boundary_doc(
+            Document::Vec(body_parts),
+            nlr_token_var.as_deref(),
+            method.span,
+        );
         let params_doc = join(params.into_iter().map(leaf::var), &Document::Str(", "));
-        let fun_doc = if let Some(token_var) = nlr_token_var {
-            let catch_vars = self.wrap_value_type_body_with_nlr_catch(&token_var);
-            docvec![
-                "fun (",
-                params_doc,
-                ") ->\n",
-                catch_vars.format_try_prefix(),
-                body_doc,
-                catch_vars.format_catch_suffix(&NlrBoundary::ValueType),
-            ]
-        } else {
-            docvec!["fun (", params_doc, ") ->\n", body_doc,]
-        };
+        let fun_doc = docvec!["fun (", params_doc, ") ->\n", body_doc];
         let fun_doc = if let Some(line_num) = line_annotation {
             Self::annotate_with_line_in(annotation_path.as_deref(), fun_doc, line_num)
         } else {
@@ -2681,7 +2626,8 @@ impl CoreErlangGenerator {
     /// captured local threading) as an **open let chain**.
     ///
     /// Unlike the closed form (which buries the extracted locals inside `_seqN = (... 'nil')`)
-    /// this form emits the foldl and the `let X = maps:get(...)` extractions directly in
+    /// this form emits the foldl and the extractions (plain lets / `element/2` for the
+    /// tuple/bare accumulator, `maps:get` for the map accumulator) directly in
     /// the method body, ending with `in ` so the caller's next `body_part` provides the
     /// continuation.  This makes the updated locals visible to all subsequent expressions.
     #[allow(clippy::too_many_lines)] // Document-based foldl scaffolding spans many lines
@@ -2713,22 +2659,21 @@ impl CoreErlangGenerator {
             "The do: block must take exactly one argument: [:each | ...]",
         )?;
 
-        // a second, throwaway `ThreadingPlan` — constructed purely to read the
-        // threaded locals and to build the fold call via `foldl_call_doc`
-        // (computed identically to the one
-        // `generate_list_do_body_with_threading` builds internally below via
-        // `ThreadingPlan::new`) — NOT passed to
-        // `emit_loop_convention_diagnostic` (that would double-emit the
-        // diagnostic `generate_list_do_body_with_threading` already emits
-        // for its own, real plan). This "open" `do:` codegen is a genuinely
-        // separate reimplementation from `list_ops/basic_ops.rs`'s closed
-        // form (it needs an open let-chain, not a closed `{Value, StateAcc}`
-        // return) — see this function's own doc comment — so it uses the same
-        // `foldl_call_doc` every other `Foldl*` call site does.
+        // The fold's real plan (BT-4116: `new_for_foldl_list_op`, so it can pick
+        // the tuple/bare accumulator). It drives either the tuple/bare open
+        // form (`generate_value_type_do_open_tuple`) or the map open form
+        // below; both emit the loop-convention diagnostic from it.
         let fold_plan = self.with_fold_self_slot_consumer(expr, |this| {
-            ThreadingPlan::new(this, body, None).with_value_self_slot(this, body)
+            ThreadingPlan::new_for_foldl_list_op(this, body, ListOpKind::Do)
+                .with_value_self_slot(this, body)
         })?;
         let threaded_locals = fold_plan.threaded_locals.clone();
+
+        // BT-4116: a body that threads only outer locals folds a bare value (one
+        // local) or an N-tuple (several) — no map, no per-element `maps:get`/`put`.
+        if fold_plan.use_tuple_acc {
+            return self.generate_value_type_do_open_tuple(receiver, body, &fold_plan);
+        }
 
         // Phase 1: create a fresh map and pack each captured local into it.
         let init_map_var = self.fresh_temp_var("InitMap");
@@ -2863,6 +2808,67 @@ impl CoreErlangGenerator {
         // Intentionally open — the caller's next body_part provides the continuation.
         docs.push(concat(post_docs));
 
+        Ok(Document::Vec(docs))
+    }
+
+    /// BT-4116: the tuple/bare-accumulator form of
+    /// [`Self::generate_value_type_do_open`]. The fold seed is the threaded
+    /// locals' current values (the single value for a bare accumulator), the
+    /// lambda unpacks them per element, and the post-fold chain rebinds each
+    /// local as an open `let` for the caller's next body part.
+    fn generate_value_type_do_open_tuple(
+        &mut self,
+        receiver: &Expression,
+        body: &beamtalk_core::ast::Block,
+        fold_plan: &ThreadingPlan,
+    ) -> Result<Document<'static>> {
+        let init_acc = fold_plan.initial_vars_tuple_doc(self);
+        let acc_var = self.fresh_temp_var("AccSt");
+        let list_var = self.fresh_temp_var("temp");
+        let recv_code = self.expression_doc(receiver)?;
+        let safe_list_var = self.fresh_temp_var("temp");
+        let lambda_var = self.fresh_temp_var("temp");
+        let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
+        let item_var = Self::to_core_erlang_var(item_param);
+
+        let mut docs: Vec<Document<'static>> = vec![docvec![
+            super::control_flow::list_recv_to_safe_list_doc(
+                recv_code,
+                None,
+                list_var,
+                safe_list_var.clone(),
+            ),
+            "let ",
+            leaf::var(lambda_var.clone()),
+            " = fun (",
+            leaf::var(item_var.clone()),
+            ", ",
+            leaf::var(acc_var.clone()),
+            ") -> ",
+        ]];
+
+        self.emit_loop_convention_diagnostic(fold_plan, body.span);
+        self.push_scope();
+        if let Some(param) = body.parameters.first() {
+            self.bind_var(&param.name, &item_var);
+        }
+        let (body_doc, _) =
+            self.generate_foldl_loop_body(body, fold_plan, &BodyKind::FoldlDo, &acc_var, 0)?;
+        self.pop_scope();
+        docs.push(body_doc);
+
+        let fold_result = self.fresh_temp_var("FoldResult");
+        docs.push(ThreadingPlan::foldl_call_doc(
+            &lambda_var,
+            init_acc,
+            &safe_list_var,
+            &fold_result,
+        ));
+        // The extraction rebinds each local under its current Core name (the
+        // suffix reads it via `lookup_var`), shadowing the pre-loop binding for
+        // every later body part.
+        docs.push(fold_plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self));
+        // Intentionally open — the caller's next body_part provides the continuation.
         Ok(Document::Vec(docs))
     }
 
@@ -3024,8 +3030,7 @@ impl CoreErlangGenerator {
     /// last position, so each branch yields only its logical value (its last expression).
     ///
     /// Reached via the shared [`Self::lower_threaded_last`] transform for both the value-type
-    /// boundary (which wraps the result in `{Result, Self{N}}` when NLR is active) and the
-    /// class-method boundary (which returns it bare).
+    /// and the class-method boundary, which both return it bare.
     pub(in crate::core_erlang) fn emit_vt_conditional_case_to_var(
         &mut self,
         expr: &Expression,
@@ -3090,7 +3095,7 @@ impl CoreErlangGenerator {
                 _ => None,
             })
             .collect();
-        let fallback = self.boolean_fallback_send(&cond_var, &selector_name, &blocks)?;
+        let fallback = self.boolean_fallback_send(&cond_var, &selector_name, &blocks, false)?;
         let no_match_var = self.fresh_temp_var("CondNoMatch");
         body_parts.push(docvec![
             "    let ",
@@ -4129,7 +4134,7 @@ impl CoreErlangGenerator {
         all_mutations: &[String],
         capture_value: bool,
     ) -> Result<VtBranchPieces> {
-        let send = self.boolean_fallback_send(cond_var, selector_name, blocks)?;
+        let send = self.boolean_fallback_send(cond_var, selector_name, blocks, false)?;
         let (preamble, value) = if capture_value {
             (Vec::new(), Some(send))
         } else {
@@ -4591,7 +4596,7 @@ impl CoreErlangGenerator {
         };
 
         // Route each class-defined method to its individual function
-        let method_branches = self.generate_dispatch_method_branches(class, &mod_name);
+        let method_branches = Self::generate_dispatch_method_branches(class, &mod_name);
 
         // Check whether this class has a catch-all DNU handler.
         let has_catch_all_dnu = dispatch_spec::class_has_catch_all_dnu(class);
@@ -4937,13 +4942,6 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Whether `method`'s function answers a `{Result, State}` pair (it has a
-    /// block non-local return), which its `dispatch/3` arm unwraps.
-    fn method_returns_nlr_pair(&self, method: &MethodDefinition) -> bool {
-        self.semantic_facts
-            .has_block_nlr_or_walk(&method.span, &method.body)
-    }
-
     /// The class's auto-generated slot accessors
     /// ([`compute_auto_slot_methods`]), after recording (BT-4473)
     /// [`Self::own_dispatch_arms`] in the class context — before any method
@@ -4954,7 +4952,7 @@ impl CoreErlangGenerator {
         class: &ClassDefinition,
     ) -> Option<AutoSlotMethods> {
         let auto = compute_auto_slot_methods(class);
-        let arms = self.own_dispatch_arms(class, auto.as_ref());
+        let arms = Self::own_dispatch_arms(class, auto.as_ref());
         self.class_context_mut().own_dispatch_arms = arms;
         auto
     }
@@ -4966,7 +4964,6 @@ impl CoreErlangGenerator {
     /// answers first ([`DISPATCH_PREFIX_SELECTORS`]) is left out, and a
     /// selector defined twice keeps its first arm, as the `case` does.
     fn own_dispatch_arms(
-        &self,
         class: &ClassDefinition,
         auto: Option<&AutoSlotMethods>,
     ) -> std::collections::HashMap<String, OwnDispatchArm> {
@@ -4975,22 +4972,16 @@ impl CoreErlangGenerator {
             arms.entry(method.selector.name().to_string())
                 .or_insert(OwnDispatchArm {
                     arity: method.parameters.len(),
-                    nlr_pair: self.method_returns_nlr_pair(method),
                 });
         }
         if let Some(auto) = auto {
             for getter in &auto.getters {
-                arms.entry(getter.clone()).or_insert(OwnDispatchArm {
-                    arity: 0,
-                    nlr_pair: false,
-                });
+                arms.entry(getter.clone())
+                    .or_insert(OwnDispatchArm { arity: 0 });
             }
             for field in &auto.setters {
                 arms.entry(AutoSlotMethods::with_star_selector(field))
-                    .or_insert(OwnDispatchArm {
-                        arity: 1,
-                        nlr_pair: false,
-                    });
+                    .or_insert(OwnDispatchArm { arity: 1 });
             }
         }
         arms.retain(|selector, _| !DISPATCH_PREFIX_SELECTORS.contains(&selector.as_str()));
@@ -4999,10 +4990,9 @@ impl CoreErlangGenerator {
 
     /// Generates dispatch case arms for all class-defined instance methods.
     ///
-    /// Each arm routes to the module-level function for that method, unwrapping
-    /// `{Result, State}` tuples for NLR-capable methods.
+    /// Each arm calls the module-level function for that method and answers
+    /// its return (BT-4503: the function answers the send's result itself).
     pub(super) fn generate_dispatch_method_branches(
-        &self,
         class: &ClassDefinition,
         mod_name: &str,
     ) -> Vec<Document<'static>> {
@@ -5014,9 +5004,6 @@ impl CoreErlangGenerator {
                 leaf::atom(mangled.clone()),
                 "> when 'true' ->\n",
             ]);
-
-            // Methods with NLR return {Result, State} tuple — unwrap via case.
-            let has_nlr = self.method_returns_nlr_pair(method);
 
             // Build the method call arguments: (Self) or (Self, DispArg0, DispArg1, ...)
             if !method.parameters.is_empty() {
@@ -5055,16 +5042,7 @@ impl CoreErlangGenerator {
                 ")",
             ];
 
-            if has_nlr {
-                // Unwrap {Result, State} tuple from NLR-capable method
-                method_branches.push(docvec![
-                    "            case ",
-                    call_doc,
-                    " of <{DispR, _DispS}> when 'true' -> DispR end\n",
-                ]);
-            } else {
-                method_branches.push(docvec!["            ", call_doc, "\n"]);
-            }
+            method_branches.push(docvec!["            ", call_doc, "\n"]);
         }
         method_branches
     }
@@ -5203,7 +5181,9 @@ impl CoreErlangGenerator {
             "                    let <PerfClass4> = call 'beamtalk_tagged_map':'class_of'(State) in\n",
             "                    let <PerfResult4> = call 'beamtalk_dispatch':'lookup'(PerfSel4, [], Self, State, PerfClass4) in\n",
             "                    case PerfResult4 of\n",
-            "                        <{'error', PerfErr4}> when 'true' -> {'error', PerfErr4, State}\n",
+            // BT-4593: `perform:` itself was invoked, so its target's lookup
+            // failure is a raise (a wrapped map), not a miss of `perform:`.
+            "                        <{'error', PerfErr4}> when 'true' -> {'error', call 'beamtalk_exception_handler':'ensure_wrapped'(PerfErr4), State}\n",
             "                        <PerfOther4> when 'true' -> PerfOther4\n",
             "                    end\n",
             "                <_PerfBadArgs> when 'true' ->\n",
@@ -5219,7 +5199,9 @@ impl CoreErlangGenerator {
             "                            let <PwaClass4> = call 'beamtalk_tagged_map':'class_of'(State) in\n",
             "                            let <PwaResult4> = call 'beamtalk_dispatch':'lookup'(PwaSel4, PwaArgs4, Self, State, PwaClass4) in\n",
             "                            case PwaResult4 of\n",
-            "                                <{'error', PwaErr4}> when 'true' -> {'error', PwaErr4, State}\n",
+            // BT-4593: `perform:` itself was invoked, so its target's lookup
+            // failure is a raise (a wrapped map), not a miss of `perform:`.
+            "                                <{'error', PwaErr4}> when 'true' -> {'error', call 'beamtalk_exception_handler':'ensure_wrapped'(PwaErr4), State}\n",
             "                                <PwaOther4> when 'true' -> PwaOther4\n",
             "                            end\n",
             "                        <_PwaBadArgList> when 'true' ->\n",
@@ -5232,27 +5214,57 @@ impl CoreErlangGenerator {
             "            end\n",
             // --- Default: delegate to dispatch/3 ---
             "        <_OtherSel4> when 'true' ->\n",
-            "            try call ",
-            leaf::atom(mod_name.to_string()),
-            ":'dispatch'(Selector, Args, Self)\n",
-            "            of <D4Result> -> {'reply', D4Result, State}\n",
-            "            catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}\n",
+            Self::dispatch_3_adapter(mod_name, "            "),
             "    end\n",
         ]
     }
 
     /// Generates a simple dispatch/4 wrapper that delegates to dispatch/3.
-    ///
-    /// Uses try-catch to convert exceptions from dispatch/3 (e.g., `does_not_understand`
-    /// calling `erlang:error`) into `{error, Error, State}` tuples expected by the
-    /// dispatch service.
     pub(super) fn generate_dispatch_4_wrapper(mod_name: &str) -> Document<'static> {
+        Self::dispatch_3_adapter(mod_name, "    ")
+    }
+
+    /// The `dispatch/4` → `dispatch/3` adapter: calls the state-less
+    /// `dispatch/3` and answers `{'reply', Result, State}`, or, for an
+    /// `error` the method raised, `{'error', Wrapped, State}` with the raised
+    /// term wrapped (with its stacktrace, unless it already carries one) as an
+    /// exception map — so the walk
+    /// reads it as "the invoked method raised", never as a lookup miss, even
+    /// when it is a `does_not_understand` from inside the method body
+    /// (BT-4593).
+    ///
+    /// Only `error` is caught. A `throw` (a `^` non-local return in flight,
+    /// ADR 0041, or a `Program exit:`, ADR 0099 §3) and an `exit` are
+    /// re-raised unchanged, so a `^` out of a block reaching an inherited
+    /// value-class method keeps its semantics instead of turning into an
+    /// error result.
+    ///
+    /// `indent` is the leading indentation of the `try` line.
+    fn dispatch_3_adapter(mod_name: &str, indent: &'static str) -> Document<'static> {
         docvec![
-            "    try call ",
+            indent,
+            "try call ",
             leaf::atom(mod_name.to_string()),
             ":'dispatch'(Selector, Args, Self)\n",
-            "    of <D4Result> -> {'reply', D4Result, State}\n",
-            "    catch <_D4Type, D4Error, _D4Stack> -> {'error', D4Error, State}\n",
+            indent,
+            "of <D4Result> -> {'reply', D4Result, State}\n",
+            indent,
+            "catch <D4Type, D4Error, D4Stack> ->\n",
+            indent,
+            "    case D4Type of\n",
+            indent,
+            "        <'error'> when 'true' ->\n",
+            indent,
+            "            let <D4Built> = primop 'build_stacktrace'(D4Stack) in\n",
+            indent,
+            // `ensure_wrapped/4` (empty context): an already-wrapped
+            // exception keeps its innermost `raw_stacktrace`, as in the
+            // walk's own `raised/4`.
+            "            {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built, ~{}~), State}\n",
+            indent,
+            "        <_D4Other> when 'true' -> primop 'raw_raise'(D4Type, D4Error, D4Stack)\n",
+            indent,
+            "    end\n",
         ]
     }
 

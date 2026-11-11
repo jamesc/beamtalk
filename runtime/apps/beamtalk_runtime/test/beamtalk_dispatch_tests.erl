@@ -112,6 +112,7 @@ dispatch_test_() ->
             {"default actor displayString bypasses to object_ops (no override)",
                 fun test_actor_default_displaystring_bypass/0},
             {"super on non-existent class returns error", fun test_super_nonexistent_class/0},
+            {"super_reply re-raises a super error", fun test_super_reply_reraises/0},
             {"lookup returns class_not_found when parent class is gone",
                 fun test_stale_parent_class/0},
             {"continue_to_superclass at root returns DNU", fun test_continue_to_superclass_root/0},
@@ -441,7 +442,8 @@ test_extension_error_propagation() ->
 
     try
         Result = beamtalk_dispatch:lookup(crashExt, [], Self, State, 'Counter'),
-        ?assertMatch({error, #beamtalk_error{}}, Result)
+        %% BT-4593: a raise from an invoked method answers the wrapped map.
+        ?assertMatch({error, #{error := #beamtalk_error{}}}, Result)
     after
         (try
             ets:delete(beamtalk_extensions, {'Counter', crashExt}),
@@ -756,6 +758,16 @@ test_super_nonexistent_class() ->
     Result = beamtalk_dispatch:super(anyMethod, [], Self, State, 'NoSuchClass'),
     ?assertMatch({error, #beamtalk_error{kind = class_not_found}}, Result).
 
+%% BT-4592: super_reply/5 (a method-root actor `super` send) raises the error
+%% super/5 answers instead of returning `{error, E}` to the reply unpack.
+test_super_reply_reraises() ->
+    State = #{'$beamtalk_class' => 'NoSuchClass'},
+    Self = make_ref(),
+    ?assertError(
+        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = class_not_found}},
+        beamtalk_dispatch:super_reply(anyMethod, [], Self, State, 'NoSuchClass')
+    ).
+
 %% Test that when the parent class process is killed, lookup returns class_not_found.
 %% Chain walk tries to reach the parent via registry; when it's gone, class_not_found.
 test_stale_parent_class() ->
@@ -1012,9 +1024,9 @@ test_dispatch_throws_wrapped() ->
         State = #{'$beamtalk_class' => 'ThrowingDispatchClass'},
         Self = make_ref(),
 
-        %% dispatch/4 throws → caught → wrapped as #beamtalk_error{}
+        %% dispatch/4 raises → caught → wrapped exception map (BT-4593)
         Result = beamtalk_dispatch:lookup(throwMethod, [], Self, State, 'ThrowingDispatchClass'),
-        ?assertMatch({error, #beamtalk_error{}}, Result)
+        ?assertMatch({error, #{error := #beamtalk_error{}}}, Result)
     after
         gen_server:stop(Pid),
         code:purge(bt_test_dispatch_throws_stub),
@@ -1072,7 +1084,7 @@ test_actor_instance_bypass_throwing_module() ->
         Result = beamtalk_dispatch:lookup(
             'displayString', [], ActorSelf, State, 'ActorDispatchThrowsClass'
         ),
-        ?assertMatch({error, #beamtalk_error{}}, Result)
+        ?assertMatch({error, #{error := #beamtalk_error{}}}, Result)
     after
         gen_server:stop(Pid),
         code:purge(bt_test_actor_dispatch_throws_stub),
@@ -1116,7 +1128,7 @@ test_extension_bad_arity() ->
         %% Caught and wrapped like any other extension-body crash, rather
         %% than raising the raw {bad_extension_arity, 1} tuple.
         Result = beamtalk_dispatch:lookup(badArityExt, [], Self, State, 'Counter'),
-        ?assertMatch({error, #beamtalk_error{selector = badArityExt}}, Result)
+        ?assertMatch({error, #{error := #beamtalk_error{selector = badArityExt}}}, Result)
     after
         (try
             ets:delete(beamtalk_extensions, {'Counter', badArityExt}),
@@ -1235,7 +1247,7 @@ test_extension_raises_reraised() ->
     Self = make_ref(),
     try
         Result = beamtalk_dispatch:lookup(throwingExt, [], Self, State, 'Counter'),
-        ?assertMatch({error, #beamtalk_error{}}, Result)
+        ?assertMatch({error, #{error := #beamtalk_error{}}}, Result)
     after
         (try
             ets:delete(beamtalk_extensions, {'Counter', throwingExt}),
@@ -1353,8 +1365,11 @@ test_compiled_dispatch_returns_error_tuple() ->
         State = #{'$beamtalk_class' => 'DispatchErrTupleClass'},
         Self = make_ref(),
         Result = beamtalk_dispatch:lookup(errMethod, [], Self, State, 'DispatchErrTupleClass'),
-        %% Normalized to 2-tuple
-        ?assertMatch({error, #beamtalk_error{}}, Result),
+        %% Normalized to 2-tuple; the resolved owner's answered error is a
+        %% raise (a wrapped map), never the walk's own miss (BT-4593).
+        ?assertMatch(
+            {error, #{error := #beamtalk_error{kind = does_not_understand}}}, Result
+        ),
         ?assertEqual(2, tuple_size(Result))
     after
         gen_server:stop(Pid),

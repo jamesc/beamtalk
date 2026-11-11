@@ -1,0 +1,78 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// ADR 0145 (BT-4514): the `|>` pipeline. `recv m1 |> m2 |> m3` is exactly
+// `((recv m1) m2) m3`: each stage is sent to the previous stage's result, on
+// value, actor and Dynamic receivers alike. A stage is a whole message chain,
+// so `|> keys sort` and `|> sort at: 1` are one stage each. Reflected source
+// keeps the `|>` as written.
+
+TestCase subclass: PipelineTest
+
+  // --- Value receivers: each stage sees the previous stage's copy ---
+  testValueKeywordStages =>
+    q := (PipelinePoint x: 1 y: 2) withX: 5 |> withY: 10
+    self assert: q x equals: 5
+    self assert: q y equals: 10
+
+  testPipelineEqualsHandNestedForm =>
+    p := PipelinePoint x: 1 y: 2
+    self assert: (p withX: 5 |> withY: 10) equals: ((p withX: 5) withY: 10)
+
+  testUnaryHeadThenKeywordStage =>
+    self assert: (#(3, 1, 2) |> inject: 0 into: [:sum :x | sum + x]) equals: 6
+
+  // --- Multi-message stages ---
+  testUnaryChainStage =>
+    self assert: (#{#b => 2, #a => 1} |> keys sort) equals: #(#a, #b)
+
+  testUnaryThenKeywordStage =>
+    self assert: (#(3, 1, 2) reversed |> sort at: 1) equals: 1
+
+  testUnaryThenBinaryStage => self assert: (#(3, 1, 2) |> size + 1) equals: 4
+
+  testThreeStages =>
+    evens := #(1, 2, 3, 4) select: [:x | x isEven] |> collect: [:x | x * 10]
+    self assert: (evens |> inject: 0 into: [:sum :x | sum + x]) equals: 60
+
+  testPipelineInParentheses => self assert: (#(1, 2) |> size) * 3 equals: 6
+
+  testPipelineAsReturnValue =>
+    self assert: (PipelineHost new sizeUnlessEmpty: #(1, 2)) equals: 2
+    self assert: (PipelineHost new sizeUnlessEmpty: #()) equals: 0
+
+  // --- Actor receivers ---
+  testActorStages =>
+    c := PipelineCounter spawn
+    [self assert: (c add: 1 |> add: 2 |> total) equals: 3] ensure: [c stop]
+
+  // --- Dynamic (untyped) receivers ---
+  testDynamicReceiverKeywordStages =>
+    q := PipelineHost new shifted: (PipelinePoint x: 1 y: 2)
+    self assert: q x equals: 5
+    self assert: q y equals: 10
+
+  testDynamicReceiverUnaryChainStage =>
+    self assert: (PipelineHost new sortedKeys: #{
+      #b => 2,
+      #a => 1
+    }) equals: #(#a, #b)
+
+  testDynamicReceiverUnaryThenKeywordStage =>
+    self assert: (PipelineHost new smallestKey: #{#b => 2, #a => 1}) equals: #a
+
+  testDynamicReceiverUnaryThenBinaryStage =>
+    self assert: (PipelineHost new sizePlusOne: #(1, 2, 3)) equals: 4
+
+  testFinalKeywordStageStopsAtNextMethod =>
+    self assert: (PipelineHost new firstOf: #(1, 2, 3)) equals: 3
+    self assert: PipelineHost new afterFirstOf equals: 1
+
+  // --- Reflected source is the text as written ---
+  testReflectedSourceKeepsKeywordPipeline =>
+    self assert: (PipelineHost >> #shifted:) source equals: "shifted: p => p withX: 5 |> withY: 10"
+
+  testReflectedSourceKeepsMultiMessageStages =>
+    self assert: (PipelineHost >> #sortedKeys:) source equals: "sortedKeys: d => d |> keys sort"
+    self assert: (PipelineHost >> #smallestKey:) source equals: "smallestKey: d => d keys |> sort at: 1"
+    self assert: (PipelineHost >> #sizePlusOne:) source equals: "sizePlusOne: xs => xs |> size + 1"

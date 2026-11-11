@@ -61,7 +61,7 @@ Extracted from beamtalk_repl_server.
     hover_docs/4,
     hover_markdown/2,
     keyword_send_at/3,
-    diagnostics_for/2
+    diagnostics_for/3
 ]).
 -endif.
 
@@ -194,9 +194,14 @@ handle_term(<<"diagnostics">>, Params, _Msg, _SessionPid) ->
     %% "method" and treats everything else as expression mode — so the runtime
     %% behaviour was already correct, but the Erlang boundary was more permissive
     %% than the facade. A non-binary `mode` is passed through unchanged so it
-    %% still degrades to `[]` via the `diagnostics_for/2` catch-all.
+    %% still degrades to `[]` via the `diagnostics_for/3` catch-all.
     Mode = normalize_diagnostics_mode(maps:get(<<"mode">>, Params, <<"expression">>)),
-    {diagnostics, diagnostics_for(Code, Mode)};
+    %% Optional `source_path` (BT-4583): the file a file-backed editor buffer
+    %% edits. The compiler checks the buffer under that file's project scope
+    %% (its `beamtalk.toml` `[diagnostics]` table, cross-file type aliases, FFI
+    %% registry) — the scope `load-project` compiles the same file with. Scratch
+    %% buffers and REPL input send no path and keep the port-process scope.
+    {diagnostics, diagnostics_for(Code, Mode, binary_param(<<"source_path">>, Params))};
 handle_term(<<"reload-findings">>, _Params, _Msg, _SessionPid) ->
     %% (ADR 0105 surface-parity gap): request/response snapshot read
     %% of the live reload-induced findings store, mirroring the
@@ -1069,35 +1074,51 @@ type_annotation_completions(Prefix, AliasNames) ->
     lists:usort(class_name_completions(Prefix) ++ AliasCompletions).
 
 -doc """
-Compute parse-only diagnostics for an editor buffer.
+Compute parse-only diagnostics for an editor buffer, optionally under the
+project scope of the file it edits.
 
 `Code` is the full buffer source; `Mode` selects the parse grammar
 (`<<"expression">>` for a top-level script, `<<"method">>` for a bare method
-body). Delegates to `beamtalk_compiler:diagnostics/2` — the side-effect-free
+body).
+
+Delegates to `beamtalk_compiler:diagnostics/3` — the side-effect-free
 parse + semantic-check path (the Rust port's `diagnostics` command): it never
 generates code, installs a module, mutates the image, or appends to the
 ChangeLog. Each diagnostic is a map with `message`, `severity`, and byte-offset
 `start`/`end` keys.
+
+`SourcePath` (BT-4583) is the file a file-backed editor buffer edits. A
+non-empty path is forwarded as the compiler's `source_path` option, so a file
+under a `beamtalk.toml` is checked with that project's scope (its
+`[diagnostics]` table, cross-file type aliases, FFI registry) — the scope
+`load-project` gives the same file. `<<>>` (a scratch buffer, REPL input) sends
+no path and keeps the port-process scope. `"method"` mode ignores it.
 
 An empty buffer short-circuits to `[]` (nothing to diagnose). A compiler-port
 failure (`{error, _}` — port down / timed out) also degrades to `[]`: diagnostics
 are advisory and fire on every keystroke, so a transient port hiccup must not
 surface an error to the editor.
 """.
--spec diagnostics_for(binary(), binary()) -> [map()].
-diagnostics_for(<<>>, _Mode) ->
+-spec diagnostics_for(term(), term(), binary()) -> [map()].
+diagnostics_for(<<>>, _Mode, _SourcePath) ->
     [];
-diagnostics_for(Code, Mode) when is_binary(Code), is_binary(Mode) ->
-    case beamtalk_compiler:diagnostics(Code, Mode) of
+diagnostics_for(Code, Mode, SourcePath) when
+    is_binary(Code), is_binary(Mode), is_binary(SourcePath)
+->
+    Options =
+        case SourcePath of
+            <<>> -> #{};
+            _ -> #{source_path => SourcePath}
+        end,
+    case beamtalk_compiler:diagnostics(Code, Mode, Options) of
         {ok, Diagnostics} when is_list(Diagnostics) -> Diagnostics;
         {error, _Reason} -> []
     end;
 %% A non-binary `code`/`mode` (a raw TCP/MCP client can send either as a JSON
 %% number/bool, not just the LiveView surface) degrades to `[]` rather than
 %% crashing the session — diagnostics are advisory and fire on every keystroke,
-%% so this matches the `{error, _}` degradation above and keeps the `binary()`
-%% spec honest at the Erlang boundary.
-diagnostics_for(_, _) ->
+%% so this matches the `{error, _}` degradation above.
+diagnostics_for(_, _, _) ->
     [].
 
 -doc """
@@ -1106,7 +1127,7 @@ Normalise the `diagnostics` `mode` param at the Erlang op boundary.
 Mirrors the Elixir `BtAttach.Facade` (`invoke(:diagnostics, ...)`): a binary
 `mode` of <<"method">> is preserved; any other binary (e.g. <<"foo">>) is
 normalised to the safe default <<"expression">>. A non-binary `mode` is passed
-through unchanged so `diagnostics_for/2`'s catch-all still degrades it to `[]`
+through unchanged so `diagnostics_for/3`'s catch-all still degrades it to `[]`
 (the existing behaviour) rather than silently treating it as expression
 mode.
 """.
@@ -1546,6 +1567,12 @@ Examples:
   <<"\"hello\" size c">>→ {expression, <<"\"hello\" size">>, <<"c">>}
   <<"s">>               → {undefined, <<"s">>}
   <<>>                  → {undefined, <<>>}
+  <<"\"hi\" size |> ab">> → {expression, <<"\"hi\" size">>, <<"ab">>}
+
+After a pipeline `|>` (ADR 0145) the receiver is the value before the last
+`|>`, so `x m1 |> pre` completes `pre` against `x m1`, as the LSP does
+(`pipeline_receiver_end` in `completion_provider.rs`). Both are pinned to the
+shared corpus `test/fixtures/completion_pipeline_receiver_corpus.json`.
 """.
 -spec parse_receiver_and_prefix(binary()) ->
     {binary() | undefined, binary()} | {expression, binary(), binary()}.
@@ -1561,8 +1588,11 @@ parse_receiver_and_prefix(Line) when is_binary(Line) ->
     {SpaceChars, ReceiverPartRev} = lists:splitwith(
         fun(C) -> C =:= $\s orelse C =:= $\t end, Rest
     ),
-    case SpaceChars of
-        [] ->
+    case {ReceiverPartRev, SpaceChars} of
+        {[$>, $| | BeforePipeRev], _} ->
+            %% `value |> prefix`: completing a pipeline stage (ADR 0145).
+            pipeline_stage_receiver(BeforePipeRev, Prefix);
+        {_, []} ->
             %% No space before prefix — single token, no receiver
             {undefined, Prefix};
         _ ->
@@ -1594,6 +1624,20 @@ parse_receiver_and_prefix(Line) when is_binary(Line) ->
             end
     end.
 
+-doc """
+The receiver and prefix when completing a pipeline stage: `Prefix` follows
+the last `|>`, and `BeforePipeRev` is the reversed text before that `|>`.
+The receiver is whatever `parse_receiver_and_prefix/1` finds at the end of
+that text, as if the cursor sat after it.
+""".
+-spec pipeline_stage_receiver(string(), binary()) ->
+    {binary() | undefined, binary()} | {expression, binary(), binary()}.
+pipeline_stage_receiver(BeforePipeRev, Prefix) ->
+    case parse_receiver_and_prefix(list_to_binary(lists:reverse(BeforePipeRev, " "))) of
+        {expression, ReceiverExpr, <<>>} -> {expression, ReceiverExpr, Prefix};
+        {Receiver, <<>>} -> {Receiver, Prefix}
+    end.
+
 -spec is_identifier_char(char()) -> boolean().
 is_identifier_char(C) ->
     (C >= $a andalso C =< $z) orelse
@@ -1621,6 +1665,7 @@ Examples:
   <<"\"hello\" size">>    → {ok, <<"\"hello\"">>, [size]}
   <<"counter getValue">>  → {ok, <<"counter">>, [getValue]}
   <<"\"hello\" size abs">>→ {ok, <<"\"hello\"">>, [size, abs]}
+  <<"\"hello\" |> size abs">> → {ok, <<"\"hello\"">>, [size, abs]}
   <<"inject: 0 into:">>   → error  (keyword send)
   <<"(myList size)">>     → error  (paren)
 """.
@@ -1628,7 +1673,7 @@ Examples:
 tokenise_send_chain(<<>>) ->
     error;
 tokenise_send_chain(Expr) when is_binary(Expr) ->
-    Parts = [list_to_binary(T) || T <- string:tokens(binary_to_list(Expr), " \t")],
+    Parts = chain_tokens(Expr),
     case Parts of
         [] ->
             error;
@@ -1651,6 +1696,20 @@ tokenise_send_chain(Expr) when is_binary(Expr) ->
                     error
             end
     end.
+
+-doc """
+Split a receiver expression into whitespace-separated tokens for the chain
+tokenisers, dropping each pipeline `|>` token: in a chain of unary and binary
+sends walked left to right, `a m1 |> m2` is the same chain as `a m1 m2`
+(ADR 0145).
+""".
+-spec chain_tokens(binary()) -> [binary()].
+chain_tokens(Expr) ->
+    [
+        list_to_binary(T)
+     || T <- string:tokens(binary_to_list(Expr), " \t"),
+        T =/= "|>"
+    ].
 
 -spec validate_chain_tokens(binary(), [binary()]) -> ok | error.
 validate_chain_tokens(ReceiverToken, Selectors) ->
@@ -1733,7 +1792,7 @@ Examples:
 tokenise_binary_chain(<<>>) ->
     error;
 tokenise_binary_chain(Expr) when is_binary(Expr) ->
-    Parts = [list_to_binary(T) || T <- string:tokens(binary_to_list(Expr), " \t")],
+    Parts = chain_tokens(Expr),
     case Parts of
         [] ->
             error;
@@ -2511,9 +2570,10 @@ base_ops() ->
             <<"params">> => [<<"code">>], <<"optional">> => [<<"before">>, <<"suffix">>]
         },
         %% Parse-only diagnostics for the cockpit editors.
-        %% optional `mode` (<<"expression">> | <<"method">>) selects the grammar.
+        %% optional `mode` (<<"expression">> | <<"method">>) selects the grammar;
+        %% optional `source_path` (BT-4583) checks under that file's project scope.
         <<"diagnostics">> => #{
-            <<"params">> => [<<"code">>], <<"optional">> => [<<"mode">>]
+            <<"params">> => [<<"code">>], <<"optional">> => [<<"mode">>, <<"source_path">>]
         },
         <<"test">> => #{<<"params">> => [], <<"optional">> => [<<"class">>, <<"file">>]},
         <<"test-all">> => #{<<"params">> => []},

@@ -29,6 +29,7 @@
 
 use super::selector_span;
 use beamtalk_core::ast::{BinarySegment, Expression, Pattern, StringSegment};
+use beamtalk_core::ast_walker::walk_pattern;
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
 /// Number of newlines in the synthetic class header that wraps the input.
@@ -176,69 +177,18 @@ fn collect_send_lines(expr: &Expression, selector_name: &str, source: &str, line
     }
 }
 
-/// Recursively collect line numbers of message sends inside a [`Pattern`].
-///
-/// Patterns are themselves name-binding/literal-matching constructs and carry
-/// no message sends today — `BinarySegment::size` is the only expression slot
-/// in the [`Pattern`] enum, and the parser currently restricts it to an
-/// integer literal or a bare identifier (see
-/// `parse_binary_segment_size`). The walker is defensive: it traverses
-/// container patterns (Tuple/Array/List/Map/Constructor) and the binary
-/// segment size expression so that loosening the parser later does not
-/// silently regress `sendersOf:`. Constructor-pattern selector keywords (e.g.
-/// the `ok:` in `Result ok: v`) are *not* sends and are skipped here.
+/// Collect line numbers of message sends inside a [`Pattern`] by walking it
+/// with [`walk_pattern`] and delegating each embedded expression to
+/// [`collect_send_lines`].
 fn collect_pattern_send_lines(
     pattern: &Pattern,
     selector_name: &str,
     source: &str,
     lines: &mut Vec<u32>,
 ) {
-    match pattern {
-        Pattern::Binary { segments, .. } => {
-            for segment in segments {
-                collect_pattern_send_lines(&segment.value, selector_name, source, lines);
-                if let Some(size) = &segment.size {
-                    collect_send_lines(size, selector_name, source, lines);
-                }
-            }
-        }
-        Pattern::Tuple { elements, .. } => {
-            for element in elements {
-                collect_pattern_send_lines(element, selector_name, source, lines);
-            }
-        }
-        Pattern::Array { elements, rest, .. } => {
-            for element in elements {
-                collect_pattern_send_lines(element, selector_name, source, lines);
-            }
-            if let Some(rest_pattern) = rest {
-                collect_pattern_send_lines(rest_pattern, selector_name, source, lines);
-            }
-        }
-        Pattern::List { elements, tail, .. } => {
-            for element in elements {
-                collect_pattern_send_lines(element, selector_name, source, lines);
-            }
-            if let Some(tail_pattern) = tail {
-                collect_pattern_send_lines(tail_pattern, selector_name, source, lines);
-            }
-        }
-        Pattern::Map { pairs, .. } => {
-            for pair in pairs {
-                collect_pattern_send_lines(&pair.value, selector_name, source, lines);
-            }
-        }
-        Pattern::Constructor { keywords, .. } => {
-            for (_selector, inner) in keywords {
-                collect_pattern_send_lines(inner, selector_name, source, lines);
-            }
-        }
-        Pattern::Wildcard(..)
-        | Pattern::Literal(..)
-        | Pattern::Variable(..)
-        | Pattern::Nil(..)
-        | Pattern::Type { .. } => {}
-    }
+    walk_pattern(pattern, &mut |expr| {
+        collect_send_lines(expr, selector_name, source, lines);
+    });
 }
 
 /// Determine the line number to report for a matching send. Uses the span of

@@ -1737,3 +1737,147 @@ wait_until(Pred, N) ->
             timer:sleep(10),
             wait_until(Pred, N - 1)
     end.
+
+%%====================================================================
+%% BT-4502: no class-chain walk when nothing is subscribed
+%%====================================================================
+
+no_subscribers_no_superclass_walk_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        [
+            ?_test(begin
+                build_hierarchy(),
+                ok = meck:new(beamtalk_class_metadata, [passthrough]),
+                try
+                    %% Only the system bus pre-checks ancestry (BT-4653); a
+                    %% per-instance announce walks, so it is not metered here.
+                    ok = beamtalk_announcements:system_announce('ButtonClicked', #{}),
+                    ?assertEqual(0, meck:num_calls(beamtalk_class_metadata, lookup_superclass, '_'))
+                after
+                    meck:unload(beamtalk_class_metadata)
+                end
+            end),
+            ?_test(begin
+                %% A superclass subscription added after an earlier (empty)
+                %% announce receives the next announce.
+                build_hierarchy(),
+                Sub = spawn_subscriber(self()),
+                try
+                    ok = beamtalk_announcements:announce('ButtonClicked', first),
+                    {ok, SubRef} = beamtalk_announcements:subscribe('UIEvent', Sub, h, false),
+                    ok = beamtalk_announcements:announce('ButtonClicked', second),
+                    ?assertMatch({SubRef, 'ButtonClicked', h, second}, expect_received())
+                after
+                    stop_subscriber(Sub)
+                end
+            end),
+            ?_test(begin
+                %% A consumed once-subscription leaves the announcer empty, so
+                %% the next announce does no walk.
+                build_hierarchy(),
+                Sub = spawn_subscriber(self()),
+                try
+                    {ok, _} = beamtalk_announcements:subscribe('UIEvent', Sub, h, true),
+                    ok = beamtalk_announcements:announce('ButtonClicked', once),
+                    {_, 'ButtonClicked', h, once} = expect_received(),
+                    ok = meck:new(beamtalk_class_metadata, [passthrough]),
+                    try
+                        ok = beamtalk_announcements:announce('ButtonClicked', again),
+                        ?assertEqual(
+                            0, meck:num_calls(beamtalk_class_metadata, lookup_superclass, '_')
+                        ),
+                        refute_received()
+                    after
+                        meck:unload(beamtalk_class_metadata)
+                    end
+                after
+                    stop_subscriber(Sub)
+                end
+            end)
+        ]
+    end}.
+
+%%====================================================================
+%% BT-4631: unrelated subscriptions do not trigger a class-chain walk on the
+%% system bus
+%%====================================================================
+
+unrelated_subscription_no_superclass_walk_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            beamtalk_class_metadata:new(),
+            build_hierarchy(),
+            beamtalk_class_metadata:insert('ClassLoaded', undefined, undefined, none, undefined),
+            Sub = spawn_subscriber(self()),
+            try
+                {ok, _} = beamtalk_announcements:subscribe('ClassLoaded', Sub, h, false),
+                %% Warm the derived cache.
+                ok = beamtalk_announcements:announce('ButtonClicked', warm),
+                ok = beamtalk_announcements:system_announce('ButtonClicked', #{}),
+                refute_received(),
+                ok = meck:new(beamtalk_class_metadata, [passthrough]),
+                try
+                    %% Only the system bus pre-checks ancestry (BT-4653); a
+                    %% per-instance announce walks, so it is not metered here.
+                    ok = beamtalk_announcements:system_announce('ButtonClicked', #{}),
+                    ?assertEqual(
+                        0, meck:num_calls(beamtalk_class_metadata, lookup_superclass, '_')
+                    ),
+                    refute_received()
+                after
+                    meck:unload(beamtalk_class_metadata)
+                end
+            after
+                catch beamtalk_class_metadata:delete('ClassLoaded'),
+                stop_subscriber(Sub)
+            end
+        end)
+    end}.
+
+reparent_respected_after_precheck_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            beamtalk_class_metadata:new(),
+            build_hierarchy(),
+            beamtalk_class_metadata:insert(
+                'OtherEvent', undefined, undefined, 'DomainEvent', undefined
+            ),
+            Sub = spawn_subscriber(self()),
+            try
+                %% ButtonClicked starts under OtherEvent, not UIEvent.
+                beamtalk_class_metadata:insert(
+                    'ButtonClicked', undefined, undefined, 'OtherEvent', undefined
+                ),
+                {ok, SubRef} = beamtalk_announcements:subscribe('UIEvent', Sub, h, false),
+                ok = beamtalk_announcements:announce('ButtonClicked', a),
+                refute_received(),
+                beamtalk_class_metadata:insert(
+                    'ButtonClicked', undefined, undefined, 'UIEvent', undefined
+                ),
+                ok = beamtalk_announcements:announce('ButtonClicked', b),
+                ?assertMatch({SubRef, 'ButtonClicked', h, b}, expect_received()),
+                beamtalk_class_metadata:insert(
+                    'ButtonClicked', undefined, undefined, 'OtherEvent', undefined
+                ),
+                ok = beamtalk_announcements:announce('ButtonClicked', c),
+                refute_received()
+            after
+                stop_subscriber(Sub)
+            end
+        end)
+    end}.
+
+unregistered_exact_class_still_matches_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
+        ?_test(begin
+            beamtalk_class_metadata:new(),
+            Sub = spawn_subscriber(self()),
+            try
+                {ok, SubRef} = beamtalk_announcements:subscribe('NoSuchEvent', Sub, h, false),
+                ok = beamtalk_announcements:announce('NoSuchEvent', e),
+                ?assertMatch({SubRef, 'NoSuchEvent', h, e}, expect_received())
+            after
+                stop_subscriber(Sub)
+            end
+        end)
+    end}.

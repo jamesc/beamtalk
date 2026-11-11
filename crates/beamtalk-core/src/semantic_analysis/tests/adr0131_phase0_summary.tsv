@@ -26,15 +26,12 @@ statement	group-by	value	1	0	0
 statement	keyed-do	actor	94	0	0
 statement	keyed-do	class	104	0	0
 statement	keyed-do	value	94	0	0
-statement	other	actor	1145	0	6
-statement	other	class	1255	0	6
-statement	other	value	1073	0	6
+statement	other	actor	1151	0	0
+statement	other	class	1261	0	0
+statement	other	value	1079	0	0
 statement	satisfy	actor	94	0	0
 statement	satisfy	class	104	0	0
 statement	satisfy	value	94	0	0
-statement-group	loop-condition	other	actor	6
-statement-group	loop-condition	other	class	6
-statement-group	loop-condition	other	value	6
 operand	arg	actor	57	38	0	19	38	0
 operand	arg	class	57	57	0	0	57	0
 operand	arg	value	57	57	0	0	57	0

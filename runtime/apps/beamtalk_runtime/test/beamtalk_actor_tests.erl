@@ -644,7 +644,8 @@ instance_side_extension_crash_test() ->
         %% The caller gets a clean structured error, not a raw exit.
         Result2 = gen_server:call(Counter, {bt3199CrashExt, []}),
         ?assertMatch(
-            {error, #beamtalk_error{kind = runtime_error, selector = bt3199CrashExt}}, Result2
+            {error, #{error := #beamtalk_error{kind = runtime_error, selector = bt3199CrashExt}}},
+            Result2
         ),
 
         %% The actor survives and keeps processing messages normally.
@@ -2455,7 +2456,7 @@ collect_log_with_stacktrace(ExpectedMsg, Timeout) ->
 -doc """
 Collect log events until we find one matching `ExpectedMsg` whose metadata
 carries `MetaKey`, returning `{ok, Value}` for that key. Shared by every
-`log/2`-handler test in this module (CLAUDE.md's no-duplicate-implementations
+`log/2`-handler test in this module (AGENTS.md's no-duplicate-implementations
 rule) — `collect_log_with_stacktrace/2` is this with `MetaKey = stacktrace`.
 """.
 collect_log_meta(ExpectedMsg, MetaKey, Timeout) ->
@@ -3724,6 +3725,43 @@ async_send_watcher_cleans_up_on_normal_completion_test() ->
 %%% {error, ...} tuples; this is covered by the existing compat_self_dispatch_*
 %%% tests. We add a direct coverage test via dispatch/4 returning an error
 %%% and then manually invoking the unwrapping path.
+
+%% BT-4525 (ADR 0146 R3): a `^` that unwound a self-dispatched callee
+%% (`safe_dispatch` answers `{error, Nlr, EntryState}`) is re-thrown unchanged
+%% as a throw, and the cell keeps the callee's writes instead of being rewound
+%% to the entry state.
+bt4525_unwrap_dispatch_result_rethrows_nlr_without_store_test() ->
+    Callee = #{x => 5},
+    Entry = #{x => 0},
+    Nlr = {'$bt_nlr', make_ref(), 3, Callee},
+    beamtalk_actor_state:install(Callee),
+    try
+        Caught =
+            try beamtalk_actor:unwrap_dispatch_result({error, Nlr, Entry}) of
+                Other -> {returned, Other}
+            catch
+                Class:Reason -> {Class, Reason}
+            end,
+        ?assertEqual({throw, Nlr}, Caught),
+        ?assertEqual(Callee, beamtalk_actor_state:take())
+    after
+        beamtalk_actor_state:uninstall(undefined)
+    end.
+
+%% Control: an ordinary dispatch error still stores the state it carries and
+%% raises (the non-NLR path is unchanged).
+bt4525_unwrap_dispatch_result_error_still_stores_test() ->
+    Entry = #{x => 0},
+    beamtalk_actor_state:install(#{x => 5}),
+    try
+        ?assertError(
+            _,
+            beamtalk_actor:unwrap_dispatch_result({error, {error, boom, []}, Entry})
+        ),
+        ?assertEqual(Entry, beamtalk_actor_state:take())
+    after
+        beamtalk_actor_state:uninstall(undefined)
+    end.
 
 dispatch_user_method_type_error_for_non_function_value_test() ->
     %% The `{ok, _NotAFunction}` branch in dispatch_user_method returns a

@@ -6,7 +6,9 @@
 //! Contains `MethodInfo`, `SuperclassTypeArg`, and `ClassInfo` — the value objects
 //! that describe classes and methods in the static hierarchy.
 
-use crate::ast::{ClassDefinition, ClassKind, Expression, MethodKind, SlotKind};
+use crate::ast::{
+    ClassDefinition, ClassKind, ConstantValue, Expression, MethodDefinition, MethodKind, SlotKind,
+};
 use ecow::EcoString;
 use std::collections::{BTreeSet, HashMap};
 
@@ -108,17 +110,35 @@ pub struct MethodInfo {
     /// (BT-4115).
     #[cfg_attr(feature = "serde", serde(default))]
     pub primitive: Option<EcoString>,
-    /// The integer when the method body is exactly one integer literal
-    /// ([`MethodDefinition::literal_integer_body`](crate::ast::MethodDefinition::literal_integer_body)),
+    /// The literal when the method body is exactly one scalar literal
+    /// ([`MethodDefinition::literal_constant_body`](crate::ast::MethodDefinition::literal_constant_body)),
     /// else `None`. Codegen answers a class-literal send of such a class-side
     /// method with the literal, behind a static call key the runtime installs
     /// only while the defining module's metadata still certifies that body
-    /// (BT-4363).
+    /// (BT-4363, BT-4504).
     #[cfg_attr(feature = "serde", serde(default))]
-    pub constant_value: Option<i64>,
+    pub constant_value: Option<ConstantValue>,
 }
 
 impl MethodInfo {
+    /// The [`MethodInfo::constant_value`] to record for `method`: its literal
+    /// body ([`MethodDefinition::literal_constant_body`]) on the class side,
+    /// `None` on the instance side.
+    ///
+    /// Only a class-literal send of a *class-side* method is folded
+    /// (BT-4363). An instance-side constant would put method bodies into the
+    /// interface surface, so a body-only edit (`=> self name` to `=> "x"`)
+    /// would rebuild unchanged callers (BT-4504). Every producer of
+    /// `MethodInfo`/stdlib method metadata goes through this one rule.
+    #[must_use]
+    pub fn recorded_constant(method: &MethodDefinition, class_side: bool) -> Option<ConstantValue> {
+        if class_side {
+            method.literal_constant_body()
+        } else {
+            None
+        }
+    }
+
     /// Returns `true` if `self` (a subclass method) can override `ancestor`.
     ///
     /// A method cannot override a sealed method with the same selector.
@@ -269,6 +289,21 @@ pub struct ClassInfo {
     /// the current module (their parse errors surface directly).
     #[cfg_attr(feature = "serde", serde(default))]
     pub surface_incomplete: bool,
+    /// BT-4501: whether this class's own explicit class-side `new:` has the
+    /// body shape that runs in the caller
+    /// ([`ClassHierarchy::explicit_class_constructor_shape`]); combined with
+    /// the chain conditions it is
+    /// [`ClassHierarchy::explicit_class_new1_runs_in_caller`], i.e. codegen
+    /// leaves `new:` out of the class's published
+    /// `process_bound_class_selectors`. Decided where the AST is in hand
+    /// (`ClassInfo::from_class_definition`, so Pass 1 extraction carries it to
+    /// cross-file callers, BT-4640; and the stdlib snapshot in
+    /// `generated_builtins.rs`) and chain-independent: the chain half is
+    /// re-evaluated by [`ClassHierarchy::runs_class_method_in_caller`] against
+    /// the hierarchy at hand. Own-class only: a subclass inheriting the `new:`
+    /// keeps the class process, so this is never inherited.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub in_caller_new1: bool,
     /// Whether this class has no compiled BEAM module (BT-4069).
     ///
     /// True for live `ClassBuilder` classes (whose methods are funs in the
@@ -426,6 +461,16 @@ const PROCESS_BOUND_CLASS_SELECTORS: &[&str] = &[
 ];
 
 impl ClassInfo {
+    /// Whether this entry is a superclass-index stub inserted by
+    /// `ClassHierarchy::add_external_superclasses`: it carries only a name and
+    /// a superclass, so its class variables and method surface are unknown,
+    /// not absent. No other producer sets both flags; a new producer of that
+    /// combination must decide whether it is a stub (BT-4644).
+    #[must_use]
+    pub fn is_superclass_index_stub(&self) -> bool {
+        self.is_module_less && self.surface_incomplete
+    }
+
     /// Whether a class registered under `module` is module-less
     /// ([`Self::is_module_less`]): a live module-less class registers its own
     /// class name as its module (`beamtalk_object_class:init/1`'s default),
@@ -520,7 +565,7 @@ impl ClassInfo {
                 // `MethodInfo::origin`'s doc for why it can't be set here.
                 origin: None,
                 primitive: m.quoted_primitive_name().cloned(),
-                constant_value: m.literal_integer_body(),
+                constant_value: MethodInfo::recorded_constant(m, false),
             })
             .collect();
 
@@ -546,7 +591,7 @@ impl ClassInfo {
                 // methods are never flattened in v1, so this is always `None`.
                 origin: None,
                 primitive: m.quoted_primitive_name().cloned(),
-                constant_value: m.literal_integer_body(),
+                constant_value: MethodInfo::recorded_constant(m, true),
             })
             .collect();
 
@@ -564,6 +609,7 @@ impl ClassInfo {
             auto_ctors: None,
             handle_scope: class.handle_scope.as_ref().map(|s| s.name.clone()),
             surface_incomplete: false,
+            in_caller_new1: ClassHierarchy::explicit_class_constructor_shape(class, "new:"),
             // AST-built classes always compile to a module.
             is_module_less: false,
             state: class.state.iter().map(|s| s.name.name.clone()).collect(),

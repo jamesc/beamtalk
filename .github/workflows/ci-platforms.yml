@@ -7,7 +7,7 @@
 # there by default: they run here, on a daily schedule, on workflow_dispatch, and
 # on a PR carrying the `ci:all-platforms` label. This is a separate workflow so
 # that labelling a PR never re-triggers (or cancels) ci.yml, and so that none of
-# its job names can shadow a required check from ci.yml (`check-corpus`).
+# its job names can shadow a required check from ci.yml.
 # nightly.yml additionally runs the full test suite on macOS/Windows and builds
 # the distribution archives.
 
@@ -85,27 +85,8 @@ jobs:
       - name: Install Just
         uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
-      # `just test-rust` runs the Rust tests through cargo-nextest (one scheduler
-      # across every test binary, see the Justfile). Prebuilt from nextest's own
-      # CDN, the same source scripts/setup-cloud.sh uses: nextest refuses a source
-      # build without --locked, and this needs no GitHub release API. Pinned.
       - name: Install cargo-nextest
-        shell: bash
-        run: |
-          case "${{ runner.os }}" in
-            Linux) platform=linux ;;
-            macOS) platform=mac ;;
-            Windows) platform=windows-tar ;;
-          esac
-          cargo_home="${CARGO_HOME:-$HOME/.cargo}"
-          # On Windows CARGO_HOME is a native path (C:\Users\...); Git Bash's tar
-          # needs the POSIX spelling.
-          if [ "${{ runner.os }}" = "Windows" ]; then cargo_home="$(cygpath -u "$cargo_home")"; fi
-          bin="$cargo_home/bin"
-          mkdir -p "$bin"
-          curl -fsSL --retry 5 --retry-connrefused --retry-delay 2 --connect-timeout 20 \
-            "https://get.nexte.st/0.9.148/${platform}" | tar -xz -C "$bin"
-          cargo nextest --version
+        uses: ./.github/actions/install-nextest
 
       # Node.js only needed on Linux for fmt-check-js (Windows fmt-check skips JS/Erlang checks)
       - name: Setup Node.js

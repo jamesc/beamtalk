@@ -1,0 +1,19 @@
+{
+  "name": "beamtalk-github-chrome",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Chrome extension: Beamtalk syntax highlighting on GitHub",
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.2.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
+  }
+}

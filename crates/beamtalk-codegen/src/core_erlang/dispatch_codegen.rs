@@ -47,7 +47,8 @@ use super::gen_server::SpawnVariant;
 use super::method_frame::CLASS_SELF_VAR;
 use super::routing;
 use super::threaded_ir::{
-    BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VersionPrefix, VersionedVar,
+    BindOp, FrameId, ThreadedStmt, ThreadedValue, ValueRef, VerifyError, VersionPrefix,
+    VersionedVar,
 };
 use super::{CodeGenContext, CodeGenError, CoreErlangGenerator, Result};
 
@@ -57,6 +58,9 @@ use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{ClassKind, Expression, MessageSelector, WellKnownSelector};
 use beamtalk_core::semantic_analysis::TypeProvenance;
 use beamtalk_core::semantic_analysis::class_hierarchy::{ClassHierarchy, ClassInfo};
+use beamtalk_core::semantic_analysis::type_checker::{
+    FFI_ARG_RUNTIME_GUARDS, ffi_arg_passes_unchanged,
+};
 use beamtalk_core::source_analysis::Span;
 
 /// One `generate_message_send` dispatch strategy: `Some(doc)` claims the
@@ -226,7 +230,18 @@ pub(in crate::core_erlang) enum StaysDynamic {
     /// An ancestor is declared in another file, so the chain is not fully
     /// known.
     CrossFileParent,
+    /// A protocol-typed receiver none of whose known conformers is a
+    /// guardable tagged class (BT-4486).
+    ProtocolNoConformers,
+    /// A protocol-typed receiver with more than [`MAX_PROTOCOL_ARMS`]
+    /// guardable conformers: a guard that long costs more than it saves
+    /// (BT-4486).
+    ProtocolTooManyConformers,
 }
+
+/// BT-4486: the most conformer arms a protocol-typed send's class-tag guard
+/// emits. Past this the send stays dynamic.
+pub(in crate::core_erlang) const MAX_PROTOCOL_ARMS: usize = 4;
 
 /// Whether `class` is `Exception` or one of its subclasses — instances route
 /// to `bt@stdlib@exception:dispatch`, so a guarded direct call never applies.
@@ -299,6 +314,13 @@ pub(in crate::core_erlang) enum TypedSendTarget {
     /// A representation-routed built-in: guard on the representation test
     /// the dynamic path routes on, call the module it would call.
     Builtin(routing::BuiltinRoute),
+    /// BT-4486: a protocol-typed receiver (two to [`MAX_PROTOCOL_ARMS`]
+    /// guardable conformers, sorted by class name): one tag arm per
+    /// conformer. Protocols are structural, so the conformer list is only a
+    /// heuristic; the guard is the contract — a value tagged with none of
+    /// them takes the dynamic send. A protocol with exactly one conformer
+    /// resolves to [`Self::Tagged`].
+    Conformers(Vec<TypedTaggedTarget>),
 }
 
 impl CoreErlangGenerator {
@@ -748,7 +770,7 @@ impl CoreErlangGenerator {
     /// only at the point a user-written annotation naming an alias is
     /// expanded (ADR 0108), so it is a declared type under another name.
     /// `Extracted` (`-spec`-derived) stays untrusted.
-    fn trusted_static_class(
+    pub(in crate::core_erlang) fn trusted_static_class(
         &self,
         receiver: &Expression,
     ) -> std::result::Result<&ecow::EcoString, StaysDynamic> {
@@ -969,11 +991,12 @@ impl CoreErlangGenerator {
     /// send. A selector the row's dynamic path answers elsewhere (`Pid`'s
     /// future protocol, `String`'s shared byte-level selectors — the
     /// fixture's `special_selectors`, BT-4390) stays dynamic; every other
-    /// selector on those rows is routed. Rows whose test spans two routes
-    /// (`Binary`) or that carry a `dynamic_only` reason (`Boolean`,
-    /// `Bitstring`, `Character`, the records, the proxy) stay dynamic. A
-    /// stdlib built-in's module can be neither removed nor redefined into
-    /// another module, so the pinned target never goes stale.
+    /// selector on those rows is routed. A row whose test spans two routes
+    /// (`Binary`: a bare binary or the `String` tag) gets both, guarded one
+    /// after the other (BT-4510). Rows that carry a `dynamic_only` reason
+    /// (`Boolean`, `Bitstring`, `Character`, the records, the proxy) stay
+    /// dynamic. A stdlib built-in's module can be neither removed nor
+    /// redefined into another module, so the pinned target never goes stale.
     pub(in crate::core_erlang) fn typed_send_target(
         &self,
         receiver: &Expression,
@@ -1004,8 +1027,65 @@ impl CoreErlangGenerator {
                 )),
             };
         }
+        if let Some(conformers) = self.protocol_conformers_of(class_name.as_str()) {
+            return self.protocol_send_target(&conformers);
+        }
         self.typed_tagged_target(class_name)
             .map(TypedSendTarget::Tagged)
+    }
+
+    /// BT-4486/BT-4630: the known conformers of `protocol` (non-protocol
+    /// classes whose known surface satisfies it), sorted by name; `None` when
+    /// `protocol` is not a protocol in scope. Structural, so a heuristic —
+    /// the emitted tag guard is the contract. Computed on first use and
+    /// memoised per protocol.
+    pub(in crate::core_erlang) fn protocol_conformers_of(
+        &self,
+        protocol: &str,
+    ) -> Option<std::rc::Rc<Vec<ecow::EcoString>>> {
+        let registry = self.protocol_registry.as_ref()?;
+        if !registry.has_protocol(protocol) {
+            return None;
+        }
+        if let Some(hit) = self.protocol_conformers_memo.borrow().get(protocol) {
+            return Some(std::rc::Rc::clone(hit));
+        }
+        let hierarchy = self.class_hierarchy.as_ref()?;
+        let name = ecow::EcoString::from(protocol);
+        let mut conformers: Vec<ecow::EcoString> = hierarchy
+            .class_names()
+            .filter(|class| {
+                !hierarchy.is_protocol_class(class)
+                    && registry.conforms_by_known_surface(class, &name, hierarchy)
+            })
+            .cloned()
+            .collect();
+        conformers.sort();
+        let conformers = std::rc::Rc::new(conformers);
+        self.protocol_conformers_memo
+            .borrow_mut()
+            .insert(name, std::rc::Rc::clone(&conformers));
+        Some(conformers)
+    }
+
+    /// BT-4486: the guarded target for a receiver typed by a protocol —
+    /// each known conformer through [`Self::typed_tagged_target`] (so the
+    /// shadowing, module-less, exception, abstract and built-in exclusions
+    /// apply per arm), keeping those that resolve.
+    fn protocol_send_target(
+        &self,
+        conformers: &[ecow::EcoString],
+    ) -> std::result::Result<TypedSendTarget, StaysDynamic> {
+        let mut targets: Vec<TypedTaggedTarget> = conformers
+            .iter()
+            .filter_map(|class| self.typed_tagged_target(class).ok())
+            .collect();
+        match targets.len() {
+            0 => Err(StaysDynamic::ProtocolNoConformers),
+            1 => Ok(TypedSendTarget::Tagged(targets.remove(0))),
+            n if n > MAX_PROTOCOL_ARMS => Err(StaysDynamic::ProtocolTooManyConformers),
+            _ => Ok(TypedSendTarget::Conformers(targets)),
+        }
     }
 
     /// BT-4069: `HANDLERS`' last entry. Converts a send to a receiver
@@ -1070,6 +1150,12 @@ impl CoreErlangGenerator {
         let mut all_exprs: Vec<&Expression> = Vec::with_capacity(arguments.len() + 1);
         all_exprs.push(receiver);
         all_exprs.extend(arguments.iter());
+        // BT-4633: no `^`-closure pre-store here either; the runtime
+        // dispatch's argument holds (`generate_runtime_dispatch`), and the
+        // same test-build log checks it. A `no_user_code` send to a receiver
+        // of statically known class reaches this guarded send, not that one.
+        #[cfg(test)]
+        self.note_dispatch_nlr_literals(receiver, selector, arguments);
         let (preamble, mut docs) = self.thread_subexprs(&all_exprs, "TTagged")?;
         let mut docs_iter = docs.drain(..);
         let receiver_doc = docs_iter.next().ok_or_else(|| {
@@ -1082,62 +1168,7 @@ impl CoreErlangGenerator {
             .iter()
             .map(|_| self.fresh_temp_var("TTaggedArg"))
             .collect();
-        let args_list_doc = Self::join_docs_with_commas(
-            arg_vars.iter().map(|var| leaf::var(var.clone())).collect(),
-        );
-
-        let module_name = match target {
-            TypedSendTarget::Tagged(tagged) => tagged.module_name.clone(),
-            TypedSendTarget::Builtin(route) => route.target_module.to_string(),
-        };
-        // BT-4473: a send to an instance of this unit's own class whose
-        // selector one of its `dispatch/3` method arms answers calls that
-        // arm's function directly; every other tagged target, and every
-        // built-in route, calls `dispatch/3`.
-        let own_arm = match target {
-            TypedSendTarget::Tagged(tagged) => {
-                self.own_dispatch_arm(&tagged.class_name, &selector_atom, arguments.len())
-            }
-            TypedSendTarget::Builtin(_) => None,
-        };
-        let direct_call = match own_arm {
-            Some(arm) => self.own_arm_call_doc(&selector_atom, arm, &receiver_var, &arg_vars),
-            None => docvec![
-                "call ",
-                leaf::atom(module_name),
-                ":'dispatch'(",
-                leaf::atom(selector_atom.clone()),
-                ", [",
-                args_list_doc.clone(),
-                "], ",
-                leaf::var(receiver_var.clone()),
-                ")",
-            ],
-        };
-        // BT-4366: both calls sit inside the type-test `case`, so each carries
-        // the send's line itself.
-        let direct_doc = self.annotate_current_send_call(direct_call);
-        let fallback_doc = self.annotate_current_send_call(docvec![
-            "call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(receiver_var.clone()),
-            ", ",
-            leaf::atom(selector_atom.clone()),
-            ", [",
-            args_list_doc,
-            "])",
-        ]);
-
-        let case_doc = match target {
-            TypedSendTarget::Tagged(tagged) => self.class_tag_guarded_doc(
-                &receiver_var,
-                &tagged.class_name,
-                direct_doc,
-                fallback_doc,
-            ),
-            TypedSendTarget::Builtin(route) => {
-                self.render_send_guard(route.guard, &receiver_var, direct_doc, &fallback_doc)
-            }
-        };
+        let case_doc = self.guarded_send_on_vars(target, &selector_atom, &receiver_var, &arg_vars);
 
         // BT-4279: a unary send that may be an auto-generated slot getter of a
         // tagged Value class. Its fast path reads the slot with no bracket
@@ -1182,6 +1213,148 @@ impl CoreErlangGenerator {
         Ok(self.close_prelude(&preamble, body, "TTaggedRes"))
     }
 
+    /// BT-4069, BT-4294, BT-4510: the guarded direct call of `selector_atom`
+    /// to the value bound to `receiver_var`, with `arg_vars` as arguments,
+    /// for a [`TypedSendTarget`]: the target's guard (a class tag, or a
+    /// built-in's representation test, then its `String`-tag half if any)
+    /// around the direct call, and the dynamic send in every miss arm. Shared
+    /// by [`Self::generate_typed_guarded_send`] and the sends the compiler
+    /// makes itself on an already-bound value (a string interpolation
+    /// segment's `displayString`).
+    pub(in crate::core_erlang) fn guarded_send_on_vars(
+        &mut self,
+        target: &TypedSendTarget,
+        selector_atom: &str,
+        receiver_var: &str,
+        arg_vars: &[String],
+    ) -> Document<'static> {
+        let args_list_doc = Self::join_docs_with_commas(
+            arg_vars.iter().map(|var| leaf::var(var.clone())).collect(),
+        );
+        let fallback_doc = self.annotate_current_send_call(docvec![
+            "call 'beamtalk_message_dispatch':'send'(",
+            leaf::var(receiver_var.to_string()),
+            ", ",
+            leaf::atom(selector_atom.to_string()),
+            ", [",
+            args_list_doc.clone(),
+            "])",
+        ]);
+        match target {
+            TypedSendTarget::Conformers(conformers) => {
+                // BT-4486: one tag arm per conformer, each a direct call.
+                let arms: Vec<(String, Document<'static>)> = conformers
+                    .iter()
+                    .map(|tagged| {
+                        let call = self.tagged_direct_call(
+                            tagged,
+                            selector_atom,
+                            receiver_var,
+                            arg_vars,
+                            &args_list_doc,
+                        );
+                        (
+                            tagged.class_name.clone(),
+                            self.annotate_current_send_call(call),
+                        )
+                    })
+                    .collect();
+                self.class_tags_guarded_doc(receiver_var, arms, fallback_doc)
+            }
+            TypedSendTarget::Tagged(tagged) => {
+                let call = self.tagged_direct_call(
+                    tagged,
+                    selector_atom,
+                    receiver_var,
+                    arg_vars,
+                    &args_list_doc,
+                );
+                // BT-4366: both calls sit inside the type-test `case`, so each
+                // carries the send's line itself.
+                let direct_doc = self.annotate_current_send_call(call);
+                self.class_tag_guarded_doc(
+                    receiver_var,
+                    &tagged.class_name,
+                    direct_doc,
+                    fallback_doc,
+                )
+            }
+            TypedSendTarget::Builtin(route) => {
+                let direct_doc = self.annotate_current_send_call(Self::dispatch3_call_doc(
+                    route.target_module.to_string(),
+                    selector_atom,
+                    &args_list_doc,
+                    receiver_var,
+                ));
+                // BT-4510: a `Binary` receiver that is a `String` at run time
+                // misses the bare-binary guard and tries the `String` route
+                // before the dynamic send.
+                let miss_doc = match route.string_tag_route {
+                    Some(string_route) => {
+                        let string_call =
+                            self.annotate_current_send_call(Self::dispatch3_call_doc(
+                                string_route.target_module.to_string(),
+                                selector_atom,
+                                &args_list_doc,
+                                receiver_var,
+                            ));
+                        self.render_send_guard(
+                            string_route.guard,
+                            receiver_var,
+                            string_call,
+                            &fallback_doc,
+                        )
+                    }
+                    None => fallback_doc,
+                };
+                self.render_send_guard(route.guard, receiver_var, direct_doc, &miss_doc)
+            }
+        }
+    }
+
+    /// BT-4473: the direct call for a receiver known to be tagged `tagged`:
+    /// the own-class method arm when this unit's own class answers the
+    /// selector, else the class module's `dispatch/3`.
+    fn tagged_direct_call(
+        &self,
+        tagged: &TypedTaggedTarget,
+        selector_atom: &str,
+        receiver_var: &str,
+        arg_vars: &[String],
+        args_list_doc: &Document<'static>,
+    ) -> Document<'static> {
+        match self.own_dispatch_arm(&tagged.class_name, selector_atom, arg_vars.len()) {
+            Some(arm) => Self::own_arm_call_doc(selector_atom, arm, receiver_var, arg_vars),
+            None => Self::dispatch3_call_doc(
+                tagged.module_name.clone(),
+                selector_atom,
+                args_list_doc,
+                receiver_var,
+            ),
+        }
+    }
+
+    /// `call 'Module':'dispatch'('sel', [Args], Recv)` — the remote
+    /// `dispatch/3` call every guarded direct send makes (BT-4510).
+    fn dispatch3_call_doc(
+        module_name: String,
+        selector_atom: &str,
+        args_list_doc: &Document<'static>,
+        receiver_var: &str,
+    ) -> Document<'static> {
+        docvec![
+            "call ",
+            leaf::atom(module_name),
+            ":'dispatch'(",
+            leaf::atom(selector_atom.to_string()),
+            ", [",
+            args_list_doc.clone(),
+            "], ",
+            leaf::var(receiver_var.to_string()),
+            ")",
+        ]
+    }
+
     /// BT-4473: the own-class `dispatch/3` method arm that answers
     /// `selector` with `arity` arguments for an instance of `class_name`, when
     /// `class_name` is the class this unit compiles and the code being
@@ -1194,8 +1367,8 @@ impl CoreErlangGenerator {
     /// which answers the selector from that arm before its default arm — so
     /// no extension or superclass is consulted, and nothing installed later
     /// can change that. The function is called locally, so caller and callee
-    /// are always the same module version and the arm shape (the NLR pair)
-    /// this unit compiled against is the one it calls. One difference from
+    /// are always the same module version and the arm this unit compiled
+    /// against is the one it calls. One difference from
     /// `dispatch/3`, whose arms are remote calls: code still running in the
     /// old version after a reload (a long loop, an old block) keeps calling
     /// the old method, where `dispatch/3` would have reached the new one.
@@ -1219,10 +1392,8 @@ impl CoreErlangGenerator {
     }
 
     /// BT-4473: the local call of an own-class method arm's function —
-    /// `apply 'sel'/N(R, A1, …)`, with a `{Result, State}` pair unwrapped as
-    /// the arm unwraps it.
+    /// `apply 'sel'/N(R, A1, …)`, which answers the send's result (BT-4503).
     fn own_arm_call_doc(
-        &mut self,
         selector: &str,
         arm: super::value_type_codegen::OwnDispatchArm,
         receiver_var: &str,
@@ -1230,28 +1401,12 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         let mut call_args: Vec<Document<'static>> = vec![leaf::var(receiver_var.to_string())];
         call_args.extend(arg_vars.iter().map(|var| leaf::var(var.clone())));
-        let call = docvec![
+        docvec![
             "apply ",
             leaf::fname(selector.to_string(), arm.arity + 1),
             "(",
             Self::join_docs_with_commas(call_args),
             ")",
-        ];
-        if !arm.nlr_pair {
-            return call;
-        }
-        let result = self.fresh_temp_var("OwnArmR");
-        let state = self.fresh_temp_var("OwnArmS");
-        docvec![
-            "case ",
-            call,
-            " of <{",
-            leaf::var(result.clone()),
-            ", ",
-            leaf::var(state),
-            "}> when 'true' -> ",
-            leaf::var(result),
-            " end",
         ]
     }
 
@@ -1307,8 +1462,36 @@ impl CoreErlangGenerator {
         direct_doc: Document<'static>,
         fallback_doc: Document<'static>,
     ) -> Document<'static> {
+        self.class_tags_guarded_doc(
+            receiver_var,
+            vec![(class_name.to_string(), direct_doc)],
+            fallback_doc,
+        )
+    }
+
+    /// BT-4486: [`Self::class_tag_guarded_doc`] over several classes — one
+    /// atom clause per `(class, direct_doc)` arm in the inner `case` (a
+    /// `select_val`), `fallback_doc` for any other tag or a non-map.
+    fn class_tags_guarded_doc(
+        &mut self,
+        receiver_var: &str,
+        arms: Vec<(String, Document<'static>)>,
+        fallback_doc: Document<'static>,
+    ) -> Document<'static> {
         let no_match_inner = self.fresh_temp_var("TTaggedNoMatch");
         let no_match_outer = self.case_clause_fallback("TTaggedOuterNoMatch");
+        let arm_docs: Vec<Document<'static>> = arms
+            .into_iter()
+            .map(|(class_name, direct_doc)| {
+                docvec![
+                    "<",
+                    leaf::atom(class_name),
+                    "> when 'true' -> ",
+                    direct_doc,
+                    " "
+                ]
+            })
+            .collect();
         docvec![
             "case call 'erlang':'is_map'(",
             leaf::var(receiver_var.to_string()),
@@ -1317,11 +1500,8 @@ impl CoreErlangGenerator {
             "case call 'maps':'get'('$beamtalk_class', ",
             leaf::var(receiver_var.to_string()),
             ", 'undefined') of ",
+            Document::Vec(arm_docs),
             "<",
-            leaf::atom(class_name.to_string()),
-            "> when 'true' -> ",
-            direct_doc,
-            " <",
             leaf::var(no_match_inner),
             "> when 'true' -> ",
             fallback_doc.clone(),
@@ -1539,17 +1719,7 @@ impl CoreErlangGenerator {
 
         // Emit the dynamic-site report entry (BT-4292): the receiver's static
         // type and the gate that kept the send dynamic.
-        if self.codegen_diagnostics_enabled {
-            let span = receiver.span();
-            let line_info = self
-                .span_to_line(span)
-                .map_or(String::new(), |l| format!(" at line {l}"));
-            let description = self.dynamic_site_description(receiver, selector);
-            self.emit_codegen_diagnostic(
-                format!("Send '{selector_atom}'{line_info}: dynamic dispatch ({description})"),
-                span,
-            );
-        }
+        self.report_dynamic_site(receiver, selector);
 
         // Capture receiver + args as one ordered sub-expression
         // sequence so left-to-right evaluation order is preserved.
@@ -1558,6 +1728,43 @@ impl CoreErlangGenerator {
         for arg in arguments {
             all_exprs.push(arg);
         }
+        // BT-4612: no `^`-closure pre-store here, nor in the typed guarded
+        // send (`generate_typed_guarded_send`), which takes a send to a
+        // receiver of statically known class instead and falls back to this
+        // same call. Outside every bracket window a send reaches either
+        // dispatch only when `classify_send` answered `UserCodeCall::No` (a
+        // `Yes` send there is a gap, and a self or `super` send dispatches
+        // elsewhere). Each way to `No`, with a block literal holding a `^`
+        // among the operands:
+        //
+        // - `SendUserCode::Never` (`p spawnWith: [^1]`): runs none of its
+        //   operands, so there is nothing to store for (BT-4606). Reaches
+        //   this dispatch (`never_spawn_with`).
+        // - `is_no_user_code_send`: a sealed primitive the stdlib marked
+        //   `no_user_code` runs no user code for any argument, so it runs
+        //   none of its operands either: a block passed to it (even to a
+        //   parameter annotated `Integer`, since annotations are not checked
+        //   at run time) is never run, and `note_nlr_operands` records
+        //   nothing for it, like a `Never` send (BT-4633). Its receiver's
+        //   class is known, so it reaches the typed guarded send
+        //   (`no_user_code_block_argument`). Both are
+        //   `send_runs_no_operand`.
+        // - `Inlined`, `LoopOrClosureCall`, `InlinedOrClosureCall` answered
+        //   `No`: the construct is lowered in place by its own lowering
+        //   (a conditional's fallback stores for itself,
+        //   `boolean_fallback_send`), never through this dispatch.
+        //
+        // Checked, not argued: in test builds every such send that reaches
+        // either dispatch is logged (`note_dispatch_nlr_literals`), and
+        // `only_sends_that_run_no_operand_reach_the_dispatch_with_a_nlr_literal`
+        // compiles the whole `nlr_closure_call_corpus` (every in-place
+        // construct, the fallback shapes with a non-literal operand, and a
+        // test-only parameterised `no_user_code` mark given a `^` block) and
+        // fails on any logged send that may run an operand. In any build,
+        // such a send would leave its `^` block an `UnbracketedNlrClosure`
+        // finding.
+        #[cfg(test)]
+        self.note_dispatch_nlr_literals(receiver, selector, arguments);
         let mut seq = self.sequence_call(&all_exprs, "Disp")?;
         let actual_receiver = seq.next();
 
@@ -1753,6 +1960,9 @@ impl CoreErlangGenerator {
                 if OBJECT_PROTOCOL_SELECTORS.contains(&function_name.as_str()) {
                     return Ok(None);
                 }
+                if let Some(doc) = self.proved_direct_ffi_call(module_name, function_name, &[])? {
+                    return Ok(Some(doc));
+                }
                 // Route zero-arg calls through proxy (consistent with keyword sends).
                 // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [], 'stock')`
                 let mode = super::util::ffi_coercion_mode(module_name);
@@ -1771,11 +1981,22 @@ impl CoreErlangGenerator {
                 // Extract function name from first keyword (before the colon)
                 let function_name = parts[0].keyword.trim_end_matches(':');
 
+                if let Some(doc) =
+                    self.proved_direct_ffi_call(module_name, function_name, arguments)?
+                {
+                    return Ok(Some(doc));
+                }
+
                 // Process arguments individually so Block arguments can be
                 // generated as Tier 1 funs (generate_erlang_interop_block) before crossing the
                 // Erlang boundary. Non-block arguments pass through unchanged.
                 let mut preamble_docs: Vec<Document<'static>> = Vec::new();
                 let mut arg_parts: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
+                // BT-4296: the arguments land in a list, which erlc evaluates
+                // last-first, so every argument before the last one that may
+                // run code is bound to a temp in source order.
+                let arg_exprs: Vec<&Expression> = arguments.iter().collect();
+                let racing_last = self.last_racing_operand(&arg_exprs);
 
                 for (i, arg) in arguments.iter().enumerate() {
                     if i > 0 {
@@ -1793,6 +2014,13 @@ impl CoreErlangGenerator {
                             " in "
                         ]);
                         arg_parts.push(leaf::var(wrapper_var));
+                    } else if racing_last.is_some_and(|last| i < last)
+                        && !Self::is_trivial_subexpr(arg)
+                    {
+                        let doc = self.expression_doc(arg)?;
+                        let (binding, var) = self.bind_subexpr_to_temp("ErlArg", doc);
+                        preamble_docs.push(binding);
+                        arg_parts.push(leaf::var(var));
                     } else {
                         arg_parts.push(self.expression_doc(arg)?);
                     }
@@ -1827,6 +2055,176 @@ impl CoreErlangGenerator {
                 Ok(None)
             }
         }
+    }
+
+    /// BT-4485: the direct remote call for an inline FFI send whose result the
+    /// imported spec proves needs no coercion and whose arguments are proved
+    /// to reach the callee unchanged — `None` keeps the proxy.
+    ///
+    /// Both proofs are the FFI type table's
+    /// ([`NativeTypeRegistry::proves_no_result_coercion`] and
+    /// [`ffi_arg_passes_unchanged`] on each argument's checked type); this
+    /// only asks them. Static types are not enforced at run time, so each
+    /// argument is also checked with the table's
+    /// [`FFI_ARG_RUNTIME_GUARDS`] and the call falls back to
+    /// `direct_call/4` when one fails. The call keeps the proxy's error
+    /// translation: a raise is handed, with the arguments and the call
+    /// site's frame (read only on that path), to
+    /// `beamtalk_erlang_proxy:ffi_call_raised/8`, which runs the same
+    /// classifier (and `badarg` charlist retry) as `direct_call/4`.
+    /// Arguments are bound before the `try`, so a raise while evaluating one
+    /// is not translated, as on the proxy path.
+    ///
+    /// ```text
+    /// let <A1> = <arg1> in
+    /// case <> of
+    ///   <> when is_number(A1) or is_atom(A1) or is_pid(A1) ->
+    ///     try call 'M':'F'(A1)
+    ///     of <R> -> R
+    ///     catch <C, E, Raw> ->
+    ///       let S = primop 'build_stacktrace'(Raw) in
+    ///       let Site = call 'erlang':'process_info'(self(), 'current_stacktrace') in
+    ///       call 'beamtalk_erlang_proxy':'ffi_call_raised'(C, E, S, 'M', 'F', [A1], Mode, Site)
+    ///   <> when 'true' -> call 'beamtalk_erlang_proxy':'direct_call'('M', 'F', [A1], Mode)
+    /// end
+    /// ```
+    ///
+    /// [`NativeTypeRegistry::proves_no_result_coercion`]: beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::proves_no_result_coercion
+    /// [`ffi_arg_passes_unchanged`]: beamtalk_core::semantic_analysis::type_checker::ffi_arg_passes_unchanged
+    /// [`FFI_ARG_RUNTIME_GUARDS`]: beamtalk_core::semantic_analysis::type_checker::FFI_ARG_RUNTIME_GUARDS
+    fn proved_direct_ffi_call(
+        &mut self,
+        module_name: &str,
+        function_name: &str,
+        arguments: &[Expression],
+    ) -> Result<Option<Document<'static>>> {
+        let Some(registry) = self.native_type_registry.as_ref() else {
+            return Ok(None);
+        };
+        let Ok(arity) = u8::try_from(arguments.len()) else {
+            return Ok(None);
+        };
+        if !registry.proves_no_result_coercion(module_name, function_name, arity) {
+            return Ok(None);
+        }
+        let args_proved = arguments.iter().all(|arg| {
+            self.type_map
+                .get(arg.span())
+                .is_some_and(ffi_arg_passes_unchanged)
+        });
+        if !args_proved {
+            return Ok(None);
+        }
+
+        let mut bindings: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
+        let mut arg_vars: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
+        let mut arg_names: Vec<String> = Vec::with_capacity(arguments.len());
+        for (i, arg) in arguments.iter().enumerate() {
+            let var = self.fresh_temp_var("FfiArg");
+            bindings.push(docvec![
+                "let ",
+                leaf::var(var.clone()),
+                " = ",
+                self.expression_doc(arg)?,
+                " in "
+            ]);
+            if i > 0 {
+                arg_vars.push(Document::Str(", "));
+            }
+            arg_vars.push(leaf::var(var.clone()));
+            arg_names.push(var);
+        }
+        let module_atom = leaf::atom(module_name.to_string());
+        let function_atom = leaf::atom(function_name.to_string());
+        let mode_atom = leaf::atom(super::util::ffi_coercion_mode(module_name));
+        let direct = self.ffi_try_direct_doc(&module_atom, &function_atom, &mode_atom, &arg_vars);
+        if arg_names.is_empty() {
+            return Ok(Some(docvec![Document::Vec(bindings), direct]));
+        }
+        // Static types are not enforced at run time: check each argument with
+        // the table's runtime guards and keep the proxy for anything else.
+        let guard = ffi_arg_runtime_guard(&arg_names);
+        Ok(Some(docvec![
+            Document::Vec(bindings),
+            "case <> of <> when ",
+            guard,
+            " -> ",
+            direct,
+            " <> when 'true' -> call 'beamtalk_erlang_proxy':'direct_call'(",
+            module_atom,
+            ", ",
+            function_atom,
+            ", [",
+            Document::Vec(arg_vars),
+            "], ",
+            mode_atom,
+            ") end",
+        ]))
+    }
+
+    /// The `try` of a direct FFI call (see [`Self::proved_direct_ffi_call`]):
+    /// the remote call, and on any exception the hand-off to
+    /// `beamtalk_erlang_proxy:ffi_call_raised/8` with the built stacktrace and
+    /// the call site's frame.
+    fn ffi_try_direct_doc(
+        &mut self,
+        module_atom: &Document<'static>,
+        function_atom: &Document<'static>,
+        mode_atom: &Document<'static>,
+        arg_vars: &[Document<'static>],
+    ) -> Document<'static> {
+        let result_var = self.fresh_temp_var("FfiRes");
+        let cls_var = self.fresh_temp_var("FfiCls");
+        let err_var = self.fresh_temp_var("FfiErr");
+        let stk_var = self.fresh_temp_var("FfiStk");
+        let built_var = self.fresh_temp_var("FfiBuiltStk");
+        let self_var = self.fresh_temp_var("FfiSelf");
+        let site_var = self.fresh_temp_var("FfiSite");
+        docvec![
+            "try call ",
+            module_atom.clone(),
+            ":",
+            function_atom.clone(),
+            "(",
+            Document::Vec(arg_vars.to_vec()),
+            ") of <",
+            leaf::var(result_var.clone()),
+            "> -> ",
+            leaf::var(result_var),
+            " catch <",
+            leaf::var(cls_var.clone()),
+            ", ",
+            leaf::var(err_var.clone()),
+            ", ",
+            leaf::var(stk_var.clone()),
+            "> -> let ",
+            leaf::var(built_var.clone()),
+            " = primop 'build_stacktrace'(",
+            leaf::var(stk_var),
+            ") in let ",
+            leaf::var(self_var.clone()),
+            " = call 'erlang':'self'() in let ",
+            leaf::var(site_var.clone()),
+            " = call 'erlang':'process_info'(",
+            leaf::var(self_var),
+            ", 'current_stacktrace') in call 'beamtalk_erlang_proxy':'ffi_call_raised'(",
+            leaf::var(cls_var),
+            ", ",
+            leaf::var(err_var),
+            ", ",
+            leaf::var(built_var),
+            ", ",
+            module_atom.clone(),
+            ", ",
+            function_atom.clone(),
+            ", [",
+            Document::Vec(arg_vars.to_vec()),
+            "], ",
+            mode_atom.clone(),
+            ", ",
+            leaf::var(site_var),
+            ")",
+        ]
     }
 
     /// ADR 0109: lower `File open:do:` / `File open:mode:do:` to a
@@ -3350,8 +3748,9 @@ impl CoreErlangGenerator {
 
     /// Generates code for a super message send.
     ///
-    /// Super calls use `beamtalk_dispatch:super/5` to invoke the superclass
-    /// implementation via hierarchy walking (ADR 0006).
+    /// A method-root actor super call uses `beamtalk_dispatch:super_reply/5`
+    /// (`super/5`, re-raising an error answer, BT-4592) to invoke the
+    /// superclass implementation via hierarchy walking (ADR 0006).
     ///
     /// # Example
     ///
@@ -3364,15 +3763,18 @@ impl CoreErlangGenerator {
     /// Generates:
     ///
     /// ```erlang
-    /// call 'beamtalk_dispatch':'super'('increment', [], Self, State, 'Counter')
-    /// call 'beamtalk_dispatch':'super'('getValue', [], Self, State, 'Counter')
-    /// call 'beamtalk_dispatch':'super'('at:put:', [1, Value], Self, State, 'Counter')
+    /// call 'beamtalk_dispatch':'super_reply'('increment', [], Self, State, 'Counter')
+    /// call 'beamtalk_dispatch':'super_reply'('getValue', [], Self, State, 'Counter')
+    /// call 'beamtalk_dispatch':'super_reply'('at:put:', [1, Value], Self, State, 'Counter')
     /// ```
     pub(super) fn generate_super_send(
         &mut self,
         selector: &MessageSelector,
         arguments: &[Expression],
     ) -> Result<Document<'static>> {
+        // Taken before any argument compiles, so a nested `super` send is
+        // judged on its own.
+        let from_producer = std::mem::take(&mut self.in_super_send_producer);
         let selector_atom = selector.name().to_string();
 
         // A class-side `super` resolves up the metaclass chain via the runtime
@@ -3387,7 +3789,7 @@ impl CoreErlangGenerator {
         // The live receiver (`ClassSelf`) is passed as is (BT-4301), so a
         // subclass receiver runs the superclass method under its own
         // class-variable key with its real reference. A class method binds no instance `Self`/`State`,
-        // so it must never reach the `beamtalk_dispatch:super/5` instance path
+        // so it must never reach the `beamtalk_dispatch:super_reply/5` instance path
         // below.
         let class_side_super_class = (self.builder_class_method_class().is_some()
             || self.in_class_method())
@@ -3411,13 +3813,15 @@ impl CoreErlangGenerator {
         }
 
         let class_name = self.class_name();
-        let args_doc = self.capture_argument_list_doc(arguments)?;
 
         // value/primitive-context funs (`fun(Args, Self) -> Result`)
         // have no `State` binding, so `super` must not reference one. Route to
         // `super_value/4`, which walks the same chain and returns a plain value.
+        // BT-4296: its arguments are sequenced (`thread_args`) so the argument
+        // list evaluates them in source order.
         if self.context == CodeGenContext::ValueType {
-            return Ok(docvec![
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
+            let call_doc = docvec![
                 "call 'beamtalk_dispatch':'super_value'(",
                 leaf::atom(selector_atom),
                 ", [",
@@ -3425,26 +3829,61 @@ impl CoreErlangGenerator {
                 "], Self, ",
                 leaf::atom(class_name),
                 ")",
-            ]);
+            ];
+            return Ok(self.close_prelude(&args_preamble, call_doc, "SuperRes"));
         }
 
         // ADR 0137 §3: inside an actor closure a `super` send runs the
         // superclass method against the cell (the actor's current state at
-        // home), stores its answer back, and answers its value.
-        if self.in_cell_closure() {
-            return Ok(self.cell_super_send_doc(&selector_atom, &class_name, args_doc));
+        // home), stores its answer back, and answers its value. A block or loop
+        // body threads no `State` for a `super` send either (BT-3995): it runs
+        // against the cell, which the enclosing call brackets
+        // (`classify_super_send`), and answers its value. Sends there are not
+        // sync-bracketed, so the arguments are sequenced (`thread_args`) to
+        // evaluate in source order (BT-4296).
+        if !self.super_send_threads_state() {
+            let (args_preamble, args_doc) = self.thread_args(arguments)?;
+            // The prelude closes around this call, so a threaded-state rebind in
+            // it would be scoped away from later statements (BT-3809): report
+            // it, as `capture_argument_list_doc` does for its arguments.
+            let escaped = super::threaded_ir::opaque_escapes(&args_preamble, false);
+            let at = arguments
+                .first()
+                .map_or_else(Span::default, Expression::span);
+            self.report_threaded_ir_verify_errors(
+                &escaped,
+                "super-send argument state rebind trapped in a closed argument list",
+                at,
+            );
+            let call_doc = self.cell_super_send_doc(&selector_atom, &class_name, args_doc);
+            return Ok(self.close_prelude(&args_preamble, call_doc, "SuperRes"));
         }
 
-        // ADR 0137 §3: a block or loop body threads no `State` for a `super` send
-        // (BT-3995): it runs against the cell, which the enclosing call brackets
-        // (`classify_super_send`), and answers its value.
-        if self.super_send_uses_cell() {
-            return Ok(self.cell_super_send_doc(&selector_atom, &class_name, args_doc));
+        // BT-4318: this form answers `{reply, Result, NewState}`; only
+        // `super_send_producer` unpacks it into a `State` `Bind`. Anywhere
+        // else the tuple leaks as the value and the state change is lost.
+        if !from_producer {
+            let at = self.current_send_span.unwrap_or_default();
+            self.report_threaded_ir_verify_errors(
+                &[VerifyError::StateEffectEscapesExpression {
+                    prefix: VersionPrefix::State,
+                    at,
+                }],
+                "state-threading super send compiled outside its producer",
+                at,
+            );
         }
 
+        // A method-body `super` send's arguments are sequenced ahead by
+        // `super_send_producer` (`sequence_children`) and read back here.
+        let args_doc = self.capture_argument_list_doc(arguments)?;
+
+        // BT-4592: `super_reply/5`, not `super/5`, so an inherited method that
+        // raises re-raises its error here instead of answering an `{error, E}`
+        // 2-tuple that the `{reply, Result, NewState}` unpack fails on.
         let current_state = self.current_state_var();
         let doc = docvec![
-            "call 'beamtalk_dispatch':'super'(",
+            "call 'beamtalk_dispatch':'super_reply'(",
             leaf::atom(selector_atom),
             ", [",
             args_doc,
@@ -3458,6 +3897,21 @@ impl CoreErlangGenerator {
         // A `super` send in a closure runs against the cell (the early returns
         // above), so its change is kept and no guard is needed (BT-3985 retired).
         Ok(self.bracket_super_send(selector, doc, Span::default()))
+    }
+
+    /// Whether a `super` send compiled now threads the method's own `State`:
+    /// `generate_super_send` answers the raw `{reply, Result, NewState}`
+    /// tuple of `beamtalk_dispatch:super_reply/5`, which the caller must unpack
+    /// (BT-4318) — through [`Self::threaded_expression`]'s `super` producer
+    /// in any value position. False on the class side, in a value type, and
+    /// wherever the send runs against the actor-state cell (a closure, a
+    /// block or loop body), all of which answer a plain value.
+    pub(super) fn super_send_threads_state(&self) -> bool {
+        self.builder_class_method_class().is_none()
+            && !self.in_class_method()
+            && self.context != CodeGenContext::ValueType
+            && !self.in_cell_closure()
+            && !self.super_send_uses_cell()
     }
 
     /// Generates code for actor spawn with conditional REPL registry integration.
@@ -3911,7 +4365,7 @@ impl CoreErlangGenerator {
                 class_name,
                 module_name,
                 raw_selector,
-                value,
+                &value,
                 args_doc,
                 arg_count,
             );
@@ -3952,12 +4406,17 @@ impl CoreErlangGenerator {
         )
     }
 
-    /// The integer that `class_name`'s own class-side method `raw_selector`
-    /// is, when its body is exactly that integer literal
-    /// (`MethodInfo::constant_value`, BT-4363). Only a compile-time
-    /// candidate: the runtime key of [`Self::guarded_constant_doc`] decides
-    /// each send.
-    fn constant_class_method_value(&self, class_name: &str, raw_selector: &str) -> Option<i64> {
+    /// The literal that `class_name`'s own class-side method `raw_selector`
+    /// is, when its body is exactly that scalar literal
+    /// (`MethodInfo::constant_value`, BT-4363; every kind of
+    /// [`ConstantValue`](beamtalk_core::ast::ConstantValue) since BT-4504).
+    /// Only a compile-time candidate: the runtime key of
+    /// [`Self::guarded_constant_doc`] decides each send.
+    fn constant_class_method_value(
+        &self,
+        class_name: &str,
+        raw_selector: &str,
+    ) -> Option<beamtalk_core::ast::ConstantValue> {
         self.class_hierarchy
             .as_ref()?
             .get_class(class_name)?
@@ -3965,11 +4424,12 @@ impl CoreErlangGenerator {
             .iter()
             .find(|m| m.selector == raw_selector)?
             .constant_value
+            .clone()
     }
 
     /// BT-4363: a static send of `raw_selector` to the literal class
     /// `class_name`, whose own class-side method compiled to `module_name`
-    /// has the integer literal `value` as its whole body
+    /// has the scalar literal `value` as its whole body
     /// ([`Self::constant_class_method_value`]), answers `value` in place,
     /// behind the keyed shape of [`Self::guarded_class_direct_call_doc`]:
     ///
@@ -3999,6 +4459,13 @@ impl CoreErlangGenerator {
     /// then answers what the dynamic send answers. Sealing plays no part: the
     /// guard already proves the target (ADR 0025 amendment §3).
     ///
+    /// The key and the hit arm carry `value` as the term the method body
+    /// compiles to ([`Self::constant_value_doc`], BT-4504): a string is the
+    /// tagged `{'beamtalk_string', #{…}#}`, a symbol, `nil`, `true` or
+    /// `false` an atom, a character its code point. Map-key matching and the
+    /// runtime certification are both exact (`=:=`), so `1` never answers
+    /// for `1.0`.
+    ///
     /// `args_doc` must be variables or literals (bound by the caller, so a
     /// side-effecting argument still runs once); the hit arm ignores them.
     fn guarded_constant_doc(
@@ -4006,13 +4473,14 @@ impl CoreErlangGenerator {
         class_name: &str,
         module_name: String,
         raw_selector: &str,
-        value: i64,
+        value: &beamtalk_core::ast::ConstantValue,
         args_doc: Document<'static>,
         arg_count: usize,
     ) -> Document<'static> {
+        let value_doc = Self::constant_value_doc(value);
         let key_doc = docvec![
             "{'constant_value', ",
-            leaf::int_lit(value),
+            value_doc.clone(),
             ", ",
             leaf::atom(module_name),
             ", ",
@@ -4031,7 +4499,7 @@ impl CoreErlangGenerator {
             &class_self_var,
             args_doc,
             arg_count + 1,
-            leaf::int_lit(value),
+            value_doc,
         )
     }
 
@@ -4503,3 +4971,27 @@ pub(super) fn is_supervisor_spawn_selector(selector_atom: &str, arity: usize) ->
 
 #[cfg(test)]
 mod tests;
+
+/// BT-4485: the Core Erlang guard that holds when every one of `arg_names`
+/// passes one of the FFI type table's [`FFI_ARG_RUNTIME_GUARDS`].
+fn ffi_arg_runtime_guard(arg_names: &[String]) -> Document<'static> {
+    arg_names
+        .iter()
+        .map(|name| {
+            FFI_ARG_RUNTIME_GUARDS
+                .iter()
+                .map(|bif| {
+                    docvec![
+                        "call 'erlang':",
+                        leaf::atom(*bif),
+                        "(",
+                        leaf::var(name.clone()),
+                        ")"
+                    ]
+                })
+                .reduce(|acc, test| docvec!["call 'erlang':'or'(", acc, ", ", test, ")"])
+                .unwrap_or(Document::Str("'true'"))
+        })
+        .reduce(|acc, test| docvec!["call 'erlang':'and'(", acc, ", ", test, ")"])
+        .unwrap_or(Document::Str("'true'"))
+}

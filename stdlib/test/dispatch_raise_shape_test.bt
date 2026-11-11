@@ -1,0 +1,33 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4593: `beamtalk_dispatch` answers a record for its own lookup miss and
+// a wrapped exception map for anything an invoked method raised, so a
+// consumer never reads a method's own error as "selector not found", and a
+// `^` through an inherited value-class method stays a non-local return.
+//
+// Fixtures: stdlib/test/fixtures/bt4593base.bt, bt4593sub.bt, bt4593dnu_sub.bt
+
+TestCase subclass: DispatchRaiseShapeTest
+
+  testInheritedMethodSurfacesItsOwnDnu =>
+    a := Bt4593Sub spawn
+    result := [a raisesOwnDnuOn: 42] on: Error do: [:e | e selector]
+    self assert: result equals: #bt4593NoSuchSelector
+    a stop
+
+  testInheritedMethodDnuSkipsSubclassDnuOverride =>
+    a := Bt4593DnuSub spawn
+    result := [a raisesOwnDnuOn: 42] on: Error do: [:e | e selector]
+    self assert: result equals: #bt4593NoSuchSelector
+    a stop
+
+  testNonLocalReturnThroughInheritedValueMethod =>
+    a := Bt4593Sub spawn
+    self assert: a earlyReturn equals: #early
+    a stop
+
+  testDnuOverrideActorSelfErrorInBlockReachesHandler =>
+    a := Bt4593DnuSub spawn
+    self assert: a caught equals: "x"
+    a stop

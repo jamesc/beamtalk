@@ -25,7 +25,7 @@ use std::fs;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::Result;
-use tracing::{debug, info, instrument};
+use tracing::{debug, error, info, instrument};
 
 use crate::beam_compiler::{ClassHierarchyContext, CompileContext};
 
@@ -64,9 +64,13 @@ pub(crate) use sources::{
 };
 #[cfg(test)]
 pub(crate) use stubs::{
-    StubLayer, distribution_stubs_dir, load_dependency_stub_registries, load_project_stub_registry,
+    DependencyStubsDir, StubLayer, distribution_stubs_dir, load_dependency_stub_registries,
+    load_project_stub_registry,
 };
-pub(crate) use stubs::{extract_type_specs, resolve_package_type_registry};
+pub(crate) use stubs::{
+    ResolvedTypeRegistry, dependency_stub_dirs, extract_type_specs, render_stub_reports,
+    resolve_package_type_registry,
+};
 
 // Re-exported only for `build::tests` (which relies on `super::*` to see
 // every build-stage helper as if this were still one flat file). None of
@@ -77,8 +81,9 @@ pub(crate) use stubs::{extract_type_specs, resolve_package_type_registry};
 pub(crate) use class_index::{collect_all_protocol_infos, collect_project_protocol_infos};
 #[cfg(test)]
 pub(crate) use native::{
-    aggregate_native_dependencies, check_native_module_collisions, collect_erl_files,
-    compile_native_erlang_with_deps, generate_class_header, generate_rebar_config, rebar3_path,
+    NativeLockState, aggregate_native_dependencies, check_native_module_collisions,
+    collect_erl_files, compile_native_erlang_with_deps, generate_class_header,
+    generate_rebar_config, native_lock_state, prepare_rebar_lock, rebar3_path,
     validate_native_class_references,
 };
 #[cfg(test)]
@@ -113,6 +118,7 @@ struct BuildPassesResult {
 pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) -> Result<()> {
     info!("Starting build");
 
+    crate::commands::build_stamp::require_supported_otp()?;
     warn_if_otp_out_of_window();
 
     let env = setup_build_environment(path)?;
@@ -125,13 +131,16 @@ pub fn build(path: &str, options: &beamtalk_core::CompilerOptions, force: bool) 
     // a manifest-less directory build skips Pass 1 entirely — both keep the
     // conservative `ModuleOnly` default.
     let mut options = options.clone();
-    // Pre-WS3 guard (`has_package_dependencies`): dependency extension
-    // contributions are not loaded until WS3 (ADR 0070 amendment), so
-    // declaring dependencies means no receiver's method surface is provably
-    // complete. Both flags come from the rule `lint`/`test` share.
+    // Pre-WS3 dependency guard: until dependency extensions are loaded, a
+    // package with dependencies has no receiver whose method surface is
+    // provably complete. Start conservative (on whenever there are
+    // dependencies); analysis lifts it once Pass 1 has loaded every
+    // dependency's extensions (`ClassHierarchyContext::
+    // dependency_extensions_complete`; ADR 0070 WS3, BT-4608).
+    // Both flags come from the rule `lint`/`test` share.
     let scope =
         beamtalk_cli::manifest::PackageCheckerScope::for_manifest(env.full_manifest.as_ref());
-    options.has_package_dependencies = scope.has_package_dependencies;
+    options.dependency_extensions_unknown = scope.has_package_dependencies;
     if Utf8Path::new(path).is_dir() {
         options.knowledge_scope = scope.knowledge_scope;
     }
@@ -218,16 +227,22 @@ fn execute_build_passes(
         options.stdlib_mode,
     );
     // ADR 0075 full resolution chain over the auto-extracted registry.
-    let stubs::ResolvedTypeRegistry {
-        registry: native_type_registry,
-        diagnostics: stub_diagnostics,
-        stub_inputs_hash,
-    } = resolve_package_type_registry(
+    let resolved_registry = resolve_package_type_registry(
         &env.project_root,
         auto_extract_registry,
         &dep_ctx.resolved_deps,
         Some(OutputFormat::Text),
     );
+    let stub_diagnostics: Vec<_> = resolved_registry.diagnostics().cloned().collect();
+    let ResolvedTypeRegistry {
+        registry: native_type_registry,
+        stub_inputs_hash,
+        ..
+    } = resolved_registry;
+    // BT-4485: inline FFI calls the FFI type table proves need no coercion
+    // compile to direct calls, so the set of proved functions shapes the
+    // generated code: fold it into every file's cache key with the stub inputs.
+    let stub_inputs_hash = fold_direct_ffi_proofs(stub_inputs_hash, native_type_registry.as_ref());
     let native_type_registry = native_type_registry.map(std::sync::Arc::new);
 
     let file_module_pairs = compute_file_module_pairs(env)?;
@@ -262,7 +277,10 @@ fn execute_build_passes(
         &BuildGraphEdges {
             file_protocol_uses,
             protocol_hashes,
-            trait_surface_hash: index.trait_surface_hash.clone(),
+            analysis_surface_hash: fold_known_erlang_modules(
+                index.analysis_surface_hash.clone(),
+                &options.known_erlang_modules,
+            ),
             stub_inputs_hash,
         },
     );
@@ -300,6 +318,21 @@ fn execute_build_passes(
         .map(|m| m.diagnostics.clone())
         .unwrap_or_default();
 
+    // BT-4550: a broken `stubs/` file yields error-severity diagnostics
+    // (stub files are parsed too) — fail the build on those instead of
+    // merely counting them in the summary while exiting 0. A wrong stub
+    // silently skews FFI typing for every file. Warning-severity stub
+    // diagnostics (e.g. drift warnings) still pass, via the shared gate
+    // `beamtalk check` uses.
+    if crate::beam_compiler::diagnostics_are_errors(
+        &stub_diagnostics,
+        options,
+        &diagnostics_overrides,
+    ) {
+        error!("Build failed for stub declarations");
+        miette::bail!("build failed: stub declarations contain errors");
+    }
+
     let registry_ref = if index.dep_registry.is_empty() {
         None
     } else {
@@ -315,6 +348,7 @@ fn execute_build_passes(
             pre_loaded_protocol_sources: index.all_protocol_sources.clone(),
             pre_loaded_aliases: index.all_alias_infos.clone(),
             extension_index: index.extension_index.clone(),
+            dependency_extensions_complete: index.dependency_extensions_complete,
         },
         dep_registry: registry_ref,
         strict_deps,
@@ -467,7 +501,7 @@ fn execute_build_passes(
 /// same check into a build-blocking error (`release::check_otp_window`).
 /// Silent when the OTP major cannot be probed (fails open, matching the
 /// provenance stamp's own probe-failure handling).
-fn warn_if_otp_out_of_window() {
+pub(crate) fn warn_if_otp_out_of_window() {
     if let Some(msg) = otp_out_of_window_warning(current_otp_major()) {
         eprintln!("warning: {msg}");
     }
@@ -582,6 +616,43 @@ fn post_process_package_artifacts(
     );
 
     Ok(())
+}
+
+/// Fold the FFI type table's direct-call proofs (BT-4485,
+/// `NativeTypeRegistry::proved_no_coercion_keys`) into the stub-inputs hash
+/// that keys incremental builds. Empty when nothing is proved, so a project
+/// without FFI specs keeps its cache keys.
+fn fold_direct_ffi_proofs(
+    stub_inputs_hash: String,
+    registry: Option<&beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry>,
+) -> String {
+    let proofs = registry
+        .map(beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry::proved_no_coercion_keys)
+        .unwrap_or_default();
+    if proofs.is_empty() {
+        return stub_inputs_hash;
+    }
+    let proofs_hash = crate::commands::util::sha256_hex(proofs.join("\n").as_bytes());
+    crate::commands::util::sha256_hex(format!("{stub_inputs_hash}\n{proofs_hash}").as_bytes())
+}
+
+/// Fold the project-known Erlang modules (BT-4022) into the analysis
+/// surface hash (BT-4336): the `unresolved_ffi` check reads them, so adding
+/// or removing a `native/*.erl` module or a hex dependency's module
+/// re-checks every file instead of replaying a stale (or missing) warning.
+/// An empty set leaves the hash untouched.
+fn fold_known_erlang_modules(
+    analysis_surface_hash: String,
+    known_erlang_modules: &std::collections::HashSet<String>,
+) -> String {
+    if known_erlang_modules.is_empty() {
+        return analysis_surface_hash;
+    }
+    let mut modules: Vec<&str> = known_erlang_modules.iter().map(String::as_str).collect();
+    modules.sort_unstable();
+    crate::commands::util::sha256_hex(
+        format!("{analysis_surface_hash}\nerlang:{}", modules.join(",")).as_bytes(),
+    )
 }
 
 #[cfg(test)]

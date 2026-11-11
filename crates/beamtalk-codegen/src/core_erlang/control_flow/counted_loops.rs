@@ -629,7 +629,8 @@ impl CoreErlangGenerator {
 
         // BT-4121: check out the marker (loud when the mode selection
         // missed a guarded operator; a hybrid loop never brackets).
-        self.checkout_guarded_op_loop(self.pop_guarded_op_loop(), true, body.span);
+        // BT-4523: and report a `^` lowered in it (`NlrThrowInHybridLoop`).
+        let nlr_errors = self.checkout_hybrid_loop(body.span);
 
         // Exit StateAcc: uses initial param names (current iteration's starting values).
         // In the exit arm (false branch), the body hasn't executed, so params are unchanged.
@@ -680,7 +681,8 @@ impl CoreErlangGenerator {
             entry_line: self.current_send_call_site_line(),
             span: body.span,
         }];
-        let errors = self.verify_threaded_ir(&ir);
+        let mut errors = self.verify_threaded_ir(&ir);
+        errors.extend(nlr_errors);
         self.report_threaded_ir_verify_errors(&errors, "counted hybrid ConditionalLoop", body.span);
         let rendered = {
             let mut ctx = threaded_ir::RenderCtx::new(self);
@@ -702,17 +704,18 @@ mod tests {
 
     #[test]
     fn test_repeat_generates_infinite_letrec_loop() {
-        // repeat generates a letrec that loops forever (no condition check)
+        // BT-4589: a literal `[b] repeat` is canonicalised to
+        // `[true] whileTrue: [b]`, so it lowers as that loop, whose condition
+        // is always `'true'`.
         let src = "Actor subclass: Server\n  state: x = 0\n\n  run =>\n    [42] repeat\n";
         let code = codegen(src);
         assert!(
             code.contains("letrec"),
             "repeat should generate a letrec. Got:\n{code}"
         );
-        // repeat uses a simple loop function that recurses unconditionally
         assert!(
-            !code.contains("case apply"),
-            "repeat should NOT have a case on a condition. Got:\n{code}"
+            code.contains("fun () -> 'true'"),
+            "repeat's condition should be a constant `true`. Got:\n{code}"
         );
     }
 

@@ -12,6 +12,7 @@
 //! `{'$bt_nlr', Token, Value, State}` throw. See ADR 0041.
 
 use crate::core_erlang::CodeGenContext;
+use crate::core_erlang::actor_state_access::{actor_state_call, actor_state_helper};
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::synced_call::ActorStateSource;
 use crate::core_erlang::threaded_ir::{self, NlrCarry};
@@ -25,10 +26,8 @@ use beamtalk_core::source_analysis::Span;
 ///
 /// Allocated by [`CoreErlangGenerator::alloc_nlr_catch_vars`] and consumed by
 /// its `format_try_prefix`/`format_catch_suffix` methods — the single place
-/// the try/catch scaffolding is built, shared by
-/// [`CoreErlangGenerator::wrap_body_with_nlr_catch`] and
-/// [`CoreErlangGenerator::wrap_value_type_body_with_nlr_catch`] so neither
-/// hand-rolls its own copy of the template.
+/// the try/catch scaffolding is built, by
+/// [`CoreErlangGenerator::wrap_body_with_nlr_catch`] for every boundary.
 #[allow(clippy::struct_field_names)]
 pub(in crate::core_erlang) struct NlrCatchVars {
     pub token_var: String,
@@ -54,14 +53,23 @@ pub(in crate::core_erlang) struct NlrCatchVars {
 /// copy-evolved per context.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum NlrBoundary {
-    /// Actor (`gen_server`) methods: the catch arm yields `{'reply', Value, State}`.
+    /// Actor (`gen_server`) methods: the catch arm yields
+    /// `{'reply', Value, beamtalk_actor_state:commit(Self, State)}`. ADR 0146:
+    /// the method commits the actor's cell, the one place its fields live, not
+    /// the copy the throw carries; away from home (an away `super_send/5`)
+    /// `commit/2` answers the carried `State` unchanged.
     ActorReply,
     /// Class methods: the catch arm yields the bare `Value`. Class variables
     /// live in the class process's dictionary (ADR 0130 §3), so nothing is
     /// returned alongside the result.
     ClassMethod,
-    /// Value-type methods: the catch arm yields `{Value, State}` so the normal and
-    /// NLR-catch paths produce the same `{Result, Self{N}}` shape.
+    /// Value-type methods (and value-type extension funs): the catch arm
+    /// yields the bare `Value`, as the body's normal path does (BT-4503). A
+    /// value-type method function answers exactly what a send of it answers,
+    /// so `dispatch/3`, the own-module typed direct call (BT-4473) and
+    /// the runtime's extension apply all take its return as the send's
+    /// result. A value type's `Self` is immutable to its callers, so nothing
+    /// is returned beside the result.
     ValueType,
     /// BT-4288: a REPL eval (`repl_nlr`). The throw's state is the workspace
     /// bindings map at the `^`, so the catch arm yields the eval's own
@@ -69,6 +77,43 @@ pub(in crate::core_erlang) enum NlrBoundary {
     /// source text) `{[{<<Source>>, Value}], Bindings}`, one step for the
     /// input the `^` ended.
     Repl { trace_source: Option<String> },
+}
+
+/// BT-4503: what the matching NLR catch arm of an [`NlrBoundary`] yields, as
+/// the function the boundary closes answers it to its caller. The one fact
+/// `ThreadedIr`'s verifier checks against the scope's calling convention
+/// (`VerifyError::MethodNlrAnswersPair`); [`nlr_arm_result`] renders it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::core_erlang) enum NlrArmShape {
+    /// The bare `Value`: what a send answers.
+    Value,
+    /// ADR 0146: the `gen_server` reply committing the actor's cell,
+    /// `{'reply', Value, beamtalk_actor_state:commit(Self, State)}`.
+    Reply,
+    /// The `gen_server` reply committing the carried copy, `{'reply', Value,
+    /// State}`: every actor method before ADR 0146, which lost a cleanup's
+    /// writes and, for a block run by another actor, every write since the
+    /// block's creation (BT-4459). Only the test-only
+    /// [`fault::NlrFault::CommitCarried`] builds it, to show
+    /// `VerifyError::ActorNlrCommitBypassesCell` rejects it.
+    CarriedReply,
+    /// A `{Result, State}` pair: the REPL eval's `{Value, Bindings}` (or its
+    /// trace-mode `{[{Source, Value}], Bindings}`).
+    ValueStatePair,
+}
+
+impl NlrBoundary {
+    /// What this boundary's matching catch arm yields ([`NlrArmShape`]).
+    pub(in crate::core_erlang) fn arm_shape(&self) -> NlrArmShape {
+        match self {
+            NlrBoundary::ActorReply => match fault::active() {
+                Some(fault::NlrFault::CommitCarried) => NlrArmShape::CarriedReply,
+                _ => NlrArmShape::Reply,
+            },
+            NlrBoundary::ClassMethod | NlrBoundary::ValueType => NlrArmShape::Value,
+            NlrBoundary::Repl { .. } => NlrArmShape::ValueStatePair,
+        }
+    }
 }
 
 /// Builds the Document the matching NLR catch arm yields for `boundary`.
@@ -82,14 +127,23 @@ pub(in crate::core_erlang) enum NlrBoundary {
 /// Use Document/docvec! — never format!() for Core Erlang fragments.
 fn nlr_arm_result(val_var: &str, state_var: &str, boundary: &NlrBoundary) -> Document<'static> {
     match boundary {
-        NlrBoundary::ActorReply => docvec![
-            "{'reply', ",
-            leaf::var(val_var.to_string()),
-            ", ",
-            leaf::var(state_var.to_string()),
-            "}",
-        ],
-        NlrBoundary::ClassMethod => leaf::var(val_var.to_string()),
+        NlrBoundary::ActorReply => {
+            let state = match boundary.arm_shape() {
+                NlrArmShape::CarriedReply => leaf::var(state_var.to_string()),
+                _ => actor_state_call(
+                    actor_state_helper::COMMIT,
+                    vec![leaf::var("Self"), leaf::var(state_var.to_string())],
+                ),
+            };
+            docvec![
+                "{'reply', ",
+                leaf::var(val_var.to_string()),
+                ", ",
+                state,
+                "}"
+            ]
+        }
+        NlrBoundary::ClassMethod | NlrBoundary::ValueType => leaf::var(val_var.to_string()),
         NlrBoundary::Repl {
             trace_source: Some(source),
         } => docvec![
@@ -101,7 +155,7 @@ fn nlr_arm_result(val_var: &str, state_var: &str, boundary: &NlrBoundary) -> Doc
             leaf::var(state_var.to_string()),
             "}",
         ],
-        NlrBoundary::ValueType | NlrBoundary::Repl { trace_source: None } => docvec![
+        NlrBoundary::Repl { trace_source: None } => docvec![
             "{",
             leaf::var(val_var.to_string()),
             ", ",
@@ -285,7 +339,11 @@ impl CoreErlangGenerator {
             }
             NlrSlot::ClassMethod => leaf::atom("nil"),
             NlrSlot::Repl => leaf::var(self.current_state_var()),
-            NlrSlot::CellClosure => self.cell_nlr_state_doc(),
+            // ADR 0146 (BT-4536): the state its reads see. At home it is the
+            // cell, which the method's commit reads anyway; away it is the
+            // creation-time capture, which an away `super_send/5`'s
+            // illegal-write check compares the method's answer against.
+            NlrSlot::CellClosure => self.cell_view_doc(),
             // A direct-params loop binds no `StateAcc`: its body cannot write
             // `State`, so the throw carries the state the loop captured on entry
             // (BT-3562's `current_field_read_state_var`). BT-4121: unless the
@@ -302,6 +360,62 @@ impl CoreErlangGenerator {
             }
             NlrSlot::ValueType => leaf::var(self.current_self_var()),
         }
+    }
+
+    /// ADR 0137 §5 / ADR 0146: whether a `^` thrown here stores its state to
+    /// the actor-state cell before the throw: an actor instance method's
+    /// threaded body (the cell protocol's scope outside a closure, whose
+    /// state already is the cell), and a merged Tier 2 fun (BT-4122, which
+    /// stores its merged map). The cell is then current whenever a `^`
+    /// starts: a cleanup the throw runs reads it, and the method's NLR
+    /// boundary commits it (`beamtalk_actor_state:commit/2`). The one
+    /// decision behind every actor `^` throw: the generic `Return` lowering
+    /// and [`Self::nlr_throw_stmt`].
+    pub(in crate::core_erlang) fn nlr_throw_stores_cell(&self) -> bool {
+        self.synced_calls_active() || self.tier2_merged_fun.is_some()
+    }
+
+    /// A `^` a conditional arm lowers to `ThreadedIr`
+    /// ([`ThreadedStmt::NlrThrow`](threaded_ir::ThreadedStmt::NlrThrow)):
+    /// throws `value` with the arm's current `State` (`state_var`, in the
+    /// arm's threaded scope) to the method's boundary, storing it to the cell
+    /// first where the cell is live ([`Self::nlr_throw_stores_cell`]).
+    /// Answers the node and the variable its (never-produced) result binds.
+    ///
+    /// Only an arm of a threaded actor body reaches it: a merged Tier 2 fun's
+    /// body is cell-mode, so its arm `^`s take the generic `Return` lowering,
+    /// whose throw carries the merged map ([`NlrSlot::Tier2Merged`]); merged
+    /// funs are also reachable only in unvalidated compiles (ADR 0133).
+    /// Pinned by `tests/tier2_merge.rs`'s
+    /// `merged_fun_arm_returns_carry_the_merged_map`.
+    pub(in crate::core_erlang) fn nlr_throw_stmt(
+        &mut self,
+        token: String,
+        value: threaded_ir::ValueRef,
+        state_var: String,
+        span: Span,
+    ) -> (threaded_ir::ThreadedStmt, String) {
+        let result_var = self.fresh_temp_var("NlrThrow");
+        let cell_live = self.nlr_throw_stores_cell();
+        let cell_store =
+            cell_live && fault::active() != Some(fault::NlrFault::ThrowWithoutCellStore);
+        // A gensym slot renders the arm's state variable verbatim; the arm's
+        // own `Bind`s already verified the version it names.
+        let slot = threaded_ir::VersionedVar::new(
+            threaded_ir::VersionPrefix::Gensym(state_var),
+            0,
+            threaded_ir::FrameId::ROOT,
+        );
+        let stmt = threaded_ir::ThreadedStmt::NlrThrow {
+            token: threaded_ir::TokenId::new(token),
+            value,
+            slot: vec![slot],
+            result_var: result_var.clone(),
+            cell_live,
+            cell_store,
+            span,
+        };
+        (stmt, result_var)
     }
 
     /// Allocates fresh temporary variable names for an NLR try/catch wrapper.
@@ -321,10 +435,8 @@ impl CoreErlangGenerator {
 
     /// The single boundary-parameterised NLR try/catch wrapper.
     ///
-    /// Shares its try/catch scaffolding — via [`NlrCatchVars::format_try_prefix`]
-    /// and [`NlrCatchVars::format_catch_suffix`] — with
-    /// [`CoreErlangGenerator::wrap_value_type_body_with_nlr_catch`]'s callers,
-    /// so the make-token/`try`/`of`/`catch` the 4-tuple
+    /// Builds its try/catch scaffolding with [`NlrCatchVars::format_try_prefix`]
+    /// and [`NlrCatchVars::format_catch_suffix`], so the make-token/`try`/`of`/`catch` the 4-tuple
     /// `{'$bt_nlr', Token, Value, State}` throw template is written exactly
     /// once; only the matching arm's result Document varies, which
     /// `boundary` selects via [`nlr_arm_result`].
@@ -354,20 +466,6 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// Wraps a value type method body with NLR (non-local return) try/catch.
-    ///
-    /// Value type NLR uses a 4-element throw tuple `{$bt_nlr, Token, Value, State}`
-    /// and catches it to return `{Value, State}`. Returns the allocated
-    /// [`NlrCatchVars`] so the caller can emit `format_try_prefix()`, the
-    /// body, and `format_catch_suffix(&NlrBoundary::ValueType)` around its own
-    /// surrounding `fun` scaffolding.
-    pub(in crate::core_erlang) fn wrap_value_type_body_with_nlr_catch(
-        &mut self,
-        token_var: &str,
-    ) -> NlrCatchVars {
-        self.alloc_nlr_catch_vars(token_var)
-    }
-
     /// BT-4312: the token of the scope being lowered: a method's (bound when a
     /// block of it holds a `^`), or the REPL eval's. Only a throw of this
     /// token carries this scope's state; a throw of any other token belongs to
@@ -391,13 +489,81 @@ impl CoreErlangGenerator {
     }
 }
 
+/// Test-only: compiles an actor method's NLR boundary, or a `^` throw, as it
+/// was before ADR 0146, so [`VerifyError::ActorNlrCommitBypassesCell`](super::threaded_ir::VerifyError::ActorNlrCommitBypassesCell)
+/// and [`VerifyError::NlrThrowWithoutCellStore`](super::threaded_ir::VerifyError::NlrThrowWithoutCellStore)
+/// can be shown to fire on a real compile (`tests/nlr.rs`). Compiled for this
+/// crate's tests only; otherwise [`active`](fault::active) is always `None`.
+pub mod fault {
+    #[cfg(test)]
+    use std::cell::Cell;
+
+    /// An actor `^` as it was before a fix.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub enum NlrFault {
+        /// The catch arm commits the state the throw carries,
+        /// `{'reply', Value, State}`, instead of the actor's cell.
+        CommitCarried,
+        /// A `^` a conditional arm lowers to a
+        /// [`ThreadedStmt::NlrThrow`](super::super::threaded_ir::ThreadedStmt::NlrThrow)
+        /// throws without storing its state to the cell, as BT-3374's and
+        /// BT-3495's arm throws did before BT-4535
+        /// (`VerifyError::NlrThrowWithoutCellStore`).
+        ThrowWithoutCellStore,
+    }
+
+    #[cfg(test)]
+    thread_local! {
+        static FAULT: Cell<Option<NlrFault>> = const { Cell::new(None) };
+    }
+
+    /// The commit fault switched on on this thread, if any.
+    #[cfg(test)]
+    pub(crate) fn active() -> Option<NlrFault> {
+        FAULT.with(Cell::get)
+    }
+
+    /// The commit fault switched on on this thread, if any.
+    #[cfg(not(test))]
+    pub(crate) fn active() -> Option<NlrFault> {
+        None
+    }
+
+    /// Runs `body` with `fault` switched on, restoring the boundary
+    /// afterwards even if `body` panics.
+    #[cfg(test)]
+    pub fn with_fault<T>(fault: NlrFault, body: impl FnOnce() -> T) -> T {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                FAULT.with(|f| f.set(None));
+            }
+        }
+        FAULT.with(|f| f.set(Some(fault)));
+        let _reset = Reset;
+        body()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn nlr_arm_result_actor_reply_yields_reply_tuple() {
+    fn nlr_arm_result_actor_reply_commits_the_cell() {
         let doc = nlr_arm_result("Val", "St", &NlrBoundary::ActorReply);
+        assert_eq!(
+            doc.to_pretty_string(),
+            "{'reply', Val, call 'beamtalk_actor_state':'commit'(Self, St)}"
+        );
+    }
+
+    #[test]
+    fn nlr_arm_result_actor_reply_under_the_fault_commits_the_carried_state() {
+        let doc = fault::with_fault(fault::NlrFault::CommitCarried, || {
+            nlr_arm_result("Val", "St", &NlrBoundary::ActorReply)
+        });
         assert_eq!(doc.to_pretty_string(), "{'reply', Val, St}");
     }
 
@@ -427,9 +593,36 @@ mod tests {
     }
 
     #[test]
-    fn nlr_arm_result_value_type_yields_value_state_tuple() {
+    fn nlr_arm_result_value_type_yields_bare_value() {
         let doc = nlr_arm_result("V", "S", &NlrBoundary::ValueType);
-        assert_eq!(doc.to_pretty_string(), "{V, S}");
+        assert_eq!(doc.to_pretty_string(), "V");
+    }
+
+    /// BT-4503: every boundary's rendered arm has the shape `arm_shape`
+    /// declares — the fact the verifier checks is the one rendered.
+    #[test]
+    fn nlr_arm_result_matches_arm_shape() {
+        for boundary in [
+            NlrBoundary::ActorReply,
+            NlrBoundary::ClassMethod,
+            NlrBoundary::ValueType,
+            NlrBoundary::Repl { trace_source: None },
+            NlrBoundary::Repl {
+                trace_source: Some("x".to_string()),
+            },
+        ] {
+            let doc = nlr_arm_result("V", "S", &boundary).to_pretty_string();
+            let shape = match doc.as_str() {
+                "V" => NlrArmShape::Value,
+                "{'reply', V, S}" => NlrArmShape::CarriedReply,
+                d if d.starts_with("{'reply', ") && d.contains("'commit'(Self, S)") => {
+                    NlrArmShape::Reply
+                }
+                d if d.starts_with('{') && d.ends_with(", S}") => NlrArmShape::ValueStatePair,
+                other => panic!("unexpected arm {other} for {boundary:?}"),
+            };
+            assert_eq!(shape, boundary.arm_shape(), "{boundary:?}");
+        }
     }
 
     fn make_test_vars() -> NlrCatchVars {
@@ -476,7 +669,7 @@ mod tests {
     }
 
     #[test]
-    fn format_catch_suffix_nlr_arm_yields_value_state_pair() {
+    fn format_catch_suffix_value_type_nlr_arm_yields_bare_value() {
         let doc = make_test_vars()
             .format_catch_suffix(&NlrBoundary::ValueType)
             .to_pretty_string();
@@ -490,10 +683,10 @@ mod tests {
             doc.contains("'=:='(CTok0, Tok0)"),
             "catch suffix should guard with CTok0 =:= Tok0. Got:\n{doc}"
         );
-        // ValueType boundary: NLR arm returns {Value, State}.
+        // ValueType boundary (BT-4503): the NLR arm answers the bare value.
         assert!(
-            doc.contains("{Val0, St0}"),
-            "ValueType NLR arm must yield {{Value, State}} pair. Got:\n{doc}"
+            doc.contains(") -> Val0") && !doc.contains("{Val0, St0}"),
+            "ValueType NLR arm must yield the bare Value. Got:\n{doc}"
         );
     }
 

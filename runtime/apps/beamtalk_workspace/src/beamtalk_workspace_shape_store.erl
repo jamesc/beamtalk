@@ -436,7 +436,7 @@ ancestor-only contribution `ancestor_shape`'s kind half needs, walked and
 merged by the exact same `ancestor_field_map/2` this shares with
 `ancestor_field_types/1` (one walk-and-merge algorithm, parameterised by
 which `__beamtalk_meta/0` key it reads at each level, rather than a second
-copy of `merge_ancestor_field_types/2`'s hand-rolled walk — CLAUDE.md's
+copy of `merge_ancestor_field_types/2`'s hand-rolled walk — AGENTS.md's
 no-duplicate-implementations rule).
 """.
 -spec ancestor_field_kinds(atom()) -> #{atom() => atom()}.
@@ -454,7 +454,7 @@ ancestor_field_map(ClassAtom, MetaKey) ->
     %% flatten_ancestor_map/2` — the one ancestor-flatten primitive this
     %% module and the build-time `beamtalk_release_shapes` extractor
     %% (ADR 0125 §2.2/§3.4) both call, rather than two independent
-    %% implementations of "merge ancestor field maps, closer wins" (CLAUDE.md's
+    %% implementations of "merge ancestor field maps, closer wins" (AGENTS.md's
     %% no-duplicate-implementations rule). Only the per-level reader
     %% (`ancestor_own_field_map/2`, a *live* `__beamtalk_meta/0` read) differs.
     beamtalk_class_metadata:flatten_ancestor_map(
@@ -499,7 +499,7 @@ Delegates to `beamtalk_class_metadata:normalize_field_shape/2` (ADR 0125
 §2.2/§3.4, BT-3574) — the shared leaf both this live flattener and the
 build-time `beamtalk_release_shapes` extractor use, rather than two
 independent implementations of the same `field_types`/`field_kinds` ->
-`shape()` zip (CLAUDE.md's no-duplicate-implementations rule). See also
+`shape()` zip (AGENTS.md's no-duplicate-implementations rule). See also
 `field_type_to_binary/1`/`field_kind_to_binary/1`, this function's two
 per-value normalisers, which delegate the same way.
 """.
