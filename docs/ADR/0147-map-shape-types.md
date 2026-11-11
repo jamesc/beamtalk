@@ -128,6 +128,20 @@ Key        := SymbolLiteral
 Optional is a property of the key, not the value. `?#k => T` means the key
 may be missing. `#k => T | Nil` means the key is present and may hold `nil`.
 
+### Semantic model
+
+The model is Elixir's set-theoretic map types, the same source ADR 0102 took
+its operators from. A shape denotes a set of maps:
+
+- A required field `#k => T` says the key is present with a value in `T`.
+- An optional field `?#k => T` says the key holds a value in `T` or is
+  absent. It is Elixir's `if_set(T)`, written on the key.
+- A closed shape says every unnamed key is absent. An open shape says
+  nothing about unnamed keys.
+
+Subtyping is inclusion between those sets. The rules below are that
+inclusion spelled out, not a separate design.
+
 ### Subtyping
 
 Dictionaries are immutable, so shapes are covariant in their value types.
@@ -149,6 +163,21 @@ shape.
 **`Dictionary(K, V)` to shape.** Not assignable. An annotated local remains
 the way to assert it, and it is the same unchecked narrowing cast it is today
 (BT-4719 decides how visible that is).
+
+### Shapes in the type algebra (ADR 0102)
+
+- **Union.** `S | T` stays a union of two shapes. Shapes are never merged
+  into one wider shape.
+- **Intersection.** `S & T` is computed fieldwise. A key in both takes the
+  intersection of the two value types and is required if either side
+  requires it. A key in only one side is kept if the other side is open; if
+  the other side is closed it is dropped when optional and makes the result
+  `Never` when required. The result is open only if both sides are.
+- **Difference and negation.** Stored with the existing `Negation` form and
+  not simplified fieldwise in this ADR.
+
+This is what later narrowing builds on: `includesKey: #k` in the true branch
+is `S & #{#k => Object, ...}`, with no new mechanism.
 
 ### Shape-aware operations
 
@@ -295,14 +324,18 @@ Diagnostic wording is illustrative and is settled in implementation.
 | Gleam | – | No shapes. `Dict(k, v)` is homogeneous; records are custom types. |
 | Pharo / Squeak | – | No static shapes. Idiom is a real object, or a `Dictionary` checked at run time. |
 
-**Adopted.** Hack's surface almost exactly: literal-like syntax, `?` prefix,
-trailing `...`, closed by default. Erlang's required/optional distinction, so
-FFI maps one-to-one. TypeScript's literal-site checking.
+**Adopted.** Elixir's semantic model: shapes are sets of maps, optional is
+"value or absent", closed by default with `...` to open, and shapes take
+part in union and intersection. This keeps shapes consistent with ADR 0102,
+which adopted the same model for unions and singletons. Hack's surface for
+the spelling: literal-like syntax and a `?` prefix. TypeScript's literal-site
+checking. Erlang is the FFI wire format only: its `:=` / `=>` fields
+translate one-to-one into required and optional keys.
 
 **Rejected.** Erlang's `:=` / `=>` spelling: in a Beamtalk literal `=>` means
 "this key is present", so using `=>` for optional would invert it. Elixir's
-`if_set` on the value: optionality belongs to the key and reads badly beside
-`T | Nil`. Open-by-default (TypeScript, early TypedDict): it gives up the
+spelling of optional as `if_set(T)` on the value: the meaning is adopted, but
+written on the key it reads better beside `T | Nil`. Open-by-default (TypeScript, early TypedDict): it gives up the
 typo check that motivates this ADR, and Python's history shows closed gets
 added later anyway.
 
@@ -414,7 +447,7 @@ FFI results.
 | Phase | Work | Components | Size |
 |---|---|---|---|
 | 1 | `TypeAnnotation::Shape`: parser, AST, unparse, formatter | `source_analysis`, `ast`, `unparse` | M |
-| 2 | `InferredType::Shape`: resolution from annotations and aliases, display, shape-to-shape and shape-to-`Dictionary` assignability, `Dictionary` view for all other sends | `type_checker` | L |
+| 2 | `InferredType::Shape`: resolution from annotations and aliases, display, shape-to-shape and shape-to-`Dictionary` assignability, fieldwise intersection, `Dictionary` view for all other sends | `type_checker` | L |
 | 3 | Map literal checked against an expected shape | `type_checker/validation.rs` | M |
 | 4 | Keyed reads: `at:`, `at:ifAbsent:`, `at:ifPresent:` (and `ifPresent:ifAbsent:`), map-pattern bindings | `type_checker/inference` | M |
 | 5 | FFI: spec reader maps `:=` / `=>` fields to shapes; `spec_codegen.rs` emits map types; shared round-trip fixture | `beamtalk_spec_reader.erl`, `native_types.rs`, `spec_codegen.rs` | M |
