@@ -455,6 +455,7 @@ pub(super) struct ThreadedExpr {
 /// BT-4499: a block parameter [`CoreErlangGenerator::seed_repl_params`] put in
 /// the REPL bindings map for one construct: its binding and the Core variable
 /// that holds the key's previous entry (`maps:find/2`).
+#[derive(Clone)]
 pub(in crate::core_erlang) struct ReplParamSeed {
     local: String,
     previous: String,
@@ -1596,7 +1597,7 @@ impl CoreErlangGenerator {
         // BT-4499: a block parameter the construct writes joins the bindings
         // map for the construct (and leaves it after).
         let params = self.repl_param_bindings_written_by(expr);
-        let (seed_prelude, seeds) = self.seed_repl_params(&params, frame, span);
+        let (seed_prelude, seeds) = self.seed_repl_params(&params, frame, span)?;
         let cached = self.repl_producer_cached_bindings(expr);
         let dropped = self.drop_cached_repl_bindings(&cached);
         let enclosing = self.repl_loop_mutated();
@@ -1754,7 +1755,7 @@ impl CoreErlangGenerator {
         params: &[String],
         frame: FrameId,
         span: Span,
-    ) -> (Vec<ThreadedStmt>, Vec<ReplParamSeed>) {
+    ) -> Result<(Vec<ThreadedStmt>, Vec<ReplParamSeed>)> {
         let mut prelude = Vec::new();
         let mut seeds = Vec::new();
         for local in params {
@@ -1778,10 +1779,7 @@ impl CoreErlangGenerator {
             let enclosing = if repl_root {
                 RebindFrame::implicit_root()
             } else {
-                match self.rebind_frame_of(frame) {
-                    Ok(enclosing) => enclosing,
-                    Err(_) => RebindFrame::implicit_root(),
-                }
+                self.rebind_frame_of(frame)?
             };
             let enclosing = enclosing.with_repl_binding(local);
             let carrier = self.fresh_temp_var("Param");
@@ -1807,7 +1805,56 @@ impl CoreErlangGenerator {
                 previous,
             });
         }
-        (prelude, seeds)
+        // A `^` thrown inside the construct carries the bindings map with
+        // these seeds undone (`Self::repl_nlr_state_doc`).
+        self.repl_active_seeds.extend(seeds.iter().cloned());
+        Ok((prelude, seeds))
+    }
+
+    /// BT-4499: `state` (a bindings map) with `seed`'s key put back to what it
+    /// held before the seed.
+    fn repl_seed_restore_doc(&mut self, seed: &ReplParamSeed, state: &str) -> Document<'static> {
+        let saved = self.fresh_temp_var("Saved");
+        docvec![
+            "case ",
+            leaf::var(seed.previous.clone()),
+            " of <{'ok', ",
+            leaf::var(saved.clone()),
+            "}> when 'true' -> call 'maps':'put'(",
+            leaf::atom(seed.local.clone()),
+            ", ",
+            leaf::var(saved),
+            ", ",
+            leaf::var(state.to_string()),
+            ") <'error'> when 'true' -> call 'maps':'remove'(",
+            leaf::atom(seed.local.clone()),
+            ", ",
+            leaf::var(state.to_string()),
+            ") end",
+        ]
+    }
+
+    /// BT-4499: the bindings map a REPL `^` throws from inside a seeded
+    /// construct: the current map with every live seed undone, so the eval
+    /// commits no block parameter (and keeps a workspace binding it shadows).
+    /// Answers the bare map variable when no seed is live.
+    pub(in crate::core_erlang) fn repl_nlr_state_doc(&mut self) -> Document<'static> {
+        let seeds = self.repl_active_seeds.clone();
+        let mut state = self.current_state_var();
+        let mut lets = Vec::new();
+        for seed in seeds.iter().rev() {
+            let next = self.fresh_temp_var("NlrState");
+            let restore = self.repl_seed_restore_doc(seed, &state);
+            lets.push(docvec![
+                "let ",
+                leaf::var(next.clone()),
+                " = ",
+                restore,
+                " in "
+            ]);
+            state = next;
+        }
+        docvec![Document::Vec(lets), leaf::var(state)]
     }
 
     /// BT-4499: ends the seeds [`Self::seed_repl_params`] made, after their
@@ -1822,6 +1869,8 @@ impl CoreErlangGenerator {
         span: Span,
     ) -> Vec<ThreadedStmt> {
         let mut prelude = Vec::new();
+        let keep = self.repl_active_seeds.len().saturating_sub(seeds.len());
+        self.repl_active_seeds.truncate(keep);
         for seed in seeds {
             if let Some(var) = self.lookup_var(&seed.local).cloned() {
                 self.repl_map_vars.remove(&var);
@@ -1829,24 +1878,7 @@ impl CoreErlangGenerator {
             let source_version = self.state_version();
             let state = self.current_state_var();
             let _ = self.next_state_var();
-            let saved = self.fresh_temp_var("Saved");
-            let restore = docvec![
-                "case ",
-                leaf::var(seed.previous.clone()),
-                " of <{'ok', ",
-                leaf::var(saved.clone()),
-                "}> when 'true' -> call 'maps':'put'(",
-                leaf::atom(seed.local.clone()),
-                ", ",
-                leaf::var(saved),
-                ", ",
-                leaf::var(state.clone()),
-                ") <'error'> when 'true' -> call 'maps':'remove'(",
-                leaf::atom(seed.local.clone()),
-                ", ",
-                leaf::var(state),
-                ") end",
-            ];
+            let restore = self.repl_seed_restore_doc(seed, &state);
             prelude.push(ThreadedStmt::Bind {
                 target: VersionedVar::new(VersionPrefix::State, self.state_version(), frame),
                 source: VersionedVar::new(VersionPrefix::State, source_version, frame),

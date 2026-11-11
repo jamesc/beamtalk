@@ -9524,6 +9524,26 @@ r := #(1, 5) inject: 0 into: [:a :i | [i < 3] whileTrue: [i := i + 1]. a + i]
 i
 // => 10
 
+// parameter / foldParamLoopNlrShadows / - / shadowed
+i := 10
+// => 10
+
+#(1, 5) inject: 0 into: [:a :i | [i < 3] whileTrue: [i := i + 1. i == 2 ifTrue: [^i]]. a + i]
+// => 2
+
+i
+// => 10
+
+// parameter / foldParamConditionalNlrShadows / - / shadowed
+i := 10
+// => 10
+
+#(1, 7) inject: 0 into: [:a :i | (i > 5) ifTrue: [i := 0. ^i] ifFalse: [nil]. a + i]
+// => 0
+
+i
+// => 10
+
 // parameter / foldParamConditionalShadows / - / shadowed
 i := 10
 // => 10

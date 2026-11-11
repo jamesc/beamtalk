@@ -44,7 +44,7 @@ fn cells() -> Vec<Cell> {
             && rest.split(" / ").count() == 4
         {
             header = Some(rest.to_string());
-        } else if line.starts_with("r := ")
+        } else if (line.starts_with("r := ") || line.starts_with("#("))
             && let Some(name) = header.take()
         {
             out.push(Cell {

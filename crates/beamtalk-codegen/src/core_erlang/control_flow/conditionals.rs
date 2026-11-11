@@ -2091,7 +2091,7 @@ impl CoreErlangGenerator {
             Vec::new()
         };
         let frame = self.current_frame();
-        let (seed_prelude, seeds) = self.seed_repl_params(&params, frame, expr.span());
+        let (seed_prelude, seeds) = self.seed_repl_params(&params, frame, expr.span())?;
         let mut lowered =
             self.lower_inline_control_flow(expr, tail, root_producer_locals.is_some())?;
         if !seeds.is_empty() {

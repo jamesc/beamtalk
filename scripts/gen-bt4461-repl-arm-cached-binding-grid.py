@@ -160,6 +160,18 @@ SHADOWED_PARAMETER_WRITES = {
         "#(1, 5) inject: 0 into: [:a :i | [i < 3] whileTrue: [i := i + 1]. a + i]",
         "8",
     ),
+    # A `^` inside the construct throws the bindings map: the seed is undone
+    # in it too.
+    "foldParamLoopNlrShadows": (
+        "i",
+        "#(1, 5) inject: 0 into: [:a :i | [i < 3] whileTrue: [i := i + 1. i == 2 ifTrue: [^i]]. a + i]",
+        "2",
+    ),
+    "foldParamConditionalNlrShadows": (
+        "i",
+        "#(1, 7) inject: 0 into: [:a :i | (i > 5) ifTrue: [i := 0. ^i] ifFalse: [nil]. a + i]",
+        "0",
+    ),
     "foldParamConditionalShadows": (
         "i",
         "#(1, 7) inject: 0 into: [:a :i | (i > 5) ifTrue: [i := 0] ifFalse: [nil]. a + i]",
@@ -248,7 +260,9 @@ def main():
             f"{shadowed} := 10",
             "// => 10",
             "",
-            f"r := {source}",
+            # A `^` ends the input with its value: the REPL rejects it in an
+            # assignment's value.
+            source if "^" in source else f"r := {source}",
             f"// => {answer}",
             "",
             shadowed,
