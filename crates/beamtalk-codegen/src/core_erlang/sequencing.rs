@@ -515,8 +515,8 @@ impl CoreErlangGenerator {
     /// map literal evaluates its last operand first). `None` when at most one
     /// operand may: it has nothing to race with.
     ///
-    /// A field read is stable outside an actor closure (a class variable read
-    /// is stable against another read, but not against a send, BT-4591): it reads a `State` or
+    /// A field read is stable outside an actor closure (a class variable read is
+    /// stable against another read, but not against a send, BT-4591): it reads a `State` or
     /// `Self` version, and a sibling that writes the field is a prelude
     /// producer `subexpr_needs_prelude` already sequences. Exempting it keeps
     /// `self.a + self.b` free of temps (the BT-4279 fast path needs an empty

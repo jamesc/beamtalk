@@ -15,6 +15,9 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 //!
+//! Scope: list cells and map literals only. Tuple elements and the arguments
+//! of a direct `call 'm':'f'(A, B)` are not scanned.
+//!
 //! The scan is a recursive-descent pass over the Core Erlang the generator
 //! prints (`Document::to_pretty_string`), answering for each expression whether
 //! evaluating it may run code. A `fun` body does not run when the closure is

@@ -622,8 +622,9 @@ that can run code (a `call`/`apply`/`primop`, not a variable or literal; pure
 projections such as `erlang:element` over variables are exempt). Because it
 runs inside the compiler, `just test-stdlib`, `just test-bunit` (the
 `verify-threaded-ir` corpus) and every codegen unit test enforce it.
-`tests/racing_operand_corpus.rs` proves it fails on a reintroduced in-place
-builder (`LocalRebindFault::OperandsInPlace`).
+It scans list cells and map literals only (not tuple elements or direct `call`
+argument lists). `tests/racing_operand_corpus.rs` proves it fails on a
+reintroduced in-place builder (`LocalRebindFault::OperandsInPlace`).
 
 ### 7b. Corpus `.core` Diff Harness (BT-3509)
 
