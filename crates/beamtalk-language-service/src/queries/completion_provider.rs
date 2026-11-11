@@ -140,7 +140,7 @@ pub fn compute_completions(
     position: Position,
     hierarchy: &ClassHierarchy,
     current_package: Option<&str>,
-    native_types: Option<&NativeTypeRegistry>,
+    native_types: Option<&Arc<NativeTypeRegistry>>,
 ) -> Vec<Completion> {
     compute_completions_with_registries(
         module,
@@ -183,8 +183,8 @@ pub fn compute_completions_with_registries(
     position: Position,
     hierarchy: &ClassHierarchy,
     current_package: Option<&str>,
-    native_types: Option<&NativeTypeRegistry>,
-    alias_registry: Option<&AliasRegistry>,
+    native_types: Option<&Arc<NativeTypeRegistry>>,
+    alias_registry: Option<&Arc<AliasRegistry>>,
     protocol_registry: Option<Arc<ProtocolRegistry>>,
 ) -> Vec<Completion> {
     // Validate position is within bounds
@@ -196,7 +196,7 @@ pub fn compute_completions_with_registries(
     // Check for Erlang module context first — if we're completing
     // after "Erlang" or "Erlang <module>", return specialized completions
     if let Some(erlang_completions) =
-        compute_erlang_completions(module, source, offset, native_types)
+        compute_erlang_completions(module, source, offset, native_types.map(AsRef::as_ref))
     {
         return erlang_completions;
     }
@@ -237,6 +237,9 @@ pub fn compute_completions_with_registries(
         };
         (h, type_map)
     };
+    // Below the type pass the lookups only read the registries, so they take
+    // plain references.
+    let alias_registry = alias_registry.map(AsRef::as_ref);
     // Try to find receiver type at cursor for type-filtered completions.
     // Right after `|>` (or a partial selector after it) the receiver is the
     // pipeline value before the `|>`, not whatever expression precedes the
@@ -2352,8 +2355,14 @@ mod tests {
         );
         #[expect(clippy::cast_possible_truncation, reason = "test source < 4GB")]
         let position = Position::new(0, source.len() as u32);
-        let completions =
-            compute_completions(&module, source, position, &hierarchy, None, Some(&registry));
+        let completions = compute_completions(
+            &module,
+            source,
+            position,
+            &hierarchy,
+            None,
+            Some(&std::sync::Arc::new(registry.clone())),
+        );
         let reverse = completions.iter().find(|c| c.label == "reverse:");
         assert!(reverse.is_some(), "Should find reverse: completion");
         let detail = reverse.unwrap().detail.as_deref().unwrap_or("");
@@ -3425,7 +3434,7 @@ mod tests {
             &hierarchy,
             None,
             None,
-            Some(&alias_registry),
+            Some(&std::sync::Arc::new(alias_registry.clone())),
             None,
         );
 
@@ -3481,7 +3490,7 @@ mod tests {
             &hierarchy,
             None,
             None,
-            Some(&alias_registry),
+            Some(&std::sync::Arc::new(alias_registry.clone())),
             None,
         );
 
@@ -3539,7 +3548,7 @@ mod tests {
             &hierarchy,
             Some("my_pkg"),
             None,
-            Some(&alias_registry),
+            Some(&std::sync::Arc::new(alias_registry.clone())),
             None,
         );
 

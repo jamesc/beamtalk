@@ -418,7 +418,7 @@ impl TypeChecker {
                                 Some(&self_type),
                             ),
                             self.protocol_registry.as_deref(),
-                            self.alias_registry.as_ref(),
+                            self.alias_registry.as_deref(),
                             super::TypeStringContext::Substitution,
                             Some(hierarchy),
                         );
@@ -1327,7 +1327,7 @@ impl TypeChecker {
                 continue;
             };
             let sendability::Tier::HandleScoped(sendability::HandleScope::Process) =
-                sendability::tier_of(value_ty, hierarchy, self.alias_registry.as_ref())
+                sendability::tier_of(value_ty, hierarchy, self.alias_registry.as_deref())
             else {
                 continue;
             };
@@ -1402,7 +1402,7 @@ impl TypeChecker {
         // payload (there is no "receiver" in the remote sense there).
         let node_upgrade_applies = is_actor_message && receiver_known_remote.is_some();
         for (i, arg_ty) in arg_types.iter().enumerate() {
-            let tier = sendability::tier_of(arg_ty, hierarchy, self.alias_registry.as_ref());
+            let tier = sendability::tier_of(arg_ty, hierarchy, self.alias_registry.as_deref());
             let scope = match tier {
                 sendability::Tier::HandleScoped(sendability::HandleScope::Process) => {
                     sendability::HandleScope::Process
@@ -1759,7 +1759,7 @@ impl TypeChecker {
             // alias-typed parameter a silent no-op. Resolve to the
             // structural expansion so the checks below actually validate.
             let (expected_structural, alias_deps) =
-                Self::resolve_alias_structural(expected_ty, self.alias_registry.as_ref());
+                Self::resolve_alias_structural(expected_ty, self.alias_registry.as_deref());
             self.referenced_aliases.extend(alias_deps);
             let is_class_ref_arg = arg_exprs
                 .and_then(|exprs| exprs.get(i))
@@ -1796,7 +1796,7 @@ impl TypeChecker {
                                 &reference,
                                 &HashMap::new(),
                                 None,
-                                self.alias_registry.as_ref(),
+                                self.alias_registry.as_deref(),
                             );
                         self.referenced_aliases.extend(arg_alias_deps);
                         resolved
@@ -2061,7 +2061,7 @@ impl TypeChecker {
             expected_declared,
             &class_type_params,
             self.protocol_registry.as_deref(),
-            self.alias_registry.as_ref(),
+            self.alias_registry.as_deref(),
             super::TypeStringContext::Declared,
         );
         self.referenced_aliases.extend(alias_deps);
@@ -2289,7 +2289,7 @@ impl TypeChecker {
                     declared,
                     &type_resolver::SubstitutionMap::new(),
                     None,
-                    self.alias_registry.as_ref(),
+                    self.alias_registry.as_deref(),
                 );
                 self.referenced_aliases.extend(deps);
                 expected
@@ -3256,7 +3256,7 @@ impl TypeChecker {
             &declared_type,
             &type_resolver::SubstitutionMap::new(),
             self.protocol_registry.as_deref(),
-            self.alias_registry.as_ref(),
+            self.alias_registry.as_deref(),
             super::TypeStringContext::Declared,
         );
         let declared_type: EcoString = declared_type.to_string().into();
@@ -3282,7 +3282,7 @@ impl TypeChecker {
         // or an alias-typed field falsely rejects every one of its own union
         // members (no "unknown class" escape hatch in `is_assignable_to`).
         let (declared_type, alias_deps) =
-            Self::resolve_alias_structural(&declared_type, self.alias_registry.as_ref());
+            Self::resolve_alias_structural(&declared_type, self.alias_registry.as_deref());
         self.referenced_aliases.extend(alias_deps);
         // BT-4199: an explicit `:: Dynamic` annotation opts the slot out of
         // checking (ADR 0077), same as `check_state_defaults`;
@@ -3658,7 +3658,7 @@ impl TypeChecker {
             .collect();
 
         let empty_registry = AliasRegistry::new();
-        let aliases = self.alias_registry.as_ref().unwrap_or(&empty_registry);
+        let aliases = self.alias_registry.as_deref().unwrap_or(&empty_registry);
 
         // Confidence: a fully-known, locally-visible ancestor chain with no
         // `native:` ancestor is a Warning; anything less certain is a Hint.
@@ -3811,7 +3811,7 @@ impl TypeChecker {
             .collect();
 
         let empty_registry = AliasRegistry::new();
-        let aliases = self.alias_registry.as_ref().unwrap_or(&empty_registry);
+        let aliases = self.alias_registry.as_deref().unwrap_or(&empty_registry);
 
         let summary = hierarchy.all_initialize_assigns(class_name);
         let confident = !summary.incomplete
@@ -3923,7 +3923,7 @@ impl TypeChecker {
         // alias's structural expansion, not the opaque unresolved name, or a
         // valid `spawnWith:` slot value falsely fails the check.
         let (declared_structural, alias_deps) =
-            Self::resolve_alias_structural(declared_ty, self.alias_registry.as_ref());
+            Self::resolve_alias_structural(declared_ty, self.alias_registry.as_deref());
         self.referenced_aliases.extend(alias_deps);
         match &value_ty {
             InferredType::Known {
@@ -4045,7 +4045,7 @@ impl TypeChecker {
                     type_annotation,
                     &type_resolver::SubstitutionMap::new(),
                     self.protocol_registry.as_deref(),
-                    self.alias_registry.as_ref(),
+                    self.alias_registry.as_deref(),
                 );
             self.referenced_aliases.extend(alias_deps);
             // BT-4032: an explicit `:: Dynamic` annotation opts the slot

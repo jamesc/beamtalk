@@ -182,7 +182,7 @@ impl TypeChecker {
         }
         let mut env = crate::semantic_analysis::type_checker::TypeEnv::new();
         let mut ctx = crate::semantic_analysis::type_checker::type_resolver::ResolutionContext::new(
-            self.alias_registry.as_ref(),
+            self.alias_registry.as_deref(),
             &mut self.referenced_aliases,
         );
         Self::set_param_types(

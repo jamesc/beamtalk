@@ -76,23 +76,23 @@ pub fn compute_signature_help(
     source: &str,
     position: Position,
     hierarchy: &ClassHierarchy,
-    native_types: Option<&NativeTypeRegistry>,
+    native_types: Option<&Arc<NativeTypeRegistry>>,
     protocol_registry: Option<Arc<ProtocolRegistry>>,
-    alias_registry: Option<&AliasRegistry>,
+    alias_registry: Option<&Arc<AliasRegistry>>,
 ) -> Option<SignatureHelp> {
     let offset = position.to_byte_offset(source)?.get();
     let protocol_registry = protocols_for_module(protocol_registry, module, hierarchy);
     let (type_map, _) = infer_types_and_returns_with_registries(
         module,
         hierarchy,
-        native_types,
+        native_types.map(Arc::clone),
         Some(Arc::clone(&protocol_registry)),
-        alias_registry,
+        alias_registry.map(Arc::clone),
     );
     let lookup = Lookup {
         hierarchy,
         type_map: &type_map,
-        native_types,
+        native_types: native_types.map(AsRef::as_ref),
         protocol_registry: &protocol_registry,
     };
 
@@ -805,7 +805,7 @@ mod tests {
             source,
             Position::new(0, 20),
             &hierarchy,
-            Some(&registry),
+            Some(&std::sync::Arc::new(registry.clone())),
             None,
             None,
         );
