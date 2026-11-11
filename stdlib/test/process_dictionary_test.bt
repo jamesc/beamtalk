@@ -60,5 +60,6 @@ TestCase subclass: ProcessDictionaryTest
     self assert: other value equals: nil
 
   testWriteInAnotherProcessIsInvisibleToTestProcess =>
-    (Parallel all: #([ProcessDictionary at: #pdTestB put: 2])) first
+    written := (Parallel all: #([ProcessDictionary at: #pdTestB put: 2])) first
+    self assert: written value equals: nil
     self assert: (ProcessDictionary at: #pdTestB) equals: nil
