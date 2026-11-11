@@ -120,7 +120,6 @@ Value subclass: Bt4367ArmLocalGridValue
         m := m + e
         acc + e
       ]
-    @expect discarded_update
     m + s
     7
 
@@ -603,7 +602,6 @@ Value subclass: Bt4367ArmLocalGridValue
         m := m + e
         acc + e
       ]
-    @expect discarded_update
     m + s
     7
 
@@ -1067,7 +1065,6 @@ Value subclass: Bt4367ArmLocalGridValue
         m := m + e
         acc + e
       ]
-    @expect discarded_update
     m + s
     7
 
@@ -1536,7 +1533,6 @@ Value subclass: Bt4367ArmLocalGridValue
         m := m + e
         acc + e
       ]
-    @expect discarded_update
     m + s
     7
 
@@ -2024,7 +2020,6 @@ Value subclass: Bt4367ArmLocalGridValue
         m := m + e
         acc + e
       ]
-    @expect discarded_update
     m + s
     7
 
@@ -2512,7 +2507,6 @@ Value subclass: Bt4367ArmLocalGridValue
         m := m + e
         acc + e
       ]
-    @expect discarded_update
     m + s
     7
 
@@ -3000,7 +2994,6 @@ Value subclass: Bt4367ArmLocalGridValue
         m := m + e
         acc + e
       ]
-    @expect discarded_update
     m + s
     7
 
@@ -3488,7 +3481,6 @@ Value subclass: Bt4367ArmLocalGridValue
         m := m + e
         acc + e
       ]
-    @expect discarded_update
     m + s
     7
 
@@ -3971,7 +3963,6 @@ Value subclass: Bt4367ArmLocalGridValue
         m := m + e
         acc + e
       ]
-    @expect discarded_update
     m + s
     7
 
@@ -4435,7 +4426,6 @@ Value subclass: Bt4367ArmLocalGridValue
         m := m + e
         acc + e
       ]
-    @expect discarded_update
     m + s
     7
 

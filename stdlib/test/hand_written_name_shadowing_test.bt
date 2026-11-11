@@ -44,7 +44,6 @@ TestCase subclass: HandWrittenNameShadowingTest
     self
       assert: ([
         _Unit := 3
-        @expect discarded_update
         4 + 1
         _Unit
       ] on: Error do: [:e | 0])
@@ -54,7 +53,6 @@ TestCase subclass: HandWrittenNameShadowingTest
     self
       assert: ([
         _Unit := 9
-        @expect discarded_update
         4 + 1
         _Unit
       ] ensure: [1 + 1])

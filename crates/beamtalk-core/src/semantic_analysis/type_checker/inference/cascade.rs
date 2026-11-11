@@ -200,6 +200,11 @@ impl TypeChecker {
         else {
             return;
         };
+        // A pure statement (`n + 1.` on plain operands) already draws the
+        // effect-free lint; it owns that shape so one problem has one message.
+        if crate::semantic_analysis::validators::is_effect_free(expr) {
+            return;
+        }
         let Some(receiver_ty) = self.type_map.get(receiver.span()).cloned() else {
             return;
         };
@@ -222,13 +227,25 @@ impl TypeChecker {
                     ),
                     None,
                 )
-                .with_hint(format!(
-                    "assign the result (`{receiver_text} := {receiver_text} {shape}`) or \
-                     chain with `|>`"
-                ))
+                .with_hint(if is_assignable_local(receiver) {
+                    format!(
+                        "assign the result (`{receiver_text} := {receiver_text} {shape}`) or \
+                         chain with `|>`"
+                    )
+                } else {
+                    "use the result (assign it, return it, or pass it on), or remove the \
+                     statement"
+                        .to_string()
+                })
                 .with_category(DiagnosticCategory::DiscardedUpdate),
         );
     }
+}
+
+/// Whether `receiver` is a plain local that `x := x …` can reassign: an
+/// identifier other than `self`/`super`.
+fn is_assignable_local(receiver: &Expression) -> bool {
+    matches!(receiver, Expression::Identifier(id) if id.name != "self" && id.name != "super")
 }
 
 /// Whether a non-final cascade message `selector` sent to a receiver of

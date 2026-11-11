@@ -187,7 +187,7 @@ pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<D
 /// Only a conservative subset is classified as pure: literals, variable reads,
 /// class references, parenthesized pure expressions, and binary sends with a
 /// known arithmetic or comparison operator applied to pure operands.
-fn is_effect_free(expr: &Expression) -> bool {
+pub(crate) fn is_effect_free(expr: &Expression) -> bool {
     match expr {
         Expression::Literal(_, _)
         | Expression::Identifier(_)

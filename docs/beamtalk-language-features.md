@@ -707,12 +707,14 @@ non-final statement that is a plain send on a value receiver answering an
 updated copy (`p withX: 5.` on its own line) leaves `p` unchanged, so the
 **`discarded-update`** warning flags it with the same predicate
 (BT-4522): ``the result of `withX:` is discarded``, with the help "assign the
-result (`p := p withX: 5`) or chain with `|>`". The last statement of a
+result (`p := p withX: …`) or chain with `|>`" (a receiver that cannot be
+reassigned, such as `self`, gets "use the result … or remove the statement"). The last statement of a
 body or block is its value and is never flagged, nor is a send whose result is
 used (assigned, passed, returned, or the receiver of another send). A
 pipeline statement is flagged once, at its last stage. A cascade statement
 keeps `cascade-drops-update`, so no span is reported twice. Binary sends
-(`n + 1.`) are flagged too. `Dynamic` and union receivers, actors and
+are flagged too, except pure ones such as `n + 1.` on plain operands, which
+keep the `effect_free` lint. `Dynamic` and union receivers, actors and
 non-value classes stay silent. Silence one with `@expect discarded_update`,
 or a package with `discarded-update = "off"` under `[diagnostics]`.
 

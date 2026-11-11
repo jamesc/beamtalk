@@ -141,10 +141,33 @@ fn cascade_statement_is_left_to_cascade_drops_update() {
 
 #[test]
 fn binary_send_statement_warns() {
-    let diags = diagnostics_for("  run -> Integer =>\n    1 + 2.\n    3\n");
+    let diags = diagnostics_for("  run: p :: Point -> Integer =>\n    p x + 1.\n    3\n");
     let hits = discarded(&diags);
     assert_eq!(hits.len(), 1, "got: {diags:#?}");
     assert_eq!(hits[0].message.as_str(), "the result of `+` is discarded");
+}
+
+#[test]
+fn pure_binary_statement_is_left_to_the_effect_free_lint() {
+    let diags = diagnostics_for("  run -> Integer =>\n    1 + 2.\n    3\n");
+    assert!(discarded(&diags).is_empty(), "got: {diags:#?}");
+}
+
+#[test]
+fn help_only_suggests_assignment_for_a_plain_local() {
+    // `self`, a literal or an expression receiver cannot be reassigned.
+    let diags = diagnostics_for(
+        "  run: p :: Point -> Point =>\n    p x + 1.\n    self runSelf.\n    p\n  runSelf -> Self =>\n    self runSelf.\n    self\n",
+    );
+    let hints: Vec<_> = discarded(&diags)
+        .iter()
+        .map(|d| d.hint.clone().unwrap_or_default())
+        .collect();
+    assert!(!hints.is_empty(), "got: {diags:#?}");
+    assert!(
+        hints.iter().all(|h| !h.contains(":=")),
+        "no assignment help for a non-local receiver, got: {hints:?}"
+    );
 }
 
 #[test]
