@@ -195,6 +195,7 @@ fn test_generate_has_method_lists_primary_class_methods() {
         methods: vec![
             MethodDefinition {
                 pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+                literal_comments: beamtalk_core::ast::LiteralComments::default(),
                 selector: MessageSelector::Unary("increment".into()),
                 parameters: vec![],
                 body: vec![bare(Expression::Literal(
@@ -213,6 +214,7 @@ fn test_generate_has_method_lists_primary_class_methods() {
             },
             MethodDefinition {
                 pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+                literal_comments: beamtalk_core::ast::LiteralComments::default(),
                 selector: MessageSelector::Keyword(vec![KeywordPart::new(
                     "setValue:",
                     Span::new(0, 0),
@@ -250,6 +252,7 @@ fn test_generate_has_method_lists_primary_class_methods() {
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         type_aliases: Vec::new(),
         native_declarations: Vec::new(),
@@ -352,6 +355,7 @@ fn actor_class_def(
 fn module_with_class(class: ClassDefinition) -> Module {
     Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         type_aliases: Vec::new(),
         native_declarations: Vec::new(),
@@ -367,6 +371,7 @@ fn module_with_class(class: ClassDefinition) -> Module {
 fn unary_method(name: &str) -> MethodDefinition {
     MethodDefinition {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         selector: MessageSelector::Unary(name.into()),
         parameters: vec![],
         body: vec![bare(Expression::Literal(
@@ -393,6 +398,7 @@ fn unary_method(name: &str) -> MethodDefinition {
 fn catch_all_dnu_method() -> MethodDefinition {
     MethodDefinition {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         selector: MessageSelector::Keyword(vec![
             KeywordPart::new("doesNotUnderstand:", Span::new(0, 0)),
             KeywordPart::new("args:", Span::new(0, 0)),

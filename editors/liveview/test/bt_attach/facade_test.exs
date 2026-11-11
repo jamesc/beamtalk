@@ -620,6 +620,22 @@ defmodule BtAttach.FacadeTest do
       assert {:hover, self(), "  options:", %{before: "Fetcher fetch: u\n", suffix: " o"}} in RecordingClient.calls()
     end
 
+    test "hover passes the edited method's class and side through (BT-4463)" do
+      assert Facade.dispatch(:hover, %{
+               session_pid: self(),
+               code: "self size",
+               class: "Counter",
+               side: "class"
+             }) == {:ok, "== Integer < Number =="}
+
+      assert {:hover, self(), "self size",
+              %{before: "", suffix: "", class: "Counter", side: "class"}} in RecordingClient.calls()
+
+      # A half-specified class context is dropped rather than forwarded.
+      Facade.dispatch(:hover, %{session_pid: self(), code: "self size", class: "Counter"})
+      assert {:hover, self(), "self size", %{before: "", suffix: ""}} in RecordingClient.calls()
+    end
+
     test "a bad shape is invalid params, with no dist call" do
       assert Facade.dispatch(:hover, %{session_pid: :nope, code: "x"}) ==
                {:error, :invalid_params}

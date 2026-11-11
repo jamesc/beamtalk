@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4319: base of a non-leaf exception hierarchy used by type_pattern_non_leaf_test.bt.
+
+Error subclass: Bt4319HttpError

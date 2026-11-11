@@ -36,6 +36,10 @@
 
 use beamtalk_core::ast::Module;
 use beamtalk_core::compilation::extension_index::ExtensionIndex;
+use beamtalk_core::semantic_analysis::alias_expansion::InternalAliasExpander;
+use beamtalk_core::semantic_analysis::alias_registry::AliasInfo;
+use beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo;
+use beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo;
 use beamtalk_core::source_analysis::{Diagnostic, Severity};
 use std::path::Path;
 
@@ -92,11 +96,55 @@ impl DependencyExtensions {
         &self.index
     }
 
+    /// Expands the dependency's own `internal type` aliases in every
+    /// extension signature (BT-4615), so the consumer never sees a name its
+    /// alias scope cannot resolve.
+    pub fn expand_internal_aliases(&mut self, expander: &InternalAliasExpander) {
+        if expander.is_empty() {
+            return;
+        }
+        self.index.map_type_infos(|info| {
+            for ty in info.param_types.iter_mut().flatten() {
+                *ty = expander.expand_str(ty);
+            }
+            if let Some(ty) = &mut info.return_type {
+                *ty = expander.expand_str(ty);
+            }
+        });
+    }
+
     /// Whether [`Self::index`] holds every extension the dependency defines.
     #[must_use]
     pub fn is_complete(&self) -> bool {
         self.complete
     }
+}
+
+/// Expands a dependency's own `internal type` aliases in its class
+/// signatures (BT-4615). Must run **after** trait flattening: flattening
+/// re-extracts each trait-using class from its AST and replaces the whole
+/// `ClassInfo`, which would discard an earlier expansion.
+pub fn expand_dependency_class_aliases(
+    alias_infos: &[AliasInfo],
+    class_infos: &mut [ClassInfo],
+    protocol_infos: &mut [ProtocolInfo],
+) {
+    let expander = InternalAliasExpander::from_alias_infos(alias_infos);
+    for info in class_infos {
+        expander.expand_class_info(info);
+    }
+    for info in protocol_infos {
+        expander.expand_protocol_info(info);
+    }
+}
+
+/// Expands a dependency's own `internal type` aliases in its extension
+/// signatures (BT-4615).
+pub fn expand_dependency_extension_aliases(
+    alias_infos: &[AliasInfo],
+    extensions: &mut DependencyExtensions,
+) {
+    extensions.expand_internal_aliases(&InternalAliasExpander::from_alias_infos(alias_infos));
 }
 
 /// Merges every dependency's extensions into `into` (the consumer's
