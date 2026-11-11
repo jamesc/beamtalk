@@ -64,5 +64,71 @@
     "source": "$( class",
     "expected_end": 2,
     "why": "the literal ends after its own payload character, not at the end of the whole source"
+  },
+  {
+    "kind": "string",
+    "source": "\"Hi {name}\" rest",
+    "expected_end": 11,
+    "why": "a plain interpolation is part of the one string token; it closes at the final quote"
+  },
+  {
+    "kind": "string",
+    "source": "\"pre {a == \"z. bogus\"} mid\" rest",
+    "expected_end": 27,
+    "why": "a string nested in an interpolation does not close the outer string"
+  },
+  {
+    "kind": "string",
+    "source": "\"a {x at: {1, 2}} b\" rest",
+    "expected_end": 20,
+    "why": "braces nested in an interpolation are depth-counted"
+  },
+  {
+    "kind": "string",
+    "source": "\"a \\{ b {c} d\" rest",
+    "expected_end": 14,
+    "why": "an escaped brace is literal text, a later brace still interpolates"
+  },
+  {
+    "kind": "string",
+    "source": "\"{x // }\n}\" rest",
+    "expected_end": 11,
+    "why": "a line comment inside an interpolation hides its brace until the newline"
+  },
+  {
+    "kind": "string",
+    "source": "\"{x /* } */ y}\" rest",
+    "expected_end": 15,
+    "why": "a block comment inside an interpolation hides its brace"
+  },
+  {
+    "kind": "string",
+    "source": "\"{$}} z\" rest",
+    "expected_end": 8,
+    "why": "a character literal inside an interpolation hides its brace"
+  },
+  {
+    "kind": "string",
+    "source": "\"a {} b\" rest",
+    "expected_end": 8,
+    "why": "empty interpolation still ends at its closing brace"
+  },
+  {
+    "kind": "string",
+    "source": "\"a {{b}} c\" rest",
+    "expected_end": 11,
+    "why": "doubled braces are skipped to the matching close"
+  },
+  {
+    "kind": "string",
+    "source": "\"{x} a\"\"b\" rest",
+    "expected_end": 10,
+    "why": "a doubled delimiter after an interpolation is still a literal quote"
+  },
+  {
+    "kind": "string",
+    "source": "\"{x \\} y} z\" rest",
+    "expected_end": 12,
+    "why": "a backslash pair inside an interpolation hides the escaped brace"
   }
 ]

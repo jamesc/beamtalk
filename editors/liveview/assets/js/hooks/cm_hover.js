@@ -76,10 +76,15 @@ export function backendHover(requestHover) {
 // editor is destroyed) and the same accepted gap as `completionQuery`. The
 // correct fix when it matters is a shared per-hook cancel signal, not a local
 // try/catch — left uncancelled deliberately.
-export function hoverQuery(pushEvent) {
+//
+// `tabId` (BT-4463) is the method-editor tab the buffer belongs to. The server
+// resolves it to the edited class and side, so a hovered `self` / `super`
+// receiver resolves against that class; the client never sends a class name.
+// The Workspace + REPL editors have no tab id and send none.
+export function hoverQuery(pushEvent, tabId = null) {
   return (payload) =>
     new Promise((resolve) => {
-      pushEvent("hover", payload, (reply) => {
+      pushEvent("hover", tabId ? { ...payload, tab_id: tabId } : payload, (reply) => {
         resolve((reply && reply.hover) || "")
       })
     })

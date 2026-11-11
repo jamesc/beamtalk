@@ -776,8 +776,32 @@ keyword_send_unresolvable_receiver_is_none_test() ->
     ?assertEqual(none, kw(<<"x > 0 ifTrue:">>, <<" [1]">>)),
     %% Cascade continuation: no receiver token in this segment.
     ?assertEqual(none, kw(<<"t show: 1; show:">>, <<" 2">>)),
-    %% An interpolated string makes the line unscannable.
-    ?assertEqual(none, kw(<<"t show: \"{x}\" with:">>, <<" 1">>)).
+    %% An unterminated interpolation makes the text unscannable.
+    ?assertEqual(none, kw(<<"t show: \"{x with:">>, <<" 1">>)).
+
+keyword_send_interpolated_strings_are_scanned_test() ->
+    %% BT-4463: an interpolated string is one opaque lexeme, so every keyword
+    %% of the send resolves — before, around, or after the string.
+    ?assertEqual(
+        {ok, <<"Transcript">>, <<"show:with:">>},
+        kw(<<"Transcript show: \"Hi {name}\" with:">>, <<" x">>)
+    ),
+    ?assertEqual(
+        {ok, <<"Transcript">>, <<"show:with:">>},
+        kw(<<"Transcript show:">>, <<" \"Hi {name}\" with: x">>)
+    ),
+    %% Nested string and brace inside the interpolation.
+    ?assertEqual(
+        {ok, <<"t">>, <<"show:with:">>},
+        kw(<<"t show:">>, <<" \"a {b at: \"k: \"} {c}\" with: 1">>)
+    ),
+    %% An interpolated string on an earlier line does not hide the send below.
+    ?assertEqual(
+        {ok, <<"d">>, <<"at:put:">>},
+        kw(<<"x := \"{y}\".\nd at:">>, <<" 1 put: 2">>)
+    ),
+    %% A keyword-looking `…:` inside an interpolated string is not a send.
+    ?assertEqual(none, kw(<<"t show: \"{x} a:">>, <<" b\"">>)).
 
 keyword_send_non_keyword_tokens_test() ->
     ?assertEqual(not_keyword, kw(<<"Integer">>, <<>>)),
@@ -848,6 +872,69 @@ hover_docs_keyword_send_unclassifiable_receiver_is_empty_test() ->
 hover_docs_keyword_send_class_receiver_test() ->
     Docs = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"Integer max:">>, <<" 3">>, #{}),
     ?assert(is_binary(Docs)).
+
+%%====================================================================
+%% self / super receivers in a method editor (BT-4463)
+%%====================================================================
+
+classify_receiver_self_resolves_against_edited_class_test() ->
+    ?assertEqual(
+        {instance, 'Integer'},
+        beamtalk_repl_ops_dev:classify_receiver(<<"self">>, #{}, {'Integer', instance})
+    ),
+    ?assertEqual(
+        {class, 'Integer'},
+        beamtalk_repl_ops_dev:classify_receiver(<<"self">>, #{}, {'Integer', class})
+    ).
+
+classify_receiver_super_resolves_against_superclass_test() ->
+    Super = beamtalk_runtime_api:superclass(beamtalk_runtime_api:whereis_class('Integer')),
+    ?assert(is_atom(Super) andalso Super =/= none),
+    ?assertEqual(
+        {instance, Super},
+        beamtalk_repl_ops_dev:classify_receiver(<<"super">>, #{}, {'Integer', instance})
+    ),
+    ?assertEqual(
+        {class, Super},
+        beamtalk_repl_ops_dev:classify_receiver(<<"super">>, #{}, {'Integer', class})
+    ).
+
+classify_receiver_super_of_root_class_is_undefined_test() ->
+    ?assertEqual(
+        undefined,
+        beamtalk_repl_ops_dev:classify_receiver(<<"super">>, #{}, {'ProtoObject', instance})
+    ).
+
+classify_receiver_self_without_context_is_an_ordinary_name_test() ->
+    ?assertEqual(undefined, beamtalk_repl_ops_dev:classify_receiver(<<"self">>, #{})),
+    ?assertEqual(
+        undefined, beamtalk_repl_ops_dev:classify_receiver(<<"self">>, #{}, undefined)
+    ).
+
+hover_docs_self_unary_and_keyword_match_a_literal_receiver_test() ->
+    Ctx = {'Integer', instance},
+    %% Unary: `self factorial` hovers exactly what `42 factorial` does.
+    Expected = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"42 factorial">>, <<>>, #{}),
+    ?assertNotEqual(<<>>, Expected),
+    ?assertEqual(
+        Expected,
+        beamtalk_repl_ops_dev:hover_docs(<<>>, <<"self factorial">>, <<>>, #{}, Ctx)
+    ),
+    %% Keyword: `self max:` resolves like `42 max:`.
+    ExpectedKw = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"42 max:">>, <<" 3">>, #{}),
+    ?assertEqual(
+        ExpectedKw,
+        beamtalk_repl_ops_dev:hover_docs(<<>>, <<"self max:">>, <<" 3">>, #{}, Ctx)
+    ),
+    %% No editor class: `self` stays unresolved.
+    ?assertEqual(<<>>, beamtalk_repl_ops_dev:hover_docs(<<>>, <<"self factorial">>, <<>>, #{})).
+
+hover_docs_class_side_self_hovers_class_methods_test() ->
+    Expected = beamtalk_repl_ops_dev:hover_docs(<<>>, <<"Integer new">>, <<>>, #{}),
+    ?assertEqual(
+        Expected,
+        beamtalk_repl_ops_dev:hover_docs(<<>>, <<"self new">>, <<>>, #{}, {'Integer', class})
+    ).
 
 %%====================================================================
 %% classify_receiver/2's remaining branches: the empty receiver, an
