@@ -417,6 +417,7 @@ handle_getValue([], State) ->
 -export([
     is_beamtalk_actor/1,
     pid_class_name/1,
+    pid_class_candidates/1,
     registered_name_for_pid/1,
     register_name/2,
     unregister_name/1,
@@ -5814,8 +5815,8 @@ named_lookup(Scope, ReceiverClass, Name, Selector) ->
             %% the node-aware wrapper, not `pid_class_name/1` directly
             %% (which raises `badarg` for a remote pid). Always safe for
             %% `local` scope too, where Pid is always local.
-            case pid_class_name_remote_safe(Pid) of
-                nil ->
+            case resolve_named_class(ReceiverClass, pid_class_candidates_remote_safe(Pid)) of
+                none ->
                     {error,
                         beamtalk_error:with_hint(
                             beamtalk_error:new(wrong_class, ReceiverClass, Selector),
@@ -5827,7 +5828,23 @@ named_lookup(Scope, ReceiverClass, Name, Selector) ->
                                 )
                             )
                         )};
-                ActualClass ->
+                {shared, Candidates} ->
+                    %% BT-4664: a `native:` actor whose backing module is shared
+                    %% by several live classes — a Beamtalk actor, but the
+                    %% runtime cannot tell which class it is.
+                    {error,
+                        beamtalk_error:with_hint(
+                            beamtalk_error:new(wrong_class, ReceiverClass, Selector),
+                            beamtalk_error:chars_to_binary(
+                                io_lib:format(
+                                    "Name '~ts' is registered to a native actor "
+                                    "whose backing module is shared by classes ~ts; "
+                                    "look it up through one of those classes",
+                                    [Name, lists:join(", ", [atom_to_list(C) || C <- Candidates])]
+                                )
+                            )
+                        )};
+                {ok, ActualClass} ->
                     case class_matches(ActualClass, ReceiverClass) of
                         true ->
                             case class_mod_for(ActualClass) of
@@ -6604,73 +6621,121 @@ registered_name_for_pid(Pid) when is_pid(Pid) ->
 %% `nil` wins as the single sentinel — see `registered_name_for_pid/1` above.
 %%
 %% A `native:` actor's backing gen_server (ADR 0056) has no marker; its class
-%% comes from the `'$initial_call'` fallback (`native_pid_class_name/1`,
+%% comes from the `'$initial_call'` fallback (`native_pid_class_candidates/1`,
 %% BT-4657), so native actors also get a class label in the inspector and are
 %% resolvable via `named:` / `allRegistered`. (Process navigation still
 %% classifies via the marker-only `is_beamtalk_actor/1`.)
 %%
 %% Local-pid only: `erlang:process_info/2` raises `badarg` for a pid on
-%% another node. `pid_class_name_remote_safe/1` below is the node-aware
+%% another node. `pid_class_candidates_remote_safe/1` below is the node-aware
 %% wrapper for a caller (like `named_lookup/4`'s `global` scope) whose pid
 %% may not be local.
 -spec pid_class_name(pid()) -> atom() | nil.
 pid_class_name(Pid) ->
+    case pid_class_candidates(Pid) of
+        [Class] -> Class;
+        %% No class (non-Beamtalk process) or an ambiguous shared backing
+        %% module (BT-4664): no single class to name.
+        _ -> nil
+    end.
+
+-doc """
+The live classes a pid could be an instance of (BT-4664): `[Class]` for a
+compiled actor (marker) or a `native:` actor with an unshared backing module,
+several classes for a `native:` actor whose backing module is shared, and `[]`
+for a non-Beamtalk process. Local-pid only; see
+`pid_class_candidates_remote_safe/1`.
+""".
+-spec pid_class_candidates(pid()) -> [atom()].
+pid_class_candidates(Pid) ->
     case erlang:process_info(Pid, dictionary) of
         {dictionary, Dict} when is_list(Dict) ->
             case lists:keyfind('$beamtalk_actor', 1, Dict) of
-                {'$beamtalk_actor', Class} when is_atom(Class) -> Class;
-                _ -> native_pid_class_name(Dict)
+                {'$beamtalk_actor', Class} when is_atom(Class) -> [Class];
+                _ -> native_pid_class_candidates(Dict)
             end;
         _ ->
-            nil
+            []
     end.
 
 %% BT-4657: a `native:` actor's hand-written backing gen_server (ADR 0056)
-%% never plants the `'$beamtalk_actor'` marker. Its class is read from the
+%% never plants the `'$beamtalk_actor'` marker. Its classes are read from the
 %% process's `'$initial_call'` (`{BackingModule, init, 1}`, set by
 %% `proc_lib`) through the backing-module index. A backing module shared by
-%% several classes names none of them: `nil`, as for a non-Beamtalk process.
--spec native_pid_class_name(list()) -> atom() | nil.
-native_pid_class_name(Dict) ->
+%% several classes yields all of them (BT-4664).
+-spec native_pid_class_candidates(list()) -> [atom()].
+native_pid_class_candidates(Dict) ->
     case lists:keyfind('$initial_call', 1, Dict) of
         {'$initial_call', {Backing, init, 1}} when is_atom(Backing) ->
             %% The index can hold a stale row for a class whose process died
             %% (`forget_backing_module_entries/2`), so keep live classes only.
-            Live = [
+            lists:usort([
                 C
              || C <- beamtalk_class_registry:classes_backing_module(Backing),
                 beamtalk_class_registry:whereis_class(C) =/= undefined
-            ],
-            case Live of
-                [Class] -> Class;
-                _ -> nil
-            end;
+            ]);
         _ ->
-            nil
+            []
     end.
 
 -doc """
-Node-aware wrapper over `pid_class_name/1` (ADR 0126 §4, BT-3603 review
-round 2): `global:whereis_name/1` (`named_lookup/4`'s `global` scope) can
-resolve to a pid on any connected node — the entire point of a
-cluster-unique name — but `pid_class_name/1`'s `erlang:process_info/2` read
-only works on a local pid, raising `badarg` otherwise. Mirrors
-`actor_started_at/1`'s `node(Pid) =:= node()` / `erpc:call/5` pattern,
-calling the already-exported `pid_class_name/1` itself as the remote
-target. An unreachable node or a dead remote process resolves to `nil` —
-the same sentinel `pid_class_name/1` already uses for "not a Beamtalk
-actor", so callers don't need a third outcome to handle.
+Node-aware wrapper over `pid_class_candidates/1` (ADR 0126 §4, BT-3603):
+`global:whereis_name/1` can resolve to a pid on any connected node, and
+`erlang:process_info/2` raises `badarg` for a remote pid, so a remote pid is
+read via `erpc:call/5`. An unreachable node or dead remote process resolves
+to `[]`, the same as a non-Beamtalk process.
 """.
--spec pid_class_name_remote_safe(pid()) -> atom() | nil.
-pid_class_name_remote_safe(Pid) when node(Pid) =:= node() ->
-    pid_class_name(Pid);
-pid_class_name_remote_safe(Pid) ->
-    try erpc:call(node(Pid), ?MODULE, pid_class_name, [Pid], ?BT_REMOTE_CALL_TIMEOUT) of
+-spec pid_class_candidates_remote_safe(pid()) -> [atom()].
+pid_class_candidates_remote_safe(Pid) when node(Pid) =:= node() ->
+    pid_class_candidates(Pid);
+pid_class_candidates_remote_safe(Pid) ->
+    try erpc:call(node(Pid), ?MODULE, pid_class_candidates, [Pid], ?BT_REMOTE_CALL_TIMEOUT) of
         Result -> Result
     catch
-        error:{erpc, _ErpcReason} -> nil;
-        error:{exception, _Reason, _Stack} -> nil;
-        exit:{exception, _Reason} -> nil
+        %% A node that predates `pid_class_candidates/1` (rolling upgrade,
+        %% ADR 0125): fall back to the single-class answer it does have.
+        error:{exception, undef, _} -> remote_single_class_candidates(Pid);
+        error:{erpc, _ErpcReason} -> [];
+        error:{exception, _Reason, _Stack} -> [];
+        exit:{exception, _Reason} -> []
+    end.
+
+-spec remote_single_class_candidates(pid()) -> [atom()].
+remote_single_class_candidates(Pid) ->
+    try erpc:call(node(Pid), ?MODULE, pid_class_name, [Pid], ?BT_REMOTE_CALL_TIMEOUT) of
+        Class when is_atom(Class), Class =/= nil, Class =/= undefined -> [Class];
+        _ -> []
+    catch
+        error:{erpc, _ErpcReason} -> [];
+        error:{exception, _Reason, _Stack} -> [];
+        exit:{exception, _Reason} -> []
+    end.
+
+%% Pick the class a `named:` lookup resolves to from a pid's candidates
+%% (BT-4664). An exact match on the receiver wins, then a single candidate
+%% under it; several candidates under it leave the class undecidable, so
+%% report them as `shared`. That includes a common-ancestor receiver
+%% (`Actor named: #x`): rejecting it is intentional, as the proxy's class and
+%% facade module would otherwise be arbitrary.
+%%
+%% Contract: classes sharing a backing module must each work against any
+%% process of that module, so answering with the receiver's class (or its one
+%% matching descendant) rather than the class the process was spawned through
+%% is not a misclassification.
+-spec resolve_named_class(atom(), [atom()]) -> none | {ok, atom()} | {shared, [atom()]}.
+resolve_named_class(_ReceiverClass, []) ->
+    none;
+resolve_named_class(_ReceiverClass, [Class]) ->
+    {ok, Class};
+resolve_named_class(ReceiverClass, Candidates) ->
+    case lists:member(ReceiverClass, Candidates) of
+        true ->
+            {ok, ReceiverClass};
+        false ->
+            case [C || C <- Candidates, class_matches(C, ReceiverClass)] of
+                [Match] -> {ok, Match};
+                _ -> {shared, Candidates}
+            end
     end.
 
 -spec class_matches(atom(), atom()) -> boolean().
