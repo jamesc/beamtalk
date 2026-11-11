@@ -62,6 +62,13 @@ TestCase subclass: GuardReturnTest
     self assert: (a bumpBig: 2) equals: 102
     self assert: a count equals: 102
 
+  testAndOrGuardsWithEffects =>
+    v := GuardReturnValue new
+    self assert: (v outside: -1) n equals: 0
+    self assert: (v outside: 101) n equals: 0
+    self assert: (v outside: 50) n equals: 5
+    self assert: (v outside: 7) n equals: 7
+
   // An untyped guard receiver that is not a Boolean is sent the guard's own
   // selector with a block that returns from the method (BT-4244).
   testNonBooleanReceiverThatCallsTheBlockReturnsEarly =>
