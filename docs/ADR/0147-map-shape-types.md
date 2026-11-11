@@ -61,6 +61,10 @@ A survey of literal-key `at:` reads in the stdlib's sibling libraries:
 | beamtalk-linear | 0 | 36 | Linear GraphQL responses |
 | beamtalk-agents | 0 | 56 | Claude and codex stream-json |
 
+The split is clean. Symbol keys are internal option and config maps, plus
+FFI maps. String keys are decoded external data (JSON, YAML). This ADR covers
+the first group only; see "String keys" under Alternatives Considered.
+
 Eleven aliases across buccaneer, catalina and beamtalk-http have the form
 `type XOptions = Dictionary(Symbol, Object | Dynamic)` with the keys listed
 in a doc comment.
@@ -90,7 +94,7 @@ What already exists in the compiler:
 
 ## Decision
 
-Add **shape types**: a structural type for a dictionary with known literal
+Add **shape types**: a structural type for a dictionary with known symbol
 keys, each with its own value type. A shape is written like the map literal it
 describes, and is usable anywhere a type is: annotations, `type` aliases,
 generic arguments, unions.
@@ -112,13 +116,13 @@ type WebSocketOptions = #{
 ```text
 ShapeType  := '#{' [ Field { ',' Field } [ ',' '...' ] | '...' ] '}'
 Field      := [ '?' ] Key '=>' Type
-Key        := SymbolLiteral | StringLiteral
+Key        := SymbolLiteral
 ```
 
 - `#key => T` is a **required** key. `?#key => T` is an **optional** key.
 - A trailing `...` makes the shape **open**: other keys may be present.
   Without it the shape is **closed**.
-- Keys are symbol literals or string literals. A shape may mix them.
+- Keys are symbol literals.
 - A value type is any type, including another shape, so shapes nest.
 
 Optional is a property of the key, not the value. `?#k => T` means the key
@@ -174,10 +178,11 @@ today.
 
 ### Runtime
 
-None. Shapes are erased like every other annotation. A shape on external data
-(parsed JSON or YAML) is a claim, not a check. External data should still be
-parsed into `Value` classes at the boundary, as `beamtalk-linear`'s
-`Issue fromNode:` does. A shape there helps only with key typos and reads.
+None. Shapes are erased like every other annotation. They describe maps the
+program builds itself (options, config) and maps a trusted FFI spec describes.
+They are not a way to validate external data: that should still be parsed
+into `Value` classes at the boundary, as `beamtalk-linear`'s `Issue fromNode:`
+does.
 
 ### FFI mapping
 
@@ -191,8 +196,8 @@ The spec reader maps Erlang map types to shapes:
 | no singleton keys at all (`#{atom() => integer()}`, `map()`) | `Dictionary`, as today |
 | `'$beamtalk_class' := C` | the class `C`, as today (checked first) |
 
-Erlang type syntax has no binary-literal keys, so FFI shapes have symbol keys
-only. In the other direction, `spec_codegen.rs` emits a shape as an Erlang
+Erlang type syntax has no binary-literal keys, so symbol keys cover every
+keyed map a spec can describe. In the other direction, `spec_codegen.rs` emits a shape as an Erlang
 map type (`#{k := T, k2 => T2}`, plus `_ => _` when open), so shapes
 round-trip through `-spec` and Dialyzer sees them.
 
@@ -232,24 +237,6 @@ HTTPClient request: #patch url: u options: #{#body => "{}", #timeout => "5s"}
 // error: #timeout expects Integer, got String
 ```
 
-**JSON (beamtalk-linear).** String keys, open, nested:
-
-```beamtalk
-type IssueNode = #{
-  "id" => String,
-  ?"priority" => Integer,
-  ?"state" => #{"name" => String, ...},
-  ...
-}
-
-class fromNode: node :: IssueNode -> Issue =>
-  state := (node at: "state" ifAbsent: [#{}]) at: "name" ifAbsent: [nil]
-```
-
-A misspelt `"nmae"` on the closed part is not caught here because the shape is
-open; what the shape buys is the value types and documentation. The caller
-passing a parsed `Dictionary` still makes an unchecked claim.
-
 **FFI (`uri_string:parse/1`).** The OTP type is:
 
 ```erlang
@@ -282,9 +269,9 @@ Diagnostic wording is illustrative and is settled in implementation.
 
 ### Single sources of truth
 
-- **Key equality** reuses the pattern-key distinction (`MapPatternKey`:
-  symbol or string literal). Shape keys must use the same type, extracted to
-  a shared location if needed, not a second enum.
+- **Keys** are symbol names. If string keys are added later, shape keys must
+  reuse the pattern-key type (`MapPatternKey`: symbol or string literal),
+  not a second enum.
 - **Type display and alias provenance** go through ADR 0108's display-name
   path, so a diagnostic says `WebSocketOptions`, not the expanded shape.
 - **Rust and Erlang** meet at the type string the spec reader writes and the
@@ -369,10 +356,9 @@ maps write `...`, which also documents that they are pass-through.
 
 - Purists and operators prefer Value classes; BEAM developers and newcomers
   prefer shapes. Both stay available and the ADR says when to use which.
-- Closed-by-default helps config and hurts evolving API responses, which must
-  remember `...`.
-- JSON users will want shapes to validate. They do not, and the documentation
-  must say so plainly.
+- Closed-by-default helps config and costs pass-through maps a `...`.
+- JSON and YAML users will ask for string-key shapes. The answer for now is a
+  `Value` class at the boundary.
 
 ## Alternatives Considered
 
@@ -380,11 +366,14 @@ maps write `...`, which also documents that they are pass-through.
 `#k => Boolean?` reads as "nullable Boolean" to anyone from Kotlin, Swift or
 TypeScript, which is a different thing from a missing key.
 
-### Symbol keys only
-Covers buccaneer, catalina and beamtalk-http, but none of the 114 string-key
-reads in exdura, symphony, beamtalk-linear and beamtalk-agents. String
-literal keys cost little: they need only literal comparison in the shape, not
-general string singleton types, and map patterns already accept them.
+### String keys (JSON and YAML objects)
+`#{"id" => String, ...}` would cover the 114 string-key reads in exdura,
+symphony, beamtalk-linear and beamtalk-agents, and map patterns already
+accept string keys. Left out: that data is external and the types are erased,
+so a shape over it is an unchecked claim that looks like a guarantee. Those
+libraries mostly want tag-field narrowing (`msg at: "type"`) and validation,
+neither of which a shape provides. The right tool today is a `Value` class
+built at the boundary. Revisit together with string singleton types.
 
 ### A named `shape` declaration (nominal)
 `shape WebSocketOptions ...` as its own declaration kind. Rejected: `type`
@@ -406,7 +395,7 @@ FFI results.
 
 ### Negative
 - A new `InferredType` variant: every exhaustive match on types gains an arm.
-- Shapes are unchecked on external data and can give false confidence.
+- String-keyed data (JSON, YAML) gets nothing from this ADR.
 - Runtime validators remain for dynamic callers and value-range checks, so
   the shape and the validator can still drift.
 - Until update operations are shape-aware, `opts at: #k put: v` answers a
@@ -443,9 +432,9 @@ None of this touches state-threading lowering, so `ci:corpus` is not needed.
 - Per-key result types for `at:put:`, `removeKey:`, `merge:`.
 - `includesKey:` narrowing an optional key to present (BT-4709), and with
   it a warning for `at:` on an un-narrowed optional key.
-- Tag-field narrowing over a union of shapes (`msg at: "type"`), which
-  beamtalk-agents and symphony's codex runner would use. Needs string
-  singleton types.
+- String keys, and tag-field narrowing over a union of shapes
+  (`msg at: "type"`), which beamtalk-agents and symphony's codex runner
+  would use. Both need string singleton types and a story for validation.
 - Deriving key lists, option docs or a validator from a shape.
 - Recursive shapes.
 
@@ -467,7 +456,7 @@ result as `Dictionary`.
 - Related issues: BT-4725 (this ADR), BT-4719 (narrowing casts), BT-4709 (narrowing gaps), BT-2949 (generic container element checks)
 - Related ADRs: ADR 0025 (gradual typing), ADR 0068 (parametric types), ADR 0075 (FFI type definitions), ADR 0102 (set-theoretic operators), ADR 0108 (type aliases)
 - Code: `stdlib/src/dictionary.bt`, `crates/beamtalk-core/src/semantic_analysis/type_checker/inference/literals.rs`, `runtime/apps/beamtalk_compiler/src/beamtalk_spec_reader.erl`
-- Motivating code: buccaneer `src/pipeline.bt`, `src/buccaneer_config.bt`; beamtalk-http `src/httpclient.bt`; beamtalk-linear `src/issue.bt`
+- Motivating code: buccaneer `src/pipeline.bt`, `src/buccaneer_config.bt`; beamtalk-http `src/httpclient.bt`
 - Erlang map types: https://www.erlang.org/doc/system/typespec.html#types-and-their-syntax
 - Hack shapes: https://docs.hhvm.com/hack/built-in-types/shape
 - Python TypedDict: PEP 589, PEP 655, PEP 728
