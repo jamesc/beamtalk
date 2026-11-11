@@ -17,16 +17,21 @@ checks (BT-4683).
     per call (`erlang:unique_integer/1`), never a fixed `<file>.tmp`, so two
     writers aiming at the same path can never write into one shared temp file
     and rename each other's partial content into place.
+  * `sweep_stale_temps/2`: delete `temp_path/1` leftovers of a crashed
+    staged write once they are old enough that no live writer can own them.
 
 A leaf module: it calls only OTP.
 """.
+
+-include_lib("kernel/include/file.hrl").
 
 -export([
     path_inside/2,
     relative_parts/2,
     temp_path/1,
     write_temp/2,
-    atomic_write/3
+    atomic_write/3,
+    sweep_stale_temps/2
 ]).
 
 -doc """
@@ -127,4 +132,64 @@ recheck_unchanged(Path, ExpectedCurrent) ->
         {ok, ExpectedCurrent} -> ok;
         {ok, _Other} -> {error, changed_on_disk};
         {error, Reason} -> {error, Reason}
+    end.
+
+-doc """
+Delete stale `temp_path/1` leftovers next to `Path`: siblings named
+`<basename>.<digits>.tmp` whose last modification is more than `MaxAgeSeconds`
+ago. Returns the paths it deleted.
+
+A staged writer (flush Phase A then Phase B) that crashes between its two
+phases leaves its unique temp file behind, and nothing else ever reads or
+overwrites it. Only age tells a crashed writer's file from a live one's: a
+live writer renames its temp file within moments, so anything older than
+`MaxAgeSeconds` is abandoned. A fresh temp file is never touched, so this is
+safe to run while another writer is staging the same `Path`. Best effort:
+files that cannot be inspected or deleted are skipped.
+""".
+-spec sweep_stale_temps(string(), non_neg_integer()) -> [string()].
+sweep_stale_temps(Path, MaxAgeSeconds) ->
+    Dir = filename:dirname(Path),
+    Prefix = filename:basename(Path) ++ ".",
+    Now = erlang:system_time(second),
+    Names =
+        case file:list_dir(Dir) of
+            {ok, Ns} -> Ns;
+            {error, _} -> []
+        end,
+    lists:filtermap(
+        fun(Name) ->
+            Candidate = filename:join(Dir, Name),
+            case is_temp_name(Prefix, Name) andalso older_than(Candidate, Now, MaxAgeSeconds) of
+                true -> file:delete(Candidate) =:= ok andalso {true, Candidate};
+                false -> false
+            end
+        end,
+        Names
+    ).
+
+%% `Name` is `Prefix ++ Digits ++ ".tmp"` with at least one digit: exactly
+%% what `temp_path/1` produces for the file `Prefix` was built from.
+-spec is_temp_name(string(), string()) -> boolean().
+is_temp_name(Prefix, Name) ->
+    case lists:prefix(Prefix, Name) of
+        true ->
+            %% Match ".tmp" on what follows the prefix, so a name where the
+            %% prefix's own trailing "." would also start ".tmp" (the legacy
+            %% `<basename>.tmp`) is not mistaken for one.
+            case lists:reverse(lists:nthtail(length(Prefix), Name)) of
+                "pmt." ++ RevDigits when RevDigits =/= [] ->
+                    lists:all(fun(C) -> C >= $0 andalso C =< $9 end, RevDigits);
+                _ ->
+                    false
+            end;
+        false ->
+            false
+    end.
+
+-spec older_than(string(), integer(), non_neg_integer()) -> boolean().
+older_than(File, Now, MaxAgeSeconds) ->
+    case file:read_file_info(File, [{time, posix}]) of
+        {ok, #file_info{type = regular, mtime = MTime}} -> Now - MTime > MaxAgeSeconds;
+        _ -> false
     end.

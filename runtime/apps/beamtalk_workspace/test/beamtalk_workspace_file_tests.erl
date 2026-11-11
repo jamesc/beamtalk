@@ -13,9 +13,11 @@ The last two groups pin the BT-4683 behaviour change for ChangeLog and
 flush writes: they used to stage through a fixed `<file>.tmp`, so a second
 writer's staging file at that name was overwritten and renamed into place.
 They now stage through a unique name and leave a foreign `<file>.tmp` alone.
+A successful flush commit sweeps only stale unique staging files.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("kernel/include/file.hrl").
 
 %%====================================================================
 %% path_inside/2, relative_parts/2
@@ -122,6 +124,33 @@ atomic_write_concurrent_writers_never_mix_test() ->
     end).
 
 %%====================================================================
+%% sweep_stale_temps/2
+%%====================================================================
+
+sweep_stale_temps_deletes_only_old_unique_temps_of_that_file_test() ->
+    with_dir(fun(Dir) ->
+        Path = filename:join(Dir, "a.bt"),
+        Old = Path ++ ".17.tmp",
+        Young = Path ++ ".18.tmp",
+        Legacy = Path ++ ".tmp",
+        NotDigits = Path ++ ".x1.tmp",
+        Sibling = filename:join(Dir, "b.bt.17.tmp"),
+        Prefixed = filename:join(Dir, "a.bt2.17.tmp"),
+        Kept = [Young, Legacy, NotDigits, Sibling, Prefixed],
+        lists:foreach(fun(F) -> ok = file:write_file(F, <<>>) end, [Old | Kept]),
+        lists:foreach(fun(F) -> ok = set_age(F, 7200) end, [
+            Old, Legacy, NotDigits, Sibling, Prefixed
+        ]),
+        ?assertEqual([Old], beamtalk_workspace_file:sweep_stale_temps(Path, 3600)),
+        ?assertNot(filelib:is_regular(Old)),
+        lists:foreach(fun(F) -> ?assert(filelib:is_regular(F)) end, Kept),
+        %% A missing directory is not an error.
+        ?assertEqual(
+            [], beamtalk_workspace_file:sweep_stale_temps(filename:join([Dir, "no", "x.bt"]), 0)
+        )
+    end).
+
+%%====================================================================
 %% beamtalk_workspace_flush stages through a unique temp name
 %%====================================================================
 
@@ -158,6 +187,41 @@ flush_does_not_touch_a_foreign_fixed_tmp_test() ->
         ?assertEqual({ok, <<"another writer's half-written body">>}, file:read_file(Foreign)),
         %% Only the foreign file is left; flush's own staging file is gone.
         ?assertEqual(["counter.bt.tmp"], tmp_files(ProjDir))
+    end).
+
+%% A crashed earlier flush's unique staging file is swept by the next
+%% successful commit to the same file once it is stale; a fresh one (which
+%% could be another flush in flight) is left alone.
+flush_sweeps_a_stale_unique_tmp_but_not_a_fresh_one_test() ->
+    with_changelog(fun(_WorkspaceId, Home) ->
+        ProjDir = filename:join([Home, "proj", "src"]),
+        ok = filelib:ensure_path(ProjDir),
+        File = filename:join(ProjDir, "counter.bt"),
+        Original = <<"Object subclass: Counter\n  value => 0\nend\n">>,
+        ok = file:write_file(File, Original),
+        Stale = File ++ ".111.tmp",
+        Fresh = File ++ ".222.tmp",
+        ok = file:write_file(Stale, <<"crashed attempt">>),
+        ok = file:write_file(Fresh, <<"in flight">>),
+        ok = set_age(Stale, 2 * 3600),
+        OldBody = <<"value => 0\n">>,
+        {Start, Len} = binary:match(Original, OldBody),
+        {ok, _} = beamtalk_workspace_changelog:append(#{
+            class => <<"Counter">>,
+            selector => <<"value">>,
+            kind => instance,
+            source => <<"value => 42\n">>,
+            prev_source => OldBody,
+            intent => durable,
+            flushable => true,
+            author => <<"sess-test">>,
+            author_kind => human,
+            source_file => list_to_binary(File),
+            span => #{start => Start, 'end' => Start + Len}
+        }),
+        {ok, Summary} = beamtalk_workspace_flush:flush(),
+        ?assertEqual(1, maps:get(flushed, Summary)),
+        ?assertEqual(["counter.bt.222.tmp"], tmp_files(ProjDir))
     end).
 
 %%====================================================================
@@ -218,6 +282,11 @@ stop(Pid) ->
         {'DOWN', Ref, process, Pid, _} -> ok
     after 5000 -> ok
     end.
+
+%% Backdate `File`'s modification time by `Seconds`.
+set_age(File, Seconds) ->
+    MTime = erlang:system_time(second) - Seconds,
+    file:write_file_info(File, #file_info{mtime = MTime}, [{time, posix}]).
 
 tmp_files(Dir) ->
     {ok, Names} = file:list_dir(Dir),
