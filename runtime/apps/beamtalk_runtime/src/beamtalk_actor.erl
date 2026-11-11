@@ -6709,8 +6709,8 @@ pid_class_candidates_remote_safe(Pid) ->
 -spec remote_single_class_candidates(pid()) -> [atom()].
 remote_single_class_candidates(Pid) ->
     try erpc:call(node(Pid), ?MODULE, pid_class_name, [Pid], ?BT_REMOTE_CALL_TIMEOUT) of
-        nil -> [];
-        Class when is_atom(Class) -> [Class]
+        Class when is_atom(Class), Class =/= nil, Class =/= undefined -> [Class];
+        _ -> []
     catch
         error:{erpc, _ErpcReason} -> [];
         error:{exception, _Reason, _Stack} -> [];
