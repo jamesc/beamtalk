@@ -70,9 +70,7 @@ DispatchDifferentialCase subclass: ClassDispatchDifferentialTest
     facts
 
   // A BUnit run summary without its timing: "1 tests, 1 passed".
-  // The summary arrives as a raw Binary although `run:` / `runAll` declare
-  // `String` (BT-4308), hence `asStringUnchecked`.
-  runSummary: summary -> String => (summary asStringUnchecked split: " (") first
+  runSummary: summary -> String => (summary split: " (") first
 
   // === An open, stateless class: own, inherited and overridden methods ===
   testOpenClassSends =>
