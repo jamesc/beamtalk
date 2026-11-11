@@ -6698,6 +6698,20 @@ pid_class_candidates_remote_safe(Pid) ->
     try erpc:call(node(Pid), ?MODULE, pid_class_candidates, [Pid], ?BT_REMOTE_CALL_TIMEOUT) of
         Result -> Result
     catch
+        %% A node that predates `pid_class_candidates/1` (rolling upgrade,
+        %% ADR 0125): fall back to the single-class answer it does have.
+        error:{exception, undef, _} -> remote_single_class_candidates(Pid);
+        error:{erpc, _ErpcReason} -> [];
+        error:{exception, _Reason, _Stack} -> [];
+        exit:{exception, _Reason} -> []
+    end.
+
+-spec remote_single_class_candidates(pid()) -> [atom()].
+remote_single_class_candidates(Pid) ->
+    try erpc:call(node(Pid), ?MODULE, pid_class_name, [Pid], ?BT_REMOTE_CALL_TIMEOUT) of
+        nil -> [];
+        Class when is_atom(Class) -> [Class]
+    catch
         error:{erpc, _ErpcReason} -> [];
         error:{exception, _Reason, _Stack} -> [];
         exit:{exception, _Reason} -> []
