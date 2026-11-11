@@ -229,7 +229,7 @@ alias.
 
 **Epic:** BT-4533
 **Issues:** BT-4534 (R1, foreign `^` keeps cleanup writes), BT-4532 (pre-store through ThreadedIr; check covers any block operand), BT-4535 (commit reads the cell; fixes BT-4459), BT-4536 (delete relay and stamp, one release after BT-4535), BT-4660 (remove the `nlr_state/2` alias, one release after BT-4536)
-**Status:** Implemented through BT-4536; the `nlr_state/2` alias goes with BT-4660
+**Status:** Implemented (BT-4660 removed the `nlr_state/2` alias)
 
 ## References
 - Issues: BT-4505, BT-4459, BT-4448, BT-4429, BT-4312, BT-4523, BT-4524, BT-4525, BT-4532, BT-3582
