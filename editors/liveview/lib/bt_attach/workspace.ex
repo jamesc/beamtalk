@@ -594,6 +594,27 @@ defmodule BtAttach.Workspace do
     do: dispatch_browse("nav-query", %{"kind" => "implementors", "selector" => selector})
 
   @doc """
+  Return the full keyword selector of the send whose keyword part ends `code`
+  (`nav-query` `kind=keyword_selector`, BT-4455) — go-to-definition's resolver.
+  `context` carries the same editor text the `hover` op takes: `:before`, `:suffix`
+  (both default `""`). The op runs the **same** recognizer as hover
+  (`beamtalk_repl_ops_dev:keyword_send_at/3`), so the two cannot drift.
+
+  Returns the live `{:value, %{"selector" => selector | nil}}` term verbatim
+  (`nil` when no send resolves), or `{:error, reason}` on a dispatch failure.
+  """
+  @spec keyword_selector_at(String.t(), %{optional(:before | :suffix) => String.t()}) ::
+          {:value, term()} | {:error, term()}
+  def keyword_selector_at(code, context \\ %{}) when is_binary(code) and is_map(context),
+    do:
+      dispatch_browse("nav-query", %{
+        "kind" => "keyword_selector",
+        "code" => code,
+        "before" => Map.get(context, :before, ""),
+        "suffix" => Map.get(context, :suffix, "")
+      })
+
+  @doc """
   Return the **required methods** of a protocol (`nav-query`
   `kind=required_methods`, BT-2639) — the protocol equivalent of Implementors,
   backing the System Browser's protocol-definition action row. `protocol` is the

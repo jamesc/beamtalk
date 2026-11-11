@@ -645,8 +645,15 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # than crashing or silently doing nothing — the graceful no-op the AC asks for.
   def handle_event("goto_definition", %{"token" => token} = params, socket)
       when is_binary(token) do
-    code = Map.get(params, "code", "")
-    {:noreply, run_goto_definition(socket, token, code)}
+    # `code` / `before` / `suffix` are the hover op's editor context (BT-4455);
+    # a non-string is treated as absent.
+    context = %{
+      code: string_param(params, "code"),
+      before: string_param(params, "before"),
+      suffix: string_param(params, "suffix")
+    }
+
+    {:noreply, run_goto_definition(socket, token, context)}
   end
 
   def handle_event("goto_definition", _params, socket), do: {:noreply, socket}
@@ -1417,7 +1424,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
   # class-then-selector order mirrors the LSP `definition_provider.rs`: a name
   # that is a loaded class is a class reference (→ its definition tab); anything
   # else is treated as a message send (→ its implementor(s)).
-  defp run_goto_definition(socket, token, code) do
+  defp run_goto_definition(socket, token, context) do
     cond do
       # An empty/blank token is a bare no-op (the JS never sends one — it only
       # fires on an identifier — but guard it without even a flash).
@@ -1433,7 +1440,7 @@ defmodule BtAttachWeb.Live.SystemBrowser do
         |> assign(nav_popover: nil)
 
       true ->
-        case goto_selector(token, code) do
+        case goto_selector(socket, token, context) do
           nil -> goto_not_found(socket)
           selector -> open_implementor(socket, selector)
         end
@@ -1450,42 +1457,35 @@ defmodule BtAttachWeb.Live.SystemBrowser do
     |> Enum.any?(fn row -> Map.get(row, "name") == token end)
   end
 
-  # The message selector the clicked token denotes, derived from the `code`
-  # line-prefix (the line up to and including the token):
+  # The message selector the clicked token denotes:
   #
-  #   * a KEYWORD send — the prefix ends in `…word:` (optionally with a trailing
-  #     argument the click landed before) — resolves to the maximal trailing run
-  #     of `word:` parts, so clicking any part of `dict at: k put: v` resolves the
-  #     whole `at:put:` selector.
+  #   * a KEYWORD part (the token ends in `:`, e.g. `fetch:` — the editor keeps
+  #     the colon) resolves to the send's FULL keyword selector (`fetch:options:`)
+  #     whichever part was clicked. That is the `keyword_selector` nav-query,
+  #     which runs the SAME recognizer cockpit hover uses (BT-4343), so strings,
+  #     comments, nested brackets and sends split across lines are handled in one
+  #     place. `before`/`suffix` are the editor context around the token.
   #   * otherwise the bare token is a UNARY selector (e.g. `factorial`).
   #
-  # An empty/whitespace token yields nil (no selector to resolve). The result is
-  # only ever fed to the `implementors` nav-query, whose `binary_to_existing_atom`
-  # guard turns an unknown selector into an empty result set — so a wrong guess is
-  # a graceful "no definition", never a crash.
-  defp goto_selector(token, code) when is_binary(code) do
-    case keyword_selector(code) do
-      nil -> if token == "", do: nil, else: token
-      selector -> selector
-    end
-  end
+  # An empty token, or a keyword part whose send does not resolve (inside a
+  # string/comment, an expression receiver), yields nil — "no definition", never
+  # a guess at a partial selector. The result is only ever fed to the
+  # `implementors` nav-query, whose `binary_to_existing_atom` guard turns an
+  # unknown selector into an empty result set, so a wrong guess is a graceful
+  # "no definition", never a crash.
+  defp goto_selector(socket, token, context) do
+    cond do
+      token == "" ->
+        nil
 
-  defp goto_selector(token, _code), do: if(token == "", do: nil, else: token)
+      String.ends_with?(token, ":") ->
+        case Facade.dispatch(:keyword_selector, context, RequestContext.build(socket)) do
+          {:value, %{"selector" => selector}} when is_binary(selector) -> selector
+          _ -> nil
+        end
 
-  # Extract the trailing keyword selector (`word:word:…`) from a line prefix, or
-  # nil when it is not a keyword send. The clicked keyword belongs to the send
-  # that ends the prefix, so we first trim to the trailing segment — everything
-  # after the last statement/grouping breaker (`.`, `;`, brackets, `^`, `|`) —
-  # then join that segment's contiguous `word:` parts. This keeps unrelated sends
-  # earlier on the line out of the selector (e.g. `coll at: i. obj foo: x bar: y`
-  # clicked near `y` resolves to `foo:bar:`, not `at:foo:bar:`).
-  defp keyword_selector(code) do
-    segment = code |> String.split(~r/[.;()\[\]{}^|]/) |> List.last()
-    parts = Regex.scan(~r/([A-Za-z_][A-Za-z0-9_]*):/, segment) |> Enum.map(&Enum.at(&1, 1))
-
-    case parts do
-      [] -> nil
-      _ -> parts |> Enum.map(&(&1 <> ":")) |> Enum.join()
+      true ->
+        token
     end
   end
 

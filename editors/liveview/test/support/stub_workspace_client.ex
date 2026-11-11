@@ -1301,6 +1301,19 @@ defmodule BtAttachWeb.StubWorkspaceClient do
     {:value, %{"sites" => rows}}
   end
 
+  # BT-4455: go-to-definition's keyword-selector resolver. The stub joins the
+  # keyword parts of the (single-line) send around the clicked token, which is
+  # enough to drive the LiveView flow; the real recognizer is covered by the
+  # Erlang `nav-query` tests.
+  def keyword_selector_at(code, context \\ %{}) do
+    text = code <> Map.get(context, :suffix, "")
+
+    case Regex.scan(~r/([A-Za-z_][A-Za-z0-9_]*:)(?!=)/, text) do
+      [] -> {:value, %{"selector" => nil}}
+      parts -> {:value, %{"selector" => parts |> Enum.map(&Enum.at(&1, 1)) |> Enum.join()}}
+    end
+  end
+
   @doc """
   Test helper (BT-2666): seed the `implementors_of/1` rows for a selector. Each
   row is a `{class, side, selector}` site map in the `nav-query` shape (`"class"`,

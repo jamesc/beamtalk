@@ -27,7 +27,7 @@ Request shape:
 ```
 {"op": "nav-query", "id": "...",
   "kind": "<senders|implementors|references|required_methods|conforming_classes|
-            callers_of_native_module>",
+            callers_of_native_module|keyword_selector>",
   "selector": "increment"            // for senders/implementors (Beamtalk selector)
   "class":    "Counter"              // for references            (Beamtalk class name)
                                      //  and required_methods/conforming_classes
@@ -112,6 +112,19 @@ handle_term(<<"nav-query">>, Params, _Msg, _SessionPid) ->
         {ok, {conforming_classes, ProtocolName}} ->
             Classes = beamtalk_protocol_registry:conforming_classes(ProtocolName),
             {value, conforming_classes_value(Classes, ProtocolName)};
+        {ok, {keyword_selector, {Before, Code, Suffix}}} ->
+            %% Editor go-to-definition (BT-4455): the clicked keyword part's full
+            %% send selector, from the SAME recognizer cockpit hover uses
+            %% (`beamtalk_repl_ops_dev:keyword_send_at/3`), so the two cannot
+            %% drift. `null` when no send resolves (not a keyword part, an
+            %% expression receiver, a keyword inside a string/comment); the
+            %% client then reports "no definition" rather than guessing.
+            Selector =
+                case beamtalk_repl_ops_dev:keyword_send_at(Before, Code, Suffix) of
+                    {ok, _Receiver, Sel} -> Sel;
+                    _ -> null
+                end,
+            {value, #{<<"selector">> => Selector}};
         {ok, {callers_of_native_module, Module}} ->
             %% Explicit `(Erlang <module>) …` FFI callers, plus
             %% ADR 0056 `self delegate` callers (a `native:` class's delegating
@@ -135,7 +148,14 @@ describe_ops() ->
     #{
         <<"nav-query">> => #{
             <<"params">> => [<<"kind">>],
-            <<"optional">> => [<<"selector">>, <<"class">>, <<"module">>]
+            <<"optional">> => [
+                <<"selector">>,
+                <<"class">>,
+                <<"module">>,
+                <<"code">>,
+                <<"before">>,
+                <<"suffix">>
+            ]
         }
     }.
 
@@ -150,8 +170,9 @@ describe_ops() ->
         | references
         | required_methods
         | conforming_classes
-        | callers_of_native_module,
-        atom()
+        | callers_of_native_module
+        | keyword_selector,
+        atom() | {binary(), binary(), binary()}
     }}
     | {error, binary()}.
 validate_params(Params) ->
@@ -168,10 +189,12 @@ validate_params(Params) ->
             with_class(Params, conforming_classes);
         <<"callers_of_native_module">> ->
             with_module(Params);
+        <<"keyword_selector">> ->
+            with_editor_context(Params);
         undefined ->
             {error, <<
                 "missing required parameter `kind` (one of senders/implementors/"
-                "references/required_methods/conforming_classes/callers_of_native_module)"
+                "references/required_methods/conforming_classes/callers_of_native_module/keyword_selector)"
             >>};
         Other when is_binary(Other) ->
             {error,
@@ -180,11 +203,32 @@ validate_params(Params) ->
                     Other,
                     <<
                         "` (expected senders/implementors/references/"
-                        "required_methods/conforming_classes/callers_of_native_module)"
+                        "required_methods/conforming_classes/callers_of_native_module/keyword_selector)"
                     >>
                 ])};
         _ ->
             {error, <<"`kind` must be a string">>}
+    end.
+
+%% `keyword_selector` takes the hover op's editor context: `code` (the line up
+%% to the clicked token, required) plus optional `before` / `suffix`.
+-spec with_editor_context(map()) ->
+    {ok, {keyword_selector, {binary(), binary(), binary()}}} | {error, binary()}.
+with_editor_context(Params) ->
+    Text = fun(Key) ->
+        case maps:get(Key, Params, <<>>) of
+            V when is_binary(V) -> V;
+            _ -> invalid
+        end
+    end,
+    case {Text(<<"before">>), Text(<<"code">>), Text(<<"suffix">>)} of
+        {B, C, S} when is_binary(B), is_binary(C), is_binary(S), C =/= <<>> ->
+            {ok, {keyword_selector, {B, C, S}}};
+        _ ->
+            {error, <<
+                "`code` (non-empty string) is required for keyword_selector; "
+                "`before`/`suffix` must be strings"
+            >>}
     end.
 
 -spec with_selector(map(), senders | implementors) ->

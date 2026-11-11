@@ -164,6 +164,10 @@ defmodule BtAttach.Facade do
     # `callers_of_native_module`, backed by the `beamtalk_xref` reverse FFI
     # index). Pure xref, no user code, safe for the Observer role.
     callers_of_native_module: :read,
+    # BT-4455: go-to-definition's keyword-selector resolver — the same
+    # recognizer cockpit hover uses, exposed as a `nav-query` kind. Pure
+    # text scan, no user code, so `:read` (Observer may navigate).
+    keyword_selector: :read,
     symbols: :read,
     subscribe_transcript: :read,
     subscribe_bindings: :read,
@@ -409,6 +413,17 @@ defmodule BtAttach.Facade do
   defp invoke(:senders, %{selector: selector}, _ctx) do
     if is_binary(selector),
       do: client().senders_of(selector),
+      else: {:error, :invalid_params}
+  end
+
+  # BT-4455: the full keyword selector at a clicked keyword part. `code` /
+  # `before` / `suffix` are the hover op's editor context; a bad shape is
+  # `:invalid_params` with no dist call.
+  defp invoke(:keyword_selector, %{code: code} = params, _ctx) do
+    context = %{before: Map.get(params, :before, ""), suffix: Map.get(params, :suffix, "")}
+
+    if is_binary(code) and is_binary(context.before) and is_binary(context.suffix),
+      do: client().keyword_selector_at(code, context),
       else: {:error, :invalid_params}
   end
 
