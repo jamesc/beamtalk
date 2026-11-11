@@ -139,8 +139,9 @@ fn non_test_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
 
 /// The contents of every string literal in the non-test part of a Rust
 /// source file, with the 1-based line it starts on. Comment lines are
-/// skipped, and scanning stops at the first `#[cfg(test)]` that opens a
-/// `mod` (the in-file unit tests).
+/// skipped, and scanning stops at the first `#[cfg(test)]` that opens an
+/// inline `mod x {` (the in-file unit tests). An out-of-line
+/// `#[cfg(test)] mod x;` does not stop it.
 fn string_literals(src: &str) -> Vec<(usize, String)> {
     let lines: Vec<&str> = src.lines().collect();
     let mut out = Vec::new();
@@ -150,7 +151,12 @@ fn string_literals(src: &str) -> Vec<(usize, String)> {
             && lines[i + 1..]
                 .iter()
                 .find(|l| !l.trim().is_empty())
-                .is_some_and(|l| l.trim_start().starts_with("mod "))
+                .is_some_and(|l| {
+                    // Only an inline `mod x {` opens test code; an
+                    // out-of-line `mod x;` sits among production items.
+                    let l = l.trim();
+                    l.starts_with("mod ") && l.ends_with('{')
+                })
         {
             break;
         }
@@ -433,6 +439,22 @@ fn string_literals_skip_comments_and_unit_tests() {
     .join("\n");
     let lits: Vec<String> = string_literals(&src).into_iter().map(|(_, s)| s).collect();
     assert_eq!(lits, ["call 'beamtalk_m':'f'(Self)", "esc \"q\""]);
+}
+
+#[test]
+fn string_literals_continue_past_an_out_of_line_test_mod() {
+    let src = [
+        "#[cfg(test)]",
+        "mod sibling_tests;",
+        "let a = \"after\";",
+        "#[cfg(test)]",
+        "mod tests {",
+        "    const T: &str = \"inside\";",
+        "}",
+    ]
+    .join("\n");
+    let lits: Vec<String> = string_literals(&src).into_iter().map(|(_, s)| s).collect();
+    assert_eq!(lits, ["after"]);
 }
 
 #[test]
