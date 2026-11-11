@@ -310,7 +310,10 @@ fn test_match_type_pattern_non_leaf_class_compiles_to_runtime_kind_of_test() {
         "Non-leaf type pattern should call the runtime kind-of test. Got:\n{code}"
     );
     assert!(
-        code.contains("'valueIsKindOfClass'(") && code.contains(", 'Shape')"),
+        code.lines().any(|l| {
+            l.find("'valueIsKindOfClass'(")
+                .is_some_and(|i| l[i..].contains(", 'Shape')"))
+        }),
         "Kind-of test should name the pattern class. Got:\n{code}"
     );
 

@@ -338,11 +338,11 @@ pub(crate) fn is_concrete_leaf_class(class_name: &str, hierarchy: &ClassHierarch
 ///   [`super::structural_validators::check_unresolved_classes`]: without
 ///   cross-file metadata loaded, any class reference might be a
 ///   not-yet-seen cross-file dependency, so the check stays silent.
-/// - **Non-leaf class** (has one or more subclasses) is a compile `Error` —
-///   Phase A only supports concrete/leaf classes; matching on a class with
-///   subclasses needs either compile-time subclass enumeration or a wrapped
-///   runtime dispatch call, deferred to ADR 0107 Phase B. Classes in
-///   [`PHASE_A_PRIMITIVE_CLASSES`] are exempt from this check (see its doc).
+/// - **Non-leaf class** (has one or more subclasses) is accepted (BT-4319,
+///   ADR 0107 Phase B): codegen emits a runtime `isKindOf:`-equivalent test.
+///   An **abstract** class is an `Error` only when no subclass is visible,
+///   since then no live instance can carry its tag. Classes in
+///   [`PHASE_A_PRIMITIVE_CLASSES`] skip both checks (see its doc).
 pub(crate) fn check_type_pattern_classes(
     module: &Module,
     hierarchy: &ClassHierarchy,
@@ -512,11 +512,11 @@ fn validate_type_pattern_class(
     // Pid}` at runtime (`beamtalk_supervisor.erl`) — a third shape distinct
     // from both the tagged-map (`Value`/`Object`) and actor-tuple
     // (`'beamtalk_object'`) strategies. `generate_type_pattern`'s
-    // `wrap_supervisor_class_tag_test` handles this shape directly, so
-    // concrete subclasses fall through to the ordinary leaf-class check
-    // below rather than being rejected outright. The abstract bases themselves
-    // (`Supervisor`, `DynamicSupervisor`) are still rejected below: no live
-    // instance ever carries the abstract class's own tag.
+    // `wrap_supervisor_class_tag_test` handles this shape directly for a
+    // concrete leaf subclass. The abstract bases themselves (`Supervisor`,
+    // `DynamicSupervisor`) are accepted below only when a subclass is visible
+    // (they then use the runtime kind-of test); with none, they are rejected
+    // since no live instance ever carries the abstract class's own tag.
 
     // BT-4319 (ADR 0107 Phase B): a class with subclasses is accepted. The
     // arm compiles to a runtime `isKindOf:`-equivalent test
