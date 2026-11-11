@@ -965,7 +965,9 @@ impl CoreErlangGenerator {
     ///
     /// The selector gates come first. Binary operators never reach the
     /// dynamic fallthrough (preserving `generate_runtime_dispatch`'s internal
-    /// error exactly). The `perform:` family is claimed by intrinsics first too, and the
+    /// error exactly). `fieldAt:put:` needs no gate: the object-reflection
+    /// intrinsic always claims it, and its hint agrees on every path
+    /// (BT-4273). The `perform:` family is claimed by intrinsics first too, and the
     /// fixture's rewritten selectors (`perform:withArguments:timeout:`) never
     /// reach a `dispatch/3` through the dynamic path, which turns them into a
     /// `send/4` of the target selector.
