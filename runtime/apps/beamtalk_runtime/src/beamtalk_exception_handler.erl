@@ -907,7 +907,12 @@ dispatch('selector', [], #{error := Error}) ->
         Selector -> Selector
     end;
 dispatch('errorClass', [], #{error := Error}) ->
-    Error#beamtalk_error.class;
+    %% BT-4227: raw exit/throw/undef and `signal_message/1` errors carry no
+    %% class (`undefined`); answer nil rather than leaking the sentinel.
+    case Error#beamtalk_error.class of
+        undefined -> nil;
+        Class -> Class
+    end;
 dispatch('reason', [], #{error := #beamtalk_error{details = Details}}) ->
     raw_reason(Details);
 dispatch('reason', [], _) ->

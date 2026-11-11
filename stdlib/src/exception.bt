@@ -120,14 +120,15 @@ Object subclass: Exception
   selector -> Symbol | Nil => @primitive
 
   /// Return the name of the class where the error occurred, as a Symbol
-  /// (like `kind` and `selector`). Send `asString` for a String.
+  /// (like `kind` and `selector`). Send `asString` for a String. Answers
+  /// `nil` when no class was recorded (e.g. a raw Erlang `throw`/`exit`).
   ///
   /// ## Examples
   /// ```beamtalk
   /// [42 unknownMsg] on: Exception do: [:e | e errorClass]   // => #Integer
   /// [42 unknownMsg] on: Exception do: [:e | e errorClass asString]   // => "Integer"
   /// ```
-  errorClass -> Symbol => @primitive
+  errorClass -> Symbol | Nil => @primitive
 
   /// Return the underlying Erlang error term, or nil if none was recorded.
   ///

@@ -388,6 +388,12 @@ dispatch_error_class_test() ->
         beamtalk_exception_handler:dispatch('errorClass', [], Ex)
     ).
 
+%% BT-4227: an undefined class maps to nil, not the `undefined` atom.
+dispatch_error_class_nil_when_undefined_test() ->
+    Error = (beamtalk_error:new(runtime_error, 'SomeClass'))#beamtalk_error{class = undefined},
+    Ex = #{'$beamtalk_class' => 'RuntimeError', error => Error},
+    ?assertEqual(nil, beamtalk_exception_handler:dispatch('errorClass', [], Ex)).
+
 %% BT-3954: reason exposes details.reason, nil when absent.
 dispatch_reason_nil_when_absent_test() ->
     Ex = make_test_exception(),
