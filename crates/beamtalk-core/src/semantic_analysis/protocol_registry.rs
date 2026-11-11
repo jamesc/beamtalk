@@ -66,7 +66,7 @@ impl ProtocolMethodRequirement {
 /// **DDD Context:** Semantic Analysis — Value Object
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReturnTypeMismatch {
-    /// The requirement's selector (e.g. `asString`).
+    /// The requirement's (or provision's) selector (e.g. `asString`).
     pub selector: EcoString,
     /// `true` for a `class` requirement, resolved against the class's
     /// class-side methods (BT-4441); `false` for an instance requirement.
@@ -75,7 +75,7 @@ pub struct ReturnTypeMismatch {
     pub defined_in: EcoString,
     /// The resolved method's declared return type.
     pub actual: DeclaredType,
-    /// The protocol requirement's declared return type.
+    /// The protocol requirement's or provision's declared return type.
     pub expected: DeclaredType,
 }
 
@@ -357,25 +357,31 @@ impl ProtocolInfo {
                 };
                 // Selector presence was checked above, and `mine` holds this
                 // protocol's provisions as well as its requirements.
-                let Some(own) = mine
+                let mut entries = mine
                     .iter()
                     .filter(|r| r.selector == req.selector)
-                    .max_by_key(|r| r.return_type.is_some())
-                else {
+                    .peekable();
+                if entries.peek().is_none() {
                     return false;
-                };
-                own.return_type
-                    .as_deref()
-                    .map(DeclaredType::parse)
-                    .is_some_and(|actual| {
-                        actual.mentions_any(&type_params)
-                            || TypeChecker::is_return_type_refinement(&actual, &expected, hierarchy)
-                    })
+                }
+                // Every entry of the protocol's type binds a conformer, so
+                // the strongest typed one is what a user of `mine` can rely
+                // on: some entry must refine `expected`.
+                entries.any(|own| {
+                    own.return_type
+                        .as_deref()
+                        .map(DeclaredType::parse)
+                        .is_some_and(|actual| {
+                            actual.mentions_any(&type_params)
+                                || TypeChecker::is_return_type_refinement(
+                                    &actual, &expected, hierarchy,
+                                )
+                        })
+                })
             })
         };
-        // Requirements and provisions side by side: `refines` prefers the
-        // entry that declares a return type, so a provision's own type is
-        // not hidden by an untyped requirement of the same selector.
+        // Requirements and provisions side by side: a provision's own type
+        // is not hidden by an untyped requirement of the same selector.
         let mut instance_side = self.all_requirements(registry);
         instance_side.extend(self.all_provided(registry));
         refines(instance_side, other.all_requirements(registry))
@@ -878,16 +884,18 @@ impl ProtocolRegistry {
         let type_params = protocol.all_type_params(self);
         let mut mismatches = Vec::new();
         // A provision's declared return type is part of the protocol's type
-        // too (ADR 0127 §8; BT-4490), so a class is judged against it as
-        // against a requirement — otherwise `P class <: Q class` would accept
-        // what a direct `C class` check rejects. A requirement of the same
-        // selector takes precedence.
-        let requirements = protocol.all_requirements(self);
-        let provisions = protocol
-            .all_provided(self)
+        // too (ADR 0127 §8; BT-4490), so a class is judged against every
+        // typed requirement *and* provision — the same entries
+        // `subsumes_conformance_to` relies on, so the two cannot disagree.
+        // That includes a `uses:` class whose own override widens a
+        // provision: it is reported here at each `:: P` call site as well as
+        // at the override's definition, because the class really does answer
+        // a type the protocol does not promise.
+        for req in protocol
+            .all_requirements(self)
             .into_iter()
-            .filter(|p| !requirements.iter().any(|r| r.selector == p.selector));
-        for req in requirements.iter().copied().chain(provisions) {
+            .chain(protocol.all_provided(self))
+        {
             let Some(expected) = req.judged_return_type(&type_params) else {
                 continue;
             };
@@ -918,13 +926,17 @@ impl ProtocolRegistry {
             }) {
                 continue;
             }
-            mismatches.push(ReturnTypeMismatch {
+            let mismatch = ReturnTypeMismatch {
                 selector: req.selector.clone(),
                 class_side: false,
                 defined_in: method.defined_in.clone(),
                 actual: actual.clone(),
                 expected,
-            });
+            };
+            // A requirement and a provision may state the same type.
+            if !mismatches.contains(&mismatch) {
+                mismatches.push(mismatch);
+            }
         }
         for req in protocol.all_class_requirements(self) {
             let Some(expected) = req.judged_return_type(&type_params) else {

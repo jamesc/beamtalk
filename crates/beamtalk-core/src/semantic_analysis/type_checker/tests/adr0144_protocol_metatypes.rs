@@ -1117,3 +1117,81 @@ Object subclass: Caller
         "Clash's `name -> Integer` clashes with the provision: {msgs:#?}"
     );
 }
+
+#[test]
+fn class_cannot_reach_requires_through_a_typed_provision_over_an_untyped_requirement() {
+    // `Base` requires an untyped `name`, `Child extending: Base` provides
+    // `name -> String`. `Clash` (`name -> Integer`) must be refused at
+    // `:: Child class`, or it would reach `Requires class` (String) through
+    // `Child class <: Requires class`.
+    let source = r#"
+Protocol define: Base
+  name
+
+Protocol define: Child
+  extending: Base
+  name -> String => "c"
+
+sealed Object subclass: Clash
+  name -> Integer => 1
+
+Object subclass: Caller
+  child: c :: Child class => c
+  run => self child: Clash
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        msgs.iter().any(|m| m.contains("Child class")),
+        "Clash answers Integer where Child's provision promises String: {msgs:#?}"
+    );
+}
+
+#[test]
+fn narrower_requirement_refines_even_when_a_parent_provision_is_broader() {
+    // `Base` provides `name -> Object`; `Child extending: Base` requires the
+    // narrower `name -> String`. Every `Child` conformer answers a String, so
+    // `Child class <: Requires class` holds.
+    let source = r"
+Protocol define: Base
+  name -> Object => 1
+
+Protocol define: Child
+  extending: Base
+  name -> String
+
+Protocol define: Requires
+  name -> String
+
+Object subclass: Caller
+  requires: r :: Requires class => r
+  run: c :: Child class => self requires: c
+";
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        !msgs.iter().any(|m| m.contains("Requires class")),
+        "{msgs:#?}"
+    );
+}
+
+#[test]
+fn instance_clashing_with_a_provision_return_type_warns_at_the_call_site() {
+    // A provision's declared return type is part of the protocol's type, so
+    // passing a `Clash` instance to `:: Provides` reports the mismatch.
+    let source = r#"
+Protocol define: Provides
+  name -> String => "p"
+
+sealed Object subclass: Clash
+  name -> Integer => 1
+
+Object subclass: Caller
+  take: p :: Provides => p
+  run => self take: Clash new
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert!(
+        msgs.iter()
+            .any(|m| m.contains("Clash>>name returns Integer")),
+        "{msgs:#?}"
+    );
+}
