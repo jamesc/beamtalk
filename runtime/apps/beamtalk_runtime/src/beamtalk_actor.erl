@@ -6627,7 +6627,7 @@ registered_name_for_pid(Pid) when is_pid(Pid) ->
 %% `nil` wins as the single sentinel — see `registered_name_for_pid/1` above.
 %%
 %% A `native:` actor's backing gen_server (ADR 0056) has no marker; its class
-%% comes from the `'$initial_call'` fallback (`native_pid_class_name/1`,
+%% comes from the `'$initial_call'` fallback (`native_pid_class_candidates/1`,
 %% BT-4657), so native actors also get a class label in the inspector and are
 %% resolvable via `named:` / `allRegistered`. (Process navigation still
 %% classifies via the marker-only `is_beamtalk_actor/1`.)
@@ -6706,7 +6706,14 @@ pid_class_candidates_remote_safe(Pid) ->
 %% Pick the class a `named:` lookup resolves to from a pid's candidates
 %% (BT-4664). An exact match on the receiver wins, then a single candidate
 %% under it; several candidates under it leave the class undecidable, so
-%% report them as `shared`.
+%% report them as `shared`. That includes a common-ancestor receiver
+%% (`Actor named: #x`): rejecting it is intentional, as the proxy's class and
+%% facade module would otherwise be arbitrary.
+%%
+%% Contract: classes sharing a backing module must each work against any
+%% process of that module, so answering with the receiver's class (or its one
+%% matching descendant) rather than the class the process was spawned through
+%% is not a misclassification.
 -spec resolve_named_class(atom(), [atom()]) -> none | {ok, atom()} | {shared, [atom()]}.
 resolve_named_class(_ReceiverClass, []) ->
     none;
