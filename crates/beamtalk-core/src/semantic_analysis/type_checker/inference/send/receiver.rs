@@ -890,7 +890,7 @@ impl TypeChecker {
                         // `Box(Integer)` not bare `Box` (the shared
                         // `resolve_declared_type` resolver's `SelfType` arm reads
                         // this same key — see its doc).
-                        return type_resolver::resolve_declared_type(
+                        return type_resolver::resolve_declared_type_in(
                             ret_ty,
                             &type_resolver::merge_substitutions(
                                 &subst,
@@ -900,6 +900,7 @@ impl TypeChecker {
                             self.protocol_registry.as_deref(),
                             self.alias_registry.as_ref(),
                             TypeStringContext::Substitution,
+                            Some(hierarchy),
                         );
                     }
 
@@ -1475,7 +1476,7 @@ impl TypeChecker {
                                 // Thread the concrete member type under
                                 // the `Self` subst key (see
                                 // `resolve_declared_type`'s `SelfType` arm).
-                                return_types.push(type_resolver::resolve_declared_type(
+                                return_types.push(type_resolver::resolve_declared_type_in(
                                     ret_ty,
                                     &type_resolver::merge_substitutions(
                                         &subst,
@@ -1485,6 +1486,7 @@ impl TypeChecker {
                                     self.protocol_registry.as_deref(),
                                     self.alias_registry.as_ref(),
                                     TypeStringContext::Substitution,
+                                    Some(hierarchy),
                                 ));
                             } else if matches!(ret_ty, DeclaredType::Simple(n) if crate::semantic_analysis::type_checker::is_type_var_placeholder(n, hierarchy))
                             {
