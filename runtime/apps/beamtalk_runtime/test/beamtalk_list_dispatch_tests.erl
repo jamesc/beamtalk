@@ -2,7 +2,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 %%% **DDD Context:** Object System Context
 
--module(beamtalk_list_tests).
+-module(beamtalk_list_dispatch_tests).
 
 -moduledoc """
 Integration tests for List compiled dispatch and primitive send.
