@@ -5884,7 +5884,9 @@ named_lookup(Scope, ReceiverClass, Name, Selector) ->
 FFI shim for `class allRegistered -> List(Actor)`.
 
 Returns a list of `#beamtalk_object{}` proxies for every currently-registered
-Beamtalk actor (those carrying the `'$beamtalk_actor'` marker). Kernel
+Beamtalk actor (those carrying the `'$beamtalk_actor'` marker, or a
+`native:` actor's backing process, whose class `pid_class_name/1` derives from
+its backing module, BT-4657). Kernel
 processes and raw OTP-registered processes are excluded.
 """.
 -spec allRegistered(#beamtalk_object{}) -> [#beamtalk_object{}].
@@ -6595,6 +6597,12 @@ registered_name_for_pid(Pid) when is_pid(Pid) ->
 %% `beamtalk_process_navigation:actor_class_name/1` (both sentinel `nil`).
 %% `nil` wins as the single sentinel — see `registered_name_for_pid/1` above.
 %%
+%% A `native:` actor's backing gen_server (ADR 0056) has no marker; its class
+%% comes from the `'$initial_call'` fallback (`native_pid_class_name/1`,
+%% BT-4657), so native actors also get a class label in the inspector and are
+%% resolvable via `named:` / `allRegistered`. (Process navigation still
+%% classifies via the marker-only `is_beamtalk_actor/1`.)
+%%
 %% Local-pid only: `erlang:process_info/2` raises `badarg` for a pid on
 %% another node. `pid_class_name_remote_safe/1` below is the node-aware
 %% wrapper for a caller (like `named_lookup/4`'s `global` scope) whose pid
@@ -6605,6 +6613,30 @@ pid_class_name(Pid) ->
         {dictionary, Dict} when is_list(Dict) ->
             case lists:keyfind('$beamtalk_actor', 1, Dict) of
                 {'$beamtalk_actor', Class} when is_atom(Class) -> Class;
+                _ -> native_pid_class_name(Dict)
+            end;
+        _ ->
+            nil
+    end.
+
+%% BT-4657: a `native:` actor's hand-written backing gen_server (ADR 0056)
+%% never plants the `'$beamtalk_actor'` marker. Its class is read from the
+%% process's `'$initial_call'` (`{BackingModule, init, 1}`, set by
+%% `proc_lib`) through the backing-module index. A backing module shared by
+%% several classes names none of them: `nil`, as for a non-Beamtalk process.
+-spec native_pid_class_name(list()) -> atom() | nil.
+native_pid_class_name(Dict) ->
+    case lists:keyfind('$initial_call', 1, Dict) of
+        {'$initial_call', {Backing, init, 1}} when is_atom(Backing) ->
+            %% The index can hold a stale row for a class whose process died
+            %% (`forget_backing_module_entries/2`), so keep live classes only.
+            Live = [
+                C
+             || C <- beamtalk_class_registry:classes_backing_module(Backing),
+                beamtalk_class_registry:whereis_class(C) =/= undefined
+            ],
+            case Live of
+                [Class] -> Class;
                 _ -> nil
             end;
         _ ->

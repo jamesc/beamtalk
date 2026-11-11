@@ -30,12 +30,13 @@ TestCase subclass: NativeActorSupervisedTest
     self assert: c increment equals: 6
     sup stop
 
-  // The child is registered under its name. (`named:` cannot resolve a
-  // native actor yet: its backing process carries no Beamtalk class tag.)
+  // The child is registered under its name, and `named:` resolves it.
   testNamedNativeChildStartsAndAnswers =>
     sup := Bt4577NativeNamedSup supervise unwrap
     c :: Bt4577NativeCounter := (sup which: Bt4577NativeCounter) unwrap
     self assert: ((Erlang erlang) whereis: #bt4577_native_counter) equals: c pid
+    found :: Bt4577NativeCounter := (Bt4577NativeCounter named: #bt4577_native_counter) unwrap
+    self assert: found getValue equals: 7
     self assert: c getValue equals: 7
     self assert: c increment equals: 8
     sup stop
@@ -92,6 +93,11 @@ TestCase subclass: NativeActorSupervisedTest
       again := Bt4577NativeCounter spawnAs: #bt4577_spawn_as
       self assert: again isError equals: true
       self assert: again error kind equals: #name_registered
+      found :: Bt4577NativeCounter := (Bt4577NativeCounter named: #bt4577_spawn_as) unwrap
+      self assert: found getValue equals: 3
+      wrong := Bt4577NativePool named: #bt4577_spawn_as
+      self assert: wrong isError equals: true
+      self assert: wrong error kind equals: #wrong_class
     ] ensure: [c kill]
 
   testNativeSpawnAsGlobal =>
