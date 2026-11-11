@@ -1371,3 +1371,120 @@ static_call_target_test_() ->
                 end
             end}
     ]}.
+
+%% BT-4004: both node-local locks are `beamtalk_fifo_lock`s. Tag-lock installers
+%% bound their wait and decline (fallback), tag-lock erasers wait unbounded, and
+%% `register`'s shadow lock raises a structured `runtime_error` behind a hung
+%% holder (`unregister` waits unbounded).
+bounded_lock_wait_test_() ->
+    {setup,
+        fun() ->
+            setup_runtime(),
+            application:set_env(
+                beamtalk_runtime, fifo_lock_timeout_ms, #{direct_flag => 100, shadow_flag => 100}
+            )
+        end,
+        fun(_) -> application:unset_env(beamtalk_runtime, fifo_lock_timeout_ms) end, [
+            {"an installer behind a hung tag-lock holder declines; an eraser waits", fun() ->
+                Name = 'Bt4004Cls',
+                Tag = beamtalk_class_registry:class_object_tag(Name),
+                stateless_row(Name),
+                _ = persistent_term:erase(Tag),
+                Parent = self(),
+                Holder = spawn_link(fun() ->
+                    beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() ->
+                        Parent ! holding,
+                        receive
+                            release -> ok
+                        end
+                    end)
+                end),
+                receive
+                    holding -> ok
+                after 5000 -> error(holder_not_holding)
+                end,
+                %% The send path gives up after the bound and takes the fallback.
+                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
+                %% An eraser must not give up: it is still waiting after the bound.
+                Eraser = spawn_link(fun() ->
+                    ok = beamtalk_class_shadow_flags:invalidate(Name),
+                    Parent ! erased
+                end),
+                receive
+                    erased -> error(eraser_gave_up_or_skipped_the_lock)
+                after 400 -> ok
+                end,
+                Holder ! release,
+                receive
+                    erased -> ok
+                after 5000 -> error({eraser_never_finished, Eraser})
+                end,
+                %% The lock is free again: the install now succeeds.
+                ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name))
+            end},
+            {"unregister waits behind a hung shadow-lock holder instead of giving up", fun() ->
+                Tag = beamtalk_class_registry:class_object_tag('Object'),
+                Parent = self(),
+                Holder = spawn_link(fun() ->
+                    beamtalk_extensions:with_shadow_lock(Tag, fun() ->
+                        Parent ! holding,
+                        receive
+                            release -> ok
+                        end
+                    end)
+                end),
+                receive
+                    holding -> ok
+                after 5000 -> error(holder_not_holding)
+                end,
+                spawn_link(fun() ->
+                    ok = beamtalk_extensions:unregister('Object', bt4004_absent, true),
+                    Parent ! unregistered
+                end),
+                receive
+                    unregistered -> error(unregister_gave_up_or_skipped_the_lock)
+                after 400 -> ok
+                end,
+                Holder ! release,
+                receive
+                    unregistered -> ok
+                after 5000 -> error(unregister_never_finished)
+                end
+            end},
+            {"with_shadow_lock times out behind a hung holder", fun() ->
+                %% A real class-object tag, so the lock is taken at all.
+                Tag = beamtalk_class_registry:class_object_tag('Object'),
+                ?assertMatch(
+                    #beamtalk_error{kind = runtime_error, details = #{reason := timeout}},
+                    held_then_raise(Tag, fun() ->
+                        beamtalk_extensions:with_shadow_lock(Tag, fun() -> ran end)
+                    end)
+                ),
+                ?assertEqual(ran, beamtalk_extensions:with_shadow_lock(Tag, fun() -> ran end))
+            end}
+        ]}.
+
+%% Hold the lock (taken by the matching `with_*` fun) in another process while
+%% `Attempt` runs here; return the structured error it raised.
+held_then_raise(Tag, Attempt) ->
+    Parent = self(),
+    HolderFun = fun(F) -> beamtalk_extensions:with_shadow_lock(Tag, F) end,
+    Holder = spawn_link(fun() ->
+        HolderFun(fun() ->
+            Parent ! holding,
+            receive
+                release -> ok
+            end
+        end)
+    end),
+    receive
+        holding -> ok
+    after 5000 -> error(holder_not_holding)
+    end,
+    try Attempt() of
+        Other -> {unexpected, Other}
+    catch
+        error:#{error := Err} -> Err
+    after
+        Holder ! release
+    end.
