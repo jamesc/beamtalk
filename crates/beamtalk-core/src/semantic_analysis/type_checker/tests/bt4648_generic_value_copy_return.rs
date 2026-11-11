@@ -7,7 +7,10 @@
 //! `synthetic_selectors::synthesized_copy_return_type` used to record the
 //! bare class (`Box`), so on `b :: Box(Integer)` the copy `b withItem: 3`
 //! inferred as plain `Box` and `(b withItem: 3) item` lost `Integer`. It is
-//! now `Self`, which resolves to the full receiver type.
+//! now `Self`, which resolves to the full receiver type. The keyword
+//! constructor stays the defining class
+//! (`synthetic_selectors::synthesized_constructor_return_type`): it always
+//! builds that class, even when a subclass inherits it.
 
 use super::common::*;
 
@@ -95,4 +98,35 @@ fn with_star_on_plain_value_class_answers_the_class() {
     let hits = return_mismatches(&diags);
     assert_eq!(hits.len(), 1, "{diags:#?}");
     assert!(hits[0].message.contains("body returns Point"), "{hits:#?}");
+}
+
+const BOX_AND_SUB: &str = "\
+Value subclass: Box(T)\n\
+  field: item :: T = nil\n\
+Box subclass: Sub\n\
+  subOnly -> Integer => 1\n";
+
+/// A keyword constructor inherited by a subclass still builds an instance
+/// of the *defining* class (its codegen ignores the class-self argument),
+/// so `Sub item: 3` is a `Box`, not a `Sub`: `subOnly` on it is a DNU.
+#[test]
+fn inherited_keyword_constructor_answers_the_defining_class() {
+    let diags = check(&format!(
+        "{BOX_AND_SUB}Object subclass: User\n  run -> String => Sub item: 3\n"
+    ));
+    let hits = return_mismatches(&diags);
+    assert_eq!(hits.len(), 1, "{diags:#?}");
+    assert!(hits[0].message.contains("body returns Box"), "{hits:#?}");
+}
+
+/// `with*:` on a subclass instance keeps the subclass: the copy is
+/// `maps:put` on the receiver, which keeps its `$beamtalk_class`.
+#[test]
+fn with_star_on_subclass_instance_answers_the_subclass() {
+    let diags = check(&format!(
+        "{BOX_AND_SUB}Object subclass: User\n  run: s :: Sub -> String => s withItem: 3\n"
+    ));
+    let hits = return_mismatches(&diags);
+    assert_eq!(hits.len(), 1, "{diags:#?}");
+    assert!(hits[0].message.contains("body returns Sub"), "{hits:#?}");
 }

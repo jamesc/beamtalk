@@ -1098,7 +1098,9 @@ fn synthesize_value_auto_methods(
         is_sealed: false,
         is_internal: false,
         spawns_block: false,
-        return_type: Some(beamtalk_core::synthetic_selectors::synthesized_copy_return_type()),
+        return_type: Some(
+            beamtalk_core::synthetic_selectors::synthesized_constructor_return_type(class_name),
+        ),
         param_types,
         doc: Some(ctor_doc),
         primitive: None,
@@ -4757,7 +4759,7 @@ mod tests {
             .find(|m| m.selector == "value:")
             .expect("auto keyword constructor should be generated");
         assert_eq!(ctor.arity, 1);
-        assert_eq!(ctor.return_type, Some(DeclaredType::SelfType));
+        assert_eq!(ctor.return_type, Some(DeclaredType::simple("Wrapper")));
     }
 
     #[test]
