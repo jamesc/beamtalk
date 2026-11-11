@@ -181,7 +181,13 @@ unrelated_subscriber_no_walk_test_() ->
             after
                 meck:unload(beamtalk_class_metadata),
                 lists:foreach(
-                    fun(C) -> catch beamtalk_class_metadata:delete(C) end,
+                    fun(C) ->
+                        try
+                            beamtalk_class_metadata:delete(C)
+                        catch
+                            _:_ -> ok
+                        end
+                    end,
                     ['Announcement', 'ClassLoaded' | [C || {C, _} <- Events]]
                 )
             end,
@@ -212,7 +218,13 @@ exact_and_announcement_subscribers_still_receive_test_() ->
                 expect_event('Announcement')
             after
                 lists:foreach(
-                    fun(C) -> catch beamtalk_class_metadata:delete(C) end,
+                    fun(C) ->
+                        try
+                            beamtalk_class_metadata:delete(C)
+                        catch
+                            _:_ -> ok
+                        end
+                    end,
                     ['Announcement', 'ClassLoaded', 'ActorSpawned']
                 )
             end
@@ -293,8 +305,14 @@ class_removed_not_fired_on_callback_crash_test_() ->
                 %% A monitor from another suite may have restarted it; stop
                 %% whatever runs now, then drop the crashed class's rows.
                 case beamtalk_class_registry:whereis_class(Name) of
-                    undefined -> ok;
-                    Live -> catch gen_server:stop(Live)
+                    undefined ->
+                        ok;
+                    Live ->
+                        try
+                            gen_server:stop(Live)
+                        catch
+                            _:_ -> ok
+                        end
                 end,
                 beamtalk_class_metadata:delete(Name),
                 beamtalk_class_registry:forget_class_pids(Pid, Name)

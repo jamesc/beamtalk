@@ -2223,7 +2223,11 @@ start_honours_exit_signals_from_existing_links_test() ->
             after 0 -> ok
             end
         after
-            catch gen_server:stop(SupPid)
+            try
+                gen_server:stop(SupPid)
+            catch
+                _:_ -> ok
+            end
         end
     end).
 
@@ -2264,8 +2268,16 @@ spawn_starts_independent_unlinked_listed_instances_test() ->
             %% ... and `pg` drops a stopped one.
             wait_until(fun() -> not lists:member(PA, beamtalk_supervisor:instance_pids()) end)
         after
-            catch gen_server:stop(PA),
-            catch gen_server:stop(PB)
+            try
+                gen_server:stop(PA)
+            catch
+                _:_ -> ok
+            end,
+            try
+                gen_server:stop(PB)
+            catch
+                _:_ -> ok
+            end
         end
     end).
 
@@ -2394,7 +2406,11 @@ supervise_waiter_behind_hung_start_gets_bounded_error_test() ->
                     beamtalk_supervisor:supervise('BT3963Sup', ?BT3963_MOD)
                 )
             after
-                catch gen_server:stop(SupPid)
+                try
+                    gen_server:stop(SupPid)
+                catch
+                    _:_ -> ok
+                end
             end
         end)
     after
@@ -3944,7 +3960,11 @@ bt1990_cleanup_name(Name) ->
         undefined ->
             ok;
         _ ->
-            catch erlang:unregister(Name),
+            try
+                erlang:unregister(Name)
+            catch
+                _:_ -> ok
+            end,
             ok
     end.
 
@@ -4628,7 +4648,11 @@ concurrent_supervise(HookOutcome) ->
                     _:_ -> ok
                 end
         end,
-        catch gen_server:stop(ClassPid, normal, 5000),
+        try
+            gen_server:stop(ClassPid, normal, 5000)
+        catch
+            _:_ -> ok
+        end,
         beamtalk_supervisor_test_helper:reset()
     end.
 
@@ -4687,7 +4711,11 @@ orphaned_init_gate_is_reclaimed_test() ->
     after
         application:unset_env(beamtalk_runtime, init_wait_timeout_ms),
         ets:delete(beamtalk_supervisor_init_gates, Sup),
-        catch exit(Sup, kill)
+        try
+            exit(Sup, kill)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %% BT-3759 review: waiter rows left after the gate was released must neither
@@ -4705,7 +4733,11 @@ stray_waiter_rows_do_not_hold_gate_test() ->
     after
         application:unset_env(beamtalk_runtime, init_wait_timeout_ms),
         ets:delete(beamtalk_supervisor_init_gates, Sup),
-        catch gen_event:stop(Sup)
+        try
+            gen_event:stop(Sup)
+        catch
+            _:_ -> ok
+        end
     end.
 
 %%====================================================================
@@ -4789,7 +4821,11 @@ bt4033_failing_initialize_on_restart_counts_against_intensity_test() ->
         %% the supervisor shuts down instead of trying again.
         ?assertEqual(3, counters:get(Starts, 1))
     after
-        catch exit(SupPid, kill),
+        try
+            exit(SupPid, kill)
+        catch
+            _:_ -> ok
+        end,
         receive
             {'EXIT', SupPid, _} -> ok
         after 1000 -> ok

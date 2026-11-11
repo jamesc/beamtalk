@@ -210,7 +210,11 @@ crash_restart_takes_the_cell_and_restarts_with_init_state_test() ->
     {ok, Sup} = supervisor:start_link(?MODULE, supervisor_init),
     try
         [{probe, Pid, _, _}] = supervisor:which_children(Sup),
-        catch gen_server:call(Pid, crash),
+        try
+            gen_server:call(Pid, crash)
+        catch
+            _:_ -> ok
+        end,
         Pid2 = wait_for_restart(Sup, Pid, 100),
         %% A restarted process is a new pid with init's state and no cell.
         ?assertNotEqual(Pid, Pid2),

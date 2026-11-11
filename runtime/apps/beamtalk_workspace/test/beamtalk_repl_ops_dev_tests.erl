@@ -2330,7 +2330,11 @@ setup_session() ->
     Pid.
 
 teardown_session(Pid) ->
-    catch beamtalk_repl_shell:stop(Pid),
+    try
+        beamtalk_repl_shell:stop(Pid)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 session_show_codegen_code_path(Pid) ->
@@ -2443,8 +2447,14 @@ with_findings_store(TestFun) ->
         TestFun()
     after
         case Started of
-            true -> catch gen_server:stop(beamtalk_workspace_findings_store);
-            false -> ok
+            true ->
+                try
+                    gen_server:stop(beamtalk_workspace_findings_store)
+                catch
+                    _:_ -> ok
+                end;
+            false ->
+                ok
         end
     end.
 

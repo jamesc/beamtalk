@@ -491,7 +491,14 @@ live_class_entries_no_cross_class_deadlock_test_() ->
             %% Far below the 5s gen_server:call timeout the deadlock would burn.
             ?assert(Elapsed < 4000)
         after
-            [catch gen_server:stop(P, normal, 5000) || P <- [PidA, PidB]]
+            [
+                try
+                    gen_server:stop(P, normal, 5000)
+                catch
+                    _:_ -> ok
+                end
+             || P <- [PidA, PidB]
+            ]
         end
     end}.
 
@@ -1379,7 +1386,11 @@ bt1982_maybe_set_heir_with_heir_process_test() ->
                 end,
                 ok = beamtalk_class_registry:ensure_class_warnings_table()
             after
-                catch erlang:unregister(beamtalk_ets_heir),
+                try
+                    erlang:unregister(beamtalk_ets_heir)
+                catch
+                    _:_ -> ok
+                end,
                 FakeHeirPid ! stop
             end
     end.
@@ -1402,7 +1413,11 @@ bt1982_heir_option_with_heir_process_test() ->
                 beamtalk_class_registry:ensure_pending_errors_table(),
                 ?assert(true)
             after
-                catch erlang:unregister(beamtalk_ets_heir),
+                try
+                    erlang:unregister(beamtalk_ets_heir)
+                catch
+                    _:_ -> ok
+                end,
                 FakeHeirPid ! stop
             end
     end.
@@ -1691,7 +1706,14 @@ bt3826_two_busy_classes(Tag, Extra, Site) ->
         ?assert(Elapsed < 4000),
         Results
     after
-        [catch gen_server:stop(P, normal, 5000) || P <- [PidA, PidB]]
+        [
+            try
+                gen_server:stop(P, normal, 5000)
+            catch
+                _:_ -> ok
+            end
+         || P <- [PidA, PidB]
+        ]
     end.
 
 %% Reflection intrinsics (`Foo methods`, `fieldNames`, `allInstVarNames`,
@@ -1966,7 +1988,14 @@ bt3832_compiled_method_records_track_class_state_test() ->
         ),
         ?assertEqual(#{}, beamtalk_class_metadata:lookup_method_records(SuperName, class))
     after
-        [catch gen_server:stop(P, normal, 5000) || P <- [SubPid, SuperPid]]
+        [
+            try
+                gen_server:stop(P, normal, 5000)
+            catch
+                _:_ -> ok
+            end
+         || P <- [SubPid, SuperPid]
+        ]
     end.
 
 %% The class-flag accessors (`is_sealed`, `is_typed`, `is_abstract`,

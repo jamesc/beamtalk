@@ -452,7 +452,13 @@ debug_others(Worker, Before, After) ->
         _ ->
             [
                 io:format(standard_error, "  other ~p ~p reds ~p~n", [
-                    P, catch process_info(P, [registered_name, current_function, initial_call]), R1 - R0
+                    P,
+                    try
+                        process_info(P, [registered_name, current_function, initial_call])
+                    catch
+                        _:_ -> undefined
+                    end,
+                    R1 - R0
                 ])
              || {P, {R1, _}} <- maps:to_list(After),
                 P =/= Worker,
@@ -872,7 +878,14 @@ inv_shape(Load, N, K, Rounds) ->
             Load, N, K, length(Keys), Rounds, median(Times), lists:min(Times), median(WarmTimes)
         ])
     after
-        [catch gen_server:stop(P, normal, 5000) || P <- [Root | SubPids]]
+        [
+            try
+                gen_server:stop(P, normal, 5000)
+            catch
+                _:_ -> ok
+            end
+         || P <- [Root | SubPids]
+        ]
     end.
 
 %% A runnable process that never blocks (one per scheduler: a busy node).

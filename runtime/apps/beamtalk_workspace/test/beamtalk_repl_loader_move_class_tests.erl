@@ -84,7 +84,11 @@ teardown(_) ->
                 undefined ->
                     ok;
                 Pid when is_pid(Pid) ->
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
             end
         end,
         ['Bt3272Gadget']
@@ -251,8 +255,14 @@ setup_dynamic() ->
 
 teardown_dynamic(_Fixture) ->
     case beamtalk_class_registry:whereis_class('Bt3272DynGadget') of
-        undefined -> ok;
-        Pid when is_pid(Pid) -> catch gen_server:stop(Pid, normal, 5000)
+        undefined ->
+            ok;
+        Pid when is_pid(Pid) ->
+            try
+                gen_server:stop(Pid, normal, 5000)
+            catch
+                _:_ -> ok
+            end
     end,
     case whereis(beamtalk_workspace_meta) of
         undefined -> ok;
