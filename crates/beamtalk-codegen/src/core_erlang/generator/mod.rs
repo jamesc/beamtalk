@@ -293,6 +293,10 @@ pub struct CoreErlangGenerator {
     /// (`repl_cached_bindings_written_by`). Variable names are fresh, so the
     /// set needs no scoping.
     pub(in crate::core_erlang) repl_map_vars: std::collections::HashSet<String>,
+    /// BT-4499: the block-parameter seeds live at this point of the REPL
+    /// lowering (`seed_repl_params`), undone in a `^` throw's state.
+    pub(in crate::core_erlang) repl_active_seeds:
+        Vec<crate::core_erlang::threaded_expr::ReplParamSeed>,
     /// BT-3910 (ADR 0131 §1): the spans of the value-position local
     /// assignments of the body being lowered (`beamtalk_core`'s
     /// `value_position_assignment_spans`), the producers `threaded_expression`
@@ -702,6 +706,7 @@ impl CoreErlangGenerator {
             current_send_span: None,
             local_producer_sites: std::collections::HashSet::new(),
             repl_map_vars: std::collections::HashSet::new(),
+            repl_active_seeds: Vec::new(),
             value_assign_sites: std::collections::HashSet::new(),
             tier2_evaluated_block_sites: std::collections::HashSet::new(),
             fold_self_slot_consumer: None,
