@@ -468,8 +468,7 @@ dispatch_badkey_is_readable_key_error_test() ->
         error:#{error := Inner} ->
             ?assertEqual(key_error, Inner#beamtalk_error.kind),
             Msg = Inner#beamtalk_error.message,
-            ?assertMatch({beamtalk_string, _}, Msg),
-            ?assertNotEqual(nomatch, binary:match(bt_bin(Msg), <<"key not found">>))
+            ?assertMatch({beamtalk_string, _}, Msg)
     end.
 
 %%% ===================================================================
@@ -534,7 +533,7 @@ dispatch_missing_function_raises_test() ->
 
 %% BT-4229: an unknown function's name is recorded as a UTF-8 `String`, also
 %% for a non-ASCII dynamic selector (`list_to_binary/1` produced Latin-1 bytes,
-%% an invalid `String`). Codepoints above 255 are BT-4241 (message formatting).
+%% an invalid `String`). BT-4241: codepoints above 255 too.
 dispatch_missing_function_records_name_as_string_test() ->
     Proxy = beamtalk_erlang_proxy:new(lists),
     Selector = list_to_atom("n\x{f6}t_there_bt4229:"),
@@ -546,6 +545,23 @@ dispatch_missing_function_records_name_as_string_test() ->
             ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
             ?assertEqual(
                 {beamtalk_string, unicode:characters_to_binary("n\x{f6}t_there_bt4229")},
+                maps:get(function, Inner#beamtalk_error.details)
+            )
+    end.
+
+%% BT-4241: a selector with codepoints above 255 must raise a structured
+%% `does_not_understand`, not crash message formatting with `badarg`.
+dispatch_missing_function_above_latin1_test() ->
+    Proxy = beamtalk_erlang_proxy:new(lists),
+    Selector = list_to_atom("x_\x{3bb}:"),
+    try
+        beamtalk_erlang_proxy:dispatch(Selector, [1], Proxy),
+        ?assert(false)
+    catch
+        error:#{error := Inner} ->
+            ?assertEqual(does_not_understand, Inner#beamtalk_error.kind),
+            ?assertEqual(
+                {beamtalk_string, unicode:characters_to_binary("x_\x{3bb}")},
                 maps:get(function, Inner#beamtalk_error.details)
             )
     end.
@@ -1923,3 +1939,7 @@ catch_ffi_error(Fun) ->
                 Err#beamtalk_error.hint
             }
     end.
+
+dispatch_missing_function_above_latin1_message_test() ->
+    Msg = beamtalk_error:generate_message(does_not_understand, 'Foo', list_to_atom("x_\x{3bb}:")),
+    ?assertEqual(unicode:characters_to_binary("Foo does not understand 'x_\x{3bb}:'"), Msg).

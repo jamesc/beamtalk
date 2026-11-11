@@ -304,7 +304,7 @@ literally, bypassing the setters).
 -spec render_text(term()) -> binary().
 render_text({beamtalk_string, Bin}) when is_binary(Bin) -> Bin;
 render_text(Bin) when is_binary(Bin) -> Bin;
-render_text(Other) -> iolist_to_binary(io_lib:format("~tp", [Other])).
+render_text(Other) -> chars_to_binary(io_lib:format("~tp", [Other])).
 
 -doc """
 Wrap an error as an Exception object and raise it.
@@ -370,22 +370,22 @@ Generate a human-readable error message from kind, class, and optional selector.
 Selector is normally an atom, but callers that only have an unregistered
 method name as a binary (e.g. `binary_to_existing_atom/2` failed, so there is
 no atom to attach to the record's `selector` field) may pass a binary
-instead — both format identically via `~s`. This keeps the
+instead — both format identically via `~ts`. This keeps the
 canonical `does_not_understand` wording (quoted selector) reachable from
 call sites that can't safely mint a new atom.
 """.
 -spec generate_message(atom(), atom(), atom() | binary() | undefined) -> binary().
 generate_message(does_not_understand, Class, undefined) ->
-    iolist_to_binary(io_lib:format("~s does not understand message", [Class]));
+    chars_to_binary(io_lib:format("~ts does not understand message", [Class]));
 generate_message(does_not_understand, Class, Selector) ->
-    iolist_to_binary(io_lib:format("~s does not understand '~s'", [Class, Selector]));
+    chars_to_binary(io_lib:format("~ts does not understand '~ts'", [Class, Selector]));
 generate_message(immutable_value, Class, undefined) ->
-    iolist_to_binary(io_lib:format("Cannot mutate ~s (immutable value)", [Class]));
+    chars_to_binary(io_lib:format("Cannot mutate ~ts (immutable value)", [Class]));
 generate_message(immutable_value, Class, Selector) ->
-    iolist_to_binary(io_lib:format("Cannot call '~s' on ~s (immutable value)", [Selector, Class]));
+    chars_to_binary(io_lib:format("Cannot call '~ts' on ~ts (immutable value)", [Selector, Class]));
 generate_message(stateful_block_dispatch, Class, undefined) ->
-    iolist_to_binary(
-        io_lib:format("~s cannot be invoked via perform: with these arguments", [Class])
+    chars_to_binary(
+        io_lib:format("~ts cannot be invoked via perform: with these arguments", [Class])
     );
 generate_message(stateful_block_dispatch, Class, Selector) ->
     %% The underlying check (erlang:is_function/2 arity
@@ -393,33 +393,33 @@ generate_message(stateful_block_dispatch, Class, Selector) ->
     %% needs StateAcc threading" from "this block was simply called with the
     %% wrong argument count" — both shapes present as the same raw fun arity.
     %% Don't assert a specific cause the check hasn't actually confirmed.
-    iolist_to_binary(
+    chars_to_binary(
         io_lib:format(
-            "Cannot call '~s' on ~s via perform: (wrong number of arguments, or the block captures mutable state and must be invoked directly)",
+            "Cannot call '~ts' on ~ts via perform: (wrong number of arguments, or the block captures mutable state and must be invoked directly)",
             [Selector, Class]
         )
     );
 generate_message(arity_mismatch, Class, undefined) ->
-    iolist_to_binary(io_lib:format("Wrong number of arguments to ~s method", [Class]));
+    chars_to_binary(io_lib:format("Wrong number of arguments to ~ts method", [Class]));
 generate_message(arity_mismatch, Class, Selector) ->
-    iolist_to_binary(io_lib:format("Wrong number of arguments to '~s' on ~s", [Selector, Class]));
+    chars_to_binary(io_lib:format("Wrong number of arguments to '~ts' on ~ts", [Selector, Class]));
 generate_message(type_error, Class, undefined) ->
-    iolist_to_binary(io_lib:format("Type error in ~s", [Class]));
+    chars_to_binary(io_lib:format("Type error in ~ts", [Class]));
 generate_message(type_error, Class, Selector) ->
-    iolist_to_binary(io_lib:format("Type error in '~s' on ~s", [Selector, Class]));
+    chars_to_binary(io_lib:format("Type error in '~ts' on ~ts", [Selector, Class]));
 %% Empty-collection access is a distinct condition from a dispatch
 %% failure — the receiver understands the selector, it just has no element to
 %% answer. Naming it lets `on:do:` discriminate it from a genuine typo.
 generate_message(empty_collection, Class, undefined) ->
-    iolist_to_binary(io_lib:format("~s is empty", [Class]));
+    chars_to_binary(io_lib:format("~ts is empty", [Class]));
 generate_message(empty_collection, Class, Selector) ->
     %% Selector is quoted because keyword selectors already end in `:` —
     %% an unquoted `at:` would render as `at:: List is empty`.
-    iolist_to_binary(io_lib:format("'~s': ~s is empty", [Selector, Class]));
+    chars_to_binary(io_lib:format("'~ts': ~ts is empty", [Selector, Class]));
 generate_message(index_out_of_bounds, Class, undefined) ->
-    iolist_to_binary(io_lib:format("Index out of bounds for ~s", [Class]));
+    chars_to_binary(io_lib:format("Index out of bounds for ~ts", [Class]));
 generate_message(index_out_of_bounds, Class, Selector) ->
-    iolist_to_binary(io_lib:format("'~s': index out of bounds for ~s", [Selector, Class]));
+    chars_to_binary(io_lib:format("'~ts': index out of bounds for ~ts", [Selector, Class]));
 %% A lookup that ran to completion without finding anything.
 %% `key_error` was the closest existing kind for `List detect:` but names a key
 %% the receiver was asked for, which a predicate search has none of; and
@@ -428,19 +428,19 @@ generate_message(index_out_of_bounds, Class, Selector) ->
 %%
 %% Deliberately generic wording: `not_found` also covers non-collection
 %% receivers (`AtomicCounter named:`, `Ets named:`, `Beamtalk`), which
-%% otherwise fall through to the `~s error in ...` fallback. A collection-
+%% otherwise fall through to the `~ts error in ...` fallback. A collection-
 %% flavoured "no matching element" would read as nonsense on those. The
 %% specifics belong in the hint, which every call site already sets.
 generate_message(not_found, Class, undefined) ->
-    iolist_to_binary(io_lib:format("Not found in ~s", [Class]));
+    chars_to_binary(io_lib:format("Not found in ~ts", [Class]));
 generate_message(not_found, Class, Selector) ->
     %% Selector is quoted because keyword selectors already end in `:`.
-    iolist_to_binary(io_lib:format("'~s': not found in ~s", [Selector, Class]));
+    chars_to_binary(io_lib:format("'~ts': not found in ~ts", [Selector, Class]));
 generate_message(actor_dead, Class, undefined) ->
-    iolist_to_binary(io_lib:format("~s actor process has terminated", [Class]));
+    chars_to_binary(io_lib:format("~ts actor process has terminated", [Class]));
 generate_message(actor_dead, Class, Selector) ->
-    iolist_to_binary(
-        io_lib:format("Cannot send '~s' to ~s (actor process has terminated)", [Selector, Class])
+    chars_to_binary(
+        io_lib:format("Cannot send '~ts' to ~ts (actor process has terminated)", [Selector, Class])
     );
 %% ADR 0126 §7.1: the target node is unreachable — down, partitioned, or
 %% never connected — distinct from actor_dead (the node answered, the
@@ -448,84 +448,84 @@ generate_message(actor_dead, Class, Selector) ->
 %% (a partition is discovered before the actor's class can be resolved),
 %% mirroring actor_dead's own generic wording above.
 generate_message(node_down, Class, undefined) ->
-    iolist_to_binary(io_lib:format("~s: node is unreachable", [Class]));
+    chars_to_binary(io_lib:format("~ts: node is unreachable", [Class]));
 generate_message(node_down, Class, Selector) ->
-    iolist_to_binary(
-        io_lib:format("Cannot send '~s' to ~s (node is unreachable)", [Selector, Class])
+    chars_to_binary(
+        io_lib:format("Cannot send '~ts' to ~ts (node is unreachable)", [Selector, Class])
     );
 generate_message(future_not_awaited, _Class, undefined) ->
-    iolist_to_binary(io_lib:format("Sent message to a Future", []));
+    chars_to_binary(io_lib:format("Sent message to a Future", []));
 generate_message(future_not_awaited, _Class, Selector) ->
-    iolist_to_binary(io_lib:format("Sent '~s' to a Future", [Selector]));
+    chars_to_binary(io_lib:format("Sent '~ts' to a Future", [Selector]));
 generate_message(instantiation_error, Class, undefined) ->
-    iolist_to_binary(io_lib:format("Cannot instantiate ~s", [Class]));
+    chars_to_binary(io_lib:format("Cannot instantiate ~ts", [Class]));
 generate_message(instantiation_error, Class, Selector) ->
-    iolist_to_binary(io_lib:format("Cannot call '~s' on ~s", [Selector, Class]));
+    chars_to_binary(io_lib:format("Cannot call '~ts' on ~ts", [Selector, Class]));
 generate_message(file_not_found, Class, undefined) ->
-    iolist_to_binary(io_lib:format("~s: file not found", [Class]));
+    chars_to_binary(io_lib:format("~ts: file not found", [Class]));
 generate_message(file_not_found, Class, Selector) ->
-    iolist_to_binary(io_lib:format("~s '~s': file not found", [Class, Selector]));
+    chars_to_binary(io_lib:format("~ts '~ts': file not found", [Class, Selector]));
 generate_message(permission_denied, Class, undefined) ->
-    iolist_to_binary(io_lib:format("~s: permission denied", [Class]));
+    chars_to_binary(io_lib:format("~ts: permission denied", [Class]));
 generate_message(permission_denied, Class, Selector) ->
-    iolist_to_binary(io_lib:format("~s '~s': permission denied", [Class, Selector]));
+    chars_to_binary(io_lib:format("~ts '~ts': permission denied", [Class, Selector]));
 generate_message(io_error, Class, undefined) ->
-    iolist_to_binary(io_lib:format("~s: I/O error", [Class]));
+    chars_to_binary(io_lib:format("~ts: I/O error", [Class]));
 generate_message(io_error, Class, Selector) ->
-    iolist_to_binary(io_lib:format("~s '~s': I/O error", [Class, Selector]));
+    chars_to_binary(io_lib:format("~ts '~ts': I/O error", [Class, Selector]));
 generate_message(user_error, _Class, undefined) ->
     <<"Error">>;
 generate_message(user_error, _Class, Selector) ->
-    iolist_to_binary(io_lib:format("~p", [Selector]));
+    chars_to_binary(io_lib:format("~p", [Selector]));
 generate_message(stdlib_shadowing, Class, undefined) ->
-    iolist_to_binary(io_lib:format("Cannot redefine stdlib class '~s'", [Class]));
+    chars_to_binary(io_lib:format("Cannot redefine stdlib class '~ts'", [Class]));
 generate_message(stdlib_shadowing, Class, Selector) ->
-    iolist_to_binary(
-        io_lib:format("Cannot redefine stdlib class '~s' (via '~s')", [Class, Selector])
+    chars_to_binary(
+        io_lib:format("Cannot redefine stdlib class '~ts' (via '~ts')", [Class, Selector])
     );
 generate_message(class_not_found, Class, undefined) ->
-    iolist_to_binary(io_lib:format("Class '~s' not found", [Class]));
+    chars_to_binary(io_lib:format("Class '~ts' not found", [Class]));
 generate_message(class_not_found, Class, Selector) ->
-    iolist_to_binary(
-        io_lib:format("Class '~s' not found (while resolving '~s')", [Class, Selector])
+    chars_to_binary(
+        io_lib:format("Class '~ts' not found (while resolving '~ts')", [Class, Selector])
     );
 generate_message(no_superclass, Class, undefined) ->
-    iolist_to_binary(io_lib:format("~s has no superclass", [Class]));
+    chars_to_binary(io_lib:format("~ts has no superclass", [Class]));
 generate_message(no_superclass, Class, Selector) ->
-    iolist_to_binary(
-        io_lib:format("~s has no superclass (cannot resolve '~s' via super)", [Class, Selector])
+    chars_to_binary(
+        io_lib:format("~ts has no superclass (cannot resolve '~ts' via super)", [Class, Selector])
     );
 generate_message(class_already_exists, Class, undefined) ->
-    iolist_to_binary(io_lib:format("Class '~s' already exists", [Class]));
+    chars_to_binary(io_lib:format("Class '~ts' already exists", [Class]));
 generate_message(class_already_exists, Class, Selector) ->
-    iolist_to_binary(io_lib:format("Class '~s' already exists (via '~s')", [Class, Selector]));
+    chars_to_binary(io_lib:format("Class '~ts' already exists (via '~ts')", [Class, Selector]));
 generate_message(internal_error, Class, undefined) ->
-    iolist_to_binary(io_lib:format("Internal error in ~s", [Class]));
+    chars_to_binary(io_lib:format("Internal error in ~ts", [Class]));
 generate_message(internal_error, Class, Selector) ->
-    iolist_to_binary(io_lib:format("Internal error in '~s' on ~s", [Selector, Class]));
+    chars_to_binary(io_lib:format("Internal error in '~ts' on ~ts", [Selector, Class]));
 generate_message(dispatch_error, Class, undefined) ->
-    iolist_to_binary(io_lib:format("Dispatch error for ~s", [Class]));
+    chars_to_binary(io_lib:format("Dispatch error for ~ts", [Class]));
 generate_message(dispatch_error, Class, Selector) ->
-    iolist_to_binary(io_lib:format("Dispatch error for '~s' on ~s", [Selector, Class]));
+    chars_to_binary(io_lib:format("Dispatch error for '~ts' on ~ts", [Selector, Class]));
 generate_message(callback_failed, Class, undefined) ->
-    iolist_to_binary(io_lib:format("Callback failed for ~s", [Class]));
+    chars_to_binary(io_lib:format("Callback failed for ~ts", [Class]));
 generate_message(callback_failed, Class, Selector) ->
-    iolist_to_binary(io_lib:format("Callback '~s' failed for ~s", [Selector, Class]));
+    chars_to_binary(io_lib:format("Callback '~ts' failed for ~ts", [Selector, Class]));
 generate_message(uninitialized_state_error, Class, undefined) ->
-    iolist_to_binary(io_lib:format("UninitializedStateError in ~s", [Class]));
+    chars_to_binary(io_lib:format("UninitializedStateError in ~ts", [Class]));
 generate_message(uninitialized_state_error, Class, Selector) ->
-    iolist_to_binary(io_lib:format("UninitializedStateError in '~s' on ~s", [Selector, Class]));
+    chars_to_binary(io_lib:format("UninitializedStateError in '~ts' on ~ts", [Selector, Class]));
 %% BT-4030: `new:`/`spawnWith:` with an undeclared initialiser key. The
 %% `check_init_args/5` call site overrides this with a message naming the
 %% key; these clauses keep a bare `new(unknown_field, ...)` readable.
 generate_message(unknown_field, Class, undefined) ->
-    iolist_to_binary(io_lib:format("Unknown field for ~s", [Class]));
+    chars_to_binary(io_lib:format("Unknown field for ~ts", [Class]));
 generate_message(unknown_field, Class, Selector) ->
-    iolist_to_binary(io_lib:format("'~s': unknown field for ~s", [Selector, Class]));
+    chars_to_binary(io_lib:format("'~ts': unknown field for ~ts", [Selector, Class]));
 generate_message(Kind, Class, undefined) ->
-    iolist_to_binary(io_lib:format("~s error in ~s", [Kind, Class]));
+    chars_to_binary(io_lib:format("~ts error in ~ts", [Kind, Class]));
 generate_message(Kind, Class, Selector) ->
-    iolist_to_binary(io_lib:format("~s error in '~s' on ~s", [Kind, Selector, Class])).
+    chars_to_binary(io_lib:format("~ts error in '~ts' on ~ts", [Kind, Selector, Class])).
 
 %% Enrich DNU hint when the selector is a class-side message.
 %%
@@ -568,8 +568,14 @@ dispatch catch blocks to avoid verbose ~tp output.
 format_reason(_ErrClass, #beamtalk_error{kind = Kind, class = Class, message = Msg}) ->
     %% BT-4170: the message field is a tagged `String` (or raw bytes in a
     %% hand-built record) — render it before `~s`-formatting.
-    iolist_to_binary(io_lib:format("~s (~s:~s)", [render_text(Msg), Class, Kind]));
+    chars_to_binary(io_lib:format("~ts (~ts:~ts)", [render_text(Msg), Class, Kind]));
 format_reason(_ErrClass, #{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}) ->
     format_reason(error, Err);
 format_reason(ErrClass, Reason) ->
-    iolist_to_binary(io_lib:format("~p:~tp", [ErrClass, Reason])).
+    chars_to_binary(io_lib:format("~p:~tp", [ErrClass, Reason])).
+
+%% BT-4241: `iolist_to_binary/1` raises badarg on codepoints above 255 (which
+%% `~ts` emits for e.g. a `λ` selector); encode as UTF-8 instead.
+-spec chars_to_binary(io_lib:chars()) -> binary().
+chars_to_binary(Chars) ->
+    unicode:characters_to_binary(Chars).
