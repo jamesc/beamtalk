@@ -152,6 +152,11 @@ fn self_field_without_narrowing_is_rejected() {
         "    (self.n =/= nil) ifTrue: [^0]\n    self take: self.n",
     ] {
         let diags = type_diagnostics(&field_source(body));
-        assert!(!diags.is_empty(), "expected a diagnostic for:\n{body}");
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("Nil") || d.message.contains("UndefinedObject")),
+            "expected a nil-type mismatch for:\n{body}\ngot: {diags:#?}"
+        );
     }
 }

@@ -568,9 +568,9 @@ impl Expression {
     /// re-matching the identifier names.
     #[must_use]
     pub fn as_literal_bool(&self) -> Option<bool> {
-        match self.unwrap_parens() {
-            Self::Identifier(Identifier { name, .. }) if name == "true" => Some(true),
-            Self::Identifier(Identifier { name, .. }) if name == "false" => Some(false),
+        match self.reserved_identifier()? {
+            "true" => Some(true),
+            "false" => Some(false),
             _ => None,
         }
     }
@@ -583,10 +583,17 @@ impl Expression {
     /// narrowing rules.
     #[must_use]
     pub fn is_literal_nil(&self) -> bool {
-        matches!(
-            self.unwrap_parens(),
-            Self::Identifier(Identifier { name, .. }) if name == "nil"
-        )
+        self.reserved_identifier() == Some("nil")
+    }
+
+    /// The identifier name of this expression through any number of
+    /// `Parenthesized` wrappers, or `None` if it is not a bare identifier.
+    /// The one place `as_literal_bool` and `is_literal_nil` peel parens.
+    fn reserved_identifier(&self) -> Option<&str> {
+        match self.unwrap_parens() {
+            Self::Identifier(Identifier { name, .. }) => Some(name.as_str()),
+            _ => None,
+        }
     }
 }
 
