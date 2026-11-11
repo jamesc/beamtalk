@@ -72,6 +72,9 @@ impl CoreErlangGenerator {
     ///   check, hardcoded to `Result` via `sealed_constructor_fields`, to
     ///   the pattern's `class` field), falling through to `rest` on any
     ///   other class tag.
+    /// - **Classes with subclasses** (BT-4319, ADR 0107 Phase B):
+    ///   [`Self::wrap_kind_of_test`] — a runtime `isKindOf:`-equivalent
+    ///   class-table lookup, so subclass instances match.
     /// - **`Block`**: `is_function` — a Beamtalk block compiles to a plain
     ///   Erlang `fun`, never a map, so it needs its own guard-safe BIF
     ///   entry rather than falling into the tagged-class path.
@@ -206,7 +209,18 @@ impl CoreErlangGenerator {
         let is_supervisor = self.class_hierarchy.as_ref().is_some_and(|h| {
             h.is_supervisor_subclass(class_name) || h.is_dynamic_supervisor_subclass(class_name)
         });
-        if is_actor {
+        // BT-4319 (ADR 0107 Phase B): a class with subclasses matches its
+        // subclasses' instances too (`isKindOf:` semantics), so an exact tag
+        // test is wrong. The class table is consulted at run time, which
+        // keeps the answer correct for subclasses defined in other files or
+        // added by hot reload.
+        let is_non_leaf = self
+            .class_hierarchy
+            .as_ref()
+            .is_some_and(|h| !h.direct_subclasses(class_name).is_empty());
+        if is_non_leaf {
+            Self::wrap_kind_of_test(match_var, class_name, bound_success, rest_doc)
+        } else if is_actor {
             self.wrap_actor_class_tag_test(match_var, class_name, bound_success, rest_doc)
         } else if is_supervisor {
             self.wrap_supervisor_class_tag_test(match_var, class_name, bound_success, rest_doc)
@@ -218,6 +232,28 @@ impl CoreErlangGenerator {
                 rest_doc,
             )
         }
+    }
+
+    /// Subclass-aware test for a class that has subclasses (BT-4319):
+    /// `case call 'beamtalk_behaviour_intrinsics':'valueIsKindOfClass'(X,
+    /// 'Class') of <'true'> -> success <'false'> -> rest end`. The runtime
+    /// answers `class_of(X)` inherits from `Class`, agreeing with
+    /// `X isKindOf: Class` for any value regardless of its representation
+    /// (tagged map, actor or supervisor tuple, primitive).
+    fn wrap_kind_of_test(
+        match_var: &str,
+        class_name: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        let test = docvec![
+            "call 'beamtalk_behaviour_intrinsics':'valueIsKindOfClass'(",
+            leaf::var(match_var.to_string()),
+            ", ",
+            leaf::atom(class_name.to_string()),
+            ")"
+        ];
+        Self::branch_on_test(test, success, rest)
     }
 
     /// Dispatches a routing-table [`Guard`] to its renderer — the one

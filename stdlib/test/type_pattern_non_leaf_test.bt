@@ -1,0 +1,152 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4319 / ADR 0107 Phase B: `binding :: Class` patterns on classes that
+// have subclasses match per `isKindOf:` — subclass instances match, and
+// the binding is narrowed to the pattern class.
+//
+// Fixtures: stdlib/test/fixtures/Bt4319*.bt
+//   Error hierarchy: Bt4319HttpError <- Bt4319HttpError414, plus the
+//   unrelated Bt4319TransportError / Bt4319OtherError
+//   Value hierarchy: Bt4319Shape <- Bt4319Circle
+//   Actor hierarchy: Bt4319Animal <- Bt4319Dog
+
+TestCase subclass: TypePatternNonLeafTest
+
+  // The beamtalk-buccaneer pipeline dispatch: protocol errors on the first
+  // two arms, anything else on the wildcard.
+  classify: ex =>
+    ex match: [
+      h :: Bt4319HttpError -> #http;
+      t :: Bt4319TransportError -> #transport;
+      _ -> #internal
+    ]
+
+  caught: aBlock => aBlock on: Exception do: [:e | self classify: e]
+
+  testSubclassInstanceTakesBaseClassArm =>
+    self assert: (self caught: [
+      Bt4319HttpError414 signal: "uri too long"
+    ]) equals: #http
+
+  testBaseClassInstanceTakesBaseClassArm =>
+    self assert: (self caught: [Bt4319HttpError signal: "bad"]) equals: #http
+
+  testUnrelatedSiblingTakesItsOwnArm =>
+    self assert: (self caught: [
+      Bt4319TransportError signal: "closed"
+    ]) equals: #transport
+
+  testUnrelatedErrorFallsThroughToWildcard =>
+    self assert: (self caught: [
+      Bt4319OtherError signal: "boom"
+    ]) equals: #internal
+
+  testStdlibErrorFallsThroughToWildcard =>
+    self assert: (self caught: [(Erlang erlang) error: #boom]) equals: #internal
+
+  testBindingIsTheMatchedValue =>
+    result := [Bt4319HttpError414 signal: "uri too long"]
+      on: Exception
+      do: [:e |
+        e match: [
+          h :: Bt4319HttpError -> h message;
+          _ -> "no"
+        ]
+      ]
+    self assert: result equals: "uri too long"
+
+  testErrorBaseClassMatchesEveryErrorSubclass =>
+    result := [Bt4319OtherError signal: "x"]
+      on: Exception
+      do: [:e |
+        e match: [
+          x :: Error -> #error;
+          _ -> #other
+        ]
+      ]
+    self assert: result equals: #error
+
+  testNonInstancesFallThrough =>
+    self
+      assert: (42 match: [
+        s :: Bt4319Shape -> #shape;
+        _ -> #no
+      ])
+      equals: #no
+    self
+      assert: (nil match: [
+        s :: Bt4319Shape -> #shape;
+        _ -> #no
+      ])
+      equals: #no
+    self
+      assert: ("str" match: [
+        s :: Bt4319Shape -> #shape;
+        _ -> #no
+      ])
+      equals: #no
+    self
+      assert: (#sym match: [
+        s :: Bt4319Shape -> #shape;
+        _ -> #no
+      ])
+      equals: #no
+    self
+      assert: (#{#a => 1} match: [
+        s :: Bt4319Shape -> #shape;
+        _ -> #no
+      ])
+      equals: #no
+    self
+      assert: (#(1, 2, 3) match: [
+        s :: Bt4319Shape -> #shape;
+        _ -> #no
+      ])
+      equals: #no
+
+  testValueSubclassMatchesBaseAndBindingNarrows =>
+    c := Bt4319Circle new
+    self
+      assert: (c match: [
+        s :: Bt4319Shape -> s area;
+        _ -> -1
+      ])
+      equals: 3
+
+  testValueBaseInstanceMatches =>
+    self
+      assert: (Bt4319Shape new match: [
+        s :: Bt4319Shape -> s area;
+        _ -> -1
+      ])
+      equals: 0
+
+  testValueSiblingDoesNotMatchSubclassArm =>
+    self
+      assert: (Bt4319Shape new match: [
+        c :: Bt4319Circle -> #circle;
+        _ -> #other
+      ])
+      equals: #other
+
+  testActorSubclassMatchesBase =>
+    dog := Bt4319Dog spawn
+    self
+      assert: (dog match: [
+        a :: Bt4319Animal -> #animal;
+        _ -> #no
+      ])
+      equals: #animal
+
+  testArmOrderMostSpecificFirst =>
+    result := [Bt4319HttpError414 signal: "x"]
+      on: Exception
+      do: [:ex |
+        ex match: [
+          e :: Bt4319HttpError414 -> #specific;
+          e :: Bt4319HttpError -> #general;
+          _ -> #none
+        ]
+      ]
+    self assert: result equals: #specific

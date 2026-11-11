@@ -1,7 +1,7 @@
 # ADR 0107: Nil and Type Patterns in `match:`
 
 ## Status
-Implemented (2026-07-12) — landed via epic BT-2853 (BT-2854/2855/2856/2857), with follow-ons BT-2870 (Supervisor-subclass extension) and BT-2860 (diagnostics polish)
+Implemented (2026-07-12) — landed via epic BT-2853 (BT-2854/2855/2856/2857), with follow-ons BT-2870 (Supervisor-subclass extension) and BT-2860 (diagnostics polish); Phase B (subclass-polymorphic patterns) landed via BT-4319
 
 ## Implementation Tracking
 
@@ -261,7 +261,19 @@ coll match: [
   differently, and exactly why its exhaustiveness story can't just reuse
   Phase A's).
 
-### Phase B (explicitly out of scope here): subclass-polymorphic matching
+### Phase B (BT-4319, implemented): subclass-polymorphic matching
+
+> **Implemented.** `binding :: Class` on a class with subclasses is accepted
+> and matches per `isKindOf:`. The arm compiles to
+> `beamtalk_behaviour_intrinsics:valueIsKindOfClass/2`, a runtime class-table
+> lookup (the second of the two strategies below), so the answer tracks the
+> live hierarchy: subclasses in other files or added by hot reload match. A
+> class with no subclass at compile time keeps Phase A's exact-class test.
+> Exhaustiveness is unchanged: a class with subclasses is never a closed-union
+> member, so a `matchExhaustive:` over it still needs a wildcard. `when:`
+> guards were not widened (see Rejected B). The text below is the original
+> Phase B deferral rationale.
+
 
 `binding :: Shape` where `Shape` has subclasses `Circle`/`Square` needs
 either compile-time subclass enumeration (using the class-hierarchy data
