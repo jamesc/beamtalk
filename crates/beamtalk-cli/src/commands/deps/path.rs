@@ -1633,8 +1633,7 @@ dep_utils = { path = "dep_utils" }"#,
                 .iter()
                 .find(|m| m.selector.as_str() == sel)
                 .and_then(|m| m.return_type.as_ref())
-                .map(ToString::to_string)
-                .unwrap_or_else(|| panic!("no return type for {sel}"))
+                .map_or_else(|| panic!("no return type for {sel}"), ToString::to_string)
         };
         assert_eq!(ret("thing"), "Integer");
         assert_eq!(ret("many:"), "List(Integer)");
@@ -1655,8 +1654,10 @@ dep_utils = { path = "dep_utils" }"#,
                 .entries()
                 .iter()
                 .find(|(k, _)| k.selector.as_str() == sel)
-                .map(|(_, locs)| locs[0].type_info.clone())
-                .unwrap_or_else(|| panic!("no extension {sel}"))
+                .map_or_else(
+                    || panic!("no extension {sel}"),
+                    |(_, locs)| locs[0].type_info.clone(),
+                )
         };
         assert_eq!(ext("secretExt").return_type.as_deref(), Some("Integer"));
         let arg = ext("secretArg:");

@@ -1538,7 +1538,8 @@ fn dependency_internal_alias_in_signature_expands_for_consumer() {
             ),
         );
         let (class_module_index, class_superclass_index, mut all_class_infos, _, _) =
-            build_class_module_index(&[file.clone()], Some(&src_path), "consumer").unwrap();
+            build_class_module_index(std::slice::from_ref(&file), Some(&src_path), "consumer")
+                .unwrap();
         all_class_infos.extend(dep_class_infos.clone());
         let core_file = build_dir.join("bt@consumer@consumer.core");
         compile_file(
