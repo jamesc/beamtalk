@@ -41,11 +41,14 @@ dispatch_is_empty_test() ->
 dispatch_first_test() ->
     ?assertEqual(1, 'bt@stdlib@list':dispatch('first', [], [1, 2, 3])).
 
+%% `first` on an empty list raises `empty_collection` (list.bt). This
+%% assertion said `does_not_understand` and went stale while the module was
+%% shadowed by beamtalk_stdlib/test's same-named copy (BT-4671).
 dispatch_first_empty_test() ->
     ?assertError(
         #{
             '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = does_not_understand, class = 'List', selector = 'first'}
+            error := #beamtalk_error{kind = empty_collection, class = 'List', selector = 'first'}
         },
         'bt@stdlib@list':dispatch('first', [], [])
     ).
