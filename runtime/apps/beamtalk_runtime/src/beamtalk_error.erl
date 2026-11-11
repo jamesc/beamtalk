@@ -296,7 +296,13 @@ format_reason_term(Reason) ->
             truncate_reason(Bin);
         _ ->
             %% Invalid encoding somewhere inside: never raise from the formatter.
-            truncate_reason(chars_to_binary(io_lib:format("~0tP", [Reason, ?REASON_MAX_DEPTH], [{chars_limit, ?REASON_MAX_BYTES}])))
+            truncate_reason(
+                chars_to_binary(
+                    io_lib:format("~0tP", [Reason, ?REASON_MAX_DEPTH], [
+                        {chars_limit, ?REASON_MAX_BYTES}
+                    ])
+                )
+            )
     end.
 
 -spec truncate_reason(binary()) -> binary().
