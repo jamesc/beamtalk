@@ -951,7 +951,7 @@ clean rename (ADR 0114 explicitly calls this out: "a single incidental
 stdlib candidate sender would leave the whole rename stuck forever").
 
 Callers classify each site themselves before folding — reusing
-`beamtalk_repl_loader:classify_source_file/1`/`no_source_reason/1` exactly
+`beamtalk_repl_loader_changelog_entries:classify_source_file/1`/`no_source_reason/1` exactly
 as the single-file kinds already do (ADR 0112), rather than this module
 re-deriving that classification, which would duplicate it: this module has
 no class-registry access, and a bare `sourceFile` cannot distinguish
@@ -2008,23 +2008,14 @@ truncate_log(State) ->
     ok.
 
 %% Write Data to Path via a sibling temp file + atomic rename so readers never
-%% observe a partially written file.
+%% observe a partially written file (`beamtalk_workspace_file:atomic_write/3`:
+%% a unique temp name per call, so a writer outside this gen_server — e.g.
+%% `store_site_body/1`, which runs in the caller — can never share a temp file
+%% with another writer). Errors are `{write, Reason}` / `{rename, Reason}`.
 -spec write_file_atomic(string(), iodata()) -> ok | {error, term()}.
 write_file_atomic(Path, Data) ->
     _ = filelib:ensure_dir(Path),
-    Tmp = Path ++ ".tmp",
-    case file:write_file(Tmp, Data) of
-        ok ->
-            case file:rename(Tmp, Path) of
-                ok ->
-                    ok;
-                {error, Reason} ->
-                    _ = file:delete(Tmp),
-                    {error, {rename, Reason}}
-            end;
-        {error, Reason} ->
-            {error, {write, Reason}}
-    end.
+    beamtalk_workspace_file:atomic_write(Path, Data, undefined).
 
 %% sources/<seq6>-source.bt / sources/<seq6>-prev.bt
 -spec source_ref_filename(non_neg_integer(), source | prev) -> binary().

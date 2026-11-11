@@ -64,6 +64,15 @@ atomic on POSIX, so a crash leaves either the old or the new file on disk —
 never partial. The ChangeEntries for that file are marked flushed only *after*
 the rename returns ok.
 
+`<file>.tmp` throughout this doc is shorthand: the real staging name is
+unique per write, `<file>.<unique>.tmp` (`beamtalk_workspace_file:write_temp/2`,
+BT-4683). Flush runs in its caller's process, so two flushes (an autoflush and
+a manual `Workspace flush`, say) can stage the same file at once; a shared
+fixed name would let one rename the other's half-written body into place. A
+crash between Phase A and Phase B can therefore leave a stray
+`<file>.<unique>.tmp` behind instead of one that the next attempt overwrites;
+it is never read back and is safe to delete.
+
 ## Atomicity (multi-file)
 
 Two-phase per flush operation (ADR 0082, *Multi-file atomicity*):
@@ -1831,7 +1840,7 @@ resolve_missing_rename_source(Entry, OldPath, NewPath, Units) ->
                     {ok, #prepared{
                         file = NewPath,
                         old_file = undefined,
-                        tmp = binary_to_list(NewPath) ++ ".tmp",
+                        tmp = undefined,
                         entries = [Entry],
                         pre_existing = false,
                         op = move_noop
@@ -2604,7 +2613,7 @@ phase_b_loop([P | Rest], Shadowed, Committed, Failed, Skipped, RenameExpectedFil
 %%     ever removed once its content is durably present at the new name. If
 %%     the unlink itself fails, `old_file` simply lingers (still untouched,
 %%     still matching its recorded `prev_source`) and the next flush attempt
-%%     harmlessly re-derives and overwrites `new_path.tmp` before retrying
+%%     harmlessly re-derives and re-stages `new_path` before retrying
 %%     the unlink — see the moduledoc's "Atomicity (class rename)" section.
 %%   - `move_noop` — the move already completed in an earlier, crashed or
 %%     marker-failed attempt; no I/O.
@@ -2880,14 +2889,16 @@ file_kind_map(#prepared{file = File, entries = [Entry | _], old_file = OldFile})
 %%% Helpers
 %%% ----------------------------------------------------------------------------
 
+%% Phase A staging write. The temp name is unique per call
+%% (`beamtalk_workspace_file:write_temp/2`), not a fixed `<file>.tmp`: flush
+%% runs in its caller's process (an autoflush after a live patch, or a manual
+%% `Workspace flush` from another session), so two flushes can stage the same
+%% file at once, and with a shared temp name one could rename the other's
+%% half-written body into place.
 -spec write_tmp(string(), binary()) -> {ok, string()} | {error, term()}.
 write_tmp(AbsPath, Body) ->
-    Tmp = AbsPath ++ ".tmp",
     _ = filelib:ensure_dir(AbsPath),
-    case file:write_file(Tmp, Body) of
-        ok -> {ok, Tmp};
-        {error, Reason} -> {error, {write, Reason}}
-    end.
+    beamtalk_workspace_file:write_temp(AbsPath, Body).
 
 %% Undo Phase A staging for every not-yet-committed `Prepared` record, so an
 %% aborted flush (Phase A conflict on another file, or a Phase B failure
