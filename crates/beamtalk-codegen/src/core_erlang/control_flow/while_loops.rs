@@ -8,29 +8,22 @@
 //! Generates code for `whileTrue:` and `whileFalse:` loop constructs
 //! with both pure and state-threading variants.
 //!
-//! ## `case apply CondFun(...) of <'true'>/<'false'>` needs no
-//! explicit wildcard clause
+//! ## The condition-dispatch `case` carries an explicit wildcard clause
 //!
 //! Every condition-dispatch `case` this file generates (`generate_while_simple`,
 //! `generate_while_loop_with_mutations`, `generate_while_loop_direct`,
-//! `generate_while_loop_hybrid`) matches only `<'true'>`/`<'false'>`, the
-//! same non-exhaustive-to-the-compiler
-//! shape [`super::super::CoreErlangGenerator::case_clause_fallback`] exists to
-//! guard (see its doc comment and ADR 0111 Addendum 5, "Production bugs
-//! found", bug 3, which has two flavors). Unlike those two, this one is **not
-//! reachable**: the case is always the tail of a `letrec`-bound loop `fun`'s
-//! own body, entered via `apply` — a genuinely separate BEAM function from
-//! whatever function contains the loop expression (e.g. `dispatch/4`'s `try`
-//! body, when the loop is a try's last statement). `beam_validator`'s
-//! `ambiguous_catch_try_state` check tracks catch/try state per function, so
-//! a non-exhaustive case belonging to a *different* function than the `try`
-//! cannot trip it. Confirmed empirically (investigation): a
-//! `[... whileTrue: [...]]` as an `ensure:`/`on:do:` try body's last
-//! statement, with a field mutation earlier in the same try body (forcing
-//! the inlined, non-closure `try` shape), still compiles cleanly through
-//! `erlc`. No fallback added here; if a future refactor ever inlines one of
-//! these `case`s directly into the same function as an enclosing `try`
-//! (removing the `letrec`/`apply` boundary), reconsider this note.
+//! `generate_while_loop_hybrid`) matches `<'true'>`/`<'false'>` and ends with
+//! [`super::super::CoreErlangGenerator::case_clause_fallback`] (BT-4202).
+//! The scrutinee can be an inlined pure conditional with a branch that is
+//! provably neither boolean, and on OTP 28 a boolean-only `case` without a
+//! catch-all then crashes `beam_clean` (`undefined_label`). The clause is
+//! behavior-preserving: a non-boolean condition already raised `case_clause`.
+//! Pinned by `boolean_only_case_with_failing_branch_needs_catch_all`.
+//!
+//! This is a different reason from the `ambiguous_catch_try_state` edge case
+//! the helper was introduced for: that one is not reachable here, because the
+//! `case` is the tail of a `letrec`-bound `fun` entered via `apply`, a separate
+//! BEAM function from any enclosing `try`.
 
 use super::super::intrinsics::{STATEFUL_BLOCK_DISPATCH_HINT, validate_block_arity_exact};
 use super::super::threaded_ir::{
@@ -268,7 +261,9 @@ impl CoreErlangGenerator {
             leaf::fname(loop_fn.clone(), 0),
             " () <",
             exit_atom,
-            "> when 'true' -> 'nil' end in ",
+            "> when 'true' -> 'nil'",
+            self.case_clause_fallback("_CondBad"),
+            " end in ",
             // The loop's entry call is the frame the method making the send
             // reports (the body runs in the `letrec` fun).
             self.annotate_current_send_call(docvec!["apply ", leaf::fname(loop_fn, 0), " ()"]),

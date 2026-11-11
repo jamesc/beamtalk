@@ -779,7 +779,10 @@ fn boolean_only_case_with_failing_branch_needs_catch_all() {
     // clause crashes `beam_clean` (`Internal consistency check failed`,
     // `{jump,{f,0}}`; the `undefined_label` family). `case_clause_fallback`
     // on the loop's `case _CondBool` is the workaround. If the first
-    // assertion starts failing, a newer OTP fixed the bug and the pin can go.
+    // assertion starts failing (e.g. after an OTP bump), a newer OTP fixed
+    // the bug: delete the pin and the `"_CondBad"` fallbacks in
+    // `while_loops.rs` only if every supported OTP release is fixed
+    // (`otp-support.toml`); otherwise keep them and drop just this test.
     use std::process::Command;
 
     fn erlc_ok(name: &str, core: &str) -> Option<(bool, String)> {
@@ -833,4 +836,23 @@ fn boolean_only_case_with_failing_branch_needs_catch_all() {
         Some(true),
         "the catch-all clause must make the Core compile"
     );
+}
+
+#[test]
+fn plain_while_with_failing_condition_branch_compiles() {
+    // BT-4202 review: `generate_while_simple` (no mutations) also emits the
+    // loop's boolean `case`, and its condition can pure-inline an arm that is
+    // neither boolean. It must carry the same catch-all.
+    let src = concat!(
+        "Value subclass: Probe\n",
+        "  run: c =>\n",
+        "    [c ifTrue: [true] ifFalse: [false]] whileTrue: [c foo].\n",
+        "    0\n",
+    );
+    let code = compile(src, "bt@probe_plain_while_fallback");
+    assert!(
+        code.contains("CondBad"),
+        "plain while must carry the case_clause fallback. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bt@probe_plain_while_fallback", &code);
 }
