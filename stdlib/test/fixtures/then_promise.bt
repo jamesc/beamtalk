@@ -8,5 +8,5 @@
 Value subclass: ThenPromise
   field: resolved :: Integer = 0
 
-  then: aBlock :: Block(Integer, Object) -> ThenPromise =>
+  then: aBlock :: Block(Integer, Integer) -> ThenPromise =>
     ThenPromise resolved: (aBlock value: self resolved)
