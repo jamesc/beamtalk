@@ -1693,7 +1693,7 @@ impl CoreErlangGenerator {
             "let StateAcc = ",
             actor_state_call(
                 actor_state_helper::REFRESH,
-                vec![leaf::var("Self"), leaf::var("StateAcc")]
+                [leaf::var("Self"), leaf::var("StateAcc")]
             ),
             " in "
         ]
@@ -1983,7 +1983,7 @@ impl CoreErlangGenerator {
             " do ",
             actor_state_call(
                 actor_state_helper::NOTE_UNWOUND,
-                vec![leaf::var(error_var.clone())],
+                [leaf::var(error_var.clone())],
             ),
             " ",
             Self::emit_raw_raise(type_var.clone(), error_var.clone(), stack_var.clone()),

@@ -6,7 +6,7 @@
 //! three narrow accessors, never through a raw field or an AST-directed
 //! emission path. Depends only on [`super::ir`]; nothing here verifies IR.
 
-use super::super::actor_state_access::{actor_state_call, actor_state_helper};
+use super::super::actor_state_access::{Helper, actor_state_call, actor_state_helper};
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     AccParam, BindOp, CallSiteLine, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary,
@@ -380,7 +380,7 @@ pub(in crate::core_erlang) fn take_cell_store_emitted() -> bool {
 /// is installed (a nested away `super_send/5`) does not claim that state for
 /// the host process.
 pub(in crate::core_erlang) fn cell_put_call(state: Document<'static>) -> Document<'static> {
-    cell_store_call(actor_state_helper::STORE, vec![state])
+    cell_store_call(actor_state_helper::STORE, [state])
 }
 
 /// ADR 0146 R1 / BT-4535: `call 'beamtalk_actor_state':'store_unwound'(<throw>,
@@ -394,11 +394,14 @@ pub(in crate::core_erlang) fn cell_put_unwound_call(
     throw: Document<'static>,
     state: Document<'static>,
 ) -> Document<'static> {
-    cell_store_call(actor_state_helper::STORE_UNWOUND, vec![throw, state])
+    cell_store_call(actor_state_helper::STORE_UNWOUND, [throw, state])
 }
 
 /// Every cell store, marking it for [`take_cell_store_emitted`].
-fn cell_store_call(helper: (&'static str, u32), args: Vec<Document<'static>>) -> Document<'static> {
+fn cell_store_call<const N: usize>(
+    helper: Helper<N>,
+    args: [Document<'static>; N],
+) -> Document<'static> {
     CELL_STORE_EMITTED.with(|c| c.set(true));
     actor_state_call(helper, args)
 }
@@ -408,7 +411,7 @@ fn cell_store_call(helper: (&'static str, u32), args: Vec<Document<'static>>) ->
 /// BT-4121 weaves it into (a flagged stateless loop seeds its exit pack from
 /// the cell, which holds the loop's slow-path writes).
 pub(in crate::core_erlang) fn cell_take_call() -> Document<'static> {
-    actor_state_call(actor_state_helper::TAKE, vec![])
+    actor_state_call(actor_state_helper::TAKE, [])
 }
 
 /// Renders one [`ThreadedStmt::SyncedCall`] (ADR 0137 §1): the store of
@@ -970,7 +973,7 @@ fn relay_resume(
         }
         RethrowSlot::CellOverCarried => actor_state_call(
             actor_state_helper::REFRESH,
-            vec![leaf::var("Self"), leaf::var(vars.nlr_carried_var.clone())],
+            [leaf::var("Self"), leaf::var(vars.nlr_carried_var.clone())],
         ),
         #[cfg(any(test, feature = "test"))]
         RethrowSlot::SiteState(doc) => doc.clone(),
@@ -1719,9 +1722,11 @@ mod cell_helper_conformance {
         for line in src.lines() {
             let code = line.split('%').next().unwrap_or("").trim();
             let mut rest = code;
-            if let Some(open) = rest.find("-export([") {
+            // A real attribute starts in column 0 (after trimming); a
+            // `-export([` inside a `-doc """` body or a string is not one.
+            if let Some(after) = rest.strip_prefix("-export([") {
                 in_export = true;
-                rest = &rest[open + "-export([".len()..];
+                rest = after;
             }
             if !in_export {
                 continue;
@@ -1756,6 +1761,20 @@ mod cell_helper_conformance {
         for entry in ["foo/1", "bar/2", "baz/0", "qux/3"] {
             assert!(entries.contains(entry), "missing {entry}: {entries:?}");
         }
+    }
+
+    #[test]
+    fn ignores_export_text_inside_doc_bodies() {
+        let src = [
+            "-doc \"\"\"",
+            "Mentions -export([fake/1]). mid-line.",
+            "\"\"\".",
+            "-export([real/0]).",
+        ]
+        .join("\n");
+        let entries = exported_entries(&src);
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert!(entries.contains("real/0"), "{entries:?}");
     }
 
     #[test]

@@ -66,50 +66,70 @@ impl ActorClosure {
     }
 }
 
-/// Every `beamtalk_actor_state` helper codegen emits, as `(name, arity)`.
+/// A `beamtalk_actor_state` helper: its name and, in the type, its arity.
 ///
-/// [`actor_state_call`] takes one of these entries and checks the emitted
-/// argument count against its arity, and `cell_helper_conformance` checks
-/// every entry against the runtime's `-export` blocks — renaming,
-/// unexporting, or mis-aritying a helper fails the build instead of failing
-/// with `undef` at runtime.
+/// [`actor_state_call`] takes `[Document; N]` for a `Helper<N>`, so emitting
+/// the wrong number of arguments is a compile error at the call site, not a
+/// failure at codegen time or an `undef` when the generated module runs.
+/// `cell_helper_conformance` checks every entry against the runtime's
+/// `-export` blocks, so renaming or unexporting a helper fails the build too.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::core_erlang) struct Helper<const N: usize> {
+    name: &'static str,
+}
+
+impl<const N: usize> Helper<N> {
+    const fn new(name: &'static str) -> Self {
+        Self { name }
+    }
+
+    /// The helper's `(name, arity)`, for the export conformance check.
+    #[cfg(test)]
+    pub(in crate::core_erlang) const fn entry(self) -> (&'static str, usize) {
+        (self.name, N)
+    }
+}
+
+/// Every `beamtalk_actor_state` helper codegen emits.
 pub(in crate::core_erlang) mod actor_state_helper {
-    pub const INSTALL: (&str, u32) = ("install", 1);
-    pub const UNINSTALL: (&str, u32) = ("uninstall", 1);
-    pub const TAKE: (&str, u32) = ("take", 0);
-    pub const STORE: (&str, u32) = ("store", 1);
-    pub const SNAPSHOT: (&str, u32) = ("snapshot", 0);
-    pub const RESTORE: (&str, u32) = ("restore", 2);
-    pub const CALL_FOREIGN: (&str, u32) = ("call_foreign", 3);
-    pub const REFRESH: (&str, u32) = ("refresh", 2);
-    pub const CAPTURE: (&str, u32) = ("capture", 2);
-    pub const VIEW: (&str, u32) = ("view", 2);
-    pub const COMMIT: (&str, u32) = ("commit", 2);
-    pub const STORE_UNWOUND: (&str, u32) = ("store_unwound", 2);
-    pub const NOTE_UNWOUND: (&str, u32) = ("note_unwound", 1);
-    pub const GET: (&str, u32) = ("get", 3);
-    pub const PUT: (&str, u32) = ("put", 3);
-    pub const SUPER_SEND: (&str, u32) = ("super_send", 5);
+    use super::Helper;
+
+    pub const INSTALL: Helper<1> = Helper::new("install");
+    pub const UNINSTALL: Helper<1> = Helper::new("uninstall");
+    pub const TAKE: Helper<0> = Helper::new("take");
+    pub const STORE: Helper<1> = Helper::new("store");
+    pub const SNAPSHOT: Helper<0> = Helper::new("snapshot");
+    pub const RESTORE: Helper<2> = Helper::new("restore");
+    pub const CALL_FOREIGN: Helper<3> = Helper::new("call_foreign");
+    pub const REFRESH: Helper<2> = Helper::new("refresh");
+    pub const CAPTURE: Helper<2> = Helper::new("capture");
+    pub const VIEW: Helper<2> = Helper::new("view");
+    pub const COMMIT: Helper<2> = Helper::new("commit");
+    pub const STORE_UNWOUND: Helper<2> = Helper::new("store_unwound");
+    pub const NOTE_UNWOUND: Helper<1> = Helper::new("note_unwound");
+    pub const GET: Helper<3> = Helper::new("get");
+    pub const PUT: Helper<3> = Helper::new("put");
+    pub const SUPER_SEND: Helper<5> = Helper::new("super_send");
 
     /// Every helper above, for the export conformance check.
     #[cfg(test)]
-    pub const ALL: &[(&str, u32)] = &[
-        INSTALL,
-        UNINSTALL,
-        TAKE,
-        STORE,
-        SNAPSHOT,
-        RESTORE,
-        CALL_FOREIGN,
-        REFRESH,
-        CAPTURE,
-        VIEW,
-        COMMIT,
-        STORE_UNWOUND,
-        NOTE_UNWOUND,
-        GET,
-        PUT,
-        SUPER_SEND,
+    pub const ALL: &[(&str, usize)] = &[
+        INSTALL.entry(),
+        UNINSTALL.entry(),
+        TAKE.entry(),
+        STORE.entry(),
+        SNAPSHOT.entry(),
+        RESTORE.entry(),
+        CALL_FOREIGN.entry(),
+        REFRESH.entry(),
+        CAPTURE.entry(),
+        VIEW.entry(),
+        COMMIT.entry(),
+        STORE_UNWOUND.entry(),
+        NOTE_UNWOUND.entry(),
+        GET.entry(),
+        PUT.entry(),
+        SUPER_SEND.entry(),
     ];
 }
 
@@ -120,25 +140,17 @@ pub(in crate::core_erlang) mod actor_state_helper {
 /// `on:do:` and `ensure:` boundaries, callback install/uninstall, and the
 /// `dispatch/4` foreign exits — so the module and function atoms are built
 /// with [`leaf::atom`] in one place (ADR 0089). `helper` is one of
-/// [`actor_state_helper`]'s `(name, arity)` entries and `args` the call's
-/// full argument list; the count is checked against the arity here, so
-/// emitting the wrong number of arguments fails the build instead of failing
-/// with `undef` at runtime.
-pub(in crate::core_erlang) fn actor_state_call(
-    helper: (&str, u32),
-    args: Vec<Document<'static>>,
+/// [`actor_state_helper`]'s entries and `args` the call's full argument list;
+/// its length is the helper's arity by type, so a wrong count does not compile.
+pub(in crate::core_erlang) fn actor_state_call<const N: usize>(
+    helper: Helper<N>,
+    args: [Document<'static>; N],
 ) -> Document<'static> {
-    let (name, arity) = helper;
-    assert_eq!(
-        args.len(),
-        arity as usize,
-        "beamtalk_actor_state:{name} takes {arity} arguments"
-    );
     let mut parts: Vec<Document<'static>> = vec![
         Document::Str("call "),
         leaf::atom("beamtalk_actor_state"),
         Document::Str(":"),
-        leaf::atom(name),
+        leaf::atom(helper.name),
         Document::Str("("),
     ];
     for (i, arg) in args.into_iter().enumerate() {
@@ -243,7 +255,7 @@ impl CoreErlangGenerator {
                 " = ",
                 actor_state_call(
                     actor_state_helper::CAPTURE,
-                    vec![leaf::var("Self"), leaf::var(outer.capture().to_string()),],
+                    [leaf::var("Self"), leaf::var(outer.capture().to_string()),],
                 ),
                 " in ",
                 fun
@@ -286,7 +298,7 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn cell_view_doc(&self) -> Document<'static> {
         actor_state_call(
             actor_state_helper::VIEW,
-            vec![leaf::var("Self"), self.closure_capture_doc()],
+            [leaf::var("Self"), self.closure_capture_doc()],
         )
     }
 
@@ -301,7 +313,7 @@ impl CoreErlangGenerator {
         let capture = self.closure_capture_doc();
         actor_state_call(
             actor_state_helper::GET,
-            vec![leaf::var("Self"), leaf::atom(name.to_string()), capture],
+            [leaf::var("Self"), leaf::atom(name.to_string()), capture],
         )
     }
 
@@ -316,7 +328,7 @@ impl CoreErlangGenerator {
         let capture = self.closure_capture_doc();
         actor_state_call(
             actor_state_helper::SUPER_SEND,
-            vec![
+            [
                 leaf::var("Self"),
                 capture,
                 leaf::atom(class_name.to_string()),
@@ -342,7 +354,7 @@ impl CoreErlangGenerator {
                 "let ",
                 leaf::var(snapshot.name().to_string()),
                 " = ",
-                actor_state_call(actor_state_helper::SNAPSHOT, vec![]),
+                actor_state_call(actor_state_helper::SNAPSHOT, []),
                 " in "
             ],
         }
@@ -367,7 +379,7 @@ impl CoreErlangGenerator {
                 "do ",
                 actor_state_call(
                     actor_state_helper::RESTORE,
-                    vec![leaf::var("Self"), leaf::var(snapshot.name().to_string())]
+                    [leaf::var("Self"), leaf::var(snapshot.name().to_string())]
                 ),
                 " "
             ],
@@ -439,7 +451,7 @@ impl CoreErlangGenerator {
             " = ",
             actor_state_call(
                 actor_state_helper::PUT,
-                vec![
+                [
                     leaf::var("Self"),
                     leaf::atom(name.to_string()),
                     leaf::var(val_var.clone())
@@ -448,22 +460,5 @@ impl CoreErlangGenerator {
             " in ",
             leaf::var(val_var)
         ]
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{actor_state_call, actor_state_helper};
-
-    /// The arity half of a helper entry is checked where the call is built:
-    /// emitting the wrong argument count fails codegen instead of failing
-    /// with `undef` when the generated module runs.
-    #[test]
-    #[should_panic(expected = "beamtalk_actor_state:get takes 3 arguments")]
-    fn wrong_argument_count_fails_codegen() {
-        let _ = actor_state_call(
-            actor_state_helper::GET,
-            vec![beamtalk_cerl_doc::leaf::var("Self")],
-        );
     }
 }
