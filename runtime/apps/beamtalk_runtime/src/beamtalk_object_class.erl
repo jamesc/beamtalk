@@ -2113,6 +2113,7 @@ remove_registration(ClassName, ForgetPidRows) ->
     %% naming it. A crash keeps them for auto-restart recovery (BT-4552,
     %% BT-4622, `restart_class/1`). The pid-guarded forgets never clobber a
     %% replacement pid's row (a reload that already recorded one).
+    %% bt-catcher-audit: not-applicable-no-block - ForgetPidRows is an internal registry-cleanup fun, never a Beamtalk block
     _ =
         (try
             ForgetPidRows(self())
