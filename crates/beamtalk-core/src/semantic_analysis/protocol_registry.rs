@@ -1264,6 +1264,7 @@ mod tests {
                     };
                     MethodDefinition {
                         pipeline_sends: crate::ast::PipelineSends::default(),
+                        literal_comments: crate::ast::LiteralComments::default(),
                         selector,
                         parameters: vec![],
                         body: vec![ExpressionStatement::bare(
@@ -1305,6 +1306,7 @@ mod tests {
         };
         MethodDefinition {
             pipeline_sends: crate::ast::PipelineSends::default(),
+            literal_comments: crate::ast::LiteralComments::default(),
             selector,
             parameters: (0..arity)
                 .map(|i| ParameterDefinition::new(ident(&format!("arg{i}"))))

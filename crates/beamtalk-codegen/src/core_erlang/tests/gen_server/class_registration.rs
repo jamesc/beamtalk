@@ -55,6 +55,7 @@ fn test_class_registration_generation() {
         methods: vec![
             MethodDefinition {
                 pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+                literal_comments: beamtalk_core::ast::LiteralComments::default(),
                 selector: MessageSelector::Unary("increment".into()),
                 parameters: vec![],
                 body: vec![bare(Expression::Literal(
@@ -73,6 +74,7 @@ fn test_class_registration_generation() {
             },
             MethodDefinition {
                 pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+                literal_comments: beamtalk_core::ast::LiteralComments::default(),
                 selector: MessageSelector::Unary("getValue".into()),
                 parameters: vec![],
                 body: vec![bare(Expression::Literal(
@@ -105,6 +107,7 @@ fn test_class_registration_generation() {
 
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         type_aliases: Vec::new(),
         native_declarations: Vec::new(),
         expressions: vec![],
@@ -491,6 +494,7 @@ fn test_multiple_classes_registration() {
 
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         type_aliases: Vec::new(),
         native_declarations: Vec::new(),
         expressions: vec![],
@@ -636,6 +640,7 @@ fn test_multi_class_early_error_short_circuits() {
     // The fix must ensure that if _Reg0 is {error, ...}, we never reach _Reg1.
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         type_aliases: Vec::new(),
         native_declarations: Vec::new(),
         expressions: vec![],
@@ -721,6 +726,7 @@ fn test_three_class_short_circuit_nesting() {
 
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         type_aliases: Vec::new(),
         native_declarations: Vec::new(),
         expressions: vec![],

@@ -651,6 +651,7 @@ mod tests {
     fn empty_module() -> Module {
         Module {
             pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+            literal_comments: beamtalk_core::ast::LiteralComments::default(),
             classes: vec![],
             method_definitions: vec![],
             protocols: vec![],
@@ -690,6 +691,7 @@ mod tests {
         };
         Module {
             pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+            literal_comments: beamtalk_core::ast::LiteralComments::default(),
             classes: vec![class],
             method_definitions: vec![],
             protocols: vec![],

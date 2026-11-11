@@ -453,6 +453,7 @@ fn test_bt897_subdirectory_module_name_consistency() {
 
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         type_aliases: Vec::new(),
         native_declarations: Vec::new(),
@@ -4023,6 +4024,7 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         type_aliases: Vec::new(),
         native_declarations: Vec::new(),
@@ -4124,6 +4126,7 @@ fn test_actor_spawn_registers_instance_for_hot_reload() {
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -4206,6 +4209,7 @@ fn test_spawn_with_args_validates_map_argument() {
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),

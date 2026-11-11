@@ -156,6 +156,28 @@ pub fn declared_dependency_names_from_manifest_toml(manifest_toml: &str) -> Vec<
         .unwrap_or_default()
 }
 
+/// The path dependencies a `beamtalk.toml`'s `[dependencies]` table declares
+/// (`name = { path = "../dir" }`), as `(name, path)` pairs in name order. The
+/// path is exactly as written: relative to the declaring manifest's
+/// directory, like the build's `canonicalize_dep_path`. Git, registry and
+/// malformed entries are skipped, as is invalid TOML.
+#[must_use]
+pub fn declared_path_dependencies_from_manifest_toml(manifest_toml: &str) -> Vec<(String, String)> {
+    let Ok(value) = toml::from_str::<toml::Value>(manifest_toml) else {
+        return Vec::new();
+    };
+    let Some(table) = value.get("dependencies").and_then(toml::Value::as_table) else {
+        return Vec::new();
+    };
+    table
+        .iter()
+        .filter_map(|(name, spec)| {
+            let path = spec.get("path")?.as_str()?;
+            Some((name.clone(), path.to_string()))
+        })
+        .collect()
+}
+
 /// The dependencies a project currently resolves: everything reachable from
 /// the root manifest's currently declared `declared_direct` dependencies
 /// through the edges `snapshot` recorded.
@@ -209,6 +231,16 @@ mod tests {
 
     fn declared(names: &[&str]) -> Vec<String> {
         names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    #[test]
+    fn path_dependencies_are_read_from_the_manifest() {
+        let toml = "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nutils = { path = \"../utils\" }\nhttp = { git = \"https://example.test/http\", tag = \"v1\" }\njson = \"1.0.0\"\n";
+        assert_eq!(
+            declared_path_dependencies_from_manifest_toml(toml),
+            vec![("utils".to_string(), "../utils".to_string())]
+        );
+        assert!(declared_path_dependencies_from_manifest_toml("{ not toml").is_empty());
     }
 
     #[test]

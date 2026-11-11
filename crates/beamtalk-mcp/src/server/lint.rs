@@ -101,7 +101,7 @@ fn offline_inputs(
 /// type, and additionally computes type-coverage statistics. Returns a
 /// JSON-serializable value suitable for direct MCP tool output.
 pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
-    use beamtalk_core::semantic_analysis::{CoverageReport, infer_types};
+    use beamtalk_core::semantic_analysis::CoverageReport;
     use beamtalk_core::source_analysis::DiagnosticSummary;
 
     let lint_path = Utf8PathBuf::from(path);
@@ -157,14 +157,11 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
         |file| {
             files_checked += 1;
             all_diags.extend(file.diagnostics);
-            let type_map = infer_types(
-                file.module,
-                file.class_hierarchy,
-                native_type_registry.as_deref(),
-            );
+            // The pipeline's own type map: a separate `infer_types` pass
+            // would run without the alias registry (BT-4537, BT-4718).
             coverage.merge(CoverageReport::from_module(
                 file.module,
-                &type_map,
+                file.type_map,
                 file.path.as_str(),
                 false,
             ));

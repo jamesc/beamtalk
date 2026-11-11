@@ -194,6 +194,7 @@ fn check_return_type_handles_generic_declared_type() {
     // Method declares -> GenResult(Integer, Error), body returns GenResult
     let method = MethodDefinition {
         pipeline_sends: crate::ast::PipelineSends::default(),
+        literal_comments: crate::ast::LiteralComments::default(),
         selector: MessageSelector::Unary("compute".into()),
         parameters: vec![],
         body: vec![bare(int_lit(42))], // placeholder body

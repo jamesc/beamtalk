@@ -215,12 +215,18 @@ pub fn resolve_dependency_class_infos_with_sources(project_root: &Utf8Path) -> D
         dep.scan
             .trait_users
             .flatten(&mut infos, prior_protocol_defs, None);
+        let mut dep_protocol_infos = dep.scan.protocol_infos.clone();
+        crate::dependency_extensions::expand_dependency_class_aliases(
+            &dep.scan.alias_infos,
+            &mut infos,
+            &mut dep_protocol_infos,
+        );
         class_infos.extend(infos);
         beamtalk_core::semantic_analysis::protocol_source::merge_protocol_sources(
             &mut protocol_sources,
             dep.scan.trait_users.protocol_sources().clone(),
         );
-        protocol_infos.extend(dep.scan.protocol_infos.iter().cloned());
+        protocol_infos.extend(dep_protocol_infos);
         alias_infos.extend(dep.scan.alias_infos.iter().cloned());
         let own_protocol_defs = dep.scan.trait_users.protocol_defs();
         protocol_defs.extend(own_protocol_defs.iter().cloned());
@@ -462,6 +468,15 @@ fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<Scanne
         protocol_infos.extend(module_protocols);
         alias_infos.extend(module_aliases);
     }
+
+    // BT-4615: the dependency's own `internal type` aliases never reach the
+    // consumer's alias scope, so expand them out of what it exports.
+    // Extensions only: class infos are expanded where they are flattened
+    // (see `scan_dependencies`), since flattening would undo it.
+    crate::dependency_extensions::expand_dependency_extension_aliases(
+        &alias_infos,
+        &mut extensions,
+    );
 
     let scanned = std::sync::Arc::new(ScannedDep {
         class_infos,
@@ -708,6 +723,45 @@ mod tests {
                 .map(|m| &m.selector)
                 .collect::<Vec<_>>()
         );
+    }
+
+    /// BT-4615: the MCP-lint scanner expands a dependency's `internal type`
+    /// aliases *after* trait flattening, which re-extracts a trait-user's
+    /// `ClassInfo` from its AST. Both the class's own method and a provision
+    /// from the dependency's protocol mention the alias.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn dependency_internal_alias_is_expanded_after_trait_flattening() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            tmp.path().join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nhttp = { git = \"https://example.com/http.git\", tag = \"v1.0.0\" }\n",
+        );
+        let dep_src = tmp.path().join("_build/deps/http/src");
+        write(
+            dep_src.join("tagged.bt").as_path(),
+            "internal type Secret = Integer\n\
+             Protocol define: Tagged\n  name -> String\n\n  tag -> Secret => 1\n",
+        );
+        write(
+            dep_src.join("widget.bt").as_path(),
+            "Object subclass: Widget\n  uses: Tagged\n  name -> String => \"w\"\n  \
+             thing -> Secret => 42\n",
+        );
+
+        let (_, infos, _) = resolve_dependency_class_infos(root);
+        let widget = infos.iter().find(|c| c.name == "Widget").unwrap();
+        for sel in ["thing", "tag"] {
+            let ret = widget
+                .methods
+                .iter()
+                .find(|m| m.selector == sel)
+                .and_then(|m| m.return_type.as_ref())
+                .map(ToString::to_string);
+            assert_eq!(ret.as_deref(), Some("Integer"), "{sel}");
+        }
     }
 
     /// BT-3915: a dependency's `uses: Comparable` of its *own* `Comparable`
