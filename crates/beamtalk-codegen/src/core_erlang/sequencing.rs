@@ -380,9 +380,11 @@ impl CoreErlangGenerator {
     /// BT-4591: the arguments are compiled in place, which is safe only because
     /// every caller's arguments are already sequenced (an actor-context send is
     /// sync-bracketed; a `super` send's are pre-sequenced by `sequence_children`).
-    /// `operand_order_check` proves it: it fails any generated module (the
-    /// stdlib / bootstrap corpus included, in debug builds) whose argument list
-    /// holds two operands that run code.
+    /// `operand_order_check` proves it for the shapes that pack the arguments
+    /// into a `[..]` list (runtime dispatch and `super`): it fails any generated
+    /// module (the stdlib / bootstrap corpus included, in debug builds) whose
+    /// list holds two operands that run code. It does not scan a direct
+    /// `call 'm':'f'(A, B)` argument list.
     pub(super) fn capture_argument_list_doc(
         &mut self,
         arguments: &[Expression],

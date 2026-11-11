@@ -498,22 +498,12 @@ impl CoreErlangGenerator {
         &mut self,
         vars: &[&StateDeclaration],
     ) -> Result<Document<'static>> {
-        let exprs: Vec<&Expression> = vars
-            .iter()
-            .filter_map(|cv| cv.default_value.as_ref())
-            .collect();
-        let (prelude, docs) = self.thread_default_values(&exprs)?;
-        let mut docs = docs.into_iter();
+        let (prelude, values) = self.thread_default_values(vars)?;
         let mut parts: Vec<Document<'static>> = Vec::new();
-        for cv in vars {
+        for (cv, val) in vars.iter().zip(values) {
             if !parts.is_empty() {
                 parts.push(Document::Str(", "));
             }
-            let val = if cv.default_value.is_some() {
-                docs.next().expect("one threaded document per default")
-            } else {
-                Document::Str("'nil'")
-            };
             parts.push(docvec![leaf::atom(cv.name.name.to_string()), " => ", val,]);
         }
         Ok(docvec![prelude, "~{", Document::Vec(parts), "}~"])

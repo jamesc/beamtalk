@@ -43,6 +43,7 @@ pub(super) fn racing_operand_errors(code: &str) -> Vec<VerifyError> {
         at: 0,
         function: String::new(),
         found: Vec::new(),
+        saw_put: false,
     };
     scan.module();
     scan.found
@@ -236,6 +237,9 @@ struct Scan<'a> {
     /// The top-level function being scanned, for the finding.
     function: String,
     found: Vec<VerifyError>,
+    /// Whether a process-dictionary `put` was parsed since it was last cleared:
+    /// a class-variable write inside a `case erlang:get(..)`.
+    saw_put: bool,
 }
 
 impl Scan<'_> {
@@ -410,10 +414,19 @@ impl Scan<'_> {
                     } else {
                         None
                     };
+                    let outer_put = std::mem::replace(&mut self.saw_put, false);
                     let scrutinee = self.expr();
                     self.eat_word("of");
                     let clauses = self.clauses("end");
-                    own.unwrap_or_else(|| scrutinee.max(clauses))
+                    let wrote = self.saw_put;
+                    self.saw_put = outer_put || wrote;
+                    // A class-variable write is the same `case erlang:get(..)`
+                    // with a `put` in a clause: it runs, it does not just read.
+                    match own {
+                        Some(READS) if wrote => RUNS,
+                        Some(effect) => effect,
+                        None => scrutinee.max(clauses),
+                    }
                 }
                 "receive" => {
                     let clauses = self.clauses("after");
@@ -454,6 +467,12 @@ impl Scan<'_> {
                     let function = self.peek_atom();
                     self.expr_operand();
                     let atomic = self.args_are_atomic();
+                    if matches!(
+                        (module.as_deref(), function.as_deref()),
+                        (Some("erlang" | "beamtalk_class_vars"), Some("put"))
+                    ) {
+                        self.saw_put = true;
+                    }
                     self.call_args();
                     // A pure projection of bound variables and literals
                     // reads nothing a sibling can change and changes nothing a
@@ -690,6 +709,15 @@ mod tests {
             "two reads cannot disturb each other"
         );
         let code = module(&format!("[call 'm':'send'(X), {read}]"));
+        assert_eq!(found(&code), vec![(RacingConstruct::ListCell, 2)]);
+    }
+
+    #[test]
+    fn a_process_state_write_races_a_read() {
+        let read =
+            "case call 'erlang':'get'(K) of <M> when 'true' -> call 'maps':'find'('n', M) end";
+        let write = "let V = 6 in case call 'erlang':'get'(K) of <M> when 'true' -> let _ = call 'erlang':'put'(K, V) in V <_> when 'true' -> call 'beamtalk_class_vars':'put'(K, V) end";
+        let code = module(&format!("[{read}, {write}]"));
         assert_eq!(found(&code), vec![(RacingConstruct::ListCell, 2)]);
     }
 

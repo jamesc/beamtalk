@@ -631,19 +631,10 @@ impl CoreErlangGenerator {
                     leaf::atom(class_name.clone()),
                 ]);
                 // BT-4591: defaults that run code are bound in source order.
-                let exprs: Vec<&Expression> = class
-                    .state
-                    .iter()
-                    .filter_map(|field| field.default_value.as_ref())
-                    .collect();
-                let (prelude, docs) = self.thread_default_values(&exprs)?;
-                let mut docs = docs.into_iter();
-                for field in &class.state {
-                    let default_code: Document<'static> = if field.default_value.is_some() {
-                        docs.next().expect("one threaded document per default")
-                    } else {
-                        leaf::atom("nil")
-                    };
+                let states: Vec<&beamtalk_core::ast::StateDeclaration> =
+                    class.state.iter().collect();
+                let (prelude, values) = self.thread_default_values(&states)?;
+                for (field, default_code) in class.state.iter().zip(values) {
                     own_field_parts.push(docvec![
                         leaf::atom(field.name.name.clone()),
                         " => ",
@@ -670,19 +661,9 @@ impl CoreErlangGenerator {
 
         // Add each field with its default value. BT-4591: defaults that run
         // code are bound in source order ahead of the map.
-        let exprs: Vec<&Expression> = class
-            .state
-            .iter()
-            .filter_map(|field| field.default_value.as_ref())
-            .collect();
-        let (prelude, docs) = self.thread_default_values(&exprs)?;
-        let mut docs = docs.into_iter();
-        for field in &class.state {
-            let default_code: Document<'static> = if field.default_value.is_some() {
-                docs.next().expect("one threaded document per default")
-            } else {
-                leaf::atom("nil")
-            };
+        let states: Vec<&beamtalk_core::ast::StateDeclaration> = class.state.iter().collect();
+        let (prelude, values) = self.thread_default_values(&states)?;
+        for (field, default_code) in class.state.iter().zip(values) {
             field_parts.push(docvec![
                 ", ",
                 leaf::atom(field.name.name.clone()),
