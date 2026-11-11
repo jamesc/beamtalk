@@ -103,6 +103,7 @@ fn test_value_subclass_typed_fields_emit_type_alias() {
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),

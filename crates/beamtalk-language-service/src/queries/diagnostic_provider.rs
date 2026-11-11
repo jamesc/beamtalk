@@ -369,8 +369,41 @@ pub fn run_post_analysis_lint_pipeline(
         &beamtalk_core::semantic_analysis::ClassHierarchy,
     ) -> Vec<beamtalk_core::source_analysis::Diagnostic>,
 ) -> beamtalk_core::semantic_analysis::ClassHierarchy {
+    run_post_analysis_lint_pipeline_with_types(
+        module,
+        source,
+        analysis_ctx,
+        file_stem,
+        diagnostics_overrides,
+        diags,
+        lint_passes,
+    )
+    .0
+}
+
+/// [`run_post_analysis_lint_pipeline`], also returning step 1's `TypeMap`.
+///
+/// Type coverage (CLI `type-coverage`, MCP `diagnostic_summary`) reads this
+/// map rather than re-running `infer_types`, so it sees exactly the context
+/// the diagnostics were computed against — aliases, dependency classes,
+/// protocols and extensions (BT-4718).
+pub fn run_post_analysis_lint_pipeline_with_types(
+    module: &beamtalk_core::ast::Module,
+    source: &str,
+    analysis_ctx: beamtalk_core::semantic_analysis::AnalysisContext,
+    file_stem: Option<&str>,
+    diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
+    diags: &mut Vec<beamtalk_core::source_analysis::Diagnostic>,
+    lint_passes: impl FnOnce(
+        &beamtalk_core::semantic_analysis::ClassHierarchy,
+    ) -> Vec<beamtalk_core::source_analysis::Diagnostic>,
+) -> (
+    beamtalk_core::semantic_analysis::ClassHierarchy,
+    beamtalk_core::semantic_analysis::TypeMap,
+) {
     let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
     let class_hierarchy = analysis_result.class_hierarchy;
+    let type_map = analysis_result.type_map;
     // Lint-pass diagnostics go ahead of the analysis ones, the order the
     // surfaces reported them in before the hook existed (they ran the passes
     // before analysis): the output is not re-sorted.
@@ -389,7 +422,7 @@ pub fn run_post_analysis_lint_pipeline(
         std::mem::take(diags),
         diagnostics_overrides,
     );
-    class_hierarchy
+    (class_hierarchy, type_map)
 }
 
 /// Computes diagnostics with native type registry for FFI type warnings (ADR 0075).

@@ -50,6 +50,7 @@ fn test_meta_type_params_in_meta_map() {
     ];
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -79,6 +80,7 @@ fn test_meta_type_params_in_meta_map() {
 fn module_with(class: ClassDefinition) -> Module {
     Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -192,6 +194,7 @@ fn test_meta_type_params_empty_for_non_generic() {
     let class = make_actor_class("Counter");
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -222,6 +225,7 @@ fn test_meta_map_includes_package_name() {
     let class = make_actor_class("Counter");
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -252,6 +256,7 @@ fn test_meta_map_package_none_without_package() {
     let class = make_actor_class("Counter");
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -282,6 +287,7 @@ fn test_meta_map_includes_kind_actor() {
     let class = make_actor_class("Counter");
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -313,6 +319,7 @@ fn test_meta_map_includes_kind_value() {
     class.class_kind = ClassKind::Value;
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -361,6 +368,7 @@ fn test_meta_map_visibility_public_by_default() {
     let class = make_actor_class("Counter");
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
@@ -392,6 +400,7 @@ fn test_meta_map_visibility_internal() {
     class.is_internal = true;
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: vec![],
