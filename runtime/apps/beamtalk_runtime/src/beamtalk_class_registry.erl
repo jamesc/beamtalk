@@ -1524,9 +1524,11 @@ remove_module_less_class(ClassName, Module) ->
     %% Serialised per class and re-checked under the lock: the eager monitor
     %% restart and a lazy-recovery caller can both reach here for one crash,
     %% and `ClassRemoved` must be announced exactly once. The loser finds the
-    %% metadata row gone.
-    global:trans(
-        {{?MODULE, remove_module_less_class, ClassName}, self()},
+    %% metadata row gone. The lock is the node-local FIFO mutex with a bounded
+    %% wait (BT-3994), not `global:trans/4`: one caller is the class monitor.
+    Locked = beamtalk_fifo_lock:with_lock(
+        {remove_module_less_class, ClassName},
+        5000,
         fun() ->
             case whereis_class(ClassName) of
                 Pid when is_pid(Pid) ->
@@ -1546,15 +1548,22 @@ remove_module_less_class(ClassName, Module) ->
                                     domain => [beamtalk, runtime]
                                 }
                             ),
-                            ok = beamtalk_object_class:remove_dead_class_registration(
-                                ClassName, Module
-                            ),
-                            {error, {module_less_class_removed, ClassName}}
+                            case
+                                beamtalk_object_class:remove_dead_class_registration(
+                                    ClassName, Module
+                                )
+                            of
+                                ok -> {error, {module_less_class_removed, ClassName}};
+                                {alive, NewPid} -> {ok, NewPid}
+                            end
                     end
             end
-        end,
-        [node()]
-    ).
+        end
+    ),
+    case Locked of
+        {ok, Result} -> Result;
+        {error, LockReason} -> {error, {remove_lock_unavailable, ClassName, LockReason}}
+    end.
 
 -spec restart_compiled_class(class_name(), module(), class_name() | none, map()) ->
     {ok, pid()} | {error, term()}.

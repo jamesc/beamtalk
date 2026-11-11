@@ -2361,6 +2361,8 @@ bt4646_compiled_class_still_restarts_test() ->
 bt4646_removal_does_not_evict_caller_from_pg_test() ->
     Builder = 'BT4646CrashedBuilder',
     BuilderPid = bt4646_builder_class(Builder),
+    %% Keep the eager monitor out of the race so the helper does the removal.
+    ok = beamtalk_class_monitor:unwatch(Builder),
     MRef = monitor(process, BuilderPid),
     exit(BuilderPid, kill),
     bt4646_await_down(BuilderPid, MRef),
@@ -2375,7 +2377,7 @@ bt4646_removal_does_not_evict_caller_from_pg_test() ->
     end),
     receive
         {bt4646_done, Result, InGroup} ->
-            ?assertNotMatch({ok, _}, Result),
+            ?assertEqual({error, {module_less_class_removed, Builder}}, Result),
             ?assert(InGroup)
     after 5000 -> error(timeout)
     end,

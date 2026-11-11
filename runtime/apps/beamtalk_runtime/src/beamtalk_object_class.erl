@@ -2068,30 +2068,40 @@ rather than by `self()`. Also runs the registry purge
 (`beamtalk_class_lifecycle:class_removed/2`), tells the workspace layer as
 `removeFromSystem` does, and flushes the derived-fact cache.
 """.
--spec remove_dead_class_registration(class_name(), module()) -> ok.
+-spec remove_dead_class_registration(class_name(), module()) -> ok | {alive, pid()}.
 remove_dead_class_registration(ClassName, Module) ->
-    remove_registration(ClassName, fun(_Pid) ->
-        beamtalk_class_registry:forget_dead_incarnations(ClassName)
-    end),
-    _ =
-        (try
-            beamtalk_class_lifecycle:class_removed(ClassName, Module)
-        catch
-            _:_ -> ok
-        end),
-    _ =
-        (try
-            beamtalk_behaviour_intrinsics:publish_class_removed(ClassName, Module)
-        catch
-            _:_ -> ok
-        end),
-    _ =
-        (try
-            beamtalk_class_derived_cache:invalidate()
-        catch
-            _:_ -> ok
-        end),
-    ok.
+    %% Registration does not take the removal lock, so a class of the same name
+    %% can be rebuilt while this runs. Re-check right before the destructive
+    %% steps, and announce `ClassRemoved` last so a subscriber that rebuilds the
+    %% class in response cannot have its fresh rows deleted by this teardown.
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        Pid when is_pid(Pid) ->
+            {alive, Pid};
+        undefined ->
+            teardown_registration(ClassName, fun(_Pid) ->
+                beamtalk_class_registry:forget_dead_incarnations(ClassName)
+            end),
+            _ =
+                (try
+                    beamtalk_class_lifecycle:class_removed(ClassName, Module)
+                catch
+                    _:_ -> ok
+                end),
+            _ =
+                (try
+                    beamtalk_behaviour_intrinsics:publish_class_removed(ClassName, Module)
+                catch
+                    _:_ -> ok
+                end),
+            _ =
+                (try
+                    beamtalk_class_derived_cache:invalidate()
+                catch
+                    _:_ -> ok
+                end),
+            announce_class_lifecycle('ClassRemoved', ClassName),
+            ok
+    end.
 
 -spec remove_registration(class_name(), fun((pid()) -> term())) -> ok.
 remove_registration(ClassName, ForgetPidRows) ->
@@ -2099,6 +2109,10 @@ remove_registration(ClassName, ForgetPidRows) ->
     %% process shuts down (e.g. removeFromSystem). The event carries only the
     %% class name, so it is independent of the metadata-row deletion below.
     announce_class_lifecycle('ClassRemoved', ClassName),
+    teardown_registration(ClassName, ForgetPidRows).
+
+-spec teardown_registration(class_name(), fun((pid()) -> term())) -> ok.
+teardown_registration(ClassName, ForgetPidRows) ->
     %% Single metadata row → single delete; it also drops the class-method
     %% funs. Wrapped in try/catch to be safe during node shutdown when
     %% ETS/pg may be gone.
