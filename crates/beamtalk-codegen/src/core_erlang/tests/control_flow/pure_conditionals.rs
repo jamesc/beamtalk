@@ -818,15 +818,30 @@ fn boolean_only_case_with_failing_branch_needs_catch_all() {
         println!("Skipping: erlc not in PATH");
         return;
     };
-    assert!(
-        !without,
-        "erlc now compiles a catch-all-less boolean case with a failing branch: \
-         the OTP bug behind BT-4202 is fixed; the loop fallback clause is no longer needed"
-    );
-    assert!(
-        out.contains("consistency") || out.contains("undefined_label"),
-        "expected the beam_clean crash, got: {out}"
-    );
+    // The crash is known on OTP 28 only (`otp-support.toml` also lists 29).
+    // Assert it there so a CI OTP bump notices a fix; on any other release
+    // only the catch-all variant is checked, so a developer on a fixed OTP
+    // is not failed by a change that did not cause it.
+    let otp = Command::new("erl")
+        .args([
+            "-noshell",
+            "-eval",
+            "io:format(\"~s\", [erlang:system_info(otp_release)]), halt().",
+        ])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    if otp == "28" {
+        assert!(
+            !without,
+            "erlc now compiles a catch-all-less boolean case with a failing branch: \
+             the OTP bug behind BT-4202 is fixed; the loop fallback clause is no longer needed"
+        );
+        assert!(
+            out.contains("consistency") || out.contains("undefined_label"),
+            "expected the beam_clean crash, got: {out}"
+        );
+    }
     assert_eq!(
         erlc_ok(
             "q1",
@@ -841,12 +856,15 @@ fn boolean_only_case_with_failing_branch_needs_catch_all() {
 #[test]
 fn plain_while_with_failing_condition_branch_compiles() {
     // BT-4202 review: `generate_while_simple` (no mutations) also emits the
-    // loop's boolean `case`, and its condition can pure-inline an arm that is
-    // neither boolean. It must carry the same catch-all.
+    // loop's boolean `case`, so it carries the same catch-all as the other
+    // three lowerings. This pins that the clause is emitted and the Core
+    // compiles. It is not a crash repro: checked with the clause removed,
+    // erlc still compiles this shape (the condition is a let-bound fun applied
+    // at runtime, not inlined into a provably failing branch).
     let src = concat!(
         "Value subclass: Probe\n",
         "  run: c =>\n",
-        "    [c ifTrue: [true] ifFalse: [false]] whileTrue: [c foo].\n",
+        "    [c ifTrue: [true] ifFalse: [3]] whileTrue: [c foo].\n",
         "    0\n",
     );
     let code = compile(src, "bt@probe_plain_while_fallback");
