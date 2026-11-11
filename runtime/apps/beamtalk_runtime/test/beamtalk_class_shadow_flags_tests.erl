@@ -1383,23 +1383,49 @@ bounded_lock_wait_test_() ->
             )
         end,
         fun(_) -> application:unset_env(beamtalk_runtime, fifo_lock_timeout_ms) end, [
-            {"with_tag_lock times out behind a hung holder", fun() ->
-                Tag = 'Bt4004Tag class',
-                ?assertMatch(
-                    #beamtalk_error{kind = runtime_error, details = #{reason := timeout}},
-                    held_then_raise(tag, Tag, fun() ->
-                        beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() -> ran end)
+            {"an installer behind a hung tag-lock holder declines; an eraser waits", fun() ->
+                Name = 'Bt4004Cls',
+                Tag = beamtalk_class_registry:class_object_tag(Name),
+                stateless_row(Name),
+                _ = persistent_term:erase(Tag),
+                Parent = self(),
+                Holder = spawn_link(fun() ->
+                    beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() ->
+                        Parent ! holding,
+                        receive
+                            release -> ok
+                        end
                     end)
-                ),
-                %% The lock is free again afterwards.
-                ?assertEqual(ran, beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() -> ran end))
+                end),
+                receive
+                    holding -> ok
+                after 5000 -> error(holder_not_holding)
+                end,
+                %% The send path gives up after the bound and takes the fallback.
+                ?assertNot(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name)),
+                %% An eraser must not give up: it is still waiting after the bound.
+                Eraser = spawn_link(fun() ->
+                    ok = beamtalk_class_shadow_flags:invalidate(Name),
+                    Parent ! erased
+                end),
+                receive
+                    erased -> error(eraser_gave_up_or_skipped_the_lock)
+                after 400 -> ok
+                end,
+                Holder ! release,
+                receive
+                    erased -> ok
+                after 5000 -> error({eraser_never_finished, Eraser})
+                end,
+                %% The lock is free again: the install now succeeds.
+                ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name))
             end},
             {"with_shadow_lock times out behind a hung holder", fun() ->
                 %% A real class-object tag, so the lock is taken at all.
                 Tag = beamtalk_class_registry:class_object_tag('Object'),
                 ?assertMatch(
                     #beamtalk_error{kind = runtime_error, details = #{reason := timeout}},
-                    held_then_raise(shadow, Tag, fun() ->
+                    held_then_raise(Tag, fun() ->
                         beamtalk_extensions:with_shadow_lock(Tag, fun() -> ran end)
                     end)
                 ),
@@ -1409,13 +1435,9 @@ bounded_lock_wait_test_() ->
 
 %% Hold the lock (taken by the matching `with_*` fun) in another process while
 %% `Attempt` runs here; return the structured error it raised.
-held_then_raise(Which, Tag, Attempt) ->
+held_then_raise(Tag, Attempt) ->
     Parent = self(),
-    HolderFun =
-        case Which of
-            shadow -> fun(F) -> beamtalk_extensions:with_shadow_lock(Tag, F) end;
-            tag -> fun(F) -> beamtalk_class_shadow_flags:with_tag_lock(Tag, F) end
-        end,
+    HolderFun = fun(F) -> beamtalk_extensions:with_shadow_lock(Tag, F) end,
     Holder = spawn_link(fun() ->
         HolderFun(fun() ->
             Parent ! holding,
@@ -1431,8 +1453,7 @@ held_then_raise(Which, Tag, Attempt) ->
     try Attempt() of
         Other -> {unexpected, Other}
     catch
-        error:#{error := Err} -> Err;
-        error:#beamtalk_error{} = Err -> Err
+        error:#{error := Err} -> Err
     after
         Holder ! release
     end.

@@ -67,7 +67,7 @@ both questions stay one read:
   so that path is unchanged.
 
 Single writer per derived key, by construction, not by convention: every write
-and erase of it runs under one per-tag `global` lock (`with_tag_lock/2`), and the
+and erase of it runs under one per-tag node-local FIFO lock (`beamtalk_fifo_lock`, `with_tag_lock/2`), and the
 lock holder re-derives the answer from the raw flags above, never from the
 reader's view.
 - Invalidation (`set/2`, any kind): under the lock, raise the raw flag, then
@@ -272,6 +272,7 @@ actual transitions write (set when unset, erase when set); both are rare
 ]).
 
 -include("beamtalk.hrl").
+-include_lib("kernel/include/logger.hrl").
 
 -define(READY_KEY, beamtalk_class_shadow_ready).
 %% BT-4004: bound on waiting for a per-tag lock held by a hung critical section.
@@ -508,20 +509,42 @@ Run `Fun` holding the per-tag lock that serializes every write of the derived
 direct-call flag (BT-3700). Exported for tests that hold it deterministically.
 
 A node-local FIFO lock (`beamtalk_fifo_lock`, BT-4004): waiters are woken on
-release rather than after `global:trans/4`'s random back-off, and a wait behind
-a holder that hangs gives up after `?TAG_LOCK_TIMEOUT_MS` by raising a
-structured `runtime_error`. Not re-entrant: a nested call on the same tag
-raises `{recursive_lock, Key}` (no caller nests; see the "never called from
-inside" notes above).
+release rather than after `global:trans/4`'s random back-off. The wait is
+unbounded, like the `global:trans(..., infinity)` it replaced: every eraser
+(`set/2`, `invalidate/1`, ...) is correct only if it takes the lock and so
+waits out an in-flight install, which would otherwise `put` a stale derived
+value after the erase. Only the send-path installers bound their wait (see
+`with_install_lock/3`). Not re-entrant: a nested call on the same tag raises
+`{recursive_lock, Key}` (no caller nests; see the "never called from inside"
+notes above).
 """.
 -spec with_tag_lock(atom(), fun(() -> T)) -> T.
 with_tag_lock(Tag, Fun) ->
     beamtalk_fifo_lock:with_lock_or_raise(
-        {?MODULE, direct_flag, Tag},
-        beamtalk_fifo_lock:configured_timeout(direct_flag, ?TAG_LOCK_TIMEOUT_MS),
-        {'ClassShadowFlags', with_tag_lock},
-        Fun
+        tag_lock_key(Tag), infinity, {'ClassShadowFlags', with_tag_lock}, Fun
     ).
+
+%% The send-path installers' lock (BT-4004): bounded, and on timeout (or a lost
+%% lock table) it declines with `Declined` instead of raising into user code.
+%% Declining is safe, installing nothing makes the send take the dynamic
+%% `class_send` fallback, whereas an eraser that gave up could lose an
+%% invalidation.
+-spec with_install_lock(atom(), fun(() -> T), D) -> T | D.
+with_install_lock(Tag, Fun, Declined) ->
+    Timeout = beamtalk_fifo_lock:configured_timeout(direct_flag, ?TAG_LOCK_TIMEOUT_MS),
+    case beamtalk_fifo_lock:with_lock(tag_lock_key(Tag), Timeout, Fun) of
+        {ok, Result} ->
+            Result;
+        {error, Reason} ->
+            ?LOG_WARNING("Class direct-call install declined: tag lock unavailable", #{
+                tag => Tag, reason => Reason, timeout_ms => Timeout, domain => [beamtalk, runtime]
+            }),
+            Declined
+    end.
+
+-spec tag_lock_key(atom()) -> {module(), direct_flag, atom()}.
+tag_lock_key(Tag) ->
+    {?MODULE, direct_flag, Tag}.
 
 -doc "Clear the `Kind` flag for `Name`. No-op when not set.".
 -spec clear(kind(), atom()) -> ok.
@@ -620,12 +643,14 @@ chain_class_vars(ClassName) ->
 -spec install_direct_flag(atom(), atom()) -> derived() | false.
 install_direct_flag(ClassTag, ClassName) ->
     %% Cheap pre-check without the lock: a shadowed or not-yet-ready class must
-    %% not take a global lock per send.
+    %% not take a lock per send.
     case derive(ClassTag, ClassName) of
         false ->
             false;
         _ ->
-            with_tag_lock(ClassTag, fun() -> install_direct_flag_locked(ClassTag, ClassName) end)
+            with_install_lock(
+                ClassTag, fun() -> install_direct_flag_locked(ClassTag, ClassName) end, false
+            )
     end.
 
 %% The derived value under the tag lock: the installed one, or re-derived from
@@ -661,10 +686,11 @@ function, when an inherited owner has an ADR 0084 runtime fun for the
 selector (BT-4270), or when the function is not exported.
 
 The checks run once without the lock, so a call site that keeps declining
-never takes a global lock per send, and again under it, after the class's
+never takes a lock per send, and again under it, after the class's
 derived flag is installed there: every eraser holds the same lock, so an
 install that lands before an erase is removed by it, and one after it sees
-the write. Never called from inside `with_tag_lock/2`.
+the write. Never called from inside `with_tag_lock/2`. Declines (`false`) too when the tag
+lock stays held past the bounded wait (BT-4004).
 """.
 -spec static_call_target(static_call_key(), atom(), atom(), arity()) ->
     #beamtalk_object{} | false.
@@ -674,17 +700,21 @@ static_call_target(Key, ClassName, Selector, Arity) ->
         false ->
             false;
         #beamtalk_object{} ->
-            with_tag_lock(Tag, fun() ->
-                case
-                    install_direct_flag_locked(Tag, ClassName) =:= true andalso
-                        static_call_ref(Key, ClassName, Selector, Arity)
-                of
-                    false ->
-                        false;
-                    #beamtalk_object{} = Ref ->
-                        install_static_call_locked(Tag, Key, Ref)
-                end
-            end)
+            with_install_lock(
+                Tag,
+                fun() ->
+                    case
+                        install_direct_flag_locked(Tag, ClassName) =:= true andalso
+                            static_call_ref(Key, ClassName, Selector, Arity)
+                    of
+                        false ->
+                            false;
+                        #beamtalk_object{} = Ref ->
+                            install_static_call_locked(Tag, Key, Ref)
+                    end
+                end,
+                false
+            )
     end.
 
 %% Add `Key => Ref` to the class's per-class static call map (BT-4442), under
