@@ -32,8 +32,10 @@ use super::threaded_ir::{RacingConstruct, VerifyError};
 /// whose operand lists are all sequenced (or that the scanner cannot read —
 /// the scan never invents a finding from text it does not understand).
 pub(super) fn racing_operand_errors(code: &str) -> Vec<VerifyError> {
-    let tokens = tokenize(code);
+    let (tokens, starts) = tokenize(code);
     let mut scan = Scan {
+        code,
+        starts,
         tokens,
         at: 0,
         function: String::new(),
@@ -57,11 +59,13 @@ enum Tok {
 }
 
 #[allow(clippy::too_many_lines)] // one arm per token form
-fn tokenize(code: &str) -> Vec<Tok> {
+fn tokenize(code: &str) -> (Vec<Tok>, Vec<usize>) {
     let b = code.as_bytes();
     let mut out = Vec::new();
+    let mut starts: Vec<usize> = Vec::new();
     let mut i = 0;
     while i < b.len() {
+        let here = i;
         let c = b[i];
         let next = b.get(i + 1).copied();
         match c {
@@ -165,8 +169,9 @@ fn tokenize(code: &str) -> Vec<Tok> {
                 i += 1;
             }
         }
+        starts.resize(out.len(), here);
     }
-    out
+    (out, starts)
 }
 
 fn is_keyword(word: &str) -> bool {
@@ -191,19 +196,30 @@ fn is_keyword(word: &str) -> bool {
     )
 }
 
-/// The BIFs whose call over variables and literals is a pure projection: the
-/// codegen's `self_dispatch_result_value` / state-read shapes.
+/// The calls over variables and literals that are pure projections: the
+/// codegen's `self_dispatch_result_value`, immutable state-map reads, string
+/// conversions and block-literal captures.
 fn is_pure_projection(module: Option<&str>, function: Option<&str>) -> bool {
     matches!(
         (module, function),
         (
             Some("erlang"),
             Some("element" | "hd" | "tl" | "tuple_size" | "map_size")
-        )
+        ) | (Some("maps"), Some("get"))
+            | (Some("beamtalk_primitive"), Some("string_to_binary"))
+            // A block literal's capture: `is_trivial_subexpr` already treats a
+            // block operand as one that races with nothing.
+            | (
+                Some("beamtalk_actor_state" | "beamtalk_class_vars"),
+                Some("capture")
+            )
     )
 }
 
-struct Scan {
+struct Scan<'a> {
+    code: &'a str,
+    /// The byte offset of each token in `code`.
+    starts: Vec<usize>,
     tokens: Vec<Tok>,
     at: usize,
     /// The top-level function being scanned, for the finding.
@@ -211,7 +227,7 @@ struct Scan {
     found: Vec<VerifyError>,
 }
 
-impl Scan {
+impl Scan<'_> {
     fn peek(&self) -> Option<&Tok> {
         self.tokens.get(self.at)
     }
@@ -319,12 +335,15 @@ impl Scan {
 
     /// Records a finding for a list or map holding `racing` operands that may
     /// run code.
-    fn note(&mut self, construct: RacingConstruct, racing: usize) {
+    fn note(&mut self, construct: RacingConstruct, racing: usize, open: usize) {
         if racing >= 2 {
+            let from = self.starts.get(open).copied().unwrap_or(0);
+            let snippet: String = self.code[from..].chars().take(240).collect();
             self.found.push(VerifyError::RacingOperands {
                 construct,
                 function: self.function.clone(),
                 operands: racing,
+                snippet,
             });
         }
     }
@@ -365,9 +384,15 @@ impl Scan {
                     self.expr()
                 }
                 "case" => {
+                    // A class reference (`case whereis('beamtalk_class_X') of
+                    // undefined -> raise class_not_found; Pid -> Pid`) runs no
+                    // user code, and `is_trivial_subexpr` treats the operand as
+                    // one that races with nothing.
+                    let class_lookup = self.at_class_lookup();
                     let scrutinee = self.expr();
                     self.eat_word("of");
-                    scrutinee | self.clauses("end")
+                    let clauses = self.clauses("end");
+                    !class_lookup && (scrutinee | clauses)
                 }
                 "receive" => {
                     let clauses = self.clauses("after");
@@ -439,6 +464,7 @@ impl Scan {
             Tok::Punct("<") => self.expr_list(">"),
             Tok::Punct("{") => self.expr_list("}"),
             Tok::Punct("[") => {
+                let open = self.at - 1;
                 let mut racing = 0;
                 while self.peek().is_some() && !self.at_punct("]") {
                     racing += usize::from(self.expr());
@@ -447,10 +473,11 @@ impl Scan {
                     }
                 }
                 self.eat_punct("]");
-                self.note(RacingConstruct::ListCell, racing);
+                self.note(RacingConstruct::ListCell, racing, open);
                 racing > 0
             }
             Tok::Punct("~{") => {
+                let open = self.at - 1;
                 let mut racing = 0;
                 while self.peek().is_some() && !self.at_punct("}~") {
                     racing += usize::from(self.expr());
@@ -462,7 +489,7 @@ impl Scan {
                     }
                 }
                 self.eat_punct("}~");
-                self.note(RacingConstruct::MapLiteral, racing);
+                self.note(RacingConstruct::MapLiteral, racing, open);
                 racing > 0
             }
             Tok::Punct("#{") => {
@@ -495,6 +522,19 @@ impl Scan {
         self.expr();
     }
 
+    /// Whether the cursor is at `call 'erlang':'whereis'(...)`.
+    fn at_class_lookup(&self) -> bool {
+        matches!(
+            self.tokens.get(self.at..self.at + 4),
+            Some([
+                Tok::Word(c),
+                Tok::Atom(m),
+                Tok::Punct(":"),
+                Tok::Atom(f)
+            ]) if c == "call" && m == "erlang" && f == "whereis"
+        )
+    }
+
     /// The quoted atom at the cursor, without consuming it.
     fn peek_atom(&self) -> Option<String> {
         match self.peek() {
@@ -503,23 +543,25 @@ impl Scan {
         }
     }
 
-    /// Whether the `( arg, ... )` at the cursor holds only variables, atoms and
-    /// literals.
+    /// Whether the `( arg, ... )` at the cursor holds no code to run: only
+    /// variables, atoms and literal terms (a tuple or binary of them).
     fn args_are_atomic(&self) -> bool {
         if !self.at_punct("(") {
             return false;
         }
-        let mut i = self.at + 1;
-        let mut expect_item = true;
-        while let Some(tok) = self.tokens.get(i) {
+        let mut depth = 0usize;
+        for tok in &self.tokens[self.at..] {
             match tok {
-                Tok::Punct(")") => return true,
-                Tok::Punct(",") if !expect_item => expect_item = true,
-                Tok::Lit | Tok::Atom(_) if expect_item => expect_item = false,
-                Tok::Word(w) if expect_item && !is_keyword(w) => expect_item = false,
-                _ => return false,
+                Tok::Punct("(" | "[" | "{" | "<" | "~{" | "#{") => depth += 1,
+                Tok::Punct(")" | "]" | "}" | ">" | "}~" | "}#") => {
+                    depth = depth.saturating_sub(1);
+                    if depth == 0 {
+                        return true;
+                    }
+                }
+                Tok::Word(w) if is_keyword(w) => return false,
+                _ => {}
             }
-            i += 1;
         }
         false
     }

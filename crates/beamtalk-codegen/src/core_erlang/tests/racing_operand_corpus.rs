@@ -59,3 +59,19 @@ fn skipping_super_argument_presequencing_reaches_the_opaque_escapes_report() {
         .expect("the escaping state bind must be reported");
     assert!(report.contains("StateEffectEscapesExpression"), "{report}");
 }
+
+/// BT-4591: the check found two in-place builders BT-4296 missed. An actor's
+/// field defaults are the pairs of the `init/1` state map, so two defaults that
+/// send messages ran last-first; a class variable read next to a send raced it.
+#[test]
+fn field_defaults_and_class_variable_reads_are_sequenced() {
+    let defaults =
+        "Actor subclass: Defaults\n  state: a = (Counter new)\n  state: b = (Counter new)\n";
+    let code = super::codegen_named(defaults, "defaults");
+    assert!(code.contains("_FieldDefault@"), "{code}");
+    let class_var =
+        "Actor subclass: ClassVar\n  classState: n = 0\n  class run: xs => #[xs last, self.n]\n";
+    assert_eq!(verifier_report(class_var, None), None);
+    let code = codegen(class_var);
+    assert!(code.contains("_ArrLit@"), "{code}");
+}

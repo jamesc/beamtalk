@@ -376,6 +376,13 @@ impl CoreErlangGenerator {
     /// (`close`-style rendering always produces a valid, self-contained
     /// `Document`). For class-method-context dispatch sites, use
     /// [`Self::thread_args`] instead and splice the returned prelude.
+    ///
+    /// BT-4591: the arguments are compiled in place, which is safe only because
+    /// every caller's arguments are already sequenced (an actor-context send is
+    /// sync-bracketed; a `super` send's are pre-sequenced by `sequence_children`).
+    /// `operand_order_check` proves it: it fails any generated module (the
+    /// stdlib / bootstrap corpus included, in debug builds) whose argument list
+    /// holds two operands that run code.
     pub(super) fn capture_argument_list_doc(
         &mut self,
         arguments: &[Expression],
@@ -506,7 +513,8 @@ impl CoreErlangGenerator {
     /// map literal evaluates its last operand first). `None` when at most one
     /// operand may: it has nothing to race with.
     ///
-    /// A field read is stable outside an actor closure: it reads a `State` or
+    /// A field read is stable outside an actor closure (and is not a class
+    /// variable read, BT-4591): it reads a `State` or
     /// `Self` version, and a sibling that writes the field is a prelude
     /// producer `subexpr_needs_prelude` already sequences. Exempting it keeps
     /// `self.a + self.b` free of temps (the BT-4279 fast path needs an empty
@@ -527,8 +535,15 @@ impl CoreErlangGenerator {
             .enumerate()
             .filter(|(_, e)| {
                 let inner = e.unwrap_parens();
-                let stable_field_read =
-                    stable_field_reads && matches!(inner, Expression::FieldAccess { .. });
+                // BT-4591: a class variable read (`self.n` in a class method) is a
+                // live process-dictionary lookup, like a cell read: a sibling send
+                // may write it (ADR 0130), so it races like any send.
+                let stable_field_read = stable_field_reads
+                    && matches!(
+                        inner,
+                        Expression::FieldAccess { receiver, field, .. }
+                            if !self.is_class_var_field_read(receiver, field)
+                    );
                 !(Self::is_trivial_subexpr(inner) || stable_field_read)
             })
             .map(|(i, _)| i);

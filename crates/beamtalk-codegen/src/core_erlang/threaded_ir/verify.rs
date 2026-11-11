@@ -48,6 +48,8 @@ pub(in crate::core_erlang) enum VerifyError {
         construct: RacingConstruct,
         function: String,
         operands: usize,
+        /// The start of the construct's text, to find it in the module.
+        snippet: String,
     },
 
     /// A versioned var referenced with no producing `Bind` in its frame (or

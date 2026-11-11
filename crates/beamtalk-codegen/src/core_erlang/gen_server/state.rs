@@ -13,53 +13,79 @@ use super::super::util::omit_late_defaultless_slot;
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf, line};
-use beamtalk_core::ast::{Expression, Module};
+use beamtalk_core::ast::{Expression, Module, StateDeclaration};
+
+/// The state fields of an `init/1` default map: a prelude binding the defaults
+/// that run code, in source order, and one map-entry line per field.
+pub(in crate::core_erlang) struct StateFieldInits {
+    /// `let FieldDefaultN = <default> in ` for the defaults hoisted ahead of
+    /// the map (empty when at most one default can run code).
+    pub prelude: Document<'static>,
+    /// One `, 'name' => value` line per field, each with a leading `line()`.
+    pub fields: Vec<Document<'static>>,
+}
 
 impl CoreErlangGenerator {
+    /// BT-4591: the map entries for `states`' defaults. A map literal's pairs
+    /// evaluate in unspecified order (erlc runs the last first), and a default
+    /// is an arbitrary expression, so two defaults that send messages are
+    /// bound to temps in source order through `thread_subexprs` and the map
+    /// holds only their variables.
+    fn state_field_inits(
+        &mut self,
+        mut leading: Vec<Document<'static>>,
+        states: &[&StateDeclaration],
+    ) -> Result<StateFieldInits> {
+        let exprs: Vec<&Expression> = states
+            .iter()
+            .filter_map(|state| state.default_value.as_ref())
+            .collect();
+        let (prelude, docs) = self.thread_subexprs(&exprs, "FieldDefault")?;
+        let mut docs = docs.into_iter();
+        for state in states {
+            let value_code = if state.default_value.is_some() {
+                docs.next().expect("one threaded document per default")
+            } else {
+                Document::Str("'nil'")
+            };
+            leading.push(docvec![
+                line(),
+                docvec![", ", leaf::atom(state.name.name.to_string()), " => "],
+                value_code,
+            ]);
+        }
+        Ok(StateFieldInits {
+            prelude: self.threaded_prelude_doc(&prelude),
+            fields: leading,
+        })
+    }
+
     /// Generates only the current class's own state fields (not inherited).
     ///
-    /// Returns a list of `Document` fragments, each representing one field
-    /// initializer line (with a leading `line()` for indentation).
-    /// The caller wraps these in a `nest()` at the appropriate level.
+    /// Each field is one `Document` fragment (with a leading `line()` for
+    /// indentation); the caller wraps them in a `nest()` at the appropriate
+    /// level, after the returned prelude.
     ///
     /// This is used when calling parent init — we only add fields defined in this class,
     /// not fields from parent classes (those come from parent's init).
-    pub(super) fn generate_own_state_fields(
-        &mut self,
-        module: &Module,
-    ) -> Result<Vec<Document<'static>>> {
-        let mut fields = Vec::new();
-
-        let current_class = self.current_class(module);
-
-        if let Some(class) = current_class {
-            for state in &class.state {
-                if omit_late_defaultless_slot(state) {
-                    continue;
-                }
-                let value_code = if let Some(ref default_value) = state.default_value {
-                    self.expression_doc(default_value)?
-                } else {
-                    Document::Str("'nil'")
-                };
-                fields.push(docvec![
-                    line(),
-                    docvec![", ", leaf::atom(state.name.name.to_string()), " => "],
-                    value_code,
-                ]);
-            }
-        }
-
-        Ok(fields)
+    pub(super) fn generate_own_state_fields(&mut self, module: &Module) -> Result<StateFieldInits> {
+        let states: Vec<&StateDeclaration> = self
+            .current_class(module)
+            .map(|class| {
+                class
+                    .state
+                    .iter()
+                    .filter(|state| !omit_late_defaultless_slot(state))
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.state_field_inits(Vec::new(), &states)
     }
 
     /// Generates the state fields for a class whose parent is a base class
     /// (`Actor` / `Object` / none) — i.e. a class with no stateful ancestor.
     ///
-    /// Returns a list of `Document` fragments, each representing one field
-    /// initializer line (with a leading `line()` for indentation).
-    /// The caller wraps these in a `nest()` at the appropriate level.
-    ///
+    /// Returns the fields like [`Self::generate_own_state_fields`].
     /// Inherited state from a *non-base* parent is NOT collected here. A subclass
     /// of a stateful actor instead has its `init/1` call the parent's compiled
     /// `init/1` and merge its own fields on top — the super-init chain
@@ -71,8 +97,8 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn generate_initial_state_fields(
         &mut self,
         module: &Module,
-    ) -> Result<Vec<Document<'static>>> {
-        let mut fields = Vec::new();
+    ) -> Result<StateFieldInits> {
+        let mut leading = Vec::new();
 
         // Initialize fields from module expressions (assignments at top level)
         // Only include literal values - blocks are methods handled by dispatch/3
@@ -81,7 +107,7 @@ impl CoreErlangGenerator {
                 if let Expression::Identifier(id) = target.as_ref() {
                     if matches!(value.as_ref(), Expression::Literal(..)) {
                         let value_code = self.expression_doc(value)?;
-                        fields.push(docvec![
+                        leading.push(docvec![
                             line(),
                             docvec![", ", leaf::atom(id.name.to_string()), " => "],
                             value_code,
@@ -92,50 +118,20 @@ impl CoreErlangGenerator {
         }
 
         // Find the current class being compiled (identity check — ADR 0119).
-        let current_class = self.current_class(module);
-
-        if let Some(class) = current_class {
-            // Emit this class's own fields. Inherited state from a non-base parent
-            // is supplied at runtime by the super-init chain, not collected
-            // here — this branch is only reached when the parent is a base class.
-            for state in &class.state {
-                if omit_late_defaultless_slot(state) {
-                    continue;
-                }
-                let value_code = if let Some(ref default_value) = state.default_value {
-                    self.expression_doc(default_value)?
-                } else {
-                    Document::Str("'nil'")
-                };
-                fields.push(docvec![
-                    line(),
-                    docvec![", ", leaf::atom(state.name.name.to_string()), " => "],
-                    value_code,
-                ]);
-            }
-        } else {
-            // Fallback: no class identity was set (e.g. a hand-constructed test
-            // fixture that calls this method directly without going through
-            // `setup_class_identity`). Load-bearing for those tests, not dead code.
-            for class in &module.classes {
-                for state in &class.state {
-                    if omit_late_defaultless_slot(state) {
-                        continue;
-                    }
-                    let value_code = if let Some(ref default_value) = state.default_value {
-                        self.expression_doc(default_value)?
-                    } else {
-                        Document::Str("'nil'")
-                    };
-                    fields.push(docvec![
-                        line(),
-                        docvec![", ", leaf::atom(state.name.name.to_string()), " => "],
-                        value_code,
-                    ]);
-                }
-            }
-        }
-
-        Ok(fields)
+        // Its own fields are emitted here; inherited state from a non-base
+        // parent is supplied at runtime by the super-init chain. Fallback: no
+        // class identity was set (e.g. a hand-constructed test fixture that
+        // calls this method directly without going through
+        // `setup_class_identity`) — load-bearing for those tests, not dead code.
+        let classes: Vec<&beamtalk_core::ast::ClassDefinition> = match self.current_class(module) {
+            Some(class) => vec![class],
+            None => module.classes.iter().collect(),
+        };
+        let states: Vec<&StateDeclaration> = classes
+            .iter()
+            .flat_map(|class| class.state.iter())
+            .filter(|state| !omit_late_defaultless_slot(state))
+            .collect();
+        self.state_field_inits(leading, &states)
     }
 }
