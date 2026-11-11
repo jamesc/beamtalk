@@ -4481,7 +4481,13 @@ init(_) ->
 
 bt4657_wait() ->
     receive
-        stop -> ok
+        stop ->
+            ok;
+        %% BT-4664: a fake class process answers the hierarchy walk's
+        %% `superclass` call as a root class.
+        {'$gen_call', From, superclass} ->
+            gen_server:reply(From, none),
+            bt4657_wait()
     end.
 
 pid_class_name_native_backing_module_test() ->
@@ -4520,10 +4526,12 @@ pid_class_name_native_backing_module_test() ->
             %% fake class has no loaded module, so it stops at that check).
             {error, MatchErr} = beamtalk_actor:named_lookup(local, Other, Name, 'named:'),
             ?assertMatch(#beamtalk_error{kind = wrong_class}, MatchErr),
-            ?assertNotEqual(nomatch, binary:match(MatchErr#beamtalk_error.hint, <<"no loaded module">>)),
+            ?assertNotEqual(nomatch, binary:match(bt4664_hint(MatchErr), <<"no loaded module">>)),
             %% Receiver is not among them: the error names the candidates.
-            {error, SharedErr} = beamtalk_actor:named_lookup(local, 'Bt4664Unrelated', Name, 'named:'),
-            Hint = SharedErr#beamtalk_error.hint,
+            {error, SharedErr} = beamtalk_actor:named_lookup(
+                local, 'Bt4664Unrelated', Name, 'named:'
+            ),
+            Hint = bt4664_hint(SharedErr),
             ?assertNotEqual(nomatch, binary:match(Hint, <<"backing module is shared">>)),
             ?assertNotEqual(nomatch, binary:match(Hint, atom_to_binary(Live))),
             ?assertNotEqual(nomatch, binary:match(Hint, atom_to_binary(Other))),
@@ -4540,6 +4548,9 @@ pid_class_name_native_backing_module_test() ->
         LivePid ! stop,
         OtherPid ! stop
     end.
+
+bt4664_hint(#beamtalk_error{hint = {beamtalk_string, Bin}}) -> Bin;
+bt4664_hint(#beamtalk_error{hint = Bin}) when is_binary(Bin) -> Bin.
 
 wait_for_initial_call(_Pid, 0) ->
     timeout;
