@@ -307,18 +307,28 @@ DispatchDifferentialCase subclass: SealedDirectDispatchDifferentialTest
   putOn: receiver => receiver fieldAt: #x put: 1
 
   testFieldAtPutOnIntegerMatchesDynamicSend =>
-    outcome := self assertSameOutcome: [self putOn: 42] as: [
-      self dynamic: #fieldAt:put: args: #(#x, 1) to: 42
-    ]
+    outcome := self
+      assertSameOutcome: [self putOn: 42]
+      as: [
+        self
+          dynamic: #fieldAt:put:
+          args: #(#x, 1)
+          to: 42
+      ]
     self assert: (outcome at: 5) equals: #Integer
     self assert: (outcome at: 3) equals: #immutable_value
     self assert: (outcome at: 4) equals: #fieldAt:put:
     self assert: (outcome at: 7) equals: "Cannot modify slot on value type — use withSlot: to create a new instance"
 
   testFieldAtPutOnStringMatchesDynamicSend =>
-    outcome := self assertSameOutcome: [self putOn: "abc"] as: [
-      self dynamic: #fieldAt:put: args: #(#x, 1) to: "abc"
-    ]
+    outcome := self
+      assertSameOutcome: [self putOn: "abc"]
+      as: [
+        self
+          dynamic: #fieldAt:put:
+          args: #(#x, 1)
+          to: "abc"
+      ]
     self assert: (outcome at: 5) equals: #String
     self assert: (outcome at: 3) equals: #immutable_value
     self assert: (outcome at: 7) equals: "Cannot modify slot on value type — use withSlot: to create a new instance"
