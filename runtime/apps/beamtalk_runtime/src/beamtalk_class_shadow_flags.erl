@@ -274,6 +274,8 @@ actual transitions write (set when unset, erase when set); both are rare
 -include("beamtalk.hrl").
 
 -define(READY_KEY, beamtalk_class_shadow_ready).
+%% BT-4004: bound on waiting for a per-tag lock held by a hung critical section.
+-define(TAG_LOCK_TIMEOUT_MS, 60000).
 
 %% BT-3700: the send-path guard (`direct_call_ok/2`) is hot; the slow-path
 %% helpers are inlined so the miss branch is not a chain of calls.
@@ -504,10 +506,22 @@ set_class_vars(ClassName, false) ->
 -doc """
 Run `Fun` holding the per-tag lock that serializes every write of the derived
 direct-call flag (BT-3700). Exported for tests that hold it deterministically.
+
+A node-local FIFO lock (`beamtalk_fifo_lock`, BT-4004): waiters are woken on
+release rather than after `global:trans/4`'s random back-off, and a wait behind
+a holder that hangs gives up after `?TAG_LOCK_TIMEOUT_MS` by raising a
+structured `runtime_error`. Not re-entrant: a nested call on the same tag
+raises `{recursive_lock, Key}` (no caller nests; see the "never called from
+inside" notes above).
 """.
 -spec with_tag_lock(atom(), fun(() -> T)) -> T.
 with_tag_lock(Tag, Fun) ->
-    global:trans({{?MODULE, direct_flag, Tag}, self()}, Fun, [node()], infinity).
+    beamtalk_fifo_lock:with_lock_or_raise(
+        {?MODULE, direct_flag, Tag},
+        beamtalk_fifo_lock:configured_timeout(direct_flag, ?TAG_LOCK_TIMEOUT_MS),
+        {'ClassShadowFlags', with_tag_lock},
+        Fun
+    ).
 
 -doc "Clear the `Kind` flag for `Name`. No-op when not set.".
 -spec clear(kind(), atom()) -> ok.

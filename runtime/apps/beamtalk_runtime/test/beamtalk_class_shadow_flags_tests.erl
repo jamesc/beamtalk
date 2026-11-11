@@ -1371,3 +1371,68 @@ static_call_target_test_() ->
                 end
             end}
     ]}.
+
+%% BT-4004: both node-local locks are `beamtalk_fifo_lock`s with a bounded
+%% wait; a hung holder yields a structured `runtime_error`, not an eternal wait.
+bounded_lock_wait_test_() ->
+    {setup,
+        fun() ->
+            setup_runtime(),
+            application:set_env(
+                beamtalk_runtime, fifo_lock_timeout_ms, #{direct_flag => 100, shadow_flag => 100}
+            )
+        end,
+        fun(_) -> application:unset_env(beamtalk_runtime, fifo_lock_timeout_ms) end, [
+            {"with_tag_lock times out behind a hung holder", fun() ->
+                Tag = 'Bt4004Tag class',
+                ?assertMatch(
+                    #beamtalk_error{kind = runtime_error, details = #{reason := timeout}},
+                    held_then_raise(tag, Tag, fun() ->
+                        beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() -> ran end)
+                    end)
+                ),
+                %% The lock is free again afterwards.
+                ?assertEqual(ran, beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() -> ran end))
+            end},
+            {"with_shadow_lock times out behind a hung holder", fun() ->
+                %% A real class-object tag, so the lock is taken at all.
+                Tag = beamtalk_class_registry:class_object_tag('Object'),
+                ?assertMatch(
+                    #beamtalk_error{kind = runtime_error, details = #{reason := timeout}},
+                    held_then_raise(shadow, Tag, fun() ->
+                        beamtalk_extensions:with_shadow_lock(Tag, fun() -> ran end)
+                    end)
+                ),
+                ?assertEqual(ran, beamtalk_extensions:with_shadow_lock(Tag, fun() -> ran end))
+            end}
+        ]}.
+
+%% Hold the lock (taken by the matching `with_*` fun) in another process while
+%% `Attempt` runs here; return the structured error it raised.
+held_then_raise(Which, Tag, Attempt) ->
+    Parent = self(),
+    HolderFun =
+        case Which of
+            shadow -> fun(F) -> beamtalk_extensions:with_shadow_lock(Tag, F) end;
+            tag -> fun(F) -> beamtalk_class_shadow_flags:with_tag_lock(Tag, F) end
+        end,
+    Holder = spawn_link(fun() ->
+        HolderFun(fun() ->
+            Parent ! holding,
+            receive
+                release -> ok
+            end
+        end)
+    end),
+    receive
+        holding -> ok
+    after 5000 -> error(holder_not_holding)
+    end,
+    try Attempt() of
+        Other -> {unexpected, Other}
+    catch
+        error:#{error := Err} -> Err;
+        error:#beamtalk_error{} = Err -> Err
+    after
+        Holder ! release
+    end.

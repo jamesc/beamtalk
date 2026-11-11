@@ -96,6 +96,8 @@ itself.
 
 -include_lib("kernel/include/logger.hrl").
 
+%% BT-4004: bound on waiting for a per-tag lock held by a hung critical section.
+-define(SHADOW_LOCK_TIMEOUT_MS, 60000).
 -define(EXTENSIONS_TABLE, beamtalk_extensions).
 -define(SOURCES_TABLE, beamtalk_extension_sources).
 -define(CONFLICTS_TABLE, beamtalk_extension_conflicts).
@@ -433,12 +435,19 @@ for tests that need to hold the lock deterministically.
 -spec with_shadow_lock(atom(), fun(() -> T)) -> T.
 with_shadow_lock(Tag, Fun) ->
     %% Only class-object tags (`'Foo class'`) have a flag the guard reads;
-    %% instance-side tags skip the lock (global:trans/4 backs off randomly when
-    %% contended and register/5 runs from parallel -on_load chains). The lock is
-    %% not FIFO-fair; contention is limited to rare same-class-tag writes.
+    %% instance-side tags skip the lock (register/5 runs from parallel -on_load
+    %% chains). BT-4004: a node-local FIFO lock with a bounded wait, which
+    %% raises a structured error rather than wait forever behind a hung holder.
     case beamtalk_class_registry:is_class_name(Tag) of
-        true -> global:trans({{?MODULE, shadow_flag, Tag}, self()}, Fun, [node()], infinity);
-        false -> Fun()
+        true ->
+            beamtalk_fifo_lock:with_lock_or_raise(
+                {?MODULE, shadow_flag, Tag},
+                beamtalk_fifo_lock:configured_timeout(shadow_flag, ?SHADOW_LOCK_TIMEOUT_MS),
+                {'Extensions', with_shadow_lock},
+                Fun
+            );
+        false ->
+            Fun()
     end.
 
 -spec has_any(atom()) -> boolean().

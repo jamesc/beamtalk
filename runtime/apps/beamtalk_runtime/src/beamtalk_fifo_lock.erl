@@ -54,7 +54,7 @@ process.
     harmless; a `gen_server` caller sees it as an unknown `handle_info`.
 """.
 
--export([with_lock/3, queue/1, ensure_table/0]).
+-export([with_lock/3, with_lock_or_raise/4, configured_timeout/2, queue/1, ensure_table/0]).
 
 -define(TABLE, beamtalk_fifo_locks).
 -define(POLL_MS, 200).
@@ -84,6 +84,48 @@ with_lock(Key, TimeoutMs, Fun) ->
             end;
         {error, _} = Error ->
             Error
+    end.
+
+-doc """
+Like `with_lock/3`, but returns `Fun()` itself and raises a structured
+`#beamtalk_error{kind = runtime_error}` (BT-4004) when the lock could not be
+taken (`{error, timeout}`, or `{error, lost}` if the table disappeared), so a
+call site that cannot return an error tuple (a `T`-returning critical
+section) still answers a bounded wait with a user-facing error. `Class` and
+`Selector` name the caller in the error; `details` carries the lock `Key`,
+the `reason` and the `timeout_ms`. `Fun` is not run on error.
+""".
+-spec with_lock_or_raise(term(), timeout(), {atom(), atom()}, fun(() -> T)) -> T.
+with_lock_or_raise(Key, TimeoutMs, {Class, Selector}, Fun) ->
+    case with_lock(Key, TimeoutMs, Fun) of
+        {ok, Result} ->
+            Result;
+        {error, Reason} ->
+            Msg = beamtalk_error:chars_to_binary(
+                io_lib:format(
+                    "could not take lock ~0tp: ~ts after ~p ms",
+                    [Key, Reason, TimeoutMs]
+                )
+            ),
+            Err0 = beamtalk_error:new(runtime_error, Class, Selector),
+            Err1 = beamtalk_error:with_message(Err0, Msg),
+            beamtalk_error:raise(
+                beamtalk_error:with_details(Err1, #{
+                    lock_key => Key, reason => Reason, timeout_ms => TimeoutMs
+                })
+            )
+    end.
+
+-doc """
+The bounded wait for lock group `Name`: the `beamtalk_runtime` application
+env `{fifo_lock_timeout_ms, #{Name => Ms}}` entry when set (tests shrink it),
+else `Default`.
+""".
+-spec configured_timeout(atom(), pos_integer()) -> pos_integer().
+configured_timeout(Name, Default) ->
+    case application:get_env(beamtalk_runtime, fifo_lock_timeout_ms, #{}) of
+        #{Name := Ms} when is_integer(Ms), Ms > 0 -> Ms;
+        _ -> Default
     end.
 
 -doc "The pids queued on `Key`, holder first (for diagnostics and tests).".
