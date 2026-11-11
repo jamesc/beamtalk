@@ -703,6 +703,88 @@ Object subclass: Caller
     );
 }
 
+#[test]
+fn class_objects_in_a_union_are_judged_at_arguments_fields_defaults_and_returns() {
+    // BT-4454: the slot rule applies to each class-object member of a union
+    // value at the other checked sites, not only annotated locals.
+    let source = wire_source(
+        r"
+typed Actor subclass: Caller
+  state: slot :: Wire class | Nil = nil
+  take: w :: Wire class | Nil => w
+  takeStr: s :: String class | Nil => s
+  badArg: flag :: Boolean => self take: (flag ifTrue: [Integer] ifFalse: [nil])
+  badNonProtocolArg: flag :: Boolean => self takeStr: (flag ifTrue: [Integer] ifFalse: [nil])
+  badStore: flag :: Boolean => self.slot := flag ifTrue: [Integer] ifFalse: [nil]
+  badReturn: flag :: Boolean -> Wire class | Nil => flag ifTrue: [Integer] ifFalse: [nil]
+  fineArg: flag :: Boolean => self take: (flag ifTrue: [Tcp] ifFalse: [Ssl])
+  fineArgNil: flag :: Boolean => self take: (flag ifTrue: [Tcp] ifFalse: [nil])
+  fineStore: flag :: Boolean => self.slot := flag ifTrue: [Tcp] ifFalse: [Ssl]
+  fineReturn: flag :: Boolean -> Wire class | Nil => flag ifTrue: [Tcp] ifFalse: [nil]
+",
+    );
+    let diags = checker_diagnostics(&source);
+    let line_of = |needle: &str| {
+        source[..source.find(needle).expect("fixture line")]
+            .lines()
+            .count()
+    };
+    let at = |needle: &str| -> Vec<&Diagnostic> {
+        diags
+            .iter()
+            .filter(|d| source[..d.span.start() as usize].lines().count() == line_of(needle))
+            .collect()
+    };
+    for (site, needle) in [
+        ("argument", "badArg:"),
+        ("field assignment", "badStore:"),
+        ("return", "badReturn:"),
+    ] {
+        assert!(
+            at(needle).iter().any(|d| d
+                .message
+                .contains("Integer class does not conform to Wire class")),
+            "{site}: a non-conformer in a union reports its non-conformance: {diags:#?}"
+        );
+    }
+    assert!(
+        at("badNonProtocolArg:")
+            .iter()
+            .any(|d| d.message.contains("Integer class")),
+        "a non-protocol class object in a union is refused: {diags:#?}"
+    );
+    let fine = line_of("fineArg:");
+    assert!(
+        diags
+            .iter()
+            .all(|d| source[..d.span.start() as usize].lines().count() < fine),
+        "conformers in the same union are accepted: {diags:#?}"
+    );
+}
+
+#[test]
+fn class_objects_in_a_union_state_default_are_judged() {
+    let source = wire_source(
+        r"
+Actor subclass: Caller
+  state: bad :: Wire class | Nil = (true ifTrue: [Integer] ifFalse: [nil])
+  state: ok :: Wire class | Nil = (true ifTrue: [Tcp] ifFalse: [nil])
+",
+    );
+    let diags = checker_diagnostics(&source);
+    assert!(
+        diags.iter().any(|d| d
+            .message
+            .contains("Integer class does not conform to Wire class")),
+        "a non-conformer default is refused: {diags:#?}"
+    );
+    assert_eq!(
+        diags.len(),
+        1,
+        "the conformer default is accepted: {diags:#?}"
+    );
+}
+
 /// BT-4450: a caller that already holds the registry in an `Arc` (the
 /// language service builds one per completion/hover request) shares it with
 /// the checker — no second deep clone of every `ProtocolInfo`.

@@ -162,6 +162,81 @@ impl TypeChecker {
         }
     }
 
+    /// BT-4454: the first class-object member (`C class` / `P class`) of a
+    /// union value that [`Self::metatype_assignable_to`] refuses for
+    /// `declared_type`. The one rule for judging class objects inside a
+    /// union, shared by [`Self::detect_assignment_type_mismatch`] (annotated
+    /// locals) and [`Self::union_class_object_diagnostic`] (arguments, fields,
+    /// state defaults, return bodies); `tower` is the caller's own tower
+    /// predicate, as for a bare class object at that site.
+    pub(super) fn refused_class_object<'a>(
+        members: &'a [InferredType],
+        declared_type: &EcoString,
+        hierarchy: &ClassHierarchy,
+        protocol_registry: Option<&ProtocolRegistry>,
+        tower: fn(&EcoString, &EcoString, &ClassHierarchy) -> bool,
+    ) -> Option<ClassObjectType<'a>> {
+        members
+            .iter()
+            .filter_map(ClassObjectType::of)
+            .find(|class_object| {
+                !Self::metatype_assignable_to(
+                    *class_object,
+                    declared_type,
+                    hierarchy,
+                    protocol_registry,
+                    tower,
+                )
+            })
+    }
+
+    /// BT-4454: a union value's class-object members are judged by
+    /// [`Self::refused_class_object`]; when one is refused, the diagnostic
+    /// for it (ADR 0144 conformance wording where it applies, else the
+    /// site's own `message`/`hint`, which receive the refused class object).
+    /// Like an annotated local, a refused class object warns even when other
+    /// members fit. `None` when every class-object member is accepted (or
+    /// there is none); the caller then checks the remaining members with
+    /// [`Self::non_class_object_members`] as before.
+    pub(super) fn union_class_object_diagnostic(
+        &self,
+        members: &[InferredType],
+        declared_type: &EcoString,
+        hierarchy: &ClassHierarchy,
+        tower: fn(&EcoString, &EcoString, &ClassHierarchy) -> bool,
+        span: Span,
+        describe: impl FnOnce(ClassObjectType<'_>) -> (String, String),
+    ) -> Option<Diagnostic> {
+        let refused = Self::refused_class_object(
+            members,
+            declared_type,
+            hierarchy,
+            self.protocol_registry.as_deref(),
+            tower,
+        )?;
+        let (message, hint) = describe(refused);
+        Some(Self::metatype_mismatch_diagnostic(
+            refused,
+            declared_type,
+            hierarchy,
+            self.protocol_registry.as_deref(),
+            message,
+            hint,
+            span,
+        ))
+    }
+
+    /// The members of a union value that are not class objects — what the
+    /// pre-BT-4454 checks (`classify_union_members`) still judge once the
+    /// class objects have been accepted by [`Self::refused_class_object`].
+    pub(super) fn non_class_object_members(members: &[InferredType]) -> Vec<InferredType> {
+        members
+            .iter()
+            .filter(|m| ClassObjectType::of(m).is_none())
+            .cloned()
+            .collect()
+    }
+
     /// Collect deduplicated missing protocol methods across union members.
     fn collect_missing_protocol_methods(
         members: &[InferredType],
@@ -1853,10 +1928,34 @@ impl TypeChecker {
                     }
                 }
                 InferredType::Union { members, .. } => {
-                    // Check every union member against the
-                    // expected type via the shared classification.
-                    let (compat, incompatible) = match Self::classify_union_arg_compat(
+                    // BT-4454: class-object members are judged by the slot
+                    // rule, as a bare class object is above.
+                    let param_pos = i + 1;
+                    if let Some(diag) = self.union_class_object_diagnostic(
                         members,
+                        &expected_structural,
+                        hierarchy,
+                        Self::is_type_compatible,
+                        span,
+                        |class_object| {
+                            (
+                                format!(
+                                    "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {class_object}"
+                                ),
+                                format!(
+                                    "Expected {expected_display} (or a subclass), got {class_object}"
+                                ),
+                            )
+                        },
+                    ) {
+                        self.diagnostics.push(diag);
+                        continue;
+                    }
+                    // Check every other union member against the
+                    // expected type via the shared classification.
+                    let instance_members = Self::non_class_object_members(members);
+                    let (compat, incompatible) = match Self::classify_union_arg_compat(
+                        &instance_members,
                         &expected_structural,
                         hierarchy,
                     ) {
@@ -1867,7 +1966,6 @@ impl TypeChecker {
                             ..
                         } => (compat, incompatible),
                     };
-                    let param_pos = i + 1;
                     let union_display = arg_ty
                         .display_for_diagnostic()
                         .unwrap_or_else(|| EcoString::from("Dynamic"));
@@ -2561,6 +2659,37 @@ impl TypeChecker {
             return;
         }
 
+        // BT-4454: class-object members are judged by the return slot rule
+        // (the same one `check_class_object_return` applies to a bare class
+        // object); the remaining members keep the check below.
+        if !matches!(expected, InferredType::Dynamic(_)) {
+            let declared_type = expected.display_annotation();
+            let expected_display = expected
+                .display_for_diagnostic()
+                .unwrap_or_else(|| InferredType::class_name_for_diagnostic(declared_type.as_str()));
+            let selector = method.selector.name();
+            if let Some(diag) = self.union_class_object_diagnostic(
+                members,
+                &declared_type,
+                hierarchy,
+                Self::is_type_compatible,
+                method.span,
+                |class_object| {
+                    (
+                        format!(
+                            "Method '{selector}' in {class_name} declares return type {expected_display}, but body returns {class_object}"
+                        ),
+                        format!("Declared -> {expected_display}, inferred body type is {class_object}"),
+                    )
+                },
+            ) {
+                self.diagnostics.push(diag);
+                return;
+            }
+        }
+        let instance_members = Self::non_class_object_members(members);
+        let members = instance_members.as_slice();
+
         let mut known_members = Vec::with_capacity(members.len());
         for member in members {
             let InferredType::Known {
@@ -3209,9 +3338,34 @@ impl TypeChecker {
                 }
             }
             InferredType::Union { members, .. } => {
-                // Check all union members against the declared field type.
+                // BT-4454: class-object members are judged by the slot rule,
+                // as a bare class object is below.
+                let declared_display_for_members = declared_display.clone();
+                if let Some(diag) = self.union_class_object_diagnostic(
+                    members,
+                    &declared_type,
+                    hierarchy,
+                    Self::is_assignable_to,
+                    span,
+                    |class_object| {
+                        (
+                            format!(
+                                "Type mismatch: field `{}` declared as {declared_display_for_members}, got {class_object}",
+                                field.name
+                            ),
+                            format!(
+                                "Expected {declared_display_for_members} but assigning {class_object}"
+                            ),
+                        )
+                    },
+                ) {
+                    self.diagnostics.push(diag);
+                    return;
+                }
+                // Check the other union members against the declared field type.
+                let instance_members = Self::non_class_object_members(members);
                 let Some((compat, total, incompatible)) =
-                    Self::classify_union_members_with(members, |member, name| {
+                    Self::classify_union_members_with(&instance_members, |member, name| {
                         Self::slot_accepts(
                             member,
                             name,
@@ -3962,10 +4116,34 @@ impl TypeChecker {
                     );
                 }
                 InferredType::Union { members, .. } => {
-                    // Check all union members against the declared field
+                    // BT-4454: class-object members are judged by the slot
+                    // rule, as a bare class object is below.
+                    if let Some(diag) = self.union_class_object_diagnostic(
+                        members,
+                        &declared_type,
+                        hierarchy,
+                        Self::is_assignable_to,
+                        decl.span,
+                        |class_object| {
+                            (
+                                format!(
+                                    "Type mismatch: state `{}` declared as {declared_display}, default is {class_object}",
+                                    decl.name.name
+                                ),
+                                format!(
+                                    "Default value type {class_object} is not compatible with {declared_display}"
+                                ),
+                            )
+                        },
+                    ) {
+                        self.diagnostics.push(diag);
+                        continue;
+                    }
+                    // Check the other union members against the declared field
                     // type, mirroring `check_field_assignment`'s handling.
+                    let instance_members = Self::non_class_object_members(members);
                     let Some((compat, total, incompatible)) =
-                        Self::classify_union_members_with(members, |member, name| {
+                        Self::classify_union_members_with(&instance_members, |member, name| {
                             Self::slot_accepts(
                                 member,
                                 name,
