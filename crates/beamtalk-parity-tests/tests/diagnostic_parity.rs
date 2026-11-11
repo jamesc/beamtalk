@@ -380,6 +380,21 @@ fn lint_verdict_cases() -> Vec<LintVerdictCase> {
             fails: false,
             fails_warnings_as_errors: true,
         },
+        // A dependency (`../lint_verdict_dep_cycle_dep`) that depends back on
+        // the package, so CLI dependency resolution fails on the cycle; its
+        // bundled stub is the only type source for the FFI call. The CLI
+        // used to drop every dependency then and report no mismatch; it now
+        // falls back to the on-disk scan MCP uses. The two warnings are the
+        // stub-typed argument mismatch (`Type`, live-recheck) and the
+        // stub-only module being unknown to the FFI module list.
+        LintVerdictCase {
+            name: "lint_verdict_dep_cycle",
+            total: 2,
+            lint: 0,
+            live_recheck: 1,
+            fails: false,
+            fails_warnings_as_errors: true,
+        },
     ]
 }
 

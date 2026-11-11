@@ -66,7 +66,7 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
     // Merge dependency class/protocol/alias metadata so lint sees the same
     // cross-package picture as build. The resolved deps are also needed
     // below for their `stubs_dir`s (ADR 0075 layer 2).
-    let (resolved_deps, dependencies) = match sources.package_root.as_deref() {
+    let (dependency_stubs, dependencies) = match sources.package_root.as_deref() {
         Some(project_root) => merge_dependency_infos(project_root),
         None => (Vec::new(), DependencyMetadata::default()),
     };
@@ -77,7 +77,7 @@ pub fn run_lint(path: &str, format: OutputFormat, warnings_as_errors: bool) -> R
     let resolved_registry = beamtalk_cli::ffi_type_registry::lint_type_registry(
         sources.package_root.as_deref(),
         &source_files,
-        &super::build::dependency_stub_dirs(&resolved_deps),
+        &dependency_stubs,
     );
     super::build::render_stub_reports(&resolved_registry.reports, Some(format));
     let native_type_registry = resolved_registry.registry.map(std::sync::Arc::new);
@@ -213,17 +213,20 @@ fn lint_erl_files(erl_files: &[Utf8PathBuf], format: OutputFormat) -> Result<usi
 
 /// Resolve the project's dependencies and collect their class, protocol and
 /// alias metadata and extension methods (ADR 0070 WS3, BT-4608) for the
-/// shared pipeline.
+/// shared pipeline, plus each one's own stub directory (ADR 0075 layer 2)
+/// for [`beamtalk_cli::ffi_type_registry::lint_type_registry`].
 ///
-/// Best-effort: if dependency resolution fails (e.g. network error for a git
-/// dep), lint continues without dependency metadata — and with the pre-WS3
-/// dependency guard on — rather than failing entirely. Also returns the
-/// resolved dependencies (empty on failure) for their `stubs_dir`s (ADR 0075
-/// layer 2); see [`beamtalk_cli::ffi_type_registry::lint_type_registry`].
+/// Best-effort: if dependency resolution fails (a network error for a git
+/// dep, a dependency cycle, a dependency manifest that does not validate),
+/// lint falls back to the dependency checkouts already on disk — the offline
+/// scan MCP `lint` always uses
+/// ([`beamtalk_cli::dependency_classes::resolve_dependency_class_infos_with_sources`])
+/// — rather than failing, or dropping every dependency's classes and stubs,
+/// so both surfaces see the same dependencies whenever resolution fails.
 fn merge_dependency_infos(
     project_root: &Utf8Path,
 ) -> (
-    Vec<super::deps::path::ResolvedDependency>,
+    Vec<beamtalk_cli::ffi_type_registry::DependencyStubsDir>,
     DependencyMetadata,
 ) {
     let options = beamtalk_core::CompilerOptions::default();
@@ -246,15 +249,19 @@ fn merge_dependency_infos(
                 );
                 metadata.alias_infos.extend(dep.alias_infos.clone());
             }
-            (resolved_deps, metadata)
+            (super::build::dependency_stub_dirs(&resolved_deps), metadata)
         }
         Err(e) => {
             warn!(
                 error = %e,
                 "Failed to resolve dependencies for lint; \
-                 dependency classes/protocols/aliases may not be available"
+                 using the dependency checkouts already on disk"
             );
-            (Vec::new(), DependencyMetadata::default())
+            let mut scan =
+                beamtalk_cli::dependency_classes::resolve_dependency_class_infos_with_sources(
+                    project_root,
+                );
+            (std::mem::take(&mut scan.stub_dirs), scan.into())
         }
     }
 }
