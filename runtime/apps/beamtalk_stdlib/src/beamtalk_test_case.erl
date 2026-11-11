@@ -1348,7 +1348,7 @@ spawn_test_execution(Selector, Args, ClassName, TestModule, FlatMethods, From) -
                 maps:from_keys(test_class_selectors(ClassName), true), FlatMethods
             ),
             Result = execute_tests(Selector, Args, ClassName, TestModule, AllMethods),
-            gen_server:reply(From, {ok, Result})
+            gen_server:reply(From, {ok, ffi_string(Result)})
         catch
             C:E:ST ->
                 Error =
