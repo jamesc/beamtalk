@@ -37,10 +37,10 @@
 //! - a block statement whose value is discarded (an arm statement that is not
 //!   the arm's value);
 //! - a block literal at a construct position §6 accepts but the shared
-//!   table does not thread (BT-3782: a unary `whileTrue` condition;
-//!   `eachWithIndex:` / `do:separatedBy:` outside an actor; a keyword
-//!   `whileTrue:` condition is a §6 error since BT-3782),
-//!   which crashes or loses the write at runtime today. As the Phase 0
+//!   table does not thread (BT-3753: `eachWithIndex:` / `do:separatedBy:`
+//!   outside an actor), which loses the write at runtime today. (A `whileTrue:` /
+//!   `whileFalse:` condition threads with a literal body, the unary form
+//!   included, BT-4602, and is a §6 error with any other.) As the Phase 0
 //!   allow-set grows over these (BT-3753) the lint steps back from each.
 //!
 //! ```text
@@ -66,7 +66,7 @@ use beamtalk_core::ast::{
     BinarySegment, Block, ClassKind, Expression, ExpressionStatement, MethodDefinition, Module,
     StringSegment,
 };
-use beamtalk_core::semantic_analysis::block_facts::{is_result_try_do, outer_local_writes};
+use beamtalk_core::semantic_analysis::block_facts::{self, is_result_try_do, outer_local_writes};
 use beamtalk_core::semantic_analysis::{
     extract_match_arm_bindings, extract_pattern_bindings, local_threading_diagnostics,
 };
@@ -189,12 +189,27 @@ enum BlockPosition<'s> {
     Value,
     /// The receiver of `selector` (`[...] value`, `[...] ensure: [...]`).
     Receiver(&'s str),
+    /// The condition of a `whileTrue:`/`whileFalse:` whose body is a block
+    /// literal, a unary `[...] whileTrue` included: the loop threads its
+    /// writes in every context (BT-4602,
+    /// [`block_facts::while_condition_threads`]).
+    ThreadedLoopCondition,
     /// The argument at this index of `selector`; the flag says whether the
     /// send is `Result tryDo:` ([`is_result_try_do`]).
     Arg(&'s str, usize, bool),
 }
 
-impl BlockPosition<'_> {
+impl<'s> BlockPosition<'s> {
+    /// The position of a block literal receiver of `selector` sent with
+    /// `arguments`.
+    fn of_receiver(selector: &'s str, arguments: &[Expression]) -> Self {
+        if block_facts::while_condition_threads(selector, arguments) == Some(true) {
+            BlockPosition::ThreadedLoopCondition
+        } else {
+            BlockPosition::Receiver(selector)
+        }
+    }
+
     /// Whether codegen threads a block literal's outer-local writes back to
     /// the caller at this position, per the shared
     /// [`beamtalk_core::state_threading_selectors`] table.
@@ -202,6 +217,7 @@ impl BlockPosition<'_> {
         use beamtalk_core::state_threading_selectors as table;
         match self {
             BlockPosition::Value => false,
+            BlockPosition::ThreadedLoopCondition => true,
             BlockPosition::Receiver(selector) => table::is_state_threaded_block_receiver(selector),
             // ADR 0131 Phase 4 (BT-3750): the block of `Result tryDo:` is
             // threaded back by the exception producer, not by the shared
@@ -245,7 +261,8 @@ fn walk_expr(expr: &Expression, scope: &mut LintScope, out: &mut Out<'_>) {
         } => {
             let selector = selector.name();
             if let Block(block) = receiver.as_ref() {
-                enter_block(block, BlockPosition::Receiver(&selector), scope, out);
+                let position = BlockPosition::of_receiver(&selector, arguments);
+                enter_block(block, position, scope, out);
             } else {
                 walk_expr(receiver, scope, out);
             }
@@ -868,16 +885,11 @@ sealed typed Value subclass: Foo
     }
 
     /// Construct positions the shared table does not thread (BT-3753) still
-    /// warn when the lint is run alone (it does not run §6): a keyword
-    /// `whileTrue:`/`whileFalse:` CONDITION block's write crashes at runtime
-    /// ("function expects 1 arguments but was called with 0"; §6 rejects it
-    /// since BT-3782), and `eachWithIndex:`/`do:separatedBy:` lose theirs.
+    /// warn when the lint is run alone (it does not run §6):
+    /// `eachWithIndex:`/`do:separatedBy:` lose their writes.
     #[test]
     fn unthreaded_construct_positions_still_warn() {
         for src in [
-            "i := 0.\n[i := i + 1. i < 3] whileTrue",
-            "i := 0.\n[i := i + 1. i < 3] whileTrue: [nil]",
-            "i := 0.\n[i := i + 1. i >= 3] whileFalse: [nil]",
             "i := 0.\n#(1, 2) eachWithIndex: [:e :ix | i := i + e]",
             "i := 0.\n#(1, 2) do: [:e | nil] separatedBy: [i := i + 1]",
         ] {
@@ -886,6 +898,27 @@ sealed typed Value subclass: Foo
                 diags.len(),
                 1,
                 "Expected 1 lint for {src:?}, got: {diags:?}"
+            );
+        }
+    }
+
+    /// BT-4602: a `whileTrue:`/`whileFalse:` condition with a literal body
+    /// threads its writes, the unary form included
+    /// (`block_facts::while_condition_threads`), so the lint leaves it alone.
+    /// (A condition whose body is not a literal is the §6 error's,
+    /// `lint_and_section6_agree`.)
+    #[test]
+    fn threaded_loop_conditions_do_not_warn() {
+        for src in [
+            "i := 0.\n[i := i + 1. i < 3] whileTrue",
+            "i := 0.\n[i := i + 1. i >= 3] whileFalse",
+            "i := 0.\n[i := i + 1. i < 3] whileTrue: [nil]",
+            "i := 0.\n[i := i + 1. i >= 3] whileFalse: []",
+        ] {
+            let diags = lint(src);
+            assert!(
+                diags.is_empty(),
+                "Expected no lints for {src:?}, got: {diags:?}"
             );
         }
     }
@@ -1072,10 +1105,17 @@ sealed typed Value subclass: Foo
                 "Erlang lists foreach: [:e | x := x + e] with: #(1)",
                 CompileError,
             ),
-            // A `whileTrue:`/`whileFalse:` condition's plain outer-local write
-            // crashed at runtime; §6 rejects it (BT-3782).
-            ("[i := i + 1. i < 3] whileTrue: [nil]", CompileError),
-            ("[i := i + 1. i >= 3] whileFalse: [nil]", CompileError),
+            // A `whileTrue:`/`whileFalse:` condition's outer-local write
+            // threads with a literal body, the unary form included (BT-4602);
+            // with any other body §6 rejects it (BT-4062).
+            ("[i := i + 1. i < 3] whileTrue: [nil]", Neither),
+            ("[i := i + 1. i >= 3] whileFalse: [nil]", Neither),
+            ("[i := i + 1. i < 3] whileTrue", Neither),
+            ("[i := i + 1. i >= 3] whileFalse", Neither),
+            (
+                "b := [nil]\n    [i := i + 1. i < 3] whileTrue: b",
+                CompileError,
+            ),
             // Accepted by §6, wrong at runtime today (probed in a TestCase:
             // eachWithIndex:/do:separatedBy: answer 0).
             ("#(1, 2) eachWithIndex: [:e :k | x := x + e]", Either),

@@ -137,7 +137,7 @@ Actor subclass: Subprocess native: beamtalk_subprocess
 
 ### `self delegate` — Pharo `ffiCall:` Pattern
 
-Method bodies that are `=> self delegate` are **delegation declarations** — the compiler generates a facade that forwards the message to the backing gen_server via `beamtalk_actor:sync_send/3`. Methods with full Beamtalk bodies (like `open:args:`) compile normally.
+Method bodies that are `=> self delegate` are **delegation declarations** — the compiler generates a facade that forwards the message to the backing gen_server via `beamtalk_actor:sync_send/3`. Methods with full Beamtalk bodies (like `open:args:`) compile normally. *(Amended by BT-4577: this holds for class methods only. A Beamtalk-bodied instance method on a `native:` actor is a compile error, because the facade forwards every instance message to the backing gen_server and the body would never run.)*
 
 `delegate` is a real `sealed` method defined on `Actor`, following Pharo's `ffiCall:` pattern:
 
@@ -485,6 +485,8 @@ Methods that need to bypass the gen_server (e.g. concurrent ETS reads) can use a
 
 This mixes `self delegate` and FFI bodies on the same `native:` class — the same pattern as Subprocess's `open:args:` factory method.
 
+> **Amended by BT-4577:** an instance method with an FFI (or any Beamtalk) body on a `native:` actor is now a compile error. The facade forwards every instance message to the backing gen_server, so the body above never ran; it was dropped without a warning. Put a bypassing read on the class side (`class directGet: store key: key => (Erlang beamtalk_kv_store) directGet: store key: key`) instead.
+
 ## Prior Art
 
 ### Pharo — `ffiCall:` and `<primitive: N>`
@@ -721,7 +723,7 @@ The primary remaining Phase 0 deliverable is documentation: write and publish th
 - Warn: `self delegate` methods without a return type annotation
 - Generate facade module: `spawn/1`, `spawnWith:`, `has_method/1`, dispatch functions for `self delegate` methods
 - Generate `__beamtalk_meta/0` with `native => true`, `backing_module => atom()`, and delegate method metadata (ADR 0050)
-- Full Beamtalk method bodies on `native:` actors compile normally (e.g. `open:args:`)
+- Full Beamtalk class-method bodies on `native:` actors compile normally (e.g. `open:args:`); a Beamtalk-bodied instance method is a compile error (BT-4577)
 - Remove `Subprocess` and `TranscriptStream` from `generated_builtins.rs`
 
 **Issues:** BT-1205, BT-1206, BT-1207, BT-1208, BT-1209, BT-1210

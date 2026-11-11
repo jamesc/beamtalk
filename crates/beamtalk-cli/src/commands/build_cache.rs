@@ -60,7 +60,10 @@ const CACHE_FILENAME: &str = ".beamtalk-pass1-cache.json";
 /// win a cross-file duplicate, so the winner can be re-picked when another
 /// file changes (BT-3686).
 /// v7: `ClassInfo` gained `in_caller_new1` (BT-4501).
-const CACHE_VERSION: u32 = 7;
+/// v8: Pass 1 infos carry the real `in_caller_new1` body shape (it was always
+/// `false` there), so v7 entries would hide it from cross-file callers
+/// (BT-4640).
+const CACHE_VERSION: u32 = 8;
 
 /// On-disk representation of the Pass 1 metadata cache.
 ///

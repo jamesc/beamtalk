@@ -26,6 +26,31 @@ Actor subclass: Bt4313UnaryWhileActor
     [self bump < 4] whileTrue
     self.n
 
+  localWhileTrue =>
+    t := 0
+    [
+      t := t + 1
+      t < 3
+    ] whileTrue
+    t
+
+  localWhileFalse =>
+    t := 10
+    [
+      t := t - 1
+      t <= 4
+    ] whileFalse
+    t
+
+  localConditionAndBody =>
+    t := 0
+    u := 0
+    [
+      t := t + 1
+      t < 5
+    ] whileTrue: [u := u + t]
+    #(t, u)
+
   bump =>
     self.n := self.n + 1
     self.n

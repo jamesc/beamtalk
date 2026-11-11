@@ -260,7 +260,21 @@ Actor subclass: DatabasePool native: my_db_pool
 
 ### How It Works
 
-The `native:` keyword on `subclass:` tells the compiler to generate a **facade module** instead of a full gen_server. Methods with `=> self delegate` bodies are compiled into dispatch calls that forward through `beamtalk_actor:sync_send/3` to the backing gen_server. Methods with full Beamtalk bodies (like `connect:` above) compile normally.
+The `native:` keyword on `subclass:` tells the compiler to generate a **facade module** instead of a full gen_server. Methods with `=> self delegate` bodies are compiled into dispatch calls that forward through `beamtalk_actor:sync_send/3` to the backing gen_server.
+
+The two sides of a native actor follow different rules:
+
+- **Instance methods must be `=> self delegate`.** The facade forwards every instance message to the backing gen_server, so a Beamtalk body would never run. Declaring one is a compile error:
+
+  ```beamtalk
+  doubled => self count * 2
+  // error: Instance method `doubled` of native actor `DatabasePool` must be `self delegate`
+  // help:  ... Make the body `self delegate`, or move the Beamtalk logic into a class method.
+  ```
+
+- **Class methods compile normally.** A class method with a Beamtalk body (like `connect:` above) runs on the class side as for any other class, so put Beamtalk logic there.
+
+Every start path reaches the backing module's `start_link/1`. That covers `spawn`, `spawnWith:`, `spawnAs:`, `spawnWith:as:`, and supervisor children declared with `supervisionSpec` (plain, `withArgs:`, `withName:`, or a `DynamicSupervisor` pool). The runtime looks the backing module up from the facade's class metadata. A named start registers the process just after `start_link/1` returns, because the backing `start_link/1` takes no name. A name that is already taken is refused before `start_link/1` runs. The backing `start_link/1` must link the new process to its caller, as `gen_server:start_link/3` does: that link is what a supervisor restarts on.
 
 The result is that callers interact with `DatabasePool` using standard Beamtalk message sends — they never see the Erlang gen_server behind it:
 

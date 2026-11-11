@@ -1,0 +1,106 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4577: a supervisor starts a `native:` actor child through the backing
+// module's `start_link/1`, as the facade's own `spawn` does, not through
+// `gen_server:start_link` on the facade (which has no `init/1`). Covers an
+// anonymous child, a named child, a DynamicSupervisor pool child, an OTP
+// restart after a crash, and `spawnAs:` outside any supervisor.
+//
+// Fixtures: stdlib/test/fixtures/bt4577*.bt
+
+TestCase subclass: NativeActorSupervisedTest
+
+  // The named child and `spawnAs:` register node-wide names.
+  class serial -> Boolean => true
+
+  // `supervise` starts a class-named singleton: stop it even when a test
+  // failed before its own `stop`.
+  tearDown =>
+    #(Bt4577NativeSup, Bt4577NativeNamedSup, Bt4577NativePool)
+      do: [:cls |
+        sup := cls current
+        sup isNil ifFalse: [[sup stop] on: Error do: [:e | nil]]
+      ]
+
+  testAnonymousNativeChildStartsAndAnswers =>
+    sup := Bt4577NativeSup supervise unwrap
+    c :: Bt4577NativeCounter := (sup which: Bt4577NativeCounter) unwrap
+    self assert: c getValue equals: 5
+    self assert: c increment equals: 6
+    sup stop
+
+  // The child is registered under its name. (`named:` cannot resolve a
+  // native actor yet: its backing process carries no Beamtalk class tag.)
+  testNamedNativeChildStartsAndAnswers =>
+    sup := Bt4577NativeNamedSup supervise unwrap
+    c :: Bt4577NativeCounter := (sup which: Bt4577NativeCounter) unwrap
+    self assert: ((Erlang erlang) whereis: #bt4577_native_counter) equals: c pid
+    self assert: c getValue equals: 7
+    self assert: c increment equals: 8
+    sup stop
+
+  testCrashedNativeChildIsRestarted =>
+    sup := Bt4577NativeSup supervise unwrap
+    before :: Bt4577NativeCounter := (sup which: Bt4577NativeCounter) unwrap
+    self assert: before increment equals: 6
+    before kill
+    after :: Bt4577NativeCounter := self restartedChildOf: sup replacing: before
+    // A fresh process, started again from the spec's args.
+    self assert: after getValue equals: 5
+    sup stop
+
+  testCrashedNamedNativeChildIsRestartedUnderItsName =>
+    sup := Bt4577NativeNamedSup supervise unwrap
+    before :: Bt4577NativeCounter := (sup which: Bt4577NativeCounter) unwrap
+    before kill
+    after :: Bt4577NativeCounter := self restartedChildOf: sup replacing: before
+    self assert: ((Erlang erlang) whereis: #bt4577_native_counter) equals: after pid
+    self assert: after getValue equals: 7
+    sup stop
+
+  // Poll until `sup` runs a live Bt4577NativeCounter other than `before`.
+  restartedChildOf: sup replacing: before =>
+    found := nil
+    50
+      timesRepeat: [
+        found isNil
+          ifTrue: [
+            c := (sup which: Bt4577NativeCounter) unwrap
+            (c notNil and: [
+              c =/= before and: [c isAlive]
+            ]) ifTrue: [found := c] ifFalse: [Timer sleep: 20]
+          ]
+      ]
+    self deny: found isNil
+    found
+
+  testNativePoolChildStartsWithArgs =>
+    pool := Bt4577NativePool supervise unwrap
+    c := (pool startChild: #{#initial => 42}) unwrap
+    self assert: c getValue equals: 42
+    d := pool startChild unwrap
+    self assert: d getValue equals: 0
+    pool stop
+
+  testNativeSpawnAsRegistersName =>
+    c :: Bt4577NativeCounter := (Bt4577NativeCounter spawnWith: #{
+      #initial => 3
+    } as: #bt4577_spawn_as) unwrap
+    [
+      self assert: c getValue equals: 3
+      again := Bt4577NativeCounter spawnAs: #bt4577_spawn_as
+      self assert: again isError equals: true
+      self assert: again error kind equals: #name_registered
+    ] ensure: [c kill]
+
+  testNativeSpawnAsGlobal =>
+    c :: Bt4577NativeCounter := (Bt4577NativeCounter
+      spawnWith: #{#initial => 9}
+      as: #bt4577_spawn_as_global
+      scope: #global) unwrap
+    [
+      self assert: c getValue equals: 9
+      again := Bt4577NativeCounter spawnAs: #bt4577_spawn_as_global scope: #global
+      self assert: again error kind equals: #name_registered
+    ] ensure: [c kill]

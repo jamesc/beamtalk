@@ -191,7 +191,6 @@ impl ClassHierarchy {
         let mut hierarchy = Self::with_builtins();
         let diagnostics = hierarchy.add_module_classes(module, stdlib_mode);
         hierarchy.rebuild_all_indexes();
-        hierarchy.publish_explicit_new1_verdicts(module);
         (Ok(hierarchy), diagnostics)
     }
     /// Register protocol definitions as synthetic class entries.
@@ -462,11 +461,15 @@ impl ClassHierarchy {
     /// of every static direct call re-checks.
     #[must_use]
     pub fn runs_class_method_in_caller(&self, class_name: &str, selector: &str) -> bool {
-        if selector == "new:" && self.get_class(class_name).is_some_and(|c| c.in_caller_new1) {
+        if selector == "new:"
+            && self.get_class(class_name).is_some_and(|c| c.in_caller_new1)
+            && self.constructor_chain_allows_in_caller(class_name)
+        {
             // BT-4501: the class's own explicit `new:` is published out of
             // `process_bound_class_selectors` (codegen), so it runs in the
-            // caller like any in-caller class method. The verdict already
-            // implies no class variables in the chain.
+            // caller like any in-caller class method. `in_caller_new1` is the
+            // chain-independent body shape (BT-4640); the chain half is
+            // answered here against this hierarchy.
             return true;
         }
         !ClassInfo::is_process_bound_class_selector(selector)

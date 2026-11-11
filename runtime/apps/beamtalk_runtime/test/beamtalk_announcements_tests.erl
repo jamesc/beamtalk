@@ -1749,7 +1749,8 @@ no_subscribers_no_superclass_walk_test_() ->
                 build_hierarchy(),
                 ok = meck:new(beamtalk_class_metadata, [passthrough]),
                 try
-                    ok = beamtalk_announcements:announce('ButtonClicked', x),
+                    %% Only the system bus pre-checks ancestry (BT-4653); a
+                    %% per-instance announce walks, so it is not metered here.
                     ok = beamtalk_announcements:system_announce('ButtonClicked', #{}),
                     ?assertEqual(0, meck:num_calls(beamtalk_class_metadata, lookup_superclass, '_'))
                 after
@@ -1797,7 +1798,8 @@ no_subscribers_no_superclass_walk_test_() ->
     end}.
 
 %%====================================================================
-%% BT-4631: unrelated subscriptions do not trigger a class-chain walk
+%% BT-4631: unrelated subscriptions do not trigger a class-chain walk on the
+%% system bus
 %%====================================================================
 
 unrelated_subscription_no_superclass_walk_test_() ->
@@ -1815,7 +1817,8 @@ unrelated_subscription_no_superclass_walk_test_() ->
                 refute_received(),
                 ok = meck:new(beamtalk_class_metadata, [passthrough]),
                 try
-                    ok = beamtalk_announcements:announce('ButtonClicked', x),
+                    %% Only the system bus pre-checks ancestry (BT-4653); a
+                    %% per-instance announce walks, so it is not metered here.
                     ok = beamtalk_announcements:system_announce('ButtonClicked', #{}),
                     ?assertEqual(
                         0, meck:num_calls(beamtalk_class_metadata, lookup_superclass, '_')

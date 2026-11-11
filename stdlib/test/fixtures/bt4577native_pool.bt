@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4577: a DynamicSupervisor whose pool children are a `native:` actor.
+
+DynamicSupervisor(Bt4577NativeCounter) subclass: Bt4577NativePool
+
+  childClass => Bt4577NativeCounter

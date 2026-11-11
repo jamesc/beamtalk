@@ -3,8 +3,8 @@
 
 // BT-3746 (ADR 0131 Phase 1a): `whileTrue:` loops whose condition writes a
 // method local, in a value-type method, with a stateful condition (it sends
-// to `self`). A plain condition write is a compile error (BT-3782, ADR 0131
-// §6). See stdlib/test/bt3746stateful_while_test.bt.
+// to `self`). A plain condition write threads too since BT-4602. See
+// stdlib/test/bt3746stateful_while_test.bt.
 
 Value subclass: Bt3746StatefulWhileValue
 
