@@ -166,8 +166,10 @@ pub fn synthesized_copy_param_type(slot: &StateDeclaration) -> Option<DeclaredTy
 
 /// The declared parameter type of the synthesized keyword constructor's
 /// argument for `slot` (`Point x: 1 y: 2`): the field's declared type, or none
-/// when the field is untyped (BT-4663). Shared by every producer of the
-/// constructor's `param_types` so a class-side send is checked like `with<Field>:`.
+/// when the field is untyped (BT-4663). Used by the AST-based producers (hierarchy
+/// AST path, codegen `__beamtalk_meta`, `build_stdlib`); the hierarchy state path
+/// copies slot types that were already derived via `synthesized_getter_return_type`,
+/// which this delegates to, so a class-side send is checked like `with<Field>:`.
 #[must_use]
 pub fn synthesized_constructor_param_type(slot: &StateDeclaration) -> Option<DeclaredType> {
     synthesized_getter_return_type(slot)
