@@ -19,6 +19,7 @@
 //! automatically without whitelist additions.
 
 use crate::ast::Expression;
+use crate::semantic_analysis::block_facts::is_literal_block;
 use crate::semantic_analysis::BlockContext;
 use crate::source_analysis::Span;
 
@@ -73,13 +74,6 @@ pub(crate) fn is_control_flow_selector(selector: &str, arg_index: usize) -> bool
 /// Returns true if the expression is an identifier that could be a block variable.
 pub(crate) fn is_block_variable(expr: &Expression) -> bool {
     matches!(expr, Expression::Identifier(_))
-}
-
-/// Determines if an expression is a literal block.
-///
-/// Returns true if the expression is a block literal (not a block variable).
-pub(crate) fn is_literal_block(expr: &Expression) -> bool {
-    matches!(expr, Expression::Block(_))
 }
 
 /// Identifies selectors that iterate over a collection using a block.
@@ -290,18 +284,6 @@ mod tests {
     fn test_is_block_variable_with_block() {
         let expr = Expression::Block(Block::new(vec![], vec![], Span::default()));
         assert!(!is_block_variable(&expr));
-    }
-
-    #[test]
-    fn test_is_literal_block_with_block() {
-        let expr = Expression::Block(Block::new(vec![], vec![], Span::default()));
-        assert!(is_literal_block(&expr));
-    }
-
-    #[test]
-    fn test_is_literal_block_with_identifier() {
-        let expr = Expression::Identifier(Identifier::new("block", Span::default()));
-        assert!(!is_literal_block(&expr));
     }
 
     #[test]
