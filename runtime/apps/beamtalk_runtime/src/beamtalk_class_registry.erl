@@ -1483,6 +1483,11 @@ would register a class with every method gone. It is removed instead
 `{error, {module_less_class_removed, ClassName}}` is returned. The user's
 `ClassBuilder` code can rebuild it.
 
+The check is "no `__beamtalk_meta/0` and no module code", so a compiled class
+whose BEAM file is gone also takes this path. Live subclasses of the removed
+class are not touched (unlike `removeFromSystem`, which refuses when it has
+direct subclasses).
+
 Returns `{ok, NewPid}` on success, `{error, Reason}` on failure.
 """.
 -spec restart_class(class_name()) -> {ok, pid()} | {error, term()}.

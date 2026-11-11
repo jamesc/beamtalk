@@ -2052,7 +2052,11 @@ remove_class_registration(ClassName) ->
     remove_registration(ClassName, fun(Pid) ->
         beamtalk_class_registry:forget_class_pids(Pid, ClassName),
         beamtalk_class_registry:forget_loaded_class(ClassName, Pid),
-        beamtalk_class_registry:forget_backing_module_entries(ClassName, Pid)
+        beamtalk_class_registry:forget_backing_module_entries(ClassName, Pid),
+        %% Only this (terminating) process leaves the group. The dead-class
+        %% path never does: pg drops dead members itself, and its caller
+        %% may be an unrelated live class.
+        pg:leave(beamtalk_classes, Pid)
     end).
 
 -doc """
@@ -2112,12 +2116,6 @@ remove_registration(ClassName, ForgetPidRows) ->
     _ =
         (try
             ForgetPidRows(self())
-        catch
-            _:_ -> ok
-        end),
-    _ =
-        (try
-            pg:leave(beamtalk_classes, self())
         catch
             _:_ -> ok
         end),

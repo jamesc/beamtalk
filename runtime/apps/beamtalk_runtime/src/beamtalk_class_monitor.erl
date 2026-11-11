@@ -275,6 +275,10 @@ restart_within_budget(
                 try beamtalk_class_registry:restart_class(ClassName) of
                     {ok, _NewPid} ->
                         counted;
+                    {error, {no_module_for_class, _}} ->
+                        %% Already removed by a lazy-recovery caller that won the
+                        %% removal race: nothing failed, nothing to count or log.
+                        uncounted;
                     {error, {module_less_class_removed, _}} ->
                         %% BT-4646: a module-less (ClassBuilder) class cannot be
                         %% restarted; restart_class/1 removed it and logged the

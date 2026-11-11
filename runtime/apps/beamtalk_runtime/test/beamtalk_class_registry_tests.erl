@@ -2354,3 +2354,33 @@ bt4646_compiled_class_still_restarts_test() ->
     ?assert(is_process_alive(NewPid)),
     ?assertEqual(NewPid, beamtalk_class_registry:whereis_class(Name)),
     ok = gen_server:stop(NewPid).
+
+%% The removal runs in the caller of restart_class/1. When that caller is an
+%% unrelated live class process (lazy recovery from a class method) it must not
+%% leave the `beamtalk_classes` pg group.
+bt4646_removal_does_not_evict_caller_from_pg_test() ->
+    Builder = 'BT4646CrashedBuilder',
+    BuilderPid = bt4646_builder_class(Builder),
+    MRef = monitor(process, BuilderPid),
+    exit(BuilderPid, kill),
+    bt4646_await_down(BuilderPid, MRef),
+    Parent = self(),
+    {Helper, HRef} = spawn_monitor(fun() ->
+        ok = pg:join(beamtalk_classes, self()),
+        Result = beamtalk_class_registry:restart_class(Builder),
+        Parent ! {bt4646_done, Result, lists:member(self(), pg:get_members(beamtalk_classes))},
+        receive
+            stop -> ok
+        end
+    end),
+    receive
+        {bt4646_done, Result, InGroup} ->
+            ?assertNotMatch({ok, _}, Result),
+            ?assert(InGroup)
+    after 5000 -> error(timeout)
+    end,
+    Helper ! stop,
+    receive
+        {'DOWN', HRef, process, Helper, _} -> ok
+    after 5000 -> ok
+    end.
