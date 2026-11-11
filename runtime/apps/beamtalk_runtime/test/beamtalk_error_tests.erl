@@ -440,6 +440,24 @@ with_message_tuple_formats_as_binary_test() ->
 
 %%% Tests: generate_message/3 — missing error kinds
 
+%% BT-4241: selectors with codepoints above 255 render as UTF-8, not badarg.
+generate_message_unicode_selector_test() ->
+    Sel = list_to_atom("x_\x{3bb}:"),
+    ?assertEqual(
+        unicode:characters_to_binary("Foo does not understand 'x_\x{3bb}:'"),
+        beamtalk_error:generate_message(does_not_understand, 'Foo', Sel)
+    ),
+    ?assertEqual(
+        unicode:characters_to_binary("Foo does not understand 'x_\x{3bb}:'"),
+        beamtalk_error:generate_message(
+            does_not_understand, 'Foo', unicode:characters_to_binary("x_\x{3bb}:")
+        )
+    ),
+    ?assertEqual(
+        unicode:characters_to_binary("Type error in 'x_\x{3bb}:' on Foo"),
+        beamtalk_error:generate_message(type_error, 'Foo', Sel)
+    ).
+
 actor_dead_message_test() ->
     Error1 = beamtalk_error:new(actor_dead, 'Counter'),
     ?assertEqual(

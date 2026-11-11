@@ -468,7 +468,8 @@ dispatch_badkey_is_readable_key_error_test() ->
         error:#{error := Inner} ->
             ?assertEqual(key_error, Inner#beamtalk_error.kind),
             Msg = Inner#beamtalk_error.message,
-            ?assertMatch({beamtalk_string, _}, Msg)
+            ?assertMatch({beamtalk_string, _}, Msg),
+            ?assertNotEqual(nomatch, binary:match(bt_bin(Msg), <<"key not found">>))
     end.
 
 %%% ===================================================================
@@ -1939,10 +1940,6 @@ catch_ffi_error(Fun) ->
                 Err#beamtalk_error.hint
             }
     end.
-
-dispatch_missing_function_above_latin1_message_test() ->
-    Msg = beamtalk_error:generate_message(does_not_understand, 'Foo', list_to_atom("x_\x{3bb}:")),
-    ?assertEqual(unicode:characters_to_binary("Foo does not understand 'x_\x{3bb}:'"), Msg).
 
 %%% ============================================================================
 %%% BT-4485: direct inline FFI calls (ffi_call_raised/8)
