@@ -541,6 +541,13 @@ pub struct TypeChecker {
     ///
     /// The value is the class name, used in the diagnostic message.
     pub(super) typed_class_context: Option<EcoString>,
+    /// Mirror of `AnalysisContext::skip_module_expression_lint`: top-level
+    /// statements are written as `// =>` assertions, so `discarded-update`
+    /// (like the effect-free lint it defers to) skips them (BT-4522).
+    pub(super) skip_module_expression_lint: bool,
+    /// True while checking top-level statements under
+    /// `skip_module_expression_lint`; gates `check_discarded_update`.
+    pub(super) discarded_update_off: bool,
     /// ADR 0126 §6: known-remote provenance recorded at every identifier
     /// *use* site whose current binding is known-remote — mirrors
     /// `type_map`, keyed the same way (by expression span). The live
@@ -569,6 +576,12 @@ pub struct TypeChecker {
 
 impl TypeChecker {
     /// Creates a new type checker.
+    /// Skip `discarded-update` for top-level statements, as the effect-free
+    /// lint does under `skip_module_expression_lint` (BT-4522).
+    pub fn set_skip_module_expression_lint(&mut self, skip: bool) {
+        self.skip_module_expression_lint = skip;
+    }
+
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -582,6 +595,8 @@ impl TypeChecker {
             referenced_aliases: std::collections::HashSet::new(),
             native_type_registry: None,
             typed_class_context: None,
+            skip_module_expression_lint: false,
+            discarded_update_off: false,
             known_remote_spans: HashMap::new(),
             block_written_locals: std::collections::HashSet::new(),
             defer_block_widening: false,
@@ -608,6 +623,8 @@ impl TypeChecker {
             referenced_aliases: std::collections::HashSet::new(),
             native_type_registry: None,
             typed_class_context: None,
+            skip_module_expression_lint: false,
+            discarded_update_off: false,
             known_remote_spans: HashMap::new(),
             block_written_locals: std::collections::HashSet::new(),
             defer_block_widening: false,

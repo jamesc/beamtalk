@@ -843,7 +843,7 @@ fn check_setup_body_returns_self(
     // `discarded-update` (`self withA: 1.`) has its own, more precise warning
     // naming the dropped send (BT-4522); don't also report it here.
     let has_field_mutation = body.iter().any(|stmt| {
-        let span = stmt.expression.span();
+        let span = stmt.expression.unwrap_parens().span();
         let already_reported = diagnostics
             .iter()
             .any(|d| d.category == Some(DiagnosticCategory::DiscardedUpdate) && d.span == span);

@@ -1114,6 +1114,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     if let Some(registry) = native_type_registry {
         type_checker.set_native_type_registry(registry);
     }
+    type_checker.set_skip_module_expression_lint(skip_module_expression_lint);
     type_checker.check_module_with_protocols_and_aliases(
         module,
         &result.class_hierarchy,

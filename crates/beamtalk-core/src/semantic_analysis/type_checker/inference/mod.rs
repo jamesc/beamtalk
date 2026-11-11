@@ -234,7 +234,12 @@ impl TypeChecker {
         // Check top-level expressions last — method return types are now available.
         self.block_written_locals =
             super::binary_string_compare::block_written_locals(&module.expressions);
+        let outer_off = std::mem::replace(
+            &mut self.discarded_update_off,
+            self.skip_module_expression_lint,
+        );
         self.infer_stmts(&module.expressions, hierarchy, &mut env, false);
+        self.discarded_update_off = outer_off;
     }
 
     /// Infers each state field's default-value expression type and caches it

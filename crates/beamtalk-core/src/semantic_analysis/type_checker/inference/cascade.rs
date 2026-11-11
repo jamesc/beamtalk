@@ -190,13 +190,17 @@ impl TypeChecker {
         expr: &Expression,
         hierarchy: &ClassHierarchy,
     ) {
+        if self.discarded_update_off {
+            return;
+        }
+        // A parenthesised statement (`(p withX: 5).`) discards just the same.
         let Expression::MessageSend {
             receiver,
             selector,
+            arguments,
             is_cast: false,
             span,
-            ..
-        } = expr
+        } = expr.unwrap_parens()
         else {
             return;
         };
@@ -218,25 +222,48 @@ impl TypeChecker {
         let display = InferredType::class_name_for_diagnostic(class_name.as_str());
         let receiver_text = receiver_display(receiver);
         let shape = send_shape(selector);
+        // A block argument may be run for its side effects (`coll collect:
+        // [...]` kept as a loop); the copy is still unused, but the statement
+        // is not a no-op and must not be called one.
+        let has_block_arg = arguments
+            .iter()
+            .any(|a| matches!(a.unwrap_parens(), Expression::Block(_)));
+        let (note, hint) = if has_block_arg {
+            (
+                format!(
+                    "`{display}` is a value: `{name}` answers a new value and leaves the \
+                     receiver unchanged, so only the block's side effects remain"
+                ),
+                "if only the block's side effects matter, iterate with `do:`; \
+                 otherwise use the result (assign it, return it, or pass it on)"
+                    .to_string(),
+            )
+        } else if is_assignable_local(receiver) {
+            (
+                format!(
+                    "`{display}` is a value: `{name}` answers a new value and leaves the \
+                     receiver unchanged, so this statement has no effect"
+                ),
+                format!(
+                    "assign the result (`{receiver_text} := {receiver_text} {shape}`) or \
+                     chain with `|>`"
+                ),
+            )
+        } else {
+            (
+                format!(
+                    "`{display}` is a value: `{name}` answers a new value and leaves the \
+                     receiver unchanged, so this statement has no effect"
+                ),
+                "use the result (assign it, return it, or pass it on), or remove the \
+                 statement"
+                    .to_string(),
+            )
+        };
         self.diagnostics.push(
             Diagnostic::warning(format!("the result of `{name}` is discarded"), *span)
-                .with_note(
-                    format!(
-                        "`{display}` is a value: `{name}` answers a new value and leaves the \
-                         receiver unchanged, so this statement has no effect"
-                    ),
-                    None,
-                )
-                .with_hint(if is_assignable_local(receiver) {
-                    format!(
-                        "assign the result (`{receiver_text} := {receiver_text} {shape}`) or \
-                         chain with `|>`"
-                    )
-                } else {
-                    "use the result (assign it, return it, or pass it on), or remove the \
-                     statement"
-                        .to_string()
-                })
+                .with_note(note, None)
+                .with_hint(hint)
                 .with_category(DiagnosticCategory::DiscardedUpdate),
         );
     }

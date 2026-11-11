@@ -181,3 +181,27 @@ fn expect_discarded_update_suppresses() {
         "the @expect must be satisfied, got: {diags:#?}"
     );
 }
+
+#[test]
+fn parenthesised_statement_warns() {
+    let diags = diagnostics_for("  run: p :: Point -> Point =>\n    (p withX: 5).\n    p\n");
+    assert_eq!(discarded(&diags).len(), 1, "got: {diags:#?}");
+}
+
+#[test]
+fn block_argument_note_does_not_claim_no_effect() {
+    let diags = diagnostics_for("  run -> Integer =>\n    #(1, 2) collect: [:i | i].\n    3\n");
+    let hits = discarded(&diags);
+    assert_eq!(hits.len(), 1, "got: {diags:#?}");
+    let note = &hits[0].notes[0].message;
+    assert!(!note.contains("no effect"), "got: {note}");
+    assert!(
+        hits[0]
+            .hint
+            .as_deref()
+            .unwrap_or_default()
+            .contains("`do:`"),
+        "got: {:?}",
+        hits[0].hint
+    );
+}

@@ -159,6 +159,7 @@ Actor subclass: Adr0131LocalProducerActor
   parenthesisedLoopStatement =>
     t := 0
     (1 to: 3 do: [:i | t := t + i])
+    @expect discarded_update
     (#(1, 2) collect: [:x | t := t + x])
     t
 
