@@ -536,11 +536,11 @@ check_client_protocol(AuthMsg) ->
             ok;
         false ->
             {error,
-                iolist_to_binary(
+                beamtalk_error:chars_to_binary(
                     io_lib:format(
                         "Protocol mismatch: the VS Code extension speaks workspace "
-                        "protocol ~s, this workspace node (beamtalk ~s) speaks "
-                        "protocol ~s. Update the Beamtalk extension or the "
+                        "protocol ~ts, this workspace node (beamtalk ~ts) speaks "
+                        "protocol ~ts. Update the Beamtalk extension or the "
                         "beamtalk toolchain so they agree, then restart the "
                         "workspace.",
                         [
@@ -570,12 +570,12 @@ check_client_versions(AuthMsg) ->
             ok;
         false ->
             {error,
-                iolist_to_binary(
+                beamtalk_error:chars_to_binary(
                     io_lib:format(
-                        "Version mismatch: client is beamtalk ~s protocol ~s, "
-                        "this workspace node is beamtalk ~s protocol ~s. "
-                        "Stop this node with `beamtalk workspace stop ~s`, "
-                        "then ~s and restart the workspace.",
+                        "Version mismatch: client is beamtalk ~ts protocol ~ts, "
+                        "this workspace node is beamtalk ~ts protocol ~ts. "
+                        "Stop this node with `beamtalk workspace stop ~ts`, "
+                        "then ~ts and restart the workspace.",
                         [
                             display_vsn(ClientBeamtalk),
                             display_vsn(ClientProtocol),

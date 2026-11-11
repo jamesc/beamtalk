@@ -567,7 +567,7 @@ actor_pid(_) ->
 -spec label_for(term()) -> binary().
 label_for(Key) when is_atom(Key) -> atom_to_binary(Key, utf8);
 label_for(Key) when is_binary(Key) -> Key;
-label_for(Key) -> iolist_to_binary(io_lib:format("~p", [Key])).
+label_for(Key) -> beamtalk_error:chars_to_binary(io_lib:format("~p", [Key])).
 
 %%====================================================================
 %% Collection field derivation & windowing (ADR 0095 §6)
@@ -1270,7 +1270,7 @@ value_string(Value) ->
     try
         beamtalk_primitive:print_string(Value)
     catch
-        _:_ -> iolist_to_binary(io_lib:format("~p", [Value]))
+        _:_ -> beamtalk_error:chars_to_binary(io_lib:format("~p", [Value]))
     end.
 
 %% Provenance-scoped leaf summary. Under `foreign` provenance every
@@ -1440,7 +1440,7 @@ eval_failed_error(Reason) ->
         eval_failed,
         'Inspector',
         'evaluate:',
-        iolist_to_binary(io_lib:format("evaluate: failed: ~tp", [Reason]))
+        beamtalk_error:chars_to_binary(io_lib:format("evaluate: failed: ~tp", [Reason]))
     ).
 
 %% The workspace eval pipeline is not running (e.g. a bare runtime), so value

@@ -229,7 +229,7 @@ require_workspace(Selector, Class) when is_atom(Selector), is_atom(Class) ->
         {ok, _Caps} ->
             ok;
         none ->
-            Message = iolist_to_binary(
+            Message = beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "~ts>>~ts needs a running workspace; none is running on this node",
                     [Class, Selector]

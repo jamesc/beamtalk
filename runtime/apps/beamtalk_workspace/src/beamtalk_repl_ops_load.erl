@@ -583,7 +583,7 @@ compile_and_write_native(Module, ModuleBin, ErlPath, Source) ->
                     #{
                         <<"path">> => SourceFileBin,
                         <<"kind">> => <<"write_error">>,
-                        <<"message">> => iolist_to_binary(
+                        <<"message">> => beamtalk_error:chars_to_binary(
                             io_lib:format("Could not stage source for compile: ~p", [WriteReason])
                         )
                     }
@@ -688,7 +688,7 @@ finish_native_write(_Module, ModuleBin, ErlPath, SourceFileBin, Source, CompileR
                     #{
                         <<"path">> => SourceFileBin,
                         <<"kind">> => <<"write_error">>,
-                        <<"message">> => iolist_to_binary(
+                        <<"message">> => beamtalk_error:chars_to_binary(
                             io_lib:format(
                                 "Compiled and reloaded, but writing the source to disk failed: ~p",
                                 [WriteReason]
@@ -1239,7 +1239,7 @@ section_io_error(ClassBin, Verb, Reason) ->
             <<" source for '">>,
             ClassBin,
             <<"': ">>,
-            iolist_to_binary(io_lib:format("~p", [Reason]))
+            beamtalk_error:chars_to_binary(io_lib:format("~p", [Reason]))
         ]),
         <<"Check file permissions and try again.">>
     ).
@@ -1254,7 +1254,7 @@ format_dep_error(Mod, Reason) ->
     #{
         <<"path">> => atom_to_binary(Mod, utf8),
         <<"kind">> => <<"dep_activation_error">>,
-        <<"message">> => iolist_to_binary(
+        <<"message">> => beamtalk_error:chars_to_binary(
             io_lib:format("Failed to activate dependency module ~p: ~p", [Mod, Reason])
         )
     }.
@@ -1355,7 +1355,7 @@ compile_native_erl_files(ErlFiles, ProjectRoot) ->
                             ErrMap = #{
                                 <<"path">> => list_to_binary(ErlPath),
                                 <<"kind">> => <<"load_error">>,
-                                <<"message">> => iolist_to_binary(
+                                <<"message">> => beamtalk_error:chars_to_binary(
                                     io_lib:format("Failed to load compiled module: ~p", [LoadErr])
                                 )
                             },
@@ -1370,7 +1370,7 @@ compile_native_erl_files(ErlFiles, ProjectRoot) ->
                             ErrMap = #{
                                 <<"path">> => list_to_binary(ErlPath),
                                 <<"kind">> => <<"load_error">>,
-                                <<"message">> => iolist_to_binary(
+                                <<"message">> => beamtalk_error:chars_to_binary(
                                     io_lib:format("Failed to load compiled module: ~p", [LoadErr])
                                 )
                             },
@@ -1416,7 +1416,7 @@ format_erl_compile_errors(ErlPath, CompileErrors) ->
                         #{
                             <<"path">> => PathBin,
                             <<"kind">> => <<"compile_error">>,
-                            <<"message">> => iolist_to_binary(
+                            <<"message">> => beamtalk_error:chars_to_binary(
                                 io_lib:format("~p", [Other])
                             )
                         }

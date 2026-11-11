@@ -286,9 +286,9 @@ raise_uninitialized_state(Name, State) ->
             none -> 'Unknown';
             DeclaredType -> DeclaredType
         end,
-    Hint = iolist_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "~s field '~s' (:: ~s) is declared `late` and has not been assigned yet",
+            "~ts field '~ts' (:: ~ts) is declared `late` and has not been assigned yet",
             [ClassName, Name, TypeName]
         )
     ),

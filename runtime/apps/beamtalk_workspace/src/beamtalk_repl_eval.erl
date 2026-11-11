@@ -1010,7 +1010,7 @@ purge_eval_module(ModuleName) ->
 %% Wrap a compile/load failure from `eval_with_self/2` as a structured error.
 -spec eval_with_self_error(term()) -> #beamtalk_error{}.
 eval_with_self_error(Reason) ->
-    Message = iolist_to_binary(io_lib:format("evaluate: failed: ~tp", [Reason])),
+    Message = beamtalk_error:chars_to_binary(io_lib:format("evaluate: failed: ~tp", [Reason])),
     Err = beamtalk_error:new(eval_failed, 'Inspector', 'evaluate:'),
     beamtalk_error:with_message(Err, Message).
 

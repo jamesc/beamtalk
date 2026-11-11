@@ -426,7 +426,7 @@ on_timeout_error(Name) ->
 on_error(Name, Reason) ->
     Error0 = beamtalk_error:with_hint(
         beamtalk_error:new(runtime_error, 'ProcessNavigation', 'on:'),
-        iolist_to_binary(io_lib:format("remote snapshot fetch failed: ~tp", [Reason]))
+        beamtalk_error:chars_to_binary(io_lib:format("remote snapshot fetch failed: ~tp", [Reason]))
     ),
     beamtalk_error:with_details(Error0, #{node => Name}).
 
@@ -1233,7 +1233,7 @@ child_handles_dead_error(SupPidStr) ->
         stale_handle,
         'Inspector',
         children,
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format("supervisor ~ts is not alive", [to_text(SupPidStr)])
         )
     ).
@@ -1244,7 +1244,7 @@ child_handles_bad_pid_error(SupPidStr) ->
         type_error,
         'Inspector',
         children,
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format("not a valid pid: ~ts", [to_text(SupPidStr)])
         )
     ).

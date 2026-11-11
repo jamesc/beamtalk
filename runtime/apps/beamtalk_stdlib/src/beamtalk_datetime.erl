@@ -631,7 +631,7 @@ format_offset_suffix(Off) ->
     Abs = abs(Off),
     HH = Abs div 60,
     MM = Abs rem 60,
-    iolist_to_binary(io_lib:format("~c~2..0B:~2..0B", [Sign, HH, MM])).
+    beamtalk_error:chars_to_binary(io_lib:format("~c~2..0B:~2..0B", [Sign, HH, MM])).
 
 -spec validate_date(integer(), integer(), integer(), atom()) -> ok.
 validate_date(Y, Mo, D, Selector) ->
@@ -639,7 +639,9 @@ validate_date(Y, Mo, D, Selector) ->
         true ->
             ok;
         false ->
-            Msg = iolist_to_binary(io_lib:format("Invalid date: ~p-~p-~p", [Y, Mo, D])),
+            Msg = beamtalk_error:chars_to_binary(
+                io_lib:format("Invalid date: ~p-~p-~p", [Y, Mo, D])
+            ),
             Error0 = beamtalk_error:new(type_error, 'DateTime'),
             Error1 = beamtalk_error:with_selector(Error0, Selector),
             Error2 = beamtalk_error:with_hint(Error1, Msg),
@@ -652,7 +654,7 @@ validate_time(H, Mi, S, _Selector) when
 ->
     ok;
 validate_time(H, Mi, S, Selector) ->
-    Msg = iolist_to_binary(io_lib:format("Invalid time: ~p:~p:~p", [H, Mi, S])),
+    Msg = beamtalk_error:chars_to_binary(io_lib:format("Invalid time: ~p:~p:~p", [H, Mi, S])),
     Error0 = beamtalk_error:new(type_error, 'DateTime'),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_hint(Error1, Msg),
@@ -662,7 +664,7 @@ validate_time(H, Mi, S, Selector) ->
 validate_offset(Off, _Selector) when is_integer(Off), Off >= -720, Off =< 840 ->
     ok;
 validate_offset(Off, Selector) ->
-    Msg = iolist_to_binary(
+    Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
             "Invalid offsetMinutes: ~p (must be within the real-world UTC offset range, -720 to +840, i.e. -12:00 to +14:00)",
             [Off]
@@ -796,7 +798,7 @@ format_padded(V, Count) -> zero_pad(V, Count).
 -spec zero_pad(integer(), pos_integer()) -> binary().
 zero_pad(V, Width) ->
     FmtStr = "~" ++ integer_to_list(Width) ++ "..0B",
-    iolist_to_binary(io_lib:format(FmtStr, [V])).
+    beamtalk_error:chars_to_binary(io_lib:format(FmtStr, [V])).
 
 -spec parse_with_pattern(binary(), binary()) ->
     {ok, integer(), integer(), integer(), integer(), integer(), integer()} | {error, binary()}.
@@ -851,11 +853,11 @@ build_pattern_regex(Tokens) ->
 field_regex(year, 2) ->
     <<"(\\d{2})">>;
 field_regex(year, Count) when Count >= 3 ->
-    iolist_to_binary(io_lib:format("(\\d{~B})", [Count]));
+    beamtalk_error:chars_to_binary(io_lib:format("(\\d{~B})", [Count]));
 field_regex(year, _Count) ->
     <<"(\\d{1,9})">>;
 field_regex(_Field, Count) when Count >= 2 ->
-    iolist_to_binary(io_lib:format("(\\d{~B})", [Count]));
+    beamtalk_error:chars_to_binary(io_lib:format("(\\d{~B})", [Count]));
 field_regex(_Field, _Count) ->
     <<"(\\d{1,2})">>.
 

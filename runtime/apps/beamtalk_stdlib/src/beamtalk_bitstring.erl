@@ -76,7 +76,7 @@ asBinary(Bits) when is_binary(Bits) ->
     %% total for direct callers.
     beamtalk_result:from_tagged_tuple({ok, Bits});
 asBinary(Bits) when is_bitstring(Bits) ->
-    Hint = iolist_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
             "~B bits is not a whole number of bytes; use 'bitSize' and 'toBits' "
             "to read the bits, or concat: more bits to reach a byte boundary",
@@ -87,7 +87,7 @@ asBinary(Bits) when is_bitstring(Bits) ->
     Error1 = beamtalk_error:with_selector(Error0, asBinary),
     Error2 = beamtalk_error:with_message(
         Error1,
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format("Bitstring of ~B bits is not byte-aligned", [bit_size(Bits)])
         )
     ),

@@ -227,26 +227,26 @@ format_msg({string, Msg}, _Meta) ->
 format_msg({report, Report}, Meta) when is_map(Report) ->
     case maps:get(report_cb, Meta, undefined) of
         undefined ->
-            iolist_to_binary(io_lib:format("~tp", [Report]));
+            beamtalk_error:chars_to_binary(io_lib:format("~tp", [Report]));
         Fun when is_function(Fun, 1) ->
             {Format, Args} = Fun(Report),
-            iolist_to_binary(io_lib:format(Format, Args));
+            beamtalk_error:chars_to_binary(io_lib:format(Format, Args));
         Fun when is_function(Fun, 2) ->
             iolist_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
     end;
 format_msg({report, Report}, Meta) ->
     format_msg_report_list(Report, Meta);
 format_msg({Format, Args}, _Meta) ->
-    iolist_to_binary(io_lib:format(Format, Args)).
+    beamtalk_error:chars_to_binary(io_lib:format(Format, Args)).
 
 -spec format_msg_report_list(term(), map()) -> binary().
 format_msg_report_list(Report, Meta) ->
     case maps:get(report_cb, Meta, undefined) of
         undefined ->
-            iolist_to_binary(io_lib:format("~tp", [Report]));
+            beamtalk_error:chars_to_binary(io_lib:format("~tp", [Report]));
         Fun when is_function(Fun, 1) ->
             {Format, Args} = Fun(Report),
-            iolist_to_binary(io_lib:format(Format, Args));
+            beamtalk_error:chars_to_binary(io_lib:format(Format, Args));
         Fun when is_function(Fun, 2) ->
             iolist_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
     end.
@@ -271,8 +271,8 @@ format_selector(_) ->
 
 -spec format_mfa(map()) -> binary() | undefined.
 format_mfa(#{mfa := {M, F, A}}) when is_atom(M), is_atom(F), is_integer(A) ->
-    iolist_to_binary(
-        io_lib:format("~s:~s/~B", [atom_to_list(M), atom_to_list(F), A])
+    beamtalk_error:chars_to_binary(
+        io_lib:format("~ts:~ts/~B", [atom_to_list(M), atom_to_list(F), A])
     );
 format_mfa(_) ->
     undefined.

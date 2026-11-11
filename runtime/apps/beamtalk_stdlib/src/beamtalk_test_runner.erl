@@ -98,7 +98,7 @@ run_all(0) ->
 run_all(MaxJobs) when is_integer(MaxJobs), MaxJobs >= 1 ->
     run_all_impl(MaxJobs);
 run_all(Invalid) ->
-    Msg = iolist_to_binary(
+    Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
             "runAll: expects a non-negative integer, got: ~p",
             [Invalid]
@@ -218,7 +218,7 @@ run_class(ClassRef) when is_tuple(ClassRef), tuple_size(ClassRef) >= 2 ->
     ClassName = extract_class_name(ClassRef),
     run_class_by_name(ClassName);
 run_class(Invalid) ->
-    Msg = iolist_to_binary(
+    Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
             "run: expects a class reference (tuple), got: ~p",
             [Invalid]
@@ -244,7 +244,7 @@ run_method(ClassRef, TestName) when
     is_tuple(ClassRef), tuple_size(ClassRef) >= 2
 ->
     %% ClassRef is valid but TestName is not an atom
-    Msg = iolist_to_binary(
+    Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
             "run:method: expects a method name (atom), got: ~p",
             [TestName]
@@ -255,7 +255,7 @@ run_method(ClassRef, TestName) when
     Error2 = beamtalk_error:with_message(Error1, Msg),
     beamtalk_error:raise(Error2);
 run_method(Invalid, _TestName) ->
-    Msg = iolist_to_binary(
+    Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
             "run:method: expects a class reference (tuple with >= 2 elements), got: ~p",
             [Invalid]
@@ -328,27 +328,27 @@ result_summary(#{
 }) ->
     case {Failed, Skipped} of
         {0, 0} ->
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "~p tests, ~p passed (~.1fs)", [Total, Passed, Duration]
                 )
             );
         {0, _} ->
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "~p tests, ~p passed, ~p skipped (~.1fs)",
                     [Total, Passed, Skipped, Duration]
                 )
             );
         {_, 0} ->
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "~p tests, ~p passed, ~p failed (~.1fs)",
                     [Total, Passed, Failed, Duration]
                 )
             );
         _ ->
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "~p tests, ~p passed, ~p skipped, ~p failed (~.1fs)",
                     [Total, Passed, Skipped, Failed, Duration]
@@ -483,7 +483,7 @@ the escript would die with no results at all.
 """.
 -spec degraded_result_json(map(), term()) -> binary().
 degraded_result_json(Result, Reason) ->
-    Note = iolist_to_binary(
+    Note = beamtalk_error:chars_to_binary(
         io_lib:format(
             "Per-test details omitted: the BUnit runner could not encode them as JSON (~p)",
             [Reason]
@@ -687,8 +687,8 @@ Raises a structured error if the class is not registered.
 discover_methods_via_registry(ClassName) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
         undefined ->
-            Msg = iolist_to_binary(
-                io_lib:format("Class '~s' not found in class registry", [ClassName])
+            Msg = beamtalk_error:chars_to_binary(
+                io_lib:format("Class '~ts' not found in class registry", [ClassName])
             ),
             Error0 = beamtalk_error:new(class_not_found, 'TestRunner'),
             Error1 = beamtalk_error:with_selector(Error0, 'run:'),
@@ -811,7 +811,7 @@ extract_class_name(ClassRef) when is_tuple(ClassRef) ->
 -doc "Raise a structured error for an invalid class reference tuple.".
 -spec raise_invalid_class_ref(term()) -> no_return().
 raise_invalid_class_ref(ClassRef) ->
-    Msg = iolist_to_binary(
+    Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
             "expected a class reference (element 2 must be a 'ClassName class' atom), got: ~p",
             [ClassRef]
@@ -997,7 +997,7 @@ spawn_class_worker(ClassName, Parent, Ref) ->
                 run_class_by_name(ClassName)
             catch
                 Class:Reason:ST ->
-                    ErrMsg = iolist_to_binary(
+                    ErrMsg = beamtalk_error:chars_to_binary(
                         io_lib:format("Test class crashed: ~p:~p~n~p", [Class, Reason, ST])
                     ),
                     make_test_result(

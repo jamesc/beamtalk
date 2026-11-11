@@ -440,6 +440,25 @@ with_message_tuple_formats_as_binary_test() ->
 
 %%% Tests: generate_message/3 — missing error kinds
 
+%% Chore: `chars_to_binary/1` is the shared encoder for formatted error text.
+chars_to_binary_encodes_utf8_test() ->
+    ?assertEqual(
+        unicode:characters_to_binary("x_\x{3bb}:"),
+        beamtalk_error:chars_to_binary(io_lib:format("~ts", [list_to_atom("x_\x{3bb}:")]))
+    ),
+    ?assertEqual(<<"plain">>, beamtalk_error:chars_to_binary(["pl", <<"ain">>])).
+
+%% Chore: hints and `format/1` reasons holding codepoints above 255 don't badarg.
+unicode_hint_and_reason_test() ->
+    %% A name no other test mints: atoms are VM-global, and the proxy tests
+    %% rely on `x_\x{3bb}` not existing yet.
+    Atom = list_to_atom("bt_unicode_hint_\x{3bb}"),
+    E0 = beamtalk_error:new(type_error, 'Foo'),
+    E1 = beamtalk_error:with_hint(E0, {missing, Atom}),
+    ?assertMatch({beamtalk_string, B} when is_binary(B), E1#beamtalk_error.hint),
+    E2 = E0#beamtalk_error{details = #{signal_reason => Atom}},
+    ?assert(is_binary(beamtalk_error:format(E2))).
+
 %% BT-4241: selectors with codepoints above 255 render as UTF-8, not badarg.
 generate_message_unicode_selector_test() ->
     Sel = list_to_atom("x_\x{3bb}:"),

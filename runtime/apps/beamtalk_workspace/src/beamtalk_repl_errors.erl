@@ -161,7 +161,7 @@ ensure_structured_error({compile_error, Msg}) when is_list(Msg) ->
         try
             list_to_binary(Msg)
         catch
-            error:badarg -> iolist_to_binary(io_lib:format("~p", [Msg]))
+            error:badarg -> beamtalk_error:chars_to_binary(io_lib:format("~p", [Msg]))
         end,
     make(compile_error, 'Compiler', MsgBin);
 ensure_structured_error({compile_error, Reason}) ->
@@ -186,8 +186,8 @@ ensure_structured_error({registration_error, {ModuleName, Reason}}) ->
     make(
         registration_error,
         'Runtime',
-        iolist_to_binary(
-            io_lib:format("Class registration failed for ~s: ~p", [ModuleName, Reason])
+        beamtalk_error:chars_to_binary(
+            io_lib:format("Class registration failed for ~ts: ~p", [ModuleName, Reason])
         )
     );
 ensure_structured_error({registration_error, Reason}) ->
@@ -322,7 +322,7 @@ ensure_structured_error(empty_expression) ->
 ensure_structured_error(timeout) ->
     make(timeout, 'REPL', <<"Request timed out">>);
 ensure_structured_error(Reason) ->
-    make(internal_error, 'REPL', iolist_to_binary(io_lib:format("~p", [Reason]))).
+    make(internal_error, 'REPL', beamtalk_error:chars_to_binary(io_lib:format("~p", [Reason]))).
 
 -doc """
 Ensure an error reason is structured, with exception class context.
@@ -450,4 +450,4 @@ normalize_diagnostic(D) when is_map(D) ->
 normalize_diagnostic(D) when is_binary(D) ->
     #{message => D};
 normalize_diagnostic(D) ->
-    #{message => iolist_to_binary(io_lib:format("~p", [D]))}.
+    #{message => beamtalk_error:chars_to_binary(io_lib:format("~p", [D]))}.

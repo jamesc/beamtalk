@@ -2525,7 +2525,7 @@ no_such_process_error_record(Name, Selector) ->
         no_such_process,
         unknown,
         Selector,
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format(
                 "No process is currently registered under name '~p'", [Name]
             )
@@ -2659,7 +2659,7 @@ async_stop(ActorPid, Reason, Timeout, Selector, FuturePid) ->
                 actor_dead,
                 unknown,
                 Selector,
-                iolist_to_binary(io_lib:format("Actor stop failed: ~p", [Other]))
+                beamtalk_error:chars_to_binary(io_lib:format("Actor stop failed: ~p", [Other]))
             ),
             beamtalk_future:reject(FuturePid, Error)
     end,
@@ -2915,7 +2915,7 @@ validate_continuation(RequestSelector, ContSelector, ArgSpec) ->
                     continuation_error(
                         arity_mismatch,
                         RequestSelector,
-                        iolist_to_binary(
+                        beamtalk_error:chars_to_binary(
                             io_lib:format(
                                 "Continuation #~ts takes ~B argument(s), got ~B",
                                 [atom_to_binary(ContSelector), Expected, Actual]
@@ -4684,37 +4684,37 @@ method_error_kind(_Class, _Reason) -> runtime_error.
 -doc "Format a human-readable error message from a method dispatch failure.".
 -spec format_method_error_message(atom(), atom(), term(), term(), list()) -> binary().
 format_method_error_message(ClassName, Selector, error, function_clause, [{M, F, A, Loc} | _]) ->
-    iolist_to_binary(
+    beamtalk_error:chars_to_binary(
         io_lib:format(
-            "No matching clause in ~s>>~s (called ~s:~s/~s~s)",
+            "No matching clause in ~ts>>~ts (called ~ts:~ts/~ts~ts)",
             [ClassName, Selector, M, F, format_arity(A), format_location(Loc)]
         )
     );
 format_method_error_message(ClassName, Selector, error, badarg, [{M, F, A, Loc} | _]) ->
-    iolist_to_binary(
+    beamtalk_error:chars_to_binary(
         io_lib:format(
-            "Bad argument in ~s>>~s (called ~s:~s/~s~s)",
+            "Bad argument in ~ts>>~ts (called ~ts:~ts/~ts~ts)",
             [ClassName, Selector, M, F, format_arity(A), format_location(Loc)]
         )
     );
 format_method_error_message(ClassName, Selector, error, undef, [{M, F, A, Loc} | _]) ->
-    iolist_to_binary(
+    beamtalk_error:chars_to_binary(
         io_lib:format(
-            "Undefined function in ~s>>~s (called ~s:~s/~s~s)",
+            "Undefined function in ~ts>>~ts (called ~ts:~ts/~ts~ts)",
             [ClassName, Selector, M, F, format_arity(A), format_location(Loc)]
         )
     );
 format_method_error_message(ClassName, Selector, error, badarith, [{M, F, A, Loc} | _]) ->
-    iolist_to_binary(
+    beamtalk_error:chars_to_binary(
         io_lib:format(
-            "Arithmetic error in ~s>>~s (called ~s:~s/~s~s)",
+            "Arithmetic error in ~ts>>~ts (called ~ts:~ts/~ts~ts)",
             [ClassName, Selector, M, F, format_arity(A), format_location(Loc)]
         )
     );
 format_method_error_message(ClassName, Selector, Class, Reason, _Stacktrace) ->
-    iolist_to_binary(
+    beamtalk_error:chars_to_binary(
         io_lib:format(
-            "~p:~p in ~s>>~s",
+            "~p:~p in ~ts>>~ts",
             [Class, Reason, ClassName, Selector]
         )
     ).
@@ -4829,7 +4829,7 @@ register_name(Name, Pid) when is_atom(Name), is_pid(Pid) ->
             {error,
                 beamtalk_error:with_hint(
                     beamtalk_error:new(reserved_name, 'Actor', registerAs),
-                    iolist_to_binary(
+                    beamtalk_error:chars_to_binary(
                         io_lib:format(
                             "Cannot register actor under reserved name '~ts'", [Name]
                         )
@@ -4847,7 +4847,7 @@ register_name(Name, Pid) when is_atom(Name), is_pid(Pid) ->
                                     beamtalk_error:new(
                                         name_registered, 'Actor', registerAs
                                     ),
-                                    iolist_to_binary(
+                                    beamtalk_error:chars_to_binary(
                                         io_lib:format(
                                             "Name '~ts' is already registered", [Name]
                                         )
@@ -4859,7 +4859,7 @@ register_name(Name, Pid) when is_atom(Name), is_pid(Pid) ->
                                     beamtalk_error:new(
                                         type_error, 'Actor', registerAs
                                     ),
-                                    iolist_to_binary(
+                                    beamtalk_error:chars_to_binary(
                                         io_lib:format(
                                             "Pid ~tp is not registerable "
                                             "(dead, remote, or already "
@@ -4875,7 +4875,7 @@ register_name(Name, Pid) ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, 'Actor', registerAs),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "register_name/2 expects (atom, pid), got (~tp, ~tp)", [Name, Pid]
                 )
@@ -4897,7 +4897,7 @@ unregister_name(Name) when is_atom(Name) ->
             {error,
                 beamtalk_error:with_hint(
                     beamtalk_error:new(reserved_name, 'Actor', unregister),
-                    iolist_to_binary(
+                    beamtalk_error:chars_to_binary(
                         io_lib:format(
                             "Cannot unregister reserved name '~ts'", [Name]
                         )
@@ -4913,7 +4913,7 @@ unregister_name(Name) when is_atom(Name) ->
                             beamtalk_error:new(
                                 name_registered, 'Actor', unregister
                             ),
-                            iolist_to_binary(
+                            beamtalk_error:chars_to_binary(
                                 io_lib:format(
                                     "Name '~ts' is not registered", [Name]
                                 )
@@ -4925,7 +4925,7 @@ unregister_name(Name) ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, 'Actor', unregister),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "unregister_name/1 expects atom, got ~tp", [Name]
                 )
@@ -4949,7 +4949,7 @@ whereis_name(Name) ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, 'Actor', whereisName),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "whereis_name/1 expects atom, got ~tp", [Name]
                 )
@@ -5008,7 +5008,7 @@ boundary can translate to `Result error: ...`.
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, 'Actor', spawnAs),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "spawnAs/3 expects (atom, module, term), got (~tp, ~tp, ~tp)",
                     [Name, Module, Args]
@@ -5040,7 +5040,7 @@ and `'spawnAs'/3` (AGENTS.md "No duplicate implementations").
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, 'Actor', 'spawnAs:scope:'),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "spawnAsGlobal/3 expects (atom, module, term), got (~tp, ~tp, ~tp)",
                     [Name, Module, Args]
@@ -5079,7 +5079,7 @@ spawn_named_scoped(Scope, Link, Name, Module, Args) ->
             {error,
                 beamtalk_error:with_hint(
                     beamtalk_error:new(reserved_name, 'Actor', spawnAs),
-                    iolist_to_binary(
+                    beamtalk_error:chars_to_binary(
                         io_lib:format(
                             "Cannot spawn actor under reserved name '~ts'", [Name]
                         )
@@ -5309,7 +5309,7 @@ resolve_scope(Other, Selector) ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, 'Actor', Selector),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "scope must be #local or #global, got ~tp", [Other]
                 )
@@ -5502,7 +5502,7 @@ registerAs(Self, _Name) ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, 'Actor', 'registerAs:'),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "registerAs: expects an Actor receiver, got ~tp", [Self]
                 )
@@ -5612,7 +5612,7 @@ unregister(Self) ->
     beamtalk_error:raise(
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, 'Actor', unregister),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "unregister expects an Actor receiver, got ~tp", [Self]
                 )
@@ -5724,7 +5724,7 @@ named(_Self, Name) ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, 'Actor', 'named:'),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "named: expects a Symbol, got ~tp", [Name]
                 )
@@ -5760,7 +5760,7 @@ doNamedScope(_Self, Name, _ScopeSym) ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, 'Actor', 'named:scope:'),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "named:scope: expects a Symbol name, got ~tp", [Name]
                 )
@@ -5807,7 +5807,7 @@ named_lookup(Scope, ReceiverClass, Name, Selector) ->
             {error,
                 beamtalk_error:with_hint(
                     beamtalk_error:new(name_not_registered, ReceiverClass, Selector),
-                    iolist_to_binary(
+                    beamtalk_error:chars_to_binary(
                         io_lib:format(
                             "No actor is registered under name '~ts'",
                             [Name]
@@ -5825,7 +5825,7 @@ named_lookup(Scope, ReceiverClass, Name, Selector) ->
                     {error,
                         beamtalk_error:with_hint(
                             beamtalk_error:new(wrong_class, ReceiverClass, Selector),
-                            iolist_to_binary(
+                            beamtalk_error:chars_to_binary(
                                 io_lib:format(
                                     "Name '~ts' is registered to a non-Beamtalk "
                                     "process",
@@ -5867,7 +5867,7 @@ named_lookup(Scope, ReceiverClass, Name, Selector) ->
                                                 ReceiverClass,
                                                 Selector
                                             ),
-                                            iolist_to_binary(
+                                            beamtalk_error:chars_to_binary(
                                                 io_lib:format(
                                                     "Registered actor class "
                                                     "'~ts' has no loaded module",
@@ -5880,7 +5880,7 @@ named_lookup(Scope, ReceiverClass, Name, Selector) ->
                             {error,
                                 beamtalk_error:with_hint(
                                     beamtalk_error:new(wrong_class, ReceiverClass, Selector),
-                                    iolist_to_binary(
+                                    beamtalk_error:chars_to_binary(
                                         io_lib:format(
                                             "Name '~ts' is registered to a "
                                             "~ts, not a ~ts",
@@ -6281,7 +6281,7 @@ node_arg_to_atom(Other) ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, 'Actor'),
-            iolist_to_binary(io_lib:format("Expected a Node value, got ~tp", [Other]))
+            beamtalk_error:chars_to_binary(io_lib:format("Expected a Node value, got ~tp", [Other]))
         )}.
 
 -doc """
@@ -6336,7 +6336,7 @@ doSpawnAsOn(Self, Name, _NodeArg) ->
             {error,
                 beamtalk_error:with_hint(
                     beamtalk_error:new(type_error, ClassName, 'spawnAs:on:'),
-                    iolist_to_binary(
+                    beamtalk_error:chars_to_binary(
                         io_lib:format("spawnAs:on: expects a Symbol name, got ~tp", [Name])
                     )
                 )};
@@ -6411,7 +6411,7 @@ doSpawnWithAsOn(Self, _InitArgs, Name, _NodeArg) ->
             {error,
                 beamtalk_error:with_hint(
                     beamtalk_error:new(type_error, ClassName, 'spawnWith:as:on:'),
-                    iolist_to_binary(
+                    beamtalk_error:chars_to_binary(
                         io_lib:format("spawnWith:as:on: expects a Symbol name, got ~tp", [Name])
                     )
                 )};
@@ -6473,7 +6473,7 @@ doNamedOn(_Self, Name, _NodeArg) ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, 'Actor', 'named:on:'),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format("named:on: expects a Symbol, got ~tp", [Name])
             )
         )}.
@@ -6525,7 +6525,7 @@ class_self_to_name_and_module(Other) ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, 'Actor'),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "Expected a class receiver, got ~tp", [Other]
                 )
@@ -6578,7 +6578,7 @@ proxy_pid(#beamtalk_object{class = ClassName, pid = Other}, Selector) ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, ClassName, Selector),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "proxy_pid/2 expects pid(), {registered, atom()}, or "
                     "{global, atom()} in #beamtalk_object.pid, got ~tp",
@@ -6713,7 +6713,7 @@ generic_spawn_error(ClassName, Selector, Reason) ->
             beamtalk_error:new(instantiation_error, ClassName),
             Selector
         ),
-        iolist_to_binary(io_lib:format("spawn failed: ~tp", [Reason]))
+        beamtalk_error:chars_to_binary(io_lib:format("spawn failed: ~tp", [Reason]))
     ).
 
 -doc """
@@ -6730,7 +6730,7 @@ generic_remote_error(ClassName, Selector, Reason) ->
             beamtalk_error:new(runtime_error, ClassName),
             Selector
         ),
-        iolist_to_binary(io_lib:format("remote operation failed: ~tp", [Reason]))
+        beamtalk_error:chars_to_binary(io_lib:format("remote operation failed: ~tp", [Reason]))
     ).
 
 -doc """
@@ -6756,7 +6756,7 @@ name_registered_error(Name) ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(name_registered, 'Actor', spawnAs),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "Name '~ts' is already registered", [Name]
                 )

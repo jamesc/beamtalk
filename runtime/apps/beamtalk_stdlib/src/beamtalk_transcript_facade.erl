@@ -112,7 +112,7 @@ require_stream(Selector) ->
             Err0 = beamtalk_error:new(no_workspace, 'Transcript', Selector),
             Err1 = beamtalk_error:with_message(
                 Err0,
-                iolist_to_binary(
+                beamtalk_error:chars_to_binary(
                     io_lib:format(
                         "Transcript>>~ts needs an interactive workspace's transcript; "
                         "none is running on this node",

@@ -120,7 +120,7 @@ wire_version_unsupported_error(Class, Selector, SentVersion, ExtraDetails) ->
     beamtalk_error:with_details(
         beamtalk_error:with_hint(
             beamtalk_error:new(wire_version_unsupported, Class, Selector),
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "wire envelope version ~p is not supported by this node (known version ~p)",
                     [SentVersion, ?BT_WIRE_VERSION]

@@ -594,7 +594,7 @@ do_attach(HandlerId, EventNames, Block, Sel) ->
                     error_with_hint(
                         handler_exists,
                         Sel,
-                        iolist_to_binary(
+                        beamtalk_error:chars_to_binary(
                             io_lib:format("A telemetry handler with id ~tp is already attached", [
                                 HandlerId
                             ])
@@ -672,7 +672,7 @@ check_not_reserved(HandlerId, Sel) ->
                 error_with_hint(
                     reserved_name,
                     Sel,
-                    iolist_to_binary(
+                    beamtalk_error:chars_to_binary(
                         io_lib:format("~tp is a runtime telemetry handler id and is reserved", [
                             HandlerId
                         ])

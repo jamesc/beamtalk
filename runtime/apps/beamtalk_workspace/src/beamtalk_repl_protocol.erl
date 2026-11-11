@@ -393,7 +393,7 @@ encode_test_entry(#{name := Name, status := fail, error := Error} = Entry) ->
     ErrorBin =
         case is_binary(Error) of
             true -> Error;
-            false -> iolist_to_binary(io_lib:format("~p", [Error]))
+            false -> beamtalk_error:chars_to_binary(io_lib:format("~p", [Error]))
         end,
     maybe_add_class(
         #{
@@ -414,7 +414,9 @@ encode_test_entry(#{name := Name, status := skip} = Entry) ->
             {ok, Reason} when is_binary(Reason) ->
                 Base0#{<<"reason">> => Reason};
             {ok, Reason} ->
-                Base0#{<<"reason">> => iolist_to_binary(io_lib:format("~p", [Reason]))};
+                Base0#{
+                    <<"reason">> => beamtalk_error:chars_to_binary(io_lib:format("~p", [Reason]))
+                };
             error ->
                 Base0
         end,

@@ -176,7 +176,9 @@ start_subprocess(Config, Selector) ->
             Err0 = beamtalk_error:new(runtime_error, 'ReactiveSubprocess', Selector),
             Err1 = beamtalk_error:with_message(
                 Err0,
-                iolist_to_binary(io_lib:format("Failed to start reactive subprocess: ~p", [Reason]))
+                beamtalk_error:chars_to_binary(
+                    io_lib:format("Failed to start reactive subprocess: ~p", [Reason])
+                )
             ),
             %% BT-4236: keep the supervisor's term for `Exception>>reason`.
             Err2 = beamtalk_error:with_details(Err1, #{reason => Reason}),

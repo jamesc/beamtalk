@@ -320,7 +320,7 @@ report fields — registered names belong in the "name" field, not "mfa".
 """.
 -spec format_mfa(term(), map()) -> binary() | undefined.
 format_mfa(_Msg, #{mfa := {M, F, A}}) ->
-    iolist_to_binary(io_lib:format("~s:~s/~B", [M, F, A]));
+    beamtalk_error:chars_to_binary(io_lib:format("~ts:~ts/~B", [M, F, A]));
 format_mfa(_Msg, _Meta) ->
     undefined.
 
@@ -430,7 +430,7 @@ user-supplied metadata (e.g. from Beamtalk Dictionary) may use binaries.
 -spec key_to_binary(atom() | binary()) -> binary().
 key_to_binary(Key) when is_atom(Key) -> atom_to_binary(Key, utf8);
 key_to_binary(Key) when is_binary(Key) -> Key;
-key_to_binary(Key) -> iolist_to_binary(io_lib:format("~tp", [Key])).
+key_to_binary(Key) -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [Key])).
 
 -doc "Convert unicode chardata to binary, falling back to latin1 on error.".
 -spec safe_to_binary(unicode:chardata()) -> binary().

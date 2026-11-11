@@ -606,8 +606,8 @@ compile_protocol_definition_result(ProtocolInfo, Mode) ->
                 },
                 Warnings};
         {error, Reason} ->
-            ErrMsg = iolist_to_binary(
-                io_lib:format("Failed to compile protocol module ~s: ~p", [ModuleNameBin, Reason])
+            ErrMsg = beamtalk_error:chars_to_binary(
+                io_lib:format("Failed to compile protocol module ~ts: ~p", [ModuleNameBin, Reason])
             ),
             {error, ErrMsg}
     end.
@@ -915,11 +915,20 @@ wrap_compiler_errors(Fun, ErrorStyle) ->
         exit:{timeout, _} ->
             wrap_error(<<"Compilation timed out.">>, ErrorStyle);
         exit:{Reason, _} ->
-            wrap_error(iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason])), ErrorStyle);
+            wrap_error(
+                beamtalk_error:chars_to_binary(io_lib:format("Compiler error: ~p", [Reason])),
+                ErrorStyle
+            );
         error:Reason ->
-            wrap_error(iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason])), ErrorStyle);
+            wrap_error(
+                beamtalk_error:chars_to_binary(io_lib:format("Compiler error: ~p", [Reason])),
+                ErrorStyle
+            );
         throw:Reason ->
-            wrap_error(iolist_to_binary(io_lib:format("Compiler error: ~p", [Reason])), ErrorStyle)
+            wrap_error(
+                beamtalk_error:chars_to_binary(io_lib:format("Compiler error: ~p", [Reason])),
+                ErrorStyle
+            )
     end.
 
 -spec wrap_error(binary(), direct | wrapped) -> {error, term()}.
@@ -928,4 +937,4 @@ wrap_error(Msg, wrapped) -> {error, {compile_error, Msg}}.
 
 -spec format_core_error(term()) -> binary().
 format_core_error(Reason) ->
-    iolist_to_binary(io_lib:format("Core Erlang compile error: ~p", [Reason])).
+    beamtalk_error:chars_to_binary(io_lib:format("Core Erlang compile error: ~p", [Reason])).

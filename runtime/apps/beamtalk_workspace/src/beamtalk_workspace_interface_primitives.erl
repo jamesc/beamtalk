@@ -1238,7 +1238,7 @@ setAutoflush(Value) when is_boolean(Value) ->
 setAutoflush(Other) ->
     Err0 = beamtalk_error:new(type_error, 'Workspace'),
     Err1 = beamtalk_error:with_selector(Err0, 'autoflush:'),
-    Msg = iolist_to_binary(
+    Msg = beamtalk_error:chars_to_binary(
         io_lib:format("autoflush: expects a Boolean, got: ~p", [Other])
     ),
     beamtalk_error:raise(beamtalk_error:with_message(Err1, Msg)).
@@ -1451,7 +1451,9 @@ raise_start_supervisor_error(Reason) ->
     beamtalk_error:raise(
         beamtalk_error:with_message(
             Err1,
-            iolist_to_binary(io_lib:format("Failed to start supervisor: ~p", [Reason]))
+            beamtalk_error:chars_to_binary(
+                io_lib:format("Failed to start supervisor: ~p", [Reason])
+            )
         )
     ).
 

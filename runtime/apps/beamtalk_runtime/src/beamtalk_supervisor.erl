@@ -311,7 +311,7 @@ class_start_concrete(ClassName, _Module, Selector, Args) ->
             arity_mismatch,
             ClassName,
             Selector,
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format("~ts takes a different number of arguments, got ~b", [
                     Selector, length(Args)
                 ])
@@ -415,7 +415,7 @@ start_lock_error(ClassName, timeout) ->
         supervisor_start_failed,
         ClassName,
         supervise,
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format(
                 "another supervise call is still starting ~ts; gave up after ~b ms",
                 [ClassName, init_wait_timeout()]
@@ -514,7 +514,7 @@ named(Self, Name) when is_atom(Name) ->
                     name_not_registered,
                     ClassName,
                     'named:',
-                    iolist_to_binary(
+                    beamtalk_error:chars_to_binary(
                         io_lib:format("No supervisor is registered under name '~ts'", [Name])
                     )
                 )};
@@ -536,7 +536,9 @@ named(Self, Name) ->
             type_error,
             ClassName,
             'named:',
-            iolist_to_binary(io_lib:format("named: expects a Symbol, got ~tp", [Name]))
+            beamtalk_error:chars_to_binary(
+                io_lib:format("named: expects a Symbol, got ~tp", [Name])
+            )
         )}.
 
 -spec wrong_class_error(atom(), atom(), atom()) -> {error, #beamtalk_error{}}.
@@ -546,7 +548,7 @@ wrong_class_error(ClassName, Name, not_a_supervisor) ->
             wrong_class,
             ClassName,
             'named:',
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format("Name '~ts' is not registered to a Beamtalk supervisor", [Name])
             )
         )};
@@ -556,7 +558,7 @@ wrong_class_error(ClassName, Name, Actual) ->
             wrong_class,
             ClassName,
             'named:',
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(
                     "Name '~ts' is registered to a ~ts, not a ~ts", [Name, Actual, ClassName]
                 )
@@ -616,7 +618,9 @@ spawn_named_instance(ClassName, _Module, _Args, Name, Selector) when not is_atom
             type_error,
             ClassName,
             Selector,
-            iolist_to_binary(io_lib:format("~ts expects a Symbol name, got ~tp", [Selector, Name]))
+            beamtalk_error:chars_to_binary(
+                io_lib:format("~ts expects a Symbol name, got ~tp", [Selector, Name])
+            )
         )};
 spawn_named_instance(ClassName, Module, Args, Name, Selector) ->
     case beamtalk_actor:reserved_name(Name) of
@@ -626,7 +630,7 @@ spawn_named_instance(ClassName, Module, Args, Name, Selector) ->
                     reserved_name,
                     ClassName,
                     Selector,
-                    iolist_to_binary(
+                    beamtalk_error:chars_to_binary(
                         io_lib:format("Cannot start a supervisor under reserved name '~ts'", [Name])
                     )
                 )};
@@ -643,7 +647,7 @@ spawn_named_instance(ClassName, Module, Args, Name, Selector) ->
                             name_registered,
                             ClassName,
                             Selector,
-                            iolist_to_binary(
+                            beamtalk_error:chars_to_binary(
                                 io_lib:format("Name '~ts' is already registered", [Name])
                             )
                         )};
@@ -753,7 +757,7 @@ start_supervisor_child(Module, Args, Name) ->
                     reserved_name,
                     'Supervisor',
                     'withName:',
-                    iolist_to_binary(
+                    beamtalk_error:chars_to_binary(
                         io_lib:format("Cannot start a supervisor under reserved name '~ts'", [Name])
                     )
                 )};
@@ -804,7 +808,7 @@ start_dynamic_supervisor_child(_Module, _DefaultArgs, _Args, Name) ->
             type_error,
             'DynamicSupervisor',
             'startChild:name:',
-            iolist_to_binary(io_lib:format("name must be a Symbol, got ~tp", [Name]))
+            beamtalk_error:chars_to_binary(io_lib:format("name must be a Symbol, got ~tp", [Name]))
         )}.
 
 -spec exports(module(), atom(), arity()) -> boolean().
@@ -903,7 +907,7 @@ format_start_failed_error(Kind, ClassName, Selector, Reason) ->
         Kind,
         ClassName,
         Selector,
-        iolist_to_binary(io_lib:format("supervisor ~s failed: ~p", [Verb, Reason]))
+        beamtalk_error:chars_to_binary(io_lib:format("supervisor ~ts failed: ~p", [Verb, Reason]))
     ).
 
 %% The text to show for a start failure's cause: its hint, else its message,
@@ -1085,8 +1089,8 @@ check_integer(ClassName, Selector, Value, Min) ->
         type_error,
         ClassName,
         Selector,
-        iolist_to_binary(
-            io_lib:format("~s must be an Integer >= ~b, got ~p", [Selector, Min, Value])
+        beamtalk_error:chars_to_binary(
+            io_lib:format("~ts must be an Integer >= ~b, got ~p", [Selector, Min, Value])
         )
     ),
     {error, beamtalk_error:with_details(Error0, #{value => Value})}.
@@ -1103,7 +1107,7 @@ check_strategy(ClassName, Value) ->
                 type_error,
                 ClassName,
                 strategy,
-                iolist_to_binary(
+                beamtalk_error:chars_to_binary(
                     io_lib:format(
                         "strategy must be #oneForOne, #oneForAll or #restForOne, got ~p", [Value]
                     )
@@ -1230,7 +1234,7 @@ child_class_entry(ClassName, ChildClass) ->
                 type_error,
                 ClassName,
                 childClass,
-                iolist_to_binary(
+                beamtalk_error:chars_to_binary(
                     io_lib:format("childClass must return a class, got ~p", [ChildClass])
                 )
             ),
@@ -1692,7 +1696,7 @@ handle_terminate_child_result(SupClass, _LogCtx, {error, Reason}) ->
             terminate_failed,
             SupClass,
             'terminateChild:',
-            iolist_to_binary(io_lib:format("~p", [Reason]))
+            beamtalk_error:chars_to_binary(io_lib:format("~p", [Reason]))
         )}.
 
 %%% ============================================================================
@@ -1826,7 +1830,7 @@ with_child_id(Self, Selector, Id, _Fun) ->
 child_not_found_error(SupClass, Selector, Id) ->
     Error0 = beamtalk_error:new(child_not_found, SupClass, Selector),
     Error1 = beamtalk_error:with_message(
-        Error0, iolist_to_binary(io_lib:format("No child with id ~p", [Id]))
+        Error0, beamtalk_error:chars_to_binary(io_lib:format("No child with id ~p", [Id]))
     ),
     beamtalk_error:with_details(Error1, #{id => Id}).
 
@@ -1840,7 +1844,7 @@ child_running_error(SupClass, Selector, Id, Status) ->
         <<"Terminate the child with terminateChild: first">>
     ),
     Error1 = beamtalk_error:with_message(
-        Error0, iolist_to_binary(io_lib:format("Child ~p is ~s", [Id, Status]))
+        Error0, beamtalk_error:chars_to_binary(io_lib:format("Child ~p is ~ts", [Id, Status]))
     ),
     beamtalk_error:with_details(Error1, #{id => Id, status => Status}).
 
@@ -1856,7 +1860,9 @@ ambiguous_child_error(SupClass, Selector, Matches) ->
     ),
     Error1 = beamtalk_error:with_message(
         Error0,
-        iolist_to_binary(io_lib:format("Several children share this class: ~p", [Ids]))
+        beamtalk_error:chars_to_binary(
+            io_lib:format("Several children share this class: ~p", [Ids])
+        )
     ),
     beamtalk_error:with_details(Error1, #{ids => Ids}).
 
@@ -1866,7 +1872,7 @@ delete_failed_error(SupClass, Selector, Reason) ->
         delete_failed,
         SupClass,
         Selector,
-        iolist_to_binary(io_lib:format("~p", [Reason]))
+        beamtalk_error:chars_to_binary(io_lib:format("~p", [Reason]))
     ).
 
 -doc """
@@ -2047,7 +2053,7 @@ startChild(Self, Args, Name) ->
                             name_registered,
                             SupClass,
                             'startChild:name:',
-                            iolist_to_binary(
+                            beamtalk_error:chars_to_binary(
                                 io_lib:format("Name '~ts' is already registered", [Name])
                             )
                         )};
@@ -2194,7 +2200,7 @@ check_stop_timeout(ClassName, Other) ->
         type_error,
         ClassName,
         'stopWithin:',
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format(
                 "stopWithin: ms must be a non-negative Integer or #infinity, got ~p",
                 [Other]
@@ -2214,7 +2220,7 @@ stop_timeout_error(ClassName, Ms) ->
         timeout,
         ClassName,
         'stopWithin:',
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format(
                 "Supervisor did not stop within ~p ms; it keeps shutting down in the background",
                 [Ms]
@@ -2820,7 +2826,7 @@ start_child_via_class_method(ClassName, Module, Selector, Args) ->
                     runtime_error,
                     ClassName,
                     Selector,
-                    iolist_to_binary(
+                    beamtalk_error:chars_to_binary(
                         io_lib:format(
                             "class method must return an Actor object, got: ~p",
                             [Other]
@@ -2908,7 +2914,7 @@ actor_child_start_error(ChildModule, timeout) ->
             instantiation_error,
             child_class_name(ChildModule),
             initialize,
-            iolist_to_binary(
+            beamtalk_error:chars_to_binary(
                 io_lib:format(?ACTOR_CHILD_INIT_TIMEOUT_HINT_FMT, [?BT_INITIALIZE_TIMEOUT])
             )
         )};
@@ -3288,7 +3294,7 @@ spec_to_otp(BtSpec, Mode) ->
                             runtime_error,
                             'SupervisionSpec',
                             childSpec,
-                            iolist_to_binary(
+                            beamtalk_error:chars_to_binary(
                                 io_lib:format(
                                     "unsupported child start function: ~p "
                                     "(expected spawn, spawnWith:, spawnAs:, "
@@ -3352,7 +3358,7 @@ supervisor_child_start(ChildClass, ChildModule, StartElems, Mode) ->
 
 -spec unsupported_supervisor_child(atom(), term()) -> no_return().
 unsupported_supervisor_child(ChildClass, StartFn) ->
-    Hint = iolist_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
             "~ts is a supervisor: its supervisionSpec supports withId:, withArgs:, "
             "withRestart:, withShutdown: and withName: (a static child), not ~ts",
@@ -3572,8 +3578,8 @@ supervisor_unavailable_error(Self, Selector, {unreachable, Why}) ->
     ),
     Error1 = beamtalk_error:with_message(
         Error0,
-        iolist_to_binary(
-            io_lib:format("Supervisor's node ~s is unreachable (~s)", [Node, Why])
+        beamtalk_error:chars_to_binary(
+            io_lib:format("Supervisor's node ~ts is unreachable (~ts)", [Node, Why])
         )
     ),
     {error, beamtalk_error:with_details(Error1, #{node => Node, reason => Why})}.
@@ -3595,7 +3601,7 @@ check_max_children(ClassName, Other) ->
         type_error,
         ClassName,
         maxChildren,
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format(
                 "maxChildren must be a non-negative Integer or #infinity, got ~p", [Other]
             )
@@ -3635,9 +3641,9 @@ check_shutdown(Class, Selector, Other) ->
         type_error,
         Class,
         Selector,
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format(
-                "~s must be an Integer from 0 to ~b (ms), #infinity or #brutalKill, got ~p",
+                "~ts must be an Integer from 0 to ~b (ms), #infinity or #brutalKill, got ~p",
                 [Selector, ?MAX_SHUTDOWN_MS, Other]
             )
         )
@@ -3941,7 +3947,7 @@ max_children_error(SupClass, Selector, Max) ->
     ),
     Error1 = beamtalk_error:with_message(
         Error0,
-        iolist_to_binary(
+        beamtalk_error:chars_to_binary(
             io_lib:format("DynamicSupervisor is at its maxChildren limit (~b)", [Max])
         )
     ),

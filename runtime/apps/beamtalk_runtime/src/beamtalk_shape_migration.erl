@@ -902,9 +902,9 @@ shape_version_ahead_error(Class, SentVersion, KnownVersion) ->
 
 -spec step_error(atom(), pos_integer(), atom(), term()) -> #beamtalk_error{}.
 step_error(Class, Step, Selector, Reason) ->
-    Hint = iolist_to_binary(
+    Hint = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "~s class >> ~s raised ~s",
+            "~ts class >> ~ts raised ~ts",
             [Class, Selector, format_step_reason(Reason)]
         )
     ),
