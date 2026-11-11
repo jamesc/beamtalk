@@ -708,7 +708,7 @@ updated copy (`p withX: 5.` on its own line) leaves `p` unchanged, so the
 **`discarded-update`** warning flags it with the same predicate
 (BT-4522): ``the result of `withX:` is discarded``, with the help "assign the
 result (`p := p withX: …`) or chain with `|>`" (a receiver that cannot be
-reassigned, such as `self`, gets "use the result … or remove the statement"). The last statement of a
+reassigned, such as `self`, gets "use the result (assign it, return it, or pass it on)"). The last statement of a
 body or block is its value and is never flagged, nor is a send whose result is
 used (assigned, passed, returned, or the receiver of another send). A
 pipeline statement is flagged once, at its last stage. A cascade statement
