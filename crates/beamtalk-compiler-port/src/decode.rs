@@ -625,7 +625,7 @@ pub(crate) fn parse_protocol_info_from_meta_term(
         // are invisible to conformance checks until then, same gap as
         // `decode.rs`'s `parse_method_infos_from_map` for `MethodInfo::origin`.
         package: None,
-        provided_selectors: vec![],
+        provided: vec![],
         // Synthetic entry — there is no source span in the live image to
         // point diagnostics at (mirrors ClassInfo's BEAM-metadata-derived
         // entries, which carry no span either).

@@ -66,7 +66,7 @@ fn fixture_sourced_protocol_name_is_not_unresolved() {
         package: None,
         span: Span::default(),
 
-        provided_selectors: vec![],
+        provided: vec![],
     };
 
     let options = crate::CompilerOptions::default();

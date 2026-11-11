@@ -904,7 +904,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
         package: None,
         span: span(),
 
-        provided_selectors: vec![],
+        provided: vec![],
     };
     registry.register_test_protocol(printable);
 

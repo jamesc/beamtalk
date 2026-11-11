@@ -701,7 +701,7 @@ fn dependency_protocol_and_alias_infos_merge_and_resolve() {
         package: None,
         span: beamtalk_core::source_analysis::Span::default(),
 
-        provided_selectors: vec![],
+        provided: vec![],
     }];
     let dep_alias_infos = vec![AliasInfo {
         name: "Status".into(),

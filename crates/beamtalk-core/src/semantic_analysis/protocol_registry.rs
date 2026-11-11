@@ -20,7 +20,9 @@
 //! - `docs/ADR/0068-parametric-types-and-protocols.md` — Stage 2
 //! - `docs/ADR/0025-gradual-typing-and-protocols.md` — Diagnostic philosophy
 
-use crate::ast::{Module, ProtocolDefinition, TypeAnnotation};
+use crate::ast::{
+    MessageSelector, Module, ParameterDefinition, ProtocolDefinition, TypeAnnotation,
+};
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::trait_expansion;
@@ -45,6 +47,25 @@ pub struct ProtocolMethodRequirement {
 }
 
 impl ProtocolMethodRequirement {
+    /// The requirement a declared signature states — one source for how a
+    /// required (`ProtocolMethodSignature`) and a provided
+    /// (`MethodDefinition`) method become a `ProtocolMethodRequirement`.
+    fn from_signature(
+        selector: &MessageSelector,
+        return_type: Option<&TypeAnnotation>,
+        parameters: &[ParameterDefinition],
+    ) -> Self {
+        Self {
+            selector: selector.name(),
+            arity: selector.arity(),
+            return_type: return_type.map(TypeAnnotation::type_name),
+            param_types: parameters
+                .iter()
+                .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
+                .collect(),
+        }
+    }
+
     /// The requirement's declared return type, when it has one that can be
     /// judged without a substitution context: `None` when it is
     /// unannotated or names one of `type_params` (the type parameters of
@@ -66,7 +87,7 @@ impl ProtocolMethodRequirement {
 /// **DDD Context:** Semantic Analysis — Value Object
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReturnTypeMismatch {
-    /// The requirement's selector (e.g. `asString`).
+    /// The requirement's (or provision's) selector (e.g. `asString`).
     pub selector: EcoString,
     /// `true` for a `class` requirement, resolved against the class's
     /// class-side methods (BT-4441); `false` for an instance requirement.
@@ -75,7 +96,7 @@ pub struct ReturnTypeMismatch {
     pub defined_in: EcoString,
     /// The resolved method's declared return type.
     pub actual: DeclaredType,
-    /// The protocol requirement's declared return type.
+    /// The protocol requirement's or provision's declared return type.
     pub expected: DeclaredType,
 }
 
@@ -100,16 +121,20 @@ pub struct ProtocolInfo {
     pub methods: Vec<ProtocolMethodRequirement>,
     /// Required class method signatures.
     pub class_methods: Vec<ProtocolMethodRequirement>,
-    /// Provided (instance-side) method selectors (ADR 0127 §1, §8) —
-    /// just the selector, not a full requirement, since a provision's
-    /// body is what implements it: nothing checks a using class's
-    /// signature against these the way [`Self::methods`] does. A
-    /// protocol's *type* is required ∪ provided (§8, decided), so this
-    /// set — via [`Self::all_conformance_selectors`] — joins `methods` in
-    /// every conformance check; `Protocol requiredMethods:` keeps
-    /// answering only `methods`, unaffected. Class-side provisions are
-    /// post-v1 (§9), so there is no `class_provided_selectors` counterpart.
-    pub provided_selectors: Vec<EcoString>,
+    /// Provided (instance-side) method signatures (ADR 0127 §1, §8) — the
+    /// selector and declared types of each provision. A provision's body
+    /// implements it, so only its declared *return type* is checked against
+    /// a conformer (BT-4490,
+    /// [`ProtocolRegistry::conformance_return_type_mismatches`]); parameter
+    /// types are not. A
+    /// protocol's *type* is required ∪ provided (§8, decided), so their
+    /// selectors — via [`Self::all_conformance_selectors`] — join `methods`
+    /// in every conformance check; `Protocol requiredMethods:` keeps
+    /// answering only `methods`, unaffected. The declared return type is
+    /// what lets a provision refine a requirement of another protocol in
+    /// [`Self::subsumes_conformance_to`] (BT-4490). Class-side provisions
+    /// are post-v1 (§9), so there is no class-side counterpart.
+    pub provided: Vec<ProtocolMethodRequirement>,
     /// The dependency package this protocol was carried in from, or `None`
     /// for the package being compiled (and for a REPL/fixture entry). Stamped
     /// by the loader that carries a dependency's protocols, like
@@ -123,18 +148,26 @@ pub struct ProtocolInfo {
 impl ProtocolInfo {
     /// Build a `ProtocolInfo` from a parsed `ProtocolDefinition` AST node.
     fn from_definition(def: &ProtocolDefinition) -> Self {
-        let make_req = |sig: &crate::ast::ProtocolMethodSignature| ProtocolMethodRequirement {
-            selector: sig.selector.name(),
-            arity: sig.selector.arity(),
-            return_type: sig.return_type.as_ref().map(TypeAnnotation::type_name),
-            param_types: sig
-                .parameters
-                .iter()
-                .map(|p| p.type_annotation.as_ref().map(TypeAnnotation::type_name))
-                .collect(),
+        let make_req = |sig: &crate::ast::ProtocolMethodSignature| {
+            ProtocolMethodRequirement::from_signature(
+                &sig.selector,
+                sig.return_type.as_ref(),
+                &sig.parameters,
+            )
         };
 
         let methods = def.method_signatures.iter().map(make_req).collect();
+        let provided = def
+            .provided_methods
+            .iter()
+            .map(|m| {
+                ProtocolMethodRequirement::from_signature(
+                    &m.selector,
+                    m.return_type.as_ref(),
+                    &m.parameters,
+                )
+            })
+            .collect();
         let class_methods = def.class_method_signatures.iter().map(make_req).collect();
 
         Self {
@@ -152,11 +185,7 @@ impl ProtocolInfo {
             extending: def.extending.as_ref().map(|id| id.name.clone()),
             methods,
             class_methods,
-            provided_selectors: def
-                .provided_methods
-                .iter()
-                .map(|m| m.selector.name())
-                .collect(),
+            provided,
             package: def.package.clone(),
             span: def.span,
         }
@@ -186,20 +215,35 @@ impl ProtocolInfo {
         &'a self,
         registry: &'a ProtocolRegistry,
     ) -> Vec<&'a EcoString> {
-        let mut selectors: Vec<&EcoString> = self.provided_selectors.iter().collect();
-        let mut visited = std::collections::HashSet::new();
-        visited.insert(self.name.clone());
-        self.collect_parent_provided_selectors(registry, &mut selectors, &mut visited);
-        selectors
+        self.all_provided(registry)
+            .into_iter()
+            .map(|req| &req.selector)
+            .collect()
     }
 
-    /// Recursively collects provided selectors from parent protocols, with
-    /// cycle detection — the provided-selector mirror of
-    /// [`Self::collect_parent_selectors`].
-    fn collect_parent_provided_selectors<'a>(
+    /// Returns all provided signatures, including those inherited from
+    /// extended protocols — [`Self::all_provided_selectors`] with the
+    /// declared types kept (BT-4490). A provision of this protocol shadows
+    /// a same-named one of a parent.
+    #[must_use]
+    pub fn all_provided<'a>(
         &'a self,
         registry: &'a ProtocolRegistry,
-        selectors: &mut Vec<&'a EcoString>,
+    ) -> Vec<&'a ProtocolMethodRequirement> {
+        let mut provided: Vec<&ProtocolMethodRequirement> = self.provided.iter().collect();
+        let mut visited = std::collections::HashSet::new();
+        visited.insert(self.name.clone());
+        self.collect_parent_provided(registry, &mut provided, &mut visited);
+        provided
+    }
+
+    /// Recursively collects provided signatures from parent protocols, with
+    /// cycle detection — the provided mirror of
+    /// [`Self::collect_parent_selectors`].
+    fn collect_parent_provided<'a>(
+        &'a self,
+        registry: &'a ProtocolRegistry,
+        provided: &mut Vec<&'a ProtocolMethodRequirement>,
         visited: &mut std::collections::HashSet<EcoString>,
     ) {
         if let Some(ref parent_name) = self.extending {
@@ -207,12 +251,12 @@ impl ProtocolInfo {
                 return; // Cycle detected — stop recursion
             }
             if let Some(parent) = registry.get(parent_name) {
-                for sel in &parent.provided_selectors {
-                    if !selectors.contains(&sel) {
-                        selectors.push(sel);
+                for req in &parent.provided {
+                    if !provided.iter().any(|r| r.selector == req.selector) {
+                        provided.push(req);
                     }
                 }
-                parent.collect_parent_provided_selectors(registry, selectors, visited);
+                parent.collect_parent_provided(registry, provided, visited);
             }
         }
     }
@@ -294,7 +338,14 @@ impl ProtocolInfo {
     /// ([`ProtocolRegistry::conformance_return_type_mismatches`],
     /// [`TypeChecker::is_return_type_refinement`]). A requirement of this
     /// protocol with no declared return type promises nothing, so it does
-    /// not refine a declared one. A return type naming a type parameter of
+    /// not refine a declared one. A *provided* method (ADR 0127) counts as a
+    /// requirement here too, with its declared return type (BT-4490): a
+    /// conformer must answer it, and it is the protocol's own body that
+    /// supplies the type, so `P` providing `name -> String` subsumes `Q`
+    /// requiring `name -> String`. The same goes for `other`'s side: its
+    /// provisions' declared return types are judged like its requirements',
+    /// matching [`ProtocolRegistry::conformance_return_type_mismatches`]. A
+    /// return type naming a type parameter of
     /// either protocol has no substitution context here and is not judged.
     #[must_use]
     pub fn subsumes_conformance_to(
@@ -324,27 +375,44 @@ impl ProtocolInfo {
                 let Some(expected) = req.judged_return_type(&type_params) else {
                     return true;
                 };
-                // Selector presence was checked above; a provided-only
-                // selector has no requirement (and no declared return type).
-                let Some(own) = mine.iter().find(|r| r.selector == req.selector) else {
+                // Selector presence was checked above, and `mine` holds this
+                // protocol's provisions as well as its requirements.
+                let mut entries = mine
+                    .iter()
+                    .filter(|r| r.selector == req.selector)
+                    .peekable();
+                if entries.peek().is_none() {
                     return false;
-                };
-                own.return_type
-                    .as_deref()
-                    .map(DeclaredType::parse)
-                    .is_some_and(|actual| {
-                        actual.mentions_any(&type_params)
-                            || TypeChecker::is_return_type_refinement(&actual, &expected, hierarchy)
-                    })
+                }
+                // Every entry of the protocol's type binds a conformer, so
+                // the strongest typed one is what a user of `mine` can rely
+                // on: some entry must refine `expected`.
+                entries.any(|own| {
+                    own.return_type
+                        .as_deref()
+                        .map(DeclaredType::parse)
+                        .is_some_and(|actual| {
+                            actual.mentions_any(&type_params)
+                                || TypeChecker::is_return_type_refinement(
+                                    &actual, &expected, hierarchy,
+                                )
+                        })
+                })
             })
         };
-        refines(
-            self.all_requirements(registry),
-            other.all_requirements(registry),
-        ) && refines(
-            self.all_class_requirements(registry),
-            other.all_class_requirements(registry),
-        )
+        // Requirements and provisions side by side: a provision's own type
+        // is not hidden by an untyped requirement of the same selector.
+        let mut instance_side = self.all_requirements(registry);
+        instance_side.extend(self.all_provided(registry));
+        // `other`'s provisions carry declared types too (ADR 0127 §8), the
+        // same entries `conformance_return_type_mismatches` judges a class by.
+        let mut theirs = other.all_requirements(registry);
+        theirs.extend(other.all_provided(registry));
+        refines(instance_side, theirs)
+            && refines(
+                self.all_class_requirements(registry),
+                other.all_class_requirements(registry),
+            )
     }
 
     /// The type parameters of this protocol and of every protocol it
@@ -839,7 +907,19 @@ impl ProtocolRegistry {
         }
         let type_params = protocol.all_type_params(self);
         let mut mismatches = Vec::new();
-        for req in protocol.all_requirements(self) {
+        // A provision's declared return type is part of the protocol's type
+        // too (ADR 0127 §8; BT-4490), so a class is judged against every
+        // typed requirement *and* provision — the same entries
+        // `subsumes_conformance_to` relies on, so the two cannot disagree.
+        // That includes a `uses:` class whose own override widens a
+        // provision: it is reported here at each `:: P` call site as well as
+        // at the override's definition, because the class really does answer
+        // a type the protocol does not promise.
+        for req in protocol
+            .all_requirements(self)
+            .into_iter()
+            .chain(protocol.all_provided(self))
+        {
             let Some(expected) = req.judged_return_type(&type_params) else {
                 continue;
             };
@@ -870,13 +950,17 @@ impl ProtocolRegistry {
             }) {
                 continue;
             }
-            mismatches.push(ReturnTypeMismatch {
+            let mismatch = ReturnTypeMismatch {
                 selector: req.selector.clone(),
                 class_side: false,
                 defined_in: method.defined_in.clone(),
                 actual: actual.clone(),
                 expected,
-            });
+            };
+            // A requirement and a provision may state the same type.
+            if !mismatches.contains(&mismatch) {
+                mismatches.push(mismatch);
+            }
         }
         for req in protocol.all_class_requirements(self) {
             let Some(expected) = req.judged_return_type(&type_params) else {
@@ -1984,7 +2068,7 @@ Value subclass: Version
             package: None,
             span: span(),
 
-            provided_selectors: vec![],
+            provided: vec![],
         };
         registry.register_test_protocol(parent_info);
 
@@ -2004,7 +2088,7 @@ Value subclass: Version
             package: None,
             span: span(),
 
-            provided_selectors: vec![],
+            provided: vec![],
         };
         registry.register_test_protocol(child_info);
 
@@ -2032,7 +2116,7 @@ Value subclass: Version
             package: None,
             span: span(),
 
-            provided_selectors: vec![],
+            provided: vec![],
         };
 
         let diags = registry.add_pre_loaded(vec![protocol], &hierarchy, None);
@@ -2059,7 +2143,7 @@ Value subclass: Version
             class_methods: vec![],
             package: None,
             span: span(),
-            provided_selectors: vec![],
+            provided: vec![],
         };
         let hierarchy = ClassHierarchy::with_builtins();
         let mut registry = ProtocolRegistry::new();
@@ -2092,7 +2176,7 @@ Value subclass: Version
             package: None,
             span: span(),
 
-            provided_selectors: vec![],
+            provided: vec![],
         };
 
         let diags = registry.add_pre_loaded(vec![protocol], &hierarchy, None);
@@ -2227,7 +2311,7 @@ Value subclass: Version
             package: None,
             span: span(),
 
-            provided_selectors: vec![],
+            provided: vec![],
         };
 
         let diags = registry.add_pre_loaded(vec![protocol], &hierarchy, None);

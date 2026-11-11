@@ -238,7 +238,7 @@ pub(crate) fn analysis_surface_hash(
                 "extending": p.extending.as_deref(),
                 "methods": requirements(&p.methods),
                 "class_methods": requirements(&p.class_methods),
-                "provided_selectors": p.provided_selectors,
+                "provided": requirements(&p.provided),
             })
         })
         .collect();
