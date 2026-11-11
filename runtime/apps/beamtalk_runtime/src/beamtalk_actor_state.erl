@@ -136,7 +136,7 @@ take() ->
 BT-4666: apply `Fun` to every actor state map a process-dictionary entry
 holds: the cell (`{Key, {Owner, Map}}`), and the carried states the
 test-build commit check notes as excused (`'$bt_nlr_commit_excused'`, see
-note_excused/1). Any other entry is answered unchanged. Lets
+note_unwound/1). Any other entry is answered unchanged. Lets
 `beamtalk_actor_redaction`'s crash-report filter redact secret slots in
 state still held in the dictionary, without knowing these keys or shapes.
 """.
