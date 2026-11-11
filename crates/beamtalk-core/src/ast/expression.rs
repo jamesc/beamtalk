@@ -574,6 +574,20 @@ impl Expression {
             _ => None,
         }
     }
+
+    /// Whether this expression is the reserved `nil` identifier, through any
+    /// number of `Parenthesized` wrappers (BT-4712).
+    ///
+    /// Like `true`/`false`, `nil` is a reserved identifier rather than a
+    /// `Literal`. Single authority for "literal nil" in the type checker's
+    /// narrowing rules.
+    #[must_use]
+    pub fn is_literal_nil(&self) -> bool {
+        matches!(
+            self.unwrap_parens(),
+            Self::Identifier(Identifier { name, .. }) if name == "nil"
+        )
+    }
 }
 
 /// A literal value.

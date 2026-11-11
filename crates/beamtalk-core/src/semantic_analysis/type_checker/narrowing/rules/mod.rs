@@ -21,6 +21,7 @@ mod class_eq;
 mod is_kind_of;
 mod is_nil;
 mod is_result;
+mod nil_eq;
 mod responds_to;
 pub(crate) mod singleton_eq;
 
@@ -47,7 +48,9 @@ pub(crate) struct NarrowingRule {
 /// distinct from `class_eq` (whose operand is a `ClassReference` and whose
 /// inner receiver is a `class` send). `boolean_eq` (BT-4638) runs on a binary
 /// `=:=` / `==` send with exactly one `true` / `false` literal operand, so it
-/// is distinct from both. So any order is correct; we list them
+/// is distinct from both. `nil_eq` (BT-4712) runs on a binary equality send
+/// with exactly one `nil` operand, distinct from the other three (their
+/// operands are a symbol, a boolean and a `ClassReference`). So any order is correct; we list them
 /// grouped by shape for readability.
 pub(crate) static RULES: &[NarrowingRule] = &[
     is_nil::RULE,
@@ -57,5 +60,6 @@ pub(crate) static RULES: &[NarrowingRule] = &[
     is_kind_of::RULE,
     class_eq::RULE,
     boolean_eq::RULE,
+    nil_eq::RULE,
     singleton_eq::RULE,
 ];

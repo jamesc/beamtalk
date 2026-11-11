@@ -75,6 +75,7 @@ fn build_info(inner_recv: &Expression, is_error: bool) -> Option<NarrowingInfo> 
         true_type: InferredType::Dynamic(DynamicReason::Unknown),
         false_type: None,
         is_nil_check: false,
+        nil_test_negated: false,
         is_result_ok_check: !is_error,
         is_result_error_check: is_error,
         responded_selector: None,
