@@ -759,7 +759,9 @@ key_target({Module, FunName, Tag}) when is_atom(Module), is_atom(FunName), is_at
 %% meta, and a change erases the keys (descendants' included).
 -spec key_body_holds(static_call_key(), atom(), atom(), atom()) -> boolean().
 key_body_holds({caller_safe_raise, Primitive, _, _, _}, _ClassName, DefiningClass, Selector) ->
-    case maps:find(Selector, beamtalk_class_metadata:lookup_caller_safe_primitives(DefiningClass)) of
+    case
+        maps:find(Selector, beamtalk_class_metadata:lookup_caller_safe_primitives(DefiningClass))
+    of
         {ok, Primitive} -> true;
         _ -> false
     end;

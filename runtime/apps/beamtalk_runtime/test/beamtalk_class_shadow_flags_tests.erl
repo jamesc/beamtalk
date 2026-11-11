@@ -1131,8 +1131,7 @@ static_call_target_test_() ->
                 stop_static_class(Root)
             end
         end},
-        {"a caller-safe raise key is certified by the published row, not the current code",
-            fun() ->
+        {"a caller-safe raise key is certified by the published row, not the current code", fun() ->
                 %% BT-4493: during a reload's `-on_load` the old code (and its
                 %% `__beamtalk_meta/0`) is still current. The loaded code here
                 %% still says `classSignal`, but the published row says
