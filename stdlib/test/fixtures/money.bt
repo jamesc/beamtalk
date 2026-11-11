@@ -31,10 +31,10 @@ Value subclass: Money
   /// `5 + aMoney` (number-on-the-left): broadcast-add `n` to the receiver's
   /// cents. Receiver is the value that was on the RIGHT of `+`; `n` is the
   /// number that was on the LEFT (ADR 0116 § Reflected method protocol).
-  plusFromNumber: n :: Number -> Money => (Money new) withCents: n + self.cents
+  plusFromNumber: n :: Integer -> Money => (Money new) withCents: n + self.cents
 
   /// `5 * aMoney` (number-on-the-left): scale by `n`, same as receiver-dispatched `*`.
-  timesFromNumber: n :: Number -> Money => (Money new) withCents: n * self.cents
+  timesFromNumber: n :: Integer -> Money => (Money new) withCents: n * self.cents
 
   /// `5 / aMoney` — "a number divided by a money amount" has no sensible
   /// meaning, unlike `plusFromNumber:`/`timesFromNumber:` above. Implemented
