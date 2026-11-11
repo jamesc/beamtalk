@@ -34,7 +34,7 @@
 //! keeps it on, so a missing extension can never become a false
 //! does-not-understand.
 
-use beamtalk_core::ast::Module;
+use beamtalk_core::ast::{Module, ProtocolDefinition};
 use beamtalk_core::compilation::extension_index::ExtensionIndex;
 use beamtalk_core::semantic_analysis::alias_expansion::InternalAliasExpander;
 use beamtalk_core::semantic_analysis::alias_registry::AliasInfo;
@@ -145,6 +145,22 @@ pub fn expand_dependency_extension_aliases(
     extensions: &mut DependencyExtensions,
 ) {
     extensions.expand_internal_aliases(&InternalAliasExpander::from_alias_infos(alias_infos));
+}
+
+/// Expands a dependency's own `internal type` aliases in the protocol ASTs it
+/// exports (BT-4707) — the ASTs a consumer's (or a later dependency's)
+/// `uses: dep@Proto` flattens provisions from in *its* alias scope, where the
+/// dependency's internal aliases do not exist. Must run after the dependency's
+/// own trait flattening (which reads the unexpanded ASTs in the dependency's
+/// own scope) and **before** any later dependency flattens them.
+pub fn expand_dependency_protocol_defs(
+    alias_infos: &[AliasInfo],
+    protocol_defs: &mut [ProtocolDefinition],
+) {
+    let expander = InternalAliasExpander::from_alias_infos(alias_infos);
+    for protocol in protocol_defs {
+        expander.expand_protocol_definition(protocol);
+    }
 }
 
 /// Merges every dependency's extensions into `into` (the consumer's
