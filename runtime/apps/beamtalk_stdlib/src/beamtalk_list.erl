@@ -71,7 +71,7 @@ raise_empty(Selector) ->
 -spec raise_out_of_bounds(integer(), binary()) -> no_return().
 raise_out_of_bounds(N, Suffix) ->
     Hint = beamtalk_error:chars_to_binary(
-        io_lib:format("Index ~p is out of bounds~ts", [N, Suffix])
+        io_lib:format("Index ~tp is out of bounds~ts", [N, Suffix])
     ),
     beamtalk_error:raise(beamtalk_error:new(index_out_of_bounds, 'List', 'at:', Hint)).
 
@@ -146,7 +146,7 @@ take(List, N) when is_list(List), not is_integer(N) ->
     beamtalk_error:raise_type_error('List', 'take:', Hint);
 take(List, N) when is_list(List), is_integer(N), N < 0 ->
     Hint = beamtalk_error:chars_to_binary(
-        io_lib:format("Argument must be a non-negative integer, got: ~p", [N])
+        io_lib:format("Argument must be a non-negative integer, got: ~tp", [N])
     ),
     beamtalk_error:raise_type_error('List', 'take:', Hint);
 take(List, N) when is_list(List), is_integer(N), N >= 0 ->
@@ -161,7 +161,7 @@ drop(List, N) when is_list(List), not is_integer(N) ->
     beamtalk_error:raise_type_error('List', 'drop:', Hint);
 drop(List, N) when is_list(List), is_integer(N), N < 0 ->
     Hint = beamtalk_error:chars_to_binary(
-        io_lib:format("Argument must be a non-negative integer, got: ~p", [N])
+        io_lib:format("Argument must be a non-negative integer, got: ~tp", [N])
     ),
     beamtalk_error:raise_type_error('List', 'drop:', Hint);
 drop(List, N) when is_list(List), is_integer(N), N >= 0 ->
@@ -260,7 +260,7 @@ from_to(List, _Start, End) when is_list(List), not is_integer(End) ->
     beamtalk_error:raise_type_error('List', 'from:to:', Hint);
 from_to(List, Start, _End) when is_list(List), is_integer(Start), Start < 1 ->
     Hint = beamtalk_error:chars_to_binary(
-        io_lib:format("Start index ~p is out of bounds (must be >= 1)", [Start])
+        io_lib:format("Start index ~tp is out of bounds (must be >= 1)", [Start])
     ),
     beamtalk_error:raise(beamtalk_error:new(index_out_of_bounds, 'List', 'from:to:', Hint)).
 
@@ -302,7 +302,7 @@ For other values, shows the Beamtalk class name.
 -spec describe_value(term()) -> binary().
 describe_value(V) when is_function(V) ->
     {arity, A} = erlang:fun_info(V, arity),
-    beamtalk_error:chars_to_binary(io_lib:format("a ~p-argument block", [A]));
+    beamtalk_error:chars_to_binary(io_lib:format("a ~tp-argument block", [A]));
 describe_value(V) ->
     ClassName = beamtalk_primitive:class_of(V),
     atom_to_binary(ClassName).

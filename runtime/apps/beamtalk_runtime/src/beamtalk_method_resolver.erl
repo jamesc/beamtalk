@@ -67,7 +67,7 @@ resolve(#beamtalk_object{class = ClassTag, pid = ClassPid} = Obj, Selector) when
             Error2 = beamtalk_error:with_hint(
                 Error1,
                 beamtalk_error:chars_to_binary(
-                    io_lib:format(">> expects a class, got instance ~p", [Obj])
+                    io_lib:format(">> expects a class, got instance ~tp", [Obj])
                 )
             ),
             beamtalk_error:raise(Error2)
@@ -87,7 +87,7 @@ resolve(Other, _Selector) ->
     Error2 = beamtalk_error:with_hint(
         Error1,
         beamtalk_error:chars_to_binary(
-            io_lib:format(">> expects a class, got ~p", [Other])
+            io_lib:format(">> expects a class, got ~tp", [Other])
         )
     ),
     beamtalk_error:raise(Error2).

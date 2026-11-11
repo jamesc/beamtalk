@@ -130,7 +130,7 @@ setContext(Other) ->
         selector = 'setContext:',
         message = beamtalk_primitive:string_from_binary(
             beamtalk_error:chars_to_binary(
-                io_lib:format("setContext: requires a Dictionary, got: ~p", [Other])
+                io_lib:format("setContext: requires a Dictionary, got: ~tp", [Other])
             )
         ),
         hint = beamtalk_primitive:string_from_binary(
@@ -338,7 +338,7 @@ extract_pid(Other) ->
         selector = undefined,
         message = beamtalk_primitive:string_from_binary(
             beamtalk_error:chars_to_binary(
-                io_lib:format("Expected an actor or pid, got: ~p", [Other])
+                io_lib:format("Expected an actor or pid, got: ~tp", [Other])
             )
         ),
         hint = beamtalk_primitive:string_from_binary(
@@ -385,7 +385,7 @@ positive_integer_error(Selector, Value, Hint) ->
         selector = Selector,
         message = beamtalk_primitive:string_from_binary(
             beamtalk_error:chars_to_binary(
-                io_lib:format("~ts requires a positive Integer, got: ~p", [
+                io_lib:format("~ts requires a positive Integer, got: ~tp", [
                     atom_to_list(Selector), Value
                 ])
             )

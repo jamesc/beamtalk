@@ -112,7 +112,7 @@ with_message(Error, Message) when is_atom(Message) ->
 with_message(Error, Message) ->
     Error#beamtalk_error{
         message = beamtalk_primitive:string_from_binary(
-            chars_to_binary(io_lib:format("~p", [Message]))
+            chars_to_binary(io_lib:format("~tp", [Message]))
         )
     }.
 
@@ -215,10 +215,10 @@ format_safe(#beamtalk_error{} = Error) ->
     try
         format(Error)
     catch
-        _:_ -> chars_to_binary(io_lib:format("~0p", [Error]))
+        _:_ -> chars_to_binary(io_lib:format("~0tp", [Error]))
     end;
 format_safe(Term) ->
-    chars_to_binary(io_lib:format("~0p", [Term])).
+    chars_to_binary(io_lib:format("~0tp", [Term])).
 
 -doc """
 Safely format an error term, searching the stacktrace for a
@@ -487,7 +487,7 @@ generate_message(io_error, Class, Selector) ->
 generate_message(user_error, _Class, undefined) ->
     <<"Error">>;
 generate_message(user_error, _Class, Selector) ->
-    chars_to_binary(io_lib:format("~p", [Selector]));
+    chars_to_binary(io_lib:format("~tp", [Selector]));
 generate_message(stdlib_shadowing, Class, undefined) ->
     chars_to_binary(io_lib:format("Cannot redefine stdlib class '~ts'", [Class]));
 generate_message(stdlib_shadowing, Class, Selector) ->
@@ -583,7 +583,7 @@ format_reason(_ErrClass, #beamtalk_error{kind = Kind, class = Class, message = M
 format_reason(_ErrClass, #{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}) ->
     format_reason(error, Err);
 format_reason(ErrClass, Reason) ->
-    chars_to_binary(io_lib:format("~p:~tp", [ErrClass, Reason])).
+    chars_to_binary(io_lib:format("~tp:~tp", [ErrClass, Reason])).
 
 -doc """
 Encode formatted text (e.g. `io_lib:format/2` output) as a UTF-8 binary.

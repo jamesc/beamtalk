@@ -178,7 +178,7 @@ abi_mismatch_error(ClassName, Module, Found) ->
     Message = beamtalk_error:chars_to_binary(
         io_lib:format(
             "Module ~ts (class ~ts) was compiled with ~ts, but this runtime requires "
-            "class_var_abi ~p",
+            "class_var_abi ~tp",
             [Module, ClassName, Declared, ?BT_CLASS_VAR_ABI]
         )
     ),

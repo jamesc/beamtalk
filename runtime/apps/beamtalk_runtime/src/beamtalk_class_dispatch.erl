@@ -1333,7 +1333,7 @@ raise_class_timeout(ClassPid, Selector, Timeout) ->
         <<"The class method may legitimately take longer: send it with a longer timeout">>
     ),
     Message = beamtalk_error:chars_to_binary(
-        io_lib:format("Class process did not answer within ~p ms", [Timeout])
+        io_lib:format("Class process did not answer within ~tp ms", [Timeout])
     ),
     Error1 = beamtalk_error:with_message(Error, Message),
     beamtalk_exception_handler:reraise(Error1).

@@ -247,7 +247,7 @@ logLevel(Level) when is_atom(Level) ->
                 beamtalk_error:new(type_error, 'Logger', logLevel),
                 beamtalk_error:chars_to_binary(
                     io_lib:format(
-                        "Invalid log level: ~p. Valid levels: ~p",
+                        "Invalid log level: ~tp. Valid levels: ~tp",
                         [Level, ?VALID_LEVELS]
                     )
                 )
@@ -258,7 +258,7 @@ logLevel(Level) ->
         beamtalk_error:new(type_error, 'Logger', logLevel),
         beamtalk_error:chars_to_binary(
             io_lib:format(
-                "Log level must be an atom, got: ~p",
+                "Log level must be an atom, got: ~tp",
                 [Level]
             )
         )
@@ -304,7 +304,7 @@ logFormat(Format) when is_atom(Format) ->
         beamtalk_error:new(type_error, 'Logger', logFormat),
         beamtalk_error:chars_to_binary(
             io_lib:format(
-                "Invalid log format: ~p. Valid formats: ~p",
+                "Invalid log format: ~tp. Valid formats: ~tp",
                 [Format, ?VALID_FORMATS]
             )
         )
@@ -314,7 +314,7 @@ logFormat(Format) ->
         beamtalk_error:new(type_error, 'Logger', logFormat),
         beamtalk_error:chars_to_binary(
             io_lib:format(
-                "Log format must be an atom, got: ~p",
+                "Log format must be an atom, got: ~tp",
                 [Format]
             )
         )
@@ -360,7 +360,7 @@ enableDebug(Target) when is_atom(Target) ->
                         beamtalk_error:new(runtime_error, 'Logger', enableDebug),
                         beamtalk_error:chars_to_binary(
                             io_lib:format(
-                                "Failed to write MCP debug signal file: ~p",
+                                "Failed to write MCP debug signal file: ~tp",
                                 [Reason]
                             )
                         )
@@ -396,7 +396,7 @@ enableDebug(Target) when is_atom(Target) ->
                 beamtalk_error:new(type_error, 'Logger', enableDebug),
                 beamtalk_error:chars_to_binary(
                     io_lib:format(
-                        "Unknown debug target: ~p. Available: ~p",
+                        "Unknown debug target: ~tp. Available: ~tp",
                         [Target, debugTargets()]
                     )
                 )
@@ -413,7 +413,7 @@ enableDebug(Target) ->
                 beamtalk_error:new(type_error, 'Logger', enableDebug),
                 beamtalk_error:chars_to_binary(
                     io_lib:format(
-                        "enableDebug: expects a symbol, class, or actor, got: ~p",
+                        "enableDebug: expects a symbol, class, or actor, got: ~tp",
                         [Target]
                     )
                 )
@@ -453,7 +453,7 @@ disableDebug(Target) when is_atom(Target) ->
                 beamtalk_error:new(type_error, 'Logger', disableDebug),
                 beamtalk_error:chars_to_binary(
                     io_lib:format(
-                        "Unknown debug target: ~p. Available: ~p",
+                        "Unknown debug target: ~tp. Available: ~tp",
                         [Target, debugTargets()]
                     )
                 )
@@ -470,7 +470,7 @@ disableDebug(Target) ->
                 beamtalk_error:new(type_error, 'Logger', disableDebug),
                 beamtalk_error:chars_to_binary(
                     io_lib:format(
-                        "disableDebug: expects a symbol, class, or actor, got: ~p",
+                        "disableDebug: expects a symbol, class, or actor, got: ~tp",
                         [Target]
                     )
                 )
@@ -726,7 +726,7 @@ format_debug_target(T) when is_atom(T) ->
                 <<"signal file (cross-process)">>;
             {domain, D} ->
                 beamtalk_error:chars_to_binary(
-                    io_lib:format("domain=~p", [D])
+                    io_lib:format("domain=~tp", [D])
                 );
             unknown ->
                 <<"(unknown)">>

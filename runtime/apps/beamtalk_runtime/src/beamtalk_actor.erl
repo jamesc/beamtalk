@@ -2527,7 +2527,7 @@ no_such_process_error_record(Name, Selector) ->
         Selector,
         beamtalk_error:chars_to_binary(
             io_lib:format(
-                "No process is currently registered under name '~p'", [Name]
+                "No process is currently registered under name '~tp'", [Name]
             )
         )
     ),
@@ -2659,7 +2659,7 @@ async_stop(ActorPid, Reason, Timeout, Selector, FuturePid) ->
                 actor_dead,
                 unknown,
                 Selector,
-                beamtalk_error:chars_to_binary(io_lib:format("Actor stop failed: ~p", [Other]))
+                beamtalk_error:chars_to_binary(io_lib:format("Actor stop failed: ~tp", [Other]))
             ),
             beamtalk_future:reject(FuturePid, Error)
     end,
@@ -4714,7 +4714,7 @@ format_method_error_message(ClassName, Selector, error, badarith, [{M, F, A, Loc
 format_method_error_message(ClassName, Selector, Class, Reason, _Stacktrace) ->
     beamtalk_error:chars_to_binary(
         io_lib:format(
-            "~p:~p in ~ts>>~ts",
+            "~tp:~tp in ~ts>>~ts",
             [Class, Reason, ClassName, Selector]
         )
     ).
@@ -4729,7 +4729,7 @@ format_location(Loc) when is_list(Loc) ->
         Line ->
             case proplists:get_value(file, Loc) of
                 undefined -> io_lib:format(" at line ~B", [Line]);
-                File -> io_lib:format(" at ~s:~B", [File, Line])
+                File -> io_lib:format(" at ~ts:~B", [File, Line])
             end
     end.
 

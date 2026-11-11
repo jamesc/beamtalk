@@ -1431,7 +1431,7 @@ do_export_traces(Opts) ->
                     _ when is_atom(V) -> atom_to_binary(V, utf8);
                     _ when is_integer(V) -> V;
                     _ when is_binary(V) -> V;
-                    _ -> beamtalk_error:chars_to_binary(io_lib:format("~p", [V]))
+                    _ -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [V]))
                 end,
             Acc#{BinKey => BinVal}
         end,
@@ -1539,7 +1539,7 @@ sanitize_metadata(Meta) ->
                 case K of
                     _ when is_atom(K) -> atom_to_binary(K, utf8);
                     _ when is_binary(K) -> K;
-                    _ -> beamtalk_error:chars_to_binary(io_lib:format("~p", [K]))
+                    _ -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [K]))
                 end,
             Acc#{BinKey => sanitize_value(V)}
         end,
@@ -1584,7 +1584,7 @@ sanitize_value(V) when is_pid(V) -> list_to_binary(pid_to_list(V));
 sanitize_value(V) when is_list(V) -> [sanitize_value(E) || E <- V];
 sanitize_value(V) when is_map(V) -> sanitize_metadata(V);
 sanitize_value(V) ->
-    beamtalk_error:chars_to_binary(io_lib:format("~p", [V])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp", [V])).
 
 -doc """
 Get aggregate stats, optionally filtered by Pid.
@@ -1912,7 +1912,7 @@ to_bt_keys(Map) when is_map(Map) ->
                 case K of
                     _ when is_atom(K) -> atom_to_binary(K, utf8);
                     _ when is_binary(K) -> K;
-                    _ -> beamtalk_error:chars_to_binary(io_lib:format("~p", [K]))
+                    _ -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [K]))
                 end,
             Acc#{beamtalk_primitive:string_from_binary(RawKey) => to_bt_value(V)}
         end,

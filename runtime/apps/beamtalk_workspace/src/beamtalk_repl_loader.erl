@@ -3873,7 +3873,7 @@ move_class_rewrite_failed_error(ClassName, Reason) ->
         runtime_error,
         ClassName,
         beamtalk_error:chars_to_binary(
-            io_lib:format("Could not move class '~ts': ~p", [ClassNameBin, Reason])
+            io_lib:format("Could not move class '~ts': ~tp", [ClassNameBin, Reason])
         )
     ).
 
@@ -5014,7 +5014,7 @@ new_class_install(Source, TargetPath, AbsPath, Binary, ClassNames, ModuleName, D
                         new_class_error(
                             new_class_load_failed,
                             beamtalk_error:chars_to_binary(
-                                io_lib:format("Could not load new class: ~p", [LoadReason])
+                                io_lib:format("Could not load new class: ~tp", [LoadReason])
                             ),
                             TargetPath
                         )}

@@ -445,7 +445,7 @@ print_string(X) when is_pid(X) -> beamtalk_opaque_ops:pid_to_string(X);
 print_string(X) when is_port(X) -> beamtalk_opaque_ops:port_to_string(X);
 print_string(X) when is_reference(X) -> beamtalk_opaque_ops:ref_to_string(X);
 print_string(X) ->
-    beamtalk_error:chars_to_binary(io_lib:format("~p", [X])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp", [X])).
 
 -doc "Format tagged maps for display.".
 -spec print_string_map(map()) -> binary().
@@ -513,7 +513,7 @@ display_string({beamtalk_string, Bin}) when is_binary(Bin) ->
 display_string(X) when is_binary(X) ->
     case unicode:characters_to_binary(X) of
         Utf8 when is_binary(Utf8) -> Utf8;
-        _ -> beamtalk_error:chars_to_binary(io_lib:format("~p", [X]))
+        _ -> beamtalk_error:chars_to_binary(io_lib:format("~tp", [X]))
     end;
 display_string(X) when is_bitstring(X) ->
     bitstring_print_string(X);
@@ -562,7 +562,7 @@ display_string(X) when is_pid(X) ->
 display_string(X) when is_port(X) -> beamtalk_opaque_ops:port_to_string(X);
 display_string(X) when is_reference(X) -> beamtalk_opaque_ops:ref_to_string(X);
 display_string(X) ->
-    beamtalk_error:chars_to_binary(io_lib:format("~p", [X])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp", [X])).
 
 -doc """
 Render the kind-headed, positional label for a live process (ADR 0094).

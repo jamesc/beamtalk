@@ -43,12 +43,30 @@ subscribe_unsubscribe_test_() ->
         fun multiple_subscribers/0,
         fun resubscribe_updates_level/0,
         fun format_includes_domain_metadata/0,
-        fun format_includes_class_metadata/0
+        fun format_includes_class_metadata/0,
+        fun format_utf8_text_is_not_double_encoded/0,
+        fun format_codepoint_above_255_is_encoded/0
     ]}.
 
 %%% ===========================================================================
 %%% Tests
 %%% ===========================================================================
+
+%% `~s` on a UTF-8 binary passes its bytes through; `~ts` on a codepoint above
+%% 255 must not crash `iolist_to_binary/1` (it would show as "[format error]").
+format_utf8_text_is_not_double_encoded() ->
+    beamtalk_ws_log_handler:subscribe(debug),
+    ?LOG_INFO("caf ~s", [<<195, 169>>], #{domain => [beamtalk, runtime]}),
+    ?assertMatch(#{msg := <<"caf ", 195, 169>>}, receive_log_event(500)),
+    ?LOG_INFO("caf ~ts", [[233]], #{domain => [beamtalk, runtime]}),
+    ?assertMatch(#{msg := <<"caf ", 195, 169>>}, receive_log_event(500)),
+    beamtalk_ws_log_handler:unsubscribe().
+
+format_codepoint_above_255_is_encoded() ->
+    beamtalk_ws_log_handler:subscribe(debug),
+    ?LOG_INFO("sel ~ts", [[955]], #{domain => [beamtalk, runtime]}),
+    ?assertMatch(#{msg := <<"sel ", 206, 187>>}, receive_log_event(500)),
+    beamtalk_ws_log_handler:unsubscribe().
 
 subscribe_receives_log_events() ->
     beamtalk_ws_log_handler:subscribe(debug),

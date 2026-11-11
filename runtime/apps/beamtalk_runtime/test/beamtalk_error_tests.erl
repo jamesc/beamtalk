@@ -448,6 +448,15 @@ chars_to_binary_encodes_utf8_test() ->
     ),
     ?assertEqual(<<"plain">>, beamtalk_error:chars_to_binary(["pl", <<"ain">>])).
 
+%% Plain `~p` printed UTF-8 bytes as latin1 chars, which `chars_to_binary/1`
+%% then encoded a second time ("cafÃ©"). The swept sites use `~tp`.
+utf8_text_in_term_is_not_double_encoded_test() ->
+    E = beamtalk_error:with_message(
+        beamtalk_error:new(type_error, 'Foo'), {x, <<"caf", 195, 169>>}
+    ),
+    {beamtalk_string, Msg} = E#beamtalk_error.message,
+    ?assertEqual(<<"{x,<<\"caf", 195, 169, "\"/utf8>>}">>, Msg).
+
 %% Chore: hints and `format/1` reasons holding codepoints above 255 don't badarg.
 unicode_hint_and_reason_test() ->
     %% A name no other test mints: atoms are VM-global, and the proxy tests

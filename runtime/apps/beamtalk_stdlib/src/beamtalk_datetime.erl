@@ -640,7 +640,7 @@ validate_date(Y, Mo, D, Selector) ->
             ok;
         false ->
             Msg = beamtalk_error:chars_to_binary(
-                io_lib:format("Invalid date: ~p-~p-~p", [Y, Mo, D])
+                io_lib:format("Invalid date: ~tp-~tp-~tp", [Y, Mo, D])
             ),
             Error0 = beamtalk_error:new(type_error, 'DateTime'),
             Error1 = beamtalk_error:with_selector(Error0, Selector),
@@ -654,7 +654,7 @@ validate_time(H, Mi, S, _Selector) when
 ->
     ok;
 validate_time(H, Mi, S, Selector) ->
-    Msg = beamtalk_error:chars_to_binary(io_lib:format("Invalid time: ~p:~p:~p", [H, Mi, S])),
+    Msg = beamtalk_error:chars_to_binary(io_lib:format("Invalid time: ~tp:~tp:~tp", [H, Mi, S])),
     Error0 = beamtalk_error:new(type_error, 'DateTime'),
     Error1 = beamtalk_error:with_selector(Error0, Selector),
     Error2 = beamtalk_error:with_hint(Error1, Msg),
@@ -666,7 +666,7 @@ validate_offset(Off, _Selector) when is_integer(Off), Off >= -720, Off =< 840 ->
 validate_offset(Off, Selector) ->
     Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "Invalid offsetMinutes: ~p (must be within the real-world UTC offset range, -720 to +840, i.e. -12:00 to +14:00)",
+            "Invalid offsetMinutes: ~tp (must be within the real-world UTC offset range, -720 to +840, i.e. -12:00 to +14:00)",
             [Off]
         )
     ),

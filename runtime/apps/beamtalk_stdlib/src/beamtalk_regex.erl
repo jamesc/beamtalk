@@ -71,7 +71,7 @@ Returns `Result ok: regex` on success, `Result error:` if the pattern is invalid
             );
         {error, {ErrStr, Pos}} ->
             Msg = beamtalk_error:chars_to_binary(
-                io_lib:format("~ts at position ~p", [ErrStr, Pos])
+                io_lib:format("~ts at position ~tp", [ErrStr, Pos])
             ),
             beamtalk_result:from_tagged_tuple(
                 {error, compile_error('Regex', 'from:', Msg, {ErrStr, Pos})}
@@ -105,7 +105,7 @@ Unknown options still raise (programming error).
             );
         {error, {ErrStr, Pos}} ->
             Msg = beamtalk_error:chars_to_binary(
-                io_lib:format("~ts at position ~p", [ErrStr, Pos])
+                io_lib:format("~ts at position ~tp", [ErrStr, Pos])
             ),
             beamtalk_result:from_tagged_tuple(
                 {error, compile_error('Regex', 'from:options:', Msg, {ErrStr, Pos})}
@@ -402,7 +402,7 @@ raise_bad_pattern(Selector, Pattern, CompileOpts) ->
     case re:compile(Pattern, CompileOpts) of
         {error, {ErrStr, Pos}} ->
             Hint = beamtalk_error:chars_to_binary(
-                io_lib:format("Invalid pattern: ~ts at position ~p", [ErrStr, Pos])
+                io_lib:format("Invalid pattern: ~ts at position ~tp", [ErrStr, Pos])
             ),
             beamtalk_error:raise(compile_error('String', Selector, Hint, {ErrStr, Pos}));
         _ ->
@@ -455,7 +455,7 @@ translate_option(Option) ->
             Error0 = beamtalk_error:new(regex_error, 'Regex'),
             Valid = lists:join(", ", [atom_to_list(O) || O <- valid_options()]),
             Hint = beamtalk_error:chars_to_binary(
-                io_lib:format("Unknown option: ~p. Valid: ~ts", [Option, Valid])
+                io_lib:format("Unknown option: ~tp. Valid: ~ts", [Option, Valid])
             ),
             Error1 = beamtalk_error:with_hint(Error0, Hint),
             beamtalk_error:raise(Error1)

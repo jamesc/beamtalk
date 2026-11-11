@@ -306,7 +306,7 @@ validate_class_side_arity(Class, Selector, Fun) ->
                 Selector,
                 beamtalk_error:chars_to_binary(
                     io_lib:format(
-                        "Class-side extension ~p on ~p must be a fun of arity 2, got ~b",
+                        "Class-side extension ~tp on ~tp must be a fun of arity 2, got ~b",
                         [Selector, Class, Arity]
                     )
                 )

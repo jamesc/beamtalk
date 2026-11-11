@@ -907,7 +907,7 @@ format_start_failed_error(Kind, ClassName, Selector, Reason) ->
         Kind,
         ClassName,
         Selector,
-        beamtalk_error:chars_to_binary(io_lib:format("supervisor ~ts failed: ~p", [Verb, Reason]))
+        beamtalk_error:chars_to_binary(io_lib:format("supervisor ~ts failed: ~tp", [Verb, Reason]))
     ).
 
 %% The text to show for a start failure's cause: its hint, else its message,
@@ -1090,7 +1090,7 @@ check_integer(ClassName, Selector, Value, Min) ->
         ClassName,
         Selector,
         beamtalk_error:chars_to_binary(
-            io_lib:format("~ts must be an Integer >= ~b, got ~p", [Selector, Min, Value])
+            io_lib:format("~ts must be an Integer >= ~b, got ~tp", [Selector, Min, Value])
         )
     ),
     {error, beamtalk_error:with_details(Error0, #{value => Value})}.
@@ -1109,7 +1109,7 @@ check_strategy(ClassName, Value) ->
                 strategy,
                 beamtalk_error:chars_to_binary(
                     io_lib:format(
-                        "strategy must be #oneForOne, #oneForAll or #restForOne, got ~p", [Value]
+                        "strategy must be #oneForOne, #oneForAll or #restForOne, got ~tp", [Value]
                     )
                 )
             ),
@@ -1235,7 +1235,7 @@ child_class_entry(ClassName, ChildClass) ->
                 ClassName,
                 childClass,
                 beamtalk_error:chars_to_binary(
-                    io_lib:format("childClass must return a class, got ~p", [ChildClass])
+                    io_lib:format("childClass must return a class, got ~tp", [ChildClass])
                 )
             ),
             exit(beamtalk_error:with_details(Error0, #{value => ChildClass}))
@@ -1696,7 +1696,7 @@ handle_terminate_child_result(SupClass, _LogCtx, {error, Reason}) ->
             terminate_failed,
             SupClass,
             'terminateChild:',
-            beamtalk_error:chars_to_binary(io_lib:format("~p", [Reason]))
+            beamtalk_error:chars_to_binary(io_lib:format("~tp", [Reason]))
         )}.
 
 %%% ============================================================================
@@ -1830,7 +1830,7 @@ with_child_id(Self, Selector, Id, _Fun) ->
 child_not_found_error(SupClass, Selector, Id) ->
     Error0 = beamtalk_error:new(child_not_found, SupClass, Selector),
     Error1 = beamtalk_error:with_message(
-        Error0, beamtalk_error:chars_to_binary(io_lib:format("No child with id ~p", [Id]))
+        Error0, beamtalk_error:chars_to_binary(io_lib:format("No child with id ~tp", [Id]))
     ),
     beamtalk_error:with_details(Error1, #{id => Id}).
 
@@ -1844,7 +1844,7 @@ child_running_error(SupClass, Selector, Id, Status) ->
         <<"Terminate the child with terminateChild: first">>
     ),
     Error1 = beamtalk_error:with_message(
-        Error0, beamtalk_error:chars_to_binary(io_lib:format("Child ~p is ~ts", [Id, Status]))
+        Error0, beamtalk_error:chars_to_binary(io_lib:format("Child ~tp is ~ts", [Id, Status]))
     ),
     beamtalk_error:with_details(Error1, #{id => Id, status => Status}).
 
@@ -1861,7 +1861,7 @@ ambiguous_child_error(SupClass, Selector, Matches) ->
     Error1 = beamtalk_error:with_message(
         Error0,
         beamtalk_error:chars_to_binary(
-            io_lib:format("Several children share this class: ~p", [Ids])
+            io_lib:format("Several children share this class: ~tp", [Ids])
         )
     ),
     beamtalk_error:with_details(Error1, #{ids => Ids}).
@@ -1872,7 +1872,7 @@ delete_failed_error(SupClass, Selector, Reason) ->
         delete_failed,
         SupClass,
         Selector,
-        beamtalk_error:chars_to_binary(io_lib:format("~p", [Reason]))
+        beamtalk_error:chars_to_binary(io_lib:format("~tp", [Reason]))
     ).
 
 -doc """
@@ -2202,7 +2202,7 @@ check_stop_timeout(ClassName, Other) ->
         'stopWithin:',
         beamtalk_error:chars_to_binary(
             io_lib:format(
-                "stopWithin: ms must be a non-negative Integer or #infinity, got ~p",
+                "stopWithin: ms must be a non-negative Integer or #infinity, got ~tp",
                 [Other]
             )
         )
@@ -2222,7 +2222,7 @@ stop_timeout_error(ClassName, Ms) ->
         'stopWithin:',
         beamtalk_error:chars_to_binary(
             io_lib:format(
-                "Supervisor did not stop within ~p ms; it keeps shutting down in the background",
+                "Supervisor did not stop within ~tp ms; it keeps shutting down in the background",
                 [Ms]
             )
         )
@@ -2828,7 +2828,7 @@ start_child_via_class_method(ClassName, Module, Selector, Args) ->
                     Selector,
                     beamtalk_error:chars_to_binary(
                         io_lib:format(
-                            "class method must return an Actor object, got: ~p",
+                            "class method must return an Actor object, got: ~tp",
                             [Other]
                         )
                     )
@@ -3296,7 +3296,7 @@ spec_to_otp(BtSpec, Mode) ->
                             childSpec,
                             beamtalk_error:chars_to_binary(
                                 io_lib:format(
-                                    "unsupported child start function: ~p "
+                                    "unsupported child start function: ~tp "
                                     "(expected spawn, spawnWith:, spawnAs:, "
                                     "spawnWith:as:, spawnAs:scope:, "
                                     "spawnWith:as:scope:, or classMethod)",
@@ -3603,7 +3603,7 @@ check_max_children(ClassName, Other) ->
         maxChildren,
         beamtalk_error:chars_to_binary(
             io_lib:format(
-                "maxChildren must be a non-negative Integer or #infinity, got ~p", [Other]
+                "maxChildren must be a non-negative Integer or #infinity, got ~tp", [Other]
             )
         )
     ),
@@ -3643,7 +3643,7 @@ check_shutdown(Class, Selector, Other) ->
         Selector,
         beamtalk_error:chars_to_binary(
             io_lib:format(
-                "~ts must be an Integer from 0 to ~b (ms), #infinity or #brutalKill, got ~p",
+                "~ts must be an Integer from 0 to ~b (ms), #infinity or #brutalKill, got ~tp",
                 [Selector, ?MAX_SHUTDOWN_MS, Other]
             )
         )

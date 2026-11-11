@@ -446,7 +446,7 @@ raise_stale_cell(#beamtalk_object{class = Class}, Cell, Carried) ->
         beamtalk_error:chars_to_binary(
             io_lib:format(
                 "~ts's state cell was stale when a `^` reached its method: the throw carried "
-                "fields the cell did not hold (~p)",
+                "fields the cell did not hold (~tp)",
                 [Class, Stale]
             )
         )

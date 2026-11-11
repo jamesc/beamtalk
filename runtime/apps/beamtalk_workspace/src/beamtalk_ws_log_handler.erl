@@ -223,32 +223,49 @@ format_time(Meta) ->
 
 -spec format_msg(term(), map()) -> binary().
 format_msg({string, Msg}, _Meta) ->
-    iolist_to_binary(Msg);
+    log_text_to_binary(Msg);
 format_msg({report, Report}, Meta) when is_map(Report) ->
     case maps:get(report_cb, Meta, undefined) of
         undefined ->
-            beamtalk_error:chars_to_binary(io_lib:format("~tp", [Report]));
+            log_text_to_binary(io_lib:format("~tp", [Report]));
         Fun when is_function(Fun, 1) ->
             {Format, Args} = Fun(Report),
-            beamtalk_error:chars_to_binary(io_lib:format(Format, Args));
+            log_text_to_binary(io_lib:format(Format, Args));
         Fun when is_function(Fun, 2) ->
-            iolist_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
+            log_text_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
     end;
 format_msg({report, Report}, Meta) ->
     format_msg_report_list(Report, Meta);
 format_msg({Format, Args}, _Meta) ->
-    beamtalk_error:chars_to_binary(io_lib:format(Format, Args)).
+    log_text_to_binary(io_lib:format(Format, Args)).
 
 -spec format_msg_report_list(term(), map()) -> binary().
 format_msg_report_list(Report, Meta) ->
     case maps:get(report_cb, Meta, undefined) of
         undefined ->
-            beamtalk_error:chars_to_binary(io_lib:format("~tp", [Report]));
+            log_text_to_binary(io_lib:format("~tp", [Report]));
         Fun when is_function(Fun, 1) ->
             {Format, Args} = Fun(Report),
-            beamtalk_error:chars_to_binary(io_lib:format(Format, Args));
+            log_text_to_binary(io_lib:format(Format, Args));
         Fun when is_function(Fun, 2) ->
-            iolist_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
+            log_text_to_binary(Fun(Report, #{single_line => true, depth => unlimited}))
+    end.
+
+%% Callers format log text with either `~s` on a UTF-8 binary (bytes surface as
+%% latin1 chars; `iolist_to_binary/1` passes them back through unchanged) or
+%% `~ts` (real codepoints, possibly above 255, where `iolist_to_binary/1` raises
+%% `badarg`; and a crashing `log/2` gets this handler removed by OTP logger).
+%% Keep the byte pass-through when it is valid UTF-8, else encode the codepoints.
+-spec log_text_to_binary(unicode:chardata()) -> binary().
+log_text_to_binary(Chardata) ->
+    try iolist_to_binary(Chardata) of
+        Bin ->
+            case unicode:characters_to_binary(Bin, utf8, utf8) of
+                Valid when is_binary(Valid) -> Bin;
+                _ -> beamtalk_error:chars_to_binary(Chardata)
+            end
+    catch
+        error:badarg -> beamtalk_error:chars_to_binary(Chardata)
     end.
 
 -spec format_domain(map()) -> binary() | undefined.

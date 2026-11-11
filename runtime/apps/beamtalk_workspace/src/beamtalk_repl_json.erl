@@ -97,7 +97,7 @@ format_error(Reason) ->
                 json:encode(#{
                     <<"type">> => <<"error">>,
                     <<"message">> => beamtalk_error:chars_to_binary(
-                        io_lib:format("Error: ~p", [Reason])
+                        io_lib:format("Error: ~tp", [Reason])
                     )
                 })
             )
@@ -145,7 +145,7 @@ format_error_with_warnings(Reason, Warnings) ->
                 json:encode(#{
                     <<"type">> => <<"error">>,
                     <<"message">> => beamtalk_error:chars_to_binary(
-                        io_lib:format("Error: ~p", [Reason])
+                        io_lib:format("Error: ~tp", [Reason])
                     )
                 })
             )
@@ -393,7 +393,7 @@ term_to_json(Value) when is_tuple(Value) ->
     end;
 term_to_json(Value) ->
     beamtalk_transcript_stream:ensure_utf8(
-        beamtalk_error:chars_to_binary(io_lib:format("~p", [Value]))
+        beamtalk_error:chars_to_binary(io_lib:format("~tp", [Value]))
     ).
 
 -doc """
@@ -525,4 +525,4 @@ format_error_message(Reason) ->
 format_rejection_reason(#beamtalk_error{} = Error) ->
     beamtalk_error:format(Error);
 format_rejection_reason(Reason) ->
-    beamtalk_error:chars_to_binary(io_lib:format("~p", [Reason])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp", [Reason])).

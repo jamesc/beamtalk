@@ -1266,7 +1266,7 @@ apply_cap(Candidates, Cap) ->
 cap_note(0) ->
     undefined;
 cap_note(N) ->
-    beamtalk_error:chars_to_binary(io_lib:format("~p more not checked", [N])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp more not checked", [N])).
 
 -doc """
 Re-check one candidate caller class: read its live source (never disk — a

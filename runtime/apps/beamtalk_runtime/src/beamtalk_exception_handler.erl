@@ -483,7 +483,7 @@ wrap_raw(Other, Context) ->
         classify_kind(Other),
         Cls,
         Sel,
-        beamtalk_error:chars_to_binary(io_lib:format("~p", [Other])),
+        beamtalk_error:chars_to_binary(io_lib:format("~tp", [Other])),
         undefined,
         #{reason => Other}
     ).
@@ -775,7 +775,7 @@ ensure_wrapped(error, undef, Stacktrace) ->
                         true -> 0
                     end,
                 beamtalk_error:chars_to_binary(
-                    io_lib:format("Undefined function: ~p:~p/~p", [Mod, Fun, Arity])
+                    io_lib:format("Undefined function: ~tp:~tp/~tp", [Mod, Fun, Arity])
                 );
             _ ->
                 <<"Undefined function">>
@@ -798,7 +798,7 @@ ensure_wrapped(exit, Reason, Stacktrace) ->
         class = undefined,
         selector = undefined,
         message = beamtalk_primitive:string_from_binary(
-            beamtalk_error:chars_to_binary(io_lib:format("~p", [Reason]))
+            beamtalk_error:chars_to_binary(io_lib:format("~tp", [Reason]))
         ),
         hint = undefined,
         details = #{reason => Reason}
@@ -829,7 +829,7 @@ ensure_wrapped(throw, Reason, Stacktrace) ->
                 class = undefined,
                 selector = undefined,
                 message = beamtalk_primitive:string_from_binary(
-                    beamtalk_error:chars_to_binary(io_lib:format("~p", [Reason]))
+                    beamtalk_error:chars_to_binary(io_lib:format("~tp", [Reason]))
                 ),
                 hint = undefined,
                 details = #{reason => Reason}
@@ -1194,7 +1194,7 @@ signal_message(Message) when is_atom(Message) ->
     signal_message(atom_to_binary(Message, utf8));
 signal_message(Message) ->
     %% Convert other types to binary for robustness
-    signal_message(beamtalk_error:chars_to_binary(io_lib:format("~p", [Message]))).
+    signal_message(beamtalk_error:chars_to_binary(io_lib:format("~tp", [Message]))).
 
 -doc """
 Raise a new exception with a message, preserving the exception class.
@@ -1224,7 +1224,7 @@ signal_message(Message, ExceptionClass, Details) when is_atom(Message) ->
     signal_message(atom_to_binary(Message, utf8), ExceptionClass, Details);
 signal_message(Message, ExceptionClass, Details) ->
     signal_message(
-        beamtalk_error:chars_to_binary(io_lib:format("~p", [Message])), ExceptionClass, Details
+        beamtalk_error:chars_to_binary(io_lib:format("~tp", [Message])), ExceptionClass, Details
     ).
 
 -doc """

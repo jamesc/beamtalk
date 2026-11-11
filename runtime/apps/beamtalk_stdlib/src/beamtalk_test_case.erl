@@ -469,7 +469,7 @@ decode_beam_error(if_clause) ->
 decode_beam_error({badarity, {Fun, Args}}) when is_function(Fun), is_list(Args) ->
     {arity, Expected} = erlang:fun_info(Fun, arity),
     beamtalk_error:chars_to_binary(
-        io_lib:format("function expects ~p arguments but was called with ~p", [
+        io_lib:format("function expects ~tp arguments but was called with ~tp", [
             Expected, length(Args)
         ])
     );

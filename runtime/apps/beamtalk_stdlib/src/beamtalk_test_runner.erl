@@ -100,7 +100,7 @@ run_all(MaxJobs) when is_integer(MaxJobs), MaxJobs >= 1 ->
 run_all(Invalid) ->
     Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "runAll: expects a non-negative integer, got: ~p",
+            "runAll: expects a non-negative integer, got: ~tp",
             [Invalid]
         )
     ),
@@ -220,7 +220,7 @@ run_class(ClassRef) when is_tuple(ClassRef), tuple_size(ClassRef) >= 2 ->
 run_class(Invalid) ->
     Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "run: expects a class reference (tuple), got: ~p",
+            "run: expects a class reference (tuple), got: ~tp",
             [Invalid]
         )
     ),
@@ -246,7 +246,7 @@ run_method(ClassRef, TestName) when
     %% ClassRef is valid but TestName is not an atom
     Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "run:method: expects a method name (atom), got: ~p",
+            "run:method: expects a method name (atom), got: ~tp",
             [TestName]
         )
     ),
@@ -257,7 +257,7 @@ run_method(ClassRef, TestName) when
 run_method(Invalid, _TestName) ->
     Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "run:method: expects a class reference (tuple with >= 2 elements), got: ~p",
+            "run:method: expects a class reference (tuple with >= 2 elements), got: ~tp",
             [Invalid]
         )
     ),
@@ -330,27 +330,27 @@ result_summary(#{
         {0, 0} ->
             beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "~p tests, ~p passed (~.1fs)", [Total, Passed, Duration]
+                    "~tp tests, ~tp passed (~.1fs)", [Total, Passed, Duration]
                 )
             );
         {0, _} ->
             beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "~p tests, ~p passed, ~p skipped (~.1fs)",
+                    "~tp tests, ~tp passed, ~tp skipped (~.1fs)",
                     [Total, Passed, Skipped, Duration]
                 )
             );
         {_, 0} ->
             beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "~p tests, ~p passed, ~p failed (~.1fs)",
+                    "~tp tests, ~tp passed, ~tp failed (~.1fs)",
                     [Total, Passed, Failed, Duration]
                 )
             );
         _ ->
             beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "~p tests, ~p passed, ~p skipped, ~p failed (~.1fs)",
+                    "~tp tests, ~tp passed, ~tp skipped, ~tp failed (~.1fs)",
                     [Total, Passed, Skipped, Failed, Duration]
                 )
             )
@@ -485,7 +485,7 @@ the escript would die with no results at all.
 degraded_result_json(Result, Reason) ->
     Note = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "Per-test details omitted: the BUnit runner could not encode them as JSON (~p)",
+            "Per-test details omitted: the BUnit runner could not encode them as JSON (~tp)",
             [Reason]
         )
     ),
@@ -813,7 +813,7 @@ extract_class_name(ClassRef) when is_tuple(ClassRef) ->
 raise_invalid_class_ref(ClassRef) ->
     Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
-            "expected a class reference (element 2 must be a 'ClassName class' atom), got: ~p",
+            "expected a class reference (element 2 must be a 'ClassName class' atom), got: ~tp",
             [ClassRef]
         )
     ),
@@ -998,7 +998,7 @@ spawn_class_worker(ClassName, Parent, Ref) ->
             catch
                 Class:Reason:ST ->
                     ErrMsg = beamtalk_error:chars_to_binary(
-                        io_lib:format("Test class crashed: ~p:~p~n~p", [Class, Reason, ST])
+                        io_lib:format("Test class crashed: ~tp:~tp~n~tp", [Class, Reason, ST])
                     ),
                     make_test_result(
                         1,

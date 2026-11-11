@@ -730,7 +730,7 @@ default_text(undefined) ->
 default_text(Value) ->
     %% Field reflection (ADR 0035): render the stored default term as text via
     %% io_lib, never by sending the value a user `printOn:` / `displayString`.
-    beamtalk_error:chars_to_binary(io_lib:format("~p", [Value])).
+    beamtalk_error:chars_to_binary(io_lib:format("~tp", [Value])).
 
 %% Synthesize the class-definition skeleton: header + state slots, method bodies
 %% excluded. Derived purely from the loaded class' reflected superclass + state
