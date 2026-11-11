@@ -1966,6 +1966,8 @@ impl TypeChecker {
                             ..
                         } => (compat, incompatible),
                     };
+                    // Accepted class objects are compatible members too.
+                    let compat = compat + (members.len() - instance_members.len());
                     let union_display = arg_ty
                         .display_for_diagnostic()
                         .unwrap_or_else(|| EcoString::from("Dynamic"));
@@ -3381,6 +3383,8 @@ impl TypeChecker {
                 if compat == total {
                     return; // All match → pass
                 }
+                // Accepted class objects are compatible members too.
+                let compat = compat + (members.len() - instance_members.len());
                 let union_display = value_ty
                     .display_for_diagnostic()
                     .unwrap_or_else(|| EcoString::from("Dynamic"));
@@ -4159,6 +4163,8 @@ impl TypeChecker {
                     if compat == total {
                         continue; // All members compatible
                     }
+                    // Accepted class objects are compatible members too.
+                    let compat = compat + (members.len() - instance_members.len());
                     let union_display = inferred
                         .display_for_diagnostic()
                         .unwrap_or_else(|| EcoString::from("Dynamic"));

@@ -717,6 +717,10 @@ typed Actor subclass: Caller
   badNonProtocolArg: flag :: Boolean => self takeStr: (flag ifTrue: [Integer] ifFalse: [nil])
   badStore: flag :: Boolean => self.slot := flag ifTrue: [Integer] ifFalse: [nil]
   badReturn: flag :: Boolean -> Wire class | Nil => flag ifTrue: [Integer] ifFalse: [nil]
+  state: mix :: Behaviour | Integer = 0
+  takeMix: m :: Behaviour | Integer => m
+  mixedArg: flag :: Boolean => self takeMix: (flag ifTrue: [Tcp] ifFalse: [#s])
+  mixedStore: flag :: Boolean => self.mix := flag ifTrue: [Tcp] ifFalse: [#s]
   fineArg: flag :: Boolean => self take: (flag ifTrue: [Tcp] ifFalse: [Ssl])
   fineArgNil: flag :: Boolean => self take: (flag ifTrue: [Tcp] ifFalse: [nil])
   fineStore: flag :: Boolean => self.slot := flag ifTrue: [Tcp] ifFalse: [Ssl]
@@ -753,6 +757,18 @@ typed Actor subclass: Caller
             .any(|d| d.message.contains("Integer class")),
         "a non-protocol class object in a union is refused: {diags:#?}"
     );
+    for needle in ["mixedArg:", "mixedStore:"] {
+        let mixed = at(needle);
+        assert!(
+            !mixed.is_empty()
+                && mixed
+                    .iter()
+                    .all(|d| d.severity == crate::source_analysis::Severity::Hint
+                        && !d.message.contains("No member")
+                        && !d.hint.as_deref().is_some_and(|h| h.contains("No member"))),
+            "{needle} a conforming class object plus a bad instance is a partial mismatch (hint): {diags:#?}"
+        );
+    }
     let fine = line_of("fineArg:");
     assert!(
         diags
