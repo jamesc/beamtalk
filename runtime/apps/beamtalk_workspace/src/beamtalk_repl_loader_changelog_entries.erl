@@ -77,6 +77,9 @@ On failure this logs `Label` at warning level with `Meta` plus
 """.
 -spec best_effort_changelog_append(string(), map(), fun(() -> map())) -> ok.
 best_effort_changelog_append(Label, Meta, BuildFun) ->
+    %% bt-catcher-audit: not-applicable-no-block - BuildFun is an Erlang closure
+    %% from this module's emit_* functions that builds the entry map; it never
+    %% runs a Beamtalk block.
     try
         Entry = BuildFun(),
         _ = beamtalk_workspace_changelog:append(Entry),
