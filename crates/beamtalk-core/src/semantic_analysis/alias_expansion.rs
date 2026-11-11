@@ -184,15 +184,38 @@ impl InternalAliasExpander {
         if self.is_empty() {
             return;
         }
+        // A protocol's own type parameter shadows a same-named internal alias
+        // (`internal type Key = Symbol` vs `Protocol define: Mapping(Key, V)`):
+        // leave it a bare name for `uses:` substitution to map.
+        let scoped;
+        let this = if protocol
+            .type_params
+            .iter()
+            .any(|tp| self.aliases.contains_key(&tp.name.name))
+        {
+            scoped = Self {
+                aliases: self
+                    .aliases
+                    .iter()
+                    .filter(|(name, _)| {
+                        !protocol.type_params.iter().any(|tp| &tp.name.name == *name)
+                    })
+                    .map(|(n, t)| (n.clone(), t.clone()))
+                    .collect(),
+            };
+            &scoped
+        } else {
+            self
+        };
         for sig in protocol
             .method_signatures
             .iter_mut()
             .chain(&mut protocol.class_method_signatures)
         {
-            self.expand_protocol_signature(sig);
+            this.expand_protocol_signature(sig);
         }
         for method in &mut protocol.provided_methods {
-            self.expand_provided_method(method);
+            this.expand_provided_method(method);
         }
     }
 
@@ -511,5 +534,39 @@ mod tests {
             });
         }
         assert_eq!(seen, ["String", "String"]);
+    }
+
+    #[test]
+    fn protocol_type_param_shadows_same_named_internal_alias() {
+        let e = expander(&[
+            ("Key", DeclaredType::simple("Symbol")),
+            ("Secret", DeclaredType::simple("String")),
+        ]);
+        let mut proto = first_protocol(
+            "Protocol define: Mapping(Key, Value)\n  \
+             at: k :: Key -> Value\n\n  \
+             pick: k :: Key -> Secret => nil\n",
+        );
+        e.expand_protocol_definition(&mut proto);
+        let sig = &proto.method_signatures[0];
+        assert_eq!(
+            sig.parameters[0]
+                .type_annotation
+                .as_ref()
+                .unwrap()
+                .type_name(),
+            "Key"
+        );
+        let pick = &proto.provided_methods[0];
+        assert_eq!(
+            pick.parameters[0]
+                .type_annotation
+                .as_ref()
+                .unwrap()
+                .type_name(),
+            "Key"
+        );
+        // Other aliases still expand.
+        assert_eq!(pick.return_type.as_ref().unwrap().type_name(), "String");
     }
 }
