@@ -650,6 +650,11 @@ fn record_manifest_reference(pkg: &mut NativePackageLock, native_deps: &NativeDe
     }
 }
 
+/// Test-only environment variable (BT-4582): base URL of a local hex
+/// repository that replaces `repo.hex.pm` in the generated `rebar.config`.
+/// The repository need not be signed; verification is disabled for it.
+const TEST_HEX_REPO_URL_ENV: &str = "BEAMTALK_TEST_HEX_REPO_URL";
+
 /// Generate a `rebar.config` file for compiling native dependencies.
 ///
 /// The generated file lives at `_build/dev/native/rebar.config` and is a
@@ -715,6 +720,20 @@ pub(crate) fn generate_rebar_config(
         config.push_str("\n]}.\n");
     }
 
+    // Test-only: point the default `hexpm` repo at a local, unsigned hex
+    // repository so end-to-end tests run offline (BT-4582).
+    if let Ok(url) = std::env::var(TEST_HEX_REPO_URL_ENV) {
+        if !url.is_empty() {
+            use crate::beam_compiler::escape_erlang_string;
+            let _ = writeln!(
+                config,
+                "{{hex, [{{repos, [#{{name => <<\"hexpm\">>, repo_url => <<\"{}\">>, \
+                 repo_verify => false, repo_verify_origin => false}}]}}]}}.",
+                escape_erlang_string(&url)
+            );
+        }
+    }
+
     debug!(path = %config_path, "Writing rebar.config");
     fs::write(&config_path, &config)
         .into_diagnostic()
@@ -763,7 +782,7 @@ fn compile_with_rebar3(
     let rebar_base_dir = rebar_layout.native_dir();
 
     // Align rebar3's rebar.lock and checkouts with beamtalk.lock.
-    prepare_rebar_lock(
+    let re_resolving = prepare_rebar_lock(
         &rebar_layout,
         native_deps,
         existing_lock.as_ref().map(|lock| &lock.native_packages),
@@ -778,24 +797,46 @@ fn compile_with_rebar3(
         "Invoking rebar3 compile"
     );
 
-    let mut cmd = std::process::Command::new(&rebar3);
-    cmd.arg("compile");
-    // rebar3 reads rebar.config from cwd — run from _build/dev/native/
-    cmd.current_dir(rebar_base_dir.as_std_path());
-    // Keep all rebar3 output in the same build directory.
     // REBAR_BASE_DIR must be absolute — rebar3 resolves it relative to cwd,
     // and cwd is already rebar_base_dir, so a relative path would nest.
     let abs_base_dir = std::fs::canonicalize(rebar_base_dir.as_std_path())
         .into_diagnostic()
         .wrap_err("Failed to canonicalize rebar base dir")?;
-    cmd.env("REBAR_BASE_DIR", &abs_base_dir);
+    let rebar3_command = |subcommand: &str| {
+        let mut cmd = std::process::Command::new(&rebar3);
+        cmd.arg(subcommand);
+        // rebar3 reads rebar.config from cwd — run from _build/dev/native/
+        cmd.current_dir(rebar_base_dir.as_std_path());
+        // Keep all rebar3 output in the same build directory.
+        cmd.env("REBAR_BASE_DIR", &abs_base_dir);
+        cmd
+    };
 
-    let output = cmd.output().into_diagnostic().wrap_err_with(|| {
-        format!(
-            "Failed to run rebar3 compile (tried '{}').\nIs Erlang/OTP installed?",
-            rebar3.display()
-        )
-    })?;
+    // rebar3 resolves a constraint from its cached package index and only
+    // refreshes it on a miss, so a re-resolve (`beamtalk deps update`, a
+    // changed constraint) would otherwise keep landing on the version it
+    // cached at the previous build. Best effort: with no network rebar3
+    // still compiles from its cache.
+    if re_resolving {
+        match rebar3_command("update").output() {
+            Ok(out) if out.status.success() => debug!("Refreshed rebar3 package index"),
+            Ok(out) => debug!(
+                status = %out.status,
+                "rebar3 update failed; resolving from the cached package index"
+            ),
+            Err(error) => debug!(%error, "rebar3 update could not run"),
+        }
+    }
+
+    let output = rebar3_command("compile")
+        .output()
+        .into_diagnostic()
+        .wrap_err_with(|| {
+            format!(
+                "Failed to run rebar3 compile (tried '{}').\nIs Erlang/OTP installed?",
+                rebar3.display()
+            )
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
