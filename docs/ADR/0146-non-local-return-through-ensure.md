@@ -206,8 +206,9 @@ release, so the relay and the new commit live side by side for that release.
 3. **Removal, one release later.** In the release after phase 2 ships, the
    relay, the owner stamp and `refresh_carried/2` are deleted. Only the
    stdlib's `Block>>ensure:` emits `refresh_carried/2`, and the stdlib is
-   rebuilt with the runtime. Closures compiled before the removal still call
-   `nlr_state/2`, so it stays one more release as an alias of `view/2`.
+   rebuilt with the runtime. Closures compiled between BT-4448 and BT-4536 called
+   `nlr_state/2`; that alias of `view/2` never shipped in a release and was
+   removed before one (BT-4660), so such nightly builds must be recompiled.
 
 The foreign-`^` change lands before the commit change, or with it, but never
 after it. On its own it changes no visible behaviour, because the commit still
@@ -221,9 +222,9 @@ actor. Work items are tracked under epic BT-4533 (design review: BT-4505).
 No source changes. The two behaviour changes described under User Impact go in
 the release notes. Code compiled before the commit change keeps its old
 behaviour, including BT-4429's relay, until the release that removes the
-relay. It must be recompiled by then. Code compiled with the commit change
-keeps running for one release after the removal, through the `nlr_state/2`
-alias.
+relay. It must be recompiled by then. The `nlr_state/2` alias that closures
+compiled between BT-4448 and BT-4536 call never shipped in a release, so it was
+removed before one (BT-4660); such pre-release builds must be recompiled.
 
 ## Implementation Tracking
 
