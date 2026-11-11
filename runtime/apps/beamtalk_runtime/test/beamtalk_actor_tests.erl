@@ -4532,7 +4532,7 @@ wait_for_initial_call(Pid, N) ->
     end.
 
 beamtalk_class_registry_name(ClassName) ->
-    binary_to_atom(<<"beamtalk_class_", (atom_to_binary(ClassName, utf8))/binary>>, utf8).
+    beamtalk_class_registry:registry_name(ClassName).
 
 registered_name_for_pid_returns_nil_when_unregistered_test() ->
     Pid = spawn(fun() ->
