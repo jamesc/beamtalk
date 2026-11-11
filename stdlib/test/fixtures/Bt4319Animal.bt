@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4319: non-leaf Actor base used by type_pattern_non_leaf_test.bt.
+
+Actor subclass: Bt4319Animal
+
+  speak => "..."

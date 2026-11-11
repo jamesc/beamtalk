@@ -227,7 +227,7 @@ jobs:
       # lint-nlr-tuple-matches (BT-3758), lint-class-var-catchers (BT-3769,
       # ADR 0130 §4), lint-coverage-skips (BT-4408), test-lint-stamp (BT-3926). See their Justfile comments.
       - name: Clippy, format and repo lints
-        run: just clippy fmt-check lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-coverage-skips test-grammar test-github-extension test-lint-stamp
+        run: just clippy fmt-check lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips test-grammar test-github-extension test-lint-stamp
 
       - name: Surface parity drift check (BT-2082)
         # Verifies REPL ops × CLI × MCP × LSP coverage matches

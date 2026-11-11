@@ -92,7 +92,11 @@ handle_term_pid_stats_live_actor_returns_value_map_test() ->
             ?assert(is_integer(maps:get(<<"reductions">>, Stats))),
             ?assert(maps:is_key(<<"status">>, Stats))
         after
-            catch gen_server:stop(ActorPid)
+            try
+                gen_server:stop(ActorPid)
+            catch
+                _:_ -> ok
+            end
         end
     end).
 

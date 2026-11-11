@@ -60,7 +60,11 @@ start_class_with_module(Name, Module, Superclass, Meta) ->
     Pid.
 
 stop_class(Pid) ->
-    catch gen_server:stop(Pid, normal, 5000),
+    try
+        gen_server:stop(Pid, normal, 5000)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 direct_constructor_test_() ->
@@ -595,7 +599,11 @@ static_new_key_test_() ->
                 ?assertNotEqual(false, ctor_target(Name)),
                 ?assertEqual(self(), beamtalk_class_dispatch:class_send(Pid, new, []))
             after
-                catch beamtalk_extensions:unregister(Name, new, true),
+                try
+                    beamtalk_extensions:unregister(Name, new, true)
+                catch
+                    _:_ -> ok
+                end,
                 stop_class(Pid)
             end
         end},

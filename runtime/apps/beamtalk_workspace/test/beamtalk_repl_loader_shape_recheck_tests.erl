@@ -835,7 +835,11 @@ precheck_class_shape_waits_for_pending_capture_test_() ->
                         %% waited for the capture instead of racing past it.
                         ?assert(Elapsed >= 200)
                     after
-                        catch sys:resume(beamtalk_workspace_shape_recheck_worker)
+                        try
+                            sys:resume(beamtalk_workspace_shape_recheck_worker)
+                        catch
+                            _:_ -> ok
+                        end
                     end
                 end)
             ]

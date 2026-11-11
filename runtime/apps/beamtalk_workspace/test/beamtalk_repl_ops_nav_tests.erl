@@ -742,7 +742,11 @@ protocol_setup() ->
     ok.
 
 protocol_cleanup(_) ->
-    catch ets:delete(beamtalk_protocol_registry, 'NavTestProtocol'),
+    try
+        ets:delete(beamtalk_protocol_registry, 'NavTestProtocol')
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 protocol_query_test_() ->
@@ -874,10 +878,20 @@ delegate_callers_setup() ->
     #{xref => XrefPid, class => {ClassName, ClassPid, Owned}}.
 
 delegate_callers_cleanup(#{class := {ClassName, ClassPid, Owned}}) ->
-    catch beamtalk_xref:purge_class(ClassName),
+    try
+        beamtalk_xref:purge_class(ClassName)
+    catch
+        _:_ -> ok
+    end,
     case Owned of
-        true -> catch gen_server:stop(ClassPid);
-        false -> ok
+        true ->
+            try
+                gen_server:stop(ClassPid)
+            catch
+                _:_ -> ok
+            end;
+        false ->
+            ok
     end,
     clear_xref_tables(),
     ok.

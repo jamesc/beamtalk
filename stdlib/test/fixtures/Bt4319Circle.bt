@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4319: Value subclass of Bt4319Shape.
+
+Bt4319Shape subclass: Bt4319Circle
+  field: r = 1
+
+  area => self.r * self.r * 3

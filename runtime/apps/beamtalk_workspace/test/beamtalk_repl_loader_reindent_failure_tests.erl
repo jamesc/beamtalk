@@ -86,8 +86,14 @@ setup() ->
 
 teardown(#{old_home := OldHome}) ->
     case beamtalk_class_registry:whereis_class('ReindentGadget') of
-        undefined -> ok;
-        Pid when is_pid(Pid) -> catch gen_server:stop(Pid, normal, 5000)
+        undefined ->
+            ok;
+        Pid when is_pid(Pid) ->
+            try
+                gen_server:stop(Pid, normal, 5000)
+            catch
+                _:_ -> ok
+            end
     end,
     case whereis(beamtalk_workspace_changelog) of
         undefined -> ok;

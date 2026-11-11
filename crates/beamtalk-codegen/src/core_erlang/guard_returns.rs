@@ -72,6 +72,9 @@
 //!   parameter ([`Rewriter::typed_comparison`], BT-4452). The rewrite
 //!   records each such comparison, and the compile fails unless codegen did
 //!   lower it bare ([`CoreErlangGenerator::unconfirmed_boolean_comparisons`]);
+//!   or an `and:`/`or:` of Booleans by construction with a literal
+//!   one-statement block, which inlines to a `case` that sends only for a
+//!   non-Boolean receiver (BT-4496);
 //!   or
 //! - it is a one-branch guard, `c ifTrue: [^v]` or `c ifFalse: [^v]`, whose
 //!   `v` has no effects ([`is_effect_free`]). Its receiver is then recorded
@@ -302,7 +305,42 @@ impl Rewriter {
     /// Whether `expr` is `true` or `false` whatever it evaluates: a structural
     /// Boolean ([`is_boolean_by_construction`]) or a [`Self::typed_comparison`].
     fn is_boolean(&self, expr: &Expression) -> bool {
-        is_boolean_by_construction(expr) || self.typed_comparison(expr).is_some()
+        is_boolean_by_construction(expr)
+            || self.typed_comparison(expr).is_some()
+            || self.short_circuit_operands(expr).is_some()
+    }
+
+    /// The receiver and block value of `expr` when it is `a and: [b]` /
+    /// `a or: [b]` with a literal one-statement block, both of which are
+    /// Booleans ([`Self::is_boolean`]). Codegen inlines such a send as a
+    /// `case` on `a` that only sends for a non-Boolean `a`, and answers
+    /// `a` or `b` otherwise, so it is `true` or `false` and never sends
+    /// (BT-4496).
+    fn short_circuit_operands<'e>(
+        &self,
+        expr: &'e Expression,
+    ) -> Option<(&'e Expression, &'e Expression)> {
+        let Expression::MessageSend {
+            receiver,
+            selector: MessageSelector::Keyword(parts),
+            arguments,
+            is_cast: false,
+            ..
+        } = expr
+        else {
+            return None;
+        };
+        let ([part], [Expression::Block(block)]) = (parts.as_slice(), arguments.as_slice()) else {
+            return None;
+        };
+        if !matches!(part.keyword.as_str(), "and:" | "or:") || !block.parameters.is_empty() {
+            return None;
+        }
+        let [stmt] = block.body.as_slice() else {
+            return None;
+        };
+        (self.is_boolean(receiver) && self.is_boolean(&stmt.expression))
+            .then_some((receiver.as_ref(), &stmt.expression))
     }
 
     /// The left operand of `expr` when it is a comparison (`< > <= >=`)
@@ -335,6 +373,9 @@ impl Rewriter {
     fn note_boolean(&mut self, receiver: &Expression) {
         if let Some(left) = self.typed_comparison(receiver) {
             self.boolean_comparisons.insert(left.span());
+        } else if let Some((first, second)) = self.short_circuit_operands(receiver) {
+            self.note_boolean(first);
+            self.note_boolean(second);
         }
     }
 
@@ -825,8 +866,11 @@ mod tests {
 
     fn parse(source: &str) -> Module {
         let tokens = beamtalk_core::source_analysis::lex_with_eof(source);
-        let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+        let (mut module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        // Codegen runs the rewrite over a module with send-operand
+        // parentheses peeled.
+        beamtalk_core::ast::normalize::peel_operand_parens(&mut module);
         module
     }
 
@@ -1027,6 +1071,40 @@ mod tests {
             rewritten(&typed_class("    x abs > 0 ifTrue: [^x foo]\n    2")),
             None
         );
+    }
+
+    #[test]
+    fn and_or_of_booleans_allows_every_shape() {
+        // BT-4496: `a and: [b]` of Booleans by construction is a Boolean.
+        for body in [
+            "    (x =:= 0 and: [x =/= 1]) ifTrue: [x foo. ^x foo]\n    2",
+            "    (x == 0 or: [x == 1]) ifTrue: [^1] ifFalse: [x foo]\n    2",
+            "    (x == 0 and: [x == 1 or: [x == 2]]) ifFalse: [^x foo]\n    2",
+            "    (x == 0 and: [true]) ifTrue: [^1]",
+        ] {
+            let (out, helpers) =
+                rewritten_with_conditions(&class(body)).unwrap_or_else(|| panic!("{body}"));
+            assert!(!out.contains('^'), "{out}");
+            assert_eq!(helpers, 0, "{body}");
+        }
+        // Typed comparisons inside are recorded for the lowering check.
+        let src = typed_class("    (x > 0 and: [x < 9]) ifTrue: [^x foo]\n    2");
+        assert!(rewritten(&src).is_some());
+        assert_eq!(boolean_comparisons(&src), 2);
+    }
+
+    #[test]
+    fn and_or_with_a_non_boolean_operand_is_not_boolean() {
+        for body in [
+            "    (x and: [x == 0]) ifTrue: [^x foo]\n    2",
+            "    (x == 0 and: [x foo]) ifTrue: [^x foo]\n    2",
+            "    (x == 0 and: [x == 1. x foo]) ifTrue: [^x foo]\n    2",
+            "    (x == 0 and: [:y | x == 1]) ifTrue: [^x foo]\n    2",
+            "    (x == 0 and: x) ifTrue: [^x foo]\n    2",
+            "    (x == 0 xor: [x == 1]) ifTrue: [^x foo]\n    2",
+        ] {
+            assert_eq!(rewritten(&class(body)), None, "{body}");
+        }
     }
 
     #[test]

@@ -559,7 +559,11 @@ classify_registered_name_found_test_() ->
             Pid
         end,
         fun(Pid) ->
-            catch erlang:unregister(RegName),
+            try
+                erlang:unregister(RegName)
+            catch
+                _:_ -> ok
+            end,
             gen_server:stop(Pid)
         end,
         fun(_Pid) ->
@@ -592,7 +596,11 @@ classify_node_qualified_registered_name_found_test_() ->
             Pid
         end,
         fun(Pid) ->
-            catch erlang:unregister(RegName),
+            try
+                erlang:unregister(RegName)
+            catch
+                _:_ -> ok
+            end,
             gen_server:stop(Pid)
         end,
         fun(_Pid) ->
@@ -681,7 +689,11 @@ actor_pid_registered_drillable_when_found_test_() ->
             {InnerPid, OuterPid}
         end,
         fun({InnerPid, OuterPid}) ->
-            catch erlang:unregister(RegName),
+            try
+                erlang:unregister(RegName)
+            catch
+                _:_ -> ok
+            end,
             gen_server:stop(InnerPid),
             gen_server:stop(OuterPid)
         end,
@@ -729,7 +741,11 @@ actor_pid_node_qualified_drillable_when_found_test_() ->
             {InnerPid, OuterPid}
         end,
         fun({InnerPid, OuterPid}) ->
-            catch erlang:unregister(RegName),
+            try
+                erlang:unregister(RegName)
+            catch
+                _:_ -> ok
+            end,
             gen_server:stop(InnerPid),
             gen_server:stop(OuterPid)
         end,

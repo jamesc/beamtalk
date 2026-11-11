@@ -1173,7 +1173,12 @@ class_of_object_by_name_test_() ->
                 after
                     %% No terminate/2 ran, so drop the rows it would have.
                     ok = beamtalk_class_metadata:delete('Bt4117Killed'),
-                    _ = (catch ets:delete(beamtalk_class_pids, Pid)),
+                    _ =
+                        (try
+                            ets:delete(beamtalk_class_pids, Pid)
+                        catch
+                            _:_ -> ok
+                        end),
                     ok
                 end
             end}
@@ -1184,7 +1189,11 @@ stop_named_class(Name) ->
         undefined ->
             ok;
         Pid ->
-            catch gen_server:stop(Pid, normal, 5000),
+            try
+                gen_server:stop(Pid, normal, 5000)
+            catch
+                _:_ -> ok
+            end,
             ok
     end.
 

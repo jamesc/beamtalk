@@ -1790,8 +1790,16 @@ ensure_pg_running() ->
 %% `beamtalk_bootstrap:init/1` makes). Idempotent — re-registering a live class
 %% is a no-op at the registry level.
 register_stub_classes() ->
-    catch beamtalk_class_bt:register_class(),
-    catch beamtalk_metaclass_bt:register_class(),
+    try
+        beamtalk_class_bt:register_class()
+    catch
+        _:_ -> ok
+    end,
+    try
+        beamtalk_metaclass_bt:register_class()
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 cleanup_app(_) ->

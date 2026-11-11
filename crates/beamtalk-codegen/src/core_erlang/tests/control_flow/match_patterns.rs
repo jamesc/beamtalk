@@ -287,6 +287,61 @@ fn test_match_type_pattern_tagged_class_compiles_to_map_tag_check() {
 }
 
 #[test]
+fn test_match_type_pattern_non_leaf_class_compiles_to_runtime_kind_of_test() {
+    // BT-4319 (ADR 0107 Phase B): `Shape` has a subclass (`Circle`, declared
+    // in another file and supplied via the superclass index), so `s :: Shape`
+    // must match `Circle` instances too. An exact `'$beamtalk_class'` tag
+    // test would miss them; the arm instead asks the runtime class table.
+    let src = "Value subclass: Shape\n  test: x =>\n    x match: [\n      s :: Shape -> s;\n      _ -> \"none\"\n    ]\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+
+    let mut superclass_index = std::collections::HashMap::new();
+    superclass_index.insert("Circle".to_string(), "Shape".to_string());
+
+    let code = generate_module(
+        &module,
+        CodegenOptions::new("shape").with_class_superclass_index(superclass_index),
+    )
+    .expect("codegen should succeed");
+
+    assert!(
+        code.contains("call 'beamtalk_behaviour_intrinsics':'valueIsKindOfClass'("),
+        "Non-leaf type pattern should call the runtime kind-of test. Got:\n{code}"
+    );
+    assert!(
+        code.lines().any(|l| {
+            l.find("'valueIsKindOfClass'(")
+                .is_some_and(|i| l[i..].contains(", 'Shape')"))
+        }),
+        "Kind-of test should name the pattern class. Got:\n{code}"
+    );
+
+    assert_compiles_through_erlc("shape", &code);
+}
+
+#[test]
+fn test_match_type_pattern_leaf_class_keeps_exact_tag_fast_path_with_kind_of_fallback() {
+    // A class with no visible subclass tests the exact tag first; an instance
+    // of a different user class falls back to the runtime kind-of test, so a
+    // subclass declared elsewhere (or hot-loaded later) still matches.
+    let src = "Value subclass: Bar\n  test: x =>\n    x match: [\n      b :: Bar -> b;\n      _ -> \"none\"\n    ]\n";
+    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
+    let (module, _diags) = beamtalk_core::source_analysis::parse(tokens);
+    let code =
+        generate_module(&module, CodegenOptions::new("bar")).expect("codegen should succeed");
+    assert!(
+        code.contains("'maps':'get'('$beamtalk_class'"),
+        "Leaf type pattern keeps the exact-tag fast path. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'valueIsKindOfClass'("),
+        "Leaf type pattern falls back to the runtime kind-of test. Got:\n{code}"
+    );
+    assert_compiles_through_erlc("bar", &code);
+}
+
+#[test]
 fn test_match_type_pattern_mixed_with_nil_and_native_arms_compiles() {
     // A `match:` mixing `nil`, a primitive `Type` arm, and a wildcard must
     // still compile into one dispatch chain (verifies the

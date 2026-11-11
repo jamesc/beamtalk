@@ -85,8 +85,14 @@ register_test_classes() ->
 
 restart_class(ClassName, ClassInfo) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined -> ok;
-        Pid -> catch gen_server:stop(Pid, normal, 5000)
+        undefined ->
+            ok;
+        Pid ->
+            try
+                gen_server:stop(Pid, normal, 5000)
+            catch
+                _:_ -> ok
+            end
     end,
     ensure_class_started(ClassName, ClassInfo).
 

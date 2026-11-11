@@ -108,8 +108,14 @@ teardown(#{
         false -> ok
     end,
     case RestoreMonitor of
-        true -> catch supervisor:restart_child(beamtalk_runtime_sup, beamtalk_class_monitor);
-        false -> ok
+        true ->
+            try
+                supervisor:restart_child(beamtalk_runtime_sup, beamtalk_class_monitor)
+            catch
+                _:_ -> ok
+            end;
+        false ->
+            ok
     end,
     ok.
 
@@ -408,7 +414,11 @@ fallback_without_sup_test_() ->
             end,
             case RestoreSup of
                 true ->
-                    catch supervisor:restart_child(beamtalk_runtime_sup, beamtalk_class_sup);
+                    try
+                        supervisor:restart_child(beamtalk_runtime_sup, beamtalk_class_sup)
+                    catch
+                        _:_ -> ok
+                    end;
                 false ->
                     ok
             end

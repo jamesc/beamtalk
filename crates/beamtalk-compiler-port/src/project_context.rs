@@ -55,9 +55,10 @@
 //! dependency's resolved manifest, and the build's live spec extraction (the
 //! tiered cache's cold path). A project that was never built — no
 //! `_build/type_cache/` — gets only its `stubs/` tier, like the port's
-//! completion path and the LSP's cache replay get none. Likewise out of
-//! scope: path dependencies (their sources live outside `_build/deps/`; see
-//! BT-4326).
+//! completion path and the LSP's cache replay get none. Path
+//! dependencies are in scope (BT-4326): their sources live at the declared
+//! path, outside `_build/deps/`, found by walking manifests like the build's
+//! discovery, and dependencies merge in the build's compilation order.
 //!
 //! The editor `diagnostics/3` entry point resolves the same scope as
 //! `compile` when its request carries the buffer's `source_path`
@@ -67,15 +68,17 @@
 //! keystroke path the memo above means a keystroke re-stats the project but
 //! never re-parses it unless a fingerprint changed.
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use beamtalk_core::compilation::dep_graph::{
     DEP_GRAPH_SNAPSHOT_FILE, DepGraphSnapshotError, declared_dependency_names_from_manifest_toml,
-    read_dep_graph_snapshot, resolved_dependency_names,
+    declared_path_dependencies_from_manifest_toml, read_dep_graph_snapshot,
+    resolved_dependency_names,
 };
+use beamtalk_core::compilation::dep_order::topological_order;
 use beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable;
 use beamtalk_core::compilation::ffi_stubs::{PROJECT_STUBS_DIR, load_project_stub_registry};
 use beamtalk_core::compilation::load_diagnostics_table_for_root;
@@ -401,10 +404,9 @@ fn registry_fingerprint(root: &Utf8Path, cache_dir: &Path) -> Vec<Fingerprint> {
     entries
 }
 
-/// The project's resolved dependencies with unpacked sources under
-/// `_build/deps/` (hex/git deps land there with their sources, which is what
-/// the build's `build_dep_class_index` scans for their aliases), each with
-/// its package name.
+/// The project's resolved dependencies with a source root on disk — unpacked
+/// under `_build/deps/` (hex/git) or at the declared path (path dependencies,
+/// BT-4326) — each with its package name, in the build's compilation order.
 ///
 /// The set is the build's resolved graph (`_build/deps/.dep-graph.json`)
 /// pruned to what `manifest_toml`'s `[dependencies]` still declares
@@ -422,25 +424,124 @@ fn registry_fingerprint(root: &Utf8Path, cache_dir: &Path) -> Vec<Fingerprint> {
 fn dependency_roots(root: &Utf8Path, manifest_toml: &str) -> Vec<(Utf8PathBuf, String)> {
     let deps_dir = root.join("_build/deps");
     let declared = declared_dependency_names_from_manifest_toml(manifest_toml);
-    let names = match read_dep_graph_snapshot(deps_dir.join(DEP_GRAPH_SNAPSHOT_FILE).as_std_path())
-    {
-        Ok(snapshot) => resolved_dependency_names(&snapshot, &declared),
-        Err(reason) => {
-            if reason != DepGraphSnapshotError::Missing {
-                tracing::debug!(
-                    root = %root,
-                    %reason,
-                    "dependency-graph snapshot unusable; falling back to _build/deps/ checkouts"
-                );
+    let (names, graph_is_resolved) =
+        match read_dep_graph_snapshot(deps_dir.join(DEP_GRAPH_SNAPSHOT_FILE).as_std_path()) {
+            Ok(snapshot) => (resolved_dependency_names(&snapshot, &declared), true),
+            Err(reason) => {
+                if reason != DepGraphSnapshotError::Missing {
+                    tracing::debug!(
+                        root = %root,
+                        %reason,
+                        "dependency-graph snapshot unusable; falling back to _build/deps/ checkouts"
+                    );
+                }
+                (
+                    unresolved_graph_dependency_names(&deps_dir, declared),
+                    false,
+                )
             }
-            unresolved_graph_dependency_names(&deps_dir, declared)
+        };
+    locate_dependencies(root, manifest_toml, &deps_dir, &names, graph_is_resolved)
+}
+
+/// A resolved dependency's on-disk root and the names its own manifest
+/// declares.
+struct LocatedDependency {
+    root: Utf8PathBuf,
+    declared: Vec<String>,
+}
+
+/// Find each of `names` on disk and order them as the build does.
+///
+/// Where a dependency lives depends on how its *declaring* manifest asks for
+/// it (BT-4326): a path dependency's sources stay at the declared path,
+/// relative to that manifest's directory (the build's
+/// `canonicalize_dep_path`); hex/git/registry dependencies are unpacked to
+/// `_build/deps/<name>/`. So this walks manifests from the project's, the way
+/// the build's discovery does, instead of guessing a layout. A name no
+/// manifest reaches (the unusable-snapshot fallback listing) is looked for
+/// under `_build/deps/`. With a usable snapshot (`graph_is_resolved`) only
+/// `names` are located; without one every dependency a manifest reaches is.
+///
+/// The result is in the build's compilation order
+/// ([`topological_order`]: leaves first, ties by name) — the order
+/// `dep_ctx.resolved_deps` carries, so a same-named alias declared by two
+/// dependencies has the same first-wins winner here as in the build.
+fn locate_dependencies(
+    root: &Utf8Path,
+    manifest_toml: &str,
+    deps_dir: &Utf8Path,
+    names: &BTreeSet<String>,
+    graph_is_resolved: bool,
+) -> Vec<(Utf8PathBuf, String)> {
+    let mut located: BTreeMap<String, LocatedDependency> = BTreeMap::new();
+    let mut queue = VecDeque::from([(root.to_path_buf(), manifest_toml.to_string())]);
+    while let Some((dir, toml)) = queue.pop_front() {
+        let paths: HashMap<String, String> = declared_path_dependencies_from_manifest_toml(&toml)
+            .into_iter()
+            .collect();
+        for name in declared_dependency_names_from_manifest_toml(&toml) {
+            // Without a usable snapshot `names` is only a guess (declared
+            // plus checkouts), so every dependency a manifest reaches counts:
+            // a transitive path dependency has no checkout to list.
+            if (graph_is_resolved && !names.contains(&name)) || located.contains_key(&name) {
+                continue;
+            }
+            let dep_root = match paths.get(&name) {
+                Some(path) => std::fs::canonicalize(dir.join(path).as_std_path())
+                    .ok()
+                    .and_then(|p| Utf8PathBuf::from_path_buf(p).ok()),
+                None => Some(deps_dir.join(&name)),
+            };
+            if let Some(dep) = dep_root.and_then(read_dependency) {
+                queue.push_back((dep.root.clone(), dep.manifest.clone()));
+                located.insert(name, dep.located);
+            }
         }
-    };
-    names
+    }
+    for name in names {
+        if !located.contains_key(name)
+            && let Some(dep) = read_dependency(deps_dir.join(name))
+        {
+            located.insert(name.clone(), dep.located);
+        }
+    }
+
+    let edges: BTreeMap<String, Vec<String>> = located
+        .iter()
+        .map(|(name, dep)| (name.clone(), dep.declared.clone()))
+        .collect();
+    // A cycle is a build error, so a project with one never has a snapshot
+    // worth ordering; fall back to name order rather than failing a compile.
+    let order = topological_order(&edges, "")
+        .unwrap_or_else(|_| located.keys().cloned().collect::<Vec<_>>());
+    order
         .into_iter()
-        .map(|name| (deps_dir.join(&name), name))
-        .filter(|(dep_root, _)| dep_root.join("beamtalk.toml").is_file())
+        .filter_map(|name| located.remove(&name).map(|dep| (dep.root, name)))
         .collect()
+}
+
+/// A dependency checkout read from disk: its manifest text plus its
+/// [`LocatedDependency`] record.
+struct ReadDependency {
+    root: Utf8PathBuf,
+    manifest: String,
+    located: LocatedDependency,
+}
+
+/// Read `dep_root`'s manifest, or `None` when it has none (a dependency with
+/// no manifest cannot be built, so it contributes nothing).
+fn read_dependency(dep_root: Utf8PathBuf) -> Option<ReadDependency> {
+    let manifest = std::fs::read_to_string(dep_root.join("beamtalk.toml").as_std_path()).ok()?;
+    let declared = declared_dependency_names_from_manifest_toml(&manifest);
+    Some(ReadDependency {
+        root: dep_root.clone(),
+        manifest,
+        located: LocatedDependency {
+            root: dep_root,
+            declared,
+        },
+    })
 }
 
 /// The dependency set when there is no usable resolved graph: the directly

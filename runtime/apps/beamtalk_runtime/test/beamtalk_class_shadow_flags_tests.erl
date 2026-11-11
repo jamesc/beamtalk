@@ -370,7 +370,11 @@ start_static_class(Name, Superclass, ClassVars) ->
     Pid.
 
 stop_static_class(Pid) ->
-    catch gen_server:stop(Pid, normal, 5000),
+    try
+        gen_server:stop(Pid, normal, 5000)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 %% A class whose class methods (`testSelf`) live in `Module`.

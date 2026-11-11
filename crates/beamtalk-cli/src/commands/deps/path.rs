@@ -1000,10 +1000,21 @@ impl DepIndexScan {
             mut class_infos,
             trait_users,
             metadata,
-            extensions,
+            mut extensions,
             dep_name,
         } = self;
         trait_users.flatten(&mut class_infos, extra_protocol_defs, Some(&dep_name));
+        // BT-4615: after flattening, which replaces trait-users' infos.
+        let mut metadata = metadata;
+        beamtalk_cli::dependency_extensions::expand_dependency_class_aliases(
+            &metadata.alias_infos,
+            &mut class_infos,
+            &mut metadata.protocol_infos,
+        );
+        beamtalk_cli::dependency_extensions::expand_dependency_extension_aliases(
+            &metadata.alias_infos,
+            &mut extensions,
+        );
         (
             class_module_index,
             class_infos,
@@ -1583,6 +1594,86 @@ dep_utils = { path = "dep_utils" }"#,
                 .map(|m| &m.selector)
                 .collect::<Vec<_>>()
         );
+    }
+
+    /// BT-4615: a dependency's own `internal type` aliases are expanded out of
+    /// the signatures it exports — class methods and extension methods alike —
+    /// because the consumer never has them in its alias scope. Public aliases
+    /// and classes stay as names.
+    #[test]
+    fn build_dep_class_index_expands_internal_aliases_in_signatures() {
+        let temp = TempDir::new().unwrap();
+        let dep_dir = temp.path().join("dep_secret");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "dep_secret", "0.1.0", "");
+        write_source(
+            &dep_dir,
+            "secret.bt",
+            "type Status = #ok | #error\n\
+             internal type Secret = Integer\n\
+             internal type Chain = Secret\n\
+             internal type Loop = Loop\n\n\
+             Protocol define: Tagged\n  \
+             name -> String\n\n  \
+             tag -> Secret => 1\n\n\
+             Object subclass: Vault\n  \
+             uses: Tagged\n  \
+             name -> String => \"v\"\n  \
+             thing -> Secret => 1\n  \
+             many: n :: Secret -> List(Secret) => #()\n  \
+             maybe -> Secret | Nil => nil\n  \
+             chained -> Chain => 1\n  \
+             looped -> Loop => nil\n  \
+             status -> Status => #ok\n\n\
+             Object >> secretExt -> Secret => 1\n\
+             Object >> secretArg: s :: List(Secret) -> Status => #ok\n",
+        );
+
+        let dep_root = Utf8PathBuf::from_path_buf(dep_dir).unwrap();
+        let (_, class_infos, _, _, _, _, extensions) =
+            build_dep_class_index(&dep_root, "dep_secret", &[]).unwrap();
+
+        let vault = class_infos
+            .iter()
+            .find(|c| c.name.as_str() == "Vault")
+            .expect("Vault class info");
+        let ret = |sel: &str| {
+            vault
+                .methods
+                .iter()
+                .find(|m| m.selector.as_str() == sel)
+                .and_then(|m| m.return_type.as_ref())
+                .map_or_else(|| panic!("no return type for {sel}"), ToString::to_string)
+        };
+        assert_eq!(ret("thing"), "Integer");
+        assert_eq!(ret("tag"), "Integer", "a flattened provision is expanded");
+        assert_eq!(ret("many:"), "List(Integer)");
+        assert_eq!(ret("maybe"), "Integer | Nil");
+        assert_eq!(ret("chained"), "Integer");
+        assert_eq!(ret("looped"), "Loop", "a cycle terminates, left as a name");
+        assert_eq!(ret("status"), "Status", "public aliases stay as names");
+        let many = vault
+            .methods
+            .iter()
+            .find(|m| m.selector == "many:")
+            .unwrap();
+        assert_eq!(many.param_types[0].as_ref().unwrap().to_string(), "Integer");
+
+        let ext = |sel: &str| {
+            extensions
+                .index()
+                .entries()
+                .iter()
+                .find(|(k, _)| k.selector.as_str() == sel)
+                .map_or_else(
+                    || panic!("no extension {sel}"),
+                    |(_, locs)| locs[0].type_info.clone(),
+                )
+        };
+        assert_eq!(ext("secretExt").return_type.as_deref(), Some("Integer"));
+        let arg = ext("secretArg:");
+        assert_eq!(arg.param_types[0].as_deref(), Some("List(Integer)"));
+        assert_eq!(arg.return_type.as_deref(), Some("Status"));
     }
 
     /// `build_dep_class_index` must extract a dependency's protocol

@@ -168,6 +168,7 @@ fn bt_2020_result_is_ok_if_true_if_false_preserves_my_val() {
         //   picked xyzzyNonsense
         let a_method = MethodDefinition {
             pipeline_sends: crate::ast::PipelineSends::default(),
+            literal_comments: crate::ast::LiteralComments::default(),
             selector: MessageSelector::Keyword(vec![KeywordPart::new("a:", span())]),
             parameters: vec![ParameterDefinition::with_type(
                 ident("r"),

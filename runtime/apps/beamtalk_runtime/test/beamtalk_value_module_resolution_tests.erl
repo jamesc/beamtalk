@@ -598,7 +598,11 @@ start_class(Name, Module, Superclass, Selectors) ->
     Pid.
 
 stop_class(Pid) ->
-    catch gen_server:stop(Pid, normal, 5000),
+    try
+        gen_server:stop(Pid, normal, 5000)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 %% The calling process's tagged_class_dispatch/1 memo for Class (BT-4623).
@@ -653,7 +657,18 @@ calls_during(Patterns, ExtraPids, Fun) ->
         receive
             go -> ok
         end,
-        Parent ! {result, self(), catch Fun()}
+        Parent !
+            {
+                result,
+                self(),
+                try
+                    Fun()
+                catch
+                    throw:BtThrown -> BtThrown;
+                    error:BtReason:BtStack -> {'EXIT', {BtReason, BtStack}};
+                    exit:BtExitReason -> {'EXIT', BtExitReason}
+                end
+            }
     end),
     lists:foreach(fun(P) -> erlang:trace_pattern(P, true, [local]) end, Patterns),
     %% Always remove the local trace patterns, even on a timeout, so they never

@@ -991,3 +991,136 @@ fn unsaved_buffer_alias_deletion_matches_load_after_save() {
         "editor (before save) and load (after save) must agree"
     );
 }
+
+/// BT-4326: lays out a project with a *path* dependency `pathdep` (sources
+/// outside `_build/`) declaring `type PathAddr`, plus a project file using
+/// it under `type = "error"`. Returns the project dir and that file.
+fn write_path_dep_project(extra_deps: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().expect("tempdir for path-dep project");
+    let root = dir.path().join("app");
+    let dep = dir.path().join("pathdep");
+    fs::create_dir_all(root.join("src")).expect("app src/");
+    fs::create_dir_all(dep.join("src")).expect("dep src/");
+    fs::write(
+        root.join("beamtalk.toml"),
+        format!("[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\npathdep = {{ path = \"../pathdep\" }}\n{extra_deps}\n[diagnostics]\ntype = \"error\"\ntype-annotation = \"error\"\n"),
+    )
+    .expect("app manifest");
+    fs::write(
+        dep.join("beamtalk.toml"),
+        "[package]\nname = \"pathdep\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("dep manifest");
+    fs::write(
+        dep.join("src/path_types.bt"),
+        "// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\n\ntype PathAddr = #a | #b\n\nValue subclass: PathTypes\n  one -> Integer => 1\n",
+    )
+    .expect("dep source");
+    let file = root.join("src/uses_path.bt");
+    fs::write(
+        &file,
+        "// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\n\ntyped Value subclass: UsesPath\n  field: addr :: PathAddr = #a\n",
+    )
+    .expect("app source");
+    (dir, file)
+}
+
+/// BT-4326: a path dependency's `type` aliases are in scope for the port,
+/// with or without a dependency-graph snapshot.
+#[test]
+fn path_dependency_aliases_resolve() {
+    let (dir, file) = write_path_dep_project("");
+    let source = fs::read_to_string(&file).expect("read app file");
+    let response = handle_compile(&load_like_compile_request(&source, &file));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "path dependency alias must resolve without a snapshot: {response:?}"
+    );
+
+    write_dep_graph_snapshot(&dir.path().join("app"), &["pathdep"]);
+    let response = handle_compile(&load_like_compile_request(&source, &file));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "path dependency alias must resolve with a snapshot: {response:?}"
+    );
+}
+
+/// BT-4326: a path dependency's own path dependency (relative to *its*
+/// manifest) resolves through the manifest walk.
+#[test]
+fn transitive_path_dependency_aliases_resolve() {
+    let (dir, file) = write_path_dep_project("");
+    let leaf = dir.path().join("leafdep");
+    fs::create_dir_all(leaf.join("src")).expect("leaf src/");
+    fs::write(
+        leaf.join("beamtalk.toml"),
+        "[package]\nname = \"leafdep\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("leaf manifest");
+    fs::write(
+        leaf.join("src/leaf_types.bt"),
+        "// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\n\ntype LeafAddr = #x | #y\n",
+    )
+    .expect("leaf source");
+    fs::write(
+        dir.path().join("pathdep/beamtalk.toml"),
+        "[package]\nname = \"pathdep\"\nversion = \"0.1.0\"\n\n[dependencies]\nleafdep = { path = \"../leafdep\" }\n",
+    )
+    .expect("dep manifest with leaf");
+    fs::write(
+        &file,
+        "// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\n\ntyped Value subclass: UsesLeaf\n  field: addr :: LeafAddr = #x\n",
+    )
+    .expect("app source");
+    let source = fs::read_to_string(&file).expect("read app file");
+    let response = handle_compile(&load_like_compile_request(&source, &file));
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "transitive path dependency alias must resolve: {response:?}"
+    );
+}
+
+/// BT-4326 ordering: two dependencies declaring the same alias name collide
+/// first-wins in the build's compilation order (leaves first, ties by name
+/// largest-first), so the port must pick the same winner. `pathdep` and
+/// `zzdep` are independent leaves: the build compiles `zzdep` first, so its
+/// `Clash = Integer` beats `pathdep`'s `Clash = String`, whatever the
+/// sorted-dirname order says.
+#[test]
+fn dependency_merge_order_follows_build_compilation_order() {
+    let (dir, file) = write_path_dep_project("zzdep = { path = \"../zzdep\" }\n");
+    let dep_a = dir.path().join("pathdep");
+    let dep_z = dir.path().join("zzdep");
+    fs::create_dir_all(dep_z.join("src")).expect("zz src/");
+    fs::write(
+        dep_z.join("beamtalk.toml"),
+        "[package]\nname = \"zzdep\"\nversion = \"0.1.0\"\n",
+    )
+    .expect("zz manifest");
+    let hdr = "// Copyright 2026 James Casey\n// SPDX-License-Identifier: Apache-2.0\n\n";
+    fs::write(
+        dep_z.join("src/z.bt"),
+        format!("{hdr}type Clash = Integer\n"),
+    )
+    .expect("zz src");
+    fs::write(
+        dep_a.join("src/clash.bt"),
+        format!("{hdr}type Clash = String\n"),
+    )
+    .expect("a src");
+    fs::write(
+        &file,
+        format!("{hdr}typed Value subclass: UsesClash\n  field: n :: Clash = 1\n"),
+    )
+    .expect("app src");
+    let source = fs::read_to_string(&file).expect("read app file");
+    let response = handle_compile(&load_like_compile_request(&source, &file));
+    let messages = error_diagnostic_messages(&response);
+    assert!(
+        !messages.iter().any(|m| m.contains("declared as Clash")),
+        "zzdep's Clash = Integer must win (build order), got: {response:?}"
+    );
+}

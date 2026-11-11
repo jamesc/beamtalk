@@ -1149,7 +1149,13 @@ has_frame_with(Frames, K, V) ->
     lists:any(
         fun
             ({text, Bin}) ->
-                case catch json:decode(Bin) of
+                case
+                    try
+                        json:decode(Bin)
+                    catch
+                        _:_ -> error
+                    end
+                of
                     M when is_map(M) -> maps:get(K, M, undefined) =:= V;
                     _ -> false
                 end;
@@ -1166,7 +1172,13 @@ first_frame_with(Frames, K, V) ->
     Decoded = lists:filtermap(
         fun
             ({text, Bin}) ->
-                case catch json:decode(Bin) of
+                case
+                    try
+                        json:decode(Bin)
+                    catch
+                        _:_ -> error
+                    end
+                of
                     M when is_map(M) -> {true, M};
                     _ -> false
                 end;

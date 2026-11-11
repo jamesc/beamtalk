@@ -883,7 +883,13 @@ clear_xref_tables() ->
 %% this so they don't fail spuriously.
 compiler_walker_available() ->
     erlang:function_exported(beamtalk_compiler, find_all_sends_in_source, 1) andalso
-        case catch beamtalk_compiler:find_all_sends_in_source(<<"x => self foo">>) of
+        case
+            try
+                beamtalk_compiler:find_all_sends_in_source(<<"x => self foo">>)
+            catch
+                _:_ -> error
+            end
+        of
             {ok, [_ | _]} -> true;
             _ -> false
         end.

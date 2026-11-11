@@ -132,7 +132,7 @@ fn nlr_arm_result(val_var: &str, state_var: &str, boundary: &NlrBoundary) -> Doc
                 NlrArmShape::CarriedReply => leaf::var(state_var.to_string()),
                 _ => actor_state_call(
                     actor_state_helper::COMMIT,
-                    vec![leaf::var("Self"), leaf::var(state_var.to_string())],
+                    [leaf::var("Self"), leaf::var(state_var.to_string())],
                 ),
             };
             docvec![
@@ -338,7 +338,7 @@ impl CoreErlangGenerator {
                 ]
             }
             NlrSlot::ClassMethod => leaf::atom("nil"),
-            NlrSlot::Repl => leaf::var(self.current_state_var()),
+            NlrSlot::Repl => self.repl_nlr_state_doc(),
             // ADR 0146 (BT-4536): the state its reads see. At home it is the
             // cell, which the method's commit reads anyway; away it is the
             // creation-time capture, which an away `super_send/5`'s

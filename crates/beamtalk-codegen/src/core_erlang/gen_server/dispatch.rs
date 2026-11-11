@@ -796,7 +796,7 @@ impl CoreErlangGenerator {
     fn call_foreign_doc(function: &str, arity: i64, args: Document<'static>) -> Document<'static> {
         actor_state_call(
             actor_state_helper::CALL_FOREIGN,
-            vec![
+            [
                 leaf::var("State"),
                 docvec![
                     "call 'erlang':'make_fun'('beamtalk_dispatch', ",

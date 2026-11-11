@@ -386,3 +386,31 @@ fn same_file_extension_guard_is_not_recorded() {
     assert!(rewrite.conditions.is_empty());
     assert!(rewrite.boolean_comparisons.is_empty());
 }
+
+#[test]
+fn and_or_guard_of_booleans_has_no_frame() {
+    // BT-4496: an inlined `and:`/`or:` of Booleans by construction (here
+    // `=:=`, `==` and typed comparisons) is a Boolean, so every guard shape
+    // on it compiles as a direct return with no helper.
+    let code = codegen(
+        "Value subclass: A\n\
+         \x20 field: n :: Integer = 0\n\
+         \x20 clamp: x :: Integer =>\n\
+         \x20   (x < 0 or: [x > 100]) ifTrue: [^self withN: 0]\n\
+         \x20   (x =:= 5 and: [x == 5]) ifTrue: [^self withN: 5] ifFalse: [self withN: x]\n",
+    );
+    assert_no_nlr_frame(&code);
+    assert!(!code.contains("beamtalk_guard_return"), "{code}");
+}
+
+#[test]
+fn and_guard_with_non_boolean_operand_keeps_its_frame() {
+    let code = codegen(
+        "Value subclass: A\n\
+         \x20 field: n :: Integer = 0\n\
+         \x20 pick: x =>\n\
+         \x20   (x =:= 0 and: [x foo]) ifTrue: [^self withN: 0]\n\
+         \x20   self withN: 1\n",
+    );
+    assert!(code.contains("make_ref"), "{code}");
+}

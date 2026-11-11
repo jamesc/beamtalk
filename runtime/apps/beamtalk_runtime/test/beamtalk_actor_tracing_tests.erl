@@ -1485,7 +1485,11 @@ dispatch_events_off_still_record_aggregates_once_test_() ->
                     ?assertEqual(1, stat(<<"errors">>, Thrown))
                 after
                     gen_server:stop(Pid),
-                    catch gen_server:stop(Thrower),
+                    try
+                        gen_server:stop(Thrower)
+                    catch
+                        _:_ -> ok
+                    end,
                     beamtalk_object_instances:unregister('ThrowingActor', Thrower),
                     [telemetry:detach(H) || H <- Handlers]
                 end

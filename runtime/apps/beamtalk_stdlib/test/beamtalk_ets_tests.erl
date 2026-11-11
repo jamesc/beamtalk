@@ -289,7 +289,14 @@ newOrExisting_concurrent_creators_test() ->
     try
         Pids = [
             spawn_link(fun() ->
-                Result = (catch beamtalk_ets:'newOrExisting:type:'(Name, set)),
+                Result =
+                    try
+                        beamtalk_ets:'newOrExisting:type:'(Name, set)
+                    catch
+                        throw:BtThrown -> BtThrown;
+                        error:BtReason:BtStack -> {'EXIT', {BtReason, BtStack}};
+                        exit:BtExitReason -> {'EXIT', BtExitReason}
+                    end,
                 Self ! {done, self(), Result},
                 %% Keep process alive until test is done (table owner must stay alive)
                 receive
@@ -818,7 +825,12 @@ bt3831_update_contention_gives_up_test() ->
     end).
 
 bt3831_bag_rejected_test() ->
-    (catch ets:delete(bt3831_bag)),
+    _ =
+        try
+            ets:delete(bt3831_bag)
+        catch
+            _:_ -> ok
+        end,
     T = beamtalk_ets:'new:type:'(bt3831_bag, bag),
     try
         ?assertError(
@@ -848,7 +860,12 @@ bt3831_block_badarg_writes_nothing_test() ->
     end).
 
 bt3831_update_ordered_set_float_key_test() ->
-    (catch ets:delete(bt3831_ord)),
+    _ =
+        try
+            ets:delete(bt3831_ord)
+        catch
+            _:_ -> ok
+        end,
     T = beamtalk_ets:'new:type:'(bt3831_ord, orderedSet),
     try
         beamtalk_ets:insert(T, 1, 10),
@@ -1079,7 +1096,11 @@ with_named_table_cleanup(Name, Body) ->
     try
         Body()
     after
-        catch ets:delete(Name)
+        try
+            ets:delete(Name)
+        catch
+            _:_ -> ok
+        end
     end.
 
 bt4604_delete_named_public_table_by_non_owner_succeeds_test() ->

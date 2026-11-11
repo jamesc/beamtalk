@@ -321,9 +321,8 @@ pub(crate) fn is_concrete_leaf_class(class_name: &str, hierarchy: &ClassHierarch
 /// `Array`, `List`, `Map`, `Constructor` keywords) — a `Pattern::Type` can
 /// appear anywhere a sub-pattern can, not just as an arm's top-level pattern.
 ///
-/// This is purely a semantic-analysis-stage check — `Pattern::Type` has no
-/// codegen yet (that lands with bindings/narrowing codegen), so there is
-/// nothing to gate at codegen time. Three checks, in order:
+/// This is a semantic-analysis-stage check; codegen is
+/// `generate_type_pattern`. Three checks, in order:
 ///
 /// - **`Character`** is never accepted, known or not: it shares `Integer`'s
 ///   runtime representation with no distinct tag (ADR 0107 §Phase A scope),
@@ -338,11 +337,11 @@ pub(crate) fn is_concrete_leaf_class(class_name: &str, hierarchy: &ClassHierarch
 ///   [`super::structural_validators::check_unresolved_classes`]: without
 ///   cross-file metadata loaded, any class reference might be a
 ///   not-yet-seen cross-file dependency, so the check stays silent.
-/// - **Non-leaf class** (has one or more subclasses) is a compile `Error` —
-///   Phase A only supports concrete/leaf classes; matching on a class with
-///   subclasses needs either compile-time subclass enumeration or a wrapped
-///   runtime dispatch call, deferred to ADR 0107 Phase B. Classes in
-///   [`PHASE_A_PRIMITIVE_CLASSES`] are exempt from this check (see its doc).
+/// - **Non-leaf class** (has one or more subclasses) is accepted (BT-4319,
+///   ADR 0107 Phase B): codegen emits a runtime `isKindOf:`-equivalent test.
+///   An **abstract** class is an `Error` only when no subclass is visible,
+///   since then no live instance can carry its tag. Classes in
+///   [`PHASE_A_PRIMITIVE_CLASSES`] skip both checks (see its doc).
 pub(crate) fn check_type_pattern_classes(
     module: &Module,
     hierarchy: &ClassHierarchy,
@@ -512,19 +511,27 @@ fn validate_type_pattern_class(
     // Pid}` at runtime (`beamtalk_supervisor.erl`) — a third shape distinct
     // from both the tagged-map (`Value`/`Object`) and actor-tuple
     // (`'beamtalk_object'`) strategies. `generate_type_pattern`'s
-    // `wrap_supervisor_class_tag_test` handles this shape directly, so
-    // concrete subclasses fall through to the ordinary leaf-class check
-    // below rather than being rejected outright. The abstract bases themselves
-    // (`Supervisor`, `DynamicSupervisor`) are still rejected below: no live
-    // instance ever carries the abstract class's own tag.
+    // `wrap_supervisor_class_tag_test` handles this shape directly for a
+    // concrete leaf subclass. The abstract bases themselves (`Supervisor`,
+    // `DynamicSupervisor`) are accepted below only when a subclass is visible
+    // (they then use the runtime kind-of test); with none, they are rejected
+    // since no live instance ever carries the abstract class's own tag.
 
-    // Abstract class — no live instance is ever tagged with an abstract
-    // class's own name, so this must be rejected
-    // unconditionally rather than relying on the non-leaf check below: an
-    // abstract class with zero subclasses *visible in this compilation
-    // unit* (e.g. stdlib's own `Supervisor`/`DynamicSupervisor`, which have
-    // no concrete `subclass:` in `src/`) would otherwise pass the leaf
-    // check and silently generate a class-tag test that can never match.
+    // BT-4319 (ADR 0107 Phase B): a class with subclasses is accepted. The
+    // arm compiles to a runtime `isKindOf:`-equivalent test
+    // (`generate_type_pattern`'s `wrap_kind_of_test`), so subclass instances
+    // match and the answer tracks the live hierarchy (open world, hot reload).
+    // This also covers abstract bases such as `Supervisor` and an abstract
+    // `HTTPError`: their subclasses' instances match.
+    if !hierarchy.direct_subclasses(class_name).is_empty() {
+        return;
+    }
+
+    // Abstract class with no visible subclass — no live instance is ever
+    // tagged with an abstract class's own name, so this is rejected rather
+    // than silently generating a class-tag test that can never match (stdlib's
+    // own `Supervisor`/`DynamicSupervisor` have no concrete `subclass:` in
+    // `src/`).
     if hierarchy.is_abstract(class_name) {
         diagnostics.push(
             Diagnostic::error(
@@ -533,25 +540,6 @@ fn validate_type_pattern_class(
             )
             .with_hint(
                 "Match on a concrete subclass instead, or use `isKindOf:` guard clauses."
-                    .to_string(),
-            )
-            .with_category(DiagnosticCategory::Type),
-        );
-        return;
-    }
-
-    // Non-leaf class — Phase A only supports concrete/leaf classes.
-    if !hierarchy.direct_subclasses(class_name).is_empty() {
-        diagnostics.push(
-            Diagnostic::error(
-                format!(
-                    "`{class_name}` has subclasses; type patterns are not yet supported \
-                     for non-leaf classes — see ADR 0107 Phase B"
-                ),
-                class.span,
-            )
-            .with_hint(
-                "Match on the concrete subclasses instead, or use `isKindOf:` guard clauses."
                     .to_string(),
             )
             .with_category(DiagnosticCategory::Type),
@@ -1002,23 +990,34 @@ mod tests {
         );
     }
 
-    /// A class with subclasses → compile error (ADR 0107 Phase A leaf-only
-    /// restriction).
+    /// A class with subclasses is accepted (BT-4319, ADR 0107 Phase B): the
+    /// arm compiles to a subclass-aware runtime test.
     #[test]
-    fn type_pattern_non_leaf_class_is_error() {
+    fn type_pattern_non_leaf_class_is_accepted() {
         let (module, hierarchy) = hierarchy_for(
             "Object subclass: Shape\nShape subclass: Circle\nx match: [s :: Shape -> s; _ -> 0]",
         );
         let mut diagnostics = Vec::new();
         check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);
-        assert_eq!(
-            diagnostics.len(),
-            1,
-            "Expected 1 error for non-leaf class, got: {diagnostics:?}"
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for a non-leaf class, got: {diagnostics:?}"
         );
-        assert_eq!(diagnostics[0].severity, Severity::Error);
-        assert!(diagnostics[0].message.contains("Shape"));
-        assert!(diagnostics[0].message.contains("subclasses"));
+    }
+
+    /// An abstract class that has subclasses is accepted too: their
+    /// instances match (`Error subclass: HTTPError` style hierarchies).
+    #[test]
+    fn type_pattern_abstract_non_leaf_class_is_accepted() {
+        let (module, hierarchy) = hierarchy_for(
+            "abstract Object subclass: Shape\nShape subclass: Circle\nx match: [s :: Shape -> s; _ -> 0]",
+        );
+        let mut diagnostics = Vec::new();
+        check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);
+        assert!(
+            diagnostics.is_empty(),
+            "Expected no diagnostics for an abstract non-leaf class, got: {diagnostics:?}"
+        );
     }
 
     /// A leaf class (no subclasses) → no diagnostics.
@@ -1154,17 +1153,14 @@ mod tests {
     /// accept a `::` type pattern at the grammar level).
     #[test]
     fn type_pattern_nested_in_array_is_validated() {
-        let (module, hierarchy) = hierarchy_for(
-            "Object subclass: Shape\nShape subclass: Circle\n\
-             x match: [#[s :: Shape, y] -> y; _ -> 0]",
-        );
+        let (module, hierarchy) = hierarchy_for("x match: [#[c :: Character, y] -> y; _ -> 0]");
         let mut diagnostics = Vec::new();
         check_type_pattern_classes(&module, &hierarchy, true, &mut diagnostics);
         assert_eq!(
             diagnostics.len(),
             1,
-            "Expected the nested non-leaf Shape type pattern to be flagged, got: {diagnostics:?}"
+            "Expected the nested Character type pattern to be flagged, got: {diagnostics:?}"
         );
-        assert!(diagnostics[0].message.contains("Shape"));
+        assert!(diagnostics[0].message.contains("Character"));
     }
 }

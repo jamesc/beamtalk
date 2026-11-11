@@ -50,7 +50,11 @@ with_class(Name, ClassVars, Fun) ->
         {ok, Class} = ?API:class_named(Name),
         Fun(Class, Pid)
     after
-        catch gen_server:stop(Pid, normal, 5000)
+        try
+            gen_server:stop(Pid, normal, 5000)
+        catch
+            _:_ -> ok
+        end
     end.
 
 error_kind(Fun) ->
