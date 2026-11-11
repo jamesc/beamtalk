@@ -1,0 +1,52 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BUnit tests for ProcessDictionary (BT-4320)
+
+TestCase subclass: ProcessDictionaryTest
+
+  tearDown =>
+    ProcessDictionary erase: #pdTestA
+    ProcessDictionary erase: #pdTestB
+
+  testMissingKeyAnswersNil =>
+    self assert: (ProcessDictionary at: #pdTestA) equals: nil
+
+  testPutThenAt =>
+    ProcessDictionary at: #pdTestA put: 42
+    self assert: (ProcessDictionary at: #pdTestA) equals: 42
+
+  testPutAnswersNilWhenNew =>
+    self assert: (ProcessDictionary at: #pdTestA put: 1) equals: nil
+
+  testPutAnswersPreviousValue =>
+    ProcessDictionary at: #pdTestA put: 1
+    self assert: (ProcessDictionary at: #pdTestA put: 2) equals: 1
+    self assert: (ProcessDictionary at: #pdTestA) equals: 2
+
+  testAtIfAbsentRunsBlockWhenMissing =>
+    self assert: (ProcessDictionary at: #pdTestA ifAbsent: [7]) equals: 7
+
+  testAtIfAbsentSkipsBlockWhenPresent =>
+    ProcessDictionary at: #pdTestA put: 1
+    self assert: (ProcessDictionary at: #pdTestA ifAbsent: [7]) equals: 1
+
+  testEraseAnswersRemovedValueAndRemoves =>
+    ProcessDictionary at: #pdTestA put: 5
+    self assert: (ProcessDictionary erase: #pdTestA) equals: 5
+    self assert: (ProcessDictionary at: #pdTestA) equals: nil
+
+  testEraseMissingAnswersNil =>
+    self assert: (ProcessDictionary erase: #pdTestB) equals: nil
+
+  testKeysListsStoredKeys =>
+    ProcessDictionary at: #pdTestA put: 1
+    ProcessDictionary at: #pdTestB put: 2
+    keys := ProcessDictionary keys
+    self assert: (keys includes: #pdTestA) equals: true
+    self assert: (keys includes: #pdTestB) equals: true
+
+  testKeysOmitsErasedKey =>
+    ProcessDictionary at: #pdTestA put: 1
+    ProcessDictionary erase: #pdTestA
+    self assert: (ProcessDictionary keys includes: #pdTestA) equals: false

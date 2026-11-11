@@ -88,6 +88,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Parallel"
             | "Pid"
             | "Port"
+            | "ProcessDictionary"
             | "ProcessNavigation"
             | "Program"
             | "ProtoObject"
@@ -3427,6 +3428,47 @@ fn class_info_Port() -> ClassInfo {
 #[allow(clippy::too_many_lines)] // auto-generated: one literal per method
 #[inline(never)] // keep each class's literal temporaries in their own frame
 #[rustfmt::skip] // preserve compact generated layout
+fn class_info_ProcessDictionary() -> ClassInfo {
+    ClassInfo {
+            name: "ProcessDictionary".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            handle_scope: None,
+            surface_incomplete: false,
+            in_caller_new1: false,
+            is_module_less: false,
+            auto_ctors: None,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            state_kinds: HashMap::new(),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: vec![],
+            class_methods: vec![
+                MethodInfo { selector: "at:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ProcessDictionary".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Object")), param_types: vec![Some(DeclaredType::simple("Object"))], doc: Some("Answer the value stored under `key` in the calling process's\ndictionary, or `nil` if there is none.\n\n## Examples\n```beamtalk\nProcessDictionary at: #nothingHere   // => nil\n```".into()), origin: None, primitive: None, constant_value: None },
+                MethodInfo { selector: "at:ifAbsent:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ProcessDictionary".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Object")), param_types: vec![Some(DeclaredType::simple("Object")), Some(DeclaredType::generic("Block", vec![DeclaredType::simple("Object")]))], doc: Some("Answer the value stored under `key` in the calling process's\ndictionary, or the result of evaluating `block` if there is none.\n\n## Examples\n```beamtalk\nProcessDictionary at: #nothingHere ifAbsent: [0]   // => 0\n```".into()), origin: None, primitive: None, constant_value: None },
+                MethodInfo { selector: "at:put:".into(), arity: 2, kind: MethodKind::Primary, defined_in: "ProcessDictionary".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Object")), param_types: vec![Some(DeclaredType::simple("Object")), Some(DeclaredType::simple("Object"))], doc: Some("Store `value` under `key` in the calling process's dictionary.\nAnswers the value previously stored under `key`, or `nil` if there was\nnone.\n\n## Examples\n```beamtalk\nProcessDictionary at: #mark put: 1   // => nil\nProcessDictionary at: #mark put: 2   // => 1\n```".into()), origin: None, primitive: None, constant_value: None },
+                MethodInfo { selector: "erase:".into(), arity: 1, kind: MethodKind::Primary, defined_in: "ProcessDictionary".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Object")), param_types: vec![Some(DeclaredType::simple("Object"))], doc: Some("Remove `key` from the calling process's dictionary. Answers the value\nthat was stored under it, or `nil` if there was none.\n\n## Examples\n```beamtalk\nProcessDictionary at: #mark put: 1\nProcessDictionary erase: #mark       // => 1\nProcessDictionary erase: #mark       // => nil\n```".into()), origin: None, primitive: None, constant_value: None },
+                MethodInfo { selector: "keys".into(), arity: 0, kind: MethodKind::Primary, defined_in: "ProcessDictionary".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::generic("List", vec![DeclaredType::simple("Object")])), param_types: vec![], doc: Some("Answer every key currently in the calling process's dictionary, in no\nparticular order. The runtime stores some entries of its own, so do not\nassume an otherwise-idle process answers `#()`.\n\n## Examples\n```beamtalk\nProcessDictionary at: #mark put: 1\nProcessDictionary keys includes: #mark   // => true\n```".into()), origin: None, primitive: None, constant_value: None },
+            ],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+    }
+}
+
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
 fn class_info_ProcessNavigation() -> ClassInfo {
     ClassInfo {
             name: "ProcessNavigation".into(),
@@ -6069,6 +6111,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     classes.insert("Parallel".into(), class_info_Parallel());
     classes.insert("Pid".into(), class_info_Pid());
     classes.insert("Port".into(), class_info_Port());
+    classes.insert("ProcessDictionary".into(), class_info_ProcessDictionary());
     classes.insert("ProcessNavigation".into(), class_info_ProcessNavigation());
     classes.insert("Program".into(), class_info_Program());
     classes.insert("ProtoObject".into(), class_info_ProtoObject());

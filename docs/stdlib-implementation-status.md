@@ -1019,6 +1019,7 @@ The following stdlib `.bt` classes exist but have not yet received a full method
 | `Pid` | `Object` | `pid.bt` | BEAM process identifier |
 | `Port` | `Object` | `port.bt` | BEAM port wrapper |
 | `ProcessNavigation` | `Value` | `process_navigation.bt` | Live supervision-tree introspection queries (ADR 0092) |
+| `ProcessDictionary` | `Object` | `process_dictionary.bt` | Blessed wrapper for the calling process's dictionary: `at:`, `at:ifAbsent:`, `at:put:`, `erase:`, `keys`; missing keys answer `nil` (BT-4320) |
 | `Program` | `Object` | `program.bt` | The running program/invocation (ADR 0099 §2) |
 | `Protocol` | `Object` | `protocol.bt` | Protocol mirror |
 | `Queue` | `Collection` | `queue.bt` | FIFO queue |
