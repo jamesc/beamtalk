@@ -53,7 +53,7 @@ A survey of literal-key `at:` reads in the stdlib's sibling libraries:
 
 | Repo | Symbol keys | String keys | String keys come from |
 |---|---|---|---|
-| buccaneer | 88 | 0 | – |
+| buccaneer | 89 | 0 | – |
 | beamtalk-http | 11 | 0 | – |
 | catalina | 16 | 0 | – |
 | exdura | 34 | 5 | JSON request bodies |
@@ -106,8 +106,10 @@ type WebSocketOptions = #{
   ?#maxFragmentedMessageSize => Integer,
   ?#validateTextFrames => Boolean,
   ?#compress => Boolean,
-  ?#deflateOptions => DeflateOptions,
-  ?#maxInflateRatio => Integer
+  ?#deflateOptions => Dictionary(Symbol, Object),
+  ?#maxInflateRatio => Integer,
+  ?#primitiveOpsModule => Object,     // reserved, accepted for Bandit parity
+  ?#logProtocolErrors => Object       // reserved, accepted for Bandit parity
 }
 ```
 
@@ -172,12 +174,26 @@ the way to assert it, and it is the same unchecked narrowing cast it is today
   intersection of the two value types and is required if either side
   requires it. A key in only one side is kept if the other side is open; if
   the other side is closed it is dropped when optional and makes the result
-  `Never` when required. The result is open only if both sides are.
+  `Never` when required. A key whose value types intersect to `Never` is
+  dropped if optional on both sides and makes the result `Never` otherwise.
+  The result is open only if both sides are.
 - **Difference and negation.** Stored with the existing `Negation` form and
   not simplified fieldwise in this ADR.
 
 This is what later narrowing builds on: `includesKey: #k` in the true branch
 is `S & #{#k => Object, ...}`, with no new mechanism.
+
+### Diagnostic severity
+
+Shape diagnostics follow ADR 0100: default severity is `Warning`, never a
+build-stopping error unless a project opts in.
+
+| Situation | Default |
+|---|---|
+| `at:` / `at:ifPresent:` / map pattern on a key a closed shape does not name | `Warning` (the read can only fail or never match) |
+| `at:ifAbsent:` on a key a closed shape does not name | `Warning` (the block always runs) |
+| Literal checked against a shape: missing required key, unknown key in a closed shape, wrong value type | `Warning` |
+| Optional key read with `at:`, or unnamed key in an open shape | silent |
 
 ### Shape-aware operations
 
@@ -242,11 +258,13 @@ validateText := ws at: #validateTextFrames ifAbsent: [true]    // Boolean
 maxFrameSize := ws at: #maxFrameSize ifAbsent: [8000000]       // Integer
 ```
 
-The two casts and the comment that excuses them go. At the call site:
+The two casts and the comment that excuses them go. With `ConfigOptions`
+also written as a shape (`?#websocket => WebSocketOptions`, ...), the call
+site is checked too:
 
 ```beamtalk
 Buccaneer start: #{#handler => h, #websocket => #{#maxFramSize => 1}}
-// error: no key #maxFramSize in WebSocketOptions (did you mean #maxFrameSize?)
+// warning: no key #maxFramSize in WebSocketOptions (did you mean #maxFrameSize?)
 ```
 
 The runtime validator stays for value-range checks (positive integers) and
@@ -256,14 +274,14 @@ for callers that build the map dynamically.
 
 ```beamtalk
 type RequestOptions = #{
-  ?#headers => List(Tuple(String, String)),
+  ?#headers => List(List(String)),
   ?#body => String,
   ?#timeout => Integer,
   ?#maxBodyBytes => Integer | #unlimited
 }
 
 HTTPClient request: #patch url: u options: #{#body => "{}", #timeout => "5s"}
-// error: #timeout expects Integer, got String
+// warning: #timeout expects Integer, got String
 ```
 
 **FFI (`uri_string:parse/1`).** The OTP type is:
@@ -283,17 +301,21 @@ diagnostic.
 
 ### REPL
 
-```text
-> type Point = #{#x => Integer, #y => Integer}
-> p :: Point := #{#x => 1, #y => 2}
-> p at: #x
-1
-> p at: #z
-error: no key #z in Point
-> q :: Point := #{#x => 1}
-error: missing required key #y for Point
+```beamtalk
+type Point = #{#x => Integer, #y => Integer}
+// => "Point"
+p :: Point := #{#x => 1, #y => 2}
+// => #{#x => 1, #y => 2}
+p at: #x
+// => 1
+p at: #z
+// warning: no key #z in Point
+// => ERROR: ... key not found (raised at run time, as today)
+q :: Point := #{#x => 1}
+// warning: missing required key #y for Point
 ```
 
+`:help Point` shows the expanded shape, as it does for any alias (ADR 0108).
 Diagnostic wording is illustrative and is settled in implementation.
 
 ### Single sources of truth
@@ -395,6 +417,13 @@ maps write `...`, which also documents that they are pass-through.
 
 ## Alternatives Considered
 
+### Do nothing: keep `Dictionary` and the annotated casts
+BT-4719 is already making unchecked narrowing casts visible, and the runtime
+validators already catch bad options at startup. This costs nothing in the
+checker. Rejected because it leaves each option alias stated three times
+(doc comment, key list, validator), gives no call-site feedback on misspelt
+keys, and leaves FFI maps as bare `Dictionary` with no way to do better.
+
 ### `Boolean?` for optional keys
 `#k => Boolean?` reads as "nullable Boolean" to anyone from Kotlin, Swift or
 TypeScript, which is a different thing from a missing key.
@@ -457,6 +486,12 @@ FFI results.
 
 Phases 3, 4 and 5 depend on 2 and are independent of each other.
 
+**Wire check.** Before phases 5 to 7, phases 1 to 4 must carry one real alias
+end to end: buccaneer's `WebSocketOptions` as a shape, the two casts in
+`pipeline.bt` removed with no new diagnostics, and a misspelt key at a
+`Buccaneer start:` call site reported. If that is noisy or awkward, revisit
+the design before building FFI mapping and tooling on it.
+
 None of this touches state-threading lowering, so `ci:corpus` is not needed.
 
 ### Deferred (each needs its own justification)
@@ -487,7 +522,7 @@ result as `Dictionary`.
 
 ## References
 - Related issues: BT-4725 (this ADR), BT-4719 (narrowing casts), BT-4709 (narrowing gaps), BT-2949 (generic container element checks)
-- Related ADRs: ADR 0025 (gradual typing), ADR 0068 (parametric types), ADR 0075 (FFI type definitions), ADR 0102 (set-theoretic operators), ADR 0108 (type aliases)
+- Related ADRs: ADR 0025 (gradual typing), ADR 0068 (parametric types), ADR 0075 (FFI type definitions), ADR 0100 (open-world diagnostic policy), ADR 0102 (set-theoretic operators), ADR 0108 (type aliases)
 - Code: `stdlib/src/dictionary.bt`, `crates/beamtalk-core/src/semantic_analysis/type_checker/inference/literals.rs`, `runtime/apps/beamtalk_compiler/src/beamtalk_spec_reader.erl`
 - Motivating code: buccaneer `src/pipeline.bt`, `src/buccaneer_config.bt`; beamtalk-http `src/httpclient.bt`
 - Erlang map types: https://www.erlang.org/doc/system/typespec.html#types-and-their-syntax
