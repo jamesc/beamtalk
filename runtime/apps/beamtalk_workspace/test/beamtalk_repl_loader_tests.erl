@@ -1166,6 +1166,11 @@ t_install_method_test_dir_keeps_package(_Proj) ->
 loader_integration_test_() ->
     {setup, fun loader_setup/0, fun loader_teardown/1, fun(Proj) ->
         [
+            %% BT-4472: the first compile after setup pays the cold cost
+            %% (loading `compile`, the compiler port, ...). Absorb it here
+            %% under an explicit timeout so the untouched tests below stay
+            %% on EUnit's 5 s default even under CPU saturation.
+            {"warm up the compiler (BT-4472)", {timeout, 30, fun() -> t_warm_up_compiler() end}},
             {"handle_load/2 success", fun() -> t_handle_load_success(Proj) end},
             {"handle_load/3 prebuilt indexes success", fun() ->
                 t_handle_load_prebuilt_success(Proj)
@@ -1232,9 +1237,12 @@ loader_integration_test_() ->
             {"protocol reload fans out to a loaded user", fun() ->
                 t_protocol_reload_fanout_reaches_user(Proj)
             end},
-            {"protocol reload fan-out carries the load_project batch (BT-4394)", fun() ->
-                t_protocol_reload_fanout_carries_project_batch(Proj)
-            end},
+            %% BT-4472: 1.7-2.0 s idle (three real compiles plus a meck
+            %% proxy), so it passes EUnit's 5 s default under CPU load.
+            {"protocol reload fan-out carries the load_project batch (BT-4394)",
+                {timeout, 30, fun() ->
+                    t_protocol_reload_fanout_carries_project_batch(Proj)
+                end}},
             {"protocol reload rejects and installs nothing when a user fails", fun() ->
                 t_protocol_reload_rejected_names_failing_user(Proj)
             end},
@@ -1319,6 +1327,13 @@ loader_integration_test_() ->
                 end}
         ]
     end}.
+
+t_warm_up_compiler() ->
+    State = beamtalk_repl_state:new(undefined, 0),
+    {ok, [#{name := "LoaderWarmUp"}], _} = beamtalk_repl_loader:handle_load_source(
+        <<"Object subclass: LoaderWarmUp\n  v => 0\n">>, "warmup", State
+    ),
+    ok.
 
 t_handle_load_success(Proj) ->
     Path = write_bt(Proj, "LoaderOne.bt", <<"Object subclass: LoaderOne\n  value => 42\n">>),
