@@ -831,6 +831,9 @@ fn boolean_only_case_with_failing_branch_needs_catch_all() {
         .output()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
         .unwrap_or_default();
+    if otp.is_empty() {
+        println!("Skipping the OTP-28 crash assertion: `erl` not available to read otp_release");
+    }
     if otp == "28" {
         assert!(
             !without,
@@ -873,4 +876,38 @@ fn plain_while_with_failing_condition_branch_compiles() {
         "plain while must carry the case_clause fallback. Got:\n{code}"
     );
     assert_compiles_through_erlc("bt@probe_plain_while_fallback", &code);
+}
+
+#[test]
+fn list_op_predicate_with_failing_branch_compiles() {
+    // BT-4202 review audit: the stateful fold predicate `case`s in `body.rs`
+    // (`select:`, `detect:`, `anySatisfy:`, `allSatisfy:`, `count:`, ...) match
+    // `true`/`false`. An actor block whose tail is a pure-inlined conditional
+    // with a non-boolean arm crashed erlc (`undefined_label`) before they
+    // carried `case_clause_fallback`; see
+    // `boolean_only_case_with_failing_branch_needs_catch_all`.
+    for (name, sel) in [
+        ("select", "select:"),
+        ("reject", "reject:"),
+        ("detect", "detect:"),
+        ("any", "anySatisfy:"),
+        ("all", "allSatisfy:"),
+        ("count", "count:"),
+    ] {
+        // Pure block, and an actor block that also writes state.
+        for (kind, head, effect) in [
+            ("pure", "Value subclass: Probe\n  run: coll c: c =>\n", ""),
+            (
+                "actor",
+                "Actor subclass: Probe\n  state: n = 0\n\n  run: coll c: c =>\n",
+                "self.n := self.n + 1. ",
+            ),
+        ] {
+            let src =
+                format!("{head}    coll {sel} [:x | {effect}c ifTrue: [true] ifFalse: [3]]\n");
+            let module = format!("bt@probe_listop_{name}_{kind}");
+            let code = compile(&src, &module);
+            assert_compiles_through_erlc(&module, &code);
+        }
+    }
 }
