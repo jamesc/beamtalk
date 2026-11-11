@@ -575,13 +575,13 @@ pub struct TypeChecker {
 }
 
 impl TypeChecker {
-    /// Creates a new type checker.
     /// Skip `discarded-update` for top-level statements, as the effect-free
     /// lint does under `skip_module_expression_lint` (BT-4522).
     pub fn set_skip_module_expression_lint(&mut self, skip: bool) {
         self.skip_module_expression_lint = skip;
     }
 
+    /// Creates a new type checker.
     #[must_use]
     pub fn new() -> Self {
         Self {

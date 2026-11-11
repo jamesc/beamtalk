@@ -222,43 +222,28 @@ impl TypeChecker {
         let display = InferredType::class_name_for_diagnostic(class_name.as_str());
         let receiver_text = receiver_display(receiver);
         let shape = send_shape(selector);
-        // A block argument may be run for its side effects (`coll collect:
-        // [...]` kept as a loop); the copy is still unused, but the statement
-        // is not a no-op and must not be called one.
+        // The one guaranteed property is that the updated copy is unused; the
+        // receiver and arguments (a block run for its side effects, a
+        // `self nextId` argument) may still do work, so the note and help
+        // never claim the statement is a no-op or tell the user to delete it.
+        let note = format!(
+            "`{display}` is a value: `{name}` answers a new value and leaves the \
+             receiver unchanged, and that new value is never used"
+        );
         let has_block_arg = arguments
             .iter()
             .any(|a| matches!(a.unwrap_parens(), Expression::Block(_)));
-        let (note, hint) = if has_block_arg {
-            (
-                format!(
-                    "`{display}` is a value: `{name}` answers a new value and leaves the \
-                     receiver unchanged, so only the block's side effects remain"
-                ),
-                "if only the block's side effects matter, iterate with `do:`; \
-                 otherwise use the result (assign it, return it, or pass it on)"
-                    .to_string(),
-            )
+        let hint = if has_block_arg {
+            "if only the block's side effects matter, iterate with `do:`; \
+             otherwise use the result (assign it, return it, or pass it on)"
+                .to_string()
         } else if is_assignable_local(receiver) {
-            (
-                format!(
-                    "`{display}` is a value: `{name}` answers a new value and leaves the \
-                     receiver unchanged, so this statement has no effect"
-                ),
-                format!(
-                    "assign the result (`{receiver_text} := {receiver_text} {shape}`) or \
-                     chain with `|>`"
-                ),
+            format!(
+                "assign the result (`{receiver_text} := {receiver_text} {shape}`) or \
+                 chain with `|>`"
             )
         } else {
-            (
-                format!(
-                    "`{display}` is a value: `{name}` answers a new value and leaves the \
-                     receiver unchanged, so this statement has no effect"
-                ),
-                "use the result (assign it, return it, or pass it on), or remove the \
-                 statement"
-                    .to_string(),
-            )
+            "use the result (assign it, return it, or pass it on)".to_string()
         };
         self.diagnostics.push(
             Diagnostic::warning(format!("the result of `{name}` is discarded"), *span)
