@@ -69,6 +69,7 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     record_class_pid/2,
     class_name_for_pid/1,
     forget_class_pids/2,
+    forget_dead_incarnations/1,
     rename_class_pids/2,
     ensure_loaded_classes_table/0,
     record_loaded_class/2,
@@ -973,6 +974,20 @@ replacement process already recorded under the same name is not clobbered
 forget_class_pids(Pid, ClassName) ->
     try
         ets:delete(beamtalk_class_pids, Pid),
+        forget_dead_class_pids(ClassName)
+    catch
+        error:badarg -> ok
+    end.
+
+-doc """
+Drop every dead local reverse-index row naming `ClassName`, without needing
+the dead pid. Used by `forget_class_pids/2` and by the removal of a class whose
+process is already gone (`forget_dead_incarnations/1`). Rows of live pids are
+left alone, so a replacement process recorded under the same name survives.
+""".
+-spec forget_dead_class_pids(class_name()) -> ok.
+forget_dead_class_pids(ClassName) ->
+    try
         _ = [
             ets:delete(beamtalk_class_pids, P)
          || [P] <- ets:match(beamtalk_class_pids, {'$1', ClassName}),
@@ -983,6 +998,39 @@ forget_class_pids(Pid, ClassName) ->
     catch
         error:badarg -> ok
     end.
+
+-doc """
+Drop every index row of `ClassName` whose process is dead: the reverse pid
+index, the loaded-class index and the backing-module index. The counterpart of
+the pid-guarded `forget_loaded_class/2` / `forget_backing_module_entries/2`
+for a class removed after its process died (`restart_class/1` on a
+module-less class), where the dead pid is not at hand. Rows of a live
+replacement process are never touched.
+""".
+-spec forget_dead_incarnations(class_name()) -> ok.
+forget_dead_incarnations(ClassName) ->
+    forget_dead_class_pids(ClassName),
+    _ =
+        [
+            forget_loaded_class(ClassName, P)
+         || {_, P} <- case ets:info(beamtalk_loaded_classes) of
+                undefined -> [];
+                _ -> ets:lookup(beamtalk_loaded_classes, ClassName)
+            end,
+            is_pid(P),
+            not is_process_alive(P)
+        ],
+    _ =
+        [
+            forget_backing_module_entries(ClassName, P)
+         || {_, _, P} <- case ets:info(beamtalk_backing_module_index) of
+                undefined -> [];
+                _ -> ets:match_object(beamtalk_backing_module_index, {'_', ClassName, '_'})
+            end,
+            is_pid(P),
+            not is_process_alive(P)
+        ],
+    ok.
 
 -doc """
 Move the dead local reverse-index rows naming `OldName` to `NewName`, for a
@@ -1425,6 +1473,14 @@ unregisters its name. This function reconstructs a minimal ClassInfo from:
 Hot-patched methods and class variable state are lost — only compiled state
 is recovered. Logs a warning so the user knows recovery happened.
 
+A module-less class (built at runtime through `ClassBuilder`: its module has
+no code and no `__beamtalk_meta/0`) cannot be restarted. Its instance-side
+funs, fields and class variables lived only in the dead process, so a restart
+would register a class with every method gone. It is removed instead
+(BT-4646): `ClassRemoved` is announced, every registry row is dropped, and
+`{error, {module_less_class_removed, ClassName}}` is returned. The user's
+`ClassBuilder` code can rebuild it.
+
 Returns `{ok, NewPid}` on success, `{error, Reason}` on failure.
 """.
 -spec restart_class(class_name()) -> {ok, pid()} | {error, term()}.
@@ -1443,11 +1499,38 @@ restart_class(ClassName) ->
             %% Ensure the module is loaded so function_exported/3 returns true.
             %% The BEAM file should still be on disk even after the class process crashed.
             code:ensure_loaded(Module),
-            Meta =
-                case beamtalk_class_metadata:read_meta(Module) of
-                    {ok, M} -> M;
-                    not_available -> #{}
-                end,
+            case beamtalk_class_metadata:read_meta(Module) of
+                {ok, Meta} ->
+                    restart_compiled_class(ClassName, Module, Superclass, Meta);
+                not_available ->
+                    case code:which(Module) of
+                        non_existing -> remove_module_less_class(ClassName, Module);
+                        _ -> restart_compiled_class(ClassName, Module, Superclass, #{})
+                    end
+            end
+    end.
+
+%% BT-4646: a crashed module-less class is removed, not restarted. A live
+%% process under the name (a concurrent restart or redefinition) wins.
+-spec remove_module_less_class(class_name(), module()) -> {ok, pid()} | {error, term()}.
+remove_module_less_class(ClassName, Module) ->
+    case whereis_class(ClassName) of
+        Pid when is_pid(Pid) ->
+            {ok, Pid};
+        undefined ->
+            ?LOG_WARNING(
+                "Class process for module-less class '~p' crashed; it cannot be "
+                "restarted and was removed",
+                [ClassName],
+                #{class => ClassName, module => Module, domain => [beamtalk, runtime]}
+            ),
+            ok = beamtalk_object_class:remove_dead_class_registration(ClassName, Module),
+            {error, {module_less_class_removed, ClassName}}
+    end.
+
+-spec restart_compiled_class(class_name(), module(), class_name() | none, map()) ->
+    {ok, pid()} | {error, term()}.
+restart_compiled_class(ClassName, Module, Superclass, Meta) ->
             ClassInfo = #{
                 module => Module,
                 superclass => Superclass,
@@ -1495,8 +1578,7 @@ restart_class(ClassName) ->
                         }
                     ),
                     Err
-            end
-    end.
+            end.
 
 %%====================================================================
 %% Return-Type Lookup (ADR 0045)

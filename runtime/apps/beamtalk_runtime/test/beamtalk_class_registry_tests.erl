@@ -2192,3 +2192,160 @@ bt4552_rename_class_pids_moves_rows_test() ->
         ets:delete(beamtalk_class_pids, DeadPid),
         ets:delete(beamtalk_class_pids, Live)
     end.
+
+%%% ============================================================================
+%%% BT-4646: a crashed module-less (ClassBuilder) class is removed, not restarted
+%%% ============================================================================
+
+bt4646_builder_class(Name) ->
+    beamtalk_class_registry:ensure_pg_started(),
+    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_registry:ensure_pid_table(),
+    InstFun = fun(Self, _Args, State) -> {reply, inst_ok, State, Self} end,
+    ClassFun = fun(_ClassSelf) -> class_ok end,
+    {ok, Pid} = beamtalk_class_builder:register(#{
+        className => Name,
+        superclassRef => 'Object',
+        fieldSpecs => #{},
+        methodSpecs => #{ping => InstFun},
+        classMethods => #{make => ClassFun}
+    }),
+    Pid.
+
+%% Counts `ClassRemoved` announcements for `Name` via a stand-in
+%% `beamtalk_announcements` that forwards each one to the test process.
+bt4646_with_announce_spy(Name, Fun) ->
+    Self = self(),
+    Standin =
+        case whereis(beamtalk_announcements) of
+            undefined ->
+                P = spawn(fun() ->
+                    receive
+                        stop -> ok
+                    end
+                end),
+                register(beamtalk_announcements, P),
+                P;
+            _ ->
+                undefined
+        end,
+    ok = meck:new(beamtalk_announcements, [passthrough, no_link]),
+    ok = meck:expect(beamtalk_announcements, system_announce, fun
+        ('ClassRemoved', #{className := N}) when N =:= Name ->
+            Self ! {bt4646_removed, N},
+            ok;
+        (_, _) ->
+            ok
+    end),
+    try
+        Fun()
+    after
+        meck:unload(beamtalk_announcements),
+        case Standin of
+            undefined ->
+                ok;
+            _ ->
+                unregister(beamtalk_announcements),
+                Standin ! stop
+        end
+    end.
+
+bt4646_assert_removed(Name, Pid) ->
+    ?assertEqual(undefined, beamtalk_class_registry:whereis_class(Name)),
+    ?assertEqual(not_found, beamtalk_class_metadata:lookup_module(Name)),
+    ?assertNot(lists:member(Name, [N || {N, _, _} <- beamtalk_class_registry:live_class_entries()])),
+    ?assertNot(lists:member(Name, beamtalk_class_registry:all_classes())),
+    ?assertNot(sets:is_element(Name, beamtalk_class_registry:loaded_class_names())),
+    ?assertEqual(not_found, beamtalk_class_registry:class_name_for_pid(Pid)),
+    ?assertEqual([], ets:match_object(beamtalk_class_method_funs, {{Name, '_'}, '_'})).
+
+bt4646_await_down(Pid, MRef) ->
+    receive
+        {'DOWN', MRef, process, Pid, Reason} -> Reason
+    after 5000 -> error(timeout_waiting_for_class_down)
+    end.
+
+bt4646_count_removed(Name, Acc) ->
+    receive
+        {bt4646_removed, Name} -> bt4646_count_removed(Name, Acc + 1)
+    after 200 -> Acc
+    end.
+
+bt4646_module_less_kill_removes_class_test() ->
+    Name = 'BT4646KillRemoved',
+    bt4646_with_announce_spy(Name, fun() ->
+        Pid = bt4646_builder_class(Name),
+        ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(Pid)),
+        MRef = monitor(process, Pid),
+        exit(Pid, kill),
+        bt4646_await_down(Pid, MRef),
+        %% An eager monitor restart may win the race; either way the class is
+        %% removed, never restarted.
+        Result = beamtalk_class_registry:restart_class(Name),
+        ?assert(
+            Result =:= {error, {module_less_class_removed, Name}} orelse
+                element(1, Result) =:= error
+        ),
+        ?assertNotMatch({ok, _}, Result),
+        bt4646_assert_removed(Name, Pid),
+        ?assertEqual(1, bt4646_count_removed(Name, 0)),
+        %% A later restart attempt finds nothing to restart and announces nothing.
+        ?assertMatch({error, {no_module_for_class, Name}}, beamtalk_class_registry:restart_class(Name)),
+        ?assertEqual(0, bt4646_count_removed(Name, 0))
+    end).
+
+bt4646_module_less_callback_exception_removes_class_test() ->
+    Name = 'BT4646CallbackRemoved',
+    bt4646_with_announce_spy(Name, fun() ->
+        Pid = bt4646_builder_class(Name),
+        MRef = monitor(process, Pid),
+        %% No handle_call clause matches: function_clause, then terminate/2.
+        ?assertExit(_, gen_server:call(Pid, bt4646_no_such_call)),
+        Reason = bt4646_await_down(Pid, MRef),
+        ?assertNot(beamtalk_class_registry:is_deliberate_stop(Reason)),
+        Result = beamtalk_class_registry:restart_class(Name),
+        ?assertNotMatch({ok, _}, Result),
+        bt4646_assert_removed(Name, Pid),
+        ?assertEqual(1, bt4646_count_removed(Name, 0))
+    end).
+
+bt4646_module_less_restart_returns_removed_error_test() ->
+    Name = 'BT4646ErrorShape',
+    Pid = bt4646_builder_class(Name),
+    %% Stop the monitor from racing us: kill, then restart immediately; if the
+    %% monitor got there first the class is already gone (no_module_for_class).
+    MRef = monitor(process, Pid),
+    exit(Pid, kill),
+    bt4646_await_down(Pid, MRef),
+    case beamtalk_class_registry:restart_class(Name) of
+        {error, {module_less_class_removed, Name}} -> ok;
+        {error, {no_module_for_class, Name}} -> ok
+    end,
+    bt4646_assert_removed(Name, Pid).
+
+%% A compiled (module-backed) class restarts exactly as before.
+bt4646_compiled_class_still_restarts_test() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_registry:ensure_pid_table(),
+    Name = 'BT4646CompiledRestart',
+    {ok, Pid} = beamtalk_object_class:start(Name, #{
+        name => Name,
+        module => beamtalk_class_bt,
+        superclass => none,
+        instance_methods => #{},
+        class_methods => #{}
+    }),
+    MRef = monitor(process, Pid),
+    exit(Pid, kill),
+    bt4646_await_down(Pid, MRef),
+    {ok, NewPid} =
+        case beamtalk_class_registry:restart_class(Name) of
+            {ok, P} -> {ok, P};
+            Other -> Other
+        end,
+    ?assert(is_process_alive(NewPid)),
+    ?assertEqual(NewPid, beamtalk_class_registry:whereis_class(Name)),
+    ok = gen_server:stop(NewPid).

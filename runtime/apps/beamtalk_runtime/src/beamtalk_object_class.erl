@@ -28,6 +28,7 @@ and join the `beamtalk_classes` pg group for enumeration.
 %% API
 -export([
     start/2,
+    remove_dead_class_registration/2,
     start_link/1,
     start_link/2,
     new/1,
@@ -1190,6 +1191,9 @@ init({ClassName, ClassInfo}) ->
     %% restarted process even though sync_identity/6 above just created a
     %% fresh row with the gate off. Mirrors the reload path in apply_class_info/2. A no-op for a class
     %% that never crashed (nothing to clear).
+    %% A module-less (ClassBuilder) class never reaches here after a crash:
+    %% `beamtalk_class_registry:restart_class/1` removes it instead (BT-4646),
+    %% so this clear can no longer drop the funs of a class being restarted.
     beamtalk_class_metadata:delete_class_method_funs(ClassName),
 
     %% ADR 0084: Seed the runtime class-method fun retrieval store for
@@ -2045,56 +2049,75 @@ backing-module entries, so the class is gone from every registry.
 """.
 -spec remove_class_registration(class_name()) -> ok.
 remove_class_registration(ClassName) ->
+    remove_registration(ClassName, fun(Pid) ->
+        beamtalk_class_registry:forget_class_pids(Pid, ClassName),
+        beamtalk_class_registry:forget_loaded_class(ClassName, Pid),
+        beamtalk_class_registry:forget_backing_module_entries(ClassName, Pid)
+    end).
+
+-doc """
+The same teardown as `remove_class_registration/1` for a class whose process
+is already dead and cannot be restarted (BT-4646: a crashed module-less
+`ClassBuilder` class). Runs in the caller, so the pid-keyed index rows are
+dropped by liveness (`beamtalk_class_registry:forget_dead_incarnations/1`)
+rather than by `self()`. Also runs the registry purge
+(`beamtalk_class_lifecycle:class_removed/2`), tells the workspace layer as
+`removeFromSystem` does, and flushes the derived-fact cache.
+""".
+-spec remove_dead_class_registration(class_name(), module()) -> ok.
+remove_dead_class_registration(ClassName, Module) ->
+    remove_registration(ClassName, fun(_Pid) ->
+        beamtalk_class_registry:forget_dead_incarnations(ClassName)
+    end),
+    _ =
+        (try
+            beamtalk_class_lifecycle:class_removed(ClassName, Module)
+        catch
+            _:_ -> ok
+        end),
+    _ =
+        (try
+            beamtalk_behaviour_intrinsics:publish_class_removed(ClassName, Module)
+        catch
+            _:_ -> ok
+        end),
+    _ =
+        (try
+            beamtalk_class_derived_cache:invalidate()
+        catch
+            _:_ -> ok
+        end),
+    ok.
+
+-spec remove_registration(class_name(), fun((pid()) -> term())) -> ok.
+remove_registration(ClassName, ForgetPidRows) ->
     %% ADR 0093 §2: Announce ClassRemoved on the system bus as the class
     %% process shuts down (e.g. removeFromSystem). The event carries only the
     %% class name, so it is independent of the metadata-row deletion below.
     announce_class_lifecycle('ClassRemoved', ClassName),
-    %% Clean up ETS hierarchy entry and pg group membership on shutdown.
-    %% This runs when removeFromSystem stops the gen_server (gen_server:stop/1),
-    %% ensuring the class is fully removed from the runtime registries.
-    %% Wrapped in catch/try to be safe during node shutdown when ETS/pg may be gone.
-    %% Single metadata row → single delete (was a three-table fan-out).
+    %% Single metadata row → single delete; it also drops the class-method
+    %% funs. Wrapped in try/catch to be safe during node shutdown when
+    %% ETS/pg may be gone.
     _ =
         (try
             beamtalk_class_metadata:delete(ClassName)
         catch
             _:_ -> ok
         end),
-    %% Clean up the pid reverse index with the metadata row above: the class
-    %% is removed and its rows must not keep naming it. A crash (callback
-    %% exception or untrappable kill) keeps them for auto-restart recovery,
-    %% including after the restart (BT-4552, BT-4622, `restart_class/1`).
-    %% The class's dead incarnations go with it, so a removed class answers
-    %% `nil` from `beamtalk_interface:liveClassName/1` however many times it
-    %% crashed.
+    %% Drop the pid reverse index, loaded-class and backing-module rows with
+    %% the metadata row: the class is removed and its rows must not keep
+    %% naming it. A crash keeps them for auto-restart recovery (BT-4552,
+    %% BT-4622, `restart_class/1`). The pid-guarded forgets never clobber a
+    %% replacement pid's row (a reload that already recorded one).
     _ =
         (try
-            beamtalk_class_registry:forget_class_pids(self(), ClassName)
+            ForgetPidRows(self())
         catch
             _:_ -> ok
         end),
     _ =
         (try
             pg:leave(beamtalk_classes, self())
-        catch
-            _:_ -> ok
-        end),
-    %% Drop this class from the fast loaded-class name index. Guarded
-    %% on self() inside forget_loaded_class/2 so a reload that already recorded
-    %% a replacement pid is not clobbered. On a crash this does not run; the
-    %% reader's is_process_alive/1 filter drops the dead row instead.
-    _ =
-        (try
-            beamtalk_class_registry:forget_loaded_class(ClassName, self())
-        catch
-            _:_ -> ok
-        end),
-    %% Drop this class from the backing-module reverse index, guarded
-    %% on self() exactly like forget_loaded_class/2 above so a reload that
-    %% already recorded a replacement pid's row is not clobbered.
-    _ =
-        (try
-            beamtalk_class_registry:forget_backing_module_entries(ClassName, self())
         catch
             _:_ -> ok
         end),
