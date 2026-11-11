@@ -56,6 +56,7 @@ enum Tok {
     Punct(&'static str),
 }
 
+#[allow(clippy::too_many_lines)] // one arm per token form
 fn tokenize(code: &str) -> Vec<Tok> {
     let b = code.as_bytes();
     let mut out = Vec::new();
@@ -123,8 +124,7 @@ fn tokenize(code: &str) -> Vec<Tok> {
             }
             b'-' | b'0'..=b'9' if c != b'-' || next.is_some_and(|n| n.is_ascii_digit()) => {
                 i += 1;
-                while i < b.len() && (b[i].is_ascii_alphanumeric() || matches!(b[i], b'.' | b'_'))
-                {
+                while i < b.len() && (b[i].is_ascii_alphanumeric() || matches!(b[i], b'.' | b'_')) {
                     // `1.5e-3`: an exponent sign belongs to the number.
                     if matches!(b[i], b'e' | b'E')
                         && b.get(i + 1) == Some(&b'-')
@@ -138,8 +138,7 @@ fn tokenize(code: &str) -> Vec<Tok> {
             }
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => {
                 let start = i;
-                while i < b.len() && (b[i].is_ascii_alphanumeric() || matches!(b[i], b'_' | b'@'))
-                {
+                while i < b.len() && (b[i].is_ascii_alphanumeric() || matches!(b[i], b'_' | b'@')) {
                     i += 1;
                 }
                 out.push(Tok::Word(code[start..i].to_string()));
@@ -173,8 +172,22 @@ fn tokenize(code: &str) -> Vec<Tok> {
 fn is_keyword(word: &str) -> bool {
     matches!(
         word,
-        "call" | "apply" | "primop" | "let" | "letrec" | "in" | "case" | "of" | "end" | "fun"
-            | "try" | "catch" | "receive" | "after" | "do" | "when"
+        "call"
+            | "apply"
+            | "primop"
+            | "let"
+            | "letrec"
+            | "in"
+            | "case"
+            | "of"
+            | "end"
+            | "fun"
+            | "try"
+            | "catch"
+            | "receive"
+            | "after"
+            | "do"
+            | "when"
     )
 }
 
@@ -330,7 +343,6 @@ impl Scan {
                 }
                 false
             }
-            Tok::Lit => false,
             Tok::Word(w) => match w.as_str() {
                 "let" => {
                     self.skip_pattern();
@@ -472,7 +484,7 @@ impl Scan {
                 self.eat_punct("}#");
                 runs
             }
-            Tok::Punct(_) => false,
+            Tok::Lit | Tok::Punct(_) => false,
         }
     }
 
@@ -596,7 +608,8 @@ mod tests {
              'm' => call 'erlang':'element'(1, C) }~",
         );
         assert!(found(&code).is_empty());
-        let code = module("[call 'erlang':'element'(1, A), call 'erlang':'element'(1, call 'm':'f'(B))]");
+        let code =
+            module("[call 'erlang':'element'(1, A), call 'erlang':'element'(1, call 'm':'f'(B))]");
         assert!(found(&code).is_empty(), "one real call, one projection");
     }
 
