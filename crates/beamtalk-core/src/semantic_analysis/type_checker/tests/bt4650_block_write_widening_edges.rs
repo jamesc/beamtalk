@@ -59,7 +59,7 @@ fn remote_probe(body: &str) -> String {
 /// Whether the final `remote` read in `src` carries the known-remote fact.
 /// A joined type is a union, which no sendability warning fires on, so the
 /// fact is read from the per-identifier table the block-capture hint uses.
-fn last_read_is_known_remote(src: &str) -> bool {
+fn last_read_remote(src: &str) -> Option<super::super::known_remote::KnownRemote> {
     let (module, perrs) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
     assert!(perrs.is_empty(), "parse errors: {perrs:?}");
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
@@ -67,7 +67,14 @@ fn last_read_is_known_remote(src: &str) -> bool {
     checker.check_module(&module, &hierarchy);
     let spans = checker.take_known_remote_spans();
     let offset = src.rfind("remote useNode:").unwrap();
-    spans.keys().any(|span| span.start() as usize == offset)
+    spans
+        .into_iter()
+        .find(|(span, _)| span.start() as usize == offset)
+        .map(|(_, remote)| remote)
+}
+
+fn last_read_is_known_remote(src: &str) -> bool {
+    last_read_remote(src).is_some()
 }
 
 #[test]
@@ -82,4 +89,34 @@ fn widening_drops_known_remote_when_an_arm_is_not_remote() {
     assert!(!last_read_is_known_remote(&remote_probe(
         "    items do: [:e | remote := Other new]\n",
     )));
+}
+
+#[test]
+fn widening_drops_node_hint_when_arms_disagree_on_the_node() {
+    let src = remote_probe("    items do: [:e | remote := (Other spawnOn: other) unwrap]\n")
+        .replace("with: items", "with: other :: Node with: items");
+    let remote = last_read_remote(&src).expect("fact kept");
+    assert_eq!(remote.node_hint, None);
+}
+
+#[test]
+fn widening_keeps_node_hint_when_arms_agree_on_the_node() {
+    let remote = last_read_remote(&remote_probe(
+        "    items do: [:e | remote := (Other spawnOn: node) unwrap]\n",
+    ))
+    .expect("fact kept");
+    assert_eq!(remote.node_hint.as_deref(), Some("node"));
+}
+
+#[test]
+fn cascade_receiver_block_write_is_visible_to_sibling_argument() {
+    let diags = check(
+        "Object subclass: Probe\n  class f: d :: Dictionary(Integer, Integer) -> Integer =>\n    i := 0\n    d at: ([i := \"x\". 1] value; yourself) put: i size\n    0\n",
+    );
+    assert!(
+        dnu(&diags)
+            .iter()
+            .any(|d| d.message.contains("in union Integer | String")),
+        "cascade receiver was deferred: {diags:#?}"
+    );
 }

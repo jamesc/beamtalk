@@ -779,7 +779,7 @@ impl TypeChecker {
                     self.infer_expr(&arm.body, hierarchy, &mut arm_env, in_abstract_method);
                 let arm_deferred =
                     std::mem::replace(&mut self.deferred_block_widenings, outer_deferred);
-                let (bound, _) = crate::semantic_analysis::extract_pattern_bindings(&arm.pattern);
+                let (bound, _) = crate::semantic_analysis::extract_match_arm_bindings(&arm.pattern);
                 self.deferred_block_widenings.extend(
                     arm_deferred
                         .into_iter()
