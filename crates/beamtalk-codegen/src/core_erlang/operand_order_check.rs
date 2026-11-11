@@ -43,7 +43,6 @@ pub(super) fn racing_operand_errors(code: &str) -> Vec<VerifyError> {
         at: 0,
         function: String::new(),
         found: Vec::new(),
-        saw_put: false,
     };
     scan.module();
     scan.found
@@ -200,24 +199,32 @@ fn is_keyword(word: &str) -> bool {
     )
 }
 
-/// The calls over variables and literals that are pure projections: the
-/// codegen's `self_dispatch_result_value`, immutable state-map reads, string
-/// conversions and block-literal captures.
-fn is_pure_projection(module: Option<&str>, function: Option<&str>) -> bool {
-    matches!(
-        (module, function),
-        (
-            Some("erlang"),
-            Some("element" | "hd" | "tl" | "tuple_size" | "map_size")
-        ) | (Some("maps"), Some("get"))
-            | (Some("beamtalk_primitive"), Some("string_to_binary"))
-            // A block literal's capture: `is_trivial_subexpr` already treats a
-            // block operand as one that races with nothing.
-            | (
-                Some("beamtalk_actor_state" | "beamtalk_class_vars"),
-                Some("capture")
-            )
-    )
+/// The effect of `call module:function(args)`, `atomic` when every argument is a
+/// variable or literal term. Deny by default: only the calls below are
+/// anything but `RUNS`.
+///
+/// `QUIET`: pure projections over bound values — the codegen's
+/// `self_dispatch_result_value`, immutable state-map reads, string conversions
+/// and block-literal captures (`is_trivial_subexpr` already treats a block
+/// operand as one that races with nothing).
+///
+/// `READS`: a read of mutable process state a sibling that runs code can
+/// change — the class-variable lookup `erlang:get(Key)` and its miss fallback
+/// `beamtalk_class_vars:get/2`, `get_late/2`.
+fn call_effect(module: Option<&str>, function: Option<&str>, atomic: bool) -> Effect {
+    if !atomic {
+        return RUNS;
+    }
+    match (module, function) {
+        (Some("erlang"), Some("element" | "hd" | "tl" | "tuple_size" | "map_size"))
+        | (Some("maps"), Some("get" | "find"))
+        | (Some("beamtalk_primitive"), Some("string_to_binary"))
+        | (Some("beamtalk_actor_state" | "beamtalk_class_vars"), Some("capture")) => QUIET,
+        (Some("erlang"), Some("get")) | (Some("beamtalk_class_vars"), Some("get" | "get_late")) => {
+            READS
+        }
+        _ => RUNS,
+    }
 }
 
 /// What evaluating an expression does: nothing observable, a read of mutable
@@ -237,9 +244,6 @@ struct Scan<'a> {
     /// The top-level function being scanned, for the finding.
     function: String,
     found: Vec<VerifyError>,
-    /// Whether a process-dictionary `put` was parsed since it was last cleared:
-    /// a class-variable write inside a `case erlang:get(..)`.
-    saw_put: bool,
 }
 
 impl Scan<'_> {
@@ -404,28 +408,20 @@ impl Scan<'_> {
                     // A class reference (`case whereis('beamtalk_class_X') of
                     // undefined -> raise class_not_found; Pid -> Pid`) runs no
                     // user code, and `is_trivial_subexpr` treats the operand as
-                    // one that races with nothing. A class variable read
-                    // (`case erlang:get(Key) of ..`) reads mutable process
-                    // state: it races a sibling that runs code, not another read.
-                    let own = if self.at_call_to("erlang", "whereis") {
-                        Some(QUIET)
-                    } else if self.at_call_to("erlang", "get") {
-                        Some(READS)
-                    } else {
-                        None
-                    };
-                    let outer_put = std::mem::replace(&mut self.saw_put, false);
+                    // one that races with nothing. Every other `case` is the
+                    // `max` of its scrutinee and clauses; a class variable read
+                    // (`case erlang:get(Key) of .. -> beamtalk_class_vars:get(..)`)
+                    // is `READS` only because each call in it is a known read
+                    // (`call_effect`), so a clause that runs code or `put`s
+                    // makes it `RUNS`.
+                    let class_lookup = self.at_call_to("erlang", "whereis");
                     let scrutinee = self.expr();
                     self.eat_word("of");
                     let clauses = self.clauses("end");
-                    let wrote = self.saw_put;
-                    self.saw_put = outer_put || wrote;
-                    // A class-variable write is the same `case erlang:get(..)`
-                    // with a `put` in a clause: it runs, it does not just read.
-                    match own {
-                        Some(READS) if wrote => RUNS,
-                        Some(effect) => effect,
-                        None => scrutinee.max(clauses),
+                    if class_lookup {
+                        QUIET
+                    } else {
+                        scrutinee.max(clauses)
                     }
                 }
                 "receive" => {
@@ -467,22 +463,8 @@ impl Scan<'_> {
                     let function = self.peek_atom();
                     self.expr_operand();
                     let atomic = self.args_are_atomic();
-                    if matches!(
-                        (module.as_deref(), function.as_deref()),
-                        (Some("erlang" | "beamtalk_class_vars"), Some("put"))
-                    ) {
-                        self.saw_put = true;
-                    }
                     self.call_args();
-                    // A pure projection of bound variables and literals
-                    // reads nothing a sibling can change and changes nothing a
-                    // sibling reads, so its position among the operands is
-                    // unobservable.
-                    if atomic && is_pure_projection(module.as_deref(), function.as_deref()) {
-                        QUIET
-                    } else {
-                        RUNS
-                    }
+                    call_effect(module.as_deref(), function.as_deref(), atomic)
                 }
                 "apply" => {
                     self.expr_operand();
@@ -719,6 +701,19 @@ mod tests {
         let write = "let V = 6 in case call 'erlang':'get'(K) of <M> when 'true' -> let _ = call 'erlang':'put'(K, V) in V <_> when 'true' -> call 'beamtalk_class_vars':'put'(K, V) end";
         let code = module(&format!("[{read}, {write}]"));
         assert_eq!(found(&code), vec![(RacingConstruct::ListCell, 2)]);
+    }
+
+    #[test]
+    fn a_read_shaped_case_whose_clause_runs_code_races() {
+        let read =
+            "case call 'erlang':'get'(K) of <M> when 'true' -> call 'maps':'find'('n', M) end";
+        let sneaky = "case call 'erlang':'get'(K) of <M> when 'true' -> call 'm':'send'(M) end";
+        let code = module(&format!("[{sneaky}, {read}]"));
+        assert_eq!(found(&code), vec![(RacingConstruct::ListCell, 2)]);
+        // A `put` in a closure that is built and not called does not run.
+        let lazy = "case call 'erlang':'get'(K) of <M> when 'true' -> fun () -> call 'erlang':'put'(K, M) end";
+        let code = module(&format!("[{lazy}, {read}]"));
+        assert!(found(&code).is_empty());
     }
 
     #[test]
