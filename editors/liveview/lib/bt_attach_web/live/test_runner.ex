@@ -184,6 +184,7 @@ defmodule BtAttachWeb.Live.TestRunner do
   # dismisses through here.
   defp dismiss_key_to_assign("browser_error"), do: :browser_error
   defp dismiss_key_to_assign("output"), do: :output
+  defp dismiss_key_to_assign("eval_warnings"), do: :eval_warnings
   defp dismiss_key_to_assign("changes_error"), do: :changes_error
   defp dismiss_key_to_assign("git_error"), do: :git_error
   defp dismiss_key_to_assign("save_result"), do: :save_result

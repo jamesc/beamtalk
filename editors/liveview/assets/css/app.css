@@ -1168,6 +1168,7 @@ body.col-resizing .cockpit { transition: none; }
 .io-block.warn{ background: color-mix(in oklab, var(--accent) 12%, var(--code-bg)); border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); }
 /* The message takes the row; the × dismiss control (BT-2612) sits top-right. */
 .io-block-msg { flex: 1 1 auto; min-width: 0; }
+.io-block-msg.multiline { white-space: pre-wrap; }
 .io-block-dismiss {
   flex: 0 0 auto; margin: -2px -4px 0 0; padding: 0 4px;
   background: none; border: none; cursor: pointer; line-height: 1;

@@ -110,6 +110,7 @@ defmodule BtAttachWeb.Live.DockTest do
         dock_tab: "workspace",
         result: nil,
         output: nil,
+        eval_warnings: nil,
         error: nil,
         expr: "3 + 4",
         eval_seq: 0,
@@ -626,6 +627,51 @@ defmodule BtAttachWeb.Live.DockTest do
       {:noreply, socket} = Dock.handle_event("eval", %{"expr" => "ignored"}, socket)
 
       assert [["ws_insert_result", %{anchor: nil}]] = socket.private.live_temp[:push_events]
+    end
+  end
+
+  describe "eval warnings (BT-4471)" do
+    test "a hinted warning shows its message and the hint on its own line" do
+      warnings = [
+        %{
+          message: "Udp class does not conform to Transport class",
+          hint: "missing: class defaultPort"
+        },
+        %{message: "unused variable x", hint: nil}
+      ]
+
+      force_workspace_replies(%{eval: {:ok, 7, "", warnings}})
+
+      {:noreply, socket} = Dock.handle_event("eval", %{"expr" => "3 + 4"}, base_socket())
+
+      assert socket.assigns.eval_warnings ==
+               "Warning: Udp class does not conform to Transport class\n" <>
+                 "Hint: missing: class defaultPort\n" <>
+                 "Warning: unused variable x"
+    end
+
+    test "warnings show alongside an errored eval" do
+      force_workspace_replies(%{
+        eval: {:error, :compile_failed, "", [%{message: "careful", hint: "do this"}]}
+      })
+
+      {:noreply, socket} = Dock.handle_event("eval", %{"expr" => "bad"}, base_socket())
+
+      assert socket.assigns.error =~ "compile_failed"
+      assert socket.assigns.eval_warnings == "Warning: careful\nHint: do this"
+    end
+
+    test "no warnings clears a previous warning banner" do
+      force_workspace_replies(%{eval: {:ok, 7, "", []}})
+
+      {:noreply, socket} =
+        Dock.handle_event(
+          "eval",
+          %{"expr" => "3 + 4"},
+          base_socket(%{eval_warnings: "Warning: stale"})
+        )
+
+      assert socket.assigns.eval_warnings == nil
     end
   end
 
