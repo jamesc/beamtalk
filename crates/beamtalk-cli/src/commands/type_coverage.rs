@@ -13,10 +13,10 @@
 
 use crate::commands::OutputFormat;
 use crate::commands::build::collect_source_files_from_dir;
-use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
-use beamtalk_core::semantic_analysis::{ClassHierarchy, CoverageReport};
-use beamtalk_core::source_analysis::{lex_with_eof, parse};
+use beamtalk_cli::lint_pipeline::{self, DependencyMetadata};
+use beamtalk_core::semantic_analysis::CoverageReport;
 use beamtalk_language_service::{ByteOffset, Position};
+use beamtalk_project::package;
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{IntoDiagnostic, Result};
 
@@ -37,88 +37,63 @@ pub fn run(
         miette::bail!("no .bt source files found in '{path}'");
     }
 
-    // Populate the FFI type registry the same way `beamtalk lint` does,
-    // so calls to specced Erlang functions (and expressions consuming their
-    // results) are reported as typed rather than misreported as `Dynamic`.
-    // Falls back to the runtime/stdlib ebin scan (mirroring `extract_type_specs`'s
-    // own `stdlib_mode` branch) when scanning a manifest-less tree such as
-    // `stdlib/src`, which has no `beamtalk.toml`.
-    let package_root = super::lint::find_package_root(&source_path);
-    let native_type_registry = match package_root.as_deref() {
-        Some(root) => {
-            let layout = crate::commands::build_layout::BuildLayout::new(root);
-            super::build::extract_type_specs(&layout, true, false)
-        }
-        None => super::build_stdlib::extract_stdlib_type_specs(),
+    // Analyse through `beamtalk lint`'s pipeline (BT-4718), so coverage is
+    // measured against the context `build`/`lint` type-check with: the whole
+    // package's classes, protocols, extensions and aliases (not only the
+    // targets'), the dependencies' metadata, the FFI registry with
+    // dependency stubs, and the package's compiler options. A hand-built
+    // context here once missed all of those and reported every send to a
+    // dependency class as `Dynamic`.
+    let mut unreadable: Option<miette::Report> = None;
+    let sources =
+        lint_pipeline::parse_package_sources(&source_path, &source_files, |file, _, e| {
+            unreadable.get_or_insert_with(|| miette::miette!("Failed to read '{file}': {e}"));
+        });
+    if let Some(e) = unreadable {
+        return Err(e);
     }
+    let (dependency_stubs, dependencies) = match sources.package_root.as_deref() {
+        Some(project_root) => super::lint::merge_dependency_infos(project_root),
+        None => (Vec::new(), DependencyMetadata::default()),
+    };
+    let native_type_registry = beamtalk_cli::ffi_type_registry::lint_type_registry(
+        sources.package_root.as_deref(),
+        &source_files,
+        &dependency_stubs,
+    )
+    .registry
     .map(std::sync::Arc::new);
 
-    // Package name for alias seeding-boundary checks (ADR 0108), derived the
-    // same way `beamtalk lint` does so an `internal` alias from another
-    // package stays invisible here too.
-    let current_package =
-        super::manifest::package_checker_scope(package_root.as_deref()).package_name;
-
-    // Pass 1: Parse all files and extract class metadata for cross-file hierarchy.
-    let mut all_class_infos = Vec::new();
-    let mut all_alias_infos = Vec::new();
-    let mut parsed_files: Vec<(Utf8PathBuf, String, beamtalk_core::ast::Module)> = Vec::new();
-
-    for file in &source_files {
-        let source = std::fs::read_to_string(file)
-            .into_diagnostic()
-            .map_err(|e| miette::miette!("Failed to read '{}': {e}", file))?;
-
-        let tokens = lex_with_eof(&source);
-        let (module, _parse_diags) = parse(tokens);
-
-        all_class_infos.extend(ClassHierarchy::extract_class_infos(&module));
-        all_alias_infos.extend(AliasRegistry::extract_package_alias_infos(
-            &module,
-            current_package.as_deref(),
-        ));
-        parsed_files.push((file.clone(), source, module));
-    }
-
-    // Flatten cross-file trait provisions into the infos (BT-3673), as
-    // `build` does, so coverage doesn't count a provided method as untyped.
-    // Same-package protocols only: type-coverage loads no dependency protocols.
-    let mut trait_users =
-        beamtalk_core::semantic_analysis::trait_expansion::TraitUserCollector::default();
-    for (_, _, module) in &parsed_files {
-        trait_users.add(module);
-    }
-    trait_users.flatten(&mut all_class_infos, std::iter::empty(), None);
-
-    // Pass 2: Run type inference per file and compute coverage.
     let mut report = CoverageReport {
         classes: Vec::new(),
         dynamic_entries: Vec::new(),
         total_expressions: 0,
         typed_expressions: 0,
     };
-
-    for (file, _source, module) in &parsed_files {
-        let cross_file_classes = ClassHierarchy::cross_file_class_infos(&all_class_infos, module);
-
-        let default_options = beamtalk_core::CompilerOptions::default();
-        let analysis_ctx = beamtalk_core::semantic_analysis::AnalysisContext::default()
-            .with_options(&default_options)
-            .with_pre_loaded_classes(cross_file_classes)
-            .with_pre_loaded_aliases(all_alias_infos.clone())
-            .with_native_type_registry(native_type_registry.clone());
-        let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
-
-        // Use `analyse_full`'s alias-aware type map directly (ADR 0108): a
-        // separate `infer_types` pass runs without the alias registry, so a
-        // `Simple` annotation naming a registered alias resolves to an
-        // unknown nominal class and every downstream expression infers as
-        // `Dynamic`. The shared map expands aliases to their structural
-        // union, matching `build`/`lint`/checker behavior.
-        let file_report =
-            CoverageReport::from_module(module, &analysis_result.type_map, file.as_str(), detail);
-        report.merge(file_report);
-    }
+    // The pipeline reports package files by their canonical path; report
+    // them as the caller spelled them, as before.
+    let spelled: std::collections::HashMap<std::path::PathBuf, &Utf8PathBuf> = source_files
+        .iter()
+        .map(|f| (package::try_canonicalize(f.as_std_path()), f))
+        .collect();
+    let mut file_sources: Vec<(Utf8PathBuf, String)> = Vec::new();
+    let _provision_diags = lint_pipeline::analyse_package(
+        sources,
+        dependencies,
+        native_type_registry.as_ref(),
+        |file| {
+            let path = spelled
+                .get(&package::try_canonicalize(file.path.as_std_path()))
+                .map_or_else(|| file.path.to_path_buf(), |f| (*f).clone());
+            report.merge(CoverageReport::from_module(
+                file.module,
+                file.type_map,
+                path.as_str(),
+                detail,
+            ));
+            file_sources.push((path, file.source.to_string()));
+        },
+    );
 
     // Apply --class filter.
     if let Some(class_name) = class_filter {
@@ -144,7 +119,7 @@ pub fn run(
         .sort_by(|a, b| a.file.cmp(&b.file).then_with(|| a.name.cmp(&b.name)));
 
     match format {
-        OutputFormat::Text => print_text_report(&report, detail, &parsed_files),
+        OutputFormat::Text => print_text_report(&report, detail, &file_sources),
         OutputFormat::Json => {
             print_json_report(&report, at_least, &mut std::io::stdout()).into_diagnostic()?;
         }
@@ -167,7 +142,7 @@ pub fn run(
 fn print_text_report(
     report: &CoverageReport,
     detail: bool,
-    parsed_files: &[(Utf8PathBuf, String, beamtalk_core::ast::Module)],
+    file_sources: &[(Utf8PathBuf, String)],
 ) {
     println!("Type Coverage Report");
     println!("====================");
@@ -195,9 +170,9 @@ fn print_text_report(
         println!("Dynamic expressions:");
 
         // Build a source map for offset-to-line conversion.
-        let source_map: std::collections::HashMap<&str, &str> = parsed_files
+        let source_map: std::collections::HashMap<&str, &str> = file_sources
             .iter()
-            .map(|(path, source, _)| (path.as_str(), source.as_str()))
+            .map(|(path, source)| (path.as_str(), source.as_str()))
             .collect();
 
         for entry in &report.dynamic_entries {
@@ -440,14 +415,14 @@ mod tests {
 
     #[test]
     fn print_text_report_empty_report_does_not_panic() {
-        let parsed: Vec<(Utf8PathBuf, String, beamtalk_core::ast::Module)> = Vec::new();
+        let parsed: Vec<(Utf8PathBuf, String)> = Vec::new();
         print_text_report(&empty_report(), false, &parsed);
     }
 
     #[test]
     fn print_text_report_detail_mode_empty_does_not_panic() {
         // detail=true with no dynamic_entries skips the detail block
-        let parsed: Vec<(Utf8PathBuf, String, beamtalk_core::ast::Module)> = Vec::new();
+        let parsed: Vec<(Utf8PathBuf, String)> = Vec::new();
         print_text_report(&empty_report(), true, &parsed);
     }
 
@@ -629,6 +604,103 @@ mod tests {
         assert!(
             result.is_ok(),
             "alias-typed param must attribute identically to the inline union: {result:?}"
+        );
+    }
+
+    /// BT-4718: a `test/` run analyses against the whole package, so a
+    /// test-side class annotated with a `src/` class is fully typed. Before,
+    /// only the targets were parsed and `w :: Widget` was an unknown class.
+    #[test]
+    fn run_on_test_dir_sees_src_classes_bt_4718() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("beamtalk.toml"),
+            "[package]\nname = \"pkg\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(dir.path().join("src")).unwrap();
+        fs::create_dir_all(dir.path().join("test")).unwrap();
+        fs::write(
+            dir.path().join("src").join("widget.bt"),
+            "Object subclass: Widget\n  size -> Integer => 3\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.path().join("test").join("caller.bt"),
+            "Object subclass: Caller\n  measure: w :: Widget -> Integer => w size\n",
+        )
+        .unwrap();
+        let test_dir = Utf8PathBuf::from_path_buf(dir.path().join("test")).unwrap();
+        let result = run(
+            test_dir.as_str(),
+            false,
+            OutputFormat::Text,
+            Some(100.0),
+            Some("Caller"),
+        );
+        assert!(
+            result.is_ok(),
+            "Caller must be fully typed through src/'s Widget: {result:?}"
+        );
+    }
+
+    /// BT-4718: sends to a dependency's class are typed, as `build` types
+    /// them. Before, `type-coverage` loaded no dependency metadata, so
+    /// `p value` on a `Producer` from a path dependency was `Dynamic`.
+    #[test]
+    fn run_types_sends_to_dependency_classes_bt_4718() {
+        let temp = TempDir::new().unwrap();
+        let producer_dir = temp.path().join("producer");
+        fs::create_dir_all(producer_dir.join("src")).unwrap();
+        fs::write(
+            producer_dir.join("beamtalk.toml"),
+            "[package]\nname = \"producer\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            producer_dir.join("src").join("producer.bt"),
+            "Object subclass: Producer\n  value -> Integer => 1\n",
+        )
+        .unwrap();
+
+        let consumer_dir = temp.path().join("consumer");
+        fs::create_dir_all(consumer_dir.join("src")).unwrap();
+        fs::write(
+            consumer_dir.join("beamtalk.toml"),
+            "[package]\nname = \"consumer\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nproducer = { path = \"../producer\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            consumer_dir.join("src").join("consumer.bt"),
+            "Object subclass: Consumer\n  use: p :: Producer -> Integer => p value\n",
+        )
+        .unwrap();
+
+        // Fake the producer's compiled state so dependency resolution takes
+        // the fresh fast path instead of an `erlc` compile (as lint's
+        // dependency tests do).
+        let consumer_root = Utf8PathBuf::from_path_buf(consumer_dir).unwrap();
+        let layout = crate::commands::build_layout::BuildLayout::new(&consumer_root);
+        let ebin_dir = layout.dep_ebin_dir("producer");
+        fs::create_dir_all(&ebin_dir).unwrap();
+        fs::write(ebin_dir.join("bt@producer@producer.beam"), b"BEAM").unwrap();
+        crate::commands::build_stamp::write_stamp(
+            &layout.dep_stamp_path("producer"),
+            crate::commands::build_stamp::current_otp_version(),
+        );
+
+        let src = consumer_root.join("src");
+        let result = run(
+            src.as_str(),
+            false,
+            OutputFormat::Text,
+            Some(100.0),
+            Some("Consumer"),
+        );
+        assert!(
+            result.is_ok(),
+            "a send to the dependency's Producer must be typed: {result:?}"
         );
     }
 }
