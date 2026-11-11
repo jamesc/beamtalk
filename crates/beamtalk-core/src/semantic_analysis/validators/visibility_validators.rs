@@ -2039,6 +2039,7 @@ mod tests {
     fn make_method(selector_name: &str, is_internal: bool) -> MethodDefinition {
         MethodDefinition {
             pipeline_sends: crate::ast::PipelineSends::default(),
+            literal_comments: crate::ast::LiteralComments::default(),
             selector: MessageSelector::Unary(selector_name.into()),
             parameters: vec![],
             body: vec![ExpressionStatement::bare(crate::ast::Expression::Literal(

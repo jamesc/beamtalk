@@ -188,6 +188,7 @@ fn test_generate_value_type_module_includes_class_name() {
     let class = make_value_class("Point", &["x", "y"]);
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -226,6 +227,7 @@ fn test_generate_value_type_module_never_emits_shape_version_key() {
     let class = make_value_class("Point", &["x", "y"]);
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),

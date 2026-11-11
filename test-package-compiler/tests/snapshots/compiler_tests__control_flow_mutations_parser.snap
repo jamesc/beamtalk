@@ -3622,6 +3622,7 @@ Module {
         },
     ],
     pipeline_sends: {},
+    literal_comments: {},
 }
 
 Diagnostics:
