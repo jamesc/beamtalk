@@ -148,6 +148,20 @@ fn non_test_rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Whether `lines[i]` is a `#[cfg(test)]` whose next item is an inline
+/// `mod x { … }`: the in-file unit tests, where scanning stops. An
+/// out-of-line `mod x;` sits among production items, so it does not count.
+fn opens_inline_test_mod(lines: &[&str], i: usize) -> bool {
+    lines[i].trim_start().starts_with("#[cfg(test)]")
+        && lines[i + 1..]
+            .iter()
+            .find(|l| !l.trim().is_empty())
+            .is_some_and(|l| {
+                let l = l.trim();
+                l.starts_with("mod ") && !l.ends_with(';')
+            })
+}
+
 /// The contents of every string literal in the non-test part of a Rust
 /// source file, with the 1-based line it starts on. Comment lines are
 /// skipped, and scanning stops at the first `#[cfg(test)]` that opens an
@@ -158,17 +172,7 @@ fn string_literals(src: &str) -> Vec<(usize, String)> {
     let mut out = Vec::new();
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("#[cfg(test)]")
-            && lines[i + 1..]
-                .iter()
-                .find(|l| !l.trim().is_empty())
-                .is_some_and(|l| {
-                    // Only an inline `mod x {` opens test code; an
-                    // out-of-line `mod x;` sits among production items.
-                    let l = l.trim();
-                    l.starts_with("mod ") && l.ends_with('{')
-                })
-        {
+        if opens_inline_test_mod(&lines, i) {
             break;
         }
         if trimmed.starts_with("//") {
@@ -337,15 +341,7 @@ fn production_source(src: &str) -> String {
     let mut out = Vec::new();
     for (i, line) in lines.iter().enumerate() {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("#[cfg(test)]")
-            && lines[i + 1..]
-                .iter()
-                .find(|l| !l.trim().is_empty())
-                .is_some_and(|l| {
-                    let l = l.trim();
-                    l.starts_with("mod ") && l.ends_with('{')
-                })
-        {
+        if opens_inline_test_mod(&lines, i) {
             break;
         }
         out.push(if trimmed.starts_with("//") { "" } else { line });
@@ -648,7 +644,7 @@ fn string_literals_continue_past_an_out_of_line_test_mod() {
         "mod sibling_tests;",
         "let a = \"after\";",
         "#[cfg(test)]",
-        "mod tests {",
+        "mod tests { // unit tests",
         "    const T: &str = \"inside\";",
         "}",
     ]
