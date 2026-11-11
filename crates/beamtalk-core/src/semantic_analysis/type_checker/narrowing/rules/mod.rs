@@ -50,7 +50,8 @@ pub(crate) struct NarrowingRule {
 /// `=:=` / `==` send with exactly one `true` / `false` literal operand, so it
 /// is distinct from both. `nil_eq` (BT-4712) runs on a binary equality send
 /// with exactly one `nil` operand, distinct from the other three (their
-/// operands are a symbol, a boolean and a `ClassReference`). So any order is correct; we list them
+/// operands are a symbol, a boolean and a `ClassReference`). So any order is
+/// correct; we list them
 /// grouped by shape for readability.
 pub(crate) static RULES: &[NarrowingRule] = &[
     is_nil::RULE,

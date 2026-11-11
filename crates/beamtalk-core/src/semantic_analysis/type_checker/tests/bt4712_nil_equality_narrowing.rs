@@ -39,11 +39,14 @@ fn assert_clean(body: &str) {
     );
 }
 
+/// Asserts the body is rejected *because* `x` still (or only) includes nil:
+/// the diagnostic must be the `+` send failing on the nil type.
 fn assert_rejected(body: &str) {
     let diags = type_diagnostics(&method(body));
     assert!(
-        !diags.is_empty(),
-        "expected a diagnostic for:\n{body}\ngot none"
+        diags.iter().any(|d| d.message.contains('+')
+            && (d.message.contains("Nil") || d.message.contains("UndefinedObject"))),
+        "expected `+` to be rejected on a nil type for:\n{body}\ngot: {diags:#?}"
     );
 }
 
@@ -101,7 +104,7 @@ fn and_or_blocks_see_the_narrowing() {
 
 #[test]
 fn eq_nil_true_branch_is_nil() {
-    // True branch narrows to Nil: `isNil` has no Integer arithmetic.
+    // True branch narrows to UndefinedObject, which has no `+`.
     assert_rejected("    (x =:= nil) ifTrue: [^x + 1]\n    0");
 }
 
@@ -114,4 +117,41 @@ fn neq_nil_false_branch_is_nil() {
 fn guard_that_does_not_exclude_nil_is_still_rejected() {
     assert_rejected("    (x =:= nil) ifFalse: [^0]\n    x + 1");
     assert_rejected("    (x =/= nil) ifTrue: [^0]\n    x + 1");
+}
+
+fn field_source(guard_and_use: &str) -> String {
+    format!(
+        r"
+typed Object subclass: Holder
+  state: n :: Integer | Nil = nil
+  take: m :: Integer -> Integer => m
+  go -> Integer =>
+{guard_and_use}
+"
+    )
+}
+
+#[test]
+fn self_field_eq_nil_narrows() {
+    for body in [
+        "    (self.n =:= nil) ifTrue: [^0]\n    self take: self.n",
+        "    (self.n == nil) ifFalse: [^self take: self.n]\n    0",
+        "    (self.n =/= nil) ifTrue: [^self take: self.n]\n    0",
+        "    (self.n /= nil) ifFalse: [^0]\n    self take: self.n",
+    ] {
+        let diags = type_diagnostics(&field_source(body));
+        assert!(diags.is_empty(), "for:\n{body}\ngot: {diags:#?}");
+    }
+}
+
+#[test]
+fn self_field_without_narrowing_is_rejected() {
+    for body in [
+        "    self take: self.n",
+        "    (self.n =:= nil) ifFalse: [^0]\n    self take: self.n",
+        "    (self.n =/= nil) ifTrue: [^0]\n    self take: self.n",
+    ] {
+        let diags = type_diagnostics(&field_source(body));
+        assert!(!diags.is_empty(), "expected a diagnostic for:\n{body}");
+    }
 }
