@@ -60,7 +60,7 @@ impl CoreErlangGenerator {
     ///   ([`Self::wrap_bif_test`]), true for exactly `'true'`/`'false'` —
     ///   not a bare `is_atom` guard, for the same shadowing reason as
     ///   `Symbol`.
-    /// - **`Dictionary`/exact tagged `Value`/sealed classes**: `maps:get/3`
+    /// - **`Dictionary`/exact tagged `Value`/sealed classes (kind-of fallback for user classes)**: `maps:get/3`
     ///   is not guard-safe, so [`Self::wrap_class_tag_test`] reuses the
     ///   exact nested-`case` shape `generate_array_match_arm` (`patterns::match_lowering`)
     ///   already uses for its class-tag check: an outer `is_map` case, and
@@ -70,8 +70,11 @@ impl CoreErlangGenerator {
     ///   `'$beamtalk_class'` key) or the class name atom for a tagged class
     ///   (generalizing `generate_constructor_pattern` (`patterns::match_lowering`)'s map-key
     ///   check, hardcoded to `Result` via `sealed_constructor_fields`, to
-    ///   the pattern's `class` field), falling through to `rest` on any
-    ///   other class tag.
+    ///   the pattern's `class` field). On a different class tag, a user
+    ///   class (BT-4319) falls back to [`Self::kind_of_call`] so an instance
+    ///   of a subclass the compiler could not see still matches; the
+    ///   actor and supervisor tuple shapes do the same on a different class
+    ///   at `element(2)`. Every other mismatch falls through to `rest`.
     /// - **Classes with subclasses** (BT-4319, ADR 0107 Phase B):
     ///   [`Self::wrap_kind_of_test`] — a runtime `isKindOf:`-equivalent
     ///   class-table lookup, so subclass instances match.
