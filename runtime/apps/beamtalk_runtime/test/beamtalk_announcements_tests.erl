@@ -1226,13 +1226,12 @@ heir_crash_survival_test_() ->
 heir_crash_survival_impl() ->
     {timeout, 15,
         ?_test(begin
-            %% We need a fake supervisor registered as `beamtalk_runtime_sup` so the
-            %% bus uses it as the ETS heir and the tables survive a bus crash. If a
-            %% real supervisor is already registered (full app running), use it.
+            %% We need the real `beamtalk_ets_heir` process running so the bus
+            %% names it as the ETS heir and the tables survive a bus crash.
             FakeSup = ensure_heir_process(),
             try
                 %% Stop any existing bus (which may have wrong heir) and restart
-                %% fresh so the tables get created with the fake supervisor as heir.
+                %% fresh so the tables get created with the heir process as heir.
                 stop_existing_bus(),
                 {ok, _} = beamtalk_announcements:start_link(),
                 clear_all_subscriptions(),
@@ -1255,7 +1254,7 @@ heir_crash_survival_impl() ->
 
                     %% Kill the bus (simulating a crash). Unlink first so the kill does
                     %% not propagate to the test process. The tables survive via heir
-                    %% to the fake supervisor.
+                    %% to the heir process.
                     BusPid = whereis(beamtalk_announcements),
                     unlink(BusPid),
                     BusMon = erlang:monitor(process, BusPid),
@@ -1682,46 +1681,36 @@ stop_existing_bus() ->
     catch ets:delete(beamtalk_announcement_by_class),
     ok.
 
-%% Ensure a process registered as `beamtalk_runtime_sup` exists to act as the ETS
-%% heir in tests. If one already exists (full app running), returns `existing` and
-%% `stop_heir_process/1` is a no-op. Otherwise spawns a fake supervisor process
-%% that just receives ETS-TRANSFER messages and holds the tables.
+%% Ensure the real `beamtalk_ets_heir` process (BT-3787) is running so the bus's
+%% tables name it as heir and survive a bus crash. If one already exists (full
+%% app running), returns `existing` and `stop_heir_process/1` is a no-op.
+%% Otherwise starts one, unlinked from the test process.
 ensure_heir_process() ->
-    case whereis(beamtalk_runtime_sup) of
+    case whereis(beamtalk_ets_heir) of
         undefined ->
-            Pid = spawn(fun heir_loop/0),
-            true = register(beamtalk_runtime_sup, Pid),
-            {fake, Pid};
+            {ok, Pid} = beamtalk_ets_heir:start_link(),
+            unlink(Pid),
+            {started, Pid};
         _Pid ->
             existing
     end.
 
 stop_heir_process(existing) ->
     ok;
-stop_heir_process({fake, Pid}) ->
-    unregister(beamtalk_runtime_sup),
+stop_heir_process({started, Pid}) ->
     Mon = erlang:monitor(process, Pid),
     exit(Pid, kill),
     receive
         {'DOWN', Mon, process, Pid, _} -> ok
     after 1000 -> ok
     end,
-    %% The fake heir *owned* the ETS tables (they were transferred to it when the
-    %% bus was killed in the crash-survival test), so killing it dropped them —
-    %% leaving the last restarted bus alive but tableless. That would crash the
-    %% next downstream suite that subscribes. Stop the stale bus and delete any
-    %% leftover tables so the next `setup/0` (or a bus consumer in another suite)
-    %% starts a fresh, healthy bus.
+    %% The heir *owned* the ETS tables (they were transferred to it when the bus
+    %% was killed in the crash-survival test), so killing it dropped them —
+    %% leaving the last restarted bus alive but tableless. Stop the stale bus and
+    %% delete any leftover tables so the next `setup/0` (or a bus consumer in
+    %% another suite) starts a fresh, healthy bus.
     stop_existing_bus(),
     ok.
-
-heir_loop() ->
-    receive
-        {'ETS-TRANSFER', _Table, _FromPid, _HeirData} ->
-            heir_loop();
-        _ ->
-            heir_loop()
-    end.
 
 %% Poll `Pred` until it returns true, or fail after ~2s.
 wait_until(Pred) ->
