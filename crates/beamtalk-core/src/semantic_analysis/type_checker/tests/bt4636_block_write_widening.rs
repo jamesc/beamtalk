@@ -9,7 +9,9 @@ use super::common::*;
 
 fn diagnostics_for(body: &str) -> Vec<Diagnostic> {
     let source = format!("Object subclass: Probe\n{body}");
-    let module = parse_source(&source);
+    let (module, perrs) =
+        crate::source_analysis::parse(crate::source_analysis::lex_with_eof(&source));
+    assert!(perrs.is_empty(), "parse errors: {perrs:?}\n{source}");
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     run_with_expect(&module, &hierarchy)
 }
@@ -66,7 +68,7 @@ fn non_nil_initial_type_is_widened_to_a_union() {
     // `found` starts as a String and the block may set it to nil: after the
     // loop it is `String | Nil`, so the guard narrows it back to String.
     let diags = diagnostics_for(
-        "  class f: items :: List(String) -> Integer =>\n    found := 'start'\n    items do: [:each | each isEmpty ifTrue: [found := nil]]\n    found isNil ifTrue: [^0]\n    found size\n",
+        "  class f: items :: List(String) -> Integer =>\n    found := \"start\"\n    items do: [:each | each isEmpty ifTrue: [found := nil]]\n    found isNil ifTrue: [^0]\n    found size\n",
     );
     assert!(dnu(&diags).is_empty(), "unexpected DNU: {diags:#?}");
 }
@@ -100,7 +102,7 @@ fn sibling_arms_do_not_see_each_others_writes() {
     // Integer, not `Integer | String` from the true arm's write (`abs` would be
     // reported against the String member).
     let diags = diagnostics_for(
-        "  class g: flag :: Boolean -> Integer =>\n    x := 0\n    flag ifTrue: [x := 'a'] ifFalse: [x abs]\n    0\n\n  class f: n :: Integer | Nil -> Integer =>\n    x := 0\n    n isNil ifTrue: [x := 'a'] ifFalse: [x abs]\n    0\n",
+        "  class g: flag :: Boolean -> Integer =>\n    x := 0\n    flag ifTrue: [x := \"a\"] ifFalse: [x abs]\n    0\n\n  class f: n :: Integer | Nil -> Integer =>\n    x := 0\n    n isNil ifTrue: [x := \"a\"] ifFalse: [x abs]\n    0\n",
     );
     assert!(dnu(&diags).is_empty(), "unexpected DNU: {diags:#?}");
 }
@@ -108,7 +110,7 @@ fn sibling_arms_do_not_see_each_others_writes() {
 #[test]
 fn both_arms_writes_are_joined_after_the_send() {
     let diags = diagnostics_for(
-        "  class flag: flag :: Boolean with: s :: String -> Integer =>\n    result := ''\n    flag ifTrue: [result := nil] ifFalse: [result := s]\n    result isNil ifTrue: [^0]\n    result size\n",
+        "  class flag: flag :: Boolean with: s :: String -> Integer =>\n    result := \"\"\n    flag ifTrue: [result := nil] ifFalse: [result := s]\n    result isNil ifTrue: [^0]\n    result size\n",
     );
     assert!(dnu(&diags).is_empty(), "unexpected DNU: {diags:#?}");
 }
@@ -120,7 +122,7 @@ fn control_sibling_arm_shape_is_checked() {
     // leaked into the sibling arm, `x` would be a union there and the DNU
     // would be lost. Also proves the shapes above are parsed and checked.
     let diags = diagnostics_for(
-        "  class g: flag :: Boolean -> Integer =>\n    x := 0\n    flag ifTrue: [x := 'a'] ifFalse: [x size]\n    0\n\n  class f: n :: Integer | Nil -> Integer =>\n    x := 0\n    n isNil ifTrue: [x := 'a'] ifFalse: [x size]\n    0\n",
+        "  class g: flag :: Boolean -> Integer =>\n    x := 0\n    flag ifTrue: [x := \"a\"] ifFalse: [x size]\n    0\n\n  class f: n :: Integer | Nil -> Integer =>\n    x := 0\n    n isNil ifTrue: [x := \"a\"] ifFalse: [x size]\n    0\n",
     );
     assert_eq!(dnu(&diags).len(), 2, "expected two DNUs: {diags:#?}");
 }
