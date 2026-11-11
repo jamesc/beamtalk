@@ -103,28 +103,58 @@ defmodule BtAttachWeb.WorkspaceGotoDefinitionTest do
       refute html =~ ~s(phx-click="nav_open")
     end
 
-    test "a keyword send resolves the full selector from the line prefix", %{conn: conn} do
+    test "clicking the first keyword part resolves the full selector (BT-4455)", %{conn: conn} do
+      StubWorkspaceClient.set_implementors("fetch:options:", [site("Fetcher", "fetch:options:")])
+      # A partial selector must NOT be what resolves.
+      StubWorkspaceClient.set_implementors("fetch:", [site("Wrong", "fetch:")])
+
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      # Clicking `fetch:` sends the line through the token plus the rest of the
+      # buffer as `suffix`, so the backend recovers `fetch:options:`.
+      html =
+        render_hook(view, "goto_definition", %{
+          "token" => "fetch:",
+          "code" => "Fetcher fetch:",
+          "before" => "",
+          "suffix" => " u options: o"
+        })
+
+      assert html =~ "fetch:options:"
+      refute html =~ "Wrong"
+    end
+
+    test "clicking a later keyword part resolves the same full selector", %{conn: conn} do
       StubWorkspaceClient.set_implementors("at:put:", [site("Dictionary", "at:put:")])
 
       {:ok, view, _html} = live(owner_conn(conn), "/")
 
-      # Clicking an argument of `dict at: k put: v` (here `v`) sends the prefix
-      # through that token, which spans both keyword colons — so the server
-      # recovers the whole `at:put:` selector. (Clicking the `at` part itself
-      # sends only `dict at`, with no second colon yet — see the next test.)
       html =
         render_hook(view, "goto_definition", %{
-          "token" => "v",
-          "code" => "dict at: k put: v"
+          "token" => "put:",
+          "code" => "dict at: k put:",
+          "suffix" => " v"
         })
 
       assert html =~ "at:put:"
     end
 
-    test "clicking the first keyword part falls back to the unary token", %{conn: conn} do
-      # The clicked-token prefix is only `dict at` (TOKEN excludes `:`), so no
-      # keyword colon is in range and the bare token `at` is resolved as a unary
-      # selector — the documented best-effort limit of the line-prefix heuristic.
+    test "a keyword part whose send does not resolve is a no-definition flash", %{conn: conn} do
+      # The stub resolves any `word:` text; with no implementors seeded the
+      # full selector has none, so this is the graceful no-op (never a crash).
+      {:ok, view, _html} = live(owner_conn(conn), "/")
+
+      html =
+        render_hook(view, "goto_definition", %{
+          "token" => "nope:",
+          "code" => "x nope:",
+          "suffix" => " 1"
+        })
+
+      assert html =~ "No definition found."
+    end
+
+    test "a unary token is resolved as-is, ignoring keywords earlier on the line", %{conn: conn} do
       StubWorkspaceClient.set_implementors("at", [site("OrderedCollection", "at")])
 
       {:ok, view, _html} = live(owner_conn(conn), "/")

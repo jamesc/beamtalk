@@ -32,7 +32,10 @@ Extracted from beamtalk_repl_server.
     base_protocol_response/1,
     list_class_methods_for_ws/1,
     list_inherited_methods_for_ws/1,
-    resolve_qualified_class_name/1
+    resolve_qualified_class_name/1,
+    %% Shared keyword-send recognizer: hover (here) and the `nav-query`
+    %% `keyword_selector` kind backing editor go-to-definition (BT-4455).
+    keyword_send_at/3
 ]).
 
 -include_lib("kernel/include/logger.hrl").
@@ -60,7 +63,6 @@ Extracted from beamtalk_repl_server.
     classify_receiver/2,
     hover_docs/4,
     hover_markdown/2,
-    keyword_send_at/3,
     diagnostics_for/3
 ]).
 -endif.

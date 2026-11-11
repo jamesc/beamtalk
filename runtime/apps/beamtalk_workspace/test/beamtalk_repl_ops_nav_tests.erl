@@ -54,6 +54,54 @@ describe_ops_nav_query_optional_includes_selector_and_class_test() ->
     ?assert(lists:member(<<"module">>, Optional)).
 
 %%====================================================================
+%% handle_term/4 — keyword_selector (BT-4455)
+%%====================================================================
+
+kw_selector(Params) ->
+    beamtalk_repl_ops_nav:handle_term(
+        <<"nav-query">>, Params#{<<"kind">> => <<"keyword_selector">>}, make_msg(), self()
+    ).
+
+keyword_selector_first_keyword_resolves_full_selector_test() ->
+    ?assertEqual(
+        {value, #{<<"selector">> => <<"fetch:options:">>}},
+        kw_selector(#{<<"code">> => <<"Fetcher fetch:">>, <<"suffix">> => <<" u options: o">>})
+    ).
+
+keyword_selector_send_split_across_lines_test() ->
+    ?assertEqual(
+        {value, #{<<"selector">> => <<"fetch:options:">>}},
+        kw_selector(#{
+            <<"before">> => <<"Fetcher fetch: u\n">>,
+            <<"code">> => <<"  options:">>,
+            <<"suffix">> => <<" o">>
+        })
+    ).
+
+keyword_selector_skips_string_and_nested_keywords_test() ->
+    ?assertEqual(
+        {value, #{<<"selector">> => <<"at:put:">>}},
+        kw_selector(#{
+            <<"code">> => <<"d at:">>,
+            <<"suffix">> => <<" (e at: 1) put: \"x: y:\"">>
+        })
+    ).
+
+keyword_selector_unresolved_is_null_test() ->
+    %% Inside a string, and a non-keyword token: no send resolves.
+    ?assertEqual(
+        {value, #{<<"selector">> => null}},
+        kw_selector(#{<<"code">> => <<"x := \"a at:">>, <<"suffix">> => <<" b\"">>})
+    ),
+    ?assertEqual(
+        {value, #{<<"selector">> => null}}, kw_selector(#{<<"code">> => <<"Integer max">>})
+    ).
+
+keyword_selector_requires_code_test() ->
+    ?assertMatch({error, _}, kw_selector(#{})),
+    ?assertMatch({error, _}, kw_selector(#{<<"code">> => <<"a b:">>, <<"suffix">> => 42})).
+
+%%====================================================================
 %% handle/4 — callers_of_native_module validation
 %%====================================================================
 
