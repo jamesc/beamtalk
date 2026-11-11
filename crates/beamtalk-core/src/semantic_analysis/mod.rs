@@ -21,6 +21,7 @@ use std::collections::{HashMap, HashSet};
 
 pub mod actor_secrets;
 pub mod actor_spawn;
+pub mod alias_expansion;
 pub mod alias_registry;
 mod block_analyzer;
 pub(crate) mod block_context;
