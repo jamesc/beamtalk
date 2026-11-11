@@ -140,6 +140,9 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% literal kind).
     put_constant_class_methods/2,
     lookup_constant_class_methods/1,
+    %% BT-4493: certified caller-safe signal primitives (the raise key's row).
+    put_caller_safe_primitives/2,
+    lookup_caller_safe_primitives/1,
     is_constant_value/1,
     lookup_direct_constructor/2,
     %% BT-4409: the per-class `new:` fact and its run-time chain walk.
@@ -271,6 +274,14 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% `__beamtalk_meta/0`: a reload publishes it from the new module's meta
     %% while the old code is still current (`-on_load`).
     constant_class_methods = #{} :: #{selector() => constant_value()},
+    %% BT-4493: `caller_safe_class_primitives` from the compiled module's
+    %% `__beamtalk_meta/0`, each class-side selector whose whole body is one
+    %% caller-safe signal primitive. Written only by
+    %% `put_caller_safe_primitives/2`; `#{}` for dynamic classes and modules
+    %% compiled before the key existed. A caller-safe raise static call key is
+    %% certified against this row of the defining class, not against the
+    %% module's own `__beamtalk_meta/0` (the old code during `-on_load`).
+    caller_safe_primitives = #{} :: #{selector() => atom()},
     %% BT-4262: the class doc (ADR 0033), mirrored from the class process like
     %% the reflection state above, so `doc` answers without a `gen_server:call`
     %% into the class (which cannot answer from inside its own process, or
@@ -1407,6 +1418,45 @@ put_constant_class_methods(Name, Constants) when is_map(Constants) ->
                 error:badarg -> ok
             end,
             beamtalk_class_shadow_flags:invalidate(Name)
+    end.
+
+-doc """
+Store a class's certified caller-safe signal primitives (BT-4493):
+`caller_safe_class_primitives` from its `__beamtalk_meta/0`
+(`#{Selector => Primitive}`); `#{}` clears it. Updates the existing row in
+place; a no-op when no row exists.
+
+A change erases the class's static call keys, and its descendants'
+(`beamtalk_class_shadow_flags:invalidate/1`), since a caller-safe raise key
+sits on the inheriting class. A key is installed only while the defining
+class's row maps its selector to the key's primitive, re-read under the tag
+lock the erase also takes. A reload publishes this map from the new module's
+meta while the old code may still be current (`-on_load`).
+""".
+-spec put_caller_safe_primitives(class_name(), #{selector() => atom()}) -> ok.
+put_caller_safe_primitives(Name, Primitives) when is_map(Primitives) ->
+    new(),
+    case field(Name, #class_metadata.caller_safe_primitives) of
+        Primitives ->
+            ok;
+        _ ->
+            try
+                ets:update_element(
+                    ?TABLE, Name, {#class_metadata.caller_safe_primitives, Primitives}
+                ),
+                ok
+            catch
+                error:badarg -> ok
+            end,
+            beamtalk_class_shadow_flags:invalidate(Name)
+    end.
+
+-doc "A class's certified caller-safe primitives (`#{}` when none or unknown).".
+-spec lookup_caller_safe_primitives(class_name()) -> #{selector() => atom()}.
+lookup_caller_safe_primitives(Name) ->
+    case field(Name, #class_metadata.caller_safe_primitives) of
+        Primitives when is_map(Primitives) -> Primitives;
+        _ -> #{}
     end.
 
 -doc "A class's certified literal class-side bodies (`#{}` when none or unknown).".

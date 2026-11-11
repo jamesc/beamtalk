@@ -1179,6 +1179,7 @@ init({ClassName, ClassInfo}) ->
     sync_identity(ClassName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create),
     sync_direct_constructors(ClassName, Meta),
     sync_constant_class_methods(ClassName, Meta),
+    sync_caller_safe_primitives(ClassName, Meta),
     sync_class_process_facts(ClassName, Meta, maps:get(class_state, ClassInfo, #{})),
 
     %% Clear any runtime class-method funs left behind by a crash of the
@@ -2845,6 +2846,24 @@ sync_constant_class_methods(ClassName, Meta) ->
     beamtalk_class_metadata:put_constant_class_methods(ClassName, Constants).
 
 -doc """
+Publish the class's caller-safe signal primitives (BT-4493):
+`caller_safe_class_primitives` from its `__beamtalk_meta/0`, keeping only
+`Selector => Primitive` atom entries; `#{}` when absent. A caller-safe raise
+static call key is certified against it, not against the module's own meta,
+which is the old code during a reload's `-on_load`.
+""".
+-spec sync_caller_safe_primitives(class_name(), map()) -> ok.
+sync_caller_safe_primitives(ClassName, Meta) ->
+    Primitives =
+        case maps:get(caller_safe_class_primitives, Meta, #{}) of
+            M when is_map(M) ->
+                maps:filter(fun(K, V) -> is_atom(K) andalso is_atom(V) end, M);
+            _ ->
+                #{}
+        end,
+    beamtalk_class_metadata:put_caller_safe_primitives(ClassName, Primitives).
+
+-doc """
 Publish the class-variable fact and the process-bound selector list (ADR 0142
 §1, BT-4299) into the unified metadata row.
 
@@ -3279,6 +3298,8 @@ apply_class_info(State, ClassInfo) ->
     %% class's static call keys on a change), so a constant-value key never
     %% certifies a literal from the old code still current during `-on_load`.
     sync_constant_class_methods(State#class_state.name, Meta),
+    %% BT-4493: likewise the caller-safe raise primitives.
+    sync_caller_safe_primitives(State#class_state.name, Meta),
     %% BT-4126: the sync above re-bakes only this class's own row; say so when
     %% the reload leaves descendants' baked `direct_constructors` behind their
     %% ancestors (informational: their dynamic `new:` re-checks the chain at

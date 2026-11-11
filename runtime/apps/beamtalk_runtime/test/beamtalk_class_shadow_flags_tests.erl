@@ -396,6 +396,17 @@ load_raise_module(Module, CallerSafe) ->
         Module, compile_module(Module, [{class_testSelf, 1}, {'__beamtalk_meta', 0}], Body)
     ).
 
+%% A class on `Module` whose registration publishes `CallerSafe` (BT-4493).
+start_raise_class(Name, Module, CallerSafe) ->
+    {ok, Pid} = beamtalk_object_class:start(Name, #{
+        superclass => none,
+        module => Module,
+        class_methods => #{testSelf => #{arity => 0}},
+        class_state => #{},
+        meta => maps:put(caller_safe_class_primitives, CallerSafe, ?STATIC_META)
+    }),
+    Pid.
+
 %% A class module defining `class_testSelf/1` whose metadata maps selectors to
 %% their integer-literal bodies as `Constants` does (BT-4363).
 load_constant_module(Module, Constants) ->
@@ -1092,7 +1103,7 @@ static_call_target_test_() ->
             %% primitive, which the defining module's metadata lists.
             Mod = bt4270_raise_root_module,
             load_raise_module(Mod, #{testSelf => classSignal}),
-            Root = start_class_on('Bt4270RaiseRoot', none, Mod),
+            Root = start_raise_class('Bt4270RaiseRoot', Mod, #{testSelf => classSignal}),
             Leaf = start_inheriting_class('Bt4270RaiseLeaf', 'Bt4270RaiseRoot'),
             try
                 Key =
@@ -1108,10 +1119,10 @@ static_call_target_test_() ->
                         'Bt4270RaiseLeaf class'},
                 ?assertNot(target('Bt4270RaiseLeaf', OtherPrimitive, testSelf)),
                 %% A reload whose new body is no longer the primitive: the
-                %% reload's registration erases the key, and the new code's
-                %% metadata no longer certifies it.
+                %% reload publishes the new row, which erases the key and no
+                %% longer certifies it.
                 load_raise_module(Mod, #{}),
-                ok = beamtalk_class_shadow_flags:invalidate('Bt4270RaiseRoot'),
+                ok = beamtalk_class_metadata:put_caller_safe_primitives('Bt4270RaiseRoot', #{}),
                 ?assertNot(key_value(Key)),
                 ?assertNot(target('Bt4270RaiseLeaf', Key, testSelf)),
                 ?assertNot(key_value(Key))
@@ -1120,6 +1131,32 @@ static_call_target_test_() ->
                 stop_static_class(Root)
             end
         end},
+        {"a caller-safe raise key is certified by the published row, not the current code",
+            fun() ->
+                %% BT-4493: during a reload's `-on_load` the old code (and its
+                %% `__beamtalk_meta/0`) is still current. The loaded code here
+                %% still says `classSignal`, but the published row says
+                %% otherwise, so the key declines.
+                Mod = bt4493_raise_window_module,
+                load_raise_module(Mod, #{testSelf => classSignal}),
+                Root = start_raise_class('Bt4493RaiseRoot', Mod, #{testSelf => classSignal}),
+                Leaf = start_inheriting_class('Bt4493RaiseLeaf', 'Bt4493RaiseRoot'),
+                try
+                    Key =
+                        {caller_safe_raise, classSignal, Mod, class_testSelf,
+                            'Bt4493RaiseLeaf class'},
+                    ?assertMatch(#beamtalk_object{}, target('Bt4493RaiseLeaf', Key, testSelf)),
+                    ?assertMatch(#beamtalk_object{}, key_value(Key)),
+                    %% The publish erases the descendant's installed key.
+                    ok = beamtalk_class_metadata:put_caller_safe_primitives('Bt4493RaiseRoot', #{}),
+                    ?assertNot(key_value(Key)),
+                    ?assertNot(target('Bt4493RaiseLeaf', Key, testSelf)),
+                    ?assertNot(key_value(Key))
+                after
+                    stop_static_class(Leaf),
+                    stop_static_class(Root)
+                end
+            end},
         {"a caller-safe raise key declines a module with no such metadata", fun() ->
             with_static_class('Bt4270NoMeta', fun(_Pid) ->
                 Key =
