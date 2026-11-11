@@ -520,8 +520,8 @@ fn guarded_operator_in_actor_receiver_still_inlines() {
 fn stateful_while_condition_tail_pure_inlines() {
     // BT-4202: a stateful while-condition tail pure-inlines like any other
     // conditional. The loop's `case _CondBool` carries a catch-all, which
-    // avoids the OTP 28 `beam_clean` crash (BT-4070 had declined inlining
-    // here as a workaround). Shape minimized from
+    // avoids the OTP 28 `beam_clean` crash that made BT-4070 decline inlining
+    // here (root-caused in BT-4202). Shape minimized from
     // `while_condition_carrier_corpus` run70/run139.
     let src = concat!(
         "Value subclass: Probe\n",
@@ -778,7 +778,7 @@ fn boolean_only_case_with_failing_branch_needs_catch_all() {
     // catch-all whose scrutinee has a branch that provably matches neither
     // clause crashes `beam_clean` (`Internal consistency check failed`,
     // `{jump,{f,0}}`; the `undefined_label` family). `case_clause_fallback`
-    // on the loop's `case _CondBool` is the workaround. If the first
+    // on the loop's `case _CondBool` guards against it (BT-4202). If the first
     // assertion starts failing (e.g. after an OTP bump), a newer OTP fixed
     // the bug: delete the pin and the `"_CondBad"` fallbacks in
     // `while_loops.rs` only if every supported OTP release is fixed
