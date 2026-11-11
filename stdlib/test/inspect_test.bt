@@ -63,15 +63,15 @@ TestCase subclass: InspectTest
   testActorSubclassWithFieldsProducesNameAndFields =>
     c := Counter spawn
     str := c inspect printString
-    self assert: (str includesSubstring: "Counter") equals: true
-    self assert: (str includesSubstring: "value: 0") equals: true
+    self assert: (str includesSubstring: "Counter")
+    self assert: (str includesSubstring: "value: 0")
 
   testActorSubclassAfterMutationShowsUpdatedValue =>
     c := Counter spawn
     c increment
     c increment
     str := c inspect printString
-    self assert: (str includesSubstring: "value: 2") equals: true
+    self assert: (str includesSubstring: "value: 2")
 
   // --- Nested value objects use recursive printString ---
   testNestedValueObjectUsesRecursivePrintString =>
@@ -82,7 +82,7 @@ TestCase subclass: InspectTest
   // --- ADR 0095 Phase 3: `inspect` now returns an Inspector, not a String ---
   testInspectReturnsAnInspector =>
     p := ValuePoint x: 3 y: 4
-    self assert: (p inspect isKindOf: Inspector) equals: true
+    self assert: (p inspect isKindOf: Inspector)
 
   testInspectIsShorthandForInspectorOn =>
     // `anObject inspect` is the shorthand for `Inspector on: anObject`.
