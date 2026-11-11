@@ -110,18 +110,36 @@ pub fn synthesized_keyword_constructor<'a>(
     }
 }
 
-/// The declared return type of a synthesized `with<Field>:` copy-setter or
-/// keyword constructor on the value class `class_name`: the class itself,
-/// since both answer a new instance of it.
+/// The declared return type of a synthesized `with<Field>:` copy-setter:
+/// `Self`, since the copy is `maps:put` on the receiver and keeps its class.
+///
+/// `Self` rather than the bare class name, so a generic value class keeps
+/// its type arguments through a copy: on `b :: Box(Integer)`,
+/// `b withItem: 3` is `Box(Integer)` and `(b withItem: 3) item` is
+/// `Integer`, where a bare `Box` would drop them (BT-4648). On a subclass
+/// instance the copy is that subclass. The flat `'Self'` rendering
+/// round-trips through `__beamtalk_meta` (`DeclaredType::parse`).
 ///
 /// Read by the hierarchy's synthesized `MethodInfo`s, the stdlib builtins
 /// generator (`build_stdlib`) and codegen's `__beamtalk_meta` `method_info`
-/// entries, so a class seen through its
-/// loaded BEAM metadata (the REPL's view of an earlier input) records the
-/// same return types as one built from its AST (BT-4621) — the
-/// `cascade-drops-update` warning, for one, reads them.
+/// entries, so a class seen through its loaded BEAM metadata (the REPL's
+/// view of an earlier input) records the same return types as one built
+/// from its AST (BT-4621) — the `cascade-drops-update` warning, for one,
+/// reads them.
 #[must_use]
-pub fn synthesized_copy_return_type(class_name: &str) -> DeclaredType {
+pub fn synthesized_copy_return_type() -> DeclaredType {
+    DeclaredType::SelfType
+}
+
+/// The declared return type of the synthesized keyword constructor on the
+/// value class `class_name`: the class itself, not `Self`. The constructor
+/// ignores its class-self argument and always builds an instance of the
+/// defining class, so a subclass that inherits it (`Sub item: 3`) gets a
+/// `class_name` instance, which `Self` would mistype as the subclass
+/// (BT-4648). A class-side send has no receiver type arguments to keep.
+/// Read by the same consumers as [`synthesized_copy_return_type`].
+#[must_use]
+pub fn synthesized_constructor_return_type(class_name: &str) -> DeclaredType {
     DeclaredType::simple(class_name)
 }
 

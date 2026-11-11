@@ -991,7 +991,7 @@ fn synthesize_value_auto_methods(
                 is_internal: false,
                 spawns_block: false,
                 return_type: Some(
-                    beamtalk_core::synthetic_selectors::synthesized_copy_return_type(class_name),
+                    beamtalk_core::synthetic_selectors::synthesized_copy_return_type(),
                 ),
                 param_types: vec![param_type],
                 doc: Some(setter_doc),
@@ -1034,7 +1034,7 @@ fn synthesize_value_auto_methods(
         is_internal: false,
         spawns_block: false,
         return_type: Some(
-            beamtalk_core::synthetic_selectors::synthesized_copy_return_type(class_name),
+            beamtalk_core::synthetic_selectors::synthesized_constructor_return_type(class_name),
         ),
         param_types,
         doc: Some(ctor_doc),
@@ -4686,7 +4686,7 @@ mod tests {
             .find(|m| m.selector == "withValue:")
             .expect("auto functional updater should be generated");
         assert_eq!(setter.arity, 1);
-        assert_eq!(setter.return_type, Some(DeclaredType::simple("Wrapper")));
+        assert_eq!(setter.return_type, Some(DeclaredType::SelfType));
 
         let ctor = meta
             .class_methods

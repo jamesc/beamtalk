@@ -881,7 +881,7 @@ impl CoreErlangGenerator {
                 entries.push((
                     safe_sel,
                     arity,
-                    Self::synthesized_copy_return_repr(class),
+                    Self::synthesized_constructor_return_repr(class),
                     vec![MetaTypeRepr::None; arity],
                     sealed,
                     false,
@@ -903,13 +903,26 @@ impl CoreErlangGenerator {
         entries
     }
 
-    /// The `method_info` return type of a synthesized `with*:` copy-setter or
-    /// keyword constructor on `class`: the shared
+    /// The `method_info` return type of a synthesized `with*:` copy-setter on
+    /// `class`: the shared
     /// [`beamtalk_core::synthetic_selectors::synthesized_copy_return_type`],
     /// converted like any declared return type.
     fn synthesized_copy_return_repr(class: &ClassDefinition) -> MetaTypeRepr {
         Self::declared_type_to_meta_repr(
-            &beamtalk_core::synthetic_selectors::synthesized_copy_return_type(&class.name.name),
+            &beamtalk_core::synthetic_selectors::synthesized_copy_return_type(),
+            &class.type_params,
+        )
+    }
+
+    /// The `method_info` return type of the synthesized keyword constructor
+    /// on `class`: the shared
+    /// [`beamtalk_core::synthetic_selectors::synthesized_constructor_return_type`],
+    /// converted like any declared return type.
+    fn synthesized_constructor_return_repr(class: &ClassDefinition) -> MetaTypeRepr {
+        Self::declared_type_to_meta_repr(
+            &beamtalk_core::synthetic_selectors::synthesized_constructor_return_type(
+                &class.name.name,
+            ),
             &class.type_params,
         )
     }

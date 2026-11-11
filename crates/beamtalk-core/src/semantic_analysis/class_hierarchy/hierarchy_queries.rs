@@ -990,9 +990,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     is_internal: false,
                     spawns_block: false,
-                    return_type: Some(crate::synthetic_selectors::synthesized_copy_return_type(
-                        class_name,
-                    )),
+                    return_type: Some(crate::synthetic_selectors::synthesized_copy_return_type()),
                     param_types: vec![None],
                     doc: Some(EcoString::from("*(compiler-generated)*")),
                     origin: None,
@@ -1023,9 +1021,9 @@ impl ClassHierarchy {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            return_type: Some(crate::synthetic_selectors::synthesized_copy_return_type(
-                class_name,
-            )),
+            return_type: Some(
+                crate::synthetic_selectors::synthesized_constructor_return_type(class_name),
+            ),
             param_types: vec![None; slots.len()],
             doc: Some(EcoString::from("*(compiler-generated)*")),
             origin: None,
@@ -1423,9 +1421,7 @@ impl ClassHierarchy {
                     is_sealed: false,
                     is_internal: false,
                     spawns_block: false,
-                    return_type: Some(crate::synthetic_selectors::synthesized_copy_return_type(
-                        &class_name,
-                    )),
+                    return_type: Some(crate::synthetic_selectors::synthesized_copy_return_type()),
                     param_types: vec![None],
                     doc: Some(setter_doc.into()),
                     origin: None,
@@ -1464,9 +1460,9 @@ impl ClassHierarchy {
             is_sealed: false,
             is_internal: false,
             spawns_block: false,
-            return_type: Some(crate::synthetic_selectors::synthesized_copy_return_type(
-                &class_name,
-            )),
+            return_type: Some(
+                crate::synthetic_selectors::synthesized_constructor_return_type(&class_name),
+            ),
             param_types: vec![None; arity],
             doc: Some(ctor_doc.into()),
             origin: None,
