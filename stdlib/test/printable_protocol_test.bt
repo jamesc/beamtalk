@@ -72,7 +72,5 @@ TestCase subclass: PrintableProtocolTest
   testUndefinedObjectConforms =>
     self assert: (UndefinedObject conformsTo: #Printable)
 
-  // --- Non-conforming class (no asString in hierarchy) ---
-  testBooleanDoesNotConform =>
-    // Boolean has printString (from Object) but no asString
-    self deny: (Boolean conformsTo: #Printable)
+  // --- Boolean (BT-4716: defines asString; printString inherited from Object) ---
+  testBooleanConforms => self assert: (Boolean conformsTo: #Printable)

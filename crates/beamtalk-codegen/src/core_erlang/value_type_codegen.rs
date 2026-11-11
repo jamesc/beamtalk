@@ -4839,10 +4839,9 @@ impl CoreErlangGenerator {
         if has_as_string {
             return Document::Vec(Vec::new());
         }
+        // `True`/`False`/`UndefinedObject` get `asString` from stdlib
+        // (`Boolean`, `UndefinedObject`); only `Block` has no `.bt` source for it.
         let default_str = match class_name {
-            "True" => "true",
-            "False" => "false",
-            "UndefinedObject" => "nil",
             "Block" => "Block",
             _ => "",
         };
@@ -4851,9 +4850,9 @@ impl CoreErlangGenerator {
         } else {
             docvec![
                 "        <'asString'> when 'true' ->\n",
-                "            ",
+                "            call 'beamtalk_primitive':'string_from_binary'(",
                 leaf::binary_lit(default_str),
-                "\n",
+                ")\n",
             ]
         }
     }

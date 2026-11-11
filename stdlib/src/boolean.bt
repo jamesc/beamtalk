@@ -17,6 +17,16 @@
 /// ```
 abstract sealed Value subclass: Boolean
 
+  /// Return `"true"` or `"false"` as a String (the `Printable` contract,
+  /// BT-4716); same text as `printString`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// true asString               // => "true"
+  /// false asString              // => "false"
+  /// ```
+  asString -> String => self printString
+
   // === Abstract protocol (subclasses must implement) ===
 
   /// Conditional evaluation: evaluate `trueBlock` if true, `falseBlock` if false.

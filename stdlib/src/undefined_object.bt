@@ -109,3 +109,12 @@ sealed Object subclass: UndefinedObject
   /// nil printString             // => "nil"
   /// ```
   printString -> String => "nil"
+
+  /// Return the String `"nil"` (the `Printable` contract, BT-4716).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// nil asString                // => "nil"
+  /// "a" ++ nil asString         // => "anil"
+  /// ```
+  asString -> String => self printString
