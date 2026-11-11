@@ -228,7 +228,18 @@ impl CoreErlangGenerator {
         // compiled) therefore still matches, and the arm means the same
         // whatever the compiling unit could see (BT-4319). The two shapes
         // compute one `'true'`/`'false'` so `bound_success` is emitted once.
-        let kind_of = Self::kind_of_call(match_var, class_name);
+        // A sealed class can never gain a subclass, so its arm stays a pure
+        // constant-time tag test.
+        let is_sealed = self
+            .class_hierarchy
+            .as_ref()
+            .and_then(|h| h.get_class(class_name))
+            .is_some_and(|c| c.is_sealed);
+        let kind_of = if is_sealed {
+            false_doc()
+        } else {
+            Self::kind_of_call(match_var, class_name)
+        };
         let exact_or_kind_of = if is_actor {
             self.wrap_actor_class_tag_test(
                 match_var,

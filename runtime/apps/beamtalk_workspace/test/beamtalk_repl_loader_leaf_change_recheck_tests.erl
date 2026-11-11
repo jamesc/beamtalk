@@ -256,8 +256,6 @@ gaining_a_first_subclass_does_not_flag_a_plain_type_pattern_dependent_test_() ->
         {setup, fun leaf_loader_setup/0, fun leaf_loader_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    subscribe_self_to_reload_check(),
-
                     %% `LeafRecheckShape` — leaf, zero subclasses.
                     ShapePath = filename:join(
                         temp_dir(),
