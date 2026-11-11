@@ -229,7 +229,7 @@ removed before one (BT-4660); such pre-release builds must be recompiled.
 ## Implementation Tracking
 
 **Epic:** BT-4533
-**Issues:** BT-4534 (R1, foreign `^` keeps cleanup writes), BT-4532 (pre-store through ThreadedIr; check covers any block operand), BT-4535 (commit reads the cell; fixes BT-4459), BT-4536 (delete relay and stamp, one release after BT-4535), BT-4660 (remove the `nlr_state/2` alias, one release after BT-4536)
+**Issues:** BT-4534 (R1, foreign `^` keeps cleanup writes), BT-4532 (pre-store through ThreadedIr; check covers any block operand), BT-4535 (commit reads the cell; fixes BT-4459), BT-4536 (delete relay and stamp, one release after BT-4535), BT-4660 (remove the never-released `nlr_state/2` alias)
 **Status:** Implemented (BT-4660 removed the `nlr_state/2` alias)
 
 ## References
