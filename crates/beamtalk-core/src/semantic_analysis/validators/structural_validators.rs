@@ -426,6 +426,8 @@ const KNOWN_OTP_MODULES: &[&str] = &[
     "unicode",
     "uri_string",
     "zlib",
+    // OTP 28+ stdlib (BT-4457).
+    "zstd",
 ];
 
 /// Warn on unresolved Erlang FFI module references.
@@ -902,6 +904,8 @@ mod tests {
         assert!(is_known_erlang_module("telemetry", &empty_known_modules()));
         assert!(is_known_erlang_module("ssl", &empty_known_modules()));
         assert!(is_known_erlang_module("public_key", &empty_known_modules()));
+        // BT-4457: `zstd` ships in OTP 28's stdlib.
+        assert!(is_known_erlang_module("zstd", &empty_known_modules()));
     }
 
     #[test]

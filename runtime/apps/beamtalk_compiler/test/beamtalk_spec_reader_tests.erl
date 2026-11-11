@@ -35,6 +35,48 @@ read_specs_lists_test() ->
     ?assertEqual(1, length(maps:get(params, ReverseSpec))),
     ?assertEqual(<<"List">>, maps:get(return_type, ReverseSpec)).
 
+%% BT-4457: zstd:compress/2 accepts a context as well as a parameter map.
+%% Skipped on OTP < 28, where `zstd' does not exist.
+read_specs_zstd_compress_accepts_context_test() ->
+    case code:which(zstd) of
+        non_existing ->
+            ok;
+        BeamFile ->
+            {ok, Specs} = beamtalk_spec_reader:read_specs(BeamFile),
+            [Spec] = [
+                S
+             || S <- Specs,
+                maps:get(name, S) =:= <<"compress">>,
+                maps:get(arity, S) =:= 2
+            ],
+            [_Data, Opts] = maps:get(params, Spec),
+            ?assertEqual(<<"Dynamic">>, maps:get(type, Opts))
+    end.
+
+%% BT-4457: a clause whose param is a union containing an unresolvable
+%% (opaque) member must also widen the merged position to Dynamic.
+multi_clause_union_with_dynamic_member_widens_to_dynamic_test() ->
+    Forms = [
+        {attribute, 1, export, [{f, 1}]},
+        {attribute, 1, opaque, {ctx, {type, 1, tuple, any}, []}},
+        {attribute, 1, spec,
+            {{f, 1}, [
+                {type, 2, 'fun', [
+                    {type, 2, product, [{type, 2, map, any}]},
+                    {type, 2, ok, []}
+                ]},
+                {type, 3, 'fun', [
+                    {type, 3, product, [
+                        {type, 3, union, [{type, 3, binary, []}, {user_type, 3, ctx, []}]}
+                    ]},
+                    {type, 3, ok, []}
+                ]}
+            ]}}
+    ],
+    [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    [Param] = maps:get(params, Spec),
+    ?assertEqual(<<"Dynamic">>, maps:get(type, Param)).
+
 %% Reading specs from maps.beam succeeds and returns non-empty results.
 read_specs_maps_test() ->
     BeamFile = code:which(maps),
@@ -1160,9 +1202,32 @@ multi_clause_different_returns_test() ->
     ?assertEqual(1, maps:get(arity, Spec)),
     %% Return type is union of both clauses
     ?assertEqual(<<"Boolean | Symbol">>, maps:get(return_type, Spec)),
-    %% Params come from first clause
+    %% Param types are the union across clauses (BT-4457)
     [Param] = maps:get(params, Spec),
-    ?assertEqual(<<"Integer">>, maps:get(type, Param)).
+    ?assertEqual(<<"Integer | Float">>, maps:get(type, Param)).
+
+%% BT-4457: an overloaded spec whose later clause takes an opaque type
+%% (zstd:compress/2 -> `compress_parameters() | context()`) must not narrow
+%% the parameter to the first clause's type.
+multi_clause_opaque_param_widens_to_dynamic_test() ->
+    Forms = [
+        {attribute, 1, export, [{compress, 2}]},
+        {attribute, 1, opaque, {context, {type, 1, tuple, any}, []}},
+        {attribute, 1, spec,
+            {{compress, 2}, [
+                {type, 2, 'fun', [
+                    {type, 2, product, [{type, 2, iodata, []}, {type, 2, map, any}]},
+                    {type, 2, iodata, []}
+                ]},
+                {type, 3, 'fun', [
+                    {type, 3, product, [{type, 3, iodata, []}, {user_type, 3, context, []}]},
+                    {type, 3, iodata, []}
+                ]}
+            ]}}
+    ],
+    [Spec] = beamtalk_spec_reader:extract_specs_from_forms(Forms),
+    [_Data, Opts] = maps:get(params, Spec),
+    ?assertEqual(<<"Dynamic">>, maps:get(type, Opts)).
 
 %% Multi-clause spec: same return types collapse to a single type.
 multi_clause_same_returns_test() ->

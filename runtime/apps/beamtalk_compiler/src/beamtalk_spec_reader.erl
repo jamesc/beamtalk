@@ -18,8 +18,9 @@ of a `.beam` file in a single pass, mapping Erlang types to Beamtalk types.
 Supports batch processing of multiple modules via `read_specs_batch/1' and
 integration with the `beamtalk_build_worker' protocol.
 
-Multi-clause specs produce a union of return types. Parameter names and
-types come from the first clause (Erlang convention).
+Multi-clause specs produce a union of return types. Parameter names come
+from the first clause (Erlang convention); parameter types are the union
+across all clauses (BT-4457).
 """.
 
 -export([
@@ -406,14 +407,15 @@ extract_exports(Forms) ->
 
 %% Process a single spec into our result format.
 %%
-%% Multi-clause specs: parameter names and types come from the first clause
-%% (Erlang convention — all clauses share the same arity). The return type
-%% is the union (deduped) of all clause return types.
+%% Multi-clause specs: parameter names come from the first clause (Erlang
+%% convention — all clauses share the same arity); parameter types and the
+%% return type are the union (deduped) across all clauses.
 %%
 %% `LineMap' maps `{Name, Arity}' to the source line of the function definition.
 -spec process_spec(atom(), non_neg_integer(), [tuple()], map()) -> map().
 process_spec(Name, Arity, Clauses, LineMap) ->
-    %% Extract params from the first clause, return types from all clauses
+    %% Param names from the first clause, param and return types unioned
+    %% across all clauses
     {Params, ReturnTypes} = extract_from_clauses(Clauses, Arity),
     ReturnType = merge_return_types(ReturnTypes),
     Base = #{
@@ -428,34 +430,59 @@ process_spec(Name, Arity, Clauses, LineMap) ->
         error -> Base
     end.
 
-%% Extract params (from first clause) and return types (from all clauses).
+%% Extract params (names from the first clause, types unioned across all
+%% clauses) and return types (from all clauses).
 -spec extract_from_clauses([tuple()], non_neg_integer()) ->
     {[map()], [binary()]}.
 extract_from_clauses(Clauses, Arity) ->
-    extract_from_clauses(Clauses, Arity, first, []).
+    extract_from_clauses(Clauses, Arity, [], []).
 
-extract_from_clauses([], Arity, first, _RetAcc) ->
+extract_from_clauses([], Arity, [], _RetAcc) ->
     %% No clauses at all — generate fallback
     Positional = [
         #{name => positional_name(I), type => <<"Dynamic">>}
      || I <- lists:seq(1, Arity)
     ],
     {Positional, [<<"Dynamic">>]};
-extract_from_clauses([], _Arity, {have_params, Params}, RetAcc) ->
-    {Params, lists:reverse(RetAcc)};
-extract_from_clauses([Clause | Rest], Arity, ParamState, RetAcc) ->
+extract_from_clauses([], _Arity, ParamLists, RetAcc) ->
+    {merge_clause_params(lists:reverse(ParamLists)), lists:reverse(RetAcc)};
+extract_from_clauses([Clause | Rest], Arity, ParamLists, RetAcc) ->
     case extract_clause(Clause) of
         {ok, ClauseParams, ClauseRet} ->
-            NewParamState =
-                case ParamState of
-                    first -> {have_params, ClauseParams};
-                    {have_params, _} = S -> S
-                end,
-            extract_from_clauses(Rest, Arity, NewParamState, [ClauseRet | RetAcc]);
+            extract_from_clauses(Rest, Arity, [ClauseParams | ParamLists], [ClauseRet | RetAcc]);
         fallback ->
             %% Unrecognized clause form — skip it
-            extract_from_clauses(Rest, Arity, ParamState, RetAcc)
+            extract_from_clauses(Rest, Arity, ParamLists, RetAcc)
     end.
+
+%% Merge per-clause parameter lists (BT-4457). Names come from the first
+%% clause; each position's type is the union of that position's type across
+%% all clauses, so an overloaded spec such as
+%% `compress(iodata(), compress_parameters()) | (iodata(), context())`
+%% accepts either. If any clause leaves a position `Dynamic` (e.g. an opaque
+%% type), the whole position is `Dynamic`: a union with an unknown member
+%% cannot be checked.
+-spec merge_clause_params([[map()]]) -> [map()].
+merge_clause_params([First]) ->
+    First;
+merge_clause_params([First | _] = ParamLists) ->
+    Columns = transpose(ParamLists),
+    [
+        Param#{type => merge_param_types([maps:get(type, P) || P <- Column])}
+     || {Param, Column} <- lists:zip(First, Columns)
+    ].
+
+-spec merge_param_types([binary()]) -> binary().
+merge_param_types(Types) ->
+    Members = lists:flatmap(fun split_top_level_union/1, Types),
+    case lists:member(<<"Dynamic">>, Members) of
+        true -> <<"Dynamic">>;
+        false -> join_types(Types)
+    end.
+
+-spec transpose([[map()]]) -> [[map()]].
+transpose([[] | _]) -> [];
+transpose(Lists) -> [[H || [H | _] <- Lists] | transpose([T || [_ | T] <- Lists])].
 
 %% Extract params and return type from a single clause.
 -spec extract_clause(tuple()) ->
