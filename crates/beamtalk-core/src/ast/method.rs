@@ -221,6 +221,9 @@ pub struct MethodDefinition {
     /// The sends in this method's body that were written with `|>`
     /// (ADR 0145), so the unparser can print the body as written.
     pub pipeline_sends: super::PipelineSends,
+    /// The comments inside collection literals in this method's body
+    /// (BT-3983), so the unparser can print them back.
+    pub literal_comments: super::LiteralComments,
     /// Source location.
     pub span: Span,
 }
@@ -325,6 +328,7 @@ impl MethodDefinition {
             comments: CommentAttachment::default(),
             doc_comment: None,
             pipeline_sends: super::PipelineSends::default(),
+            literal_comments: super::LiteralComments::default(),
             span,
         }
     }
@@ -351,6 +355,7 @@ impl MethodDefinition {
             comments: CommentAttachment::default(),
             doc_comment: None,
             pipeline_sends: super::PipelineSends::default(),
+            literal_comments: super::LiteralComments::default(),
             span,
         }
     }
@@ -378,6 +383,7 @@ impl MethodDefinition {
             comments: CommentAttachment::default(),
             doc_comment: None,
             pipeline_sends: super::PipelineSends::default(),
+            literal_comments: super::LiteralComments::default(),
             span,
         }
     }

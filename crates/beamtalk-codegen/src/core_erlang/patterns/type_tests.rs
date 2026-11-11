@@ -60,7 +60,7 @@ impl CoreErlangGenerator {
     ///   ([`Self::wrap_bif_test`]), true for exactly `'true'`/`'false'` —
     ///   not a bare `is_atom` guard, for the same shadowing reason as
     ///   `Symbol`.
-    /// - **`Dictionary`/exact tagged `Value`/sealed classes**: `maps:get/3`
+    /// - **`Dictionary`/exact tagged `Value`/sealed classes (kind-of fallback for user classes)**: `maps:get/3`
     ///   is not guard-safe, so [`Self::wrap_class_tag_test`] reuses the
     ///   exact nested-`case` shape `generate_array_match_arm` (`patterns::match_lowering`)
     ///   already uses for its class-tag check: an outer `is_map` case, and
@@ -70,8 +70,14 @@ impl CoreErlangGenerator {
     ///   `'$beamtalk_class'` key) or the class name atom for a tagged class
     ///   (generalizing `generate_constructor_pattern` (`patterns::match_lowering`)'s map-key
     ///   check, hardcoded to `Result` via `sealed_constructor_fields`, to
-    ///   the pattern's `class` field), falling through to `rest` on any
-    ///   other class tag.
+    ///   the pattern's `class` field). On a different class tag, a user
+    ///   class (BT-4319) falls back to [`Self::kind_of_call`] so an instance
+    ///   of a subclass the compiler could not see still matches; the
+    ///   actor and supervisor tuple shapes do the same on a different class
+    ///   at `element(2)`. Every other mismatch falls through to `rest`.
+    /// - **Classes with subclasses** (BT-4319, ADR 0107 Phase B):
+    ///   [`Self::wrap_kind_of_test`] — a runtime `isKindOf:`-equivalent
+    ///   class-table lookup, so subclass instances match.
     /// - **`Block`**: `is_function` — a Beamtalk block compiles to a plain
     ///   Erlang `fun`, never a map, so it needs its own guard-safe BIF
     ///   entry rather than falling into the tagged-class path.
@@ -206,18 +212,79 @@ impl CoreErlangGenerator {
         let is_supervisor = self.class_hierarchy.as_ref().is_some_and(|h| {
             h.is_supervisor_subclass(class_name) || h.is_dynamic_supervisor_subclass(class_name)
         });
-        if is_actor {
-            self.wrap_actor_class_tag_test(match_var, class_name, bound_success, rest_doc)
+        // BT-4319 (ADR 0107 Phase B): a class with subclasses matches its
+        // subclasses' instances too (`isKindOf:` semantics), so an exact tag
+        // test is wrong. The class table is consulted at run time, which
+        // keeps the answer correct for subclasses defined in other files or
+        // added by hot reload.
+        let is_non_leaf = self
+            .class_hierarchy
+            .as_ref()
+            .is_some_and(|h| !h.direct_subclasses(class_name).is_empty());
+        if is_non_leaf {
+            return Self::wrap_kind_of_test(match_var, class_name, bound_success, rest_doc);
+        }
+        // A class with no *visible* subclass keeps a constant-time exact-tag
+        // fast path, but an instance of a different user class falls back to
+        // the same runtime kind-of test. A subclass the compiler could not
+        // see (another package, or added by hot reload after this module was
+        // compiled) therefore still matches, and the arm means the same
+        // whatever the compiling unit could see (BT-4319). The two shapes
+        // compute one `'true'`/`'false'` so `bound_success` is emitted once.
+        let kind_of = Self::kind_of_call(match_var, class_name);
+        let exact_or_kind_of = if is_actor {
+            self.wrap_actor_class_tag_test(
+                match_var,
+                class_name,
+                true_doc(),
+                &false_doc(),
+                &kind_of,
+            )
         } else if is_supervisor {
-            self.wrap_supervisor_class_tag_test(match_var, class_name, bound_success, rest_doc)
+            self.wrap_supervisor_class_tag_test(
+                match_var,
+                class_name,
+                true_doc(),
+                &false_doc(),
+                &kind_of,
+            )
         } else {
             self.wrap_class_tag_test(
                 match_var,
                 leaf::atom(class_name.to_string()),
-                bound_success,
-                rest_doc,
+                true_doc(),
+                &false_doc(),
+                &kind_of,
             )
-        }
+        };
+        Self::branch_on_test(exact_or_kind_of, bound_success, rest_doc)
+    }
+
+    /// Subclass-aware test for a class that has subclasses (BT-4319):
+    /// `case call 'beamtalk_behaviour_intrinsics':'valueIsKindOfClass'(X,
+    /// 'Class') of <'true'> -> success <'false'> -> rest end`. The runtime
+    /// answers `class_of(X)` inherits from `Class`, agreeing with
+    /// `X isKindOf: Class` for any value regardless of its representation
+    /// (tagged map, actor or supervisor tuple, primitive).
+    fn wrap_kind_of_test(
+        match_var: &str,
+        class_name: &str,
+        success: Document<'static>,
+        rest: &Document<'static>,
+    ) -> Document<'static> {
+        Self::branch_on_test(Self::kind_of_call(match_var, class_name), success, rest)
+    }
+
+    /// `call 'beamtalk_behaviour_intrinsics':'valueIsKindOfClass'(X, 'Class')`,
+    /// evaluating to `'true'`/`'false'`.
+    fn kind_of_call(match_var: &str, class_name: &str) -> Document<'static> {
+        docvec![
+            "call 'beamtalk_behaviour_intrinsics':'valueIsKindOfClass'(",
+            leaf::var(match_var.to_string()),
+            ", ",
+            leaf::atom(class_name.to_string()),
+            ")"
+        ]
     }
 
     /// Dispatches a routing-table [`Guard`] to its renderer — the one
@@ -475,6 +542,7 @@ impl CoreErlangGenerator {
         expected_tag: Document<'static>,
         success: Document<'static>,
         rest: &Document<'static>,
+        other_class: &Document<'static>,
     ) -> Document<'static> {
         let no_match_class = self.fresh_temp_var("NoMatch");
         docvec![
@@ -492,7 +560,7 @@ impl CoreErlangGenerator {
             " <",
             leaf::var(no_match_class),
             "> when 'true' -> ",
-            rest.clone(),
+            other_class.clone(),
             " end ",
             "<'false'> when 'true' -> ",
             rest.clone(),
@@ -552,6 +620,7 @@ impl CoreErlangGenerator {
         class_name: &str,
         success: Document<'static>,
         rest: &Document<'static>,
+        other_class: &Document<'static>,
     ) -> Document<'static> {
         // `is_tuple`/`tuple_size == 4` are boolean-returning (2-clause,
         // `'true'`/`'false'` only — same convention as the outer `is_map`
@@ -583,7 +652,7 @@ impl CoreErlangGenerator {
             " <",
             leaf::var(no_match_class),
             "> when 'true' -> ",
-            rest.clone(),
+            other_class.clone(),
             " end ",
             "<",
             leaf::var(no_match_tag),
@@ -615,6 +684,7 @@ impl CoreErlangGenerator {
         class_name: &str,
         success: Document<'static>,
         rest: &Document<'static>,
+        other_class: &Document<'static>,
     ) -> Document<'static> {
         let no_match_tag = self.fresh_temp_var("NoMatch");
         let no_match_class = self.fresh_temp_var("NoMatch");
@@ -631,7 +701,7 @@ impl CoreErlangGenerator {
             " <",
             leaf::var(no_match_class),
             "> when 'true' -> ",
-            rest.clone(),
+            other_class.clone(),
             " end"
         ];
 

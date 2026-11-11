@@ -1096,6 +1096,9 @@ pub(super) struct Parser {
     /// before its `|>` (ADR 0145). A method definition takes the entries its
     /// body added (`parse_method_definition`); the module takes the rest.
     pub(super) pipeline_sends: Vec<(Span, CommentAttachment)>,
+    /// The comments inside collection literals so far, keyed by the literal's
+    /// span (BT-3983). Taken by the owning definition like `pipeline_sends`.
+    pub(super) literal_comments: Vec<(Span, crate::ast::LiteralCommentSlots)>,
 }
 
 impl Parser {
@@ -1124,6 +1127,7 @@ impl Parser {
             unattached_doc_comment_indices,
             attached_doc_comment_positions: None,
             pipeline_sends: Vec::new(),
+            literal_comments: Vec::new(),
         }
     }
 
@@ -1779,6 +1783,9 @@ impl Parser {
             file_leading_comments,
             file_trailing_comments,
             pipeline_sends: std::mem::take(&mut self.pipeline_sends)
+                .into_iter()
+                .collect(),
+            literal_comments: std::mem::take(&mut self.literal_comments)
                 .into_iter()
                 .collect(),
         }

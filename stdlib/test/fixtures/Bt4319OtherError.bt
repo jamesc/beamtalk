@@ -1,0 +1,6 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4319: an error outside the Bt4319HttpError hierarchy.
+
+Error subclass: Bt4319OtherError

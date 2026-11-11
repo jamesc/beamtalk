@@ -36,6 +36,7 @@ fn test_is_actor_class_direct_actor_subclass() {
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -81,6 +82,7 @@ fn test_is_actor_class_object_subclass_is_value_type() {
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -153,6 +155,7 @@ fn test_is_actor_class_multi_level_inheritance() {
     // Module with both classes; first class is LoggingCounter
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![counter, logging_counter.clone()],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -171,6 +174,7 @@ fn test_is_actor_class_multi_level_inheritance() {
     // Test with LoggingCounter as the first class
     let module_lc = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![logging_counter],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -225,6 +229,7 @@ fn test_is_actor_class_unknown_superclass_defaults_to_actor() {
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -271,6 +276,7 @@ fn test_is_actor_class_collection_subclass_is_value_type() {
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -321,6 +327,7 @@ fn test_is_actor_class_integer_subclass_is_value_type() {
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -370,6 +377,7 @@ fn test_is_actor_class_root_class_is_value_type() {
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -427,6 +435,7 @@ fn test_actor_value_classification_consistent_regardless_of_exception_grandchild
         for class in &module.classes {
             let single_class_module = Module {
                 pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+                literal_comments: beamtalk_core::ast::LiteralComments::default(),
                 classes: vec![class.clone()],
                 method_definitions: Vec::new(),
                 protocols: Vec::new(),
@@ -468,6 +477,7 @@ fn test_generate_with_bindings_compiles_value_type() {
     );
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -777,6 +787,7 @@ fn test_object_subclass_no_auto_getters() {
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -806,6 +817,7 @@ fn test_value_subclass_user_defined_overrides_auto() {
     // User-defined methods suppress the corresponding auto-generated method.
     let x_method = MethodDefinition {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         selector: MessageSelector::Unary("x".into()),
         parameters: vec![],
         return_type: None,
@@ -858,6 +870,7 @@ fn test_value_subclass_user_defined_overrides_auto() {
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -907,6 +920,7 @@ fn test_value_subclass_no_slots_no_keyword_constructor() {
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -969,6 +983,7 @@ fn test_value_subclass_class_method_slot_send_routes_to_constructor() {
         methods: vec![],
         class_methods: vec![MethodDefinition {
             pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+            literal_comments: beamtalk_core::ast::LiteralComments::default(),
             selector: MessageSelector::Keyword(vec![KeywordPart::new(
                 "withName:",
                 Span::new(0, 0),
@@ -1017,6 +1032,7 @@ fn test_value_subclass_class_method_slot_send_routes_to_constructor() {
     };
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),

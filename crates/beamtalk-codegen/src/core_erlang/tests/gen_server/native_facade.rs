@@ -37,6 +37,7 @@ fn make_native_actor_module() -> Module {
         methods: vec![
             MethodDefinition {
                 pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+                literal_comments: beamtalk_core::ast::LiteralComments::default(),
                 selector: MessageSelector::Unary("doWork".into()),
                 parameters: vec![],
                 body: vec![delegate_send()],
@@ -52,6 +53,7 @@ fn make_native_actor_module() -> Module {
             },
             MethodDefinition {
                 pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+                literal_comments: beamtalk_core::ast::LiteralComments::default(),
                 selector: MessageSelector::Keyword(vec![KeywordPart::new(
                     "process:",
                     Span::new(0, 0),
@@ -86,6 +88,7 @@ fn make_native_actor_module() -> Module {
     };
     Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),
@@ -373,6 +376,7 @@ fn make_native_actor_with_class_methods() -> Module {
         state: vec![],
         methods: vec![MethodDefinition {
             pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+            literal_comments: beamtalk_core::ast::LiteralComments::default(),
             selector: MessageSelector::Unary("status".into()),
             parameters: vec![],
             body: vec![bare(Expression::Identifier(Identifier::new(
@@ -391,6 +395,7 @@ fn make_native_actor_with_class_methods() -> Module {
         }],
         class_methods: vec![MethodDefinition {
             pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+            literal_comments: beamtalk_core::ast::LiteralComments::default(),
             selector: MessageSelector::Keyword(vec![KeywordPart::new("connect:", Span::new(0, 0))]),
             parameters: vec![ParameterDefinition::new(Identifier::new(
                 "config",
@@ -433,6 +438,7 @@ fn make_native_actor_with_class_methods() -> Module {
     };
     Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![class],
         method_definitions: Vec::new(),
         protocols: Vec::new(),

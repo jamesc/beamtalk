@@ -3463,3 +3463,53 @@ object_is_kind_of_fast_path_test_() ->
             end)
         ]
     end}.
+
+%%% ============================================================================
+%%% valueIsKindOfClass/2 — runtime test behind `x :: Class` on non-leaf classes
+%%% (BT-4319)
+%%% ============================================================================
+
+value_is_kind_of_class_test_() ->
+    Classes = ['BT4319Base', 'BT4319Mid', 'BT4319Leaf', 'BT4319Other'],
+    {setup, fun setup/0, fun(_) -> teardown(Classes) end, fun(_) ->
+        [
+            ?_test(begin
+                register_class('BT4319Base', #{}, #{}),
+                register_class_with_super('BT4319Mid', 'BT4319Base', #{}, #{}),
+                register_class_with_super('BT4319Leaf', 'BT4319Mid', #{}, #{}),
+                register_class('BT4319Other', #{}, #{}),
+                Leaf = #{'$beamtalk_class' => 'BT4319Leaf'},
+                %% An instance matches its own class and every ancestor.
+                ?assert(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'BT4319Leaf')),
+                ?assert(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'BT4319Mid')),
+                ?assert(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'BT4319Base')),
+                ?assert(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'Object')),
+                %% Not an unrelated class, and not a subclass of the instance's class.
+                ?assertNot(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'BT4319Other')),
+                Base = #{'$beamtalk_class' => 'BT4319Base'},
+                ?assertNot(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Base, 'BT4319Mid')),
+                %% An unregistered class name answers false.
+                ?assertNot(beamtalk_behaviour_intrinsics:valueIsKindOfClass(Leaf, 'BT4319Nope')),
+                %% Primitives and other representations never match a user class.
+                lists:foreach(
+                    fun(V) ->
+                        ?assertNot(
+                            beamtalk_behaviour_intrinsics:valueIsKindOfClass(V, 'BT4319Base')
+                        )
+                    end,
+                    [
+                        1,
+                        2.5,
+                        nil,
+                        true,
+                        sym,
+                        <<"b">>,
+                        {beamtalk_string, <<"s">>},
+                        [1],
+                        #{a => 1},
+                        {beamtalk_future, make_ref()}
+                    ]
+                )
+            end)
+        ]
+    end}.

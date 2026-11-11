@@ -12,6 +12,7 @@ use super::*;
 fn protocol_only_module_generates_register_class() {
     let module = Module {
         pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+        literal_comments: beamtalk_core::ast::LiteralComments::default(),
         classes: vec![],
         method_definitions: Vec::new(),
         protocols: vec![ProtocolDefinition {

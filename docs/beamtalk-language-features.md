@@ -5212,9 +5212,21 @@ Bind the match's answer instead: `timeout := value match: [...]`.
 
 **Type patterns** test the runtime class of the scrutinee and bind the value to the named variable, narrowed to that class. Subsequent arms see the scrutinee type narrowed by difference (e.g. after a `s :: String` arm, the remaining arms see the type minus `String`).
 
-**Phase A scope (ADR 0107):** type patterns are restricted to concrete/leaf classes only — `binding :: SomeClass` where `SomeClass` has subclasses is a compile error (`"SomeClass has subclasses; type patterns are not yet supported for non-leaf classes"`), never silently-wrong matching. Subclass-polymorphic matching (`binding :: Shape` where `Shape` has subclasses `Circle`/`Square`) is deferred to a future ADR 0107 Phase B. Supported classes today: `String`, `Integer`, `Float`, `List`, `Dictionary`, `Boolean` (uses the `is_boolean/1` BIF; `True`/`False` use exact atom guards — all three are stdlib primitives that bypass the leaf-restriction via a BIF/atom-guard check, not the user-class hierarchy check a `Shape`/`Circle`-style class would go through), `True`, `False`, `Symbol`, `Nil`, `UndefinedObject`, `Block`, `Pid`, `Reference`, `Port`, `Bitstring` (ADR 0141: `is_bitstring` and not `is_binary`, so it never matches a `Binary`), user-defined `Value` subclasses, `Actor` subclasses, and `Supervisor`/`DynamicSupervisor` subclasses (BT-2870).
+**Supported classes (ADR 0107):** a class without subclasses is tested for its exact class. Supported classes: `String`, `Integer`, `Float`, `List`, `Dictionary`, `Boolean` (uses the `is_boolean/1` BIF; `True`/`False` use exact atom guards — all three are stdlib primitives tested by a BIF/atom guard rather than a user-class hierarchy check), `True`, `False`, `Symbol`, `Nil`, `UndefinedObject`, `Block`, `Pid`, `Reference`, `Port`, `Bitstring` (ADR 0141: `is_bitstring` and not `is_binary`, so it never matches a `Binary`), user-defined `Value` subclasses, `Actor` subclasses, and `Supervisor`/`DynamicSupervisor` subclasses (BT-2870).
 
-**`Binary` is the one non-leaf exception (BT-4228).** `Binary` is `sealed` and `String` is its only subclass, so `b :: Binary` is accepted and compiles to a closed, constant-time *subclass-aware* test: it matches a bare binary (valid UTF-8 or not) **or** a `String`, agreeing with `isKindOf: Binary`. To tell bytes from text, put the `String` arm first:
+**Classes with subclasses (ADR 0107 Phase B, BT-4319):** `binding :: Shape` where `Shape` has subclasses `Circle`/`Square` matches per `isKindOf:` — instances of `Shape` and of every subclass match, and the binding is narrowed to `Shape`. The arm looks the value's class up in the live class table at run time, so subclasses declared in other files or added by hot reload are matched too. Abstract classes work the same way. Put the most specific arm first; an arm for a subclass after its base class's arm is unreachable. This is how to dispatch over an exception hierarchy:
+
+```beamtalk
+ex match: [
+  h :: HTTPError -> self protocolError: h;       // also HTTPError414, …
+  t :: TransportError -> self protocolError: t;
+  _ -> self internalError: ex
+]
+```
+
+Two things to know. A class with no visible subclass tests its exact class first and, only for an instance of a different user class, falls back to the same runtime lookup — so a subclass declared in another package or loaded later by hot reload still matches, without changing the arm. And `when:` guards stay comparison/arithmetic-only: `_ when: [e isKindOf: HTTPError] -> …` is rejected ("complex guard expression"), so use the type pattern instead. A `Future` scrutinee never matches a user-class arm (it is not awaited). An `abstract` class with no subclass visible to the compiling package is still rejected ("is abstract; type patterns require a concrete subclass"), even if its concrete subclasses live in a downstream package.
+
+**`Binary` was the first subclass-aware pattern (BT-4228).** `Binary` is `sealed` and `String` is its only subclass, so `b :: Binary` is accepted and compiles to a closed, constant-time *subclass-aware* test: it matches a bare binary (valid UTF-8 or not) **or** a `String`, agreeing with `isKindOf: Binary`. To tell bytes from text, put the `String` arm first:
 
 ```beamtalk
 value match: [
@@ -5253,7 +5265,7 @@ Four runtime-representation nuances (see ADR 0107 Implementation for the full co
 | Constructor | `Result ok: v` | Match sealed type by constructor (Phase 1: Result only) |
 | Binary | `<<n:8, payload:n/binary>>` | Match bytes/bits; sizes may name earlier segments, params/locals, or parenthesized exprs; `bits` for unaligned tails; `utf8`/`utf16`/`utf32` and `unit:N`; integer, float, character and string literal values; a misfit literal warns (BT-663, BT-4096, BT-4097, BT-4143, BT-4376) |
 | Nil | `nil` | Matches `nil` exactly; narrows subsequent arms to exclude `Nil` (BT-2854, ADR 0107) |
-| Type | `x :: String` | Bind `x` and test runtime class; `x` is narrowed to the named class in the arm body and guard. Phase A: leaf/concrete classes only (plus the sealed `Binary`, subclass-aware) — see restrictions below (BT-2855, ADR 0107) |
+| Type | `x :: String` | Bind `x` and test runtime class; `x` is narrowed to the named class in the arm body and guard. A class with subclasses matches its subclasses' instances too (`isKindOf:` semantics, BT-4319); a class without subclasses matches exactly that class; sealed `Binary` is subclass-aware — see restrictions below (BT-2855, ADR 0107) |
 
 **Exhaustiveness checking (BT-1299):** `match:` on a sealed type with constructor patterns must cover all known variants or include a wildcard `_` arm, or the compiler emits an error:
 
