@@ -979,7 +979,7 @@ fn synthesize_value_auto_methods(
         // Auto functional updater: `withFieldName:` → Self type
         let with_sel = beamtalk_core::synthetic_selectors::with_star_selector(slot_name);
         if !user_selectors.contains(&with_sel) {
-            let param_type = slot.type_annotation.as_ref().map(DeclaredType::from);
+            let param_type = beamtalk_core::synthetic_selectors::synthesized_copy_param_type(slot);
             let setter_doc = format!(
                 "Returns a new `{class_name}` with `{slot_name}` set to the given value.\n\n*(compiler-generated)*"
             );

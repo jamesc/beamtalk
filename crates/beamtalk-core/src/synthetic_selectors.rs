@@ -151,6 +151,19 @@ pub fn synthesized_getter_return_type(slot: &StateDeclaration) -> Option<Declare
     slot.type_annotation.as_ref().map(DeclaredType::from)
 }
 
+/// The declared parameter type of the synthesized `with<Field>:` copy-setter
+/// for `slot`: the field's declared type, or none when the field is untyped.
+///
+/// With the copy typed `Self` ([`synthesized_copy_return_type`]), its argument
+/// must be checked against the field type too — over the receiver's type
+/// arguments on a generic class — or `(b withItem: 'hi') item` on
+/// `b :: Box(Integer)` would infer `Integer` for a `String` (BT-4648). Read by
+/// the same consumers as [`synthesized_copy_return_type`].
+#[must_use]
+pub fn synthesized_copy_param_type(slot: &StateDeclaration) -> Option<DeclaredType> {
+    synthesized_getter_return_type(slot)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
