@@ -88,6 +88,15 @@ pub const STRUCTURAL_INTRINSICS: &[&str] = &[
     "erlangApply",
     // ClassBuilder (ADR 0038)
     "classBuilderRegister",
+    // Logger bodies (`logger.bt` class-side methods)
+    "loggerDebug",
+    "loggerInfo",
+    "loggerWarn",
+    "loggerError",
+    "loggerDebugMeta",
+    "loggerInfoMeta",
+    "loggerWarnMeta",
+    "loggerErrorMeta",
 ];
 
 /// Validates all `@primitive` usages in a module.

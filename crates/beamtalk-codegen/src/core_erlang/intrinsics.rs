@@ -3712,7 +3712,8 @@ impl CoreErlangGenerator {
     /// Emits the `beamtalk_logging_config:log/3` call shared by the call-site
     /// Logger intrinsic ([`Self::try_generate_logger_intrinsic`]) and the
     /// `@intrinsic logger*` method bodies
-    /// ([`Self::try_generate_logger_body_intrinsic`]). The call answers `'nil'`.
+    /// (`IntrinsicBody::Logger` in `primitives::intrinsic_bodies`). The call
+    /// answers `'nil'`.
     ///
     /// The message is passed through unchanged: a Beamtalk `String` is the
     /// tagged `{beamtalk_string, Bin}` term, and the runtime unwraps it (and
