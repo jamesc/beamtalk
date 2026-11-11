@@ -26,6 +26,17 @@ pub(in crate::core_erlang) enum SpawnVariant {
 }
 
 impl SpawnVariant {
+    /// Every variant, for the runtime export contract
+    /// (`runtime_export_contract_tests`). The exhaustive `match` below makes
+    /// a new variant a compile error here until it is listed.
+    #[cfg(test)]
+    pub(in crate::core_erlang) const ALL: [Self; 2] = {
+        match Self::Plain {
+            Self::Plain | Self::Monitored => {}
+        }
+        [Self::Plain, Self::Monitored]
+    };
+
     /// The variant an anonymous class-side spawn selector belongs to, or
     /// `None` when the selector/arity is not one.
     pub(in crate::core_erlang) fn of_selector(selector: &str, arity: usize) -> Option<Self> {
@@ -70,7 +81,7 @@ impl SpawnVariant {
     }
 
     /// The `beamtalk_actor` start helper.
-    fn runtime_function(self) -> &'static str {
+    pub(in crate::core_erlang) fn runtime_function(self) -> &'static str {
         match self {
             Self::Plain => "safe_spawn",
             Self::Monitored => "safe_spawn_monitored",

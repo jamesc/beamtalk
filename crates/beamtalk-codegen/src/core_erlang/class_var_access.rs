@@ -34,18 +34,64 @@ use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Block, Expression, Identifier};
 use beamtalk_core::semantic_analysis::block_facts::class_var_accesses;
 
+/// A `beamtalk_class_vars` function the generated code calls. Built only
+/// from the constants in [`class_var_fn`], so every function name codegen can
+/// emit is listed there and the runtime export contract
+/// (`runtime_export_contract_tests`) checks each one.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::core_erlang) struct ClassVarFn(&'static str);
+
+impl ClassVarFn {
+    /// The function's name, for the export contract.
+    #[cfg(test)]
+    pub(in crate::core_erlang) const fn name(self) -> &'static str {
+        self.0
+    }
+}
+
+/// Every `beamtalk_class_vars` function codegen emits.
+pub(in crate::core_erlang) mod class_var_fn {
+    use super::ClassVarFn;
+
+    pub const GET: ClassVarFn = ClassVarFn("get");
+    pub const GET_LATE: ClassVarFn = ClassVarFn("get_late");
+    pub const HAS: ClassVarFn = ClassVarFn("has");
+    pub const PUT: ClassVarFn = ClassVarFn("put");
+    pub const CLEAR: ClassVarFn = ClassVarFn("clear");
+    pub const FIELD_AT: ClassVarFn = ClassVarFn("field_at");
+    pub const FIELD_AT_PUT: ClassVarFn = ClassVarFn("field_at_put");
+    pub const CAPTURE: ClassVarFn = ClassVarFn("capture");
+    pub const SNAPSHOT: ClassVarFn = ClassVarFn("snapshot");
+    pub const RESTORE: ClassVarFn = ClassVarFn("restore");
+
+    /// Every function above, for the export contract.
+    #[cfg(test)]
+    pub const ALL: &[ClassVarFn] = &[
+        GET,
+        GET_LATE,
+        HAS,
+        PUT,
+        CLEAR,
+        FIELD_AT,
+        FIELD_AT_PUT,
+        CAPTURE,
+        SNAPSHOT,
+        RESTORE,
+    ];
+}
+
 /// The one emitter of a `call 'beamtalk_class_vars':'<function>'(<receiver>,
 /// <args>..)` expression; every helper-call doc below goes through it.
 /// `receiver` is the leading argument (`ClassSelf`), or `None` for the
 /// receiver-less `snapshot`/`restore` boundary calls.
 fn beamtalk_class_vars_call(
-    function: &str,
+    function: ClassVarFn,
     receiver: Option<Document<'static>>,
     args: Vec<Document<'static>>,
 ) -> Document<'static> {
     let mut parts: Vec<Document<'static>> = vec![
         Document::Str("call 'beamtalk_class_vars':"),
-        leaf::atom(function),
+        leaf::atom(function.0),
         Document::Str("("),
     ];
     for (i, arg) in receiver.into_iter().chain(args).enumerate() {
@@ -61,7 +107,7 @@ fn beamtalk_class_vars_call(
 impl CoreErlangGenerator {
     /// `call 'beamtalk_class_vars':'<function>'(ClassSelf, <args>..)`.
     pub(super) fn class_var_helper_call_doc(
-        function: &str,
+        function: ClassVarFn,
         args: Vec<Document<'static>>,
     ) -> Document<'static> {
         beamtalk_class_vars_call(function, Some(leaf::var("ClassSelf")), args)
@@ -74,7 +120,7 @@ impl CoreErlangGenerator {
     /// when it was created. Writes never take a capture (`put`/`clear`).
     pub(super) fn class_var_read_helper_call_doc(
         &self,
-        function: &str,
+        function: ClassVarFn,
         mut args: Vec<Document<'static>>,
     ) -> Document<'static> {
         if let Some(capture) = &self.class_var_capture {
@@ -91,7 +137,7 @@ impl CoreErlangGenerator {
             "let ",
             leaf::var(snapshot_var.name()),
             " = ",
-            beamtalk_class_vars_call("snapshot", None, vec![]),
+            beamtalk_class_vars_call(class_var_fn::SNAPSHOT, None, vec![]),
             " in "
         ]
     }
@@ -101,7 +147,11 @@ impl CoreErlangGenerator {
     pub(super) fn class_var_restore_doc(snapshot_var: &ErlangVar) -> Document<'static> {
         docvec![
             "do ",
-            beamtalk_class_vars_call("restore", None, vec![leaf::var(snapshot_var.name())]),
+            beamtalk_class_vars_call(
+                class_var_fn::RESTORE,
+                None,
+                vec![leaf::var(snapshot_var.name())]
+            ),
             " "
         ]
     }
@@ -118,7 +168,7 @@ impl CoreErlangGenerator {
             leaf::var(capture_var.to_string()),
             " = ",
             Self::class_var_helper_call_doc(
-                "capture",
+                class_var_fn::CAPTURE,
                 vec![match outer {
                     Some(var) => leaf::var(var.to_string()),
                     None => leaf::atom("none"),
@@ -310,7 +360,11 @@ impl CoreErlangGenerator {
     pub(super) fn class_var_read_doc(&mut self, name: &str, late: bool) -> Document<'static> {
         let map_var = self.fresh_temp_var("CVMap");
         let val_var = self.fresh_temp_var("CVVal");
-        let function = if late { "get_late" } else { "get" };
+        let function = if late {
+            class_var_fn::GET_LATE
+        } else {
+            class_var_fn::GET
+        };
         let key = self.class_var_key_ref_doc();
         let fallback = || self.class_var_read_helper_call_doc(function, vec![leaf::atom(name)]);
         docvec![
@@ -383,7 +437,10 @@ impl CoreErlangGenerator {
             ")) in ",
             leaf::var(val_var.clone()),
             " <_> when 'true' -> ",
-            Self::class_var_helper_call_doc("put", vec![leaf::atom(name), leaf::var(val_var)]),
+            Self::class_var_helper_call_doc(
+                class_var_fn::PUT,
+                vec![leaf::atom(name), leaf::var(val_var)]
+            ),
             " end"
         ]
     }

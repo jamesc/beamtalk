@@ -144,7 +144,19 @@ pub(in crate::core_erlang) enum GuardSense {
 }
 
 impl GuardSense {
-    fn helper(self) -> &'static str {
+    /// Every sense, for the runtime export contract
+    /// (`runtime_export_contract_tests`). The exhaustive `match` below makes
+    /// a new sense a compile error here until it is listed.
+    #[cfg(test)]
+    pub(in crate::core_erlang) const ALL: [Self; 2] = {
+        match Self::IfTrue {
+            Self::IfTrue | Self::IfFalse => {}
+        }
+        [Self::IfTrue, Self::IfFalse]
+    };
+
+    /// The `beamtalk_guard_return` function this sense calls.
+    pub(in crate::core_erlang) fn helper(self) -> &'static str {
         match self {
             Self::IfTrue => "if_true",
             Self::IfFalse => "if_false",

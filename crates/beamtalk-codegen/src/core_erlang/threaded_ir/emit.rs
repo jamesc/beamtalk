@@ -1681,36 +1681,3 @@ fn render_return(value: &ValueRef, state: &VersionedVar, ctx: &RenderCtx) -> Doc
         "}"
     ]
 }
-
-#[cfg(test)]
-mod cell_helper_conformance {
-    use crate::core_erlang::actor_state_access::actor_state_helper;
-    use crate::core_erlang::runtime_export_contract_tests::exported_entries;
-
-    /// Every `beamtalk_actor_state` helper codegen emits must be exported by
-    /// the runtime: generated code calls them, so removing or renaming one
-    /// fails here instead of with `undef` at runtime. The expected set lives
-    /// in one place (`actor_state_helper::ALL`), which the one emitter
-    /// references, so the list cannot drift from what is actually emitted.
-    /// All `-export` blocks in the module are collected, so a helper moved
-    /// to a second block is still found (AGENTS.md). Edit the Erlang module
-    /// (the owner) when this fails.
-    #[test]
-    fn the_runtime_exports_every_emitted_cell_helper() {
-        let path = crate::core_erlang::tests::repo_root()
-            .join("runtime/apps/beamtalk_runtime/src/beamtalk_actor_state.erl");
-        let src = std::fs::read_to_string(path).expect("read beamtalk_actor_state.erl");
-        let exported = exported_entries(&src);
-        assert!(
-            !exported.is_empty(),
-            "no -export block found in beamtalk_actor_state.erl"
-        );
-        for (name, arity) in actor_state_helper::ALL {
-            let entry = format!("{name}/{arity}");
-            assert!(
-                exported.contains(&entry),
-                "beamtalk_actor_state.erl must export {entry}; generated code calls it"
-            );
-        }
-    }
-}

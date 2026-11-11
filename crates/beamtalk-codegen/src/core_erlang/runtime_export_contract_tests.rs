@@ -12,7 +12,7 @@
 //! the codegen can emit and checks each against the `-export` attributes of
 //! the modules under `runtime/apps/*/src`, without booting a node.
 //!
-//! Calls are collected two ways:
+//! Calls are collected three ways:
 //!
 //! 1. **Source literals.** Every `'beamtalk_m':'f'` inside a Rust string
 //!    literal in the non-test codegen source. When the same literal also
@@ -23,22 +23,33 @@
 //!    candidate selector. This reaches table-driven arms whose function name
 //!    is spliced in at render time (the Behaviour tower's zero-argument
 //!    table), and the rendered text gives an exact arity.
+//! 3. **Open call heads.** A site that writes the module (`'beamtalk_m':` or
+//!    `leaf::atom("beamtalk_m"), ":"`) and takes the function name from the
+//!    next document piece. When that piece is a literal `leaf::atom("f")`,
+//!    the call is read directly. When it comes from an enum or a typed
+//!    constant, [`dynamic_calls`] enumerates every value the emitter can
+//!    take (`actor_state_helper::ALL`, `class_var_fn::ALL`, the `ALL` arrays
+//!    of `SpawnVariant`, `NamedSpawn`, `GuardSense` and the supervisor
+//!    kinds). An open head under `primitives/` is covered by pass 2. Any
+//!    other open head whose module has no enumeration fails the test, so a
+//!    new render-time call site cannot go unchecked.
 //!
 //! What is excluded is excluded by rule, never by a list of names: comments
 //! and doc comments, `#[cfg(test)] mod` bodies and files under a `tests`
 //! directory (they hold expected-output strings and fake module names), and
 //! any module not named `beamtalk_*` (generated `bt@…` modules, OTP
 //! modules).
-//!
-//! Not covered: call sites that put the module atom in one document piece
-//! and take the function name from an enum or argument at render time
-//! (`beamtalk_actor_state` has its own export check in
-//! `threaded_ir::emit::cell_helper_conformance`).
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use super::actor_state_access::actor_state_helper;
+use super::class_var_access::class_var_fn;
+use super::dispatch_codegen::NamedSpawn;
+use super::gen_server::SpawnVariant;
+use super::guard_returns::GuardSense;
 use super::primitives;
+use super::supervisor_codegen::{ALL_SUPERVISOR_KINDS, supervisor_init_fn};
 
 /// One `'beamtalk_m':'f'` occurrence and where it came from.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -318,6 +329,185 @@ fn primitive_table_calls(root: &Path) -> Vec<EmittedCall> {
     out
 }
 
+/// The non-test part of a Rust source file with comment lines blanked, so
+/// line numbers still match. It ends at the first `#[cfg(test)]` that opens
+/// an inline `mod x {`, the same rule as [`string_literals`].
+fn production_source(src: &str) -> String {
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("#[cfg(test)]")
+            && lines[i + 1..]
+                .iter()
+                .find(|l| !l.trim().is_empty())
+                .is_some_and(|l| {
+                    let l = l.trim();
+                    l.starts_with("mod ") && l.ends_with('{')
+                })
+        {
+            break;
+        }
+        out.push(if trimmed.starts_with("//") { "" } else { line });
+    }
+    out.join("\n")
+}
+
+/// An open call head: the module is written, and the function name is the
+/// next document piece.
+#[derive(Debug)]
+struct OpenHead {
+    module: String,
+    /// The function, when the next piece is a literal `leaf::atom("f")`.
+    function: Option<String>,
+    origin: String,
+}
+
+/// Every open call head in `src` (already reduced by [`production_source`]).
+fn open_heads(src: &str, origin_file: &str) -> Vec<OpenHead> {
+    let patterns = [
+        // `"... 'beamtalk_m':"` or `"... 'beamtalk_m':'"`, closing the literal.
+        r#"'(beamtalk_[a-z0-9_]+)':'?",\s*"#,
+        // `leaf::atom("beamtalk_m"), ":",` (optionally `Document::Str(":")`).
+        r#"leaf::atom\("(beamtalk_[a-z0-9_]+)"\),\s*(?:Document::Str\()?":"\)?,\s*"#,
+    ];
+    let next_atom = regex::Regex::new(r#"^leaf::atom\("([^"]+)"\)"#).expect("regex");
+    let mut out = Vec::new();
+    for pattern in patterns {
+        let re = regex::Regex::new(pattern).expect("regex");
+        for caps in re.captures_iter(src) {
+            let whole = caps.get(0).expect("match");
+            let line = src[..whole.start()].matches('\n').count() + 1;
+            out.push(OpenHead {
+                module: caps[1].to_string(),
+                function: next_atom
+                    .captures(&src[whole.end()..])
+                    .map(|c| c[1].to_string()),
+                origin: format!("{origin_file}:{line}"),
+            });
+        }
+    }
+    out
+}
+
+/// Every open call head in the non-test codegen source.
+fn source_open_heads(root: &Path) -> Vec<OpenHead> {
+    let mut files = Vec::new();
+    non_test_rust_files(&root.join("crates/beamtalk-codegen/src"), &mut files);
+    let mut out = Vec::new();
+    for file in files {
+        let src = std::fs::read_to_string(&file)
+            .unwrap_or_else(|e| panic!("read {}: {e}", file.display()));
+        let rel = file
+            .strip_prefix(root)
+            .unwrap_or(&file)
+            .display()
+            .to_string();
+        out.extend(open_heads(&production_source(&src), &rel));
+    }
+    out
+}
+
+/// The calls whose function name is chosen at render time, enumerated from
+/// the enums and typed constants their emitters take.
+fn dynamic_calls() -> Vec<EmittedCall> {
+    let call = |module: &str, function: &str, arity: Option<usize>, origin: &str| EmittedCall {
+        module: module.to_string(),
+        function: function.to_string(),
+        arity,
+        origin: origin.to_string(),
+    };
+    let mut out = Vec::new();
+    for (name, arity) in actor_state_helper::ALL {
+        out.push(call(
+            "beamtalk_actor_state",
+            name,
+            Some(*arity),
+            "actor_state_helper::ALL",
+        ));
+    }
+    // `class_var_fn`'s arity is not part of its type: read helpers take an
+    // extra capture argument inside a block, so only the name is checked.
+    for f in class_var_fn::ALL {
+        out.push(call(
+            "beamtalk_class_vars",
+            f.name(),
+            None,
+            "class_var_fn::ALL",
+        ));
+    }
+    for v in SpawnVariant::ALL {
+        out.push(call(
+            "beamtalk_class_instantiation",
+            v.class_self_helper(),
+            None,
+            "SpawnVariant::class_self_helper",
+        ));
+        out.push(call(
+            "beamtalk_actor",
+            v.runtime_function(),
+            None,
+            "SpawnVariant::runtime_function",
+        ));
+    }
+    for n in NamedSpawn::ALL {
+        out.push(call(
+            "beamtalk_class_instantiation",
+            n.helper(),
+            None,
+            "NamedSpawn::helper",
+        ));
+    }
+    for g in GuardSense::ALL {
+        out.push(call(
+            "beamtalk_guard_return",
+            g.helper(),
+            None,
+            "GuardSense::helper",
+        ));
+    }
+    for k in ALL_SUPERVISOR_KINDS {
+        out.push(call(
+            "beamtalk_supervisor",
+            supervisor_init_fn(k),
+            None,
+            "supervisor_init_fn",
+        ));
+    }
+    out
+}
+
+/// Calls read directly off open heads, plus a problem for each open head
+/// that nothing enumerates.
+fn resolve_open_heads(
+    heads: &[OpenHead],
+    enumerated: &[EmittedCall],
+) -> (Vec<EmittedCall>, Vec<String>) {
+    let covered: BTreeSet<&str> = enumerated.iter().map(|c| c.module.as_str()).collect();
+    let mut calls = Vec::new();
+    let mut problems = Vec::new();
+    for head in heads {
+        if let Some(function) = &head.function {
+            calls.push(EmittedCall {
+                module: head.module.clone(),
+                function: function.clone(),
+                arity: None,
+                origin: head.origin.clone(),
+            });
+        } else if head.origin.contains("/primitives/") || covered.contains(head.module.as_str()) {
+            // Pass 2 renders every primitive; `dynamic_calls` covers the rest.
+        } else {
+            problems.push(format!(
+                "{}: the function called on {} is chosen at render time, and nothing \
+                 enumerates it. Give its emitter a typed set of values with an `ALL` \
+                 list (like `class_var_fn`) and add it to `dynamic_calls`.",
+                head.origin, head.module
+            ));
+        }
+    }
+    (calls, problems)
+}
+
 /// The calls among `calls` that the runtime does not export.
 fn unexported(calls: &[EmittedCall], exports: &BTreeMap<String, BTreeSet<String>>) -> Vec<String> {
     let mut problems = BTreeSet::new();
@@ -371,7 +561,17 @@ fn every_runtime_call_the_codegen_emits_is_exported() {
         "primitive tables rendered only {} runtime calls",
         calls.len() - literal_count
     );
-    let problems = unexported(&calls, &exports);
+    let heads = source_open_heads(&root);
+    assert!(
+        heads.len() > 10,
+        "open-head scan found only {} sites",
+        heads.len()
+    );
+    let enumerated = dynamic_calls();
+    let (direct, mut problems) = resolve_open_heads(&heads, &enumerated);
+    calls.extend(direct);
+    calls.extend(enumerated);
+    problems.extend(unexported(&calls, &exports));
     assert!(
         problems.is_empty(),
         "generated code calls runtime functions that are not exported. Export \
@@ -455,6 +655,48 @@ fn string_literals_continue_past_an_out_of_line_test_mod() {
     .join("\n");
     let lits: Vec<String> = string_literals(&src).into_iter().map(|(_, s)| s).collect();
     assert_eq!(lits, ["after"]);
+}
+
+#[test]
+fn open_heads_read_literal_functions_and_flag_unenumerated_ones() {
+    let src = [
+        "let a = docvec![\"call 'beamtalk_known':\", leaf::atom(\"direct\"), \"(\"];",
+        "let b = docvec![\"call \", leaf::atom(\"beamtalk_atom\"), \":\", leaf::atom(\"f\")];",
+        "let c = docvec![\"call 'beamtalk_enum':'\", leaf::var(x), \"'()\"];",
+        "let d = docvec![\"call 'beamtalk_gap':\", leaf::atom(kind.name()), \"(\"];",
+    ]
+    .join("\n");
+    let heads = open_heads(&production_source(&src), "x.rs");
+    assert_eq!(heads.len(), 4, "{heads:?}");
+    let enumerated = vec![EmittedCall {
+        module: "beamtalk_enum".to_string(),
+        function: "g".to_string(),
+        arity: None,
+        origin: "enum".to_string(),
+    }];
+    let (direct, problems) = resolve_open_heads(&heads, &enumerated);
+    let names: Vec<String> = direct
+        .iter()
+        .map(|c| format!("{}:{}", c.module, c.function))
+        .collect();
+    assert_eq!(names, ["beamtalk_known:direct", "beamtalk_atom:f"]);
+    assert_eq!(problems.len(), 1, "{problems:?}");
+    assert!(problems[0].starts_with("x.rs:4:"), "{problems:?}");
+}
+
+#[test]
+fn every_open_head_in_the_tree_is_read_or_enumerated() {
+    // The direct calls this finds are the ones pass 1 cannot see: the
+    // function is a separate `leaf::atom` piece.
+    let heads = source_open_heads(&super::tests::repo_root());
+    let (direct, problems) = resolve_open_heads(&heads, &dynamic_calls());
+    assert!(problems.is_empty(), "{problems:#?}");
+    assert!(
+        direct
+            .iter()
+            .any(|c| c.module == "beamtalk_exception_handler" && c.function == "ensure_wrapped"),
+        "{direct:?}"
+    );
 }
 
 #[test]
