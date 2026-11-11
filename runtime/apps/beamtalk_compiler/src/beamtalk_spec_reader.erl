@@ -432,30 +432,53 @@ process_spec(Name, Arity, Clauses, LineMap) ->
 -spec extract_from_clauses([tuple()], non_neg_integer()) ->
     {[map()], [binary()]}.
 extract_from_clauses(Clauses, Arity) ->
-    extract_from_clauses(Clauses, Arity, first, []).
+    extract_from_clauses(Clauses, Arity, [], []).
 
-extract_from_clauses([], Arity, first, _RetAcc) ->
+extract_from_clauses([], Arity, [], _RetAcc) ->
     %% No clauses at all — generate fallback
     Positional = [
         #{name => positional_name(I), type => <<"Dynamic">>}
      || I <- lists:seq(1, Arity)
     ],
     {Positional, [<<"Dynamic">>]};
-extract_from_clauses([], _Arity, {have_params, Params}, RetAcc) ->
-    {Params, lists:reverse(RetAcc)};
-extract_from_clauses([Clause | Rest], Arity, ParamState, RetAcc) ->
+extract_from_clauses([], _Arity, ParamLists, RetAcc) ->
+    {merge_clause_params(lists:reverse(ParamLists)), lists:reverse(RetAcc)};
+extract_from_clauses([Clause | Rest], Arity, ParamLists, RetAcc) ->
     case extract_clause(Clause) of
         {ok, ClauseParams, ClauseRet} ->
-            NewParamState =
-                case ParamState of
-                    first -> {have_params, ClauseParams};
-                    {have_params, _} = S -> S
-                end,
-            extract_from_clauses(Rest, Arity, NewParamState, [ClauseRet | RetAcc]);
+            extract_from_clauses(Rest, Arity, [ClauseParams | ParamLists], [ClauseRet | RetAcc]);
         fallback ->
             %% Unrecognized clause form — skip it
-            extract_from_clauses(Rest, Arity, ParamState, RetAcc)
+            extract_from_clauses(Rest, Arity, ParamLists, RetAcc)
     end.
+
+%% Merge per-clause parameter lists (BT-4457). Names come from the first
+%% clause; each position's type is the union of that position's type across
+%% all clauses, so an overloaded spec such as
+%% `compress(iodata(), compress_parameters()) | (iodata(), context())`
+%% accepts either. If any clause leaves a position `Dynamic` (e.g. an opaque
+%% type), the whole position is `Dynamic`: a union with an unknown member
+%% cannot be checked.
+-spec merge_clause_params([[map()]]) -> [map()].
+merge_clause_params([First]) ->
+    First;
+merge_clause_params([First | _] = ParamLists) ->
+    Columns = transpose(ParamLists),
+    [
+        Param#{type => merge_param_types([maps:get(type, P) || P <- Column])}
+     || {Param, Column} <- lists:zip(First, Columns)
+    ].
+
+-spec merge_param_types([binary()]) -> binary().
+merge_param_types(Types) ->
+    case lists:member(<<"Dynamic">>, Types) of
+        true -> <<"Dynamic">>;
+        false -> join_types(Types)
+    end.
+
+-spec transpose([[map()]]) -> [[map()]].
+transpose([[] | _]) -> [];
+transpose(Lists) -> [[H || [H | _] <- Lists] | transpose([T || [_ | T] <- Lists])].
 
 %% Extract params and return type from a single clause.
 -spec extract_clause(tuple()) ->
