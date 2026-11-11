@@ -17,12 +17,21 @@ sealed Object subclass: Tuple
 
   isError => @primitive "isError"
 
-  // Unwrapping
-  unwrap => @primitive "unwrap"
+  // Unwrapping: plain Beamtalk, as in stdlib/src/tuple.bt (no primitive)
+  unwrap =>
+    self isOk
+      ifTrue: [self at: 2]
+      ifFalse: [
+        self isError ifTrue: [
+          self error: "Called unwrap on error tuple: {self at: 2}"
+        ] ifFalse: [self error: "unwrap requires an ok or error result tuple"]
+      ]
 
-  unwrapOr: default => @primitive "unwrapOr:"
+  unwrapOr: default =>
+    self isOk ifTrue: [self at: 2] ifFalse: [default]
 
-  unwrapOrElse: block => @primitive "unwrapOrElse:"
+  unwrapOrElse: block =>
+    self isOk ifTrue: [self at: 2] ifFalse: [block value]
 
   // Conversion
   asString => @primitive "asString"
