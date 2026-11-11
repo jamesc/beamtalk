@@ -845,7 +845,15 @@ impl TypeChecker {
         };
         arms.iter()
             .filter(|arm| Self::is_return_arm(arm))
-            .filter_map(|arm| self.type_map.get(arm.body.span()).cloned())
+            // `type_map` never records `Dynamic(Unknown)`; an arm with no entry is
+            // that, not an arm to drop (dropping it would leave an all-`^` tail
+            // as `Never`).
+            .map(|arm| {
+                self.type_map
+                    .get(arm.body.span())
+                    .cloned()
+                    .unwrap_or(InferredType::Dynamic(DynamicReason::Unknown))
+            })
             .collect()
     }
 }

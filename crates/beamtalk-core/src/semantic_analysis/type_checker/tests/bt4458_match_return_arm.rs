@@ -138,3 +138,25 @@ fn all_return_if_true_if_false_tail_does_not_make_method_never() {
         "`self kind: x` returns, so `x` must stay `String | Nil`: {diags:?}"
     );
 }
+
+/// A `^` arm whose value has no recorded type (unresolved `foo`/`bar` infer
+/// `Dynamic(Unknown)`, which `type_map` skips) must not leave the tail as
+/// `Never`.
+#[test]
+fn all_return_match_tail_with_untyped_values_does_not_make_method_never() {
+    let diags = type_diagnostics(
+        r"typed Object subclass: ZzRepro
+  kind: v => v match: [1 -> ^foo; _ -> ^bar]
+
+  pick: x :: String | Nil -> Integer =>
+    x isNil ifTrue: [self kind: 1]
+    self len: x
+
+  len: s :: String -> Integer => s size
+",
+    );
+    assert!(
+        diags.iter().any(|m| m.contains("expects String")),
+        "`self kind: 1` returns, so `x` must stay `String | Nil`: {diags:?}"
+    );
+}
