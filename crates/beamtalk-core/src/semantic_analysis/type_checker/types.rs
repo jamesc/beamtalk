@@ -7,7 +7,7 @@
 
 use crate::semantic_analysis::ClassHierarchy;
 use crate::semantic_analysis::class_hierarchy::DeclaredType;
-use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+use crate::semantic_analysis::protocol_registry::{ProtocolRegistry, ReturnTypeMismatch};
 use crate::source_analysis::Span;
 use ecow::{EcoString, eco_format};
 
@@ -1752,8 +1752,19 @@ pub(in crate::semantic_analysis::type_checker) struct AssignmentTypeMismatch {
     /// ADR 0144: when a class object `C class` misses a declared `P class`,
     /// the protocol `P` and the selectors `C` is missing — rendered as
     /// `C class does not conform to P class` instead of the plain mismatch.
-    pub(in crate::semantic_analysis::type_checker) nonconformance:
-        Option<(EcoString, Vec<EcoString>)>,
+    pub(in crate::semantic_analysis::type_checker) nonconformance: Option<MetatypeNonconformance>,
+}
+
+/// ADR 0144: why a class object `C class` is not a declared `P class` — the
+/// selectors `C` is missing, and (BT-4490) the requirements it answers with
+/// an incompatible declared return type, the same two findings
+/// `ProtocolInfo::subsumes_conformance_to` judges for `P class <: Q class`.
+pub(in crate::semantic_analysis::type_checker) struct MetatypeNonconformance {
+    pub(in crate::semantic_analysis::type_checker) protocol: EcoString,
+    /// As `ProtocolRegistry::check_conformance` reports them; class-side
+    /// ones are prefixed `class `.
+    pub(in crate::semantic_analysis::type_checker) missing: Vec<EcoString>,
+    pub(in crate::semantic_analysis::type_checker) return_mismatches: Vec<ReturnTypeMismatch>,
 }
 
 /// An attempt to mutate another object's field (`other.field := value`,

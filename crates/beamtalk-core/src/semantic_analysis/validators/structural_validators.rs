@@ -757,7 +757,7 @@ mod tests {
             package: None,
             span: test_span(),
 
-            provided_selectors: vec![],
+            provided: vec![],
         });
         let mut diags = Vec::new();
 

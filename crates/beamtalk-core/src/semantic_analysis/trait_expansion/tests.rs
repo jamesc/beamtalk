@@ -2168,9 +2168,9 @@ fn registry_resolves_a_bare_stdlib_name_as_uses_does() {
         assert!(!provided.contains(&"depOnly".to_string()), "{package:?}");
         assert_eq!(
             annotation
-                .provided_selectors
+                .provided
                 .iter()
-                .map(ToString::to_string)
+                .map(|r| r.selector.to_string())
                 .collect::<Vec<_>>(),
             provided,
             "annotation and uses: agree on the protocol ({package:?})"

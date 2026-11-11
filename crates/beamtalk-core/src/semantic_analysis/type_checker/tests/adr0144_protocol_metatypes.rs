@@ -972,3 +972,95 @@ Object subclass: Caller
         "block param is typed Integer from the class requirement: {msgs:#?}"
     );
 }
+
+// ── BT-4490: a class object is judged by the same rule as a protocol ─────
+
+#[test]
+fn class_object_is_checked_for_class_side_return_types() {
+    // `Tcp class>>label -> String` does not refine `Numbered`'s `Integer`, so
+    // `Tcp` must not flow into `Numbered class` any more than `Wire class`
+    // may; `Described` promises an `Object`, which `String` refines.
+    let source = wire_source(
+        r"
+Protocol define: Numbered
+  class label -> Integer
+
+Protocol define: Described
+  class label -> Object
+
+Object subclass: Caller
+  numbered: n :: Numbered class => n label
+  described: d :: Described class => d label
+  run =>
+    self numbered: Tcp
+    self described: Tcp
+",
+    );
+    let diags = checker_diagnostics(&source);
+    let numbered: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(|d| d.message.contains("Numbered class"))
+        .collect();
+    assert_eq!(numbered.len(), 1, "{:#?}", messages(&diags));
+    assert_eq!(
+        numbered[0].message.as_str(),
+        "Tcp class does not conform to Numbered class"
+    );
+    let hint = numbered[0].hint.as_deref().unwrap_or_default();
+    assert!(
+        hint.contains("return type: class label returns String, expected Integer"),
+        "the hint names the mismatch: {hint}"
+    );
+    assert!(
+        !hint.contains("missing:"),
+        "every selector is present: {hint}"
+    );
+    assert!(
+        !messages(&diags)
+            .iter()
+            .any(|m| m.contains("Described class")),
+        "String refines Object: {:#?}",
+        messages(&diags)
+    );
+}
+
+#[test]
+fn provided_selector_return_type_refines_a_requirement() {
+    // `Provides` supplies `name -> String`; `Requires` demands the same, and
+    // `Strict` demands `name -> Integer`. A provision carries its declared
+    // return type, so `Provides class` flows into `Requires class` but not
+    // `Strict class`; `Bare` provides `name` with no declared type, which
+    // promises nothing.
+    let source = r#"
+Protocol define: Requires
+  name -> String
+
+Protocol define: Strict
+  name -> Integer
+
+Protocol define: Provides
+  name -> String => "p"
+
+Protocol define: Bare
+  name => "b"
+
+Object subclass: Caller
+  requires: r :: Requires class => r
+  strict: s :: Strict class => s
+  run: p :: Provides class with: b :: Bare class =>
+    self requires: p
+    self strict: p
+    self requires: b
+"#;
+    let msgs = messages(&checker_diagnostics(source));
+    assert_eq!(
+        msgs.iter().filter(|m| m.contains("Requires class")).count(),
+        1,
+        "only the untyped provision fails Requires: {msgs:#?}"
+    );
+    assert_eq!(
+        msgs.iter().filter(|m| m.contains("Strict class")).count(),
+        1,
+        "a String provision does not refine Integer: {msgs:#?}"
+    );
+}

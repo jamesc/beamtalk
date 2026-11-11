@@ -38,10 +38,10 @@ use ecow::EcoString;
 use super::known_remote;
 use super::sendability;
 use super::type_resolver;
-use super::types::ClassObjectType;
 use super::types::{
     AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass, OverrideReturnWidening,
 };
+use super::types::{ClassObjectType, MetatypeNonconformance};
 use super::well_known::WellKnownClass;
 use super::{DynamicReason, InferredType, TypeChecker, TypeEnv};
 
@@ -2078,11 +2078,10 @@ impl TypeChecker {
             ) else {
                 continue;
             };
-            let diag = if let Some((protocol, missing)) = &mismatch.nonconformance {
+            let diag = if let Some(nonconformance) = &mismatch.nonconformance {
                 Self::protocol_metatype_nonconformance_diagnostic(
                     &mismatch.inferred_display,
-                    protocol,
-                    missing,
+                    nonconformance,
                     span,
                 )
             } else {
@@ -4124,11 +4123,20 @@ impl TypeChecker {
                     // A protocol literal is the protocol object, not the
                     // class object of a conformer; `check_conformance` would
                     // wave it through the open-world gate (no hierarchy entry).
+                    // Return types count too (BT-4490), as in
+                    // `subsumes_conformance_to` below: one conformance rule.
                     ClassObjectType::Class(class_name) => {
                         !registry.has_protocol(class_name)
                             && registry
                                 .check_conformance(class_name, declared_base, hierarchy)
                                 .is_ok()
+                            && registry
+                                .conformance_return_type_mismatches(
+                                    class_name,
+                                    declared_base,
+                                    hierarchy,
+                                )
+                                .is_empty()
                     }
                     ClassObjectType::Protocol(protocol_name) => {
                         match (registry.get(protocol_name), registry.get(declared_base)) {
@@ -4173,16 +4181,19 @@ impl TypeChecker {
 
     /// ADR 0144: when a class object `C class` fails
     /// [`Self::metatype_assignable_to`] because of a declared protocol
-    /// metatype part `P class`, the protocol and the selectors `C` is
-    /// missing (as [`ProtocolRegistry::check_conformance`] reports them —
-    /// class-side ones prefixed `class `). `None` when no declared `P class`
-    /// part is involved, so the caller keeps its plain type-mismatch wording.
+    /// metatype part `P class`, the protocol, the selectors `C` is missing
+    /// (as [`ProtocolRegistry::check_conformance`] reports them — class-side
+    /// ones prefixed `class `) and the requirements it answers with an
+    /// incompatible return type (BT-4490,
+    /// [`ProtocolRegistry::conformance_return_type_mismatches`]). `None`
+    /// when no declared `P class` part is the cause, so the caller keeps its
+    /// plain type-mismatch wording.
     pub(super) fn protocol_metatype_nonconformance(
         class_name: &EcoString,
         declared_type: &EcoString,
         hierarchy: &ClassHierarchy,
         protocol_registry: Option<&ProtocolRegistry>,
-    ) -> Option<(EcoString, Vec<EcoString>)> {
+    ) -> Option<MetatypeNonconformance> {
         let registry = protocol_registry?;
         crate::semantic_analysis::string_utils::split_top_level(declared_type, '|')
             .iter()
@@ -4190,10 +4201,19 @@ impl TypeChecker {
             .filter_map(|part| part.trim().strip_suffix(" class").map(str::trim))
             .filter(|base| Self::is_protocol_type(base, hierarchy, registry))
             .find_map(|base| {
-                registry
+                let missing = registry
                     .check_conformance(class_name, base, hierarchy)
                     .err()
-                    .map(|missing| (EcoString::from(base), missing))
+                    .unwrap_or_default();
+                let return_mismatches =
+                    registry.conformance_return_type_mismatches(class_name, base, hierarchy);
+                (!missing.is_empty() || !return_mismatches.is_empty()).then(|| {
+                    MetatypeNonconformance {
+                        protocol: EcoString::from(base),
+                        missing,
+                        return_mismatches,
+                    }
+                })
             })
     }
 
@@ -4221,10 +4241,9 @@ impl TypeChecker {
             ClassObjectType::Protocol(_) => None,
         };
         match nonconformance {
-            Some((protocol, missing)) => Self::protocol_metatype_nonconformance_diagnostic(
+            Some(nonconformance) => Self::protocol_metatype_nonconformance_diagnostic(
                 &value.to_string(),
-                &protocol,
-                &missing,
+                &nonconformance,
                 span,
             ),
             None => Diagnostic::warning(message, span)
@@ -4234,19 +4253,42 @@ impl TypeChecker {
     }
 
     /// The ADR 0144 conformance warning: `<C> class does not conform to <P>
-    /// class`, with the missing selectors (class-side ones prefixed `class `).
+    /// class`, with the missing selectors (class-side ones prefixed `class `)
+    /// and, after them, the requirements answered with an incompatible
+    /// return type (BT-4490).
     pub(super) fn protocol_metatype_nonconformance_diagnostic(
         value_display: &str,
-        protocol: &str,
-        missing: &[EcoString],
+        nonconformance: &MetatypeNonconformance,
         span: Span,
     ) -> Diagnostic {
+        let MetatypeNonconformance {
+            protocol,
+            missing,
+            return_mismatches,
+        } = nonconformance;
+        let mut hint_parts = Vec::new();
+        if !missing.is_empty() {
+            hint_parts.push(format!("missing: {}", missing.join(", ")));
+        }
+        if !return_mismatches.is_empty() {
+            let mismatches: Vec<String> = return_mismatches
+                .iter()
+                .map(|m| {
+                    let side = if m.class_side { "class " } else { "" };
+                    format!(
+                        "{side}{} returns {}, expected {}",
+                        m.selector, m.actual, m.expected
+                    )
+                })
+                .collect();
+            hint_parts.push(format!("return type: {}", mismatches.join(", ")));
+        }
         Diagnostic::warning(
             format!("{value_display} does not conform to {protocol} class"),
             span,
         )
         .with_category(DiagnosticCategory::Type)
-        .with_hint(format!("missing: {}", missing.join(", ")))
+        .with_hint(hint_parts.join("; "))
     }
 
     /// Returns true if `value_type` is assignable to `declared_type`.
@@ -4620,12 +4662,11 @@ impl TypeChecker {
         mismatch: &AssignmentTypeMismatch,
         span: Span,
     ) {
-        if let Some((protocol, missing)) = &mismatch.nonconformance {
+        if let Some(nonconformance) = &mismatch.nonconformance {
             self.diagnostics
                 .push(Self::protocol_metatype_nonconformance_diagnostic(
                     &mismatch.inferred_display,
-                    protocol,
-                    missing,
+                    nonconformance,
                     span,
                 ));
             return;
