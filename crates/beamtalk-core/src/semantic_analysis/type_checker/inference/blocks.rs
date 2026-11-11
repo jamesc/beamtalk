@@ -25,7 +25,7 @@ use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 use crate::semantic_analysis::type_checker::{
     DynamicReason, EnvKey, InferredType, TypeChecker, TypeEnv,
 };
-use crate::source_analysis::Span;
+use crate::source_analysis::{Diagnostic, Span};
 
 /// The `then:` selector (`Object >> then:`, ADR 0145 § 2, BT-4515).
 ///
@@ -321,6 +321,23 @@ impl TypeChecker {
                 let Expression::Block(block) = arg else {
                     return self.infer_expr(arg, hierarchy, env, in_abstract_method);
                 };
+                if block.parameters.len() != 1 {
+                    // BT-4620: `then:` passes exactly one argument, so any
+                    // other arity fails at run time. The send's result is not
+                    // typed from this block (see `then_block_has_one_param`).
+                    let count = block.parameters.len();
+                    self.diagnostics.push(
+                        Diagnostic::warning(
+                            format!(
+                                "`then:` passes one argument, but this block takes {count} \
+                                 parameter{}",
+                                if count == 1 { "" } else { "s" }
+                            ),
+                            arg.span(),
+                        )
+                        .with_hint("Use a block with exactly one parameter, e.g. `[:x | ...]`"),
+                    );
+                }
                 // `Object >> then:` sends `value:`, so a well-formed block has
                 // one parameter; any beyond the first stay `Dynamic`, as in
                 // `infer_if_not_nil_block`. A zero-arity block still goes
@@ -348,6 +365,16 @@ impl TypeChecker {
                 )
             })
             .collect()
+    }
+
+    /// Whether `arg` may be typed by the `then:` rule: anything but a literal
+    /// block whose parameter count is not exactly one (BT-4620). Such a block
+    /// draws a warning in [`Self::infer_args_for_then`] and the send keeps
+    /// the generic result type.
+    pub(in crate::semantic_analysis::type_checker) fn then_block_has_one_param(
+        arg: &Expression,
+    ) -> bool {
+        !matches!(arg, Expression::Block(block) if block.parameters.len() != 1)
     }
 
     /// The result type of evaluating a block argument: the last type-arg of
