@@ -483,7 +483,7 @@ fn is_loud_ensure_nlr_rejection(text: &str, case_files: &[String]) -> bool {
             && e.contains("(ADR 0133)")
     };
     // BT-4018: warnings (`Diagnostic::warning`), never the compile
-    // failure: an unused local or parameter, or a block that reads class
+    // failure: an unused local or parameter, a discarded update, or a block that reads class
     // state (with or without a `hasField:` probe) and escapes
     // (`class_state_abroad`). The prefixes are exact: the error-severity
     // `block writes object state, but ...` (ADR 0133) must never be allowed.
@@ -492,6 +492,9 @@ fn is_loud_ensure_nlr_rejection(text: &str, case_files: &[String]) -> bool {
             || e.starts_with("Unused parameter")
             || e.starts_with("block reads class variable")
             || e.starts_with("block probes the class state")
+            // `discarded-update` (BT-4522): a warning on the generated
+            // `0 max: ...` statements, never the compile failure.
+            || (e.starts_with("the result of `") && e.contains("` is discarded"))
     };
     // The fixtures a pin error is located in (`╭─[<file>:<line>:<col>]`).
     let files: Vec<&str> = errors
