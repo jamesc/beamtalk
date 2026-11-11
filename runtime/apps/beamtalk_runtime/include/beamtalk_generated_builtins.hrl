@@ -81,6 +81,7 @@
     'Parallel',
     'Pid',
     'Port',
+    'ProcessDictionary',
     'ProcessNavigation',
     'Program',
     'ProtoObject',

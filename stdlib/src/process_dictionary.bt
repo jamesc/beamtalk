@@ -1,0 +1,117 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// ProcessDictionary — the calling process's own dictionary.
+///
+/// Every operation acts on **the process that calls it**, never on the class
+/// process and never on another process. Class methods of a class without
+/// class variables run in the caller (ADR 0142), so `ProcessDictionary at:`
+/// reads the dictionary of whoever sent the message; a value written in one
+/// process is invisible to every other process.
+///
+/// Missing keys answer `nil` (not Erlang's raw `undefined`), so a lookup is
+/// safe to chain with `ifNil:`.
+///
+/// ## Intended Uses
+/// - **Owner-bound state**: a value that belongs to the process that is
+///   serving a request, such as the current request id or a per-connection
+///   handle.
+/// - **Per-request marks**: set a mark at the start of a request, read it
+///   deep in the call stack, and `erase:` it when the request ends.
+///
+/// ## Non-Goals
+/// This is not a general mutable global. Nothing here is shared between
+/// processes, nothing survives the process, and keys are **not** namespaced,
+/// so pick keys that cannot collide with other libraries (for example a
+/// package-prefixed Symbol). Prefer an Actor or `classState:` for state that
+/// several processes need.
+///
+/// ## Absence
+/// "Absent" means the key holds Erlang's `undefined` (a Beamtalk `#undefined`
+/// Symbol) or is not there at all. Two consequences:
+/// - A stored `#undefined` reads as absent: `at:` answers `nil` and
+///   `at:ifAbsent:` runs its block, and `at:put:` / `erase:` report `nil` as
+///   the previous value.
+/// - A stored `nil` is a real value: `at:ifAbsent:` answers `nil` without
+///   running its block, while `at:` answers `nil` for it exactly as for a
+///   missing key. So `at:` cannot tell stored `nil` from absence; use
+///   `keys includes:` for a membership test, not `at:ifAbsent:`.
+///
+/// ## Examples
+/// ```beamtalk
+/// ProcessDictionary at: #requestId put: 42     // => nil
+/// ProcessDictionary at: #requestId             // => 42
+/// ProcessDictionary at: #missing               // => nil
+/// ProcessDictionary at: #missing ifAbsent: [0] // => 0
+/// ProcessDictionary erase: #requestId          // => 42
+/// (ProcessDictionary keys includes: #requestId) // => false
+/// ```
+sealed typed Object subclass: ProcessDictionary
+
+  /// Answer the value stored under `key` in the calling process's
+  /// dictionary, or `nil` if there is none.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ProcessDictionary at: #nothingHere   // => nil
+  /// ```
+  @expect type
+  class sealed at: key :: Object -> Object =>
+    @expect class_method_process_resource "reads the calling process's dictionary by design"
+    value := Erlang erlang get: key
+    value =:= #undefined ifTrue: [nil] ifFalse: [value]
+
+  /// Answer the value stored under `key` in the calling process's
+  /// dictionary, or the result of evaluating `block` if there is none.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ProcessDictionary at: #nothingHere ifAbsent: [0]   // => 0
+  /// ```
+  @expect type
+  class sealed at: key :: Object ifAbsent: block :: Block(Object) -> Object =>
+    @expect class_method_process_resource "reads the calling process's dictionary by design"
+    value := Erlang erlang get: key
+    value =:= #undefined ifTrue: [block value] ifFalse: [value]
+
+  /// Store `value` under `key` in the calling process's dictionary.
+  /// Answers the value previously stored under `key`, or `nil` if there was
+  /// none.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ProcessDictionary at: #mark put: 1   // => nil
+  /// ProcessDictionary at: #mark put: 2   // => 1
+  /// ```
+  @expect type
+  class sealed at: key :: Object put: value :: Object -> Object =>
+    @expect class_method_process_resource "writes the calling process's dictionary by design"
+    previous := Erlang erlang put: key value: value
+    previous =:= #undefined ifTrue: [nil] ifFalse: [previous]
+
+  /// Remove `key` from the calling process's dictionary. Answers the value
+  /// that was stored under it, or `nil` if there was none.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ProcessDictionary at: #mark put: 1
+  /// ProcessDictionary erase: #mark       // => 1
+  /// ProcessDictionary erase: #mark       // => nil
+  /// ```
+  @expect type
+  class sealed erase: key :: Object -> Object =>
+    @expect class_method_process_resource "erases from the calling process's dictionary by design"
+    previous := Erlang erlang erase: key
+    previous =:= #undefined ifTrue: [nil] ifFalse: [previous]
+
+  /// Answer every key currently in the calling process's dictionary, in no
+  /// particular order. The runtime stores some entries of its own, so do not
+  /// assume an otherwise-idle process answers `#()`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// ProcessDictionary at: #mark put: 1
+  /// ProcessDictionary keys includes: #mark   // => true
+  /// ```
+  @expect type
+  class sealed keys -> List(Object) => Erlang erlang get_keys
