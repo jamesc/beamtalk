@@ -101,26 +101,6 @@ impl LiteralComments {
     pub fn get(&self, span: Span) -> Option<&LiteralCommentSlots> {
         self.literals.get(&key(span))
     }
-
-    /// The recorded literal spans, in source order.
-    pub fn spans(&self) -> impl Iterator<Item = Span> + '_ {
-        self.literals
-            .keys()
-            .map(|&(start, end)| Span::new(start, end))
-    }
-
-    /// The entries whose literals lie inside `span`.
-    #[must_use]
-    pub fn within(&self, span: Span) -> Self {
-        Self {
-            literals: self
-                .literals
-                .range((span.start(), span.start())..=(span.end(), span.end()))
-                .filter(|&(&(_, end), _)| end <= span.end())
-                .map(|(&key, slots)| (key, slots.clone()))
-                .collect(),
-        }
-    }
 }
 
 impl FromIterator<(Span, LiteralCommentSlots)> for LiteralComments {

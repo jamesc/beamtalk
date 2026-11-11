@@ -3934,7 +3934,7 @@ impl Parser {
             }
 
             let pair_start = self.current_token().span();
-            let item_comments = self.collect_literal_item_leading(&slots, open_idx);
+            let mut item_comments = self.collect_literal_item_leading(&slots, open_idx);
 
             // Bare identifier keys in map literals are a compile error.
             // `#{foo => v}` is invalid; write `#{#foo => v}` instead.
@@ -3959,6 +3959,16 @@ impl Parser {
             };
 
             // Expect '=>' separator between key and value
+            if matches!(self.current_kind(), TokenKind::FatArrow) {
+                // Comments between the key and `=>` join the pair's leading
+                // comments, so they are kept (printed above the pair).
+                if let Some(after_key) = self.collect_trailing_comment() {
+                    item_comments.leading.push(after_key);
+                }
+                item_comments
+                    .leading
+                    .extend(self.collect_comment_attachment().leading);
+            }
             if !matches!(self.current_kind(), TokenKind::FatArrow) {
                 let bad_token = self.advance();
                 let span = bad_token.span();
@@ -3991,6 +4001,13 @@ impl Parser {
                 continue;
             }
             self.advance(); // consume '=>'
+            // Likewise comments between `=>` and the value.
+            if let Some(after_arrow) = self.collect_trailing_comment() {
+                item_comments.leading.push(after_arrow);
+            }
+            item_comments
+                .leading
+                .extend(self.collect_comment_attachment().leading);
 
             // Parse value expression as a full keyword message (lowest message
             // precedence), so `#{#k => Foo new: #{#a => 1}}` correctly parses

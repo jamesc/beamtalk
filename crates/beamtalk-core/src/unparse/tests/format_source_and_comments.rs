@@ -562,3 +562,11 @@ fn literal_without_comments_unchanged() {
     assert_literal_formats("t := {#a, #b}\n", "t := {#a, #b}\n");
     assert_literal_formats("l := #(1, 2 | r)\n", "l := #(1, 2 | r)\n");
 }
+
+#[test]
+fn literal_comments_map_pair_internal_comments_kept() {
+    assert_literal_formats(
+        "m := #{\n  #a => // why a\n    1,\n  #b // key note\n    => 2\n}\n",
+        "m := #{\n  // why a\n  #a => 1,\n  // key note\n  #b => 2\n}\n",
+    );
+}
