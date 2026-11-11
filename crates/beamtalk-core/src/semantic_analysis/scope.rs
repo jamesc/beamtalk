@@ -145,8 +145,9 @@ impl Scope {
             .insert(name.to_string(), binding);
     }
 
-    /// Names that are in scope in every method body without being declared.
-    const METHOD_BUILTINS: [&'static str; 3] = ["true", "false", "nil"];
+    /// Names that are in scope everywhere (module and method bodies) without
+    /// being declared. `NameResolver::resolve_module` defines exactly these.
+    pub(crate) const BUILTINS: [&'static str; 3] = ["true", "false", "nil"];
 
     /// Hides the module-level (depth 0) bindings from method bodies (BT-4665).
     ///
@@ -161,7 +162,7 @@ impl Scope {
     pub(crate) fn hide_module_bindings(&mut self) -> HashMap<String, Binding> {
         let module_level = &mut self.levels[0].variables;
         let mut hidden = std::mem::take(module_level);
-        for builtin in Self::METHOD_BUILTINS {
+        for builtin in Self::BUILTINS {
             if let Some(binding) = hidden.remove(builtin) {
                 module_level.insert(builtin.to_string(), binding);
             }
