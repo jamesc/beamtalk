@@ -26,6 +26,17 @@
 /// package-prefixed Symbol). Prefer an Actor or `classState:` for state that
 /// several processes need.
 ///
+/// ## Absence
+/// "Absent" means the key holds Erlang's `undefined` (a Beamtalk `#undefined`
+/// Symbol) or is not there at all. Two consequences:
+/// - A stored `#undefined` reads as absent: `at:` answers `nil` and
+///   `at:ifAbsent:` runs its block, and `at:put:` / `erase:` report `nil` as
+///   the previous value.
+/// - A stored `nil` is a real value: `at:ifAbsent:` answers `nil` without
+///   running its block, while `at:` answers `nil` for it exactly as for a
+///   missing key. So `at:` cannot tell stored `nil` from absence; use
+///   `keys includes:` for a membership test, not `at:ifAbsent:`.
+///
 /// ## Examples
 /// ```beamtalk
 /// ProcessDictionary at: #requestId put: 42     // => nil
@@ -33,7 +44,7 @@
 /// ProcessDictionary at: #missing               // => nil
 /// ProcessDictionary at: #missing ifAbsent: [0] // => 0
 /// ProcessDictionary erase: #requestId          // => 42
-/// ProcessDictionary keys                       // => #()
+/// (ProcessDictionary keys includes: #requestId) // => false
 /// ```
 sealed typed Object subclass: ProcessDictionary
 
