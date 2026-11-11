@@ -468,6 +468,70 @@ unicode_hint_and_reason_test() ->
     E2 = E0#beamtalk_error{details = #{signal_reason => Atom}},
     ?assert(is_binary(beamtalk_error:format(E2))).
 
+%% BT-4230: the `Reason:` line renders nested Beamtalk values Beamtalk-style.
+reason_line(Reason) ->
+    E = (beamtalk_error:new(type_error, 'Foo'))#beamtalk_error{
+        message = <<"boom">>, details = #{signal_reason => Reason}
+    },
+    Out = beamtalk_error:format(E),
+    [_, Line] = binary:split(Out, <<"\nReason: ">>),
+    Line.
+
+reason_nested_string_test() ->
+    ?assertEqual(
+        <<"{#io, \"disk full\"}">>,
+        reason_line({io, {beamtalk_string, <<"disk full">>}})
+    ).
+
+reason_symbol_test() ->
+    ?assertEqual(<<"#econnreset">>, reason_line(econnreset)),
+    ?assertEqual(<<"#(#a, nil, true, 3)">>, reason_line([a, nil, true, 3])).
+
+reason_exception_as_reason_test() ->
+    Inner = (beamtalk_error:new(type_error, 'Foo'))#beamtalk_error{message = <<"inner">>},
+    Wrapped = #{
+        '$beamtalk_class' => 'Error',
+        error => Inner,
+        stacktrace => [{lists, seq, 2, [{file, "lists.erl"}, {line, 1}]}]
+    },
+    ?assertEqual(<<"inner">>, reason_line(Wrapped)).
+
+reason_large_is_bounded_test() ->
+    Big = [{beamtalk_string, binary:copy(<<"x">>, 500)} || _ <- lists:seq(1, 10000)],
+    Line = reason_line(Big),
+    ?assert(byte_size(Line) =< 2048 + 3),
+    ?assertEqual(<<"...">>, binary:part(Line, byte_size(Line), -3)),
+    Deep = lists:foldl(fun(_, Acc) -> {Acc} end, leaf, lists:seq(1, 1000)),
+    ?assert(byte_size(reason_line(Deep)) =< 2048 + 3).
+
+%% Shared subterms expand exponentially; the walker's node budget bounds the
+%% work, not just the output.
+reason_shared_subterm_expansion_is_bounded_test() ->
+    L1 = lists:duplicate(50, [x]),
+    L6 = lists:foldl(fun(_, Acc) -> lists:duplicate(50, Acc) end, L1, lists:seq(1, 5)),
+    Line = reason_line(L6),
+    ?assert(byte_size(Line) =< 2048 + 3),
+    Wide = list_to_tuple(lists:seq(1, 100000)),
+    ?assert(byte_size(reason_line(Wide)) =< 2048 + 3).
+
+%% Invalid UTF-8 inside a reason string never raises from the formatter.
+reason_invalid_utf8_does_not_raise_test() ->
+    ?assert(is_binary(reason_line({beamtalk_string, <<255, 254, 253>>}))),
+    ?assert(is_binary(reason_line({io, <<255, 254>>}))),
+    %% improper list / map fallbacks are bounded by chars_limit
+    Shared = lists:foldl(fun(_, Acc) -> lists:duplicate(50, Acc) end, [x], lists:seq(1, 5)),
+    ?assert(byte_size(reason_line([Shared | tail])) =< 2048 + 3),
+    ?assert(byte_size(reason_line(#{k => Shared})) =< 2048 + 3).
+
+%% A huge binary is cut before rendering; a multibyte char at the cut stays valid.
+reason_huge_binary_is_cut_test() ->
+    Big = <<"a", (binary:copy(<<"\x{3bb}"/utf8>>, 100000))/binary>>,
+    Line = reason_line({beamtalk_string, Big}),
+    ?assert(byte_size(Line) =< 2048 + 8),
+    ?assert(is_binary(unicode:characters_to_binary(Line))),
+    ?assertEqual(<<"...">>, binary:part(Line, byte_size(Line), -3)),
+    ?assert(byte_size(reason_line(binary:copy(<<"y">>, 1000000))) =< 2048 + 8).
+
 %% BT-4241: selectors with codepoints above 255 render as UTF-8, not badarg.
 generate_message_unicode_selector_test() ->
     Sel = list_to_atom("x_\x{3bb}:"),

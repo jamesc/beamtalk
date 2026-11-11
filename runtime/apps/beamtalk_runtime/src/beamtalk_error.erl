@@ -197,9 +197,7 @@ format(#beamtalk_error{kind = does_not_understand} = Error) ->
     format_parts(Enriched#beamtalk_error.message, Enriched#beamtalk_error.hint);
 format(#beamtalk_error{message = Message, hint = Hint, details = #{signal_reason := Reason}}) ->
     %% BT-4159: `signal:reason:` — show the reason in uncaught reports.
-    chars_to_binary([
-        format_parts(Message, Hint), <<"\nReason: ">>, format_reason_term(Reason)
-    ]);
+    <<(format_parts(Message, Hint))/binary, "\nReason: ", (format_reason_term(Reason))/binary>>;
 format(#beamtalk_error{message = Message, hint = Hint}) ->
     format_parts(Message, Hint).
 
@@ -279,13 +277,131 @@ extract_from_tuple(T, I, Size, Depth) ->
         Found -> Found
     end.
 
-%% BT-4159: render a `signal:reason:` term. Strings print quoted; everything
-%% else uses `~0tp` (pure formatting; never messages an actor).
--spec format_reason_term(term()) -> iodata().
-format_reason_term({beamtalk_string, _} = Str) ->
-    beamtalk_primitive:print_string(Str);
+%% BT-4159 / BT-4230: render a `signal:reason:` term Beamtalk-style.
+%% A small pure walker (never awaits futures or messages an actor, so it
+%% must not delegate to the general `print_string/1`): strings print quoted,
+%% symbols with `#`, lists as `#(..)`, wrapped Exceptions via `format/1`.
+%% Depth and total size are bounded so a large reason cannot flood a report.
+-define(REASON_MAX_DEPTH, 20).
+-define(REASON_MAX_BYTES, 2048).
+-define(REASON_MAX_ELEMS, 50).
+%% Total node budget: bounds the *work* (shared subterms can expand
+%% exponentially), not just the output size.
+-define(REASON_MAX_NODES, 500).
+-spec format_reason_term(term()) -> binary().
 format_reason_term(Reason) ->
-    io_lib:format("~0tp", [Reason]).
+    {Doc, _Left} = reason_doc(Reason, ?REASON_MAX_DEPTH, ?REASON_MAX_NODES),
+    case unicode:characters_to_binary(Doc) of
+        Bin when is_binary(Bin) ->
+            truncate_reason(Bin);
+        _ ->
+            %% Invalid encoding somewhere inside: never raise from the formatter.
+            truncate_reason(
+                chars_to_binary(
+                    io_lib:format("~0tP", [Reason, ?REASON_MAX_DEPTH], [
+                        {chars_limit, ?REASON_MAX_BYTES}
+                    ])
+                )
+            )
+    end.
+
+-spec truncate_reason(binary()) -> binary().
+truncate_reason(Bin) when byte_size(Bin) =< ?REASON_MAX_BYTES ->
+    Bin;
+truncate_reason(Bin) ->
+    %% Cut on a UTF-8 boundary: drop trailing partial sequence bytes.
+    Cut = binary:part(Bin, 0, ?REASON_MAX_BYTES),
+    Safe = utf8_prefix(Cut),
+    <<Safe/binary, "...">>.
+
+-spec utf8_prefix(binary()) -> binary().
+utf8_prefix(<<>>) ->
+    <<>>;
+utf8_prefix(Bin) ->
+    case unicode:characters_to_binary(Bin, utf8, utf8) of
+        B when is_binary(B) -> B;
+        {incomplete, Good, _} -> Good;
+        {error, Good, _} -> Good
+    end.
+
+-spec reason_doc(term(), integer(), integer()) -> {iodata(), integer()}.
+reason_doc(_Term, Depth, Budget) when Depth =< 0; Budget =< 0 ->
+    {<<"...">>, Budget};
+reason_doc({beamtalk_string, Bin}, _Depth, B) when is_binary(Bin) ->
+    {Cut, Marker} = cut_binary(Bin),
+    {[beamtalk_primitive:print_string({beamtalk_string, Cut}), Marker], B - 1};
+reason_doc(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}, _Depth, B) ->
+    {format(Err), B - 1};
+reason_doc(#beamtalk_error{} = Err, _Depth, B) ->
+    {format(Err), B - 1};
+reason_doc('$reason_elided', _Depth, B) ->
+    {<<"...">>, B};
+reason_doc(true, _Depth, B) ->
+    {<<"true">>, B - 1};
+reason_doc(false, _Depth, B) ->
+    {<<"false">>, B - 1};
+reason_doc(nil, _Depth, B) ->
+    {<<"nil">>, B - 1};
+reason_doc(Atom, _Depth, B) when is_atom(Atom) ->
+    {[<<"#">>, atom_to_binary(Atom, utf8)], B - 1};
+reason_doc(N, _Depth, B) when is_integer(N) ->
+    {integer_to_binary(N), B - 1};
+reason_doc(F, _Depth, B) when is_float(F) ->
+    {float_to_binary(F, [short]), B - 1};
+reason_doc(Bin, _Depth, B) when is_binary(Bin) ->
+    %% A bare binary prints the way `Binary printString` does (pure clause).
+    {Cut, Marker} = cut_binary(Bin),
+    {[beamtalk_primitive:print_string(Cut), Marker], B - 1};
+reason_doc(List, Depth, B) when is_list(List) ->
+    case is_proper_list(List) of
+        true ->
+            {Elems, B1} = reason_elems(cap_elems(List), Depth - 1, B - 1),
+            {[<<"#(">>, lists:join(<<", ">>, Elems), <<")">>], B1};
+        false ->
+            {io_lib:format("~0tP", [List, Depth], [{chars_limit, ?REASON_MAX_BYTES}]), B - 1}
+    end;
+reason_doc(Tuple, Depth, B) when is_tuple(Tuple) ->
+    {Elems, B1} = reason_elems(cap_elems(tuple_to_list(Tuple)), Depth - 1, B - 1),
+    {[<<"{">>, lists:join(<<", ">>, Elems), <<"}">>], B1};
+reason_doc(Other, Depth, B) ->
+    {io_lib:format("~0tP", [Other, Depth], [{chars_limit, ?REASON_MAX_BYTES}]), B - 1}.
+
+%% Cut a binary *before* rendering so the work is bounded by the output cap,
+%% not by the binary's size. A cut that lands mid-character drops the partial
+%% sequence; genuinely invalid bytes are kept (they render as hex).
+-spec cut_binary(binary()) -> {binary(), binary()}.
+cut_binary(Bin) when byte_size(Bin) =< ?REASON_MAX_BYTES ->
+    {Bin, <<>>};
+cut_binary(Bin) ->
+    Cut = binary:part(Bin, 0, ?REASON_MAX_BYTES),
+    case unicode:characters_to_binary(Cut, utf8, utf8) of
+        {incomplete, Good, _} -> {Good, <<"...">>};
+        _ -> {Cut, <<"...">>}
+    end.
+
+%% Render elements, threading the remaining node budget.
+-spec reason_elems(list(), integer(), integer()) -> {[iodata()], integer()}.
+reason_elems([], _Depth, B) ->
+    {[], B};
+reason_elems(_Elems, _Depth, B) when B =< 0 ->
+    {[<<"...">>], B};
+reason_elems([E | Rest], Depth, B) ->
+    {Doc, B1} = reason_doc(E, Depth, B),
+    {Docs, B2} = reason_elems(Rest, Depth, B1),
+    {[Doc | Docs], B2}.
+
+%% At most ?REASON_MAX_ELEMS elements; a marker element stands for the rest.
+-spec cap_elems(list()) -> list().
+cap_elems(List) ->
+    case length(List) =< ?REASON_MAX_ELEMS of
+        true -> List;
+        false -> lists:sublist(List, ?REASON_MAX_ELEMS) ++ ['$reason_elided']
+    end.
+
+-spec is_proper_list(list()) -> boolean().
+is_proper_list([]) -> true;
+is_proper_list([_ | T]) -> is_proper_list(T);
+is_proper_list(_) -> false.
 
 %% Format message with optional hint.
 -spec format_parts(term(), term()) -> binary().
