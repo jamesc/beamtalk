@@ -167,13 +167,14 @@ Logger primary filter for the `proc_lib` crash report (`label =>
 not go through `format_status/1`: it lists the process's mailbox
 (`messages`) and process dictionary (`dictionary`) raw.
 
-For an actor whose class declares `secretSelectors`, a queued send of a
-secret selector keeps its selector but its arguments become
-`<<"[redacted]">>`, as in format_status/2; so do secret-selector entries in
-the pending `continueWith:` queue in the dictionary. The actor is found by
+For an actor whose class declares secrets, a queued send of a secret
+selector keeps its selector but its arguments become `<<"[redacted]">>`, as
+in format_status/2; so do secret-selector entries in the pending
+`continueWith:` queue in the dictionary, and secret slots in the actor-state
+cell if one is still installed. The actor is found by
 the report's `initial_call`, `{Module, init, _}`, and its compiled
 `'__beamtalk_secrets'/0`; no user code runs. Any other event, a non-actor
-process, or an actor with no secret selectors passes unchanged.
+process, or an actor with no secrets passes unchanged.
 
 The filter never raises: logger removes a primary filter that crashes. If
 redacting an actor's report fails, its `messages` and `dictionary` are
@@ -214,28 +215,32 @@ redact_crash_info(Module, Info) ->
     %% bt-catcher-audit: not-applicable-no-block - '__beamtalk_secrets'/0 is a generated constant getter
     try
         case Module:'__beamtalk_secrets'() of
-            {_Slots, []} ->
+            {[], []} ->
                 Info;
-            {_Slots, Selectors} when is_list(Selectors) ->
-                [redact_info_item(Item, Selectors) || Item <- Info]
+            {Slots, Selectors} when is_list(Slots), is_list(Selectors) ->
+                [redact_info_item(Item, Slots, Selectors) || Item <- Info]
         end
     catch
         _:_ -> fail_closed_info(Info)
     end.
 
--spec redact_info_item(term(), [atom()]) -> term().
-redact_info_item({messages, Messages}, Selectors) when is_list(Messages) ->
+-spec redact_info_item(term(), [atom()], [atom()]) -> term().
+redact_info_item({messages, Messages}, _Slots, Selectors) when is_list(Messages) ->
     {messages, [redact_msg(Msg, Selectors) || Msg <- Messages]};
-redact_info_item({dictionary, Dict}, Selectors) when is_list(Dict) ->
-    {dictionary, [redact_dict_entry(Entry, Selectors) || Entry <- Dict]};
-redact_info_item(Item, _Selectors) ->
+redact_info_item({dictionary, Dict}, Slots, Selectors) when is_list(Dict) ->
+    {dictionary, [redact_dict_entry(Entry, Slots, Selectors) || Entry <- Dict]};
+redact_info_item(Item, _Slots, _Selectors) ->
     Item.
 
--spec redact_dict_entry(term(), [atom()]) -> term().
-redact_dict_entry({?PENDING_CONTINUE_KEY, Queue}, Selectors) when is_list(Queue) ->
+%% Pending continuations to a secret selector, and secret slots in the
+%% actor-state cell. Every crash path uninstalls the cell before re-raising,
+%% so it is normally gone by the time proc_lib reports; redacting it anyway
+%% keeps the secretState guarantee from resting on that.
+-spec redact_dict_entry(term(), [atom()], [atom()]) -> term().
+redact_dict_entry({?PENDING_CONTINUE_KEY, Queue}, _Slots, Selectors) when is_list(Queue) ->
     {?PENDING_CONTINUE_KEY, [redact_request(Step, Selectors) || Step <- Queue]};
-redact_dict_entry(Entry, _Selectors) ->
-    Entry.
+redact_dict_entry(Entry, Slots, _Selectors) ->
+    beamtalk_actor_state:map_cell_entry(Entry, fun(State) -> redact_state(State, Slots) end).
 
 -spec fail_closed_info(list()) -> list().
 fail_closed_info(Info) ->

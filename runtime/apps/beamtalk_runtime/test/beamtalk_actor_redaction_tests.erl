@@ -359,3 +359,33 @@ await_proc_lib_report(Pid) ->
             await_proc_lib_report(Pid)
     after 5000 -> error(no_proc_lib_report)
     end.
+
+crash_filter_redacts_installed_state_cell_test() ->
+    %% Defense in depth: a crash path that left the cell installed must not
+    %% put secret slots in the report.
+    Cell = {'$bt_actor_state', {self(), #{token => <<"tok">>, count => 1}}},
+    Event = crash_event({?MODULE, init, ['Argument__1']}, [], [Cell]),
+    Info = crash_info(beamtalk_actor_redaction:crash_report_filter(Event, [])),
+    ?assertEqual(
+        [{'$bt_actor_state', {self(), #{token => ?R, count => 1}}}],
+        proplists:get_value(dictionary, Info)
+    ).
+
+crash_filter_secret_state_only_actor_test() ->
+    %% An actor declaring only secretState still has its cell redacted;
+    %% its queued messages pass unchanged.
+    ok = meck:new(bt4666_state_only_actor, [non_strict]),
+    try
+        ok = meck:expect(bt4666_state_only_actor, '__beamtalk_secrets', fun() -> {[pin], []} end),
+        Cell = {'$bt_actor_state', {self(), #{pin => 1234}}},
+        Msg = {'$gen_call', {self(), tag}, {'login:', [pw], #{}}},
+        Event = crash_event({bt4666_state_only_actor, init, ['Argument__1']}, [Msg], [Cell]),
+        Info = crash_info(beamtalk_actor_redaction:crash_report_filter(Event, [])),
+        ?assertEqual([Msg], proplists:get_value(messages, Info)),
+        ?assertEqual(
+            [{'$bt_actor_state', {self(), #{pin => ?R}}}],
+            proplists:get_value(dictionary, Info)
+        )
+    after
+        meck:unload(bt4666_state_only_actor)
+    end.

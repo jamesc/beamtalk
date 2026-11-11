@@ -281,7 +281,7 @@ Every actor has a compiled `format_status/1` that applies the declarations:
 | `sys:get_status` state, and a crash report's state | each `secretState` slot's value becomes `"[redacted]"`; other slots are unchanged |
 | a crash report's last message | a send of a `secretSelectors` selector keeps its selector, but its arguments become `"[redacted]"` (also for `perform:` of that selector) |
 | `sys:get_status` logged events and a crash report's log (with `sys:log` on) | incoming secret sends, the reply to a secret call, and the state in each entry, as above |
-| the separate `proc_lib` crash report a crashing actor also writes | secret sends still queued in its mailbox (`messages`), and secret-selector entries in the pending `continueWith:` queue in its process dictionary (`dictionary`), redacted as above by a logger filter the runtime installs |
+| the separate `proc_lib` crash report a crashing actor also writes | secret sends still queued in its mailbox (`messages`), and in its process dictionary (`dictionary`) secret-selector entries in the pending `continueWith:` queue and secret slots in any actor state still held there, redacted as above by a logger filter the runtime installs |
 
 - Both methods default to `#()` on `Actor`, which leaves status output exactly as before. A subclass's lists **add to** its superclass's.
 - The body must be a **literal list of symbols**: the compiler reads it at compile time and bakes it into the actor module, so no user code runs while OTP formats a status or crash report. Anything else is a compile error. A `secretState` name that is not a state slot, or a `secretSelectors` name the class does not understand, is a compile warning. Calling `SessionStore secretState` still answers the class's own list.

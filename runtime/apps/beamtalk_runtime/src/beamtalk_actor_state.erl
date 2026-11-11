@@ -83,7 +83,8 @@ and the test-build check in `commit/2`, which call them.
     has/3,
     clear/2,
     capture/2,
-    protect/1
+    protect/1,
+    map_cell_entry/2
 ]).
 
 -export_type([cell/0, capture/0, adapted/0]).
@@ -135,6 +136,19 @@ take() ->
         {_, State} when is_map(State) -> State;
         _ -> raise_no_cell(take)
     end.
+
+-doc """
+BT-4666: apply `Fun` to the state map of a process-dictionary entry when the
+entry is the cell (`{Key, {Owner, Map}}`); any other entry is answered
+unchanged. Lets `beamtalk_actor_redaction`'s crash-report filter redact
+secret slots in a cell that is still installed, without knowing the cell's
+key or shape.
+""".
+-spec map_cell_entry(term(), fun((map()) -> map())) -> term().
+map_cell_entry({?CELL, {Owner, State}}, Fun) when is_map(State) ->
+    {?CELL, {Owner, Fun(State)}};
+map_cell_entry(Entry, _Fun) ->
+    Entry.
 
 -doc "Restore the value `install/1` returned: erase the cell, or put the enclosing one back.".
 -spec uninstall(cell()) -> ok.
