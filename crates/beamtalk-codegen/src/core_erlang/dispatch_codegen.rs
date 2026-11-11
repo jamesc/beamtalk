@@ -4290,7 +4290,7 @@ impl CoreErlangGenerator {
             "let ",
             leaf::var(class_pid_var.clone()),
             " = ",
-            Self::registered_class_pid_doc(class_name),
+            self.registered_class_pid_or_name_doc(class_name),
             " in ",
             self.class_send_call_doc(&class_pid_var, selector_atom, args_doc),
         ];
@@ -4736,7 +4736,7 @@ impl CoreErlangGenerator {
             "let ",
             leaf::var(class_pid_var.clone()),
             " = ",
-            Self::registered_class_pid_doc(class_name),
+            self.registered_class_pid_or_name_doc(class_name),
             " in ",
             self.class_send_call_doc(&class_pid_var, class_selector, args_doc),
         ]

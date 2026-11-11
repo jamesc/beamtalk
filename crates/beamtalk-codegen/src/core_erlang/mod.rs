@@ -560,6 +560,35 @@ impl CoreErlangGenerator {
         (self.compiled_module_name(class_name) == module).then_some(module)
     }
 
+    /// BT-4723: like [`Self::registered_class_pid_doc`], but an unregistered
+    /// class yields its own name atom instead of `undefined`, so
+    /// `beamtalk_class_dispatch:class_send/4` names the class in the
+    /// `class_not_found` error rather than `'unknown'`:
+    ///
+    /// ```erlang
+    /// case call 'erlang':'whereis'('beamtalk_class_Foo') of
+    ///   <'undefined'> when 'true' -> 'Foo'
+    ///   <ClassPid> when 'true' -> ClassPid
+    /// end
+    /// ```
+    pub(in crate::core_erlang) fn registered_class_pid_or_name_doc(
+        &mut self,
+        class_name: &str,
+    ) -> Document<'static> {
+        let pid_var = self.fresh_var("RegPid");
+        docvec![
+            "case ",
+            Self::registered_class_pid_doc(class_name),
+            " of <'undefined'> when 'true' -> ",
+            leaf::atom(class_name.to_string()),
+            " <",
+            leaf::var(pid_var.clone()),
+            "> when 'true' -> ",
+            leaf::var(pid_var),
+            " end",
+        ]
+    }
+
     /// `call 'erlang':'whereis'('beamtalk_class_<Name>')`: the pid of the class
     /// process named `class_name`, or `'undefined'`.
     ///

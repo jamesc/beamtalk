@@ -755,7 +755,7 @@ Send a message to a class object synchronously (ADR 0013 Phase 1).
 
 Delegates to beamtalk_class_dispatch.
 """.
--spec class_send(pid() | undefined, atom(), list()) -> term().
+-spec class_send(pid() | atom(), atom(), list()) -> term().
 class_send(ClassPid, Selector, Args) ->
     beamtalk_class_dispatch:class_send(ClassPid, Selector, Args).
 
@@ -764,7 +764,7 @@ class_send(ClassPid, Selector, Args) ->
 (BT-4556). Delegates to `beamtalk_class_dispatch:class_send/4`, whose doc says
 which sends the bound applies to.
 """.
--spec class_send(pid() | undefined, atom(), list(), timeout()) -> term().
+-spec class_send(pid() | atom(), atom(), list(), timeout()) -> term().
 class_send(ClassPid, Selector, Args, Timeout) ->
     beamtalk_class_dispatch:class_send(ClassPid, Selector, Args, Timeout).
 
