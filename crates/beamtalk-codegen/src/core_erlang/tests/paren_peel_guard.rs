@@ -154,10 +154,11 @@ const CEILINGS: &[(&str, usize)] = &[
         "beamtalk-core/src/semantic_analysis/type_checker/inference/blocks.rs",
         1,
     ),
-    // A `match:` scrutinee.
+    // A `match:` scrutinee, and a `match:` arm body (BT-4458: a bare `^expr`
+    // arm, possibly parenthesised, contributes `Never`).
     (
         "beamtalk-core/src/semantic_analysis/type_checker/inference/flow.rs",
-        1,
+        2,
     ),
     // Cascade shared receivers (`infer_cascade`'s dispatch receiver) and
     // `(super)`: `is_class_side_receiver`.
