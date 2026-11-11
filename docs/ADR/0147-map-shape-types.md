@@ -87,6 +87,10 @@ What already exists in the compiler:
 
 - Types are erased (ADR 0025). A shape cannot make untrusted data safe.
 - Aliases expand eagerly and cannot be recursive (ADR 0108).
+- Assignability is partly string-based today. `is_assignable_to` takes type
+  strings, treats a leading `#` as a singleton, and `split_top_level` tracks
+  only `()`. The spec reader also hands types to Rust as strings. A shape's
+  `#{`, `|` and `,` inside braces break all three unless handled.
 - A new `InferredType` variant touches subtyping, unions, the set-theoretic
   operators (ADR 0102), narrowing, display, spec generation and the LSP. The
   cost grows with every operation made shape-aware, so the set of shape-aware
@@ -124,7 +128,10 @@ Key        := SymbolLiteral
 - `#key => T` is a **required** key. `?#key => T` is an **optional** key.
 - A trailing `...` makes the shape **open**: other keys may be present.
   Without it the shape is **closed**.
-- Keys are symbol literals.
+- Keys are symbol literals, in any form the language accepts for a symbol.
+- `,` and `?` are both binary-selector characters, so `Integer,?#b` lexes as
+  one `,?` token today. In a shape the parser splits it; no whitespace is
+  required.
 - A value type is any type, including another shape, so shapes nest.
 
 Optional is a property of the key, not the value. `?#k => T` means the key
@@ -162,26 +169,58 @@ entries are `Object`-keyed and `Object`-valued, so it is assignable only when
 `K` and `V` accept `Object` (or are `Dynamic`). Bare `Dictionary` accepts any
 shape.
 
-**`Dictionary(K, V)` to shape.** Not assignable. An annotated local remains
-the way to assert it, and it is the same unchecked narrowing cast it is today
-(BT-4719 decides how visible that is).
+**`Dictionary` to shape.** Follows the existing gradual rule for generics
+(`type_args_match`):
+
+- Bare `Dictionary`, and a `Dictionary` with a `Dynamic` argument, are
+  compatible with any shape, silently. `Dictionary new` and
+  `Dictionary(Symbol, Dynamic)` therefore keep working where a shape is
+  expected.
+- A fully typed `Dictionary(K, V)` (for example `Dictionary(Symbol, Object)`)
+  is not assignable. An annotated local remains the way to assert it, and it
+  is the same unchecked narrowing cast it is today (BT-4719 decides how
+  visible that is).
+
+### Map literals infer shapes
+
+A map literal whose keys are all symbol literals infers a closed shape, with
+nested literals inferring nested shapes:
+
+```beamtalk
+opts := #{#body => "{}", #timeout => 5000}
+// #{#body => String, #timeout => Integer}
+```
+
+Any other literal (a computed or non-symbol key) infers `Dictionary(K, V)` as
+today. Checking a literal against a declared shape is then ordinary
+shape-to-shape assignability, including through an unannotated local, with
+diagnostics that name the offending key.
+
+This is needed, not optional. Without it `opts := #{...}` followed by passing
+`opts` to a shape-typed parameter would warn, because the local would be a
+fully typed `Dictionary`.
+
+The `Dictionary(K, V)` view of an inferred shape (see below) is exactly the
+type `infer_map_literal` gives today, so sends that are not shape-aware see
+no change.
 
 ### Shapes in the type algebra (ADR 0102)
 
 - **Union.** `S | T` stays a union of two shapes. Shapes are never merged
   into one wider shape.
-- **Intersection.** `S & T` is computed fieldwise. A key in both takes the
-  intersection of the two value types and is required if either side
-  requires it. A key in only one side is kept if the other side is open; if
-  the other side is closed it is dropped when optional and makes the result
-  `Never` when required. A key whose value types intersect to `Never` is
-  dropped if optional on both sides and makes the result `Never` otherwise.
-  The result is open only if both sides are.
-- **Difference and negation.** Stored with the existing `Negation` form and
-  not simplified fieldwise in this ADR.
+- **Intersection, difference, negation.** Stored with ADR 0102's existing
+  forms and not simplified fieldwise in this ADR. `Dynamic` behaves as it
+  does everywhere else in ADR 0102.
 
-This is what later narrowing builds on: `includesKey: #k` in the true branch
-is `S & #{#k => Object, ...}`, with no new mechanism.
+The fieldwise intersection rule follows from the model and is recorded here
+for the narrowing work (BT-4709) to implement, since that is its only user.
+A key in both sides takes the intersection of the value types and is required
+if either side requires it. A key in one side only is kept if the other side
+is open; if the other side is closed it is dropped when optional and makes
+the result `Never` when required. A key whose value types intersect to
+`Never` is dropped if optional on both sides and makes the result `Never`
+otherwise. The result is open only if both sides are. `includesKey: #k` in
+the true branch is then `S & #{#k => Object, ...}`.
 
 ### Diagnostic severity
 
@@ -197,7 +236,10 @@ build-stopping error unless a project opts in.
 
 ### Shape-aware operations
 
-Only these operations use the per-key types. Each requires a literal key.
+Only these operations use the per-key types. The key argument must have a
+singleton symbol type (`#k`). A literal `#k` has one; so does a local bound
+to one. A key typed as a union of singletons answers the union of the
+per-key results.
 
 | Operation | Required key | Optional key | Key not in shape |
 |---|---|---|---|
@@ -205,25 +247,31 @@ Only these operations use the per-key types. Each requires a literal key.
 | `at: #k ifAbsent: [b]` | `T` | `T \| B` | closed: diagnostic; open: `Object \| B` |
 | `at: #k ifPresent: [:v \| ...]` | block gets `T` | block gets `T` | closed: diagnostic; open: block gets `Object` |
 | map pattern `#{#k => v}` | `v :: T` | `v :: T` | closed: diagnostic; open: `v :: Object` |
+| `at: #k put: v` | shape with `#k => typeof(v)`, required | same | closed or open: shape gains `#k`, required |
 
-A **map literal checked against an expected shape** (an argument to a
-shape-typed parameter, an annotated local, a field default, a typed return)
-reports a missing required key, a key the closed shape does not name, and a
-value of the wrong type. This extends the literal inspection the checker
-already does for `new:` and `spawnWith:`.
+`at:put:` is here because real code builds option maps with it
+(`options at: #handler put: handler` in `Buccaneer start:handler:`), and a
+`Dictionary` result would not be accepted where the shape is expected.
+
+**Union receivers.** A keyed read on a union (`S1 | S2`, `S | Nil`,
+`S | Tuple`) answers the union of each member's result, with non-shape
+members typed as they are today. The "key not in shape" diagnostic fires only
+when every member is a closed shape lacking the key.
+
+**`isKindOf: Dictionary`** narrowing keeps the shape members of a union: a
+shape is a `Dictionary`.
 
 **Every other message** treats the shape as `Dictionary(K, V)`, where `K` is
 the join of the key types and `V` the join of the value types (`Object` for
-both if the shape is open). That includes `at:` with a computed key, `keys`,
-`do:`, `collect:`, and, in this ADR, `at:put:`, `removeKey:` and `merge:`,
-which answer a `Dictionary(K, V)`.
-
-A map literal with no expected shape infers `Dictionary(K, V)` exactly as
-today.
+both if the shape is open). That includes any keyed message with a key that
+is not a singleton symbol, `keys`, `do:`, `collect:`, and, in this ADR,
+`removeKey:` and `merge:`, which answer a `Dictionary(K, V)`.
 
 ### Runtime
 
-None. Shapes are erased like every other annotation. They describe maps the
+None, and no change to generated code. Shapes are erased like every other
+annotation, and a shape in a signature still emits `map()` in the Erlang
+`-spec`, as `Dictionary` does today. They describe maps the
 program builds itself (options, config) and maps a trusted FFI spec describes.
 They are not a way to validate external data: that should still be parsed
 into `Value` classes at the boundary, as `beamtalk-linear`'s `Issue fromNode:`
@@ -238,15 +286,24 @@ The spec reader maps Erlang map types to shapes:
 | `k := T` (`map_field_exact`, atom key) | `#k => T` |
 | `k => T` (`map_field_assoc`, atom key) | `?#k => T` |
 | a non-singleton key field alongside atom keys (`atom() => term()`) | trailing `...` |
+| a field keyed by `true`, `false` or `nil` | trailing `...` (those atoms are not symbols in Beamtalk) |
 | no singleton keys at all (`#{atom() => integer()}`, `map()`) | `Dictionary`, as today |
 | `'$beamtalk_class' := C` | the class `C`, as today (checked first) |
 
 Erlang type syntax has no binary-literal keys, so symbol keys cover every
-keyed map a spec can describe. In the other direction, `spec_codegen.rs` emits a shape as an Erlang
-map type (`#{k := T, k2 => T2}`, plus `_ => _` when open), so shapes
-round-trip through `-spec` and Dialyzer sees them.
+keyed map a spec can describe. Turning a typed domain field
+(`atom() => integer()`) into `...` loses its value type; that is accepted.
 
-FFI specs are trusted exactly as ADR 0075 already trusts them.
+Value types are whatever the reader already produces for them, which is often
+loose (`unicode:chardata()` is `Dynamic | String | Binary`). A shape does not
+make those tighter; it adds the key set and keeps each key's type separate.
+
+This applies to parameters as well as results: an Erlang function that takes
+a keyed map now expects a shape. The gradual rule and literal inference above
+keep existing callers quiet unless they pass a fully typed `Dictionary`.
+
+FFI specs are trusted exactly as ADR 0075 already trusts them. Emitting
+shapes back into Erlang `-spec`s is deferred (see below).
 
 ### Worked examples
 
@@ -294,10 +351,20 @@ HTTPClient request: #patch url: u options: #{#body => "{}", #timeout => "5s"}
     userinfo => unicode:chardata()}.
 ```
 
-It maps to a closed shape with seven optional symbol keys, so in
-`HTTPClient urlParts:` the read `raw at: #port ifAbsent: [80]` is
-`Integer | #undefined` rather than `Dynamic`, and `raw at: #prot` is a
-diagnostic.
+`parse/1` returns `uri_map() | error()`. Today that reads as
+`Dictionary | Tuple(Symbol, Symbol, Dynamic)`; with this ADR it is a closed
+shape with seven optional keys, or the tuple. In `HTTPClient urlParts:`:
+
+```beamtalk
+raw := (Erlang uri_string) parse: url
+(raw isKindOf: Dictionary) ifFalse: [^self httpError: "Invalid URL"]
+port := raw at: #port ifAbsent: [80]       // Integer | Symbol, was Dynamic
+scheme := raw at: #shceme ifAbsent: [nil]  // warning: no key #shceme
+```
+
+The gain is the key set and the port type. The text fields stay
+`Dynamic | String | Binary` because that is what `unicode:chardata()` maps
+to, so the `textOf:` conversions in that method stay.
 
 ### REPL
 
@@ -325,10 +392,12 @@ Diagnostic wording is illustrative and is settled in implementation.
   not a second enum.
 - **Type display and alias provenance** go through ADR 0108's display-name
   path, so a diagnostic says `WebSocketOptions`, not the expanded shape.
-- **Rust and Erlang** meet at the type string the spec reader writes and the
-  Erlang type `spec_codegen.rs` emits. A shared round-trip fixture (Erlang
-  map spec to shape to emitted spec) keeps the two sides in step; no
-  hand-synchronised table.
+- **The string form of a type.** Shapes must be parsed from type strings by
+  one brace-aware routine shared by `is_assignable_to`, `split_top_level`
+  and the FFI type-string reader, not three ad hoc checks.
+- **Rust and Erlang** meet at the type string the spec reader writes. A
+  shared fixture (Erlang map spec, the string the reader emits, the shape
+  Rust parses) keeps the two sides in step; no hand-synchronised table.
 - **Options documentation.** Once an alias is a shape, the key list in its
   doc comment and helpers like `websocketKeys` duplicate it. Deriving those
   from the shape is future work (see below), not a reason to keep both.
@@ -369,8 +438,8 @@ added later anyway.
 - **Smalltalk developer.** No precedent in Smalltalk. Nothing changes for
   objects: a shape is still a `Dictionary` answering the same messages. The
   guidance stays "data with behaviour is a class".
-- **Erlang/Elixir developer.** Map specs they already write arrive typed,
-  and Beamtalk signatures emit map specs Dialyzer understands.
+- **Erlang/Elixir developer.** Map specs they already write arrive typed.
+  Beamtalk signatures still emit `map()`, so Dialyzer sees no more than today.
 - **Operator.** No runtime change, no new failure mode, no performance cost.
 - **Tooling developer.** Key completion after `at: #` on a shape, hover
   showing a key's type and the alias name, go-to-definition on an alias.
@@ -441,10 +510,22 @@ built at the boundary. Revisit together with string singleton types.
 `shape WebSocketOptions ...` as its own declaration kind. Rejected: `type`
 aliases (ADR 0108) already name structural types, and FFI shapes are anonymous.
 
-### Precise update types now
-Typing `at:put:`, `removeKey:` and `merge:` per key in this ADR. Deferred:
-each adds checker surface, and none is needed to remove the casts or type
-FFI results.
+### Shapes only where declared, no literal inference
+The first draft kept `infer_map_literal` unchanged and checked a literal
+against a shape only when it sat directly in a typed position. Rejected after
+review: `opts := #{...}` followed by a call, and `options at: #handler put: h`,
+are both common in the libraries being migrated and would warn.
+
+### Per-key types for every update now
+Typing `removeKey:` and `merge:` per key in this ADR. Deferred: each adds
+checker surface, and the surveyed code does not need them. `at:put:` is in
+because it does.
+
+### Emit shapes into Erlang `-spec`s
+`#{k := T, k2 => T2}` instead of `map()`. Deferred: it changes generated
+attributes, and Dialyzer would then check closed map contracts against
+callers the Beamtalk checker accepted through `Dynamic`. It needs its own
+measurement of Dialyzer fallout.
 
 ## Consequences
 
@@ -452,20 +533,31 @@ FFI results.
 - Option-map aliases state their shape once, in a form the checker enforces.
 - Misspelt and mistyped option keys are caught at the call site.
 - A large class of unchecked narrowing casts (BT-4719) disappears.
-- Erlang map specs arrive typed and Beamtalk shapes emit as map specs.
+- Erlang map specs with atom keys arrive typed instead of as bare `Dictionary`.
 - No runtime cost and no change to generated code.
+- Reads of a key a literal never had (`#{#a => 1} at: #b`) are reported.
 
 ### Negative
 - A new `InferredType` variant: every exhaustive match on types gains an arm.
 - String-keyed data (JSON, YAML) gets nothing from this ADR.
 - Runtime validators remain for dynamic callers and value-range checks, so
   the shape and the validator can still drift.
-- Until update operations are shape-aware, `opts at: #k put: v` answers a
-  `Dictionary` and loses the shape.
+- `removeKey:` and `merge:` answer a `Dictionary` and lose the shape.
+- The config boundary still needs one cast: a validator that builds a section
+  from a `Dictionary(Symbol, Object)` must assert its shape once. The casts
+  move from every reader to that one place; they do not vanish.
+- FFI tightening will produce new warnings in existing callers. The number
+  is unknown until measured (phase 6 gate).
+- Anonymous FFI shapes have no alias name, so hovers and diagnostics must
+  truncate long shapes.
 - Recursive shapes are impossible while aliases are non-recursive.
 
 ### Neutral
-- Unannotated map literals keep their current inferred type.
+- Symbol-keyed map literals infer a shape instead of
+  `Dictionary(K, V)`. Sends that are not shape-aware see the same type as
+  before.
+- Redefining a shape alias re-checks its use sites through ADR 0108's
+  existing hot-reload trigger.
 - Tightening an FFI return from `Dictionary` to a shape can surface new
   diagnostics in existing code that reads a key the spec does not name.
 - Existing `Dictionary(Symbol, Object)` aliases keep working; migration is
@@ -475,31 +567,41 @@ FFI results.
 
 | Phase | Work | Components | Size |
 |---|---|---|---|
-| 1 | `TypeAnnotation::Shape`: parser, AST, unparse, formatter | `source_analysis`, `ast`, `unparse` | M |
-| 2 | `InferredType::Shape`: resolution from annotations and aliases, display, shape-to-shape and shape-to-`Dictionary` assignability, fieldwise intersection, `Dictionary` view for all other sends | `type_checker` | L |
-| 3 | Map literal checked against an expected shape | `type_checker/validation.rs` | M |
-| 4 | Keyed reads: `at:`, `at:ifAbsent:`, `at:ifPresent:` (and `ifPresent:ifAbsent:`), map-pattern bindings | `type_checker/inference` | M |
-| 5 | FFI: spec reader maps `:=` / `=>` fields to shapes; `spec_codegen.rs` emits map types; shared round-trip fixture | `beamtalk_spec_reader.erl`, `native_types.rs`, `spec_codegen.rs` | M |
-| 6 | LSP key completion and hover; language-features and syntax-rationale docs; surface parity | `beamtalk-language-service`, docs | M |
-| 7 | Prove it: migrate buccaneer config aliases, beamtalk-http `RequestOptions` / `ClientOptions` and `urlParts:`, stdlib `system_navigation.bt` casts | sibling repos, stdlib | M |
-| 8 | End-to-end tests (BUnit plus one btscript) | `stdlib/test` | S |
+| 1 | `TypeAnnotation::Shape`: parser (including the `,?` split), AST, unparse, formatter | `source_analysis`, `ast`, `unparse` | M |
+| 2 | Brace-aware type strings: one shared routine for splitting and parsing the string form; fix the `#`-prefix singleton checks so `#{` is not a singleton | `string_utils.rs`, `type_checker/validation.rs` | M |
+| 3 | `InferredType::Shape`: resolution from annotations and aliases, display with truncation, shape-to-shape and shape-to-`Dictionary` assignability, the gradual rule, `Dictionary` view for all other sends | `type_checker` | L |
+| 4 | Map literals infer shapes; key-naming diagnostics for shape mismatches | `type_checker/inference/literals.rs`, `validation.rs` | M |
+| 5 | Keyed operations: `at:`, `at:ifAbsent:`, `at:ifPresent:` (and `ifPresent:ifAbsent:`), `at:put:`, map-pattern bindings, union receivers, `isKindOf:` narrowing | `type_checker/inference`, `narrowing` | M |
+| 6 | FFI: spec reader maps `:=` / `=>` fields to shapes; shared fixture | `beamtalk_spec_reader.erl`, `native_types.rs` | M |
+| 7 | LSP key completion and hover; language-features and syntax-rationale docs; surface parity | `beamtalk-language-service`, docs | M |
+| 8 | Prove it: migrate buccaneer config aliases, beamtalk-http `RequestOptions` / `ClientOptions`, stdlib `system_navigation.bt` casts | sibling repos, stdlib | M |
+| 9 | End-to-end tests (BUnit plus one btscript) | `stdlib/test`, `tests/repl-protocol` | S |
 
-Phases 3, 4 and 5 depend on 2 and are independent of each other.
+Phase 3 depends on 1 and 2. Phases 4 and 5 depend on 3. Phase 6 depends on 3
+and the gates below.
 
-**Wire check.** Before phases 5 to 7, phases 1 to 4 must carry one real alias
-end to end: buccaneer's `WebSocketOptions` as a shape, the two casts in
-`pipeline.bt` removed with no new diagnostics, and a misspelt key at a
-`Buccaneer start:` call site reported. If that is noisy or awkward, revisit
-the design before building FFI mapping and tooling on it.
+**Wire check (gate before phase 6).** Phases 1 to 5 must carry one real alias
+end to end: buccaneer's `WebSocketOptions` as a shape, the casts in
+`pipeline.bt` removed, a misspelt key at a `Buccaneer start:` call site
+reported, and no new warnings elsewhere in buccaneer beyond the one cast at
+the config validator. If that is noisy or awkward, revisit the design before
+building FFI mapping and tooling on it.
+
+**FFI gate (within phase 6).** Before the reader change is switched on, count
+the new warnings it produces across the stdlib and the sibling libraries. If
+most are noise from loose value types or domain keys, narrow the mapping
+(for example, results only) before shipping it.
 
 None of this touches state-threading lowering, so `ci:corpus` is not needed.
 
 ### Deferred (each needs its own justification)
 
-- Inferring a shape for an unannotated literal.
-- Per-key result types for `at:put:`, `removeKey:`, `merge:`.
-- `includesKey:` narrowing an optional key to present (BT-4709), and with
-  it a warning for `at:` on an un-narrowed optional key.
+- Per-key result types for `removeKey:` and `merge:`.
+- Fieldwise intersection, and `includesKey:` narrowing of an optional key to
+  present (BT-4709), with a warning for `at:` on an un-narrowed optional key.
+- Emitting shapes into Erlang `-spec`s.
+- Expected-type propagation into list literals (`List(Shape)` elements):
+  owned by BT-2949.
 - String keys, and tag-field narrowing over a union of shapes
   (`msg at: "type"`), which beamtalk-agents and symphony's codex runner
   would use. Both need string singleton types and a story for validation.
@@ -508,17 +610,26 @@ None of this touches state-threading lowering, so `ci:corpus` is not needed.
 
 ## Migration Path
 
-Nothing breaks: existing `Dictionary` aliases and code are unaffected until
-an alias is rewritten as a shape.
+Two things change for existing code without any edit:
 
-To migrate an option alias: replace the `Dictionary(Symbol, Object)` alias
-with a shape taken from its doc comment, fix the diagnostics at literal call
-sites, then delete the annotated-local casts at the readers. Keep the runtime
-validator.
+- Symbol-keyed map literals infer shapes. A read of a key the literal never
+  had now warns. Everything else sees the same type as before.
+- FFI maps with atom keys become shapes (phase 6). A read of a key outside
+  the spec warns; the fix is to correct the key or annotate the value as
+  `Dictionary`.
 
-FFI results tighten automatically in phase 5. Code that read a key outside
-the spec gets a diagnostic; the fix is to correct the key or annotate the
-result as `Dictionary`.
+To migrate an option alias:
+
+1. Replace the `Dictionary(Symbol, Object)` alias with a shape taken from its
+   doc comment and its key list. Include every key the validator accepts,
+   reserved ones too.
+2. Where a validator builds the section from an untyped map, assert the shape
+   once there with an annotated local.
+3. Delete the annotated-local casts at the readers.
+4. Keep the runtime validator for value-range checks and dynamic callers.
+
+Field defaults such as `field: websocket :: WebSocketOptions = Dictionary new`
+keep working under the gradual rule.
 
 ## References
 - Related issues: BT-4725 (this ADR), BT-4719 (narrowing casts), BT-4709 (narrowing gaps), BT-2949 (generic container element checks)
