@@ -19,8 +19,8 @@
 //! automatically without whitelist additions.
 
 use crate::ast::Expression;
-use crate::semantic_analysis::block_facts::is_literal_block;
 use crate::semantic_analysis::BlockContext;
+use crate::semantic_analysis::block_facts::is_literal_block;
 use crate::source_analysis::Span;
 
 /// Identifies selectors that take literal blocks for Tier 1 inline codegen.
