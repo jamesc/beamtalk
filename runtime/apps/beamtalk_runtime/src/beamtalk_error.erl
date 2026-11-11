@@ -197,9 +197,7 @@ format(#beamtalk_error{kind = does_not_understand} = Error) ->
     format_parts(Enriched#beamtalk_error.message, Enriched#beamtalk_error.hint);
 format(#beamtalk_error{message = Message, hint = Hint, details = #{signal_reason := Reason}}) ->
     %% BT-4159: `signal:reason:` — show the reason in uncaught reports.
-    chars_to_binary([
-        format_parts(Message, Hint), <<"\nReason: ">>, format_reason_term(Reason)
-    ]);
+    <<(format_parts(Message, Hint))/binary, "\nReason: ", (format_reason_term(Reason))/binary>>;
 format(#beamtalk_error{message = Message, hint = Hint}) ->
     format_parts(Message, Hint).
 
@@ -289,7 +287,7 @@ extract_from_tuple(T, I, Size, Depth) ->
 -define(REASON_MAX_ELEMS, 50).
 -spec format_reason_term(term()) -> binary().
 format_reason_term(Reason) ->
-    Bin = chars_to_binary(reason_doc(Reason, ?REASON_MAX_DEPTH)),
+    Bin = unicode:characters_to_binary(reason_doc(Reason, ?REASON_MAX_DEPTH)),
     truncate_reason(Bin).
 
 -spec truncate_reason(binary()) -> binary().
