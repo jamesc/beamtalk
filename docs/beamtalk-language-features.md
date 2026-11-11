@@ -702,6 +702,20 @@ on the statement, or a whole package with `cascade-drops-update = "off"` under
 0 max: 1; max: 2
 ```
 
+The same bug without a cascade is a statement whose copy nobody uses. A
+non-final statement that is a plain send on a value receiver answering an
+updated copy (`p withX: 5.` on its own line) leaves `p` unchanged, so the
+**`discarded-update`** warning flags it with the same predicate
+(BT-4522): ``the result of `withX:` is discarded``, with the help "assign the
+result (`p := p withX: 5`) or chain with `|>`". The last statement of a
+body or block is its value and is never flagged, nor is a send whose result is
+used (assigned, passed, returned, or the receiver of another send). A
+pipeline statement is flagged once, at its last stage. A cascade statement
+keeps `cascade-drops-update`, so no span is reported twice. Binary sends
+(`n + 1.`) are flagged too. `Dynamic` and union receivers, actors and
+non-value classes stay silent. Silence one with `@expect discarded_update`,
+or a package with `discarded-update = "off"` under `[diagnostics]`.
+
 ### Pipelines (`|>`) (ADR 0145)
 
 The pipeline operator `|>` sends each message to the **previous result**.
@@ -8702,6 +8716,7 @@ anything                    // any diagnostic suppressed (discouraged — use a 
 | `class_method_process_resource` | A class-side method that runs in the caller's process (no class variables in its chain, ADR 0142) directly creates a resource tied to the caller (`ets:new`, `open_port`, `link`, `monitor`, timers, …) or acts on the caller (`self()`, the process dictionary, `process_flag`) (BT-4302) |
 | `class_var_reflection_shadowing` | A class-side method named `fieldAt:`, `fieldAt:put:`, `hasField:` or `clearField:`, which the class process answers itself for a Symbol argument (BT-4422, BT-4426) |
 | `cascade_drops_update` | A non-final cascade message on a value receiver that answers an updated copy, which the cascade discards (`p withX: 5; withY: 10`, ADR 0145 § 3, BT-4512) |
+| `discarded_update` | A non-final statement-level send on a value receiver that answers an updated copy, which is thrown away (`p withX: 5.` alone, ADR 0145 § 3, BT-4522) |
 | `ffi_nested_string` | A `String` nested in a collection argument (`List(String)`, `Dictionary` keys/values, `Tuple`) to a stock Erlang call reaches it tagged; an Erlang comparison against raw binaries misses (BT-4243, see [Strings at the FFI boundary](beamtalk-native-erlang.md#strings-at-the-ffi-boundary)) |
 | `actor_state_abroad` | A block that touches its actor's state where it runs outside the actor's process (ADR 0137) *(lint-only, see below)* |
 | `dead_assignment` | `beamtalk lint`'s "assignment inside an escaping block" check *(lint-only, see below)* |

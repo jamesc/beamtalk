@@ -58,6 +58,7 @@ Actor subclass: Adr0131ExcMatrixActor
       on: Error
       do: [:ex |
         t := t + 0
+        @expect discarded_update
         #(1, 2) collect: [:x | t := t + x]
         0
       ]
@@ -150,6 +151,7 @@ Actor subclass: Adr0131ExcMatrixActor
     [Error signal: "x"]
       on: Error
       do: [:ex |
+        @expect discarded_update
         #(1, 2) collect: [:x | t := t + x]
         0
       ]
@@ -469,6 +471,7 @@ Actor subclass: Adr0131ExcMatrixActor
     t := 0
     [
       t := t + 0
+      @expect discarded_update
       #(1, 2) collect: [:x | t := t + x]
       7
     ] on: Error do: [:e | 0]
@@ -545,6 +548,7 @@ Actor subclass: Adr0131ExcMatrixActor
   protOuterCollect =>
     t := 0
     [
+      @expect discarded_update
       #(1, 2) collect: [:x | t := t + x]
       7
     ] on: Error do: [:e | 0]
@@ -679,6 +683,7 @@ Actor subclass: Adr0131ExcMatrixActor
       ifTrue: [
         [
           t := t + 0
+          @expect discarded_update
           #(1, 2) collect: [:x | t := t + x]
           7
         ] on: Error do: [:e | 0]
@@ -779,6 +784,7 @@ Actor subclass: Adr0131ExcMatrixActor
     c
       ifTrue: [
         [
+          @expect discarded_update
           #(1, 2) collect: [:x | t := t + x]
           7
         ] on: Error do: [:e | 0]

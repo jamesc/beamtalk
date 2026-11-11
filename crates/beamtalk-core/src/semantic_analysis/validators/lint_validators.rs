@@ -839,9 +839,16 @@ fn check_setup_body_returns_self(
     let Some(last_stmt) = body.last() else {
         return;
     };
-    let has_field_mutation = body
-        .iter()
-        .any(|stmt| contains_self_reconstructing_send(&stmt.expression));
+    // A non-final statement the type checker already flagged as
+    // `discarded-update` (`self withA: 1.`) has its own, more precise warning
+    // naming the dropped send (BT-4522); don't also report it here.
+    let has_field_mutation = body.iter().any(|stmt| {
+        let expr = stmt.expression.unwrap_parens();
+        let already_reported = diagnostics.iter().any(|d| {
+            d.category == Some(DiagnosticCategory::DiscardedUpdate) && d.span == expr.span()
+        });
+        !already_reported && contains_self_reconstructing_send(&stmt.expression)
+    });
     if !has_field_mutation {
         return;
     }

@@ -357,6 +357,7 @@ Object subclass: Adr0131CondMatrixClass
     t := 0
     c
       and: [
+        @expect discarded_update
         #(1, 2) collect: [:x | t := t + x]
         true
       ]
@@ -449,6 +450,7 @@ Object subclass: Adr0131CondMatrixClass
     c
       ifTrue: [
         t := t + 0
+        @expect discarded_update
         #(1, 2) collect: [:x | t := t + x]
         5
       ]
@@ -546,6 +548,7 @@ Object subclass: Adr0131CondMatrixClass
     t := 0
     c
       ifTrue: [
+        @expect discarded_update
         #(1, 2) collect: [:x | t := t + x]
         5
       ]

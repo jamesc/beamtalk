@@ -35,6 +35,7 @@ Object subclass: Adr0131LoopBodyProducerClass
     i := 0
     [i < 2]
       whileTrue: [
+        @expect discarded_update
         #(1, 2) collect: [:x | t := t + x]
         i := i + 1
       ]
@@ -47,6 +48,7 @@ Object subclass: Adr0131LoopBodyProducerClass
 
   class toDoInCollect =>
     t := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:x |
         1 to: 2 do: [:k | t := t + x]
@@ -199,6 +201,7 @@ Object subclass: Adr0131LoopBodyProducerClass
       to: 2
       do: [:i |
         w := 0
+        @expect discarded_update
         #(1, 2)
           collect: [:x |
             w := w + x
@@ -358,6 +361,7 @@ Object subclass: Adr0131LoopBodyProducerClass
 
   class foldInLetrecInCollect =>
     t := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         2

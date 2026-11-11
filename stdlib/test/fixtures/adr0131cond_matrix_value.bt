@@ -246,6 +246,7 @@ Value subclass: Adr0131CondMatrixValue
     c
       ifTrue: [
         t := t + 0
+        @expect discarded_update
         #(1, 2) collect: [:x | t := t + x]
         5
       ]
@@ -343,6 +344,7 @@ Value subclass: Adr0131CondMatrixValue
     t := 0
     c
       ifTrue: [
+        @expect discarded_update
         #(1, 2) collect: [:x | t := t + x]
         5
       ]

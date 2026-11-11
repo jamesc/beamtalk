@@ -103,6 +103,7 @@ ClosureMatrixSubject subclass: ClosureMatrixSub
     (self.n * 100)
 
   collectSUPStmt =>
+    @expect discarded_update
     #(1, 2, 3)
       collect: [:e |
         super bump

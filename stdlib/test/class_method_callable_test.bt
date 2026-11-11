@@ -25,7 +25,9 @@ TestCase subclass: ClassMethodCallableTest
 
   testACollectionMessageOnADictionaryAnswersWhatItAlwaysDid =>
     d := Dictionary new
+    @expect discarded_update
     d at: #a put: 1
+    @expect discarded_update
     d at: #b put: 2
     self assert: (ClassMethodCallableFixture collectIn: d with: [:x |
       x

@@ -79,6 +79,7 @@ Actor subclass: ClosureMatrixSubject
     (self.n * 100)
 
   collectRStmt =>
+    @expect discarded_update
     #(1, 2, 3) collect: [:e | self.n]
     (self.n * 100)
 
@@ -359,6 +360,7 @@ Actor subclass: ClosureMatrixSubject
     (self.n * 100)
 
   collectRWStmt =>
+    @expect discarded_update
     #(1, 2, 3)
       collect: [:e |
         self.n := self.n + 1
@@ -765,6 +767,7 @@ Actor subclass: ClosureMatrixSubject
     (self.n * 100)
 
   collectSStmt =>
+    @expect discarded_update
     #(1, 2, 3)
       collect: [:e |
         self bump
@@ -1184,6 +1187,7 @@ Actor subclass: ClosureMatrixSubject
 
   collectRWBStmt =>
     base := 10
+    @expect discarded_update
     #(1, 2, 3)
       collect: [:e |
         self.n := self.n + base
@@ -1604,6 +1608,7 @@ Actor subclass: ClosureMatrixSubject
 
   collectRBStmt =>
     base := 10
+    @expect discarded_update
     #(1, 2, 3) collect: [:e | self.n + base]
     (self.n * 100)
 
@@ -1924,6 +1929,7 @@ Actor subclass: ClosureMatrixSubject
     (self.n * 100)
 
   collectSSStmt =>
+    @expect discarded_update
     #(1, 2, 3)
       collect: [:e |
         self.n := self.n + self peek
@@ -2306,6 +2312,7 @@ Actor subclass: ClosureMatrixSubject
 
   collectWLStmt =>
     c := 0
+    @expect discarded_update
     #(1, 2, 3)
       collect: [:e |
         c := c + 1
@@ -2746,6 +2753,7 @@ Actor subclass: ClosureMatrixSubject
     (self.n * 100)
 
   collectALStmt =>
+    @expect discarded_update
     #(1, 2, 3)
       collect: [:e |
         s := self
@@ -3188,6 +3196,7 @@ Actor subclass: ClosureMatrixSubject
     (self.n * 100)
 
   collectINHStmt =>
+    @expect discarded_update
     #(1, 2, 3)
       collect: [:e |
         self yourself

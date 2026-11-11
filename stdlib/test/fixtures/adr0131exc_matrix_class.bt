@@ -152,6 +152,7 @@ Object subclass: Adr0131ExcMatrixClass
   class ensOuterCollect =>
     t := 0
     [
+      @expect discarded_update
       #(1, 2) collect: [:x | t := t + x]
       7
     ] ensure: [nil]
@@ -253,6 +254,7 @@ Object subclass: Adr0131ExcMatrixClass
       on: Error
       do: [:ex |
         t := t + 0
+        @expect discarded_update
         #(1, 2) collect: [:x | t := t + x]
         0
       ]
@@ -345,6 +347,7 @@ Object subclass: Adr0131ExcMatrixClass
     [Error signal: "x"]
       on: Error
       do: [:ex |
+        @expect discarded_update
         #(1, 2) collect: [:x | t := t + x]
         0
       ]
@@ -654,6 +657,7 @@ Object subclass: Adr0131ExcMatrixClass
     t := 0
     [
       t := t + 0
+      @expect discarded_update
       #(1, 2) collect: [:x | t := t + x]
       7
     ] on: Error do: [:e | 0]
@@ -730,6 +734,7 @@ Object subclass: Adr0131ExcMatrixClass
   class protOuterCollect =>
     t := 0
     [
+      @expect discarded_update
       #(1, 2) collect: [:x | t := t + x]
       7
     ] on: Error do: [:e | 0]
@@ -880,6 +885,7 @@ Object subclass: Adr0131ExcMatrixClass
       ifTrue: [
         [
           t := t + 0
+          @expect discarded_update
           #(1, 2) collect: [:x | t := t + x]
           7
         ] on: Error do: [:e | 0]
@@ -1019,6 +1025,7 @@ Object subclass: Adr0131ExcMatrixClass
     c
       ifTrue: [
         [
+          @expect discarded_update
           #(1, 2) collect: [:x | t := t + x]
           7
         ] on: Error do: [:e | 0]

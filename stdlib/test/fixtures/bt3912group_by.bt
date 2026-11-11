@@ -135,6 +135,7 @@ Actor subclass: Bt3912GroupBy
 
   selectAssign =>
     r := Dictionary new
+    @expect discarded_update
     #(1)
       select: [:z |
         r := #(1, 3)

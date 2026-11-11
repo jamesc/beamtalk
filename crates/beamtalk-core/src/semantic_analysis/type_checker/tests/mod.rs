@@ -59,6 +59,7 @@ mod bt4482_protocol_assignment_conformance;
 mod bt4487_destructure_tuple_types;
 mod bt4512_cascade_drops_update;
 mod bt4515_object_then;
+mod bt4522_discarded_update;
 mod bt4526_static_dnu_known_receiver;
 mod bt4594_protocol_receiver_object_methods;
 mod bt4607_protocol_field_assignment;

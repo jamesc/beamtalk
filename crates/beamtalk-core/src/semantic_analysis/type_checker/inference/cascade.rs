@@ -173,6 +173,64 @@ impl TypeChecker {
     }
 }
 
+impl TypeChecker {
+    /// The `discarded-update` warning (ADR 0145 § 3, BT-4522): a non-final
+    /// statement that is a plain send answering an updated copy of a value
+    /// receiver — `p withX: 5.` alone — throws the copy away, since the
+    /// receiver is unchanged.
+    ///
+    /// Called by `infer_stmts` right after `expr` was inferred, so the
+    /// receiver's type is already in the type map (keyed by its span); no
+    /// re-inference, hence no double-emitted diagnostics. Cascades are
+    /// `Expression::Cascade` and stay with `cascade-drops-update`; a pipeline
+    /// is a nest of sends, so only its last stage (the statement itself) is
+    /// examined and it is reported once.
+    pub(in crate::semantic_analysis::type_checker) fn check_discarded_update(
+        &mut self,
+        expr: &Expression,
+        hierarchy: &ClassHierarchy,
+    ) {
+        let Expression::MessageSend {
+            receiver,
+            selector,
+            is_cast: false,
+            span,
+            ..
+        } = expr
+        else {
+            return;
+        };
+        let Some(receiver_ty) = self.type_map.get(receiver.span()).cloned() else {
+            return;
+        };
+        let name = selector.name();
+        if !cascade_drops_update(hierarchy, &receiver_ty, &name) {
+            return;
+        }
+        let InferredType::Known { class_name, .. } = &receiver_ty else {
+            return;
+        };
+        let display = InferredType::class_name_for_diagnostic(class_name.as_str());
+        let receiver_text = receiver_display(receiver);
+        let shape = send_shape(selector);
+        self.diagnostics.push(
+            Diagnostic::warning(format!("the result of `{name}` is discarded"), *span)
+                .with_note(
+                    format!(
+                        "`{display}` is a value: `{name}` answers a new value and leaves the \
+                         receiver unchanged, so this statement has no effect"
+                    ),
+                    None,
+                )
+                .with_hint(format!(
+                    "assign the result (`{receiver_text} := {receiver_text} {shape}`) or \
+                     chain with `|>`"
+                ))
+                .with_category(DiagnosticCategory::DiscardedUpdate),
+        );
+    }
+}
+
 /// Whether a non-final cascade message `selector` sent to a receiver of
 /// static type `receiver_ty` draws the `cascade-drops-update` warning
 /// (ADR 0145 § 3): the receiver is a `Known` instance of a value kind

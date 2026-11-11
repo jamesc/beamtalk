@@ -143,6 +143,7 @@ Value subclass: Adr0131ExcMatrixValue
       on: Error
       do: [:ex |
         t := t + 0
+        @expect discarded_update
         #(1, 2) collect: [:x | t := t + x]
         0
       ]
@@ -235,6 +236,7 @@ Value subclass: Adr0131ExcMatrixValue
     [Error signal: "x"]
       on: Error
       do: [:ex |
+        @expect discarded_update
         #(1, 2) collect: [:x | t := t + x]
         0
       ]
@@ -408,6 +410,7 @@ Value subclass: Adr0131ExcMatrixValue
     t := 0
     [
       t := t + 0
+      @expect discarded_update
       #(1, 2) collect: [:x | t := t + x]
       7
     ] on: Error do: [:e | 0]
@@ -484,6 +487,7 @@ Value subclass: Adr0131ExcMatrixValue
   protOuterCollect =>
     t := 0
     [
+      @expect discarded_update
       #(1, 2) collect: [:x | t := t + x]
       7
     ] on: Error do: [:e | 0]
@@ -634,6 +638,7 @@ Value subclass: Adr0131ExcMatrixValue
       ifTrue: [
         [
           t := t + 0
+          @expect discarded_update
           #(1, 2) collect: [:x | t := t + x]
           7
         ] on: Error do: [:e | 0]
@@ -773,6 +778,7 @@ Value subclass: Adr0131ExcMatrixValue
     c
       ifTrue: [
         [
+          @expect discarded_update
           #(1, 2) collect: [:x | t := t + x]
           7
         ] on: Error do: [:e | 0]

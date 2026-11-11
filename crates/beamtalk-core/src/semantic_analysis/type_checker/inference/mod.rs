@@ -1031,7 +1031,13 @@ impl TypeChecker {
     ) -> InferredType {
         let mut body_type = InferredType::Dynamic(DynamicReason::Unknown);
 
-        for stmt in stmts {
+        // The last non-directive statement is the body's value; every earlier
+        // one is evaluated for effect only (BT-4522 `discarded-update`).
+        let last_value_idx = stmts
+            .iter()
+            .rposition(|s| !matches!(s.expression, Expression::ExpectDirective { .. }));
+
+        for (idx, stmt) in stmts.iter().enumerate() {
             let expr = &stmt.expression;
 
             // @expect directives are compile-time only; skip them so they don't
@@ -1041,6 +1047,10 @@ impl TypeChecker {
             }
 
             body_type = self.infer_expr(expr, hierarchy, env, in_abstract_method);
+
+            if Some(idx) != last_value_idx {
+                self.check_discarded_update(expr, hierarchy);
+            }
 
             // Early-return narrowing (ADR 0068 Phase 1g):
             // After `x isNil ifTrue: [<diverge>]`, narrow x to non-nil for the

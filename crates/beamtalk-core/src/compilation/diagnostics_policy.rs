@@ -172,6 +172,7 @@ const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
         "cascade-drops-update",
         DiagnosticCategory::CascadeDropsUpdate,
     ),
+    ("discarded-update", DiagnosticCategory::DiscardedUpdate),
     (
         "handleinfo-no-catch-all",
         DiagnosticCategory::HandleInfoNoCatchAll,
@@ -620,6 +621,7 @@ fn expect_category_unchecked(
         | ExpectCategory::FfiNestedString
         | ExpectCategory::BinaryStringCompare
         | ExpectCategory::CascadeDropsUpdate
+        | ExpectCategory::DiscardedUpdate
         // Deprecated, parse-only (ADR 0130): nothing produces it, so it is
         // never "unchecked" — it is reported stale like any unmatched directive.
         | ExpectCategory::StoredClosure => false,
@@ -957,6 +959,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
                     ExpectCategory::CascadeDropsUpdate,
                     Some(DiagnosticCategory::CascadeDropsUpdate)
                 )
+                | (
+                    ExpectCategory::DiscardedUpdate,
+                    Some(DiagnosticCategory::DiscardedUpdate)
+                )
         )
 }
 
@@ -1214,6 +1220,7 @@ actor-state-abroad = "off"
 ffi-nested-string = "off"
 binary-string-compare = "off"
 cascade-drops-update = "off"
+discarded-update = "off"
 handleinfo-no-catch-all = "error"
 "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();

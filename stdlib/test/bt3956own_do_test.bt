@@ -11,6 +11,7 @@ TestCase subclass: Bt3956OwnDoTest
   field: n = 0
 
   do: aBlock =>
+    @expect discarded_update
     #(1, 2, 3) collect: [:x | aBlock value: x]
     self
 
