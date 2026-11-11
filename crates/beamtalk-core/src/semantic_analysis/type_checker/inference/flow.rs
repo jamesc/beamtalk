@@ -804,7 +804,14 @@ impl TypeChecker {
                         );
                     }
                 }
-                body_ty
+                // BT-4458: an arm whose body is a bare `^expr` never produces
+                // a value for the match — it leaves the enclosing method — so
+                // it contributes bottom (`Never`), not `expr`'s type.
+                if matches!(arm.body.unwrap_parens(), Expression::Return { .. }) {
+                    InferredType::Never
+                } else {
+                    body_ty
+                }
             })
             .collect();
         if arm_types.is_empty() {

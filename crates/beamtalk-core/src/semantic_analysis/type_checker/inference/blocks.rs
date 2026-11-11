@@ -944,6 +944,15 @@ impl TypeChecker {
             // Build `Block(P1, ..., Pn, R)` so downstream generic inference
             // (e.g. `infer_method_local_params` matching `Block(R) -> R`) can
             // recover the block's return type.
+            //
+            // BT-4458: a branch ending in a top-level `^expr` never produces a
+            // local value, so it is `Never` (the `union_of` identity), exactly
+            // as in `infer_block_with_typed_params`.
+            let body_ty = if block_has_return(block) {
+                InferredType::Never
+            } else {
+                body_ty
+            };
             let mut block_type_args = block_param_types;
             block_type_args.push(body_ty);
             let ty = InferredType::Known {
