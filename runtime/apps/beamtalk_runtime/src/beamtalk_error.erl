@@ -285,10 +285,19 @@ extract_from_tuple(T, I, Size, Depth) ->
 -define(REASON_MAX_DEPTH, 20).
 -define(REASON_MAX_BYTES, 2048).
 -define(REASON_MAX_ELEMS, 50).
+%% Total node budget: bounds the *work* (shared subterms can expand
+%% exponentially), not just the output size.
+-define(REASON_MAX_NODES, 500).
 -spec format_reason_term(term()) -> binary().
 format_reason_term(Reason) ->
-    Bin = unicode:characters_to_binary(reason_doc(Reason, ?REASON_MAX_DEPTH)),
-    truncate_reason(Bin).
+    {Doc, _Left} = reason_doc(Reason, ?REASON_MAX_DEPTH, ?REASON_MAX_NODES),
+    case unicode:characters_to_binary(Doc) of
+        Bin when is_binary(Bin) ->
+            truncate_reason(Bin);
+        _ ->
+            %% Invalid encoding somewhere inside: never raise from the formatter.
+            truncate_reason(chars_to_binary(io_lib:format("~0tP", [Reason, ?REASON_MAX_DEPTH])))
+    end.
 
 -spec truncate_reason(binary()) -> binary().
 truncate_reason(Bin) when byte_size(Bin) =< ?REASON_MAX_BYTES ->
@@ -309,50 +318,64 @@ utf8_prefix(Bin) ->
         {error, Good, _} -> Good
     end.
 
--spec reason_doc(term(), integer()) -> iodata().
-reason_doc(_Term, Depth) when Depth =< 0 ->
-    <<"...">>;
-reason_doc({beamtalk_string, Bin} = Str, _Depth) when is_binary(Bin) ->
-    beamtalk_primitive:print_string(Str);
-reason_doc(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}, _Depth) ->
-    format(Err);
-reason_doc(#beamtalk_error{} = Err, _Depth) ->
-    format(Err);
-reason_doc(true, _Depth) ->
-    <<"true">>;
-reason_doc(false, _Depth) ->
-    <<"false">>;
-reason_doc(nil, _Depth) ->
-    <<"nil">>;
-reason_doc(Atom, _Depth) when is_atom(Atom) ->
-    [<<"#">>, atom_to_binary(Atom, utf8)];
-reason_doc(N, _Depth) when is_integer(N) ->
-    integer_to_binary(N);
-reason_doc(F, _Depth) when is_float(F) ->
-    float_to_binary(F, [short]);
-reason_doc(Bin, _Depth) when is_binary(Bin) ->
-    io_lib:format("~0tP", [Bin, 10]);
-reason_doc(List, Depth) when is_list(List) ->
+-spec reason_doc(term(), integer(), integer()) -> {iodata(), integer()}.
+reason_doc(_Term, Depth, Budget) when Depth =< 0; Budget =< 0 ->
+    {<<"...">>, Budget};
+reason_doc({beamtalk_string, Bin} = Str, _Depth, B) when is_binary(Bin) ->
+    {beamtalk_primitive:print_string(Str), B - 1};
+reason_doc(#{'$beamtalk_class' := _, error := #beamtalk_error{} = Err}, _Depth, B) ->
+    {format(Err), B - 1};
+reason_doc(#beamtalk_error{} = Err, _Depth, B) ->
+    {format(Err), B - 1};
+reason_doc('$reason_elided', _Depth, B) ->
+    {<<"...">>, B};
+reason_doc(true, _Depth, B) ->
+    {<<"true">>, B - 1};
+reason_doc(false, _Depth, B) ->
+    {<<"false">>, B - 1};
+reason_doc(nil, _Depth, B) ->
+    {<<"nil">>, B - 1};
+reason_doc(Atom, _Depth, B) when is_atom(Atom) ->
+    {[<<"#">>, atom_to_binary(Atom, utf8)], B - 1};
+reason_doc(N, _Depth, B) when is_integer(N) ->
+    {integer_to_binary(N), B - 1};
+reason_doc(F, _Depth, B) when is_float(F) ->
+    {float_to_binary(F, [short]), B - 1};
+reason_doc(Bin, _Depth, B) when is_binary(Bin) ->
+    %% A bare binary prints the way `Binary printString` does (pure clause).
+    {beamtalk_primitive:print_string(Bin), B - 1};
+reason_doc(List, Depth, B) when is_list(List) ->
     case is_proper_list(List) of
         true ->
-            {Shown, More} = split_reason_list(List, ?REASON_MAX_ELEMS),
-            Elems = [reason_doc(E, Depth - 1) || E <- Shown],
-            [<<"#(">>, lists:join(<<", ">>, Elems ++ More), <<")">>];
+            {Elems, B1} = reason_elems(cap_elems(List), Depth - 1, B - 1),
+            {[<<"#(">>, lists:join(<<", ">>, Elems), <<")">>], B1};
         false ->
-            io_lib:format("~0tP", [List, Depth])
+            {io_lib:format("~0tP", [List, Depth]), B - 1}
     end;
-reason_doc(Tuple, Depth) when is_tuple(Tuple) ->
-    [
-        <<"{">>,
-        lists:join(<<", ">>, [reason_doc(E, Depth - 1) || E <- tuple_to_list(Tuple)]),
-        <<"}">>
-    ];
-reason_doc(Other, Depth) ->
-    io_lib:format("~0tP", [Other, Depth]).
+reason_doc(Tuple, Depth, B) when is_tuple(Tuple) ->
+    {Elems, B1} = reason_elems(cap_elems(tuple_to_list(Tuple)), Depth - 1, B - 1),
+    {[<<"{">>, lists:join(<<", ">>, Elems), <<"}">>], B1};
+reason_doc(Other, Depth, B) ->
+    {io_lib:format("~0tP", [Other, Depth]), B - 1}.
 
--spec split_reason_list(list(), non_neg_integer()) -> {list(), [binary()]}.
-split_reason_list(List, N) when length(List) =< N -> {List, []};
-split_reason_list(List, N) -> {lists:sublist(List, N), [<<"...">>]}.
+%% Render elements, threading the remaining node budget.
+-spec reason_elems(list(), integer(), integer()) -> {[iodata()], integer()}.
+reason_elems([], _Depth, B) ->
+    {[], B};
+reason_elems(_Elems, _Depth, B) when B =< 0 ->
+    {[<<"...">>], B};
+reason_elems([E | Rest], Depth, B) ->
+    {Doc, B1} = reason_doc(E, Depth, B),
+    {Docs, B2} = reason_elems(Rest, Depth, B1),
+    {[Doc | Docs], B2}.
+
+%% At most ?REASON_MAX_ELEMS elements; a marker element stands for the rest.
+-spec cap_elems(list()) -> list().
+cap_elems(List) ->
+    case length(List) =< ?REASON_MAX_ELEMS of
+        true -> List;
+        false -> lists:sublist(List, ?REASON_MAX_ELEMS) ++ ['$reason_elided']
+    end.
 
 -spec is_proper_list(list()) -> boolean().
 is_proper_list([]) -> true;

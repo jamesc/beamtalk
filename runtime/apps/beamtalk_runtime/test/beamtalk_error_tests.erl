@@ -504,6 +504,22 @@ reason_large_is_bounded_test() ->
     Deep = lists:foldl(fun(_, Acc) -> {Acc} end, leaf, lists:seq(1, 1000)),
     ?assert(byte_size(reason_line(Deep)) =< 2048 + 3).
 
+%% Shared subterms expand exponentially; the walker's node budget bounds the
+%% work, not just the output.
+reason_shared_subterm_expansion_is_bounded_test() ->
+    L1 = lists:duplicate(50, [x]),
+    L6 = lists:foldl(fun(_, Acc) -> lists:duplicate(50, Acc) end, L1, lists:seq(1, 5)),
+    {Micros, Line} = timer:tc(fun() -> reason_line(L6) end),
+    ?assert(byte_size(Line) =< 2048 + 3),
+    ?assert(Micros < 1000000),
+    Wide = list_to_tuple(lists:seq(1, 100000)),
+    ?assert(byte_size(reason_line(Wide)) =< 2048 + 3).
+
+%% Invalid UTF-8 inside a reason string never raises from the formatter.
+reason_invalid_utf8_does_not_raise_test() ->
+    ?assert(is_binary(reason_line({beamtalk_string, <<255, 254, 253>>}))),
+    ?assert(is_binary(reason_line({io, <<255, 254>>}))).
+
 %% BT-4241: selectors with codepoints above 255 render as UTF-8, not badarg.
 generate_message_unicode_selector_test() ->
     Sel = list_to_atom("x_\x{3bb}:"),
