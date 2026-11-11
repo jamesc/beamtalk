@@ -3,6 +3,27 @@
 ## Status
 Accepted (2026-11-11)
 
+## Implementation Tracking
+
+**Epic:** [BT-4726](https://linear.app/beamtalk/issue/BT-4726)
+**Issues:**
+
+| Phase | Issue | Title | Size | Blocked by |
+|---|---|---|---|---|
+| 1 | [BT-4727](https://linear.app/beamtalk/issue/BT-4727) | Parse shape type annotations: AST, parser, unparse, formatter | M | – |
+| 2 | [BT-4728](https://linear.app/beamtalk/issue/BT-4728) | Make type-string handling brace-aware | M | – |
+| 3 | [BT-4729](https://linear.app/beamtalk/issue/BT-4729) | `InferredType::Shape`: resolution from annotations and aliases, display | M | BT-4727, BT-4728 |
+| 3 | [BT-4730](https://linear.app/beamtalk/issue/BT-4730) | Shape assignability: shape-to-shape, shape-to-`Dictionary`, gradual rule | M | BT-4729 |
+| 4 | [BT-4731](https://linear.app/beamtalk/issue/BT-4731) | Infer shapes for symbol-keyed map literals | M | BT-4730 |
+| 5 | [BT-4732](https://linear.app/beamtalk/issue/BT-4732) | Shape-aware keyed operations: `at:` family, `at:put:`, map patterns, union receivers | M | BT-4730 |
+| gate | [BT-4733](https://linear.app/beamtalk/issue/BT-4733) | Wire check: buccaneer `WebSocketOptions` as a shape, end to end | S | BT-4731, BT-4732 |
+| 6 | [BT-4734](https://linear.app/beamtalk/issue/BT-4734) | FFI: map Erlang `:=` / `=>` map specs to shapes, gated on a measured warning count | M | BT-4733 |
+| 7 | [BT-4735](https://linear.app/beamtalk/issue/BT-4735) | LSP: shape key completion and hover | M | BT-4733 |
+| 8 | [BT-4736](https://linear.app/beamtalk/issue/BT-4736) | Migrate option aliases to shapes: buccaneer, beamtalk-http, stdlib casts | M | BT-4733 |
+| 9 | [BT-4737](https://linear.app/beamtalk/issue/BT-4737) | Language docs and end-to-end tests (final phase) | M | BT-4734, BT-4735, BT-4736 |
+
+**Status:** Planned
+
 ## Context
 
 ### Problem statement
