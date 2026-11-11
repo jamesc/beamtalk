@@ -37,10 +37,8 @@ const TOWER_ZERO_ARG: &[&str] = &[
     "classSubclasses",
     "classAllSubclasses",
     "classLocalMethods",
-    "classInstVarNames",
     "classAllSuperclasses",
     "classMethods",
-    "classAllInstVarNames",
     "classFieldNames",
     "classAllFieldNames",
     // ADR 0124 §9/B5b (BT-3550): field name -> eager|late kind reflection.
@@ -283,15 +281,6 @@ mod tests {
                 "call 'beamtalk_behaviour_intrinsics':'classIncludesSelector'(Self, Selector)"
                     .to_string()
             )
-        );
-    }
-
-    #[test]
-    fn test_class_inst_var_names() {
-        let result = doc_to_string(generate_tower_bif("classInstVarNames", &[]));
-        assert_eq!(
-            result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classInstVarNames'(Self)".to_string())
         );
     }
 

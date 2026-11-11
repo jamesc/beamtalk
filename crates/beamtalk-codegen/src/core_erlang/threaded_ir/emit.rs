@@ -1685,6 +1685,7 @@ fn render_return(value: &ValueRef, state: &VersionedVar, ctx: &RenderCtx) -> Doc
 #[cfg(test)]
 mod cell_helper_conformance {
     use crate::core_erlang::actor_state_access::actor_state_helper;
+    use crate::core_erlang::runtime_export_contract::exported_entries;
 
     /// Every `beamtalk_actor_state` helper codegen emits must be exported by
     /// the runtime: generated code calls them, so removing or renaming one
@@ -1710,81 +1711,6 @@ mod cell_helper_conformance {
                 exported.contains(&entry),
                 "beamtalk_actor_state.erl must export {entry}; generated code calls it"
             );
-        }
-    }
-
-    /// The `name/arity` entries of every `-export([...])` block in an Erlang
-    /// source file: one-line and multi-line blocks, several entries per line,
-    /// entries on the block's opening line, and `%` comments all count.
-    fn exported_entries(src: &str) -> std::collections::BTreeSet<String> {
-        let mut exported = std::collections::BTreeSet::new();
-        let mut in_export = false;
-        for line in src.lines() {
-            let code = line.split('%').next().unwrap_or("").trim_end();
-            let mut rest = code;
-            // A real attribute starts in column 0; a `-export([` inside a
-            // `-doc """` body (indented or mid-line) or a string is not one.
-            if let Some(after) = rest.strip_prefix("-export([") {
-                in_export = true;
-                rest = after;
-            }
-            if !in_export {
-                continue;
-            }
-            if let Some(close) = rest.find("])") {
-                rest = &rest[..close];
-                in_export = false;
-            }
-            for entry in rest.split(',') {
-                let entry = entry.trim();
-                if !entry.is_empty() {
-                    exported.insert(entry.to_string());
-                }
-            }
-        }
-        exported
-    }
-
-    #[test]
-    fn parses_one_line_blocks_and_several_entries_per_line() {
-        let src = [
-            "% a comment mentioning -export([ignored/9]).",
-            "-export([foo/1]).",
-            "-export([",
-            "    bar/2, baz/0, % a trailing comment",
-            "    qux/3",
-            "]).",
-        ]
-        .join("\n");
-        let entries = exported_entries(&src);
-        assert_eq!(entries.len(), 4);
-        for entry in ["foo/1", "bar/2", "baz/0", "qux/3"] {
-            assert!(entries.contains(entry), "missing {entry}: {entries:?}");
-        }
-    }
-
-    #[test]
-    fn ignores_export_text_inside_doc_bodies() {
-        let src = [
-            "-doc \"\"\"",
-            "Mentions -export([fake/1]). mid-line.",
-            "    -export([indented_fake/2]).",
-            "\"\"\".",
-            "-export([real/0]).",
-        ]
-        .join("\n");
-        let entries = exported_entries(&src);
-        assert_eq!(entries.len(), 1, "{entries:?}");
-        assert!(entries.contains("real/0"), "{entries:?}");
-    }
-
-    #[test]
-    fn finds_entries_on_the_opening_line_and_in_later_blocks() {
-        let src = "-export([first/1,\n second/2]).\n-export([third/3]).\n";
-        let entries = exported_entries(src);
-        assert_eq!(entries.len(), 3);
-        for entry in ["first/1", "second/2", "third/3"] {
-            assert!(entries.contains(entry), "missing {entry}: {entries:?}");
         }
     }
 }

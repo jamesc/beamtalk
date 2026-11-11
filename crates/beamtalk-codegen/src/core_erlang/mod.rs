@@ -150,6 +150,8 @@ pub mod primitive_bindings;
 mod primitives;
 pub mod repl_nlr;
 mod routing;
+#[cfg(test)]
+mod runtime_export_contract;
 pub mod selector_mangler;
 mod sequencing;
 mod spec_codegen;
