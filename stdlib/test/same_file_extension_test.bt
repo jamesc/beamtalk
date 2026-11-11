@@ -1,0 +1,27 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4489: an extension written in the target class's OWN file used to compile
+// to no function and no dispatch arm (does_not_understand). It is now registered
+// at load through `beamtalk_extensions:register/5`, like a foreign extension.
+//
+// Fixtures: stdlib/test/fixtures/same_file_ext_pt.bt
+//           stdlib/test/fixtures/same_file_ext_ac.bt
+
+TestCase subclass: SameFileExtensionTest
+
+  testValueInstanceExtension =>
+    self assert: ((SameFileExtPt x: 3) extra: 4) equals: 7
+
+  testValueClassSideExtension => self assert: SameFileExtPt make getX equals: 9
+
+  testActorInstanceExtension =>
+    a := SameFileExtAc spawn
+    self assert: (a plus: 2) equals: 7
+
+  testActorExtensionUpdatesState =>
+    a := SameFileExtAc spawn
+    a bump
+    self assert: a getN equals: 6
+
+  testActorClassSideExtension => self assert: SameFileExtAc cextra equals: 42

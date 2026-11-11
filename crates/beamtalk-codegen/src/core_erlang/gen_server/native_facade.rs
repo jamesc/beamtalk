@@ -464,7 +464,7 @@ impl CoreErlangGenerator {
         };
 
         // Reuse the standard meta map and append native-specific keys
-        // include_standalone: false — standalone methods are runtime-patched, not static
+        // include_standalone: false — standalone methods are registered as extensions at load (BT-4489), not static
         // ADR 0070 Phase 4: Extract package name from module name
         let package_name = super::methods::extract_package_from_module_name(&self.module_name);
         Ok(docvec![

@@ -6191,8 +6191,9 @@ when parameters already have `::` annotations (to avoid consecutive `::` tokens)
 ### Cross-file extensions
 
 Extensions can target classes defined in other files or in stdlib. The compiler
-registers each foreign extension at module load, so it dispatches at runtime just
-like a same-file extension. Class-side extensions register under the metaclass tag
+registers each foreign extension at module load. An extension written in the
+target class's own file (`Pt >> extra: n => ...` next to `Value subclass: Pt`) is
+registered the same way, after the class itself, so both dispatch identically. Class-side extensions register under the metaclass tag
 (`String class`).
 
 ```beamtalk

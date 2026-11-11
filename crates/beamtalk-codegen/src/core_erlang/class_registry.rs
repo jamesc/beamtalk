@@ -347,6 +347,10 @@ impl CoreErlangGenerator {
         // succeeds — it just inserts into ETS — so it does not short-circuit).
         let ext_reg_doc = self.generate_foreign_extension_registrations(module)?;
         let try_body = docvec![ext_reg_doc, class_chain];
+        // BT-4489: same-file extensions register after the host classes, once
+        // the class chain has succeeded (class-side tags need the class object).
+        let has_same_file_ext = !Self::same_file_extension_methods(module).is_empty();
+        let same_file_ext_doc = self.generate_same_file_extension_registrations(module)?;
 
         // ADR 0068 Phase 2c: Generate protocol registration calls.
         // Protocol definitions in the module are registered with the runtime
@@ -366,7 +370,17 @@ impl CoreErlangGenerator {
                     INDENT,
                     docvec![
                         line(),
-                        "of _ClassRegResult -> _ClassRegResult",
+                        if has_same_file_ext {
+                            docvec![
+                                "of _ClassRegResult ->",
+                                nest(
+                                    INDENT,
+                                    docvec![same_file_ext_doc, line(), "_ClassRegResult",]
+                                ),
+                            ]
+                        } else {
+                            Document::Str("of _ClassRegResult -> _ClassRegResult")
+                        },
                         line(),
                         "catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)",
                     ]
@@ -389,7 +403,12 @@ impl CoreErlangGenerator {
                         "of _ClassRegResult ->",
                         nest(
                             INDENT,
-                            docvec![protocol_reg_doc, line(), "_ClassRegResult",]
+                            docvec![
+                                same_file_ext_doc,
+                                protocol_reg_doc,
+                                line(),
+                                "_ClassRegResult",
+                            ]
                         ),
                         line(),
                         "catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)",

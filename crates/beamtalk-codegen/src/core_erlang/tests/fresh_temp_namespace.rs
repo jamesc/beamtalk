@@ -216,6 +216,7 @@ const HAND_WRITTEN: &[&str] = &[
     "_ExitResult",
     "_Ext",
     "_ExtArgs",
+    "_ExtReply",
     "_ExtOwner",
     "_Extra",
     "_From",
