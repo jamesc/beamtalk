@@ -781,7 +781,8 @@ fn boolean_only_case_with_failing_branch_needs_catch_all() {
     // on the loop's `case _CondBool` guards against it (BT-4202). If the first
     // assertion starts failing (e.g. after an OTP bump), a newer OTP fixed
     // the bug: delete the pin and the `"_CondBad"` fallbacks in
-    // `while_loops.rs` only if every supported OTP release is fixed
+    // `while_loops.rs` and the `"_PredBad"` fallbacks in `control_flow/body.rs`
+    // only if every supported OTP release is fixed
     // (`otp-support.toml`); otherwise keep them and drop just this test.
     use std::process::Command;
 
@@ -893,6 +894,9 @@ fn list_op_predicate_with_failing_branch_compiles() {
         ("any", "anySatisfy:"),
         ("all", "allSatisfy:"),
         ("count", "count:"),
+        ("takewhile", "takeWhile:"),
+        ("dropwhile", "dropWhile:"),
+        ("partition", "partition:"),
     ] {
         // Pure block, and an actor block that also writes state.
         for (kind, head, effect) in [
@@ -907,6 +911,12 @@ fn list_op_predicate_with_failing_branch_compiles() {
                 format!("{head}    coll {sel} [:x | {effect}c ifTrue: [true] ifFalse: [3]]\n");
             let module = format!("bt@probe_listop_{name}_{kind}");
             let code = compile(&src, &module);
+            if kind == "actor" {
+                assert!(
+                    code.contains("PredBad"),
+                    "{sel} stateful fold must carry the case_clause fallback. Got:\n{code}"
+                );
+            }
             assert_compiles_through_erlc(&module, &code);
         }
     }
