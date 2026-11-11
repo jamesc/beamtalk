@@ -122,7 +122,6 @@ impl<'a> MethodFrame<'a> {
             method.pipeline_sends.clone(),
         );
         let guard_method = super::guard_returns::MethodKey::of(method);
-        generator.generated_methods.insert(guard_method.clone());
         let prev_guard_method = generator.current_guard_method.replace(guard_method);
 
         if boundary == MethodBoundary::ClassMethod {

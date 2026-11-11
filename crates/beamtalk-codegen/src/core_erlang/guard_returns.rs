@@ -178,7 +178,11 @@ impl GuardRewrite {
 /// its only block NLRs (see the module doc).
 pub(in crate::core_erlang) fn rewrite_guard_returns(module: &mut Module) -> GuardRewrite {
     let mut rewrite = GuardRewrite::default();
-    for method in methods_mut(module) {
+    // A same-file `X >> m` is runtime-patched, never generated into X's
+    // module, so nothing would consume its recorded guards: leave it
+    // unrewritten and unrecorded (BT-4497), keeping the checks fail-closed.
+    let declared = CoreErlangGenerator::declared_class_names(module);
+    for method in methods_mut(module, &declared) {
         let mut rw = Rewriter::of(method);
         if let Some(body) = rewritten_body(&method.body, &mut rw) {
             let original = std::mem::replace(&mut method.body, body);
@@ -202,15 +206,25 @@ pub(in crate::core_erlang) fn rewrite_guard_returns(module: &mut Module) -> Guar
 /// Whether `module` has a method [`rewrite_guard_returns`] would change, so
 /// a caller can skip cloning the module when it has none.
 pub(in crate::core_erlang) fn has_guard_returns(module: &Module) -> bool {
+    let declared = CoreErlangGenerator::declared_class_names(module);
     module
         .classes
         .iter()
         .flat_map(|class| class.methods.iter().chain(class.class_methods.iter()))
-        .chain(module.method_definitions.iter().map(|m| &m.method))
+        .chain(
+            module
+                .method_definitions
+                .iter()
+                .filter(|m| !declared.contains(&m.class_name.name))
+                .map(|m| &m.method),
+        )
         .any(|method| rewritten_body(&method.body, &mut Rewriter::of(method)).is_some())
 }
 
-fn methods_mut(module: &mut Module) -> impl Iterator<Item = &mut MethodDefinition> {
+fn methods_mut<'a>(
+    module: &'a mut Module,
+    declared: &'a HashSet<EcoString>,
+) -> impl Iterator<Item = &'a mut MethodDefinition> {
     module
         .classes
         .iter_mut()
@@ -220,7 +234,13 @@ fn methods_mut(module: &mut Module) -> impl Iterator<Item = &mut MethodDefinitio
                 .iter_mut()
                 .chain(class.class_methods.iter_mut())
         })
-        .chain(module.method_definitions.iter_mut().map(|m| &mut m.method))
+        .chain(
+            module
+                .method_definitions
+                .iter_mut()
+                .filter(|m| !declared.contains(&m.class_name.name))
+                .map(|m| &mut m.method),
+        )
 }
 
 /// One method's rewrite: what it records, and what it needs to know about
@@ -773,7 +793,6 @@ impl CoreErlangGenerator {
             .guard_rewrite
             .boolean_comparisons
             .iter()
-            .filter(|key| self.generated_methods.contains(&key.0))
             .filter(|key| self.boolean_comparison_lowerings.get(*key) != Some(&true))
             .cloned()
             .collect();
@@ -791,7 +810,6 @@ impl CoreErlangGenerator {
             .guard_rewrite
             .conditions
             .keys()
-            .filter(|key| self.generated_methods.contains(&key.0))
             .filter(|key| !used.contains(key))
             .cloned()
             .collect();
