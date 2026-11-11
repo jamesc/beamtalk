@@ -4162,7 +4162,7 @@ pub fn stored_block_var_uses(expr: &Expression, var_name: &str) -> (bool, bool) 
 }
 
 /// Checks if a block is a literal block (not a variable reference).
-pub fn is_literal_block(expr: &Expression) -> bool {
+pub(crate) fn is_literal_block(expr: &Expression) -> bool {
     matches!(expr, Expression::Block(_))
 }
 
