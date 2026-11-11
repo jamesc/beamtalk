@@ -1871,7 +1871,7 @@ crash_recovery_restart_test_() ->
             ?_test(begin
                 ClassInfo = #{
                     name => 'CrashRecoveryTest',
-                    module => test_class,
+                    module => beamtalk_class_bt,
                     superclass => 'Object',
                     instance_methods => #{},
                     class_methods => #{}
@@ -1918,7 +1918,7 @@ crash_recovery_class_send_test_() ->
             ?_test(begin
                 ClassInfo = #{
                     name => 'CrashRecoverySendTest',
-                    module => test_class,
+                    module => beamtalk_class_bt,
                     superclass => 'Object',
                     instance_methods => #{},
                     class_methods => #{}

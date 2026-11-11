@@ -139,7 +139,7 @@ stop_if_alive(_) ->
     ok.
 
 minimal_class_info() ->
-    #{superclass => none, methods => #{}, class_methods => #{}}.
+    #{module => beamtalk_class_bt, superclass => none, methods => #{}, class_methods => #{}}.
 
 wait_until(Fun) ->
     wait_until(Fun, 100).

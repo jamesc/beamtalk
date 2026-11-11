@@ -149,7 +149,8 @@ that the Behaviour/Class libraries can rely on.
     %% reverse direction this module's other cross-app calls use) rather
     %% than duplicating its whereis/stop/purge sequence (AGENTS.md's
     %% no-duplicate-implementations rule).
-    install_class_rename/3
+    install_class_rename/3,
+    publish_class_removed/2
 ]).
 
 -ifdef(TEST).
