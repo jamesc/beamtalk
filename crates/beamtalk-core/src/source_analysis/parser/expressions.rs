@@ -3908,6 +3908,7 @@ impl Parser {
     /// (and discard) an `aliasing:` clause's `#{...}` argument for parse
     /// recovery — `aliasing:` itself is reserved but "not yet supported"
     /// in v1 (ADR 0127 §Status 4).
+    #[allow(clippy::too_many_lines)] // element loop plus comment capture
     pub(super) fn parse_map_literal(&mut self) -> Expression {
         let start_token = self.expect(&TokenKind::MapOpen, "Expected '#{'");
         let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
@@ -4027,19 +4028,12 @@ impl Parser {
             }
         }
 
-        // Expect closing brace
-        if self.check(&TokenKind::RightBrace) {
-            self.collect_literal_closing(&mut slots, open_idx);
-        }
-        let end_span = if self.check(&TokenKind::RightBrace) {
-            self.advance().span()
-        } else {
-            self.diagnostics.push(Diagnostic::error(
-                "Expected '}' to close map literal",
-                self.current_token().span(),
-            ));
-            self.current_token().span()
-        };
+        let end_span = self.finish_literal(
+            &TokenKind::RightBrace,
+            "Expected '}' to close map literal",
+            &mut slots,
+            open_idx,
+        );
 
         let span = start.merge(end_span);
         self.record_literal_comments(span, slots);
@@ -4057,6 +4051,7 @@ impl Parser {
     /// (`parse_selector_symbol_list`, ADR 0127 §2) can reuse this for
     /// `excluding:`/`overriding:` selector lists rather than duplicating
     /// the comma/paren/cons/error-recovery handling.
+    #[allow(clippy::too_many_lines)] // element loop plus comment capture
     pub(super) fn parse_list_literal(&mut self) -> Expression {
         let start_token = self.expect(&TokenKind::ListOpen, "Expected '#('");
         let start = start_token.map_or_else(|| self.current_token().span(), |t: Token| t.span());
@@ -4170,19 +4165,12 @@ impl Parser {
             }
         }
 
-        // Expect closing paren
-        if self.check(&TokenKind::RightParen) {
-            self.collect_literal_closing(&mut slots, open_idx);
-        }
-        let end_span = if self.check(&TokenKind::RightParen) {
-            self.advance().span()
-        } else {
-            self.diagnostics.push(Diagnostic::error(
-                "Expected ')' to close list literal",
-                self.current_token().span(),
-            ));
-            self.current_token().span()
-        };
+        let end_span = self.finish_literal(
+            &TokenKind::RightParen,
+            "Expected ')' to close list literal",
+            &mut slots,
+            open_idx,
+        );
 
         let span = start.merge(end_span);
         self.record_literal_comments(span, slots);
@@ -4265,19 +4253,12 @@ impl Parser {
             }
         }
 
-        // Expect closing bracket
-        if self.check(&TokenKind::RightBracket) {
-            self.collect_literal_closing(&mut slots, open_idx);
-        }
-        let end_span = if self.check(&TokenKind::RightBracket) {
-            self.advance().span()
-        } else {
-            self.diagnostics.push(Diagnostic::error(
-                "Expected ']' to close array literal",
-                self.current_token().span(),
-            ));
-            self.current_token().span()
-        };
+        let end_span = self.finish_literal(
+            &TokenKind::RightBracket,
+            "Expected ']' to close array literal",
+            &mut slots,
+            open_idx,
+        );
 
         let span = start.merge(end_span);
         self.record_literal_comments(span, slots);
@@ -4348,18 +4329,12 @@ impl Parser {
             }
         }
 
-        if self.check(&TokenKind::RightBrace) {
-            self.collect_literal_closing(&mut slots, open_idx);
-        }
-        let end_span = if self.check(&TokenKind::RightBrace) {
-            self.advance().span()
-        } else {
-            self.diagnostics.push(Diagnostic::error(
-                "Expected '}' to close tuple literal",
-                self.current_token().span(),
-            ));
-            self.current_token().span()
-        };
+        let end_span = self.finish_literal(
+            &TokenKind::RightBrace,
+            "Expected '}' to close tuple literal",
+            &mut slots,
+            open_idx,
+        );
 
         let span = start.merge(end_span);
         self.record_literal_comments(span, slots);
@@ -4409,6 +4384,26 @@ impl Parser {
                 .then(|| self.collect_trailing_comment_at(last))
                 .flatten()
         });
+    }
+
+    /// Consumes the closing delimiter `close` of a collection literal,
+    /// recording the comments before it (BT-3983), or reports `message` and
+    /// leaves the current token. Returns the delimiter's span.
+    fn finish_literal(
+        &mut self,
+        close: &TokenKind,
+        message: &'static str,
+        slots: &mut LiteralCommentSlots,
+        open_idx: usize,
+    ) -> Span {
+        if self.check(close) {
+            self.collect_literal_closing(slots, open_idx);
+            self.advance().span()
+        } else {
+            self.diagnostics
+                .push(Diagnostic::error(message, self.current_token().span()));
+            self.current_token().span()
+        }
     }
 
     /// Records the comments before the closing delimiter (the current token)

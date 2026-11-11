@@ -1037,6 +1037,7 @@ fn cycle_detection_in_superclass_chain() {
     let _ = h.resolves_selector("A", "methodB");
 }
 #[test]
+#[allow(clippy::too_many_lines)] // long AST fixture
 fn multiple_user_classes_in_module() {
     let base = ClassDefinition {
         name: Identifier::new("Base", test_span()),
