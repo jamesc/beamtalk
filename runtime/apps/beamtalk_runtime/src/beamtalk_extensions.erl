@@ -381,7 +381,9 @@ unregister(Class, Selector, ClassSide) when
             false -> Class
         end,
     Key = {EtsClass, Selector},
-    Existed = with_shadow_lock(EtsClass, fun() ->
+    %% Removal must not give up (a half-done `purge_class/1` would leave rows
+    %% that reattach to a re-created class): wait for the lock without a bound.
+    Existed = with_shadow_lock(EtsClass, infinity, fun() ->
         Present = ets:member(?EXTENSIONS_TABLE, Key),
         ets:delete(?EXTENSIONS_TABLE, Key),
         ets:delete(?SOURCES_TABLE, Key),
@@ -434,17 +436,22 @@ for tests that need to hold the lock deterministically.
 """.
 -spec with_shadow_lock(atom(), fun(() -> T)) -> T.
 with_shadow_lock(Tag, Fun) ->
-    %% Only class-object tags (`'Foo class'`) have a flag the guard reads;
-    %% instance-side tags skip the lock (register/5 runs from parallel -on_load
-    %% chains). BT-4004: a node-local FIFO lock with a bounded wait, which
-    %% raises a structured error rather than wait forever behind a hung holder.
+    with_shadow_lock(
+        Tag, beamtalk_fifo_lock:configured_timeout(shadow_flag, ?SHADOW_LOCK_TIMEOUT_MS), Fun
+    ).
+
+%% Only class-object tags (`'Foo class'`) have a flag the guard reads;
+%% instance-side tags skip the lock (register/5 runs from parallel -on_load
+%% chains). BT-4004: a node-local FIFO lock. `register/5` bounds the wait and
+%% raises a structured error rather than wait forever behind a hung holder;
+%% `unregister/3` passes `infinity`, since a removal that gave up part-way
+%% (e.g. a `purge_class/1` loop) would leave rows behind.
+-spec with_shadow_lock(atom(), timeout(), fun(() -> T)) -> T.
+with_shadow_lock(Tag, Timeout, Fun) ->
     case beamtalk_class_registry:is_class_name(Tag) of
         true ->
             beamtalk_fifo_lock:with_lock_or_raise(
-                {?MODULE, shadow_flag, Tag},
-                beamtalk_fifo_lock:configured_timeout(shadow_flag, ?SHADOW_LOCK_TIMEOUT_MS),
-                {'Extensions', with_shadow_lock},
-                Fun
+                {?MODULE, shadow_flag, Tag}, Timeout, {'Extensions', with_shadow_lock}, Fun
             );
         false ->
             Fun()

@@ -1372,8 +1372,10 @@ static_call_target_test_() ->
             end}
     ]}.
 
-%% BT-4004: both node-local locks are `beamtalk_fifo_lock`s with a bounded
-%% wait; a hung holder yields a structured `runtime_error`, not an eternal wait.
+%% BT-4004: both node-local locks are `beamtalk_fifo_lock`s. Tag-lock installers
+%% bound their wait and decline (fallback), tag-lock erasers wait unbounded, and
+%% `register`'s shadow lock raises a structured `runtime_error` behind a hung
+%% holder (`unregister` waits unbounded).
 bounded_lock_wait_test_() ->
     {setup,
         fun() ->
@@ -1419,6 +1421,35 @@ bounded_lock_wait_test_() ->
                 end,
                 %% The lock is free again: the install now succeeds.
                 ?assert(beamtalk_class_shadow_flags:direct_call_ok(Tag, Name))
+            end},
+            {"unregister waits behind a hung shadow-lock holder instead of giving up", fun() ->
+                Tag = beamtalk_class_registry:class_object_tag('Object'),
+                Parent = self(),
+                Holder = spawn_link(fun() ->
+                    beamtalk_extensions:with_shadow_lock(Tag, fun() ->
+                        Parent ! holding,
+                        receive
+                            release -> ok
+                        end
+                    end)
+                end),
+                receive
+                    holding -> ok
+                after 5000 -> error(holder_not_holding)
+                end,
+                spawn_link(fun() ->
+                    ok = beamtalk_extensions:unregister('Object', bt4004_absent, true),
+                    Parent ! unregistered
+                end),
+                receive
+                    unregistered -> error(unregister_gave_up_or_skipped_the_lock)
+                after 400 -> ok
+                end,
+                Holder ! release,
+                receive
+                    unregistered -> ok
+                after 5000 -> error(unregister_never_finished)
+                end
             end},
             {"with_shadow_lock times out behind a hung holder", fun() ->
                 %% A real class-object tag, so the lock is taken at all.

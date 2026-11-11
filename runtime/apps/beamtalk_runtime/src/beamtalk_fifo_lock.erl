@@ -102,10 +102,14 @@ with_lock_or_raise(Key, TimeoutMs, {Class, Selector}, Fun) ->
             Result;
         {error, Reason} ->
             Msg = beamtalk_error:chars_to_binary(
-                io_lib:format(
-                    "could not take lock ~0tp: ~ts after ~p ms",
-                    [Key, Reason, TimeoutMs]
-                )
+                case TimeoutMs of
+                    infinity ->
+                        io_lib:format("could not take lock ~0tp: ~ts", [Key, Reason]);
+                    _ ->
+                        io_lib:format(
+                            "could not take lock ~0tp: ~ts after ~p ms", [Key, Reason, TimeoutMs]
+                        )
+                end
             ),
             Err0 = beamtalk_error:new(runtime_error, Class, Selector),
             Err1 = beamtalk_error:with_message(Err0, Msg),
