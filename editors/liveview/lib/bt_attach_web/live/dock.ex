@@ -114,16 +114,18 @@ defmodule BtAttachWeb.Live.Dock do
     target = eval_target(expr, socket)
 
     case Facade.dispatch(:eval, %{session_pid: pid, code: target}, RequestContext.build(socket)) do
-      {:ok, term, output, _warnings} ->
+      {:ok, term, output, warnings} ->
         # eval returns the live term; rendering is display-only and reuses the
         # workspace's own formatter for surface-consistency with the browser.
-        {:noreply, eval_success(socket, action, term, output, expr)}
+        socket = eval_success(socket, action, term, output, expr)
+        {:noreply, assign(socket, eval_warnings: format_warnings(warnings))}
 
-      {:error, reason, output, _warnings} ->
+      {:error, reason, output, warnings} ->
         {:noreply,
          assign(socket,
            result: nil,
            output: present(output),
+           eval_warnings: format_warnings(warnings),
            error: Workspace.render_error(reason),
            expr: expr
          )}
@@ -135,14 +137,26 @@ defmodule BtAttachWeb.Live.Dock do
       # message rather than crashing the LiveView on an unmatched case clause.
       {:error, reason} ->
         {:noreply,
-         assign(socket, result: nil, output: nil, error: FacadeError.render(reason), expr: expr)}
+         assign(socket,
+           result: nil,
+           output: nil,
+           eval_warnings: nil,
+           error: FacadeError.render(reason),
+           expr: expr
+         )}
     end
   end
 
   # No session (attach failed) — don't crash on a missing assign.
   def handle_event("eval", %{"expr" => expr}, socket) do
     {:noreply,
-     assign(socket, result: nil, output: nil, error: "not attached to workspace", expr: expr)}
+     assign(socket,
+       result: nil,
+       output: nil,
+       eval_warnings: nil,
+       error: "not attached to workspace",
+       expr: expr
+     )}
   end
 
   # Switch the Workspace dock's active tab (Workspace / REPL / Transcript /
@@ -662,6 +676,26 @@ defmodule BtAttachWeb.Live.Dock do
       expr: expr,
       eval_seq: socket.assigns.eval_seq + 1
     )
+  end
+
+  # BT-4471: render an eval's compile warnings the way the CLI REPL and MCP
+  # `evaluate` do — one block per warning, its hint (when the diagnostic has
+  # one) on its own `Hint:` line. `Workspace.eval/2` already normalises each
+  # warning to `%{message, hint}`; `nil` when there is nothing to show.
+  defp format_warnings([]), do: nil
+  defp format_warnings(nil), do: nil
+
+  defp format_warnings(warnings) when is_list(warnings) do
+    Enum.map_join(warnings, "\n", fn
+      %{message: message, hint: hint} when is_binary(hint) and hint != "" ->
+        "Warning: #{message}\nHint: #{hint}"
+
+      %{message: message} ->
+        "Warning: #{message}"
+
+      message when is_binary(message) ->
+        "Warning: #{message}"
+    end)
   end
 
   # Blank captured output is not worth rendering a pane for.

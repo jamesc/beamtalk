@@ -685,6 +685,8 @@ defmodule BtAttachWeb.CoreComponents do
   # Variant maps to the `io-block` modifier class.
   attr :variant, :atom, default: :plain, values: [:err, :ok, :warn, :plain]
   attr :message, :string, required: true
+  # Preserve newlines in `message` (e.g. a warning with its `Hint:` line).
+  attr :multiline, :boolean, default: false
   # Map of phx-* attributes rendered onto the dismiss button. The caller
   # decides which event/values clear the right backing assign.
   attr :dismiss_attrs, :map, required: true
@@ -692,7 +694,7 @@ defmodule BtAttachWeb.CoreComponents do
   def notice(assigns) do
     ~H"""
     <div class={["io-block", notice_variant_class(@variant)]}>
-      <span class="io-block-msg">{@message}</span>
+      <span class={["io-block-msg", @multiline && "multiline"]}>{@message}</span>
       <button
         type="button"
         class="io-block-dismiss"

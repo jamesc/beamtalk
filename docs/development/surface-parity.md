@@ -1090,8 +1090,11 @@ the useful part: ADR 0144's `X class does not conform to P class` puts
   each, after the value — or after the `Error:` block when the eval failed),
   as the CLI REPL does; before BT-4449 it dropped them.
 - **LiveView attach:** `BtAttach.Workspace.eval/2` returns each warning as
-  `%{message: String.t(), hint: String.t() | nil}`. The attach UI does not
-  display eval warnings yet (surface-specific gap, pre-existing; BT-4471).
+  `%{message: String.t(), hint: String.t() | nil}`. The dock eval
+  (printIt/doIt/inspectIt) shows them in a `Warning:` notice, one block per
+  warning with its `Hint:` line at column 0, alongside the result or the error
+  (BT-4471). Other call sites (inspector, class modals, method editor) still
+  ignore eval warnings.
 - **LSP:** unaffected — it publishes its own `Diagnostic`s, whose hints it
   already shows; it never reads the port's REPL warnings.
 
