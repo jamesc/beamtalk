@@ -804,30 +804,48 @@ impl TypeChecker {
                         );
                     }
                 }
-                body_ty
+                // BT-4458: an arm whose body is a bare `^expr` never produces a
+                // value for the match — it leaves the enclosing method — so it
+                // contributes `Never`, not `expr`'s type. A method whose tail is
+                // this match gets those `^` types back in its return type: see
+                // [`Self::tail_match_return_types`].
+                if Self::is_return_arm(arm) {
+                    InferredType::Never
+                } else {
+                    body_ty
+                }
             })
             .collect();
         if arm_types.is_empty() {
-            return InferredType::Dynamic(DynamicReason::AmbiguousControlFlow);
-        }
-        // BT-4458: an arm whose body is a bare `^expr` never produces a value
-        // for the match — it leaves the enclosing method — so it contributes
-        // `Never`, not `expr`'s type, when another arm does produce one.
-        // When *every* arm is a `^`, the match is a method's tail returning
-        // through them; keep their types so the method's inferred return type
-        // is not `Never` (which would make sends to it count as diverging).
-        let is_return_arm =
-            |arm: &MatchArm| matches!(arm.body.unwrap_parens(), Expression::Return { .. });
-        if arms.iter().all(is_return_arm) {
-            InferredType::union_of(&arm_types)
+            InferredType::Dynamic(DynamicReason::AmbiguousControlFlow)
         } else {
-            let kept: Vec<InferredType> = arms
-                .iter()
-                .zip(arm_types)
-                .filter(|(arm, _)| !is_return_arm(arm))
-                .map(|(_, ty)| ty)
-                .collect();
-            InferredType::union_of(&kept)
+            InferredType::union_of(&arm_types)
         }
+    }
+
+    /// BT-4458: is `arm`'s body a bare `^expr` (possibly parenthesised)?
+    fn is_return_arm(arm: &MatchArm) -> bool {
+        matches!(arm.body.unwrap_parens(), Expression::Return { .. })
+    }
+
+    /// BT-4458: the types of the `^` arms of a `match:` that is a method
+    /// body's last statement.
+    ///
+    /// Method return inference reads only the last statement's type, and
+    /// [`Self::infer_match`] gives `^` arms `Never`, so without these the
+    /// `^` values would drop out of the method's return type: a mismatch
+    /// against a declared `-> T` would go unreported, and an all-`^` tail
+    /// would infer `-> Never` and make sends to the method count as diverging.
+    pub(in crate::semantic_analysis::type_checker) fn tail_match_return_types(
+        &self,
+        body: &[crate::ast::ExpressionStatement],
+    ) -> Vec<InferredType> {
+        let Some(Expression::Match { arms, .. }) = body.last().map(|s| &s.expression) else {
+            return Vec::new();
+        };
+        arms.iter()
+            .filter(|arm| Self::is_return_arm(arm))
+            .filter_map(|arm| self.type_map.get(arm.body.span()).cloned())
+            .collect()
     }
 }

@@ -412,6 +412,16 @@ impl TypeChecker {
         } else {
             body_type
         };
+        let body_type = {
+            let returned = self.tail_match_return_types(&method.body);
+            if returned.is_empty() {
+                body_type
+            } else {
+                let mut all = vec![body_type];
+                all.extend(returned);
+                InferredType::union_of(&all)
+            }
+        };
         let body_type =
             self.resolve_self_delegate_return_type(method, body_type, class_name, hierarchy);
         self.check_return_type(method, &body_type, class_name, hierarchy);

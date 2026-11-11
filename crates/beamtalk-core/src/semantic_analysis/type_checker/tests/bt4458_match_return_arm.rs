@@ -96,3 +96,45 @@ fn all_return_match_tail_does_not_make_method_never() {
         "`self kind: 1` returns, so `x` must stay `String | Nil`: {diags:?}"
     );
 }
+
+/// A mixed-arm tail `match:` still reports a `^` value that disagrees with the
+/// declared return type (the `^` arm's type reaches the method's return type).
+#[test]
+fn mixed_arm_match_tail_still_checks_return_value_against_declared_type() {
+    let diags = type_diagnostics(
+        r"typed Object subclass: ZzRepro
+  count: v :: String | Nil -> Integer =>
+    v match: [
+      nil -> ^#none;
+      x :: String -> x size
+    ]
+",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|m| m.contains("declares return type Integer") && m.contains("#none")),
+        "`^#none` must still be checked against `-> Integer`: {diags:?}"
+    );
+}
+
+/// `x isNil ifTrue: [^a] ifFalse: [^b]` as a method tail must not make the
+/// method `-> Never` either.
+#[test]
+fn all_return_if_true_if_false_tail_does_not_make_method_never() {
+    let diags = type_diagnostics(
+        r"typed Object subclass: ZzRepro
+  kind: v => v isNil ifTrue: [^#one] ifFalse: [^#other]
+
+  pick: x :: String | Nil -> Integer =>
+    x isNil ifTrue: [self kind: x]
+    self len: x
+
+  len: s :: String -> Integer => s size
+",
+    );
+    assert!(
+        diags.iter().any(|m| m.contains("expects String")),
+        "`self kind: x` returns, so `x` must stay `String | Nil`: {diags:?}"
+    );
+}
