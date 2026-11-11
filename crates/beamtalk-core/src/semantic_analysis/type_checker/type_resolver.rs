@@ -101,7 +101,8 @@ pub(in crate::semantic_analysis) fn merge_substitutions(
 ///   machinery.
 /// * [`TypeAnnotation::Difference`] — `base \ excluded`, resolved through
 ///   [`InferredType::difference`] (ADR 0102 §1) with `hierarchy = None` (this
-///   resolver never consults the class hierarchy — see below), so only the
+///   resolver only consults the class hierarchy for the `Substitution`
+///   placeholder check, never for set operations — see below), so only the
 ///   singleton flavour (`Symbol \ #foo`) and structurally-reducible cases
 ///   normalise; the nominal-class flavour (ADR 0102 §5, `Object \
 ///   Number`) requires a hierarchy and is only produced by narrowing
@@ -388,7 +389,7 @@ pub(in crate::semantic_analysis) fn resolve_declared_type_in(
 /// not prevent this — it only rejects a name that is an *ancestor* of
 /// itself, and `L(n-1)`'s two references here are siblings, not nested.
 /// Since resolution is a pure function of `(declared_type, subst,
-/// alias_registry, ctx)` and neither changes across a single top-level
+/// alias_registry, ctx, hierarchy)` and none changes across a single top-level
 /// [`resolve_declared_type`] call (every recursive call below threads them
 /// unchanged), caching by alias name alone is sound *within* one call: the
 /// first full resolution of a name is reused verbatim for every subsequent
@@ -618,8 +619,8 @@ fn resolve_declared_type_inner(
         }
         DeclaredType::Intersection { left, right } => {
             // ADR 0102 §1/§3: `left & right` resolves through the
-            // shared `intersect` set operation. `hierarchy` is `None` (this
-            // resolver never consults it); `protocol_registry` is passed
+            // shared `intersect` set operation. `intersect` gets `None` for its
+            // hierarchy (only the bare-name placeholder check uses it); `protocol_registry` is passed
             // through so class ∩ protocol resolves to the stored
             // `Intersection` instead of falling through to `Never`.
             let left_ty = resolve_declared_type_inner(

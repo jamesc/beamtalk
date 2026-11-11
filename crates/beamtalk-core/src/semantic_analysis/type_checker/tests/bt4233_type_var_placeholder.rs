@@ -134,9 +134,10 @@ typed Object subclass: Use
 ",
     );
     assert!(
-        diags
-            .iter()
-            .any(|d| d.message.contains("bogusSelector") && d.message.contains('E')),
+        diags.iter().any(|d| d.message.contains("bogusSelector")
+            && d.message
+                .split(|c: char| !c.is_alphanumeric())
+                .any(|w| w == "E")),
         "expected DNU against E, got: {diags:#?}"
     );
 }
