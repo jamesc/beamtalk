@@ -129,21 +129,6 @@ pub(crate) fn with_dependency_closure<R>(
     result
 }
 
-/// Resolve a dependency's own package-bundled stubs directory (ADR 0075
-/// layer 2) from its `beamtalk.toml` `[stubs] path`.
-///
-/// Returns `None` if the dependency declares no `[stubs]` section, or if its
-/// manifest cannot be parsed (already validated earlier in discovery).
-pub(crate) fn resolve_dep_stubs_dir(
-    dep_manifest: &ParsedManifest,
-    dep_root: &Utf8Path,
-) -> Option<Utf8PathBuf> {
-    dep_manifest
-        .stubs
-        .as_ref()
-        .map(|stubs| dep_root.join(&stubs.path))
-}
-
 /// Resolve and compile all path dependencies for a package.
 ///
 /// Given a project root containing a `beamtalk.toml`, resolves all path
@@ -331,7 +316,7 @@ fn resolve_single_path_dep(
     let (_, class_infos, protocol_infos, protocol_defs, alias_infos, protocol_sources, extensions) =
         build_dep_class_index(&dep_root, name, resolved).unwrap_or_default();
 
-    let stubs_dir = resolve_dep_stubs_dir(&dep_manifest, &dep_root);
+    let stubs_dir = dep_manifest.stubs_dir(&dep_root);
 
     resolved.push(ResolvedDependency {
         name: name.to_string(),
@@ -395,7 +380,7 @@ pub(crate) fn compile_dependency_at(
 
     let stubs_dir = manifest::parse_manifest_full(&dep_root.join("beamtalk.toml"))
         .ok()
-        .and_then(|dep_manifest| resolve_dep_stubs_dir(&dep_manifest, dep_root));
+        .and_then(|dep_manifest| dep_manifest.stubs_dir(dep_root));
 
     Ok(ResolvedDependency {
         name: dep_name.to_string(),

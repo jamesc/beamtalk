@@ -27,6 +27,7 @@ pub use beamtalk_core::ffi_type_specs::{
 
 use crate::build_layout::BuildLayout;
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
+use camino::Utf8PathBuf;
 
 /// ADR 0075 Phase 1: Extract type specs from OTP and dependency
 /// `.beam` files for a manifest-backed project and cache them.
@@ -43,4 +44,76 @@ pub fn extract_project_type_specs(layout: &BuildLayout) -> Option<NativeTypeRegi
     let dep_ebin_dirs =
         beamtalk_core::ffi_type_specs::collect_project_dependency_ebin_dirs(layout.project_root());
     beamtalk_core::ffi_type_specs::extract_type_specs(&layout.type_cache_dir(), &dep_ebin_dirs)
+}
+
+/// Extract native type specs from runtime `.beam` files for FFI type inference.
+///
+/// Discovers `.beam` files from the runtime and stdlib Erlang ebin directories
+/// and extracts their `-spec` attributes. Returns `None` if no specs could be
+/// extracted (e.g., runtime not yet compiled).
+///
+/// The registry `beamtalk build-stdlib` types the stdlib against, and the
+/// fallback `beamtalk lint` and MCP `lint` use for a `stdlib/src` target,
+/// which has no `beamtalk.toml` (BT-4643).
+#[must_use]
+pub fn extract_stdlib_type_specs() -> Option<NativeTypeRegistry> {
+    use crate::repl_startup;
+
+    // Use the same runtime discovery as the build worker so paths stay in sync
+    // with the runtime layout (dev vs installed).
+    let (runtime_dir, layout): (std::path::PathBuf, _) =
+        if let Ok(result) = repl_startup::find_runtime_dir_with_layout() {
+            result
+        } else {
+            tracing::debug!("Runtime not found — skipping FFI type spec extraction");
+            return None;
+        };
+    let paths = repl_startup::beam_paths_for_layout(&runtime_dir, layout);
+
+    // Collect ebin directories that contain Erlang FFI modules with -spec attributes.
+    // Convert from std PathBuf to camino Utf8PathBuf (required by beam_compiler API).
+    let mut ebin_dirs: Vec<Utf8PathBuf> = Vec::new();
+    let candidates: Vec<std::path::PathBuf> = vec![
+        paths.runtime_ebin,
+        paths.stdlib_erlang_ebin,
+        paths.workspace_ebin,
+        paths.compiler_ebin,
+    ];
+    for dir in candidates {
+        if dir.exists() {
+            if let Ok(utf8) = Utf8PathBuf::from_path_buf(dir) {
+                ebin_dirs.push(utf8);
+            }
+        }
+    }
+
+    let beam_files = discover_dependency_beam_files(&ebin_dirs);
+    if beam_files.is_empty() {
+        tracing::debug!("No runtime .beam files found for stdlib FFI type specs");
+        return None;
+    }
+
+    // Cache directory under the runtime _build to avoid re-extracting specs
+    let cache_dir: Utf8PathBuf = Utf8PathBuf::from_path_buf(runtime_dir.join("_build/type_cache"))
+        .unwrap_or_else(|p| Utf8PathBuf::from(p.to_string_lossy().as_ref()));
+
+    match extract_beam_specs(&beam_files, &cache_dir) {
+        Ok(mut registry) => {
+            // Runtime `beamtalk_*` specs are first-party: they may prove
+            // direct FFI calls (BT-4507).
+            registry.trust_all_modules();
+            if registry.module_count() > 0 {
+                tracing::info!(
+                    modules = registry.module_count(),
+                    functions = registry.function_count(),
+                    "Extracted FFI type specs for stdlib build"
+                );
+            }
+            Some(registry)
+        }
+        Err(e) => {
+            tracing::debug!("Failed to extract type specs for stdlib build: {e}");
+            None
+        }
+    }
 }

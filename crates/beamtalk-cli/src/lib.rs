@@ -10,6 +10,10 @@
 //! - [`build_layout`] — centralised `_build/` path construction
 //! - [`dependency_classes`] — best-effort, offline dependency class
 //!   resolution shared with `beamtalk-mcp`
+//! - [`content_hash`] — the shared SHA-256 hex digest
+//! - [`ffi_type_registry`] — ADR 0075's FFI type resolution chain (auto-
+//!   extracted specs plus the stub tiers), shared by `beamtalk build`/`lint`
+//!   and the MCP `lint`/`diagnostic_summary` tools (BT-4643)
 //! - [`erlang_lint`] — text-based lint checks for native `.erl` files
 //! - [`lint_pipeline`] — the `beamtalk lint` analysis pipeline, shared with
 //!   the MCP `lint`/`diagnostic_summary` tools (BT-4585)
@@ -24,11 +28,13 @@
 //!   shared with `tests/repl_protocol.rs`
 
 pub mod build_layout;
+pub mod content_hash;
 pub mod dependency_classes;
 // Moved to `beamtalk-project` so the LSP applies the same rule (BT-4611).
 pub use beamtalk_project::dependency_extensions;
 pub mod erlang_lint;
 pub mod erlc;
+pub mod ffi_type_registry;
 pub mod lint_pipeline;
 pub mod manifest;
 pub mod native_type_specs;

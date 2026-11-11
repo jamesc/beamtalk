@@ -8,7 +8,7 @@ use super::*;
 /// `load_type_cache` extracts live from OTP `.beam` files for a
 /// workspace root with no prior `beamtalk build` — analogous to
 /// `beamtalk-cli`'s `lint_extracts_type_specs_live_on_cold_cache_bt_2851`
-/// and `beamtalk-mcp`'s `build_native_type_registry_extracts_live_on_cold_cache`.
+/// and `beamtalk-mcp`'s `lint_type_registry_extracts_live_on_cold_cache`.
 /// Otherwise the LSP only reads `_build/type_cache/`
 /// JSON files directly, so a workspace opened before any build gets an
 /// empty registry for the rest of the session.

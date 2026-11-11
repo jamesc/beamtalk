@@ -106,7 +106,7 @@ path = "stubs/"
 
 Stubs are `.bt` files containing `declare native: <module>` forms — type-only declarations for Erlang module functions. When a package with a `[stubs]` section is used as a dependency, its stubs are automatically available to consumers.
 
-`beamtalk build` and `beamtalk lint` resolve stubs in precedence order: project-local (`stubs/`) > package-bundled (dependencies' `[stubs]` paths) > distribution (`share/beamtalk/stubs/`, overridden by `BEAMTALK_STUBS_DIR` env var) > auto-extracted from `.beam` files. A stub for a specific function/arity overrides only that function at its layer; all other functions in the module keep their lower-layer types.
+`beamtalk build`, `beamtalk lint` and the MCP `lint` tool resolve stubs in precedence order: project-local (`stubs/`) > package-bundled (dependencies' `[stubs]` paths) > distribution (`share/beamtalk/stubs/`, overridden by `BEAMTALK_STUBS_DIR` env var) > auto-extracted from `.beam` files. A stub for a specific function/arity overrides only that function at its layer; all other functions in the module keep their lower-layer types.
 
 ### `[diagnostics]` Section
 

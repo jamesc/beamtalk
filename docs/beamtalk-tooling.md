@@ -146,10 +146,11 @@ same scope as `build`.
   (`diagnostics_policy::is_live_recheck_failure`; BT-4336). Both surfaces
   run the same analysis pipeline (`beamtalk_cli::lint_pipeline`, BT-4585),
   `.erl` linting included, so they report the same diagnostics and
-  verdict. Two inputs stay surface-specific: MCP reads dependencies only
-  from checkouts already on disk (it never fetches), and its FFI type
-  registry does not yet include ADR 0075 stub files or, for `stdlib/src`
-  targets, the stdlib's runtime specs (BT-4643).
+  verdict. Both build the FFI type registry the same way too, ADR 0075
+  stub tiers included, and for `stdlib/src` targets from the stdlib's
+  runtime specs (BT-4643). One input stays surface-specific: MCP reads
+  dependencies, and their stubs, only from checkouts already on disk (it
+  never fetches).
 - `beamtalk build` re-checks a byte-identical file when a signature it
   type-checks against changes elsewhere (BT-4336): every pre-loaded class
   (project and dependency, trait provisions flattened in), protocol and

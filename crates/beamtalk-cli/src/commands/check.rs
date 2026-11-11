@@ -30,9 +30,9 @@ use crate::beam_compiler::{
 };
 use crate::commands::OutputFormat;
 use crate::commands::build::{
-    ResolvedTypeRegistry, build_class_index, compute_file_module_pairs, extract_type_specs,
-    package_identity, resolve_and_validate_dependencies, resolve_package_type_registry,
-    setup_build_environment, warn_if_otp_out_of_window,
+    build_class_index, compute_file_module_pairs, extract_type_specs, package_identity,
+    resolve_and_validate_dependencies, resolve_package_type_registry, setup_build_environment,
+    warn_if_otp_out_of_window,
 };
 
 /// Check Beamtalk source files for errors without emitting bytecode.
@@ -89,16 +89,14 @@ pub fn run_check(path: &str) -> Result<()> {
         env.pkg_manifest().is_some(),
         options.stdlib_mode,
     );
-    let ResolvedTypeRegistry {
-        registry: native_type_registry,
-        diagnostics: stub_diagnostics,
-        ..
-    } = resolve_package_type_registry(
+    let resolved_registry = resolve_package_type_registry(
         &env.project_root,
         auto_extract_registry,
         &dep_ctx.resolved_deps,
         Some(OutputFormat::Text),
     );
+    let stub_diagnostics: Vec<_> = resolved_registry.diagnostics().cloned().collect();
+    let native_type_registry = resolved_registry.registry;
     let native_type_registry = native_type_registry.map(std::sync::Arc::new);
 
     let file_module_pairs = compute_file_module_pairs(&env)?;
