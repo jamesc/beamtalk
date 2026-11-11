@@ -298,6 +298,31 @@ DispatchDifferentialCase subclass: SealedDirectDispatchDifferentialTest
     w := self widget
     self assert: (self outcomeOf: [w fieldAt: #y put: 99]) equals: outcome
 
+  // BT-4286: on a primitive the source-level `fieldAt:put:` (the intrinsic)
+  // raises exactly what the dynamic send raises. Integer and String are Value
+  // kinds, so their generated `dispatch/3` arm carries the shared Value hint
+  // too (the "{Class}s are immutable" hint is only for non-Value kinds).
+  // An unannotated receiver, so the compiler does not reject the literal
+  // primitive write at compile time.
+  putOn: receiver => receiver fieldAt: #x put: 1
+
+  testFieldAtPutOnIntegerMatchesDynamicSend =>
+    outcome := self assertSameOutcome: [self putOn: 42] as: [
+      self dynamic: #fieldAt:put: args: #(#x, 1) to: 42
+    ]
+    self assert: (outcome at: 5) equals: #Integer
+    self assert: (outcome at: 3) equals: #immutable_value
+    self assert: (outcome at: 4) equals: #fieldAt:put:
+    self assert: (outcome at: 7) equals: "Cannot modify slot on value type — use withSlot: to create a new instance"
+
+  testFieldAtPutOnStringMatchesDynamicSend =>
+    outcome := self assertSameOutcome: [self putOn: "abc"] as: [
+      self dynamic: #fieldAt:put: args: #(#x, 1) to: "abc"
+    ]
+    self assert: (outcome at: 5) equals: #String
+    self assert: (outcome at: 3) equals: #immutable_value
+    self assert: (outcome at: 7) equals: "Cannot modify slot on value type — use withSlot: to create a new instance"
+
   // === Guard mismatch: a lying annotation takes the dynamic fallback ===
   testLyingAnnotationOtherValueClassDispatches =>
     imp := self impostor

@@ -231,9 +231,6 @@ impl CoreErlangGenerator {
         match gate {
             StaysDynamic::Untyped => "untyped".to_string(),
             StaysDynamic::BinarySelector => "binary-selector".to_string(),
-            StaysDynamic::FieldAtPut => {
-                "fieldAt:put: — the dynamic path raises its own hint".to_string()
-            }
             StaysDynamic::PerformFamily => {
                 "perform — the dynamic path does not dispatch this selector as sent".to_string()
             }
