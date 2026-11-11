@@ -335,7 +335,7 @@ impl TypeChecker {
                         // `SelfType` arm) so nested `Self` in the return type
                         // resolves the same way the old `self_type` parameter
                         // did.
-                        return type_resolver::resolve_declared_type(
+                        return type_resolver::resolve_declared_type_in(
                             ret_ty,
                             &type_resolver::merge_substitutions(
                                 &class_subst,
@@ -345,6 +345,7 @@ impl TypeChecker {
                             self.protocol_registry.as_deref(),
                             self.alias_registry.as_ref(),
                             super::TypeStringContext::Substitution,
+                            Some(hierarchy),
                         );
                     }
                 }

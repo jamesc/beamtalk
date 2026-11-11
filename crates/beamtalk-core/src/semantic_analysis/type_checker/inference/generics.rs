@@ -64,12 +64,13 @@ impl TypeChecker {
         // this function's own bare-name precedence above.
         let mut subst: type_resolver::SubstitutionMap = class_subst.clone();
         subst.extend(method_subst.iter().map(|(k, v)| (k.clone(), v.clone())));
-        type_resolver::resolve_declared_type(
+        type_resolver::resolve_declared_type_in(
             param,
             &subst,
             None,
             None,
             TypeStringContext::Substitution,
+            Some(hierarchy),
         )
     }
 
@@ -213,12 +214,13 @@ impl TypeChecker {
                             // `Base(List(Integer))`) — resolve through the
                             // shared resolver instead of the bare-name-only
                             // lookup above.
-                            super_args.push(type_resolver::resolve_declared_type(
+                            super_args.push(type_resolver::resolve_declared_type_in(
                                 declared,
                                 &current_subst,
                                 None,
                                 None,
                                 TypeStringContext::Substitution,
+                                Some(hierarchy),
                             ));
                         }
                     }
