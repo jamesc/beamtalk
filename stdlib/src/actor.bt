@@ -489,6 +489,42 @@ Object subclass: Actor
   /// ```
   class isSupervisor -> Boolean => false
 
+  /// State slots whose values are redacted in the formatted state of
+  /// status and crash reports.
+  ///
+  /// Override with a literal list of slot names. The compiler reads the list
+  /// at compile time, and the actor's `format_status/1` shows each named
+  /// slot's value as `"[redacted]"` in the state that `sys:get_status` and a
+  /// crash report show. Only the state is covered: list any accessor that
+  /// takes or answers a secret slot (`token`, `token:`) in `secretSelectors`
+  /// too, or its arguments and reply show in the sys log. A subclass's list
+  /// adds to its superclass's. Defaults to `#()`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Actor secretState                  // => #()
+  /// // In a subclass:
+  /// // class secretState -> List(Symbol) => #(#verifier)
+  /// ```
+  class secretState -> List(Symbol) => #()
+
+  /// Messages whose arguments and replies are redacted in the formatted
+  /// status, sys log and crash report.
+  ///
+  /// Override with a literal list of selectors. The compiler reads the list
+  /// at compile time. A send of a listed selector keeps its selector in
+  /// `sys:get_status`'s logged events and in a crash report's last message,
+  /// but its arguments, and the reply to it, show as `"[redacted]"`. A
+  /// subclass's list adds to its superclass's. Defaults to `#()`.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// Actor secretSelectors              // => #()
+  /// // In a subclass:
+  /// // class secretSelectors -> List(Symbol) => #(#create:boundTo:)
+  /// ```
+  class secretSelectors -> List(Symbol) => #()
+
   /// Return a SupervisionSpec for this actor class with default settings.
   ///
   /// Creates a SupervisionSpec with `actorClass` set to the receiver and

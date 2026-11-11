@@ -145,7 +145,8 @@ impl CoreErlangGenerator {
         let base_exports: Document<'static> = docvec![
             "'start_link'/1, 'start_link'/2, 'init'/1, 'handle_continue'/2, \
              'handle_cast'/2, 'handle_call'/3, \
-             'handle_info'/2, 'code_change'/3, 'terminate'/2, 'dispatch'/4",
+             'handle_info'/2, 'code_change'/3, 'terminate'/2, \
+             'format_status'/1, '__beamtalk_secrets'/0, 'dispatch'/4",
             dispatch_3_export,
             ", 'safe_dispatch'/3, 'safe_dispatch'/4, \
              'method_table'/0, 'has_method'/1, 'class_name'/0, \
@@ -322,6 +323,9 @@ impl CoreErlangGenerator {
             push_fn(self.generate_terminate(module)?)?;
             push_fn(self.generate_safe_dispatch()?)?;
         }
+        // BT-4567: abstract classes too — a concrete subclass chains to their
+        // `'__beamtalk_secrets'/0`.
+        push_fn(self.generate_format_status(module))?;
 
         push_fn(self.generate_dispatch(module)?)?;
         if has_primitive_methods {

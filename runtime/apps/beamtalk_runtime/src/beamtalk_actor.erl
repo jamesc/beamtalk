@@ -239,9 +239,6 @@ handle_getValue([], State) ->
 %% per sync call, nothing otherwise.
 -define(CALL_FROM_KEY, '$bt_call_from').
 
-%% BT-3968: the `handle_continue/2` term carrying the continuation queue.
--define(BT_CONTINUE_TAG, '$bt_continue').
-
 %% BT-3992: start-args key carrying the starter's `{StarterPid, AckRef}`
 %% initialize-ack target (see with_init_ack/1 and await_initialize/3), and
 %% the process-dictionary key the actor keeps it under between init/1 and
@@ -388,7 +385,7 @@ handle_getValue([], State) ->
 %% BT-3968: the mailbox-boundary guard against another process scheduling a
 %% continuation — called by this module's own handle_call/handle_cast and by
 %% every compiled actor's generated ones (see mailbox_continuation_check/2).
--export([mailbox_continuation_check/2]).
+-export([mailbox_continuation_check/2, performed_selector/2]).
 
 %% exported so generated self-dispatch error breadcrumbs
 %% (dispatch_codegen.rs's generate_self_dispatch_error_clause) can resolve
@@ -2962,19 +2959,34 @@ mailbox_continuation_check(Selector, Args) ->
 %% `self deferReply`), so one arriving through the mailbox came from another
 %% process.
 -spec restricted_target(term(), term()) -> atom() | none.
-restricted_target(Selector, _Args) when ?IS_CONTINUATION_SELECTOR(Selector) ->
-    Selector;
-restricted_target(deferReply, _Args) ->
-    deferReply;
-restricted_target(Selector, [Target | Rest]) when ?IS_PERFORM_SELECTOR(Selector) ->
+restricted_target(Selector, Args) ->
+    case performed_selector(Selector, Args) of
+        Target when ?IS_CONTINUATION_SELECTOR(Target) -> Target;
+        deferReply -> deferReply;
+        _ -> none
+    end.
+
+-doc """
+The selector a send of `Selector` with `Args` actually runs: `Selector`
+itself, or, for a `perform:` / `perform:withArguments:` /
+`perform:withArguments:timeout:` send, the selector it names, unwrapping
+nested `perform:` forms to any depth
+(`perform: #perform:withArguments: withArguments: #(#unlock:, ...)` runs
+`unlock:`). Shared by restricted_target/2 and `beamtalk_actor_redaction`
+(BT-4567), which treats a performed secret selector as a secret send.
+""".
+-spec performed_selector(term(), term()) -> term().
+performed_selector(Selector, [Target | Rest]) when
+    ?IS_PERFORM_SELECTOR(Selector), is_atom(Target)
+->
     InnerArgs =
         case Rest of
             [ArgList | _] when is_list(ArgList) -> ArgList;
             _ -> []
         end,
-    restricted_target(Target, InnerArgs);
-restricted_target(_Selector, _Args) ->
-    none.
+    performed_selector(Target, InnerArgs);
+performed_selector(Selector, _Args) ->
+    Selector.
 
 -spec rejected_mailbox_continuation(atom()) -> {error, #beamtalk_error{}}.
 rejected_mailbox_continuation(Selector) ->

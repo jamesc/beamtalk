@@ -19,6 +19,7 @@ use crate::source_analysis::{Diagnostic, Span};
 use ecow::EcoString;
 use std::collections::{HashMap, HashSet};
 
+pub mod actor_secrets;
 pub mod actor_spawn;
 pub mod alias_registry;
 mod block_analyzer;
@@ -1267,6 +1268,12 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // Validate supervisionPolicy overrides + warn for children without explicit policy
     validators::check_supervision_policy_override(module, &mut result.diagnostics);
     validators::check_children_supervision_policy(
+        module,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
+    // BT-4567: `class secretState` / `class secretSelectors` declarations
+    actor_secrets::check_actor_secret_declarations(
         module,
         &result.class_hierarchy,
         &mut result.diagnostics,

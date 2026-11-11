@@ -156,6 +156,12 @@
 %% (ADR 0126 §5.1) rather than guessing at a decode.
 -define(BT_WIRE_VERSION, 1).
 
+%% @doc BT-3968: the tag on the `handle_continue/2` term carrying an actor's
+%% continuation queue, `{continue, {?BT_CONTINUE_TAG, [{Selector, Args}]}}`
+%% (`beamtalk_actor:add_continue/2`). Shared with `beamtalk_actor_redaction`,
+%% which redacts secret-selector continuations in status and sys logs.
+-define(BT_CONTINUE_TAG, '$bt_continue').
+
 %% @doc ADR 0126 §3 timeout (ms) for a bounded `erpc:call/5` to a peer node —
 %% remote spawn/lookup (`beamtalk_actor`), `Node>>shapeManifest`, and
 %% `beamtalk_node_monitor`'s connect-/reload-time shape-skew comparison
