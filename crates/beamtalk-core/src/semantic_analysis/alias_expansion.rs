@@ -36,9 +36,7 @@ use ecow::EcoString;
 use super::alias_registry::AliasInfo;
 use super::class_hierarchy::{ClassInfo, DeclaredType, MethodInfo};
 use super::protocol_registry::ProtocolInfo;
-use crate::ast::{
-    Expression, MethodDefinition, ProtocolDefinition, ProtocolMethodSignature, TypeAnnotation,
-};
+use crate::ast::{Expression, MethodDefinition, ProtocolDefinition, TypeAnnotation};
 use crate::ast_walker::walk_expression_mut;
 
 /// Expands a package's `internal type` aliases inside exported signatures.
@@ -71,16 +69,30 @@ impl InternalAliasExpander {
     /// An alias cycle is cut at the repeated name, which stays a bare name.
     #[must_use]
     pub fn expand(&self, ty: &DeclaredType) -> DeclaredType {
-        self.expand_inner(ty, &mut Vec::new())
+        self.expand_shadowing(ty, &[])
+    }
+
+    /// [`Self::expand`], except a *direct* reference to one of `shadowed`
+    /// stays a bare name. A protocol's own type parameter shadows a
+    /// same-named internal alias (`uses:` later maps it to the consumer's type
+    /// argument); only direct references in the protocol's annotations are
+    /// shadowed — an alias body still means what it meant at module scope.
+    #[must_use]
+    pub fn expand_shadowing(&self, ty: &DeclaredType, shadowed: &[EcoString]) -> DeclaredType {
+        self.expand_inner(ty, &mut Vec::new(), shadowed)
     }
 
     fn expand_inner<'a>(
         &'a self,
         ty: &DeclaredType,
         active: &mut Vec<&'a EcoString>,
+        shadowed: &[EcoString],
     ) -> DeclaredType {
         match ty {
             DeclaredType::Simple(name) => {
+                if active.is_empty() && shadowed.contains(name) {
+                    return ty.clone();
+                }
                 let Some((key, target)) = self.aliases.get_key_value(name) else {
                     return ty.clone();
                 };
@@ -88,14 +100,14 @@ impl InternalAliasExpander {
                     return ty.clone();
                 }
                 active.push(key);
-                let expanded = self.expand_inner(target, active);
+                let expanded = self.expand_inner(target, active, shadowed);
                 active.pop();
                 expanded
             }
             DeclaredType::Union(members) => {
                 let mut out = Vec::with_capacity(members.len());
                 for member in members {
-                    let expanded = match self.expand_inner(member, active) {
+                    let expanded = match self.expand_inner(member, active, shadowed) {
                         DeclaredType::Union(inner) => inner,
                         other => vec![other],
                     };
@@ -113,19 +125,19 @@ impl InternalAliasExpander {
                 base: base.clone(),
                 parameters: parameters
                     .iter()
-                    .map(|p| self.expand_inner(p, active))
+                    .map(|p| self.expand_inner(p, active, shadowed))
                     .collect(),
             },
             DeclaredType::FalseOr(inner) => {
-                DeclaredType::FalseOr(Box::new(self.expand_inner(inner, active)))
+                DeclaredType::FalseOr(Box::new(self.expand_inner(inner, active, shadowed)))
             }
             DeclaredType::Difference { base, excluded } => DeclaredType::Difference {
-                base: Box::new(self.expand_inner(base, active)),
-                excluded: Box::new(self.expand_inner(excluded, active)),
+                base: Box::new(self.expand_inner(base, active, shadowed)),
+                excluded: Box::new(self.expand_inner(excluded, active, shadowed)),
             },
             DeclaredType::Intersection { left, right } => DeclaredType::Intersection {
-                left: Box::new(self.expand_inner(left, active)),
-                right: Box::new(self.expand_inner(right, active)),
+                left: Box::new(self.expand_inner(left, active, shadowed)),
+                right: Box::new(self.expand_inner(right, active, shadowed)),
             },
             DeclaredType::Singleton(_)
             | DeclaredType::SelfType
@@ -143,6 +155,12 @@ impl InternalAliasExpander {
     /// difference or intersection is then expanded like any other (BT-4707).
     #[must_use]
     pub fn expand_str(&self, signature: &EcoString) -> EcoString {
+        self.expand_str_shadowing(signature, &[])
+    }
+
+    /// [`Self::expand_str`] with [`Self::expand_shadowing`]'s shadow set.
+    #[must_use]
+    pub fn expand_str_shadowing(&self, signature: &EcoString, shadowed: &[EcoString]) -> EcoString {
         if self.is_empty() {
             return signature.clone();
         }
@@ -152,7 +170,7 @@ impl InternalAliasExpander {
                 parsed = real;
             }
         }
-        let expanded = self.expand(&parsed);
+        let expanded = self.expand_shadowing(&parsed, shadowed);
         if expanded == parsed {
             signature.clone()
         } else {
@@ -167,8 +185,18 @@ impl InternalAliasExpander {
     /// source rather than at the alias declaration.
     #[must_use]
     pub fn expand_annotation(&self, ann: &TypeAnnotation) -> TypeAnnotation {
+        self.expand_annotation_shadowing(ann, &[])
+    }
+
+    /// [`Self::expand_annotation`] with [`Self::expand_shadowing`]'s shadow set.
+    #[must_use]
+    pub fn expand_annotation_shadowing(
+        &self,
+        ann: &TypeAnnotation,
+        shadowed: &[EcoString],
+    ) -> TypeAnnotation {
         let declared = DeclaredType::from(ann);
-        let expanded = self.expand(&declared);
+        let expanded = self.expand_shadowing(&declared, shadowed);
         if expanded == declared {
             ann.clone()
         } else {
@@ -184,71 +212,49 @@ impl InternalAliasExpander {
         if self.is_empty() {
             return;
         }
-        // A protocol's own type parameter shadows a same-named internal alias
-        // (`internal type Key = Symbol` vs `Protocol define: Mapping(Key, V)`):
-        // leave it a bare name for `uses:` substitution to map.
-        let scoped;
-        let this = if protocol
+        let shadowed: Vec<EcoString> = protocol
             .type_params
             .iter()
-            .any(|tp| self.aliases.contains_key(&tp.name.name))
-        {
-            scoped = Self {
-                aliases: self
-                    .aliases
-                    .iter()
-                    .filter(|(name, _)| {
-                        !protocol.type_params.iter().any(|tp| &tp.name.name == *name)
-                    })
-                    .map(|(n, t)| (n.clone(), t.clone()))
-                    .collect(),
-            };
-            &scoped
-        } else {
-            self
-        };
+            .map(|tp| tp.name.name.clone())
+            .collect();
         for sig in protocol
             .method_signatures
             .iter_mut()
             .chain(&mut protocol.class_method_signatures)
         {
-            this.expand_protocol_signature(sig);
-        }
-        for method in &mut protocol.provided_methods {
-            this.expand_provided_method(method);
-        }
-    }
-
-    fn expand_protocol_signature(&self, sig: &mut ProtocolMethodSignature) {
-        for param in &mut sig.parameters {
-            if let Some(ty) = &mut param.type_annotation {
-                *ty = self.expand_annotation(ty);
+            for param in &mut sig.parameters {
+                if let Some(ty) = &mut param.type_annotation {
+                    *ty = self.expand_annotation_shadowing(ty, &shadowed);
+                }
+            }
+            if let Some(ty) = &mut sig.return_type {
+                *ty = self.expand_annotation_shadowing(ty, &shadowed);
             }
         }
-        if let Some(ty) = &mut sig.return_type {
-            *ty = self.expand_annotation(ty);
+        for method in &mut protocol.provided_methods {
+            self.expand_provided_method(method, &shadowed);
         }
     }
 
-    fn expand_provided_method(&self, method: &mut MethodDefinition) {
+    fn expand_provided_method(&self, method: &mut MethodDefinition, shadowed: &[EcoString]) {
         for param in &mut method.parameters {
             if let Some(ty) = &mut param.type_annotation {
-                *ty = self.expand_annotation(ty);
+                *ty = self.expand_annotation_shadowing(ty, shadowed);
             }
         }
         if let Some(ty) = &mut method.return_type {
-            *ty = self.expand_annotation(ty);
+            *ty = self.expand_annotation_shadowing(ty, shadowed);
         }
         for stmt in &mut method.body {
             walk_expression_mut(&mut stmt.expression, &mut |expr| match expr {
                 Expression::Assignment {
                     type_annotation: Some(ty),
                     ..
-                } => *ty = self.expand_annotation(ty),
+                } => *ty = self.expand_annotation_shadowing(ty, shadowed),
                 Expression::Block(block) => {
                     for param in &mut block.parameters {
                         if let Some(ty) = &mut param.type_annotation {
-                            *ty = self.expand_annotation(ty);
+                            *ty = self.expand_annotation_shadowing(ty, shadowed);
                         }
                     }
                 }
@@ -281,6 +287,9 @@ impl InternalAliasExpander {
         if self.is_empty() {
             return;
         }
+        // Same shadowing rule as `expand_protocol_definition`, so the exported
+        // `ProtocolInfo` and the exported AST agree.
+        let shadowed = info.type_params.clone();
         let all = info
             .methods
             .iter_mut()
@@ -288,10 +297,10 @@ impl InternalAliasExpander {
             .chain(&mut info.provided);
         for req in all {
             for ty in req.param_types.iter_mut().flatten() {
-                *ty = self.expand_str(ty);
+                *ty = self.expand_str_shadowing(ty, &shadowed);
             }
             if let Some(ty) = &mut req.return_type {
-                *ty = self.expand_str(ty);
+                *ty = self.expand_str_shadowing(ty, &shadowed);
             }
         }
     }
@@ -568,5 +577,57 @@ mod tests {
         );
         // Other aliases still expand.
         assert_eq!(pick.return_type.as_ref().unwrap().type_name(), "String");
+    }
+
+    #[test]
+    fn shadowing_applies_to_direct_references_only() {
+        let e = expander(&[
+            ("Key", DeclaredType::simple("Symbol")),
+            ("Secret", DeclaredType::parse("Key | Nil")),
+        ]);
+        let mut proto = first_protocol(
+            "Protocol define: Mapping(Key, V)\n  \
+             pick: k :: Key -> Secret => nil\n",
+        );
+        e.expand_protocol_definition(&mut proto);
+        let pick = &proto.provided_methods[0];
+        assert_eq!(
+            pick.parameters[0]
+                .type_annotation
+                .as_ref()
+                .unwrap()
+                .type_name(),
+            "Key"
+        );
+        // `Secret` was declared at module scope, where `Key` is the alias.
+        assert_eq!(
+            pick.return_type.as_ref().unwrap().type_name(),
+            "Symbol | Nil"
+        );
+    }
+
+    #[test]
+    fn protocol_info_applies_the_same_shadowing() {
+        use crate::semantic_analysis::protocol_registry::ProtocolMethodRequirement;
+        let e = expander(&[("Key", DeclaredType::simple("Symbol"))]);
+        let mut info = ProtocolInfo {
+            name: "Mapping".into(),
+            type_params: vec!["Key".into()],
+            type_param_bounds: vec![None],
+            extending: None,
+            methods: vec![ProtocolMethodRequirement {
+                selector: "at:".into(),
+                arity: 1,
+                param_types: vec![Some("Key".into())],
+                return_type: Some("Key".into()),
+            }],
+            class_methods: Vec::new(),
+            provided: Vec::new(),
+            package: None,
+            span: Span::new(0, 0),
+        };
+        e.expand_protocol_info(&mut info);
+        assert_eq!(info.methods[0].param_types[0].as_deref(), Some("Key"));
+        assert_eq!(info.methods[0].return_type.as_deref(), Some("Key"));
     }
 }
