@@ -23,6 +23,9 @@
 //!    analyses each target file with [`analyse_file`], reporting each one to
 //!    a callback, then routes flattened-provision diagnostics to their
 //!    protocol's file.
+//!    Each file's `TypeMap` rides along on [`FileLint`], so CLI
+//!    `type-coverage` and MCP `diagnostic_summary` measure coverage against
+//!    the same context (BT-4718).
 //! 4. [`LintGate`] tallies the verdict: Lint-severity diagnostics, plus the
 //!    live-recheck set under `--warnings-as-errors`.
 //!
@@ -52,7 +55,7 @@ use beamtalk_core::semantic_analysis::protocol_source::{
 use beamtalk_core::semantic_analysis::trait_expansion::{TraitUserCollector, is_carried_protocol};
 use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
 use beamtalk_core::semantic_analysis::{
-    AnalysisContext, ClassHierarchy, KnowledgeScope, ProtocolSourceMap,
+    AnalysisContext, ClassHierarchy, KnowledgeScope, ProtocolSourceMap, TypeMap,
 };
 use beamtalk_core::source_analysis::{Diagnostic, Severity, Span, lex_with_eof, parse};
 use beamtalk_project::package;
@@ -398,6 +401,18 @@ pub fn analyse_file(
     parse_diagnostics: Vec<Diagnostic>,
     ctx: FileContext<'_>,
 ) -> (Vec<Diagnostic>, ClassHierarchy) {
+    let (diags, hierarchy, _) = analyse_file_with_types(module, source, parse_diagnostics, ctx);
+    (diags, hierarchy)
+}
+
+/// [`analyse_file`], also returning the file's `TypeMap` (BT-4718).
+#[must_use]
+pub fn analyse_file_with_types(
+    module: &Module,
+    source: &str,
+    parse_diagnostics: Vec<Diagnostic>,
+    ctx: FileContext<'_>,
+) -> (Vec<Diagnostic>, ClassHierarchy, TypeMap) {
     let mut diags: Vec<_> = parse_diagnostics
         .into_iter()
         .filter(|d| {
@@ -428,8 +443,8 @@ pub fn analyse_file(
         .with_native_type_registry(ctx.native_type_registry)
         .with_cross_file_extensions(ctx.cross_file_extensions.unwrap_or(&no_extensions))
         .with_is_stub_file(ctx.is_stub_file);
-    let hierarchy =
-        beamtalk_language_service::queries::diagnostic_provider::run_post_analysis_lint_pipeline(
+    let (hierarchy, type_map) =
+        beamtalk_language_service::queries::diagnostic_provider::run_post_analysis_lint_pipeline_with_types(
             module,
             source,
             analysis_ctx,
@@ -438,7 +453,7 @@ pub fn analyse_file(
             &mut diags,
             |hierarchy| beamtalk_lint::run_lint_passes_with_hierarchy(module, hierarchy),
         );
-    (diags, hierarchy)
+    (diags, hierarchy, type_map)
 }
 
 /// Decides whether a diagnostic should be kept, deduplicating repeat
@@ -474,6 +489,8 @@ pub struct FileLint<'a> {
     pub module: &'a Module,
     /// The class hierarchy it was analysed against.
     pub class_hierarchy: &'a ClassHierarchy,
+    /// The types inferred against that same context, for type coverage.
+    pub type_map: &'a TypeMap,
     /// Its diagnostics, minus those raised inside a flattened trait
     /// provision (reported against the protocol's file instead).
     pub diagnostics: Vec<Diagnostic>,
@@ -570,7 +587,7 @@ pub fn analyse_package(
         let is_stub_file = package_root.as_deref().is_some_and(|root| {
             package::is_under_stubs_dir(root.as_std_path(), target.path.as_std_path())
         });
-        let (diags, class_hierarchy) = analyse_file(
+        let (diags, class_hierarchy, type_map) = analyse_file_with_types(
             &target.module,
             &target.source,
             target.parse_diagnostics,
@@ -612,6 +629,7 @@ pub fn analyse_package(
             source: &target.source,
             module: &target.module,
             class_hierarchy: &class_hierarchy,
+            type_map: &type_map,
             diagnostics: own,
         });
     }
