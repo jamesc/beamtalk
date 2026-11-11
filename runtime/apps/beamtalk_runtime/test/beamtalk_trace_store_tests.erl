@@ -770,9 +770,19 @@ take_store_direct() ->
         undefined ->
             ok;
         SupPid ->
-            _ = catch supervisor:terminate_child(SupPid, beamtalk_trace_store)
+            _ =
+                try
+                    supervisor:terminate_child(SupPid, beamtalk_trace_store)
+                catch
+                    _:_ -> ok
+                end
     end,
-    _ = catch gen_server:stop(beamtalk_trace_store),
+    _ =
+        try
+            gen_server:stop(beamtalk_trace_store)
+        catch
+            _:_ -> ok
+        end,
     wait_until(fun() -> whereis(beamtalk_trace_store) =:= undefined end),
     case whereis(beamtalk_ets_heir) of
         undefined -> {ok, _} = beamtalk_ets_heir:start_link();
@@ -790,9 +800,20 @@ crash_cleanup(State) ->
         undefined ->
             ok;
         SupPid ->
-            _ = catch gen_server:stop(beamtalk_trace_store),
+            _ =
+                try
+                    gen_server:stop(beamtalk_trace_store)
+                catch
+                    _:_ -> ok
+                end,
             timer:sleep(50),
-            case catch supervisor:restart_child(SupPid, beamtalk_trace_store) of
+            case
+                try
+                    supervisor:restart_child(SupPid, beamtalk_trace_store)
+                catch
+                    _:_ -> error
+                end
+            of
                 {ok, _} ->
                     ok;
                 _ ->

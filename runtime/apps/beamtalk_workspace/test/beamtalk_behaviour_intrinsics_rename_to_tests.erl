@@ -138,7 +138,11 @@ teardown(_) ->
                 undefined ->
                     ok;
                 Pid when is_pid(Pid) ->
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
             end
         end,
         ['Bt3278Widget', 'Bt3278WidgetRenamed', 'Bt3278WidgetSub', 'Bt3278WidgetUser']
@@ -451,7 +455,11 @@ teardown_dynamic_with_reference(_Fixture) ->
                 undefined ->
                     ok;
                 Pid when is_pid(Pid) ->
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
             end
         end,
         ['Bt3278DynSource', 'Bt3278DynRenamed', 'Bt3278DynUser']

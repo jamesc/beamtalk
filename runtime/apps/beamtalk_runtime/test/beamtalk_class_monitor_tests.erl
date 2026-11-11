@@ -98,8 +98,14 @@ teardown(#{monitor := Pid, restore := Restore}) ->
     %% the registered name too.
     stop_if_alive(whereis(beamtalk_class_monitor)),
     case Restore of
-        true -> catch supervisor:restart_child(beamtalk_runtime_sup, beamtalk_class_monitor);
-        false -> ok
+        true ->
+            try
+                supervisor:restart_child(beamtalk_runtime_sup, beamtalk_class_monitor)
+            catch
+                _:_ -> ok
+            end;
+        false ->
+            ok
     end,
     ok.
 
@@ -203,8 +209,14 @@ watch_and_unwatch_when_monitor_not_running_test_() ->
 
 restore_displaced(Restore) ->
     case Restore of
-        true -> catch supervisor:restart_child(beamtalk_runtime_sup, beamtalk_class_monitor);
-        false -> ok
+        true ->
+            try
+                supervisor:restart_child(beamtalk_runtime_sup, beamtalk_class_monitor)
+            catch
+                _:_ -> ok
+            end;
+        false ->
+            ok
     end,
     ok.
 

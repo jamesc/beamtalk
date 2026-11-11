@@ -313,7 +313,11 @@ teardown(_) ->
         end,
     lists:foreach(
         fun(Pid) ->
-            catch gen_server:stop(Pid, normal, 1000)
+            try
+                gen_server:stop(Pid, normal, 1000)
+            catch
+                _:_ -> ok
+            end
         end,
         Members
     ).

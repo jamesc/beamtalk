@@ -851,7 +851,7 @@ lint-elixir: fmt-check-elixir
 lint-elixir: fmt-check-elixir
 
 # Run all linting and formatting checks
-lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-coverage-skips test-lint-stamp
+lint: lint-rust lint-erlang lint-js lint-elixir lint-beamtalk lint-workaround-comments lint-binary-literal-encoding lint-removed-facade-names lint-nlr-tuple-matches lint-class-var-catchers lint-old-style-catch lint-coverage-skips test-lint-stamp
 
 # Test (BT-3926): scripts/lint-stamp.sh writes the same js stamp from the repo
 # root and from `editors/vscode` (where `lint-js` writes it), with and without
@@ -942,6 +942,16 @@ lint-class-var-catchers:
 [windows]
 lint-class-var-catchers:
     @echo "lint-class-var-catchers: skipped on Windows (covered by Linux CI)"
+
+# Guard (BT-4616): no old-style `catch Expr` in runtime/perf/benchmark Erlang
+# (deprecated in OTP 29); use `try ... catch ... end`. Unix-only; Linux CI covers it.
+[unix]
+lint-old-style-catch:
+    @escript scripts/ci/lint-old-style-catch.escript
+
+[windows]
+lint-old-style-catch:
+    @echo "lint-old-style-catch: skipped on Windows (covered by Linux CI)"
 
 # Ratchet lint: flag workaround/limitation comments lacking a BT-NNNN tracking
 # reference (BT-2347). Ships with an allowlist snapshot of pre-existing offenders

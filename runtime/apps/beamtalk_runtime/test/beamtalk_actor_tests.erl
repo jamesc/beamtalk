@@ -2015,8 +2015,14 @@ safe_spawn_links_caller_when_supervisor_spawn_context_set_test() ->
 
 unregister_if_alive(Name) ->
     case erlang:whereis(Name) of
-        undefined -> ok;
-        Pid when is_pid(Pid) -> catch gen_server:stop(Pid)
+        undefined ->
+            ok;
+        Pid when is_pid(Pid) ->
+            try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end
     end.
 
 await_initialize_preserves_full_stop_reason_test() ->
@@ -2405,7 +2411,11 @@ safe_spawn_restores_trap_exit_test() ->
         try
             ?assertEqual(false, process_flag(trap_exit, false))
         after
-            catch gen_server:stop(Pid)
+            try
+                gen_server:stop(Pid)
+            catch
+                _:_ -> ok
+            end
         end
     after
         process_flag(trap_exit, OldTrap)
@@ -3071,8 +3081,14 @@ sync_send_onExit_with_kill_reason_test() ->
 %% Helper: cleanup a name if registered (used in test teardown).
 cleanup_name(Name) ->
     case erlang:whereis(Name) of
-        undefined -> ok;
-        _ -> catch erlang:unregister(Name)
+        undefined ->
+            ok;
+        _ ->
+            try
+                erlang:unregister(Name)
+            catch
+                _:_ -> ok
+            end
     end.
 
 is_beamtalk_actor_true_for_actor_test() ->
@@ -3492,7 +3508,11 @@ ffi_unregister_does_not_touch_replacement_test() ->
             %% Step 4: replacement must still be registered under `Name`.
             ?assertEqual(Replacement, erlang:whereis(Name))
         after
-            catch erlang:unregister(Name),
+            try
+                erlang:unregister(Name)
+            catch
+                _:_ -> ok
+            end,
             Replacement ! stop
         end
     after
@@ -4590,7 +4610,11 @@ registered_name_for_pid_returns_name_when_registered_test() ->
     try
         ?assertEqual(Name, beamtalk_actor:registered_name_for_pid(Pid))
     after
-        catch erlang:unregister(Name),
+        try
+            erlang:unregister(Name)
+        catch
+            _:_ -> ok
+        end,
         Pid ! stop
     end.
 

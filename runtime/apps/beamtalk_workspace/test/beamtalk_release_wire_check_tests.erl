@@ -75,7 +75,11 @@ run_wire_check() ->
         try
             assert_wire_check(PeerPid)
         after
-            catch peer:stop(PeerPid)
+            try
+                peer:stop(PeerPid)
+            catch
+                _:_ -> ok
+            end
         end
     after
         _ = file:del_dir_r(Stage)

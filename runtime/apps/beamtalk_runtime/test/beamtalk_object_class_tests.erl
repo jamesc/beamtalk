@@ -2732,7 +2732,13 @@ compiler_walker_available() ->
     %% beam exists but hasn't been demand-loaded yet.
     _ = code:ensure_loaded(beamtalk_compiler),
     erlang:function_exported(beamtalk_compiler, find_all_sends_in_source, 1) andalso
-        case catch beamtalk_compiler:find_all_sends_in_source(<<"x => self foo">>) of
+        case
+            try
+                beamtalk_compiler:find_all_sends_in_source(<<"x => self foo">>)
+            catch
+                _:_ -> error
+            end
+        of
             {ok, [_ | _]} -> true;
             _ -> false
         end.

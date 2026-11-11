@@ -74,7 +74,11 @@ clear_all_subscriptions() ->
     %% link cannot leak into a later test's announce walk.
     lists:foreach(
         fun(C) ->
-            catch beamtalk_class_metadata:delete(C)
+            try
+                beamtalk_class_metadata:delete(C)
+            catch
+                _:_ -> ok
+            end
         end,
         ['ButtonClicked', 'UIEvent', 'DomainEvent', 'PriceChanged', 'OtherEvent']
     ),
@@ -507,8 +511,16 @@ mro_cyclic_hierarchy_test_() ->
                     ?assert(is_integer(beamtalk_announcements:subscription_count()))
                 after
                     stop_subscriber(Sub),
-                    catch beamtalk_class_metadata:delete('CycA'),
-                    catch beamtalk_class_metadata:delete('CycB')
+                    try
+                        beamtalk_class_metadata:delete('CycA')
+                    catch
+                        _:_ -> ok
+                    end,
+                    try
+                        beamtalk_class_metadata:delete('CycB')
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -1297,7 +1309,11 @@ heir_crash_survival_impl() ->
                     refute_received()
                 after
                     stop_subscriber(LiveSub),
-                    catch stop_subscriber(DyingSub),
+                    try
+                        stop_subscriber(DyingSub)
+                    catch
+                        _:_ -> ok
+                    end,
                     clear_all_subscriptions()
                 end
             after
@@ -1369,7 +1385,11 @@ heir_rearm_monitor_fires_on_later_death_impl() ->
                     ?assertNot(beamtalk_announcements:is_active(SubRef)),
                     ?assertEqual([], beamtalk_announcements:subscribers_of('RearmEvent'))
                 after
-                    catch stop_subscriber(Sub),
+                    try
+                        stop_subscriber(Sub)
+                    catch
+                        _:_ -> ok
+                    end,
                     clear_all_subscriptions()
                 end
             after
@@ -1618,7 +1638,11 @@ build_hierarchy() ->
 %% created the table.
 setup_with_dispatch() ->
     Pid = setup(),
-    catch beamtalk_extensions:init(),
+    try
+        beamtalk_extensions:init()
+    catch
+        _:_ -> ok
+    end,
     Pid.
 
 %% Spawn an idle process to act as the subscriber pid for synchronous-path tests.
@@ -1677,8 +1701,16 @@ stop_existing_bus() ->
             end
     end,
     %% Delete any leftover tables so they get recreated with the correct heir.
-    catch ets:delete(beamtalk_announcement_subs),
-    catch ets:delete(beamtalk_announcement_by_class),
+    try
+        ets:delete(beamtalk_announcement_subs)
+    catch
+        _:_ -> ok
+    end,
+    try
+        ets:delete(beamtalk_announcement_by_class)
+    catch
+        _:_ -> ok
+    end,
     ok.
 
 %% Ensure the real `beamtalk_ets_heir` process (BT-3787) is running so the bus's
@@ -1817,7 +1849,11 @@ unrelated_subscription_no_superclass_walk_test_() ->
                     meck:unload(beamtalk_class_metadata)
                 end
             after
-                catch beamtalk_class_metadata:delete('ClassLoaded'),
+                try
+                    beamtalk_class_metadata:delete('ClassLoaded')
+                catch
+                    _:_ -> ok
+                end,
                 stop_subscriber(Sub)
             end
         end)

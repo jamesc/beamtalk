@@ -601,7 +601,11 @@ mirror_read_without_snapshot_row_unreachable_test() ->
                 )
             end)
         after
-            catch stop_fake_class(Pid)
+            try
+                stop_fake_class(Pid)
+            catch
+                _:_ -> ok
+            end
         end
     end).
 
@@ -621,7 +625,11 @@ mirror_read_with_dead_class_unreachable_test() ->
                 )
             end)
         after
-            catch stop_fake_class(Pid)
+            try
+                stop_fake_class(Pid)
+            catch
+                _:_ -> ok
+            end
         end
     end).
 
@@ -654,7 +662,11 @@ with_snapshot_resolves_after_restart_test() ->
                 end
             end)
         after
-            catch stop_fake_class(Pid1)
+            try
+                stop_fake_class(Pid1)
+            catch
+                _:_ -> ok
+            end
         end
     end).
 

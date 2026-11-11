@@ -2560,8 +2560,16 @@ stop_class_actors_with_registry_test_() ->
                             undefined, beamtalk_class_registry:whereis_class(ClassName)
                         )
                     after
-                        catch exit(Registry, kill),
-                        catch exit(ActorPid, kill)
+                        try
+                            exit(Registry, kill)
+                        catch
+                            _:_ -> ok
+                        end,
+                        try
+                            exit(ActorPid, kill)
+                        catch
+                            _:_ -> ok
+                        end
                     end
                 end)
             end)
@@ -2625,8 +2633,16 @@ classremovefromsystembyname_with_class_spawned_actor_test_() ->
                         ?assertEqual(undefined, beamtalk_class_registry:whereis_class(ClassName)),
                         ?assertNot(is_process_alive(ActorPid))
                     after
-                        catch exit(Registry, kill),
-                        catch exit(ActorPid, kill)
+                        try
+                            exit(Registry, kill)
+                        catch
+                            _:_ -> ok
+                        end,
+                        try
+                            exit(ActorPid, kill)
+                        catch
+                            _:_ -> ok
+                        end
                     end
                 end)
             end)
@@ -2726,7 +2742,11 @@ stub_registry_loop(ClassName, ActorPid) ->
             gen_server:reply(From, [#{pid => ActorPid, class => ClassName}]),
             stub_registry_loop(ClassName, ActorPid);
         {'$gen_call', From, {kill, Pid}} ->
-            catch exit(Pid, kill),
+            try
+                exit(Pid, kill)
+            catch
+                _:_ -> ok
+            end,
             gen_server:reply(From, ok),
             stub_registry_loop(ClassName, ActorPid);
         _ ->
@@ -2924,7 +2944,11 @@ class_remove_selector_absent_raises_selector_not_found_test_() ->
                         )
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -2950,7 +2974,11 @@ class_remove_selector_extension_instance_side_test_() ->
                     ?assertEqual(ClassObj, Result),
                     ?assertNot(beamtalk_extensions:has(ClassName, 'extensionMethod3186'))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -2970,7 +2998,11 @@ class_remove_selector_if_absent_block_called_test_() ->
                     ),
                     ?assertEqual(block_was_called, Result)
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -2995,7 +3027,11 @@ class_remove_selector_if_absent_extension_hit_returns_self_test_() ->
                     ?assertEqual(ClassObj, Result),
                     ?assertNot(beamtalk_extensions:has(ClassName, 'extMethod3186'))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -3028,7 +3064,11 @@ class_remove_selector_class_side_extension_test_() ->
                     ?assertEqual(MetaObj, Result),
                     ?assertNot(beamtalk_extensions:has(ClassEtsKey, 'classExtMethod3186'))
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -3053,7 +3093,11 @@ class_remove_selector_local_method_no_workspace_raises_no_workspace_test_() ->
                         )
                     )
                 after
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -3117,7 +3161,11 @@ class_remove_selector_protocol_provided_refused_test_() ->
                     ?assert(beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'maxOf:'))
                 after
                     beamtalk_xref:purge_class(ClassName),
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]
@@ -3197,7 +3245,11 @@ class_rename_selector_protocol_provided_refused_test_() ->
                     )
                 after
                     beamtalk_xref:purge_class(ClassName),
-                    catch gen_server:stop(Pid, normal, 5000)
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
                 end
             end)
         ]

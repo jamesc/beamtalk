@@ -1200,7 +1200,7 @@ collect_port(Port, Acc) ->
         {Port, {exit_status, Status}} -> {Status, unicode:characters_to_list(iolist_to_binary(lists:reverse(Acc)))}
     after ?CLI_TIMEOUT_MS ->
         kill_port_os_process(Port),
-        catch port_close(Port),
+        try port_close(Port) catch _:_ -> ok end,
         {timeout, unicode:characters_to_list(iolist_to_binary(lists:reverse(Acc)))}
     end.
 
