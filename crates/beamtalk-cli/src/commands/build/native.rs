@@ -652,7 +652,8 @@ fn record_manifest_reference(pkg: &mut NativePackageLock, native_deps: &NativeDe
 
 /// Test-only environment variable (BT-4582): base URL of a local hex
 /// repository that replaces `repo.hex.pm` in the generated `rebar.config`.
-/// The repository need not be signed; verification is disabled for it.
+/// The repository need not be signed; verification is disabled for it, so
+/// only debug builds honour it.
 const TEST_HEX_REPO_URL_ENV: &str = "BEAMTALK_TEST_HEX_REPO_URL";
 
 /// Generate a `rebar.config` file for compiling native dependencies.
@@ -722,7 +723,14 @@ pub(crate) fn generate_rebar_config(
 
     // Test-only: point the default `hexpm` repo at a local, unsigned hex
     // repository so end-to-end tests run offline (BT-4582).
-    if let Ok(url) = std::env::var(TEST_HEX_REPO_URL_ENV) {
+    // Debug builds only: the hook disables signature verification, so
+    // shipped (release) binaries must not honour it.
+    let test_repo_url = if cfg!(debug_assertions) {
+        std::env::var(TEST_HEX_REPO_URL_ENV).ok()
+    } else {
+        None
+    };
+    if let Some(url) = test_repo_url {
         if !url.is_empty() {
             use crate::beam_compiler::escape_erlang_string;
             let _ = writeln!(
