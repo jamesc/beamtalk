@@ -630,13 +630,20 @@ impl CoreErlangGenerator {
                     "'$beamtalk_class' => ",
                     leaf::atom(class_name.clone()),
                 ]);
+                // BT-4591: defaults that run code are bound in source order.
+                let exprs: Vec<&Expression> = class
+                    .state
+                    .iter()
+                    .filter_map(|field| field.default_value.as_ref())
+                    .collect();
+                let (prelude, docs) = self.thread_default_values(&exprs)?;
+                let mut docs = docs.into_iter();
                 for field in &class.state {
-                    let default_code: Document<'static> =
-                        if let Some(default_value) = &field.default_value {
-                            self.expression_doc(default_value)?
-                        } else {
-                            leaf::atom("nil")
-                        };
+                    let default_code: Document<'static> = if field.default_value.is_some() {
+                        docs.next().expect("one threaded document per default")
+                    } else {
+                        leaf::atom("nil")
+                    };
                     own_field_parts.push(docvec![
                         leaf::atom(field.name.name.clone()),
                         " => ",
@@ -648,7 +655,9 @@ impl CoreErlangGenerator {
                     "    let ParentState = call ",
                     leaf::atom(super_mod),
                     ":'new'() in\n",
-                    "    call 'maps':'merge'(ParentState, ~{",
+                    "    ",
+                    prelude,
+                    "call 'maps':'merge'(ParentState, ~{",
                     join(own_field_parts, &Document::Str(", ")),
                     "}~)\n",
                     "\n",
@@ -659,11 +668,18 @@ impl CoreErlangGenerator {
         // Direct Value subclass: build a flat map with all own fields.
         let mut field_parts: Vec<Document<'static>> = Vec::new();
 
-        // Add each field with its default value
+        // Add each field with its default value. BT-4591: defaults that run
+        // code are bound in source order ahead of the map.
+        let exprs: Vec<&Expression> = class
+            .state
+            .iter()
+            .filter_map(|field| field.default_value.as_ref())
+            .collect();
+        let (prelude, docs) = self.thread_default_values(&exprs)?;
+        let mut docs = docs.into_iter();
         for field in &class.state {
-            let default_code: Document<'static> = if let Some(default_value) = &field.default_value
-            {
-                self.expression_doc(default_value)?
+            let default_code: Document<'static> = if field.default_value.is_some() {
+                docs.next().expect("one threaded document per default")
             } else {
                 leaf::atom("nil")
             };
@@ -677,7 +693,9 @@ impl CoreErlangGenerator {
 
         Ok(docvec![
             "'new'/0 = fun () ->\n",
-            "    ~{'$beamtalk_class' => '",
+            "    ",
+            prelude,
+            "~{'$beamtalk_class' => '",
             leaf::var(class_name),
             "'",
             concat(field_parts),

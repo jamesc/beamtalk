@@ -20,8 +20,9 @@
 //! evaluating it may run code. A `fun` body does not run when the closure is
 //! built, so it does not count. Patterns and guards are skipped.
 //!
-//! The driver runs it on every generated module in debug builds
-//! (`generate_module_with_warnings`), so `just test-stdlib`, `just test-bunit`
+//! The driver runs it on every module `generate_module_with_warnings` generates
+//! in debug builds (the REPL assembler drives its own generator and is not
+//! scanned), so `just test-stdlib`, `just test-bunit`
 //! and every codegen unit test — the `verify-threaded-ir` corpus — fail on a
 //! reintroduced in-place builder.
 
@@ -29,8 +30,10 @@ use super::threaded_ir::{RacingConstruct, VerifyError};
 
 /// The racing operand lists of Core Erlang `code`: one finding per list cell or
 /// map literal with two or more operands that may run code. Empty for a module
-/// whose operand lists are all sequenced (or that the scanner cannot read —
-/// the scan never invents a finding from text it does not understand).
+/// whose operand lists are all sequenced. The scan is a heuristic over the
+/// printed text: if the parser falls out of step with the Core Erlang grammar
+/// it can report a finding that is not there — a loud failure in debug builds,
+/// never a silent miss of the shapes it understands.
 pub(super) fn racing_operand_errors(code: &str) -> Vec<VerifyError> {
     let (tokens, starts) = tokenize(code);
     let mut scan = Scan {
@@ -216,6 +219,14 @@ fn is_pure_projection(module: Option<&str>, function: Option<&str>) -> bool {
     )
 }
 
+/// What evaluating an expression does: nothing observable, a read of mutable
+/// process state (the class-variable lookup `case erlang:get(Key) of ..`), or
+/// arbitrary code. Ordered, so a combination is the `max` of its parts.
+type Effect = u8;
+const QUIET: Effect = 0;
+const READS: Effect = 1;
+const RUNS: Effect = 2;
+
 struct Scan<'a> {
     code: &'a str,
     /// The byte offset of each token in `code`.
@@ -321,10 +332,10 @@ impl Scan<'_> {
 
     /// A comma-separated expression list closed by `close`; whether any may run
     /// code.
-    fn expr_list(&mut self, close: &str) -> bool {
-        let mut runs = false;
+    fn expr_list(&mut self, close: &str) -> Effect {
+        let mut runs = QUIET;
         while self.peek().is_some() && !self.at_punct(close) {
-            runs |= self.expr();
+            runs = runs.max(self.expr());
             if !self.eat_punct(",") && !self.at_punct(close) {
                 break;
             }
@@ -335,8 +346,11 @@ impl Scan<'_> {
 
     /// Records a finding for a list or map holding `racing` operands that may
     /// run code.
-    fn note(&mut self, construct: RacingConstruct, racing: usize, open: usize) {
-        if racing >= 2 {
+    fn note(&mut self, construct: RacingConstruct, effects: &[Effect], open: usize) {
+        let racing = effects.iter().filter(|e| **e >= READS).count();
+        // A read races only a sibling that runs code: two reads cannot disturb
+        // each other.
+        if racing >= 2 && effects.contains(&RUNS) {
             let from = self.starts.get(open).copied().unwrap_or(0);
             let snippet: String = self.code[from..].chars().take(240).collect();
             self.found.push(VerifyError::RacingOperands {
@@ -350,9 +364,9 @@ impl Scan<'_> {
 
     /// Parses one expression; whether evaluating it may run code.
     #[allow(clippy::too_many_lines)] // one arm per Core Erlang form
-    fn expr(&mut self) -> bool {
+    fn expr(&mut self) -> Effect {
         let Some(tok) = self.bump() else {
-            return false;
+            return QUIET;
         };
         match tok {
             Tok::Atom(_) => {
@@ -360,7 +374,7 @@ impl Scan<'_> {
                 if self.at_punct("/") {
                     self.at += 2;
                 }
-                false
+                QUIET
             }
             Tok::Word(w) => match w.as_str() {
                 "let" => {
@@ -368,8 +382,7 @@ impl Scan<'_> {
                     self.eat_punct("=");
                     let bound = self.expr();
                     self.eat_word("in");
-                    let body = self.expr();
-                    bound | body
+                    bound.max(self.expr())
                 }
                 "letrec" => {
                     while matches!(self.peek(), Some(Tok::Atom(_))) {
@@ -387,19 +400,27 @@ impl Scan<'_> {
                     // A class reference (`case whereis('beamtalk_class_X') of
                     // undefined -> raise class_not_found; Pid -> Pid`) runs no
                     // user code, and `is_trivial_subexpr` treats the operand as
-                    // one that races with nothing.
-                    let class_lookup = self.at_class_lookup();
+                    // one that races with nothing. A class variable read
+                    // (`case erlang:get(Key) of ..`) reads mutable process
+                    // state: it races a sibling that runs code, not another read.
+                    let own = if self.at_call_to("erlang", "whereis") {
+                        Some(QUIET)
+                    } else if self.at_call_to("erlang", "get") {
+                        Some(READS)
+                    } else {
+                        None
+                    };
                     let scrutinee = self.expr();
                     self.eat_word("of");
                     let clauses = self.clauses("end");
-                    !class_lookup && (scrutinee | clauses)
+                    own.unwrap_or_else(|| scrutinee.max(clauses))
                 }
                 "receive" => {
                     let clauses = self.clauses("after");
                     self.eat_word("after");
                     let timeout = self.expr();
                     self.eat_punct("->");
-                    clauses | timeout | self.expr()
+                    clauses.max(timeout).max(self.expr())
                 }
                 "try" => {
                     let body = self.expr();
@@ -410,7 +431,7 @@ impl Scan<'_> {
                     self.eat_word("catch");
                     self.skip_pattern();
                     self.eat_punct("->");
-                    body | ok | self.expr()
+                    body.max(ok).max(self.expr())
                 }
                 "fun" => {
                     if self.at_punct("(") {
@@ -419,11 +440,11 @@ impl Scan<'_> {
                     self.eat_punct("->");
                     // The body runs when the closure is called, not built.
                     self.expr();
-                    false
+                    QUIET
                 }
                 "do" => {
                     let first = self.expr();
-                    first | self.expr()
+                    first.max(self.expr())
                 }
                 "catch" => self.expr(),
                 "call" => {
@@ -438,20 +459,24 @@ impl Scan<'_> {
                     // reads nothing a sibling can change and changes nothing a
                     // sibling reads, so its position among the operands is
                     // unobservable.
-                    !(atomic && is_pure_projection(module.as_deref(), function.as_deref()))
+                    if atomic && is_pure_projection(module.as_deref(), function.as_deref()) {
+                        QUIET
+                    } else {
+                        RUNS
+                    }
                 }
                 "apply" => {
                     self.expr_operand();
                     self.call_args();
-                    true
+                    RUNS
                 }
                 "primop" => {
                     self.bump();
                     self.call_args();
-                    true
+                    RUNS
                 }
                 // A variable (or an unknown word): reads, runs nothing.
-                _ => false,
+                _ => QUIET,
             },
             Tok::Punct("(") => {
                 let runs = self.expr();
@@ -465,44 +490,44 @@ impl Scan<'_> {
             Tok::Punct("{") => self.expr_list("}"),
             Tok::Punct("[") => {
                 let open = self.at - 1;
-                let mut racing = 0;
+                let mut effects = Vec::new();
                 while self.peek().is_some() && !self.at_punct("]") {
-                    racing += usize::from(self.expr());
+                    effects.push(self.expr());
                     if !(self.eat_punct(",") || self.eat_punct("|")) {
                         break;
                     }
                 }
                 self.eat_punct("]");
-                self.note(RacingConstruct::ListCell, racing, open);
-                racing > 0
+                self.note(RacingConstruct::ListCell, &effects, open);
+                effects.into_iter().max().unwrap_or(QUIET)
             }
             Tok::Punct("~{") => {
                 let open = self.at - 1;
-                let mut racing = 0;
+                let mut effects = Vec::new();
                 while self.peek().is_some() && !self.at_punct("}~") {
-                    racing += usize::from(self.expr());
+                    effects.push(self.expr());
                     if self.eat_punct("=>") || self.eat_punct(":=") {
-                        racing += usize::from(self.expr());
+                        effects.push(self.expr());
                     }
                     if !(self.eat_punct(",") || self.eat_punct("|")) {
                         break;
                     }
                 }
                 self.eat_punct("}~");
-                self.note(RacingConstruct::MapLiteral, racing, open);
-                racing > 0
+                self.note(RacingConstruct::MapLiteral, &effects, open);
+                effects.into_iter().max().unwrap_or(QUIET)
             }
             Tok::Punct("#{") => {
                 // Binary segments: `#<Value>(Size, Unit, Type, Flags)`.
-                let mut runs = false;
+                let mut runs = QUIET;
                 while self.peek().is_some() && !self.at_punct("}#") {
                     self.eat_punct("#");
                     if self.eat_punct("<") {
-                        runs |= self.expr();
+                        runs = runs.max(self.expr());
                         self.eat_punct(">");
                     }
                     if self.eat_punct("(") {
-                        runs |= self.expr_list(")");
+                        runs = runs.max(self.expr_list(")"));
                     }
                     if !self.eat_punct(",") {
                         break;
@@ -511,7 +536,7 @@ impl Scan<'_> {
                 self.eat_punct("}#");
                 runs
             }
-            Tok::Lit | Tok::Punct(_) => false,
+            Tok::Lit | Tok::Punct(_) => QUIET,
         }
     }
 
@@ -522,8 +547,8 @@ impl Scan<'_> {
         self.expr();
     }
 
-    /// Whether the cursor is at `call 'erlang':'whereis'(...)`.
-    fn at_class_lookup(&self) -> bool {
+    /// Whether the cursor is at `call '<module>':'<function>'(...)`.
+    fn at_call_to(&self, module: &str, function: &str) -> bool {
         matches!(
             self.tokens.get(self.at..self.at + 4),
             Some([
@@ -531,7 +556,7 @@ impl Scan<'_> {
                 Tok::Atom(m),
                 Tok::Punct(":"),
                 Tok::Atom(f)
-            ]) if c == "call" && m == "erlang" && f == "whereis"
+            ]) if c == "call" && m == module && f == function
         )
     }
 
@@ -576,8 +601,8 @@ impl Scan<'_> {
 
     /// A clause list up to (and including) the word `end`/`after` that closes
     /// it; whether any body may run code. Patterns and guards are skipped.
-    fn clauses(&mut self, end: &str) -> bool {
-        let mut runs = false;
+    fn clauses(&mut self, end: &str) -> Effect {
+        let mut runs = QUIET;
         while self.peek().is_some() && !self.at_word(end) {
             self.skip_pattern();
             if self.eat_word("when") {
@@ -586,7 +611,7 @@ impl Scan<'_> {
             if !self.eat_punct("->") {
                 break;
             }
-            runs |= self.expr();
+            runs = runs.max(self.expr());
         }
         if end == "end" {
             self.eat_word("end");
@@ -653,6 +678,19 @@ mod tests {
         let code =
             module("[call 'erlang':'element'(1, A), call 'erlang':'element'(1, call 'm':'f'(B))]");
         assert!(found(&code).is_empty(), "one real call, one projection");
+    }
+
+    #[test]
+    fn a_process_state_read_races_a_call_but_not_another_read() {
+        let read =
+            "case call 'erlang':'get'(K) of <M> when 'true' -> call 'maps':'find'('n', M) end";
+        let code = module(&format!("[{read}, {read}]"));
+        assert!(
+            found(&code).is_empty(),
+            "two reads cannot disturb each other"
+        );
+        let code = module(&format!("[call 'm':'send'(X), {read}]"));
+        assert_eq!(found(&code), vec![(RacingConstruct::ListCell, 2)]);
     }
 
     #[test]

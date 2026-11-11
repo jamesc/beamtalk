@@ -26,11 +26,26 @@ pub(in crate::core_erlang) struct StateFieldInits {
 }
 
 impl CoreErlangGenerator {
-    /// BT-4591: the map entries for `states`' defaults. A map literal's pairs
-    /// evaluate in unspecified order (erlc runs the last first), and a default
-    /// is an arbitrary expression, so two defaults that send messages are
-    /// bound to temps in source order through `thread_subexprs` and the map
-    /// holds only their variables.
+    /// BT-4591: sequences the default-value expressions of one map literal.
+    /// A map literal's pairs evaluate in unspecified order (erlc runs the last
+    /// first), and a default is an arbitrary expression, so two defaults that
+    /// send messages are bound to temps in source order through
+    /// `thread_subexprs` and the map holds only their variables.
+    ///
+    /// Returns the prelude (`let FieldDefaultN = <default> in `, empty when at
+    /// most one default can run code), which the caller places directly before
+    /// the map, and one value document per present default, in order. The one
+    /// helper every default-map builder uses: an actor's `init/1`, a Value
+    /// class's `new/0`, and the `classState:` initial values.
+    pub(in crate::core_erlang) fn thread_default_values(
+        &mut self,
+        defaults: &[&Expression],
+    ) -> Result<(Document<'static>, Vec<Document<'static>>)> {
+        let (prelude, docs) = self.thread_subexprs(defaults, "FieldDefault")?;
+        Ok((self.threaded_prelude_doc(&prelude), docs))
+    }
+
+    /// The map entries for `states`' defaults — see [`Self::thread_default_values`].
     fn state_field_inits(
         &mut self,
         mut leading: Vec<Document<'static>>,
@@ -40,7 +55,7 @@ impl CoreErlangGenerator {
             .iter()
             .filter_map(|state| state.default_value.as_ref())
             .collect();
-        let (prelude, docs) = self.thread_subexprs(&exprs, "FieldDefault")?;
+        let (prelude, docs) = self.thread_default_values(&exprs)?;
         let mut docs = docs.into_iter();
         for state in states {
             let value_code = if state.default_value.is_some() {
@@ -55,7 +70,7 @@ impl CoreErlangGenerator {
             ]);
         }
         Ok(StateFieldInits {
-            prelude: self.threaded_prelude_doc(&prelude),
+            prelude,
             fields: leading,
         })
     }

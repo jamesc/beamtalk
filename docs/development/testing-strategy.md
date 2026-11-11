@@ -614,7 +614,8 @@ spawn_zero_uses_default_state_test() ->
 
 Core Erlang leaves operand evaluation order unspecified: erlc evaluates a list
 cell's tail before its head and a map literal's last pair first. In debug
-builds the codegen driver scans every module it generates
+builds the codegen driver (`generate_module_with_warnings`; the REPL assembler
+drives its own generator and is not scanned) scans every module it generates
 (`core_erlang/operand_order_check.rs`) and reports a `RacingOperands`
 verifier finding for any list cell or map literal holding two or more operands
 that can run code (a `call`/`apply`/`primop`, not a variable or literal; pure

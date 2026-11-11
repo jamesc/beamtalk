@@ -75,3 +75,45 @@ fn field_defaults_and_class_variable_reads_are_sequenced() {
     let code = codegen(class_var);
     assert!(code.contains("_ArrLit@"), "{code}");
 }
+
+/// Value `field:` (direct and chained-parent `new/0`) and `classState:`
+/// defaults that send messages compile clean and are bound in source order.
+#[test]
+fn value_and_class_state_defaults_are_sequenced() {
+    for (name, src) in [
+        (
+            "value",
+            "Value subclass: P\n  field: a = Set new\n  field: b = Set new\n",
+        ),
+        (
+            "object classState",
+            "Object subclass: Q\n  classState: x = Set new\n  classState: y = Set new\n",
+        ),
+        (
+            "actor classState",
+            "Actor subclass: R\n  state: n = 0\n  classState: x = Set new\n  classState: y = Set new\n",
+        ),
+    ] {
+        assert_eq!(verifier_report(src, None), None, "{name}");
+        assert!(codegen(src).contains("_FieldDefault@"), "{name}");
+    }
+}
+
+/// Two class variable reads cannot disturb each other; one next to a send can.
+#[test]
+fn class_variable_reads_race_only_alongside_a_send() {
+    let src = "Object subclass: C\n  classState: a = 0\n  classState: b = 0\n  class both => #[self.a, self.b]\n  class mixed: xs => #[xs last, self.a]\n";
+    let code = codegen(src);
+    let both = code.split("\n'class_both'/").nth(1).expect("both");
+    let both = &both[..both.find("\n\n").unwrap_or(both.len())];
+    assert!(
+        !both.contains("_ArrLit@"),
+        "two reads need no temp:\n{both}"
+    );
+    let mixed = code.split("\n'class_mixed:'/").nth(1).expect("mixed");
+    let mixed = &mixed[..mixed.find("\n\n").unwrap_or(mixed.len())];
+    assert!(
+        mixed.contains("_ArrLit@"),
+        "a read beside a send needs one:\n{mixed}"
+    );
+}
