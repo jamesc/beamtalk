@@ -84,6 +84,10 @@ start(_StartType, _StartArgs) ->
     %% interactive workspace. Installed before any user code can run.
     ok = beamtalk_logging_config:install_transcript_handler(),
 
+    %% BT-4666: redact declared actor secrets in `proc_lib` crash reports,
+    %% which do not go through an actor's format_status/1.
+    ok = beamtalk_actor_redaction:install_crash_report_filter(),
+
     %% Start the runtime supervisor tree (which starts beamtalk_bootstrap, beamtalk_stdlib,
     %% and beamtalk_object_instances; pg is conditionally started inside beamtalk_bootstrap:init/1)
     case beamtalk_runtime_sup:start_link() of
@@ -158,4 +162,4 @@ verify_metaclass_self_grounding() ->
 -doc "Stop the Beamtalk runtime application.".
 -spec stop(term()) -> ok.
 stop(_State) ->
-    ok.
+    beamtalk_actor_redaction:remove_crash_report_filter().

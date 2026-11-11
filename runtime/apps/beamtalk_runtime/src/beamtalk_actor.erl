@@ -220,12 +220,6 @@ handle_getValue([], State) ->
 %% apply_pending_actions/1 once the current gen_server callback returns.
 -define(PENDING_STOP_KEY, '$bt_pending_stop').
 
-%% BT-3968: process-dictionary key holding the deferred continuation queue
-%% (`self continueWith: #sel` from inside a method) as a *reversed* list of
-%% `{Selector, Args}`, consumed by apply_pending_actions/1 once the current
-%% gen_server callback returns — it becomes OTP's `{continue, _}` action.
--define(PENDING_CONTINUE_KEY, '$bt_pending_continue').
-
 %% BT-4113: marker written alongside either pending-action key above, so the
 %% per-callback clear_pending_actions/0 and apply_pending_actions/1 read one
 %% key, not two, in the common case where a method requested neither.

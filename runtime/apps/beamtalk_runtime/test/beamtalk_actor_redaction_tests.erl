@@ -260,3 +260,102 @@ compiled_actor_crash_report_redacts_test() ->
     after
         logger:remove_handler(HandlerId)
     end.
+
+%%% ----------------------------------------------------------------------
+%%% proc_lib crash report filter (BT-4666)
+%%% ----------------------------------------------------------------------
+
+%% A `{proc_lib, crash}` log event as proc_lib:crash_report/4 builds it.
+crash_event(InitialCall, Messages, Dict) ->
+    Info = [
+        {initial_call, InitialCall},
+        {pid, self()},
+        {error_info, {error, boom, []}},
+        {messages, Messages},
+        {dictionary, Dict}
+    ],
+    #{
+        level => error,
+        msg => {report, #{label => {proc_lib, crash}, report => [Info, []]}},
+        meta => #{}
+    }.
+
+crash_info(#{msg := {report, #{report := [Info, _Linked]}}}) ->
+    Info.
+
+crash_filter_redacts_queued_secret_sends_test() ->
+    Call = {'$gen_call', {self(), tag}, {'login:', [pw], #{}}},
+    Other = {'$gen_call', {self(), tag2}, {count, [], #{}}},
+    Event = crash_event({?MODULE, init, ['Argument__1']}, [Call, Other, stray], []),
+    Info = crash_info(beamtalk_actor_redaction:crash_report_filter(Event, [])),
+    ?assertEqual(
+        [{'$gen_call', {self(), tag}, {'login:', ?R, #{}}}, Other, stray],
+        proplists:get_value(messages, Info)
+    ).
+
+crash_filter_redacts_pending_continuations_test() ->
+    Pending = {'$bt_pending_continue', [{'login:', [pw]}, {count, []}]},
+    Event = crash_event({?MODULE, init, ['Argument__1']}, [], [Pending, {other, kept}]),
+    Info = crash_info(beamtalk_actor_redaction:crash_report_filter(Event, [])),
+    ?assertEqual(
+        [{'$bt_pending_continue', [{'login:', ?R}, {count, []}]}, {other, kept}],
+        proplists:get_value(dictionary, Info)
+    ).
+
+crash_filter_ignores_non_actor_processes_test() ->
+    Event = crash_event({some_server, init, ['Argument__1']}, [{'login:', [pw], #{}}], []),
+    ?assertEqual(ignore, beamtalk_actor_redaction:crash_report_filter(Event, [])).
+
+crash_filter_ignores_other_events_test() ->
+    Event = #{level => error, msg => {string, "hello"}, meta => #{}},
+    ?assertEqual(ignore, beamtalk_actor_redaction:crash_report_filter(Event, [])).
+
+crash_filter_fails_closed_test() ->
+    ok = meck:new(bt4666_broken_actor, [non_strict]),
+    try
+        ok = meck:expect(bt4666_broken_actor, '__beamtalk_secrets', fun() -> error(boom) end),
+        Event = crash_event({bt4666_broken_actor, init, ['Argument__1']}, [m], [{k, v}]),
+        Info = crash_info(beamtalk_actor_redaction:crash_report_filter(Event, [])),
+        ?assertEqual(?R, proplists:get_value(messages, Info)),
+        ?assertEqual(?R, proplists:get_value(dictionary, Info)),
+        ?assertMatch({error, boom, _}, proplists:get_value(error_info, Info))
+    after
+        meck:unload(bt4666_broken_actor)
+    end.
+
+compiled_actor_proc_lib_report_redacts_queued_send_test() ->
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    HandlerId = bt4666_compiled_capture,
+    ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{pid => self()}}),
+    Pid = element(4, 'bt@secret_vault_actor':spawn()),
+    MRef = monitor(process, Pid),
+    try
+        %% Queue a secret call behind the cast that crashes the actor, so it
+        %% is still in the mailbox when proc_lib writes its crash report.
+        true = erlang:suspend_process(Pid),
+        gen_server:cast(Pid, {cast, 'explode:', [1], #{}}),
+        Pid ! {'$gen_call', {self(), make_ref()}, {'unlock:', [31337], #{}}},
+        true = erlang:resume_process(Pid),
+        receive
+            {'DOWN', MRef, process, Pid, _} -> ok
+        after 5000 -> error(no_crash)
+        end,
+        Info = await_proc_lib_report(Pid),
+        Messages = proplists:get_value(messages, Info),
+        ?assertMatch([{'$gen_call', _, {'unlock:', ?R, _}}], Messages),
+        ?assertEqual(nomatch, string:find(lists:flatten(io_lib:format("~p", [Info])), "31337"))
+    after
+        logger:remove_handler(HandlerId)
+    end.
+
+await_proc_lib_report(Pid) ->
+    receive
+        {captured_log, #{msg := {report, #{label := {proc_lib, crash}, report := [Info, _]}}}} ->
+            case proplists:get_value(pid, Info) of
+                Pid -> Info;
+                _ -> await_proc_lib_report(Pid)
+            end;
+        {captured_log, _Other} ->
+            await_proc_lib_report(Pid)
+    after 5000 -> error(no_proc_lib_report)
+    end.

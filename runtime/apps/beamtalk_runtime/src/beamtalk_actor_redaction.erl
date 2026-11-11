@@ -37,9 +37,12 @@ by `gen_server`'s crash report (keys `state`, `message`, `reason`, `log`).
 - `reason` is left as is.
 
 A crashing actor also gets a `proc_lib` crash report, which does not go
-through `format_status/1`: its `messages` (the mailbox, so any secret send
-still queued) and `dictionary` (including pending `continueWith:` arguments)
-are raw. `sys:get_state/1`, `sys:replace_state/2`, `sys:log(Pid, get)`,
+through `format_status/1`. The logger primary filter crash_report_filter/2
+(installed when the runtime starts, BT-4666) redacts it instead: secret
+sends still queued in its `messages` (the mailbox) and secret-selector
+entries in the pending `continueWith:` queue in its `dictionary`.
+
+`sys:get_state/1`, `sys:replace_state/2`, `sys:log(Pid, get)`,
 `sys:log(Pid, print)` and `sys:trace/2` do not go through `format_status/1`
 (OTP gives them no hook), so they show raw values. Neither do the raw
 process dictionary and `Debug` terms `sys:get_status/1` returns next to the
@@ -67,8 +70,12 @@ A `perform:` send naming a secret selector, at any depth of nested
 -include("beamtalk.hrl").
 
 -export([format_status/2, merge_secrets/3, redacted/0]).
+-export([install_crash_report_filter/0, remove_crash_report_filter/0, crash_report_filter/2]).
 
 -define(REDACTED, <<"[redacted]">>).
+
+%% BT-4666: the logger primary filter that redacts `proc_lib` crash reports.
+-define(CRASH_FILTER_ID, beamtalk_actor_secrets).
 
 -type secrets() :: {Slots :: [atom()], Selectors :: [atom()]}.
 -export_type([secrets/0]).
@@ -133,6 +140,113 @@ fail_closed(Status) ->
         end,
         Status
     ).
+
+%%% proc_lib crash reports (BT-4666)
+
+-doc """
+Install the logger primary filter that redacts the `proc_lib` crash report
+of a crashing actor (see crash_report_filter/2). Called once when the
+runtime application starts; installing it again is a no-op.
+""".
+-spec install_crash_report_filter() -> ok.
+install_crash_report_filter() ->
+    case logger:add_primary_filter(?CRASH_FILTER_ID, {fun ?MODULE:crash_report_filter/2, []}) of
+        ok -> ok;
+        {error, {already_exist, _}} -> ok
+    end.
+
+-doc "Remove the filter install_crash_report_filter/0 installed.".
+-spec remove_crash_report_filter() -> ok.
+remove_crash_report_filter() ->
+    _ = logger:remove_primary_filter(?CRASH_FILTER_ID),
+    ok.
+
+-doc """
+Logger primary filter for the `proc_lib` crash report (`label =>
+{proc_lib, crash}`) that OTP writes when a process crashes. That report does
+not go through `format_status/1`: it lists the process's mailbox
+(`messages`) and process dictionary (`dictionary`) raw.
+
+For an actor whose class declares `secretSelectors`, a queued send of a
+secret selector keeps its selector but its arguments become
+`<<"[redacted]">>`, as in format_status/2; so do secret-selector entries in
+the pending `continueWith:` queue in the dictionary. The actor is found by
+the report's `initial_call`, `{Module, init, _}`, and its compiled
+`'__beamtalk_secrets'/0`; no user code runs. Any other event, a non-actor
+process, or an actor with no secret selectors passes unchanged.
+
+The filter never raises: logger removes a primary filter that crashes. If
+redacting an actor's report fails, its `messages` and `dictionary` are
+replaced (fail closed).
+""".
+-spec crash_report_filter(logger:log_event(), term()) -> logger:filter_return().
+crash_report_filter(
+    #{msg := {report, #{label := {proc_lib, crash}, report := [Info | Linked]} = Report}} = Event,
+    _Extra
+) when is_list(Info) ->
+    case actor_module(Info) of
+        none ->
+            ignore;
+        Module ->
+            Redacted = redact_crash_info(Module, Info),
+            Event#{msg := {report, Report#{report := [Redacted | Linked]}}}
+    end;
+crash_report_filter(_Event, _Extra) ->
+    ignore.
+
+%% The compiled actor module behind a crash report, from its
+%% `{initial_call, {Module, init, _}}` (gen_server's `'$initial_call'`), or
+%% `none` for a process that is not a loaded Beamtalk actor.
+-spec actor_module(list()) -> module() | none.
+actor_module(Info) ->
+    case lists:keyfind(initial_call, 1, Info) of
+        {initial_call, {Module, init, _}} when is_atom(Module) ->
+            case erlang:function_exported(Module, '__beamtalk_secrets', 0) of
+                true -> Module;
+                false -> none
+            end;
+        _ ->
+            none
+    end.
+
+-spec redact_crash_info(module(), list()) -> list().
+redact_crash_info(Module, Info) ->
+    %% bt-catcher-audit: not-applicable-no-block - '__beamtalk_secrets'/0 is a generated constant getter
+    try
+        case Module:'__beamtalk_secrets'() of
+            {_Slots, []} ->
+                Info;
+            {_Slots, Selectors} when is_list(Selectors) ->
+                [redact_info_item(Item, Selectors) || Item <- Info]
+        end
+    catch
+        _:_ -> fail_closed_info(Info)
+    end.
+
+-spec redact_info_item(term(), [atom()]) -> term().
+redact_info_item({messages, Messages}, Selectors) when is_list(Messages) ->
+    {messages, [redact_msg(Msg, Selectors) || Msg <- Messages]};
+redact_info_item({dictionary, Dict}, Selectors) when is_list(Dict) ->
+    {dictionary, [redact_dict_entry(Entry, Selectors) || Entry <- Dict]};
+redact_info_item(Item, _Selectors) ->
+    Item.
+
+-spec redact_dict_entry(term(), [atom()]) -> term().
+redact_dict_entry({?PENDING_CONTINUE_KEY, Queue}, Selectors) when is_list(Queue) ->
+    {?PENDING_CONTINUE_KEY, [redact_request(Step, Selectors) || Step <- Queue]};
+redact_dict_entry(Entry, _Selectors) ->
+    Entry.
+
+-spec fail_closed_info(list()) -> list().
+fail_closed_info(Info) ->
+    [
+        case Item of
+            {messages, _} -> {messages, ?REDACTED};
+            {dictionary, _} -> {dictionary, ?REDACTED};
+            _ -> Item
+        end
+     || Item <- Info
+    ].
 
 %%% State
 
