@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4319: Actor subclass of Bt4319Animal.
+
+Bt4319Animal subclass: Bt4319Dog
+
+  speak => "woof"

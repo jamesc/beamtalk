@@ -95,6 +95,8 @@ that the Behaviour/Class libraries can rely on.
     objectIsKindOf/2,
     primitiveIsKindOf/2,
     isKindOfBuiltin/3,
+    %% BT-4319: `binding :: Class` match arm on a class with subclasses
+    valueIsKindOfClass/2,
     %% ADR 0036: Metaclass primitives
     metaclassThisClass/1,
     metaclassSuperclass/1,
@@ -984,6 +986,25 @@ primitiveIsKindOf(Receiver, #beamtalk_object{pid = BPid} = Behaviour) when is_pi
     end;
 primitiveIsKindOf(Receiver, Behaviour) ->
     beamtalk_primitive:send(Receiver, 'isKindOf:', [Behaviour]).
+
+-doc """
+Runtime test behind a `binding :: Class` match arm where `Class` has subclasses
+(BT-4319, ADR 0107 Phase B): is `Value`'s class `Class` or a (transitive)
+subclass of it?
+
+Answers `Value isKindOf: Class` for an instance of any representation, from the
+class table (`beamtalk_class_derived_cache:inherits_from/2`), without sending a
+message: a match arm must not run user code or call into a class process. An
+unregistered class name answers `false`.
+
+A future answers `false` without being awaited, so a pending or rejected future
+never blocks or raises inside an arm test (the same as an exact-class arm).
+""".
+-spec valueIsKindOfClass(term(), atom()) -> boolean().
+valueIsKindOfClass({beamtalk_future, _}, Class) when is_atom(Class) ->
+    false;
+valueIsKindOfClass(Value, Class) when is_atom(Class) ->
+    beamtalk_class_derived_cache:inherits_from(beamtalk_primitive:class_of(Value), Class).
 
 -doc """
 `Receiver isKindOf: Behaviour` where `Behaviour` is a class literal the
