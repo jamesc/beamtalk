@@ -740,7 +740,9 @@ chars_to_binary(Chars) ->
 %%% ============================================================================
 %%% Shared system-error constructors (BT-4676)
 %%% ============================================================================
-%%% The hint text for each system error lives here and nowhere else.
+%%% Shared hints for `node_down`, `actor_dead`, `does_not_understand` and the
+%%% actor-send `timeout` live here; `timeout/3` and `stale_handle/3` take the
+%%% hint from the caller.
 
 -doc "A `node_down` error: `Node` is unreachable. The hint is shared by every site.".
 -spec node_down(atom(), atom(), node()) -> #beamtalk_error{}.

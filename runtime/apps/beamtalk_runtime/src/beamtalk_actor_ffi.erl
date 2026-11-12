@@ -1087,8 +1087,10 @@ class_self_to_name_and_module(Other) ->
 -doc """
 ADR 0079: derive a current pid from a `#beamtalk_object{}`
 identity slot. Pid identities pass through unchanged; name-resolving
-proxies look up the current pid via `whereis/1`. Returns a structured
-`no_such_process` error when a proxy's name is not currently registered.
+proxies (`{registered, Name}`, `{registered, Name, Node}`, `{global, Name}`) resolve
+via `beamtalk_actor:resolve_proxy_or_error/2`. Returns a structured
+`no_such_process` error when the name is not currently registered, or
+`node_down` when a node-qualified ref's node is unreachable.
 """.
 -spec proxy_pid(#beamtalk_object{}, atom()) ->
     {ok, pid()} | {error, #beamtalk_error{}}.
@@ -1108,8 +1110,9 @@ proxy_pid(#beamtalk_object{class = ClassName, pid = Other}, Selector) ->
             beamtalk_error:new(type_error, ClassName, Selector),
             beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "proxy_pid/2 expects pid(), {registered, atom()}, or "
-                    "{global, atom()} in #beamtalk_object.pid, got ~tp",
+                    "proxy_pid/2 expects pid(), {registered, atom()}, "
+                    "{registered, atom(), node()}, or {global, atom()} in "
+                    "#beamtalk_object.pid, got ~tp",
                     [Other]
                 )
             )

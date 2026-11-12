@@ -2332,18 +2332,23 @@ proxy_route({_Kind, Name}, registeredName, []) ->
 proxy_route({registered, Name, _Node}, registeredName, []) ->
     {answer, Name};
 proxy_route(Ref, Selector, _Args) ->
-    case resolve_proxy(Ref) of
+    case resolve_or_error(Ref, Selector) of
         {ok, Pid} -> {pid, Pid};
-        undefined -> {error, no_such_process_error(Ref, Selector)};
-        {node_down, Node} -> {error, node_down_error_record(Node, Selector)}
+        {error, _} = Error -> Error
     end.
 
 -doc "The pid a proxy ref currently resolves to, or the structured error (for the FFI's `proxy_pid/2`).".
 -spec resolve_proxy_or_error(proxy_ref(), atom()) -> {ok, pid()} | {error, #beamtalk_error{}}.
 resolve_proxy_or_error(Ref, Selector) ->
-    case proxy_route(Ref, Selector, []) of
-        {pid, Pid} -> {ok, Pid};
-        {error, Error} -> {error, Error}
+    resolve_or_error(Ref, Selector).
+
+%% The one resolve -> structured-error mapping; selector-independent.
+-spec resolve_or_error(proxy_ref(), atom()) -> {ok, pid()} | {error, #beamtalk_error{}}.
+resolve_or_error(Ref, Selector) ->
+    case resolve_proxy(Ref) of
+        {ok, Pid} -> {ok, Pid};
+        undefined -> {error, no_such_process_error(Ref, Selector)};
+        {node_down, Node} -> {error, node_down_error_record(Node, Selector)}
     end.
 
 -spec is_pid_result({ok, pid()} | undefined | {node_down, node()}) -> boolean().
