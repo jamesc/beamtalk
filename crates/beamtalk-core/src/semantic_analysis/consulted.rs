@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Per-file record of the cross-file analysis surface a compilation consulted
-//! (BT-4586, phase 1 of per-file incremental dependency edges).
+//! (BT-4586, phase 1 of per-file incremental dependency edges; the key itself
+//! is BT-4690).
 //!
 //! **DDD Context:** Semantic Analysis
 //!
@@ -15,7 +16,7 @@
 //! - a by-name lookup (`get_class`, `has_class`, protocol/alias lookups, …)
 //!   records that name;
 //! - a whole-collection scan (`class_names`, iteration, "any class …" queries)
-//!   sets [`ConsultedSurface::scanned_all`];
+//!   sets that store's `scanned_*` flag;
 //! - a read that depends on package-level state that is not fully loaded
 //!   (`dependency_extensions_unknown`) sets
 //!   [`ConsultedSurface::extensions_unknown`].
@@ -30,16 +31,18 @@
 //! by hand, since they produce the current file's diagnostics from other
 //! files' entries.
 //!
-//! Known over-recording for phase 2 to narrow: hierarchy construction inside a
-//! file's scope (for example `add_external_superclasses`, which reads every
-//! name of the cross-file superclass index) records those names, and often a
-//! scan. That is a real dependency on the injected index, so it is left
-//! recorded rather than hidden; the surface is only logged in phase 1.
+//! Construction passes that read a store in order to write it
+//! (`add_external_superclasses`, `propagate_cross_file_class_kind`) read
+//! unrecorded: a file observes their effect only through by-name reads, which
+//! are recorded, and the build keys a name on its superclass chain and its
+//! entries in the injected indexes (BT-4690). Codegen's direct-call table is
+//! answered per class on demand for the same reason.
 //!
 //! Recording is thread-local and scoped by [`ConsultedScope`]. With no scope
 //! installed (the REPL and LSP) every hook is a single flag check.
 //!
-//! Phase 1 only records: the result is logged and never used for the cache key.
+//! The build persists each file's surface in the beam-hash sidecar and keys the
+//! file on just that slice of the cross-file surface (BT-4690, `build::surface_key`).
 
 use ecow::EcoString;
 use std::cell::{Cell, RefCell};
@@ -49,12 +52,19 @@ use std::collections::BTreeSet;
 ///
 /// Names are bare class, protocol and alias names, as passed to the lookup
 /// (a name may be absent from the store; an absent lookup still depends on it).
+// Four independent facts about one compile, not a state machine.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConsultedSurface {
     /// Names looked up individually.
     pub names: BTreeSet<EcoString>,
-    /// A whole-collection scan happened: the file depends on the whole surface.
-    pub scanned_all: bool,
+    /// A whole-hierarchy scan of the class map happened: the file depends on
+    /// every class (and extension) signature.
+    pub scanned_classes: bool,
+    /// A scan of the protocol registry happened: the file depends on every protocol.
+    pub scanned_protocols: bool,
+    /// A scan of the alias registry happened: the file depends on every alias.
+    pub scanned_aliases: bool,
     /// An extension-related read happened while dependency extensions were
     /// not all loaded: a later phase must treat the file as depending on everything.
     pub extensions_unknown: bool,
@@ -64,7 +74,13 @@ impl ConsultedSurface {
     /// True when nothing cross-file was consulted.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.names.is_empty() && !self.scanned_all && !self.extensions_unknown
+        self.names.is_empty() && !self.scanned_all() && !self.extensions_unknown
+    }
+
+    /// True when any store was scanned as a whole.
+    #[must_use]
+    pub fn scanned_all(&self) -> bool {
+        self.scanned_classes || self.scanned_protocols || self.scanned_aliases
     }
 }
 
@@ -149,13 +165,25 @@ fn record_name_slow(name: &str) {
     });
 }
 
-/// Record a whole-collection scan. A flag check when no scope is installed.
+/// Which store a whole-collection scan read.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ScanKind {
+    Classes,
+    Protocols,
+    Aliases,
+}
+
+/// Record a whole-collection scan of one store. A flag check when no scope is installed.
 #[inline]
-pub(crate) fn record_scan() {
+pub(crate) fn record_scan(kind: ScanKind) {
     if ACTIVE.with(Cell::get) {
         RECORDER.with(|r| {
             if let Some(s) = r.borrow_mut().as_mut() {
-                s.scanned_all = true;
+                match kind {
+                    ScanKind::Classes => s.scanned_classes = true,
+                    ScanKind::Protocols => s.scanned_protocols = true,
+                    ScanKind::Aliases => s.scanned_aliases = true,
+                }
             }
         });
     }
@@ -183,13 +211,13 @@ mod tests {
         let scope = ConsultedScope::begin();
         record_name("A");
         record_name("A");
-        record_scan();
+        record_scan(ScanKind::Classes);
         let s = scope.finish();
         assert_eq!(
             s.names.iter().map(EcoString::as_str).collect::<Vec<_>>(),
             ["A"]
         );
-        assert!(s.scanned_all);
+        assert!(s.scanned_classes);
         record_name("After");
         assert!(!ACTIVE.with(Cell::get));
     }
@@ -235,7 +263,7 @@ mod tests {
             "supertype {owner} must be recorded: {s:?}"
         );
         assert!(!s.names.contains("Dictionary"), "{s:?}");
-        assert!(!s.scanned_all, "{s:?}");
+        assert!(!s.scanned_all(), "{s:?}");
     }
 
     #[test]
@@ -260,7 +288,7 @@ mod tests {
             let scope = ConsultedScope::begin();
             scan(&hierarchy);
             let s = scope.finish();
-            assert!(s.scanned_all, "{s:?}");
+            assert!(s.scanned_classes, "{s:?}");
             assert!(s.names.is_empty(), "{s:?}");
         }
     }
@@ -292,7 +320,7 @@ mod tests {
         ] {
             assert!(s.names.contains(name), "{name} missing from {s:?}");
         }
-        assert!(!s.scanned_all);
+        assert!(!s.scanned_all());
     }
 
     #[test]
@@ -303,10 +331,10 @@ mod tests {
         let scope = ConsultedScope::begin();
         let _ = protocols.protocols().count();
         let s = scope.finish();
-        assert!(s.scanned_all);
+        assert!(s.scanned_protocols && !s.scanned_classes && !s.scanned_aliases);
         let scope = ConsultedScope::begin();
         let _ = aliases.aliases().count();
-        assert!(scope.finish().scanned_all);
+        assert!(scope.finish().scanned_aliases);
 
         let scope = ConsultedScope::begin();
         let _ = hierarchy.dependency_extensions_unknown();
@@ -329,6 +357,9 @@ mod tests {
         let scope = ConsultedScope::begin();
         let _ = aliases.register_module(&module, &hierarchy, &protocols);
         let s = scope.finish();
-        assert!(s.scanned_all, "the cycle check reads every alias: {s:?}");
+        assert!(
+            s.scanned_aliases,
+            "the cycle check reads every alias: {s:?}"
+        );
     }
 }

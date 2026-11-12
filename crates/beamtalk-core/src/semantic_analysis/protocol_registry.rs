@@ -751,13 +751,17 @@ impl ProtocolRegistry {
 
     /// Returns an iterator over all protocol names in the registry.
     pub fn protocol_names(&self) -> impl Iterator<Item = &EcoString> {
-        crate::semantic_analysis::consulted::record_scan();
+        crate::semantic_analysis::consulted::record_scan(
+            crate::semantic_analysis::consulted::ScanKind::Protocols,
+        );
         self.protocols.keys()
     }
 
     /// Returns an iterator over all protocols in the registry.
     pub fn protocols(&self) -> impl Iterator<Item = (&EcoString, &ProtocolInfo)> {
-        crate::semantic_analysis::consulted::record_scan();
+        crate::semantic_analysis::consulted::record_scan(
+            crate::semantic_analysis::consulted::ScanKind::Protocols,
+        );
         self.protocols.iter()
     }
 
@@ -769,7 +773,9 @@ impl ProtocolRegistry {
     /// if zero or multiple protocols match (ambiguous — fall back to Dynamic).
     #[must_use]
     pub fn find_unique_protocol_for_selector(&self, selector: &str) -> Option<&EcoString> {
-        crate::semantic_analysis::consulted::record_scan();
+        crate::semantic_analysis::consulted::record_scan(
+            crate::semantic_analysis::consulted::ScanKind::Protocols,
+        );
         let mut found: Option<&EcoString> = None;
         for (name, info) in &self.protocols {
             let selectors = info.all_required_selectors(self);
@@ -1123,7 +1129,9 @@ impl ProtocolRegistry {
         class_name: &str,
         hierarchy: &ClassHierarchy,
     ) -> Vec<EcoString> {
-        crate::semantic_analysis::consulted::record_scan();
+        crate::semantic_analysis::consulted::record_scan(
+            crate::semantic_analysis::consulted::ScanKind::Protocols,
+        );
         self.protocols
             .keys()
             .filter(|proto_name| {

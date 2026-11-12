@@ -211,65 +211,19 @@ pub(crate) fn analysis_surface_hash(
     {
         return String::new();
     }
-    let mut classes: Vec<_> = class_infos
-        .iter()
-        .map(|info| {
-            let mut info = info.clone();
-            for method in info.methods.iter_mut().chain(info.class_methods.iter_mut()) {
-                method.doc = None;
-            }
-            info
-        })
-        .collect();
+    let mut classes: Vec<_> = class_infos.iter().map(signature_only_class_info).collect();
     classes.sort_by(|a, b| (&a.package, &a.name).cmp(&(&b.package, &b.name)));
-    let requirements = |reqs: &[beamtalk_core::semantic_analysis::protocol_registry::ProtocolMethodRequirement]| {
-        reqs.iter()
-            .map(|r| serde_json::json!([r.selector.as_str(), r.arity, r.return_type.as_deref(), r.param_types]))
-            .collect::<Vec<_>>()
-    };
-    let mut protocols: Vec<_> = protocol_infos
-        .iter()
-        .map(|p| {
-            serde_json::json!({
-                "package": p.package.as_deref(),
-                "name": p.name.as_str(),
-                "type_params": p.type_params,
-                "type_param_bounds": p.type_param_bounds,
-                "extending": p.extending.as_deref(),
-                "methods": requirements(&p.methods),
-                "class_methods": requirements(&p.class_methods),
-                "provided": requirements(&p.provided),
-            })
-        })
-        .collect();
+    let mut protocols: Vec<_> = protocol_infos.iter().map(protocol_surface_value).collect();
     protocols.sort_by_key(|p| (p["package"].to_string(), p["name"].to_string()));
-    let mut aliases: Vec<_> = alias_infos
-        .iter()
-        .map(|a| {
-            serde_json::json!([
-                a.package.as_deref(),
-                a.name.as_str(),
-                a.annotation.type_name().as_str(),
-                a.is_internal,
-            ])
-        })
-        .collect();
+    let mut aliases: Vec<_> = alias_infos.iter().map(alias_surface_value).collect();
     aliases.sort_by_key(ToString::to_string);
     let mut extensions: Vec<_> = extension_index
         .entries()
         .iter()
         .flat_map(|(key, locations)| {
-            locations.iter().map(move |loc| {
-                serde_json::json!([
-                    key.class_name.as_str(),
-                    format!("{:?}", key.side),
-                    key.selector.as_str(),
-                    loc.file_path,
-                    loc.type_info.arity,
-                    loc.type_info.param_types,
-                    loc.type_info.return_type.as_deref(),
-                ])
-            })
+            locations
+                .iter()
+                .map(move |loc| extension_surface_value(key, loc))
         })
         .collect();
     extensions.sort_by_key(ToString::to_string);
@@ -281,6 +235,69 @@ pub(crate) fn analysis_surface_hash(
             "extensions": extensions,
         })
     }))
+}
+
+/// A `ClassInfo` as the analysis surface sees it: method doc comments dropped
+/// (spans are not part of `ClassInfo`).
+pub(crate) fn signature_only_class_info(
+    info: &beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo,
+) -> beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo {
+    let mut info = info.clone();
+    for method in info.methods.iter_mut().chain(info.class_methods.iter_mut()) {
+        method.doc = None;
+    }
+    info
+}
+
+/// The surface-relevant shape of one protocol, shared by the package-wide
+/// [`analysis_surface_hash`] and the per-name hashes of `build::surface_key`.
+pub(crate) fn protocol_surface_value(
+    p: &beamtalk_core::semantic_analysis::protocol_registry::ProtocolInfo,
+) -> serde_json::Value {
+    let requirements = |reqs: &[beamtalk_core::semantic_analysis::protocol_registry::ProtocolMethodRequirement]| {
+        reqs.iter()
+            .map(|r| serde_json::json!([r.selector.as_str(), r.arity, r.return_type.as_deref(), r.param_types]))
+            .collect::<Vec<_>>()
+    };
+    serde_json::json!({
+        "package": p.package.as_deref(),
+        "name": p.name.as_str(),
+        "type_params": p.type_params,
+        "type_param_bounds": p.type_param_bounds,
+        "extending": p.extending.as_deref(),
+        "methods": requirements(&p.methods),
+        "class_methods": requirements(&p.class_methods),
+        "provided": requirements(&p.provided),
+    })
+}
+
+/// The surface-relevant shape of one type alias (see [`protocol_surface_value`]).
+pub(crate) fn alias_surface_value(
+    a: &beamtalk_core::semantic_analysis::AliasInfo,
+) -> serde_json::Value {
+    serde_json::json!([
+        a.package.as_deref(),
+        a.name.as_str(),
+        a.annotation.type_name().as_str(),
+        a.is_internal,
+    ])
+}
+
+/// The surface-relevant shape of one standalone extension location (see
+/// [`protocol_surface_value`]).
+pub(crate) fn extension_surface_value(
+    key: &beamtalk_core::compilation::extension_index::ExtensionKey,
+    loc: &beamtalk_core::compilation::extension_index::ExtensionLocation,
+) -> serde_json::Value {
+    serde_json::json!([
+        key.class_name.as_str(),
+        format!("{:?}", key.side),
+        key.selector.as_str(),
+        loc.file_path,
+        loc.type_info.arity,
+        loc.type_info.param_types,
+        loc.type_info.return_type.as_deref(),
+    ])
 }
 
 /// Hash a serialized class surface. A serialization failure must not collapse

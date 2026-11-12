@@ -543,11 +543,15 @@ impl ClassHierarchy {
     /// synthesize auto-slot methods for newly-discovered Value subclasses.
     pub(crate) fn propagate_cross_file_class_kind(&mut self) {
         // Pass 1: Collect all classes that need is_value fixup.
+        // Construction: this normalises `is_value` across the whole map. A file
+        // observes the result through by-name reads (recorded), and the build
+        // keys a name on its superclass chain, so the pass reads unrecorded
+        // (BT-4690).
         let classes_to_fix: Vec<EcoString> = self
             .classes
-            .iter()
+            .iter_unrecorded()
             .filter(|(_, info)| {
-                !info.is_value && self.ancestors_include_value(info.superclass.as_ref())
+                !info.is_value && self.ancestors_include_value_unrecorded(info.superclass.as_ref())
             })
             .map(|(name, _)| name.clone())
             .collect();
@@ -567,8 +571,10 @@ impl ClassHierarchy {
         // We don't have the AST, so we build synthetic slot info from ClassInfo.
         for class_name in &classes_to_fix {
             // Extract state and existing selectors without holding a mutable borrow.
-            let slot_data: Option<Vec<(EcoString, Option<DeclaredType>)>> =
-                self.classes.get(class_name.as_str()).map(|info| {
+            let slot_data: Option<Vec<(EcoString, Option<DeclaredType>)>> = self
+                .classes
+                .get_unrecorded(class_name.as_str())
+                .map(|info| {
                     info.state
                         .iter()
                         .map(|s| {
@@ -579,10 +585,12 @@ impl ClassHierarchy {
                 });
             let existing_instance: Option<HashSet<EcoString>> = self
                 .classes
-                .get(class_name.as_str())
+                .get_unrecorded(class_name.as_str())
                 .map(|info| info.methods.iter().map(|m| m.selector.clone()).collect());
-            let existing_class: Option<HashSet<EcoString>> =
-                self.classes.get(class_name.as_str()).map(|info| {
+            let existing_class: Option<HashSet<EcoString>> = self
+                .classes
+                .get_unrecorded(class_name.as_str())
+                .map(|info| {
                     info.class_methods
                         .iter()
                         .map(|m| m.selector.clone())
@@ -613,6 +621,39 @@ impl ClassHierarchy {
             }
         }
         self.rebuild_all_indexes();
+    }
+
+    /// Construction-time form of [`Self::ancestors_include_value`]: not recorded.
+    pub(super) fn ancestors_include_value_unrecorded(
+        &self,
+        superclass: Option<&EcoString>,
+    ) -> bool {
+        superclass_chain_includes_value(superclass.map(EcoString::as_str), |name| {
+            self.classes
+                .get_unrecorded(name)
+                .and_then(|info| info.superclass.as_deref())
+        })
+    }
+
+    /// Whether a built-in class other than `Object` defines `selector` itself.
+    ///
+    /// Codegen asks this before inlining a built-in's `isKindOf:` (the
+    /// inline test is only right while nothing but `Object` overrides it).
+    /// Only entries under a built-in's name are read, so it records exactly
+    /// those names rather than a scan of the whole hierarchy: a project class
+    /// that shadows a built-in name replaces the entry and changes the answer,
+    /// which the by-name record keeps visible to the incremental build (BT-4690).
+    #[must_use]
+    pub fn builtin_other_than_object_defines(&self, selector: &str) -> bool {
+        self.classes
+            .iter_unrecorded()
+            .filter(|(owner, _)| owner.as_str() != "Object" && Self::is_builtin_class(owner))
+            .any(|(owner, info)| {
+                crate::semantic_analysis::consulted::record_name(owner);
+                info.methods
+                    .iter()
+                    .any(|m| m.defined_in == *owner && m.selector == selector)
+            })
     }
 
     /// Check if the superclass chain includes Value.

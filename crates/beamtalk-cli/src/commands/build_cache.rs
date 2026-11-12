@@ -255,8 +255,10 @@ pub(crate) fn discard_pass1_cache(build_dir: &Utf8Path) {
 /// hash that produced its currently-compiled `.beam`.
 const BEAM_HASH_CACHE_FILENAME: &str = ".beamtalk-beam-hashes.json";
 
-/// Format version for the beam-hash sidecar. Bump when the layout changes.
-const BEAM_HASH_CACHE_VERSION: u32 = 1;
+/// Format version for the beam-hash sidecar. Bump when the layout changes or
+/// the meaning of a stored key does (2: a file keys on the slice of the
+/// cross-file surface it consulted, BT-4690).
+const BEAM_HASH_CACHE_VERSION: u32 = 2;
 
 /// On-disk representation of the beam-hash sidecar.
 #[derive(Debug, Default, Serialize, Deserialize)]

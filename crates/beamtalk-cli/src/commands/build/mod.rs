@@ -38,6 +38,7 @@ mod native;
 mod outputs;
 mod sources;
 mod stubs;
+mod surface_key;
 
 // Re-exports so `crate::commands::build::X` paths used by `build_stdlib.rs`,
 // `test.rs`, `lint.rs`, `fmt.rs`, `type_coverage.rs`, `beam_compiler.rs`, and
@@ -59,10 +60,10 @@ pub(crate) use outputs::{
     generate_package_outputs,
 };
 #[cfg(test)]
-pub(crate) use sources::compile_file_with_surface;
+pub(crate) use sources::compile_file;
 pub use sources::{collect_formattable_files_from_dir, collect_source_files_from_dir};
 pub(crate) use sources::{
-    compile_file, compile_to_beam, compute_file_module_pairs, compute_relative_module,
+    compile_file_with_surface, compile_to_beam, compute_file_module_pairs, compute_relative_module,
 };
 #[cfg(test)]
 pub(crate) use stubs::{
@@ -270,21 +271,29 @@ fn execute_build_passes(
     // is newer than the corresponding .beam output. Pass 1's already-computed
     // content hashes (`index.source_hashes`) let this skip re-hashing
     // any file Pass 1 already hashed this build.
-    let changes = detect_changes(
+    let mut surface_keys = index.surface_keys.clone();
+    if let Some(keys) = &mut surface_keys {
+        // Package-wide inputs no class name addresses, folded like the full hash.
+        keys.globals =
+            fold_known_erlang_modules(keys.globals.clone(), &options.known_erlang_modules);
+    }
+    let edges = BuildGraphEdges {
+        file_protocol_uses,
+        protocol_hashes,
+        analysis_surface_hash: fold_known_erlang_modules(
+            index.analysis_surface_hash.clone(),
+            &options.known_erlang_modules,
+        ),
+        stub_inputs_hash,
+        surface_keys,
+    };
+    let mut changes = detect_changes(
         &env.source_files,
         &env.build_dir,
         &file_module_pairs,
         force,
         &index.source_hashes,
-        &BuildGraphEdges {
-            file_protocol_uses,
-            protocol_hashes,
-            analysis_surface_hash: fold_known_erlang_modules(
-                index.analysis_surface_hash.clone(),
-                &options.known_erlang_modules,
-            ),
-            stub_inputs_hash,
-        },
+        &edges,
     );
 
     // Warn about orphaned .beam files (source deleted but .beam remains)
@@ -393,10 +402,15 @@ fn execute_build_passes(
 
         if changed_set.contains(file.as_path()) {
             let cached = cached_asts.remove(file);
-            let file_diags = flush_provision_on_error(
-                compile_file(file, module_name, core_file, options, &compile_ctx, cached),
-                &compile_ctx,
+            let file_diags = compile_and_rekey(
+                file,
+                module_name,
+                core_file,
                 options,
+                &compile_ctx,
+                cached,
+                &edges,
+                &mut changes.source_hashes,
             )?;
             files_with_known_diagnostics += 1;
             new_diagnostics_cache.insert(file.as_str().to_string(), file_diags.clone());
@@ -443,10 +457,15 @@ fn execute_build_passes(
         // even though the file was never in `cached_asts`.
         debug!(file = %file, "Unchanged file has no diagnostics cache entry — recompiling");
         let cached = cached_asts.remove(file);
-        let file_diags = flush_provision_on_error(
-            compile_file(file, module_name, core_file, options, &compile_ctx, cached),
-            &compile_ctx,
+        let file_diags = compile_and_rekey(
+            file,
+            module_name,
+            core_file,
             options,
+            &compile_ctx,
+            cached,
+            &edges,
+            &mut changes.source_hashes,
         )?;
         files_with_known_diagnostics += 1;
         diagnostics_cache_miss_recompiles += 1;
@@ -636,6 +655,33 @@ fn fold_direct_ffi_proofs(
     }
     let proofs_hash = crate::commands::util::sha256_hex(proofs.join("\n").as_bytes());
     crate::commands::util::sha256_hex(format!("{stub_inputs_hash}\n{proofs_hash}").as_bytes())
+}
+
+/// Compile one file and re-key it on the slice of the cross-file surface that
+/// compile consulted (BT-4690), so the next build skips it unless that slice
+/// changed.
+#[allow(clippy::too_many_arguments)] // the compile inputs plus the key bookkeeping
+fn compile_and_rekey(
+    file: &Utf8Path,
+    module_name: &str,
+    core_file: &Utf8Path,
+    options: &beamtalk_core::CompilerOptions,
+    compile_ctx: &CompileContext<'_>,
+    cached: Option<CachedAst>,
+    edges: &BuildGraphEdges,
+    source_hashes: &mut HashMap<String, String>,
+) -> Result<Vec<beamtalk_core::source_analysis::Diagnostic>> {
+    let compiled =
+        compile_file_with_surface(file, module_name, core_file, options, compile_ctx, cached);
+    let (diags, surface) = match compiled {
+        Ok(ok) => (Ok(ok.0), Some(ok.1)),
+        Err(e) => (Err(e), None),
+    };
+    let file_diags = flush_provision_on_error(diags, compile_ctx, options)?;
+    if let Some(surface) = surface {
+        changes::record_compiled_surface(source_hashes, edges, file, &surface);
+    }
+    Ok(file_diags)
 }
 
 /// Fold the project-known Erlang modules (BT-4022) into the analysis

@@ -13,7 +13,7 @@
 //! the map in order to write it.
 
 use super::ClassInfo;
-use crate::semantic_analysis::consulted::{record_name, record_scan};
+use crate::semantic_analysis::consulted::{ScanKind, record_name, record_scan};
 use ecow::EcoString;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -40,6 +40,12 @@ impl ClassMap {
         self.0.contains_key(name)
     }
 
+    /// Construction-time read of one entry; **not recorded** (see
+    /// [`Self::iter_unrecorded`]).
+    pub(super) fn get_unrecorded(&self, name: &str) -> Option<&ClassInfo> {
+        self.0.get(name)
+    }
+
     /// Construction-time membership test; **not recorded** (see
     /// [`Self::iter_unrecorded`]).
     pub(super) fn contains_key_unrecorded(&self, name: &str) -> bool {
@@ -48,19 +54,19 @@ impl ClassMap {
 
     /// Whole-map read: records a scan.
     pub(super) fn iter(&self) -> std::collections::hash_map::Iter<'_, EcoString, ClassInfo> {
-        record_scan();
+        record_scan(ScanKind::Classes);
         self.0.iter()
     }
 
     /// Whole-map read: records a scan.
     pub(super) fn keys(&self) -> std::collections::hash_map::Keys<'_, EcoString, ClassInfo> {
-        record_scan();
+        record_scan(ScanKind::Classes);
         self.0.keys()
     }
 
     /// Whole-map read: records a scan.
     pub(super) fn values(&self) -> std::collections::hash_map::Values<'_, EcoString, ClassInfo> {
-        record_scan();
+        record_scan(ScanKind::Classes);
         self.0.values()
     }
 

@@ -180,9 +180,9 @@ pub use driver::{
 };
 pub use error::CodeGenError;
 pub use error::Result;
-pub(in crate::core_erlang) use generator::DirectCallClassInfo;
 pub(in crate::core_erlang) use generator::version::render_state_prefix;
 pub use generator::{CodeGenContext, CoreErlangGenerator};
+pub(in crate::core_erlang) use generator::{DirectCallClassInfo, DirectCallTable};
 pub(in crate::core_erlang) use nlr::NlrBoundary;
 pub use options::{CodegenOptions, GeneratedModule};
 pub use threaded_expr::ReplProducerDoc;

@@ -95,6 +95,10 @@ pub(crate) struct ClassIndexResult {
     /// file is re-checked when a signature it may type-check against
     /// changes. Empty for manifest-less builds.
     pub(crate) analysis_surface_hash: String,
+    /// Per-name hashes of that same surface (BT-4690), so a file whose last
+    /// build recorded what it consulted keys on that slice only. `None` for
+    /// manifest-less builds and when the surface could not be serialised.
+    pub(crate) surface_keys: Option<super::surface_key::SurfaceKeys>,
 }
 
 /// Phase 5-6: Build the class index (Pass 1) and merge dependency indexes.
@@ -295,6 +299,7 @@ pub(crate) fn build_class_index(
     // have Pass 1 infos (and `file_protocol_uses`) to rewrite; a manifest-less
     // build — including `--stdlib-mode` — is a no-op here.
     let mut analysis_surface_hash = String::new();
+    let mut surface_keys = None;
     if let Some(pkg) = package_identity(pkg_manifest, options.stdlib_mode) {
         flatten_trait_user_class_infos(
             &mut all_class_infos,
@@ -323,6 +328,7 @@ pub(crate) fn build_class_index(
         // dependencies it is part of the surface too. Folded as the value
         // analysis will actually use (`beam_compiler` computes it the same
         // way), so the two cannot drift apart.
+        let mut globals = String::new();
         if options.dependency_extensions_unknown {
             let guard = beamtalk_cli::dependency_extensions::dependency_extensions_unknown(
                 options.dependency_extensions_unknown,
@@ -333,6 +339,21 @@ pub(crate) fn build_class_index(
                 format!("{analysis_surface_hash}\ndependency-extensions-unknown:{guard}")
                     .as_bytes(),
             );
+            globals = format!("dependency-extensions-unknown:{guard}");
+        }
+        if !analysis_surface_hash.is_empty() {
+            surface_keys = super::surface_key::SurfaceKeys::build(
+                &all_class_infos,
+                &all_protocol_infos,
+                &all_alias_infos,
+                &extension_index,
+                &class_superclass_index,
+                &class_module_index,
+            )
+            .map(|mut keys| {
+                keys.globals = globals;
+                keys
+            });
         }
     }
 
@@ -357,6 +378,7 @@ pub(crate) fn build_class_index(
         source_hashes,
         file_protocol_uses,
         analysis_surface_hash,
+        surface_keys,
     })
 }
 
