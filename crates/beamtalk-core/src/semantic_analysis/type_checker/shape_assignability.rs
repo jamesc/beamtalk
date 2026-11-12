@@ -324,6 +324,11 @@ impl TypeChecker {
         else {
             return Ok(());
         };
+        // Protocol conformance is structural, not nominal: leave it to the
+        // protocol-conformance checks, as the non-shape paths do.
+        if hierarchy.is_protocol_class(ename) {
+            return Ok(());
+        }
         if !Self::is_type_compatible(aname, ename, hierarchy) {
             return Err(ShapeMismatch::Incompatible);
         }
@@ -437,5 +442,34 @@ impl TypeChecker {
             self.diagnostics.push(diag);
         }
         true
+    }
+
+    /// Cheap pre-check: can `declared` be, or contain, a shape? True for a
+    /// syntactic shape or any name that is a registered alias (which may
+    /// expand to one).
+    pub(super) fn declared_may_be_shape(
+        &self,
+        declared: &crate::semantic_analysis::class_hierarchy::DeclaredType,
+    ) -> bool {
+        use crate::semantic_analysis::class_hierarchy::DeclaredType as D;
+        match declared {
+            D::Shape { .. } => true,
+            D::Simple(name) => self
+                .alias_registry
+                .as_ref()
+                .is_some_and(|r| r.get(name).is_some()),
+            D::Generic { parameters, .. } => {
+                parameters.iter().any(|p| self.declared_may_be_shape(p))
+            }
+            D::Union(m) => m.iter().any(|p| self.declared_may_be_shape(p)),
+            D::FalseOr(i) => self.declared_may_be_shape(i),
+            D::Difference { base, excluded } => {
+                self.declared_may_be_shape(base) || self.declared_may_be_shape(excluded)
+            }
+            D::Intersection { left, right } => {
+                self.declared_may_be_shape(left) || self.declared_may_be_shape(right)
+            }
+            D::Singleton(_) | D::SelfType | D::SelfClass | D::ClassOf(_) => false,
+        }
     }
 }

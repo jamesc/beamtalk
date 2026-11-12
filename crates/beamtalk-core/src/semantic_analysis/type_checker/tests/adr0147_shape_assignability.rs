@@ -652,3 +652,19 @@ fn symbol_literal_map_stays_assignable_until_literals_infer_shapes() {
         msgs.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn protocol_typed_slots_are_left_to_conformance_checks() {
+    let msgs = diagnostics(
+        "Protocol define: Named\n  name -> String\n\n\
+         Object subclass: Probe\n  \
+           take: o :: Named => o\n  \
+           either: o :: Named | #{#a => Integer} => o\n  \
+           go: s :: #{#a => Integer} => self either: s\n",
+    );
+    assert!(
+        msgs.iter().all(|d| !d.message.contains("expects Named")),
+        "{:#?}",
+        msgs.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}

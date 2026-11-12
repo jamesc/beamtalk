@@ -1733,9 +1733,11 @@ impl TypeChecker {
             // ADR 0147: a shape on either side (an alias to one included) is
             // judged structurally; everything else keeps the string-level
             // nominal rules below, which know no `#{...}` class.
-            let expected_resolved =
-                self.resolve_declared_recording_aliases(expected_declared, class_subst);
-            if expected_resolved.contains_shape() || arg_ty.contains_shape() {
+            let expected_resolved = (arg_ty.contains_shape()
+                || self.declared_may_be_shape(expected_declared))
+            .then(|| self.resolve_declared_recording_aliases(expected_declared, class_subst))
+            .filter(|resolved| resolved.contains_shape() || arg_ty.contains_shape());
+            if let Some(expected_resolved) = expected_resolved {
                 if let Err(mismatch) = Self::shape_assignable(arg_ty, &expected_resolved, hierarchy)
                 {
                     let param_pos = i + 1;
