@@ -196,7 +196,9 @@ build-release: build-rust-release build-erlang
 # which activates dev-dependencies, and a dev-dependency's `features = ["test"]`
 # (e.g. beamtalk-repl -> beamtalk-codegen) is then unified into the *library*
 # that the shipped binaries link — compiling the fault registry and test probes
-# into the release `beamtalk`. `just check-release-build` guards this.
+# into the release `beamtalk`. `just check-release-build` rejects `--all-targets`
+# on any release build command (this recipe, release.yml, nightly.yml) and checks
+# the resolved release graph and binaries for leaked test features.
 build-rust-release:
     @echo "🔨 Building Rust workspace (release)..."
     @cargo build --release --quiet
@@ -205,13 +207,23 @@ build-rust-release:
 # BT-4749: the release workspace build must be warning-free AND must not carry
 # test-only code. Builds into its own target dir (RUSTFLAGS differ from a normal
 # build, so sharing target/release would force a full rebuild of it) and fails
-# if any workspace crate's `test` feature is enabled in the release graph, or
-# a fault-injection/probe symbol is linked into the shipped binaries.
+# if a release build command passes --all-targets, any workspace crate's `test`
+# feature is enabled in the release graph, or a fault-injection/probe symbol is
+# linked into the shipped binaries.
 # Unix-only (needs `nm`); Linux CI runs it.
 [unix]
 check-release-build:
     #!/usr/bin/env bash
     set -euo pipefail
+    # 0. The commands that actually produce the shipped binaries must not pass
+    #    --all-targets (it activates dev-dependencies and unifies their `test`
+    #    features into the libraries). This recipe builds its own way, so scan
+    #    the real release build commands. `[ ]` keeps this line from matching
+    #    itself.
+    if grep -nE 'cargo[ ]build[^#]*(--all-targets[^#]*--release|--release[^#]*--all-targets)' Justfile .github/workflows/*.yml scripts/ci/*.sh; then
+        echo "❌ a release build passes --all-targets (see above); it unifies dev-dependency 'test' features into the shipped binaries"
+        exit 1
+    fi
     echo "🔍 Checking the release workspace build (warnings denied)..."
     dir=target/release-check
     RUSTFLAGS="-D warnings" cargo build --release --workspace --locked --quiet --target-dir "$dir"
