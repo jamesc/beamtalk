@@ -188,6 +188,9 @@ impl CoreErlangGenerator {
         // so spawn_monitored/0,1 raise instead of failing with `undef`.
         push_fn(self.generate_unsupported_spawn_monitored_method(false));
         push_fn(self.generate_unsupported_spawn_monitored_method(true));
+        // BT-4477: same for the asynchronous monitored pair.
+        push_fn(self.generate_unsupported_spawn_monitored_async_method(false));
+        push_fn(self.generate_unsupported_spawn_monitored_async_method(true));
 
         // new/0 and new/1 error methods (actors can't use new)
         push_fn(self.generate_actor_new_error_method()?);

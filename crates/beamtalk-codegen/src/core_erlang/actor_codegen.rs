@@ -151,6 +151,7 @@ impl CoreErlangGenerator {
             ", 'safe_dispatch'/3, 'safe_dispatch'/4, \
              'method_table'/0, 'has_method'/1, 'class_name'/0, \
              'spawn'/0, 'spawn'/1, 'spawn_monitored'/0, 'spawn_monitored'/1, \
+             'spawn_monitored_async'/0, 'spawn_monitored_async'/1, \
              'new'/0, 'new'/1, 'superclass'/0",
             meta_export,
             has_method_local_export,
@@ -293,8 +294,12 @@ impl CoreErlangGenerator {
         push_fn(self.generate_start_link_doc())?;
         push_fn(self.generate_start_link_named_doc())?;
 
-        // BT-4104: `spawn_monitored/0,1` mirror `spawn/0,1` (abstract stubs included).
-        for variant in [SpawnVariant::Plain, SpawnVariant::Monitored] {
+        // BT-4104/BT-4477: `spawn_monitored/0,1` and `spawn_monitored_async/0,1` mirror `spawn/0,1` (abstract stubs included).
+        for variant in [
+            SpawnVariant::Plain,
+            SpawnVariant::Monitored,
+            SpawnVariant::MonitoredAsync,
+        ] {
             if is_abstract {
                 push_fn(self.generate_abstract_spawn_error_method(variant)?)?;
                 push_fn(self.generate_abstract_spawn_with_args_error_method(variant)?)?;

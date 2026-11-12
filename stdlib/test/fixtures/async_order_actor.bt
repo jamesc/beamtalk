@@ -1,0 +1,18 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4477 fixture: an Actor whose `initialize` is slow, so a message sent
+// right after `spawnMonitoredAsync` reaches the mailbox before `initialize`
+// finishes. `log` shows the order they ran in: `initialize` first, then the
+// queued message. See stdlib/test/actor_spawn_monitored_async_test.bt.
+
+Actor subclass: AsyncOrderActor
+  state: log = #()
+
+  initialize =>
+    Timer sleep: 50
+    self.log := self.log add: #initialize
+
+  touch => self.log := self.log add: #touch
+
+  log => self.log

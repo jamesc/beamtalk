@@ -2295,6 +2295,135 @@ safe_spawn_monitored_failing_initialize_cleans_up_test() ->
         logger:set_primary_config(level, all)
     end.
 
+%%% BT-4477: safe_spawn_monitored_async/2
+
+safe_spawn_monitored_async_does_not_wait_for_init_test() ->
+    %% The pair comes back while the actor is still in a slow continue step:
+    %% the caller did not wait for `init/1`'s continuation. A call queued behind
+    %% the step is answered only once it has finished.
+    {ok, {Pid, MonRef}} = beamtalk_actor:safe_spawn_monitored_async(
+        test_async_init_actor, #{mode => {continue, slow}, delay => 300}
+    ),
+    ?assert(is_pid(Pid)),
+    ?assert(is_reference(MonRef)),
+    ?assertEqual(no_stray_ack, stray_ack()),
+    T0 = erlang:monotonic_time(millisecond),
+    State = gen_server:call(Pid, get_state),
+    Waited = erlang:monotonic_time(millisecond) - T0,
+    ?assertMatch(#{done := slow}, State),
+    ?assert(Waited >= 100),
+    erlang:demonitor(MonRef, [flush]),
+    gen_server:stop(Pid).
+
+safe_spawn_monitored_async_live_actor_is_monitored_not_linked_test() ->
+    {ok, {Pid, MonRef}} = beamtalk_actor:safe_spawn_monitored_async(
+        test_async_init_actor, #{mode => ok}
+    ),
+    {monitors, Monitors} = process_info(self(), monitors),
+    ?assert(lists:member({process, Pid}, Monitors)),
+    {links, CallerLinks} = process_info(self(), links),
+    ?assertNot(lists:member(Pid, CallerLinks)),
+    ?assertMatch(#{mode := ok}, gen_server:call(Pid, get_state)),
+    gen_server:stop(Pid),
+    receive
+        {'DOWN', MonRef, process, Pid, Reason} -> ?assertEqual(normal, Reason)
+    after 5000 -> error(no_down)
+    end.
+
+safe_spawn_monitored_async_is_a_proc_lib_gen_server_test() ->
+    %% `sys` and observer rely on `$ancestors` / `$initial_call`, which
+    %% `proc_lib:spawn_opt/2` provides; `sys:get_state/1` needs the gen_server loop.
+    {ok, {Pid, MonRef}} = beamtalk_actor:safe_spawn_monitored_async(
+        test_async_init_actor, #{mode => ok}
+    ),
+    ?assertMatch(#{mode := ok}, sys:get_state(Pid)),
+    {dictionary, Dict} = process_info(Pid, dictionary),
+    ?assertEqual([self()], proplists:get_value('$ancestors', Dict)),
+    ?assertMatch({_, _, _}, proplists:get_value('$initial_call', Dict)),
+    erlang:demonitor(MonRef, [flush]),
+    gen_server:stop(Pid).
+
+safe_spawn_monitored_async_honours_init_actions_test() ->
+    %% `{ok, State, hibernate}` and `{ok, State, Timeout}` reach the gen_server loop.
+    {ok, {HPid, HRef}} = beamtalk_actor:safe_spawn_monitored_async(
+        test_async_init_actor, #{mode => hibernate}
+    ),
+    ?assertMatch(#{mode := hibernate}, gen_server:call(HPid, get_state)),
+    erlang:demonitor(HRef, [flush]),
+    gen_server:stop(HPid),
+    {ok, {TPid, TRef}} = beamtalk_actor:safe_spawn_monitored_async(
+        test_async_init_actor, #{mode => timeout}
+    ),
+    receive
+        {'DOWN', TRef, process, TPid, Reason} -> ?assertEqual(timed_out, Reason)
+    after 5000 -> error(no_down)
+    end.
+
+safe_spawn_monitored_async_init_stop_delivers_down_with_reason_test() ->
+    %% `{stop, Reason}` from `init/1` cannot be raised to the caller: the pair
+    %% still comes back and the monitor's DOWN carries `Reason` — never `noproc`.
+    {ok, {Pid, MonRef}} = beamtalk_actor:safe_spawn_monitored_async(
+        test_async_init_actor, #{mode => stop}
+    ),
+    receive
+        {'DOWN', MonRef, process, Pid, Reason} -> ?assertEqual(init_refused, Reason)
+    after 5000 -> error(no_down)
+    end,
+    ?assertEqual(no_stray_ack, stray_ack()).
+
+safe_spawn_monitored_async_init_ignore_exits_normal_test() ->
+    {ok, {Pid, MonRef}} = beamtalk_actor:safe_spawn_monitored_async(
+        test_async_init_actor, #{mode => ignore}
+    ),
+    receive
+        {'DOWN', MonRef, process, Pid, Reason} -> ?assertEqual(normal, Reason)
+    after 5000 -> error(no_down)
+    end.
+
+safe_spawn_monitored_async_bad_init_return_and_crash_deliver_down_test() ->
+    logger:set_primary_config(level, none),
+    try
+        {ok, {P1, R1}} = beamtalk_actor:safe_spawn_monitored_async(
+            test_async_init_actor, #{mode => bad_return}
+        ),
+        receive
+            {'DOWN', R1, process, P1, Reason1} ->
+                ?assertEqual({bad_return_value, not_a_valid_init_result}, Reason1)
+        after 5000 -> error(no_down)
+        end,
+        {ok, {P2, R2}} = beamtalk_actor:safe_spawn_monitored_async(
+            test_async_init_actor, #{mode => crash}
+        ),
+        receive
+            {'DOWN', R2, process, P2, Reason2} ->
+                ?assertMatch({boom, _Stacktrace}, Reason2)
+        after 5000 -> error(no_down)
+        end
+    after
+        logger:set_primary_config(level, all)
+    end.
+
+safe_spawn_monitored_async_fast_exit_reports_real_reason_test_() ->
+    %% As safe_spawn_monitored/2 (BT-4104): the monitor exists from the
+    %% process's first instant, so a short-lived actor reports `normal`.
+    {timeout, 60, fun() ->
+        Reasons = [
+            begin
+                {ok, {Pid, MonRef}} =
+                    beamtalk_actor:safe_spawn_monitored_async(
+                        test_init_ack_actor, #{mode => exit_normal}
+                    ),
+                receive
+                    {'DOWN', MonRef, process, Pid, Reason} -> Reason
+                after 5000 -> no_down
+                end
+            end
+         || _ <- lists:seq(1, 200)
+        ],
+        ?assertEqual([normal], lists:usort(Reasons)),
+        ?assertEqual(no_stray_ack, stray_ack())
+    end}.
+
 %% Drop DOWN messages left in this (shared) eunit process by earlier tests, so
 %% a "no stray DOWN" assertion only sees messages from its own spawn.
 flush_downs() ->

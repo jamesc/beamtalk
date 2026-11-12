@@ -24,6 +24,10 @@ TestCase subclass: SpawnNonSpawnableClassTest
     self should: [Fraction spawnMonitored] raise: #does_not_understand
     @expect dnu
     self should: [Fraction spawnMonitoredWith: #{}] raise: #does_not_understand
+    @expect dnu
+    self should: [Fraction spawnMonitoredAsync] raise: #does_not_understand
+    @expect dnu
+    self should: [Fraction spawnMonitoredAsyncWith: #{}] raise: #does_not_understand
 
   testDynamicSpawnOnValueClassIsDoesNotUnderstand =>
     cls := #(1) inject: Fraction into: [:acc :_ | acc]

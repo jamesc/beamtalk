@@ -1,0 +1,110 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4477: Actor class>>spawnMonitoredAsync / spawnMonitoredAsyncWith: —
+// like spawnMonitored (BT-4104), `{actor, ref}` with the monitor created
+// atomically with the process, but the caller does not wait for `init/1` or
+// `initialize`. A start failure cannot be raised; it arrives as the DOWN.
+//
+// The DOWN cases spawn from inside a Server (static sends in its methods) and
+// read what its `handleInfo:` recorded.
+//
+// Fixtures: stdlib/test/fixtures/spawn_monitored_observer.bt
+//           stdlib/test/fixtures/quick_exit_actor.bt
+//           stdlib/test/fixtures/failing_initialize_actor.bt
+//           stdlib/test/fixtures/async_order_actor.bt
+//           stdlib/test/fixtures/continue_with_actor.bt
+//           stdlib/test/fixtures/abstract_shape.bt
+
+TestCase subclass: ActorSpawnMonitoredAsyncTest
+
+  // === Answer shape ===
+  testStaticSendAnswersActorAndRefTuple =>
+    pair := ContinueWithActor spawnMonitoredAsync
+    self assert: pair class equals: Tuple
+    self assert: pair size equals: 2
+    self assert: (pair at: 1) class equals: ContinueWithActor
+    self assert: (pair at: 2) class equals: Reference
+    self assert: (pair at: 2) demonitor
+    (pair at: 1) stop
+
+  testSpawnMonitoredAsyncWithAnswersActorAndRefTuple =>
+    pair := AsyncOrderActor spawnMonitoredAsyncWith: #{}
+    self assert: pair class equals: Tuple
+    self assert: (pair at: 1) class equals: AsyncOrderActor
+    self assert: (pair at: 2) class equals: Reference
+    self assert: (pair at: 2) demonitor
+    (pair at: 1) stop
+
+  testDynamicSendAnswersActorAndRefTuple =>
+    // A dynamic send runs in the class process, which owns this monitor —
+    // only the answer's shape is checked here.
+    cls := QuickExitActor
+    pair := cls spawnMonitoredAsyncWith: #{#exitReason => #normal}
+    self assert: pair class equals: Tuple
+    self assert: (pair at: 1) class equals: QuickExitActor
+    pair2 := ContinueWithActor perform: #spawnMonitoredAsync
+    self assert: (pair2 at: 1) class equals: ContinueWithActor
+    (pair2 at: 1) stop
+
+  // === A fast exit reports its real reason, never #noproc ===
+  testFastNormalExitsAlwaysReportNormalNeverNoproc =>
+    obs := SpawnMonitoredObserver spawn
+    refs := obs spawnQuickAsync: 50
+    self assert: refs size equals: 50
+    500 timesRepeat: [obs downs size < 50 ifTrue: [Timer sleep: 10]]
+    downs := obs downs
+    self assert: downs size equals: 50
+    self assert: (downs collect: [:d | d at: 5]) asSet asList equals: #(#normal)
+    self assert: (refs allSatisfy: [:r |
+      downs anySatisfy: [:d | (d at: 2) =:= r]
+    ])
+    self assert: obs others isEmpty
+    obs stop
+
+  testCrashReportsTheRealReasonAndPassesInitArgs =>
+    obs := SpawnMonitoredObserver spawn
+    pair := obs spawnQuickAsyncWith: #kaboom
+    50 timesRepeat: [obs downs isEmpty ifTrue: [Timer sleep: 10]]
+    self assert: obs downs size equals: 1
+    msg := obs downs first
+    self assert: (msg at: 1) equals: #DOWN
+    self assert: (msg at: 2) =:= (pair at: 2)
+    self assert: (msg at: 3) equals: #process
+    self assert: (msg at: 4) =:= (pair at: 1) pid
+    self assert: (msg at: 5) equals: #kaboom
+    obs stop
+
+  // === A failing initialize is not raised: it arrives as the DOWN ===
+  testRaisingInitializeDoesNotRaiseAndDeliversDown =>
+    obs := SpawnMonitoredObserver spawn
+    answer := obs spawnFailingAsync
+    self assert: (answer at: 1) equals: #returned
+    pair := answer at: 2
+    50 timesRepeat: [obs downs isEmpty ifTrue: [Timer sleep: 10]]
+    self assert: obs downs size equals: 1
+    msg := obs downs first
+    self assert: (msg at: 2) =:= (pair at: 2)
+    self deny: (msg at: 5) =:= #noproc
+    self deny: (msg at: 5) =:= #normal
+    self assert: obs others isEmpty
+    obs stop
+
+  // === Messages sent before initialize finishes run after it ===
+  testMessageSentRightAfterSpawnRunsAfterInitialize =>
+    pair := AsyncOrderActor spawnMonitoredAsync
+    actor := pair at: 1
+    actor touch
+    self assert: actor log equals: #(#initialize, #touch)
+    (pair at: 2) demonitor
+    actor stop
+
+  // === Errors that are raised synchronously ===
+  testAbstractActorRaisesInstantiationError =>
+    self should: [AbstractShape spawnMonitoredAsync] raise: #instantiation_error
+    cls := AbstractShape
+    self should: [cls spawnMonitoredAsync] raise: #instantiation_error
+    self should: [cls spawnMonitoredAsyncWith: #{}] raise: #instantiation_error
+
+  testNonDictionaryInitArgsRaiseTypeError =>
+    self should: [AsyncOrderActor spawnMonitoredAsyncWith: 42] raise: #type_error

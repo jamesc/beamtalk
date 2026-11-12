@@ -33,6 +33,7 @@ Called by `beamtalk_object_class` gen_server handle_call clauses.
     class_self_spawn/3,
     class_self_spawn/4,
     class_self_spawn_monitored/4,
+    class_self_spawn_monitored_async/4,
     class_self_spawn_as/4,
     class_self_spawn_with/5,
     ensure_is_constructible/3,
@@ -52,8 +53,9 @@ Called by `beamtalk_object_class` gen_server handle_call clauses.
 %% A spawn's compiled entry point and public selectors: `plain` is
 %% `Module:spawn/0,1` (`spawn`/`spawnWith:`), `monitored` is
 %% `Module:spawn_monitored/0,1` (`spawnMonitored`/`spawnMonitoredWith:`,
-%% BT-4104).
--type spawn_variant() :: plain | monitored.
+%% BT-4104), `monitored_async` is `Module:spawn_monitored_async/0,1`
+%% (`spawnMonitoredAsync`/`spawnMonitoredAsyncWith:`, BT-4477).
+-type spawn_variant() :: plain | monitored | monitored_async.
 
 %%====================================================================
 %% Spawn Protocol
@@ -71,15 +73,18 @@ Returns gen_server reply tuple.
 handle_spawn(Args, ClassName, Module, IsAbstract) ->
     do_handle_spawn(plain, Args, ClassName, Module, IsAbstract).
 
--spec spawn_function(spawn_variant()) -> spawn | spawn_monitored.
+-spec spawn_function(spawn_variant()) -> spawn | spawn_monitored | spawn_monitored_async.
 spawn_function(plain) -> spawn;
-spawn_function(monitored) -> spawn_monitored.
+spawn_function(monitored) -> spawn_monitored;
+spawn_function(monitored_async) -> spawn_monitored_async.
 
 -spec spawn_selector(spawn_variant(), list()) -> atom().
 spawn_selector(plain, []) -> spawn;
 spawn_selector(plain, _) -> 'spawnWith:';
 spawn_selector(monitored, []) -> spawnMonitored;
-spawn_selector(monitored, _) -> 'spawnMonitoredWith:'.
+spawn_selector(monitored, _) -> 'spawnMonitoredWith:';
+spawn_selector(monitored_async, []) -> spawnMonitoredAsync;
+spawn_selector(monitored_async, _) -> 'spawnMonitoredAsyncWith:'.
 
 %% BT-4443: every spawn that reaches a class's own `Module:spawn/0,1` /
 %% `Module:spawn_monitored/0,1` from the runtime — the dynamic route
@@ -722,6 +727,22 @@ for a class method, the class process.
     {#beamtalk_object{}, reference()}.
 class_self_spawn_monitored(ClassName, Module, IsAbstract0, Args) ->
     class_self_spawn_variant(monitored, ClassName, Module, IsAbstract0, Args).
+
+-doc """
+BT-4477: `self spawnMonitoredAsync` / `self spawnMonitoredAsyncWith:` from a
+class method, and the `Actor>>spawnMonitoredAsync`/`spawnMonitoredAsyncWith:`
+FFI shims.
+
+Calls the compiled `Module:spawn_monitored_async/0,1` and answers its
+`{Actor, MonitorRef}` pair without waiting for the actor's `init/1` or
+`initialize`; an `initialize` failure arrives as the monitor's `'DOWN'`, not
+as a raise here. Other failures raise `instantiation_error`, like
+`class_self_spawn_monitored/4`.
+""".
+-spec class_self_spawn_monitored_async(class_name(), atom(), boolean() | term(), list()) ->
+    {#beamtalk_object{}, reference()}.
+class_self_spawn_monitored_async(ClassName, Module, IsAbstract0, Args) ->
+    class_self_spawn_variant(monitored_async, ClassName, Module, IsAbstract0, Args).
 
 -spec class_self_spawn_variant(spawn_variant(), class_name(), atom(), boolean() | term(), list()) ->
     term().
