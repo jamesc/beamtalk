@@ -1571,9 +1571,13 @@ impl CoreErlangGenerator {
     ) -> Result<(Vec<ThreadedStmt>, PrecompiledScope)> {
         let mut prelude: Vec<ThreadedStmt> = Vec::new();
         let mut scope = PrecompiledScope::new();
+        // BT-4722: a block literal whose capture reads live state races with a
+        // sibling that runs code (`last_racing_operand`), so the hoisting point
+        // extends to it; the sibling is bound to a temp ahead of the capture.
         let Some(k) = children
             .iter()
             .rposition(|child| self.subexpr_needs_prelude(child))
+            .max(self.last_racing_block_capture(children))
         else {
             return Ok((prelude, scope));
         };
@@ -1582,6 +1586,7 @@ impl CoreErlangGenerator {
         // named local, if a plain variable); `Some(i)`: `compiled[i]`.
         let mut order: Vec<(Option<usize>, Option<&str>, Span)> = Vec::with_capacity(k + 1);
         let mut compiled: Vec<(&Expression, bool, bool, ThreadedValue)> = Vec::with_capacity(k + 1);
+        let mut source_index: Vec<usize> = Vec::with_capacity(k + 1);
         for (i, child) in children[..=k].iter().enumerate() {
             let inner = child.unwrap_parens();
             let snapshot = self.snapshot_before_sibling_rebind(inner, &children[i + 1..=k]);
@@ -1597,13 +1602,13 @@ impl CoreErlangGenerator {
             let tv = self.threaded_expression(child, frame)?;
             order.push((Some(compiled.len()), None, inner.span()));
             compiled.push((child, is_producer, snapshot, tv));
+            source_index.push(i);
         }
-        let last = compiled.len().saturating_sub(1);
 
         let mut ranges: Vec<std::ops::Range<usize>> = Vec::with_capacity(compiled.len());
         for (i, (child, is_producer, snapshot, tv)) in compiled.into_iter().enumerate() {
             let span = child.unwrap_parens().span();
-            let must_bind = i < last && (snapshot || !tv.value_is_trivial());
+            let must_bind = source_index[i] < k && (snapshot || !tv.value_is_trivial());
             let start = prelude.len();
             prelude.extend(tv.prelude);
             ranges.push(start..prelude.len());

@@ -572,16 +572,29 @@ impl CoreErlangGenerator {
             .copied()
     }
 
+    /// BT-4722: the index of the last block-literal child whose capture reads
+    /// live state, when a sibling child runs code and so races with it
+    /// ([`Self::last_racing_operand`]) — `None` otherwise. A hoisting point for
+    /// [`Self::sequence_children`], which otherwise hoists only to the last
+    /// child that needs a prelude.
+    pub(super) fn last_racing_block_capture(&self, children: &[&Expression]) -> Option<usize> {
+        let racing = self.last_racing_operand(children)?;
+        children
+            .iter()
+            .rposition(|c| matches!(c.unwrap_parens(), Expression::Block(b) if self.block_capture_reads_live_state(b)))
+            .filter(|_| true)
+            .map(|b| b.max(racing))
+    }
+
     /// BT-4722: whether creating `block` here reads live mutable state: a
     /// block in a class method that reads a class variable binds
     /// `beamtalk_class_vars:capture` (a process-dictionary read), and a block
-    /// nested in an actor closure that touches actor state binds
-    /// `beamtalk_actor_state:capture` (a live cell read). A sibling operand that
+    /// nested in an actor closure binds `beamtalk_actor_state:capture` (a live
+    /// cell read; any block there may, since a `^` carries the state out). A sibling operand that
     /// runs code and writes that state must run before the capture, so the
     /// block is sequenced like a read, never treated as a constant.
     fn block_capture_reads_live_state(&self, block: &Block) -> bool {
-        (self.in_class_method() && self.block_reads_class_var(block))
-            || (self.in_cell_closure() && self.block_touches_actor_state(block))
+        (self.in_class_method() && self.block_reads_class_var(block)) || self.in_cell_closure()
     }
 
     /// Threads `exprs` via [`Self::thread_subexprs`] and returns
