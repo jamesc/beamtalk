@@ -3069,6 +3069,7 @@ mod tests {
                         origin: None,
                         primitive: None,
                         constant_value: None,
+                        answers_receiver: false,
                     },
                     MethodInfo {
                         selector: EcoString::from("internalHelper"),
@@ -3085,6 +3086,7 @@ mod tests {
                         origin: None,
                         primitive: None,
                         constant_value: None,
+                        answers_receiver: false,
                     },
                 ],
                 class_methods: vec![],
@@ -3230,6 +3232,7 @@ mod tests {
                         origin: None,
                         primitive: None,
                         constant_value: None,
+                        answers_receiver: false,
                     },
                     MethodInfo {
                         selector: EcoString::from("internalHelper"),
@@ -3246,6 +3249,7 @@ mod tests {
                         origin: None,
                         primitive: None,
                         constant_value: None,
+                        answers_receiver: false,
                     },
                 ],
                 class_methods: vec![],

@@ -230,6 +230,7 @@ impl ClassHierarchy {
                     origin: None,
                     primitive: None,
                     constant_value: None,
+                    answers_receiver: false,
                 },
                 MethodInfo {
                     selector: "conformingClasses".into(),
@@ -247,6 +248,7 @@ impl ClassHierarchy {
                     origin: None,
                     primitive: None,
                     constant_value: None,
+                    answers_receiver: false,
                 },
             ];
             self.classes.insert(
@@ -854,6 +856,7 @@ impl ClassHierarchy {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             };
             if let Some(class_info) = self.classes.get_mut(key.class_name.as_str()) {
                 let methods = match key.side {

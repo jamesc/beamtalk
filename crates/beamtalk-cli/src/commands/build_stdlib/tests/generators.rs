@@ -420,6 +420,7 @@ fn test_generate_method_list_emits_return_type() {
         doc: None,
         primitive: None,
         constant_value: None,
+        answers_receiver: false,
     }];
     let mut code = String::new();
     generate_method_list(&mut code, "methods", &methods, "Counter");
@@ -447,6 +448,7 @@ fn test_generate_method_list_emits_none_return_type() {
         doc: None,
         primitive: None,
         constant_value: None,
+        answers_receiver: false,
     }];
     let mut code = String::new();
     generate_method_list(&mut code, "methods", &methods, "Counter");
@@ -474,6 +476,7 @@ fn test_generate_method_list_emits_spawns_block_true() {
         doc: None,
         primitive: None,
         constant_value: None,
+        answers_receiver: false,
     }];
     let mut code = String::new();
     generate_method_list(&mut code, "class_methods", &methods, "Timer");
@@ -500,6 +503,7 @@ fn test_generate_method_list_emits_is_internal_true() {
         doc: None,
         primitive: None,
         constant_value: None,
+        answers_receiver: false,
     }];
     let mut code = String::new();
     generate_method_list(&mut code, "methods", &methods, "SystemNavigation");
@@ -716,6 +720,7 @@ fn test_generate_method_list_escapes_doc_special_characters() {
         doc: Some("Line one\nLine \"two\"\tend\r".to_string()),
         primitive: None,
         constant_value: None,
+        answers_receiver: false,
     }];
     let mut code = String::new();
     generate_method_list(&mut code, "methods", &methods, "Help");

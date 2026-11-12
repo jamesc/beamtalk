@@ -49,6 +49,7 @@ pub(super) fn sample_class_meta() -> ClassMeta {
                 doc: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
             MethodMeta {
                 selector: "add:".to_string(),
@@ -62,6 +63,7 @@ pub(super) fn sample_class_meta() -> ClassMeta {
                 doc: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
         ],
         class_methods: vec![MethodMeta {
@@ -76,6 +78,7 @@ pub(super) fn sample_class_meta() -> ClassMeta {
             doc: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         }],
         class_variables: vec![],
         type_params: vec![],

@@ -307,6 +307,81 @@ impl MethodDefinition {
         }
     }
 
+    /// Whether this method answers its own receiver on every path
+    /// (BT-4739): the last statement is `self` (or `^ self`), and every `^`
+    /// anywhere in the body — including inside blocks, where it is a
+    /// non-local return — returns `self` or raises (`^ self error: "…"`,
+    /// `^ … signal`), and no field is assigned (`self.x := …`, legal in
+    /// `TestCase`, makes the trailing `self` an updated copy).
+    ///
+    /// A `Value` method cannot mutate its receiver, so one that answers
+    /// `self` does its work through a side effect (process dictionary,
+    /// socket, logger, telemetry) or only to raise; the answer is the
+    /// receiver, never an updated copy. The `discarded-update` lint uses this
+    /// to stay silent on such calls. Bodies that are a bare `@primitive`
+    /// answer `false`: the runtime decides what they return.
+    #[must_use]
+    pub fn answers_receiver(&self) -> bool {
+        use super::visitor::{Visitor, walk_block, walk_expr};
+
+        fn is_self(expr: &Expression) -> bool {
+            matches!(expr, Expression::Identifier(id) if id.name == "self")
+        }
+
+        // `^ self error: "…"` / `^ … signal` raise, so they answer nothing.
+        // Selector-based heuristic: `error:` only on `self`, `signal`/`signal:`
+        // on any receiver (a false negative at worst).
+        fn raises(expr: &Expression) -> bool {
+            match expr {
+                Expression::MessageSend {
+                    receiver, selector, ..
+                } => match selector.name().as_str() {
+                    "error:" => is_self(receiver),
+                    "signal" | "signal:" => true,
+                    _ => false,
+                },
+                _ => false,
+            }
+        }
+
+        struct OnlyReturnsSelf(bool);
+        impl<'ast> Visitor<'ast> for OnlyReturnsSelf {
+            fn visit_expr(&mut self, expr: &'ast Expression) {
+                match expr {
+                    Expression::Return { value, .. } => {
+                        self.0 &= is_self(value) || raises(value);
+                    }
+                    // `self.x := …` (legal in `TestCase`) makes a trailing
+                    // `self` answer the updated copy, not the receiver.
+                    Expression::Assignment { target, .. }
+                        if matches!(target.as_ref(), Expression::FieldAccess { .. }) =>
+                    {
+                        self.0 = false;
+                    }
+                    _ => {}
+                }
+                walk_expr(self, expr);
+            }
+            fn visit_block(&mut self, block: &'ast super::Block) {
+                walk_block(self, block);
+            }
+        }
+
+        let Some(last) = self.body.last() else {
+            return false;
+        };
+        let ends_with_self = is_self(&last.expression)
+            || matches!(&last.expression, Expression::Return { value, .. } if is_self(value));
+        if !ends_with_self {
+            return false;
+        }
+        let mut check = OnlyReturnsSelf(true);
+        for stmt in &self.body {
+            check.visit_expr(&stmt.expression);
+        }
+        check.0
+    }
+
     /// Creates a new method definition.
     #[must_use]
     pub fn new(

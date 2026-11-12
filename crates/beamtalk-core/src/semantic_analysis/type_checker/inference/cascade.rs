@@ -245,10 +245,12 @@ impl TypeChecker {
         } else if is_assignable_local(receiver) {
             format!(
                 "assign the result (`{receiver_text} := {receiver_text} {shape}`) or \
-                 chain with `|>`"
+                 chain with `|>`; to discard it on purpose, write `_ := {receiver_text} {shape}`"
             )
         } else {
-            "use the result (assign it, return it, or pass it on)".to_string()
+            "use the result (assign it, return it, or pass it on), or discard it on \
+             purpose with `_ := …`"
+                .to_string()
         };
         self.diagnostics.push(
             Diagnostic::warning(format!("the result of `{name}` is discarded"), *span)
@@ -295,6 +297,13 @@ pub fn cascade_drops_update(
         return false;
     };
     if !hierarchy.is_value_subclass(&method.defined_in) {
+        return false;
+    }
+    // A method whose body answers its own receiver (BT-4739) does its work
+    // through a side effect (process dictionary, socket, logger, telemetry)
+    // or only to raise; a value cannot mutate itself, so the answer is the
+    // receiver, never an updated copy.
+    if method.answers_receiver {
         return false;
     }
     match &method.return_type {

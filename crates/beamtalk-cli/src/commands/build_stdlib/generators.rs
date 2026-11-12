@@ -926,12 +926,13 @@ pub(super) fn generate_method_list(
              is_internal: {internal}, spawns_block: {spawns_block}, \
              return_type: {return_type_expr}, param_types: {param_types_expr}, doc: {doc_expr}, \
              origin: None, primitive: {primitive_expr}, \
-             constant_value: {constant_value_expr} }},",
+             constant_value: {constant_value_expr}, answers_receiver: {answers_receiver} }},",
             arity = m.arity,
             class = class_name,
             sealed = m.is_sealed,
             internal = m.is_internal,
             spawns_block = m.spawns_block,
+            answers_receiver = m.answers_receiver,
         );
     }
     code.push_str("            ],\n");

@@ -763,6 +763,7 @@ fn bt2868_unannotated_return_method_reports_honest_reason() {
             origin: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         }],
         class_methods: vec![],
         class_variables: vec![],

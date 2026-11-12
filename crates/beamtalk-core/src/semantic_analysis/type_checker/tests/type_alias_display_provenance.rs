@@ -604,6 +604,7 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             }],
             class_methods: vec![],
             class_variables: vec![],
@@ -653,6 +654,7 @@ fn instance_arg_rejected_for_class_typed_alias_parameter() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)] // one MethodInfo literal per class; the new field added a line
 fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
     // `argument_that_is_itself_an_alias_typed_return_value_is_not_flagged`
     // above only asserts the diagnostic side (no false "expects ... got ..."
@@ -711,6 +713,7 @@ fn arg_ty_side_alias_name_is_recorded_in_referenced_aliases() {
             origin: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         }],
         class_methods: vec![],
         class_variables: vec![],

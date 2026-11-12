@@ -57,6 +57,7 @@ fn sealed_parser(package: Option<&str>) -> ClassInfo {
             origin: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         }],
         class_variables: vec![],
         type_params: vec![],

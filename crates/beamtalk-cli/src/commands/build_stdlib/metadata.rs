@@ -149,6 +149,7 @@ pub(super) struct ClassVarMeta {
 }
 
 /// Metadata for a single method, extracted from the AST.
+#[allow(clippy::struct_excessive_bools)] // independent per-method flags, each documented
 pub(super) struct MethodMeta {
     /// Message selector (e.g., `"increment"` or `"add:"`).
     pub(super) selector: String,
@@ -174,6 +175,9 @@ pub(super) struct MethodMeta {
     /// The scalar literal when it is the whole body (BT-4363, BT-4504,
     /// `MethodInfo::constant_value`).
     pub(super) constant_value: Option<beamtalk_core::ast::ConstantValue>,
+    /// Whether the body answers its receiver on every path (BT-4739,
+    /// `MethodInfo::answers_receiver`).
+    pub(super) answers_receiver: bool,
 }
 
 /// Simplified method kind for code generation.
@@ -217,6 +221,7 @@ fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition, class_side: bool
         doc: m.doc_comment.clone(),
         primitive: m.quoted_primitive_name().map(ToString::to_string),
         constant_value: MethodInfo::recorded_constant(m, class_side),
+        answers_receiver: m.answers_receiver(),
     }
 }
 
@@ -270,6 +275,7 @@ pub(super) fn synthesize_value_auto_methods(
                 doc: Some(getter_doc),
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             });
         }
 
@@ -294,6 +300,7 @@ pub(super) fn synthesize_value_auto_methods(
                 doc: Some(setter_doc),
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             });
         }
     }
@@ -337,6 +344,7 @@ pub(super) fn synthesize_value_auto_methods(
         doc: Some(ctor_doc),
         primitive: None,
         constant_value: None,
+        answers_receiver: false,
     });
     Some(kw_sel)
 }

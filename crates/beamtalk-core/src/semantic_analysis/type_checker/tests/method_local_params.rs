@@ -52,6 +52,7 @@ fn add_processor_class(hierarchy: &mut ClassHierarchy) {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
             MethodInfo {
                 selector: eco_string("processArray:"),
@@ -68,6 +69,7 @@ fn add_processor_class(hierarchy: &mut ClassHierarchy) {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
         ],
         class_methods: vec![],

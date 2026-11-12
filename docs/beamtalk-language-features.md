@@ -722,7 +722,17 @@ pipeline statement is flagged once, at its last stage. A cascade statement
 keeps `cascade-drops-update`, so no span is reported twice. Binary sends
 are flagged too, except pure ones such as `n + 1.` on plain operands, which
 keep the `effect_free` lint. `Dynamic` and union receivers, actors and
-non-value classes stay silent. Silence one with `@expect discarded_update`,
+non-value classes stay silent. A method whose body answers its own receiver
+on every path (BT-4739) is not an update either: a value cannot mutate itself
+(`TestCase` can assign its own slots, so a body with `self.x := …` always
+counts as an update), so `store: v`, `send: data` or `checkHeaders: h` that ends in `self` (or
+`^ self`) works through a side effect or only to raise, and a call to it is
+never flagged. Every `^` in such a body must return `self` or raise
+(`^ self error: "…"`). A method that ends in a new value (`self withX: 1`),
+has a `^` that answers something else, or is a bare `@primitive` still counts
+as an update. To discard a result on purpose, assign it to an
+underscore-prefixed local (`_ := p withX: 3.`); an assigned result is never
+flagged. Silence one with `@expect discarded_update`,
 or a package with `discarded-update = "off"` under `[diagnostics]`.
 
 ### Pipelines (`|>`) (ADR 0145)
