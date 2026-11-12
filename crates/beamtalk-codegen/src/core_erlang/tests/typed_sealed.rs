@@ -374,24 +374,85 @@ fn untyped_param_stays_dynamic() {
     );
 }
 
+/// BT-4595: a union whose members all have routes compiles to a guard chain.
 #[test]
-fn union_typed_param_stays_dynamic() {
+fn routed_union_typed_param_sends_direct_with_guard_chain() {
     let code = codegen(concat!(
         "Object subclass: Caller\n",
-        "  useIt: w :: Widget | Gadget =>\n",
+        "  useIt: w :: Widget | Gadget | Integer =>\n",
         "    w ping\n\n",
         "Object subclass: Widget\n",
         "  ping => 1\n\n",
         "Object subclass: Gadget\n",
         "  ping => 1\n",
     ));
-    assert!(
-        !code.contains("'dispatch'('ping'"),
-        "union receiver must stay dynamic. Got:\n{code}"
-    );
+    for fragment in [
+        "call 'bt@widget':'dispatch'('ping'",
+        "call 'bt@gadget':'dispatch'('ping'",
+        "call 'bt@stdlib@integer':'dispatch'('ping'",
+        "call 'erlang':'is_integer'(",
+        "<'Widget'> when 'true'",
+        "<'Gadget'> when 'true'",
+        "beamtalk_message_dispatch':'send'(",
+    ] {
+        assert!(
+            code.contains(fragment),
+            "missing {fragment:?}. Got:\n{code}"
+        );
+    }
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn union_with_duplicate_members_dedupes_arms() {
+    // `Widget(Integer) | Widget(String)`-style duplicates collapse; with a
+    // single distinct class the send is the plain tagged guard.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: w :: Widget | Widget | Gadget =>\n",
+        "    w ping\n\n",
+        "Object subclass: Widget\n",
+        "  ping => 1\n\n",
+        "Object subclass: Gadget\n",
+        "  ping => 1\n",
+    ));
+    assert_eq!(code.matches("<'Widget'> when 'true'").count(), 1, "{code}");
+    assert_eq!(code.matches("<'Gadget'> when 'true'").count(), 1, "{code}");
+}
+
+#[test]
+fn union_with_unrouted_member_stays_dynamic() {
+    // `Boolean` is abstract: no guard can hit, so the whole union is dynamic.
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: w :: Widget | Boolean =>\n",
+        "    w ping\n\n",
+        "Object subclass: Widget\n",
+        "  ping => 1\n",
+    ));
+    assert!(!code.contains("'dispatch'('ping'"), "{code}");
     assert!(
         code.contains("beamtalk_message_dispatch':'send'("),
-        "union receiver send should still exist as a dynamic send. Got:\n{code}"
+        "{code}"
+    );
+}
+
+#[test]
+fn union_over_the_arm_cap_stays_dynamic() {
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: w :: A1 | A2 | A3 | A4 | A5 =>\n",
+        "    w ping\n\n",
+        "Object subclass: A1\n  ping => 1\n\n",
+        "Object subclass: A2\n  ping => 1\n\n",
+        "Object subclass: A3\n  ping => 1\n\n",
+        "Object subclass: A4\n  ping => 1\n\n",
+        "Object subclass: A5\n  ping => 1\n",
+    ));
+    assert!(!code.contains("'dispatch'('ping'"), "{code}");
+    assert!(
+        code.contains("beamtalk_message_dispatch':'send'("),
+        "{code}"
     );
 }
 
@@ -1738,4 +1799,67 @@ fn interpolation_segment_display_string_uses_the_typed_route() {
         "the untyped segment (and every miss arm) keeps the dynamic send. Got:\n{code}"
     );
     super::assert_compiles_through_erlc("test", &code);
+}
+
+/// BT-4595: `-spec`-extracted (`Extracted`) provenance is accepted for the
+/// members of a union chain only: a union-typed FFI result takes the guard
+/// chain, while a single-class `Extracted` receiver stays dynamic.
+#[test]
+fn extracted_provenance_is_trusted_for_union_members_only() {
+    use beamtalk_core::semantic_analysis::type_checker::{FunctionSignature, NativeTypeRegistry};
+    use beamtalk_core::semantic_analysis::{InferredType, TypeProvenance};
+
+    let extracted = |name: &str| InferredType::Known {
+        class_name: ecow::EcoString::from(name),
+        type_args: vec![],
+        provenance: TypeProvenance::Extracted,
+    };
+    let signature = |name: &str, return_type: InferredType| FunctionSignature {
+        name: name.to_string(),
+        arity: 0,
+        params: vec![],
+        return_type,
+        provenance: TypeProvenance::Extracted,
+        line: None,
+    };
+    let mut registry = NativeTypeRegistry::new();
+    registry.register_module(
+        "ffi_mod",
+        vec![
+            signature(
+                "either",
+                InferredType::Union {
+                    members: vec![extracted("Integer"), extracted("List")],
+                    provenance: TypeProvenance::Extracted,
+                },
+            ),
+            signature("one", extracted("Integer")),
+        ],
+    );
+    let compile = |call: &str| {
+        let src = format!(
+            "Object subclass: Caller\n  useIt =>\n    (Erlang ffi_mod {call}) frobnicate\n"
+        );
+        let module = beamtalk_core::source_analysis::parse(
+            beamtalk_core::source_analysis::lex_with_eof(&src),
+        )
+        .0;
+        crate::core_erlang::generate_module(
+            &module,
+            crate::core_erlang::CodegenOptions::new("test")
+                .with_native_type_registry(Some(std::sync::Arc::new(registry.clone()))),
+        )
+        .expect("codegen should succeed")
+    };
+    let union = compile("either");
+    assert!(
+        union.contains("'bt@stdlib@integer':'dispatch'('frobnicate'")
+            && union.contains("'bt@stdlib@list':'dispatch'('frobnicate'"),
+        "extracted union receiver should take the guard chain. Got:\n{union}"
+    );
+    let single = compile("one");
+    assert!(
+        !single.contains("'bt@stdlib@integer':'dispatch'('frobnicate'"),
+        "single-class extracted receiver must stay dynamic. Got:\n{single}"
+    );
 }

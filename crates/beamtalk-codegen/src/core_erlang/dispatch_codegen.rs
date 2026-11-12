@@ -186,9 +186,26 @@ pub(in crate::core_erlang) const HANDLERS: &[(&str, SendHandler)] = &[
 /// rather than re-deriving it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(in crate::core_erlang) enum StaysDynamic {
-    /// No trusted static type: none recorded, `Dynamic`, a union, a
-    /// negation, a metatype, or a `Known` type of untrusted provenance.
+    /// No trusted static type: none recorded, `Dynamic`, a negation, a
+    /// metatype, or a single `Known` type of untrusted provenance
+    /// (`Extracted`). A union has its own gates
+    /// ([`Self::UnionMemberUntyped`], [`Self::UnionMember`],
+    /// [`Self::UnionTooManyArms`]).
     Untyped,
+    /// BT-4595: a union-typed receiver one of whose members has no
+    /// `Known` class (`Dynamic`, a negation, a metatype, …); the string is
+    /// the member's rendered type.
+    UnionMemberUntyped(String),
+    /// BT-4595: a union-typed receiver one of whose `Known` members has no
+    /// guarded route; the whole union stays dynamic and the report names the
+    /// member and its own gate.
+    UnionMember {
+        class: ecow::EcoString,
+        why: Box<StaysDynamic>,
+    },
+    /// BT-4595: a union-typed receiver with more than [`MAX_PROTOCOL_ARMS`]
+    /// distinct guard arms.
+    UnionTooManyArms,
     /// A binary selector: lowered by the operator path, never a guarded call.
     BinarySelector,
     /// The `perform:` family, or a selector the dynamic entry point rewrites
@@ -319,6 +336,15 @@ pub(in crate::core_erlang) enum TypedSendTarget {
     /// them takes the dynamic send. A protocol with exactly one conformer
     /// resolves to [`Self::Tagged`].
     Conformers(Vec<TypedTaggedTarget>),
+    /// BT-4595: a union-typed receiver (two to [`MAX_PROTOCOL_ARMS`]
+    /// distinct member classes, each resolving to [`Self::Tagged`] or
+    /// [`Self::Builtin`]): one guard per member, chained so each miss falls
+    /// to the next, the dynamic send last. Member guards do not overlap, so
+    /// the order never changes meaning; a value matching no member takes the
+    /// dynamic send exactly as before. Members of any provenance (including
+    /// `-spec`-extracted) are accepted — the guard, not the annotation, is
+    /// the contract (ADR 0025 amendment).
+    Union(Vec<TypedSendTarget>),
 }
 
 impl CoreErlangGenerator {
@@ -1013,7 +1039,23 @@ impl CoreErlangGenerator {
         if routing::rewritten_selectors().contains(&selector.name().as_str()) {
             return Err(StaysDynamic::PerformFamily);
         }
+        if let Some(beamtalk_core::semantic_analysis::InferredType::Union { members, .. }) =
+            self.type_map.get(receiver.span())
+        {
+            return self.union_send_target(members, selector);
+        }
         let class_name = self.trusted_static_class(receiver)?;
+        self.class_send_target(class_name, selector)
+    }
+
+    /// The guarded target for a receiver whose class is `class_name`: a
+    /// representation-routed built-in, a protocol's conformers, or a tagged
+    /// map class. Provenance is the caller's concern.
+    fn class_send_target(
+        &self,
+        class_name: &ecow::EcoString,
+        selector: &MessageSelector,
+    ) -> std::result::Result<TypedSendTarget, StaysDynamic> {
         if routing::is_non_tagged_map_class(class_name.as_str()) {
             return match routing::builtin_send_route(class_name.as_str(), &selector.name()) {
                 Some(Ok(route)) => Ok(TypedSendTarget::Builtin(route)),
@@ -1028,6 +1070,63 @@ impl CoreErlangGenerator {
         }
         self.typed_tagged_target(class_name)
             .map(TypedSendTarget::Tagged)
+    }
+
+    /// BT-4595: the guarded target for a union-typed receiver. Members are
+    /// deduped by class, each resolved through [`Self::class_send_target`]
+    /// with any `Known` provenance accepted (see [`TypedSendTarget::Union`]);
+    /// a member with no route keeps the whole union dynamic, and so does a
+    /// chain of more than [`MAX_PROTOCOL_ARMS`] arms. A protocol member
+    /// contributes its conformer arms.
+    fn union_send_target(
+        &self,
+        members: &[beamtalk_core::semantic_analysis::InferredType],
+        selector: &MessageSelector,
+    ) -> std::result::Result<TypedSendTarget, StaysDynamic> {
+        let mut seen: Vec<&ecow::EcoString> = Vec::new();
+        let mut arms: Vec<TypedSendTarget> = Vec::new();
+        for member in members {
+            let beamtalk_core::semantic_analysis::InferredType::Known { class_name, .. } = member
+            else {
+                return Err(StaysDynamic::UnionMemberUntyped(
+                    member.display_name().to_string(),
+                ));
+            };
+            if seen.contains(&class_name) {
+                continue;
+            }
+            seen.push(class_name);
+            let target = self
+                .class_send_target(class_name, selector)
+                .map_err(|why| StaysDynamic::UnionMember {
+                    class: class_name.clone(),
+                    why: Box::new(why),
+                })?;
+            match target {
+                TypedSendTarget::Conformers(tagged) => {
+                    arms.extend(tagged.into_iter().map(TypedSendTarget::Tagged));
+                }
+                other => arms.push(other),
+            }
+        }
+        // Distinct arms only: two members may share a conformer.
+        let mut distinct: Vec<TypedSendTarget> = Vec::with_capacity(arms.len());
+        for arm in arms {
+            if let TypedSendTarget::Tagged(t) = &arm
+                && distinct.iter().any(
+                    |d| matches!(d, TypedSendTarget::Tagged(o) if o.class_name == t.class_name),
+                )
+            {
+                continue;
+            }
+            distinct.push(arm);
+        }
+        match distinct.len() {
+            0 => Err(StaysDynamic::UnionTooManyArms),
+            1 => Ok(distinct.remove(0)),
+            n if n > MAX_PROTOCOL_ARMS => Err(StaysDynamic::UnionTooManyArms),
+            _ => Ok(TypedSendTarget::Union(distinct)),
+        }
     }
 
     /// BT-4486/BT-4630: the known conformers of `protocol` (non-protocol
@@ -1236,7 +1335,38 @@ impl CoreErlangGenerator {
             args_list_doc.clone(),
             "])",
         ]);
+        self.guard_around(
+            target,
+            selector_atom,
+            receiver_var,
+            arg_vars,
+            &args_list_doc,
+            fallback_doc,
+        )
+    }
+
+    /// The guard(s) of one [`TypedSendTarget`] around its direct call(s),
+    /// with `miss` (the dynamic send, or the next link of a union chain) in
+    /// every miss arm.
+    fn guard_around(
+        &mut self,
+        target: &TypedSendTarget,
+        selector_atom: &str,
+        receiver_var: &str,
+        arg_vars: &[String],
+        args_list_doc: &Document<'static>,
+        miss: Document<'static>,
+    ) -> Document<'static> {
+        let fallback_doc = miss;
         match target {
+            TypedSendTarget::Union(members) => self.union_chain_doc(
+                members,
+                selector_atom,
+                receiver_var,
+                arg_vars,
+                args_list_doc,
+                fallback_doc,
+            ),
             TypedSendTarget::Conformers(conformers) => {
                 // BT-4486: one tag arm per conformer, each a direct call.
                 let arms: Vec<(String, Document<'static>)> = conformers
@@ -1247,7 +1377,7 @@ impl CoreErlangGenerator {
                             selector_atom,
                             receiver_var,
                             arg_vars,
-                            &args_list_doc,
+                            args_list_doc,
                         );
                         (
                             tagged.class_name.clone(),
@@ -1263,7 +1393,7 @@ impl CoreErlangGenerator {
                     selector_atom,
                     receiver_var,
                     arg_vars,
-                    &args_list_doc,
+                    args_list_doc,
                 );
                 // BT-4366: both calls sit inside the type-test `case`, so each
                 // carries the send's line itself.
@@ -1279,7 +1409,7 @@ impl CoreErlangGenerator {
                 let direct_doc = self.annotate_current_send_call(Self::dispatch3_call_doc(
                     route.target_module.to_string(),
                     selector_atom,
-                    &args_list_doc,
+                    args_list_doc,
                     receiver_var,
                 ));
                 // BT-4510: a `Binary` receiver that is a `String` at run time
@@ -1291,7 +1421,7 @@ impl CoreErlangGenerator {
                             self.annotate_current_send_call(Self::dispatch3_call_doc(
                                 string_route.target_module.to_string(),
                                 selector_atom,
-                                &args_list_doc,
+                                args_list_doc,
                                 receiver_var,
                             ));
                         self.render_send_guard(
@@ -1306,6 +1436,57 @@ impl CoreErlangGenerator {
                 self.render_send_guard(route.guard, receiver_var, direct_doc, &miss_doc)
             }
         }
+    }
+
+    /// BT-4595: the guard chain of a [`TypedSendTarget::Union`].
+    fn union_chain_doc(
+        &mut self,
+        members: &[TypedSendTarget],
+        selector_atom: &str,
+        receiver_var: &str,
+        arg_vars: &[String],
+        args_list_doc: &Document<'static>,
+        fallback_doc: Document<'static>,
+    ) -> Document<'static> {
+        // BT-4595: tag arms share one `select_val` case; each
+        // built-in guard wraps it, built right to left so the
+        // dynamic send is the last miss. Guards do not overlap, so
+        // grouping the tag arms changes no meaning.
+        let (tagged, others): (Vec<&TypedSendTarget>, Vec<&TypedSendTarget>) = members
+            .iter()
+            .partition(|m| matches!(m, TypedSendTarget::Tagged(_)));
+        let mut chain = fallback_doc;
+        if !tagged.is_empty() {
+            let arms: Vec<(String, Document<'static>)> = tagged
+                .iter()
+                .filter_map(|m| match m {
+                    TypedSendTarget::Tagged(t) => Some(t),
+                    _ => None,
+                })
+                .map(|t| {
+                    let call = self.tagged_direct_call(
+                        t,
+                        selector_atom,
+                        receiver_var,
+                        arg_vars,
+                        args_list_doc,
+                    );
+                    (t.class_name.clone(), self.annotate_current_send_call(call))
+                })
+                .collect();
+            chain = self.class_tags_guarded_doc(receiver_var, arms, chain);
+        }
+        for member in others.into_iter().rev() {
+            chain = self.guard_around(
+                member,
+                selector_atom,
+                receiver_var,
+                arg_vars,
+                args_list_doc,
+                chain,
+            );
+        }
+        chain
     }
 
     /// BT-4473: the direct call for a receiver known to be tagged `tagged`:

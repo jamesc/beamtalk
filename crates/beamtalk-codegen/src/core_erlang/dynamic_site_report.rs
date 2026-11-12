@@ -230,6 +230,17 @@ impl CoreErlangGenerator {
         let class = class_name.unwrap_or("?");
         match gate {
             StaysDynamic::Untyped => "untyped".to_string(),
+            StaysDynamic::UnionMemberUntyped(member) => {
+                format!("union-member-untyped — union member {member} has no static class")
+            }
+            StaysDynamic::UnionMember { class, why } => format!(
+                "union-member — {class}: {}",
+                self.describe_gate(why, Some(class.as_str()))
+            ),
+            StaysDynamic::UnionTooManyArms => format!(
+                "union-too-many — more than {} guardable member classes",
+                super::dispatch_codegen::MAX_PROTOCOL_ARMS
+            ),
             StaysDynamic::BinarySelector => "binary-selector".to_string(),
             StaysDynamic::PerformFamily => {
                 "perform — the dynamic path does not dispatch this selector as sent".to_string()
