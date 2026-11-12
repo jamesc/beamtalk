@@ -2582,11 +2582,14 @@ concurrent_alloc_during_grow_and_clear_test_() ->
                     beamtalk_trace_store:record_dispatch(Live, Sel, 5, ok, sync, 'Grow')
                  || Sel <- [one, two, three]
                 ],
-                Bases = [
-                    B
-                 || {{P, _}, _, B, _} <- ets:tab2list(beamtalk_agg_pid), P =:= Live
+                %% A slot is a {Ref, Base} pair (see above), not a bare base:
+                %% free-list slots released from different counter arrays can
+                %% share a base and are still distinct slots (BT-4746).
+                Slots = [
+                    {R, B}
+                 || {{P, _}, R, B, _} <- ets:tab2list(beamtalk_agg_pid), P =:= Live
                 ],
-                ?assertEqual(3, length(lists:usort(Bases))),
+                ?assertEqual(3, length(lists:usort(Slots))),
                 #{{beamtalk_string, <<"methods">>} := LiveMethods} =
                     maps:get(
                         {beamtalk_string, list_to_binary(pid_to_list(Live))},
@@ -2608,6 +2611,38 @@ concurrent_alloc_during_grow_and_clear_test_() ->
                 ],
                 Live ! stop
             end)}
+    end}.
+
+free_list_slots_sharing_a_base_stay_distinct_test_() ->
+    %% BT-4746: slots released from different counter arrays (after a grow)
+    %% can carry the same base. They are distinct slots, so two new keys that
+    %% claim them get distinct {Ref, Base} pairs, zeroed, with no sharing.
+    {setup, fun churn_setup/0, fun cleanup/1, fun(_) ->
+        ?_test(begin
+            beamtalk_trace_store:enable(),
+            beamtalk_trace_store:clear(),
+            ets:delete_all_objects(beamtalk_agg_free_slots),
+            RefA = atomics:new(64, [{signed, true}]),
+            RefB = atomics:new(64, [{signed, true}]),
+            %% Dirty both slots' call counters (offset 1): reuse must zero them.
+            atomics:put(RefA, 8 + 1, 99),
+            atomics:put(RefB, 8 + 1, 99),
+            true = ets:insert(beamtalk_agg_free_slots, [{{0, RefA, 8}}, {{1, RefB, 8}}]),
+            Live = idle_process(),
+            [
+                beamtalk_trace_store:record_dispatch(Live, Sel, 5, ok, sync, 'Share')
+             || Sel <- [one, two]
+            ],
+            Rows = [R || {{P, _}, _, _, _} = R <- ets:tab2list(beamtalk_agg_pid), P =:= Live],
+            Slots = [{R, B} || {_, R, B, _} <- Rows],
+            ?assertEqual(2, length(lists:usort(Slots))),
+            ?assertEqual([8], lists:usort([B || {_, B} <- Slots])),
+            ?assertEqual(lists:sort([{RefA, 8}, {RefB, 8}]), lists:sort(Slots)),
+            ?assertEqual(0, ets:info(beamtalk_agg_free_slots, size)),
+            %% Each key counted its one call in its own slot, not a stale 99.
+            [?assertEqual(1, atomics:get(R, B + 1)) || {R, B} <- Slots],
+            Live ! stop
+        end)
     end}.
 
 upgrade_resets_aggregates_test_() ->

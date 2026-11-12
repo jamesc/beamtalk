@@ -328,14 +328,6 @@ impl CoreErlangGenerator {
         let needs_nlr = frame
             .semantic_facts
             .has_block_nlr_or_walk(&method.span, &method.body);
-        let nlr_token_var = if needs_nlr {
-            let token_var = frame.fresh_temp_var("NlrToken");
-            frame.set_current_nlr_token(Some(token_var.clone()));
-            Some(token_var)
-        } else {
-            None
-        };
-
         // Each arm captures its own `Result` (rather than using `?` inside
         // the match) so `frame`'s `Drop` and the `context` restore below run
         // unconditionally before the error, if any, propagates — same as
@@ -343,12 +335,13 @@ impl CoreErlangGenerator {
         let fun_doc_result: Result<Document<'static>> = match boundary {
             MethodBoundary::ValueType => {
                 let body = super::super::util::collect_body_exprs(&method.body);
-                let body_result = if body.is_empty() {
-                    Ok(Self::generate_vt_empty_body())
-                } else {
-                    frame.generate_vt_body_exprs(&body)
-                };
-                frame.set_current_nlr_token(None);
+                let (body_result, nlr_token_var) = frame.with_nlr_scope(needs_nlr, |g| {
+                    if body.is_empty() {
+                        Ok(Self::generate_vt_empty_body())
+                    } else {
+                        g.generate_vt_body_exprs(&body)
+                    }
+                });
                 body_result.map(|body_parts| {
                     // BT-4503: the runtime applies a value-type extension
                     // fun as `fun(Args, Self) -> Result`
@@ -368,8 +361,9 @@ impl CoreErlangGenerator {
                 })
             }
             MethodBoundary::Actor => {
-                let lowered = frame.lower_method_definition_body_with_reply(method);
-                frame.set_current_nlr_token(None);
+                let (lowered, nlr_token_var) = frame.with_nlr_scope(needs_nlr, |g| {
+                    g.lower_method_definition_body_with_reply(method)
+                });
                 lowered.map(|stmts| {
                     // (ADR 0111 Addendum 4/6): prepend a real `NlrCatch`
                     // stmt and verify+render once, instead of rendering the
@@ -460,14 +454,7 @@ impl CoreErlangGenerator {
         let needs_nlr = frame
             .semantic_facts
             .has_block_nlr_or_walk(&method.span, &method.body);
-        let nlr_token_var = if needs_nlr {
-            let token_var = frame.fresh_temp_var("NlrToken");
-            frame.set_current_nlr_token(Some(token_var.clone()));
-            Some(token_var)
-        } else {
-            None
-        };
-        let body_result = frame.class_method_body_doc(method, nlr_token_var.as_deref());
+        let body_result = frame.class_method_body_doc(method, needs_nlr);
 
         // `frame` drops here (pops the scope, clears `in_class_method`,
         // restores the selector) on the success and error paths alike.

@@ -1,7 +1,7 @@
 # ADR 0147: Map-Shape Types for Keyed Dictionaries
 
 ## Status
-Accepted (2026-11-11)
+Implemented (2026-11-12)
 
 ## Implementation Tracking
 
@@ -22,7 +22,7 @@ Accepted (2026-11-11)
 | 8 | [BT-4736](https://linear.app/beamtalk/issue/BT-4736) | Migrate option aliases to shapes: buccaneer, beamtalk-http, stdlib casts | M | BT-4733 |
 | 9 | [BT-4737](https://linear.app/beamtalk/issue/BT-4737) | Language docs and end-to-end tests (final phase) | M | BT-4734, BT-4735, BT-4736 |
 
-**Status:** Planned
+**Status:** Done
 
 ## Context
 
@@ -265,6 +265,8 @@ build-stopping error unless a project opts in.
 | `at:ifAbsent:` on a key a closed shape does not name | `Warning` (the block always runs) |
 | Literal checked against a shape: missing required key, unknown key in a closed shape, wrong value type | `Warning` |
 | Optional key read with `at:`, or unnamed key in an open shape | silent |
+
+A misspelt key aimed at a closed shape gets a "did you mean" whether the target key is optional (reported as an unexpected key) or required (reported as `missing required key` with a `did you misspell it as` note, BT-4737).
 
 ### Shape-aware operations
 

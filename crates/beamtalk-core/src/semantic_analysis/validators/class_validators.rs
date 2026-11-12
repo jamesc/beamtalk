@@ -311,7 +311,11 @@ fn check_object_new_in_class_methods(
 ) {
     for class in &module.classes {
         let class_name = class.name.name.as_str();
+        // An unresolved ancestor (cross-file parent in a manifest-less build)
+        // makes the kind unknowable: `resolve_class_kind` would fall back to
+        // Object and wrongly refuse `new:` on a Value/Actor subclass (BT-4747).
         if !hierarchy.has_class(class_name)
+            || hierarchy.has_cross_file_parent(class_name)
             || !matches!(hierarchy.resolve_class_kind(class_name), ClassKind::Object)
         {
             continue;
@@ -385,6 +389,9 @@ fn uninstantiable_new(
     if !matches!(selector, "new" | "new:")
         || matches!(class_name, "self" | "super")
         || !hierarchy.has_class(class_name)
+        // Unresolved ancestor: the kind is unknowable here, and the Object
+        // fallback would misreport a Value/Actor subclass (BT-4747).
+        || hierarchy.has_cross_file_parent(class_name)
         || hierarchy.has_own_class_method(class_name, selector)
     {
         return None;

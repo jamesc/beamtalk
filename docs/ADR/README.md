@@ -173,7 +173,7 @@ Each ADR follows the structure in [TEMPLATE.md](TEMPLATE.md). Key sections:
 | [0144](0144-class-side-protocol-types.md) | Class-Side Protocol Types — `P class` Means "a Class Conforming to `P`" | Implemented | 2026-11-04 |
 | [0145](0145-cascade-pipeline-semantics.md) | Cascade Semantics for Immutable Values — Keep `;` Fan-Out, Add a `\|>` Pipeline | Accepted | 2026-11-06 |
 | [0146](0146-non-local-return-through-ensure.md) | A `^` Commits the Actor's Cell, Not a Copy | Accepted | 2026-11-06 |
-| [0147](0147-map-shape-types.md) | Map-Shape Types for Keyed Dictionaries | Accepted | 2026-11-11 |
+| [0147](0147-map-shape-types.md) | Map-Shape Types for Keyed Dictionaries | Implemented | 2026-11-11 |
 
 > ADR 0086 was originally numbered 0069 (a collision with *Actor Observability and Tracing*) and was renumbered on 2026-05-25.
 

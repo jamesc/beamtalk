@@ -362,6 +362,26 @@ A dedicated `type` form also wins on the feature's own terms: the whole point of
 
 **Parsing cost is bounded.** `type` becomes a contextual keyword only in top-level declaration position (`type` + uppercase identifier + `=`, a three-token lookahead) — it stays a legal identifier everywhere else (`type := 5`, `foo type`, `type printString`), so no reserved word is added and no existing code can break. See ADR 0108's Decision section and Rejected B for the full steelman on both sides.
 
+### Shape Types: `?#k => T` and Trailing `...` (ADR 0147)
+
+**The question:** how should a dictionary with known symbol keys, each with its own value type, be written as a type?
+
+```beamtalk
+// Chosen — looks like the map literal it describes
+type WebSocketOptions = #{#enabled => Boolean, ?#maxFrameSize => Integer, ...}
+```
+
+- **`#k => T` required, `?#k => T` optional.** The type looks like the value, so `=>` keeps its literal meaning: "this key is present". The `?` marks the *key* as possibly absent, which is what optional means for a map. It also reads beside `T | Nil` without being confused with it: `?#k => T` may be absent, `#k => T | Nil` is present and may hold `nil`.
+- **Trailing `...` opens the shape.** `...` is already a token (rest patterns), and a trailing position reads as "and more keys". A shape is closed without it, so a misspelt option key is a warning instead of silently accepted.
+
+**Rejected:**
+
+- **`Boolean?` for optional keys.** `#k => Boolean?` reads as "nullable Boolean" to anyone from Kotlin, Swift or TypeScript. That is a present-but-nil value, a different thing from a missing key.
+- **Erlang's `:=` / `=>` spelling.** In a Beamtalk literal `=>` already means "this key is present". Using `=>` for *optional* would invert it. Erlang's spelling is used only on the FFI wire (`k := T` becomes `#k => T`, `k => T` becomes `?#k => T`).
+- **Elixir's `if_set(T)` on the value.** The meaning is adopted, but written on the key it reads better beside `T | Nil`.
+- **Open by default** (TypeScript, early `TypedDict`). It gives up the typo check that motivates shapes. Pass-through maps say `...`, which also documents that they are pass-through.
+- **A nominal `shape` declaration.** `type` aliases (ADR 0108) already name structural types, and FFI shapes are anonymous.
+
 ### Tuple Literals: `{a, b}`, not Pharo's `{a. b}`
 
 **Pharo/Squeak:** `{a. b}` is a *dynamic Array*: the elements are statements separated by periods, and the result is an `Array`.

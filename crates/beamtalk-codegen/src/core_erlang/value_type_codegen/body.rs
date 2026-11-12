@@ -968,14 +968,6 @@ impl CoreErlangGenerator {
             .semantic_facts
             .has_block_nlr_or_walk(&method.span, &method.body);
 
-        let nlr_token_var = if needs_nlr {
-            let token_var = frame.fresh_temp_var("NlrToken");
-            frame.set_current_nlr_token(Some(token_var.clone()));
-            Some(token_var)
-        } else {
-            None
-        };
-
         // Generate method body expressions. Value types support Self-threading
         // for field assignments: each `:=` produces a new Self{N} snapshot via
         // maps:put (see generate_field_assignment); field reads use
@@ -988,13 +980,13 @@ impl CoreErlangGenerator {
         // syntactically invalid (e.g., `fun (...) ->\n\n`).
         // Capture the result so cleanup runs unconditionally before the `?`
         // below propagates an error, same as on the success path.
-        let body_result = if body.is_empty() {
-            Ok(Self::generate_vt_empty_body())
-        } else {
-            frame.generate_vt_body_exprs(&body)
-        };
-
-        frame.set_current_nlr_token(None);
+        let (body_result, nlr_token_var) = frame.with_nlr_scope(needs_nlr, |g| {
+            if body.is_empty() {
+                Ok(Self::generate_vt_empty_body())
+            } else {
+                g.generate_vt_body_exprs(&body)
+            }
+        });
         // Resolve the method-level line + file while `frame` still has a
         // flattened provision's protocol source swapped in (ADR 0127 §3);
         // after the drop below, `self` maps through this module's own source.

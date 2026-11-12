@@ -82,6 +82,22 @@ fn run(cases: &[Case]) {
 }
 
 #[test]
+fn unrelated_stray_key_is_not_offered_as_a_typo() {
+    let diags = pass("#{#zzzzzz => Integer}", "#{#maxFrameSize => Integer}");
+    assert_eq!(diags.len(), 1);
+    assert!(
+        diags[0]
+            .hint
+            .contains("missing required key `#maxFrameSize`")
+    );
+    assert!(
+        !diags[0].hint.contains("did you misspell"),
+        "{:?}",
+        diags[0].hint
+    );
+}
+
+#[test]
 fn shape_to_shape_required_and_optional_keys() {
     run(&[
         ("identical", "#{#a => Integer}", "#{#a => Integer}", None),
@@ -96,6 +112,18 @@ fn shape_to_shape_required_and_optional_keys() {
             "#{#a => Integer}",
             "#{#a => Integer, #b => String}",
             Some("missing required key `#b`"),
+        ),
+        (
+            "misspelt required key suggests the typo",
+            "#{#maxFramSize => Integer}",
+            "#{#maxFrameSize => Integer}",
+            Some("did you misspell it as `#maxFramSize`"),
+        ),
+        (
+            "unrelated stray key is not offered as a typo",
+            "#{#zzzzzz => Integer}",
+            "#{#maxFrameSize => Integer}",
+            Some("missing required key `#maxFrameSize`"),
         ),
         (
             "wrong value type",

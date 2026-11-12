@@ -286,6 +286,22 @@ fn count_args(text: &str) -> Option<usize> {
     None
 }
 
+/// `file` relative to `root`, with `/` separators on every host, so origin
+/// strings can be matched with `/`-based checks (e.g. `"/primitives/"`).
+fn origin_path(file: &Path, root: &Path) -> String {
+    normalize_separators(
+        &file
+            .strip_prefix(root)
+            .unwrap_or(file)
+            .display()
+            .to_string(),
+    )
+}
+
+fn normalize_separators(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
 /// Calls from string literals in the non-test codegen source.
 fn source_literal_calls(root: &Path) -> Vec<EmittedCall> {
     let mut files = Vec::new();
@@ -294,11 +310,7 @@ fn source_literal_calls(root: &Path) -> Vec<EmittedCall> {
     for file in files {
         let src = std::fs::read_to_string(&file)
             .unwrap_or_else(|e| panic!("read {}: {e}", file.display()));
-        let rel = file
-            .strip_prefix(root)
-            .unwrap_or(&file)
-            .display()
-            .to_string();
+        let rel = origin_path(&file, root);
         for (line, lit) in string_literals(&src) {
             out.extend(calls_in(&lit, &format!("{rel}:{line}")));
         }
@@ -394,11 +406,7 @@ fn source_open_heads(root: &Path) -> Vec<OpenHead> {
     for file in files {
         let src = std::fs::read_to_string(&file)
             .unwrap_or_else(|e| panic!("read {}: {e}", file.display()));
-        let rel = file
-            .strip_prefix(root)
-            .unwrap_or(&file)
-            .display()
-            .to_string();
+        let rel = origin_path(&file, root);
         out.extend(open_heads(&production_source(&src), &rel));
     }
     out
@@ -682,6 +690,24 @@ fn open_heads_read_literal_functions_and_flag_unenumerated_ones() {
     assert_eq!(names, ["beamtalk_known:direct", "beamtalk_atom:f"]);
     assert_eq!(problems.len(), 1, "{problems:?}");
     assert!(problems[0].starts_with("x.rs:4:"), "{problems:?}");
+}
+
+#[test]
+fn backslash_origins_are_normalised_so_primitive_heads_are_exempt() {
+    // Windows `Path::display()` yields backslashes; this must hold on any host.
+    let origin =
+        normalize_separators(r"crates\beamtalk-codegen\src\core_erlang\primitives\behaviour.rs:69");
+    assert_eq!(
+        origin,
+        "crates/beamtalk-codegen/src/core_erlang/primitives/behaviour.rs:69"
+    );
+    let heads = vec![OpenHead {
+        module: "beamtalk_behaviour_intrinsics".to_string(),
+        function: None,
+        origin,
+    }];
+    let (_, problems) = resolve_open_heads(&heads, &[]);
+    assert!(problems.is_empty(), "{problems:?}");
 }
 
 #[test]

@@ -551,6 +551,9 @@ jobs:
       - name: Test examples
         run: just test-examples
 
+      - name: Build examples (BT-4747)
+        run: just build-examples
+
   test-runtime:
     needs: otp-matrix
     strategy:

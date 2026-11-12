@@ -593,21 +593,13 @@ impl CoreErlangGenerator {
                 .semantic_facts
                 .has_block_nlr_or_walk(&method.span, &method.body);
 
-            let nlr_token_var = if needs_nlr {
-                let token_var = frame.fresh_temp_var("NlrToken");
-                frame.set_current_nlr_token(Some(token_var.clone()));
-                Some(token_var)
-            } else {
-                None
-            };
-
             // Lower the method body (reuse existing codegen). Capture the
             // result so `frame`'s `Drop` (pop scope, restore the selector)
             // and the NLR token cleanup run before the `?` below propagates
             // an error, same as on the success path.
-            let lowered = frame.lower_method_definition_body_with_reply(method);
-
-            frame.set_current_nlr_token(None);
+            let (lowered, nlr_token_var) = frame.with_nlr_scope(needs_nlr, |g| {
+                g.lower_method_definition_body_with_reply(method)
+            });
 
             let stmts = lowered?;
 
