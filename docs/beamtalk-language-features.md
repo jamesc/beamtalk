@@ -3342,6 +3342,7 @@ render: coll :: Printable | Nil -> String =>
 | `(x notNil and: [y notNil and: [p]]) ifTrue: [...]` | `x` and `y` are non-nil in true block | True block |
 | `x isNil not ifTrue: [...]`, `(k isKindOf: Integer) not ifTrue: [^...]`, `(a isNil or: [b isNil]) not ifTrue: [...]` | `not` swaps the true and false facts, so each narrows as its un-negated dual would; it composes with `and:` / `or:` in either position | True block / rest of method |
 | `[x notNil] whileTrue: [...]`, `[n notNil and: [p]] whileTrue: [...]`, `[n isNil] whileFalse: [...]` | the condition block's last expression narrows the loop body, as `ifTrue:` / `ifFalse:` would; only for variables the body never assigns; `self.<field>` tests do not narrow a loop body (BT-4713). Not narrowed after the loop | Loop body only |
+| `c := x notNil. c ifTrue: [...]` (also `ifFalse:`, `not`, `and:` / `or:`, `whileTrue:`, post-guard) | a local assigned a condition stands for what that condition proves. Dropped when the local or any variable it tests is reassigned, when a block assigns either, and for `self.<field>` tests; an alias never proves more than the inline test (BT-4714) | Branch arms / loop body / method remainder, as for the inline test |
 | `(p or: [x notNil]) ifTrue: [...]`, `(x notNil or: [p]) ifTrue: [...]`, `(x isNil and: [p]) ifFalse: [...]` | **no narrowing** — the other side may have decided the answer | — |
 | `x =:= #sym ifTrue: [^...]` | `x` is `T \ #sym` after the statement | Rest of method |
 | `x == #sym ifTrue: [^...]` | `x` is `T \ #sym` after the statement | Rest of method |
