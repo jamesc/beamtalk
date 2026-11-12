@@ -65,6 +65,8 @@ A use the table's protection forbids raises `access_denied`, never a raw
 """.
 
 %% Class methods — canonical colon forms (for EUnit tests and Beamtalk dispatch)
+-define(RECEIVER_HINT, <<"Receiver must be an Ets instance">>).
+
 -export(['new:type:'/2, 'named:'/1, 'exists:'/1, 'newOrExisting:type:'/2]).
 -export(['private:'/1, 'protected:'/1]).
 
@@ -270,7 +272,7 @@ lookup(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
         error:badarg -> badarg_error('lookup:key:', TableName)
     end;
 lookup(_Self, _Key) ->
-    beamtalk_error:raise_type_error('Ets', 'at:', <<"Receiver must be an Ets instance">>).
+    beamtalk_error:raise_type_error('Ets', 'at:', ?RECEIVER_HINT).
 
 -spec at(t(), Key :: term()) -> term().
 at(Self, Key) -> lookup(Self, Key).
@@ -299,7 +301,7 @@ insert(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Value) ->
         error:badarg -> badarg_error('insert:key:value:', TableName)
     end;
 insert(_Self, _Key, _Value) ->
-    beamtalk_error:raise_type_error('Ets', 'at:put:', <<"Receiver must be an Ets instance">>).
+    beamtalk_error:raise_type_error('Ets', 'at:put:', ?RECEIVER_HINT).
 
 -doc "Look up a key; if absent, evaluate the block and return its result.".
 -spec lookupIfAbsent(t(), Key :: term(), Block :: function()) -> term().
@@ -313,7 +315,7 @@ lookupIfAbsent(#{'$beamtalk_class' := 'Ets', table := TableName}, Key, Block) wh
 lookupIfAbsent(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
     beamtalk_error:raise_type_error('Ets', 'at:ifAbsent:', <<"Third argument must be a Block">>);
 lookupIfAbsent(_Self, _Key, _Block) ->
-    beamtalk_error:raise_type_error('Ets', 'at:ifAbsent:', <<"Receiver must be an Ets instance">>).
+    beamtalk_error:raise_type_error('Ets', 'at:ifAbsent:', ?RECEIVER_HINT).
 
 -doc "Test whether a key exists in the table.".
 -spec includesKey(t(), Key :: term()) -> boolean().
@@ -324,7 +326,7 @@ includesKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
         error:badarg -> badarg_error('includesKey:key:', TableName)
     end;
 includesKey(_Self, _Key) ->
-    beamtalk_error:raise_type_error('Ets', 'includesKey:', <<"Receiver must be an Ets instance">>).
+    beamtalk_error:raise_type_error('Ets', 'includesKey:', ?RECEIVER_HINT).
 
 -doc "Remove the entry for key. Returns nil.".
 -spec removeKey(t(), Key :: term()) -> nil.
@@ -336,7 +338,7 @@ removeKey(#{'$beamtalk_class' := 'Ets', table := TableName}, Key) ->
         error:badarg -> badarg_error('removeKey:key:', TableName)
     end;
 removeKey(_Self, _Key) ->
-    beamtalk_error:raise_type_error('Ets', 'removeKey:', <<"Receiver must be an Ets instance">>).
+    beamtalk_error:raise_type_error('Ets', 'removeKey:', ?RECEIVER_HINT).
 
 -doc """
 Atomically remove the entry for Key and answer its value (`ets:take/2`); if
@@ -360,7 +362,7 @@ removeKey(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
     );
 removeKey(_Self, _Key, _Block) ->
     beamtalk_error:raise_type_error(
-        'Ets', 'removeKey:ifAbsent:', <<"Receiver must be an Ets instance">>
+        'Ets', 'removeKey:ifAbsent:', ?RECEIVER_HINT
     ).
 
 -doc """
@@ -377,7 +379,7 @@ keys(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
         error:badarg -> badarg_error('keys:', TableName)
     end;
 keys(_Self) ->
-    beamtalk_error:raise_type_error('Ets', 'keys', <<"Receiver must be an Ets instance">>).
+    beamtalk_error:raise_type_error('Ets', 'keys', ?RECEIVER_HINT).
 
 -doc """
 Return the number of entries in the table.
@@ -401,7 +403,7 @@ tableSize(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
             end
     end;
 tableSize(_Self) ->
-    beamtalk_error:raise_type_error('Ets', 'size', <<"Receiver must be an Ets instance">>).
+    beamtalk_error:raise_type_error('Ets', 'size', ?RECEIVER_HINT).
 
 -doc """
 Destroy the ETS table. Returns nil.
@@ -425,7 +427,7 @@ deleteTable(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
             badarg_error('delete', TableName)
     end;
 deleteTable(_Self) ->
-    beamtalk_error:raise_type_error('Ets', 'delete', <<"Receiver must be an Ets instance">>).
+    beamtalk_error:raise_type_error('Ets', 'delete', ?RECEIVER_HINT).
 
 -doc """
 Marker read by `beamtalk_erlang_proxy:coerce_ffi_result/2`: results of this
@@ -452,7 +454,7 @@ removeAll(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
         error:badarg -> badarg_error('removeAll', TableName)
     end;
 removeAll(_Self) ->
-    beamtalk_error:raise_type_error('Ets', 'removeAll', <<"Receiver must be an Ets instance">>).
+    beamtalk_error:raise_type_error('Ets', 'removeAll', ?RECEIVER_HINT).
 
 -doc """
 Return all values as a List. A point-in-time `ets:tab2list/1` read: order is
@@ -463,7 +465,7 @@ one value per stored entry.
 values(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
     [V || {_K, V} <- entries(TableName, 'values')];
 values(_Self) ->
-    beamtalk_error:raise_type_error('Ets', 'values', <<"Receiver must be an Ets instance">>).
+    beamtalk_error:raise_type_error('Ets', 'values', ?RECEIVER_HINT).
 
 -doc """
 Evaluate Block(Key, Value) for every entry of a snapshot taken up front, so
@@ -484,7 +486,7 @@ keysAndValuesDo(#{'$beamtalk_class' := 'Ets'}, _Block) ->
     );
 keysAndValuesDo(_Self, _Block) ->
     beamtalk_error:raise_type_error(
-        'Ets', 'keysAndValuesDo:', <<"Receiver must be an Ets instance">>
+        'Ets', 'keysAndValuesDo:', ?RECEIVER_HINT
     ).
 
 -doc """
@@ -496,7 +498,7 @@ asDictionary(#{'$beamtalk_class' := 'Ets', table := TableName}) ->
     maps:from_list(entries(TableName, 'asDictionary'));
 asDictionary(_Self) ->
     beamtalk_error:raise_type_error(
-        'Ets', 'asDictionary', <<"Receiver must be an Ets instance">>
+        'Ets', 'asDictionary', ?RECEIVER_HINT
     ).
 
 -doc "If Key is present evaluate Block(Value) and answer its result, else nil.".
@@ -514,7 +516,7 @@ ifPresent(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
     );
 ifPresent(_Self, _Key, _Block) ->
     beamtalk_error:raise_type_error(
-        'Ets', 'at:ifPresent:', <<"Receiver must be an Ets instance">>
+        'Ets', 'at:ifPresent:', ?RECEIVER_HINT
     ).
 
 -doc """
@@ -536,7 +538,7 @@ incrementAt(#{'$beamtalk_class' := 'Ets'}, _Key, _N) ->
     );
 incrementAt(_Self, _Key, _N) ->
     beamtalk_error:raise_type_error(
-        'Ets', 'at:increment:', <<"Receiver must be an Ets instance">>
+        'Ets', 'at:increment:', ?RECEIVER_HINT
     ).
 
 -doc """
@@ -559,7 +561,7 @@ updateAt(#{'$beamtalk_class' := 'Ets'}, _Key, _Block) ->
     );
 updateAt(_Self, _Key, _Block) ->
     beamtalk_error:raise_type_error(
-        'Ets', 'at:update:', <<"Receiver must be an Ets instance">>
+        'Ets', 'at:update:', ?RECEIVER_HINT
     ).
 
 -doc """
@@ -888,11 +890,9 @@ map_table_type_for(_Selector, bag) ->
 map_table_type_for(_Selector, duplicateBag) ->
     duplicate_bag;
 map_table_type_for(Selector, Other) ->
-    Error0 = beamtalk_error:new(type_error, 'Ets'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_details(Error1, #{type => Other}),
-    Error3 = beamtalk_error:with_hint(
-        Error2,
-        <<"Table type must be one of: #set, #orderedSet, #bag, #duplicateBag">>
-    ),
-    beamtalk_error:raise(Error3).
+    beamtalk_error:raise_type_error(
+        'Ets',
+        Selector,
+        <<"Table type must be one of: #set, #orderedSet, #bag, #duplicateBag">>,
+        #{type => Other}
+    ).

@@ -112,8 +112,7 @@ open(Command, Args, Notify) when is_record(Notify, beamtalk_object) ->
         #{executable => Executable, args => BinArgs, notify => Notify}, 'open:args:notify:'
     );
 open(_Command, _Args, _Notify) ->
-    Err = beamtalk_error:new(type_error, 'ReactiveSubprocess', 'open:args:notify:'),
-    beamtalk_error:raise(Err).
+    beamtalk_error:raise_type_error('ReactiveSubprocess', 'open:args:notify:', undefined).
 
 -doc """
 Open a reactive subprocess with environment and working directory.
@@ -146,14 +145,11 @@ open(Command, Args, Env, Dir, Notify) when is_map(Env), is_record(Notify, beamta
         'open:args:env:dir:notify:'
     );
 open(_Command, _Args, _Env, _Dir, _Notify) ->
-    Err = beamtalk_error:new(type_error, 'ReactiveSubprocess', 'open:args:env:dir:notify:'),
-    beamtalk_error:raise(Err).
+    beamtalk_error:raise_type_error('ReactiveSubprocess', 'open:args:env:dir:notify:', undefined).
 
 %% BT-4173: command/dir arrive tagged from Beamtalk — unwrap to bytes.
-unwrap_text_arg({beamtalk_string, B}, _Selector) when is_binary(B) -> B;
-unwrap_text_arg(B, _Selector) when is_binary(B) -> B;
-unwrap_text_arg(_Other, Selector) ->
-    beamtalk_error:raise(beamtalk_error:new(type_error, 'ReactiveSubprocess', Selector)).
+unwrap_text_arg(Value, Selector) ->
+    beamtalk_text:unwrap_or_raise(Value, 'ReactiveSubprocess', Selector, undefined).
 
 -doc """
 Start a supervised beamtalk_reactive_subprocess gen_server.

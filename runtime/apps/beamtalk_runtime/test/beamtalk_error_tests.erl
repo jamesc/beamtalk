@@ -336,6 +336,50 @@ raise_type_error_raises_wrapped_type_error_test() ->
             ?assertEqual({beamtalk_string, <<"{expected,binary}">>}, Inner#beamtalk_error.hint)
     end.
 
+%%% Tests: raise_type_error/4 and raise_type_error_message/3 (BT-4686)
+
+caught_error(Fun) ->
+    try
+        Fun(),
+        no_error
+    catch
+        error:#{'$beamtalk_class' := 'TypeError', error := Inner} -> Inner
+    end.
+
+raise_type_error_4_attaches_details_test() ->
+    Inner = caught_error(fun() ->
+        beamtalk_error:raise_type_error('Ets', 'at:', <<"bad">>, #{type => foo})
+    end),
+    ?assertEqual(type_error, Inner#beamtalk_error.kind),
+    ?assertEqual('Ets', Inner#beamtalk_error.class),
+    ?assertEqual('at:', Inner#beamtalk_error.selector),
+    ?assertEqual({beamtalk_string, <<"bad">>}, Inner#beamtalk_error.hint),
+    ?assertEqual(#{type => foo}, Inner#beamtalk_error.details).
+
+raise_type_error_4_matches_inline_build_test() ->
+    Inline = beamtalk_error:with_details(
+        beamtalk_error:with_hint(
+            beamtalk_error:with_selector(beamtalk_error:new(type_error, 'Block'), fork), <<"h">>
+        ),
+        #{got => 1}
+    ),
+    ?assertEqual(
+        Inline,
+        caught_error(fun() ->
+            beamtalk_error:raise_type_error('Block', fork, <<"h">>, #{got => 1})
+        end)
+    ).
+
+raise_type_error_message_overrides_message_without_hint_test() ->
+    Inline = beamtalk_error:with_message(
+        beamtalk_error:with_selector(beamtalk_error:new(type_error, 'Beamtalk'), 'x:'), <<"m">>
+    ),
+    Inner = caught_error(fun() ->
+        beamtalk_error:raise_type_error_message('Beamtalk', 'x:', <<"m">>)
+    end),
+    ?assertEqual(Inline, Inner),
+    ?assertEqual(undefined, Inner#beamtalk_error.hint).
+
 %%% Tests: format_safe/1
 
 format_safe_with_beamtalk_error_test() ->

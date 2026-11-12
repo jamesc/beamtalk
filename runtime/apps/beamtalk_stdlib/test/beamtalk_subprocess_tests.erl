@@ -22,6 +22,7 @@ Tests cover:
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
 %%% Cross-platform command helpers
@@ -402,26 +403,51 @@ stderrLines_stream_yields_correct_sequence_test() ->
 %%% ============================================================================
 
 validate_config_missing_executable_test() ->
-    {error, {missing_key, executable}} =
+    {error, #beamtalk_error{
+        kind = type_error,
+        class = 'Subprocess',
+        selector = 'spawnWith:',
+        hint = {beamtalk_string, <<"Missing required config key: executable">>}
+    }} =
         beamtalk_subprocess:start(#{}).
 
 validate_config_non_binary_executable_test() ->
-    {error, {type_error, executable, expected_binary}} =
+    {error, #beamtalk_error{
+        kind = type_error,
+        class = 'Subprocess',
+        selector = 'spawnWith:',
+        hint = {beamtalk_string, <<"Config key executable must be a String">>}
+    }} =
         beamtalk_subprocess:start(#{executable => 42}).
 
 validate_config_non_binary_args_test() ->
     {EchoExe, _} = echo_cmd(<<"test">>),
-    {error, {type_error, args, expected_binary_elements}} =
+    {error, #beamtalk_error{
+        kind = type_error,
+        class = 'Subprocess',
+        selector = 'spawnWith:',
+        hint = {beamtalk_string, <<"Config key args must be a List of Strings">>}
+    }} =
         beamtalk_subprocess:start(#{executable => EchoExe, args => [123]}).
 
 validate_config_non_map_env_test() ->
     {EchoExe, _} = echo_cmd(<<"test">>),
-    {error, {type_error, env, expected_map}} =
+    {error, #beamtalk_error{
+        kind = type_error,
+        class = 'Subprocess',
+        selector = 'spawnWith:',
+        hint = {beamtalk_string, <<"Config key env must be a Dictionary">>}
+    }} =
         beamtalk_subprocess:start(#{executable => EchoExe, args => [], env => 42}).
 
 validate_config_non_binary_dir_test() ->
     {EchoExe, _} = echo_cmd(<<"test">>),
-    {error, {type_error, dir, expected_binary}} =
+    {error, #beamtalk_error{
+        kind = type_error,
+        class = 'Subprocess',
+        selector = 'spawnWith:',
+        hint = {beamtalk_string, <<"Config key dir must be a String">>}
+    }} =
         beamtalk_subprocess:start(#{executable => EchoExe, args => [], dir => 42}).
 
 %%% ============================================================================

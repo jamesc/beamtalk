@@ -31,6 +31,8 @@ See docs/internal/design-self-as-object.md Section 3.8 for error taxonomy.
     extract_beamtalk_error/2,
     raise/1,
     raise_type_error/3,
+    raise_type_error/4,
+    raise_type_error_message/3,
     generate_message/3,
     format_reason/2,
     is_does_not_understand/1,
@@ -444,6 +446,19 @@ raise(#beamtalk_error{} = Error) ->
 -spec raise_type_error(atom(), atom(), term()) -> no_return().
 raise_type_error(Class, Selector, Hint) ->
     raise(new(type_error, Class, Selector, Hint)).
+
+-doc """
+Raise a type_error whose message is overridden with `Message` (no hint).
+For call sites that author the full message text rather than a hint.
+""".
+-spec raise_type_error_message(atom(), atom(), term()) -> no_return().
+raise_type_error_message(Class, Selector, Message) ->
+    raise(with_message(new(type_error, Class, Selector), Message)).
+
+-doc "Like `raise_type_error/3`, additionally attaching a details map.".
+-spec raise_type_error(atom(), atom(), term(), map()) -> no_return().
+raise_type_error(Class, Selector, Hint, Details) ->
+    raise(with_details(new(type_error, Class, Selector, Hint), Details)).
 
 -doc """
 Predicate: does this error represent a genuine "selector not found anywhere

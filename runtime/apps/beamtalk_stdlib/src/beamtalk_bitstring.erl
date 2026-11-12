@@ -36,14 +36,14 @@ protocol of `Binary`/`Collection` is not understood (see
 bitSize(Bits) when is_bitstring(Bits) ->
     bit_size(Bits);
 bitSize(_) ->
-    raise_type_error(bitSize, <<"Receiver must be a Bitstring">>).
+    beamtalk_error:raise_type_error('Bitstring', bitSize, <<"Receiver must be a Bitstring">>).
 
 -doc "The bits as a list of 0/1 Integers, most significant bit first.".
 -spec toBits(bitstring()) -> [0 | 1].
 toBits(Bits) when is_bitstring(Bits) ->
     [B || <<B:1>> <= Bits];
 toBits(_) ->
-    raise_type_error(toBits, <<"Receiver must be a Bitstring">>).
+    beamtalk_error:raise_type_error('Bitstring', toBits, <<"Receiver must be a Bitstring">>).
 
 -doc """
 Join the receiver's bits with the argument's.
@@ -59,9 +59,11 @@ concat(A, {beamtalk_string, Raw}) when is_bitstring(A), is_binary(Raw) ->
 concat(A, B) when is_bitstring(A), is_bitstring(B) ->
     <<A/bitstring, B/bitstring>>;
 concat(A, _B) when not is_bitstring(A) ->
-    raise_type_error(concat, <<"Receiver must be a Bitstring">>);
+    beamtalk_error:raise_type_error('Bitstring', concat, <<"Receiver must be a Bitstring">>);
 concat(_A, _B) ->
-    raise_type_error(concat, <<"Argument must be a Bitstring, Binary or String">>).
+    beamtalk_error:raise_type_error(
+        'Bitstring', concat, <<"Argument must be a Bitstring, Binary or String">>
+    ).
 
 -doc """
 Convert to a `Binary`, as a `Result`.
@@ -93,26 +95,22 @@ asBinary(Bits) when is_bitstring(Bits) ->
     ),
     beamtalk_result:from_tagged_tuple({error, beamtalk_error:with_hint(Error2, Hint)});
 asBinary(_) ->
-    raise_type_error(asBinary, <<"Receiver must be a Bitstring">>).
+    beamtalk_error:raise_type_error('Bitstring', asBinary, <<"Receiver must be a Bitstring">>).
 
 -doc "Erlang notation, e.g. `<<2:3>>`.".
 -spec printString(bitstring()) -> beamtalk_string:t().
 printString(Bits) when is_bitstring(Bits) ->
     beamtalk_primitive:string_from_binary(beamtalk_primitive:print_string(Bits));
 printString(_) ->
-    raise_type_error(printString, <<"Receiver must be a Bitstring">>).
+    beamtalk_error:raise_type_error('Bitstring', printString, <<"Receiver must be a Bitstring">>).
 
 -doc "Same as `printString/1`: a Bitstring has no text reading.".
 -spec displayString(bitstring()) -> beamtalk_string:t().
 displayString(Bits) when is_bitstring(Bits) ->
     beamtalk_primitive:string_from_binary(beamtalk_primitive:display_string(Bits));
 displayString(_) ->
-    raise_type_error(displayString, <<"Receiver must be a Bitstring">>).
+    beamtalk_error:raise_type_error('Bitstring', displayString, <<"Receiver must be a Bitstring">>).
 
 %%% ============================================================================
 %%% Internal
 %%% ============================================================================
-
--spec raise_type_error(atom(), binary()) -> no_return().
-raise_type_error(Selector, Hint) ->
-    beamtalk_error:raise_type_error('Bitstring', Selector, Hint).

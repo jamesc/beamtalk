@@ -144,8 +144,40 @@ init(Config) ->
             },
             {ok, State};
         {error, Reason} ->
-            {stop, Reason}
+            {stop, config_error(Reason)}
     end.
+
+-doc """
+Translate a `validate_config/1` reason into a `#beamtalk_error{}` so a bad
+`spawnWith:` config reaches the caller as a structured error, not a bare tuple.
+""".
+-spec config_error(term()) -> #beamtalk_error{}.
+config_error({missing_key, Key}) ->
+    config_type_error(<<"Missing required config key: ", (atom_to_binary(Key, utf8))/binary>>);
+config_error({type_error, Field, Expected}) ->
+    config_type_error(
+        iolist_to_binary([
+            <<"Config key ">>,
+            atom_to_binary(Field, utf8),
+            <<" ">>,
+            config_expectation(Expected)
+        ])
+    ).
+
+%% Beamtalk-facing wording for the reasons `validate_config/1` returns.
+-spec config_expectation(atom()) -> binary().
+config_expectation(expected_binary) -> <<"must be a String">>;
+config_expectation(expected_binary_elements) -> <<"must be a List of Strings">>;
+config_expectation(expected_binary_keys_and_values) -> <<"must be a Dictionary of Strings">>;
+config_expectation(expected_list_or_array) -> <<"must be a List or Array">>;
+config_expectation(invalid_array) -> <<"must be a valid Array">>;
+config_expectation(expected_map) -> <<"must be a Dictionary">>.
+
+%% A missing or ill-typed config key is reported as a `type_error`, like every
+%% other `Subprocess` argument problem.
+-spec config_type_error(binary()) -> #beamtalk_error{}.
+config_type_error(Hint) ->
+    beamtalk_error:new(type_error, 'Subprocess', 'spawnWith:', Hint).
 
 -doc "Dispatch sync calls.".
 -spec handle_call(term(), term(), map()) ->
@@ -279,9 +311,7 @@ validate_config(_Other) ->
 %% Unwrap one text value to bytes; `undefined` and junk stay distinct so
 %% callers can tell "missing" from "wrong type".
 text_bytes(undefined) -> undefined;
-text_bytes({beamtalk_string, B}) when is_binary(B) -> {ok, B};
-text_bytes(B) when is_binary(B) -> {ok, B};
-text_bytes(_) -> error.
+text_bytes(Value) -> beamtalk_text:unwrap(Value).
 
 -doc "Validate and coerce the args field.".
 -spec validate_config_args(map(), binary()) -> {ok, config()} | {error, term()}.
@@ -304,12 +334,11 @@ normalize_text_list(List) ->
 
 normalize_text_list([], Acc) ->
     {ok, lists:reverse(Acc)};
-normalize_text_list([{beamtalk_string, B} | T], Acc) when is_binary(B) ->
-    normalize_text_list(T, [B | Acc]);
-normalize_text_list([B | T], Acc) when is_binary(B) ->
-    normalize_text_list(T, [B | Acc]);
-normalize_text_list(_, _) ->
-    error.
+normalize_text_list([H | T], Acc) ->
+    case beamtalk_text:unwrap(H) of
+        {ok, B} -> normalize_text_list(T, [B | Acc]);
+        error -> error
+    end.
 
 -doc "Validate and clean the env field.".
 -spec validate_config_env(map(), binary(), [binary()]) -> {ok, config()} | {error, term()}.
@@ -366,9 +395,11 @@ normalize_text_env(Env) ->
         error:bad_text -> {error, {type_error, env, expected_binary_keys_and_values}}
     end.
 
-unwrap_text_entry({beamtalk_string, B}) when is_binary(B) -> B;
-unwrap_text_entry(B) when is_binary(B) -> B;
-unwrap_text_entry(_) -> error(bad_text).
+unwrap_text_entry(Value) ->
+    case beamtalk_text:unwrap(Value) of
+        {ok, Bin} -> Bin;
+        error -> error(bad_text)
+    end.
 
 %%% ============================================================================
 %%% Internal handlers

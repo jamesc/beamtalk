@@ -224,10 +224,7 @@ run_class(Invalid) ->
             [Invalid]
         )
     ),
-    Error0 = beamtalk_error:new(type_error, 'TestRunner'),
-    Error1 = beamtalk_error:with_selector(Error0, 'run:'),
-    Error2 = beamtalk_error:with_message(Error1, Msg),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error_message('TestRunner', 'run:', Msg).
 
 -doc """
 Run a single test method in a class.
@@ -250,10 +247,7 @@ run_method(ClassRef, TestName) when
             [TestName]
         )
     ),
-    Error0 = beamtalk_error:new(type_error, 'TestRunner'),
-    Error1 = beamtalk_error:with_selector(Error0, 'run:method:'),
-    Error2 = beamtalk_error:with_message(Error1, Msg),
-    beamtalk_error:raise(Error2);
+    beamtalk_error:raise_type_error_message('TestRunner', 'run:method:', Msg);
 run_method(Invalid, _TestName) ->
     Msg = beamtalk_error:chars_to_binary(
         io_lib:format(
@@ -261,10 +255,7 @@ run_method(Invalid, _TestName) ->
             [Invalid]
         )
     ),
-    Error0 = beamtalk_error:new(type_error, 'TestRunner'),
-    Error1 = beamtalk_error:with_selector(Error0, 'run:method:'),
-    Error2 = beamtalk_error:with_message(Error1, Msg),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error_message('TestRunner', 'run:method:', Msg).
 
 %%====================================================================
 %% TestResult instance primitives
@@ -817,10 +808,7 @@ raise_invalid_class_ref(ClassRef) ->
             [ClassRef]
         )
     ),
-    Error0 = beamtalk_error:new(type_error, 'TestRunner'),
-    Error1 = beamtalk_error:with_selector(Error0, 'run:'),
-    Error2 = beamtalk_error:with_message(Error1, Msg),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error_message('TestRunner', 'run:', Msg).
 
 -doc "Create a TestResult tagged map.".
 -spec make_test_result(

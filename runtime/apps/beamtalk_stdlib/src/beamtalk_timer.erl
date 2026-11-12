@@ -115,11 +115,17 @@ The delay is Integer milliseconds or a Duration.
     end),
     make_timer(Pid);
 'after:do:'(Ms, _Block) when is_integer(Ms) ->
-    raise_error('after:do:', <<"Delay must be a non-negative Integer or a non-negative Duration">>);
+    beamtalk_error:raise_type_error(
+        'Timer', 'after:do:', <<"Delay must be a non-negative Integer or a non-negative Duration">>
+    );
 'after:do:'(_Ms, Block) when is_function(Block, 0) ->
-    raise_error('after:do:', <<"Delay must be a non-negative Integer or a non-negative Duration">>);
+    beamtalk_error:raise_type_error(
+        'Timer', 'after:do:', <<"Delay must be a non-negative Integer or a non-negative Duration">>
+    );
 'after:do:'(_, _) ->
-    raise_error('after:do:', <<"Expected an Integer or Duration delay and a Block">>).
+    beamtalk_error:raise_type_error(
+        'Timer', 'after:do:', <<"Expected an Integer or Duration delay and a Block">>
+    ).
 
 -doc """
 Evaluate `Block` at the given repeat interval. Returns a Timer.
@@ -133,12 +139,18 @@ The interval is Integer milliseconds or a Duration.
     Pid = spawn_link(fun() -> repeat_loop(Ms, Block) end),
     make_timer(Pid);
 'every:do:'(Ms, _Block) when is_integer(Ms) ->
-    raise_error('every:do:', <<"Interval must be a positive Integer or a positive Duration">>);
+    beamtalk_error:raise_type_error(
+        'Timer', 'every:do:', <<"Interval must be a positive Integer or a positive Duration">>
+    );
 'every:do:'(_Ms, Block) when is_function(Block, 0) ->
-    raise_error('every:do:', <<"Interval must be a positive Integer or a positive Duration">>);
+    beamtalk_error:raise_type_error(
+        'Timer', 'every:do:', <<"Interval must be a positive Integer or a positive Duration">>
+    );
 'every:do:'(_, _) ->
-    raise_error(
-        'every:do:', <<"Expected a positive Integer or a positive Duration interval and a Block">>
+    beamtalk_error:raise_type_error(
+        'Timer',
+        'every:do:',
+        <<"Expected a positive Integer or a positive Duration interval and a Block">>
     ).
 
 -doc """
@@ -165,8 +177,10 @@ milliseconds or a Duration. Backed by `erlang:send_after/3`.
             make_timer(spawn(fun() -> send_once(Ms, Dest, Msg) end))
     end;
 'send:to:after:'(_Msg, _Target, _Ms) ->
-    raise_error(
-        'send:to:after:', <<"Delay must be an Integer or a Duration from 0 to 4294967295 ms">>
+    beamtalk_error:raise_type_error(
+        'Timer',
+        'send:to:after:',
+        <<"Delay must be an Integer or a Duration from 0 to 4294967295 ms">>
     ).
 
 -doc """
@@ -193,8 +207,10 @@ Integer milliseconds or a Duration. Runs in a small unlinked process (the
             make_timer(Pid)
     end;
 'send:to:every:'(_Msg, _Target, _Ms) ->
-    raise_error(
-        'send:to:every:', <<"Interval must be an Integer or a Duration from 1 to 4294967295 ms">>
+    beamtalk_error:raise_type_error(
+        'Timer',
+        'send:to:every:',
+        <<"Interval must be an Integer or a Duration from 1 to 4294967295 ms">>
     ).
 
 -doc """
@@ -209,7 +225,9 @@ The delay is Integer milliseconds or a Duration.
     timer:sleep(Ms),
     nil;
 'sleep:'(_) ->
-    raise_error('sleep:', <<"Delay must be a non-negative Integer or a non-negative Duration">>).
+    beamtalk_error:raise_type_error(
+        'Timer', 'sleep:', <<"Delay must be a non-negative Integer or a non-negative Duration">>
+    ).
 
 %%% ============================================================================
 %%% Instance Methods
@@ -329,7 +347,7 @@ resolve_dest(_Selector, #beamtalk_object{pid = {global, Name}}) ->
         Pid -> {ok, Pid}
     end;
 resolve_dest(Selector, _Other) ->
-    raise_error(Selector, <<"Target must be an Actor or a Pid">>).
+    beamtalk_error:raise_type_error('Timer', Selector, <<"Target must be an Actor or a Pid">>).
 
 %% One-shot message timer for a remote target (send_after/3 is local-only).
 -spec send_once(non_neg_integer(), pid() | {atom(), node()}, term()) -> ok.
@@ -392,10 +410,3 @@ repeat_loop(Ms, Block) ->
         end),
         repeat_loop(Ms, Block)
     end.
-
--spec raise_error(atom(), binary()) -> no_return().
-raise_error(Selector, Hint) ->
-    Error0 = beamtalk_error:new(type_error, 'Timer'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, Hint),
-    beamtalk_error:raise(Error2).

@@ -43,7 +43,7 @@ digest — callers convert to hex/base64 via `beamtalk_binary`.
 'sha256:'(Input) when is_binary(Input) ->
     crypto:hash(sha256, Input);
 'sha256:'(_) ->
-    raise_type_error('sha256:', <<"Argument must be a String or Binary">>).
+    beamtalk_error:raise_type_error('Digest', 'sha256:', <<"Argument must be a String or Binary">>).
 
 -doc "SHA-512 digest (64 bytes) of Input.".
 -spec 'sha512:'(beamtalk_binary:binary_or_string()) -> binary().
@@ -52,7 +52,7 @@ digest — callers convert to hex/base64 via `beamtalk_binary`.
 'sha512:'(Input) when is_binary(Input) ->
     crypto:hash(sha512, Input);
 'sha512:'(_) ->
-    raise_type_error('sha512:', <<"Argument must be a String or Binary">>).
+    beamtalk_error:raise_type_error('Digest', 'sha512:', <<"Argument must be a String or Binary">>).
 
 -doc """
 MD5 digest (16 bytes) of Input.
@@ -66,7 +66,7 @@ use for signatures, password storage, or integrity checks on untrusted data.
 'md5:'(Input) when is_binary(Input) ->
     crypto:hash(md5, Input);
 'md5:'(_) ->
-    raise_type_error('md5:', <<"Argument must be a String or Binary">>).
+    beamtalk_error:raise_type_error('Digest', 'md5:', <<"Argument must be a String or Binary">>).
 
 -doc "HMAC-SHA256 message authentication code (32 bytes) of Input using Key.".
 -spec 'hmacSha256:key:'(beamtalk_binary:binary_or_string(), beamtalk_binary:binary_or_string()) ->
@@ -78,9 +78,13 @@ use for signatures, password storage, or integrity checks on untrusted data.
 'hmacSha256:key:'(Input, Key) when is_binary(Input), is_binary(Key) ->
     crypto:mac(hmac, sha256, Key, Input);
 'hmacSha256:key:'(Input, _Key) when is_binary(Input) ->
-    raise_type_error('hmacSha256:key:', <<"Key must be a String or Binary">>);
+    beamtalk_error:raise_type_error(
+        'Digest', 'hmacSha256:key:', <<"Key must be a String or Binary">>
+    );
 'hmacSha256:key:'(_Input, _Key) ->
-    raise_type_error('hmacSha256:key:', <<"Argument must be a String or Binary">>).
+    beamtalk_error:raise_type_error(
+        'Digest', 'hmacSha256:key:', <<"Argument must be a String or Binary">>
+    ).
 
 -doc "HMAC-SHA512 message authentication code (64 bytes) of Input using Key.".
 -spec 'hmacSha512:key:'(beamtalk_binary:binary_or_string(), beamtalk_binary:binary_or_string()) ->
@@ -92,9 +96,13 @@ use for signatures, password storage, or integrity checks on untrusted data.
 'hmacSha512:key:'(Input, Key) when is_binary(Input), is_binary(Key) ->
     crypto:mac(hmac, sha512, Key, Input);
 'hmacSha512:key:'(Input, _Key) when is_binary(Input) ->
-    raise_type_error('hmacSha512:key:', <<"Key must be a String or Binary">>);
+    beamtalk_error:raise_type_error(
+        'Digest', 'hmacSha512:key:', <<"Key must be a String or Binary">>
+    );
 'hmacSha512:key:'(_Input, _Key) ->
-    raise_type_error('hmacSha512:key:', <<"Argument must be a String or Binary">>).
+    beamtalk_error:raise_type_error(
+        'Digest', 'hmacSha512:key:', <<"Argument must be a String or Binary">>
+    ).
 
 %%% ============================================================================
 %%% FFI Shims — (Erlang beamtalk_digest) dispatch
@@ -125,8 +133,3 @@ hmacSha512(Input, Key) -> 'hmacSha512:key:'(Input, Key).
 %%% ============================================================================
 %%% Internal Functions
 %%% ============================================================================
-
--doc "Raise a Digest type_error by delegating to beamtalk_error:raise_type_error/3.".
--spec raise_type_error(atom(), binary()) -> no_return().
-raise_type_error(Selector, Hint) ->
-    beamtalk_error:raise_type_error('Digest', Selector, Hint).
