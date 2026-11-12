@@ -414,7 +414,7 @@ format_name(Name) -> beamtalk_text:to_binary(Name).
 Normalise a compiler diagnostic term to a plain map with guaranteed keys.
 
 Single authority for the 3-clause dispatch shared by `format_diagnostic_text/1`
-(beamtalk_repl_compiler) and `diagnostic_to_error_map/2` (beamtalk_repl_ops_load):
+(beamtalk_repl_compiler) and `diagnostic_to_error_map/2` (beamtalk_workspace_project_sync):
 both were re-implementing the same `is_map`/`is_binary`/fallback pattern, so if
 the compiler changes the diagnostic shape (e.g. renames `line` to `line_number`)
 both files would need parallel edits with no mechanical link.
