@@ -1505,10 +1505,10 @@ classReload(Self) ->
             %% Uses dynamic dispatch to avoid compile-time dep on beamtalk_workspace.
             try
                 ProjectRoot = erlang:apply(
-                    beamtalk_repl_ops_load, find_project_root, [SourcePathStr]
+                    beamtalk_workspace_project_sync, find_project_root, [SourcePathStr]
                 ),
                 _ = erlang:apply(
-                    beamtalk_repl_ops_load,
+                    beamtalk_workspace_project_sync,
                     maybe_recompile_native_deps,
                     [SourcePathStr, ProjectRoot]
                 )

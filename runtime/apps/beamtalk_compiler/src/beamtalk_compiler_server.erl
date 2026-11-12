@@ -697,7 +697,7 @@ Build the class→module-name index for a single `src/**/*.bt` file
 — see `beamtalk_compiler_port:build_class_module_index_in_source/4' for the
 full wire shape. Backs the REPL/workspace cold-load fallback for
 `class_module_index' (ADR 0050,
-`beamtalk_repl_ops_load:build_source_class_module_index/1'). Returns
+`beamtalk_workspace_project_sync:build_source_class_module_index/2'). Returns
 `{ok, ModuleName, ClassNames}' on success; a bad `relative_path' returns
 `{error, invalid_path_segment, Message}'; transport failures return
 `{error, port_error | noproc | timeout, Message}'.
