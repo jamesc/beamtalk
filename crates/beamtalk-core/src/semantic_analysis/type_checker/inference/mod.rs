@@ -316,6 +316,8 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
     ) {
         let diagnostics_before = self.diagnostics.len();
+        let outer_value_type_body =
+            std::mem::replace(&mut self.in_value_type_body, value_type_body);
         self.check_method_body_inner(
             method,
             class_name,
@@ -327,6 +329,7 @@ impl TypeChecker {
             value_type_body,
             hierarchy,
         );
+        self.in_value_type_body = outer_value_type_body;
         self.attribute_provision_diagnostics(
             method,
             class_name,
@@ -628,6 +631,11 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
+        // BT-4715: a send to `self` anywhere inside `expr` (including in a
+        // block or `match:` arm whose child env is dropped) may have
+        // reassigned a field, so `env` must not keep its `self.<field>`
+        // refinements. See `infer_message_send_with_receiver_ty`.
+        let epoch_before = self.self_send_epoch;
         let ty = match expr {
             // Literals have known types
             Expression::Literal(lit, _span) => Self::infer_literal(lit),
@@ -923,6 +931,9 @@ impl TypeChecker {
             }
         };
 
+        if self.self_send_epoch != epoch_before {
+            env.clear_self_field_narrowings();
+        }
         self.post_process_expr_type(expr, &ty);
         ty
     }

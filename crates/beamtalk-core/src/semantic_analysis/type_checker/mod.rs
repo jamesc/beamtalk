@@ -453,6 +453,7 @@ pub fn infer_types_and_returns_with_registries(
 /// - Protocol conformance checking for protocol-typed parameters (ADR 0068 Phase 2b)
 /// - FFI call type inference from `NativeTypeRegistry` (ADR 0075)
 #[derive(Debug)]
+#[allow(clippy::struct_excessive_bools)] // independent per-walk flags, each documented on its field
 pub struct TypeChecker {
     /// BT-4102: expected block-parameter types for block literals whose
     /// expected `Block(P…, R)` type is known from a *declaration* rather than
@@ -573,6 +574,10 @@ pub struct TypeChecker {
     /// one ran anywhere inside it — including inside a block whose child env
     /// is dropped — and invalidate `self.<field>` narrowings in its own env.
     pub(super) self_send_epoch: u64,
+    /// BT-4715: true while checking an instance method that lowers through
+    /// the value-type body path, where a self-send cannot change the caller's
+    /// fields (see `infer_message_send_with_receiver_ty`).
+    pub(super) in_value_type_body: bool,
     /// BT-4636: `(local, type the block left it with)` pairs collected while
     /// [`Self::defer_block_widening`] is set.
     pub(in crate::semantic_analysis::type_checker) deferred_block_widenings:
@@ -606,6 +611,7 @@ impl TypeChecker {
             block_written_locals: std::collections::HashSet::new(),
             defer_block_widening: false,
             self_send_epoch: 0,
+            in_value_type_body: false,
             deferred_block_widenings: Vec::new(),
             block_param_pushdown: HashMap::new(),
             unresolved_selector_sends: std::collections::HashSet::new(),
@@ -635,6 +641,7 @@ impl TypeChecker {
             block_written_locals: std::collections::HashSet::new(),
             defer_block_widening: false,
             self_send_epoch: 0,
+            in_value_type_body: false,
             deferred_block_widenings: Vec::new(),
             block_param_pushdown: HashMap::new(),
             unresolved_selector_sends: std::collections::HashSet::new(),

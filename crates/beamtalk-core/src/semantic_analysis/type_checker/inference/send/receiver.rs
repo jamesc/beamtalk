@@ -38,14 +38,17 @@ impl TypeChecker {
     /// it produces. By threading the receiver type through, we walk the inner
     /// subtree exactly once.
     ///
-    /// BT-4715: this is the one place a send's effect on field narrowings is
-    /// decided. A send to `self`/`super` runs a method that may assign any
-    /// state field (`reset => self.f := nil`), so once it returns, every
-    /// `self.<field>` refinement is dropped and the field reads as its
-    /// declared type again. The epoch counter also catches a self-send
-    /// buried in a block argument, whose child env is discarded: the
-    /// enclosing send invalidates its own env. A send that diverges
-    /// (`-> Never`) leaves no later code to mislead, so it does not count.
+    /// BT-4715: this is where a send's effect on field narrowings is
+    /// *recorded*. A send to `self`/`super` runs a method that may assign any
+    /// state field of an actor (`reset => self.f := nil`), so it bumps
+    /// `self_send_epoch`; [`TypeChecker::infer_expr`] compares the epoch
+    /// around every expression and drops the `self.<field>` refinements of
+    /// its own env when it changed. Doing the comparison there rather than
+    /// here also covers a self-send buried in a block argument or a `match:`
+    /// arm, whose child env is discarded. A send that diverges (`-> Never`)
+    /// leaves no later code to mislead, so it does not count. In a value-type
+    /// body the callee's `self.f :=` rebinds only the callee's own `self`
+    /// (functional update), so the caller's fields cannot change.
     #[allow(clippy::too_many_arguments)] // split from infer_message_send to share body
     pub(in crate::semantic_analysis::type_checker) fn infer_message_send_with_receiver_ty(
         &mut self,
@@ -58,7 +61,6 @@ impl TypeChecker {
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> InferredType {
-        let epoch_before = self.self_send_epoch;
         let ty = self.infer_message_send_with_receiver_ty_inner(
             receiver,
             receiver_ty,
@@ -69,11 +71,11 @@ impl TypeChecker {
             env,
             in_abstract_method,
         );
-        if Self::is_self_or_super(receiver) && !matches!(ty, InferredType::Never) {
+        if Self::is_self_or_super(receiver)
+            && !self.in_value_type_body
+            && !matches!(ty, InferredType::Never)
+        {
             self.self_send_epoch += 1;
-        }
-        if self.self_send_epoch != epoch_before {
-            env.clear_self_field_narrowings();
         }
         ty
     }

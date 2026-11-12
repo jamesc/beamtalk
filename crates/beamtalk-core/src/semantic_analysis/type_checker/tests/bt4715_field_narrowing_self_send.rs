@@ -117,3 +117,31 @@ fn diverging_self_send_does_not_drop_earlier_narrowing() {
         "  run -> Integer =>\n    self.f isNil ifTrue: [^0]\n    self.f > 5 ifTrue: [self error: \"big\"]\n    self need: self.f",
     );
 }
+
+#[test]
+fn self_send_in_match_arm_drops_narrowing() {
+    assert_nil_leak(
+        "  run: v :: Symbol -> Integer =>\n    self.f isNil ifTrue: [^0]\n    v match: [#reset -> self reset; _ -> nil]\n    self need: self.f",
+    );
+}
+
+#[test]
+fn value_type_self_send_keeps_narrowing() {
+    // A value type's `self.f :=` rebinds the callee's own `self`; the
+    // caller's field cannot change, so the narrowing survives.
+    let source = r"
+typed Object subclass: Box
+  state: f :: Integer | Nil = nil
+  with: v :: Integer | Nil -> Box => self.f := v
+  need: v :: Integer -> Integer => v
+  run -> Integer =>
+    self.f isNil ifTrue: [^0]
+    self with: nil
+    self need: self.f
+";
+    let diags: Vec<_> = type_diagnostics(source)
+        .into_iter()
+        .filter(|d| d.message.contains("expects Integer"))
+        .collect();
+    assert!(diags.is_empty(), "got: {diags:#?}");
+}
