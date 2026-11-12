@@ -4894,11 +4894,20 @@ startChild_cached_kind_capped_test() ->
         ),
         ok = supervisor:terminate_child(SupPid, element(4, Child)),
         wait_until_count(Self, 0),
+        %% A raw supervisor:terminate_child releases the cap slot asynchronously
+        %% (capacity monitor handles the child's DOWN), so countChildren reading 0
+        %% does not imply the slot is free. Wait on the slot counter itself.
+        wait_until_slots_used(SupPid, 0),
         ?assertMatch({ok, _}, beamtalk_supervisor:startChild(Self))
     after
         ChildClassPid ! stop,
         gen_server:stop(SupPid)
     end.
+
+wait_until_slots_used(SupPid, N) ->
+    {{dictionary, '$beamtalk_max_children_state'}, {Tid, _MonPid}} =
+        erlang:process_info(SupPid, {dictionary, '$beamtalk_max_children_state'}),
+    await_capacity_count(Tid, N).
 
 wait_until_count(Self, N) ->
     case beamtalk_supervisor:countChildren(Self) of
