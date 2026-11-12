@@ -21,17 +21,23 @@ TestCase subclass: InheritedClassNewTest
     self assert: InheritedNewChild new equals: #{#viaBase => true}
 
   testChildInheritsNewDynamic =>
-    self assert: (self lookUp: #InheritedNewChild) new equals: #{#viaBase => true}
+    self assert: (self lookUp: #InheritedNewChild) new equals: #{
+      #viaBase => true
+    }
 
   testGrandchildInheritsNewStatic =>
     self assert: InheritedNewGrandchild new equals: #{#viaBase => true}
 
   testGrandchildInheritsNewDynamic =>
-    self assert: (self lookUp: #InheritedNewGrandchild) new equals: #{#viaBase => true}
+    self assert: (self lookUp: #InheritedNewGrandchild) new equals: #{
+      #viaBase => true
+    }
 
   testOwnNewStillWins =>
     self assert: InheritedNewOverride new equals: #{#viaOverride => true}
-    self assert: (self lookUp: #InheritedNewOverride) new equals: #{#viaOverride => true}
+    self assert: (self lookUp: #InheritedNewOverride) new equals: #{
+      #viaOverride => true
+    }
 
   // The Announcer case from the issue: the inherited constructor mints the
   // `ref`, and the instance carries the subclass name.
