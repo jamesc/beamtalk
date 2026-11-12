@@ -36,6 +36,7 @@ The testClassProtocol probe is a test-registered extension on `Class`
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%====================================================================
@@ -133,10 +134,7 @@ test_unknown_message_dnu() ->
     ok = ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
 
-    ?assertError(
-        #{error := #beamtalk_error{kind = does_not_understand, class = 'Counter'}},
-        beamtalk_object_class:class_send(CounterPid, totallyUnknownMessage, [])
-    ).
+    ?assertBtError(does_not_understand, 'Counter', beamtalk_object_class:class_send(CounterPid, totallyUnknownMessage, [])).
 
 %% Test 4: Graceful fallback when Class is not registered.
 %%
@@ -164,10 +162,7 @@ test_fallthrough_absent_class() ->
 
     try
         %% Should raise does_not_understand, not crash
-        ?assertError(
-            #{error := #beamtalk_error{kind = does_not_understand, class = 'Counter'}},
-            beamtalk_object_class:class_send(CounterPid, testClassProtocol, [])
-        )
+        ?assertBtError(does_not_understand, 'Counter', beamtalk_object_class:class_send(CounterPid, testClassProtocol, []))
     after
         %% Re-register the real 'Class' (same module it had) and the probe so
         %% later tests and modules in the same VM are not affected.

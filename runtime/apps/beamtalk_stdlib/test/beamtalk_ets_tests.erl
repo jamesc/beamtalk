@@ -25,6 +25,7 @@ Tests cover:
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -102,31 +103,19 @@ new_already_exists_test() ->
     end),
     ets:new(bt_ets_test_dup, [set, named_table, public]),
     try
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = already_exists}},
-            beamtalk_ets:'new:type:'(bt_ets_test_dup, set)
-        )
+        ?assertBtError(already_exists, beamtalk_ets:'new:type:'(bt_ets_test_dup, set))
     after
         ets:delete(bt_ets_test_dup)
     end.
 
 new_type_error_name_not_atom_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-        beamtalk_ets:'new:type:'(<<"not_an_atom">>, set)
-    ).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:'new:type:'(<<"not_an_atom">>, set)).
 
 new_type_error_type_not_atom_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-        beamtalk_ets:'new:type:'(some_table, <<"set">>)
-    ).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:'new:type:'(some_table, <<"set">>)).
 
 new_type_error_invalid_type_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-        beamtalk_ets:'new:type:'(some_table, invalid_type)
-    ).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:'new:type:'(some_table, invalid_type)).
 
 %%% ============================================================================
 %%% named:/1
@@ -147,16 +136,10 @@ named_success_test() ->
     end.
 
 named_not_found_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = not_found, class = 'Ets'}},
-        beamtalk_ets:'named:'(bt_ets_test_no_such_table_xyz)
-    ).
+    ?assertBtError(not_found, 'Ets', beamtalk_ets:'named:'(bt_ets_test_no_such_table_xyz)).
 
 named_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-        beamtalk_ets:'named:'(<<"not_an_atom">>)
-    ).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:'named:'(<<"not_an_atom">>)).
 
 %%% ============================================================================
 %%% exists:/1
@@ -179,10 +162,7 @@ exists_false_test() ->
     ?assertNot(beamtalk_ets:'exists:'(bt_ets_test_no_such_exists_xyz)).
 
 exists_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-        beamtalk_ets:'exists:'(<<"not_an_atom">>)
-    ).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:'exists:'(<<"not_an_atom">>)).
 
 ffi_exists_shim_test() ->
     ?assertNot(beamtalk_ets:exists(bt_ets_test_ffi_exists_xyz)).
@@ -234,16 +214,10 @@ newOrExisting_returns_existing_test() ->
     end.
 
 newOrExisting_type_error_name_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-        beamtalk_ets:'newOrExisting:type:'(<<"not_atom">>, set)
-    ).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:'newOrExisting:type:'(<<"not_atom">>, set)).
 
 newOrExisting_type_error_type_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-        beamtalk_ets:'newOrExisting:type:'(some_table, <<"set">>)
-    ).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:'newOrExisting:type:'(some_table, <<"set">>)).
 
 newOrExisting_invalid_type_test() ->
     ?assertError(
@@ -379,10 +353,7 @@ lookup_absent_returns_nil_test() ->
     end).
 
 lookup_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-        beamtalk_ets:lookup(not_an_ets, <<"key">>)
-    ).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:lookup(not_an_ets, <<"key">>)).
 
 %%% ============================================================================
 %%% insert/3
@@ -402,10 +373,7 @@ insert_update_test() ->
     end).
 
 insert_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-        beamtalk_ets:insert(not_an_ets, <<"key">>, <<"val">>)
-    ).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:insert(not_an_ets, <<"key">>, <<"val">>)).
 
 %%% ============================================================================
 %%% lookupIfAbsent/3
@@ -433,34 +401,22 @@ lookupIfAbsent_block_badarg_is_not_reported_as_stale_table_test() ->
     %% a stale_table. BT-3836: it surfaces as a structured type_error (not a raw
     %% badarg, which would trigger the FFI proxy's charlist retry and re-run the Block).
     with_table(bt_ets_test_lookup_default_block_badarg, fun(Table) ->
-        ?assertError(
-            #{error := #beamtalk_error{kind = type_error}},
-            beamtalk_ets:lookupIfAbsent(Table, <<"missing">>, fun() -> erlang:error(badarg) end)
-        )
+        ?assertBtError(type_error, beamtalk_ets:lookupIfAbsent(Table, <<"missing">>, fun() -> erlang:error(badarg) end))
     end).
 
 lookupIfAbsent_stale_table_still_reported_test() ->
     %% BT-3739: a table that no longer exists is still a stale-table error.
     Table = beamtalk_ets:'new:type:'(bt_ets_test_lookup_default_stale, set),
     ets:delete(bt_ets_test_lookup_default_stale),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_table, class = 'Ets'}},
-        beamtalk_ets:lookupIfAbsent(Table, <<"key">>, fun() -> 0 end)
-    ).
+    ?assertBtError(stale_table, 'Ets', beamtalk_ets:lookupIfAbsent(Table, <<"key">>, fun() -> 0 end)).
 
 lookupIfAbsent_type_error_not_block_test() ->
     with_table(bt_ets_test_lookup_default_type, fun(Table) ->
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-            beamtalk_ets:lookupIfAbsent(Table, <<"key">>, not_a_function)
-        )
+        ?assertBtError(type_error, 'Ets', beamtalk_ets:lookupIfAbsent(Table, <<"key">>, not_a_function))
     end).
 
 lookupIfAbsent_type_error_not_ets_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-        beamtalk_ets:lookupIfAbsent(not_an_ets, <<"key">>, fun() -> 0 end)
-    ).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:lookupIfAbsent(not_an_ets, <<"key">>, fun() -> 0 end)).
 
 %%% ============================================================================
 %%% includesKey/2
@@ -478,10 +434,7 @@ includesKey_absent_test() ->
     end).
 
 includesKey_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-        beamtalk_ets:includesKey(not_an_ets, <<"key">>)
-    ).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:includesKey(not_an_ets, <<"key">>)).
 
 %%% ============================================================================
 %%% removeKey/2
@@ -501,10 +454,7 @@ removeKey_missing_is_idempotent_test() ->
     end).
 
 removeKey_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-        beamtalk_ets:removeKey(not_an_ets, <<"key">>)
-    ).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:removeKey(not_an_ets, <<"key">>)).
 
 %%% ============================================================================
 %%% keys/1
@@ -525,10 +475,7 @@ keys_multiple_test() ->
     end).
 
 keys_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-        beamtalk_ets:keys(not_an_ets)
-    ).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:keys(not_an_ets)).
 
 %%% ============================================================================
 %%% tableSize/1
@@ -555,10 +502,7 @@ tableSize_after_update_does_not_increase_test() ->
     end).
 
 tableSize_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-        beamtalk_ets:tableSize(not_an_ets)
-    ).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:tableSize(not_an_ets)).
 
 %%% ============================================================================
 %%% deleteTable/1
@@ -575,10 +519,7 @@ deleteTable_success_test() ->
     ?assertEqual(undefined, ets:whereis(bt_ets_test_delete)).
 
 deleteTable_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Ets'}},
-        beamtalk_ets:deleteTable(not_an_ets)
-    ).
+    ?assertBtError(type_error, 'Ets', beamtalk_ets:deleteTable(not_an_ets)).
 
 %%% ============================================================================
 %%% FFI shims: new/2, named/1
@@ -609,10 +550,7 @@ ffi_named_shim_success_test() ->
     end.
 
 ffi_named_shim_not_found_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = not_found}},
-        beamtalk_ets:named(bt_ets_test_no_such_xyz_ffi)
-    ).
+    ?assertBtError(not_found, beamtalk_ets:named(bt_ets_test_no_such_xyz_ffi)).
 
 %%% ============================================================================
 %%% Bag / duplicate_bag table semantics
@@ -692,10 +630,7 @@ stale_table_lookup_test() ->
     end),
     Table = beamtalk_ets:'new:type:'(bt_ets_test_stale_lookup, set),
     beamtalk_ets:deleteTable(Table),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_table, class = 'Ets'}},
-        beamtalk_ets:lookup(Table, <<"key">>)
-    ).
+    ?assertBtError(stale_table, 'Ets', beamtalk_ets:lookup(Table, <<"key">>)).
 
 stale_table_insert_test() ->
     (try
@@ -705,10 +640,7 @@ stale_table_insert_test() ->
     end),
     Table = beamtalk_ets:'new:type:'(bt_ets_test_stale_insert, set),
     beamtalk_ets:deleteTable(Table),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_table, class = 'Ets'}},
-        beamtalk_ets:insert(Table, <<"key">>, <<"val">>)
-    ).
+    ?assertBtError(stale_table, 'Ets', beamtalk_ets:insert(Table, <<"key">>, <<"val">>)).
 
 stale_table_size_test() ->
     (try
@@ -718,10 +650,7 @@ stale_table_size_test() ->
     end),
     Table = beamtalk_ets:'new:type:'(bt_ets_test_stale_size, set),
     beamtalk_ets:deleteTable(Table),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_table, class = 'Ets'}},
-        beamtalk_ets:tableSize(Table)
-    ).
+    ?assertBtError(stale_table, 'Ets', beamtalk_ets:tableSize(Table)).
 
 stale_table_delete_test() ->
     (try
@@ -733,10 +662,7 @@ stale_table_delete_test() ->
     %% Delete the underlying table directly, then verify deleteTable raises stale_table
     %% (the same kind as an unnamed table and every other operation; BT-4604).
     ets:delete(bt_ets_test_stale_delete),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_table, class = 'Ets'}},
-        beamtalk_ets:deleteTable(Table)
-    ).
+    ?assertBtError(stale_table, 'Ets', beamtalk_ets:deleteTable(Table)).
 
 duplicate_bag_insert_upsert_test() ->
     %% insert on a duplicate_bag table also replaces existing values (delete-then-insert)
@@ -793,13 +719,9 @@ bt3831_increment_test() ->
     with_table(bt3831_inc, fun(T) ->
         ?assertEqual(1, beamtalk_ets:incrementAt(T, c, 1)),
         ?assertEqual(6, beamtalk_ets:incrementAt(T, c, 5)),
-        ?assertError(
-            #{error := #beamtalk_error{kind = type_error}}, beamtalk_ets:incrementAt(T, c, x)
-        ),
+        ?assertBtError(type_error, beamtalk_ets:incrementAt(T, c, x)),
         beamtalk_ets:insert(T, s, <<"str">>),
-        ?assertError(
-            #{error := #beamtalk_error{kind = type_error}}, beamtalk_ets:incrementAt(T, s, 1)
-        )
+        ?assertBtError(type_error, beamtalk_ets:incrementAt(T, s, 1))
     end).
 
 bt3831_update_test() ->
@@ -818,10 +740,7 @@ bt3831_update_contention_gives_up_test() ->
             ets:insert(bt3831_cont, {k, O + 1}),
             O
         end,
-        ?assertError(
-            #{error := #beamtalk_error{kind = update_contention}},
-            beamtalk_ets:updateAt(T, k, Block)
-        )
+        ?assertBtError(update_contention, beamtalk_ets:updateAt(T, k, Block))
     end).
 
 bt3831_bag_rejected_test() ->
@@ -833,30 +752,18 @@ bt3831_bag_rejected_test() ->
         end,
     T = beamtalk_ets:'new:type:'(bt3831_bag, bag),
     try
-        ?assertError(
-            #{error := #beamtalk_error{kind = unsupported_table_type}},
-            beamtalk_ets:incrementAt(T, k, 1)
-        ),
-        ?assertError(
-            #{error := #beamtalk_error{kind = unsupported_table_type}},
-            beamtalk_ets:updateAt(T, k, fun(_) -> 1 end)
-        )
+        ?assertBtError(unsupported_table_type, beamtalk_ets:incrementAt(T, k, 1)),
+        ?assertBtError(unsupported_table_type, beamtalk_ets:updateAt(T, k, fun(_) -> 1 end))
     after
         ets:delete(bt3831_bag)
     end.
 
 bt3831_block_badarg_writes_nothing_test() ->
     with_table(bt3831_badarg, fun(T) ->
-        ?assertError(
-            #{error := #beamtalk_error{kind = type_error}},
-            beamtalk_ets:updateAt(T, <<"k">>, fun(_) -> erlang:error(badarg) end)
-        ),
+        ?assertBtError(type_error, beamtalk_ets:updateAt(T, <<"k">>, fun(_) -> erlang:error(badarg) end)),
         ?assertEqual([], ets:tab2list(bt3831_badarg)),
         beamtalk_ets:insert(T, <<"k">>, 1),
-        ?assertError(
-            #{error := #beamtalk_error{kind = type_error}},
-            beamtalk_ets:ifPresent(T, <<"k">>, fun(_) -> erlang:error(badarg) end)
-        )
+        ?assertBtError(type_error, beamtalk_ets:ifPresent(T, <<"k">>, fun(_) -> erlang:error(badarg) end))
     end).
 
 bt3831_update_ordered_set_float_key_test() ->
@@ -876,27 +783,18 @@ bt3831_update_ordered_set_float_key_test() ->
 
 bt3831_update_wildcard_key_rejected_test() ->
     with_table(bt3831_wild, fun(T) ->
-        ?assertError(
-            #{error := #beamtalk_error{kind = type_error}},
-            beamtalk_ets:updateAt(T, '_', fun(_) -> 1 end)
-        ),
-        ?assertError(
-            #{error := #beamtalk_error{kind = type_error}},
-            beamtalk_ets:updateAt(T, {'$1', x}, fun(_) -> 1 end)
-        )
+        ?assertBtError(type_error, beamtalk_ets:updateAt(T, '_', fun(_) -> 1 end)),
+        ?assertBtError(type_error, beamtalk_ets:updateAt(T, {'$1', x}, fun(_) -> 1 end))
     end).
 
 bt3831_keys_and_values_do_badarg_runs_once_test() ->
     with_table(bt3831_kvdo, fun(T) ->
         beamtalk_ets:insert(T, a, 1),
         Self = self(),
-        ?assertError(
-            #{error := #beamtalk_error{kind = type_error}},
-            beamtalk_ets:keysAndValuesDo(T, fun(_, _) ->
+        ?assertBtError(type_error, beamtalk_ets:keysAndValuesDo(T, fun(_, _) ->
                 Self ! ran,
                 erlang:error(badarg)
-            end)
-        ),
+            end)),
         ?assertEqual(
             ran,
             receive
@@ -928,19 +826,14 @@ bt3831_update_map_key_rejected_test() ->
     with_table(bt3831_mapkey, fun(T) ->
         beamtalk_ets:insert(T, #{a => 1}, 0),
         beamtalk_ets:insert(T, #{a => 1, b => 2}, 0),
-        ?assertError(
-            #{error := #beamtalk_error{kind = type_error}},
-            beamtalk_ets:updateAt(T, #{a => 1}, fun(O) -> O + 1 end)
-        ),
+        ?assertBtError(type_error, beamtalk_ets:updateAt(T, #{a => 1}, fun(O) -> O + 1 end)),
         ?assertEqual(0, beamtalk_ets:lookup(T, #{a => 1, b => 2}))
     end).
 
 bt3836_if_absent_block_badarg_runs_once_test() ->
     with_table(bt3836_absent, fun(T) ->
         Self = self(),
-        ?assertError(
-            #{error := #beamtalk_error{kind = type_error}},
-            beamtalk_erlang_proxy:direct_call(
+        ?assertBtError(type_error, beamtalk_erlang_proxy:direct_call(
                 beamtalk_ets,
                 lookupIfAbsent,
                 [
@@ -951,8 +844,7 @@ bt3836_if_absent_block_badarg_runs_once_test() ->
                         erlang:error(badarg)
                     end
                 ]
-            )
-        ),
+            )),
         ?assertEqual(
             ran,
             receive
@@ -1087,9 +979,7 @@ bt4576_delete_unnamed_table_errors_test() ->
     %% Only the owner may delete, even a table others may read.
     ?assertAccessDenied(in_other_process(fun() -> beamtalk_ets:deleteTable(T) end)),
     ?assertEqual(nil, beamtalk_ets:deleteTable(T)),
-    ?assertError(
-        #{error := #beamtalk_error{kind = stale_table}}, beamtalk_ets:deleteTable(T)
-    ).
+    ?assertBtError(stale_table, beamtalk_ets:deleteTable(T)).
 
 -doc "Run Body, then delete the named table Name whether or not Body failed.".
 with_named_table_cleanup(Name, Body) ->
@@ -1108,10 +998,7 @@ bt4604_delete_named_public_table_by_non_owner_succeeds_test() ->
     with_named_table_cleanup(bt4604_named_public_delete, fun() ->
         T = beamtalk_ets:'new:type:'(bt4604_named_public_delete, set),
         ?assertEqual({ok, nil}, in_other_process(fun() -> beamtalk_ets:deleteTable(T) end)),
-        ?assertError(
-            #{error := #beamtalk_error{kind = stale_table, class = 'Ets'}},
-            beamtalk_ets:deleteTable(T)
-        )
+        ?assertBtError(stale_table, 'Ets', beamtalk_ets:deleteTable(T))
     end).
 
 bt4604_delete_named_protected_table_by_non_owner_is_access_denied_test() ->
@@ -1125,10 +1012,7 @@ bt4604_delete_named_protected_table_by_non_owner_is_access_denied_test() ->
     end).
 
 -define(assertDeleteFault(Kind, Name),
-    ?assertError(
-        #{error := #beamtalk_error{kind = Kind, class = 'Ets'}},
-        beamtalk_ets:badarg_error('delete', Name)
-    )
+    ?assertBtError(Kind, 'Ets', beamtalk_ets:badarg_error('delete', Name))
 ).
 
 bt4604_delete_badarg_name_reuse_test() ->
@@ -1159,22 +1043,12 @@ bt4604_delete_badarg_name_reuse_test() ->
 bt4576_deleted_private_table_is_stale_test() ->
     T = beamtalk_ets:'private:'(set),
     beamtalk_ets:deleteTable(T),
-    ?assertError(
-        #{error := #beamtalk_error{kind = stale_table}}, beamtalk_ets:lookup(T, k)
-    ),
-    ?assertError(
-        #{error := #beamtalk_error{kind = stale_table}}, beamtalk_ets:tableSize(T)
-    ).
+    ?assertBtError(stale_table, beamtalk_ets:lookup(T, k)),
+    ?assertBtError(stale_table, beamtalk_ets:tableSize(T)).
 
 bt4576_private_rejects_bad_type_test() ->
-    ?assertError(
-        #{error := #beamtalk_error{kind = type_error, selector = 'private:'}},
-        beamtalk_ets:'private:'(nope)
-    ),
-    ?assertError(
-        #{error := #beamtalk_error{kind = type_error, selector = 'protected:'}},
-        beamtalk_ets:'protected:'(<<"set">>)
-    ).
+    ?assertBtError(type_error, _, 'private:', beamtalk_ets:'private:'(nope)),
+    ?assertBtError(type_error, _, 'protected:', beamtalk_ets:'protected:'(<<"set">>)).
 
 bt4576_remove_key_if_absent_takes_value_test() ->
     with_table(bt_ets_test_take, fun(T) ->
@@ -1182,10 +1056,7 @@ bt4576_remove_key_if_absent_takes_value_test() ->
         ?assertEqual(7, beamtalk_ets:removeKey(T, k, fun() -> nil end)),
         ?assertNot(beamtalk_ets:includesKey(T, k)),
         ?assertEqual(absent, beamtalk_ets:removeKey(T, k, fun() -> absent end)),
-        ?assertError(
-            #{error := #beamtalk_error{kind = type_error}},
-            beamtalk_ets:removeKey(T, k, not_a_block)
-        )
+        ?assertBtError(type_error, beamtalk_ets:removeKey(T, k, not_a_block))
     end).
 
 bt4576_atomic_ops_on_private_bag_deny_before_type_check_test() ->

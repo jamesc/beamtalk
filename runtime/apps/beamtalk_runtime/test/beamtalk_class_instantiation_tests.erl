@@ -12,6 +12,7 @@ method validation.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%====================================================================
@@ -677,12 +678,9 @@ test_class_self_spawn_success() ->
 
 test_class_self_spawn_abstract() ->
     %% With IsAbstract=true, should raise instantiation_error
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = instantiation_error}},
-        beamtalk_class_instantiation:class_self_spawn(
+    ?assertBtError(instantiation_error, beamtalk_class_instantiation:class_self_spawn(
             'AbstractThing', some_mod, true, []
-        )
-    ).
+        )).
 
 test_class_self_spawn_normalize_abstract() ->
     %% undefined (from erlang:get) should be treated as false (non-abstract)
@@ -709,18 +707,12 @@ test_class_self_spawn_monitored_success() ->
     end.
 
 test_class_self_spawn_monitored_abstract() ->
-    ?assertError(
-        #{error := #beamtalk_error{kind = instantiation_error, selector = spawnMonitored}},
-        beamtalk_class_instantiation:class_self_spawn_monitored(
+    ?assertBtError(instantiation_error, _, spawnMonitored, beamtalk_class_instantiation:class_self_spawn_monitored(
             'AbstractThing', some_mod, true, []
-        )
-    ),
-    ?assertError(
-        #{error := #beamtalk_error{kind = instantiation_error, selector = 'spawnMonitoredWith:'}},
-        beamtalk_class_instantiation:class_self_spawn_monitored(
+        )),
+    ?assertBtError(instantiation_error, _, 'spawnMonitoredWith:', beamtalk_class_instantiation:class_self_spawn_monitored(
             'AbstractThing', some_mod, true, [#{}]
-        )
-    ).
+        )).
 
 %%====================================================================
 %% compute_is_constructible edge cases
@@ -1084,12 +1076,9 @@ test_check_init_args_internal_keys_rejected() ->
     %% Internal state keys live in the base map but are never valid
     %% initialiser keys — passing one raises instead of corrupting state.
     BaseState = #{'__class_mod__' => counter, '__shape_version__' => 1, value => 0},
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = unknown_field}},
-        beamtalk_class_instantiation:check_init_args(
+    ?assertBtError(unknown_field, beamtalk_class_instantiation:check_init_args(
             'Counter', 'spawnWith:', BaseState, #{'__class_mod__' => evil}, []
-        )
-    ).
+        )).
 
 test_check_init_args_non_map_passthrough() ->
     %% Non-map args are each caller's own shape to handle (spawn/1 and the

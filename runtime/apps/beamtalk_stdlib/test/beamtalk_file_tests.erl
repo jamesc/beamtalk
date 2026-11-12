@@ -26,6 +26,7 @@ Tests cover:
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% ============================================================================
 %%% Test Helpers
@@ -2580,16 +2581,10 @@ open_mode_unknown_mode_returns_type_error_test() ->
     ).
 
 open_mode_non_atom_mode_raises_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_file:'open:mode:'(<<"x.txt">>, <<"read">>)
-    ).
+    ?assertBtError(type_error, beamtalk_file:'open:mode:'(<<"x.txt">>, <<"read">>)).
 
 open_mode_non_binary_path_raises_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_file:'open:mode:'(42, read)
-    ).
+    ?assertBtError(type_error, beamtalk_file:'open:mode:'(42, read)).
 
 open_mode_permission_denied_test() ->
     case {os:type(), running_as_root()} of
@@ -2655,10 +2650,7 @@ open_mode_do_block_closing_handle_is_fine_test() ->
     end).
 
 open_mode_do_non_block_raises_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_file:'open:mode:do:'(<<"x.txt">>, read, not_a_block)
-    ).
+    ?assertBtError(type_error, beamtalk_file:'open:mode:do:'(<<"x.txt">>, read, not_a_block)).
 
 open_shim_rejects_ambiguous_second_argument_test() ->
     %% open/2 backs both open:do: and open:mode:; a non-atom, non-Block second
@@ -2803,17 +2795,11 @@ ffi_boundary_preserves_wrapped_error_test() ->
 
 open_mode_do_non_atom_mode_raises_test() ->
     %% Binary path + binary mode (not atom) + valid block → raises type_error.
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_file:'open:mode:do:'(<<"x.txt">>, <<"read">>, fun(_H) -> ok end)
-    ).
+    ?assertBtError(type_error, beamtalk_file:'open:mode:do:'(<<"x.txt">>, <<"read">>, fun(_H) -> ok end)).
 
 open_mode_do_non_binary_path_raises_test() ->
     %% Non-binary path → raises type_error regardless of mode or block.
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_file:'open:mode:do:'(42, read, fun(_H) -> ok end)
-    ).
+    ?assertBtError(type_error, beamtalk_file:'open:mode:do:'(42, read, fun(_H) -> ok end)).
 
 %%% ============================================================================
 %%% do_open: ensure_parent_dir failure path

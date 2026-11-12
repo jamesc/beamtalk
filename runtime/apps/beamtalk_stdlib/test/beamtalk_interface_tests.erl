@@ -18,6 +18,7 @@ in findSendersIn/2 and findReferencesToIn/2, while [] is still returned
 -export([log/2]).
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("kernel/include/logger.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
@@ -177,26 +178,17 @@ find_references_to_in_returns_list_test() ->
 %%% ============================================================================
 
 find_senders_in_rejects_bad_args_test() ->
-    ?assertError(
-        #{error := #beamtalk_error{kind = type_error, class = 'Beamtalk'}},
-        beamtalk_interface:findSendersIn(not_a_binary, ifTrue)
-    ).
+    ?assertBtError(type_error, 'Beamtalk', beamtalk_interface:findSendersIn(not_a_binary, ifTrue)).
 
 all_sends_in_returns_list_test() ->
     Result = beamtalk_interface:allSendsIn(<<"x foo: 1">>),
     ?assert(is_list(Result)).
 
 all_sends_in_rejects_bad_args_test() ->
-    ?assertError(
-        #{error := #beamtalk_error{kind = type_error, selector = 'allSendsIn:'}},
-        beamtalk_interface:allSendsIn(not_a_binary)
-    ).
+    ?assertBtError(type_error, _, 'allSendsIn:', beamtalk_interface:allSendsIn(not_a_binary)).
 
 find_references_to_in_rejects_bad_args_test() ->
-    ?assertError(
-        #{error := #beamtalk_error{kind = type_error, class = 'Beamtalk'}},
-        beamtalk_interface:findReferencesToIn(123, 'Integer')
-    ).
+    ?assertBtError(type_error, 'Beamtalk', beamtalk_interface:findReferencesToIn(123, 'Integer')).
 
 find_field_readers_in_returns_list_test() ->
     Result = beamtalk_interface:findFieldReadersIn(<<"x + 1">>, count),
@@ -207,10 +199,7 @@ find_field_writers_in_returns_list_test() ->
     ?assert(is_list(Result)).
 
 find_field_access_rejects_bad_args_test() ->
-    ?assertError(
-        #{error := #beamtalk_error{kind = type_error}},
-        beamtalk_interface:findFieldReadersIn(not_a_binary, count)
-    ).
+    ?assertBtError(type_error, beamtalk_interface:findFieldReadersIn(not_a_binary, count)).
 
 ffi_sites_in_returns_list_test() ->
     Result = beamtalk_interface:ffiSitesIn(<<"x + 1">>, <<"lists">>, <<"reverse">>, any),
@@ -262,10 +251,7 @@ dispatch_version_returns_string_test() ->
     ?assertMatch({beamtalk_string, _}, beamtalk_interface:dispatch(version, [], fake_self())).
 
 dispatch_unknown_selector_raises_dnu_test() ->
-    ?assertError(
-        #{error := #beamtalk_error{kind = does_not_understand, class = 'Beamtalk'}},
-        beamtalk_interface:dispatch(noSuchSelectorXyz, [], fake_self())
-    ).
+    ?assertBtError(does_not_understand, 'Beamtalk', beamtalk_interface:dispatch(noSuchSelectorXyz, [], fake_self())).
 
 %%% ============================================================================
 %%% Live registry tests
@@ -382,17 +368,11 @@ live_registry_test_() ->
                 end
             end},
             {"classNamed integer arg raises type_error", fun() ->
-                ?assertError(
-                    #{error := #beamtalk_error{kind = type_error}},
-                    beamtalk_interface:classNamed(42)
-                )
+                ?assertBtError(type_error, beamtalk_interface:classNamed(42))
             end},
             %% Review: a non-list argument is a type error, like classNamed/1.
             {"classesNamed non-list arg raises type_error", fun() ->
-                ?assertError(
-                    #{error := #beamtalk_error{kind = type_error}},
-                    beamtalk_interface:classesNamed(42)
-                )
+                ?assertBtError(type_error, beamtalk_interface:classesNamed(42))
             end},
             {"help: on a known class returns its formatted help", fun() ->
                 {beamtalk_string, H} = beamtalk_interface:help('Integer'),
@@ -402,10 +382,7 @@ live_registry_test_() ->
                 {beamtalk_string, H} = beamtalk_interface:help(<<"Integer">>)
             end},
             {"help: unknown class raises class_not_found", fun() ->
-                ?assertError(
-                    #{error := #beamtalk_error{kind = class_not_found}},
-                    beamtalk_interface:help('ZzzNoSuchClass')
-                )
+                ?assertBtError(class_not_found, beamtalk_interface:help('ZzzNoSuchClass'))
             end},
             {"help:selector: on an own method returns its signature", fun() ->
                 {beamtalk_string, H} = beamtalk_interface:help('Integer', '+'),
@@ -416,26 +393,17 @@ live_registry_test_() ->
                 {beamtalk_string, H} = beamtalk_interface:help('Integer', <<"+">>)
             end},
             {"help:selector: unknown selector raises does_not_understand", fun() ->
-                ?assertError(
-                    #{error := #beamtalk_error{kind = does_not_understand}},
-                    beamtalk_interface:help('Integer', zzzNoSuchMethod)
-                )
+                ?assertBtError(does_not_understand, beamtalk_interface:help('Integer', zzzNoSuchMethod))
             end},
             {"help:selector: unknown class raises class_not_found", fun() ->
-                ?assertError(
-                    #{error := #beamtalk_error{kind = class_not_found}},
-                    beamtalk_interface:help('ZzzNoSuchClass', foo)
-                )
+                ?assertBtError(class_not_found, beamtalk_interface:help('ZzzNoSuchClass', foo))
             end},
             {"help:selector: on Metaclass new returns metaclass doc", fun() ->
                 {beamtalk_string, H} = beamtalk_interface:help('Metaclass', new),
                 ?assertNotEqual(nomatch, binary:match(H, <<"Metaclass">>))
             end},
             {"help:selector: on Metaclass unknown selector raises dnu", fun() ->
-                ?assertError(
-                    #{error := #beamtalk_error{kind = does_not_understand}},
-                    beamtalk_interface:help('Metaclass', zzzNoSuchMeta)
-                )
+                ?assertBtError(does_not_understand, beamtalk_interface:help('Metaclass', zzzNoSuchMeta))
             end},
             {"dispatch help: routes to handle_help", fun() ->
                 {beamtalk_string, H} = beamtalk_interface:dispatch(
@@ -458,16 +426,10 @@ live_registry_test_() ->
                 )
             end},
             {"erlangHelp: unknown module raises not_found", fun() ->
-                ?assertError(
-                    #{error := #beamtalk_error{kind = not_found}},
-                    beamtalk_interface:erlangHelp(<<"zzz_no_such_module_xyz">>)
-                )
+                ?assertBtError(not_found, beamtalk_interface:erlangHelp(<<"zzz_no_such_module_xyz">>))
             end},
             {"erlangHelp: non-binary arg raises type_error", fun() ->
-                ?assertError(
-                    #{error := #beamtalk_error{kind = type_error}},
-                    beamtalk_interface:erlangHelp(123)
-                )
+                ?assertBtError(type_error, beamtalk_interface:erlangHelp(123))
             end},
             {"erlangHelp:selector: on a known function returns docs", fun() ->
                 ?assertMatch(
@@ -482,22 +444,13 @@ live_registry_test_() ->
                 )
             end},
             {"erlangHelp:selector: unknown function raises not_found", fun() ->
-                ?assertError(
-                    #{error := #beamtalk_error{kind = not_found}},
-                    beamtalk_interface:erlangHelp(<<"lists">>, <<"zzzNoSuchFn">>)
-                )
+                ?assertBtError(not_found, beamtalk_interface:erlangHelp(<<"lists">>, <<"zzzNoSuchFn">>))
             end},
             {"erlangHelp:selector: unknown module raises not_found", fun() ->
-                ?assertError(
-                    #{error := #beamtalk_error{kind = not_found}},
-                    beamtalk_interface:erlangHelp(<<"zzz_no_module">>, <<"reverse">>)
-                )
+                ?assertBtError(not_found, beamtalk_interface:erlangHelp(<<"zzz_no_module">>, <<"reverse">>))
             end},
             {"erlangHelp:selector: non-binary module raises type_error", fun() ->
-                ?assertError(
-                    #{error := #beamtalk_error{kind = type_error}},
-                    beamtalk_interface:erlangHelp(123, <<"reverse">>)
-                )
+                ?assertBtError(type_error, beamtalk_interface:erlangHelp(123, <<"reverse">>))
             end},
             {"findSendersIn on real source returns a list", fun() ->
                 R = beamtalk_interface:findSendersIn(<<"self foo: 1. self foo: 2">>, 'foo:'),
@@ -549,10 +502,7 @@ live_registry_test_() ->
                 {beamtalk_string, H} = beamtalk_interface:help(ClassObj)
             end},
             {"help: with a non-class argument raises type_error", fun() ->
-                ?assertError(
-                    #{error := #beamtalk_error{kind = type_error}},
-                    beamtalk_interface:help(3.14)
-                )
+                ?assertBtError(type_error, beamtalk_interface:help(3.14))
             end},
             {"help: on an abstract class shows the [abstract] modifier", fun() ->
                 %% Number is abstract — exercises the {false, true} modifier branch.
@@ -567,19 +517,13 @@ live_registry_test_() ->
             {"dispatch help:selector: unknown class raises class_not_found", fun() ->
                 %% Drives the dispatch('help:selector:', ...) {error,Err} ->
                 %% beamtalk_error:raise branch.
-                ?assertError(
-                    #{error := #beamtalk_error{kind = class_not_found}},
-                    beamtalk_interface:dispatch(
+                ?assertBtError(class_not_found, beamtalk_interface:dispatch(
                         'help:selector:', ['ZzzNoSuchClass', foo], fake_self()
-                    )
-                )
+                    ))
             end},
             {"findClass integer arg raises type_error", fun() ->
                 %% Drives the findClass/1 {error,Err} -> raise branch.
-                ?assertError(
-                    #{error := #beamtalk_error{kind = type_error}},
-                    beamtalk_interface:findClass(42)
-                )
+                ?assertBtError(type_error, beamtalk_interface:findClass(42))
             end},
             {"help:selector: resolves a class-side method", fun() ->
                 %% `new` is a class-side method (inherited from Value): the

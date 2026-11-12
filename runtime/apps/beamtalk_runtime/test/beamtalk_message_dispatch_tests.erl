@@ -11,6 +11,7 @@ Note: Compiled stdlib modules (bt@stdlib@integer etc.) require `just build-stdli
 These tests focus on routing logic that works without compiled stdlib.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 -export([init/1]).
 
@@ -56,10 +57,7 @@ actor_dead_raises_error() ->
     gen_server:stop(Counter),
     beamtalk_test_wait:dead(Counter),
     Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = Counter},
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
-        beamtalk_message_dispatch:send(Obj, 'getValue', [])
-    ).
+    ?assertBtError(actor_dead, beamtalk_message_dispatch:send(Obj, 'getValue', [])).
 
 class_object_returns_value() ->
     ClassPid = beamtalk_class_registry:whereis_class('Object'),
@@ -86,10 +84,7 @@ send4_actor_timeout_raises_error() ->
     {ok, Counter} = test_counter:start_link(42),
     Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = Counter},
     %% slowGet: sleeps 500ms; 50ms timeout should fail
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = timeout}},
-        beamtalk_message_dispatch:send(Obj, 'slowGet:', [500], 50)
-    ),
+    ?assertBtError(timeout, beamtalk_message_dispatch:send(Obj, 'slowGet:', [500], 50)),
     gen_server:stop(Counter).
 
 send4_value_type_ignores_timeout() ->
@@ -110,12 +105,9 @@ perform_with_timeout_intercept_succeeds() ->
 perform_with_timeout_intercept_times_out() ->
     {ok, Counter} = test_counter:start_link(42),
     Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = Counter},
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = timeout}},
-        beamtalk_message_dispatch:send(
+    ?assertBtError(timeout, beamtalk_message_dispatch:send(
             Obj, 'perform:withArguments:timeout:', ['slowGet:', [500], 50]
-        )
-    ),
+        )),
     gen_server:stop(Counter).
 
 send4_test_() ->
@@ -184,7 +176,7 @@ supervisor_stop_returns_nil_test() ->
     Sup = {beamtalk_supervisor, 'TestSup', test_mod, SupPid},
     Result = beamtalk_message_dispatch:send(Sup, stop, []),
     ?assertEqual(nil, Result),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(SupPid),
     ?assertEqual(false, is_process_alive(SupPid)).
 
 supervisor_stop_stale_handle_test() ->
@@ -194,10 +186,7 @@ supervisor_stop_stale_handle_test() ->
     gen_server:stop(SupPid),
     beamtalk_test_wait:dead(SupPid),
     Sup = {beamtalk_supervisor, 'TestSup', test_mod, SupPid},
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},
-        beamtalk_message_dispatch:send(Sup, stop, [])
-    ).
+    ?assertBtError(stale_handle, beamtalk_message_dispatch:send(Sup, stop, [])).
 
 supervisor_unreachable_node_test() ->
     %% BT-3984: a handle to a supervisor on a node this VM cannot reach.
@@ -206,10 +195,7 @@ supervisor_unreachable_node_test() ->
     RemotePid = beamtalk_dist_test_helper:unreachable_pid(bt3984_ghost),
     Sup = {beamtalk_supervisor, 'TestSup', test_mod, RemotePid},
     ?assertEqual(true, beamtalk_message_dispatch:send(Sup, isAlive, [])),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = node_down}},
-        beamtalk_message_dispatch:send(Sup, stop, [])
-    ).
+    ?assertBtError(node_down, beamtalk_message_dispatch:send(Sup, stop, [])).
 
 %% ============================================================================
 %% cast/3 dispatch tests
@@ -296,10 +282,7 @@ invalid_pid_test_() ->
 actor_undefined_pid_raises_error() ->
     %% When an actor record has a non-pid value (e.g. undefined), send/3 raises actor_dead.
     Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = undefined},
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
-        beamtalk_message_dispatch:send(Obj, increment, [])
-    ).
+    ?assertBtError(actor_dead, beamtalk_message_dispatch:send(Obj, increment, [])).
 
 %% ============================================================================
 %% send/4 supervisor timeout delegation
@@ -409,10 +392,7 @@ send4_class_object_delegates() ->
 send4_invalid_pid_raises() ->
     %% send/4 with invalid pid raises the same structured actor_dead error as send/3.
     Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = undefined},
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
-        beamtalk_message_dispatch:send(Obj, increment, [], 5000)
-    ).
+    ?assertBtError(actor_dead, beamtalk_message_dispatch:send(Obj, increment, [], 5000)).
 
 %% ============================================================================
 %% Supervisor generic method dispatch (not isAlive/stop)

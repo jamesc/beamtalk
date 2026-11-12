@@ -10,6 +10,7 @@ Tests assertion methods, test discovery, test execution,
 result formatting, and error extraction.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%% ============================================================================
@@ -17,22 +18,13 @@ result formatting, and error extraction.
 %%% ============================================================================
 
 fail_with_binary_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
-        beamtalk_test_case:fail(<<"oops">>)
-    ).
+    ?assertBtError(assertion_failed, beamtalk_test_case:fail(<<"oops">>)).
 
 fail_with_atom_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
-        beamtalk_test_case:fail(broken)
-    ).
+    ?assertBtError(assertion_failed, beamtalk_test_case:fail(broken)).
 
 fail_with_other_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
-        beamtalk_test_case:fail(123)
-    ).
+    ?assertBtError(assertion_failed, beamtalk_test_case:fail(123)).
 
 %%% ============================================================================
 %%% should_raise Tests
@@ -59,10 +51,7 @@ should_raise_raw_badkey_uses_on_do_kind_test() ->
 
 should_raise_no_error_test() ->
     Block = fun() -> ok end,
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
-        beamtalk_test_case:should_raise(Block, some_error)
-    ).
+    ?assertBtError(assertion_failed, beamtalk_test_case:should_raise(Block, some_error)).
 
 should_raise_wrong_kind_test() ->
     Block = fun() ->
@@ -72,23 +61,14 @@ should_raise_wrong_kind_test() ->
             message = <<"m">>
         })
     end,
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
-        beamtalk_test_case:should_raise(Block, does_not_understand)
-    ).
+    ?assertBtError(assertion_failed, beamtalk_test_case:should_raise(Block, does_not_understand)).
 
 should_raise_non_function_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_test_case:should_raise(not_a_fun, some_error)
-    ).
+    ?assertBtError(type_error, beamtalk_test_case:should_raise(not_a_fun, some_error)).
 
 should_raise_non_atom_kind_raises_type_error_test() ->
     Block = fun() -> ok end,
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_test_case:should_raise(Block, <<"not_atom">>)
-    ).
+    ?assertBtError(type_error, beamtalk_test_case:should_raise(Block, <<"not_atom">>)).
 
 %%% ============================================================================
 %%% extract_error_kind Tests (via should_raise which calls it)

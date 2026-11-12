@@ -16,6 +16,7 @@ format_results/2 all branches, and run_test_method/5 failure catch clauses.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -51,45 +52,27 @@ skip_with_list_test() ->
 %%% ============================================================================
 
 fail_with_atom_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
-        beamtalk_test_case:fail(broken)
-    ).
+    ?assertBtError(assertion_failed, beamtalk_test_case:fail(broken)).
 
 fail_with_integer_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
-        beamtalk_test_case:fail(42)
-    ).
+    ?assertBtError(assertion_failed, beamtalk_test_case:fail(42)).
 
 fail_with_tuple_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = assertion_failed}},
-        beamtalk_test_case:fail({some, tuple})
-    ).
+    ?assertBtError(assertion_failed, beamtalk_test_case:fail({some, tuple})).
 
 %%% ============================================================================
 %%% should_raise/2 — type-error clauses (lines 99–115)
 %%% ============================================================================
 
 should_raise_non_function_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_test_case:should_raise(not_a_fun, some_error)
-    ).
+    ?assertBtError(type_error, beamtalk_test_case:should_raise(not_a_fun, some_error)).
 
 should_raise_non_atom_kind_raises_type_error_test() ->
     Block = fun() -> ok end,
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_test_case:should_raise(Block, <<"not_atom">>)
-    ).
+    ?assertBtError(type_error, beamtalk_test_case:should_raise(Block, <<"not_atom">>)).
 
 should_raise_both_wrong_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_test_case:should_raise(42, <<"bad">>)
-    ).
+    ?assertBtError(type_error, beamtalk_test_case:should_raise(42, <<"bad">>)).
 
 %%% ============================================================================
 %%% run_test_method/5 via tc_run_helper — failure catch clauses (lines 817–835)
@@ -759,7 +742,4 @@ run_class_ffi_wrapper_test() ->
 run_all_ffi_unknown_class_test() ->
     %% This atom is never registered in any loaded module — badarg → does_not_understand
     ClassRef = {class_object, 'BeamtalkNightlyCoverageXyzUniq99999 class'},
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand}},
-        beamtalk_test_case:runAll(ClassRef)
-    ).
+    ?assertBtError(does_not_understand, beamtalk_test_case:runAll(ClassRef)).

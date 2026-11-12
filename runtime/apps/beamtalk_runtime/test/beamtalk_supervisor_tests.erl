@@ -54,6 +54,7 @@ Tests cover:
   the slot synchronously, failing children release theirs (BT-4068)
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% OTP supervisor callback and worker start function — required for supervisor:start_link/3.
@@ -947,8 +948,7 @@ stop_returns_ok_nil_test() ->
     Self = make_supervisor_tuple('TestSup5', test_module5, SupPid),
     Result = beamtalk_supervisor:stop(Self),
     ?assertEqual({ok, nil}, Result),
-    %% Give the process a moment to shut down
-    timer:sleep(50),
+    beamtalk_test_wait:dead(SupPid),
     ?assertEqual(false, is_process_alive(SupPid)).
 
 %%====================================================================
@@ -975,7 +975,7 @@ terminate_child_by_pid_test() ->
         ChildArg = {beamtalk_object, 'SomeActor', some_mod, ChildPid},
         Result = beamtalk_supervisor:terminateChild(Self, ChildArg),
         ?assertEqual({ok, nil}, Result),
-        timer:sleep(50),
+        beamtalk_test_wait:dead(ChildPid),
         ?assertEqual(false, is_process_alive(ChildPid))
     after
         gen_server:stop(SupPid)
@@ -1994,12 +1994,9 @@ start_child_via_class_method_rejects_abstract_class_test() ->
     %% class would have instantiated successfully instead of raising.
     FakeClassPid = setup_fake_class('BT3106Abstract', true),
     try
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = instantiation_error}},
-            beamtalk_supervisor:start_child_via_class_method(
+        ?assertBtError(instantiation_error, beamtalk_supervisor:start_child_via_class_method(
                 'BT3106Abstract', ?MODULE, class_selfNew, []
-            )
-        ),
+            )),
         %% The fabricated PD entry must not linger either way.
         ?assertEqual(undefined, get(beamtalk_class_is_abstract))
     after
@@ -2035,7 +2032,7 @@ stop_terminates_children_test() ->
     ?assert(is_process_alive(ChildPid)),
     Self = make_supervisor_tuple('TestSupStop', test_stop_mod, SupPid),
     beamtalk_supervisor:stop(Self),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(SupPid),
     ?assertEqual(false, is_process_alive(SupPid)),
     ?assertEqual(false, is_process_alive(ChildPid)).
 
@@ -2271,10 +2268,7 @@ spawn_starts_independent_unlinked_listed_instances_test() ->
 spawn_start_failure_raises_supervisor_start_failed_test() ->
     Config = bt3963_static_config(#{childSpecs => fun(_) -> error(boom) end}),
     with_bt3963_class('BT3963Sup', Config, fun() ->
-        ?assertError(
-            #{error := #beamtalk_error{kind = supervisor_start_failed, selector = spawn}},
-            beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, spawn, [])
-        )
+        ?assertBtError(supervisor_start_failed, _, spawn, beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, spawn, []))
     end).
 
 %% BT-4104: OTP has no atomic supervisor start+monitor, so the monitored
@@ -2336,10 +2330,7 @@ initialize_raise_answers_result_error_for_result_forms_test() ->
         %% Each failed instance was stopped: no registration is left behind.
         ?assertEqual(undefined, whereis(?BT3963_MOD)),
         ?assertEqual(undefined, whereis(Name)),
-        ?assertError(
-            #{error := #beamtalk_error{kind = bt3994_init_failed}},
-            beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, spawn, [])
-        )
+        ?assertBtError(bt3994_init_failed, beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, spawn, []))
     end).
 
 %% BT-3994: `supervise` serialises racing starts with a node-local FIFO lock
@@ -2515,14 +2506,8 @@ spec_to_otp_supervisor_child_mapping_test() ->
             maps:get(id, beamtalk_supervisor:spec_to_otp(bt3962_bt_spec(ClassObj, 1, spawn, [])))
         ),
         %% withClassMethod: and scope: #global are not supported.
-        ?assertError(
-            #{error := #beamtalk_error{kind = type_error}},
-            Start(classMethod, [foo, []], static)
-        ),
-        ?assertError(
-            #{error := #beamtalk_error{kind = type_error}},
-            Start('spawnAs:scope:', [n1], static)
-        )
+        ?assertBtError(type_error, Start(classMethod, [foo, []], static)),
+        ?assertBtError(type_error, Start('spawnAs:scope:', [n1], static))
     after
         FakePid ! stop,
         beamtalk_class_metadata:delete('BT3962MapSupCls')
@@ -4687,10 +4672,7 @@ orphaned_init_gate_is_reclaimed_test() ->
     ets:insert(beamtalk_supervisor_init_gates, {Sup, gate}),
     try
         SupTuple = {beamtalk_supervisor, 'BT3759Orphan', undefined, Sup},
-        ?assertError(
-            #{error := #beamtalk_error{kind = supervisor_start_failed}},
-            beamtalk_supervisor:await_initialized(SupTuple)
-        ),
+        ?assertBtError(supervisor_start_failed, beamtalk_supervisor:await_initialized(SupTuple)),
         %% Gate rows are gone, so the next caller is not blocked.
         ?assertEqual([], ets:lookup(beamtalk_supervisor_init_gates, Sup)),
         ?assertNot(is_process_alive(Sup)),

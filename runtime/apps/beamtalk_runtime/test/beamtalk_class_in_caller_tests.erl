@@ -16,6 +16,7 @@ the class process, and an error has the same value on both paths.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 -define(HELPER, beamtalk_class_dispatch_test_helper).
@@ -179,24 +180,15 @@ in_caller_test_() ->
                     class = tag('Bt4300NoHome'), class_mod = ?HELPER, pid = Pid
                 },
                 ?assertEqual(ClassSelf, beamtalk_class_vars:clear(ClassSelf, count)),
-                ?assertError(
-                    #{error := #beamtalk_error{kind = class_state_unreachable}},
-                    beamtalk_class_vars:put(ClassSelf, count, 1)
-                )
+                ?assertBtError(class_state_unreachable, beamtalk_class_vars:put(ClassSelf, count, 1))
             end),
             with_class('Bt4300Home', none, #{count => 0}, fun(Pid) ->
                 ?assertEqual(true, send(Pid, testHasCount, [])),
                 ClassSelf = #beamtalk_object{
                     class = tag('Bt4300Home'), class_mod = ?HELPER, pid = Pid
                 },
-                ?assertError(
-                    #{error := #beamtalk_error{kind = class_state_unreachable}},
-                    beamtalk_class_vars:has(ClassSelf, count)
-                ),
-                ?assertError(
-                    #{error := #beamtalk_error{kind = class_state_unreachable}},
-                    beamtalk_class_vars:clear(ClassSelf, count)
-                )
+                ?assertBtError(class_state_unreachable, beamtalk_class_vars:has(ClassSelf, count)),
+                ?assertBtError(class_state_unreachable, beamtalk_class_vars:clear(ClassSelf, count))
             end)
         end},
         {"every error has the value it has through the class process", fun() ->

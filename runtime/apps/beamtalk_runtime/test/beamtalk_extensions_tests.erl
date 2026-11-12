@@ -11,6 +11,7 @@ EUnit tests for beamtalk_extensions module.
 Tests extension registration, lookup, conflict tracking, and tooling APIs.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -107,10 +108,7 @@ register_class_side_three_arity_refused_test_() ->
         fun() ->
             Tag = beamtalk_class_registry:class_object_tag('BT3708Ext'),
             Old = fun(_Args, _Self, State) -> {ok, State} end,
-            ?assertError(
-                #{error := #beamtalk_error{kind = arity_mismatch, selector = make}},
-                beamtalk_extensions:register(Tag, make, Old, mylib)
-            ),
+            ?assertBtError(arity_mismatch, _, make, beamtalk_extensions:register(Tag, make, Old, mylib)),
             ?assertNot(beamtalk_extensions:has(Tag, make)),
             %% Any arity other than 2 is refused, reporting the real arity.
             lists:foreach(

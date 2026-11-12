@@ -19,6 +19,14 @@
     )
 ).
 
+%% Shorter forms leave the unconstrained fields as wildcards.
+-define(assertBtError(Kind, Class, Expr),
+    ?assertBtError(Kind, Class, _, Expr)
+).
+-define(assertBtError(Kind, Expr),
+    ?assertBtError(Kind, _, _, Expr)
+).
+
 %% Expr returns `{error, #beamtalk_error{kind, class, selector}}` (Result-wrapped).
 -define(assertBtErrorResult(Kind, Class, Selector, Expr),
     ?assertMatch(

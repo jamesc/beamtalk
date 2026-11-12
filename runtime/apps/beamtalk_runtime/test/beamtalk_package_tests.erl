@@ -13,6 +13,7 @@ class listing, and dependency queries.
 
 -include("beamtalk.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% ============================================================================
 %%% Test setup — ensure beamtalk_stdlib app metadata is loaded
@@ -83,17 +84,11 @@ named_classes_contains_known_classes_test() ->
 
 named_raises_error_for_unknown_package_test() ->
     setup(),
-    ?assertError(
-        #{error := #beamtalk_error{kind = package_not_found}},
-        beamtalk_package:named(<<"nonexistent_package_xyz">>)
-    ).
+    ?assertBtError(package_not_found, beamtalk_package:named(<<"nonexistent_package_xyz">>)).
 
 named_raises_error_for_unknown_atom_test() ->
     setup(),
-    ?assertError(
-        #{error := #beamtalk_error{kind = package_not_found}},
-        beamtalk_package:named(nonexistent_package_xyz)
-    ).
+    ?assertBtError(package_not_found, beamtalk_package:named(nonexistent_package_xyz)).
 
 named_error_includes_hint_with_loaded_packages_test() ->
     setup(),

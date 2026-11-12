@@ -13,6 +13,7 @@ row, each asserted against both release variants (default, and
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 -define(RELEASE, #{mode => release, include_compiler => false}).
@@ -269,10 +270,7 @@ require_workspace_raises_when_never_recorded_test() ->
 
 require_workspace_names_class_test() ->
     beamtalk_capability:clear(),
-    ?assertError(
-        #{error := #beamtalk_error{kind = no_workspace, class = 'Counter'}},
-        beamtalk_capability:require_workspace('reload', 'Counter')
-    ).
+    ?assertBtError(no_workspace, 'Counter', beamtalk_capability:require_workspace('reload', 'Counter')).
 
 require_workspace_ok_when_recorded_in_any_mode_test_() ->
     [
@@ -296,10 +294,7 @@ clear_makes_workspace_absent_again_test() ->
     ok = beamtalk_capability:set(?RUN),
     ?assertEqual(ok, beamtalk_capability:require_workspace('load:')),
     ok = beamtalk_capability:clear(),
-    ?assertError(
-        #{error := #beamtalk_error{kind = no_workspace}},
-        beamtalk_capability:require_workspace('load:')
-    ).
+    ?assertBtError(no_workspace, beamtalk_capability:require_workspace('load:')).
 
 set_rejects_invalid_mode_test() ->
     ?assertError(
@@ -308,10 +303,7 @@ set_rejects_invalid_mode_test() ->
 
 require_raises_refusal_test() ->
     with_capabilities(?RELEASE, fun() ->
-        ?assertError(
-            #{error := #beamtalk_error{kind = release_mode_no_compiler}},
-            beamtalk_capability:require(reload, 'Counter', <<"Counter reload">>)
-        ),
+        ?assertBtError(release_mode_no_compiler, beamtalk_capability:require(reload, 'Counter', <<"Counter reload">>)),
         ?assertEqual(ok, beamtalk_capability:require(<<"inspect">>, 'REPL', <<"inspect">>))
     end).
 

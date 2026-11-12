@@ -13,6 +13,7 @@ ISO 8601 round-trips, FFI shims, the cross-module helper, and error paths.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -51,10 +52,7 @@ negative_constructor_test() ->
     ?assertEqual(-1000, maps:get(millis, beamtalk_duration:'seconds:'(-1))).
 
 constructor_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_duration:'seconds:'(<<"5">>)
-    ).
+    ?assertBtError(type_error, beamtalk_duration:'seconds:'(<<"5">>)).
 
 %%% ============================================================================
 %%% Conversions
@@ -117,16 +115,10 @@ multiply_float_rounds_test() ->
     ?assertEqual(15000, beamtalk_duration:'asMilliseconds'(Scaled)).
 
 add_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_duration:'+'(ms(1), 5)
-    ).
+    ?assertBtError(type_error, beamtalk_duration:'+'(ms(1), 5)).
 
 multiply_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_duration:'*'(ms(1), ms(2))
-    ).
+    ?assertBtError(type_error, beamtalk_duration:'*'(ms(1), ms(2))).
 
 %%% ============================================================================
 %%% Comparison
@@ -146,10 +138,7 @@ comparison_test() ->
     ?assertEqual(false, beamtalk_duration:'/='(A, A)).
 
 comparison_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_duration:'<'(ms(1), 5)
-    ).
+    ?assertBtError(type_error, beamtalk_duration:'<'(ms(1), 5)).
 
 %%% ============================================================================
 %%% Formatting — printString
@@ -272,10 +261,7 @@ from_string_invalid_test_() ->
     ].
 
 from_string_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_duration:'fromString:'(42)
-    ).
+    ?assertBtError(type_error, beamtalk_duration:'fromString:'(42)).
 
 %%% ============================================================================
 %%% FFI shims
@@ -341,10 +327,7 @@ datetime_add_duration_truncates_subsecond_test() ->
 
 datetime_add_duration_type_error_test() ->
     DT = beamtalk_datetime:'year:month:day:'(2026, 1, 1),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'addDuration:'(DT, 3600)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'addDuration:'(DT, 3600)).
 
 datetime_subtract_test() ->
     A = beamtalk_datetime:'year:month:day:'(2026, 1, 2),
@@ -356,10 +339,7 @@ datetime_subtract_test() ->
 
 datetime_subtract_type_error_test() ->
     A = beamtalk_datetime:'year:month:day:'(2026, 1, 2),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'-'(A, 42)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'-'(A, 42)).
 
 %%% ============================================================================
 %%% Integration — Future await: accepts Duration

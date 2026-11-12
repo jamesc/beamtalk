@@ -18,7 +18,9 @@ Every waiter returns `ok` or raises `error({wait_timeout, Reason})`; none
 returns an atom like `timeout` for the caller to forget to check.
 """.
 
--export([until/1, until/2, until/3, dead/1, dead/2, class/1, class/2, sync/1, default_timeout/0]).
+-export([
+    idle/1, until/1, until/2, until/3, dead/1, dead/2, class/1, class/2, sync/1, default_timeout/0
+]).
 
 -define(DEFAULT_TIMEOUT_MS, 6000).
 -define(DEFAULT_INTERVAL_MS, 5).
@@ -117,3 +119,21 @@ or unresponsive. Returns `ok`.
 sync(PidOrName) ->
     _ = sys:get_state(PidOrName, ?DEFAULT_TIMEOUT_MS),
     ok.
+
+-doc """
+Synchronise with a plain (non-OTP) process, where `sync/1` cannot work:
+return once `Pid` is blocked in a `receive` with an empty message queue, i.e.
+it has consumed everything sent to it so far. Returns `ok` immediately if the
+process is dead. Only meaningful for messages already sent by the caller.
+""".
+-spec idle(pid()) -> ok.
+idle(Pid) ->
+    until(
+        fun() ->
+            case process_info(Pid, [status, message_queue_len]) of
+                undefined -> true;
+                [{status, waiting}, {message_queue_len, 0}] -> true;
+                _ -> false
+            end
+        end
+    ).

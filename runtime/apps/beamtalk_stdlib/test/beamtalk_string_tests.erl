@@ -11,6 +11,7 @@ Tests string operations: indexing, slicing, searching, casing, and trimming.
 """.
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% ============================================================================
 %%% at/2
@@ -333,16 +334,10 @@ as_charlist_bare_binary_test() ->
     %% Direct Erlang callers only (BT-4382): valid UTF-8 reads as code points,
     %% and invalid UTF-8 names Binary, not String.
     ?assertEqual([233], beamtalk_string:as_charlist(<<"\x{E9}"/utf8>>)),
-    ?assertError(
-        #{error := #beamtalk_error{kind = type_error, class = 'Binary', selector = asCharlist}},
-        beamtalk_string:as_charlist(<<255, 254>>)
-    ).
+    ?assertBtError(type_error, 'Binary', asCharlist, beamtalk_string:as_charlist(<<255, 254>>)).
 
 as_charlist_non_string_test() ->
-    ?assertError(
-        #{error := #beamtalk_error{kind = type_error, selector = asCharlist}},
-        beamtalk_string:as_charlist(42)
-    ).
+    ?assertBtError(type_error, _, asCharlist, beamtalk_string:as_charlist(42)).
 
 %%% ============================================================================
 %%% as_list/1

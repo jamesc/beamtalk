@@ -19,6 +19,7 @@ and beamtalk_object_class registry for realistic testing.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("kernel/include/logger.hrl").
 -include("beamtalk.hrl").
 
@@ -763,10 +764,7 @@ test_super_nonexistent_class() ->
 test_super_reply_reraises() ->
     State = #{'$beamtalk_class' => 'NoSuchClass'},
     Self = make_ref(),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = class_not_found}},
-        beamtalk_dispatch:super_reply(anyMethod, [], Self, State, 'NoSuchClass')
-    ).
+    ?assertBtError(class_not_found, beamtalk_dispatch:super_reply(anyMethod, [], Self, State, 'NoSuchClass')).
 
 %% Test that when the parent class process is killed, lookup returns class_not_found.
 %% Chain walk tries to reach the parent via registry; when it's gone, class_not_found.

@@ -19,6 +19,7 @@ Tests cover:
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -58,10 +59,7 @@ enqueue_increases_size_test() ->
     ?assertEqual(2, beamtalk_queue:size(Q2)).
 
 enqueue_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Queue'}},
-        beamtalk_queue:enqueue(not_a_queue, hello)
-    ).
+    ?assertBtError(type_error, 'Queue', beamtalk_queue:enqueue(not_a_queue, hello)).
 
 %%% ============================================================================
 %%% dequeue/1
@@ -82,16 +80,10 @@ dequeue_leaves_remaining_elements_test() ->
 
 dequeue_empty_queue_error_test() ->
     Q = beamtalk_queue:'new'(),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = empty_queue, class = 'Queue'}},
-        beamtalk_queue:dequeue(Q)
-    ).
+    ?assertBtError(empty_queue, 'Queue', beamtalk_queue:dequeue(Q)).
 
 dequeue_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Queue'}},
-        beamtalk_queue:dequeue(not_a_queue)
-    ).
+    ?assertBtError(type_error, 'Queue', beamtalk_queue:dequeue(not_a_queue)).
 
 %%% ============================================================================
 %%% peek/1
@@ -108,16 +100,10 @@ peek_does_not_remove_element_test() ->
 
 peek_empty_queue_error_test() ->
     Q = beamtalk_queue:'new'(),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = empty_queue, class = 'Queue'}},
-        beamtalk_queue:peek(Q)
-    ).
+    ?assertBtError(empty_queue, 'Queue', beamtalk_queue:peek(Q)).
 
 peek_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Queue'}},
-        beamtalk_queue:peek(not_a_queue)
-    ).
+    ?assertBtError(type_error, 'Queue', beamtalk_queue:peek(not_a_queue)).
 
 %%% ============================================================================
 %%% isEmpty/1
@@ -137,10 +123,7 @@ isEmpty_true_after_dequeue_all_test() ->
     ?assert(beamtalk_queue:isEmpty(Q2)).
 
 isEmpty_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Queue'}},
-        beamtalk_queue:isEmpty(not_a_queue)
-    ).
+    ?assertBtError(type_error, 'Queue', beamtalk_queue:isEmpty(not_a_queue)).
 
 %%% ============================================================================
 %%% size/1
@@ -161,10 +144,7 @@ size_decreases_after_dequeue_test() ->
     ?assertEqual(1, beamtalk_queue:size(Q3)).
 
 size_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Queue'}},
-        beamtalk_queue:size(not_a_queue)
-    ).
+    ?assertBtError(type_error, 'Queue', beamtalk_queue:size(not_a_queue)).
 
 %%% ============================================================================
 %%% FIFO ordering

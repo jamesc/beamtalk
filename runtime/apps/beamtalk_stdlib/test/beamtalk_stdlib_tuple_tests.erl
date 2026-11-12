@@ -12,6 +12,7 @@ Tests at, as_string, do, and error paths.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -31,34 +32,19 @@ at_single_element_test() ->
     ?assertEqual(42, beamtalk_tuple:at({42}, 1)).
 
 at_out_of_bounds_high_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand}},
-        beamtalk_tuple:at({a, b}, 3)
-    ).
+    ?assertBtError(does_not_understand, beamtalk_tuple:at({a, b}, 3)).
 
 at_out_of_bounds_zero_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand}},
-        beamtalk_tuple:at({a, b}, 0)
-    ).
+    ?assertBtError(does_not_understand, beamtalk_tuple:at({a, b}, 0)).
 
 at_out_of_bounds_negative_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand}},
-        beamtalk_tuple:at({a, b}, -1)
-    ).
+    ?assertBtError(does_not_understand, beamtalk_tuple:at({a, b}, -1)).
 
 at_type_error_non_integer_index_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_tuple:at({a, b}, <<"1">>)
-    ).
+    ?assertBtError(type_error, beamtalk_tuple:at({a, b}, <<"1">>)).
 
 at_type_error_atom_index_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_tuple:at({a, b}, first)
-    ).
+    ?assertBtError(type_error, beamtalk_tuple:at({a, b}, first)).
 
 %%% ============================================================================
 %%% as_string/1

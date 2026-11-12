@@ -22,6 +22,7 @@ test classes via beamtalk_class_builder.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%% ============================================================================
@@ -112,10 +113,7 @@ register_class_with_super(ClassName, SuperclassRef, FieldSpecs, MethodSpecs) ->
 %%% ============================================================================
 
 metaclass_new_raises_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = user_error}},
-        beamtalk_behaviour_intrinsics:metaclassNew()
-    ).
+    ?assertBtError(user_error, beamtalk_behaviour_intrinsics:metaclassNew()).
 
 %%% ============================================================================
 %%% classClass/1 — returns a Metaclass-tagged object
@@ -1541,10 +1539,7 @@ class_set_method_doc_overwrite_test_() ->
 %%% --- classRemoveFromSystemByName/1 — class not found ---
 
 class_remove_from_system_by_name_not_found_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = class_not_found}},
-        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName('BT1959NoSuchClass')
-    ).
+    ?assertBtError(class_not_found, beamtalk_behaviour_intrinsics:classRemoveFromSystemByName('BT1959NoSuchClass')).
 
 %%% --- classRemoveFromSystemByName/1 — has subclasses ---
 
@@ -1558,12 +1553,9 @@ class_remove_from_system_has_subclasses_test_() ->
                 ),
                 try
                     %% Should raise because parent has subclasses
-                    ?assertError(
-                        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
-                        beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(
+                    ?assertBtError(runtime_error, beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(
                             'BT1959RemoveParent'
-                        )
-                    )
+                        ))
                 after
                     (try
                         gen_server:stop(ChildPid, normal, 5000)
@@ -3086,12 +3078,9 @@ class_remove_selector_local_method_no_workspace_raises_no_workspace_test_() ->
                     'BTRmSelLocalNoWs3186', #{}, #{'localTestMethod3186' => MethodFun}
                 ),
                 try
-                    ?assertError(
-                        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = no_workspace}},
-                        beamtalk_class_refactor:classRemoveSelector(
+                    ?assertBtError(no_workspace, beamtalk_class_refactor:classRemoveSelector(
                             ClassObj, 'localTestMethod3186'
-                        )
-                    )
+                        ))
                 after
                     try
                         gen_server:stop(Pid, normal, 5000)
@@ -3187,12 +3176,9 @@ class_remove_selector_non_protocol_provided_still_removable_test_() ->
                 %% No xref row at all for this class — method_origin/3 must
                 %% answer `nil`, not crash, and the refusal must not fire.
                 try
-                    ?assertError(
-                        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = no_workspace}},
-                        beamtalk_class_refactor:classRemoveSelector(
+                    ?assertBtError(no_workspace, beamtalk_class_refactor:classRemoveSelector(
                             ClassObj, 'ordinaryMethod3592'
-                        )
-                    )
+                        ))
                 after
                     ok
                 end
