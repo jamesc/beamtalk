@@ -448,7 +448,10 @@ impl TypeChecker {
                         ),
                         &mismatch,
                         &expected_resolved,
-                        span,
+                        arg_exprs
+                            .and_then(|exprs| exprs.get(i))
+                            .and_then(|arg| mismatch.key_span_in(arg, &expected_resolved))
+                            .unwrap_or(span),
                     );
                     if let (Some(exprs), Some(e)) = (arg_exprs, env) {
                         if let Some(Expression::Identifier(ident)) = exprs.get(i) {

@@ -57,8 +57,11 @@ use ecow::EcoString;
 
 use crate::ast::{Identifier, Module, TypeAliasDefinition, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::class_hierarchy::DeclaredType;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
-use crate::semantic_analysis::type_checker::{is_type_var_placeholder, resolve_type_annotation};
+use crate::semantic_analysis::type_checker::{
+    InferredType, is_type_var_placeholder, resolve_declared_type, resolve_type_annotation,
+};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 /// Information about a type alias in the registry.
@@ -728,6 +731,25 @@ impl AliasRegistry {
         });
         let resolved = resolve_type_annotation(&reference, &HashMap::new(), None, Some(self));
         resolved.display_for_diagnostic()
+    }
+
+    /// Resolves a declared type to a structured [`InferredType`], expanding
+    /// every alias it names (a shape alias becomes an [`InferredType::Shape`]
+    /// tagged `Aliased`).
+    ///
+    /// For tooling that needs the expected type of a slot (the language
+    /// service's map-literal key completion, ADR 0147): the checker's own
+    /// resolver is crate-private, and this is the same call
+    /// [`resolve_display_name`](Self::resolve_display_name) makes.
+    #[must_use]
+    pub fn resolve_declared(&self, declared: &DeclaredType) -> InferredType {
+        resolve_declared_type(
+            declared,
+            &HashMap::new(),
+            None,
+            Some(self),
+            crate::semantic_analysis::type_checker::TypeStringContext::Declared,
+        )
     }
 
     /// Checks if an alias exists in the registry.

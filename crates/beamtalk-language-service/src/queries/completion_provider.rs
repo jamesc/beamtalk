@@ -26,6 +26,7 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol completion requests
 use crate::queries::erlang_modules;
+use crate::queries::shape_keys;
 use crate::queries::{
     enrich_hierarchy_with_inferred_returns, protocols_for_module, type_of_parsed,
 };
@@ -213,6 +214,18 @@ pub fn compute_completions_with_registries(
         if let Some(class_name) = self_class_name {
             return compute_self_dot_completions(class_name, hierarchy, current_package);
         }
+    }
+    // ADR 0147 (BT-4735): at a shape-key site (`at: #|`, or a key position in a
+    // map literal expected to be a shape) offer the shape's keys.
+    if let Some(keys) = shape_keys::compute_shape_key_completions(
+        source,
+        offset,
+        hierarchy,
+        native_types,
+        alias_registry,
+        protocol_registry.clone(),
+    ) {
+        return keys;
     }
     let protocol_registry = protocols_for_module(protocol_registry, module, hierarchy);
     // Enrich hierarchy with inferred return types and get the type map in a single

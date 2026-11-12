@@ -62,6 +62,7 @@ impl TypeChecker {
             &declared_resolved,
             hierarchy,
             span,
+            None,
             |value, declared| {
                 format!(
                     "Type mismatch: field `{}` declared as {declared}, got {value}",
@@ -726,6 +727,7 @@ impl TypeChecker {
             &declared_resolved,
             hierarchy,
             value_expr.span(),
+            Some(value_expr),
             |value, declared_display| {
                 format!(
                     "type mismatch for state key `{slot_name}` on `{class_name}`: declared {declared_display}, got {value}"
@@ -922,6 +924,7 @@ impl TypeChecker {
                 &resolved_declared,
                 hierarchy,
                 decl.span,
+                decl.default_value.as_ref(),
                 |value, declared| {
                     format!(
                         "Type mismatch: state `{}` declared as {declared}, default is {value}",

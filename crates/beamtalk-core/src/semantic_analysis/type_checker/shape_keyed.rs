@@ -41,6 +41,15 @@ pub(super) enum KeyedOp {
     AtPut,
 }
 
+/// Whether `selector` is one of the keyed operations that read or write a
+/// map shape by key (`at:`, `at:ifAbsent:`, …). Tooling asks this to offer a
+/// shape's keys after the first keyword; it is the same set
+/// [`KeyedOp::from_selector`] decides on.
+#[must_use]
+pub fn is_shape_keyed_selector(selector: &str) -> bool {
+    KeyedOp::from_selector(selector).is_some()
+}
+
 impl KeyedOp {
     pub(super) fn from_selector(selector: &str) -> Option<Self> {
         match selector {
