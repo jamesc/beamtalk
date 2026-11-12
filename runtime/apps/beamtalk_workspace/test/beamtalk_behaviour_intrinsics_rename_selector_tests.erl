@@ -4,7 +4,7 @@
 -module(beamtalk_behaviour_intrinsics_rename_selector_tests).
 
 -moduledoc """
-Integration tests for `beamtalk_behaviour_intrinsics:classRenameSelector/3`
+Integration tests for `beamtalk_selector_refactor:classRenameSelector/3`
 and `classRenameSelectorIfAbsent/4` (ADR 0114 Phase 3) against real,
 in-project fixture graphs.
 
@@ -151,7 +151,7 @@ teardown_super_in_self(Fixture) ->
     stop_meta().
 
 rename_selector_super_in_self(_Fixture) ->
-    _ = beamtalk_behaviour_intrinsics:classRenameSelector(
+    _ = beamtalk_selector_refactor:classRenameSelector(
         class_object('Bt3279SuperInSelfBase'), bump, boost
     ),
     [Entry] = beamtalk_workspace_changelog:entries(),
@@ -218,7 +218,7 @@ teardown_happy(_Fixture) ->
     stop_meta().
 
 rename_selector_success(_Fixture) ->
-    Result = beamtalk_behaviour_intrinsics:classRenameSelector(
+    Result = beamtalk_selector_refactor:classRenameSelector(
         class_object('Bt3279HappyBase'), bump, boost
     ),
     [
@@ -295,7 +295,7 @@ rename_selector_revert_test_() ->
         fun rename_selector_revert/1}.
 
 rename_selector_revert(_Fixture) ->
-    _ = beamtalk_behaviour_intrinsics:classRenameSelector(
+    _ = beamtalk_selector_refactor:classRenameSelector(
         class_object('Bt3279HappyBase'), bump, boost
     ),
     RevertResult = beamtalk_workspace_interface_primitives:revert_method(
@@ -327,7 +327,7 @@ rename_selector_revert_after_flush_is_unsupported_test_() ->
         fun rename_selector_revert_after_flush_is_unsupported/1}.
 
 rename_selector_revert_after_flush_is_unsupported(_Fixture) ->
-    _ = beamtalk_behaviour_intrinsics:classRenameSelector(
+    _ = beamtalk_selector_refactor:classRenameSelector(
         class_object('Bt3279HappyBase'), bump, boost
     ),
     {ok, _Summary} = beamtalk_workspace_flush:flush_including_destructive(),
@@ -351,7 +351,7 @@ rename_selector_revert_after_intervening_edit_is_refused_test_() ->
         fun rename_selector_revert_after_intervening_edit_is_refused/1}.
 
 rename_selector_revert_after_intervening_edit_is_refused(_Fixture) ->
-    _ = beamtalk_behaviour_intrinsics:classRenameSelector(
+    _ = beamtalk_selector_refactor:classRenameSelector(
         class_object('Bt3279HappyBase'), bump, boost
     ),
     %% An out-of-band edit to the SAME class the rename touched, landing
@@ -419,7 +419,7 @@ teardown_xclass(Fixture) ->
     stop_meta().
 
 rename_selector_cross_hierarchy(_Fixture) ->
-    _ = beamtalk_behaviour_intrinsics:classRenameSelector(
+    _ = beamtalk_selector_refactor:classRenameSelector(
         class_object('Bt3279XClassBase'), bump, boost
     ),
     [Entry] = beamtalk_workspace_changelog:entries(),
@@ -500,7 +500,7 @@ teardown_override(Fixture) ->
     stop_meta().
 
 rename_selector_override_shadowing(_Fixture) ->
-    _ = beamtalk_behaviour_intrinsics:classRenameSelector(
+    _ = beamtalk_selector_refactor:classRenameSelector(
         class_object('Bt3279OverrideBase'), bump, boost
     ),
     [Entry] = beamtalk_workspace_changelog:entries(),
@@ -578,7 +578,7 @@ teardown_collision(_Fixture) ->
 
 rename_selector_collision(_Fixture) ->
     try
-        beamtalk_behaviour_intrinsics:classRenameSelector(
+        beamtalk_selector_refactor:classRenameSelector(
             class_object('Bt3279CollisionClass'), foo, bar
         ),
         [?_assert(false)]
@@ -640,7 +640,7 @@ teardown_target_collision(_Fixture) ->
 
 rename_selector_target_collision(_Fixture) ->
     try
-        beamtalk_behaviour_intrinsics:classRenameSelector(
+        beamtalk_selector_refactor:classRenameSelector(
             class_object('Bt3279TargetCollisionBase'), bump, boost
         ),
         [?_assert(false)]
@@ -707,7 +707,7 @@ teardown_inherited_target_collision(_Fixture) ->
 
 rename_selector_inherited_target_collision(_Fixture) ->
     try
-        beamtalk_behaviour_intrinsics:classRenameSelector(
+        beamtalk_selector_refactor:classRenameSelector(
             class_object('Bt3279InheritedTCollisionBase'), bump, boost
         ),
         [?_assert(false)]
@@ -757,7 +757,7 @@ teardown_absent(_Fixture) ->
     stop_meta().
 
 rename_selector_if_absent(_Fixture) ->
-    Result = beamtalk_behaviour_intrinsics:classRenameSelectorIfAbsent(
+    Result = beamtalk_selector_refactor:classRenameSelectorIfAbsent(
         class_object('Bt3279AbsentClass'),
         missingSelector,
         newName,

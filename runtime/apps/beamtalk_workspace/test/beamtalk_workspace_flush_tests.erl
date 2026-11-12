@@ -324,7 +324,7 @@ rename_class_move_commit_refreshes_stale_source_attribute(#{proj_dir := ProjDir}
 
 %% The full sequential-rename scenario at the flush level:
 %% `OldPath2` is read from the class's REAL, current `class_source_file/1`
-%% attribute — exactly what `beamtalk_behaviour_intrinsics:classRenameTo/2`'s
+%% attribute — exactly what `beamtalk_class_refactor:classRenameTo/2`'s
 %% `capture_class_removal_snapshot/1` reads in production — rather than a
 %% value hardcoded by the test. Before the fix that attribute is stale
 %% (`OldPath1`, already deleted by the first flush's move-commit) and this
@@ -3698,7 +3698,7 @@ remove_class_input(ClassName, PrevSource, File) ->
 
 %% A flushable `'rename-class'` append_input (ADR 0114):
 %% `sites[0]` is always the class's own declaration site, whose `sourceFile`
-%% is `OldPath` — matching what `beamtalk_behaviour_intrinsics:classRenameTo/2`
+%% is `OldPath` — matching what `beamtalk_class_refactor:classRenameTo/2`
 %% actually records (`capture_class_removal_snapshot/1` captures the OLD
 %% class's source file BEFORE any rename happens), NOT `NewPath` — see
 %% `beamtalk_workspace_flush`'s own "Atomicity (class rename)" moduledoc
