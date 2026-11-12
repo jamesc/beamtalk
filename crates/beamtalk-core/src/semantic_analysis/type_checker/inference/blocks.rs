@@ -959,8 +959,10 @@ impl TypeChecker {
                 block_param_types.push(param_ty);
             }
             let deferring = std::mem::take(&mut self.defer_block_widening);
+            let epoch_before = self.self_send_epoch;
             let body_ty =
                 self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
+            self.forget_diverging_block_self_sends(epoch_before, block, &body_ty);
             self.defer_block_widening = deferring;
             // BT-4636: a write inside a narrowing arm (`found isNil ifTrue:
             // [found := e]`) is joined into the enclosing scope too, so it
@@ -1598,7 +1600,9 @@ impl TypeChecker {
         }
         // A block body starts a fresh send frame (see `defer_block_widening`).
         let deferring = std::mem::take(&mut self.defer_block_widening);
+        let epoch_before = self.self_send_epoch;
         let body_ty = self.infer_stmts(&block.body, hierarchy, &mut block_env, in_abstract_method);
+        self.forget_diverging_block_self_sends(epoch_before, block, &body_ty);
         self.defer_block_widening = deferring;
         self.widen_outer_locals_written_by_block(block, &block_env, env, deferring);
         // A block whose body ends in a top-level non-local return
@@ -1640,6 +1644,22 @@ impl TypeChecker {
         };
         self.type_map.insert(block_span, ty.clone());
         ty
+    }
+
+    /// BT-4715: a block that diverges (`^` or a `-> Never` tail) never hands
+    /// control back to the code after its enclosing send, so a self-send in
+    /// it (`[self log. ^0]`) cannot have reassigned a field that code reads.
+    /// Rewind `self_send_epoch` so the enclosing expression keeps its other
+    /// fields' narrowings.
+    fn forget_diverging_block_self_sends(
+        &mut self,
+        epoch_before: u64,
+        block: &crate::ast::Block,
+        body_ty: &InferredType,
+    ) {
+        if block_has_return(block) || matches!(body_ty, InferredType::Never) {
+            self.self_send_epoch = epoch_before;
+        }
     }
 
     /// BT-4636: a block's writes to an outer local are threaded back to the

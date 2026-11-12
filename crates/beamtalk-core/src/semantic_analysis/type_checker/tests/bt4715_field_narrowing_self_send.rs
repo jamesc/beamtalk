@@ -153,8 +153,12 @@ fn self_send_in_non_diverging_sibling_block_blocks_post_guard_narrowing() {
     );
 }
 
+/// Regression pin, not coverage of the receiver check: an `or:` guard with a
+/// non-`isNil` disjunct is not a narrowing shape, so `self.f` is never
+/// narrowed after it and the leak is reported with or without the
+/// `fallthrough_may_self_send` receiver arm.
 #[test]
-fn self_send_in_compound_guard_receiver_blocks_post_guard_narrowing() {
+fn unrecognised_compound_guard_with_self_send_stays_unnarrowed() {
     assert_nil_leak(
         "  stale -> Boolean => true\n  run -> Integer =>\n    (self.f isNil or: [self stale]) ifTrue: [^0]\n    self need: self.f",
     );
@@ -164,5 +168,29 @@ fn self_send_in_compound_guard_receiver_blocks_post_guard_narrowing() {
 fn self_send_in_diverging_guard_block_keeps_post_guard_narrowing() {
     assert_clean(
         "  run -> Integer =>\n    self.f isNil ifTrue: [self reset. ^0]\n    self need: self.f",
+    );
+}
+
+#[test]
+fn self_send_in_diverging_guard_block_keeps_other_fields_narrowed() {
+    let source = r"
+typed Actor subclass: Pair
+  state: f :: Integer | Nil = nil
+  state: g :: Integer | Nil = nil
+  reset -> Nil => self.f := nil
+  need: v :: Integer -> Integer => v
+  run -> Integer =>
+    self.g isNil ifTrue: [^0]
+    self.f isNil ifTrue: [self reset. ^0]
+    self need: self.g
+";
+    let diags = type_diagnostics(source);
+    assert!(diags.is_empty(), "got: {diags:#?}");
+}
+
+#[test]
+fn self_send_later_in_loop_body_drops_narrowing_for_earlier_statements() {
+    assert_nil_leak(
+        "  run -> Integer =>\n    self.f isNil ifTrue: [^0]\n    1 to: 3 do: [:i | self need: self.f. self reset]\n    0",
     );
 }

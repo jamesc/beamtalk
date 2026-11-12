@@ -15,6 +15,9 @@ pub(in crate::semantic_analysis::type_checker) mod receiver;
 
 use crate::ast::{Expression, MessageSelector};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::type_checker::narrowing::visitors::{
+    block_has_return, expr_contains_self_send,
+};
 use crate::semantic_analysis::type_checker::{InferredType, TypeChecker, TypeEnv};
 use crate::source_analysis::Span;
 
@@ -90,6 +93,24 @@ impl TypeChecker {
         // — its block params should resolve against `C`'s class methods —
         // and so is a protocol metatype (`ProtocolMeta{P}`, ADR 0144), whose
         // block params resolve against `P`'s `class` requirements.
+        // BT-4715: a block argument here may run more than once (`to:do:`,
+        // `do:`, `whileTrue:`), so a self-send late in its body can reassign a
+        // field before an earlier statement runs again. Drop field narrowings
+        // before inferring such a body. Conditional selectors (`ifTrue:`,
+        // `ifNil:`, `and:`, …) run their block at most once, and a block that
+        // returns never loops, so neither is pre-cleared.
+        let runs_block_at_most_once =
+            selector_name.starts_with("if") || matches!(selector_name, "and:" | "or:");
+        if !runs_block_at_most_once
+            && arguments.iter().any(|arg| match arg {
+                Expression::Block(block) => {
+                    !block_has_return(block) && expr_contains_self_send(arg)
+                }
+                _ => false,
+            })
+        {
+            env.clear_self_field_narrowings();
+        }
         let is_class_side = Self::is_class_side_receiver(receiver, env)
             || matches!(
                 receiver_ty,
