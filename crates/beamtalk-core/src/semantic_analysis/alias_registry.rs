@@ -673,6 +673,7 @@ impl AliasRegistry {
     /// Looks up an alias by name.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&AliasInfo> {
+        crate::semantic_analysis::consulted::record_name(name);
         self.aliases.get(name)
     }
 
@@ -707,6 +708,7 @@ impl AliasRegistry {
     /// their existing plain-name display in that case.
     #[must_use]
     pub fn resolve_display_name(&self, name: &str) -> Option<EcoString> {
+        crate::semantic_analysis::consulted::record_name(name);
         let info = self.aliases.get(name)?;
         let reference = TypeAnnotation::Simple(Identifier {
             name: info.name.clone(),
@@ -719,16 +721,19 @@ impl AliasRegistry {
     /// Checks if an alias exists in the registry.
     #[must_use]
     pub fn has_alias(&self, name: &str) -> bool {
+        crate::semantic_analysis::consulted::record_name(name);
         self.aliases.contains_key(name)
     }
 
     /// Returns an iterator over all alias names in the registry.
     pub fn alias_names(&self) -> impl Iterator<Item = &EcoString> {
+        crate::semantic_analysis::consulted::record_scan();
         self.aliases.keys()
     }
 
     /// Returns an iterator over all aliases in the registry.
     pub fn aliases(&self) -> impl Iterator<Item = (&EcoString, &AliasInfo)> {
+        crate::semantic_analysis::consulted::record_scan();
         self.aliases.iter()
     }
 

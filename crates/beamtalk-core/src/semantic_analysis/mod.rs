@@ -30,6 +30,7 @@ pub mod class_hierarchy;
 pub mod class_kind_writeback;
 pub mod class_module_registry;
 pub mod collision_checker;
+pub mod consulted;
 pub mod definite_assignment;
 pub mod error;
 pub mod facts;

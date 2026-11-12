@@ -9,6 +9,8 @@
 //! - [`build_basics`] — source discovery and basic single/multi-file builds
 //! - [`module_naming`] — `compute_relative_module` and manifest-driven
 //!   package/module naming, including declared-alias metadata
+//! - [`consulted_surface`] — the per-file consulted-surface recorder
+//!   (BT-4586)
 //! - [`cross_file_resolution`] — the class-module index and cross-file
 //!   class/alias resolution
 //! - [`flattened_provision_reporting`] — flattened-provision diagnostics are
@@ -43,6 +45,7 @@ pub(crate) fn default_options() -> beamtalk_core::CompilerOptions {
 }
 
 mod build_basics;
+mod consulted_surface;
 mod cross_file_resolution;
 mod flattened_provision_reporting;
 mod incremental_build;

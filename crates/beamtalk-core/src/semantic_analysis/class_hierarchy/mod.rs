@@ -20,6 +20,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 mod builtins;
 pub(crate) mod class_info;
+mod class_map;
 pub(crate) mod declared_type;
 mod hierarchy_queries;
 mod method_resolution;
@@ -67,7 +68,7 @@ thread_local! {
 /// including built-in classes and user-defined classes from the AST.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClassHierarchy {
-    classes: HashMap<EcoString, ClassInfo>,
+    classes: class_map::ClassMap,
     /// Per-class selector → method-vec index for instance methods.
     /// Enables O(1) selector lookups instead of linear scans.
     method_indexes: SelectorIndexMap,
@@ -139,12 +140,10 @@ impl ClassHierarchy {
         index
     }
     /// Build selector indexes for all classes in the map.
-    fn build_all_indexes(
-        classes: &HashMap<EcoString, ClassInfo>,
-    ) -> (SelectorIndexMap, SelectorIndexMap) {
-        let mut mi = HashMap::with_capacity(classes.len());
-        let mut cmi = HashMap::with_capacity(classes.len());
-        for (name, info) in classes {
+    fn build_all_indexes(classes: &class_map::ClassMap) -> (SelectorIndexMap, SelectorIndexMap) {
+        let mut mi = HashMap::with_capacity(classes.iter_unrecorded().len());
+        let mut cmi = HashMap::with_capacity(classes.iter_unrecorded().len());
+        for (name, info) in classes.iter_unrecorded() {
             mi.insert(name.clone(), Self::build_selector_index(&info.methods));
             cmi.insert(
                 name.clone(),
@@ -300,7 +299,7 @@ impl ClassHierarchy {
         static BUILTIN_HIERARCHY: OnceLock<ClassHierarchy> = OnceLock::new();
         BUILTIN_HIERARCHY
             .get_or_init(|| {
-                let classes = builtins::builtin_classes();
+                let classes = class_map::ClassMap::from(builtins::builtin_classes());
                 let (method_indexes, class_method_indexes) = Self::build_all_indexes(&classes);
                 Self {
                     classes,
@@ -384,6 +383,12 @@ impl ClassHierarchy {
     /// Whether dependency extension contributions are unknown.
     #[must_use]
     pub fn dependency_extensions_unknown(&self) -> bool {
+        if self.dependency_extensions_unknown {
+            // Some dependency's extensions are not loaded: no receiver's
+            // surface is provably complete, so the reader depends on
+            // everything (BT-4586).
+            crate::semantic_analysis::consulted::record_extensions_unknown();
+        }
         self.dependency_extensions_unknown
     }
 
@@ -581,6 +586,7 @@ impl ClassHierarchy {
     /// protocol and a real class share a name across files.
     #[must_use]
     pub fn is_protocol_class(&self, name: &str) -> bool {
+        crate::semantic_analysis::consulted::record_name(name);
         self.protocol_classes.contains(name)
     }
     /// Returns an iterator over all class names in the hierarchy.
@@ -861,19 +867,24 @@ impl ClassHierarchy {
             self.rebuild_all_indexes();
         }
     }
-    /// Returns a reference to the underlying class map.
-    #[must_use]
-    pub fn classes(&self) -> &HashMap<EcoString, ClassInfo> {
-        &self.classes
+    /// Iterate every class. Records a whole-hierarchy scan (BT-4586).
+    pub fn iter_classes(&self) -> impl Iterator<Item = (&EcoString, &ClassInfo)> {
+        self.classes.iter()
     }
-    /// Returns a mutable reference to the underlying class map.
+    /// Mutable by-name access, for `ProjectIndex` conflict resolution and
+    /// post-registration fix-ups. A write: not recorded.
     ///
-    /// Used by `ProjectIndex` for conflict resolution when re-merging.
+    /// **Important:** after changing method lists, call
+    /// [`rebuild_all_indexes()`](Self::rebuild_all_indexes) to keep selector
+    /// indexes consistent with the class data.
+    pub fn get_class_mut(&mut self, name: &str) -> Option<&mut ClassInfo> {
+        self.classes.get_mut(name)
+    }
+    /// Insert (or replace) a class entry under `name`. A write: not recorded.
     ///
-    /// **Important:** After mutating the map, call [`rebuild_all_indexes()`](Self::rebuild_all_indexes)
-    /// to keep selector indexes consistent with the class data.
-    pub fn classes_mut(&mut self) -> &mut HashMap<EcoString, ClassInfo> {
-        &mut self.classes
+    /// **Important:** call [`rebuild_all_indexes()`](Self::rebuild_all_indexes) afterwards.
+    pub fn insert_class(&mut self, name: EcoString, info: ClassInfo) -> Option<ClassInfo> {
+        self.classes.insert(name, info)
     }
     /// Merge another hierarchy's user-defined classes into this one.
     ///

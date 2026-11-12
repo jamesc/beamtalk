@@ -707,10 +707,9 @@ impl ProjectIndex {
         let mut changed = false;
         for name in names {
             for path in &sorted_paths {
-                if let Some(info) = self.file_hierarchies[*path].classes().get(name) {
+                if let Some(info) = self.file_hierarchies[*path].get_class(name) {
                     self.merged_hierarchy
-                        .classes_mut()
-                        .insert(name.clone(), info.clone());
+                        .insert_class(name.clone(), info.clone());
                     changed = true;
                     break;
                 }
@@ -892,8 +891,7 @@ impl ProjectIndex {
             .unwrap_or_default();
 
         self.merged_hierarchy
-            .classes()
-            .iter()
+            .iter_classes()
             .filter(|(name, _)| {
                 !ClassHierarchy::is_builtin_class(name) && !current_file_classes.contains(name)
             })
@@ -1088,7 +1086,7 @@ impl ProjectIndex {
         let class_names = self.file_classes.get(file)?;
         let file_hierarchy = self.file_hierarchies.get(file)?;
         for name in class_names {
-            if let Some(info) = file_hierarchy.classes().get(name.as_str()) {
+            if let Some(info) = file_hierarchy.get_class(name.as_str()) {
                 if let Some(ref pkg) = info.package {
                     return Some(pkg.clone());
                 }

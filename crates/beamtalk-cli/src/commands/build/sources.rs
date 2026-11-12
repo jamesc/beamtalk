@@ -6,6 +6,7 @@
 
 use crate::beam_compiler::{BeamCompiler, CompileContext, compile_source_with_bindings};
 use beamtalk_core::file_walker::{FileWalker, collect_project_source_files};
+use beamtalk_core::semantic_analysis::consulted::{ConsultedScope, ConsultedSurface};
 use camino::{Utf8Path, Utf8PathBuf};
 use miette::{Context, IntoDiagnostic, Result};
 use tracing::{debug, info};
@@ -145,9 +146,32 @@ pub(crate) fn compile_file(
     ctx: &CompileContext<'_>,
     cached_ast: Option<CachedAst>,
 ) -> Result<Vec<beamtalk_core::source_analysis::Diagnostic>> {
+    compile_file_with_surface(path, module_name, core_file, options, ctx, cached_ast)
+        .map(|(diags, _surface)| diags)
+}
+
+/// [`compile_file`], also returning the [`ConsultedSurface`] the file's
+/// semantic analysis and codegen consulted (BT-4586, phase 1).
+///
+/// A recorder scope is installed for the whole per-file compile, so every
+/// class / protocol / alias lookup and whole-hierarchy scan is captured. The
+/// surface is logged at debug level and returned for in-memory use; it is not
+/// persisted and not part of the incremental cache key yet.
+pub(crate) fn compile_file_with_surface(
+    path: &Utf8Path,
+    module_name: &str,
+    core_file: &Utf8Path,
+    options: &beamtalk_core::CompilerOptions,
+    ctx: &CompileContext<'_>,
+    cached_ast: Option<CachedAst>,
+) -> Result<(
+    Vec<beamtalk_core::source_analysis::Diagnostic>,
+    ConsultedSurface,
+)> {
     debug!("Compiling {path}");
 
-    let diags = compile_source_with_bindings(
+    let scope = ConsultedScope::begin();
+    let result = compile_source_with_bindings(
         path,
         module_name,
         core_file,
@@ -155,11 +179,21 @@ pub(crate) fn compile_file(
         &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
         ctx,
         cached_ast,
-    )?;
+    );
+    let surface = scope.finish();
+    let diags = result?;
 
+    debug!(
+        file = %path,
+        scanned_all = surface.scanned_all,
+        extensions_unknown = surface.extensions_unknown,
+        consulted = surface.names.len(),
+        names = ?surface.names,
+        "Consulted analysis surface"
+    );
     debug!("Generated Core Erlang: {core_file}");
 
-    Ok(diags)
+    Ok((diags, surface))
 }
 
 /// Compile Core Erlang files to BEAM bytecode, reporting incremental build

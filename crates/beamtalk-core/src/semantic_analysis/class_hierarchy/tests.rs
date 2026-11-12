@@ -3621,7 +3621,7 @@ fn all_initialize_assigns_includes_own_summary() {
     };
     // Overwrite the AST-derived (empty-body) summary with a non-empty one,
     // simulating a class whose real `initialize` assigns `value`.
-    if let Some(info) = h.classes_mut().get_mut("Standalone") {
+    if let Some(info) = h.get_class_mut("Standalone") {
         info.initialize_assigns = BTreeSet::from([EcoString::from("value")]);
     }
 
@@ -3656,7 +3656,7 @@ fn all_initialize_assigns_native_ancestor_marks_incomplete() {
     };
     // Give Child its own definitely-assigned slot so this test can prove
     // `incomplete` doesn't come at the cost of losing `assigned` data.
-    if let Some(info) = h.classes_mut().get_mut("Child") {
+    if let Some(info) = h.get_class_mut("Child") {
         info.initialize_assigns = BTreeSet::from([EcoString::from("own")]);
     }
 

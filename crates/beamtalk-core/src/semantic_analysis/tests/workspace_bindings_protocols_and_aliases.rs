@@ -120,8 +120,7 @@ fn pre_loaded_synthetic_protocol_class_entry_does_not_shadow_protocol() {
     let mut hierarchy = hierarchy.expect("protocol file hierarchy builds");
     hierarchy.register_protocol_classes(&protocol_module);
     let synthetic_entry = hierarchy
-        .classes()
-        .get("TimeoutToken")
+        .get_class("TimeoutToken")
         .cloned()
         .expect("register_protocol_classes adds a synthetic class entry");
     assert!(hierarchy.is_protocol_class("TimeoutToken"));
