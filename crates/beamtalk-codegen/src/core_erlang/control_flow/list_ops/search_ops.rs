@@ -272,15 +272,13 @@ impl CoreErlangGenerator {
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
             let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             docs.push(docvec![
-                " in let ",
-                leaf::var(fold_result.clone()),
-                " = call 'lists':'foldl'(",
-                leaf::var(lambda_var),
-                ", ",
-                init_tuple_doc,
-                ", ",
-                leaf::var(safe_list_var),
-                ") in let ",
+                ThreadingPlan::foldl_call_doc(
+                    &lambda_var,
+                    init_tuple_doc,
+                    &safe_list_var,
+                    &fold_result
+                ),
+                "let ",
                 leaf::var(bool_result.clone()),
                 " = call 'erlang':'element'(1, ",
                 leaf::var(fold_result),
@@ -711,15 +709,13 @@ impl CoreErlangGenerator {
             // (`ambiguous_catch_try_state`, see `case_clause_fallback`).
             let no_match_fallback = self.case_clause_fallback("DetectNoMatch");
             docs.push(docvec![
-                " in let ",
-                leaf::var(fold_result.clone()),
-                " = call 'lists':'foldl'(",
-                leaf::var(lambda_var),
-                ", ",
-                init_tuple_doc,
-                ", ",
-                leaf::var(safe_list_var),
-                ") in let ",
+                ThreadingPlan::foldl_call_doc(
+                    &lambda_var,
+                    init_tuple_doc,
+                    &safe_list_var,
+                    &fold_result
+                ),
+                "let ",
                 leaf::var(found_item.clone()),
                 " = call 'erlang':'element'(1, ",
                 leaf::var(fold_result.clone()),
@@ -933,15 +929,12 @@ impl CoreErlangGenerator {
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 3, self);
             let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             docs.push(docvec![
-                " in let ",
-                leaf::var(fold_result.clone()),
-                " = call 'lists':'foldl'(",
-                leaf::var(lambda_var),
-                ", ",
-                init_tuple_doc,
-                ", ",
-                leaf::var(safe_list_var),
-                ") in ",
+                ThreadingPlan::foldl_call_doc(
+                    &lambda_var,
+                    init_tuple_doc,
+                    &safe_list_var,
+                    &fold_result
+                ),
                 bind_detect_found_or_raise_doc(
                     &found_result,
                     &fold_result,
