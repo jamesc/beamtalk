@@ -1100,7 +1100,7 @@ prepare_new_class(File, Entries, Entry) ->
     %% filesystem entry — directory, symlink, unreadable path — is caught
     %% up front as target_exists. Otherwise a directory at the target would
     %% slip past Phase A and fail later with an opaque rename_failed conflict.
-    %% Mirrors the same validation in beamtalk_repl_loader:validate_target_path/1.
+    %% Mirrors the same validation in beamtalk_repl_loader_newclass:validate_target_path/1.
     case file:read_file_info(AbsPath) of
         {error, enoent} ->
             case beamtalk_workspace_changelog:read_source_body(Entry) of

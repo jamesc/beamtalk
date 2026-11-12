@@ -844,7 +844,7 @@ defmodule BtAttachWeb.Live.ClassModals do
   # The basename is snake_cased to match the project convention (every file in a
   # package `src/` is snake_case). The runtime's `newClass:at:` validation
   # snake_case-normalises both the declared class name and the path basename
-  # (`beamtalk_repl_loader:validate_new_class/3` via `to_snake_case/1`), so a
+  # (`beamtalk_repl_loader_newclass:validate_new_class/3` via `to_snake_case/1`), so a
   # snake_case file maps cleanly to the PascalCase class. The name is already
   # PascalCase-validated by the caller, so this always succeeds; it returns
   # `{:ok, path}` to keep the call-site explicit.
