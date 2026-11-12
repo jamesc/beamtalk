@@ -999,7 +999,7 @@ impl InferredType {
     /// Returns `true` if `name` is a symbol singleton (`#foo`) — a subtype of
     /// `Symbol` in the type checker's singleton convention.
     fn is_symbol_singleton(name: &str) -> bool {
-        name.starts_with('#')
+        crate::semantic_analysis::string_utils::is_symbol_singleton_name(name)
     }
 
     /// Returns `true` if `ty` is the base of a well-formed **singleton-excluded**

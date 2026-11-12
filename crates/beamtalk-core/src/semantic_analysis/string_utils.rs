@@ -7,10 +7,13 @@
 //!
 //! Contains general-purpose string algorithms used across analysis modules.
 
-/// Split a type-string on `sep` while respecting parenthesis nesting.
+/// Split a type-string on `sep` while respecting `()` and `{}` nesting.
 ///
 /// e.g. `split_top_level("Outer(Inner(A, B), C), D", ',')` returns
-/// `["Outer(Inner(A, B), C)", "D"]`, not four pieces. Empty trailing
+/// `["Outer(Inner(A, B), C)", "D"]`, not four pieces. Braces nest the same way,
+/// so a map-shape member (ADR 0147) is never split internally:
+/// `split_top_level("#{#a => Integer | String, #b => Float} | nil", '|')`
+/// returns `["#{#a => Integer | String, #b => Float}", "nil"]`. Empty trailing
 /// segments are dropped (so `split_top_level("", sep)` is `[]`), and each
 /// segment is trimmed.
 ///
@@ -21,9 +24,9 @@
 /// `split_intersection_type_string`, which layers "no separator found ⇒
 /// `None`" semantics on top for its caller).
 ///
-/// **Unbalanced-parens behaviour:** a stray extra `)` clamps depth
+/// **Unbalanced-delimiter behaviour:** a stray extra `)` or `}` clamps depth
 /// at zero via `saturating_sub` rather than going negative. Depth is only
-/// ever incremented by `(`, so once it reaches zero a further unmatched `)`
+/// ever incremented by `(` and `{`, so once it reaches zero a further unmatched `)`
 /// cannot make later separators look "more nested" than they are — the
 /// scanner recovers immediately instead of requiring an equal number of
 /// extra `(` to compensate. Prior copies of this scanner disagreed here
@@ -36,8 +39,8 @@ pub(crate) fn split_top_level(s: &str, sep: char) -> Vec<&str> {
     let mut start = 0;
     for (i, c) in s.char_indices() {
         match c {
-            '(' => depth += 1,
-            ')' => depth = depth.saturating_sub(1),
+            '(' | '{' => depth += 1,
+            ')' | '}' => depth = depth.saturating_sub(1),
             c if c == sep && depth == 0 => {
                 result.push(s[start..i].trim());
                 start = i + 1;
@@ -50,6 +53,16 @@ pub(crate) fn split_top_level(s: &str, sep: char) -> Vec<&str> {
         result.push(last);
     }
     result
+}
+
+/// Returns `true` if the type string names a symbol singleton (`#foo`).
+///
+/// `#{` opens a map-shape type (ADR 0147), not a singleton, so it answers
+/// `false`. This is the one predicate behind every "is this type string a
+/// singleton symbol" check in the type checker.
+#[must_use]
+pub(crate) fn is_symbol_singleton_name(name: &str) -> bool {
+    name.starts_with('#') && !name.starts_with("#{")
 }
 
 /// Split a stored-string type name into `(base, args_slice)`.
@@ -188,6 +201,53 @@ mod tests {
         assert_eq!(edit_distance("abc", "abcd"), 1);
         assert_eq!(edit_distance("abc", "xyz"), 3);
         assert_eq!(edit_distance("lenght", "length"), 2);
+    }
+
+    // ---- brace-aware splitting / singleton predicate ----
+
+    #[test]
+    fn split_top_level_union_ignores_pipe_inside_shape() {
+        assert_eq!(
+            split_top_level("#{#a => Integer | String, #b => Float} | nil", '|'),
+            vec!["#{#a => Integer | String, #b => Float}", "nil"]
+        );
+    }
+
+    #[test]
+    fn split_top_level_generic_args_with_shapes() {
+        assert_eq!(
+            split_top_level("#{#a => Integer, #b => Float}, Result(#{#c => X}, E)", ','),
+            vec!["#{#a => Integer, #b => Float}", "Result(#{#c => X}, E)"]
+        );
+    }
+
+    #[test]
+    fn split_top_level_nested_shapes() {
+        assert_eq!(
+            split_top_level("#{#a => #{#b => A | B, #c => C}} | #{#d => D}", '|'),
+            vec!["#{#a => #{#b => A | B, #c => C}}", "#{#d => D}"]
+        );
+    }
+
+    #[test]
+    fn split_top_level_shape_in_generic_in_union() {
+        assert_eq!(
+            split_top_level("Array(#{#a => A | B}) | nil", '|'),
+            vec!["Array(#{#a => A | B})", "nil"]
+        );
+    }
+
+    #[test]
+    fn split_top_level_stray_close_brace_recovers() {
+        assert_eq!(split_top_level("A} | B", '|'), vec!["A}", "B"]);
+    }
+
+    #[test]
+    fn symbol_singleton_name_predicate() {
+        assert!(is_symbol_singleton_name("#ok"));
+        assert!(!is_symbol_singleton_name("#{#a => Integer}"));
+        assert!(!is_symbol_singleton_name("Symbol"));
+        assert!(!is_symbol_singleton_name(""));
     }
 
     // ---- split_top_level ----

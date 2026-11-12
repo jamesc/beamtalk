@@ -151,7 +151,7 @@ impl TypeChecker {
             let InferredType::Known { class_name, .. } = member else {
                 continue;
             };
-            if !class_name.starts_with('#') {
+            if !crate::semantic_analysis::string_utils::is_symbol_singleton_name(class_name) {
                 continue;
             }
             let dist = edit_distance(target.as_str(), class_name.as_str());
@@ -225,7 +225,7 @@ impl TypeChecker {
         if !members.is_empty() && members.iter().all(|m| matches!(
             m,
             InferredType::Known { class_name, type_args, .. }
-                if type_args.is_empty() && class_name.starts_with('#')
+                if type_args.is_empty() && crate::semantic_analysis::string_utils::is_symbol_singleton_name(class_name)
         )))
     }
 

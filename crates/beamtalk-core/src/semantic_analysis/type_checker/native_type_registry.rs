@@ -469,7 +469,7 @@ pub fn ffi_result_passes_unchanged(ty: &InferredType) -> bool {
 #[must_use]
 pub fn ffi_arg_passes_unchanged(ty: &InferredType) -> bool {
     all_members(ty, &|name| {
-        name.starts_with('#')
+        crate::semantic_analysis::string_utils::is_symbol_singleton_name(name)
             || FFI_SCALAR_CLASSES.contains(&name)
             || FFI_ARG_EXTRA_CLASSES.contains(&name)
     })
