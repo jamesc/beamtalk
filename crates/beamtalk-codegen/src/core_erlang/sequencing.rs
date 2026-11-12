@@ -28,7 +28,7 @@ use super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::Expression;
+use beamtalk_core::ast::{Block, Expression};
 use beamtalk_core::source_analysis::Span;
 
 /// One entry of [`CoreErlangGenerator::precompiled_subexprs`] — see that
@@ -537,11 +537,18 @@ impl CoreErlangGenerator {
         // process-dictionary lookup that a sibling *send* may write (ADR 0130)
         // but that two reads cannot disturb: it races only alongside an operand
         // that runs code, so `self.a + self.b` stays free of temps (BT-4279).
+        // A block literal whose creation-time capture reads that live state
+        // (BT-4722) is the same kind of operand.
         let mut runs: Vec<usize> = Vec::new();
         let mut class_var: Vec<usize> = Vec::new();
         for (i, e) in exprs.iter().enumerate() {
             let inner = e.unwrap_parens();
             if Self::is_trivial_subexpr(inner) {
+                if let Expression::Block(block) = inner {
+                    if self.block_capture_reads_live_state(block) {
+                        class_var.push(i);
+                    }
+                }
                 continue;
             }
             match inner {
@@ -563,6 +570,37 @@ impl CoreErlangGenerator {
             .chain(class_var.last())
             .max()
             .copied()
+    }
+
+    /// BT-4722: the hoisting point [`Self::sequence_children`] extends to when
+    /// a child is a block literal whose capture reads live state and a sibling
+    /// child runs code and so races with it: the last racing operand
+    /// ([`Self::last_racing_operand`]), or `None` when no such block exists.
+    /// Without it `sequence_children` hoists only to the last child that needs
+    /// a prelude.
+    pub(super) fn last_racing_block_capture(&self, children: &[&Expression]) -> Option<usize> {
+        let racing = self.last_racing_operand(children)?;
+        children
+            .iter()
+            .any(|c| {
+                matches!(c.unwrap_parens(), Expression::Block(b) if self.block_capture_reads_live_state(b))
+            })
+            .then_some(racing)
+    }
+
+    /// BT-4722: whether creating `block` here reads live mutable state: a
+    /// block in a class method that reads a class variable binds
+    /// `beamtalk_class_vars:capture` (a process-dictionary read), and a block
+    /// nested in an actor closure binds `beamtalk_actor_state:capture` (a live
+    /// cell read) when it touches the actor state or carries it out through a
+    /// `^`. A sibling operand that runs code and writes that state must run
+    /// before the capture, so the block is sequenced like a read, never
+    /// treated as a constant.
+    fn block_capture_reads_live_state(&self, block: &Block) -> bool {
+        (self.in_class_method() && self.block_reads_class_var(block))
+            || (self.in_cell_closure()
+                && (self.block_touches_actor_state(block)
+                    || beamtalk_core::semantic_analysis::facts::block_has_nlr(block)))
     }
 
     /// Threads `exprs` via [`Self::thread_subexprs`] and returns

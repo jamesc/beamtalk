@@ -207,13 +207,14 @@ fn is_keyword(word: &str) -> bool {
 /// anything but `RUNS`.
 ///
 /// `QUIET`: pure projections over bound values — the codegen's
-/// `self_dispatch_result_value`, immutable state-map reads, string conversions
-/// and block-literal captures (`is_trivial_subexpr` already treats a block
-/// operand as one that races with nothing).
+/// `self_dispatch_result_value`, immutable state-map reads and string
+/// conversions.
 ///
 /// `READS`: a read of mutable process state a sibling that runs code can
 /// change — the class-variable lookup `erlang:get(Key)` and its miss fallback
-/// `beamtalk_class_vars:get/2`, `get_late/2`.
+/// `beamtalk_class_vars:get/2`, `get_late/2`, and a block literal's
+/// creation-time `capture/2` (BT-4722), which reads the live cell or
+/// class-variable map.
 fn call_effect(module: Option<&str>, function: Option<&str>, atomic: bool) -> Effect {
     if !atomic {
         return RUNS;
@@ -221,11 +222,13 @@ fn call_effect(module: Option<&str>, function: Option<&str>, atomic: bool) -> Ef
     match (module, function) {
         (Some("erlang"), Some("element" | "hd" | "tl" | "tuple_size" | "map_size"))
         | (Some("maps"), Some("get" | "find"))
-        | (Some("beamtalk_primitive"), Some("string_to_binary"))
-        | (Some("beamtalk_actor_state" | "beamtalk_class_vars"), Some("capture")) => QUIET,
-        (Some("erlang"), Some("get")) | (Some("beamtalk_class_vars"), Some("get" | "get_late")) => {
-            READS
-        }
+        | (Some("beamtalk_primitive"), Some("string_to_binary")) => QUIET,
+        // BT-4722: a block literal's creation-time capture reads the live cell /
+        // class-variable map, so a sibling operand that runs code and writes
+        // that state must be sequenced before it.
+        (Some("erlang"), Some("get"))
+        | (Some("beamtalk_class_vars"), Some("get" | "get_late" | "capture"))
+        | (Some("beamtalk_actor_state"), Some("capture")) => READS,
         _ => RUNS,
     }
 }

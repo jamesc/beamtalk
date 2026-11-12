@@ -1,0 +1,14 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4722: a block literal's creation-time class-variable capture is taken
+// after a sibling operand that writes the class variable
+
+Object subclass: ClassVarSnapshot
+  classState: n = 0
+
+  class snapshotAfterWrite =>
+    w := [self.n := 7]
+    @expect class_state_abroad "the away read of the stored block is the test"
+    pair := #(w value, [self.n])
+    ClosureCellRunner spawn run: (pair at: 2)
