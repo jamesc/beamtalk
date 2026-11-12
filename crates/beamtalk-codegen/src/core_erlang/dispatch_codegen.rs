@@ -1122,7 +1122,7 @@ impl CoreErlangGenerator {
             distinct.push(arm);
         }
         match distinct.len() {
-            0 => Err(StaysDynamic::UnionTooManyArms),
+            0 => Err(StaysDynamic::Untyped),
             1 => Ok(distinct.remove(0)),
             n if n > MAX_PROTOCOL_ARMS => Err(StaysDynamic::UnionTooManyArms),
             _ => Ok(TypedSendTarget::Union(distinct)),
@@ -1455,7 +1455,14 @@ impl CoreErlangGenerator {
         let (tagged, others): (Vec<&TypedSendTarget>, Vec<&TypedSendTarget>) = members
             .iter()
             .partition(|m| matches!(m, TypedSendTarget::Tagged(_)));
-        let mut chain = fallback_doc;
+        // Each guard renderer repeats its miss document in every miss arm, so
+        // a chain of built-in guards would multiply the dynamic send. Bind it
+        // once as a nullary fun and have every miss arm apply it.
+        let miss_fun = (!others.is_empty()).then(|| self.fresh_temp_var("TUnionMiss"));
+        let mut chain = match &miss_fun {
+            Some(name) => docvec!["apply ", leaf::var(name.clone()), "()"],
+            None => fallback_doc.clone(),
+        };
         if !tagged.is_empty() {
             let arms: Vec<(String, Document<'static>)> = tagged
                 .iter()
@@ -1486,7 +1493,17 @@ impl CoreErlangGenerator {
                 chain,
             );
         }
-        chain
+        match miss_fun {
+            Some(name) => docvec![
+                "let ",
+                leaf::var(name),
+                " = fun () -> ",
+                fallback_doc,
+                " in ",
+                chain
+            ],
+            None => chain,
+        }
     }
 
     /// BT-4473: the direct call for a receiver known to be tagged `tagged`:

@@ -65,7 +65,7 @@ so they are not re-proposed without new evidence:
 as a union (`A | B | C`) compiles to a chain of guards, one per distinct
 member class, with the dynamic send as the last miss arm.
 - Members are deduped by class and the chain is capped at four arms, as for
-  protocol conformers. If any member has no guarded route (`Dynamic`, `nil`,
+  protocol conformers. If any member has no guarded route (`Dynamic`, `Boolean`,
   abstract, module-less, no single built-in route, …), or the union is over
   the cap, the whole union stays dynamic and the dynamic-site report names
   the member and its reason.

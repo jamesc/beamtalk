@@ -422,7 +422,8 @@ fn union_with_duplicate_members_dedupes_arms() {
 
 #[test]
 fn union_with_unrouted_member_stays_dynamic() {
-    // `Boolean` is abstract: no guard can hit, so the whole union is dynamic.
+    // `Boolean` has no single built-in route (true/false dispatch to
+    // different modules), so the whole union is dynamic.
     let code = codegen(concat!(
         "Object subclass: Caller\n",
         "  useIt: w :: Widget | Boolean =>\n",
@@ -1862,4 +1863,22 @@ fn extracted_provenance_is_trusted_for_union_members_only() {
         !single.contains("'bt@stdlib@integer':'dispatch'('frobnicate'"),
         "single-class extracted receiver must stay dynamic. Got:\n{single}"
     );
+}
+
+/// BT-4595: a worst-case union of built-in guards binds the dynamic send once
+/// instead of repeating it in every miss arm of every guard.
+#[test]
+fn builtin_union_chain_emits_the_dynamic_send_once() {
+    let code = codegen(concat!(
+        "Object subclass: Caller\n",
+        "  useIt: r :: Symbol | String | Binary | Tuple -> Object =>\n",
+        "    r frobnicate\n",
+    ));
+    assert_eq!(
+        code.matches("call 'beamtalk_message_dispatch':'send'(")
+            .count(),
+        1,
+        "dynamic send should be bound once. Got:\n{code}"
+    );
+    super::assert_compiles_through_erlc("test", &code);
 }
