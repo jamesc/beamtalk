@@ -18,14 +18,12 @@ where the errors both build their values from.
 -include("beamtalk.hrl").
 
 -export([
-    uninitialized_hint/2,
     uninitialized_error/2,
     raise_uninitialized/2,
     raise_nil_receiver/0,
     raise_unreachable/3,
     raise_no_snapshot/2,
     raise_read_only/2,
-    raise_undeclared/2,
     undeclared_error/2
 ]).
 
@@ -172,11 +170,6 @@ raise_read_only(Class, Name) ->
     Error1 = beamtalk_error:with_message(Error0, Message),
     Error2 = beamtalk_error:with_details(Error1, #{class_variable => Name}),
     beamtalk_error:raise(beamtalk_error:with_hint(Error2, Hint)).
-
--doc "`undeclared_class_variable`: an access of a name the class does not declare.".
--spec raise_undeclared(atom(), atom()) -> no_return().
-raise_undeclared(Class, Name) ->
-    beamtalk_error:raise(undeclared_error(Class, Name)).
 
 -doc """
 Build (but do not raise) the `undeclared_class_variable` error, for the class

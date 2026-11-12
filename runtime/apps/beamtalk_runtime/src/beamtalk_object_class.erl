@@ -65,11 +65,8 @@ and join the `beamtalk_classes` pg group for enumeration.
     class_send/4,
     local_call/3,
     set_class_var/3,
-    has_class_var/2,
-    clear_class_var/2,
     update_class/2,
     local_class_methods/1,
-    local_class_methods_map/1,
     local_instance_methods/1,
     dispatch_caller_pid/0,
     class_var_reflection_op/2,
@@ -330,41 +327,6 @@ set_class_var(ClassName, Name, Value) ->
             error(Error0);
         Pid ->
             gen_server:call(Pid, {set_class_var, Name, Value})
-    end.
-
--doc """
-Presence test for a class variable on a class by name (ADR 0124 §1/§4i/B4).
-
-Never raises, unlike `get_class_var`'s declared-`late` branch — the
-class-side counterpart to `beamtalk_reflection:has_field/2`. An unregistered
-class answers `false` rather than raising, mirroring the non-raising
-contract `hasField:` promises everywhere else.
-""".
--spec has_class_var(class_name(), atom()) -> boolean().
-has_class_var(ClassName, Name) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            false;
-        Pid ->
-            gen_server:call(Pid, {has_class_var, Name})
-    end.
-
--doc """
-Returns a `late` class variable to unassigned (ADR 0124 §1/§4i/§4f/B4).
-
-The class-side counterpart to `beamtalk_reflection:clear_field/2` —
-`maps:remove/2` on `ClassVars`, never a sentinel value. Works uniformly on
-any class variable, not only a declared-`late` one, matching
-`clear_field/2`'s own "the caller's business, not this primitive's" stance.
-""".
--spec clear_class_var(class_name(), atom()) -> term().
-clear_class_var(ClassName, Name) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            Error0 = beamtalk_error:new(class_not_found, ClassName),
-            error(Error0);
-        Pid ->
-            gen_server:call(Pid, {clear_class_var, Name})
     end.
 
 -doc "Create a new instance of this class.".
@@ -1553,19 +1515,7 @@ handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = Clas
     NewClassVars = ClassVars#{Name => Value},
     %% Keep the live snapshot in sync with this mutation.
     beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
-    {reply, Value, State#class_state{class_state = NewClassVars}};
-handle_call({has_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
-    %% ADR 0124 §1/§4i/B4: never raises. The presence test is
-    %% `beamtalk_class_vars:has_value/2`, shared with `get_class_var`'s
-    %% declared-`late` branch (`read_in/4`, BT-4061).
-    {reply, beamtalk_class_vars:has_value(ClassVars, Name), State};
-handle_call({clear_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
-    %% ADR 0124 §1/§4f/§4i/B4: returns the class object itself, matching
-    %% the instance-side intrinsic's `clearField: -> Self` convention.
-    NewClassVars = maps:remove(Name, ClassVars),
-    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
-    NewState = State#class_state{class_state = NewClassVars},
-    {reply, beamtalk_class_registry:class_object_from_pid(self()), NewState}.
+    {reply, Value, State#class_state{class_state = NewClassVars}}.
 
 %% ADR 0114: see rename/2's doc.
 -spec call_rename_class(class_name(), #class_state{}) -> {reply, term(), #class_state{}}.
@@ -2138,8 +2088,7 @@ ownership when there is no session context to fall back to (tier 1).
 %% 0035), these are reflection primitives, not overridable class methods.
 %% `ClassVars` lives in `State` directly, so none of them needs
 %% `handle_class_method_call/6`'s method-lookup machinery. `has`/`clear` are
-%% the same operations as the `has_class_var`/`clear_class_var` `handle_call`
-%% clauses (`maps:is_key/2`/`maps:remove/2` are the whole operation); `get`
+%% `maps:is_key/2`/`maps:remove/2` (the whole operation); `get`
 %% shares `read_class_var/4` with `get_class_var`; and `put` is the checked
 %% counterpart (`write_class_var/4`) of the deliberately unchecked
 %% `set_class_var`.

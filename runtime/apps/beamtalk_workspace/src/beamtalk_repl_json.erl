@@ -23,19 +23,11 @@ Uses OTP `json` module (OTP 27+) for encoding/decoding.
 -define(ACTOR_PRINT_TIMEOUT_MS, 250).
 
 -export([
-    format_response/1,
     format_error/1,
-    format_response_with_warnings/2,
-    format_error_with_warnings/2,
-    format_loaded/1,
-    format_actors/1,
-    format_modules/1,
-    format_docs/1,
     term_to_json/1,
     element_to_json/1,
     format_error_message/1,
     parse_json/1,
-    encode_reloaded/4, encode_reloaded/5,
     encode_error/2, encode_error/4, encode_error/5
 ]).
 
@@ -61,23 +53,6 @@ parse_json(Data) ->
 
 %%% Response Formatting
 
--doc "Format a successful response as JSON.".
--spec format_response(term()) -> binary().
-format_response(Value) ->
-    try
-        JsonValue = term_to_json(Value),
-        iolist_to_binary(json:encode(#{<<"type">> => <<"result">>, <<"value">> => JsonValue}))
-    catch
-        Class:Reason:_Stack ->
-            ErrorMsg = io_lib:format("Internal error formatting ~p: ~p:~p", [Value, Class, Reason]),
-            iolist_to_binary(
-                json:encode(#{
-                    <<"type">> => <<"error">>,
-                    <<"message">> => iolist_to_binary(ErrorMsg)
-                })
-            )
-    end.
-
 -doc "Format an error response as JSON.".
 -spec format_error(term()) -> binary().
 format_error(Reason) ->
@@ -102,132 +77,6 @@ format_error(Reason) ->
                 })
             )
     end.
-
--doc "Format a successful response with warnings as JSON.".
--spec format_response_with_warnings(term(), [beamtalk_repl_protocol:warning()]) -> binary().
-format_response_with_warnings(Value, Warnings) ->
-    try
-        JsonValue = term_to_json(Value),
-        Response = #{<<"type">> => <<"result">>, <<"value">> => JsonValue},
-        iolist_to_binary(
-            json:encode(beamtalk_repl_protocol:maybe_add_warnings(Response, Warnings))
-        )
-    catch
-        Class:Reason:_Stack ->
-            ErrorMsg = io_lib:format("Internal error formatting ~p: ~p:~p", [Value, Class, Reason]),
-            iolist_to_binary(
-                json:encode(#{
-                    <<"type">> => <<"error">>,
-                    <<"message">> => iolist_to_binary(ErrorMsg)
-                })
-            )
-    end.
-
--doc "Format an error response with warnings as JSON.".
--spec format_error_with_warnings(term(), [beamtalk_repl_protocol:warning()]) -> binary().
-format_error_with_warnings(Reason, Warnings) ->
-    try
-        Message = format_error_message(Reason),
-        Response = #{<<"type">> => <<"error">>, <<"message">> => Message},
-        iolist_to_binary(
-            json:encode(beamtalk_repl_protocol:maybe_add_warnings(Response, Warnings))
-        )
-    catch
-        Class:FormatError:Stack ->
-            ?LOG_DEBUG("Failed to format error", #{
-                class => Class,
-                reason => FormatError,
-                stack => lists:sublist(Stack, 5),
-                original_reason => Reason,
-                domain => [beamtalk, runtime]
-            }),
-            iolist_to_binary(
-                json:encode(#{
-                    <<"type">> => <<"error">>,
-                    <<"message">> => beamtalk_error:chars_to_binary(
-                        io_lib:format("Error: ~tp", [Reason])
-                    )
-                })
-            )
-    end.
-
--doc "Format a documentation response as JSON.".
--spec format_docs(binary()) -> binary().
-format_docs(DocText) ->
-    iolist_to_binary(json:encode(#{<<"type">> => <<"docs">>, <<"docs">> => DocText})).
-
--doc """
-Format a loaded file response as JSON.
-Classes is a list of #{name => string(), superclass => string()} maps.
-""".
--spec format_loaded([map()]) -> binary().
-format_loaded(Classes) ->
-    ClassNames = [list_to_binary(maps:get(name, C, "")) || C <- Classes],
-    iolist_to_binary(json:encode(#{<<"type">> => <<"loaded">>, <<"classes">> => ClassNames})).
-
--doc "Format an actors list response as JSON.".
--spec format_actors([beamtalk_repl_actors:actor_metadata()]) -> binary().
-format_actors(Actors) ->
-    JsonActors = [
-        #{
-            <<"pid">> => list_to_binary(pid_to_list(Pid)),
-            <<"class">> => atom_to_binary(Class, utf8),
-            <<"module">> => atom_to_binary(Module, utf8),
-            <<"spawned_at">> => SpawnedAt
-        }
-     || #{pid := Pid, class := Class, module := Module, spawned_at := SpawnedAt} <- Actors
-    ],
-    iolist_to_binary(json:encode(#{<<"type">> => <<"actors">>, <<"actors">> => JsonActors})).
-
--doc "Format a modules list response as JSON.".
--spec format_modules([{atom(), map()}]) -> binary().
-format_modules(ModulesWithInfo) ->
-    JsonModules = [
-        #{
-            <<"name">> => maps:get(name, Info),
-            <<"source_file">> => list_to_binary(maps:get(source_file, Info)),
-            <<"actor_count">> => maps:get(actor_count, Info),
-            <<"load_time">> => maps:get(load_time, Info),
-            <<"time_ago">> => list_to_binary(lists:flatten(maps:get(time_ago, Info)))
-        }
-     || {_ModuleName, Info} <- ModulesWithInfo
-    ],
-    iolist_to_binary(json:encode(#{<<"type">> => <<"modules">>, <<"modules">> => JsonModules})).
-
--doc """
-Encode reload response with classes, affected actor count, and migration results.
-""".
--spec encode_reloaded(
-    [map()],
-    non_neg_integer(),
-    [{pid(), term()}],
-    beamtalk_repl_protocol:protocol_msg()
-) -> binary().
-encode_reloaded(Classes, ActorCount, MigrationFailures, Msg) ->
-    encode_reloaded(Classes, ActorCount, MigrationFailures, Msg, []).
-
--doc """
-Encode a reload response with optional class collision warnings.
-Warnings are surfaced when a reload causes a cross-package class collision.
-""".
--spec encode_reloaded(
-    [map()],
-    non_neg_integer(),
-    [{pid(), term()}],
-    beamtalk_repl_protocol:protocol_msg(),
-    [beamtalk_repl_protocol:warning()]
-) -> binary().
-encode_reloaded(Classes, ActorCount, MigrationFailures, Msg, Warnings) ->
-    ClassNames = [list_to_binary(maps:get(name, C, "")) || C <- Classes],
-    Base = beamtalk_repl_protocol:base_response(Msg),
-    FailureCount = length(MigrationFailures),
-    Full = Base#{
-        <<"classes">> => ClassNames,
-        <<"affected_actors">> => ActorCount,
-        <<"migration_failures">> => FailureCount,
-        <<"status">> => [<<"done">>]
-    },
-    iolist_to_binary(json:encode(beamtalk_repl_protocol:maybe_add_warnings(Full, Warnings))).
 
 -doc "Encode an error response using the REPL error formatter.".
 -spec encode_error(term(), beamtalk_repl_protocol:protocol_msg()) -> binary().

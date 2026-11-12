@@ -2258,10 +2258,12 @@ get_class_var_declared_late_unassigned_errors_without_crashing_test_() ->
                     ?assertEqual(7, gen_server:call(Pid, {set_class_var, current, 7})),
                     ?assertEqual(7, gen_server:call(Pid, {get_class_var, current})),
                     %% BT-4061: a stored `nil` is present, so it answers
-                    %% `nil` — agreeing with `has_class_var` — not an error.
+                    %% `nil` — agreeing with `beamtalk_class_vars:has_value/2`
+                    %% (the presence test `hasField:` uses) — not an error.
                     ?assertEqual(nil, gen_server:call(Pid, {set_class_var, current, nil})),
                     ?assertEqual(nil, gen_server:call(Pid, {get_class_var, current})),
-                    ?assertEqual(true, gen_server:call(Pid, {has_class_var, current}))
+                    {ok, Snapshot} = beamtalk_class_registry:class_state_snapshot_lookup(Pid),
+                    ?assertEqual(true, beamtalk_class_vars:has_value(Snapshot, current))
                 after
                     _ = code:purge(Mod),
                     _ = code:delete(Mod),

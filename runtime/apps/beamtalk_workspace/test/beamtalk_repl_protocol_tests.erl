@@ -449,26 +449,6 @@ encode_actors_new_format_test() ->
     ?assertEqual(<<"Counter">>, maps:get(<<"class">>, A)),
     ?assertEqual(<<"counter">>, maps:get(<<"module">>, A)).
 
-%%% encode_modules/3 new format
-
-encode_modules_new_format_test() ->
-    Msg = make_msg(<<"modules">>, <<"msg-m1">>, undefined),
-    Modules = [
-        {counter, #{
-            name => <<"Counter">>,
-            source_file => "counter.bt",
-            actor_count => 2,
-            load_time => 99,
-            time_ago => "5s ago"
-        }}
-    ],
-    Result = beamtalk_repl_protocol:encode_modules(Modules, Msg, fun identity/1),
-    Decoded = json:decode(Result),
-    ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
-    [M] = maps:get(<<"modules">>, Decoded),
-    ?assertEqual(<<"Counter">>, maps:get(<<"name">>, M)),
-    ?assertEqual(<<"counter.bt">>, maps:get(<<"source_file">>, M)).
-
 %%% base_response edge cases
 
 base_response_with_both_id_and_session_test() ->

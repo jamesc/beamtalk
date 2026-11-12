@@ -13,18 +13,16 @@ for manipulating state during REPL sessions.
 """.
 
 -export([
-    new/2, new/3,
+    new/2,
+    new/3,
     get_bindings/1,
     set_bindings/2,
     clear_bindings/1,
     get_eval_counter/1,
     increment_eval_counter/1,
     get_client_meta/1,
-    get_client_kind/1,
     get_loaded_modules/1,
     add_loaded_module/2,
-    get_listen_socket/1,
-    get_port/1,
     get_actor_registry/1,
     set_actor_registry/2,
     get_module_tracker/1,
@@ -43,6 +41,13 @@ for manipulating state during REPL sessions.
     put_alias/3,
     known_type_alias_sources/1
 ]).
+-ifdef(TEST).
+-export([
+    get_client_kind/1,
+    get_listen_socket/1,
+    get_port/1
+]).
+-endif.
 
 -export_type([state/0, mutation/0, alias_entry/0]).
 
@@ -194,10 +199,12 @@ increment_eval_counter(State = #state{eval_counter = Counter}) ->
 get_client_meta(#state{client_meta = Meta}) ->
     Meta.
 
+-ifdef(TEST).
 -doc "Get the originating client surface (the `kind` key of the metadata map).".
 -spec get_client_kind(state()) -> binary().
 get_client_kind(#state{client_meta = Meta}) ->
     maps:get(kind, Meta, <<"unknown">>).
+-endif.
 
 -doc "Get loaded modules list.".
 -spec get_loaded_modules(state()) -> [atom()].
@@ -209,15 +216,19 @@ get_loaded_modules(#state{loaded_modules = Modules}) ->
 add_loaded_module(Module, State = #state{loaded_modules = Modules}) ->
     State#state{loaded_modules = [Module | Modules]}.
 
+-ifdef(TEST).
 -doc "Get listen socket.".
 -spec get_listen_socket(state()) -> gen_tcp:socket() | undefined.
 get_listen_socket(#state{listen_socket = Socket}) ->
     Socket.
+-endif.
 
+-ifdef(TEST).
 -doc "Get port number.".
 -spec get_port(state()) -> inet:port_number().
 get_port(#state{port = Port}) ->
     Port.
+-endif.
 
 -doc "Get actor registry PID.".
 -spec get_actor_registry(state()) -> pid() | undefined.

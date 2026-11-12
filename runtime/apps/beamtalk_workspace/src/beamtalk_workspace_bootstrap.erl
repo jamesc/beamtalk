@@ -20,10 +20,6 @@ visible in the class registry without requiring `:load`.
 -export([init/1, handle_info/2, handle_call/3, handle_cast/2, terminate/2]).
 -export([activate_project_modules/1, activate_dependency_modules/1]).
 
-%% Backwards-compatible re-exports — callers should migrate to
-%% beamtalk_module_activation directly.
--export([find_bt_modules_in_dir/1, sort_modules_by_dependency/2, is_valid_module_name/1]).
-
 -include_lib("kernel/include/logger.hrl").
 
 -record(state, {}).
@@ -182,18 +178,3 @@ store_bootstrap_class_source(ModuleName, SourcePath) ->
                 }
             )
     end.
-
--doc "Backwards-compatible delegate to beamtalk_module_activation.".
--spec find_bt_modules_in_dir(string()) -> [module()].
-find_bt_modules_in_dir(Dir) ->
-    beamtalk_module_activation:find_bt_modules_in_dir(Dir).
-
--doc "Backwards-compatible delegate to beamtalk_module_activation.".
--spec sort_modules_by_dependency(string(), [module()]) -> [module()].
-sort_modules_by_dependency(EbinDir, Modules) ->
-    beamtalk_module_activation:sort_modules_by_dependency(EbinDir, Modules).
-
--doc "Backwards-compatible delegate to beamtalk_module_activation.".
--spec is_valid_module_name(string()) -> boolean().
-is_valid_module_name(Name) ->
-    beamtalk_module_activation:is_valid_module_name(Name).

@@ -2025,16 +2025,16 @@ base_protocol_response_no_id_no_session_test() ->
 
 ensure_structured_error_already_structured_test() ->
     Err = beamtalk_error:new(some_kind, 'SomeClass'),
-    ?assertEqual(Err, beamtalk_repl_server:ensure_structured_error(Err)).
+    ?assertEqual(Err, beamtalk_repl_errors:ensure_structured_error(Err)).
 
 ensure_structured_error_compile_error_binary_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({compile_error, <<"some msg">>}),
+    Err = beamtalk_repl_errors:ensure_structured_error({compile_error, <<"some msg">>}),
     ?assertEqual(compile_error, Err#beamtalk_error.kind),
     ?assertEqual('Compiler', Err#beamtalk_error.class).
 
 ensure_structured_error_compile_error_structured_diagnostics_test() ->
     %% structured diagnostic maps with message field
-    Err = beamtalk_repl_server:ensure_structured_error(
+    Err = beamtalk_repl_errors:ensure_structured_error(
         {compile_error, [#{message => <<"Unused variable `x`">>, line => 3}]}
     ),
     ?assertEqual(compile_error, Err#beamtalk_error.kind),
@@ -2042,7 +2042,7 @@ ensure_structured_error_compile_error_structured_diagnostics_test() ->
 
 ensure_structured_error_compile_error_structured_with_hint_test() ->
     %% structured diagnostic preserves hint
-    Err = beamtalk_repl_server:ensure_structured_error(
+    Err = beamtalk_repl_errors:ensure_structured_error(
         {compile_error, [
             #{
                 message => <<"Unused variable `x`">>,
@@ -2055,112 +2055,112 @@ ensure_structured_error_compile_error_structured_with_hint_test() ->
     ?assertEqual({beamtalk_string, <<"prefix with _x">>}, Err#beamtalk_error.hint).
 
 ensure_structured_error_compile_error_list_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({compile_error, "some msg"}),
+    Err = beamtalk_repl_errors:ensure_structured_error({compile_error, "some msg"}),
     ?assertEqual(compile_error, Err#beamtalk_error.kind).
 
 ensure_structured_error_compile_error_other_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({compile_error, {some, reason}}),
+    Err = beamtalk_repl_errors:ensure_structured_error({compile_error, {some, reason}}),
     ?assertEqual(compile_error, Err#beamtalk_error.kind).
 
 ensure_structured_error_undefined_variable_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({undefined_variable, <<"x">>}),
+    Err = beamtalk_repl_errors:ensure_structured_error({undefined_variable, <<"x">>}),
     ?assertEqual(undefined_variable, Err#beamtalk_error.kind).
 
 ensure_structured_error_file_not_found_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({file_not_found, "/nonexistent/foo.bt"}),
+    Err = beamtalk_repl_errors:ensure_structured_error({file_not_found, "/nonexistent/foo.bt"}),
     ?assertEqual(file_not_found, Err#beamtalk_error.kind).
 
 ensure_structured_error_read_error_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({read_error, enoent}),
+    Err = beamtalk_repl_errors:ensure_structured_error({read_error, enoent}),
     ?assertEqual(io_error, Err#beamtalk_error.kind).
 
 ensure_structured_error_load_error_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({load_error, bad_module}),
+    Err = beamtalk_repl_errors:ensure_structured_error({load_error, bad_module}),
     ?assertEqual(io_error, Err#beamtalk_error.kind).
 
 ensure_structured_error_parse_error_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({parse_error, {line, 1}}),
+    Err = beamtalk_repl_errors:ensure_structured_error({parse_error, {line, 1}}),
     ?assertEqual(compile_error, Err#beamtalk_error.kind).
 
 ensure_structured_error_invalid_request_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({invalid_request, unknown_type}),
+    Err = beamtalk_repl_errors:ensure_structured_error({invalid_request, unknown_type}),
     ?assertEqual(internal_error, Err#beamtalk_error.kind).
 
 ensure_structured_error_empty_expression_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error(empty_expression),
+    Err = beamtalk_repl_errors:ensure_structured_error(empty_expression),
     ?assertEqual(empty_expression, Err#beamtalk_error.kind).
 
 ensure_structured_error_timeout_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error(timeout),
+    Err = beamtalk_repl_errors:ensure_structured_error(timeout),
     ?assertEqual(timeout, Err#beamtalk_error.kind).
 
 ensure_structured_error_unknown_term_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error(some_random_term),
+    Err = beamtalk_repl_errors:ensure_structured_error(some_random_term),
     ?assertEqual(internal_error, Err#beamtalk_error.kind).
 
 ensure_structured_error_eval_error_nested_test() ->
     Inner = beamtalk_error:new(type_error, 'Integer'),
-    Err = beamtalk_repl_server:ensure_structured_error({eval_error, error, Inner}),
+    Err = beamtalk_repl_errors:ensure_structured_error({eval_error, error, Inner}),
     ?assertEqual(type_error, Err#beamtalk_error.kind).
 
 ensure_structured_error_eval_error_raw_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({eval_error, error, badarg}),
+    Err = beamtalk_repl_errors:ensure_structured_error({eval_error, error, badarg}),
     ?assertEqual(internal_error, Err#beamtalk_error.kind).
 
 %%% ensure_structured_error/2 tests
 
 ensure_structured_error_2_already_structured_test() ->
     Err = beamtalk_error:new(some_kind, 'SomeClass'),
-    ?assertEqual(Err, beamtalk_repl_server:ensure_structured_error(Err, error)).
+    ?assertEqual(Err, beamtalk_repl_errors:ensure_structured_error(Err, error)).
 
 ensure_structured_error_2_compile_error_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({compile_error, <<"msg">>}, error),
+    Err = beamtalk_repl_errors:ensure_structured_error({compile_error, <<"msg">>}, error),
     ?assertEqual(compile_error, Err#beamtalk_error.kind).
 
 ensure_structured_error_2_unknown_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error(some_reason, error),
+    Err = beamtalk_repl_errors:ensure_structured_error(some_reason, error),
     ?assertEqual(internal_error, Err#beamtalk_error.kind),
     ?assert(binary:match(element(2, Err#beamtalk_error.message), <<"error:">>) =/= nomatch).
 
 ensure_structured_error_2_eval_error_test() ->
     Inner = beamtalk_error:new(does_not_understand, 'Counter'),
-    Err = beamtalk_repl_server:ensure_structured_error({eval_error, error, Inner}, error),
+    Err = beamtalk_repl_errors:ensure_structured_error({eval_error, error, Inner}, error),
     ?assertEqual(does_not_understand, Err#beamtalk_error.kind).
 
 ensure_structured_error_2_undefined_variable_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({undefined_variable, <<"x">>}, error),
+    Err = beamtalk_repl_errors:ensure_structured_error({undefined_variable, <<"x">>}, error),
     ?assertEqual(undefined_variable, Err#beamtalk_error.kind).
 
 ensure_structured_error_2_file_not_found_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({file_not_found, "/path"}, error),
+    Err = beamtalk_repl_errors:ensure_structured_error({file_not_found, "/path"}, error),
     ?assertEqual(file_not_found, Err#beamtalk_error.kind).
 
 ensure_structured_error_2_read_error_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({read_error, enoent}, error),
+    Err = beamtalk_repl_errors:ensure_structured_error({read_error, enoent}, error),
     ?assertEqual(io_error, Err#beamtalk_error.kind).
 
 ensure_structured_error_2_load_error_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({load_error, bad}, error),
+    Err = beamtalk_repl_errors:ensure_structured_error({load_error, bad}, error),
     ?assertEqual(io_error, Err#beamtalk_error.kind).
 
 ensure_structured_error_2_parse_error_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({parse_error, x}, error),
+    Err = beamtalk_repl_errors:ensure_structured_error({parse_error, x}, error),
     ?assertEqual(compile_error, Err#beamtalk_error.kind).
 
 ensure_structured_error_2_invalid_request_test() ->
-    Err = beamtalk_repl_server:ensure_structured_error({invalid_request, x}, error),
+    Err = beamtalk_repl_errors:ensure_structured_error({invalid_request, x}, error),
     ?assertEqual(internal_error, Err#beamtalk_error.kind).
 
 ensure_structured_error_2_beamtalk_object_test() ->
     Inner = beamtalk_error:new(type_error, 'String'),
     Obj = #{'$beamtalk_class' => 'Error', error => Inner},
-    Err = beamtalk_repl_server:ensure_structured_error(Obj, error),
+    Err = beamtalk_repl_errors:ensure_structured_error(Obj, error),
     ?assertEqual(type_error, Err#beamtalk_error.kind).
 
 ensure_structured_error_beamtalk_object_test() ->
     Inner = beamtalk_error:new(does_not_understand, 'Integer'),
     Obj = #{'$beamtalk_class' => 'Error', error => Inner},
-    Err = beamtalk_repl_server:ensure_structured_error(Obj),
+    Err = beamtalk_repl_errors:ensure_structured_error(Obj),
     ?assertEqual(does_not_understand, Err#beamtalk_error.kind).
 
 %%% make_class_not_found_error/1 tests

@@ -139,7 +139,7 @@ find_bt_modules_returns_project_modules_test() ->
         "other_module.beam"
     ]),
     try
-        Result = beamtalk_workspace_bootstrap:find_bt_modules_in_dir(Dir),
+        Result = beamtalk_module_activation:find_bt_modules_in_dir(Dir),
         ?assertEqual(lists:sort(['bt@AnotherClass', 'bt@MyClass']), lists:sort(Result))
     after
         remove_temp_dir(Dir)
@@ -153,7 +153,7 @@ find_bt_modules_excludes_stdlib_test() ->
         "bt@stdlib@Integer.beam"
     ]),
     try
-        Result = beamtalk_workspace_bootstrap:find_bt_modules_in_dir(Dir),
+        Result = beamtalk_module_activation:find_bt_modules_in_dir(Dir),
         ?assertEqual(['bt@MyClass'], Result)
     after
         remove_temp_dir(Dir)
@@ -161,14 +161,14 @@ find_bt_modules_excludes_stdlib_test() ->
 
 %% Test that find_bt_modules_in_dir returns [] for a nonexistent directory.
 find_bt_modules_missing_dir_test() ->
-    Result = beamtalk_workspace_bootstrap:find_bt_modules_in_dir("/nonexistent/path/xyz"),
+    Result = beamtalk_module_activation:find_bt_modules_in_dir("/nonexistent/path/xyz"),
     ?assertEqual([], Result).
 
 %% Test that find_bt_modules_in_dir returns [] for an empty directory.
 find_bt_modules_empty_dir_test() ->
     Dir = make_temp_beam_dir([]),
     try
-        Result = beamtalk_workspace_bootstrap:find_bt_modules_in_dir(Dir),
+        Result = beamtalk_module_activation:find_bt_modules_in_dir(Dir),
         ?assertEqual([], Result)
     after
         remove_temp_dir(Dir)
@@ -182,7 +182,7 @@ find_bt_modules_ignores_non_beam_test() ->
         "bt@MyClass.app"
     ]),
     try
-        Result = beamtalk_workspace_bootstrap:find_bt_modules_in_dir(Dir),
+        Result = beamtalk_module_activation:find_bt_modules_in_dir(Dir),
         ?assertEqual(['bt@MyClass'], Result)
     after
         remove_temp_dir(Dir)
@@ -414,7 +414,7 @@ sort_modules_by_dependency_test_() ->
                     ),
                     %% Modules in reverse dependency order (child first)
                     Input = [ChildMod, ParentMod],
-                    Sorted = beamtalk_workspace_bootstrap:sort_modules_by_dependency(
+                    Sorted = beamtalk_module_activation:sort_modules_by_dependency(
                         EbinDir, Input
                     ),
                     %% Parent must come before child
@@ -456,19 +456,19 @@ purge_bt745_modules() ->
 
 %% Test that valid Beamtalk module names are accepted.
 is_valid_module_name_accepts_valid_names_test() ->
-    ?assert(beamtalk_workspace_bootstrap:is_valid_module_name("bt@MyClass")),
-    ?assert(beamtalk_workspace_bootstrap:is_valid_module_name("bt@stdlib@String")),
-    ?assert(beamtalk_workspace_bootstrap:is_valid_module_name("bt@My_Class_123")),
-    ?assert(beamtalk_workspace_bootstrap:is_valid_module_name("abc")).
+    ?assert(beamtalk_module_activation:is_valid_module_name("bt@MyClass")),
+    ?assert(beamtalk_module_activation:is_valid_module_name("bt@stdlib@String")),
+    ?assert(beamtalk_module_activation:is_valid_module_name("bt@My_Class_123")),
+    ?assert(beamtalk_module_activation:is_valid_module_name("abc")).
 
 %% Test that invalid module names are rejected.
 is_valid_module_name_rejects_invalid_names_test() ->
-    ?assertNot(beamtalk_workspace_bootstrap:is_valid_module_name("")),
-    ?assertNot(beamtalk_workspace_bootstrap:is_valid_module_name("bt@My-Class")),
-    ?assertNot(beamtalk_workspace_bootstrap:is_valid_module_name("bt@My Class")),
-    ?assertNot(beamtalk_workspace_bootstrap:is_valid_module_name("bt@My.Class")),
-    ?assertNot(beamtalk_workspace_bootstrap:is_valid_module_name("bt@My/Class")),
-    ?assertNot(beamtalk_workspace_bootstrap:is_valid_module_name("bt@My;Class")).
+    ?assertNot(beamtalk_module_activation:is_valid_module_name("")),
+    ?assertNot(beamtalk_module_activation:is_valid_module_name("bt@My-Class")),
+    ?assertNot(beamtalk_module_activation:is_valid_module_name("bt@My Class")),
+    ?assertNot(beamtalk_module_activation:is_valid_module_name("bt@My.Class")),
+    ?assertNot(beamtalk_module_activation:is_valid_module_name("bt@My/Class")),
+    ?assertNot(beamtalk_module_activation:is_valid_module_name("bt@My;Class")).
 
 %% Test that find_bt_modules_in_dir skips files with invalid module names.
 find_bt_modules_skips_invalid_names_test() ->
@@ -479,7 +479,7 @@ find_bt_modules_skips_invalid_names_test() ->
         "bt@OK_Name.beam"
     ]),
     try
-        Result = beamtalk_workspace_bootstrap:find_bt_modules_in_dir(Dir),
+        Result = beamtalk_module_activation:find_bt_modules_in_dir(Dir),
         ?assertEqual(
             lists:sort(['bt@OK_Name', 'bt@ValidClass']),
             lists:sort(Result)

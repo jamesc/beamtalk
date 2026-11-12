@@ -47,8 +47,7 @@ removed. Use the Beamtalk-native message sends instead:
     get_nonce/0,
     handle_protocol_request/2,
     generate_session_id/0,
-    safe_to_existing_atom/1,
-    ensure_structured_error/1
+    safe_to_existing_atom/1
 ]).
 -ifdef(TEST).
 -export([
@@ -395,10 +394,3 @@ Implementation lives in beamtalk_repl_errors .
 """.
 -spec safe_to_existing_atom(binary()) -> {ok, atom()} | {error, badarg}.
 safe_to_existing_atom(Bin) -> beamtalk_repl_errors:safe_to_existing_atom(Bin).
-
--doc """
-Ensure an error reason is a structured #beamtalk_error{} record.
-Implementation lives in beamtalk_repl_errors .
-""".
--spec ensure_structured_error(term()) -> #beamtalk_error{}.
-ensure_structured_error(Reason) -> beamtalk_repl_errors:ensure_structured_error(Reason).

@@ -38,12 +38,10 @@ bindings while sharing access to actors and loaded modules.
     get_session_id/2,
     get_session_meta/1,
     get_session_meta/2,
-    clear_bindings/1,
     enqueue_mutation/2,
     load_file/2,
     load_file/3,
     load_source/2,
-    unload_module/2,
     remove_from_tracker/2,
     get_module_tracker/1,
     show_codegen/2
@@ -58,6 +56,12 @@ bindings while sharing access to actors and loaded modules.
     terminate/2,
     code_change/3
 ]).
+-ifdef(TEST).
+-export([
+    clear_bindings/1,
+    unload_module/2
+]).
+-endif.
 
 %%% Public API
 
@@ -213,10 +217,12 @@ get_session_meta(SessionPid) ->
 get_session_meta(SessionPid, Timeout) ->
     gen_server:call(SessionPid, get_session_meta, Timeout).
 
+-ifdef(TEST).
 -doc "Clear all variable bindings for this session.".
 -spec clear_bindings(pid()) -> ok.
 clear_bindings(SessionPid) ->
     gen_server:call(SessionPid, clear_bindings).
+-endif.
 
 -doc """
 Enqueue a deferred session-local mutation (ADR 0081 Phase 2).
@@ -250,12 +256,14 @@ load_source(SessionPid, Source) ->
 get_module_tracker(SessionPid) ->
     gen_server:call(SessionPid, get_module_tracker, 5000).
 
+-ifdef(TEST).
 -doc """
 Unload a module from this session, purging its code and removing it from the tracker.
 """.
 -spec unload_module(pid(), atom()) -> ok | {error, #beamtalk_error{}}.
 unload_module(SessionPid, Module) ->
     gen_server:call(SessionPid, {unload_module, Module}, 5000).
+-endif.
 
 -doc """
 Remove a module from the session tracker only (no BEAM purge).
