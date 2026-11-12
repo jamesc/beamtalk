@@ -520,23 +520,15 @@ impl CoreErlangGenerator {
             .semantic_facts
             .has_block_nlr_or_walk(&block.span, &block.body);
 
-        let nlr_token_var = if needs_nlr {
-            let token_var = self.fresh_temp_var("NlrToken");
-            self.set_current_nlr_token(Some(token_var.clone()));
-            Some(token_var)
-        } else {
-            None
-        };
-
-        let stmts = match self.lower_method_body_with_reply(block) {
+        let (lowered, nlr_token_var) =
+            self.with_nlr_scope(needs_nlr, |g| g.lower_method_body_with_reply(block));
+        let stmts = match lowered {
             Ok(stmts) => stmts,
             Err(e) => {
-                self.set_current_nlr_token(None);
                 self.pop_scope();
                 return Err(e);
             }
         };
-        self.set_current_nlr_token(None);
 
         // ADR 0111 Addendum 4/6: prepend a real `NlrCatch` stmt and
         // verify+render once, instead of rendering the body then wrapping the
