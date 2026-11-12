@@ -210,8 +210,8 @@ pub fn validate_selector_input(sel: &str) -> Result<(), String> {
 /// LSP's static completion provider (`queries::completion_provider`) both
 /// delegate here rather than keeping their own copies.
 ///
-/// The live REPL/MCP completion engine (`beamtalk_repl_ops_dev:is_identifier_char/1`
-/// in `runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_dev.erl`) cannot
+/// The live REPL/MCP completion engine (`beamtalk_repl_editor_context:is_identifier_char/1`
+/// in `runtime/apps/beamtalk_workspace/src/beamtalk_repl_editor_context.erl`) cannot
 /// depend on this Rust crate, so it re-implements the identical rule in
 /// Erlang; a shared corpus fixture
 /// (`runtime/apps/beamtalk_workspace/test/fixtures/completion_word_boundary_corpus.json`)
