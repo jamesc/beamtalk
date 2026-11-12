@@ -1382,8 +1382,8 @@ class name: `MyAnnouncer new class` is `MyAnnouncer`.
     %% `Announcer`'s own compiled `new/0` has no receiver to pass
     %% (`class_new('undefined')`), and is only ever `Announcer new`.
     #{'$beamtalk_class' => 'Announcer', ref => make_ref()};
-'newAnnouncer'(Self) ->
-    ClassName = beamtalk_object_class:class_name_safe(element(4, Self)),
+'newAnnouncer'(#beamtalk_object{pid = ClassPid}) ->
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
     #{'$beamtalk_class' => ClassName, ref => make_ref()}.
 
 -doc """

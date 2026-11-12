@@ -58,3 +58,11 @@ TestCase subclass: InheritedClassNewTest
 
   testAnnouncerStillBuildsAnnouncer =>
     self assert: Announcer new class equals: Announcer
+
+  // The singleton system bus is reached only through `current`; it must not
+  // inherit Announcer's constructor and mint a private-ref lookalike.
+  testSystemAnnouncerNewRaises =>
+    self should: [
+      (self lookUp: #SystemAnnouncer) new
+    ] raise: #instantiation_error
+    self assert: SystemAnnouncer current class equals: SystemAnnouncer

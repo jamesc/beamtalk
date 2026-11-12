@@ -5038,6 +5038,7 @@ fn class_info_SystemAnnouncer() -> ClassInfo {
             ],
             class_methods: vec![
                 MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SystemAnnouncer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("SystemAnnouncer")), param_types: vec![], doc: Some("The singleton system announcer instance.\n\n## Examples\n```beamtalk\nSystemAnnouncer current class   // => SystemAnnouncer\n```".into()), origin: None, primitive: None, constant_value: None },
+                MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SystemAnnouncer".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Never")), param_types: vec![], doc: Some("PROHIBITED on SystemAnnouncer — it is a singleton reached only through\n`current`. It would otherwise inherit `Announcer class >> new` (BT-4479)\nand mint a private-ref announcer that is not the system bus.".into()), origin: None, primitive: None, constant_value: None },
             ],
             class_variables: vec![],
             type_params: vec![],

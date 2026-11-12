@@ -615,6 +615,11 @@ new0_chain_test_() ->
                     {ok, _}, beamtalk_class_dispatch:lookup_direct_constructor(Child, new, [])
                 ),
                 ?assertEqual(self(), beamtalk_class_dispatch:class_send(Child, new, [])),
+                %% A warmed static call key on the child (BT-4316) is erased when
+                %% the ancestor gains a user `new`, so a compiled `Child new`
+                %% call site stops calling the synthesized `new/0`.
+                ?assertNotEqual(false, ctor_target('BT4479Child')),
+                ?assertNotEqual(false, ctor_key_value('BT4479Child')),
                 %% Gaining one again turns it off without recompiling the child.
                 ok = reload_with('BT4479Parent', ?NEW0_HELPER, #{
                     defines_user_class_new0 => true, class_method_info => ?USER_NEW0
@@ -622,7 +627,9 @@ new0_chain_test_() ->
                 ?assert(beamtalk_class_metadata:inherits_user_class_new('BT4479Child')),
                 ?assertEqual(
                     error, beamtalk_class_dispatch:lookup_direct_constructor(Child, new, [])
-                )
+                ),
+                ?assertEqual(false, ctor_key_value('BT4479Child')),
+                ?assertEqual(false, ctor_target('BT4479Child'))
             after
                 [stop_class(P) || P <- [Grand, Child, Parent]]
             end

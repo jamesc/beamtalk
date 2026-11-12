@@ -391,6 +391,32 @@ Object subclass: MyService
 }
 
 #[test]
+fn test_inherited_user_new_external_send_allowed_but_self_new_rejected() {
+    // BT-4479: `Sub new` runs the ancestor's user `class new`, so the external
+    // send is no longer an Object-kind error. A class-side `self new` still
+    // lowers to the synthesized constructor (`class_self_new`), so it stays
+    // rejected rather than silently skipping the inherited `new`.
+    let source = "
+Object subclass: Base
+  class new => 1
+Base subclass: Sub
+  class make => self new
+Object subclass: User
+  class build => Sub new
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = analyse(&module);
+    let errors: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("cannot be instantiated"))
+        .collect();
+    assert_eq!(errors.len(), 1, "got: {:?}", result.diagnostics);
+    assert!(errors[0].message.contains("`Sub`"), "got: {errors:?}");
+}
+
+#[test]
 fn test_value_self_new_in_class_method_allowed() {
     let source = "
 Value subclass: Point
