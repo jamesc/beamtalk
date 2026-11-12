@@ -16,7 +16,7 @@ hardcoded `/tmp`) and named with `beamtalk_test_unique:id/0`, so separate
 
 -include_lib("kernel/include/file.hrl").
 
--export([with_tmp_home/1, tmp_dir/1, rm_rf/1]).
+-export([with_tmp_home/1, tmp_dir/1, rm_rf/1, base_dir/0, restore_home/1]).
 
 -doc """
 Create (and return) a fresh unique directory under the platform temp dir.
@@ -24,8 +24,7 @@ Create (and return) a fresh unique directory under the platform temp dir.
 """.
 -spec tmp_dir(string()) -> file:filename().
 tmp_dir(Label) ->
-    Base = binary_to_list(element(2, beamtalk_file:'tempDirectory'())),
-    Dir = filename:join(Base, "bt_" ++ Label ++ "_" ++ beamtalk_test_unique:id()),
+    Dir = filename:join(base_dir(), "bt_" ++ Label ++ "_" ++ beamtalk_test_unique:id()),
     ok = filelib:ensure_path(Dir),
     Dir.
 
@@ -49,6 +48,17 @@ with_tmp_home(Fun) ->
         rm_rf(Dir)
     end.
 
+-doc "Cross-platform absolute temp directory (never a hardcoded `/tmp`).".
+-spec base_dir() -> file:filename().
+base_dir() ->
+    unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())).
+
+-doc """
+Restore `HOME` from a previous `os:getenv("HOME")` result: unset when it was
+`false`, otherwise put the old value back. For fixtures whose setup returns
+the old value to a separate teardown; prefer `with_tmp_home/1` otherwise.
+""".
+-spec restore_home(string() | false) -> true | ok.
 restore_home(false) -> os:unsetenv("HOME");
 restore_home(Old) -> os:putenv("HOME", Old).
 

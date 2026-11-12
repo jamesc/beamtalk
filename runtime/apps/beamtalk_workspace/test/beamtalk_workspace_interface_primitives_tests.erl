@@ -1140,7 +1140,7 @@ revert_via_object_keyed_map(_Ctx) ->
 setup_changelog_ws() ->
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("test-ws-wip-" ++ Unique),
-    Tmp = filename:join(ws_temp_dir(), "bt-wip-" ++ Unique),
+    Tmp = filename:join(beamtalk_test_fs:base_dir(), "bt-wip-" ++ Unique),
     ok = filelib:ensure_path(Tmp),
     OldHome = os:getenv("HOME"),
     true = os:putenv("HOME", Tmp),
@@ -1179,9 +1179,6 @@ cleanup_changelog_ws(#{
     _ = file:del_dir_r(Tmp),
     ok.
 
-ws_temp_dir() ->
-    unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())).
-
 stop_proc(Pid) when is_pid(Pid) ->
     case is_process_alive(Pid) of
         true ->
@@ -1211,7 +1208,7 @@ stop_proc(_) ->
 dependencies_with_package_name_returns_map_test() ->
     Unique = integer_to_list(erlang:unique_integer([positive])),
     WorkspaceId = list_to_binary("test-ws-deps-" ++ Unique),
-    Tmp = filename:join(ws_temp_dir(), "bt-deps-" ++ Unique),
+    Tmp = filename:join(beamtalk_test_fs:base_dir(), "bt-deps-" ++ Unique),
     ok = filelib:ensure_path(Tmp),
     %% A recorded root package makes get_package_name/0 resolve a real name,
     %% so dependencies/0 leaves the `undefined` short-circuit.

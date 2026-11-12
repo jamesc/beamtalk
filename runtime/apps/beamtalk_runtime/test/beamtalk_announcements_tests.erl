@@ -286,7 +286,7 @@ dead_subscriber_pruned_test_() ->
                 %% The bus processes the DOWN asynchronously; sync on it via a
                 %% gen_server call (subscribe of a throwaway ref forces the
                 %% mailbox to drain past the DOWN). Poll until pruned.
-                ok = wait_until(fun() ->
+                ok = beamtalk_test_wait:until(fun() ->
                     beamtalk_announcements:subscription_count() =:= 0
                 end),
                 ?assertNot(beamtalk_announcements:is_active(SubRef)),
@@ -794,7 +794,7 @@ do_once_single_announcer_test_() ->
                     {GotRef, 'OnceEvent', h, first} = expect_received(),
                     ?assertEqual(SubRef, GotRef),
                     %% The subscription is gone (consumed atomically).
-                    ok = wait_until(fun() ->
+                    ok = beamtalk_test_wait:until(fun() ->
                         not beamtalk_announcements:is_active(SubRef)
                     end),
                     ?assertEqual([], beamtalk_announcements:subscribers_of('OnceEvent')),
@@ -1109,7 +1109,7 @@ subscribe_remote_pid_through_gen_server_test_() ->
             ?assert(is_process_alive(BusPid)),
             %% Without a dist connection the monitor's immediate `noconnection`
             %% DOWN prunes the subscription — the documented cleanup path.
-            ok = wait_until(fun() ->
+            ok = beamtalk_test_wait:until(fun() ->
                 not beamtalk_announcements:is_active(SubRef)
             end),
             ?assertEqual([], beamtalk_announcements:subscribers_of('RemoteSubEvent'))
@@ -1379,7 +1379,7 @@ heir_rearm_monitor_fires_on_later_death_impl() ->
                     end,
 
                     %% Wait for the bus to process the DOWN and prune.
-                    ok = wait_until(fun() ->
+                    ok = beamtalk_test_wait:until(fun() ->
                         beamtalk_announcements:subscription_count() =:= 0
                     end),
                     ?assertNot(beamtalk_announcements:is_active(SubRef)),
@@ -1743,21 +1743,6 @@ stop_heir_process({started, Pid}) ->
     %% another suite) starts a fresh, healthy bus.
     stop_existing_bus(),
     ok.
-
-%% Poll `Pred` until it returns true, or fail after ~2s.
-wait_until(Pred) ->
-    wait_until(Pred, 200).
-
-wait_until(_Pred, 0) ->
-    ?assert(false);
-wait_until(Pred, N) ->
-    case Pred() of
-        true ->
-            ok;
-        false ->
-            timer:sleep(10),
-            wait_until(Pred, N - 1)
-    end.
 
 %%====================================================================
 %% BT-4502: no class-chain walk when nothing is subscribed

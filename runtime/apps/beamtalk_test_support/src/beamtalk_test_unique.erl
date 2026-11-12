@@ -52,7 +52,7 @@ Lives in `beamtalk_test_support` rather than `beamtalk_workspace/test/`
 would otherwise reach into a peer app's test tree to reuse this.
 """.
 
--export([id/0]).
+-export([id/0, atom/1]).
 
 -doc """
 A short string, distinct from every other call in this VM invocation AND
@@ -72,3 +72,12 @@ cross-invocation case this module exists for.
 -spec id() -> string().
 id() ->
     os:getpid() ++ "z" ++ integer_to_list(erlang:unique_integer([positive])).
+
+-doc """
+`Prefix ++ "_" ++ N` as an atom, `N` a positive monotonic in-VM integer. For
+in-memory identifiers only (registered names, class names); use `id/0` when
+the value reaches the disk. Replaces the per-file `unique_name/1` copies.
+""".
+-spec atom(string()) -> atom().
+atom(Prefix) ->
+    list_to_atom(Prefix ++ "_" ++ integer_to_list(erlang:unique_integer([positive, monotonic]))).

@@ -203,7 +203,7 @@ monitor_handles_unknown_cast_test() ->
 
     try
         gen_server:cast(MonPid, unknown_message),
-        timer:sleep(50),
+        ok = beamtalk_test_wait:sync(MonPid),
 
         ?assert(is_process_alive(MonPid))
     after

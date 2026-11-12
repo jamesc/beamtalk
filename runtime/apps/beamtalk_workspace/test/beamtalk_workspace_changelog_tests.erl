@@ -114,8 +114,8 @@ setup() ->
 
 cleanup(#{pid := Pid, tmp_home := TmpHome, old_home := OldHome}) ->
     stop(Pid),
-    restore_home(OldHome),
-    del_tree(TmpHome),
+    beamtalk_test_fs:restore_home(OldHome),
+    beamtalk_test_fs:rm_rf(TmpHome),
     ok.
 
 %%====================================================================
@@ -756,7 +756,7 @@ unknown_call_returns_error(#{pid := Pid}) ->
 %% An unknown cast must not crash the server.
 unknown_cast_is_ignored(#{pid := Pid}) ->
     gen_server:cast(Pid, some_bogus_cast),
-    timer:sleep(20),
+    ok = beamtalk_test_wait:sync(Pid),
     [?_assert(is_process_alive(Pid))].
 
 %% An unknown info message must not crash the server.
@@ -1066,8 +1066,8 @@ restart_bumps_epoch_and_tags_prior() ->
         ?assertEqual(1, length(beamtalk_workspace_changelog:active_entries())),
         stop(P2)
     after
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 restart_tags_orphan_when_disk_advanced() ->
@@ -1096,8 +1096,8 @@ restart_tags_orphan_when_disk_advanced() ->
         ?assertEqual([], beamtalk_workspace_changelog:active_entries()),
         stop(P2)
     after
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 restart_keeps_prior_when_disk_matches() ->
@@ -1122,8 +1122,8 @@ restart_keeps_prior_when_disk_matches() ->
         ?assertNot(is_orphan_flag(Entry)),
         stop(P2)
     after
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 %%====================================================================
@@ -1169,8 +1169,8 @@ rotation_archives_overflow() ->
         ?assertEqual(1000, length(Lines)),
         stop(Pid)
     after
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 rotation_keeps_state_when_archive_fails() ->
@@ -1211,8 +1211,8 @@ rotation_keeps_state_when_archive_fails() ->
         ?assert(is_process_alive(Pid)),
         stop(Pid)
     after
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 archive_filenames_unique_within_same_second() ->
@@ -1246,8 +1246,8 @@ archive_filenames_unique_within_same_second() ->
         ?assertEqual(length(MetaArchives), length(lists:usort(MetaArchives))),
         stop(Pid)
     after
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 load_enforces_ring_bound_when_disk_exceeds_max() ->
@@ -1279,8 +1279,8 @@ load_enforces_ring_bound_when_disk_exceeds_max() ->
         ?assertEqual(1000, length(LogLines)),
         stop(Pid)
     after
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 %%====================================================================
@@ -1652,18 +1652,11 @@ rename_method_input() ->
 fresh_workspace() ->
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("test-ws-" ++ Unique),
-    Tmp = filename:join(temp_dir(), "bt-changelog-" ++ Unique),
+    Tmp = filename:join(beamtalk_test_fs:base_dir(), "bt-changelog-" ++ Unique),
     ok = filelib:ensure_path(Tmp),
     OldHome = os:getenv("HOME"),
     true = os:putenv("HOME", Tmp),
     {WorkspaceId, Tmp, OldHome}.
-
-restore_home(false) -> os:unsetenv("HOME");
-restore_home(OldHome) -> os:putenv("HOME", OldHome).
-
-%% Cross-platform absolute temp dir (AGENTS.md: never hardcode /tmp in tests).
-temp_dir() ->
-    unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 stop(Pid) ->
     case is_process_alive(Pid) of
@@ -1678,13 +1671,6 @@ stop(Pid) ->
         false ->
             ok
     end.
-
-del_tree(Path) ->
-    case filelib:is_dir(Path) of
-        true -> _ = file:del_dir_r(Path);
-        false -> _ = file:delete(Path)
-    end,
-    ok.
 
 seq_file(Seq, Suffix) ->
     lists:flatten(io_lib:format("~6..0b~s", [Seq, Suffix])).

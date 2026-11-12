@@ -23,8 +23,6 @@ an xref-filtered candidate set — see that function's doc).
 
 -include_lib("eunit/include/eunit.hrl").
 
-temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
-
 %%====================================================================
 %% Pure helpers — superclasses_losing_leaf_status/1, was_leaf_class/1
 %%====================================================================
@@ -72,7 +70,7 @@ superclasses_losing_leaf_status_dedupes_test_() ->
             [
                 ?_test(begin
                     ShapePath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("leaf_helper_shape_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -107,7 +105,7 @@ superclasses_losing_leaf_status_accepts_binary_superclass_test_() ->
             [
                 ?_test(begin
                     ShapePath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("leaf_helper_binary_shape_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -258,7 +256,7 @@ gaining_a_first_subclass_does_not_flag_a_plain_type_pattern_dependent_test_() ->
                 ?_test(begin
                     %% `LeafRecheckShape` — leaf, zero subclasses.
                     ShapePath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("leaf_recheck_shape_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -285,7 +283,7 @@ gaining_a_first_subclass_does_not_flag_a_plain_type_pattern_dependent_test_() ->
                     %% it to completion (`wait_for_leaf_change_worker/0`) —
                     %% asynchronously, off this call's own return.
                     CirclePath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("leaf_recheck_circle_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -317,7 +315,7 @@ reloading_the_same_subclass_again_does_not_refire_test_() ->
             [
                 ?_test(begin
                     ShapePath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("leaf_recheck_shape2_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -327,7 +325,7 @@ reloading_the_same_subclass_again_does_not_refire_test_() ->
                     {ok, _, State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
 
                     CirclePath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("leaf_recheck_circle2_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -378,7 +376,7 @@ clean_leaf_change_recheck_does_not_announce_test_() ->
                     %% cannot attribute a single finding to the transition,
                     %% and no owner has a stored finding to clear either.
                     ShapePath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("leaf_recheck_clean_shape_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -390,7 +388,7 @@ clean_leaf_change_recheck_does_not_announce_test_() ->
                     {ok, _, State1} = beamtalk_repl_loader:handle_load(ShapePath, State0),
 
                     CirclePath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("leaf_recheck_clean_circle_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -518,7 +516,7 @@ gaining_a_first_subclass_invalidates_a_matchexhaustive_proof_test_() ->
                     subscribe_self_to_reload_check(),
 
                     ShapePath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("leaf_recheck_exhaustive_shape_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -542,7 +540,7 @@ gaining_a_first_subclass_invalidates_a_matchexhaustive_proof_test_() ->
                     ),
 
                     CirclePath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("leaf_recheck_exhaustive_circle_~p.bt", [
                             erlang:unique_integer([positive])
                         ])

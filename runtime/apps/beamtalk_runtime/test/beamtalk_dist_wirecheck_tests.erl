@@ -69,10 +69,6 @@ setup() ->
 cleanup({Peer, _PeerNode}) ->
     beamtalk_dist_test_helper:stop_peer(Peer).
 
--doc "A short, run-unique atom, so repeated `just test` runs never collide on a stale registered name.".
-unique_name(Prefix) ->
-    list_to_atom(Prefix ++ "_" ++ integer_to_list(erlang:unique_integer([positive, monotonic]))).
-
 wirecheck_test_() ->
     {timeout, 60,
         {setup, fun setup/0, fun cleanup/1, fun({_Peer, PeerNode}) ->
@@ -130,7 +126,7 @@ spawn_via_erpc(Name, DoUnlink) ->
     Pid.
 
 named_spawn_survives_when_unlinked(PeerNode) ->
-    Name = unique_name("bt3579a_pos"),
+    Name = beamtalk_test_unique:atom("bt3579a_pos"),
     Pid = erpc:call(PeerNode, ?MODULE, spawn_via_erpc, [Name, true]),
     ?assert(is_pid(Pid)),
     try
@@ -152,7 +148,7 @@ non-`normal`) — this pins whatever `erpc` actually does today rather than
 trusting that prose, per BT-3579's mandate to test the assumption itself.
 """.
 named_spawn_without_unlink(PeerNode) ->
-    Name = unique_name("bt3579a_neg"),
+    Name = beamtalk_test_unique:atom("bt3579a_neg"),
     Pid = erpc:call(PeerNode, ?MODULE, spawn_via_erpc, [Name, false]),
     ?assert(is_pid(Pid)),
     %% Unlike the positive case, there is a real race here: the actor's
@@ -224,7 +220,7 @@ parse_form(IoData) ->
     Form.
 
 block_missing_module_raises(PeerNode) ->
-    ModName = unique_name("bt3579b_missing"),
+    ModName = beamtalk_test_unique:atom("bt3579b_missing"),
     Binary = compile_block_module_variant(ModName, "v1"),
     %% Loaded on THIS node only — never written to any path on
     %% code:get_path(), so the peer never sees it (it is not "shared code
@@ -249,7 +245,7 @@ block_missing_module_raises(PeerNode) ->
     end.
 
 block_different_version_raises(PeerNode) ->
-    ModName = unique_name("bt3579b_skew"),
+    ModName = beamtalk_test_unique:atom("bt3579b_skew"),
     BinaryV1 = compile_block_module_variant(ModName, "v1"),
     BinaryV2 = compile_block_module_variant(ModName, "v2"),
     {module, ModName} = code:load_binary(ModName, atom_to_list(ModName) ++ ".erl", BinaryV1),
@@ -408,7 +404,7 @@ class_object_for(ClassName) ->
     end.
 
 class_object_rewrite_lands_locally(PeerNode) ->
-    ClassName = unique_name("WirecheckDemoClass"),
+    ClassName = beamtalk_test_unique:atom("WirecheckDemoClass"),
     {ok, LocalClassPid} = test_wirecheck_fakeclass:start(ClassName),
     {ok, RemoteClassPid} = rpc:call(PeerNode, test_wirecheck_fakeclass, start, [ClassName]),
     try

@@ -253,24 +253,12 @@ side never halts the peer.
 -spec force_disconnect(node()) -> ok.
 force_disconnect(PeerNode) ->
     _ = erlang:disconnect_node(PeerNode),
-    wait_until(fun() -> not lists:member(PeerNode, nodes()) end, 5000).
+    beamtalk_test_wait:until(fun() -> not lists:member(PeerNode, nodes()) end, 5000).
 
 -doc "Reconnect to `PeerNode`, asserting the connection actually came up.".
 -spec reconnect(node()) -> ok.
 reconnect(PeerNode) ->
     ?assertEqual(true, net_kernel:connect_node(PeerNode)).
-
--spec wait_until(fun(() -> boolean()), non_neg_integer()) -> ok.
-wait_until(_Pred, RemainingMs) when RemainingMs =< 0 ->
-    ok;
-wait_until(Pred, RemainingMs) ->
-    case Pred() of
-        true ->
-            ok;
-        false ->
-            timer:sleep(20),
-            wait_until(Pred, RemainingMs - 20)
-    end.
 
 %% Subscribe `self()` to a system event class with a fun handler that
 %% forwards each payload back to this process (mirrors

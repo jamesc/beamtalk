@@ -96,25 +96,6 @@ sync(_) ->
     _ = sys:get_state(beamtalk_file_handle_registry),
     ok.
 
-%% Poll `Pred` until it holds, then return ok; assert (and so fail the test) if
-%% it never does. Owner-death reclamation is only half-synchronous:
-%% `sync/1` proves the registry has dropped its own bookkeeping, but
-%% the descriptor is closed by a transient process shortly afterwards, so
-%% "is the handle shut?" has to be polled rather than assumed.
-wait_until(Pred) ->
-    wait_until(Pred, 400).
-
-wait_until(Pred, 0) ->
-    ?assert(Pred());
-wait_until(Pred, Attempts) ->
-    case Pred() of
-        true ->
-            ok;
-        false ->
-            timer:sleep(5),
-            wait_until(Pred, Attempts - 1)
-    end.
-
 closed(Handle) ->
     fun() -> not beamtalk_file_handle:is_open(Handle) end.
 
@@ -144,7 +125,7 @@ owned_handle_closed_and_removed_on_owner_death_test_() ->
             %% Bookkeeping is dropped synchronously with the 'DOWN'; the close
             %% itself lands a moment later, off the registry process.
             ?assertNot(has_entry(PathBin, beamtalk_file_handle_registry:open_handles())),
-            ok = wait_until(closed(Handle)),
+            ok = beamtalk_test_wait:until(closed(Handle)),
             delete_temp(TmpPath)
         end)
     end}.
@@ -169,7 +150,7 @@ registry_stays_responsive_while_owner_close_is_in_flight_test_() ->
             stop_dummy(Owner),
             %% The registry drops its own bookkeeping synchronously, so the
             %% wedged handle disappearing proves the 'DOWN' was handled...
-            ok = wait_until(unlisted(WedgedPath)),
+            ok = beamtalk_test_wait:until(unlisted(WedgedPath)),
             %% ...while its close is genuinely still in flight and stuck.
             ?assert(is_process_alive(WedgedFd)),
 
@@ -258,7 +239,7 @@ shared_owner_monitor_survives_until_last_handle_gone_test_() ->
             stop_dummy(Owner),
             ok = sync(ok),
 
-            ok = wait_until(closed(H2)),
+            ok = beamtalk_test_wait:until(closed(H2)),
             Handles = beamtalk_file_handle_registry:open_handles(),
             ?assertNot(has_entry(list_to_binary(P1), Handles)),
             ?assertNot(has_entry(list_to_binary(P2), Handles)),
@@ -369,7 +350,7 @@ multiple_owners_monitor_demonitored_independently_test_() ->
             %% H2 must still be reclaimed when Owner2 dies (its monitor was kept).
             stop_dummy(Owner2),
             ok = sync(ok),
-            ok = wait_until(closed(H2)),
+            ok = beamtalk_test_wait:until(closed(H2)),
             ?assertNot(
                 has_entry(
                     list_to_binary(P2),

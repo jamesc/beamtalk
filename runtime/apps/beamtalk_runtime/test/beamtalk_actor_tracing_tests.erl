@@ -373,7 +373,7 @@ sync_send_dead_actor_preserves_error_test_() ->
             ?_test(begin
                 Pid = start_registered_counter(0),
                 gen_server:stop(Pid),
-                timer:sleep(50),
+                beamtalk_test_wait:dead(Pid),
 
                 %% Sync send to dead actor should raise actor_dead error
                 Result =
@@ -406,7 +406,7 @@ async_send_dead_actor_test_() ->
                 try
                     Pid = start_registered_counter(0),
                     gen_server:stop(Pid),
-                    timer:sleep(50),
+                    beamtalk_test_wait:dead(Pid),
 
                     %% Async send to dead actor should reject the future
                     {beamtalk_future, FuturePid} = beamtalk_future:new(),
@@ -537,7 +537,7 @@ cast_send_dead_actor_test_() ->
                 try
                     Pid = start_registered_counter(0),
                     gen_server:stop(Pid),
-                    timer:sleep(50),
+                    beamtalk_test_wait:dead(Pid),
 
                     %% Cast send to dead actor should return ok (fire-and-forget)
                     Result = beamtalk_actor:cast_send(Pid, increment, []),
@@ -745,7 +745,7 @@ lifecycle_events_in_traces_test_() ->
                 Pid = start_registered_counter(0),
                 %% Stop the actor to trigger lifecycle events
                 beamtalk_actor:sync_send(Pid, stop, []),
-                timer:sleep(100),
+                beamtalk_test_wait:dead(Pid),
 
                 %% Get all traces — should include lifecycle events
                 Traces = beamtalk_trace_store:get_traces(),
@@ -790,7 +790,7 @@ lifecycle_aggregate_stats_test_() ->
                 Pid = start_registered_counter(0),
                 %% Stop the actor to trigger lifecycle events
                 beamtalk_actor:sync_send(Pid, stop, []),
-                timer:sleep(100),
+                beamtalk_test_wait:dead(Pid),
 
                 %% Get aggregate stats — should include lifecycle operations.
                 %% Death changes nothing: the always-on class entry holds
@@ -988,7 +988,7 @@ trace_context_in_traces_test_() ->
                 try
                     %% Sync send — telemetry handler runs in caller process
                     _Result = beamtalk_actor:sync_send(Pid, getValue, []),
-                    timer:sleep(50),
+                    ok = beamtalk_test_wait:sync(Pid),
 
                     Traces = beamtalk_trace_store:get_traces(),
                     DispatchTraces = [
@@ -1029,7 +1029,7 @@ empty_trace_context_no_overhead_test_() ->
                 Pid = start_registered_counter(0),
                 try
                     _Result = beamtalk_actor:sync_send(Pid, getValue, []),
-                    timer:sleep(50),
+                    ok = beamtalk_test_wait:sync(Pid),
 
                     Traces = beamtalk_trace_store:get_traces(),
                     DispatchTraces = [
@@ -1132,7 +1132,7 @@ causal_root_span_test_() ->
                 try
                     %% Sync send — first dispatch creates a root span
                     _Result = beamtalk_actor:sync_send(Pid, getValue, []),
-                    timer:sleep(50),
+                    ok = beamtalk_test_wait:sync(Pid),
 
                     %% Verify causal context was set in process dictionary
                     TraceId = get('$beamtalk_trace_id'),
@@ -1181,7 +1181,7 @@ causal_parent_child_linking_test_() ->
                 try
                     %% First dispatch — creates root span
                     _Result1 = beamtalk_actor:sync_send(Pid, getValue, []),
-                    timer:sleep(50),
+                    ok = beamtalk_test_wait:sync(Pid),
 
                     RootTraceId = get('$beamtalk_trace_id'),
                     RootSpanId = get('$beamtalk_span_id'),
@@ -1225,12 +1225,12 @@ causal_trace_id_filter_test_() ->
                 try
                     %% First dispatch — root span with trace_id T1
                     _Result1 = beamtalk_actor:sync_send(Pid, getValue, []),
-                    timer:sleep(50),
+                    ok = beamtalk_test_wait:sync(Pid),
                     T1 = get('$beamtalk_trace_id'),
 
                     %% Second dispatch under same trace — different span_id, same trace_id
                     _Result2 = beamtalk_actor:sync_send(Pid, increment, []),
-                    timer:sleep(50),
+                    ok = beamtalk_test_wait:sync(Pid),
 
                     %% Start a new trace by clearing causal context
                     erase('$beamtalk_trace_id'),
@@ -1239,7 +1239,7 @@ causal_trace_id_filter_test_() ->
 
                     %% Third dispatch — new root span with trace_id T2
                     _Result3 = beamtalk_actor:sync_send(Pid, getValue, []),
-                    timer:sleep(50),
+                    ok = beamtalk_test_wait:sync(Pid),
                     T2 = get('$beamtalk_trace_id'),
                     ?assertNotEqual(T1, T2),
 
@@ -1290,7 +1290,7 @@ causal_multi_hop_chain_test_() ->
                 PidA = start_registered_counter(0),
                 try
                     _ResultA = beamtalk_actor:sync_send(PidA, getValue, []),
-                    timer:sleep(50),
+                    ok = beamtalk_test_wait:sync(PidA),
 
                     TraceId = get('$beamtalk_trace_id'),
                     SpanA = get('$beamtalk_span_id'),
@@ -1308,7 +1308,7 @@ causal_multi_hop_chain_test_() ->
 
                     %% Actor B's own dispatch generates new span_id
                     _ResultB = beamtalk_actor:sync_send(PidA, increment, []),
-                    timer:sleep(50),
+                    ok = beamtalk_test_wait:sync(PidA),
                     SpanB = get('$beamtalk_span_id'),
                     ?assertNotEqual(SpanA, SpanB),
                     ?assertEqual(TraceId, get('$beamtalk_trace_id')),
@@ -1326,7 +1326,7 @@ causal_multi_hop_chain_test_() ->
 
                     %% Actor C dispatches
                     _ResultC = beamtalk_actor:sync_send(PidA, getValue, []),
-                    timer:sleep(50),
+                    ok = beamtalk_test_wait:sync(PidA),
                     SpanC = get('$beamtalk_span_id'),
                     ?assertNotEqual(SpanB, SpanC),
                     ?assertEqual(TraceId, get('$beamtalk_trace_id')),
@@ -1373,7 +1373,7 @@ causal_no_overhead_when_disabled_test_() ->
                 try
                     %% Dispatch with tracing disabled
                     _Result = beamtalk_actor:sync_send(Pid, getValue, []),
-                    timer:sleep(50),
+                    ok = beamtalk_test_wait:sync(Pid),
 
                     %% No causal context should be set
                     ?assertEqual(undefined, get('$beamtalk_trace_id')),

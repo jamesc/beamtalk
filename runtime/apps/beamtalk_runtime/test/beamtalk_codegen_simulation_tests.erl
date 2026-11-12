@@ -1219,7 +1219,8 @@ method_not_found_error_test_() ->
     {timeout, ?TEST_TIMEOUT_S, fun method_not_found_error/0}.
 
 method_not_found_error() ->
-    wait_for_class('Actor', ?ACTOR_WAIT_MS),
+    application:ensure_all_started(beamtalk_runtime),
+    beamtalk_test_wait:class('Actor', ?ACTOR_WAIT_MS),
     Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
 
@@ -1445,31 +1446,6 @@ setup_super_test_classes() ->
     end,
     ok.
 
-%% Block until ClassName is registered in the class registry, or
-%% raise if TimeoutMs elapses first. beamtalk_stdlib registers stdlib
-%% classes (including 'Actor') asynchronously in the background at
-%% application startup, so tests whose real-codegen DNU path needs a
-%% hierarchy walk up to 'Actor' can otherwise run before it's ready.
--spec wait_for_class(atom(), non_neg_integer()) -> ok.
-wait_for_class(ClassName, TimeoutMs) ->
-    application:ensure_all_started(beamtalk_runtime),
-    Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
-    wait_for_class_loop(ClassName, Deadline).
-
-wait_for_class_loop(ClassName, Deadline) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            case erlang:monotonic_time(millisecond) >= Deadline of
-                true ->
-                    error({class_not_registered, ClassName});
-                false ->
-                    timer:sleep(10),
-                    wait_for_class_loop(ClassName, Deadline)
-            end;
-        _Pid ->
-            ok
-    end.
-
 %% ==========================================================================
 %% Super Keyword Tests
 %%
@@ -1671,7 +1647,8 @@ unregistered_extension_gives_dnu_test_() ->
     {timeout, ?TEST_TIMEOUT_S, fun unregistered_extension_gives_dnu/0}.
 
 unregistered_extension_gives_dnu() ->
-    wait_for_class('Actor', ?ACTOR_WAIT_MS),
+    application:ensure_all_started(beamtalk_runtime),
+    beamtalk_test_wait:class('Actor', ?ACTOR_WAIT_MS),
     Object = 'bt@counter':spawn(),
     Pid = element(4, Object),
     try

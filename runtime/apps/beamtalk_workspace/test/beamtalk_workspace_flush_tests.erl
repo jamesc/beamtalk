@@ -247,7 +247,7 @@ reload_case_setup() ->
     %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("test-ws-flush-reload-" ++ Unique),
-    Tmp = filename:join(temp_dir(), "bt-flush-reload-" ++ Unique),
+    Tmp = filename:join(beamtalk_test_fs:base_dir(), "bt-flush-reload-" ++ Unique),
     ProjDir = filename:join(Tmp, "proj"),
     ok = filelib:ensure_path(filename:join(ProjDir, "src")),
     OldHome = os:getenv("HOME"),
@@ -273,8 +273,8 @@ reload_case_teardown(#{
 }) ->
     stop(MetaPid),
     stop(ClogPid),
-    restore_home(OldHome),
-    del_tree(Tmp),
+    beamtalk_test_fs:restore_home(OldHome),
+    beamtalk_test_fs:rm_rf(Tmp),
     ok.
 
 %% Compile+load a real, in-project-backed class from `Path` (reusing the
@@ -401,8 +401,8 @@ setup() ->
 
 cleanup(#{pid := Pid, tmp_home := TmpHome, old_home := OldHome}) ->
     stop(Pid),
-    restore_home(OldHome),
-    del_tree(TmpHome),
+    beamtalk_test_fs:restore_home(OldHome),
+    beamtalk_test_fs:rm_rf(TmpHome),
     ok.
 
 %%====================================================================
@@ -1045,8 +1045,8 @@ filter_shadowed_keeps_only_renamed_survivors() ->
         ?assertEqual(1, length(Kept))
     after
         stop(Pid),
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 filter_shadowed_drops_unrenamed_survivors() ->
@@ -1080,8 +1080,8 @@ filter_shadowed_drops_unrenamed_survivors() ->
         ?assertEqual([], Kept)
     after
         stop(Pid),
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 %%====================================================================
@@ -3280,8 +3280,8 @@ entry_tier_classifies_remove_class_as_tier2() ->
         ?assertEqual(tier2, beamtalk_workspace_flush:entry_tier(Entry))
     after
         stop(Pid),
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 entry_tier_classifies_other_kinds_as_tier1() ->
@@ -3308,8 +3308,8 @@ entry_tier_classifies_other_kinds_as_tier1() ->
         ?assertEqual([tier1, tier1, tier1], Tiers)
     after
         stop(Pid),
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 %% ADR 0114 Phase 2: `'rename-class'` joins `'remove-class'` in
@@ -3331,8 +3331,8 @@ entry_tier_classifies_rename_class_as_tier2() ->
         ?assertEqual(tier2, beamtalk_workspace_flush:entry_tier(Entry))
     after
         stop(Pid),
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 %% ADR 0114 Phase 3: `'rename-method'` joins `'remove-class'`/
@@ -3356,8 +3356,8 @@ entry_tier_classifies_rename_method_as_tier2() ->
         ?assertEqual(tier2, beamtalk_workspace_flush:entry_tier(MethodEntry))
     after
         stop(Pid),
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 %% `resolve_new_path/1` prefers a recorded `new_path` verbatim over deriving
@@ -3382,8 +3382,8 @@ resolve_new_path_prefers_recorded_value() ->
         )
     after
         stop(Pid),
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 %% `resolve_new_path/1` derives a target path when the entry itself did not
@@ -3408,8 +3408,8 @@ resolve_new_path_derives_exact_style_from_old_path() ->
         )
     after
         stop(Pid),
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 %% Same, but the old file used the snake_case convention (`counter.bt`) — the
@@ -3432,8 +3432,8 @@ resolve_new_path_derives_snake_case_style_from_old_path() ->
         )
     after
         stop(Pid),
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 %% Windows regression: a derived new path must preserve the exact
@@ -3460,8 +3460,8 @@ resolve_new_path_preserves_drive_letter_case() ->
         )
     after
         stop(Pid),
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 %% Nightly Windows regression: a derived new path must preserve `old_path`'s
@@ -3491,8 +3491,8 @@ resolve_new_path_preserves_backslash_separators() ->
         )
     after
         stop(Pid),
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 %% `old_path` with no directory component (`filename:dirname/1` returns
@@ -3513,8 +3513,8 @@ resolve_new_path_derives_path_with_no_directory() ->
         ?assertEqual(<<"Accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry))
     after
         stop(Pid),
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 %% `old_path` at the filesystem root (`filename:dirname/1` returns the
@@ -3535,8 +3535,8 @@ resolve_new_path_derives_path_at_filesystem_root() ->
         ?assertEqual(<<"/Accumulator.bt">>, beamtalk_workspace_flush:resolve_new_path(Entry))
     after
         stop(Pid),
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 splice_is_pure_byte_replace() ->
@@ -3586,8 +3586,8 @@ group_by_file_preserves_seq_order() ->
         ?assertEqual([<<"inc">>, <<"dec">>], Selectors)
     after
         stop(Pid),
-        restore_home(OldHome),
-        del_tree(TmpHome)
+        beamtalk_test_fs:restore_home(OldHome),
+        beamtalk_test_fs:rm_rf(TmpHome)
     end.
 
 %%====================================================================
@@ -3789,17 +3789,11 @@ fresh_workspace() ->
     %% table.
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("test-ws-flush-" ++ Unique),
-    Tmp = filename:join(temp_dir(), "bt-flush-" ++ Unique),
+    Tmp = filename:join(beamtalk_test_fs:base_dir(), "bt-flush-" ++ Unique),
     ok = filelib:ensure_path(Tmp),
     OldHome = os:getenv("HOME"),
     true = os:putenv("HOME", Tmp),
     {WorkspaceId, Tmp, OldHome}.
-
-restore_home(false) -> os:unsetenv("HOME");
-restore_home(OldHome) -> os:putenv("HOME", OldHome).
-
-temp_dir() ->
-    unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 stop(Pid) ->
     case is_process_alive(Pid) of
@@ -3814,13 +3808,6 @@ stop(Pid) ->
         false ->
             ok
     end.
-
-del_tree(Path) ->
-    case filelib:is_dir(Path) of
-        true -> _ = file:del_dir_r(Path);
-        false -> _ = file:delete(Path)
-    end,
-    ok.
 
 %%====================================================================
 %% FlushCompleted announcement (ADR 0093 §2)

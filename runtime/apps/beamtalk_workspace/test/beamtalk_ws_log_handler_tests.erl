@@ -116,7 +116,7 @@ subscriber_cleanup_on_death() ->
     ?assertNotEqual([], ets:lookup(beamtalk_ws_log_subscribers, Pid)),
     %% Kill the subscriber
     exit(Pid, kill),
-    timer:sleep(100),
+    beamtalk_test_wait:dead(Pid),
     %% Verify cleanup
     ?assertEqual([], ets:lookup(beamtalk_ws_log_subscribers, Pid)).
 
