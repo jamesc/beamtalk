@@ -207,7 +207,7 @@ const CEILINGS: &[(&str, usize)] = &[
         1,
     ),
     (
-        "beamtalk-core/src/semantic_analysis/type_checker/validation.rs",
+        "beamtalk-core/src/semantic_analysis/type_checker/validation/arguments.rs",
         1,
     ),
     // An assignment value (`a := (Worker spawn)`): not an operand, so

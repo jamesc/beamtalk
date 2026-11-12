@@ -224,7 +224,7 @@ impl TypeChecker {
             // non-`List` tail (e.g. `Array`, tuple-backed) builds an
             // improper list at runtime; flag it instead of silently
             // widening the element type to `Dynamic`. The fact
-            // (this pure check) stays here; `validation.rs` renders it.
+            // (this pure check) stays here; `validation/` renders it.
             if let Some(tail_display) = Self::improper_cons_tail_display(&tail_ty) {
                 self.emit_improper_cons_tail(&tail_display, t.span());
             }

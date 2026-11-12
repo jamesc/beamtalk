@@ -14,14 +14,14 @@
 //! - Shared context: [`TypeStringContext`], [`TypeChecker::set_param_types`]
 //!
 //! Dependency direction is one-way: this module (and everything under it)
-//! calls into `validation.rs`/`protocol.rs` to render diagnostics
+//! calls into `validation/`/`protocol.rs` to render diagnostics
 //! (`check_argument_types`, `check_instance_selector`, …), never the other
 //! way around. State-field default values are the one place validation
 //! needs an inferred type it didn't compute itself; rather than calling
 //! back into `infer_expr` (which would make the dependency cyclic),
 //! `check_module` infers each default value once here and caches the
 //! result in `TypeChecker::state_default_types` (BT-3481) for
-//! `validation.rs`/`protocol.rs` to read.
+//! `validation/`/`protocol.rs` to read.
 
 use crate::ast::{Expression, ExpressionStatement, Module, TypeAnnotation};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
@@ -247,7 +247,7 @@ impl TypeChecker {
     /// (BT-3481).
     ///
     /// Only infers fields that declare *both* a type annotation and a
-    /// default value — `validation.rs::check_state_defaults` and
+    /// default value — `validation/construction.rs::check_state_defaults` and
     /// `protocol.rs::check_state_variance` (this map's only two readers)
     /// both require both to be present before they look anything up, so a
     /// field missing either would never be read back and inferring it here
@@ -705,7 +705,7 @@ impl TypeChecker {
             // The syntactic class-side path (`Expression::ClassReference`
             // receiver in `infer_message_send`) still fires for direct sends, and
             // the type-driven `Meta{C}` path covers receivers reached through a
-            // binding. `Meta{C} <: Class <: Behaviour` subtyping (validation.rs)
+            // binding. `Meta{C} <: Class <: Behaviour` subtyping (validation/)
             // keeps `:: Class` / `:: Behaviour` parameter checks and `isKindOf:`
             // satisfied; `x class = Foo` narrowing is AST-driven (class_eq.rs) and
             // unaffected by this inference change.
@@ -962,7 +962,7 @@ impl TypeChecker {
         // Detecting whether this Dynamic warrants the
         // "Dynamic in typed class" warning is pure data (see
         // `detect_dynamic_in_typed_class`); rendering it as a diagnostic is
-        // `validation.rs`'s job.
+        // `validation/`'s job.
         if let Some(fact) = Self::detect_dynamic_in_typed_class(
             expr,
             ty,
@@ -976,7 +976,7 @@ impl TypeChecker {
     /// Detect the "Dynamic in typed class" fact for `ty` (an
     /// expression's freshly-inferred type) under `typed_class_context` (the
     /// enclosing `typed` class's name, if any) — pure data, no diagnostic
-    /// construction; see `validation.rs::emit_dynamic_in_typed_class` for
+    /// construction; see `validation/emit.rs::emit_dynamic_in_typed_class` for
     /// the rendering.
     ///
     /// Only warns for root-cause Dynamic reasons: not `DynamicReceiver`

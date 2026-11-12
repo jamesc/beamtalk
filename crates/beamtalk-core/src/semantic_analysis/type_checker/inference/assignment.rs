@@ -83,7 +83,7 @@ impl TypeChecker {
 
     /// Detect a declared-vs-inferred type mismatch on an assignment's type
     /// annotation — pure data, no diagnostic construction; see
-    /// `validation.rs::emit_assignment_type_mismatch` for the rendering.
+    /// `validation/emit.rs::emit_assignment_type_mismatch` for the rendering.
     ///
     /// Returns `None` when the RHS is `Dynamic` (the primary use case for
     /// annotations — accepted silently) or `Never` (a diverging expression
@@ -105,7 +105,7 @@ impl TypeChecker {
     /// (`E`, `T` — see `is_type_var_placeholder`). Inside a method body a
     /// method-local or class-level type variable is an opaque placeholder
     /// with no binding (BT-4210), so it is symbolic and compatible with
-    /// anything; `type_args_compatible` (validation.rs) treats generic type
+    /// anything; `type_args_compatible` (validation/) treats generic type
     /// args with the same predicate.
     pub(in crate::semantic_analysis::type_checker) fn detect_assignment_type_mismatch(
         inferred_ty: &InferredType,
@@ -625,7 +625,7 @@ impl TypeChecker {
         let ty = if let Some(declared) = declared_ann {
             // Detection (is this RHS type actually incompatible
             // with the declared annotation?) stays here; rendering the
-            // resulting fact as a diagnostic is `validation.rs`'s job.
+            // resulting fact as a diagnostic is `validation/`'s job.
             if let Some(mismatch) = Self::detect_assignment_type_mismatch(
                 &inferred_ty,
                 &declared,
@@ -710,7 +710,7 @@ impl TypeChecker {
                     // objects cannot mutate another object's state. The
                     // fact (which receiver/field) is detected here; the
                     // message (including the `withField:` suggestion text)
-                    // is rendered by `validation.rs`.
+                    // is rendered by `validation/`.
                     let recv_name = match receiver.as_ref() {
                         Expression::Identifier(recv_id) => recv_id.name.clone(),
                         _ => EcoString::from("receiver"),

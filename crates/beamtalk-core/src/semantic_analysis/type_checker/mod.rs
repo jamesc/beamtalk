@@ -58,7 +58,7 @@ mod env_key;
 mod exhaustiveness;
 mod inference;
 // ADR 0126 §6: known-remote flow-fact classification, shared between the
-// live-`TypeEnv` message-argument check (`validation.rs`) and the
+// live-`TypeEnv` message-argument check (`validation/`) and the
 // span-indexed post-hoc block-argument check
 // (`semantic_analysis::validators::sendability_validators`) — `pub(crate)`
 // since both consumers live outside this module.
@@ -481,7 +481,7 @@ pub struct TypeChecker {
     /// Populated once per class by `inference/mod.rs::check_module`
     /// (Phase 1, alongside `check_state_defaults`) for every state field
     /// that declares both a type annotation and a default value — the only
-    /// fields either consumer below ever looks up. `validation.rs`'s
+    /// fields either consumer below ever looks up. `validation/`'s
     /// `check_state_defaults` and `protocol.rs`'s `check_state_variance`
     /// (Phase 2f, which runs strictly after Phase 1 — see
     /// `check_module_with_protocols_and_aliases`) both read from this map

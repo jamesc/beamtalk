@@ -10,7 +10,7 @@
 //! send, or a `scope: #global` spawn/lookup send. Known-remote receivers
 //! upgrade two of ADR 0103's advisory sendability checks
 //! (`sendability_validators.rs::check_block_captures`,
-//! `validation.rs::check_arg_sendability`) from silent/info to a
+//! `validation/arguments.rs::check_arg_sendability`) from silent/info to a
 //! diagnostic that predicts an actual runtime rejection or failure mode.
 //!
 //! This module is the **single source of truth** for the classification —

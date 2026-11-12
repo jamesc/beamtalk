@@ -7,7 +7,7 @@
 //! (`compute_hover` is the hover entry point, not part of this crate's
 //! `semantic_analysis::type_checker`). This file covers the diagnostic side:
 //! membership-violation wording naming the alias (with a "did you mean"
-//! suggestion, reusing `validation.rs`'s `edit_distance` "did you mean"
+//! suggestion, reusing `validation/`'s `edit_distance` "did you mean"
 //! machinery), and the core `TypeProvenance::Aliased` display mechanics that
 //! back both surfaces.
 //!
@@ -38,7 +38,7 @@ fn singleton_comparison_against_alias_names_alias_and_suggests_correction() {
     // declared type is `RestartStrategy`, so the diagnostic must render
     // `RestartStrategy (#temporary | #transient | #permanent)`, not the bare
     // expansion — and, since the union is closed, a "did you mean" typo
-    // suggestion (mirroring `validation.rs`'s `closest_state_slot`).
+    // suggestion (mirroring `validation/`'s `closest_state_slot`).
     let source = r"
 type RestartStrategy = #temporary | #transient | #permanent
 
@@ -229,7 +229,7 @@ fn argument_mismatch_on_alias_typed_parameter_names_the_alias() {
     // never registered as a class in `ClassHierarchy`
     // (`hierarchy.has_class("RestartStrategy")` is always `false`), and
     // `is_type_compatible`'s "unknown declared class → conservatively
-    // compatible" fallback (validation.rs, the
+    // compatible" fallback (validation/, the
     // `!hierarchy.has_class(actual_base) || !hierarchy.has_class(expected_base)`
     // check) absorbed *every* argument against a bare alias-typed parameter
     // as compatible, so the mismatch branch this test targets never ran
@@ -325,7 +325,7 @@ Object subclass: Widget
 #[test]
 fn field_assignment_of_a_valid_alias_member_is_not_flagged() {
     // Positive case: `check_field_assignment` must not call
-    // `is_assignable_to` (validation.rs) with the *bare* alias name
+    // `is_assignable_to` (validation/) with the *bare* alias name
     // (`"RestartStrategy"`, never expanded — `ClassHierarchy` predates ADR
     // 0108 and has no `AliasRegistry` access). `is_assignable_to` has no
     // "unknown declared class" escape hatch, so a bare alias name that never
@@ -489,7 +489,7 @@ Object subclass: Runner
 
 #[test]
 fn spawn_with_value_mismatch_on_alias_typed_slot_names_the_alias() {
-    // `check_spawn_with_value` (validation.rs) sits on the same
+    // `check_spawn_with_value` (validation/) sits on the same
     // pre-ADR-0108 `state_field_type` `EcoString` boundary as
     // `check_field_assignment` — a fourth EcoString-based display path
     // beyond the three main call sites. `C spawnWith: #{ slot: value }`
@@ -522,7 +522,7 @@ Supervisor spawnWith: #{#policy => 42}
 #[allow(clippy::too_many_lines)] // exercises three ClassInfo fixtures inline; splitting hurts readability
 fn instance_arg_rejected_for_class_typed_alias_parameter() {
     // `check_argument_types`'s
-    // `class_shortcut_applies` guard (validation.rs, `expected_ty.as_str()
+    // `class_shortcut_applies` guard (validation/, `expected_ty.as_str()
     // == "Class"`) must gate on `expected_structural`,
     // not the bare `expected_ty`. For `type ClassAlias = Class`,
     // `expected_ty` is `"ClassAlias"` (never `"Class"`) while

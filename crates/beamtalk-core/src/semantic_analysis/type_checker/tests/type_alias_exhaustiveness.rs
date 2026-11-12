@@ -189,7 +189,7 @@ fn alias_typed_method_return_resolves_to_structural_union() {
     // ADR 0108's other motivating shape: `defaultHeading -> Direction`. A
     // mismatched return (returning a value outside the union) must be
     // caught exactly as it would be against the spelled-out union — proving
-    // `check_return_type` (validation.rs) also expands the alias, not just
+    // `check_return_type` (validation/) also expands the alias, not just
     // parameter positions.
     let source = r"
 type Direction = #north | #south | #east | #west
