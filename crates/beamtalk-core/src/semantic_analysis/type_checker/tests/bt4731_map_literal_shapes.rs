@@ -279,3 +279,15 @@ fn build_then_pass_idiom_is_silent_now_keyed_ops_are_shape_aware() {
     );
     assert!(msgs.is_empty(), "got: {msgs:#?}");
 }
+
+#[test]
+fn annotated_local_accepts_a_literal_by_structure() {
+    let msgs = warnings(
+        "Object subclass: Probe\n  \
+           bare =>\n    d :: Dictionary := #{#a => 1}\n    d\n  \
+           typed =>\n    d :: Dictionary(Symbol, Integer) := #{#a => 1}\n    d\n  \
+           open =>\n    d :: #{#a => Integer, ...} := #{#a => 1, #b => \"x\"}\n    d\n  \
+           optional =>\n    d :: #{#a => Integer, ?#b => String} := #{#a => 1}\n    d\n",
+    );
+    assert!(msgs.is_empty(), "got: {msgs:#?}");
+}

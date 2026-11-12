@@ -13,7 +13,7 @@ Object subclass: ResultTryDoTier2MatrixClass
       do: [:k |
         Result
           tryDo: [
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -59,7 +59,7 @@ Object subclass: ResultTryDoTier2MatrixClass
         Result
           tryDo: [
             t := t + 1
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -76,7 +76,7 @@ Object subclass: ResultTryDoTier2MatrixClass
       do: [:k |
         [
           t := t + 1
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -92,7 +92,7 @@ Object subclass: ResultTryDoTier2MatrixClass
       do: [:k |
         Result
           tryDo: [
-            #{#a => 1} at: #k ifAbsent: [t := 1]
+            (Dictionary new at: #a put: 1) at: #k ifAbsent: [t := 1]
             2
           ]
       ]
@@ -138,7 +138,7 @@ Object subclass: ResultTryDoTier2MatrixClass
     #(1, 2)
       do: [:k |
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -153,7 +153,7 @@ Object subclass: ResultTryDoTier2MatrixClass
     #(1, 2)
       do: [:k |
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -184,7 +184,7 @@ Object subclass: ResultTryDoTier2MatrixClass
       do: [:k |
         Result
           tryDo: [
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -233,7 +233,7 @@ Object subclass: ResultTryDoTier2MatrixClass
         Result
           tryDo: [
             t := t + 1
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -251,7 +251,7 @@ Object subclass: ResultTryDoTier2MatrixClass
       do: [:k |
         [
           t := t + 1
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -268,7 +268,7 @@ Object subclass: ResultTryDoTier2MatrixClass
       do: [:k |
         Result
           tryDo: [
-            #{#a => 1} at: #k ifAbsent: [t := 1]
+            (Dictionary new at: #a put: 1) at: #k ifAbsent: [t := 1]
             2
           ]
       ]
@@ -318,7 +318,7 @@ Object subclass: ResultTryDoTier2MatrixClass
       to: 2
       do: [:k |
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -334,7 +334,7 @@ Object subclass: ResultTryDoTier2MatrixClass
       to: 2
       do: [:k |
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -365,7 +365,7 @@ Object subclass: ResultTryDoTier2MatrixClass
       timesRepeat: [
         Result
           tryDo: [
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -411,7 +411,7 @@ Object subclass: ResultTryDoTier2MatrixClass
         Result
           tryDo: [
             t := t + 1
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -428,7 +428,7 @@ Object subclass: ResultTryDoTier2MatrixClass
       timesRepeat: [
         [
           t := t + 1
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -444,7 +444,7 @@ Object subclass: ResultTryDoTier2MatrixClass
       timesRepeat: [
         Result
           tryDo: [
-            #{#a => 1} at: #k ifAbsent: [t := 1]
+            (Dictionary new at: #a put: 1) at: #k ifAbsent: [t := 1]
             2
           ]
       ]
@@ -490,7 +490,7 @@ Object subclass: ResultTryDoTier2MatrixClass
     2
       timesRepeat: [
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -505,7 +505,7 @@ Object subclass: ResultTryDoTier2MatrixClass
     2
       timesRepeat: [
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -537,7 +537,7 @@ Object subclass: ResultTryDoTier2MatrixClass
         i := i + 1
         Result
           tryDo: [
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -589,7 +589,7 @@ Object subclass: ResultTryDoTier2MatrixClass
         Result
           tryDo: [
             t := t + 1
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -608,7 +608,7 @@ Object subclass: ResultTryDoTier2MatrixClass
         i := i + 1
         [
           t := t + 1
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -626,7 +626,7 @@ Object subclass: ResultTryDoTier2MatrixClass
         i := i + 1
         Result
           tryDo: [
-            #{#a => 1} at: #k ifAbsent: [t := 1]
+            (Dictionary new at: #a put: 1) at: #k ifAbsent: [t := 1]
             2
           ]
       ]
@@ -680,7 +680,7 @@ Object subclass: ResultTryDoTier2MatrixClass
       whileTrue: [
         i := i + 1
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -697,7 +697,7 @@ Object subclass: ResultTryDoTier2MatrixClass
       whileTrue: [
         i := i + 1
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -727,7 +727,7 @@ Object subclass: ResultTryDoTier2MatrixClass
     t := 0
     Result
       tryDo: [
-        #{#a => 1}
+        (Dictionary new at: #a put: 1)
           at: #k
           ifAbsent: [
             t := t + 1
@@ -764,7 +764,7 @@ Object subclass: ResultTryDoTier2MatrixClass
     Result
       tryDo: [
         t := t + 1
-        #{#a => 1}
+        (Dictionary new at: #a put: 1)
           at: #k
           ifAbsent: [
             t := t + 1
@@ -778,7 +778,7 @@ Object subclass: ResultTryDoTier2MatrixClass
     t := 0
     [
       t := t + 1
-      #{#a => 1}
+      (Dictionary new at: #a put: 1)
         at: #k
         ifAbsent: [
           t := t + 1
@@ -791,7 +791,7 @@ Object subclass: ResultTryDoTier2MatrixClass
     t := 0
     Result
       tryDo: [
-        #{#a => 1} at: #k ifAbsent: [t := 1]
+        (Dictionary new at: #a put: 1) at: #k ifAbsent: [t := 1]
         2
       ]
     t
@@ -825,7 +825,7 @@ Object subclass: ResultTryDoTier2MatrixClass
   class onceOnDoLookup =>
     t := 0
     [
-      #{#a => 1}
+      (Dictionary new at: #a put: 1)
         at: #k
         ifAbsent: [
           t := t + 1
@@ -837,7 +837,7 @@ Object subclass: ResultTryDoTier2MatrixClass
   class onceEnsureLookup =>
     t := 0
     [
-      #{#a => 1}
+      (Dictionary new at: #a put: 1)
         at: #k
         ifAbsent: [
           t := t + 1
@@ -866,7 +866,7 @@ Object subclass: ResultTryDoTier2MatrixClass
           do: [:k |
             Result
               tryDo: [
-                #{#a => 1} at: #k ifAbsent: [a := 1]
+                (Dictionary new at: #a put: 1) at: #k ifAbsent: [a := 1]
                 2
               ]
           ]

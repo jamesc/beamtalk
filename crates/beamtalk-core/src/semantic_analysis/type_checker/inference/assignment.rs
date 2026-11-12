@@ -271,6 +271,11 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         protocol_registry: Option<&ProtocolRegistry>,
     ) -> bool {
+        // ADR 0147: a map shape is judged structurally, never by display
+        // name (a shape has no class name to compare).
+        if inferred_ty.contains_shape() || declared.contains_shape() {
+            return Self::shape_assignable(inferred_ty, declared, hierarchy).is_ok();
+        }
         let inferred_members = Self::union_members(inferred_ty);
         let declared_members = Self::union_members(declared);
         if !Self::protocol_involved(inferred_ty, declared, hierarchy, protocol_registry) {

@@ -454,7 +454,7 @@ Actor subclass: Adr0131EvalBlockActor
 
   argLookupInDo =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     #(1, 2)
       do: [:x |
         [:z |

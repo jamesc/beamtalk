@@ -15,7 +15,7 @@ Actor subclass: ResultTryDoTier2ActorFixture
       do: [:k |
         Result
           tryDo: [
-            #{#a => 1} at: #k ifAbsent: [t := t + 1]
+            (Dictionary new at: #a put: 1) at: #k ifAbsent: [t := t + 1]
             7
           ]
       ]
@@ -24,7 +24,7 @@ Actor subclass: ResultTryDoTier2ActorFixture
   lookupBehindOnDoInLoop =>
     t := 0
     #(1, 2) do: [:k |
-      [#{#a => 1} at: #k ifAbsent: [t := t + 1]] on: Error do: [:e | 0]
+      [(Dictionary new at: #a put: 1) at: #k ifAbsent: [t := t + 1]] on: Error do: [:e | 0]
     ]
     t
 
