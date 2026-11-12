@@ -20,18 +20,6 @@ for all primitive types, tagged maps, class objects, and edge cases.
 %%% class_of/1 tests
 %%% ============================================================================
 
-class_of_integer_test() ->
-    ?assertEqual('Integer', beamtalk_primitive:class_of(0)),
-    ?assertEqual('Integer', beamtalk_primitive:class_of(42)),
-    ?assertEqual('Integer', beamtalk_primitive:class_of(-100)),
-    ?assertEqual('Integer', beamtalk_primitive:class_of(999999999999)).
-
-class_of_float_test() ->
-    ?assertEqual('Float', beamtalk_primitive:class_of(0.0)),
-    ?assertEqual('Float', beamtalk_primitive:class_of(3.14)),
-    ?assertEqual('Float', beamtalk_primitive:class_of(-2.5)),
-    ?assertEqual('Float', beamtalk_primitive:class_of(1.0e10)).
-
 class_of_string_test() ->
     %% BT-4173: class_of/1 answers the construction type. A String is the
     %% tagged term; a bare binary is always Binary, whatever its bytes.
@@ -182,53 +170,6 @@ send_shared_selector_with_string_extension_test_() ->
                 string_extension_fired, beamtalk_primitive:send(Utf8Str, 'byteAt:', [0])
             )
         end}.
-
-class_of_boolean_test() ->
-    ?assertEqual('True', beamtalk_primitive:class_of(true)),
-    ?assertEqual('False', beamtalk_primitive:class_of(false)).
-
-class_of_nil_test() ->
-    ?assertEqual('UndefinedObject', beamtalk_primitive:class_of(nil)).
-
-class_of_block_test() ->
-    ?assertEqual('Block', beamtalk_primitive:class_of(fun() -> ok end)),
-    ?assertEqual('Block', beamtalk_primitive:class_of(fun(X) -> X + 1 end)),
-    ?assertEqual('Block', beamtalk_primitive:class_of(fun(X, Y) -> X + Y end)).
-
-class_of_symbol_test() ->
-    ?assertEqual('Symbol', beamtalk_primitive:class_of(atom)),
-    ?assertEqual('Symbol', beamtalk_primitive:class_of('hello')),
-    ?assertEqual('Symbol', beamtalk_primitive:class_of('with_underscores')).
-
-class_of_list_test() ->
-    ?assertEqual('List', beamtalk_primitive:class_of([])),
-    ?assertEqual('List', beamtalk_primitive:class_of([1, 2, 3])),
-    ?assertEqual('List', beamtalk_primitive:class_of([a, b, c])),
-    ?assertEqual('List', beamtalk_primitive:class_of([[1], [2], [3]])).
-
-class_of_dictionary_test() ->
-    ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{})),
-    ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{a => 1})),
-    ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{key => value, x => 42})).
-
-%% Dictionary with user '__class__' key must NOT be misclassified
-class_of_dictionary_with_old_class_key_collision_test() ->
-    %% A user Dictionary that happens to have '__class__' key (old tag)
-    %% must still be treated as Dictionary, not as a tagged map
-    Dict = #{'__class__' => 'Integer', value => 42},
-    ?assertEqual('Dictionary', beamtalk_primitive:class_of(Dict)).
-
-class_of_dictionary_with_class_key_string_collision_test() ->
-    %% Non-atom __class__ value was already handled, verify it still works
-    Dict = #{'__class__' => <<"Integer">>, value => 42},
-    ?assertEqual('Dictionary', beamtalk_primitive:class_of(Dict)).
-
-class_of_tuple_test() ->
-    ?assertEqual('Tuple', beamtalk_primitive:class_of({})),
-    ?assertEqual('Tuple', beamtalk_primitive:class_of({1, 2})),
-    ?assertEqual('Tuple', beamtalk_primitive:class_of({a, b, c})),
-    %% Non-object tuples
-    ?assertEqual('Tuple', beamtalk_primitive:class_of({other_record, data})).
 
 class_of_supervisor_tuple_test() ->
     Pid = spawn(fun() -> ok end),
@@ -445,29 +386,6 @@ send_map_size_test() ->
 %%% ============================================================================
 %%% Edge cases and special values
 %%% ============================================================================
-
-class_of_special_atoms_test() ->
-    %% Ensure true/false/nil are not treated as generic symbols
-    ?assertEqual('True', beamtalk_primitive:class_of(true)),
-    ?assertEqual('False', beamtalk_primitive:class_of(false)),
-    ?assertEqual('UndefinedObject', beamtalk_primitive:class_of(nil)),
-
-    %% But other atoms are symbols
-    ?assertEqual('Symbol', beamtalk_primitive:class_of(ok)),
-    ?assertEqual('Symbol', beamtalk_primitive:class_of(error)).
-
-class_of_empty_collections_test() ->
-    %% BT-4173: an empty bare binary is Binary; only the tagged term is String.
-    ?assertEqual('Binary', beamtalk_primitive:class_of(<<>>)),
-    ?assertEqual('String', beamtalk_primitive:class_of({beamtalk_string, <<>>})),
-    ?assertEqual('List', beamtalk_primitive:class_of([])),
-    ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{})),
-    ?assertEqual('Tuple', beamtalk_primitive:class_of({})).
-
-class_of_nested_structures_test() ->
-    ?assertEqual('List', beamtalk_primitive:class_of([[1, 2], [3, 4]])),
-    ?assertEqual('Dictionary', beamtalk_primitive:class_of(#{key => #{nested => value}})),
-    ?assertEqual('Tuple', beamtalk_primitive:class_of({{a, b}, {c, d}})).
 
 %%% ============================================================================
 %%% Reflection methods (class, respondsTo)
@@ -860,21 +778,9 @@ maps_get_form(Name, Field) ->
 %%% print_string/1 Tests — Complex Types
 %%% ============================================================================
 
-print_string_integer_test() ->
-    ?assertEqual(<<"42">>, beamtalk_primitive:print_string(42)),
-    ?assertEqual(<<"-7">>, beamtalk_primitive:print_string(-7)).
-
 print_string_float_test() ->
     Result = beamtalk_primitive:print_string(3.14),
     ?assert(is_binary(Result)).
-
-print_string_string_test() ->
-    ?assertEqual(<<"\"hello\"">>, beamtalk_primitive:print_string(<<"hello">>)).
-
-print_string_non_utf8_binary_is_hex_test() ->
-    %% Raw bytes render as `Binary printString` hex, never inline.
-    ?assertEqual(<<"<<FF FE FD>>">>, beamtalk_primitive:print_string(<<255, 254, 253>>)),
-    ?assertEqual(<<"<<00 C8>>">>, beamtalk_primitive:print_string(<<0, 200>>)).
 
 print_string_non_utf8_binary_output_is_valid_utf8_test() ->
     %% The invariant that keeps json:encode/1 and the logger from blowing up.
@@ -891,43 +797,6 @@ print_string_non_utf8_binary_output_is_valid_utf8_test() ->
         end,
         Cases
     ).
-
-print_string_non_utf8_nested_in_tuple_test() ->
-    %% The real crash path: `string:length/1` raises `{badarg, RawBinary}`, and
-    %% that reason is rendered for the failure message.
-    ?assertEqual(
-        <<"{#badarg, <<FF FE>>}">>,
-        beamtalk_primitive:print_string({badarg, <<255, 254>>})
-    ).
-
-print_string_boolean_test() ->
-    ?assertEqual(<<"true">>, beamtalk_primitive:print_string(true)),
-    ?assertEqual(<<"false">>, beamtalk_primitive:print_string(false)).
-
-print_string_nil_test() ->
-    ?assertEqual(<<"nil">>, beamtalk_primitive:print_string(nil)).
-
-print_string_metaclass_test() ->
-    %% ADR 0036: 'Metaclass' atom is no longer a sentinel with special print_string.
-    %% It prints as a Symbol (atom) with '#' prefix, like any other atom.
-    ?assertEqual(<<"#Metaclass">>, beamtalk_primitive:print_string('Metaclass')).
-
-print_string_symbol_test() ->
-    ?assertEqual(<<"#hello">>, beamtalk_primitive:print_string(hello)).
-
-print_string_list_test() ->
-    Result = beamtalk_primitive:print_string([1, 2, 3]),
-    ?assertEqual(<<"#(1, 2, 3)">>, Result).
-
-print_string_empty_list_test() ->
-    ?assertEqual(<<"#()">>, beamtalk_primitive:print_string([])).
-
-print_string_tuple_test() ->
-    Result = beamtalk_primitive:print_string({1, <<"two">>, 3}),
-    ?assertEqual(<<"{1, \"two\", 3}">>, Result).
-
-print_string_empty_tuple_test() ->
-    ?assertEqual(<<"{}">>, beamtalk_primitive:print_string({})).
 
 print_string_beamtalk_error_test() ->
     Error = #beamtalk_error{
@@ -1217,43 +1086,10 @@ class_name_to_module_test() ->
 %%%   - Atoms rendered without '#' prefix
 %%% ============================================================================
 
-display_string_integer_test() ->
-    ?assertEqual(<<"42">>, beamtalk_primitive:display_string(42)),
-    ?assertEqual(<<"-7">>, beamtalk_primitive:display_string(-7)),
-    ?assertEqual(<<"0">>, beamtalk_primitive:display_string(0)).
-
 display_string_float_test() ->
     Result = beamtalk_primitive:display_string(3.14),
     ?assert(is_binary(Result)),
     ?assert(byte_size(Result) > 0).
-
-display_string_string_no_quotes_test() ->
-    %% Strings are returned as-is, without surrounding quotes (unlike print_string)
-    ?assertEqual(<<"hello">>, beamtalk_primitive:display_string(<<"hello">>)),
-    ?assertEqual(<<>>, beamtalk_primitive:display_string(<<>>)),
-    ?assertEqual(<<"with spaces">>, beamtalk_primitive:display_string(<<"with spaces">>)).
-
-display_string_boolean_test() ->
-    ?assertEqual(<<"true">>, beamtalk_primitive:display_string(true)),
-    ?assertEqual(<<"false">>, beamtalk_primitive:display_string(false)).
-
-display_string_nil_test() ->
-    ?assertEqual(<<"nil">>, beamtalk_primitive:display_string(nil)).
-
-display_string_atom_no_hash_test() ->
-    %% Atoms are rendered without '#' prefix (unlike print_string/1)
-    ?assertEqual(<<"hello">>, beamtalk_primitive:display_string(hello)),
-    ?assertEqual(<<"ok">>, beamtalk_primitive:display_string(ok)),
-    ?assertEqual(<<"error">>, beamtalk_primitive:display_string(error)).
-
-display_string_list_test() ->
-    ?assertEqual(<<"#(1, 2, 3)">>, beamtalk_primitive:display_string([1, 2, 3])),
-    ?assertEqual(<<"#()">>, beamtalk_primitive:display_string([])).
-
-display_string_list_of_strings_test() ->
-    %% List elements use display_string (no quotes on strings)
-    Result = beamtalk_primitive:display_string([<<"a">>, <<"b">>]),
-    ?assertEqual(<<"#(a, b)">>, Result).
 
 display_string_pid_test() ->
     %% display_string/1 had no is_pid/1 clause at all, so a raw pid
@@ -1267,24 +1103,9 @@ display_string_reference_test() ->
     Result = beamtalk_primitive:display_string(make_ref()),
     ?assertMatch(<<"#Ref<", _/binary>>, Result).
 
-display_string_block_test() ->
-    ?assertEqual(<<"Block/0">>, beamtalk_primitive:display_string(fun() -> ok end)),
-    ?assertEqual(<<"Block/1">>, beamtalk_primitive:display_string(fun(_) -> ok end)).
-
-display_string_tuple_test() ->
-    %% display_string/1 had no is_tuple/1 clause at all, so a plain
-    %% tuple fell into the ~p catch-all instead of recursing via display_string.
-    Result = beamtalk_primitive:display_string({1, <<"two">>, 3}),
-    ?assertEqual(<<"{1, two, 3}">>, Result).
-
 display_string_supervisor_tuple_test() ->
     Result = beamtalk_primitive:display_string({beamtalk_supervisor, 'MySup', mysup_mod, self()}),
     ?assertMatch(<<"Supervisor(MySup, ", _/binary>>, Result).
-
-display_string_unicode_string_test() ->
-    %% Valid UTF-8 binary is returned as-is
-    Str = <<"héllo"/utf8>>,
-    ?assertEqual(Str, beamtalk_primitive:display_string(Str)).
 
 %%% ============================================================================
 %%% send/3 — Boolean dispatch
@@ -1400,43 +1221,6 @@ send_symbol_print_string_test_() ->
 %%% ============================================================================
 %%% send/3 — Extended integer arithmetic
 %%% ============================================================================
-
-send_integer_subtraction_test() ->
-    ?assertEqual(34, beamtalk_primitive:send(42, '-', [8])).
-
-send_integer_multiplication_test() ->
-    ?assertEqual(21, beamtalk_primitive:send(3, '*', [7])).
-
-send_integer_less_than_test() ->
-    ?assertEqual(true, beamtalk_primitive:send(3, '<', [5])),
-    ?assertEqual(false, beamtalk_primitive:send(5, '<', [3])).
-
-send_integer_greater_than_test() ->
-    ?assertEqual(true, beamtalk_primitive:send(5, '>', [3])),
-    ?assertEqual(false, beamtalk_primitive:send(3, '>', [5])).
-
-send_integer_less_than_or_equal_test() ->
-    ?assertEqual(true, beamtalk_primitive:send(3, '<=', [3])),
-    ?assertEqual(true, beamtalk_primitive:send(2, '<=', [3])),
-    ?assertEqual(false, beamtalk_primitive:send(4, '<=', [3])).
-
-send_integer_greater_than_or_equal_test() ->
-    ?assertEqual(true, beamtalk_primitive:send(3, '>=', [3])),
-    ?assertEqual(true, beamtalk_primitive:send(4, '>=', [3])),
-    ?assertEqual(false, beamtalk_primitive:send(2, '>=', [3])).
-
-send_integer_equality_test() ->
-    %% Integer uses =:= (Erlang exact equality), not =
-    ?assertEqual(true, beamtalk_primitive:send(42, '=:=', [42])),
-    ?assertEqual(false, beamtalk_primitive:send(42, '=:=', [43])).
-
-send_integer_abs_test() ->
-    ?assertEqual(5, beamtalk_primitive:send(-5, 'abs', [])),
-    ?assertEqual(5, beamtalk_primitive:send(5, 'abs', [])).
-
-send_integer_negated_test() ->
-    ?assertEqual(-42, beamtalk_primitive:send(42, 'negated', [])),
-    ?assertEqual(42, beamtalk_primitive:send(-42, 'negated', [])).
 
 %%% ============================================================================
 %%% send/3 — Extended float arithmetic
@@ -1607,45 +1391,9 @@ tagged_map_unknown_class_dnu_test() ->
 %%% print_string/1 — Additional edge cases
 %%% ============================================================================
 
-print_string_string_with_embedded_quotes_test() ->
-    %% Embedded double quotes are escaped as ""
-    ?assertEqual(
-        <<"\"she said \"\"hi\"\"\"">>, beamtalk_primitive:print_string(<<"she said \"hi\"">>)
-    ).
-
-print_string_empty_string_test() ->
-    ?assertEqual(<<"\"\"">>, beamtalk_primitive:print_string(<<>>)).
-
 %%% ============================================================================
 %%% print_string/1 — ADR 0138 escape mapping (BT-4176)
 %%% ============================================================================
-
-print_string_escapes_backslash_test() ->
-    ?assertEqual(<<"\"a\\\\b\"">>, beamtalk_primitive:print_string(<<"a\\b">>)),
-    ?assertEqual(<<"\"\\\\\"">>, beamtalk_primitive:print_string(<<"\\">>)).
-
-print_string_escapes_braces_test() ->
-    %% `{` escapes (or the spelling re-parses as interpolation); bare `}` is safe.
-    ?assertEqual(<<"\"a\\{b\"">>, beamtalk_primitive:print_string(<<"a{b">>)),
-    ?assertEqual(<<"\"a}b\"">>, beamtalk_primitive:print_string(<<"a}b">>)),
-    ?assertEqual(<<"\"\\{x}\"">>, beamtalk_primitive:print_string(<<"{x}">>)).
-
-print_string_escapes_controls_test() ->
-    ?assertEqual(<<"\"a\\rb\"">>, beamtalk_primitive:print_string(<<"a\rb">>)),
-    ?assertEqual(<<"\"a\\nb\"">>, beamtalk_primitive:print_string(<<"a\nb">>)),
-    ?assertEqual(<<"\"a\\tb\"">>, beamtalk_primitive:print_string(<<"a\tb">>)),
-    ?assertEqual(<<"\"a\\0b\"">>, beamtalk_primitive:print_string(<<$a, 0, $b>>)),
-    ?assertEqual(<<"\"\\r\\n\"">>, beamtalk_primitive:print_string(<<"\r\n">>)).
-
-print_string_escapes_combined_test() ->
-    %% Backslash doubles before brace/quote escaping; `\0` takes no octal tail.
-    ?assertEqual(<<"\"\\\\\\{x}\"">>, beamtalk_primitive:print_string(<<"\\{x}">>)),
-    ?assertEqual(<<"\"a\\\\\"\"b\"">>, beamtalk_primitive:print_string(<<"a\\\"b">>)),
-    ?assertEqual(
-        <<"\"\\r\\n\\t\\\\\"\"\\{}\"">>,
-        beamtalk_primitive:print_string(<<"\r\n\t\\\"{}">>)
-    ),
-    ?assertEqual(<<"\"\\01\"">>, beamtalk_primitive:print_string(<<0, $1>>)).
 
 print_string_nested_escapes_match_top_level_test() ->
     %% Nested values (inspector/`#()`/error output) render through the same
@@ -1717,22 +1465,6 @@ print_string_reference_uses_opaque_ops_test() ->
     Result = beamtalk_primitive:print_string(Ref),
     ?assert(is_binary(Result)),
     ?assertMatch(<<"#Ref<", _/binary>>, Result).
-
-print_string_nested_list_test() ->
-    Result = beamtalk_primitive:print_string([[1, 2], [3]]),
-    ?assertEqual(<<"#(#(1, 2), #(3))">>, Result).
-
-print_string_list_with_strings_test() ->
-    Result = beamtalk_primitive:print_string([<<"a">>, <<"b">>]),
-    ?assertEqual(<<"#(\"a\", \"b\")">>, Result).
-
-print_string_tuple_nested_test() ->
-    Result = beamtalk_primitive:print_string({{1, 2}, {3, 4}}),
-    ?assertEqual(<<"{{1, 2}, {3, 4}}">>, Result).
-
-print_string_set_empty_test() ->
-    Set = #{'$beamtalk_class' => 'Set', elements => []},
-    ?assertEqual(<<"Set()">>, beamtalk_primitive:print_string(Set)).
 
 print_string_plain_map_empty_test_() ->
     {setup,
@@ -2108,25 +1840,9 @@ send_list_includes_test_() ->
 %%% print_string/1 — Float edge cases
 %%% ============================================================================
 
-print_string_float_negative_test() ->
-    Result = beamtalk_primitive:print_string(-2.5),
-    ?assertEqual(<<"-2.5">>, Result).
-
-print_string_float_zero_test() ->
-    Result = beamtalk_primitive:print_string(0.0),
-    ?assertEqual(<<"0.0">>, Result).
-
 %%% ============================================================================
 %%% display_string/1 — Float edge cases
 %%% ============================================================================
-
-display_string_float_negative_test() ->
-    Result = beamtalk_primitive:display_string(-2.5),
-    ?assertEqual(<<"-2.5">>, Result).
-
-display_string_float_zero_test() ->
-    Result = beamtalk_primitive:display_string(0.0),
-    ?assertEqual(<<"0.0">>, Result).
 
 %%% ============================================================================
 %%% Future auto-await across dispatch/reflection API
@@ -2465,3 +2181,183 @@ pid_label_dead_pid_test() ->
     PidStr = erlang:pid_to_list(Pid),
     Inner = list_to_binary(lists:sublist(PidStr, 2, length(PidStr) - 2)),
     ?assertEqual(<<"#Dead<", Inner/binary, ">">>, Result).
+
+
+%%% ============================================================================
+%%% Table-driven cases (BT-4679)
+%%%
+%%% Each row is one former `?assertEqual(Expected, f(Input))`. A failing row
+%%% names itself through its label.
+%%% ============================================================================
+
+%% print_string/1: {Label, Expected, Input}.
+print_string_table_test_() ->
+    [
+        {Label, ?_assertEqual(Expected, beamtalk_primitive:print_string(Input))}
+     || {Label, Expected, Input} <- [
+            {"integer 42", <<"42">>, 42},
+            {"integer -7", <<"-7">>, -7},
+            {"string", <<"\"hello\"">>, <<"hello">>},
+            %% Raw bytes render as `Binary printString` hex, never inline.
+            {"non-utf8 binary FF FE FD", <<"<<FF FE FD>>">>, <<255, 254, 253>>},
+            {"non-utf8 binary 00 C8", <<"<<00 C8>>">>, <<0, 200>>},
+            %% The real crash path: `string:length/1` raises `{badarg, RawBinary}`.
+            {"non-utf8 nested in tuple", <<"{#badarg, <<FF FE>>}">>, {badarg, <<255, 254>>}},
+            {"true", <<"true">>, true},
+            {"false", <<"false">>, false},
+            {"nil", <<"nil">>, nil},
+            %% ADR 0036: 'Metaclass' is an ordinary atom, printed as a Symbol.
+            {"metaclass atom", <<"#Metaclass">>, 'Metaclass'},
+            {"symbol", <<"#hello">>, hello},
+            {"list", <<"#(1, 2, 3)">>, [1, 2, 3]},
+            {"empty list", <<"#()">>, []},
+            {"tuple", <<"{1, \"two\", 3}">>, {1, <<"two">>, 3}},
+            {"empty tuple", <<"{}">>, {}},
+            %% Embedded double quotes are escaped as ""
+            {"string with embedded quotes", <<"\"she said \"\"hi\"\"\"">>, <<"she said \"hi\"">>},
+            {"empty string", <<"\"\"">>, <<>>},
+            %% ADR 0138 escape mapping (BT-4176)
+            {"escape backslash mid-string", <<"\"a\\\\b\"">>, <<"a\\b">>},
+            {"escape lone backslash", <<"\"\\\\\"">>, <<"\\">>},
+            %% `{` escapes (or the spelling re-parses as interpolation); bare `}` is safe.
+            {"escape open brace", <<"\"a\\{b\"">>, <<"a{b">>},
+            {"close brace is not escaped", <<"\"a}b\"">>, <<"a}b">>},
+            {"escape brace pair", <<"\"\\{x}\"">>, <<"{x}">>},
+            {"escape CR", <<"\"a\\rb\"">>, <<"a\rb">>},
+            {"escape LF", <<"\"a\\nb\"">>, <<"a\nb">>},
+            {"escape TAB", <<"\"a\\tb\"">>, <<"a\tb">>},
+            {"escape NUL", <<"\"a\\0b\"">>, <<$a, 0, $b>>},
+            {"escape CRLF", <<"\"\\r\\n\"">>, <<"\r\n">>},
+            %% Backslash doubles before brace/quote escaping; `\0` takes no octal tail.
+            {"combined backslash and brace", <<"\"\\\\\\{x}\"">>, <<"\\{x}">>},
+            {"combined backslash and quote", <<"\"a\\\\\"\"b\"">>, <<"a\\\"b">>},
+            {"combined controls, backslash, quote, brace", <<"\"\\r\\n\\t\\\\\"\"\\{}\"">>,
+                <<"\r\n\t\\\"{}">>},
+            {"NUL followed by digit", <<"\"\\01\"">>, <<0, $1>>},
+            {"nested list", <<"#(#(1, 2), #(3))">>, [[1, 2], [3]]},
+            {"list of strings", <<"#(\"a\", \"b\")">>, [<<"a">>, <<"b">>]},
+            {"nested tuple", <<"{{1, 2}, {3, 4}}">>, {{1, 2}, {3, 4}}},
+            {"empty set", <<"Set()">>, #{'$beamtalk_class' => 'Set', elements => []}},
+            {"float -2.5", <<"-2.5">>, -2.5},
+            {"float 0.0", <<"0.0">>, 0.0}
+        ]
+    ].
+
+%% display_string/1: {Label, Expected, Input}.
+display_string_table_test_() ->
+    [
+        {Label, ?_assertEqual(Expected, beamtalk_primitive:display_string(Input))}
+     || {Label, Expected, Input} <- [
+            {"integer 42", <<"42">>, 42},
+            {"integer -7", <<"-7">>, -7},
+            {"integer 0", <<"0">>, 0},
+            %% Strings are returned as-is, without surrounding quotes (unlike print_string)
+            {"string without quotes", <<"hello">>, <<"hello">>},
+            {"empty string", <<>>, <<>>},
+            {"string with spaces", <<"with spaces">>, <<"with spaces">>},
+            {"true", <<"true">>, true},
+            {"false", <<"false">>, false},
+            {"nil", <<"nil">>, nil},
+            %% Atoms are rendered without '#' prefix (unlike print_string/1)
+            {"atom hello", <<"hello">>, hello},
+            {"atom ok", <<"ok">>, ok},
+            {"atom error", <<"error">>, error},
+            {"list", <<"#(1, 2, 3)">>, [1, 2, 3]},
+            {"empty list", <<"#()">>, []},
+            %% List elements use display_string (no quotes on strings)
+            {"list of strings", <<"#(a, b)">>, [<<"a">>, <<"b">>]},
+            {"tuple", <<"{1, two, 3}">>, {1, <<"two">>, 3}},
+            %% Valid UTF-8 binary is returned as-is
+            {"unicode string", <<"héllo"/utf8>>, <<"héllo"/utf8>>},
+            {"float -2.5", <<"-2.5">>, -2.5},
+            {"float 0.0", <<"0.0">>, 0.0},
+            {"block/0", <<"Block/0">>, fun() -> ok end},
+            {"block/1", <<"Block/1">>, fun(_) -> ok end}
+        ]
+    ].
+
+%% send/3 on an Integer receiver: {Label, Expected, Receiver, Selector, Args}.
+send_integer_table_test_() ->
+    [
+        {Label, ?_assertEqual(Expected, beamtalk_primitive:send(Receiver, Selector, Args))}
+     || {Label, Expected, Receiver, Selector, Args} <- [
+            {"42 - 8", 34, 42, '-', [8]},
+            {"3 * 7", 21, 3, '*', [7]},
+            {"3 < 5", true, 3, '<', [5]},
+            {"5 < 3", false, 5, '<', [3]},
+            {"5 > 3", true, 5, '>', [3]},
+            {"3 > 5", false, 3, '>', [5]},
+            {"3 <= 3", true, 3, '<=', [3]},
+            {"2 <= 3", true, 2, '<=', [3]},
+            {"4 <= 3", false, 4, '<=', [3]},
+            {"3 >= 3", true, 3, '>=', [3]},
+            {"4 >= 3", true, 4, '>=', [3]},
+            {"2 >= 3", false, 2, '>=', [3]},
+            %% Integer uses =:= (Erlang exact equality), not =
+            {"42 =:= 42", true, 42, '=:=', [42]},
+            {"42 =:= 43", false, 42, '=:=', [43]},
+            {"-5 abs", 5, -5, 'abs', []},
+            {"5 abs", 5, 5, 'abs', []},
+            {"42 negated", -42, 42, 'negated', []},
+            {"-42 negated", 42, -42, 'negated', []}
+        ]
+    ].
+
+%% class_of/1: {Label, ExpectedClass, Input}.
+class_of_table_test_() ->
+    [
+        {Label, ?_assertEqual(Expected, beamtalk_primitive:class_of(Input))}
+     || {Label, Expected, Input} <- [
+            {"integer 0", 'Integer', 0},
+            {"integer 42", 'Integer', 42},
+            {"integer -100", 'Integer', -100},
+            {"big integer", 'Integer', 999999999999},
+            {"float 0.0", 'Float', 0.0},
+            {"float 3.14", 'Float', 3.14},
+            {"float -2.5", 'Float', -2.5},
+            {"float 1.0e10", 'Float', 1.0e10},
+            {"true", 'True', true},
+            {"false", 'False', false},
+            {"nil", 'UndefinedObject', nil},
+            {"block/0", 'Block', fun() -> ok end},
+            {"block/1", 'Block', fun(X) -> X + 1 end},
+            {"block/2", 'Block', fun(X, Y) -> X + Y end},
+            {"symbol atom", 'Symbol', atom},
+            {"symbol hello", 'Symbol', hello},
+            {"symbol with underscores", 'Symbol', with_underscores},
+            {"empty list", 'List', []},
+            {"list of integers", 'List', [1, 2, 3]},
+            {"list of atoms", 'List', [a, b, c]},
+            {"list of lists", 'List', [[1], [2], [3]]},
+            {"empty dictionary", 'Dictionary', #{}},
+            {"dictionary one key", 'Dictionary', #{a => 1}},
+            {"dictionary two keys", 'Dictionary', #{key => value, x => 42}},
+            %% A user Dictionary that happens to have '__class__' key (old tag)
+            %% must still be treated as Dictionary, not as a tagged map
+            {"dictionary with old class key", 'Dictionary', #{'__class__' => 'Integer', value => 42}},
+            %% Non-atom __class__ value was already handled, verify it still works
+            {"dictionary with string class key", 'Dictionary', #{
+                '__class__' => <<"Integer">>, value => 42
+            }},
+            {"empty tuple", 'Tuple', {}},
+            {"tuple of two", 'Tuple', {1, 2}},
+            {"tuple of three atoms", 'Tuple', {a, b, c}},
+            {"non-object tuple", 'Tuple', {other_record, data}},
+            %% Ensure true/false/nil are not treated as generic symbols
+            {"special true", 'True', true},
+            {"special false", 'False', false},
+            {"special nil", 'UndefinedObject', nil},
+            %% But other atoms are symbols
+            {"special ok", 'Symbol', ok},
+            {"special error", 'Symbol', error},
+            %% BT-4173: an empty bare binary is Binary; only the tagged term is String.
+            {"empty bare binary", 'Binary', <<>>},
+            {"empty tagged string", 'String', {beamtalk_string, <<>>}},
+            {"empty list (collections)", 'List', []},
+            {"empty dictionary (collections)", 'Dictionary', #{}},
+            {"empty tuple (collections)", 'Tuple', {}},
+            {"nested lists", 'List', [[1, 2], [3, 4]]},
+            {"nested dictionary", 'Dictionary', #{key => #{nested => value}}},
+            {"nested tuples", 'Tuple', {{a, b}, {c, d}}}
+        ]
+    ].
