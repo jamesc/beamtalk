@@ -123,12 +123,7 @@ handle_term(<<"nav-symbols">>, Params, _Msg, _SessionPid) ->
 -doc "Advertise the `nav-symbols` op in `describe`.".
 -spec describe_ops() -> map().
 describe_ops() ->
-    #{
-        <<"nav-symbols">> => #{
-            <<"params">> => [],
-            <<"optional">> => [<<"scope">>]
-        }
-    }.
+    beamtalk_repl_op_table:describe_for(?MODULE).
 
 %%% ====================================================================
 %%% Internal

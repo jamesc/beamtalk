@@ -215,31 +215,7 @@ handle_term(<<"browse-alias-source">>, Params, _Msg, _SessionPid) ->
 -doc "Advertise the browse ops in `describe`.".
 -spec describe_ops() -> map().
 describe_ops() ->
-    #{
-        <<"browse-classes">> => #{<<"params">> => []},
-        <<"browse-protocols">> => #{<<"params">> => [<<"class">>, <<"side">>]},
-        <<"browse-method-source">> => #{
-            <<"params">> => [<<"class">>, <<"side">>, <<"selector">>]
-        },
-        <<"browse-class-definition">> => #{<<"params">> => [<<"class">>]},
-        %% The divider-grouped ("// === Name ===") method view.
-        <<"browse-categories">> => #{<<"params">> => [<<"class">>]},
-        %% `selector` is optional: present → also resolve the matching
-        %% `handle_call` clause; absent → whole-module view. `module` is an
-        %% alternative key (a standalone native module with no
-        %% backing class); one of `class` / `module` is required.
-        <<"browse-native-source">> => #{<<"params">> => [<<"class">>, <<"module">>]},
-        %% Enumerate a loaded package's hand-written native Erlang
-        %% modules (no params).
-        <<"browse-native-modules">> => #{<<"params">> => []},
-        %% ADR 0108 Phase 8: enumerate every loaded package's
-        %% declared `type` aliases (no params).
-        <<"browse-type-aliases">> => #{<<"params">> => []},
-        %% Read-only source view for a declared type alias. `package`
-        %% disambiguates a same-named alias declared by more than one package
-        %% (`browse-type-aliases` does not dedupe by name — see its doc).
-        <<"browse-alias-source">> => #{<<"params">> => [<<"name">>, <<"package">>]}
-    }.
+    beamtalk_repl_op_table:describe_for(?MODULE).
 
 %%% ====================================================================
 %%% Op 1 — browse-classes

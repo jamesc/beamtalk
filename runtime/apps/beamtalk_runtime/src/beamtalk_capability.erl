@@ -244,20 +244,11 @@ require_workspace(Selector, Class) when is_atom(Selector), is_atom(Class) ->
 
 -doc """
 The capability an operation needs. This is the §1.5 table; everything it
-does not name is `always`.
+does not name is `always`. REPL protocol ops (binaries) are classified by
+`beamtalk_repl_op_table`; this function names only Beamtalk-level (atom)
+operations.
 """.
 -spec classify(operation()) -> capability_class().
-%% REPL protocol ops that compile source.
-classify(<<"eval">>) -> compiler;
-classify(<<"load-source">>) -> compiler;
-classify(<<"load-project">>) -> compiler;
-classify(<<"load-tests">>) -> compiler;
-classify(<<"show-codegen">>) -> compiler;
-classify(<<"diagnostics">>) -> compiler;
-%% REPL protocol ops that write to the working tree or remove a class.
-classify(<<"unload">>) -> workspace;
-classify(<<"save-native-source">>) -> workspace;
-classify(<<"save-section">>) -> workspace;
 %% Beamtalk-level operations that compile source.
 classify('compile:source:') -> compiler;
 classify('tryCompile:source:') -> compiler;
@@ -294,7 +285,9 @@ classify('renameSelector:to:') -> workspace;
 %% Everything else — `run-entry`, `inspect`, `actors`, `actor-stats`,
 %% `pid-stats`, `sessions`, `complete`, `describe`, … — needs nothing a
 %% release lacks.
-classify(Op) when is_binary(Op); is_atom(Op) -> always.
+classify(Op) when is_atom(Op) -> always;
+%% REPL protocol ops: the op table is the single source (BT-4673).
+classify(Op) when is_binary(Op) -> beamtalk_repl_op_table:capability(Op).
 
 -doc "Is `Op` available on this node?".
 -spec available(operation()) -> boolean().

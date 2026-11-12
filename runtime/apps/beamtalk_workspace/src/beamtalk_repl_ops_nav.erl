@@ -145,19 +145,7 @@ handle_term(<<"nav-query">>, Params, _Msg, _SessionPid) ->
 -doc "Advertise the `nav-query` op in `describe`.".
 -spec describe_ops() -> map().
 describe_ops() ->
-    #{
-        <<"nav-query">> => #{
-            <<"params">> => [<<"kind">>],
-            <<"optional">> => [
-                <<"selector">>,
-                <<"class">>,
-                <<"module">>,
-                <<"code">>,
-                <<"before">>,
-                <<"suffix">>
-            ]
-        }
-    }.
+    beamtalk_repl_op_table:describe_for(?MODULE).
 
 %%% ====================================================================
 %%% Internal
