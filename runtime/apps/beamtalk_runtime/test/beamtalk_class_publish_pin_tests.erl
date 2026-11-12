@@ -28,7 +28,6 @@ setup() ->
     beamtalk_class_registry:ensure_hierarchy_table(),
     beamtalk_class_registry:ensure_module_table(),
     beamtalk_class_registry:ensure_pid_table(),
-    beamtalk_test_class_teardown:stop_pg_class_processes(),
     meck:new(beamtalk_class_metadata, [passthrough, no_link]),
     meck:new(beamtalk_compiler_server, [non_strict, no_link]),
     meck:expect(beamtalk_compiler_server, register_class, fun(_, _) -> ok end),
@@ -39,14 +38,28 @@ setup() ->
 teardown(_) ->
     meck:unload(beamtalk_compiler_server),
     meck:unload(beamtalk_class_metadata),
-    beamtalk_test_class_teardown:stop_pg_class_processes(),
+    %% Stop only this module's classes: other suites rely on the bootstrap
+    %% classes (e.g. `Actor`) staying registered.
+    lists:foreach(fun stop_class/1, ['PinPoint', 'PinCounter', 'PinFactory']),
     ok.
+
+stop_class(Name) ->
+    case beamtalk_class_registry:whereis_class(Name) of
+        Pid when is_pid(Pid) ->
+            Ref = erlang:monitor(process, Pid),
+            exit(Pid, kill),
+            receive
+                {'DOWN', Ref, process, Pid, _} -> ok
+            end;
+        _ ->
+            ok
+    end.
 
 %% Calls made for `Name` since the last reset, as `{Fun, Args}` in call order.
 %% Funs are replaced by '$fun' so traces compare across runs.
 trace(Name) ->
     Meta = [
-        {F, norm(Args)}
+        {F, canon(F, norm(Args))}
      || {_Pid, {beamtalk_class_metadata, F, [Name | _] = Args}, _Ret} <- meck:history(
             beamtalk_class_metadata
         ),
@@ -59,6 +72,13 @@ trace(Name) ->
         )
     ],
     {Meta, Compiler}.
+
+%% `maps:keys/1` order follows atom-table order, which varies with module load
+%% order; the selector list is a set, so compare it sorted.
+canon(put_reflection, [Name, #{instance_methods := Sels} = Refl]) ->
+    [Name, Refl#{instance_methods := lists:sort(Sels)}];
+canon(_, Args) ->
+    Args.
 
 reset() ->
     meck:reset(beamtalk_class_metadata),
@@ -182,6 +202,6 @@ dump(Key, R) ->
 
 expected(Key) ->
     {ok, [T]} = file:consult(
-        filename:join(code:lib_dir(beamtalk_runtime), "test/pin_" ++ atom_to_list(Key) ++ ".eterm")
+        filename:join(filename:dirname(?FILE), "pin_" ++ atom_to_list(Key) ++ ".eterm")
     ),
     T.

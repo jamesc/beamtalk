@@ -1,5 +1,5 @@
 {{[{put_reflection,['PinPoint',
-                    #{instance_methods => [x,plus],
+                    #{instance_methods => [plus,x],
                       method_return_types => #{},
                       class_method_return_types => #{},
                       instance_variables => [x,y]}]},
@@ -35,7 +35,7 @@
    {put_class_doc,['PinPoint',<<"A point v2.">>]}],
   []},
  {[{put_reflection,['PinPoint',
-                    #{instance_methods => [x,pinned],
+                    #{instance_methods => [pinned,x],
                       method_return_types => #{},
                       class_method_return_types => #{},
                       instance_variables => [x,y,z]}]},
@@ -56,7 +56,7 @@
   [{register_class,['PinPoint',
                     #{module => pin_point,
                       fields => [x,y,z],
-                      class => 'PinPoint',superclass => nil,is_sealed => true,
+                      is_sealed => true,class => 'PinPoint',superclass => nil,
                       is_abstract => false,
                       method_info =>
                           #{x =>

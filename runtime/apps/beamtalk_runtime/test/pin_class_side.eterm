@@ -53,13 +53,13 @@
                #{is_sealed => false,is_typed => false,shape_version => 1,
                  is_internal => true}]},
    {put_method_records,['PinFactory',instance,
-                        #{make =>
-                              #{info => #{arity => 0},
-                                signature => nil,doc => nil,source => <<>>},
-                          pinned =>
+                        #{pinned =>
                               #{info => #{arity => 0,block => '$fun'},
                                 signature => nil,doc => nil,
-                                source => <<"pinned => 1">>}}]},
+                                source => <<"pinned => 1">>},
+                          make =>
+                              #{info => #{arity => 0},
+                                signature => nil,doc => nil,source => <<>>}}]},
    {put_method_records,['PinFactory',class,
                         #{create =>
                               #{info => #{arity => 1},
@@ -69,15 +69,15 @@
   [{register_class,['PinFactory',
                     #{module => pin_factory,
                       fields => [seed],
-                      class => 'PinFactory',superclass => nil,
-                      is_sealed => false,is_abstract => false,
+                      is_sealed => false,class => 'PinFactory',
+                      superclass => nil,is_abstract => false,
                       method_info =>
-                          #{make =>
+                          #{pinned =>
+                                #{arity => 0,return_type => none,
+                                  param_types => none},
+                            make =>
                                 #{arity => 0,
                                   return_type => {generic,'List',['Integer']},
-                                  param_types => none},
-                            pinned =>
-                                #{arity => 0,return_type => none,
                                   param_types => none}},
                       class_method_info =>
                           #{create =>

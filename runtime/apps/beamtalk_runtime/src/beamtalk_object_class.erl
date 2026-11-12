@@ -1690,8 +1690,9 @@ call_put_method(Selector, Fun, Source, #class_state{name = ClassName} = State) -
     %% __beamtalk_meta/0 is stale after hot-patching, so synthesize metadata
     %% from the live class_state record instead.  Return types are cleared for
     %% hot-patched methods — the compiler treats them as dynamic.
-    ok = beamtalk_class_publish:publish_reflection(reflection_view(NewState)),
-    beamtalk_class_publish:notify_hot_patch(reflection_view(NewState)),
+    View = reflection_view(NewState),
+    ok = beamtalk_class_publish:publish_reflection(View),
+    beamtalk_class_publish:notify_hot_patch(View),
     %% A hot-patched instance method changes what ClassName (and
     %% every subclass inheriting through it) understands, invalidating any
     %% cached conforms_to/2 result for either.
@@ -1739,8 +1740,9 @@ call_put_class_method(Selector, Fun, Source, #class_state{name = ClassName} = St
     %% (ClassSide = true) from its Source. A no-op when xref / the compiler app
     %% is unavailable.
     beamtalk_class_publish:put_method_xref(ClassName, true, Selector, Source),
-    ok = beamtalk_class_publish:publish_reflection(reflection_view(NewState)),
-    beamtalk_class_publish:notify_hot_patch(reflection_view(NewState)),
+    View = reflection_view(NewState),
+    ok = beamtalk_class_publish:publish_reflection(View),
+    beamtalk_class_publish:notify_hot_patch(View),
     %% A hot-patched class-side method changes conforms_to/2's
     %% class-method check (class_has_class_method/2) for ClassName and every
     %% descendant walked through it.
@@ -2570,8 +2572,9 @@ do_remove_class_method(Selector, #class_state{name = ClassName} = State) ->
                 beamtalk_xref:purge_method(ClassName, true, Selector)
             end)
     end,
-    ok = beamtalk_class_publish:publish_reflection(reflection_view(NewState)),
-    beamtalk_class_publish:notify_hot_patch(reflection_view(NewState)),
+    View = reflection_view(NewState),
+    ok = beamtalk_class_publish:publish_reflection(View),
+    beamtalk_class_publish:notify_hot_patch(View),
     beamtalk_protocol_registry:invalidate_conforms_cache(),
     NewState.
 

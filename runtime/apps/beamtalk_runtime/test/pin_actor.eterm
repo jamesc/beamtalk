@@ -17,7 +17,7 @@
    {put_class_doc,['PinCounter',none]}],
   []},
  {[{put_reflection,['PinCounter',
-                    #{instance_methods => [reset,get,increment],
+                    #{instance_methods => [get,increment,reset],
                       method_return_types =>
                           #{reset => 'Nil',get => 'Integer'},
                       class_method_return_types => #{},
@@ -39,7 +39,7 @@
    {put_class_doc,['PinCounter',none]}],
   []},
  {[{put_reflection,['PinCounter',
-                    #{instance_methods => [reset,get,increment,pinned],
+                    #{instance_methods => [get,increment,pinned,reset],
                       method_return_types =>
                           #{reset => 'Nil',get => 'Integer'},
                       class_method_return_types => #{},
@@ -66,8 +66,8 @@
   [{register_class,['PinCounter',
                     #{module => pin_counter,
                       fields => [count],
-                      class => 'PinCounter',superclass => nil,
-                      is_sealed => false,is_abstract => false,
+                      is_sealed => false,class => 'PinCounter',
+                      superclass => nil,is_abstract => false,
                       method_info =>
                           #{reset =>
                                 #{arity => 0,return_type => 'Nil',
