@@ -44,24 +44,24 @@ generate_nonce_is_hex_test() ->
 
 safe_to_existing_atom_existing_test() ->
     %% 'ok' is a well-known existing atom
-    ?assertEqual({ok, ok}, beamtalk_repl_errors:safe_to_existing_atom(<<"ok">>)).
+    ?assertEqual({ok, ok}, beamtalk_repl_server:safe_to_existing_atom(<<"ok">>)).
 
 safe_to_existing_atom_nonexistent_test() ->
     %% A random string should fail
     ?assertEqual(
         {error, badarg},
-        beamtalk_repl_errors:safe_to_existing_atom(<<"xyzzy_nonexistent_atom_9999">>)
+        beamtalk_repl_server:safe_to_existing_atom(<<"xyzzy_nonexistent_atom_9999">>)
     ).
 
 safe_to_existing_atom_empty_test() ->
-    ?assertEqual({error, badarg}, beamtalk_repl_errors:safe_to_existing_atom(<<>>)).
+    ?assertEqual({error, badarg}, beamtalk_repl_server:safe_to_existing_atom(<<>>)).
 
 safe_to_existing_atom_non_binary_test() ->
-    ?assertEqual({error, badarg}, beamtalk_repl_errors:safe_to_existing_atom(123)).
+    ?assertEqual({error, badarg}, beamtalk_repl_server:safe_to_existing_atom(123)).
 
 safe_to_existing_atom_integer_atom_test() ->
     %% 'Integer' is a well-known existing atom in beamtalk
-    ?assertEqual({ok, 'Integer'}, beamtalk_repl_errors:safe_to_existing_atom(<<"Integer">>)).
+    ?assertEqual({ok, 'Integer'}, beamtalk_repl_server:safe_to_existing_atom(<<"Integer">>)).
 
 %% Generator: runs all TCP integration tests within a single workspace instance
 tcp_integration_test_() ->
