@@ -750,7 +750,7 @@ boolean — `unregister/3` mirrors this exactly so its
 **Key-collision caveat (ADR 0112, not a blocker, documented so it isn't
 rediscovered via a debugger):** an instance-side extension's xref row and a
 *local* instance-side method's xref row share the identical
-`{Class, false, Selector}` key shape — `beamtalk_object_class:put_method_xref/4`
+`{Class, false, Selector}` key shape — `beamtalk_class_publish:put_method_xref/4`
 indexes local methods the same way. In the local-shadowed-by-extension case
 (a class defines `#foo` locally *and* a same-named extension is registered),
 `beamtalk_xref:purge_method/3` on either one's rows will collide with the
