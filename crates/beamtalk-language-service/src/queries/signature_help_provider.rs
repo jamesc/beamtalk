@@ -530,10 +530,10 @@ fn resolve_receiver_class(
             }
             SigHelpClassContext::TopLevel => None,
         },
+        // A map shape (`#{#a => 1}`, ADR 0147) resolves as its `Dictionary`.
         _ => type_of_parsed(type_map, receiver)
-            .and_then(InferredType::as_known)
-            .cloned()
-            .map(|name| (name, false)),
+            .and_then(InferredType::instance_class)
+            .map(|(name, _)| (name.clone(), false)),
     }
 }
 

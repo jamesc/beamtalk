@@ -269,8 +269,11 @@ impl TypeChecker {
         Self::union_members(inferred_ty)
             .iter()
             .filter(|member| !Self::shape_member_ok(member, declared, hierarchy))
-            .find_map(|member| Self::shape_assignable(member, declared, hierarchy).err())
-            .filter(|m| !matches!(m, ShapeMismatch::Incompatible))
+            .find_map(|member| {
+                Self::shape_assignable(member, declared, hierarchy)
+                    .err()
+                    .filter(|m| !matches!(m, ShapeMismatch::Incompatible))
+            })
             .map(|m| m.describe())
     }
 
