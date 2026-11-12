@@ -40,7 +40,7 @@ and can be queried by other components (e.g., idle monitor).
 %% the protocol-reload fan-out). Deliberately NOT persisted to
 %% `metadata.json` like `class_sources` is — see that function's doc.
 -export([
-    set_protocol_source/2, get_protocol_source/1, all_protocol_sources/0, remove_protocol_source/1
+    set_protocol_source/2, get_protocol_source/1, all_protocol_sources/0
 ]).
 %% File mtime tracking for incremental load-project.
 -export([set_file_mtime/2, get_file_mtimes/0, clear_file_mtimes/0, remove_file_mtime/1]).
@@ -371,20 +371,6 @@ get_protocol_source(ProtocolName) when is_binary(ProtocolName) ->
     catch
         exit:{noproc, _} ->
             undefined
-    end.
-
--doc """
-Remove stored source text for a protocol — mirrors `remove_class_source/1`'s
-fire-and-forget, degrade-silently contract. Called when a protocol's
-defining class is removed from the system.
-""".
--spec remove_protocol_source(binary()) -> ok.
-remove_protocol_source(ProtocolName) when is_binary(ProtocolName) ->
-    try
-        gen_server:cast(?MODULE, {remove_protocol_source, ProtocolName})
-    catch
-        exit:{noproc, _} ->
-            ok
     end.
 
 -doc """

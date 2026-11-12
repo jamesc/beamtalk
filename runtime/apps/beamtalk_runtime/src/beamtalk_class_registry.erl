@@ -83,7 +83,6 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     classes_backing_module/1,
     ensure_class_state_table/0,
     record_class_state_snapshot/2,
-    class_state_snapshot/1,
     class_state_snapshot_lookup/1,
     forget_class_state_snapshot/1,
     ensure_static_call_keys_table/0,
@@ -1116,22 +1115,7 @@ record_class_state_snapshot(Pid, ClassVars) ->
     ok.
 
 -doc """
-Look up the current `classState:` map for a class process.
-
-Returns `#{}` if the table doesn't exist yet or the class process has no
-snapshot recorded (e.g. a class with no `classState:` declarations at all).
-Never messages `Pid` — safe to call from inside another process's `init/1`
-even when `Pid` itself is blocked waiting on that very call to return.
-""".
--spec class_state_snapshot(pid() | undefined) -> map().
-class_state_snapshot(Pid) ->
-    case class_state_snapshot_lookup(Pid) of
-        {ok, ClassVars} -> ClassVars;
-        not_found -> #{}
-    end.
-
--doc """
-Like `class_state_snapshot/1`, but tells "no row for this pid" (`not_found`:
+Look up the current `classState:` map for a class process, telling "no row for this pid" (`not_found`:
 the table is absent, or a restarted class process is registered but has not yet
 recorded its snapshot) apart from "the row is an empty map" (`{ok, #{}}`).
 `beamtalk_class_vars` mirror reads use it to raise `class_state_unreachable`
@@ -1164,7 +1148,7 @@ already resolved via `whereis_class/1`. Without this cleanup, rows
 accumulate for the life of the node — unbounded growth across a long
 hot-reload session, which is a core REPL/dev workflow. On a hard crash
 `terminate/1` does not run, so a dead row can linger there too; harmless,
-since `class_state_snapshot/1` is only ever called with a pid a caller just
+since `class_state_snapshot_lookup/1` is only ever called with a pid a caller just
 resolved as live.
 """.
 -spec forget_class_state_snapshot(pid()) -> ok.

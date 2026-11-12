@@ -16,17 +16,22 @@ Provides utilities for listing, unloading, and reloading modules.
     new/0,
     add_module/3,
     remove_module/2,
+    get_actor_count/3,
+    resolve_source_path/1
+]).
+-ifdef(TEST).
+-export([
     get_module_info/2,
     list_modules/1,
     module_exists/2,
-    get_actor_count/3,
-    format_module_info/2,
     get_source_file/1,
-    resolve_source_path/1
+    format_module_info/2,
+    format_time_ago/1
 ]).
+-endif.
 
 -ifdef(TEST).
--export([format_time_ago/1]).
+
 -endif.
 
 -export_type([module_tracker/0, module_info/0]).
@@ -65,6 +70,7 @@ add_module(ModuleName, SourceFile, Tracker) ->
 remove_module(ModuleName, Tracker) ->
     maps:remove(ModuleName, Tracker).
 
+-ifdef(TEST).
 -doc "Get information about a specific module.".
 -spec get_module_info(atom(), module_tracker()) -> {ok, module_info()} | {error, not_found}.
 get_module_info(ModuleName, Tracker) ->
@@ -73,12 +79,16 @@ get_module_info(ModuleName, Tracker) ->
         {ok, Info} -> {ok, Info};
         error -> {error, not_found}
     end.
+-endif.
 
+-ifdef(TEST).
 -doc "Get the source file path from a module_info record.".
 -spec get_source_file(module_info()) -> string() | undefined.
 get_source_file(#module_info{source_file = SourceFile}) ->
     SourceFile.
+-endif.
 
+-ifdef(TEST).
 -doc """
 List all tracked modules with their information.
 Optionally updates actor counts from the actor registry.
@@ -86,11 +96,14 @@ Optionally updates actor counts from the actor registry.
 -spec list_modules(module_tracker()) -> [{atom(), module_info()}].
 list_modules(Tracker) ->
     maps:to_list(Tracker).
+-endif.
 
+-ifdef(TEST).
 -doc "Check if a module is being tracked.".
 -spec module_exists(atom(), module_tracker()) -> boolean().
 module_exists(ModuleName, Tracker) ->
     maps:is_key(ModuleName, Tracker).
+-endif.
 
 -doc """
 Get the current actor count for a module.
@@ -115,6 +128,7 @@ get_actor_count(ModuleName, RegistryPid, Tracker) ->
             0
     end.
 
+-ifdef(TEST).
 -doc """
 Format module information for display.
 Returns a map with displayable fields.
@@ -140,6 +154,7 @@ format_module_info(
         load_time => LoadTime,
         time_ago => TimeAgo
     }.
+-endif.
 
 -doc """
 Resolve source path for a loaded module when workspace_meta has none.
@@ -157,6 +172,7 @@ resolve_source_path(ModName) ->
         _:_ -> "unknown"
     end.
 
+-ifdef(TEST).
 -doc "Format elapsed time as a human-readable string (e.g., \"5m ago\").".
 -spec format_time_ago(integer()) -> string().
 format_time_ago(Secs) when Secs < 60 ->
@@ -170,3 +186,4 @@ format_time_ago(Secs) when Secs < 86400 ->
 format_time_ago(Secs) ->
     Days = Secs div 86400,
     io_lib:format("~pd ago", [Days]).
+-endif.

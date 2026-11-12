@@ -30,7 +30,6 @@ requests, "type"-keyed responses) has been removed.
     encode_need_input/2,
     encode_loaded/3, encode_loaded/4,
     encode_actors/3,
-    encode_modules/3,
     encode_sessions/3,
     encode_inspect/2, encode_inspect/3,
     encode_docs/2,
@@ -265,24 +264,6 @@ encode_actors(Actors, Msg, _TermToJson) ->
     Base = base_response(Msg),
     iolist_to_binary(
         json:encode(Base#{<<"actors">> => JsonActors, <<"status">> => [<<"done">>]})
-    ).
-
--doc "Encode a modules list response.".
--spec encode_modules([{atom(), map()}], protocol_msg(), fun((term()) -> term())) -> binary().
-encode_modules(ModulesWithInfo, Msg, _TermToJson) ->
-    JsonModules = [
-        #{
-            <<"name">> => maps:get(name, Info),
-            <<"source_file">> => list_to_binary(maps:get(source_file, Info)),
-            <<"actor_count">> => maps:get(actor_count, Info),
-            <<"load_time">> => maps:get(load_time, Info),
-            <<"time_ago">> => list_to_binary(lists:flatten(maps:get(time_ago, Info)))
-        }
-     || {_ModuleName, Info} <- ModulesWithInfo
-    ],
-    Base = base_response(Msg),
-    iolist_to_binary(
-        json:encode(Base#{<<"modules">> => JsonModules, <<"status">> => [<<"done">>]})
     ).
 
 -doc "Encode a sessions list response.".

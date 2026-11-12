@@ -152,7 +152,6 @@ moduledoc already declined for the same complexity/benefit tradeoff.
     previous/1,
     clear/0,
     field_type_to_binary/1,
-    field_kind_to_binary/1,
     normalize_shape/2
 ]).
 
@@ -500,8 +499,8 @@ Delegates to `beamtalk_class_metadata:normalize_field_shape/2` (ADR 0125
 build-time `beamtalk_release_shapes` extractor use, rather than two
 independent implementations of the same `field_types`/`field_kinds` ->
 `shape()` zip (AGENTS.md's no-duplicate-implementations rule). See also
-`field_type_to_binary/1`/`field_kind_to_binary/1`, this function's two
-per-value normalisers, which delegate the same way.
+`field_type_to_binary/1`, this function's per-value normaliser, which
+delegates the same way.
 """.
 -spec normalize_shape(#{atom() => atom()}, #{atom() => atom()}) -> shape().
 normalize_shape(FieldTypes, FieldKinds) ->
@@ -515,12 +514,3 @@ doc.
 """.
 -spec field_type_to_binary(atom()) -> binary().
 field_type_to_binary(Atom) -> beamtalk_class_metadata:field_type_to_binary(Atom).
-
--doc """
-`field_kinds`' `'eager'`/`'late'` atom -> binary normalisation
-`normalize_shape/2` uses for a `shape()` value's `Kind` half. Delegates to
-`beamtalk_class_metadata:field_kind_to_binary/1` — see `normalize_shape/2`'s
-doc.
-""".
--spec field_kind_to_binary(eager | late) -> binary().
-field_kind_to_binary(Atom) -> beamtalk_class_metadata:field_kind_to_binary(Atom).
