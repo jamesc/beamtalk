@@ -16,7 +16,7 @@
 //! - `docs/beamtalk-ddd-model.md` - Semantic Analysis Context
 
 use crate::ast::{
-    BinarySegment, Block, CascadeMessage, ClassDefinition, Expression, Identifier, Literal,
+    BinarySegment, Block, CascadeMessage, ClassDefinition, Expression, Literal,
     MatchArm, MessageSelector, MethodDefinition, Module, Pattern,
 };
 use crate::ast_walker::cascade_shared_receiver;
@@ -228,7 +228,7 @@ impl NameResolver {
                     ..
                 } if arguments.is_empty()
                     && sel.as_str() == "delegate"
-                    && matches!(receiver.as_ref(), Expression::Identifier(Identifier { name, .. }) if name.as_str() == "self")
+                    && receiver.is_self()
             )
         );
         if !is_primitive_body && !is_self_delegate_body {

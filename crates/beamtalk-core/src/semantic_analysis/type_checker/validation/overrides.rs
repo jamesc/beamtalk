@@ -189,10 +189,10 @@ impl TypeChecker {
     ) -> Option<OverrideReturnWidening> {
         let superclass = hierarchy.get_class(class_name)?.superclass.clone()?;
         let parent_method = hierarchy.find_method(&superclass, selector)?;
-        let parent_rt = parent_method.return_type?;
+        let parent_rt = parent_method.return_type.clone()?;
         // Class type params (possibly multi-letter, which the shared rule's
         // single-letter heuristic would miss) have no substitution here.
-        let parent_class = parent_method.defined_in;
+        let parent_class = parent_method.defined_in.clone();
         let type_params: Vec<EcoString> = [class_name, parent_class.as_str()]
             .into_iter()
             .filter_map(|c| hierarchy.get_class(c))

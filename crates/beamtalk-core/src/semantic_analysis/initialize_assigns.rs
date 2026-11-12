@@ -49,7 +49,6 @@ use crate::ast::{
     Pattern, WellKnownSelector,
 };
 use crate::ast_walker::walk_expression;
-use crate::semantic_analysis::block_facts::is_self_reference;
 use ecow::EcoString;
 use std::collections::BTreeSet;
 
@@ -215,7 +214,7 @@ fn analyze_expr(expr: &Expression, current: &BTreeSet<EcoString>) -> FlowResult 
                 receiver, field, ..
             } = target.as_ref()
             {
-                if is_self_reference(receiver) {
+                if receiver.is_self() {
                     after_value.insert(field.name.clone());
                 }
             }

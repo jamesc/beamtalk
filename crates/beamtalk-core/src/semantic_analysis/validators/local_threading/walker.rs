@@ -16,7 +16,7 @@ use crate::semantic_analysis::block_facts::{
     RootMethodKind, WriteKind, block_literal_of_other_arity, conditional_arm_blocks,
     conditional_producer_writes, construct_outer_local_writes, escape_sites, exception_arm_blocks,
     exception_producer_writes, is_actor_fold_value_site, is_fold_frame_body,
-    is_loop_body_producer_site, is_self_or_super, is_threaded_frame_body, literal_block_value_arm,
+    is_loop_body_producer_site, is_threaded_frame_body, literal_block_value_arm,
     local_threading_construct, lookup_arm_blocks, loop_body_producer_sites, match_arm_block,
     match_arm_body_writes, match_arms, match_guard_writes, match_producer_writes,
     operand_producer_writes, outer_local_writes, outer_state_writes, producer_body_block,
@@ -1176,7 +1176,7 @@ impl<'d> Walker<'d> {
             return false;
         };
         matches!(self.context, Actor | Class)
-            && is_self_or_super(receiver)
+            && receiver.is_self_or_super()
             && local_threading_construct(expr)
                 .is_some_and(|c| c.family == LocalThreadingFamily::Fold)
     }

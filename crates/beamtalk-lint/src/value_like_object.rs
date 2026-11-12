@@ -168,7 +168,7 @@ fn is_self_field_access(expr: &Expression, field_names: &HashSet<&str>) -> bool 
     matches!(
         expr,
         Expression::FieldAccess { receiver, field, .. }
-            if matches!(receiver.as_ref(), Expression::Identifier(Identifier { name, .. }) if name.as_str() == "self")
+            if receiver.is_self()
             && field_names.contains(field.name.as_str())
     )
 }

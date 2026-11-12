@@ -64,10 +64,7 @@ fn is_timer_block_selector(selector: &MessageSelector) -> bool {
 
 /// Returns `true` if `expr` is the identifier `self`.
 fn is_self(expr: &Expression) -> bool {
-    matches!(
-        expr,
-        Expression::Identifier(Identifier { name, .. }) if name.as_str() == "self"
-    )
+    expr.is_self()
 }
 
 /// The lint for a synchronous `self {selector}` send inside a Timer block.

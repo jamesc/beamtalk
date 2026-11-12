@@ -131,7 +131,7 @@ fn send_crosses_process_boundary(
     }
     // Self-sends and state-threading selectors keep the block local (same
     // process; inline or Tier-2 promoted).
-    let is_self_send = matches!(receiver, Expression::Identifier(id) if id.name == "self");
+    let is_self_send = receiver.is_self();
     if is_self_send || is_state_threading_keyword_selector(selector) {
         return false;
     }

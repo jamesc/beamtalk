@@ -326,7 +326,7 @@ fn check_object_new_in_class_methods(
                     let mut check = |receiver: &Expression, sel: &str, span: Span| {
                         if matches!(sel, "new" | "new:")
                             && (matches!(receiver, Expression::Super(_))
-                                || is_self_identifier(receiver))
+                                || receiver.is_self())
                             && !hierarchy.has_own_class_method(class_name, sel)
                             // BT-4479/BT-4738: `super new` and `self new` both run
                             // an ancestor's user `class new` when this class has
@@ -356,10 +356,6 @@ fn check_object_new_in_class_methods(
             }
         }
     }
-}
-
-fn is_self_identifier(expr: &Expression) -> bool {
-    matches!(expr, Expression::Identifier(id) if id.name == "self")
 }
 
 /// Why `ClassName new`/`new:` cannot work for a given receiver.
@@ -909,7 +905,7 @@ fn check_slot_assignment_at(
             receiver, field, ..
         } = target.as_ref()
         {
-            if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self") {
+            if receiver.is_self() {
                 report_self_slot_assignment(
                     field.name.as_str(),
                     *span,
@@ -1033,7 +1029,7 @@ fn is_subclass_responsibility(method: &MethodDefinition) -> bool {
                     receiver,
                     selector: MessageSelector::Unary(sel),
                     ..
-                } if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+                } if receiver.is_self()
                     && sel.as_str() == "subclassResponsibility"
             ) {
                 found = true;
@@ -1412,7 +1408,7 @@ fn check_migration_body_class_var_access(
             else {
                 return;
             };
-            if !matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self") {
+            if !receiver.is_self() {
                 return;
             }
             if class_var_names

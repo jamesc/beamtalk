@@ -182,11 +182,11 @@ fn binary_as_string_does_not_refine_collection_as_string() {
     let h = ClassHierarchy::with_builtins();
     let binary = h
         .find_method("Binary", "asString")
-        .and_then(|m| m.return_type)
+        .and_then(|m| m.return_type.clone())
         .expect("Binary>>asString has a declared return type");
     let collection = h
         .find_method("Collection", "asString")
-        .and_then(|m| m.return_type)
+        .and_then(|m| m.return_type.clone())
         .expect("Collection>>asString has a declared return type");
     assert_eq!(binary.to_string(), "Result(String, Error)");
     assert_eq!(collection.to_string(), "String");

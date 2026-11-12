@@ -120,7 +120,7 @@ pub(crate) fn expr_contains_returning_self_send(expr: &Expression, type_map: &Ty
             }
             if let Expression::MessageSend { receiver, .. } = e {
                 let to_self = matches!(receiver.as_ref(), Expression::Super(_))
-                    || matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self");
+                    || receiver.is_self();
                 if to_self && !matches!(self.1.get(e.span()), Some(InferredType::Never)) {
                     self.0 = true;
                     return;

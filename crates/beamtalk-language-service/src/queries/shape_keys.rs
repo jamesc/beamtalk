@@ -394,7 +394,7 @@ fn receiver_method(
             hierarchy.find_method(class_name, selector)
         }
     }?;
-    Some(info.param_types)
+    Some(info.param_types.clone())
 }
 
 /// The literal holding the placeholder inside `value` (descending through

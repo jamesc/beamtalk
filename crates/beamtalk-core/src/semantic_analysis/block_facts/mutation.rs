@@ -491,7 +491,7 @@ pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAcce
                     receiver, field, ..
                 } = target.as_ref()
                 {
-                    if is_self_reference(receiver) && vars.contains(field.name.as_str()) {
+                    if receiver.is_self() && vars.contains(field.name.as_str()) {
                         accesses
                             .writes
                             .entry(field.name.to_string())
@@ -504,7 +504,7 @@ pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAcce
                 e @ Expression::FieldAccess {
                     receiver, field, ..
                 },
-            ) if is_self_reference(receiver)
+            ) if receiver.is_self()
                 && vars.contains(field.name.as_str())
                 && !written_targets.contains(&std::ptr::from_ref(e)) =>
             {
@@ -512,7 +512,7 @@ pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAcce
             }
             WalkEvent::Send(send)
                 if send.site == SendSite::Plain
-                    && is_self_reference(send.receiver)
+                    && send.receiver.is_self()
                     && send.selector.well_known() == Some(WellKnownSelector::HasField) =>
             {
                 let probed = match send.arguments.first() {
@@ -526,7 +526,7 @@ pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAcce
             WalkEvent::Send(send)
                 if send.site == SendSite::Plain
                     && !send.is_cast
-                    && is_self_reference(send.receiver)
+                    && send.receiver.is_self()
                     && send.selector.well_known() == Some(WellKnownSelector::FieldAt) =>
             {
                 match send.arguments.first() {
@@ -541,7 +541,7 @@ pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAcce
             WalkEvent::Send(send)
                 if send.site == SendSite::Plain
                     && !send.is_cast
-                    && is_self_reference(send.receiver) =>
+                    && send.receiver.is_self() =>
             {
                 let kind = match send.selector.well_known() {
                     Some(WellKnownSelector::FieldAtPut) => ReflectiveWriteKind::FieldAtPut,
@@ -639,7 +639,7 @@ fn analyze_expression(
         } => {
             // Read of a field (self.field)
             analyze_expression(receiver, analysis, ctx);
-            if is_self_reference(receiver) {
+            if receiver.is_self() {
                 analysis.field_reads.insert(field.name.to_string());
             }
         }
@@ -663,7 +663,7 @@ fn analyze_expression(
                     receiver, field, ..
                 } => {
                     // Field assignment
-                    if is_self_reference(receiver) {
+                    if receiver.is_self() {
                         analysis.field_writes.insert(field.name.to_string());
                     }
                 }
@@ -849,7 +849,7 @@ fn record_send_target(
     is_cast: bool,
     analysis: &mut BlockMutationAnalysis,
 ) {
-    if is_self_reference(receiver) {
+    if receiver.is_self() {
         analysis.has_self_sends = true;
         analysis
             .self_send_selectors
@@ -995,24 +995,6 @@ fn collect_pattern_bindings(
             }
         }
     }
-}
-
-/// Returns true if the expression is a reference to `self`.
-///
-/// `pub(crate)`: also used by [`crate::semantic_analysis::initialize_assigns`]'s
-/// must-analysis (ADR 0124 A2a) — same "is this receiver `self`" question this
-/// may-analysis already answers, imported rather than redefined (AGENTS.md's
-/// no-duplicate-implementations rule).
-/// Whether `expr` (parentheses looked through) is `self` or `super`: the
-/// receivers whose sends run the object's own methods.
-#[must_use]
-pub(crate) fn is_self_or_super(expr: &Expression) -> bool {
-    let expr = expr.unwrap_parens();
-    is_self_reference(expr) || matches!(expr, Expression::Super(_))
-}
-
-pub(crate) fn is_self_reference(expr: &Expression) -> bool {
-    matches!(expr, Expression::Identifier(id) if id.name == "self")
 }
 
 /// Returns true if `selector_name` is `on:do:` or `ensure:` — exception

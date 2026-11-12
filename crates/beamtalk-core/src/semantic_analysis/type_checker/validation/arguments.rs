@@ -985,7 +985,7 @@ impl TypeChecker {
             } = e
             {
                 if name == "deferReply"
-                    && matches!(&**receiver, Expression::Identifier(id) if id.name == "self")
+                    && receiver.is_self()
                 {
                     found = true;
                 }

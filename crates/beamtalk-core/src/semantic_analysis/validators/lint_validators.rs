@@ -604,7 +604,7 @@ fn is_self_field_assignment(expr: &Expression) -> bool {
     let Expression::FieldAccess { receiver, .. } = target.as_ref() else {
         return false;
     };
-    matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+    receiver.is_self()
 }
 
 /// Returns `true` if `expr` is the bare identifier `self`.

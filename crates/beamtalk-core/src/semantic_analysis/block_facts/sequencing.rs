@@ -581,7 +581,7 @@ pub fn is_self_field_target(target: &Expression) -> bool {
     matches!(
         target,
         Expression::FieldAccess { receiver, .. }
-            if matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+            if receiver.is_self()
     )
 }
 
@@ -619,7 +619,7 @@ fn operands_not_sequenced(
     arguments: &[Expression],
 ) -> Option<UnsequencedOperand> {
     use crate::ast::WellKnownSelector;
-    let is_self = matches!(receiver, Expression::Identifier(id) if id.name == "self");
+    let is_self = receiver.is_self();
     if matches!(receiver, Expression::Super(_)) {
         return Some(UnsequencedOperand::SuperSend);
     }

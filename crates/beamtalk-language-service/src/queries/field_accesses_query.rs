@@ -131,10 +131,6 @@ fn collect_field_lines(method_source: &str, field_name: &str, kind: AccessKind) 
 /// A field access counts only when the receiver is `self` — `other.x` /
 /// `foo.x := ...` reference a different object's field, not this class's slot,
 /// so they must not be reported (avoids false positives).
-fn is_self_receiver(receiver: &Expression) -> bool {
-    matches!(receiver, Expression::Identifier(id) if id.name == "self")
-}
-
 /// Collect a stand-alone `FieldAccess` (i.e. one that is NOT an assignment
 /// target). Outside an assignment target a `self.x` access is a read; it is
 /// never a write (writes only come from the `Assignment` arm). The receiver is
@@ -148,7 +144,7 @@ fn collect_field_access(
     source: &str,
     lines: &mut Vec<u32>,
 ) {
-    if kind == AccessKind::Read && field.name == field_name && is_self_receiver(receiver) {
+    if kind == AccessKind::Read && field.name == field_name && receiver.is_self() {
         lines.push(field_access_line(field.span, span, source));
     }
     collect_access_lines(receiver, field_name, kind, source, lines);
@@ -175,7 +171,7 @@ fn collect_assignment(
         span,
     } = target
     {
-        if kind == AccessKind::Write && field.name == field_name && is_self_receiver(receiver) {
+        if kind == AccessKind::Write && field.name == field_name && receiver.is_self() {
             lines.push(field_access_line(field.span, *span, source));
         }
         // Walk the target's receiver only — NOT the target field as a read.
