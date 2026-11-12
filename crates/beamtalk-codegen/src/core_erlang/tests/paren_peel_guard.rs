@@ -249,7 +249,7 @@ const CEILINGS: &[(&str, usize)] = &[
     // Shared predicates over statements, assignment values and receivers.
     (
         "beamtalk-core/src/semantic_analysis/validators/lint_validators.rs",
-        8,
+        7,
     ),
     // `discarded-update` examines a statement (`(p withX: 5).`) and a block
     // literal argument, both positions the pass leaves alone (BT-4522).

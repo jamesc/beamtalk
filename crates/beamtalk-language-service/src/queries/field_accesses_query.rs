@@ -128,9 +128,6 @@ fn collect_field_lines(method_source: &str, field_name: &str, kind: AccessKind) 
         .collect()
 }
 
-/// A field access counts only when the receiver is `self` — `other.x` /
-/// `foo.x := ...` reference a different object's field, not this class's slot,
-/// so they must not be reported (avoids false positives).
 /// Collect a stand-alone `FieldAccess` (i.e. one that is NOT an assignment
 /// target). Outside an assignment target a `self.x` access is a read; it is
 /// never a write (writes only come from the `Assignment` arm). The receiver is
