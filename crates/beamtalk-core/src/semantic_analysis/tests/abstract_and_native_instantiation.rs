@@ -401,6 +401,7 @@ Object subclass: Base
   class new => 1
 Base subclass: Sub
   class make => self new
+  class viaSuper => super new
 Object subclass: User
   class build => Sub new
 ";

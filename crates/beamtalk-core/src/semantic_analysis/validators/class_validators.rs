@@ -324,6 +324,12 @@ fn check_object_new_in_class_methods(
                             && (matches!(receiver, Expression::Super(_))
                                 || is_self_identifier(receiver))
                             && !hierarchy.has_own_class_method(class_name, sel)
+                            // BT-4479: `super new` dispatches up the chain to an
+                            // ancestor's user `class new`; only `self new` lowers
+                            // to the synthesized constructor.
+                            && !(sel == "new"
+                                && matches!(receiver, Expression::Super(_))
+                                && hierarchy.chain_has_user_new0(class_name))
                         {
                             diagnostics.push(object_kind_new_error(class_name, sel, span));
                         }
