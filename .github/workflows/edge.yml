@@ -31,10 +31,13 @@ on:
   workflow_dispatch:
 
 concurrency:
-  # Serialize edge publishes; a newer merge supersedes an in-flight build so the
-  # rolling release always lands on the latest commit (no publish races).
+  # Serialize edge publishes: a newer merge waits for the in-flight publish
+  # instead of cancelling it; only the newest pending run is kept (older pending
+  # runs are replaced). A ~15 min build must be able to finish during a burst of
+  # merges, otherwise each run is cancelled by the next one and nothing publishes.
+  # The release still catches up to the latest main within one extra build.
   group: edge
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: write
