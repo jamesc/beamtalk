@@ -25,8 +25,9 @@ the writers for those facts, none of which touch the `#class_state{}` record:
 `sync_identity/6` writes the *calling* process's dictionary, so it must be
 called from the class gen_server itself, as `init/1` and the reload path do.
 
-`publish_reflection/1` and the hot-patch notifier stay in
-`beamtalk_object_class`: they read the private `#class_state{}` record.
+`publish_reflection/1` and `notify_hot_patch/1` take a `reflection_view()`, a
+plain map of the class fields they read that `beamtalk_object_class` builds with
+`reflection_view/1`, so the private `#class_state{}` record is never shared.
 """.
 
 -include_lib("kernel/include/logger.hrl").
@@ -46,11 +47,38 @@ called from the class gen_server itself, as `init/1` and the reload path do.
     sync_class_process_facts/3,
     warn_stale_subclass_constructors/3,
     is_runtime_fun_info/1,
-    seed_runtime_class_methods/2
+    seed_runtime_class_methods/2,
+    publish_reflection/1,
+    method_record/4,
+    notify_hot_patch/1
 ]).
 
 -type class_name() :: atom().
 -type selector() :: atom().
+
+-type reflection_view() :: #{
+    name := class_name(),
+    module := atom(),
+    superclass := class_name() | none,
+    is_sealed := boolean(),
+    is_abstract := boolean(),
+    is_typed := boolean(),
+    is_internal := boolean(),
+    shape_version := pos_integer(),
+    doc := binary() | none,
+    fields := [atom()],
+    instance_methods := #{selector() => map()},
+    class_methods := #{selector() => map()},
+    method_return_types := #{selector() => term()},
+    class_method_return_types := #{selector() => term()},
+    method_source := #{selector() => binary()},
+    method_signatures := #{selector() => binary()},
+    method_docs := #{selector() => binary()},
+    class_method_source := #{selector() => binary()},
+    class_method_signatures := #{selector() => binary()},
+    class_method_docs := #{selector() => binary()}
+}.
+-export_type([reflection_view/0]).
 
 %%====================================================================
 %% xref index and lifecycle announcements
@@ -476,4 +504,154 @@ seed_runtime_class_methods(ClassName, ClassMethods) ->
                 Funs
             ),
             beamtalk_class_metadata:set_runtime_class_methods(ClassName, maps:keys(ClassMethods))
+    end.
+
+-doc """
+Mirror this class's reflection state into its metadata row (BT-3826).
+
+Publishes the local instance-method selectors, declared instance variables and
+both return-type maps, so `instance_methods_safe/1`, `instance_variables_safe/1`,
+`has_method/2` and `beamtalk_class_registry:get_method_return_type/2` can answer
+for this class without a `gen_server:call` -- which, issued from inside another
+class's handler, deadlocks two busy classes against each other. Called after
+every state change to those four fields: `init/1`, `put_method`,
+`put_class_method`, `update_class` and `rename_class`. Also publishes the class
+doc (BT-4262; `set_doc` publishes it directly).
+""".
+-spec publish_reflection(reflection_view()) -> ok.
+publish_reflection(
+    #{
+        name := ClassName,
+        instance_methods := InstanceMethods,
+        fields := Fields,
+        method_return_types := MethodReturnTypes,
+        class_method_return_types := ClassMethodReturnTypes,
+        class_methods := ClassMethods,
+        is_sealed := IsSealed,
+        is_typed := IsTyped,
+        is_internal := IsInternal,
+        shape_version := ShapeVersion,
+        doc := Doc
+    } = View
+) ->
+    beamtalk_class_metadata:put_reflection(ClassName, #{
+        instance_methods => maps:keys(InstanceMethods),
+        instance_variables => Fields,
+        method_return_types => MethodReturnTypes,
+        class_method_return_types => ClassMethodReturnTypes
+    }),
+    %% BT-3832: flags, and the per-method records behind CompiledMethod lookups.
+    beamtalk_class_metadata:put_flags(ClassName, #{
+        is_sealed => IsSealed,
+        is_typed => IsTyped,
+        is_internal => IsInternal,
+        shape_version => ShapeVersion
+    }),
+    beamtalk_class_metadata:put_method_records(
+        ClassName, instance, method_records(instance, InstanceMethods, View)
+    ),
+    beamtalk_class_metadata:put_method_records(
+        ClassName, class, method_records(class, ClassMethods, View)
+    ),
+    %% BT-4262: the class doc, read by `beamtalk_behaviour_intrinsics:classDoc/1`.
+    beamtalk_class_metadata:put_class_doc(ClassName, Doc).
+
+%% `selector => #{info, source, signature, doc}` for one side of a class.
+-spec method_records(instance | class, #{selector() => map()}, reflection_view()) ->
+    #{selector() => beamtalk_class_metadata:method_record()}.
+method_records(Side, Methods, View) ->
+    maps:map(fun(Sel, Info) -> method_record(Side, Sel, Info, View) end, Methods).
+
+-spec method_record(instance | class, selector(), map(), reflection_view()) ->
+    beamtalk_class_metadata:method_record().
+method_record(instance, Sel, Info, #{
+    method_source := Source, method_signatures := Sigs, method_docs := Docs
+}) ->
+    #{
+        info => Info,
+        source => maps:get(Sel, Source, <<"">>),
+        signature => maps:get(Sel, Sigs, nil),
+        doc => maps:get(Sel, Docs, nil)
+    };
+method_record(class, Sel, Info, #{
+    class_method_source := Source,
+    class_method_signatures := Sigs,
+    class_method_docs := Docs
+}) ->
+    #{
+        info => Info,
+        source => maps:get(Sel, Source, <<"">>),
+        signature => maps:get(Sel, Sigs, nil),
+        doc => maps:get(Sel, Docs, nil)
+    }.
+
+-doc """
+Notify the compiler server of a hot-patch.
+
+ADR 0050 Phase 3: `__beamtalk_meta/0` is stale after hot-patching (it reflects
+compile-time metadata only).  This function synthesizes a minimal metadata map
+from the current live class state (a `reflection_view()`) and casts it to the compiler server.
+The compiler server replaces the class entry wholesale.
+Fire-and-forget — silently dropped if the server is not running.
+""".
+-spec notify_hot_patch(reflection_view()) -> ok.
+notify_hot_patch(#{
+    name := ClassName,
+    module := Module,
+    superclass := Superclass,
+    is_sealed := IsSealed,
+    is_abstract := IsAbstract,
+    instance_methods := InstanceMethods,
+    class_methods := ClassMethods,
+    fields := Fields,
+    method_return_types := MethodReturnTypes,
+    class_method_return_types := ClassMethodReturnTypes
+}) ->
+    %% Build selector→arity maps from the live instance_methods and class_methods.
+    %% param_types uses atom `none` (not empty list) per ADR 0050 format.
+    MethodInfo = maps:map(
+        fun(Sel, #{arity := Arity}) ->
+            %% Return types are cleared for hot-patched selectors — the compiler
+            %% will treat them as dynamic (none).
+            #{
+                arity => Arity,
+                return_type => maps:get(Sel, MethodReturnTypes, none),
+                param_types => none
+            }
+        end,
+        InstanceMethods
+    ),
+    ClassMethodInfo = maps:map(
+        fun(Sel, #{arity := Arity}) ->
+            #{
+                arity => Arity,
+                return_type => maps:get(Sel, ClassMethodReturnTypes, none),
+                param_types => none
+            }
+        end,
+        ClassMethods
+    ),
+    %% Normalize superclass: class_state uses `none` for root classes, but
+    %% __beamtalk_meta/0 uses `nil`.  Keep the cache consistent with the meta format.
+    SuperclassOut =
+        case Superclass of
+            none -> nil;
+            S -> S
+        end,
+    Meta = #{
+        class => ClassName,
+        superclass => SuperclassOut,
+        module => Module,
+        meta_version => 2,
+        is_sealed => IsSealed,
+        is_abstract => IsAbstract,
+        fields => Fields,
+        method_info => MethodInfo,
+        class_method_info => ClassMethodInfo
+    },
+    %% Guard: the compiler app may not be present in all deployments.
+    %% beamtalk_runtime does not formally depend on beamtalk_compiler.
+    case erlang:function_exported(beamtalk_compiler_server, register_class, 2) of
+        true -> beamtalk_compiler_server:register_class(ClassName, Meta);
+        false -> ok
     end.
