@@ -26,7 +26,7 @@
 
 use ecow::{EcoString, eco_format};
 
-use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
+use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::string_utils::edit_distance;
 
 use super::{InferredType, TypeChecker, TypeStringContext, type_resolver};
@@ -447,29 +447,35 @@ impl TypeChecker {
     /// Cheap pre-check: can `declared` be, or contain, a shape? True for a
     /// syntactic shape or any name that is a registered alias (which may
     /// expand to one).
-    pub(super) fn declared_may_be_shape(
-        &self,
-        declared: &crate::semantic_analysis::class_hierarchy::DeclaredType,
-    ) -> bool {
-        use crate::semantic_analysis::class_hierarchy::DeclaredType as D;
-        match declared {
-            D::Shape { .. } => true,
-            D::Simple(name) => self
-                .alias_registry
+    pub(super) fn declared_may_be_shape(&self, declared: &DeclaredType) -> bool {
+        declared_type_any_shape(declared, &|name| {
+            self.alias_registry
                 .as_ref()
-                .is_some_and(|r| r.get(name).is_some()),
-            D::Generic { parameters, .. } => {
-                parameters.iter().any(|p| self.declared_may_be_shape(p))
-            }
-            D::Union(m) => m.iter().any(|p| self.declared_may_be_shape(p)),
-            D::FalseOr(i) => self.declared_may_be_shape(i),
-            D::Difference { base, excluded } => {
-                self.declared_may_be_shape(base) || self.declared_may_be_shape(excluded)
-            }
-            D::Intersection { left, right } => {
-                self.declared_may_be_shape(left) || self.declared_may_be_shape(right)
-            }
-            D::Singleton(_) | D::SelfType | D::SelfClass | D::ClassOf(_) => false,
-        }
+                .is_some_and(|r| r.get(name).is_some())
+        })
+    }
+}
+
+/// `true` when a map shape (ADR 0147) appears anywhere in `ty`.
+pub(super) fn declared_type_has_shape(ty: &DeclaredType) -> bool {
+    declared_type_any_shape(ty, &|_| false)
+}
+
+/// The one walker over a [`DeclaredType`] looking for a shape; `bare_name`
+/// decides whether a bare `Simple` name counts as one (e.g. an alias).
+fn declared_type_any_shape(ty: &DeclaredType, bare_name: &dyn Fn(&str) -> bool) -> bool {
+    let rec = |t: &DeclaredType| declared_type_any_shape(t, bare_name);
+    match ty {
+        DeclaredType::Shape { .. } => true,
+        DeclaredType::Simple(name) => bare_name(name),
+        DeclaredType::Generic { parameters, .. } => parameters.iter().any(rec),
+        DeclaredType::Union(members) => members.iter().any(rec),
+        DeclaredType::FalseOr(inner) => rec(inner),
+        DeclaredType::Difference { base, excluded } => rec(base) || rec(excluded),
+        DeclaredType::Intersection { left, right } => rec(left) || rec(right),
+        DeclaredType::Singleton(_)
+        | DeclaredType::SelfType
+        | DeclaredType::SelfClass
+        | DeclaredType::ClassOf(_) => false,
     }
 }

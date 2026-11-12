@@ -668,3 +668,19 @@ fn protocol_typed_slots_are_left_to_conformance_checks() {
         msgs.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn shape_arriving_through_a_receiver_type_parameter_is_checked_at_send_sites() {
+    let msgs = diagnostics(
+        "Object subclass: Probe\n  \
+           put: d :: Dictionary(Symbol, #{#port => Integer}) => d at: #a put: 42\n  \
+           putOk: d :: Dictionary(Symbol, #{#port => Integer}) => d at: #a put: Dictionary new\n  \
+           add: l :: List(#{#port => Integer}) => l add: \"x\"\n",
+    );
+    assert_eq!(
+        msgs.len(),
+        2,
+        "got: {:#?}",
+        msgs.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}

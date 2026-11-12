@@ -39,6 +39,7 @@ use ecow::EcoString;
 
 use super::known_remote;
 use super::sendability;
+use super::shape_assignability::declared_type_has_shape;
 use super::type_resolver;
 use super::types::{
     AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass, OverrideReturnWidening,
@@ -1734,6 +1735,7 @@ impl TypeChecker {
             // judged structurally; everything else keeps the string-level
             // nominal rules below, which know no `#{...}` class.
             let expected_resolved = (arg_ty.contains_shape()
+                || class_subst.values().any(InferredType::contains_shape)
                 || self.declared_may_be_shape(expected_declared))
             .then(|| self.resolve_declared_recording_aliases(expected_declared, class_subst))
             .filter(|resolved| resolved.contains_shape() || arg_ty.contains_shape());
@@ -5697,25 +5699,4 @@ pub(super) struct ListLiteralElements<'a> {
     tail: Option<&'a Expression>,
     /// The declared element type `E` of the parameter's `List(E)`.
     element: InferredType,
-}
-
-/// `true` when a map shape (ADR 0147) appears anywhere in `ty`.
-fn declared_type_has_shape(ty: &DeclaredType) -> bool {
-    match ty {
-        DeclaredType::Shape { .. } => true,
-        DeclaredType::Generic { parameters, .. } => parameters.iter().any(declared_type_has_shape),
-        DeclaredType::Union(members) => members.iter().any(declared_type_has_shape),
-        DeclaredType::FalseOr(inner) => declared_type_has_shape(inner),
-        DeclaredType::Difference { base, excluded } => {
-            declared_type_has_shape(base) || declared_type_has_shape(excluded)
-        }
-        DeclaredType::Intersection { left, right } => {
-            declared_type_has_shape(left) || declared_type_has_shape(right)
-        }
-        DeclaredType::Simple(_)
-        | DeclaredType::Singleton(_)
-        | DeclaredType::SelfType
-        | DeclaredType::SelfClass
-        | DeclaredType::ClassOf(_) => false,
-    }
 }
