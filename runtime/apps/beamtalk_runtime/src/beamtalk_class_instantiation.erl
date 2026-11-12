@@ -834,7 +834,7 @@ do_class_self_named_spawn_checked(ClassName, Module, IsAbstract, InitArgs, Name,
                 {error, abstract_class_error(ClassName, Selector)}
             );
         false ->
-            %% beamtalk_actor:'spawnAs'/3 (safe_spawn_named) always
+            %% beamtalk_actor_registry:'spawnAs'/3 (safe_spawn_named) always
             %% links — it doubles as the real OTP supervisor child MFA for
             %% named children (ADR 0079), where that link is the
             %% restart mechanism. For *this* call site, the caller is
@@ -860,7 +860,7 @@ do_class_self_named_spawn_checked(ClassName, Module, IsAbstract, InitArgs, Name,
             %% `beamtalk_actor:safe_spawn/2`'s doc). That function marks the
             %% context via `?BT_SUPERVISOR_SPAWN_CONTEXT_KEY`;
             %% `spawn_named_for_caller/4` stays linked only when it is set.
-            case beamtalk_actor:spawn_named_for_caller(local, Name, Module, InitArgs) of
+            case beamtalk_actor_registry:spawn_named_for_caller(local, Name, Module, InitArgs) of
                 {ok, Pid} ->
                     beamtalk_result:from_tagged_tuple(
                         {ok, #beamtalk_object{
@@ -878,7 +878,7 @@ do_class_self_named_spawn_checked(ClassName, Module, IsAbstract, InitArgs, Name,
                     );
                 {error, Reason} ->
                     beamtalk_result:from_tagged_tuple(
-                        {error, beamtalk_actor:generic_spawn_error(ClassName, Selector, Reason)}
+                        {error, beamtalk_actor_ffi:generic_spawn_error(ClassName, Selector, Reason)}
                     )
             end
     end.

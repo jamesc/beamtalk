@@ -238,7 +238,7 @@ fn ffi_singleton_union_return_matches_declared_annotation() {
     );
 }
 
-/// A lone (non-union) `-> ok.` Erlang spec — e.g. `beamtalk_actor:unregister/1`
+/// A lone (non-union) `-> ok.` Erlang spec — e.g. `beamtalk_actor_ffi:unregister/1`
 /// — is now recognized by `beamtalk_spec_reader.erl` (ADR 0121, BT-3498) as
 /// `Result(Nil, Exception)` (BT-4023), not `Symbol`. Builds the registry entry
 /// from `map_type_name("Result(Nil, Exception)")`, the exact string the spec
@@ -251,7 +251,7 @@ fn ffi_singleton_union_return_matches_declared_annotation() {
 fn ffi_bare_ok_spec_infers_result_nil_matching_declared_annotation() {
     let mut reg = NativeTypeRegistry::new();
     reg.register_module(
-        "beamtalk_actor",
+        "beamtalk_actor_ffi",
         vec![FunctionSignature {
             name: "unregister".to_string(),
             arity: 1,
@@ -267,7 +267,7 @@ fn ffi_bare_ok_spec_infers_result_nil_matching_declared_annotation() {
 
     let src = "typed Object subclass: Reg\n  \
         unregisterName -> Result(Nil) =>\n    \
-          (Erlang beamtalk_actor) unregister: self";
+          (Erlang beamtalk_actor_ffi) unregister: self";
     let module = parse_source(src);
     let hierarchy = ClassHierarchy::with_builtins();
     let mut checker = TypeChecker::new();

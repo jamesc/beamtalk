@@ -47,14 +47,14 @@ anonymous_linked_start_test() ->
 
 local_named_start_test() ->
     Name = bt4577_eunit_local,
-    {ok, Pid} = beamtalk_actor:'spawnAs'(Name, ?FACADE, #{initial => 4}),
+    {ok, Pid} = beamtalk_actor_registry:'spawnAs'(Name, ?FACADE, #{initial => 4}),
     ?assertEqual(Pid, whereis(Name)),
     ?assertEqual({ok, 4}, get_value(Name)),
     stop(Pid).
 
 global_named_start_test() ->
     Name = bt4577_eunit_global,
-    {ok, Pid} = beamtalk_actor:'spawnAsGlobal'(Name, ?FACADE, #{initial => 5}),
+    {ok, Pid} = beamtalk_actor_registry:'spawnAsGlobal'(Name, ?FACADE, #{initial => 5}),
     ?assertEqual(Pid, global:whereis_name(Name)),
     ?assertEqual({ok, 5}, get_value(Pid)),
     stop(Pid).
@@ -69,14 +69,14 @@ taken_name_is_refused_before_start_test() ->
     true = register(Name, Holder),
     ?assertMatch(
         {error, #beamtalk_error{kind = name_registered}},
-        beamtalk_actor:'spawnAs'(Name, ?FACADE, #{})
+        beamtalk_actor_registry:'spawnAs'(Name, ?FACADE, #{})
     ),
     ?assertEqual(Holder, whereis(Name)),
     Holder ! stop.
 
 unlinked_named_start_test() ->
     Name = bt4577_eunit_unlinked,
-    {ok, Pid} = beamtalk_actor:spawn_named_unlinked(Name, ?FACADE, #{}),
+    {ok, Pid} = beamtalk_actor_registry:spawn_named_unlinked(Name, ?FACADE, #{}),
     {links, Links} = process_info(self(), links),
     ?assertNot(lists:member(Pid, Links)),
     ?assertEqual({ok, 0}, get_value(Pid)),

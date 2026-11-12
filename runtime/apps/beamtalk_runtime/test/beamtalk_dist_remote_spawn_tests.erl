@@ -7,7 +7,7 @@
 
 -moduledoc """
 Two-node EUnit tests for argument-free remote spawn and lookup (ADR 0126
-§3, Phase 2, BT-3599): `beamtalk_actor:remote_spawn/4`, `remote_named/3`,
+§3, Phase 2, BT-3599): `beamtalk_actor_remote:remote_spawn/4`, `remote_named/3`,
 `remote_all_registered/1`, and the `{registered, Name, Node}` node-qualified
 proxy shape those introduce.
 
@@ -90,7 +90,7 @@ remote_spawn_test_() ->
 
 anonymous_spawn_lands_on_target(PeerNode) ->
     register_counter_class(PeerNode),
-    {ok, Pid} = beamtalk_actor:remote_spawn(PeerNode, 'Counter', undefined, 'spawnOn:'),
+    {ok, Pid} = beamtalk_actor_remote:remote_spawn(PeerNode, 'Counter', undefined, 'spawnOn:'),
     ?assert(is_pid(Pid)),
     ?assertEqual(PeerNode, node(Pid)),
     try
@@ -109,7 +109,7 @@ anonymous_spawn_lands_on_target(PeerNode) ->
 named_spawn_and_lookup_round_trip(PeerNode) ->
     register_counter_class(PeerNode),
     Name = unique_name("bt3599_named"),
-    {ok, Pid} = beamtalk_actor:remote_spawn(PeerNode, 'Counter', Name, 'spawnAs:on:'),
+    {ok, Pid} = beamtalk_actor_remote:remote_spawn(PeerNode, 'Counter', Name, 'spawnAs:on:'),
     ?assert(is_pid(Pid)),
     ?assertEqual(PeerNode, node(Pid)),
     try
@@ -120,7 +120,7 @@ named_spawn_and_lookup_round_trip(PeerNode) ->
         ?assertEqual(Pid, rpc:call(PeerNode, erlang, whereis, [Name])),
 
         %% named:on: finds it and returns a node-qualified proxy.
-        {ok, Obj} = beamtalk_actor:remote_named(PeerNode, 'Counter', Name),
+        {ok, Obj} = beamtalk_actor_remote:remote_named(PeerNode, 'Counter', Name),
         ?assertMatch(#beamtalk_object{class = 'Counter', pid = {registered, Name, PeerNode}}, Obj),
 
         %% The proxy actually addresses the spawned actor.
@@ -132,7 +132,7 @@ named_spawn_and_lookup_round_trip(PeerNode) ->
         %% a crash — the documented non-idempotency recovery path.
         ?assertMatch(
             {error, #beamtalk_error{kind = name_registered}},
-            beamtalk_actor:remote_spawn(PeerNode, 'Counter', Name, 'spawnAs:on:')
+            beamtalk_actor_remote:remote_spawn(PeerNode, 'Counter', Name, 'spawnAs:on:')
         )
     after
         rpc:call(PeerNode, gen_server, stop, [Pid])
@@ -152,15 +152,15 @@ node_down_on_unreachable_node() ->
     ),
     ?assertMatch(
         {error, #beamtalk_error{kind = node_down}},
-        beamtalk_actor:remote_spawn(GhostNode, 'Counter', undefined, 'spawnOn:')
+        beamtalk_actor_remote:remote_spawn(GhostNode, 'Counter', undefined, 'spawnOn:')
     ),
     ?assertMatch(
         {error, #beamtalk_error{kind = node_down}},
-        beamtalk_actor:remote_named(GhostNode, 'Counter', someName)
+        beamtalk_actor_remote:remote_named(GhostNode, 'Counter', someName)
     ),
     ?assertMatch(
         {error, #beamtalk_error{kind = node_down}},
-        beamtalk_actor:remote_all_registered(GhostNode)
+        beamtalk_actor_remote:remote_all_registered(GhostNode)
     ),
     %% unregister on a node-qualified proxy must raise node_down rather than
     %% silently reporting success — the name may still be registered on the
@@ -169,7 +169,7 @@ node_down_on_unreachable_node() ->
         class = 'Counter', class_mod = test_counter, pid = {registered, someName, GhostNode}
     },
     ?assertError(
-        #{error := #beamtalk_error{kind = node_down}}, beamtalk_actor:unregister(GhostProxy)
+        #{error := #beamtalk_error{kind = node_down}}, beamtalk_actor_ffi:unregister(GhostProxy)
     ).
 
 %%====================================================================
@@ -182,7 +182,7 @@ class_not_found_for_unregistered_class(PeerNode) ->
     UnknownClass = unique_name("BT3599NoSuchClass"),
     ?assertMatch(
         {error, #beamtalk_error{kind = class_not_found, class = UnknownClass}},
-        beamtalk_actor:remote_spawn(PeerNode, UnknownClass, undefined, 'spawnOn:')
+        beamtalk_actor_remote:remote_spawn(PeerNode, UnknownClass, undefined, 'spawnOn:')
     ).
 
 %%====================================================================
@@ -230,9 +230,9 @@ registered_ref_is_node_qualified(PeerNode) ->
 all_registered_on_lists_target_node(PeerNode) ->
     register_counter_class(PeerNode),
     Name = unique_name("bt3599_allreg"),
-    {ok, Pid} = beamtalk_actor:remote_spawn(PeerNode, 'Counter', Name, 'spawnAs:on:'),
+    {ok, Pid} = beamtalk_actor_remote:remote_spawn(PeerNode, 'Counter', Name, 'spawnAs:on:'),
     try
-        {ok, List} = beamtalk_actor:remote_all_registered(PeerNode),
+        {ok, List} = beamtalk_actor_remote:remote_all_registered(PeerNode),
         ?assert(is_list(List)),
         ?assertMatch(
             [_ | _],

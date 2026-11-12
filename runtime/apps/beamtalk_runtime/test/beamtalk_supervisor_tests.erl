@@ -1917,7 +1917,7 @@ start_child_via_class_method_real_self_spawn_as_supervisor_restart_test() ->
     %% factory. Routes through the ACTUAL compiled call chain:
     %% 'class_createNamedViaSpawn:value:'/4 →
     %% beamtalk_class_instantiation:class_self_spawn_as/4 →
-    %% do_class_self_named_spawn/6 → beamtalk_actor:'spawnAs'/3
+    %% do_class_self_named_spawn/6 → beamtalk_actor_registry:'spawnAs'/3
     %% (safe_spawn_named). Before the fix, do_class_self_named_spawn/6
     %% unconditionally unlinked regardless of caller context, so this
     %% supervisor would never see the killed child's exit and the test
@@ -3973,7 +3973,7 @@ spec_to_otp_spawnAs_translates_to_beamtalk_actor_spawnAs_test() ->
     %% childSpec with startFn = #spawnAs: and startArgs = #(Name). The
     %% supervisor runtime must translate that into the MFA
     %% `{beamtalk_supervisor, start_actor_child, [Module, #{}, {local, Name}]}`
-    %% (BT-4033: the awaited start, through `beamtalk_actor:spawnAs/3`) so OTP restart re-
+    %% (BT-4033: the awaited start, through `beamtalk_actor_registry:spawnAs/3`) so OTP restart re-
     %% registers the name atomically. We construct the dispatchable
     %% Beamtalk spec by hand (equivalent to what Supervisor childSpec
     %% returns) and run it through build_child_specs/1.
@@ -4399,7 +4399,7 @@ supervisor_restart_re_registers_name_test() ->
     %% The load-bearing restart-survival integration test.
     %%
     %% Wire a real OTP supervisor with an atomically-named child (start MFA
-    %% uses `beamtalk_actor:spawnAs/3`). Hold a name-resolving proxy
+    %% uses `beamtalk_actor_registry:spawnAs/3`). Hold a name-resolving proxy
     %% (`{registered, Name}`), then kill the child. After the supervisor
     %% restarts the child, the held proxy must resolve to the new pid —
     %% proving that name-based dispatch survives restarts.
@@ -4471,7 +4471,7 @@ supervisor_restart_survival_via_named_proxy_from_outside_tree_test() ->
                     class_mod = counter,
                     pid = ClassPid
                 },
-                {ok, Proxy} = beamtalk_actor:named(Self, Name),
+                {ok, Proxy} = beamtalk_actor_ffi:named(Self, Name),
                 ?assertMatch(
                     #beamtalk_object{pid = {registered, Name}}, Proxy
                 ),

@@ -41,7 +41,7 @@ Object subclass: Actor
   /// ```beamtalk
   /// c := Counter spawn
   /// ```
-  class sealed spawn -> Self => (Erlang beamtalk_actor) doSpawn: self
+  class sealed spawn -> Self => (Erlang beamtalk_actor_ffi) doSpawn: self
 
   /// Spawn a new actor process with initialization arguments.
   ///
@@ -52,7 +52,7 @@ Object subclass: Actor
   /// c := Counter spawnWith: #{#count => 10}
   /// ```
   class sealed spawnWith: initArgs :: Object -> Self =>
-    (Erlang beamtalk_actor) doSpawnWith: self args: initArgs
+    (Erlang beamtalk_actor_ffi) doSpawnWith: self args: initArgs
 
   /// Spawn a new actor process already monitored by the caller (BT-4104).
   ///
@@ -79,7 +79,7 @@ Object subclass: Actor
   /// ref := pair at: 2
   /// ```
   class sealed spawnMonitored -> Tuple =>
-    (Erlang beamtalk_actor) doSpawnMonitored: self
+    (Erlang beamtalk_actor_ffi) doSpawnMonitored: self
 
   /// Spawn a new actor process with initialization arguments, already
   /// monitored by the caller (BT-4104).
@@ -93,7 +93,7 @@ Object subclass: Actor
   /// pair := Counter spawnMonitoredWith: #{#count => 10}
   /// ```
   class sealed spawnMonitoredWith: initArgs :: Object -> Tuple =>
-    (Erlang beamtalk_actor) doSpawnMonitoredWith: self args: initArgs
+    (Erlang beamtalk_actor_ffi) doSpawnMonitoredWith: self args: initArgs
 
   /// Spawn a new actor process already monitored by the caller, **without
   /// waiting for it to start** (BT-4477).
@@ -120,7 +120,7 @@ Object subclass: Actor
   /// ref := pair at: 2
   /// ```
   class sealed spawnMonitoredAsync -> Tuple =>
-    (Erlang beamtalk_actor) doSpawnMonitoredAsync: self
+    (Erlang beamtalk_actor_ffi) doSpawnMonitoredAsync: self
 
   /// Spawn a new actor process with initialization arguments, already
   /// monitored by the caller, without waiting for it to start (BT-4477).
@@ -133,7 +133,7 @@ Object subclass: Actor
   /// pair := Counter spawnMonitoredAsyncWith: #{#count => 10}
   /// ```
   class sealed spawnMonitoredAsyncWith: initArgs :: Object -> Tuple =>
-    (Erlang beamtalk_actor) doSpawnMonitoredAsyncWith: self args: initArgs
+    (Erlang beamtalk_actor_ffi) doSpawnMonitoredAsyncWith: self args: initArgs
 
   /// Actors cannot be created with `new` — always raises (BT-217).
   ///
@@ -192,7 +192,7 @@ Object subclass: Actor
   /// (Counter spawnAs: #counter) onError: [:e | Logger warn: "name taken"]
   /// ```
   class sealed spawnAs: name :: Symbol -> Result(Self, Error) =>
-    (Erlang beamtalk_actor) doSpawnAs: self withName: name
+    (Erlang beamtalk_actor_ffi) doSpawnAs: self withName: name
 
   /// Atomically spawn a new actor with init args and register it under `name`.
   ///
@@ -204,7 +204,7 @@ Object subclass: Actor
   /// c := (Counter spawnWith: #{#count => 10} as: #counter) unwrap
   /// ```
   class sealed spawnWith: initArgs :: Object as: name :: Symbol -> Result(Self, Error) =>
-    (Erlang beamtalk_actor)
+    (Erlang beamtalk_actor_ffi)
       doSpawnWith: self
       args: initArgs
       name: name
@@ -231,7 +231,7 @@ Object subclass: Actor
   /// (Logger named: #counter) // => Result error: (beamtalk_error wrong_class)
   /// ```
   class sealed named: name :: Symbol -> Result(Self, Error) =>
-    (Erlang beamtalk_actor) named: self as: name
+    (Erlang beamtalk_actor_ffi) named: self as: name
 
   // === Cluster-unique names: scope: #global (ADR 0126 §4, Phase 5) ===
   //
@@ -280,7 +280,7 @@ Object subclass: Actor
   /// s := (Scheduler named: #scheduler scope: #global) unwrap
   /// ```
   class sealed spawnAs: name :: Symbol scope: scope :: Symbol -> Result(Self, Error) =>
-    (Erlang beamtalk_actor)
+    (Erlang beamtalk_actor_ffi)
       doSpawnAsScope: self
       withName: name
       scope: scope
@@ -298,7 +298,7 @@ Object subclass: Actor
   /// c := (Counter spawnWith: #{#count => 10} as: #counter scope: #global) unwrap
   /// ```
   class sealed spawnWith: initArgs :: Object as: name :: Symbol scope: scope :: Symbol -> Result(Self, Error) =>
-    (Erlang beamtalk_actor)
+    (Erlang beamtalk_actor_ffi)
       doSpawnWithAsScope: self
       args: initArgs
       name: name
@@ -320,7 +320,7 @@ Object subclass: Actor
   /// s := (Scheduler named: #scheduler scope: #global) unwrap
   /// ```
   class sealed named: name :: Symbol scope: scope :: Symbol -> Result(Self, Error) =>
-    (Erlang beamtalk_actor)
+    (Erlang beamtalk_actor_ffi)
       doNamedScope: self
       as: name
       scope: scope
@@ -345,7 +345,7 @@ Object subclass: Actor
   /// Actor allRegistered  // => #(an Actor(Counter), an Actor(Logger))
   /// ```
   class sealed allRegistered -> List(Actor) =>
-    (Erlang beamtalk_actor) allRegistered: self
+    (Erlang beamtalk_actor_ffi) allRegistered: self
 
   // === Remote spawn and lookup (ADR 0126 §3, Phase 2) ===
   //
@@ -392,7 +392,7 @@ Object subclass: Actor
   /// c node          // => Node(worker@localhost)
   /// ```
   class sealed spawnOn: node :: Node -> Result(Self, Error) =>
-    (Erlang beamtalk_actor) doSpawnOn: self on: node
+    (Erlang beamtalk_actor_ffi) doSpawnOn: self on: node
 
   /// Atomically spawn a new actor on `node` and register it under `name`
   /// there.
@@ -410,7 +410,7 @@ Object subclass: Actor
   /// (Counter spawnAs: #hits on: worker) unwrap
   /// ```
   class sealed spawnAs: name :: Symbol on: node :: Node -> Result(Self, Error) =>
-    (Erlang beamtalk_actor)
+    (Erlang beamtalk_actor_ffi)
       doSpawnAsOn: self
       withName: name
       on: node
@@ -434,7 +434,7 @@ Object subclass: Actor
   /// c := (Counter spawnWith: #{#count => 10} on: worker) unwrap
   /// ```
   class sealed spawnWith: initArgs :: Object on: node :: Node -> Result(Self, Error) =>
-    (Erlang beamtalk_actor)
+    (Erlang beamtalk_actor_ffi)
       doSpawnWithOn: self
       args: initArgs
       on: node
@@ -452,7 +452,7 @@ Object subclass: Actor
   /// (Counter spawnWith: #{#count => 10} as: #hits on: worker) unwrap
   /// ```
   class sealed spawnWith: initArgs :: Object as: name :: Symbol on: node :: Node -> Result(Self, Error) =>
-    (Erlang beamtalk_actor)
+    (Erlang beamtalk_actor_ffi)
       doSpawnWithAsOn: self
       args: initArgs
       withName: name
@@ -474,7 +474,7 @@ Object subclass: Actor
   /// hits increment   // => 1 — sent to worker, not resolved locally
   /// ```
   class sealed named: name :: Symbol on: node :: Node -> Result(Self, Error) =>
-    (Erlang beamtalk_actor)
+    (Erlang beamtalk_actor_ffi)
       doNamedOn: self
       withName: name
       on: node
@@ -496,7 +496,7 @@ Object subclass: Actor
   /// (Actor allRegisteredOn: worker) unwrap  // => #(an Actor(Counter), ...)
   /// ```
   class sealed allRegisteredOn: node :: Node -> Result(List(Actor), Error) =>
-    (Erlang beamtalk_actor) doAllRegisteredOn: self on: node
+    (Erlang beamtalk_actor_ffi) doAllRegisteredOn: self on: node
 
   // === Supervision defaults ===
 
@@ -599,7 +599,7 @@ Object subclass: Actor
   /// (counter registerAs: #c) onSuccess: [:c | c increment]
   /// ```
   sealed registerAs: name :: Symbol -> Result(Self, Error) =>
-    (Erlang beamtalk_actor) registerAs: self as: name
+    (Erlang beamtalk_actor_ffi) registerAs: self as: name
 
   /// Unregister this actor's name, if any. Idempotent.
   ///
@@ -625,7 +625,7 @@ Object subclass: Actor
   /// name. Keeps `unregister` pure Beamtalk. Returns bare `ok`, which the
   /// FFI boundary auto-converts to `Result ok: nil` (ADR 0076/0121).
   internal unregisterName -> Result(Nil) =>
-    (Erlang beamtalk_actor) unregister: self
+    (Erlang beamtalk_actor_ffi) unregister: self
 
   /// Return the Symbol this actor is registered under, or `nil` if unnamed.
   ///
@@ -634,7 +634,7 @@ Object subclass: Actor
   /// counter registeredName   // => #counter (or nil)
   /// ```
   sealed registeredName -> Symbol | Nil =>
-    (Erlang beamtalk_actor) registeredName: self
+    (Erlang beamtalk_actor_ffi) registeredName: self
 
   /// Whether this actor currently has a registered name.
   ///
@@ -642,7 +642,8 @@ Object subclass: Actor
   /// ```beamtalk
   /// counter isRegistered   // => true or false
   /// ```
-  sealed isRegistered -> Boolean => (Erlang beamtalk_actor) isRegistered: self
+  sealed isRegistered -> Boolean =>
+    (Erlang beamtalk_actor_ffi) isRegistered: self
 
   // === Timeout proxy ===
 
