@@ -5,7 +5,7 @@
 
 -moduledoc """
 Tests for the shared multi-site rewrite mechanism (ADR 0114):
-`beamtalk_repl_loader:rewrite_sites/2`, its validate-only counterpart
+`beamtalk_repl_loader_rewrite:rewrite_sites/2`, its validate-only counterpart
 `validate_sites/2`, and `emit_rewrite_change_entry/2`.
 
 Integration tests against the real compiler port + a real
@@ -52,11 +52,11 @@ compiled successfully (which essentially never happens naturally — see that
 function's own doc), and `stale_snapshot` needs a second writer's edit to
 land in the exact gap between one class-group's validation and that same
 group's own install turn, which a real concurrent process can never be
-reliably scheduled into inside a deterministic test. `meck:new(?MODULE,
-[passthrough])` against `beamtalk_repl_loader` itself, mocking only
-`install_reload_result/2` (`beamtalk_repl_loader.erl`'s `install_rewrite_group/7`
-calls it as `?MODULE:install_reload_result/2` specifically so this can
-intercept it — a local call would bypass meck's module-replacement
+reliably scheduled into inside a deterministic test. `meck:new(beamtalk_repl_loader,
+[passthrough])`, mocking only `install_reload_result/2`
+(`beamtalk_repl_loader_rewrite.erl`'s `install_rewrite_group/5` calls it as
+the remote call `beamtalk_repl_loader:install_reload_result/2` specifically so
+this can intercept it — a local call would bypass meck's module-replacement
 entirely), was chosen deliberately over the alternatives: mocking a shared
 system module like `code` or `file` would risk destabilizing every other
 test in the same `rebar3 eunit` run (those modules are used everywhere,
@@ -207,7 +207,7 @@ rewrite_sites_success(#{counter_path := CounterPath, sub_counter_path := SubCoun
         }
     ],
 
-    Result = beamtalk_repl_loader:rewrite_sites(DefinitionSite, ReferenceSites),
+    Result = beamtalk_repl_loader_rewrite:rewrite_sites(DefinitionSite, ReferenceSites),
     {ok, #{definition := Definition, sites := InstalledRefSites}} = Result,
 
     NewCounterSource = unicode:characters_to_binary(
@@ -291,7 +291,7 @@ rewrite_sites_cross_file_protocol_uses(#{proj_dir := ProjDir}) ->
         span => PingSpan,
         new_text => <<"pong">>
     },
-    Result = beamtalk_repl_loader:rewrite_sites(Site, []),
+    Result = beamtalk_repl_loader_rewrite:rewrite_sites(Site, []),
     NewSource = unicode:characters_to_binary(
         beamtalk_workspace_meta:get_class_source(<<"RwGreeterUser">>)
     ),
@@ -346,7 +346,7 @@ rewrite_sites_same_start_tie_insert_first(_Fixture) ->
         beamtalk_workspace_meta:get_class_source(<<"Counter">>)
     ),
     {ZeroLengthInsert, Replacement, Expected} = same_start_tie_sites_and_expected(CounterSource),
-    Result = beamtalk_repl_loader:rewrite_sites(undefined, [ZeroLengthInsert, Replacement]),
+    Result = beamtalk_repl_loader_rewrite:rewrite_sites(undefined, [ZeroLengthInsert, Replacement]),
     NewCounterSource = unicode:characters_to_binary(
         beamtalk_workspace_meta:get_class_source(<<"Counter">>)
     ),
@@ -366,7 +366,7 @@ rewrite_sites_same_start_tie_replacement_first(_Fixture) ->
     %% Same two sites, opposite caller-list order — must produce the
     %% identical, correct merge, not a different (and possibly corrupted)
     %% result.
-    Result = beamtalk_repl_loader:rewrite_sites(undefined, [Replacement, ZeroLengthInsert]),
+    Result = beamtalk_repl_loader_rewrite:rewrite_sites(undefined, [Replacement, ZeroLengthInsert]),
     NewCounterSource = unicode:characters_to_binary(
         beamtalk_workspace_meta:get_class_source(<<"Counter">>)
     ),
@@ -452,7 +452,9 @@ emit_rewrite_change_entry_case(#{counter_path := CounterPath, sub_counter_path :
             new_text => <<"incrementBy">>
         }
     ],
-    {ok, RewriteResult} = beamtalk_repl_loader:rewrite_sites(DefinitionSite, ReferenceSites),
+    {ok, RewriteResult} = beamtalk_repl_loader_rewrite:rewrite_sites(
+        DefinitionSite, ReferenceSites
+    ),
     Spec = #{
         kind => 'rename-method',
         class => <<"Counter">>,
@@ -543,7 +545,7 @@ rewrite_sites_validation_failure(#{counter_path := CounterPath, sub_counter_path
         }
     ],
 
-    Result = beamtalk_repl_loader:rewrite_sites(DefinitionSite, ReferenceSites),
+    Result = beamtalk_repl_loader_rewrite:rewrite_sites(DefinitionSite, ReferenceSites),
 
     CounterSourceAfter = unicode:characters_to_binary(
         beamtalk_workspace_meta:get_class_source(<<"Counter">>)
@@ -623,7 +625,7 @@ validate_sites_success(#{counter_path := CounterPath, sub_counter_path := SubCou
         }
     ],
 
-    Result = beamtalk_repl_loader:validate_sites(DefinitionSite, ReferenceSites),
+    Result = beamtalk_repl_loader_rewrite:validate_sites(DefinitionSite, ReferenceSites),
 
     CounterSourceAfter = unicode:characters_to_binary(
         beamtalk_workspace_meta:get_class_source(<<"Counter">>)
@@ -686,7 +688,7 @@ validate_sites_validation_failure(#{counter_path := CounterPath, sub_counter_pat
         }
     ],
 
-    Result = beamtalk_repl_loader:validate_sites(DefinitionSite, ReferenceSites),
+    Result = beamtalk_repl_loader_rewrite:validate_sites(DefinitionSite, ReferenceSites),
 
     CounterSourceAfter = unicode:characters_to_binary(
         beamtalk_workspace_meta:get_class_source(<<"Counter">>)
@@ -783,7 +785,7 @@ setup_with_install_fault() ->
 
 rewrite_sites_partial_install_failure(Fixture) ->
     {DefinitionSite, ReferenceSites} = rename_increment_sites(Fixture),
-    Result = beamtalk_repl_loader:rewrite_sites(DefinitionSite, ReferenceSites),
+    Result = beamtalk_repl_loader_rewrite:rewrite_sites(DefinitionSite, ReferenceSites),
     NewCounterSource = unicode:characters_to_binary(
         beamtalk_workspace_meta:get_class_source(<<"Counter">>)
     ),
@@ -872,7 +874,7 @@ setup_with_concurrent_write() ->
 
 rewrite_sites_stale_snapshot(Fixture) ->
     {DefinitionSite, ReferenceSites} = rename_increment_sites(Fixture),
-    Result = beamtalk_repl_loader:rewrite_sites(DefinitionSite, ReferenceSites),
+    Result = beamtalk_repl_loader_rewrite:rewrite_sites(DefinitionSite, ReferenceSites),
     NewCounterSource = unicode:characters_to_binary(
         beamtalk_workspace_meta:get_class_source(<<"Counter">>)
     ),
@@ -931,7 +933,7 @@ setup_with_concurrent_removal() ->
 
 rewrite_sites_stale_snapshot_removed(Fixture) ->
     {DefinitionSite, ReferenceSites} = rename_increment_sites(Fixture),
-    Result = beamtalk_repl_loader:rewrite_sites(DefinitionSite, ReferenceSites),
+    Result = beamtalk_repl_loader_rewrite:rewrite_sites(DefinitionSite, ReferenceSites),
     NewCounterSource = unicode:characters_to_binary(
         beamtalk_workspace_meta:get_class_source(<<"Counter">>)
     ),

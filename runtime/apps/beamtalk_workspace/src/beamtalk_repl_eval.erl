@@ -87,7 +87,7 @@ module loading to beamtalk_repl_loader.
 
 %% ADR 0114 Phase 4: `Workspace changes revert:` for a pending
 %% `'rename-class'`/`'rename-method'` entry — thin forwarding wrapper over
-%% `beamtalk_repl_loader:revert_rename_sites/1`, called from `beamtalk_
+%% `beamtalk_repl_loader_rewrite:revert_rename_sites/1`, called from `beamtalk_
 %% workspace_interface_primitives:revert_rename_entry/2`.
 -export([revert_rename_sites/1]).
 
@@ -833,11 +833,11 @@ new_class(Source, TargetPath) ->
 -doc """
 Move a class's `.bt` file to a new path without changing its name (ADR 0114
 Phase 2). Thin forwarding wrapper — see
-`beamtalk_repl_loader:move_class/2` for the full contract.
+`beamtalk_repl_loader_rewrite:move_class/2` for the full contract.
 """.
 -spec move_class(atom(), binary()) -> ok | {error, term()}.
 move_class(ClassName, NewPathBin) ->
-    beamtalk_repl_loader:move_class(ClassName, NewPathBin).
+    beamtalk_repl_loader_rewrite:move_class(ClassName, NewPathBin).
 
 -doc """
 Recompile and reinstall a class from a recorded prior source (ADR 0113
@@ -1196,33 +1196,37 @@ emit_remove_change_entry(ClassNameBin, Selector, Side, Author, AuthorKind) ->
 -doc """
 Rewrite a definition site plus N reference/sender sites transactionally, in
 memory (ADR 0114). Thin forwarding wrapper — see
-`beamtalk_repl_loader:rewrite_sites/2` for the full contract, including the
+`beamtalk_repl_loader_rewrite:rewrite_sites/2` for the full contract, including the
 in-memory atomicity protocol.
 """.
 -spec rewrite_sites(
-    beamtalk_repl_loader:rewrite_site() | undefined, [beamtalk_repl_loader:rewrite_site()]
+    beamtalk_repl_loader_rewrite:rewrite_site() | undefined, [
+        beamtalk_repl_loader_rewrite:rewrite_site()
+    ]
 ) ->
-    {ok, beamtalk_repl_loader:rewrite_result()} | {error, term()}.
+    {ok, beamtalk_repl_loader_rewrite:rewrite_result()} | {error, term()}.
 rewrite_sites(DefinitionSite, ReferenceSites) ->
-    beamtalk_repl_loader:rewrite_sites(DefinitionSite, ReferenceSites).
+    beamtalk_repl_loader_rewrite:rewrite_sites(DefinitionSite, ReferenceSites).
 
 -doc """
 Validate a `rewrite_sites/2` call without installing anything (ADR 0114).
 Thin forwarding wrapper — see
-`beamtalk_repl_loader:validate_sites/2` for the full contract.
+`beamtalk_repl_loader_rewrite:validate_sites/2` for the full contract.
 """.
 -spec validate_sites(
-    beamtalk_repl_loader:rewrite_site() | undefined, [beamtalk_repl_loader:rewrite_site()]
+    beamtalk_repl_loader_rewrite:rewrite_site() | undefined, [
+        beamtalk_repl_loader_rewrite:rewrite_site()
+    ]
 ) -> ok | {error, term()}.
 validate_sites(DefinitionSite, ReferenceSites) ->
-    beamtalk_repl_loader:validate_sites(DefinitionSite, ReferenceSites).
+    beamtalk_repl_loader_rewrite:validate_sites(DefinitionSite, ReferenceSites).
 
 -doc """
 Best-effort ChangeLog append for a completed `rewrite_sites/2` call (ADR
 0114). Thin forwarding wrapper — see
 `beamtalk_repl_loader:emit_rewrite_change_entry/2` for the full contract.
 """.
--spec emit_rewrite_change_entry(map(), beamtalk_repl_loader:rewrite_result()) -> ok.
+-spec emit_rewrite_change_entry(map(), beamtalk_repl_loader_rewrite:rewrite_result()) -> ok.
 emit_rewrite_change_entry(Spec, RewriteResult) ->
     beamtalk_repl_loader:emit_rewrite_change_entry(Spec, RewriteResult).
 
@@ -1234,7 +1238,7 @@ revert_rename_sites/1` for the full contract.
 -spec revert_rename_sites(beamtalk_workspace_changelog:entry()) ->
     {ok, binary()} | {error, term()}.
 revert_rename_sites(Entry) ->
-    beamtalk_repl_loader:revert_rename_sites(Entry).
+    beamtalk_repl_loader_rewrite:revert_rename_sites(Entry).
 
 -doc """
 Best-effort ChangeLog append for a completed extension-method `removeSelector:`

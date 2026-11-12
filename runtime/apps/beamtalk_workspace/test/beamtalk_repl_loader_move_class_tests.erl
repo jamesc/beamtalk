@@ -4,7 +4,7 @@
 -module(beamtalk_repl_loader_move_class_tests).
 
 -moduledoc """
-Integration tests for `beamtalk_repl_loader:move_class/2` (ADR 0114 Phase 2;
+Integration tests for `beamtalk_repl_loader_rewrite:move_class/2` (ADR 0114 Phase 2;
 `Workspace moveClass:to:`) against a real, in-project fixture.
 
 `Workspace` (the class-side facade) has no live workspace behind it in the BUnit test context
@@ -141,7 +141,7 @@ move_class_success(#{proj_dir := ProjDir, gadget_path := GadgetPath}) ->
     NewPathBin = list_to_binary(NewPath),
     OldPid = beamtalk_class_registry:whereis_class('Bt3272Gadget'),
 
-    Result = beamtalk_repl_loader:move_class('Bt3272Gadget', NewPathBin),
+    Result = beamtalk_repl_loader_rewrite:move_class('Bt3272Gadget', NewPathBin),
 
     NewPid = beamtalk_class_registry:whereis_class('Bt3272Gadget'),
     [Entry] = beamtalk_workspace_changelog:entries(),
@@ -199,7 +199,7 @@ move_class_same_path_test_() ->
 
 move_class_same_path(#{gadget_path := GadgetPath}) ->
     GadgetPathBin = list_to_binary(GadgetPath),
-    Result = beamtalk_repl_loader:move_class('Bt3272Gadget', GadgetPathBin),
+    Result = beamtalk_repl_loader_rewrite:move_class('Bt3272Gadget', GadgetPathBin),
     [
         ?_assertMatch({error, #beamtalk_error{kind = same_path}}, Result),
         %% Refused before any ChangeLog entry or disk write — the fixture's
@@ -272,7 +272,7 @@ teardown_dynamic(_Fixture) ->
 
 move_class_dynamic_no_source_file(#{proj_dir := ProjDir}) ->
     NewPath = list_to_binary(filename:join(ProjDir, "dyn_gadget.bt")),
-    Result = beamtalk_repl_loader:move_class('Bt3272DynGadget', NewPath),
+    Result = beamtalk_repl_loader_rewrite:move_class('Bt3272DynGadget', NewPath),
     [
         ?_assertMatch({error, #beamtalk_error{kind = no_source_file}}, Result)
     ].
@@ -291,7 +291,7 @@ move_class_stdlib_refusal_test_() ->
 %% EUnit VM; none replaces `Bag`, which `setup_dynamic/0` (re)loads.
 move_class_stdlib_refusal(#{proj_dir := ProjDir}) ->
     NewPath = list_to_binary(filename:join(ProjDir, "bag.bt")),
-    Result = beamtalk_repl_loader:move_class('Bag', NewPath),
+    Result = beamtalk_repl_loader_rewrite:move_class('Bag', NewPath),
     [
         ?_assertMatch({error, #beamtalk_error{kind = runtime_error}}, Result)
     ].
@@ -347,7 +347,7 @@ dep_gadget_source() ->
 
 move_class_dependency_refusal(#{proj_dir := ProjDir, gadget_path := GadgetPath}) ->
     NewPath = list_to_binary(filename:join(ProjDir, "dep_gadget.bt")),
-    Result = beamtalk_repl_loader:move_class('Bt3272DepGadget', NewPath),
+    Result = beamtalk_repl_loader_rewrite:move_class('Bt3272DepGadget', NewPath),
     [
         ?_assertMatch({error, #beamtalk_error{kind = runtime_error}}, Result),
         %% Refused before any ChangeLog entry or disk write — the dependency
@@ -376,9 +376,9 @@ move_class_revert_round_trip(#{proj_dir := ProjDir}) ->
     NewPath = filename:join([ProjDir, "moved", "bt3272_gadget.bt"]),
     NewPathBin = list_to_binary(NewPath),
     OldPid = beamtalk_class_registry:whereis_class('Bt3272Gadget'),
-    ok = beamtalk_repl_loader:move_class('Bt3272Gadget', NewPathBin),
+    ok = beamtalk_repl_loader_rewrite:move_class('Bt3272Gadget', NewPathBin),
     [Entry] = beamtalk_workspace_changelog:entries(),
-    RevertResult = beamtalk_repl_loader:revert_rename_sites(Entry),
+    RevertResult = beamtalk_repl_loader_rewrite:revert_rename_sites(Entry),
     PidAfter = beamtalk_class_registry:whereis_class('Bt3272Gadget'),
     [
         ?_assertEqual({ok, <<"Bt3272Gadget">>}, RevertResult),
@@ -421,7 +421,7 @@ move_class_revert_after_drift_test_() ->
 move_class_revert_after_drift(#{proj_dir := ProjDir}) ->
     NewPath = filename:join([ProjDir, "moved", "bt3272_gadget.bt"]),
     NewPathBin = list_to_binary(NewPath),
-    ok = beamtalk_repl_loader:move_class('Bt3272Gadget', NewPathBin),
+    ok = beamtalk_repl_loader_rewrite:move_class('Bt3272Gadget', NewPathBin),
     [Entry] = beamtalk_workspace_changelog:entries(),
     %% `resolve_class_span/2` clamps a class's span to end BEFORE its first
     %% method (this fixture's only member), so the recorded definition site
@@ -430,7 +430,7 @@ move_class_revert_after_drift(#{proj_dir := ProjDir}) ->
     DriftedSource =
         "Value subclass: Bt3272GadgetDrifted\n  greet -> String => \"hi\"",
     ok = beamtalk_workspace_meta:set_class_source(<<"Bt3272Gadget">>, DriftedSource),
-    Result = beamtalk_repl_loader:revert_rename_sites(Entry),
+    Result = beamtalk_repl_loader_rewrite:revert_rename_sites(Entry),
     [
         ?_assertMatch({error, {revert_site_drifted, <<"Bt3272Gadget">>, _}}, Result),
         %% Refused loudly — the drifted (edited) source is left exactly as
