@@ -692,3 +692,77 @@ fn block_parameters_are_contravariant_in_shapes() {
         ),
     ]);
 }
+
+#[test]
+fn closed_shape_widens_to_dictionary_symbol_v() {
+    run(&[
+        (
+            "Object values accept any field types",
+            "#{#a => Integer, #b => String}",
+            "Dictionary(Symbol, Object)",
+            None,
+        ),
+        (
+            "optional fields count",
+            "#{#a => Integer, ?#b => String}",
+            "Dictionary(Symbol, Object)",
+            None,
+        ),
+        (
+            "nested shape field is an Object",
+            "#{#a => #{#b => Integer}}",
+            "Dictionary(Symbol, Object)",
+            None,
+        ),
+        (
+            "empty closed shape",
+            "#{}",
+            "Dictionary(Symbol, Object)",
+            None,
+        ),
+        (
+            "optional field type mismatch with V",
+            "#{#a => Integer, ?#b => String}",
+            "Dictionary(Symbol, Integer)",
+            Some("Dictionary(Symbol, Integer)"),
+        ),
+        (
+            "non-Symbol key type",
+            "#{#a => Integer}",
+            "Dictionary(String, Object)",
+            Some("Dictionary(String, Object)"),
+        ),
+    ]);
+}
+
+#[test]
+fn closed_shape_widens_through_a_send_argument() {
+    let diags = diagnostics(
+        "Object subclass: Probe\n  check: d :: Dictionary(Symbol, Object) => d\n  go => self check: #{#a => 1, #b => \"x\"}\n  goShaped: s :: #{#a => Integer, #b => String} => self check: s\n",
+    );
+    assert!(
+        diags.is_empty(),
+        "{:#?}",
+        diags
+            .iter()
+            .map(|d| (&d.message, &d.hint))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn misspelt_literal_key_against_a_shape_still_suggests() {
+    let diags = diagnostics(
+        "Object subclass: Probe\n  take: o :: #{?#maxFrameSize => Integer} => o\n  go => self take: #{#maxFramSize => 1}\n",
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.hint.contains("did you mean `#maxFrameSize`")),
+        "{:#?}",
+        diags
+            .iter()
+            .map(|d| (&d.message, &d.hint))
+            .collect::<Vec<_>>()
+    );
+}
