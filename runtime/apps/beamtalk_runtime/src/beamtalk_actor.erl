@@ -215,17 +215,6 @@ handle_getValue([], State) ->
 %% Default `gen_server:stop/3` timeout for `stop` / `stopWith:` (ms).
 -define(STOP_TIMEOUT, 5000).
 
-%% BT-4676: name-resolving proxy refs (ADR 0079 / 0126) accepted by the send
-%% functions; resolved by resolve_proxy/1.
--type proxy_ref() :: {registered, atom()} | {registered, atom(), node()} | {global, atom()}.
--define(IS_PROXY_REF(R),
-    (is_tuple(R) andalso
-        ((tuple_size(R) =:= 2 andalso is_atom(element(2, R)) andalso
-            (element(1, R) =:= registered orelse element(1, R) =:= global)) orelse
-            (tuple_size(R) =:= 3 andalso element(1, R) =:= registered andalso
-                is_atom(element(2, R)) andalso is_atom(element(3, R)))))
-).
-
 %% BT-3967: process-dictionary key holding a deferred self-stop request
 %% (`self stopWith: Reason` from inside a method), consumed by
 %% apply_pending_actions/1 once the current gen_server callback returns.
@@ -427,7 +416,8 @@ handle_getValue([], State) ->
     safe_spawn_named/5,
     node_down_error_record/2,
     no_such_process_error_record/2,
-    resolve_remote_registered/2
+    resolve_remote_registered/2,
+    resolve_proxy_or_error/2
 ]).
 
 %% BT-4701: delegates kept under the old module name for at least one release —
@@ -2346,6 +2336,14 @@ proxy_route(Ref, Selector, _Args) ->
         {ok, Pid} -> {pid, Pid};
         undefined -> {error, no_such_process_error(Ref, Selector)};
         {node_down, Node} -> {error, node_down_error_record(Node, Selector)}
+    end.
+
+-doc "The pid a proxy ref currently resolves to, or the structured error (for the FFI's `proxy_pid/2`).".
+-spec resolve_proxy_or_error(proxy_ref(), atom()) -> {ok, pid()} | {error, #beamtalk_error{}}.
+resolve_proxy_or_error(Ref, Selector) ->
+    case proxy_route(Ref, Selector, []) of
+        {pid, Pid} -> {ok, Pid};
+        {error, Error} -> {error, Error}
     end.
 
 -spec is_pid_result({ok, pid()} | undefined | {node_down, node()}) -> boolean().

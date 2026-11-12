@@ -4387,7 +4387,7 @@ bt1990_cast_send_through_proxy_to_vanished_name_is_silent_test() ->
         cleanup_name(Name)
     end.
 
-bt4676_cast_send_proxy_name_only_selectors_are_dropped_test() ->
+bt4676_cast_send_proxy_name_only_selectors_are_forwarded_test() ->
     %% Intended drift (BT-4676): unlike async_send/sync_send, cast_send does
     %% not answer isAlive/isRegistered/registeredName from the proxy — a
     %% cast has no reply channel. It forwards them (and never raises), for
