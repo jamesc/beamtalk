@@ -19,17 +19,17 @@
 //! cell:
 //!
 //! 1. It compiles with the `ThreadedIr` verifier on and through `erlc`.
-//! 2. With the relay off (`fault::RelayFault::NoRelay`, every `ensure:`
+//! 2. With the relay off (`Fault::RelayNoRelay`, every `ensure:`
 //!    before BT-4312) it fails `EnsureCleanupLostOnNlr` exactly when its
 //!    cleanup can write the state the `^` carries, by the oracle
 //!    [`relay_needed`]: a closure cleanup in an actor method (it writes the
 //!    cell) failed before the fix, with no relay.
 //! 3. With the relay rebuilding a cell-carried throw's state at the
-//!    `ensure:` site (`fault::RelayFault::RebuildAtSite`, the first BT-4312
+//!    `ensure:` site (`Fault::RelayRebuildAtSite`, the first BT-4312
 //!    relay, finding A) every cell that relays in a scope whose state lives
 //!    in the cell fails `RebuildsCarriedStateAtSite`, and no value-type or
 //!    class cell does.
-//! 4. With no foreign clause (`fault::RelayFault::ForeignOnErrorPath`, every
+//! 4. With no foreign clause (`Fault::RelayForeignOnErrorPath`, every
 //!    `ensure:` before ADR 0146 R1) a cell fails
 //!    `EnsureForeignCleanupNotStored` exactly when, by the oracle
 //!    [`foreign_store_needed`], its `ensure:` sits where the actor-state cell
@@ -61,8 +61,7 @@
 //! (`ClosureCellEnsure`).
 
 use super::{assert_compiles_through_erlc, erlc_available};
-use crate::core_erlang::ensure_nlr_relay::fault::{RelayFault, with_fault};
-use crate::core_erlang::nlr::fault::{NlrFault, with_fault as with_nlr_fault};
+use crate::core_erlang::fault::{Fault, with as with_fault};
 use crate::core_erlang::{
     CodeGenContext, CodeGenError, CodegenOptions, CoreErlangGenerator, generate_module,
 };
@@ -609,7 +608,7 @@ fn ensure_relay_corpus_fails_without_the_relay() {
     let (compiled, mut failures) = compiled_cells();
     let mut fired = 0;
     for (cell, _) in &compiled {
-        let report = with_fault(RelayFault::NoRelay, || cell.compile()).err();
+        let report = with_fault(Fault::RelayNoRelay, || cell.compile()).err();
         let lost = report
             .as_deref()
             .is_some_and(|r| r.contains("EnsureCleanupLostOnNlr") && r.contains("NoRelay"));
@@ -643,7 +642,7 @@ fn ensure_relay_corpus_fails_when_the_relay_rebuilds_at_the_site() {
     let (compiled, mut failures) = compiled_cells();
     let mut fired = 0;
     for (cell, _) in &compiled {
-        let report = with_fault(RelayFault::RebuildAtSite, || cell.compile()).err();
+        let report = with_fault(Fault::RelayRebuildAtSite, || cell.compile()).err();
         let rebuilt = report
             .as_deref()
             .is_some_and(|r| r.contains("RebuildsCarriedStateAtSite"));
@@ -684,7 +683,7 @@ fn ensure_relay_corpus_fails_when_a_foreign_return_takes_the_error_path() {
     let (compiled, mut failures) = compiled_cells();
     let mut fired_foreign = 0;
     for (cell, _) in &compiled {
-        let report = with_fault(RelayFault::ForeignOnErrorPath, || cell.compile()).err();
+        let report = with_fault(Fault::RelayForeignOnErrorPath, || cell.compile()).err();
         let lost = report
             .as_deref()
             .is_some_and(|r| r.contains("EnsureForeignCleanupNotStored") && r.contains("NoClause"));
@@ -734,7 +733,7 @@ fn a_class_method_running_in_its_caller_stores_no_foreign_cleanup() {
         "a class method running in its caller stores a foreign `^`'s cleanup:\n{code}"
     );
     // The verifier owes it nothing, so the pre-fix catch is no defect there.
-    let report = with_fault(RelayFault::ForeignOnErrorPath, || compile(&class_only)).err();
+    let report = with_fault(Fault::RelayForeignOnErrorPath, || compile(&class_only)).err();
     assert_eq!(report, None, "a class method's `ensure:` owes no store");
     // The control: the same `ensure:` in an instance method stores, and
     // fails without its foreign clause.
@@ -744,7 +743,7 @@ fn a_class_method_running_in_its_caller_stores_no_foreign_cleanup() {
         code.contains("_EnsureForeignNlr") && code.contains("'beamtalk_actor_state':'store'"),
         "the instance method's `ensure:` has no foreign clause:\n{code}"
     );
-    let report = with_fault(RelayFault::ForeignOnErrorPath, || compile(&both)).err();
+    let report = with_fault(Fault::RelayForeignOnErrorPath, || compile(&both)).err();
     assert!(
         report
             .as_deref()
@@ -770,7 +769,7 @@ fn a_class_method_running_in_its_caller_stores_no_foreign_cleanup() {
 /// now. What keeps a performed cleanup's write is the commit, so the
 /// replacement proof is the commit's own fault: an actor method whose `^`
 /// crosses a performed `ensure:`, with its boundary committing the carried
-/// copy (`NlrFault::CommitCarried`, every actor method before ADR 0146), fails
+/// copy (`Fault::NlrCommitCarried`, every actor method before ADR 0146), fails
 /// `ActorNlrCommitBypassesCell`. The runtime answer is
 /// `ActorClosureCellTest`'s performed-`ensure:` cells.
 #[test]
@@ -797,7 +796,7 @@ fn block_ensure_fallback_re_raises_a_foreign_throw_after_its_cleanup() {
         assert_compiles_through_erlc("test", &code);
     }
     // No relay to switch off: the fault leaves it unchanged.
-    let without = with_fault(RelayFault::NoRelay, || compile(&src));
+    let without = with_fault(Fault::RelayNoRelay, || compile(&src));
     assert_eq!(without.as_deref().ok(), Some(code.as_str()));
 
     // The replacement proof: a `^` across a performed `ensure:` keeps the
@@ -808,7 +807,7 @@ fn block_ensure_fallback_re_raises_a_foreign_throw_after_its_cleanup() {
         code.contains("call 'beamtalk_actor_state':'commit'(Self, "),
         "the method does not commit the cell:\n{code}"
     );
-    let report = with_nlr_fault(NlrFault::CommitCarried, || compile(performed)).err();
+    let report = with_fault(Fault::NlrCommitCarried, || compile(performed)).err();
     assert!(
         report
             .as_deref()
@@ -848,7 +847,7 @@ fn an_ensure_inside_an_away_super_send_relays_its_own_return() {
         assert_compiles_through_erlc("test", &base_code);
         assert_compiles_through_erlc("test", &sub_code);
     }
-    let report = with_fault(RelayFault::NoRelay, || compile(base)).err();
+    let report = with_fault(Fault::RelayNoRelay, || compile(base)).err();
     assert!(
         report
             .as_deref()

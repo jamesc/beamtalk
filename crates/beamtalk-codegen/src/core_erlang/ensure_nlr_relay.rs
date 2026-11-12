@@ -118,46 +118,30 @@ impl CoreErlangGenerator {
         other: Document<'static>,
         span: Span,
     ) -> Document<'static> {
-        let foreign = match fault::active() {
+        let foreign = if fault!(RelayForeignOnErrorPath) {
             // The catch before ADR 0146 R1: a foreign `^` takes the error
             // path, whose cleanup's writes die with the re-raise.
-            Some(fault::RelayFault::ForeignOnErrorPath) => None,
+            None
+        } else if fault!(RelayNoRelay) {
             // With the relay off, a foreign clause that shared its cleanup
             // (BT-4598) keeps it as its own, as it compiled before sharing.
-            Some(fault::RelayFault::NoRelay) => {
-                foreign.map(|foreign| match (&foreign.body, &relay) {
-                    (ForeignCleanupBody::SharedWithRelay, Some(relay)) => EnsureForeignNlr {
-                        body: ForeignCleanupBody::Own {
-                            seed: relay.seed.clone(),
-                            cleanup: relay.cleanup.clone(),
-                        },
-                        ..foreign
+            foreign.map(|foreign| match (&foreign.body, &relay) {
+                (ForeignCleanupBody::SharedWithRelay, Some(relay)) => EnsureForeignNlr {
+                    body: ForeignCleanupBody::Own {
+                        seed: relay.seed.clone(),
+                        cleanup: relay.cleanup.clone(),
                     },
-                    _ => foreign,
-                })
-            }
-            _ => foreign,
+                    ..foreign
+                },
+                _ => foreign,
+            })
+        } else {
+            foreign
         };
-        let relay = match fault::active() {
-            None | Some(fault::RelayFault::ForeignOnErrorPath) => relay,
-            Some(fault::RelayFault::NoRelay) => None,
-            // The relay before review: a cell-carried throw resumed with what
-            // a `^` at this site would carry, rebuilt from the site's bindings.
-            #[cfg(any(test, feature = "test"))]
-            Some(fault::RelayFault::RebuildAtSite) => relay.map(|relay| {
-                if relay.rethrow == threaded_ir::RethrowSlot::CellOverCarried
-                    && carry == Some(NlrCarry::Live)
-                {
-                    EnsureNlrRelay {
-                        rethrow: threaded_ir::RethrowSlot::SiteState(
-                            self.nlr_throw_state_doc(span),
-                        ),
-                        ..relay
-                    }
-                } else {
-                    relay
-                }
-            }),
+        let relay = if fault!(RelayNoRelay) {
+            None
+        } else {
+            self.rebuild_relay_at_site_fault(relay, carry, span)
         };
         let token = self.scope_nlr_token().map(TokenId::new);
         // The relay clause's pattern variables, minted only when it is
@@ -217,78 +201,45 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn ensure_relay_carried_var(&mut self) -> String {
         self.fresh_temp_var("EnsureCarried")
     }
-}
 
-/// Test-only: compiles `ensure:` with its `$bt_nlr` relay as it was before a
-/// fix, so [`VerifyError::EnsureCleanupLostOnNlr`](super::threaded_ir::VerifyError::EnsureCleanupLostOnNlr)
-/// (and, for the foreign clause,
-/// [`VerifyError::EnsureForeignCleanupNotStored`](super::threaded_ir::VerifyError::EnsureForeignCleanupNotStored))
-/// can be shown to fire on a real compile
-/// (`beamtalk-repl/tests/repl_loop_body_return.rs`,
-/// `tests/ensure_relay_corpus.rs`). Compiled for this crate's tests and for
-/// dependents that enable the `test` feature; otherwise
-/// [`active`](fault::active) is always `None`.
-pub mod fault {
+    /// The relay before review (`Fault::RelayRebuildAtSite`): a cell-carried
+    /// throw resumed with what a `^` at this site would carry, rebuilt from
+    /// the site's bindings. Test builds only; any other build answers `relay`
+    /// unchanged.
     #[cfg(any(test, feature = "test"))]
-    use std::cell::Cell;
-
-    /// The relay as it was before a fix.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    #[cfg_attr(not(any(test, feature = "test")), allow(dead_code))]
-    pub enum RelayFault {
-        /// No relay: the catch re-raises the scope's own throw after the
-        /// cleanup, as every `ensure:` did before BT-4312.
-        NoRelay,
-        /// A cell-carried throw resumes with the state a `^` at the
-        /// `ensure:` site would carry, rebuilt from the site's bindings, as
-        /// the first BT-4312 relay did. Test builds only, with the
-        /// [`RethrowSlot::SiteState`](crate::core_erlang::threaded_ir::RethrowSlot::SiteState)
-        /// it builds.
-        #[cfg(any(test, feature = "test"))]
-        RebuildAtSite,
-        /// ADR 0146 R1: no foreign clause. A `^` of another method of the
-        /// same actor takes the error path, which runs the cleanup with
-        /// write-through off and re-raises, so the cleanup's writes never
-        /// reach the cell (`VerifyError::EnsureForeignCleanupNotStored`).
-        ForeignOnErrorPath,
-    }
-
-    #[cfg(any(test, feature = "test"))]
-    thread_local! {
-        static FAULT: Cell<Option<RelayFault>> = const { Cell::new(None) };
-    }
-
-    /// The relay fault switched on on this thread, if any.
-    #[cfg(any(test, feature = "test"))]
-    pub(crate) fn active() -> Option<RelayFault> {
-        FAULT.with(Cell::get)
-    }
-
-    /// The relay fault switched on on this thread, if any.
-    #[cfg(not(any(test, feature = "test")))]
-    pub(crate) fn active() -> Option<RelayFault> {
-        None
-    }
-
-    /// Runs `body` with `fault` switched on, restoring the relay afterwards
-    /// even if `body` panics.
-    #[cfg(any(test, feature = "test"))]
-    pub fn with_fault<T>(fault: RelayFault, body: impl FnOnce() -> T) -> T {
-        struct Reset;
-        impl Drop for Reset {
-            fn drop(&mut self) {
-                FAULT.with(|f| f.set(None));
-            }
+    fn rebuild_relay_at_site_fault(
+        &mut self,
+        relay: Option<EnsureNlrRelay>,
+        carry: Option<NlrCarry>,
+        span: Span,
+    ) -> Option<EnsureNlrRelay> {
+        if !fault!(RelayRebuildAtSite) {
+            return relay;
         }
-        FAULT.with(|f| f.set(Some(fault)));
-        let _reset = Reset;
-        body()
+        relay.map(|relay| {
+            if relay.rethrow == threaded_ir::RethrowSlot::CellOverCarried
+                && carry == Some(NlrCarry::Live)
+            {
+                EnsureNlrRelay {
+                    rethrow: threaded_ir::RethrowSlot::SiteState(self.nlr_throw_state_doc(span)),
+                    ..relay
+                }
+            } else {
+                relay
+            }
+        })
     }
 
-    /// Runs `body` with the `ensure:` relay switched off
-    /// ([`RelayFault::NoRelay`]).
-    #[cfg(any(test, feature = "test"))]
-    pub fn without_relay<T>(body: impl FnOnce() -> T) -> T {
-        with_fault(RelayFault::NoRelay, body)
+    /// See the test-build overload: with no test configuration there is no
+    /// fault to apply.
+    #[cfg(not(any(test, feature = "test")))]
+    #[allow(clippy::unused_self)]
+    fn rebuild_relay_at_site_fault(
+        &mut self,
+        relay: Option<EnsureNlrRelay>,
+        _carry: Option<NlrCarry>,
+        _span: Span,
+    ) -> Option<EnsureNlrRelay> {
+        relay
     }
 }

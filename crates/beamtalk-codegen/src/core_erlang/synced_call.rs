@@ -39,6 +39,15 @@
 //! (`tests/synced_call_sites_corpus.rs`) compiles generated programs in a
 //! count-only test mode that records each gap's codegen site instead.
 
+#[cfg(any(test, feature = "test"))]
+mod probe;
+#[cfg(any(test, feature = "test"))]
+#[cfg_attr(not(test), allow(unused_imports))]
+pub(in crate::core_erlang) use probe::{
+    CLASSIFY_SEND_CALLS, DISPATCH_NLR_LITERALS, GapSite, PRESTORE_EARLY_READ, SITE_LOG, SiteRecord,
+    capture_site, count_only,
+};
+
 use super::threaded_ir::{
     FrameId, StaleReadDefect, StateReadSite, StateRestoreDefect, ThreadedStmt, ThreadedValue,
     UserCodeRegion, ValueRef, VerifyError, VersionPrefix, VersionedVar,
@@ -59,6 +68,7 @@ pub(in crate::core_erlang) struct UnbracketedSend {
     pub(in crate::core_erlang) at: Span,
     /// Probe only: the codegen site (`file:function`) that compiled the
     /// call outside a `ThreadedIr` frame, and the codegen frames above it.
+    #[cfg(any(test, feature = "test"))]
     pub(in crate::core_erlang) site: GapSite,
 }
 
@@ -73,142 +83,10 @@ pub(in crate::core_erlang) struct FallbackBracket {
     pub(in crate::core_erlang) state: String,
 }
 
-/// Where in the code generator a gap was compiled: [`capture_site`].
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(in crate::core_erlang) struct GapSite {
-    /// `file:function` of the nearest lowering frame that is not generic plumbing.
-    pub(in crate::core_erlang) site: String,
-    /// The codegen frames, innermost first, for choosing the plumbing list.
-    pub(in crate::core_erlang) chain: String,
-}
-
-/// One gap as the invariant probe sees it (`tests/synced_call_sites.rs`).
-#[cfg(test)]
-#[derive(Debug, Clone)]
-pub(in crate::core_erlang) struct SiteRecord {
-    pub(in crate::core_erlang) site: String,
-    pub(in crate::core_erlang) chain: String,
-    pub(in crate::core_erlang) selector: String,
-    pub(in crate::core_erlang) region: UserCodeRegion,
-}
-
-#[cfg(test)]
-thread_local! {
-    /// Test-only fault: no call is bracketed (every user-code call is a gap), so
-    /// the invariant probe can be shown to see a missing bracket.
-    pub(in crate::core_erlang) static FAULT_NO_BRACKETS: std::cell::Cell<bool> =
-        const { std::cell::Cell::new(false) };
-    /// Test-only fault (BT-4122): Tier 2 threads the legacy way (fields
-    /// through `StateAcc`, callers rebinding `State` from its return), so
-    /// the `FieldReadFromStateAcc` rule can be shown to fire on it.
-    pub(in crate::core_erlang) static FAULT_LEGACY_TIER2: std::cell::Cell<bool> =
-        const { std::cell::Cell::new(false) };
-    /// Test-only fault (BT-4179): inside a loop that brackets guarded
-    /// operators, an `on:do:` stores the threaded `State` (`Snapshot` only in
-    /// an actor closure) and a nested `StateAcc` producer seeds from it, as
-    /// before the fix, so the loop checkout can be shown to report both.
-    pub(in crate::core_erlang) static FAULT_STALE_STATE_IN_BRACKETED_LOOP: std::cell::Cell<bool> =
-        const { std::cell::Cell::new(false) };
-    /// Test-only fault (BT-4369): mode selection ignores a body's field
-    /// writes, so a loop with a field write and a guarded operator is lowered
-    /// stateless (direct params or tuple accumulator) and brackets, as the
-    /// §4b prose says never happens. The loop checkout can then be shown to
-    /// report `FieldWriteInBracketedLoop` for it.
-    pub(in crate::core_erlang) static FAULT_STATELESS_FIELD_WRITES: std::cell::Cell<bool> =
-        const { std::cell::Cell::new(false) };
-    /// Test-only fault (BT-4180): the read choke point
-    /// ([`CoreErlangGenerator::actor_state_read_source`]) ignores the
-    /// take-reads decision while the loop still brackets, so every read site
-    /// emits the threaded `State` (or a pre-extracted parameter) and the
-    /// checkout can be shown to report `StaleReadInBracketedLoop`.
-    pub(in crate::core_erlang) static FAULT_ENTRY_STATE_READS: std::cell::Cell<bool> =
-        const { std::cell::Cell::new(false) };
-}
-
-/// BT-4369: whether a body's field writes keep it out of a stateless loop
-/// (direct fun parameters or a tuple accumulator), as mode selection requires.
-/// Always `true`; a test-only fault turns it off so the loop checkout's
-/// `FieldWriteInBracketedLoop` rule can be shown to fire. Only the field-write
-/// half of the exclusion: a body with a self-send stays off the stateless
-/// paths either way.
-pub(in crate::core_erlang) fn field_writes_block_stateless_loops() -> bool {
-    #[cfg(test)]
-    if FAULT_STATELESS_FIELD_WRITES.with(std::cell::Cell::get) {
-        return false;
-    }
-    true
-}
-
-#[cfg(test)]
-thread_local! {
-    /// Test-only fault (BT-4524): a `^` in a block run as a closure does not
-    /// make its call store first (no bracket, no fallback pre-store), as
-    /// before the fix, so the `UnbracketedNlrClosure` rule can be shown to
-    /// fire.
-    pub(in crate::core_erlang) static FAULT_NLR_CLOSURES_UNSTORED: std::cell::Cell<bool> =
-        const { std::cell::Cell::new(false) };
-    /// Test-only count of [`CoreErlangGenerator::classify_send`] calls
-    /// (BT-4524), so a test can show the probes classify each send a
-    /// bounded number of times rather than once per enclosing probe.
-    pub(in crate::core_erlang) static CLASSIFY_SEND_CALLS: std::cell::Cell<usize> =
-        const { std::cell::Cell::new(0) };
-    /// Test-only fault (BT-4523): mode selection ignores a body's `^`, so a
-    /// body with a field write and a `^` is lowered hybrid, as before the
-    /// fix. The hybrid lowerings' `NlrThrowInHybridLoop` check
-    /// ([`CoreErlangGenerator::checkout_hybrid_loop`]) can then be shown to
-    /// fire on it.
-    pub(in crate::core_erlang) static FAULT_HYBRID_ADMITS_NLR: std::cell::Cell<bool> =
-        const { std::cell::Cell::new(false) };
-    /// Test-only fault (BT-4612): the `^`-closure pre-store of a
-    /// conditional's non-Boolean fallback stores the state read before the
-    /// conditional's receiver was sequenced (`(self flip: p) ifTrue: [^8]`),
-    /// as BT-4532's first cut did for the runtime dispatch's operands, so the
-    /// `StalePrestore` rule can be shown to fire.
-    pub(in crate::core_erlang) static FAULT_PRESTORE_READS_BEFORE_OPERANDS: std::cell::Cell<bool> =
-        const { std::cell::Cell::new(false) };
-    /// Every send [`CoreErlangGenerator::note_dispatch_nlr_literals`] logged:
-    /// its selector, and whether it runs none of its operands
-    /// ([`CoreErlangGenerator::send_runs_no_operand`]).
-    pub(in crate::core_erlang) static DISPATCH_NLR_LITERALS:
-        std::cell::RefCell<Vec<(String, bool)>> = const { std::cell::RefCell::new(Vec::new()) };
-    /// The reads the fault stores instead, by the conditional's first block
-    /// argument (the pre-store's `at`)
-    /// ([`CoreErlangGenerator::publish_fault_prestore_read`]); cleared with
-    /// the fault.
-    pub(in crate::core_erlang) static PRESTORE_EARLY_READ: std::cell::RefCell<
-        std::collections::HashMap<Span, Option<PrestoreRead>>,
-    > = std::cell::RefCell::new(std::collections::HashMap::new());
-}
-
-/// BT-4524 (ADR 0146 P0): whether a `^` in a block the call runs as a closure
-/// makes the call store the threaded state first (a bracketed call, or a
-/// conditional fallback's pre-store). Always `true`; a test-only fault turns
-/// it off so the `UnbracketedNlrClosure` rule can be shown to fire.
-pub(in crate::core_erlang) fn nlr_closures_store_first() -> bool {
-    #[cfg(test)]
-    if FAULT_NLR_CLOSURES_UNSTORED.with(std::cell::Cell::get) {
-        return false;
-    }
-    true
-}
-
-/// BT-4523: whether a body's `^` keeps it out of hybrid mode, as mode
-/// selection requires (ADR 0146 P0: a `^` stores and carries a whole `State`,
-/// and a hybrid loop's `State` omits the fields its parameters hold). Always
-/// `true`; a test-only fault turns it off
-/// so the `NlrThrowInHybridLoop` check can be shown to fire.
-pub(in crate::core_erlang) fn nlr_blocks_hybrid_loops() -> bool {
-    #[cfg(test)]
-    if FAULT_HYBRID_ADMITS_NLR.with(std::cell::Cell::get) {
-        return false;
-    }
-    true
-}
-
 /// BT-4524: whether running `block` may end the current scope with a `^`
 /// (nested blocks included), so the call that runs it must store first.
 pub(in crate::core_erlang) fn block_returns_from_scope(block: &beamtalk_core::ast::Block) -> bool {
-    nlr_closures_store_first() && beamtalk_core::semantic_analysis::facts::block_has_nlr(block)
+    !fault!(NlrClosuresUnstored) && beamtalk_core::semantic_analysis::facts::block_has_nlr(block)
 }
 
 /// The block-literal operands (receiver, then arguments) of the send
@@ -225,107 +103,6 @@ fn block_literal_operands<'a>(
             Expression::Block(block) => Some(block),
             _ => None,
         })
-}
-
-#[cfg(test)]
-thread_local! {
-    /// Count-only mode (the invariant probe): gaps and other verifier findings
-    /// are recorded, not failed on.
-    static COUNT_ONLY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-/// Restores count-only mode on drop.
-#[cfg(test)]
-#[derive(Debug)]
-pub(in crate::core_erlang) struct CountOnly(bool);
-
-#[cfg(test)]
-impl Drop for CountOnly {
-    fn drop(&mut self) {
-        COUNT_ONLY.with(|c| c.set(self.0));
-    }
-}
-
-/// Puts the current thread in count-only mode until the guard drops.
-#[cfg(test)]
-pub(in crate::core_erlang) fn count_only() -> CountOnly {
-    CountOnly(COUNT_ONLY.with(|c| c.replace(true)))
-}
-
-#[cfg(test)]
-thread_local! {
-    /// Every gap a count-only compile on this thread recorded.
-    pub(in crate::core_erlang) static SITE_LOG: std::cell::RefCell<Vec<SiteRecord>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-}
-
-#[cfg(test)]
-/// Frames that are plumbing every expression passes through, never the owning
-/// lowering: skipped when naming a gap's site.
-const PLUMBING_FRAMES: &[&str] = &[
-    "capture_site",
-    "record_gap",
-    "note_send",
-    "note_self_dispatch",
-    "generate_message_send",
-    "generate_expression",
-    "generate_expression_inner",
-    "expression_doc",
-    "generate_runtime_dispatch",
-    "generate_binary_op",
-    "guarded_op_doc",
-];
-
-/// The `file:function` site of the code generator frame that compiled the
-/// current call (count-only mode; a backtrace per gap is too slow otherwise).
-#[cfg(test)]
-pub(in crate::core_erlang) fn capture_site() -> GapSite {
-    let text = std::backtrace::Backtrace::force_capture().to_string();
-    let mut frames: Vec<(String, String)> = Vec::new();
-    let mut lines = text.lines().peekable();
-    while let Some(line) = lines.next() {
-        let trimmed = line.trim_start();
-        let Some((index, symbol)) = trimmed.split_once(": ") else {
-            continue;
-        };
-        if !index.chars().all(|c| c.is_ascii_digit()) {
-            continue;
-        }
-        // The frame's source line follows its symbol; only code generator frames count.
-        let Some(at) = lines
-            .peek()
-            .and_then(|next| next.trim_start().strip_prefix("at "))
-        else {
-            continue;
-        };
-        let path = at.rsplitn(3, ':').last().unwrap_or(at).replace('\\', "/");
-        let Some((_, file)) = path.split_once("src/core_erlang/") else {
-            continue;
-        };
-        let function = symbol
-            .split('<')
-            .next()
-            .unwrap_or(symbol)
-            .trim()
-            .to_string();
-        frames.push((file.to_string(), function));
-    }
-    let chain = frames
-        .iter()
-        .take(14)
-        .map(|(file, function)| format!("{file}:{function}"))
-        .collect::<Vec<_>>()
-        .join(" < ");
-    let site = frames
-        .iter()
-        .find(|(_, function)| {
-            !PLUMBING_FRAMES.contains(&function.as_str())
-                && !function.starts_with('{')
-                && !function.starts_with("with_")
-        })
-        .map(|(file, function)| format!("{file}:{function}"))
-        .unwrap_or_default();
-    GapSite { site, chain }
 }
 
 /// The generator's bracket bookkeeping.
@@ -564,7 +341,7 @@ impl StaleStateUseKind {
     }
 
     /// The invariant probe's selector prefix for this use.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test"))]
     fn probe_prefix(self) -> &'static str {
         match self {
             Self::OnDoStore | Self::StateAccSeed => "stale-state",
@@ -744,7 +521,7 @@ impl CoreErlangGenerator {
         arguments: &[Expression],
         is_cast: bool,
     ) -> UserCodeCall {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test"))]
         CLASSIFY_SEND_CALLS.with(|n| n.set(n.get() + 1));
         if is_cast {
             // A cast posts to the receiver's mailbox; nothing runs here.
@@ -776,7 +553,7 @@ impl CoreErlangGenerator {
             // variable, a parameter, any expression): a literal is judged by
             // the construct that knows whether it inlines it.
             SendUserCode::ClosureOperand => {
-                if nlr_closures_store_first() {
+                if !fault!(NlrClosuresUnstored) {
                     UserCodeCall::Yes
                 } else {
                     UserCodeCall::No
@@ -1268,7 +1045,7 @@ impl CoreErlangGenerator {
     ) -> Document<'static> {
         // Read here, where the store is emitted (see `NlrPrestore`).
         let read = self.nlr_prestore_read(prestore.at);
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test"))]
         let read = PRESTORE_EARLY_READ
             .with(|early| early.borrow().get(&prestore.at).cloned())
             .unwrap_or(read);
@@ -1299,87 +1076,19 @@ impl CoreErlangGenerator {
         super::threaded_ir::render(&[node], &mut ctx)
     }
 
-    /// BT-4612 (test-only): logs a send that reaches the runtime dispatch
-    /// (or, BT-4633, the typed guarded send) with a `^`-holding block literal
-    /// among its operands that no store covers, where the cell protocol
-    /// applies, with whether it runs none of its operands
-    /// ([`DISPATCH_NLR_LITERALS`]). Neither dispatch has a pre-store, so
-    /// every logged send must be one that runs none
-    /// ([`Self::send_runs_no_operand`]: a [`SendUserCode::Never`] send, or a
-    /// `no_user_code` primitive, BT-4633).
-    ///
-    /// BT-4632: a bracketed send's own block literals are covered by its
-    /// window ([`Self::open_sync_window`]); a send nested in its operands is
-    /// logged like one outside every window, since the window's store
-    /// covers none of its closures.
-    #[cfg(test)]
-    pub(in crate::core_erlang) fn note_dispatch_nlr_literals(
-        &self,
-        receiver: &Expression,
-        selector: &MessageSelector,
-        arguments: &[Expression],
-    ) {
-        let blocks: Vec<&beamtalk_core::ast::Block> = block_literal_operands(receiver, arguments)
-            .filter(|block| !self.synced.nlr_cover.contains(&block.span))
-            .collect();
-        if !self.nlr_closure_prestore_applies(&blocks) {
-            return;
-        }
-        let runs_no_operand = self.send_runs_no_operand(receiver, selector, arguments);
-        DISPATCH_NLR_LITERALS.with(|log| {
-            log.borrow_mut()
-                .push((selector.name().to_string(), runs_no_operand));
-        });
-    }
-
-    /// BT-4612 test-only fault hook, called where the conditional `send`
-    /// sequences its receiver ahead (the operand its non-Boolean fallback's
-    /// pre-store follows): the pre-store's `at` (the conditional's first
-    /// block argument) and the read a pre-store made here would take, for
-    /// [`Self::publish_fault_prestore_read`] once the receiver is sequenced.
-    /// `None` with the fault off.
-    #[cfg(test)]
-    pub(in crate::core_erlang) fn fault_prestore_read_before_operands(
-        &self,
-        send: &Expression,
-    ) -> Option<(Span, Option<PrestoreRead>)> {
-        if !FAULT_PRESTORE_READS_BEFORE_OPERANDS.with(std::cell::Cell::get) {
-            return None;
-        }
-        let Expression::MessageSend { arguments, .. } = send else {
-            return None;
-        };
-        let at = arguments.iter().find_map(|arg| match arg {
-            Expression::Block(block) => Some(block.span),
-            _ => None,
-        })?;
-        Some((at, self.nlr_prestore_read(at)))
-    }
-
-    /// BT-4612 test-only fault hook: makes `early` (taken by
-    /// [`Self::fault_prestore_read_before_operands`]) the read the pre-store
-    /// at its span stores.
-    #[cfg(test)]
-    pub(in crate::core_erlang) fn publish_fault_prestore_read(
-        early: Option<(Span, Option<PrestoreRead>)>,
-    ) {
-        if let Some((at, read)) = early {
-            PRESTORE_EARLY_READ.with(|slot| slot.borrow_mut().insert(at, read));
-        }
-    }
-
     /// In count-only test mode, accepts a verifier finding instead of failing
-    /// on it; answers whether it did.
-    #[cfg(test)]
+    /// on it; answers whether it did. Always `false` outside the test
+    /// configuration.
     #[allow(clippy::unused_self)]
     pub(in crate::core_erlang) fn note_counted_verify_errors(&self) -> bool {
-        COUNT_ONLY.with(std::cell::Cell::get)
-    }
-
-    #[cfg(not(test))]
-    #[allow(clippy::unused_self)]
-    pub(in crate::core_erlang) fn note_counted_verify_errors(&self) -> bool {
-        false
+        #[cfg(any(test, feature = "test"))]
+        {
+            probe::is_count_only()
+        }
+        #[cfg(not(any(test, feature = "test")))]
+        {
+            false
+        }
     }
 
     /// The statement of a self-dispatch prelude: the dispatch `call` itself, or
@@ -1572,19 +1281,16 @@ impl CoreErlangGenerator {
     /// [`Self::record_guarded_op_gap`] and [`Self::record_tier2_stateacc_gap`].
     fn make_unbracketed_send(&self, selector: String, at: Span) -> UnbracketedSend {
         let region = self.user_code_region();
-        #[cfg(test)]
-        let site = if COUNT_ONLY.with(std::cell::Cell::get) {
-            capture_site()
-        } else {
-            GapSite::default()
-        };
-        #[cfg(not(test))]
-        let site = GapSite::default();
         UnbracketedSend {
             selector,
             region,
             at,
-            site,
+            #[cfg(any(test, feature = "test"))]
+            site: if probe::is_count_only() {
+                capture_site()
+            } else {
+                GapSite::default()
+            },
         }
     }
 
@@ -1595,8 +1301,8 @@ impl CoreErlangGenerator {
     fn finish_nlr_closure_gaps(&mut self, module_span: Span) {
         let gaps = std::mem::take(&mut self.synced.nlr_closure_gaps);
         self.synced.nlr_operands.clear();
-        #[cfg(test)]
-        if COUNT_ONLY.with(std::cell::Cell::get) {
+        #[cfg(any(test, feature = "test"))]
+        if probe::is_count_only() {
             SITE_LOG.with(|log| {
                 log.borrow_mut().extend(gaps.iter().map(|g| SiteRecord {
                     site: g.site.site.clone(),
@@ -1633,8 +1339,8 @@ impl CoreErlangGenerator {
         let tier2_stateacc_gaps = std::mem::take(&mut self.synced.tier2_stateacc_gaps);
         let stale_state_gaps = std::mem::take(&mut self.synced.stale_state_gaps);
         self.finish_nlr_closure_gaps(module_span);
-        #[cfg(test)]
-        if COUNT_ONLY.with(std::cell::Cell::get) {
+        #[cfg(any(test, feature = "test"))]
+        if probe::is_count_only() {
             SITE_LOG.with(|log| {
                 log.borrow_mut().extend(gaps.iter().map(|g| SiteRecord {
                     site: g.site.site.clone(),
@@ -1898,8 +1604,7 @@ impl CoreErlangGenerator {
         if !self.synced_calls_active() || self.in_cell_closure() {
             return false;
         }
-        #[cfg(test)]
-        if FAULT_NO_BRACKETS.with(std::cell::Cell::get) {
+        if fault!(NoBrackets) {
             return false;
         }
         if self.precompiled_subexprs_contains(inner) {
@@ -2132,15 +1837,14 @@ impl CoreErlangGenerator {
     ///
     /// `will_bracket` is decided here, from the same [`Self::classify_binary`]
     /// the send emitter exempts, so the two cannot disagree; the `need` half
-    /// is set while the body lowers. Under [`FAULT_NO_BRACKETS`] no marker
+    /// is set while the body lowers. Under `Fault::NoBrackets` no marker
     /// is pushed, so the invariant probe sees every guarded-operator gap.
     pub(in crate::core_erlang) fn push_guarded_op_loop(
         &mut self,
         body: &beamtalk_core::ast::Block,
         condition: Option<&Expression>,
     ) {
-        #[cfg(test)]
-        if FAULT_NO_BRACKETS.with(std::cell::Cell::get) {
+        if fault!(NoBrackets) {
             return;
         }
         let will_bracket = self.synced_calls_active()
@@ -2164,8 +1868,7 @@ impl CoreErlangGenerator {
     /// (the stack is a [`RefCell`]) so a checkout nests the pop in its own
     /// call.
     pub(in crate::core_erlang) fn pop_guarded_op_loop(&self) -> GuardedOpLoopMarker {
-        #[cfg(test)]
-        if FAULT_NO_BRACKETS.with(std::cell::Cell::get) {
+        if fault!(NoBrackets) {
             return GuardedOpLoopMarker {
                 will_bracket: false,
                 need: None,
@@ -2321,11 +2024,7 @@ impl CoreErlangGenerator {
         field: Option<&str>,
         at: Span,
     ) -> Option<ActorStateSource> {
-        #[cfg(test)]
-        let faulted = FAULT_ENTRY_STATE_READS.with(std::cell::Cell::get);
-        #[cfg(not(test))]
-        let faulted = false;
-        if self.guarded_op_take_reads() && !faulted {
+        if self.guarded_op_take_reads() && !fault!(EntryStateReads) {
             return Some(ActorStateSource::Cell);
         }
         if let Some(field) = field
@@ -2406,8 +2105,7 @@ impl CoreErlangGenerator {
     /// a stateless loop that brackets guarded operators, whose slow paths
     /// write the cell past that `State` ([`Self::guarded_op_take_reads`]).
     pub(in crate::core_erlang) fn state_seeds_from_cell(&self) -> bool {
-        #[cfg(test)]
-        if FAULT_STALE_STATE_IN_BRACKETED_LOOP.with(std::cell::Cell::get) {
+        if fault!(StaleStateInBracketedLoop) {
             return false;
         }
         self.guarded_op_take_reads()
@@ -2434,8 +2132,7 @@ impl CoreErlangGenerator {
     /// this gate and [`Self::guarded_op_take_reads`] differ in that one
     /// conjunct only, both built on [`Self::in_bracketed_region`].
     pub(in crate::core_erlang) fn nested_state_acc_seed_from_cell(&self) -> bool {
-        #[cfg(test)]
-        if FAULT_STALE_STATE_IN_BRACKETED_LOOP.with(std::cell::Cell::get) {
+        if fault!(StaleStateInBracketedLoop) {
             return false;
         }
         self.in_bracketed_region()

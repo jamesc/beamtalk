@@ -660,12 +660,8 @@ impl CoreErlangGenerator {
         );
         // BT-3821 fault injection: the last local's rebind is omitted
         // (`ThreadedLocalDropped` on a real compile). Only test builds mutate `built`.
-        #[cfg(test)]
         let mut built = built;
-        #[cfg(test)]
-        if super::super::threaded_expr::fault::active()
-            == Some(super::super::threaded_expr::fault::LocalRebindFault::DropRebind)
-        {
+        if fault!(DropRebind) {
             if let Some(at) = built
                 .iter()
                 .rposition(|stmt| matches!(stmt, ThreadedStmt::LocalRebind { .. }))
@@ -1416,10 +1412,7 @@ impl CoreErlangGenerator {
         // BT-3821 fault injection: the merge `Bind` the construct declared its family
         // for is omitted, so the verifier's `ConstructFamilyDropped` is shown to fire
         // on a real compile (`tests/value_type_conditional_family_verifier_corpus.rs`).
-        #[cfg(test)]
-        if super::super::threaded_expr::fault::active()
-            == Some(super::super::threaded_expr::fault::LocalRebindFault::DropFamilyBind)
-        {
+        if fault!(DropFamilyBind) {
             return Vec::new();
         }
         extraction

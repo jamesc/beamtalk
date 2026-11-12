@@ -20,7 +20,7 @@
 //! every root-form cell when the producer is switched off.
 
 use super::{assert_compiles_through_erlc, codegen};
-use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
+use crate::core_erlang::fault::{self, Fault};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 const HEADER: &str = "Actor subclass: SuperValueProbe
@@ -147,7 +147,7 @@ fn the_super_send_corpus_fails_without_the_producer() {
         .iter()
         .filter(|(_, _, root_form)| *root_form)
         .filter(|(_, body, _)| {
-            !fault::with(LocalRebindFault::SuperSendNotAProducer, || failure(body))
+            !fault::with(Fault::SuperSendNotAProducer, || failure(body))
                 .is_some_and(|f| f.contains("StateEffectEscapesExpression"))
         })
         .map(|(name, _, _)| name.clone())

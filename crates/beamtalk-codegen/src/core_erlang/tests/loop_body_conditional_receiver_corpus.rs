@@ -26,11 +26,11 @@
 //! the debug verifier and compiles through `erlc`.
 //! [`loop_body_conditional_receiver_corpus_reports_the_pre_fix_lowering`] shows
 //! the verifier catches the pre-fix lowering
-//! ([`LocalRebindFault::ReceiverPreludeInTuple`]) over the same rows.
+//! ([`Fault::ReceiverPreludeInTuple`]) over the same rows.
 
 use super::{assert_compiles_through_erlc, assert_parses, codegen};
 #[cfg(debug_assertions)]
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::fault::Fault;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 const HELPERS: &str = "  done => false
@@ -234,7 +234,7 @@ fn loop_body_conditional_receiver_value_positions_compile() {
 }
 
 /// BT-4000: with the receiver prelude rendered into the conditional's tuple
-/// again ([`LocalRebindFault::ReceiverPreludeInTuple`]), the verifier reports
+/// again ([`Fault::ReceiverPreludeInTuple`]), the verifier reports
 /// `UnboundVersion` for every row whose conditional is a statement of a
 /// `Letrec` loop body, a conditional arm or an `on:do:`/`ensure:` body (the
 /// frames the bug reached). The check that was missing already existed, and
@@ -250,7 +250,7 @@ fn loop_body_conditional_receiver_corpus_reports_the_pre_fix_lowering() {
         .filter(|(name, _)| !name.starts_with("loop5 ") && !name.starts_with("loop6 "))
     {
         let src = format!("{HEADER}{HELPERS}{}", method("", 0, &body));
-        let report = super::verifier_report(&src, Some(LocalRebindFault::ReceiverPreludeInTuple));
+        let report = super::verifier_report(&src, Some(Fault::ReceiverPreludeInTuple));
         if !report
             .as_deref()
             .is_some_and(|r| r.contains("UnboundVersion"))
@@ -296,7 +296,7 @@ fn bt4000_repros_compile() {
 // the IR, the fold body's raw-tuple unpack is an opaque statement, and `erlc`
 // accepts `element(2, X)` of any `X`. The proof is a codegen-shape check
 // ([`fold_raw_tuple_unpacks`]) over the generated corpus, shown to catch the
-// pre-fix routing ([`LocalRebindFault::FoldRawTupleUnpack`]), plus the runtime
+// pre-fix routing ([`Fault::FoldRawTupleUnpack`]), plus the runtime
 // rows in `stdlib/test/bt4017fold_body_block_arg_test.bt`.
 
 /// Every fold kind, with the conditional statement `{S}` as the body's last
@@ -468,7 +468,7 @@ fn fold_body_block_arg_corpus_compiles_without_a_raw_tuple_unpack() {
 }
 
 /// BT-4017: with the fold body's pre-fix routing restored
-/// ([`LocalRebindFault::FoldRawTupleUnpack`]), the fold rows the pre-fix routing
+/// ([`Fault::FoldRawTupleUnpack`]), the fold rows the pre-fix routing
 /// sent to the raw-tuple unpack are one again, which the codegen-shape check
 /// reports, while the verifier stays silent: the reason the proof is a shape
 /// check and a runtime test rather than a `VerifyError`. Under ADR 0137 a fold
@@ -479,7 +479,7 @@ fn fold_body_block_arg_corpus_compiles_without_a_raw_tuple_unpack() {
 #[cfg(debug_assertions)]
 #[test]
 fn fold_body_block_arg_corpus_reports_the_pre_fix_routing() {
-    use crate::core_erlang::threaded_expr::fault;
+    use crate::core_erlang::fault;
     let mut verifier_saw = Vec::new();
     let mut detected = 0usize;
     let rows: Vec<_> = block_arg_sources("")
@@ -489,13 +489,11 @@ fn fold_body_block_arg_corpus_reports_the_pre_fix_routing() {
     assert!(rows.len() >= 900, "only {} rows", rows.len());
     let total = rows.len();
     for (name, src) in rows {
-        if let Some(report) =
-            super::verifier_report(&src, Some(LocalRebindFault::FoldRawTupleUnpack))
-        {
+        if let Some(report) = super::verifier_report(&src, Some(Fault::FoldRawTupleUnpack)) {
             verifier_saw.push(format!("{name}: the verifier saw it ({report})\n{src}"));
             continue;
         }
-        let code = fault::with(LocalRebindFault::FoldRawTupleUnpack, || codegen(&src));
+        let code = fault::with(Fault::FoldRawTupleUnpack, || codegen(&src));
         if fold_raw_tuple_unpacks(&code) > 0 {
             detected += 1;
         }

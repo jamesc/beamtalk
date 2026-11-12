@@ -82,7 +82,7 @@ fn actor_and_repl_scopes_are_not_constrained() {
 /// rejected in every scope; the cell-committing reply verifies clean.
 #[test]
 fn an_actor_reply_committing_the_carried_state_is_rejected() {
-    use crate::core_erlang::nlr::fault::{NlrFault, with_fault};
+    use crate::core_erlang::fault::{Fault, with as with_fault};
     for scope in [ScopeKind::Instance, ScopeKind::Repl] {
         assert_eq!(
             verify_in_scope(&nlr_catch(NlrBoundary::ActorReply), scope),
@@ -90,7 +90,7 @@ fn an_actor_reply_committing_the_carried_state_is_rejected() {
             "{scope:?}"
         );
         assert_eq!(
-            with_fault(NlrFault::CommitCarried, || {
+            with_fault(Fault::NlrCommitCarried, || {
                 verify_in_scope(&nlr_catch(NlrBoundary::ActorReply), scope)
             }),
             vec![VerifyError::ActorNlrCommitBypassesCell { at: span() }],

@@ -21,7 +21,7 @@
 //! `fun` back) a field read or write in the body reports instead of
 //! threading through `StateAcc`.
 
-use super::synced_call::{FAULT_LEGACY_TIER2, FAULT_NO_BRACKETS};
+use crate::core_erlang::fault::{self, Fault};
 use crate::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
@@ -46,16 +46,16 @@ fn enforce_report(src: &str) -> Option<String> {
 }
 
 fn with_legacy_fault<T>(f: impl FnOnce() -> T) -> T {
-    FAULT_LEGACY_TIER2.with(|c| c.set(true));
+    fault::set(Fault::LegacyTier2, true);
     let result = f();
-    FAULT_LEGACY_TIER2.with(|c| c.set(false));
+    fault::set(Fault::LegacyTier2, false);
     result
 }
 
 fn with_no_brackets_fault<T>(f: impl FnOnce() -> T) -> T {
-    FAULT_NO_BRACKETS.with(|c| c.set(true));
+    fault::set(Fault::NoBrackets, true);
     let result = f();
-    FAULT_NO_BRACKETS.with(|c| c.set(false));
+    fault::set(Fault::NoBrackets, false);
     result
 }
 

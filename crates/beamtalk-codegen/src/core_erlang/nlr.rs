@@ -94,7 +94,7 @@ pub(in crate::core_erlang) enum NlrArmShape {
     /// State}`: every actor method before ADR 0146, which lost a cleanup's
     /// writes and, for a block run by another actor, every write since the
     /// block's creation (BT-4459). Only the test-only
-    /// [`fault::NlrFault::CommitCarried`] builds it, to show
+    /// [`Fault::NlrCommitCarried`](super::fault::Fault::NlrCommitCarried) builds it, to show
     /// `VerifyError::ActorNlrCommitBypassesCell` rejects it.
     CarriedReply,
     /// A `{Result, State}` pair: the REPL eval's `{Value, Bindings}` (or its
@@ -106,10 +106,8 @@ impl NlrBoundary {
     /// What this boundary's matching catch arm yields ([`NlrArmShape`]).
     pub(in crate::core_erlang) fn arm_shape(&self) -> NlrArmShape {
         match self {
-            NlrBoundary::ActorReply => match fault::active() {
-                Some(fault::NlrFault::CommitCarried) => NlrArmShape::CarriedReply,
-                _ => NlrArmShape::Reply,
-            },
+            NlrBoundary::ActorReply if fault!(NlrCommitCarried) => NlrArmShape::CarriedReply,
+            NlrBoundary::ActorReply => NlrArmShape::Reply,
             NlrBoundary::ClassMethod | NlrBoundary::ValueType => NlrArmShape::Value,
             NlrBoundary::Repl { .. } => NlrArmShape::ValueStatePair,
         }
@@ -397,8 +395,7 @@ impl CoreErlangGenerator {
     ) -> (threaded_ir::ThreadedStmt, String) {
         let result_var = self.fresh_temp_var("NlrThrow");
         let cell_live = self.nlr_throw_stores_cell();
-        let cell_store =
-            cell_live && fault::active() != Some(fault::NlrFault::ThrowWithoutCellStore);
+        let cell_store = cell_live && !fault!(NlrThrowWithoutCellStore);
         // A gensym slot renders the arm's state variable verbatim; the arm's
         // own `Bind`s already verified the version it names.
         let slot = threaded_ir::VersionedVar::new(
@@ -489,63 +486,6 @@ impl CoreErlangGenerator {
     }
 }
 
-/// Test-only: compiles an actor method's NLR boundary, or a `^` throw, as it
-/// was before ADR 0146, so [`VerifyError::ActorNlrCommitBypassesCell`](super::threaded_ir::VerifyError::ActorNlrCommitBypassesCell)
-/// and [`VerifyError::NlrThrowWithoutCellStore`](super::threaded_ir::VerifyError::NlrThrowWithoutCellStore)
-/// can be shown to fire on a real compile (`tests/nlr.rs`). Compiled for this
-/// crate's tests only; otherwise [`active`](fault::active) is always `None`.
-pub mod fault {
-    #[cfg(test)]
-    use std::cell::Cell;
-
-    /// An actor `^` as it was before a fix.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub enum NlrFault {
-        /// The catch arm commits the state the throw carries,
-        /// `{'reply', Value, State}`, instead of the actor's cell.
-        CommitCarried,
-        /// A `^` a conditional arm lowers to a
-        /// [`ThreadedStmt::NlrThrow`](super::super::threaded_ir::ThreadedStmt::NlrThrow)
-        /// throws without storing its state to the cell, as BT-3374's and
-        /// BT-3495's arm throws did before BT-4535
-        /// (`VerifyError::NlrThrowWithoutCellStore`).
-        ThrowWithoutCellStore,
-    }
-
-    #[cfg(test)]
-    thread_local! {
-        static FAULT: Cell<Option<NlrFault>> = const { Cell::new(None) };
-    }
-
-    /// The commit fault switched on on this thread, if any.
-    #[cfg(test)]
-    pub(crate) fn active() -> Option<NlrFault> {
-        FAULT.with(Cell::get)
-    }
-
-    /// The commit fault switched on on this thread, if any.
-    #[cfg(not(test))]
-    pub(crate) fn active() -> Option<NlrFault> {
-        None
-    }
-
-    /// Runs `body` with `fault` switched on, restoring the boundary
-    /// afterwards even if `body` panics.
-    #[cfg(test)]
-    pub fn with_fault<T>(fault: NlrFault, body: impl FnOnce() -> T) -> T {
-        struct Reset;
-        impl Drop for Reset {
-            fn drop(&mut self) {
-                FAULT.with(|f| f.set(None));
-            }
-        }
-        FAULT.with(|f| f.set(Some(fault)));
-        let _reset = Reset;
-        body()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -561,7 +501,7 @@ mod tests {
 
     #[test]
     fn nlr_arm_result_actor_reply_under_the_fault_commits_the_carried_state() {
-        let doc = fault::with_fault(fault::NlrFault::CommitCarried, || {
+        let doc = crate::core_erlang::fault::with(crate::core_erlang::fault::Fault::NlrCommitCarried, || {
             nlr_arm_result("Val", "St", &NlrBoundary::ActorReply)
         });
         assert_eq!(doc.to_pretty_string(), "{'reply', Val, St}");

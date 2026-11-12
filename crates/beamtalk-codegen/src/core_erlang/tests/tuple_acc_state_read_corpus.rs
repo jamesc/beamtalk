@@ -10,7 +10,7 @@
 //! Proved over a generated corpus, not the repro: every fold kind x every
 //! read form x every enclosing context compiles with a silent verifier and
 //! never reads a field from a fold's tuple accumulator. With the fold's entry
-//! capture skipped ([`LocalRebindFault::TupleAccNoEntryCapture`]) every
+//! capture skipped ([`Fault::TupleAccNoEntryCapture`]) every
 //! program whose code the fault changes must be reported as
 //! `TupleAccStateReadNotEntryState` (a program it leaves unchanged holds no
 //! tuple-acc fold, or one whose entry state is already the name the loop
@@ -22,7 +22,7 @@
 //! (BT-4121), which is a different path.
 
 use super::{codegen, verifier_report};
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::fault::Fault;
 use crate::core_erlang::threaded_ir::{
     FoldAccShape, ThreadingMode, VerifyError, verify_tuple_acc_state_reads,
 };
@@ -136,7 +136,7 @@ fn skipping_the_entry_capture_is_reported() {
     let mut fired_folds = [false; FOLDS.len()];
     for (c, f, src) in programs() {
         let clean = codegen(&src);
-        let report = verifier_report(&src, Some(LocalRebindFault::TupleAccNoEntryCapture));
+        let report = verifier_report(&src, Some(Fault::TupleAccNoEntryCapture));
         let fired = report
             .as_deref()
             .is_some_and(|r| r.contains("TupleAccStateReadNotEntryState"));
@@ -145,10 +145,8 @@ fn skipping_the_entry_capture_is_reported() {
             fired_folds[f] = true;
             continue;
         }
-        let faulted = crate::core_erlang::threaded_expr::fault::with(
-            LocalRebindFault::TupleAccNoEntryCapture,
-            || codegen(&src),
-        );
+        let faulted =
+            crate::core_erlang::fault::with(Fault::TupleAccNoEntryCapture, || codegen(&src));
         if faulted != clean {
             missed.push(format!("changed but unreported ({report:?}):\n{src}"));
         }

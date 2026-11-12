@@ -20,7 +20,7 @@
 //! is clean.
 
 use super::{codegen, verifier_report};
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::fault::Fault;
 
 /// The issue's repro: an actor method whose taken `ifTrue:` arm answers a map
 /// literal holding a self-call `collect:`.
@@ -72,7 +72,7 @@ fn the_unbroken_repro_passes_the_verifier() {
 
 #[test]
 fn withholding_the_arm_producer_sites_is_construct_carrier_in_place() {
-    let report = verifier_report(repro(), Some(LocalRebindFault::PlainArmOpaqueProducers))
+    let report = verifier_report(repro(), Some(Fault::PlainArmOpaqueProducers))
         .expect("the in-place lowering is a verifier finding");
     assert!(
         report.contains("ConstructCarrierInPlace"),
@@ -175,7 +175,7 @@ enum Outcome {
     Finding(String),
 }
 
-fn outcome(src: &str, fault: Option<LocalRebindFault>) -> Outcome {
+fn outcome(src: &str, fault: Option<Fault>) -> Outcome {
     match verifier_report(src, fault) {
         None => Outcome::Clean,
         Some(report) if report.contains("UnsupportedFeature") => Outcome::Unsupported,
@@ -230,7 +230,7 @@ fn the_fault_is_reported_over_the_generated_corpus() {
     let mut reported = 0;
     let mut missed = Vec::new();
     for src in programs(Host::Actor) {
-        match outcome(&src, Some(LocalRebindFault::PlainArmOpaqueProducers)) {
+        match outcome(&src, Some(Fault::PlainArmOpaqueProducers)) {
             Outcome::Finding(report) => {
                 assert!(
                     report.contains("ConstructCarrierInPlace"),
@@ -600,7 +600,7 @@ fn withholding_the_fold_body_family_only_sites_is_reported_over_the_corpus() {
     let mut missed = Vec::new();
     for cell in fold_body_cells() {
         let src = cell.program();
-        match outcome(&src, Some(LocalRebindFault::FoldOperandFamilyOnlyInPlace)) {
+        match outcome(&src, Some(Fault::FoldOperandFamilyOnlyInPlace)) {
             Outcome::Finding(report) => {
                 assert!(
                     report.contains("ConstructCarrierInPlace"),
@@ -646,7 +646,7 @@ fn withholding_the_fold_body_family_only_sites_is_reported_over_the_corpus() {
 // `STATEMENT_ONLY_POSITIONS`, at the method root. A `match:` guard allows only comparisons
 // and arithmetic, so it cannot hold one at all.)
 
-use crate::core_erlang::threaded_expr::fault::recording_producers;
+use crate::core_erlang::fault::recording_producers;
 use beamtalk_core::semantic_analysis::block_facts::{
     UnsequencedOperand, operand_loop_constructs_with_holders,
 };
@@ -1004,7 +1004,7 @@ fn check_withholding_unsequenced_sites(parts: &[usize]) -> usize {
     {
         let (_, records) = recording_producers(|| codegen(&cell.src));
         let must_report = cell.construct_is_producer(&records);
-        match outcome(&cell.src, Some(LocalRebindFault::UnsequencedOperandInPlace)) {
+        match outcome(&cell.src, Some(Fault::UnsequencedOperandInPlace)) {
             Outcome::Finding(report) => {
                 assert!(
                     report.contains("ConstructCarrierInPlace"),
@@ -1082,7 +1082,7 @@ fn the_bt4310_repros_are_producers_and_withholding_their_sites_is_reported() {
                         && span.end() as usize <= start + fold.len()),
                 "the fold should be a producer:\n{src}"
             );
-            let report = verifier_report(&src, Some(LocalRebindFault::UnsequencedOperandInPlace))
+            let report = verifier_report(&src, Some(Fault::UnsequencedOperandInPlace))
                 .unwrap_or_else(|| panic!("the in-place lowering should be reported:\n{src}"));
             assert!(
                 report.contains("ConstructCarrierInPlace"),

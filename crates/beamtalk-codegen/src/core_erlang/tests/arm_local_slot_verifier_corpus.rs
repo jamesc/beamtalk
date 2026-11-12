@@ -18,11 +18,11 @@
 //! protected body, a handler, an arm of another conditional), in a class, a value-type and an
 //! actor method. Each is compiled twice: unbroken (control: compiles and the verifier is
 //! silent) and with the frame's slot gate removed
-//! ([`fault::LocalRebindFault::PutUncarriedLocal`]), which the verifier must report wherever the
+//! ([`fault::Fault::PutUncarriedLocal`]), which the verifier must report wherever the
 //! arm is lowered inline.
 
 use super::{codegen, verifier_report};
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::fault::Fault;
 
 /// The method headers, by context.
 const CONTEXTS: &[(&str, &str)] = &[
@@ -107,16 +107,14 @@ fn an_arm_local_put_its_frame_does_not_carry_is_reported_wherever_the_arm_is_low
     let mut reported = 0;
     let mut wrong = Vec::new();
     for (name, src) in programs() {
-        match verifier_report(&src, Some(LocalRebindFault::PutUncarriedLocal)) {
+        match verifier_report(&src, Some(Fault::PutUncarriedLocal)) {
             Some(report) if report.contains("ArmLocalPutNotCarried") => reported += 1,
             Some(report) => wrong.push(format!("{name}: wrong report: {report}\n{src}")),
             // An arm that is not lowered inline (a plain closure) writes no scratch map:
             // the fault changes nothing, so its output is the unbroken compile's.
             None => {
-                let broken = crate::core_erlang::threaded_expr::fault::with(
-                    LocalRebindFault::PutUncarriedLocal,
-                    || codegen(&src),
-                );
+                let broken =
+                    crate::core_erlang::fault::with(Fault::PutUncarriedLocal, || codegen(&src));
                 if broken != codegen(&src) {
                     wrong.push(format!("{name}: changed output without a report\n{src}"));
                 }

@@ -13,7 +13,7 @@
 //! operand position, in each method context; a program the ADR 0131
 //! checks reject is skipped (nothing is compiled for it).
 
-use crate::core_erlang::threaded_expr::fault::recording_producers;
+use crate::core_erlang::fault::recording_producers;
 use crate::core_erlang::{CodegenOptions, generate_module_with_warnings};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::block_facts::{

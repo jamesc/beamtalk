@@ -17,7 +17,7 @@
 
 use super::local_producer_agreement::CONSTRUCTS;
 use super::local_producer_agreement_conditional::CONDITIONALS;
-use crate::core_erlang::threaded_expr::fault::recording_producers;
+use crate::core_erlang::fault::recording_producers;
 use crate::core_erlang::{CodeGenContext, CodeGenError, CoreErlangGenerator};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::block_facts::{

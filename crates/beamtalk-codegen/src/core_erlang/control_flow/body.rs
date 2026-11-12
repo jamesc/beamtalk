@@ -110,7 +110,7 @@ impl CoreErlangGenerator {
         // actor-state name its body resolves is the fold's entry state —
         // captured here, like a direct-params loop's (BT-3562), and logged
         // for the check below.
-        let tuple_acc_capture = plan.use_tuple_acc && !Self::tuple_acc_capture_faulted();
+        let tuple_acc_capture = plan.use_tuple_acc && !fault!(TupleAccNoEntryCapture);
         let prev_outer_state = if tuple_acc_capture {
             self.loop_mode
                 .direct_params_outer_state_var
@@ -154,24 +154,6 @@ impl CoreErlangGenerator {
             );
         }
         lowered
-    }
-
-    /// Test-only fault injection (BT-4178): whether a tuple-acc fold skips
-    /// its entry-state capture
-    /// ([`LocalRebindFault::TupleAccNoEntryCapture`](super::super::threaded_expr::fault::LocalRebindFault::TupleAccNoEntryCapture)),
-    /// so `TupleAccStateReadNotEntryState` is shown to fire on a real compile.
-    fn tuple_acc_capture_faulted() -> bool {
-        #[cfg(test)]
-        {
-            super::super::threaded_expr::fault::active()
-                == Some(
-                    super::super::threaded_expr::fault::LocalRebindFault::TupleAccNoEntryCapture,
-                )
-        }
-        #[cfg(not(test))]
-        {
-            false
-        }
     }
 
     /// The body half of [`Self::generate_foldl_loop_body`]: lowers the fold
@@ -297,10 +279,7 @@ impl CoreErlangGenerator {
             // Test-only fault injection: the lambda forgets to return `Self`,
             // so the verifier's `FoldFamilyNotCarried` is shown to fire on a
             // real compile (`tests/value_type_fold_family_corpus.rs`).
-            #[cfg(test)]
-            if super::super::threaded_expr::fault::active()
-                == Some(super::super::threaded_expr::fault::LocalRebindFault::DropFoldFamilySlot)
-            {
+            if fault!(DropFoldFamilySlot) {
                 continue;
             }
             let Some(ThreadedStmt::FoldAccumulator {
@@ -322,25 +301,6 @@ impl CoreErlangGenerator {
         Ok(())
     }
 
-    /// Test-only fault injection (BT-3863): whether the fold body statement
-    /// classifier is split from the fold's gate
-    /// ([`LocalRebindFault::SplitFoldStatementGate`](super::super::threaded_expr::fault::LocalRebindFault::SplitFoldStatementGate)),
-    /// so `FoldLocalsNotCarried` is shown to fire on a real compile
-    /// (`tests/fold_locals_carried_corpus.rs`).
-    fn fold_statement_gate_split() -> bool {
-        #[cfg(test)]
-        {
-            super::super::threaded_expr::fault::active()
-                == Some(
-                    super::super::threaded_expr::fault::LocalRebindFault::SplitFoldStatementGate,
-                )
-        }
-        #[cfg(not(test))]
-        {
-            false
-        }
-    }
-
     /// BT-4017: whether a fold body statement is lowered through
     /// [`Self::thread_ahead`] and its value read back, rather than unpacked as
     /// the raw `{Value, StateAcc}` tuple of a construct with mutations: the one
@@ -358,10 +318,7 @@ impl CoreErlangGenerator {
         // Test-only fault injection: the pre-BT-4017 routing, so the
         // codegen-shape check is shown to catch it on a real compile
         // (`tests/loop_body_conditional_receiver_corpus.rs`).
-        #[cfg(test)]
-        if super::super::threaded_expr::fault::active()
-            == Some(super::super::threaded_expr::fault::LocalRebindFault::FoldRawTupleUnpack)
-        {
+        if fault!(FoldRawTupleUnpack) {
             return false;
         }
         self.thread_ahead_unwraps(expr)
@@ -768,7 +725,7 @@ impl CoreErlangGenerator {
         frame: FrameId,
     ) -> Result<Vec<ThreadedStmt>> {
         let filtered_body = super::super::util::collect_body_exprs(&body.body);
-        let producer_body: &[&Expression] = if Self::fold_statement_gate_split() {
+        let producer_body: &[&Expression] = if fault!(SplitFoldStatementGate) {
             &[]
         } else {
             &filtered_body
@@ -795,7 +752,7 @@ impl CoreErlangGenerator {
         let mut stmts: Vec<ThreadedStmt> = Vec::new();
         let mut has_mutations = false;
         let mut has_plain_lets = false;
-        let gate_split = Self::fold_statement_gate_split();
+        let gate_split = fault!(SplitFoldStatementGate);
 
         // For predicate-based body kinds, allocate a pred_var upfront.
         let pred_var: Option<String> = if matches!(
@@ -2301,7 +2258,7 @@ impl CoreErlangGenerator {
                         || has_plain_lets
                         || (self.synced_calls_active()
                             && !plan.use_tuple_acc
-                            && !Self::fold_statement_gate_split());
+                            && !fault!(SplitFoldStatementGate));
                     if threads_here {
                         let doc = self.bind_closed_expr_doc(expr, "_")?;
                         stmts.push(ThreadedStmt::Statement(doc, span));

@@ -99,11 +99,7 @@ impl CoreErlangGenerator {
         &self,
         analysis: &super::block_analysis::BlockMutationAnalysis,
     ) -> bool {
-        #[cfg(test)]
-        let fault_legacy = super::synced_call::FAULT_LEGACY_TIER2.with(std::cell::Cell::get);
-        #[cfg(not(test))]
-        let fault_legacy = false;
-        if fault_legacy {
+        if fault!(LegacyTier2) {
             return false;
         }
         self.synced_calls_scope() && analysis.may_write_actor_state()
@@ -467,10 +463,7 @@ impl CoreErlangGenerator {
             this.with_rebind_frame(rebind, |this| {
                 // Test-only fault (`Tier2OpaqueProducers`): the producer sites
                 // BT-3939 registers, withheld.
-                #[cfg(test)]
-                if super::threaded_expr::fault::active()
-                    == Some(super::threaded_expr::fault::LocalRebindFault::Tier2OpaqueProducers)
-                {
+                if fault!(Tier2OpaqueProducers) {
                     return this.generate_block_stateful_body(block, frame, &mut stmts);
                 }
                 // Generate body expressions with state threading

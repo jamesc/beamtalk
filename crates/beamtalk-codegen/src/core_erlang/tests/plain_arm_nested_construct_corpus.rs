@@ -20,7 +20,7 @@
 //! statement reports the construct compiled in place.
 
 use super::verifier_report;
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::fault::Fault;
 
 const ACTOR: &str =
     include_str!("../../../../../stdlib/test/fixtures/bt4460plain_arm_nested_actor.bt");
@@ -108,7 +108,7 @@ fn the_repro_passes_the_verifier() {
 
 #[test]
 fn the_pre_bt4460_arm_rule_compiles_the_repro_in_place() {
-    let report = verifier_report(repro(), Some(LocalRebindFault::ArmLoopOrFoldSitesOnly))
+    let report = verifier_report(repro(), Some(Fault::ArmLoopOrFoldSitesOnly))
         .expect("the in-place construct is a verifier finding");
     assert!(
         report.contains("ConstructLocalsNotRebound") && report.contains("\"m\""),
@@ -172,10 +172,7 @@ fn the_pre_bt4460_arm_rule_is_reported_over_the_corpus() {
                     .strip_prefix(selector)
                     .is_some_and(|rest| rest.starts_with("nonlast_"))
             });
-        match verifier_report(
-            &cell.program,
-            Some(LocalRebindFault::ArmLoopOrFoldSitesOnly),
-        ) {
+        match verifier_report(&cell.program, Some(Fault::ArmLoopOrFoldSitesOnly)) {
             Some(report) => {
                 assert!(
                     report.contains("ConstructLocalsNotRebound"),

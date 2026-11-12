@@ -1777,7 +1777,7 @@ pub(in crate::core_erlang) enum RethrowSlot {
     /// from the site's bindings. Never right for a relay: in a merged Tier 2
     /// fun it re-flushes the captured locals as bound at the `ensure:`, not as
     /// the `^` carried them (BT-4122). Only the test-only
-    /// `ensure_nlr_relay::fault::RelayFault::RebuildAtSite` builds it, to
+    /// `fault::Fault::RelayRebuildAtSite` builds it, to
     /// show the verifier rejects it, so it exists only in test builds.
     #[cfg(any(test, feature = "test"))]
     SiteState(Document<'static>),

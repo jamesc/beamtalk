@@ -19,7 +19,7 @@
 //! withheld (`ReplCachedBindingsNotRethreaded`) every cell whose frame wrote
 //! the binding first reports the stale binding, and no other cell does.
 
-use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
+use crate::core_erlang::fault::{self, Fault};
 use crate::core_erlang::{CodeGenContext, CodeGenError, CoreErlangGenerator};
 use beamtalk_core::ast::Expression;
 
@@ -59,7 +59,7 @@ fn cells() -> Vec<Cell> {
 
 /// Compiles `input` as the REPL compiles one input, under `fault`; answers the
 /// verifier's finding (the debug-build panic message), if any.
-fn repl_verifier_report(input: &str, fault: Option<LocalRebindFault>) -> Option<String> {
+fn repl_verifier_report(input: &str, fault: Option<Fault>) -> Option<String> {
     let src = format!("{input}\n");
     let (module, diagnostics) = super::parse_normalised(&src);
     assert!(diagnostics.is_empty(), "{src}: {diagnostics:?}");
@@ -126,11 +126,8 @@ fn the_repros_pass_the_verifier() {
 #[test]
 fn the_pre_bt4461_repl_producers_leave_the_repros_stale() {
     for repro in REPROS {
-        let report = repl_verifier_report(
-            repro,
-            Some(LocalRebindFault::ReplCachedBindingsNotRethreaded),
-        )
-        .unwrap_or_else(|| panic!("no verifier finding for {repro}"));
+        let report = repl_verifier_report(repro, Some(Fault::ReplCachedBindingsNotRethreaded))
+            .unwrap_or_else(|| panic!("no verifier finding for {repro}"));
         assert!(
             report.contains("ReplCachedBindingStale") && report.contains("\"m\""),
             "expected ReplCachedBindingStale for `m` in {repro}, got: {report}"
@@ -166,10 +163,8 @@ fn the_pre_bt4461_repl_producers_are_reported_over_the_grid() {
     let mut reported = 0;
     let mut wrong = Vec::new();
     for cell in cells() {
-        let report = repl_verifier_report(
-            &cell.input,
-            Some(LocalRebindFault::ReplCachedBindingsNotRethreaded),
-        );
+        let report =
+            repl_verifier_report(&cell.input, Some(Fault::ReplCachedBindingsNotRethreaded));
         match (cell.pre, report) {
             (true, Some(report)) if report.contains("ReplCachedBindingStale") => reported += 1,
             (false, None) => {}
@@ -212,7 +207,7 @@ fn the_parameter_repros_pass_the_verifier() {
 #[test]
 fn an_unseeded_parameter_is_reported_stale() {
     for repro in PARAMETER_REPROS {
-        let report = repl_verifier_report(repro, Some(LocalRebindFault::ReplParamsNotSeeded))
+        let report = repl_verifier_report(repro, Some(Fault::ReplParamsNotSeeded))
             .unwrap_or_else(|| panic!("no verifier finding for {repro}"));
         assert!(
             report.contains("ReplCachedBindingStale"),

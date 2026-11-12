@@ -18,10 +18,10 @@
 //! (`VerifyError::NlrThrowInHybridLoop`, `checkout_hybrid_loop`). The corpus
 //! is loop shape x `^` position x field write before/after the `^`: clean and
 //! `erlc`-valid with the gate on, and with the gate off
-//! (`FAULT_HYBRID_ADMITS_NLR`) every shape that lowers hybrid reports.
+//! (`Fault::HybridAdmitsNlr`) every shape that lowers hybrid reports.
 
 use super::assert_compiles_through_erlc;
-use crate::core_erlang::synced_call::FAULT_HYBRID_ADMITS_NLR;
+use crate::core_erlang::fault::{self, Fault};
 use crate::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
@@ -134,9 +134,9 @@ fn report(src: &str) -> Option<String> {
 }
 
 fn with_hybrid_admits_nlr<T>(f: impl FnOnce() -> T) -> T {
-    FAULT_HYBRID_ADMITS_NLR.with(|flag| flag.set(true));
+    fault::set(Fault::HybridAdmitsNlr, true);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-    FAULT_HYBRID_ADMITS_NLR.with(|flag| flag.set(false));
+    fault::set(Fault::HybridAdmitsNlr, false);
     result.unwrap_or_else(|payload| std::panic::resume_unwind(payload))
 }
 

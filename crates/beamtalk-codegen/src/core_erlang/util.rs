@@ -529,10 +529,7 @@ impl CoreErlangGenerator {
 
         if let Some(children) = Self::sequenced_send_children(inner) {
             // BT-4591 fault: skip a `super` send's argument pre-sequencing.
-            #[cfg(test)]
-            let children = if super::threaded_expr::fault::active()
-                == Some(super::threaded_expr::fault::LocalRebindFault::SuperArgsNotPresequenced)
-                && Self::is_super_message_send(inner)
+            let children = if fault!(SuperArgsNotPresequenced) && Self::is_super_message_send(inner)
             {
                 Vec::new()
             } else {
@@ -963,10 +960,7 @@ impl CoreErlangGenerator {
     /// ([`Self::super_send_threads_state`]) — [`Self::super_send_producer`]'s
     /// shape. Every other `super` send answers a plain value.
     pub(super) fn is_super_send_producer(&self, expr: &Expression) -> bool {
-        #[cfg(test)]
-        if super::threaded_expr::fault::active()
-            == Some(super::threaded_expr::fault::LocalRebindFault::SuperSendNotAProducer)
-        {
+        if fault!(SuperSendNotAProducer) {
             return false;
         }
         matches!(expr, Expression::MessageSend { is_cast: false, .. })
@@ -1078,11 +1072,7 @@ impl CoreErlangGenerator {
             // `lower_root_statement_with_producer`).
             // Test-only fault injection: the pre-BT-4014 lowering, which
             // sequenced a write's value only.
-            #[cfg(test)]
-            let only_writes = super::threaded_expr::fault::active()
-                == Some(super::threaded_expr::fault::LocalRebindFault::ClassSendOperandsInPlace);
-            #[cfg(not(test))]
-            let only_writes = false;
+            let only_writes = fault!(ClassSendOperandsInPlace);
             let children: Vec<&Expression> =
                 if only_writes && !matches!(expr, Expression::Assignment { .. }) {
                     Vec::new()
@@ -1142,10 +1132,7 @@ impl CoreErlangGenerator {
         // Test-only fault injection: the pre-BT-4000 lowering, so the
         // verifier's `UnboundVersion` is shown to fire on a real compile
         // (`tests/loop_body_conditional_receiver_corpus.rs`).
-        #[cfg(test)]
-        if super::threaded_expr::fault::active()
-            == Some(super::threaded_expr::fault::LocalRebindFault::ReceiverPreludeInTuple)
-        {
+        if fault!(ReceiverPreludeInTuple) {
             return false;
         }
         self.in_actor_instance_context() && self.subexpr_needs_prelude(receiver)
@@ -1660,10 +1647,7 @@ impl CoreErlangGenerator {
         let Expression::Identifier(id) = child else {
             return false;
         };
-        #[cfg(test)]
-        if super::threaded_expr::fault::active()
-            == Some(super::threaded_expr::fault::LocalRebindFault::SkipSiblingSnapshot)
-        {
+        if fault!(SkipSiblingSnapshot) {
             return false;
         }
         later.iter().any(|sibling| {

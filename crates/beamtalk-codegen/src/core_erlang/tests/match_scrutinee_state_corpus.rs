@@ -17,14 +17,14 @@
 //! checks the generated output over scrutinee x arm x position in an actor
 //! instance method; [`the_verifier_reports_a_seed_read_before_the_scrutinee`]
 //! shows the verifier catches the pre-fix ordering
-//! ([`LocalRebindFault::SeedBeforeScrutinee`]) on every row; and
+//! ([`Fault::SeedBeforeScrutinee`]) on every row; and
 //! [`inline_path_producer_matches_compile`] /
 //! [`repl_producer_matches_verify`] cover the inline path: class methods,
 //! value-type and plain-object methods, and the REPL.
 
 use super::while_condition_binding_corpus::repl_report;
 use super::{assert_compiles_through_erlc, codegen, verifier_report};
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::fault::Fault;
 
 /// Scrutinees whose evaluation steps the actor `State` (a self-send that
 /// writes a field, alone and as an operand).
@@ -280,7 +280,7 @@ fn newest_state_before_is_scoped_to_the_enclosing_function_and_open_clauses() {
 }
 
 /// BT-4206: with the scratch seed read before the scrutinee compiles (the
-/// pre-BT-4196 ordering, [`LocalRebindFault::SeedBeforeScrutinee`]) every
+/// pre-BT-4196 ordering, [`Fault::SeedBeforeScrutinee`]) every
 /// actor row reports `StaleConstructSeed`: the verifier, not the output scan,
 /// catches a seed that skips the scrutinee's `State` step.
 #[cfg(debug_assertions)]
@@ -293,7 +293,7 @@ fn the_verifier_reports_a_seed_read_before_the_scrutinee() {
     let missed: Vec<String> = programs
         .iter()
         .filter_map(|src| {
-            let report = verifier_report(src, Some(LocalRebindFault::SeedBeforeScrutinee));
+            let report = verifier_report(src, Some(Fault::SeedBeforeScrutinee));
             (!report
                 .as_deref()
                 .is_some_and(|r| r.contains("StaleConstructSeed")))

@@ -834,10 +834,7 @@ impl CoreErlangGenerator {
     /// before BT-4584, so `ConditionWriteNotInMap` is shown to fire on a real
     /// compile (`tests/while_condition_binding_corpus.rs`).
     fn condition_destructure_plain_fault() -> bool {
-        #[cfg(test)]
-        if super::super::threaded_expr::fault::active()
-            == Some(super::super::threaded_expr::fault::LocalRebindFault::ConditionDestructurePlain)
-        {
+        if fault!(ConditionDestructurePlain) {
             return true;
         }
         false

@@ -624,7 +624,27 @@ runs inside the compiler, `just test-stdlib`, `just test-bunit` (the
 `verify-threaded-ir` corpus) and every codegen unit test enforce it.
 It scans list cells and map literals only (not tuple elements or direct `call`
 argument lists). `tests/racing_operand_corpus.rs` proves it fails on a
-reintroduced in-place builder (`LocalRebindFault::OperandsInPlace`).
+reintroduced in-place builder (`Fault::OperandsInPlace`).
+
+#### Codegen fault injection (BT-4688)
+
+A *fault* switches one lowering back to a pre-fix (or deliberately wrong)
+shape so a verifier check or corpus test can be shown to fire on a real
+compile. Every fault is a variant of `Fault` in
+`crates/beamtalk-codegen/src/core_erlang/fault.rs`, switched on with
+`fault::with(Fault::X, || ...)` (or `fault::set` to hold one across several
+compiles) and read in production code with `fault!(X)`. Add a new fault as a
+variant plus a `fault!` call at the site; never a per-file static or an
+always-true probe function.
+
+The registry exists only under `cfg(any(test, feature = "test"))`. In any
+other build (including `beamtalk-cli`'s release binary) `fault!(X)` expands
+to the constant `false` and no registry, enum or thread-local is compiled.
+A crate whose integration tests need a fault enables the codegen `test`
+feature in its `[dev-dependencies]` (`cfg(test)` does not cross crate
+boundaries); `beamtalk-repl` does so for `repl_loop_body_return`. Test-only
+observation probes (the synced-call gap log, producer recorders) are gated
+the same way but are not faults.
 
 ### 7b. Corpus `.core` Diff Harness (BT-3509)
 

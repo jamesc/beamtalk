@@ -342,10 +342,7 @@ impl CoreErlangGenerator {
         // Test-only fault injection: the pre-BT-4002 body-only answer, so the
         // verifier's `ConditionFamilyNotCarried` is shown to fire on a real
         // compile (`tests/while_condition_carrier_corpus.rs`).
-        #[cfg(test)]
-        if super::super::threaded_expr::fault::active()
-            == Some(super::super::threaded_expr::fault::LocalRebindFault::BodyOnlyLoopFamilies)
-        {
+        if fault!(BodyOnlyLoopFamilies) {
             return false;
         }
         matches!(condition, Expression::Block(cond) if self.loop_body_threads_value_self(cond))

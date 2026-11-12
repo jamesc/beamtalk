@@ -17,7 +17,7 @@
 //!
 //! 1. each row compiles through the debug `ThreadedIr` verifier and `erlc`;
 //! 2. with the rebinding after the scope pop disabled
-//!    ([`LocalRebindFault::EvaluatedBlockRebindsScoped`], the lowering before
+//!    ([`Fault::EvaluatedBlockRebindsScoped`], the lowering before
 //!    the fix), every row fails with `VerifyError::RebindNotVisible`, the check
 //!    that fails on the repro before the fix.
 //!
@@ -29,7 +29,7 @@
 //! verifier in every position and method context.
 
 use super::{assert_compiles_through_erlc, codegen, erlc_available, verifier_report};
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::fault::Fault;
 
 /// The BT-4263 repro table: a row name and a method body (after `t := 0`).
 /// Every row reads `t` after the `value:` send, so a dropped rebind is
@@ -124,7 +124,7 @@ fn a_parameter_that_shadows_an_outer_local_is_not_rebound() {
 fn the_rebind_visibility_check_fails_every_repro_row_when_the_rebinds_stay_scoped() {
     for (row, body) in ROWS {
         for src in sources(body) {
-            match verifier_report(&src, Some(LocalRebindFault::EvaluatedBlockRebindsScoped)) {
+            match verifier_report(&src, Some(Fault::EvaluatedBlockRebindsScoped)) {
                 Some(report) if report.contains("RebindNotVisible") => {}
                 other => panic!("{row}: expected RebindNotVisible, got {other:?}\n{src}"),
             }

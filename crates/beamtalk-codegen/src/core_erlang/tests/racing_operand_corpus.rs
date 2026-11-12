@@ -6,12 +6,12 @@
 //! `operand_order_check` scans every generated module (debug builds) for a list
 //! cell or map literal holding two operands that run code. Here: the BT-4296
 //! operand sources compile clean, and reintroducing the in-place list builder
-//! (`LocalRebindFault::OperandsInPlace`) is reported. The second case reaches
+//! (`Fault::OperandsInPlace`) is reported. The second case reaches
 //! the cell/loop-body actor `super` report, which no real program does.
 
 use super::operand_evaluation_order::SRC;
 use super::{codegen, verifier_report};
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::fault::Fault;
 
 #[test]
 fn sequenced_operand_lists_pass_the_check() {
@@ -20,7 +20,7 @@ fn sequenced_operand_lists_pass_the_check() {
 
 #[test]
 fn a_reintroduced_in_place_list_builder_is_reported() {
-    let report = verifier_report(SRC, Some(LocalRebindFault::OperandsInPlace))
+    let report = verifier_report(SRC, Some(Fault::OperandsInPlace))
         .expect("in-place operand lists must fail the check");
     assert!(report.contains("RacingOperands"), "{report}");
     for method in ["arrayOf:", "listOf:", "mapOf:"] {
@@ -34,7 +34,7 @@ fn a_reintroduced_in_place_list_builder_is_reported() {
             }
         );
         assert_eq!(verifier_report(&one, None), None, "{method} clean");
-        let report = verifier_report(&one, Some(LocalRebindFault::OperandsInPlace))
+        let report = verifier_report(&one, Some(Fault::OperandsInPlace))
             .unwrap_or_else(|| panic!("{method} not reported"));
         assert!(report.contains("RacingOperands"), "{method}: {report}");
     }
@@ -55,7 +55,7 @@ fn a_cell_super_send_with_a_state_argument_compiles_clean() {
 
 #[test]
 fn skipping_super_argument_presequencing_reaches_the_opaque_escapes_report() {
-    let report = verifier_report(CELL_SUPER, Some(LocalRebindFault::SuperArgsNotPresequenced))
+    let report = verifier_report(CELL_SUPER, Some(Fault::SuperArgsNotPresequenced))
         .expect("the escaping state bind must be reported");
     assert!(report.contains("StateEffectEscapesExpression"), "{report}");
 }
