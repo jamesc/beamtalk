@@ -144,8 +144,31 @@ init(Config) ->
             },
             {ok, State};
         {error, Reason} ->
-            {stop, Reason}
+            {stop, config_error(Reason)}
     end.
+
+-doc """
+Translate a `validate_config/1` reason into a `#beamtalk_error{}` so a bad
+`spawnWith:` config reaches the caller as a structured error, not a bare tuple.
+""".
+-spec config_error(term()) -> #beamtalk_error{}.
+config_error({missing_key, Key}) ->
+    config_type_error(<<"Missing required config key: ", (atom_to_binary(Key, utf8))/binary>>);
+config_error({type_error, Field, Expected}) ->
+    config_type_error(
+        iolist_to_binary([
+            <<"Invalid config value for ">>,
+            atom_to_binary(Field, utf8),
+            <<": ">>,
+            atom_to_binary(Expected, utf8)
+        ])
+    ).
+
+-spec config_type_error(binary()) -> #beamtalk_error{}.
+config_type_error(Hint) ->
+    beamtalk_error:with_hint(
+        beamtalk_error:new(type_error, 'Subprocess', 'spawnWith:'), Hint
+    ).
 
 -doc "Dispatch sync calls.".
 -spec handle_call(term(), term(), map()) ->
