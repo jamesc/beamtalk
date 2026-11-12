@@ -303,3 +303,13 @@ fn annotated_local_is_the_narrowing_cast_into_a_shape() {
     );
     assert!(msgs.is_empty(), "got: {msgs:#?}");
 }
+
+#[test]
+fn union_of_literals_with_a_wrong_branch_is_still_caught() {
+    let msgs = warnings(
+        "Object subclass: Probe\n  \
+           go: flag :: Boolean =>\n    \
+             x :: #{#a => Integer} := flag ifTrue: [#{#a => 1}] ifFalse: [#{#b => 2}]\n    x\n",
+    );
+    assert_eq!(msgs.len(), 1, "got: {msgs:#?}");
+}
