@@ -203,6 +203,7 @@ fn category_label(cat: DiagnosticCategory) -> &'static str {
         DiagnosticCategory::FfiNestedString => "FfiNestedString",
         DiagnosticCategory::BinaryStringCompare => "BinaryStringCompare",
         DiagnosticCategory::CascadeDropsUpdate => "CascadeDropsUpdate",
+        DiagnosticCategory::DiscardedUpdate => "DiscardedUpdate",
         DiagnosticCategory::Tier2BlockNoReturnChannel => "Tier2BlockNoReturnChannel",
         DiagnosticCategory::UnthreadedLocalWrite => "UnthreadedLocalWrite",
         DiagnosticCategory::InternalVerifier => "InternalVerifier",
@@ -448,6 +449,7 @@ mod tests {
                 "BinaryStringCompare",
             ),
             (DiagnosticCategory::CascadeDropsUpdate, "CascadeDropsUpdate"),
+            (DiagnosticCategory::DiscardedUpdate, "DiscardedUpdate"),
             (
                 DiagnosticCategory::Tier2BlockNoReturnChannel,
                 "Tier2BlockNoReturnChannel",

@@ -180,6 +180,7 @@ Actor subclass: Bt4367ArmLocalGridActor
 
   ifTrue_ifFalse_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -658,6 +659,7 @@ Actor subclass: Bt4367ArmLocalGridActor
 
   ifTrue_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -1120,6 +1122,7 @@ Actor subclass: Bt4367ArmLocalGridActor
 
   ifFalse_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -1590,6 +1593,7 @@ Actor subclass: Bt4367ArmLocalGridActor
 
   ifNil_ifNotNil_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -2076,6 +2080,7 @@ Actor subclass: Bt4367ArmLocalGridActor
 
   ifNotNil_ifNil_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -2562,6 +2567,7 @@ Actor subclass: Bt4367ArmLocalGridActor
 
   ifTrue_ifFalseSecond_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -3048,6 +3054,7 @@ Actor subclass: Bt4367ArmLocalGridActor
 
   ifNil_ifNotNilSecond_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -3534,6 +3541,7 @@ Actor subclass: Bt4367ArmLocalGridActor
 
   ifNotNil_ifNilSecond_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -4012,6 +4020,7 @@ Actor subclass: Bt4367ArmLocalGridActor
 
   ifNil_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -4474,6 +4483,7 @@ Actor subclass: Bt4367ArmLocalGridActor
 
   ifNotNil_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 

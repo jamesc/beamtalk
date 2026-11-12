@@ -149,6 +149,7 @@ Object subclass: MutationCorpusClassMethod
   // NonLast: collect is a bare side-effect statement; result is discarded.
   class collectNonLastReadWrite =>
     n := 0
+    @expect discarded_update
     #(1, 2, 3)
       collect: [:i |
         n := n + 1
@@ -169,6 +170,7 @@ Object subclass: MutationCorpusClassMethod
   // ── select: ─────────────────────────────────────────────────────────────────
   class selectNonLastReadWrite =>
     n := 0
+    @expect discarded_update
     #(1, 2, 3, 4)
       select: [:i |
         n := n + 1
@@ -179,6 +181,7 @@ Object subclass: MutationCorpusClassMethod
   // ── reject: ─────────────────────────────────────────────────────────────────
   class rejectNonLastReadWrite =>
     n := 0
+    @expect discarded_update
     #(1, 2, 3, 4)
       reject: [:i |
         n := n + 1

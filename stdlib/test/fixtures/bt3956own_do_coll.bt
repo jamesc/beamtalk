@@ -12,6 +12,7 @@
 Value subclass: Bt3956OwnDoColl
 
   do: aBlock =>
+    @expect discarded_update
     #(1, 2, 3) collect: [:x | aBlock value: x]
     self
 

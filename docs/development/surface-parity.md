@@ -657,6 +657,19 @@ the same message at the same span. No operation is surface-specific.
 - `beamtalk lint`'s `cascade_candidate` pass reads the same predicate
   (`cascade_drops_update`) and does not suggest a cascade it would flag.
 
+### `discarded-update` diagnostic (ADR 0145 § 3, BT-4522)
+
+A non-final statement that is a plain send (unary, binary or keyword) whose
+receiver is statically a value kind and whose selector satisfies the same
+`cascade_drops_update` predicate gets a `discarded-update` warning at the send
+(``the result of `withX:` is discarded``). It is computed by the type checker
+in `infer_stmts`, so all surfaces report it identically; no operation is
+surface-specific. Cascade statements keep `cascade-drops-update`.
+
+- Category `DiscardedUpdate`; `[diagnostics]` key `discarded-update`;
+  `@expect discarded_update`.
+- The `setUp` lint does not warn again for a statement already flagged.
+
 ### Dependency extensions and the dependency guard (ADR 0070 WS3, ADR 0100, BT-4608)
 
 In a package with dependencies, whether does-not-understand hints and

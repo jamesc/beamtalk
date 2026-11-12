@@ -173,6 +173,93 @@ impl TypeChecker {
     }
 }
 
+impl TypeChecker {
+    /// The `discarded-update` warning (ADR 0145 § 3, BT-4522): a non-final
+    /// statement that is a plain send answering an updated copy of a value
+    /// receiver — `p withX: 5.` alone — throws the copy away, since the
+    /// receiver is unchanged.
+    ///
+    /// Called by `infer_stmts` right after `expr` was inferred, so the
+    /// receiver's type is already in the type map (keyed by its span); no
+    /// re-inference, hence no double-emitted diagnostics. Cascades are
+    /// `Expression::Cascade` and stay with `cascade-drops-update`; a pipeline
+    /// is a nest of sends, so only its last stage (the statement itself) is
+    /// examined and it is reported once.
+    pub(in crate::semantic_analysis::type_checker) fn check_discarded_update(
+        &mut self,
+        expr: &Expression,
+        hierarchy: &ClassHierarchy,
+    ) {
+        if self.discarded_update_off {
+            return;
+        }
+        // A parenthesised statement (`(p withX: 5).`) discards just the same.
+        let Expression::MessageSend {
+            receiver,
+            selector,
+            arguments,
+            is_cast: false,
+            span,
+        } = expr.unwrap_parens()
+        else {
+            return;
+        };
+        // A pure statement (`n + 1.` on plain operands) already draws the
+        // effect-free lint; it owns that shape so one problem has one message.
+        if crate::semantic_analysis::validators::is_effect_free(expr) {
+            return;
+        }
+        let Some(receiver_ty) = self.type_map.get(receiver.span()).cloned() else {
+            return;
+        };
+        let name = selector.name();
+        if !cascade_drops_update(hierarchy, &receiver_ty, &name) {
+            return;
+        }
+        let InferredType::Known { class_name, .. } = &receiver_ty else {
+            return;
+        };
+        let display = InferredType::class_name_for_diagnostic(class_name.as_str());
+        let receiver_text = receiver_display(receiver);
+        let shape = send_shape(selector);
+        // The one guaranteed property is that the updated copy is unused; the
+        // receiver and arguments (a block run for its side effects, a
+        // `self nextId` argument) may still do work, so the note and help
+        // never claim the statement is a no-op or tell the user to delete it.
+        let note = format!(
+            "`{display}` is a value: `{name}` answers a new value and leaves the \
+             receiver unchanged, and that new value is never used"
+        );
+        let has_block_arg = arguments
+            .iter()
+            .any(|a| matches!(a.unwrap_parens(), Expression::Block(_)));
+        let hint = if has_block_arg {
+            "if only the block's side effects matter, iterate with `do:`; \
+             otherwise use the result (assign it, return it, or pass it on)"
+                .to_string()
+        } else if is_assignable_local(receiver) {
+            format!(
+                "assign the result (`{receiver_text} := {receiver_text} {shape}`) or \
+                 chain with `|>`"
+            )
+        } else {
+            "use the result (assign it, return it, or pass it on)".to_string()
+        };
+        self.diagnostics.push(
+            Diagnostic::warning(format!("the result of `{name}` is discarded"), *span)
+                .with_note(note, None)
+                .with_hint(hint)
+                .with_category(DiagnosticCategory::DiscardedUpdate),
+        );
+    }
+}
+
+/// Whether `receiver` is a plain local that `x := x …` can reassign: an
+/// identifier other than `self`/`super`.
+fn is_assignable_local(receiver: &Expression) -> bool {
+    matches!(receiver, Expression::Identifier(id) if id.name != "self" && id.name != "super")
+}
+
 /// Whether a non-final cascade message `selector` sent to a receiver of
 /// static type `receiver_ty` draws the `cascade-drops-update` warning
 /// (ADR 0145 § 3): the receiver is a `Known` instance of a value kind

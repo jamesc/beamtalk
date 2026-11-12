@@ -589,7 +589,8 @@ rewrite would preserve meaning but suggest a shape that is now warned. The
 lint therefore skips a run of sends that the new warning would flag.
 Such a run is itself a dropped-update bug (`p withX: 5.` alone discards
 its result). Catching discarded copies at statement level is a separate,
-broader lint and is out of scope here; it is listed as a follow-up.
+broader lint and is out of scope here; it shipped as the `discarded-update`
+warning (BT-4522), which shares the `cascade_drops_update` predicate.
 The same change corrects `check_testcase_setup_drops_field_assignments`:
 a `setUp` ending in a `self with*:` cascade with **more than one** `with*:`
 message is no longer accepted as self-producing (it drops all but the last).
@@ -1057,7 +1058,7 @@ Follow-ups outside the epic (low priority, `needs-spec`):
 
 - BT-4520: inline `then:` so it runs in the caller
 - BT-4521: multi-field functional update (Alternative F)
-- BT-4522: statement-level lint for discarded copies
+- BT-4522: statement-level lint for discarded copies (shipped: `discarded-update`)
 - BT-4508: cascade parts silently drop trailing tokens
 
 ## References

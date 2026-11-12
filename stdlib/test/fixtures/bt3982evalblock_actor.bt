@@ -182,6 +182,7 @@ Actor subclass: Bt3982EvalblockActor
 
   foldOtherAssign =>
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:z |
         q := [
@@ -422,6 +423,7 @@ Actor subclass: Bt3982EvalblockActor
 
   ensureUnderWritingCollect =>
     r := 0
+    @expect discarded_update
     #(1)
       collect: [:y |
         r := 1
@@ -527,6 +529,7 @@ Actor subclass: Bt3982EvalblockActor
 
   rejectAssignsOuter =>
     r := 0
+    @expect discarded_update
     #(1)
       reject: [:z |
         r := [
@@ -541,6 +544,7 @@ Actor subclass: Bt3982EvalblockActor
     r := 0
     flag := false
     c := true
+    @expect discarded_update
     flag
       or: [
         c

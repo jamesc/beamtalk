@@ -19,6 +19,7 @@ Value subclass: GuardReturnValue
     x < 0 ifTrue: [^self withN: 0]
     x > 100
       ifTrue: [
+        @expect discarded_update
         self withN: 1
         ^self withN: 100
       ]

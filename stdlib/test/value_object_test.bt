@@ -69,6 +69,7 @@ TestCase subclass: ValueObjectTest
   // Original object is unchanged after with*:
   testWithSetterDoesNotMutateOriginal =>
     p := ValuePoint x: 10 y: 20
+    @expect discarded_update
     p withX: 999
     self assert: p x equals: 10
     self assert: p y equals: 20

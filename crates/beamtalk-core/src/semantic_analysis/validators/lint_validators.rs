@@ -187,7 +187,7 @@ pub(crate) fn check_empty_method_bodies(module: &Module, diagnostics: &mut Vec<D
 /// Only a conservative subset is classified as pure: literals, variable reads,
 /// class references, parenthesized pure expressions, and binary sends with a
 /// known arithmetic or comparison operator applied to pure operands.
-fn is_effect_free(expr: &Expression) -> bool {
+pub(crate) fn is_effect_free(expr: &Expression) -> bool {
     match expr {
         Expression::Literal(_, _)
         | Expression::Identifier(_)
@@ -839,9 +839,16 @@ fn check_setup_body_returns_self(
     let Some(last_stmt) = body.last() else {
         return;
     };
-    let has_field_mutation = body
-        .iter()
-        .any(|stmt| contains_self_reconstructing_send(&stmt.expression));
+    // A non-final statement the type checker already flagged as
+    // `discarded-update` (`self withA: 1.`) has its own, more precise warning
+    // naming the dropped send (BT-4522); don't also report it here.
+    let has_field_mutation = body.iter().any(|stmt| {
+        let span = stmt.expression.unwrap_parens().span();
+        let already_reported = diagnostics
+            .iter()
+            .any(|d| d.category == Some(DiagnosticCategory::DiscardedUpdate) && d.span == span);
+        !already_reported && contains_self_reconstructing_send(&stmt.expression)
+    });
     if !has_field_mutation {
         return;
     }

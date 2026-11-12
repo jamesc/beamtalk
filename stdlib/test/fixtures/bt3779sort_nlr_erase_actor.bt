@@ -15,6 +15,7 @@ Actor subclass: Bt3779SortNlrEraseActor
   /// Comparator writes state, then returns non-locally with 0 on its first
   /// comparison.
   nlrSort =>
+    @expect discarded_update
     #(3, 1, 2)
       sort: [:a :b |
         self.n := self.n + 1

@@ -85,6 +85,10 @@ pub enum ExpectCategory {
     /// on a value receiver whose updated copy the cascade discards
     /// (ADR 0145 § 3, BT-4512).
     CascadeDropsUpdate,
+    /// Suppress discarded-update warnings — a non-final statement-level send
+    /// on a value receiver whose updated copy is thrown away (ADR 0145 § 3,
+    /// BT-4522).
+    DiscardedUpdate,
     /// Deprecated, parse-only (ADR 0130 §Migration Path): the stored-closure
     /// advisory it suppressed no longer exists, so nothing produces a matching
     /// diagnostic. The name is still accepted so existing
@@ -125,6 +129,7 @@ impl ExpectCategory {
             "ffi_nested_string" => Some(Self::FfiNestedString),
             "binary_string_compare" => Some(Self::BinaryStringCompare),
             "cascade_drops_update" => Some(Self::CascadeDropsUpdate),
+            "discarded_update" => Some(Self::DiscardedUpdate),
             "stored_closure" => Some(Self::StoredClosure),
             "all" => Some(Self::All),
             _ => None,
@@ -159,6 +164,7 @@ impl ExpectCategory {
             Self::FfiNestedString => "ffi_nested_string",
             Self::BinaryStringCompare => "binary_string_compare",
             Self::CascadeDropsUpdate => "cascade_drops_update",
+            Self::DiscardedUpdate => "discarded_update",
             Self::StoredClosure => "stored_closure",
             Self::All => "all",
         }
@@ -193,6 +199,7 @@ impl ExpectCategory {
             "ffi_nested_string",
             "binary_string_compare",
             "cascade_drops_update",
+            "discarded_update",
             "all",
         ]
     }

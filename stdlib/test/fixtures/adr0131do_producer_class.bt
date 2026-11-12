@@ -179,6 +179,7 @@ Object subclass: Adr0131DoProducerClass
 
   class doReturnedInSortBlock =>
     t := 0
+    @expect discarded_update
     #(2, 1) sort: [:a :b | ^#(1, 2) do: [:x | t := t + x]]
     t
 

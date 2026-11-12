@@ -143,6 +143,7 @@ Actor subclass: MutationCorpusActor
   // NonLast: collect is a bare side-effect statement; result is discarded.
   collectNonLastReadWrite =>
     n := 0
+    @expect discarded_update
     #(1, 2, 3)
       collect: [:i |
         n := n + 1
@@ -163,6 +164,7 @@ Actor subclass: MutationCorpusActor
   // ── select: ─────────────────────────────────────────────────────────────────
   selectNonLastReadWrite =>
     n := 0
+    @expect discarded_update
     #(1, 2, 3, 4)
       select: [:i |
         n := n + 1
@@ -173,6 +175,7 @@ Actor subclass: MutationCorpusActor
   // ── reject: ─────────────────────────────────────────────────────────────────
   rejectNonLastReadWrite =>
     n := 0
+    @expect discarded_update
     #(1, 2, 3, 4)
       reject: [:i |
         n := n + 1
@@ -366,6 +369,7 @@ Actor subclass: MutationCorpusActor
   // unbound `_Val` while the `do:` cell already worked.
   stateFieldCollectNonLastReadWrite =>
     seen := 0
+    @expect discarded_update
     #(1, 2, 3)
       collect: [:i |
         self.total := self.total + i
@@ -380,6 +384,7 @@ Actor subclass: MutationCorpusActor
   // both branches shared the same hardcoded-literal bug independently.
   stateFieldCollectFieldWriteLastReadWrite =>
     seen := 0
+    @expect discarded_update
     #(1, 2, 3)
       collect: [:i |
         seen := seen + 1
@@ -398,6 +403,7 @@ Actor subclass: MutationCorpusActor
   // as the `collect:` cell above, just with a boolean-valued local assign.
   stateFieldSelectNonLastReadWrite =>
     _keep := true
+    @expect discarded_update
     #(1, 2, 3)
       select: [:i |
         self.total := self.total + i

@@ -332,6 +332,7 @@ Actor subclass: Adr0131LoopMatrixActor
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         #(1, 2) do: [:x | t := t + x]
@@ -344,6 +345,7 @@ Actor subclass: Adr0131LoopMatrixActor
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         #(1, 2)
@@ -465,6 +467,7 @@ Actor subclass: Adr0131LoopMatrixActor
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         2 timesRepeat: [#(1, 2) do: [:x | t := t + x]]
@@ -477,6 +480,7 @@ Actor subclass: Adr0131LoopMatrixActor
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         2
@@ -495,6 +499,7 @@ Actor subclass: Adr0131LoopMatrixActor
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         2 timesRepeat: [r := #(1, 2) do: [:x | t := t + x]]
@@ -507,6 +512,7 @@ Actor subclass: Adr0131LoopMatrixActor
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         2

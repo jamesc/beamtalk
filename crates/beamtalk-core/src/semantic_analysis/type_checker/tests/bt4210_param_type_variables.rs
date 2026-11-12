@@ -187,9 +187,8 @@ typed Object subclass: H
 fn block_param_type_variable_vs_pushed_concrete_type_no_mismatch() {
     let source = r"
 typed Object subclass: H
-  each: x :: E -> Integer =>
-    #(1, 2) collect: [:y :: E | y].
-    1
+  each: x :: E -> List =>
+    #(1, 2) collect: [:y :: E | y]
 ";
     let module = parse_source(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();

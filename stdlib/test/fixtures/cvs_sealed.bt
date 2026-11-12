@@ -85,6 +85,7 @@ sealed Object subclass: CvsSealed
 
   class rowCollect =>
     self reset
+    @expect discarded_update
     #(1, 2, 3) collect: [:x | self bump]
     self.n
 
@@ -111,6 +112,7 @@ sealed Object subclass: CvsSealed
   class rowCollectLocal =>
     self reset
     sum := 0
+    @expect discarded_update
     #(1, 2, 3)
       collect: [:x |
         sum := sum + x

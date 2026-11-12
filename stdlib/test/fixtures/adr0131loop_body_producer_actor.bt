@@ -36,6 +36,7 @@ Actor subclass: Adr0131LoopBodyProducerActor
     i := 0
     [i < 2]
       whileTrue: [
+        @expect discarded_update
         #(1, 2) collect: [:x | t := t + x]
         i := i + 1
       ]
@@ -48,6 +49,7 @@ Actor subclass: Adr0131LoopBodyProducerActor
 
   toDoInCollect =>
     t := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:x |
         1 to: 2 do: [:k | t := t + x]
@@ -182,6 +184,7 @@ Actor subclass: Adr0131LoopBodyProducerActor
       to: 2
       do: [:i |
         w := 0
+        @expect discarded_update
         #(1, 2)
           collect: [:x |
             w := w + x
@@ -322,6 +325,7 @@ Actor subclass: Adr0131LoopBodyProducerActor
 
   foldInLetrecInCollect =>
     t := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         2

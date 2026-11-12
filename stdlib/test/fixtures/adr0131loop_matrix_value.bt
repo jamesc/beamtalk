@@ -149,6 +149,7 @@ Value subclass: Adr0131LoopMatrixValue
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         #(1, 2) do: [:x | t := t + x]
@@ -160,6 +161,7 @@ Value subclass: Adr0131LoopMatrixValue
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         r := #(1, 2) do: [:x | t := t + x]
@@ -171,6 +173,7 @@ Value subclass: Adr0131LoopMatrixValue
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         r := #[#(1, 2) do: [:x | t := t + x], t]
@@ -182,6 +185,7 @@ Value subclass: Adr0131LoopMatrixValue
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         r := #[t, #(1, 2) do: [:x | t := t + x], t]
@@ -305,6 +309,7 @@ Value subclass: Adr0131LoopMatrixValue
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         2 timesRepeat: [#(1, 2) do: [:x | t := t + x]]
@@ -316,6 +321,7 @@ Value subclass: Adr0131LoopMatrixValue
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         2 timesRepeat: [r := #(1, 2) do: [:x | t := t + x]]
@@ -327,6 +333,7 @@ Value subclass: Adr0131LoopMatrixValue
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         2 timesRepeat: [r := #[#(1, 2) do: [:x | t := t + x], t]]
@@ -338,6 +345,7 @@ Value subclass: Adr0131LoopMatrixValue
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         2 timesRepeat: [r := #[t, #(1, 2) do: [:x | t := t + x], t]]
@@ -689,6 +697,7 @@ Value subclass: Adr0131LoopMatrixValue
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         r := #(1, 2)
@@ -705,6 +714,7 @@ Value subclass: Adr0131LoopMatrixValue
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         r := #[#(1, 2)
@@ -771,6 +781,7 @@ Value subclass: Adr0131LoopMatrixValue
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         r := 2 timesRepeat: [t := t + 1]
@@ -782,6 +793,7 @@ Value subclass: Adr0131LoopMatrixValue
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         r := #[2 timesRepeat: [t := t + 1], t]
@@ -845,6 +857,7 @@ Value subclass: Adr0131LoopMatrixValue
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         r := 1 to: 2 do: [:x | t := t + x]
@@ -856,6 +869,7 @@ Value subclass: Adr0131LoopMatrixValue
     t := 0
     s := 0
     r := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:k |
         r := #[1 to: 2 do: [:x | t := t + x], t]

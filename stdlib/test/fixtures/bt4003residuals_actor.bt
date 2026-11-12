@@ -280,6 +280,7 @@ Actor subclass: Bt4003ResidualsActor
     #(1, 2)
       do: [:w |
         [
+          @expect discarded_update
           w + (self.items inject: 0 into: [:b :y | b + self bump])
           false
         ] whileTrue: [0]

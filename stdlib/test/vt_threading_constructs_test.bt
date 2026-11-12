@@ -46,6 +46,7 @@ TestCase subclass: VtThreadingConstructsTest
   // collect: as a non-last side effect threads the counter.
   testCollectSideEffectThreadsLocal =>
     n := 0
+    @expect discarded_update
     #[1, 2, 3]
       collect: [:i |
         n := n + 1
@@ -114,6 +115,7 @@ TestCase subclass: VtThreadingConstructsTest
   // Mutation must be visible to later statements (non-last, no assignment).
   testCollectMutationVisibleLater =>
     n := 0
+    @expect discarded_update
     #[1, 2, 3]
       collect: [:i |
         n := n + 1
@@ -169,6 +171,7 @@ TestCase subclass: VtThreadingConstructsTest
     flag
       ifTrue: [
         n := 0
+        @expect discarded_update
         #[1, 2, 3]
           collect: [:i |
             n := n + 1

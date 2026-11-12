@@ -89,6 +89,7 @@ Object subclass: CvsOverrideBase
 
   class rowCollect =>
     self reset
+    @expect discarded_update
     #(1, 2, 3) collect: [:x | self bump]
     self.n
 
@@ -115,6 +116,7 @@ Object subclass: CvsOverrideBase
   class rowCollectLocal =>
     self reset
     sum := 0
+    @expect discarded_update
     #(1, 2, 3)
       collect: [:x |
         sum := sum + x

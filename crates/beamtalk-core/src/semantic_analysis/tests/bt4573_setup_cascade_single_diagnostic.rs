@@ -185,3 +185,18 @@ fn later_dropped_message_is_reported_at_its_own_span() {
         .collect();
     assert_eq!(at, ["self withA: 1", "withB: 2"], "got: {diags:#?}");
 }
+
+/// BT-4522: a non-final `self withA: 1.` statement in `setUp` draws the
+/// type checker's `discarded-update` and no second `setUp` warning.
+#[test]
+fn setup_non_final_with_star_statement_gets_only_discarded_update() {
+    for tail in ["    self", "    nil"] {
+        let (_, diags) = compile_setup(&format!("    self withA: 1\n{tail}"));
+        assert_eq!(diags.len(), 1, "tail {tail:?}, got: {diags:#?}");
+        assert_eq!(
+            diags[0].category,
+            Some(DiagnosticCategory::DiscardedUpdate),
+            "tail {tail:?}, got: {diags:#?}"
+        );
+    }
+}

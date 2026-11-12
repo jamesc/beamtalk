@@ -460,6 +460,7 @@ Actor subclass: Bt3981EvalblockActor
 
   collectAssignsOuter =>
     r := 0
+    @expect discarded_update
     #(1)
       collect: [:z |
         r := [
@@ -483,6 +484,7 @@ Actor subclass: Bt3981EvalblockActor
 
   selectAssignsOuter =>
     r := 0
+    @expect discarded_update
     #(1)
       select: [:z |
         r := [
@@ -509,6 +511,7 @@ Actor subclass: Bt3981EvalblockActor
   collectArmE =>
     r := 0
     flag := true
+    @expect discarded_update
     #(1)
       collect: [:z |
         r := 3

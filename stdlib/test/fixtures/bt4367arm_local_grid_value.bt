@@ -180,6 +180,7 @@ Value subclass: Bt4367ArmLocalGridValue
 
   ifTrue_ifFalse_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -658,6 +659,7 @@ Value subclass: Bt4367ArmLocalGridValue
 
   ifTrue_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -1120,6 +1122,7 @@ Value subclass: Bt4367ArmLocalGridValue
 
   ifFalse_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -1590,6 +1593,7 @@ Value subclass: Bt4367ArmLocalGridValue
 
   ifNil_ifNotNil_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -2076,6 +2080,7 @@ Value subclass: Bt4367ArmLocalGridValue
 
   ifNotNil_ifNil_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -2562,6 +2567,7 @@ Value subclass: Bt4367ArmLocalGridValue
 
   ifTrue_ifFalseSecond_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -3048,6 +3054,7 @@ Value subclass: Bt4367ArmLocalGridValue
 
   ifNil_ifNotNilSecond_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -3534,6 +3541,7 @@ Value subclass: Bt4367ArmLocalGridValue
 
   ifNotNil_ifNilSecond_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -4012,6 +4020,7 @@ Value subclass: Bt4367ArmLocalGridValue
 
   ifNil_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 
@@ -4474,6 +4483,7 @@ Value subclass: Bt4367ArmLocalGridValue
 
   ifNotNil_nonlast_final_collectRoot =>
     m := 0
+    @expect discarded_update
     #(1, 2) collect: [:e | m := m + e]
     7
 

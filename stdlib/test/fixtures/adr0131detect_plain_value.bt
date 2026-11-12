@@ -358,6 +358,7 @@ Value subclass: Adr0131DetectPlainValue
 
   missInCollect =>
     t := 0
+    @expect discarded_update
     #(1, 2)
       collect: [:z |
         #(1, 2)

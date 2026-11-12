@@ -119,6 +119,7 @@ Actor subclass: ActorThreadingCorpus
 
   flatMapNonLastReadWrite =>
     n := 0
+    @expect discarded_update
     #(1, 2, 3)
       flatMap: [:i |
         n := n + 1
@@ -128,6 +129,7 @@ Actor subclass: ActorThreadingCorpus
 
   takeWhileNonLastReadWrite =>
     n := 0
+    @expect discarded_update
     #(1, 2, 3)
       takeWhile: [:i |
         n := n + 1
@@ -137,6 +139,7 @@ Actor subclass: ActorThreadingCorpus
 
   dropWhileNonLastReadWrite =>
     n := 0
+    @expect discarded_update
     #(1, 2, 3)
       dropWhile: [:i |
         n := n + 1
@@ -167,6 +170,7 @@ Actor subclass: ActorThreadingCorpus
   // result: at least one comparison runs for a 3-element list.
   sortNonLastWriteOnly =>
     touched := 0
+    @expect discarded_update
     #(3, 1, 2)
       sort: [:a :b |
         touched := 1
@@ -195,6 +199,7 @@ Actor subclass: ActorThreadingCorpus
 
   collectWriteOnlyNonLast =>
     found := 0
+    @expect discarded_update
     #(1, 2, 3)
       collect: [:i |
         found := 7
@@ -204,6 +209,7 @@ Actor subclass: ActorThreadingCorpus
 
   selectWriteOnlyNonLast =>
     found := 0
+    @expect discarded_update
     #(1, 2, 3)
       select: [:i |
         found := 7
@@ -213,6 +219,7 @@ Actor subclass: ActorThreadingCorpus
 
   rejectWriteOnlyNonLast =>
     found := 0
+    @expect discarded_update
     #(1, 2, 3)
       reject: [:i |
         found := 7

@@ -709,6 +709,11 @@ pub enum DiagnosticCategory {
     /// A warning, silent on `Dynamic` targets. Suppressible with
     /// `@expect cascade_drops_update`.
     CascadeDropsUpdate,
+    /// A non-final statement that is a plain send on a value receiver and
+    /// answers an updated copy nothing uses (ADR 0145 § 3, BT-4522): the
+    /// statement `p withX: 5.` leaves `p` unchanged. A warning, silent on
+    /// `Dynamic` receivers. Suppressible with `@expect discarded_update`.
+    DiscardedUpdate,
     /// ADR 0131 §6 (BT-3745): a Tier 2 block value — a block literal that
     /// writes an outer local, or a local bound to one — flows to a send that
     /// has no way to return the write (anything but a control-flow construct,
