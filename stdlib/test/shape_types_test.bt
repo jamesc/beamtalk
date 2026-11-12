@@ -1,0 +1,101 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Runtime-visible behaviour of map-shape types (ADR 0147, BT-4737).
+//
+// Shapes are erased: a shape-typed value is an ordinary Dictionary, and every
+// keyed operation behaves exactly as it does on an untyped one. The compiler's
+// per-key diagnostics are covered by the type-checker tests and the REPL
+// protocol case `shape_types.btscript`; this file pins down that nothing
+// changes at run time, plus one FFI map result read through a shape.
+
+type ShapeTestPoint = #{#x => Integer, #y => Integer}
+type ShapeTestOpts = #{#name => String, ?#retries => Integer}
+type ShapeTestTagged = #{#kind => Symbol, ...}
+type ShapeTestUri = #{?#scheme => Object, ?#host => Object, ?#port => Integer | Symbol}
+
+TestCase subclass: ShapeTypesTest
+
+  testShapeTypedValueIsAnOrdinaryDictionary =>
+    p :: ShapeTestPoint := #{#x => 1, #y => 2}
+    self assert: p class equals: Dictionary
+    self assert: (p isKindOf: Dictionary)
+    self assert: p equals: #{#x => 1, #y => 2}
+    self assert: p size equals: 2
+
+  testAtAnswersTheValue =>
+    p :: ShapeTestPoint := #{#x => 1, #y => 2}
+    self assert: (p at: #x) equals: 1
+    self assert: (p at: #y) equals: 2
+
+  testAtIfAbsentOnRequiredAndOptionalKeys =>
+    o :: ShapeTestOpts := #{#name => "job"}
+    self assert: (o at: #name ifAbsent: ["none"]) equals: "job"
+    self assert: (o at: #retries ifAbsent: [3]) equals: 3
+    withRetries :: ShapeTestOpts := #{#name => "job", #retries => 5}
+    self assert: (withRetries at: #retries ifAbsent: [3]) equals: 5
+
+  testAtIfPresent =>
+    p :: ShapeTestPoint := #{#x => 1, #y => 2}
+    self assert: (p at: #x ifPresent: [:v | v + 10]) equals: 11
+
+  testAtPutAnswersANewDictionary =>
+    p :: ShapeTestPoint := #{#x => 1, #y => 2}
+    moved := p at: #x put: 5
+    self assert: (moved at: #x) equals: 5
+    // Dictionaries are immutable: the original is untouched.
+    self assert: (p at: #x) equals: 1
+
+  testAtPutAddsAKey =>
+    o :: ShapeTestOpts := #{#name => "job"}
+    withRetries := o at: #retries put: 2
+    self assert: withRetries equals: #{#name => "job", #retries => 2}
+
+  testMissingKeyRaisesAsOnAnUntypedDictionary =>
+    // A key the type does not name is a compile-time warning, never a
+    // different run-time behaviour: this raises exactly as an untyped read.
+    untyped := Dictionary new
+    self should: [untyped perform: #at: withArguments: #(#z)] raise: #key_error
+    p :: ShapeTestPoint := #{#x => 1, #y => 2}
+    self should: [p perform: #at: withArguments: #(#z)] raise: #key_error
+
+  testMapPatternDestructuring =>
+    p :: ShapeTestPoint := #{#x => 3, #y => 4}
+    #{#x => x, #y => y} := p
+    self assert: x equals: 3
+    self assert: y equals: 4
+
+  testMapPatternOnAnOpenShapeBindsTheNamedKey =>
+    t :: ShapeTestTagged := #{#kind => #circle, #radius => 3}
+    #{#kind => kind} := t
+    self assert: kind equals: #circle
+
+  testOpenShapeHoldsExtraKeys =>
+    t :: ShapeTestTagged := #{#kind => #circle, #radius => 3}
+    self assert: (t at: #radius) equals: 3
+    self assert: t size equals: 2
+
+  testShapeWidensToADictionaryParameter =>
+    p :: ShapeTestPoint := #{#x => 1, #y => 2}
+    self assert: (self countKeys: p) equals: 2
+
+  testOtherMessagesSeeADictionary =>
+    p :: ShapeTestPoint := #{#x => 1, #y => 2}
+    self assert: p keys asSet equals: #(#x, #y) asSet
+    self assert: (p collect: [:v | v * 2]) equals: #{#x => 2, #y => 4}
+
+  testFfiMapResultReadThroughAShape =>
+    // `uri_string:parse/1` returns a map with seven optional atom keys; the
+    // FFI spec reader types it as a closed shape (ADR 0147).
+    parts :: ShapeTestUri := (Erlang uri_string) parse: "https://example.com:8443/a?b=c"
+    self assert: (parts at: #port ifAbsent: [80]) equals: 8443
+    // The text fields are `unicode:chardata()`: normalise before comparing.
+    scheme := (Erlang unicode) characters_to_list: (parts at: #scheme ifAbsent: [""])
+    self assert: scheme asString equals: "https"
+    host := (Erlang unicode) characters_to_list: (parts at: #host ifAbsent: [""])
+    self assert: host asString equals: "example.com"
+
+  /// A generic helper takes `Dictionary(Symbol, Object)`, not a shape alias:
+  /// a closed shape widens to it, so every shape is accepted.
+  countKeys: d :: Dictionary(Symbol, Object) -> Integer =>
+    d keys size

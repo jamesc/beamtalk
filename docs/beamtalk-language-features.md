@@ -27,6 +27,7 @@ Language features for Beamtalk. See [beamtalk-principles.md](beamtalk-principles
   - [Reflection](#reflection)
 - [Union Types and Narrowing (ADR 0068)](#union-types-and-narrowing-adr-0068)
   - [Named Type Aliases (`type` Declarations) (ADR 0108)](#named-type-aliases-type-declarations-adr-0108)
+  - [Shape Types (ADR 0147)](#shape-types-adr-0147)
 - [Actor Message Passing](#actor-message-passing)
 - [Server — OTP Interop (ADR 0065)](#server--otp-interop-adr-0065)
 - [Supervision Trees (ADR 0059)](#supervision-trees-adr-0059)
@@ -3290,6 +3291,117 @@ type Pub = Priv | String
 **Erlang interop.** Codegen emits a named Erlang `-type` attribute for each alias declared in a module, and method `-spec` attributes reference it via `user_type` instead of expanding to `any()`. Erlang/Elixir consumers of a compiled Beamtalk module see idiomatic Dialyzer types (e.g. `-type 'Timeout'() :: integer() | 'infinity'.`). See [Dialyzer Spec Generation](#dialyzer-spec-generation) for details.
 
 **Tooling.** The LSP offers completions, go-to-definition, find-references, and hover for alias names in `.bt` files. In the REPL, `type` declarations are accepted as input and persist for the rest of the session; declaring `type Direction = ...` at the prompt echoes the declared name (`=> Direction`), the same convention a class declaration echoes (`Actor subclass: Counter` → `Counter`); `:help <Alias>` renders the declaration, its expansion, and any doc comment. Stdlib-declared type aliases (e.g. `RestartStrategy`, `Timeout`) are available automatically in a fresh REPL session — `::` typed locals referencing them resolve without a prior declaration, and `:help RestartStrategy` shows `Declared in: stdlib`. A session-declared `type` with the same name shadows the stdlib alias. The System Browser and the VS Code Workspace Explorer sidebar list declared aliases in a "Type Aliases" section alongside Classes and Protocols. See [`docs/development/surface-parity.md`](development/surface-parity.md) for the full cross-surface matrix.
+
+### Shape Types (ADR 0147)
+
+A **shape** is a structural type for a dictionary whose symbol keys each have
+their own value type. It is written like the map literal it describes and is
+usable anywhere a type is: annotations, `type` aliases, generic arguments and
+unions.
+
+```beamtalk
+type Point = #{#x => Integer, #y => Integer}
+
+p :: Point := #{#x => 1, #y => 2}
+p at: #x                          // Integer
+p at: #z ifAbsent: [0]            // ⚠ `#z` is not a key of Point
+q :: Point := #{#x => 1}          // ⚠ missing required key `#y`
+```
+
+**Required and optional keys.** `#k => T` is a required key. `?#k => T` is an
+optional key: it may be missing. Optional is a property of the key, not the
+value: `?#k => T` means the key may be absent, while `#k => T | Nil` means it
+is present and may hold `nil`.
+
+```beamtalk
+type WebSocketOptions = #{
+  ?#maxFrameSize => Integer,
+  ?#compress => Boolean,
+  ?#deflateOptions => Dictionary(Symbol, Object)
+}
+```
+
+**Closed and open.** A shape is closed by default: a key it does not name is a
+warning. A trailing `...` makes it open, so other keys may be present
+(`#{#kind => Symbol, ...}`). Use an open shape for maps that flow through
+layers that add their own keys.
+
+**Subtyping with `Dictionary`.** Shapes are covariant in their value types,
+because dictionaries are immutable.
+
+- A shape is assignable to another shape when every required key of the target
+  is required in the source with an assignable type, and every source key the
+  target does not name is allowed only if the target is open.
+- A **closed** shape is assignable to `Dictionary(Symbol, V)` when every field
+  type is assignable to `V`. So `Dictionary(Symbol, Object)` accepts every
+  closed shape. A generic helper over symbol-keyed maps should be annotated
+  `Dictionary(Symbol, Object)`, not with a particular shape alias.
+- An **open** shape is assignable to `Dictionary(K, V)` only when `K` and `V`
+  accept `Object` (or are `Dynamic`), because its unnamed entries are
+  `Object`-keyed and `Object`-valued. It does **not** widen to
+  `Dictionary(Symbol, Object)`; use bare `Dictionary` for a parameter that
+  must take open shapes.
+- Bare `Dictionary` (and a `Dictionary` with a `Dynamic` argument) is
+  assignable to any shape, silently, so `Dictionary new` keeps working where a
+  shape is expected. A fully typed `Dictionary(Symbol, Object)` is not; assert
+  it with an annotated local, which is an unchecked narrowing cast.
+
+**Literal inference.** A map literal whose keys are all symbol literals infers
+a closed shape, nested literals inferring nested shapes. `opts := #{#body => "{}", #timeout => 5000}`
+has type `#{#body => String, #timeout => Integer}`, so passing `opts` to a
+shape-typed parameter is checked key by key. Any other literal infers
+`Dictionary(K, V)`.
+
+**Shape-aware operations.** Only these use the per-key types, and the key must
+have a singleton symbol type (a literal `#k`, or a local bound to one):
+
+| Operation | Required key | Optional key | Key not in shape |
+|---|---|---|---|
+| `at: #k` | `T` | `T` (raises at run time if absent) | closed: warning; open: `Object` |
+| `at: #k ifAbsent: [b]` | `T` | `T \| B` | closed: warning; open: `Object \| B` |
+| `at: #k ifPresent: [:v \| ...]` | block gets `T` | block gets `T` | closed: warning; open: block gets `Object` |
+| map pattern `#{#k => v}` | `v :: T` | `v :: T` | closed: warning; open: `v :: Object` |
+| `at: #k put: v` | shape with `#k => typeof(v)`, required | same | shape gains `#k`, required |
+
+Every other message (`keys`, `do:`, `collect:`, `removeKey:`, `merge:`, ...)
+treats the shape as `Dictionary(K, V)`. On a union receiver (`S | Nil`) a
+keyed read answers the union of each member's result.
+
+**Diagnostics** are warnings (ADR 0100), and name the offending key: a literal
+checked against a shape reports a missing required key, an unknown key in a
+closed shape, or a wrong value type. A misspelt key gets a suggestion:
+`#maxFramSize` against a closed `#maxFrameSize` reports
+`key #maxFramSize is not named by the closed expected shape — did you mean #maxFrameSize?`
+when the target key is optional, and `missing required key #maxFrameSize — did you misspell it as #maxFramSize?`
+when it is required.
+
+**FFI mapping.** The spec reader maps Erlang map types with atom keys to
+shapes: `k := T` becomes `#k => T`, `k => T` becomes `?#k => T`, and a general
+key field (`atom() => term()`) adds a trailing `...`. Maps with no atom keys
+stay `Dictionary`. `(Erlang uri_string) parse: url` therefore answers a closed
+shape with seven optional keys, or the error tuple. Value types are whatever
+the spec reader already produced, so `unicode:chardata()` fields stay loose.
+
+**Runtime.** None. Shapes are erased like every other annotation, a shape in a
+signature still emits `map()` in the Erlang `-spec`, and a shape-typed value is
+an ordinary `Dictionary`. A shape is a claim about maps the program builds
+itself (options, config) or that a trusted FFI spec describes. It does not
+validate anything: keep runtime validators for value ranges and for callers
+that build the map dynamically.
+
+**What to shape.** Shape leaf option sets (`WebSocketOptions`). Keep shared or
+generic option bags, and any map whose keys are added at runtime, as
+`Dictionary(Symbol, Object)`.
+
+**External data.** Do not use shapes for JSON or YAML. Their keys are strings
+(shapes take symbol keys only) and their types are erased, so a shape over
+decoded data is an unchecked claim that looks like a guarantee. Parse external
+data into [`Value` classes](#value-subclass-in-depth) at the boundary instead.
+
+**Tooling.** Redefining a shape alias re-checks its use sites through the same
+hot-reload trigger as any alias. The LSP offers key completion after `at: #`
+on a shape-typed receiver and hover showing a key's type. In the REPL,
+`type Point = #{...}` echoes `Point` and `:help Point` shows the expansion.
 
 ### Control Flow Narrowing
 

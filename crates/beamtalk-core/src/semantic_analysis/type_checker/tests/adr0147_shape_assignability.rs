@@ -98,6 +98,18 @@ fn shape_to_shape_required_and_optional_keys() {
             Some("missing required key `#b`"),
         ),
         (
+            "misspelt required key suggests the typo",
+            "#{#maxFramSize => Integer}",
+            "#{#maxFrameSize => Integer}",
+            Some("did you misspell it as `#maxFramSize`"),
+        ),
+        (
+            "unrelated stray key is not offered as a typo",
+            "#{#zzzzzz => Integer}",
+            "#{#maxFrameSize => Integer}",
+            Some("missing required key `#maxFrameSize`"),
+        ),
+        (
             "wrong value type",
             "#{#a => String}",
             "#{#a => Integer}",
