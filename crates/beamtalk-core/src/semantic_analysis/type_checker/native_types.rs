@@ -466,6 +466,58 @@ fn parse_param_map(map_str: &str) -> Option<ParamType> {
 mod tests {
     use super::*;
 
+    /// BT-4734: the Rust half of the FFI map-shape conformance fixture. The
+    /// Erlang half (`beamtalk_spec_reader_tests:ffi_map_shape_conformance_test_`)
+    /// checks that the reader emits `emitted` for each Erlang type; this checks
+    /// that the shared brace-aware parser reads `emitted` as `shape` (or not as
+    /// a shape at all when `shape` is null), and that it resolves to a type.
+    #[test]
+    fn ffi_map_shape_conformance_matches_reader_fixture() {
+        use crate::semantic_analysis::class_hierarchy::{DeclaredShapeField, DeclaredType};
+
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
+            "../../runtime/apps/beamtalk_compiler/test/fixtures/ffi_map_shape_conformance.json",
+        );
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read fixture {}: {e}", path.display()));
+        let fixture: serde_json::Value = serde_json::from_str(&raw).expect("fixture is JSON");
+        let cases = fixture["cases"].as_array().expect("cases array");
+        assert!(cases.len() >= 15, "fixture shrank unexpectedly");
+
+        for case in cases {
+            let name = case["name"].as_str().expect("name");
+            let emitted = case["emitted"].as_str().expect("emitted");
+            let parsed = DeclaredType::parse(emitted);
+            let resolved = map_type_name(emitted);
+            if case["shape"].is_null() {
+                assert!(
+                    !matches!(parsed, DeclaredType::Shape { .. }),
+                    "{name}: {emitted:?} must not parse as a shape, got {parsed:?}"
+                );
+                continue;
+            }
+            let expected_fields: Vec<DeclaredShapeField> = case["shape"]["fields"]
+                .as_array()
+                .expect("fields")
+                .iter()
+                .map(|f| DeclaredShapeField {
+                    key: f["key"].as_str().expect("key").into(),
+                    value: DeclaredType::parse(f["value"].as_str().expect("value")),
+                    optional: f["optional"].as_bool().expect("optional"),
+                })
+                .collect();
+            let expected = DeclaredType::Shape {
+                fields: expected_fields,
+                open: case["shape"]["open"].as_bool().expect("open"),
+            };
+            assert_eq!(parsed, expected, "{name}: {emitted:?}");
+            assert!(
+                matches!(resolved, InferredType::Shape { .. }),
+                "{name}: {emitted:?} must resolve to a shape type, got {resolved:?}"
+            );
+        }
+    }
+
     // -----------------------------------------------------------------------
     // map_type_name tests
     // -----------------------------------------------------------------------

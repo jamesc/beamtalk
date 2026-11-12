@@ -793,6 +793,7 @@ Basic typed completions ship in Phase 1. This phase adds richer tooling and runt
 ### Future Work
 
 - **Richer type mapping** — as Beamtalk's type system grows (subrange types, typed maps, record types), the Erlang→Beamtalk mapping can become more precise
+  - *Typed maps are now mapped (ADR 0147, BT-4734):* `k := T` becomes `#k => T`, `k => T` becomes `?#k => T`, and a domain field or a `true`/`false`/`nil` key adds a trailing `...`. A map with no atom keys stays `Dictionary`. The shared fixture `runtime/apps/beamtalk_compiler/test/fixtures/ffi_map_shape_conformance.json` pins the reader and the Rust parser.
 - **Elixir stubs** — `declare native:` files for Elixir modules (`'Elixir.Enum'`, `'Elixir.String'`, etc.)
 - **PLT integration** — read Dialyzer PLT for inferred types of unspecced functions (if needed)
 - **Native module discoverability** — `Beamtalk nativeModules` or `Workspace nativeModules` listing all available Erlang modules with type info (from `NativeTypeRegistry`) or all loaded modules (from `code:all_loaded()`)

@@ -1,0 +1,26 @@
+{
+  "_comment": "BT-4734 / ADR 0147 § FFI mapping: how beamtalk_spec_reader:map_type/1 turns an Erlang map type into a Beamtalk type string, and the map shape the Rust side must parse that string into. Each case: 'erlang' is the type as written in a -type, 'emitted' is the exact string the reader must produce, 'shape' is null when the string must not parse as a shape (plain Dictionary or a class), else {fields: [{key, optional, value}], open} where 'key' is the symbol name without '#' and 'value' is the value type string. Read by beamtalk_spec_reader_tests (EUnit, ffi_map_shape_conformance_test) and by native_types.rs (ffi_map_shape_conformance_matches_reader_fixture). Change a row and both sides must agree or a test fails.",
+  "cases": [
+    {"name": "exact_field", "erlang": "#{a := integer()}", "emitted": "#{#a => Integer}", "shape": {"fields": [{"key": "a", "optional": false, "value": "Integer"}], "open": false}},
+    {"name": "assoc_field_is_optional", "erlang": "#{a => integer()}", "emitted": "#{?#a => Integer}", "shape": {"fields": [{"key": "a", "optional": true, "value": "Integer"}], "open": false}},
+    {"name": "mixed_exact_and_assoc", "erlang": "#{a := atom(), b => binary()}", "emitted": "#{#a => Symbol, ?#b => String | Binary}", "shape": {"fields": [{"key": "a", "optional": false, "value": "Symbol"}, {"key": "b", "optional": true, "value": "String | Binary"}], "open": false}},
+    {"name": "domain_key_opens_the_shape", "erlang": "#{a := integer(), atom() => term()}", "emitted": "#{#a => Integer, ...}", "shape": {"fields": [{"key": "a", "optional": false, "value": "Integer"}], "open": true}},
+    {"name": "domain_key_first_still_trailing", "erlang": "#{atom() => term(), a := integer()}", "emitted": "#{#a => Integer, ...}", "shape": {"fields": [{"key": "a", "optional": false, "value": "Integer"}], "open": true}},
+    {"name": "boolean_and_nil_keys_open_the_shape", "erlang": "#{a := integer(), true => atom(), false => atom(), nil => atom()}", "emitted": "#{#a => Integer, ...}", "shape": {"fields": [{"key": "a", "optional": false, "value": "Integer"}], "open": true}},
+    {"name": "only_boolean_keys_is_a_dictionary", "erlang": "#{true := integer(), false := integer()}", "emitted": "Dictionary", "shape": null},
+    {"name": "domain_only_is_a_dictionary", "erlang": "#{atom() => integer()}", "emitted": "Dictionary", "shape": null},
+    {"name": "any_map_is_a_dictionary", "erlang": "map()", "emitted": "Dictionary", "shape": null},
+    {"name": "empty_map_is_a_dictionary", "erlang": "#{}", "emitted": "Dictionary", "shape": null},
+    {"name": "beamtalk_class_tag_wins", "erlang": "#{'$beamtalk_class' := 'Result', a := integer()}", "emitted": "Result", "shape": null},
+    {"name": "key_needing_quotes", "erlang": "#{'content-type' := binary()}", "emitted": "#{#'content-type' => String | Binary}", "shape": {"fields": [{"key": "content-type", "optional": false, "value": "String | Binary"}], "open": false}},
+    {"name": "key_with_space", "erlang": "#{'two words' => integer()}", "emitted": "#{?#'two words' => Integer}", "shape": {"fields": [{"key": "two words", "optional": true, "value": "Integer"}], "open": false}},
+    {"name": "uppercase_key", "erlang": "#{'Foo' := integer()}", "emitted": "#{#Foo => Integer}", "shape": {"fields": [{"key": "Foo", "optional": false, "value": "Integer"}], "open": false}},
+    {"name": "unrepresentable_key_opens_the_shape", "erlang": "#{a := integer(), 'x,y' := integer()}", "emitted": "#{#a => Integer, ...}", "shape": {"fields": [{"key": "a", "optional": false, "value": "Integer"}], "open": true}},
+    {"name": "only_unrepresentable_keys_is_a_dictionary", "erlang": "#{'a=>b' := integer(), 'it\\'s' := integer()}", "emitted": "Dictionary", "shape": null},
+    {"name": "union_value_stays_inside_the_field", "erlang": "#{port := non_neg_integer() | undefined}", "emitted": "#{#port => Integer | Symbol}", "shape": {"fields": [{"key": "port", "optional": false, "value": "Integer | Symbol"}], "open": false}},
+    {"name": "nested_shape", "erlang": "#{outer := #{inner := integer()}}", "emitted": "#{#outer => #{#inner => Integer}}", "shape": {"fields": [{"key": "outer", "optional": false, "value": "#{#inner => Integer}"}], "open": false}},
+    {"name": "shape_inside_a_list", "erlang": "[#{a := integer()}]", "emitted": "List(#{#a => Integer})", "shape": null},
+    {"name": "shape_in_a_union_stays_one_member", "erlang": "#{a := binary() | atom()} | integer()", "emitted": "#{#a => String | Binary | Symbol} | Integer", "shape": null},
+    {"name": "duplicate_key_keeps_the_first", "erlang": "#{a := integer(), a => atom()}", "emitted": "#{#a => Integer}", "shape": {"fields": [{"key": "a", "optional": false, "value": "Integer"}], "open": false}}
+  ]
+}

@@ -1606,10 +1606,10 @@ map_type_opaque_via_user_type_test() ->
     %% Opaque types appear as user_type in abstract code
     ?assertEqual(<<"Dynamic">>, beamtalk_spec_reader:map_type({user_type, 0, opaque_type, []})).
 
-%% Typed map (#{key := Type}) maps to Dictionary
+%% Typed map (#{key := Type}) maps to a closed map shape (ADR 0147)
 map_type_typed_map_test() ->
     ?assertEqual(
-        <<"Dictionary">>,
+        <<"#{#key => Integer}">>,
         beamtalk_spec_reader:map_type(
             {type, 0, map, [
                 {type, 0, map_field_exact, [{atom, 0, key}, {type, 0, integer, []}]}
@@ -2067,3 +2067,61 @@ read_raw_specs_module_qualified_spec_test() ->
     after
         cleanup_tmp_dir(TmpDir)
     end.
+
+%%% ---------------------------------------------------------------
+%%% Map shapes (ADR 0147 § FFI mapping, BT-4734)
+%%% ---------------------------------------------------------------
+
+%% Every row of the shared fixture (also read by the Rust side in
+%% `native_types.rs`) maps the Erlang type text to exactly the emitted string.
+ffi_map_shape_conformance_test_() ->
+    #{<<"cases">> := Cases} = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_compiler",
+        "test",
+        "fixtures",
+        "ffi_map_shape_conformance.json"
+    ]),
+    [
+        {binary_to_list(Name), fun() ->
+            Type = parse_type_text(binary_to_list(Erlang)),
+            ?assertEqual(Emitted, beamtalk_spec_reader:map_type(Type))
+        end}
+     || #{<<"name">> := Name, <<"erlang">> := Erlang, <<"emitted">> := Emitted} <- Cases
+    ].
+
+%% Parse Erlang type text (`#{a := integer()}`) into its abstract form.
+parse_type_text(Text) ->
+    {ok, Tokens, _} = erl_scan:string("-type t() :: " ++ Text ++ "."),
+    {ok, {attribute, _, type, {t, Type, []}}} = erl_parse:parse_form(Tokens),
+    Type.
+
+%% A map type reached through a named `-type` keeps its shape.
+map_type_shape_through_named_type_test() ->
+    Registry = #{{point, 0} => parse_type_text("#{x := integer(), y => integer()}")},
+    put(beamtalk_type_registry, Registry),
+    put(beamtalk_opaque_set, sets:new()),
+    put(beamtalk_type_depth, 0),
+    try
+        ?assertEqual(
+            <<"#{#x => Integer, ?#y => Integer}">>,
+            beamtalk_spec_reader:map_type({user_type, 0, point, []})
+        )
+    after
+        erase(beamtalk_type_registry),
+        erase(beamtalk_opaque_set),
+        erase(beamtalk_type_depth)
+    end.
+
+%% `uri_string:parse/1` reads as the closed seven-key shape or the error tuple.
+uri_string_parse_is_a_shape_test() ->
+    {ok, Specs} = beamtalk_spec_reader:read_specs(code:which(uri_string)),
+    [#{return_type := Return}] = [
+        S
+     || #{name := <<"parse">>, arity := 1} = S <- Specs
+    ],
+    ?assertMatch(<<"#{?#fragment => ", _/binary>>, Return),
+    ?assertNotEqual(nomatch, binary:match(Return, <<"?#port => Integer | Symbol">>)),
+    ?assertNotEqual(nomatch, binary:match(Return, <<"?#userinfo =>">>)),
+    ?assertEqual(nomatch, binary:match(Return, <<"...">>)).
