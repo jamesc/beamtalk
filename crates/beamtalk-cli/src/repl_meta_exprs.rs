@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 //! Beamtalk-expression builders for REPL meta-commands, shared between the
-//! `beamtalk` binary's dispatch (`commands/repl/mod.rs`) and the
+//! `beamtalk` binary's dispatch (`commands/repl/handlers.rs`) and the
 //! `tests/repl_protocol.rs` integration-test harness.
 //!
 //! These live in the library target (rather than `commands/repl/mod.rs`,
@@ -74,7 +74,7 @@ pub fn flush_expr_for(selector: &str) -> Option<String> {
 /// [`remove_method_expr_for`], there is no second (selector) token to split
 /// off and no leading-`#` stripping — a class name is never symbol-decorated.
 ///
-/// The real REPL dispatch (`commands/repl/mod.rs`) prompts for `y/N`
+/// The real REPL dispatch (`commands/repl/handlers.rs`) prompts for `y/N`
 /// confirmation before calling this — a destructive, memory-mutating
 /// operation per ADR 0113's Surface section — but that terminal-only
 /// confirmation step is orthogonal to expression construction, so it isn't
@@ -93,7 +93,7 @@ pub fn remove_class_expr_for(arg: &str) -> Option<String> {
 ///
 /// A `const`, not a function, because the bare form takes no argument to
 /// build from — mirroring `Flush`'s own bare-form handling in
-/// `commands/repl/mod.rs` (`"Workspace flush"` is written as a literal there
+/// `commands/repl/handlers.rs` (`"Workspace flush"` is written as a literal there
 /// too; this one is exposed as a shared constant instead purely so the
 /// integration-test harness in `tests/repl_protocol.rs` can reference it by
 /// name rather than re-typing the literal — see the module doc's
@@ -146,7 +146,7 @@ pub fn flush_destructive_expr_for(selector: &str) -> Option<String> {
 /// `#`-stripping the second), so the caller can print a usage hint instead
 /// of evaluating a malformed `renameTo:` send.
 ///
-/// The real REPL dispatch (`commands/repl/mod.rs`) prompts for `y/N`
+/// The real REPL dispatch (`commands/repl/handlers.rs`) prompts for `y/N`
 /// confirmation before calling this — a destructive, memory-mutating
 /// operation per ADR 0114's Surface section (reusing ADR 0113's) — but that
 /// terminal-only confirmation step is orthogonal to expression construction,
