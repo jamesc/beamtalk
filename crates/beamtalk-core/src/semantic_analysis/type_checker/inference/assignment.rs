@@ -272,16 +272,19 @@ impl TypeChecker {
         protocol_registry: Option<&ProtocolRegistry>,
     ) -> bool {
         // ADR 0147: a map shape is judged structurally, never by display
-        // name (a shape has no class name to compare). Either direction, like
-        // the nominal rule below: an annotated local is the narrowing cast
-        // (ADR 0147 § `Dictionary` to shape) of a non-shape value (a typed
-        // `Dictionary`, `Object`) into a shape. A value that is itself or
-        // contains a shape is judged forward only, so a misspelt key in one
-        // branch of a union of literals is still caught.
+        // name (a shape has no class name to compare). Each member of the
+        // value is judged on its own: a member that is, or contains, a shape
+        // goes forward only (so a misspelt key in one branch of a union of
+        // literals is caught, and an open shape or a container of shapes is
+        // not silently narrowed); any other member (a typed `Dictionary`,
+        // `Object`) may also go the other way, because an annotated local is
+        // the narrowing cast (ADR 0147 § `Dictionary` to shape).
         if inferred_ty.contains_shape() || declared.contains_shape() {
-            return Self::shape_assignable(inferred_ty, declared, hierarchy).is_ok()
-                || (!inferred_ty.contains_shape()
-                    && Self::shape_assignable(declared, inferred_ty, hierarchy).is_ok());
+            return Self::union_members(inferred_ty).iter().all(|member| {
+                Self::shape_assignable(member, declared, hierarchy).is_ok()
+                    || (!member.contains_shape()
+                        && Self::shape_assignable(declared, member, hierarchy).is_ok())
+            });
         }
         let inferred_members = Self::union_members(inferred_ty);
         let declared_members = Self::union_members(declared);

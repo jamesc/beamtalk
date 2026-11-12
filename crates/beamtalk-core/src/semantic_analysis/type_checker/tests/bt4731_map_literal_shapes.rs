@@ -313,3 +313,29 @@ fn union_of_literals_with_a_wrong_branch_is_still_caught() {
     );
     assert_eq!(msgs.len(), 1, "got: {msgs:#?}");
 }
+
+#[test]
+fn union_members_are_judged_one_at_a_time() {
+    // The typed-`Dictionary` branch keeps the narrowing cast; the shape branch
+    // is still checked forward.
+    let msgs = warnings(
+        "Object subclass: Probe\n  \
+           ok: flag :: Boolean d: d :: Dictionary(Symbol, Object) =>\n    \
+             x :: #{#a => Integer} := flag ifTrue: [#{#a => 1}] ifFalse: [d]\n    x\n  \
+           bad: flag :: Boolean d: d :: Dictionary(Symbol, Object) =>\n    \
+             x :: #{#a => Integer} := flag ifTrue: [#{#b => 1}] ifFalse: [d]\n    x\n",
+    );
+    assert_eq!(msgs.len(), 1, "got: {msgs:#?}");
+}
+
+#[test]
+fn open_shape_is_not_narrowed_by_an_annotated_local() {
+    // Pinned: only a typed `Dictionary`/`Object` is cast into a shape; an
+    // open shape into a closed or wider one is refused (ADR 0147 § Subtyping).
+    let msgs = warnings(
+        "Object subclass: Probe\n  \
+           go: o :: #{#a => Integer, ...} =>\n    \
+             x :: #{#a => Integer, #b => String} := o\n    x\n",
+    );
+    assert_eq!(msgs.len(), 1, "got: {msgs:#?}");
+}
