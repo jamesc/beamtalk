@@ -1597,7 +1597,6 @@ mod tests {
     fn completions_at(source: &str, position: Position) -> Vec<Completion> {
         completions_at_with_package(source, position, None)
     }
-    /// Parse source and compute completions with a specific package context.
     #[test]
     fn resolve_expression_type_answers_dictionary_for_a_map_literal() {
         // BT-4731: a symbol-keyed literal infers a shape; the REPL/MCP
@@ -1609,6 +1608,7 @@ mod tests {
         );
     }
 
+    /// Parse source and compute completions with a specific package context.
     fn completions_at_with_package(
         source: &str,
         position: Position,
