@@ -28,6 +28,11 @@ TestCase subclass: ActorClosureCellTest
     self assert: (c peekVia: ClosureCellRunner spawn) equals: 0
     self assert: c n equals: 99
 
+  // BT-4722: `#(self bump, [self.n])` in a closure captures after the bump.
+  testBlockLiteralCapturesAfterSiblingWriteInClosure =>
+    c := ClosureCellCounter spawn
+    self assert: (c snapshotAfterWriteVia: ClosureCellRunner spawn) equals: 1
+
   testPokeVia =>
     c := ClosureCellCounter spawn
     self should: [

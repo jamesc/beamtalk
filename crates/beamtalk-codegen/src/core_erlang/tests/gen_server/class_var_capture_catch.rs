@@ -457,3 +457,46 @@ fn class_variable_read_in_a_later_cascade_message_binds_a_capture() {
     );
     assert_compiles_through_erlc("test", &code);
 }
+
+/// BT-4722: a block literal whose capture reads a class variable is sequenced
+/// after a sibling operand that runs code (and may write the variable), even
+/// though erlc evaluates a list cell's tail first.
+#[test]
+fn capture_is_taken_after_a_sibling_operand_that_runs_code() {
+    let src = concat!(
+        "Object subclass: Counter\n",
+        "  classState: n = 0\n\n",
+        "  class pair: blk => #(blk value, [self.n])\n",
+    );
+    let code = codegen(src);
+    let pair = function_text(&code, "'class_pair:'/2 = fun");
+    let capture_at = pair.find(CAPTURE_CALL).expect("capture bound");
+    let temp_at = pair.find("let _ListLit").expect("sibling bound to a temp");
+    assert!(
+        temp_at < capture_at,
+        "the sibling operand is bound to a temp before the capture: {pair}"
+    );
+}
+
+/// BT-4722: the capture is taken before a writing sibling that follows it in
+/// source order, and a parenthesised block operand is sequenced like a bare one.
+#[test]
+fn capture_order_follows_source_order_for_either_operand_order_and_parens() {
+    for (list, capture_first) in [
+        ("#([self.n], blk value)", true),
+        ("#(blk value, ([self.n]))", false),
+    ] {
+        let src = format!(
+            "Object subclass: Counter\n  classState: n = 0\n\n  class pair: blk => {list}\n"
+        );
+        let code = codegen(&src);
+        let pair = function_text(&code, "'class_pair:'/2 = fun");
+        let capture_at = pair.find(CAPTURE_CALL).expect("capture bound");
+        let run_at = pair.find("apply _ValRecv").expect("the `value` send runs");
+        assert_eq!(
+            capture_at < run_at,
+            capture_first,
+            "{list}: operands are bound in source order: {pair}"
+        );
+    }
+}
