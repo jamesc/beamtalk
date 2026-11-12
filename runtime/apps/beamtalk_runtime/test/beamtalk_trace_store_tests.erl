@@ -3013,9 +3013,18 @@ pid_row_count() ->
 
 sweep_and_sync() ->
     beamtalk_trace_store ! sweep_eviction,
-    %% A call is served after the sweep message, so the sweep has finished.
-    _ = sys:get_state(beamtalk_trace_store),
-    ok.
+    wait_sweep_done().
+
+%% A chunked sweep (BT-4124) spans several gen_server turns: poll until no
+%% continuation is pending. The first call is served after the sweep message.
+wait_sweep_done() ->
+    case gen_server:call(beamtalk_trace_store, sweep_pending) of
+        false ->
+            ok;
+        true ->
+            timer:sleep(5),
+            wait_sweep_done()
+    end.
 
 sweep_remote_pid_test_() ->
     {setup, fun setup/0, fun cleanup/1, fun(_Pid) ->
@@ -3092,4 +3101,149 @@ sweep_reclaims_row_without_keys_entry_test_() ->
                 ?assertEqual(0, pid_row_count())
             end)
         ]
+    end}.
+
+%%====================================================================
+%% Test: chunked sweep and in-caller bottlenecks (BT-4124)
+%%====================================================================
+
+%% One row per live idle process. The sweep only reclaims dead pids, so the
+%% store's own periodic tick cannot change the row count while this fills.
+fill_live_pid_rows(Count) ->
+    lists:map(
+        fun(_) ->
+            Pid = idle_process(),
+            beamtalk_trace_store:record_dispatch(Pid, ping, 10, ok, sync, 'Counter'),
+            Pid
+        end,
+        lists:seq(1, Count)
+    ).
+
+%% Kill the pids and queue a sweep with the trace store suspended, so the
+%% store's own periodic tick cannot sweep part of the dead set first: whichever
+%% message starts the sweep, its first chunk sees every dead pid.
+kill_then_sweep(Pids) ->
+    Store = whereis(beamtalk_trace_store),
+    sys:suspend(Store),
+    try
+        kill_and_wait(Pids),
+        Store ! sweep_eviction
+    after
+        sys:resume(Store)
+    end.
+
+kill_and_wait(Pids) ->
+    Mons = [{erlang:monitor(process, P), P} || P <- Pids],
+    lists:foreach(fun(P) -> exit(P, kill) end, Pids),
+    lists:foreach(
+        fun({Mon, P}) ->
+            receive
+                {'DOWN', Mon, process, P, _} -> ok
+            end
+        end,
+        Mons
+    ).
+
+chunked_sweep_yields_between_chunks_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        {timeout, 60,
+            ?_test(begin
+                beamtalk_trace_store:enable(),
+                Count = 10 * 2000 + 500,
+                Pids = fill_live_pid_rows(Count),
+                ?assertEqual(Count, pid_row_count()),
+                kill_then_sweep(Pids),
+                %% A call queued behind the first chunk is served while the
+                %% sweep still has chunks left: the server yielded.
+                ?assertEqual(true, gen_server:call(beamtalk_trace_store, sweep_pending)),
+                %% An overlapping tick starts no second sweep and loses nothing.
+                beamtalk_trace_store ! sweep_eviction,
+                wait_sweep_done(),
+                ?assertEqual(0, pid_row_count()),
+                ?assertEqual(0, ets:info(beamtalk_agg_pid_keys, size))
+            end)}
+    end}.
+
+chunked_sweep_drop_continuation_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        [
+            {timeout, 60,
+                ?_test(begin
+                    %% clear/0 mid-sweep drops the continuation.
+                    beamtalk_trace_store:enable(),
+                    kill_then_sweep(fill_live_pid_rows(3 * 2000 + 10)),
+                    ?assertEqual(true, gen_server:call(beamtalk_trace_store, sweep_pending)),
+                    beamtalk_trace_store:clear(),
+                    ?assertEqual(false, gen_server:call(beamtalk_trace_store, sweep_pending)),
+                    ?assertEqual(0, pid_row_count())
+                end)},
+            {timeout, 60,
+                ?_test(begin
+                    %% disable/0 mid-sweep drops it too.
+                    beamtalk_trace_store:enable(),
+                    kill_then_sweep(fill_live_pid_rows(3 * 2000 + 10)),
+                    ?assertEqual(true, gen_server:call(beamtalk_trace_store, sweep_pending)),
+                    beamtalk_trace_store:disable(),
+                    ?assertEqual(false, gen_server:call(beamtalk_trace_store, sweep_pending)),
+                    ?assertEqual(0, pid_row_count())
+                end)},
+            ?_test(begin
+                %% A resume message for a dropped sweep is ignored.
+                Store = whereis(beamtalk_trace_store),
+                Store ! {sweep_continue, make_ref()},
+                ?assertEqual(false, gen_server:call(beamtalk_trace_store, sweep_pending)),
+                ?assertEqual(Store, whereis(beamtalk_trace_store))
+            end)
+        ]
+    end}.
+
+chunked_sweep_stale_continuation_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        ?_test(begin
+            %% A continuation whose table is gone must not crash the server.
+            beamtalk_trace_store:enable(),
+            kill_then_sweep(fill_live_pid_rows(2 * 2000 + 10)),
+            Store = whereis(beamtalk_trace_store),
+            ?assertEqual(true, gen_server:call(Store, sweep_pending)),
+            %% A continuation for another table, deleted since: `select/1`
+            %% rejects it with `badarg`, as it does for a deleted pid table.
+            Foreign = ets:new(bt4124_foreign, []),
+            true = ets:insert(Foreign, [{a}, {b}, {c}]),
+            {_, ForeignCont} = ets:select(Foreign, [{'_', [], ['$_']}], 1),
+            ets:delete(Foreign),
+            Token = make_ref(),
+            sys:replace_state(Store, fun(S) -> setelement(4, S, {Token, ForeignCont}) end),
+            Store ! {sweep_continue, Token},
+            ?assertEqual(false, gen_server:call(Store, sweep_pending)),
+            ?assertEqual(Store, whereis(beamtalk_trace_store))
+        end)
+    end}.
+
+bottlenecks_does_not_call_gen_server_test_() ->
+    {setup, fun setup/0, fun cleanup/1, fun(_) ->
+        ?_test(begin
+            case whereis(beamtalk_object_instances) of
+                undefined -> {ok, _} = beamtalk_object_instances:start_link();
+                _ -> ok
+            end,
+            Pids = [idle_process() || _ <- lists:seq(1, 2000)],
+            lists:foreach(
+                fun(P) -> ok = beamtalk_object_instances:register('Counter', P) end, Pids
+            ),
+            Store = whereis(beamtalk_trace_store),
+            %% With the trace store suspended, a gen_server call would block;
+            %% bottlenecks/1 runs in the caller and answers regardless.
+            sys:suspend(Store),
+            try
+                Caller = self(),
+                spawn(fun() -> Caller ! {bottlenecks, beamtalk_trace_store:bottlenecks(10)} end),
+                receive
+                    {bottlenecks, Result} -> ?assertEqual(10, length(Result))
+                after 10000 -> ?assert(false)
+                end
+            after
+                sys:resume(Store),
+                lists:foreach(fun(P) -> P ! stop end, Pids)
+            end
+        end)
     end}.
