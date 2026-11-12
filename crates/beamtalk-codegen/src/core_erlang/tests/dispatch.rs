@@ -629,38 +629,39 @@ fn test_bt906_class_module_index_overrides_heuristic_for_spawn() {
 
 // ── ADR 0119: `own_package_id` ────────────────────────────────
 
+/// BT-4679: the former four `test_own_package_id_*` tests, one row each.
 #[test]
-fn test_own_package_id_stdlib_module() {
+fn test_own_package_id_table() {
     use beamtalk_core::semantic_analysis::PackageId;
-    let generator = CoreErlangGenerator::new("bt@stdlib@ordered_collection");
-    assert_eq!(generator.own_package_id(), PackageId::Stdlib);
-}
-
-#[test]
-fn test_own_package_id_package_module_preserves_subdirectory_free_name() {
-    use beamtalk_core::semantic_analysis::PackageId;
-    // A deep subdirectory module still yields the top-level package name —
-    // `own_package_id` only needs to identify *which* package this
-    // generation unit belongs to, not its position within it.
-    let generator = CoreErlangGenerator::new("bt@sicp@scheme@env");
-    assert_eq!(
-        generator.own_package_id(),
-        PackageId::Package("sicp".to_string())
-    );
-}
-
-#[test]
-fn test_own_package_id_single_file_module() {
-    use beamtalk_core::semantic_analysis::PackageId;
-    let generator = CoreErlangGenerator::new("bt@counter");
-    assert_eq!(generator.own_package_id(), PackageId::SingleFile);
-}
-
-#[test]
-fn test_own_package_id_unprefixed_test_fixture_module() {
-    use beamtalk_core::semantic_analysis::PackageId;
-    let generator = CoreErlangGenerator::new("counter");
-    assert_eq!(generator.own_package_id(), PackageId::SingleFile);
+    let cases = [
+        (
+            "stdlib module",
+            "bt@stdlib@ordered_collection",
+            PackageId::Stdlib,
+        ),
+        // A deep subdirectory module still yields the top-level package name —
+        // `own_package_id` only needs to identify *which* package this
+        // generation unit belongs to, not its position within it.
+        (
+            "package module preserves subdirectory-free name",
+            "bt@sicp@scheme@env",
+            PackageId::Package("sicp".to_string()),
+        ),
+        ("single-file module", "bt@counter", PackageId::SingleFile),
+        (
+            "unprefixed test fixture module",
+            "counter",
+            PackageId::SingleFile,
+        ),
+    ];
+    for (label, module_name, expected) in cases {
+        let generator = CoreErlangGenerator::new(module_name);
+        assert_eq!(
+            generator.own_package_id(),
+            expected,
+            "[{label}] own_package_id({module_name})"
+        );
+    }
 }
 
 #[test]
@@ -1384,89 +1385,108 @@ fn test_cascade_multiple_field_assignments_state_threading() {
     generator.pop_scope();
 }
 
+/// BT-4679: the former `test_erlang_interop_direct_call_keyword_single_arg`,
+/// `..._keyword_multi_arg`, `..._zero_arg` and `..._parenthesized_receiver` tests:
+/// `Erlang <module> <selector>` routes through `beamtalk_erlang_proxy:direct_call/4`
+/// (binary→charlist coercion support) with no proxy map and no runtime dispatch.
+/// `test_erlang_interop_direct_call_coercion_mode` already loops over its own table.
 #[test]
-fn test_erlang_interop_direct_call_keyword_single_arg() {
-    // `Erlang lists reverse: xs` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'reverse', [Xs], 'stock')`
-    // Routes through proxy for binary→charlist coercion support
-    let mut generator = CoreErlangGenerator::new("test");
-
-    // Inner: Erlang lists (ClassReference("Erlang") + Unary("lists"))
-    let inner_receiver = Expression::MessageSend {
-        receiver: Box::new(Expression::ClassReference {
-            name: Identifier::new("Erlang", Span::new(0, 6)),
-            span: Span::new(0, 6),
-            package: None,
-        }),
-        selector: MessageSelector::Unary("lists".into()),
-        arguments: vec![],
-        is_cast: false,
-        span: Span::new(0, 12),
-    };
-    // Outer: (Erlang lists) reverse: xs
-    let selector = MessageSelector::Keyword(vec![KeywordPart::new("reverse:", Span::new(13, 21))]);
-    let arguments = vec![Expression::Identifier(Identifier::new(
-        "xs",
-        Span::new(22, 24),
-    ))];
-
-    let doc = generator
-        .generate_message_send(&inner_receiver, &selector, &arguments)
-        .unwrap();
-    let output = doc.to_pretty_string();
-
-    assert!(
-        output.contains("call 'beamtalk_erlang_proxy':'direct_call'("),
-        "Should emit proxy-routed call. Got: {output}"
-    );
-    assert!(
-        !output.contains("ErlangModule"),
-        "Should not create proxy map. Got: {output}"
-    );
-    assert!(
-        !output.contains("beamtalk_message_dispatch"),
-        "Should not use runtime dispatch. Got: {output}"
-    );
-}
-
-#[test]
-fn test_erlang_interop_direct_call_keyword_multi_arg() {
-    // `Erlang lists seq: 1 with: 10` → `call 'beamtalk_erlang_proxy':'direct_call'('lists', 'seq', [1, 10], 'stock')`
-    // Routes through proxy for binary→charlist coercion support
-    let mut generator = CoreErlangGenerator::new("test");
-
-    let inner_receiver = Expression::MessageSend {
-        receiver: Box::new(Expression::ClassReference {
-            name: Identifier::new("Erlang", Span::new(0, 6)),
-            span: Span::new(0, 6),
-            package: None,
-        }),
-        selector: MessageSelector::Unary("lists".into()),
-        arguments: vec![],
-        is_cast: false,
-        span: Span::new(0, 12),
-    };
-    let selector = MessageSelector::Keyword(vec![
-        KeywordPart::new("seq:", Span::new(13, 17)),
-        KeywordPart::new("with:", Span::new(20, 25)),
-    ]);
-    let arguments = vec![
-        Expression::Literal(Literal::Integer(1), Span::new(18, 19)),
-        Expression::Literal(Literal::Integer(10), Span::new(26, 28)),
+fn test_erlang_interop_direct_call_table() {
+    // (label, module, parenthesised receiver, selector, arguments, has, lacks)
+    #[allow(clippy::type_complexity)]
+    let cases: Vec<(
+        &str,
+        &str,
+        bool,
+        MessageSelector,
+        Vec<Expression>,
+        Vec<&str>,
+        Vec<&str>,
+    )> = vec![
+        (
+            // `Erlang lists reverse: xs`
+            "keyword single argument",
+            "lists",
+            false,
+            MessageSelector::Keyword(vec![KeywordPart::new("reverse:", Span::new(13, 21))]),
+            vec![Expression::Identifier(Identifier::new(
+                "xs",
+                Span::new(22, 24),
+            ))],
+            vec!["call 'beamtalk_erlang_proxy':'direct_call'("],
+            vec!["ErlangModule", "beamtalk_message_dispatch"],
+        ),
+        (
+            // `Erlang lists seq: 1 with: 10`
+            "keyword multiple arguments",
+            "lists",
+            false,
+            MessageSelector::Keyword(vec![
+                KeywordPart::new("seq:", Span::new(13, 17)),
+                KeywordPart::new("with:", Span::new(20, 25)),
+            ]),
+            vec![
+                Expression::Literal(Literal::Integer(1), Span::new(18, 19)),
+                Expression::Literal(Literal::Integer(10), Span::new(26, 28)),
+            ],
+            vec!["call 'beamtalk_erlang_proxy':'direct_call'("],
+            vec!["ErlangModule"],
+        ),
+        (
+            // `Erlang erlang node`: unary selector, zero arguments
+            "unary zero arguments",
+            "erlang",
+            false,
+            MessageSelector::Unary("node".into()),
+            vec![],
+            vec!["call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [], 'stock')"],
+            vec![],
+        ),
+        (
+            // `(Erlang lists) reverse: xs` with a genuine `Parenthesized` AST node must
+            // hit the same direct-call fast path as the unparenthesized form — the shared
+            // `beamtalk_core::ffi_receiver::erlang_module_of_receiver` recognizer peels
+            // parens so codegen and the LSP queries agree on this canonical form.
+            "parenthesized receiver",
+            "lists",
+            true,
+            MessageSelector::Keyword(vec![KeywordPart::new("reverse:", Span::new(15, 23))]),
+            vec![Expression::Identifier(Identifier::new(
+                "xs",
+                Span::new(24, 26),
+            ))],
+            vec!["call 'beamtalk_erlang_proxy':'direct_call'("],
+            vec!["ErlangModule", "beamtalk_message_dispatch"],
+        ),
     ];
-
-    let doc = generator
-        .generate_message_send(&inner_receiver, &selector, &arguments)
-        .unwrap();
-    let output = doc.to_pretty_string();
-
-    assert!(
-        output.contains("call 'beamtalk_erlang_proxy':'direct_call'("),
-        "Should emit proxy-routed multi-arg call. Got: {output}"
-    );
-    assert!(
-        !output.contains("ErlangModule"),
-        "Should not create proxy map. Got: {output}"
-    );
+    for (label, module, parenthesized, selector, arguments, has, lacks) in &cases {
+        let mut generator = CoreErlangGenerator::new("test");
+        let inner = Expression::MessageSend {
+            receiver: Box::new(Expression::ClassReference {
+                name: Identifier::new("Erlang", Span::new(0, 6)),
+                span: Span::new(0, 6),
+                package: None,
+            }),
+            selector: MessageSelector::Unary((*module).into()),
+            arguments: vec![],
+            is_cast: false,
+            span: Span::new(0, 12),
+        };
+        let receiver = if *parenthesized {
+            Expression::Parenthesized {
+                expression: Box::new(inner),
+                span: Span::new(0, 14),
+            }
+        } else {
+            inner
+        };
+        let output = generator
+            .generate_message_send(&receiver, selector, arguments)
+            .unwrap()
+            .to_pretty_string();
+        assert_has(label, &output, has);
+        assert_lacks(label, &output, lacks);
+    }
 }
 
 #[test]
@@ -1637,39 +1657,6 @@ fn test_bt4075_actor_logger_error_last_statement_replies() {
 }
 
 #[test]
-fn test_erlang_interop_direct_call_zero_arg() {
-    // `Erlang erlang node` → `call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [], 'stock')`
-    // Routes through proxy for consistent validation/coercion
-    let mut generator = CoreErlangGenerator::new("test");
-
-    let inner_receiver = Expression::MessageSend {
-        receiver: Box::new(Expression::ClassReference {
-            name: Identifier::new("Erlang", Span::new(0, 6)),
-            span: Span::new(0, 6),
-            package: None,
-        }),
-        selector: MessageSelector::Unary("erlang".into()),
-        arguments: vec![],
-        is_cast: false,
-        span: Span::new(0, 13),
-    };
-    // Outer: (Erlang erlang) node — unary selector, zero arguments
-    let selector = MessageSelector::Unary("node".into());
-    let arguments = vec![];
-
-    let doc = generator
-        .generate_message_send(&inner_receiver, &selector, &arguments)
-        .unwrap();
-    let output = doc.to_pretty_string();
-
-    assert!(
-        output
-            .contains("call 'beamtalk_erlang_proxy':'direct_call'('erlang', 'node', [], 'stock')"),
-        "Should emit proxy-routed zero-arg call. Got: {output}"
-    );
-}
-
-#[test]
 fn test_erlang_interop_proxy_still_works_for_standalone() {
     // `Erlang lists` (standalone, no chained call) → proxy map (unchanged)
     let mut generator = CoreErlangGenerator::new("test");
@@ -1757,55 +1744,6 @@ fn test_erlang_interop_protocol_selectors_not_optimized() {
             || output.contains("beamtalk_primitive")
             || output.contains("ErlangModule"),
         "printString should use runtime dispatch or proxy. Got: {output}"
-    );
-}
-
-#[test]
-fn test_erlang_interop_direct_call_parenthesized_receiver() {
-    // `(Erlang lists) reverse: xs` with a genuine `Parenthesized`
-    // AST node wrapping the inner `Erlang lists` send must hit the same
-    // direct-call fast path as the unparenthesized form — the shared
-    // `beamtalk_core::ffi_receiver::erlang_module_of_receiver` recognizer peels
-    // parens so codegen and the LSP queries agree on this canonical form.
-    let mut generator = CoreErlangGenerator::new("test");
-
-    let inner_send = Expression::MessageSend {
-        receiver: Box::new(Expression::ClassReference {
-            name: Identifier::new("Erlang", Span::new(1, 7)),
-            span: Span::new(1, 7),
-            package: None,
-        }),
-        selector: MessageSelector::Unary("lists".into()),
-        arguments: vec![],
-        is_cast: false,
-        span: Span::new(1, 13),
-    };
-    let parenthesized_receiver = Expression::Parenthesized {
-        expression: Box::new(inner_send),
-        span: Span::new(0, 14),
-    };
-    let selector = MessageSelector::Keyword(vec![KeywordPart::new("reverse:", Span::new(15, 23))]);
-    let arguments = vec![Expression::Identifier(Identifier::new(
-        "xs",
-        Span::new(24, 26),
-    ))];
-
-    let doc = generator
-        .generate_message_send(&parenthesized_receiver, &selector, &arguments)
-        .unwrap();
-    let output = doc.to_pretty_string();
-
-    assert!(
-        output.contains("call 'beamtalk_erlang_proxy':'direct_call'("),
-        "Parenthesized FFI receiver should emit proxy-routed call. Got: {output}"
-    );
-    assert!(
-        !output.contains("ErlangModule"),
-        "Should not create proxy map. Got: {output}"
-    );
-    assert!(
-        !output.contains("beamtalk_message_dispatch"),
-        "Should not use runtime dispatch. Got: {output}"
     );
 }
 
@@ -2153,143 +2091,62 @@ fn test_bt3986_generate_erlang_interop_block_stateful_is_internal_error() {
     );
 }
 
+/// BT-4679: the former `test_cast_send_to_non_self_receiver_uses_dispatch_cast`,
+/// `test_cast_send_to_non_self_keyword_receiver_uses_dispatch_cast` and
+/// `test_cast_self_send_routes_to_mailbox` tests: `generate_cast_send` on a built AST.
+/// (`test_cast_send_in_actor_method_compiles` goes through source and stays separate.)
 #[test]
-fn test_cast_send_to_non_self_receiver_uses_dispatch_cast() {
-    // `someActor increment!` should generate beamtalk_message_dispatch:cast/3
-    let mut generator = CoreErlangGenerator::new("test");
-
-    let receiver = Expression::Identifier(Identifier::new("someActor", Span::new(0, 9)));
-    let selector = MessageSelector::Unary("increment".into());
-    let send_expr = Expression::MessageSend {
-        receiver: Box::new(receiver),
-        selector: selector.clone(),
-        arguments: vec![],
-        is_cast: true,
-        span: Span::new(0, 20),
-    };
-
-    let doc = if let Expression::MessageSend {
-        receiver,
-        selector,
-        arguments,
-        is_cast: true,
-        ..
-    } = &send_expr
-    {
-        generator
-            .generate_cast_send(receiver, selector, arguments)
+fn test_generate_cast_send_table() {
+    // (label, receiver name, selector, arguments, must contain, must not contain)
+    #[allow(clippy::type_complexity)]
+    let cases: Vec<(
+        &str,
+        &str,
+        MessageSelector,
+        Vec<Expression>,
+        Vec<&str>,
+        Vec<&str>,
+    )> = vec![
+        (
+            // `someActor increment!` should generate beamtalk_message_dispatch:cast/3
+            "unary cast to a non-self receiver",
+            "someActor",
+            MessageSelector::Unary("increment".into()),
+            vec![],
+            vec!["beamtalk_message_dispatch':'cast'(", "'increment'"],
+            vec!["beamtalk_message_dispatch':'send'"],
+        ),
+        (
+            // `someActor setValue: 42!` should generate beamtalk_message_dispatch:cast/3
+            "keyword cast to a non-self receiver",
+            "someActor",
+            MessageSelector::Keyword(vec![KeywordPart::new("setValue:", Span::new(10, 19))]),
+            vec![Expression::Literal(Literal::Integer(42), Span::new(20, 22))],
+            vec!["beamtalk_message_dispatch':'cast'(", "'setValue:'", "42"],
+            vec![],
+        ),
+        (
+            // `self increment!` in actor context routes through the mailbox
+            // (beamtalk_message_dispatch:cast/3), BT-3998, and is not dispatched inline.
+            // CoreErlangGenerator::new defaults to Actor context: self-sends are valid.
+            "self cast routes to the mailbox",
+            "self",
+            MessageSelector::Unary("increment".into()),
+            vec![],
+            vec!["'beamtalk_message_dispatch':'cast'(", "'increment'"],
+            vec!["safe_dispatch"],
+        ),
+    ];
+    for (label, receiver_name, selector, arguments, has, lacks) in &cases {
+        let mut generator = CoreErlangGenerator::new("test");
+        let receiver = Expression::Identifier(Identifier::new(*receiver_name, Span::new(0, 9)));
+        let output = generator
+            .generate_cast_send(&receiver, selector, arguments)
             .unwrap()
-    } else {
-        panic!("expected MessageSend")
-    };
-
-    let output = doc.to_pretty_string();
-    assert!(
-        output.contains("beamtalk_message_dispatch':'cast'("),
-        "Cast send should route via beamtalk_message_dispatch:cast/3. Got: {output}"
-    );
-    assert!(
-        output.contains("'increment'"),
-        "Cast send should include selector atom. Got: {output}"
-    );
-    assert!(
-        !output.contains("beamtalk_message_dispatch':'send'"),
-        "Cast send must NOT use send/3. Got: {output}"
-    );
-}
-
-#[test]
-fn test_cast_send_to_non_self_keyword_receiver_uses_dispatch_cast() {
-    // `someActor setValue: 42!` should generate beamtalk_message_dispatch:cast/3
-    let mut generator = CoreErlangGenerator::new("test");
-
-    let receiver = Expression::Identifier(Identifier::new("someActor", Span::new(0, 9)));
-    let selector = MessageSelector::Keyword(vec![KeywordPart::new("setValue:", Span::new(10, 19))]);
-    let args = vec![Expression::Literal(Literal::Integer(42), Span::new(20, 22))];
-    let send_expr = Expression::MessageSend {
-        receiver: Box::new(receiver),
-        selector: selector.clone(),
-        arguments: args.clone(),
-        is_cast: true,
-        span: Span::new(0, 22),
-    };
-
-    let doc = if let Expression::MessageSend {
-        receiver,
-        selector,
-        arguments,
-        is_cast: true,
-        ..
-    } = &send_expr
-    {
-        generator
-            .generate_cast_send(receiver, selector, arguments)
-            .unwrap()
-    } else {
-        panic!("expected MessageSend")
-    };
-
-    let output = doc.to_pretty_string();
-    assert!(
-        output.contains("beamtalk_message_dispatch':'cast'("),
-        "Keyword cast send should route via beamtalk_message_dispatch:cast/3. Got: {output}"
-    );
-    assert!(
-        output.contains("'setValue:'"),
-        "Cast send should include keyword selector atom. Got: {output}"
-    );
-    assert!(
-        output.contains("42"),
-        "Cast send should include argument value. Got: {output}"
-    );
-}
-
-#[test]
-fn test_cast_self_send_routes_to_mailbox() {
-    // `self increment!` in actor context routes through the mailbox
-    // (beamtalk_message_dispatch:cast/3), BT-3998.
-    let mut generator = CoreErlangGenerator::new("test");
-    // CoreErlangGenerator::new defaults to Actor context — self-sends are valid
-
-    let receiver = Expression::Identifier(Identifier::new("self", Span::new(0, 4)));
-    let selector = MessageSelector::Unary("increment".into());
-    let send_expr = Expression::MessageSend {
-        receiver: Box::new(receiver),
-        selector: selector.clone(),
-        arguments: vec![],
-        is_cast: true,
-        span: Span::new(0, 15),
-    };
-
-    let doc = if let Expression::MessageSend {
-        receiver,
-        selector,
-        arguments,
-        is_cast: true,
-        ..
-    } = &send_expr
-    {
-        generator
-            .generate_cast_send(receiver, selector, arguments)
-            .unwrap()
-    } else {
-        panic!("expected MessageSend")
-    };
-
-    let output = doc.to_pretty_string();
-    // BT-3998: a self cast routes to the mailbox, it is not dispatched inline
-    assert!(
-        output.contains("'beamtalk_message_dispatch':'cast'("),
-        "Self cast send should route through the mailbox. Got: {output}"
-    );
-    assert!(
-        !output.contains("safe_dispatch"),
-        "Self cast send must not dispatch inline. Got: {output}"
-    );
-    assert!(
-        output.contains("'increment'"),
-        "Self cast send should include selector atom. Got: {output}"
-    );
+            .to_pretty_string();
+        assert_has(label, &output, has);
+        assert_lacks(label, &output, lacks);
+    }
 }
 
 #[test]
@@ -2533,39 +2390,6 @@ fn has_sync_send_for_selector(code: &str, selector: &str) -> bool {
         })
 }
 
-#[test]
-fn test_field_names_routes_through_message_dispatch() {
-    // fieldNames on a non-self receiver must go through
-    // beamtalk_message_dispatch:send/3, which sync_sends actors (never
-    // async_send + future), class_sends class objects, and answers primitive
-    // values in-process. It must never pull `element(4, R)` from a receiver
-    // it merely assumed to be an actor (BT-4264: badarg on Integer, Binary,
-    // Bitstring, List, ...).
-    let src = concat!(
-        "Actor subclass: Srv\n",
-        "  state: x = 0\n\n",
-        "  run: other =>\n",
-        "    other fieldNames\n",
-    );
-    let code = codegen_source(src);
-    assert!(
-        has_message_dispatch_send_for_selector(&code, "'fieldNames'"),
-        "fieldNames must delegate to beamtalk_message_dispatch:send. Got:\n{code}"
-    );
-    assert!(
-        !has_sync_send_for_selector(&code, "'fieldNames'"),
-        "fieldNames must not sync_send an unclassified receiver. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'async_send'"),
-        "fieldNames must not use async_send. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'beamtalk_future':'new'"),
-        "fieldNames must not allocate a future. Got:\n{code}"
-    );
-}
-
 /// True when `code` delegates `selector` to `beamtalk_message_dispatch:send/3`.
 fn has_message_dispatch_send_for_selector(code: &str, selector: &str) -> bool {
     code.match_indices("'beamtalk_message_dispatch':'send'(")
@@ -2575,302 +2399,276 @@ fn has_message_dispatch_send_for_selector(code: &str, selector: &str) -> bool {
         })
 }
 
-#[test]
-fn test_field_at_object_receiver_uses_message_dispatch() {
-    // BT-4148: a `#beamtalk_object{}` receiver of `fieldAt:` may be an actor
-    // instance OR a class object; only `beamtalk_message_dispatch:send/3`
-    // (`classify_receiver`) tells them apart. A direct `sync_send` sent a
-    // class object the actor message shape and crashed its gen_server.
-    let src = concat!(
-        "Actor subclass: Srv\n",
-        "  state: x = 0\n\n",
-        "  run: other with: name =>\n",
-        "    other fieldAt: name\n",
-    );
-    let code = codegen_source(src);
-    assert!(
-        has_message_dispatch_send_for_selector(&code, "'fieldAt:'"),
-        "fieldAt: on an object receiver must go through beamtalk_message_dispatch:send. Got:\n{code}"
-    );
-    assert!(
-        !has_sync_send_for_selector(&code, "'fieldAt:'"),
-        "fieldAt: must not sync_send directly (class objects are #beamtalk_object{{}} too). Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'async_send'"),
-        "fieldAt: must not use async_send. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'beamtalk_future':'new'"),
-        "fieldAt: must not allocate a future. Got:\n{code}"
-    );
-    // The primitive-receiver error stays inline.
-    assert!(
-        code.contains("'immutable_value'"),
-        "fieldAt: must keep its inline immutable_value error for primitives. Got:\n{code}"
-    );
+/// One expectation on generated Core Erlang for [`FieldCase`].
+enum Expect {
+    /// `code` contains the text.
+    Has(&'static str),
+    /// `code` does not contain the text.
+    Lacks(&'static str),
+    /// A `beamtalk_message_dispatch:send/3` call carries the selector atom.
+    Dispatches(&'static str),
+    /// No `beamtalk_actor:sync_send` call carries the selector atom.
+    NoSyncSend(&'static str),
 }
 
-#[test]
-fn test_field_at_put_object_receiver_uses_message_dispatch() {
-    // BT-4148: as `fieldAt:` above, for `fieldAt:put:`.
-    let src = concat!(
-        "Actor subclass: Srv\n",
-        "  state: x = 0\n\n",
-        "  run: other with: name with: val =>\n",
-        "    other fieldAt: name put: val\n",
-    );
-    let code = codegen_source(src);
-    assert!(
-        has_message_dispatch_send_for_selector(&code, "'fieldAt:put:'"),
-        "fieldAt:put: on an object receiver must go through beamtalk_message_dispatch:send. Got:\n{code}"
-    );
-    assert!(
-        !has_sync_send_for_selector(&code, "'fieldAt:put:'"),
-        "fieldAt:put: must not sync_send directly (class objects are #beamtalk_object{{}} too). Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'async_send'"),
-        "fieldAt:put: must not use async_send. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'beamtalk_future':'new'"),
-        "fieldAt:put: must not allocate a future. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'immutable_value'"),
-        "fieldAt:put: must keep its inline immutable_value error for primitives. Got:\n{code}"
-    );
+/// One row of [`test_field_operation_codegen_table`]: a label, a source module and
+/// the expectations on its generated code.
+struct FieldCase {
+    label: &'static str,
+    src: &'static str,
+    expect: &'static [Expect],
 }
 
+/// BT-4679: the former `test_field_names_*`, `test_field_at_*`, `test_field_at_put_*`,
+/// `test_clear_field_*` and `test_has_field_*` tests (13 cases, 34 assertions). The
+/// rationale for each row is its comment.
+///
+/// ADR 0124 §1/§4f/B4 — `clearField:`/`hasField:` mirror `fieldAt:put:`/`fieldAt:`'s
+/// own sync_send-avoidance cases.
 #[test]
-fn test_field_at_class_receiver_uses_message_dispatch() {
-    // BT-4148: `Cls fieldAt: #x` / `Cls fieldAt: #x put: v` from outside the
-    // class route through `beamtalk_message_dispatch:send/3`, which reaches
-    // the class gen_server's `dispatch_class_method` `fieldAt:` clauses.
-    let src = concat!(
-        "Object subclass: Holder\n",
-        "  classState: count = 0\n\n",
-        "  probe => Holder fieldAt: #count\n",
-        "  poke => Holder fieldAt: #count put: 3\n",
-    );
-    let code = codegen_source(src);
-    assert!(
-        has_message_dispatch_send_for_selector(&code, "'fieldAt:'"),
-        "Cls fieldAt: must go through beamtalk_message_dispatch:send. Got:\n{code}"
-    );
-    assert!(
-        has_message_dispatch_send_for_selector(&code, "'fieldAt:put:'"),
-        "Cls fieldAt:put: must go through beamtalk_message_dispatch:send. Got:\n{code}"
-    );
-    assert!(
-        !has_sync_send_for_selector(&code, "'fieldAt:"),
-        "Cls fieldAt:[put:] must not sync_send to the class pid. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_field_names_self_no_sync_send() {
-    // `self fieldNames` inside an actor must NOT route through sync_send.
-    // Self is a #beamtalk_object{..., pid: self()} tuple; sync_send(self()) would be
-    // gen_server:call(self(), ...) → deadlock. Must use beamtalk_primitive:send(State).
-    let src = concat!(
-        "Actor subclass: Srv\n",
-        "  state: x = 0\n\n",
-        "  getFieldNames =>\n",
-        "    self fieldNames\n",
-    );
-    let code = codegen_source(src);
-    assert!(
-        !has_sync_send_for_selector(&code, "'fieldNames'"),
-        "self fieldNames must not route through sync_send (deadlock risk). Got:\n{code}"
-    );
-    assert!(
-        code.contains("'beamtalk_primitive':'send'"),
-        "self fieldNames must route through beamtalk_primitive:send. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_field_at_self_no_sync_send() {
-    // `self fieldAt: name` inside an actor must NOT route through sync_send.
-    let src = concat!(
-        "Actor subclass: Srv\n",
-        "  state: x = 0\n\n",
-        "  getField: name =>\n",
-        "    self fieldAt: name\n",
-    );
-    let code = codegen_source(src);
-    assert!(
-        !has_sync_send_for_selector(&code, "'fieldAt:'"),
-        "self fieldAt: must not route through sync_send (deadlock risk). Got:\n{code}"
-    );
-    assert!(
-        code.contains("'beamtalk_primitive':'send'"),
-        "self fieldAt: must route through beamtalk_primitive:send. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_field_at_put_self_no_sync_send() {
-    // `self fieldAt: name put: val` inside an actor must NOT route through sync_send.
-    // Must thread state update via maps:put so subsequent reads see the new value.
-    let src = concat!(
-        "Actor subclass: Srv\n",
-        "  state: x = 0\n\n",
-        "  setField: name to: val =>\n",
-        "    self fieldAt: name put: val\n",
-    );
-    let code = codegen_source(src);
-    assert!(
-        !has_sync_send_for_selector(&code, "'fieldAt:put:'"),
-        "self fieldAt:put: must not route through sync_send (deadlock risk). Got:\n{code}"
-    );
-    assert!(
-        code.contains("'maps':'put'"),
-        "self fieldAt:put: must thread state via maps:put (BT-1324). Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_field_at_put_self_threads_state() {
-    // After `self fieldAt: #x put: val`, subsequent `self fieldAt: #x`
-    // must read from the updated state, not the stale snapshot.
-    let src = concat!(
-        "Actor subclass: Srv\n",
-        "  state: x = 0\n\n",
-        "  mutateAndRead =>\n",
-        "    self fieldAt: #x put: 42.\n",
-        "    self fieldAt: #x\n",
-    );
-    let code = codegen_source(src);
-    // The maps:put must produce a new State variable (State1)
-    // and the subsequent fieldAt: read must use State1, not State0.
-    assert!(
-        code.contains("'maps':'put'"),
-        "self fieldAt:put: must use maps:put for state threading. Got:\n{code}"
-    );
-    // Verify the fieldAt: read uses the threaded State1 (not stale State)
-    assert!(
-        code.contains("'beamtalk_primitive':'send'(State1, 'fieldAt:'"),
-        "self fieldAt: read must reference State1 after fieldAt:put: threading. Got:\n{code}"
-    );
-}
-
-// ADR 0124 §1/§4f/B4 — `clearField:`/`hasField:` mirror `fieldAt:put:`/
-// `fieldAt:`'s own sync_send-avoidance tests immediately above.
-
-#[test]
-fn test_clear_field_other_receiver_uses_message_dispatch() {
-    // clearField: on a non-self receiver delegates to
-    // beamtalk_message_dispatch:send/3 (NOT a hand-rolled is_tuple/is_map
-    // check, unlike fieldAt:/fieldAt:put: above) — the general dispatcher
-    // already classifies actor/class-object/value receivers correctly, so
-    // a class-object receiver reaches `dispatch_class_method`'s
-    // `'clearField:'` clause instead of being mistaken for a plain actor
-    // instance and crashing it with the wrong message shape (found via
-    // this issue's own "from outside" BUnit test).
-    let src = concat!(
-        "Actor subclass: Srv\n",
-        "  state: x = 0\n\n",
-        "  run: other with: name =>\n",
-        "    other clearField: name\n",
-    );
-    let code = codegen_source(src);
-    assert!(
-        code.contains("'beamtalk_message_dispatch':'send'") && code.contains("'clearField:'"),
-        "clearField: on a non-self receiver must delegate to beamtalk_message_dispatch:send with the 'clearField:' selector. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'async_send'"),
-        "clearField: must not use async_send. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_clear_field_self_no_sync_send() {
-    // `self clearField: name` inside an actor must NOT route through
-    // sync_send (deadlock risk) — must thread state via maps:remove
-    // (`generate_self_clear_field_open`, mirroring `fieldAt:put:`'s
-    // `maps:put`).
-    let src = concat!(
-        "Actor subclass: Srv\n",
-        "  state: x = 0\n\n",
-        "  clear: name =>\n",
-        "    self clearField: name\n",
-    );
-    let code = codegen_source(src);
-    assert!(
-        !has_sync_send_for_selector(&code, "'clearField:'"),
-        "self clearField: must not route through sync_send (deadlock risk). Got:\n{code}"
-    );
-    assert!(
-        code.contains("'maps':'remove'"),
-        "self clearField: must thread state via maps:remove (ADR 0124 §4f). Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_clear_field_self_threads_state() {
-    // After `self clearField: #x`, a subsequent `self fieldAt: #x` must
-    // read from the updated (post-remove) state, not the stale snapshot.
-    let src = concat!(
-        "Actor subclass: Srv\n",
-        "  state: x = 0\n\n",
-        "  clearAndRead =>\n",
-        "    self clearField: #x.\n",
-        "    self fieldAt: #x\n",
-    );
-    let code = codegen_source(src);
-    assert!(
-        code.contains("'maps':'remove'"),
-        "self clearField: must use maps:remove for state threading. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'beamtalk_primitive':'send'(State1, 'fieldAt:'"),
-        "self fieldAt: read must reference State1 after clearField: threading. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_has_field_self_no_sync_send() {
-    // `self hasField: name` inside an actor must NOT route through
-    // sync_send (deadlock risk) — a pure read via beamtalk_primitive:send,
-    // mirroring `fieldAt:`.
-    let src = concat!(
-        "Actor subclass: Srv\n",
-        "  state: x = 0\n\n",
-        "  has: name =>\n",
-        "    self hasField: name\n",
-    );
-    let code = codegen_source(src);
-    assert!(
-        !has_sync_send_for_selector(&code, "'hasField:'"),
-        "self hasField: must not route through sync_send (deadlock risk). Got:\n{code}"
-    );
-    assert!(
-        code.contains("'beamtalk_primitive':'send'"),
-        "self hasField: must route through beamtalk_primitive:send. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_has_field_other_receiver_uses_message_dispatch() {
-    // hasField: on a non-self receiver delegates to
-    // beamtalk_message_dispatch:send/3 — see
-    // test_clear_field_other_receiver_uses_message_dispatch's doc comment
-    // for why (a class-object receiver, not just a plain actor instance).
-    let src = concat!(
-        "Actor subclass: Srv\n",
-        "  state: x = 0\n\n",
-        "  run: other with: name =>\n",
-        "    other hasField: name\n",
-    );
-    let code = codegen_source(src);
-    assert!(
-        code.contains("'beamtalk_message_dispatch':'send'") && code.contains("'hasField:'"),
-        "hasField: on a non-self receiver must delegate to beamtalk_message_dispatch:send with the 'hasField:' selector. Got:\n{code}"
-    );
+#[allow(clippy::too_many_lines)] // a data table: one entry per former test
+fn test_field_operation_codegen_table() {
+    use Expect::{Dispatches, Has, Lacks, NoSyncSend};
+    let cases = [
+        // fieldNames on a non-self receiver must go through
+        // beamtalk_message_dispatch:send/3, which sync_sends actors (never
+        // async_send + future), class_sends class objects, and answers primitive
+        // values in-process. It must never pull `element(4, R)` from a receiver
+        // it merely assumed to be an actor (BT-4264: badarg on Integer, Binary,
+        // Bitstring, List, ...).
+        FieldCase {
+            label: "fieldNames on other receiver delegates to message dispatch",
+            src: concat!(
+                "Actor subclass: Srv\n",
+                "  state: x = 0\n\n",
+                "  run: other =>\n",
+                "    other fieldNames\n",
+            ),
+            expect: &[
+                Dispatches("'fieldNames'"),
+                NoSyncSend("'fieldNames'"),
+                Lacks("'async_send'"),
+                Lacks("'beamtalk_future':'new'"),
+            ],
+        },
+        // BT-4148: a `#beamtalk_object{}` receiver of `fieldAt:` may be an actor
+        // instance OR a class object; only `beamtalk_message_dispatch:send/3`
+        // (`classify_receiver`) tells them apart. A direct `sync_send` sent a
+        // class object the actor message shape and crashed its gen_server.
+        // The primitive-receiver error stays inline.
+        FieldCase {
+            label: "fieldAt: on object receiver delegates to message dispatch",
+            src: concat!(
+                "Actor subclass: Srv\n",
+                "  state: x = 0\n\n",
+                "  run: other with: name =>\n",
+                "    other fieldAt: name\n",
+            ),
+            expect: &[
+                Dispatches("'fieldAt:'"),
+                NoSyncSend("'fieldAt:'"),
+                Lacks("'async_send'"),
+                Lacks("'beamtalk_future':'new'"),
+                Has("'immutable_value'"),
+            ],
+        },
+        // BT-4148: as `fieldAt:` above, for `fieldAt:put:`.
+        FieldCase {
+            label: "fieldAt:put: on object receiver delegates to message dispatch",
+            src: concat!(
+                "Actor subclass: Srv\n",
+                "  state: x = 0\n\n",
+                "  run: other with: name with: val =>\n",
+                "    other fieldAt: name put: val\n",
+            ),
+            expect: &[
+                Dispatches("'fieldAt:put:'"),
+                NoSyncSend("'fieldAt:put:'"),
+                Lacks("'async_send'"),
+                Lacks("'beamtalk_future':'new'"),
+                Has("'immutable_value'"),
+            ],
+        },
+        // BT-4148: `Cls fieldAt: #x` / `Cls fieldAt: #x put: v` from outside the
+        // class route through `beamtalk_message_dispatch:send/3`, which reaches
+        // the class gen_server's `dispatch_class_method` `fieldAt:` clauses.
+        FieldCase {
+            label: "fieldAt: and fieldAt:put: on class receiver delegate to message dispatch",
+            src: concat!(
+                "Object subclass: Holder\n",
+                "  classState: count = 0\n\n",
+                "  probe => Holder fieldAt: #count\n",
+                "  poke => Holder fieldAt: #count put: 3\n",
+            ),
+            expect: &[
+                Dispatches("'fieldAt:'"),
+                Dispatches("'fieldAt:put:'"),
+                // Prefix only: covers both `fieldAt:` and `fieldAt:put:`.
+                NoSyncSend("'fieldAt:"),
+            ],
+        },
+        // `self fieldNames` inside an actor must NOT route through sync_send.
+        // Self is a #beamtalk_object{..., pid: self()} tuple; sync_send(self()) would be
+        // gen_server:call(self(), ...) → deadlock. Must use beamtalk_primitive:send(State).
+        FieldCase {
+            label: "self fieldNames does not sync_send",
+            src: concat!(
+                "Actor subclass: Srv\n",
+                "  state: x = 0\n\n",
+                "  getFieldNames =>\n",
+                "    self fieldNames\n",
+            ),
+            expect: &[
+                NoSyncSend("'fieldNames'"),
+                Has("'beamtalk_primitive':'send'"),
+            ],
+        },
+        // `self fieldAt: name` inside an actor must NOT route through sync_send.
+        FieldCase {
+            label: "self fieldAt: does not sync_send",
+            src: concat!(
+                "Actor subclass: Srv\n",
+                "  state: x = 0\n\n",
+                "  getField: name =>\n",
+                "    self fieldAt: name\n",
+            ),
+            expect: &[NoSyncSend("'fieldAt:'"), Has("'beamtalk_primitive':'send'")],
+        },
+        // `self fieldAt: name put: val` inside an actor must NOT route through sync_send.
+        // Must thread state update via maps:put so subsequent reads see the new value
+        // (BT-1324).
+        FieldCase {
+            label: "self fieldAt:put: does not sync_send and threads state via maps:put",
+            src: concat!(
+                "Actor subclass: Srv\n",
+                "  state: x = 0\n\n",
+                "  setField: name to: val =>\n",
+                "    self fieldAt: name put: val\n",
+            ),
+            expect: &[NoSyncSend("'fieldAt:put:'"), Has("'maps':'put'")],
+        },
+        // After `self fieldAt: #x put: val`, subsequent `self fieldAt: #x`
+        // must read from the updated state, not the stale snapshot. The maps:put
+        // must produce a new State variable (State1) and the subsequent fieldAt:
+        // read must use State1, not State0.
+        FieldCase {
+            label: "self fieldAt:put: then fieldAt: reads threaded State1",
+            src: concat!(
+                "Actor subclass: Srv\n",
+                "  state: x = 0\n\n",
+                "  mutateAndRead =>\n",
+                "    self fieldAt: #x put: 42.\n",
+                "    self fieldAt: #x\n",
+            ),
+            expect: &[
+                Has("'maps':'put'"),
+                Has("'beamtalk_primitive':'send'(State1, 'fieldAt:'"),
+            ],
+        },
+        // clearField: on a non-self receiver delegates to
+        // beamtalk_message_dispatch:send/3 (NOT a hand-rolled is_tuple/is_map
+        // check, unlike fieldAt:/fieldAt:put: above) — the general dispatcher
+        // already classifies actor/class-object/value receivers correctly, so
+        // a class-object receiver reaches `dispatch_class_method`'s
+        // `'clearField:'` clause instead of being mistaken for a plain actor
+        // instance and crashing it with the wrong message shape (found via
+        // this issue's own "from outside" BUnit test).
+        FieldCase {
+            label: "clearField: on other receiver delegates to message dispatch",
+            src: concat!(
+                "Actor subclass: Srv\n",
+                "  state: x = 0\n\n",
+                "  run: other with: name =>\n",
+                "    other clearField: name\n",
+            ),
+            expect: &[
+                Has("'beamtalk_message_dispatch':'send'"),
+                Has("'clearField:'"),
+                Lacks("'async_send'"),
+            ],
+        },
+        // `self clearField: name` inside an actor must NOT route through
+        // sync_send (deadlock risk) — must thread state via maps:remove
+        // (`generate_self_clear_field_open`, mirroring `fieldAt:put:`'s
+        // `maps:put`; ADR 0124 §4f).
+        FieldCase {
+            label: "self clearField: does not sync_send and threads state via maps:remove",
+            src: concat!(
+                "Actor subclass: Srv\n",
+                "  state: x = 0\n\n",
+                "  clear: name =>\n",
+                "    self clearField: name\n",
+            ),
+            expect: &[NoSyncSend("'clearField:'"), Has("'maps':'remove'")],
+        },
+        // After `self clearField: #x`, a subsequent `self fieldAt: #x` must
+        // read from the updated (post-remove) state, not the stale snapshot.
+        FieldCase {
+            label: "self clearField: then fieldAt: reads threaded State1",
+            src: concat!(
+                "Actor subclass: Srv\n",
+                "  state: x = 0\n\n",
+                "  clearAndRead =>\n",
+                "    self clearField: #x.\n",
+                "    self fieldAt: #x\n",
+            ),
+            expect: &[
+                Has("'maps':'remove'"),
+                Has("'beamtalk_primitive':'send'(State1, 'fieldAt:'"),
+            ],
+        },
+        // `self hasField: name` inside an actor must NOT route through
+        // sync_send (deadlock risk) — a pure read via beamtalk_primitive:send,
+        // mirroring `fieldAt:`.
+        FieldCase {
+            label: "self hasField: does not sync_send",
+            src: concat!(
+                "Actor subclass: Srv\n",
+                "  state: x = 0\n\n",
+                "  has: name =>\n",
+                "    self hasField: name\n",
+            ),
+            expect: &[
+                NoSyncSend("'hasField:'"),
+                Has("'beamtalk_primitive':'send'"),
+            ],
+        },
+        // hasField: on a non-self receiver delegates to
+        // beamtalk_message_dispatch:send/3, as clearField: above (a class-object
+        // receiver, not just a plain actor instance).
+        FieldCase {
+            label: "hasField: on other receiver delegates to message dispatch",
+            src: concat!(
+                "Actor subclass: Srv\n",
+                "  state: x = 0\n\n",
+                "  run: other with: name =>\n",
+                "    other hasField: name\n",
+            ),
+            expect: &[
+                Has("'beamtalk_message_dispatch':'send'"),
+                Has("'hasField:'"),
+            ],
+        },
+    ];
+    for case in &cases {
+        let code = codegen_source(case.src);
+        for expect in case.expect {
+            match expect {
+                Has(text) => assert_has(case.label, &code, &[text]),
+                Lacks(text) => assert_lacks(case.label, &code, &[text]),
+                Dispatches(selector) => assert!(
+                    has_message_dispatch_send_for_selector(&code, selector),
+                    "[{}] expected beamtalk_message_dispatch:send for {selector}. Got:\n{code}",
+                    case.label
+                ),
+                NoSyncSend(selector) => assert!(
+                    !has_sync_send_for_selector(&code, selector),
+                    "[{}] must not beamtalk_actor:sync_send {selector}. Got:\n{code}",
+                    case.label
+                ),
+            }
+        }
+    }
 }
 
 // --- State-mutation hoisting in block value: apply paths ---
@@ -3539,115 +3337,80 @@ fn test_qualified_class_name_only_reference_uses_bare_name() {
     );
 }
 
+/// BT-4679: the former `test_qualified_class_method_call`, `test_qualified_actor_spawn`,
+/// `test_qualified_actor_spawn_with_args` and `test_qualified_class_reference_multi_word`
+/// tests (ADR 0070 Phase 2): a package-qualified class receiver (`pkg@Class`) sent a
+/// message from `bt@my_app@main`. The other `test_qualified_*` tests use different
+/// codegen entry points (`generate_expression`, `class_name_only_reference`) and stay
+/// separate.
 #[test]
-fn test_qualified_class_method_call() {
-    // ADR 0070 Phase 2: `json@Parser parse: input` should use the class
-    // registry to find the class PID and dispatch the class method.
-    let mut generator = CoreErlangGenerator::new("bt@my_app@main");
-
-    let receiver = Expression::ClassReference {
-        name: Identifier::new("Parser", Span::new(5, 11)),
-        package: Some(Identifier::new("json", Span::new(0, 4))),
-        span: Span::new(0, 11),
-    };
-    let selector = MessageSelector::Keyword(vec![KeywordPart::new("parse:", Span::new(12, 18))]);
-    let arguments = vec![Expression::Identifier(Identifier::new(
-        "input",
-        Span::new(19, 24),
-    ))];
-
-    let doc = generator
-        .generate_message_send(&receiver, &selector, &arguments)
-        .unwrap();
-    let output = doc.to_pretty_string();
-
-    // Should look up by short class name in class registry
-    assert!(
-        output.contains("'erlang':'whereis'('beamtalk_class_Parser')"),
-        "Should use short class name for registry lookup. Got:\n{output}"
-    );
-
-    // Should dispatch via class_send
-    assert!(
-        output.contains("'beamtalk_object_class':'class_send'"),
-        "Should dispatch class method via class_send. Got:\n{output}"
-    );
+fn test_qualified_receiver_message_send_table() {
+    // (label, package, class, selector, arguments, expected substring)
+    #[allow(clippy::type_complexity)]
+    let cases: Vec<(&str, &str, &str, MessageSelector, Vec<Expression>, &str)> = vec![
+        (
+            // Should look up by short class name in the class registry...
+            "class method call looks up the short class name",
+            "json",
+            "Parser",
+            MessageSelector::Keyword(vec![KeywordPart::new("parse:", Span::new(12, 18))]),
+            vec![Expression::Identifier(Identifier::new(
+                "input",
+                Span::new(19, 24),
+            ))],
+            "'erlang':'whereis'('beamtalk_class_Parser')",
+        ),
+        (
+            // ...and dispatch via class_send.
+            "class method call dispatches via class_send",
+            "json",
+            "Parser",
+            MessageSelector::Keyword(vec![KeywordPart::new("parse:", Span::new(12, 18))]),
+            vec![Expression::Identifier(Identifier::new(
+                "input",
+                Span::new(19, 24),
+            ))],
+            "'beamtalk_object_class':'class_send'",
+        ),
+        (
+            "spawn uses the fully-qualified BEAM module name",
+            "json",
+            "Worker",
+            MessageSelector::Unary("spawn".into()),
+            vec![],
+            "call 'bt@json@worker':'spawn'()",
+        ),
+        (
+            "spawnWith: uses the fully-qualified BEAM module name",
+            "json",
+            "Worker",
+            MessageSelector::Keyword(vec![KeywordPart::new("spawnWith:", Span::new(12, 22))]),
+            vec![Expression::Literal(Literal::Integer(42), Span::new(23, 25))],
+            "call 'bt@json@worker':'spawn'(42)",
+        ),
+        (
+            "multi-word class name uses snake_case in the module name",
+            "utils",
+            "MyClass",
+            MessageSelector::Unary("spawn".into()),
+            vec![],
+            "call 'bt@utils@my_class':'spawn'()",
+        ),
+    ];
+    for (label, package, class, selector, arguments, expected) in &cases {
+        let mut generator = CoreErlangGenerator::new("bt@my_app@main");
+        let receiver = Expression::ClassReference {
+            name: Identifier::new(*class, Span::new(5, 11)),
+            package: Some(Identifier::new(*package, Span::new(0, 4))),
+            span: Span::new(0, 11),
+        };
+        let output = generator
+            .generate_message_send(&receiver, selector, arguments)
+            .unwrap()
+            .to_pretty_string();
+        assert_has(label, &output, &[expected]);
+    }
 }
-
-#[test]
-fn test_qualified_actor_spawn() {
-    // ADR 0070 Phase 2: `json@Worker spawn` should use the fully-qualified
-    // BEAM module name 'bt@json@worker' for the spawn call.
-    let mut generator = CoreErlangGenerator::new("bt@my_app@main");
-
-    let receiver = Expression::ClassReference {
-        name: Identifier::new("Worker", Span::new(5, 11)),
-        package: Some(Identifier::new("json", Span::new(0, 4))),
-        span: Span::new(0, 11),
-    };
-    let selector = MessageSelector::Unary("spawn".into());
-
-    let doc = generator
-        .generate_message_send(&receiver, &selector, &[])
-        .unwrap();
-    let output = doc.to_pretty_string();
-
-    // Should use the fully-qualified BEAM module name
-    assert!(
-        output.contains("call 'bt@json@worker':'spawn'()"),
-        "Qualified spawn should use 'bt@json@worker' module name. Got:\n{output}"
-    );
-}
-
-#[test]
-fn test_qualified_actor_spawn_with_args() {
-    // ADR 0070 Phase 2: `json@Worker spawnWith: config` should use the
-    // fully-qualified BEAM module name 'bt@json@worker'.
-    let mut generator = CoreErlangGenerator::new("bt@my_app@main");
-
-    let receiver = Expression::ClassReference {
-        name: Identifier::new("Worker", Span::new(5, 11)),
-        package: Some(Identifier::new("json", Span::new(0, 4))),
-        span: Span::new(0, 11),
-    };
-    let selector =
-        MessageSelector::Keyword(vec![KeywordPart::new("spawnWith:", Span::new(12, 22))]);
-    let arguments = vec![Expression::Literal(Literal::Integer(42), Span::new(23, 25))];
-
-    let doc = generator
-        .generate_message_send(&receiver, &selector, &arguments)
-        .unwrap();
-    let output = doc.to_pretty_string();
-
-    assert!(
-        output.contains("call 'bt@json@worker':'spawn'(42)"),
-        "Qualified spawnWith: should use 'bt@json@worker' module name. Got:\n{output}"
-    );
-}
-
-#[test]
-fn test_qualified_class_reference_multi_word() {
-    // ADR 0070 Phase 2: `utils@MyClass spawn` should produce 'bt@utils@my_class'.
-    let mut generator = CoreErlangGenerator::new("bt@my_app@main");
-
-    let receiver = Expression::ClassReference {
-        name: Identifier::new("MyClass", Span::new(6, 13)),
-        package: Some(Identifier::new("utils", Span::new(0, 5))),
-        span: Span::new(0, 13),
-    };
-    let selector = MessageSelector::Unary("spawn".into());
-
-    let doc = generator
-        .generate_message_send(&receiver, &selector, &[])
-        .unwrap();
-    let output = doc.to_pretty_string();
-
-    assert!(
-        output.contains("call 'bt@utils@my_class':'spawn'()"),
-        "Multi-word class name should use snake_case in qualified module name. Got:\n{output}"
-    );
-}
-
 #[test]
 fn test_unqualified_class_reference_unchanged() {
     // ADR 0070 Phase 2: Unqualified class references should continue to

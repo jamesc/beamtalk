@@ -183,6 +183,27 @@ pub(crate) fn assert_parses(src: &str) {
     );
 }
 
+/// BT-4679: asserts every needle occurs in `code`. A failure names the table row
+/// (`label`) and prints the full generated code after "Got:".
+pub(crate) fn assert_has(label: &str, code: &str, needles: &[&str]) {
+    for needle in needles {
+        assert!(
+            code.contains(needle),
+            "[{label}] expected output to contain {needle:?}. Got:\n{code}"
+        );
+    }
+}
+
+/// BT-4679: asserts no needle occurs in `code`; the counterpart of [`assert_has`].
+pub(crate) fn assert_lacks(label: &str, code: &str, needles: &[&str]) {
+    for needle in needles {
+        assert!(
+            !code.contains(needle),
+            "[{label}] expected output NOT to contain {needle:?}. Got:\n{code}"
+        );
+    }
+}
+
 /// Parse `src` as a single-class Beamtalk module and run codegen in workspace mode.
 ///
 /// Shared by control-flow and dispatch test modules to avoid copy-pasting this
