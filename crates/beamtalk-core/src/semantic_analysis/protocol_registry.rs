@@ -693,7 +693,9 @@ impl ProtocolRegistry {
                 }
             }
 
-            // Duplicate protocol definition
+            // Duplicate protocol definition (pre-loaded entries from other
+            // files are in the map, so this read is a consulted dependency)
+            crate::semantic_analysis::consulted::record_name(name);
             if self.protocols.contains_key(name) {
                 diagnostics.push(
                     Diagnostic::error(
@@ -712,6 +714,7 @@ impl ProtocolRegistry {
 
             // Validate extending clause
             if let Some(ref parent_name) = info.extending {
+                crate::semantic_analysis::consulted::record_name(parent_name);
                 if !self.protocols.contains_key(parent_name) {
                     diagnostics.push(
                         Diagnostic::error(
@@ -735,22 +738,26 @@ impl ProtocolRegistry {
     /// Looks up a protocol by name.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&ProtocolInfo> {
+        crate::semantic_analysis::consulted::record_name(name);
         self.protocols.get(name)
     }
 
     /// Checks if a protocol exists in the registry.
     #[must_use]
     pub fn has_protocol(&self, name: &str) -> bool {
+        crate::semantic_analysis::consulted::record_name(name);
         self.protocols.contains_key(name)
     }
 
     /// Returns an iterator over all protocol names in the registry.
     pub fn protocol_names(&self) -> impl Iterator<Item = &EcoString> {
+        crate::semantic_analysis::consulted::record_scan();
         self.protocols.keys()
     }
 
     /// Returns an iterator over all protocols in the registry.
     pub fn protocols(&self) -> impl Iterator<Item = (&EcoString, &ProtocolInfo)> {
+        crate::semantic_analysis::consulted::record_scan();
         self.protocols.iter()
     }
 
@@ -762,6 +769,7 @@ impl ProtocolRegistry {
     /// if zero or multiple protocols match (ambiguous — fall back to Dynamic).
     #[must_use]
     pub fn find_unique_protocol_for_selector(&self, selector: &str) -> Option<&EcoString> {
+        crate::semantic_analysis::consulted::record_scan();
         let mut found: Option<&EcoString> = None;
         for (name, info) in &self.protocols {
             let selectors = info.all_required_selectors(self);
@@ -1115,6 +1123,7 @@ impl ProtocolRegistry {
         class_name: &str,
         hierarchy: &ClassHierarchy,
     ) -> Vec<EcoString> {
+        crate::semantic_analysis::consulted::record_scan();
         self.protocols
             .keys()
             .filter(|proto_name| {
@@ -2196,7 +2205,7 @@ Value subclass: Version
         // Registering the same protocol name should succeed — it's not a
         // real namespace collision.
         let mut hierarchy = ClassHierarchy::with_builtins();
-        hierarchy.classes_mut().insert(
+        hierarchy.insert_class(
             "Printable".into(),
             crate::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,
@@ -2270,7 +2279,7 @@ Value subclass: Version
         // Pre-loaded protocol should not collide with a synthetic
         // protocol class entry in the hierarchy.
         let mut hierarchy = ClassHierarchy::with_builtins();
-        hierarchy.classes_mut().insert(
+        hierarchy.insert_class(
             "Tickable".into(),
             crate::semantic_analysis::class_hierarchy::ClassInfo {
                 surface_incomplete: false,

@@ -689,7 +689,7 @@ impl CoreErlangGenerator {
     ) -> std::collections::HashMap<String, DirectCallClassInfo> {
         let mut result = std::collections::HashMap::new();
 
-        for (class_name, class_info) in hierarchy.classes() {
+        for (class_name, class_info) in hierarchy.iter_classes() {
             // Gate: class must have class methods
             //
             // ADR 0119 Context: this is the only place that

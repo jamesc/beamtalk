@@ -940,8 +940,7 @@ impl CoreErlangGenerator {
                 continue;
             }
             let defines_initialize = hierarchy
-                .classes()
-                .get(name.as_str())
+                .get_class(name.as_str())
                 .is_some_and(|info| info.methods.iter().any(|m| m.selector == "initialize"));
             if !defines_initialize {
                 continue;
@@ -1038,8 +1037,7 @@ impl CoreErlangGenerator {
                 return false;
             }
             hierarchy
-                .classes()
-                .get(name.as_str())
+                .get_class(name.as_str())
                 .is_some_and(|info| info.methods.iter().any(|m| m.selector == selector))
         })
     }

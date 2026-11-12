@@ -2115,7 +2115,7 @@ impl CoreErlangGenerator {
         if !hierarchy.get_class(class_name)?.is_sealed {
             return None;
         }
-        let overridden = hierarchy.classes().iter().any(|(owner, info)| {
+        let overridden = hierarchy.iter_classes().any(|(owner, info)| {
             owner.as_str() != "Object"
                 && ClassHierarchy::is_builtin_class(owner)
                 && info

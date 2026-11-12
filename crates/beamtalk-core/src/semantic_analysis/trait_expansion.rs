@@ -820,7 +820,7 @@ pub fn apply_origins(hierarchy: &mut ClassHierarchy, origins: &OriginMap) {
         return;
     }
     for ((class_name, selector), protocol_name) in origins {
-        if let Some(class_info) = hierarchy.classes_mut().get_mut(class_name.as_str()) {
+        if let Some(class_info) = hierarchy.get_class_mut(class_name.as_str()) {
             stamp_origin(class_info, selector, protocol_name);
         }
     }

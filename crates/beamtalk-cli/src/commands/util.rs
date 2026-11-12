@@ -947,6 +947,240 @@ mod tests {
         );
     }
 
+    /// BT-4586: every `ClassInfo` / `MethodInfo` field is classified as part of
+    /// the analysis surface (**signature**) or excluded from it
+    /// (**non-signature**, with a reason), and the classification is checked
+    /// against what `analysis_surface_hash` actually does. The exhaustive
+    /// destructurings (no `..`) make adding a field a compile error here, so a
+    /// new field cannot silently skip the classification.
+    #[test]
+    #[allow(
+        clippy::too_many_lines,
+        clippy::items_after_statements,
+        clippy::semicolon_if_nothing_returned
+    )]
+    fn class_info_fields_are_classified_against_the_surface_hash() {
+        use beamtalk_core::ast::{ConstantValue, SlotKind};
+        use beamtalk_core::compilation::extension_index::ExtensionIndex;
+        use beamtalk_core::semantic_analysis::class_hierarchy::{
+            AutoConstructors, ClassHierarchy, ClassInfo, ClassVarInfo, DeclaredType, MethodInfo,
+            SuperclassTypeArg,
+        };
+        use beamtalk_core::source_analysis::{lex_with_eof, parse};
+
+        #[derive(Clone, Copy, PartialEq, Debug)]
+        enum Class {
+            Signature,
+            /// Excluded from the hash, for the stated reason.
+            NonSignature(&'static str),
+        }
+        use Class::{NonSignature, Signature};
+
+        let (module, diags) = parse(lex_with_eof(
+            "Value subclass: Lib\n  state: n :: Integer = 0\n  label -> String => \"x\"\n  class make -> Lib => 1\n",
+        ));
+        assert!(diags.is_empty(), "{diags:?}");
+        let mut base = ClassHierarchy::extract_class_infos(&module).remove(0);
+        assert!(!base.methods.is_empty() && !base.class_methods.is_empty());
+        base.methods[0].doc = Some("Doc.".into());
+        let hash = |info: &ClassInfo| {
+            analysis_surface_hash(std::slice::from_ref(info), &[], &[], &ExtensionIndex::new())
+        };
+        let base_hash = hash(&base);
+
+        // Exhaustive: a new `ClassInfo` field fails to compile until classified below.
+        let ClassInfo {
+            name: _,
+            superclass: _,
+            is_sealed: _,
+            is_abstract: _,
+            is_typed: _,
+            is_internal: _,
+            package: _,
+            is_value: _,
+            is_native: _,
+            auto_ctors: _,
+            handle_scope: _,
+            surface_incomplete: _,
+            in_caller_new1: _,
+            is_module_less: _,
+            state: _,
+            state_types: _,
+            state_has_default: _,
+            state_kinds: _,
+            initialize_assigns: _,
+            has_dynamic_field_writer: _,
+            methods: _,
+            class_methods: _,
+            class_variables: _,
+            type_params: _,
+            type_param_bounds: _,
+            superclass_type_args: _,
+        } = base.clone();
+        type ClassMutator = fn(&mut ClassInfo);
+        let class_fields: Vec<(&str, Class, ClassMutator)> = vec![
+            ("name", Signature, |c| c.name = "Other".into()),
+            ("superclass", Signature, |c| {
+                c.superclass = Some("Other".into())
+            }),
+            ("is_sealed", Signature, |c| c.is_sealed = !c.is_sealed),
+            ("is_abstract", Signature, |c| c.is_abstract = !c.is_abstract),
+            ("is_typed", Signature, |c| c.is_typed = !c.is_typed),
+            ("is_internal", Signature, |c| c.is_internal = !c.is_internal),
+            ("package", Signature, |c| c.package = Some("pkg".into())),
+            ("is_value", Signature, |c| c.is_value = !c.is_value),
+            ("is_native", Signature, |c| c.is_native = !c.is_native),
+            ("auto_ctors", Signature, |c| {
+                c.auto_ctors = Some(AutoConstructors {
+                    keyword_constructor: Some("x:".into()),
+                });
+            }),
+            ("handle_scope", Signature, |c| {
+                c.handle_scope = Some("scope".into())
+            }),
+            ("surface_incomplete", Signature, |c| {
+                c.surface_incomplete = !c.surface_incomplete;
+            }),
+            ("in_caller_new1", Signature, |c| {
+                c.in_caller_new1 = !c.in_caller_new1
+            }),
+            ("is_module_less", Signature, |c| {
+                c.is_module_less = !c.is_module_less
+            }),
+            ("state", Signature, |c| c.state.push("extra".into())),
+            ("state_types", Signature, |c| {
+                c.state_types
+                    .insert("extra".into(), DeclaredType::simple("Integer"));
+            }),
+            ("state_has_default", Signature, |c| {
+                c.state_has_default.insert("extra".into(), true);
+            }),
+            ("state_kinds", Signature, |c| {
+                c.state_kinds.insert("extra".into(), SlotKind::Eager);
+            }),
+            // Body-derived summaries stay in the key: other files' diagnostics
+            // and codegen read them.
+            ("initialize_assigns", Signature, |c| {
+                c.initialize_assigns.insert("extra".into());
+            }),
+            ("has_dynamic_field_writer", Signature, |c| {
+                c.has_dynamic_field_writer = !c.has_dynamic_field_writer;
+            }),
+            ("methods", Signature, |c| {
+                c.methods[0].selector = "renamed".into()
+            }),
+            ("class_methods", Signature, |c| {
+                c.class_methods[0].selector = "renamed".into();
+            }),
+            ("class_variables", Signature, |c| {
+                c.class_variables.push(ClassVarInfo {
+                    name: "extra".into(),
+                    ty: None,
+                    has_default: false,
+                    kind: SlotKind::Eager,
+                });
+            }),
+            ("type_params", Signature, |c| c.type_params.push("T".into())),
+            ("type_param_bounds", Signature, |c| {
+                c.type_param_bounds.push(None)
+            }),
+            ("superclass_type_args", Signature, |c| {
+                c.superclass_type_args
+                    .push(SuperclassTypeArg::ParamRef { param_index: 0 });
+            }),
+        ];
+        for (field, class, mutate) in &class_fields {
+            let mut changed = base.clone();
+            mutate(&mut changed);
+            match class {
+                Signature => assert_ne!(
+                    hash(&changed),
+                    base_hash,
+                    "ClassInfo.{field} is a signature field: it must move the hash"
+                ),
+                NonSignature(reason) => assert_eq!(
+                    hash(&changed),
+                    base_hash,
+                    "ClassInfo.{field} is excluded ({reason}): it must not move the hash"
+                ),
+            }
+        }
+
+        // Same for the fields of each method.
+        let MethodInfo {
+            selector: _,
+            arity: _,
+            kind: _,
+            defined_in: _,
+            is_sealed: _,
+            is_internal: _,
+            spawns_block: _,
+            return_type: _,
+            param_types: _,
+            doc: _,
+            origin: _,
+            primitive: _,
+            constant_value: _,
+        } = base.methods[0].clone();
+        type MethodMutator = fn(&mut MethodInfo);
+        let method_fields: Vec<(&str, Class, MethodMutator)> = vec![
+            ("selector", Signature, |m| m.selector = "renamed".into()),
+            ("arity", Signature, |m| m.arity += 1),
+            // `MethodKind` has a single variant today: nothing to mutate, so the
+            // hash check is skipped below. Still a signature field.
+            ("kind", Signature, |_| {}),
+            ("defined_in", Signature, |m| m.defined_in = "Other".into()),
+            ("is_sealed", Signature, |m| m.is_sealed = !m.is_sealed),
+            ("is_internal", Signature, |m| m.is_internal = !m.is_internal),
+            ("spawns_block", Signature, |m| {
+                m.spawns_block = !m.spawns_block
+            }),
+            ("return_type", Signature, |m| {
+                m.return_type = Some(DeclaredType::simple("Object"));
+            }),
+            ("param_types", Signature, |m| m.param_types.push(None)),
+            (
+                "doc",
+                NonSignature("doc comments cannot change a dependent's diagnostics"),
+                |m| m.doc = Some("Reworded doc.".into()),
+            ),
+            ("origin", Signature, |m| m.origin = Some("Proto".into())),
+            // Body-derived: codegen of other files reads it.
+            ("primitive", Signature, |m| {
+                m.primitive = Some("prim".into())
+            }),
+            ("constant_value", Signature, |m| {
+                m.constant_value = Some(ConstantValue::Integer(7));
+            }),
+        ];
+        for (field, class, mutate) in &method_fields {
+            if *field == "kind" {
+                continue;
+            }
+            for class_side in [false, true] {
+                let mut changed = base.clone();
+                let methods = if class_side {
+                    &mut changed.class_methods
+                } else {
+                    &mut changed.methods
+                };
+                mutate(&mut methods[0]);
+                match class {
+                    Signature => assert_ne!(
+                        hash(&changed),
+                        base_hash,
+                        "MethodInfo.{field} is a signature field: it must move the hash"
+                    ),
+                    NonSignature(reason) => assert_eq!(
+                        hash(&changed),
+                        base_hash,
+                        "MethodInfo.{field} is excluded ({reason}): it must not move the hash"
+                    ),
+                }
+            }
+        }
+    }
+
     /// The analysis surface hash serializes `ClassInfo`'s `HashMap` fields
     /// through `serde_json`, and is only deterministic while its objects are
     /// key-sorted (no `preserve_order` feature unified into the build). If a

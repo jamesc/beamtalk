@@ -207,7 +207,9 @@ impl AliasRegistry {
                 continue;
             }
 
-            // Duplicate alias definition.
+            // Duplicate alias definition (may collide with a pre-loaded alias
+            // from another file, so this read is a consulted dependency).
+            crate::semantic_analysis::consulted::record_name(name);
             if self.aliases.contains_key(name) {
                 diagnostics.push(
                     Diagnostic::error(
@@ -262,6 +264,9 @@ impl AliasRegistry {
         // aliases eagerly and lazily (pulled on reference, not pushed in
         // dependency order), with its own memo cache making a precomputed
         // order redundant for that purpose.
+        // The cycle check walks every alias, pre-loaded ones from other files
+        // included, and reports against the current file: a whole-store read.
+        crate::semantic_analysis::consulted::record_scan();
         let (cycles, _resolution_order) = find_cycles(&self.aliases);
         for (cycle, cycle_span) in cycles {
             if self.reported_cycles.insert(canonical_cycle_key(&cycle)) {
@@ -660,6 +665,9 @@ impl AliasRegistry {
         // shares, so a cycle already reported here is not reported again if
         // a subsequent `register_module` (or `add_pre_loaded`) call re-scans
         // the same still-unresolved cycle.
+        // The cycle check walks every alias, pre-loaded ones from other files
+        // included, and reports against the current file: a whole-store read.
+        crate::semantic_analysis::consulted::record_scan();
         let (cycles, _resolution_order) = find_cycles(&self.aliases);
         for (cycle, cycle_span) in cycles {
             if self.reported_cycles.insert(canonical_cycle_key(&cycle)) {
@@ -673,6 +681,7 @@ impl AliasRegistry {
     /// Looks up an alias by name.
     #[must_use]
     pub fn get(&self, name: &str) -> Option<&AliasInfo> {
+        crate::semantic_analysis::consulted::record_name(name);
         self.aliases.get(name)
     }
 
@@ -707,6 +716,7 @@ impl AliasRegistry {
     /// their existing plain-name display in that case.
     #[must_use]
     pub fn resolve_display_name(&self, name: &str) -> Option<EcoString> {
+        crate::semantic_analysis::consulted::record_name(name);
         let info = self.aliases.get(name)?;
         let reference = TypeAnnotation::Simple(Identifier {
             name: info.name.clone(),
@@ -719,16 +729,19 @@ impl AliasRegistry {
     /// Checks if an alias exists in the registry.
     #[must_use]
     pub fn has_alias(&self, name: &str) -> bool {
+        crate::semantic_analysis::consulted::record_name(name);
         self.aliases.contains_key(name)
     }
 
     /// Returns an iterator over all alias names in the registry.
     pub fn alias_names(&self) -> impl Iterator<Item = &EcoString> {
+        crate::semantic_analysis::consulted::record_scan();
         self.aliases.keys()
     }
 
     /// Returns an iterator over all aliases in the registry.
     pub fn aliases(&self) -> impl Iterator<Item = (&EcoString, &AliasInfo)> {
+        crate::semantic_analysis::consulted::record_scan();
         self.aliases.iter()
     }
 

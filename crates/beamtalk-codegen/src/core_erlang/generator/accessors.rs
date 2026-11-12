@@ -359,8 +359,7 @@ impl CoreErlangGenerator {
         hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
     ) {
         self.supervisor_classes = hierarchy
-            .classes()
-            .keys()
+            .class_names()
             .filter(|name| {
                 hierarchy.is_supervisor_subclass(name)
                     || hierarchy.is_dynamic_supervisor_subclass(name)

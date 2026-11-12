@@ -58,6 +58,8 @@ pub(crate) use outputs::{
     PackageBuildOutputs, build_alias_metadata, build_class_metadata, generate_package_corpus,
     generate_package_outputs,
 };
+#[cfg(test)]
+pub(crate) use sources::compile_file_with_surface;
 pub use sources::{collect_formattable_files_from_dir, collect_source_files_from_dir};
 pub(crate) use sources::{
     compile_file, compile_to_beam, compute_file_module_pairs, compute_relative_module,
