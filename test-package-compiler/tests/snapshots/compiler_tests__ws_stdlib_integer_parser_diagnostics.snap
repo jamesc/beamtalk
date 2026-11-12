@@ -1,0 +1,9 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Error 337..338: Unexpected token: expected expression, found =
+Error 421..422: Unexpected token: expected expression, found ]
+Error 485..486: Unexpected token: expected expression, found ]
+Error 672..673: Unexpected token: expected expression, found ]
+Error 795..796: Unexpected token: expected expression, found ]

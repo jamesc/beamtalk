@@ -1527,6 +1527,35 @@ mod tests {
     }
 
     #[test]
+    fn lex_non_ascii_identifier_chars_are_error_tokens() {
+        // Ported from the removed `boundary_unicode_identifiers` lexer
+        // snapshot: identifiers are ASCII-only, so each non-ASCII letter
+        // outside a string lexes as its own `Error` token, while the same
+        // characters inside a string literal stay a plain `String`.
+        assert_eq!(
+            lex_kinds("café := 42"),
+            vec![
+                TokenKind::Identifier("caf".into()),
+                TokenKind::Error("é".into()),
+                TokenKind::Assign,
+                TokenKind::Integer("42".into()),
+            ]
+        );
+        assert_eq!(
+            lex_kinds("日本 x"),
+            vec![
+                TokenKind::Error("日".into()),
+                TokenKind::Error("本".into()),
+                TokenKind::Identifier("x".into()),
+            ]
+        );
+        assert_eq!(
+            lex_kinds("\"é 世界\""),
+            vec![TokenKind::String("é 世界".into())]
+        );
+    }
+
+    #[test]
     fn lex_string_unknown_escape_with_later_interpolation() {
         // An interpolation after the unknown escape is skipped, not lexed:
         // one error, then lexing resumes after the closing quote.

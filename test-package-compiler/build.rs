@@ -69,16 +69,10 @@ fn main() {
         .expect("Failed to write to generated_tests.rs");
 
     for case_name in &test_cases {
-        // Generate lexer test
-        writeln!(f, "#[test]").expect("Failed to write test");
-        writeln!(f, "fn test_{}_lexer() {{", case_name).expect("Failed to write test");
-        writeln!(f, "    test_lexer_snapshot(\"{}\");", case_name).expect("Failed to write test");
-        writeln!(f, "}}\n").expect("Failed to write test");
-
         // Generate parser test
         writeln!(f, "#[test]").expect("Failed to write test");
         writeln!(f, "fn test_{}_parser() {{", case_name).expect("Failed to write test");
-        writeln!(f, "    test_parser_snapshot(\"{}\");", case_name).expect("Failed to write test");
+        writeln!(f, "    test_parser_check(\"{}\");", case_name).expect("Failed to write test");
         writeln!(f, "}}\n").expect("Failed to write test");
 
         // Generate codegen test
