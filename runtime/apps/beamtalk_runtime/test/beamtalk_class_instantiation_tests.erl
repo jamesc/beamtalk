@@ -783,7 +783,7 @@ test_class_self_spawn_as_success() ->
     ),
     #{'okValue' := Obj} = Result,
     ?assert(erlang:whereis(Name) =/= undefined),
-    %% beamtalk_actor:'spawnAs'/3 (safe_spawn_named) always links —
+    %% beamtalk_actor_registry:'spawnAs'/3 (safe_spawn_named) always links —
     %% it doubles as the real OTP supervisor child MFA for named children
     %% (ADR 0079). do_class_self_named_spawn/6 must sever that link
     %% right after a successful `self spawnAs:`, since the caller here (this

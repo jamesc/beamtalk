@@ -82,7 +82,7 @@ else → dispatch), so that non-object primitives such as `nil` raise
 `does_not_understand` instead of being silently term-ordered (BT-3924).
 
 Limitation (single-node assumption): the pid case delegates to
-`beamtalk_actor:is_beamtalk_actor/1`, which reads `process_info(Pid,
+`beamtalk_actor_registry:is_beamtalk_actor/1`, which reads `process_info(Pid,
 dictionary)` and so returns `false` for a **remote** actor pid (another node)
 just as it does for a dead one. Tagged value-type maps and
 `#beamtalk_object{}` refs are node-agnostic and unaffected.
@@ -93,7 +93,7 @@ is_object(X) when is_map(X) ->
 is_object(#beamtalk_object{}) ->
     true;
 is_object(X) when is_pid(X) ->
-    beamtalk_actor:is_beamtalk_actor(X);
+    beamtalk_actor_registry:is_beamtalk_actor(X);
 is_object(_) ->
     %% Non-pid primitives (numbers, atoms, lists, plain maps, …) are never
     %% objects — return via a local pattern match rather than paying a

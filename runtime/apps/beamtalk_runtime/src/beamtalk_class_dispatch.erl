@@ -2430,7 +2430,7 @@ name and module are read from the process dictionary (set during
 beamtalk_object_class:init/1).
 
 `actor.bt` declares real `class sealed spawn`/`spawnWith:`
-bodies (`beamtalk_actor:doSpawn/1`, `doSpawnWith/2`), matching the treatment
+bodies (`beamtalk_actor_ffi:doSpawn/1`, `doSpawnWith/2`), matching the treatment
 given to `new`/`new:`. This function — and `class_send/3`'s explicit
 `spawn`/`spawnWith:` clauses above, and `handle_metaclass_self_call/2` below
 — deliberately keep routing through `class_self_spawn`/`class_self_new`
@@ -2439,7 +2439,7 @@ dispatch: doing so would mean a self-send here reaches the lifted body via
 `gen_server:call(self(), ...)`, which deadlocks — the exact regression this
 routing exists to avoid. Same "keep the shim, the lifted body is
 the dynamic-dispatch definition, not the one every path actually calls"
-choice made for `new`/`new:` — see `beamtalk_actor:doSpawn/1`'s doc.
+choice made for `new`/`new:` — see `beamtalk_actor_ffi:doSpawn/1`'s doc.
 """.
 -spec handle_self_instantiation(new | spawn, atom(), list()) -> term().
 handle_self_instantiation(Type, Selector, Args) ->

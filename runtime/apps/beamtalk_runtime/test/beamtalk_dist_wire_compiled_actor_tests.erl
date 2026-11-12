@@ -22,7 +22,7 @@ module is the regression suite proving that gap is closed, using
 `ArithmeticActor` and `WireBlockActor` (`test_fixtures/arithmetic_actor.bt`,
 `test_fixtures/wire_block_actor.bt`) — real `.bt` source compiled by
 `beamtalk`, spawned remotely via `spawnOn:`'s runtime entry point
-(`beamtalk_actor:remote_spawn/4`) — never a `__methods__`-map fixture.
+(`beamtalk_actor_remote:remote_spawn/4`) — never a `__methods__`-map fixture.
 
 `beamtalk_dist_wire_tests.erl` (BT-3601) already proves the wire tag/codec
 end to end for the hand-written path; this module does not repeat those
@@ -68,7 +68,7 @@ unique_name(Prefix) ->
 
 -doc "Spawn `ClassName` on `PeerNode` via `remote_spawn/4` — the `spawnOn:` runtime entry point.".
 spawn_remote(PeerNode, ClassName) ->
-    {ok, Pid} = beamtalk_actor:remote_spawn(PeerNode, ClassName, undefined, 'spawnOn:'),
+    {ok, Pid} = beamtalk_actor_remote:remote_spawn(PeerNode, ClassName, undefined, 'spawnOn:'),
     ?assert(is_pid(Pid)),
     ?assertEqual(PeerNode, node(Pid)),
     Pid.
