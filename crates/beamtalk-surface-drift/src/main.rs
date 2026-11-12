@@ -16,7 +16,7 @@
 //! * An MCP tool is implemented in `crates/beamtalk-mcp/src/server.rs` but
 //!   is not referenced anywhere in the parity doc.
 //! * A REPL meta-command is dispatched in
-//!   `crates/beamtalk-cli/src/commands/repl/mod.rs` but is not referenced
+//!   `crates/beamtalk-cli/src/commands/repl/handlers.rs` but is not referenced
 //!   in the parity doc.
 //! * An LSP capability is enabled in `crates/beamtalk-lsp/src/server/`
 //!   but is not referenced in the parity doc.
@@ -34,7 +34,7 @@ use std::process::ExitCode;
 const PARITY_DOC: &str = "docs/development/surface-parity.md";
 const REPL_OPS_DIR: &str = "runtime/apps/beamtalk_workspace/src";
 const MCP_SERVER: &str = "crates/beamtalk-mcp/src/server/tools/";
-const REPL_DISPATCH: &str = "crates/beamtalk-cli/src/commands/repl/mod.rs";
+const REPL_DISPATCH: &str = "crates/beamtalk-cli/src/commands/repl/handlers.rs";
 /// The single source of the REPL meta-command vocabulary — every
 /// `":cmd"` name/alias tab-completion offers lives in this table
 /// (`commands::REPL_COMMAND_TABLE`), and `REPL_DISPATCH`'s `classify_command`
@@ -825,7 +825,7 @@ fn extract_repl_command_consts(text: &str, out: &mut BTreeSet<String>) {
 }
 
 /// Collect every `commands::IDENT` reference in `REPL_DISPATCH`
-/// (`crates/beamtalk-cli/src/commands/repl/mod.rs`) — the set of
+/// (`crates/beamtalk-cli/src/commands/repl/handlers.rs`) — the set of
 /// `ReplCommandSpec` table constants `classify_command` actually consults
 /// when recognising a line.
 fn extract_repl_command_dispatch_refs(text: &str, out: &mut BTreeSet<String>) {

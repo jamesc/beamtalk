@@ -132,7 +132,7 @@ fn compute_diagnostic_summary_clean_file() {
 //
 // The tools below pin the Beamtalk expression each MCP tool dispatches to,
 // matching the REPL meta-command tests in
-// crates/beamtalk-cli/src/commands/repl/mod.rs. Surface drift in the
+// crates/beamtalk-cli/src/commands/repl/handlers.rs. Surface drift in the
 // expression mapping fails CI through these tests.
 
 #[test]
