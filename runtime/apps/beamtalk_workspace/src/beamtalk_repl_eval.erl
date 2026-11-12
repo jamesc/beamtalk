@@ -313,7 +313,7 @@ handle_type_alias_definition(AliasInfo, Warnings, State) ->
     beamtalk_compiler_server:register_aliases(
         beamtalk_repl_state:known_type_alias_sources(NewState)
     ),
-    beamtalk_repl_loader:spawn_alias_change_recheck([Name]),
+    beamtalk_repl_loader_recheck:spawn_alias_change_recheck([Name]),
     %% REPL display-value decision (flagged in the PR description for
     %% maintainer sign-off per AGENTS.md's REPL-output rule): echo the
     %% declared name as a plain binary. BT-4167: binaries (Strings) now

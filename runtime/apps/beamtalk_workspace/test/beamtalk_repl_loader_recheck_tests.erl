@@ -5,7 +5,7 @@
 
 -moduledoc """
 Tests for the publish/clearing half of ADR 0105 Phase 1:
-`beamtalk_repl_loader:maybe_trigger_recheck/4`'s wiring of
+`beamtalk_repl_loader_recheck:maybe_trigger_recheck/4`'s wiring of
 `beamtalk_workspace_findings_store` + the `'ReloadCheckCompleted'` system
 announcement.
 
@@ -186,7 +186,7 @@ reload_fixes_reload_clears_a_fixed_finding_test_() ->
                     %% Reload A: Counter>>size now returns String — Dashboard's
                     %% `(c size) + 1` goes stale.
                     install_fixture('String'),
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckCounter">>,
                         <<"size">>,
                         instance,
@@ -211,7 +211,7 @@ reload_fixes_reload_clears_a_fixed_finding_test_() ->
                     %% Counter's own reload (the trigger the ADR's mechanism
                     %% relies on — every reload re-runs steps 1-3 automatically).
                     install_fixture('Integer'),
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckCounter">>,
                         <<"size">>,
                         instance,
@@ -271,7 +271,7 @@ different_changed_class_origin_survives_test_() ->
 
                     %% Now Counter reloads and breaks Dashboard independently.
                     install_fixture('String'),
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckCounter">>,
                         <<"size">>,
                         instance,
@@ -290,7 +290,7 @@ different_changed_class_origin_survives_test_() ->
                     %% Counter is fixed (a clean re-check) — only Counter's
                     %% origin clears; Widget's survives.
                     install_fixture('Integer'),
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckCounter">>,
                         <<"size">>,
                         instance,
@@ -318,7 +318,7 @@ supersession_replaces_not_accumulates_test_() ->
                     subscribe_self_to_reload_check(),
                     install_fixture('String'),
 
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckCounter">>,
                         <<"size">>,
                         instance,
@@ -337,7 +337,7 @@ supersession_replaces_not_accumulates_test_() ->
                     %% Back-to-back reload of the SAME method, same-shaped
                     %% finding — generation B must replace generation A, not
                     %% pile up alongside it.
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckCounter">>,
                         <<"size">>,
                         instance,
@@ -425,7 +425,7 @@ own_install_clears_stale_findings_as_caller_test_() ->
                     %% No dependents of Dashboard>>refresh: exist in this
                     %% fixture, so the only newsworthy thing is clearing its
                     %% own stale entry.
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckDashboard">>,
                         <<"refresh:">>,
                         instance,
@@ -456,7 +456,7 @@ no_op_install_with_nothing_to_clear_announces_nothing_test_() ->
         {setup, fun loader_recheck_setup/0, fun loader_recheck_teardown/1, fun(_) ->
             [
                 ?_test(begin
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckDashboard">>, <<"refresh:">>, instance, not_captured
                     ),
                     assert_no_reload_check_announcement(),
@@ -545,7 +545,7 @@ capped_out_candidate_with_existing_finding_gets_marked_stale_test_() ->
                             <<"LoaderReCheckListView">>, <<"LoaderReCheckCounter">>, [SeedFinding]
                         ),
 
-                        ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                        ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                             <<"LoaderReCheckCounter">>,
                             <<"size">>,
                             instance,
@@ -591,7 +591,7 @@ capped_out_candidate_with_no_existing_finding_stays_absent_test_() ->
             [
                 ?_test(begin
                     with_capped_fixture('String', fun() ->
-                        ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                        ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                             <<"LoaderReCheckCounter">>,
                             <<"size">>,
                             instance,
@@ -636,7 +636,7 @@ capped_out_stale_note_is_idempotent_across_reloads_test_() ->
 
                         %% Two consecutive reloads of Counter, both capping
                         %% ListView out.
-                        ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                        ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                             <<"LoaderReCheckCounter">>,
                             <<"size">>,
                             instance,
@@ -645,7 +645,7 @@ capped_out_stale_note_is_idempotent_across_reloads_test_() ->
                         [FirstMarked] = beamtalk_workspace_findings_store:get_origin(
                             <<"LoaderReCheckListView">>, <<"LoaderReCheckCounter">>
                         ),
-                        ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                        ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                             <<"LoaderReCheckCounter">>,
                             <<"size">>,
                             instance,
@@ -713,7 +713,7 @@ skipped_candidate_with_existing_finding_gets_marked_stale_test_() ->
                         <<"LoaderReCheckDashboard">>, <<"LoaderReCheckCounter">>, [SeedFinding]
                     ),
 
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckCounter">>,
                         <<"size">>,
                         instance,
@@ -752,7 +752,7 @@ skipped_candidate_with_no_existing_finding_stays_absent_test_() ->
             [
                 ?_test(begin
                     install_fixture_no_live_source('String'),
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckCounter">>,
                         <<"size">>,
                         instance,
@@ -796,7 +796,7 @@ skipped_stale_note_is_idempotent_across_reloads_test_() ->
 
                     %% Two consecutive reloads of Counter, Dashboard's source
                     %% unavailable both times.
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckCounter">>,
                         <<"size">>,
                         instance,
@@ -805,7 +805,7 @@ skipped_stale_note_is_idempotent_across_reloads_test_() ->
                     [FirstMarked] = beamtalk_workspace_findings_store:get_origin(
                         <<"LoaderReCheckDashboard">>, <<"LoaderReCheckCounter">>
                     ),
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckCounter">>,
                         <<"size">>,
                         instance,
@@ -881,7 +881,7 @@ failed_candidate_with_existing_finding_gets_marked_stale_test_() ->
                     ok = beamtalk_compiler_server:inject_diagnostics_failure(
                         <<"BT-2832: injected compiler-port failure (test)">>
                     ),
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckCounter">>,
                         <<"size">>,
                         instance,
@@ -924,7 +924,7 @@ failed_candidate_with_no_existing_finding_stays_absent_test_() ->
                     ok = beamtalk_compiler_server:inject_diagnostics_failure(
                         <<"BT-2832: injected compiler-port failure (test)">>
                     ),
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckCounter">>,
                         <<"size">>,
                         instance,
@@ -973,7 +973,7 @@ failed_stale_note_is_idempotent_across_reloads_test_() ->
                     ok = beamtalk_compiler_server:inject_diagnostics_failure(
                         <<"BT-2832: injected compiler-port failure (test, reload A)">>
                     ),
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckCounter">>,
                         <<"size">>,
                         instance,
@@ -985,7 +985,7 @@ failed_stale_note_is_idempotent_across_reloads_test_() ->
                     ok = beamtalk_compiler_server:inject_diagnostics_failure(
                         <<"BT-2832: injected compiler-port failure (test, reload B)">>
                     ),
-                    ok = beamtalk_repl_loader:maybe_trigger_recheck(
+                    ok = beamtalk_repl_loader_recheck:maybe_trigger_recheck(
                         <<"LoaderReCheckCounter">>,
                         <<"size">>,
                         instance,

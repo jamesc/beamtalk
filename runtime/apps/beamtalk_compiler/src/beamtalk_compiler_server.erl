@@ -887,7 +887,7 @@ be able to wipe each other's entries).
 Synchronous `call`, not a fire-and-forget `cast`: the one production caller
 (`beamtalk_repl_eval:handle_type_alias_definition/3`) enqueues the
 alias-change re-check trigger immediately afterwards
-(`beamtalk_repl_loader:spawn_alias_change_recheck/1`), and that trigger's
+(`beamtalk_repl_loader_recheck:spawn_alias_change_recheck/1`), and that trigger's
 `diagnostics/3` round trip needs this cache update to have *already landed*
 by the time it runs — a `cast` only guarantees same-process mailbox
 ordering (this call and the subsequent enqueue are sent from the same

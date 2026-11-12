@@ -1031,7 +1031,7 @@ mod tests {
 
         /// ADR 0105 Phase 2: a shape change has no single changed
         /// selector — `changedSelector` carries the comma-joined affected
-        /// slot names instead (`beamtalk_repl_loader:shape_change_summary/1`).
+        /// slot names instead (`beamtalk_repl_loader_recheck:shape_change_summary/1`).
         #[test]
         fn shape_change_uses_warning_icon_and_shape_verb() {
             let data = json!({

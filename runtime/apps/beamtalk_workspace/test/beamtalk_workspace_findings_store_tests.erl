@@ -30,7 +30,7 @@ Covers:
 - gen_server boilerplate: handle_cast/2, handle_info/2 are no-ops; an unknown
   handle_call returns `{error, unknown_request}`; code_change/3 preserves state
 
-The end-to-end thread from `beamtalk_repl_loader:maybe_trigger_recheck/4`
+The end-to-end thread from `beamtalk_repl_loader_recheck:maybe_trigger_recheck/4`
 through to a correctly-populated/cleared store entry, and the
 `'ReloadCheckCompleted'` announcement, is covered in
 `beamtalk_repl_loader_recheck_tests.erl`, not here — this module tests the

@@ -67,7 +67,7 @@ freshly-verified.
 
 `clear_owner/1` is the *other*, deliberately un-scoped operation: it wipes
 **every** origin bucket for one caller class, fired whenever that caller's
-*own* source changes (`beamtalk_repl_loader:maybe_trigger_recheck/4` calls
+*own* source changes (`beamtalk_repl_loader_recheck:maybe_trigger_recheck/4` calls
 `clear_owner(ClassNameBin)` unconditionally before deciding whether a
 dependent re-check is warranted). This is correct precisely because it is
 un-scoped: when the caller's own source is reinstalled, every finding about

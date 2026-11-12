@@ -34,7 +34,7 @@ temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 %% unloaded class being leaf) rather than crash.
 was_leaf_class_false_for_never_loaded_class_test() ->
     ?assertNot(
-        beamtalk_repl_loader:was_leaf_class(
+        beamtalk_repl_loader_recheck:was_leaf_class(
             <<"LeafHelperNeverLoadedClass_",
                 (integer_to_binary(
                     erlang:unique_integer([positive])
@@ -48,7 +48,7 @@ superclasses_losing_leaf_status_ignores_classes_without_a_superclass_key_test() 
     %% must not crash.
     ?assertEqual(
         [],
-        beamtalk_repl_loader:superclasses_losing_leaf_status([#{name => "NoSuperclassHere"}])
+        beamtalk_repl_loader_recheck:superclasses_losing_leaf_status([#{name => "NoSuperclassHere"}])
     ).
 
 %% This function runs in the class-install hot path with no surrounding
@@ -61,7 +61,7 @@ superclasses_losing_leaf_status_ignores_classes_without_a_superclass_key_test() 
 superclasses_losing_leaf_status_never_crashes_the_caller_test() ->
     ?assertEqual(
         [],
-        beamtalk_repl_loader:superclasses_losing_leaf_status([
+        beamtalk_repl_loader_recheck:superclasses_losing_leaf_status([
             #{name => "Malformed", superclass => not_a_string_or_binary}
         ])
     ).
@@ -90,7 +90,7 @@ superclasses_losing_leaf_status_dedupes_test_() ->
                     ],
                     ?assertEqual(
                         [<<"LeafHelperShape">>],
-                        beamtalk_repl_loader:superclasses_losing_leaf_status(Classes)
+                        beamtalk_repl_loader_recheck:superclasses_losing_leaf_status(Classes)
                     )
                 end)
             ]
@@ -126,7 +126,7 @@ superclasses_losing_leaf_status_accepts_binary_superclass_test_() ->
                     ],
                     ?assertEqual(
                         [<<"LeafHelperBinaryShape">>],
-                        beamtalk_repl_loader:superclasses_losing_leaf_status(Classes)
+                        beamtalk_repl_loader_recheck:superclasses_losing_leaf_status(Classes)
                     )
                 end)
             ]
@@ -463,7 +463,7 @@ leaf_change_recheck_announces_when_it_clears_a_stale_finding_test_() ->
                         not_checked_owners => [],
                         not_verified_owners => []
                     },
-                    ok = beamtalk_repl_loader:publish_leaf_change_recheck_outcome(
+                    ok = beamtalk_repl_loader_recheck:publish_leaf_change_recheck_outcome(
                         SuperclassBin, CleanResult
                     ),
 

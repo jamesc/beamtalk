@@ -447,7 +447,7 @@ live_development_child_specs() ->
         %% class-body reloads can't flood `beamtalk_compiler_server` (ADR
         %% 0022) with unbounded concurrent recheck traffic — see that
         %% worker's moduledoc. Started right after the shape store it reads
-        %% from (via `beamtalk_repl_loader:maybe_trigger_shape_recheck/1`).
+        %% from (via `beamtalk_repl_loader_recheck:maybe_trigger_shape_recheck/1`).
         #{
             id => beamtalk_workspace_shape_recheck_worker,
             start => {beamtalk_workspace_shape_recheck_worker, start_link, []},
@@ -461,7 +461,7 @@ live_development_child_specs() ->
         %% Live, session-only findings keyed by caller class, published to
         %% every surface (LSP / REPL / workspace UI) via the
         %% `'ReloadCheckCompleted'` system announcement
-        %% (`beamtalk_repl_loader:maybe_trigger_recheck/4`). Downstream of the
+        %% (`beamtalk_repl_loader_recheck:maybe_trigger_recheck/4`). Downstream of the
         %% signature and shape stores (a re-check needs a classified diff
         %% first), so it starts right after them — before any REPL connection
         %% could trigger an install.
