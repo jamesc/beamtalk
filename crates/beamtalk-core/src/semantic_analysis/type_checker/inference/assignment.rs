@@ -213,17 +213,7 @@ impl TypeChecker {
                 .unwrap_or_else(|| inferred_ty.display_name()),
         };
         // ADR 0147: when a map shape is involved, say which key is at fault.
-        let shape_detail = (inferred_ty.contains_shape() || declared.contains_shape())
-            .then(|| {
-                // The first member `instance_assignable` itself refused.
-                Self::union_members(inferred_ty)
-                    .iter()
-                    .filter(|member| !Self::shape_member_ok(member, declared, hierarchy))
-                    .find_map(|member| Self::shape_assignable(member, declared, hierarchy).err())
-            })
-            .flatten()
-            .filter(|m| !matches!(m, ShapeMismatch::Incompatible))
-            .map(|m| m.describe());
+        let shape_detail = Self::shape_mismatch_detail(inferred_ty, declared, hierarchy);
         Some(AssignmentTypeMismatch {
             shape_detail,
             declared_display: declared
@@ -263,6 +253,25 @@ impl TypeChecker {
                 hierarchy,
                 protocol_registry,
             )
+    }
+
+    /// ADR 0147: when a map shape is involved, why the value is not
+    /// assignable, naming the offending key — from the first member of the
+    /// value that [`Self::shape_member_ok`] itself refused.
+    fn shape_mismatch_detail(
+        inferred_ty: &InferredType,
+        declared: &InferredType,
+        hierarchy: &ClassHierarchy,
+    ) -> Option<EcoString> {
+        if !(inferred_ty.contains_shape() || declared.contains_shape()) {
+            return None;
+        }
+        Self::union_members(inferred_ty)
+            .iter()
+            .filter(|member| !Self::shape_member_ok(member, declared, hierarchy))
+            .find_map(|member| Self::shape_assignable(member, declared, hierarchy).err())
+            .filter(|m| !matches!(m, ShapeMismatch::Incompatible))
+            .map(|m| m.describe())
     }
 
     /// ADR 0147: whether one member of an assigned value fits `declared` when
