@@ -2362,12 +2362,14 @@ fn parse_shape_optional_marker_before_ellipsis_is_error() {
 
 #[test]
 fn parse_shape_ellipsis_then_comma_question_field_recovers_cleanly() {
-    let (ann, diags) = parse_shape_alias("#{..., #a => Integer,?#b => String}");
+    // `,?` directly after `...` must split into separator + optional marker.
+    let (ann, diags) = parse_shape_alias("#{...,?#a => Integer, #b => String}");
     assert_eq!(diags.len(), 1, "{diags:?}");
     let (fields, open) = shape_parts(&ann);
     assert!(open);
     assert_eq!(fields.len(), 2);
-    assert!(fields[1].1);
+    assert!(fields[0].1);
+    assert!(!fields[1].1);
 }
 
 #[test]
