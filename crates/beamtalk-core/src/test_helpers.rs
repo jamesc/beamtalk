@@ -347,6 +347,11 @@ pub mod test_support {
 
     /// A strategy that picks one of `fragments` and truncates it at a random
     /// (char-boundary-safe) point.
+    ///
+    /// A cut that floors to 0 (a fragment starting with a multi-byte char)
+    /// yields the empty string; the per-module copies this replaced returned
+    /// the whole fragment in that case. Empty input is still a valid
+    /// "never panics" case.
     pub fn truncated_from(
         fragments: &'static [&'static str],
     ) -> impl Strategy<Value = String> + Clone {

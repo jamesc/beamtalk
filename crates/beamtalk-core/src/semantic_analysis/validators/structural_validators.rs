@@ -585,8 +585,8 @@ pub(crate) fn check_native_declaration_location(
 mod tests {
     use super::*;
     use crate::ast::{
-        ClassDefinition, CommentAttachment, ExpressionStatement, KeywordPart, MethodDefinition,
-        MethodKind, TypeParamDecl,
+        ClassDefinition, CommentAttachment, ExpressionStatement, Identifier, KeywordPart,
+        MethodDefinition, MethodKind, TypeParamDecl,
     };
     use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
     use crate::source_analysis::{Severity, Span};
@@ -595,7 +595,6 @@ mod tests {
         Span::new(0, 10)
     }
 
-    use crate::ast::Identifier;
     fn ident(name: &str) -> Identifier {
         Identifier::new(name, test_span())
     }

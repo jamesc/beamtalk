@@ -1288,7 +1288,7 @@ mod tests {
 
     // ── Helpers ────────────────────────────────────────────────────────
 
-    /// Creates a dummy span for test AST nodes.
+    // Dummy one-byte span for test AST nodes.
     use beamtalk_core::test_helpers::test_support::unit_span as span;
 
     /// Creates an integer literal expression.
