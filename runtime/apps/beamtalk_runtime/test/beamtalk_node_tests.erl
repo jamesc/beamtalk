@@ -27,6 +27,7 @@ and `isRemote`/`node` on an actor spawned on the peer.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %% supervisor callback for with_bare_workspace_sup/1 (a childless workspace_sup stand-in).
@@ -60,7 +61,7 @@ named_malformed_carries_hint_test() ->
     ?assertEqual(#{name => nohost}, Error#beamtalk_error.details).
 
 named_non_symbol_raises_type_error_test() ->
-    ?assertError(#{error := #beamtalk_error{kind = type_error}}, beamtalk_node:named(<<"a@b">>)).
+    ?assertBtError(type_error, beamtalk_node:named(<<"a@b">>)).
 
 named_error_kind(Name) ->
     #{isOk := false, errReason := #{error := #beamtalk_error{kind = Kind}}} =

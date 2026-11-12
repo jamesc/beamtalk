@@ -11,6 +11,7 @@ class-side facade (ADR 0129 §4): the `no_workspace` guard and `isAvailable/0`.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 -define(RUN, #{mode => run, include_compiler => false}).
@@ -47,10 +48,7 @@ guard_raises_no_workspace_when_unavailable_test_() ->
     [
         {atom_to_list(F) ++ "/" ++ integer_to_list(length(A)), fun() ->
             beamtalk_capability:clear(),
-            ?assertError(
-                #{error := #beamtalk_error{kind = no_workspace, class = 'Workspace'}},
-                erlang:apply(beamtalk_workspace_facade, F, A)
-            )
+            ?assertBtError(no_workspace, 'Workspace', erlang:apply(beamtalk_workspace_facade, F, A))
         end}
      || {F, A} <- guarded_entries()
     ].

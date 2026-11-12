@@ -33,7 +33,7 @@ start_stop_test_() ->
                 {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-session-1">>),
                 ?assert(is_process_alive(Pid)),
                 beamtalk_repl_shell:stop(Pid),
-                timer:sleep(50),
+                beamtalk_test_wait:dead(Pid),
                 ?assertNot(is_process_alive(Pid))
             end)
         ]
@@ -366,7 +366,7 @@ class_removed_event_updates_tracker_test_() ->
             ?_test(begin
                 {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-class-removed-2">>),
                 Pid ! {class_removed, 'BT1242NoSuchClass', bt1242_no_such_mod},
-                timer:sleep(50),
+                ok = beamtalk_test_wait:sync(Pid),
                 ?assert(is_process_alive(Pid)),
                 beamtalk_repl_shell:stop(Pid)
             end),
@@ -393,7 +393,7 @@ class_removed_event_updates_tracker_test_() ->
                 end),
                 %% Send class_removed while worker is "active" — goes to pending path
                 Pid ! {class_removed, 'BT1242PendingClass', DummyMod3},
-                timer:sleep(50),
+                ok = beamtalk_test_wait:sync(Pid),
                 %% Shell must still be alive
                 ?assert(is_process_alive(Pid)),
                 %% Pending removal recorded in state — verify by extracting ShellState
@@ -541,7 +541,7 @@ pending_mutations_applied_on_success_test_() ->
                 %% Worker returns locals carrying z (to be removed) and its own w.
                 WorkerState = worker_state_with_bindings(#{z => 99, w => 7}),
                 Pid ! {eval_result, FakeWorker, {ok, nil, <<>>, [], WorkerState}},
-                timer:sleep(50),
+                ok = beamtalk_test_wait:sync(Pid),
                 {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
                 ?assertEqual(#{x => 1, y => 2, w => 7}, Bindings),
                 {_SId, CleanState, undefined} = sys:get_state(Pid),
@@ -563,7 +563,7 @@ pending_clear_applied_on_success_test_() ->
                 ),
                 WorkerState = worker_state_with_bindings(#{a => 1, b => 2}),
                 Pid ! {eval_result, FakeWorker, {ok, nil, <<>>, [], WorkerState}},
-                timer:sleep(50),
+                ok = beamtalk_test_wait:sync(Pid),
                 {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
                 ?assertEqual(#{}, Bindings),
                 beamtalk_repl_shell:stop(Pid)
@@ -585,7 +585,7 @@ pending_clear_dropped_on_error_test_() ->
                 WorkerState = worker_state_with_bindings(#{keep => 42}),
                 Err = beamtalk_error:new(runtime_error, 'Test'),
                 Pid ! {eval_result, FakeWorker, {error, Err, <<>>, [], WorkerState}},
-                timer:sleep(50),
+                ok = beamtalk_test_wait:sync(Pid),
                 {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
                 %% put applied, keep preserved, clear dropped
                 ?assertEqual(#{keep => 42, x => 1}, Bindings),
@@ -659,7 +659,7 @@ pending_clear_then_put_ordering_test_() ->
                 ),
                 WorkerState = worker_state_with_bindings(#{old => 99}),
                 Pid ! {eval_result, FakeWorker, {ok, nil, <<>>, [], WorkerState}},
-                timer:sleep(50),
+                ok = beamtalk_test_wait:sync(Pid),
                 {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
                 %% a set, then clear wipes (old + a), then b set
                 ?assertEqual(#{b => 2}, Bindings),

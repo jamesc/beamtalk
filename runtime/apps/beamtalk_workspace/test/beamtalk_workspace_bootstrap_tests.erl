@@ -25,7 +25,7 @@ cleanup_singleton(Name) ->
         Pid ->
             unlink(Pid),
             gen_server:stop(Pid, normal, 1000),
-            timer:sleep(50)
+            beamtalk_test_wait:dead(Pid)
     end.
 
 cleanup_bootstrap() ->
@@ -35,7 +35,7 @@ cleanup_bootstrap() ->
         Pid ->
             unlink(Pid),
             gen_server:stop(Pid, normal, 1000),
-            timer:sleep(50)
+            beamtalk_test_wait:dead(Pid)
     end.
 
 cleanup_all() ->
@@ -67,7 +67,7 @@ unknown_monitor_down_test_() ->
                 %% Send a DOWN message with a bogus monitor ref
                 FakeRef = make_ref(),
                 BPid ! {'DOWN', FakeRef, process, self(), normal},
-                timer:sleep(50),
+                ok = beamtalk_test_wait:sync(BPid),
                 %% Bootstrap should still be alive and responsive
                 ?assert(is_process_alive(BPid)),
                 ?assertEqual(ok, gen_server:call(BPid, ping))
@@ -107,7 +107,7 @@ unknown_info_ignored_test_() ->
             ?_test(begin
                 {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
                 BPid ! {some, random, message},
-                timer:sleep(50),
+                ok = beamtalk_test_wait:sync(BPid),
                 ?assert(is_process_alive(BPid))
             end)
         ]
@@ -258,7 +258,7 @@ cleanup_activation_test_class() ->
             ok;
         Pid ->
             gen_server:stop(Pid, normal, 1000),
-            timer:sleep(50)
+            beamtalk_test_wait:dead(Pid)
     end.
 
 purge_activation_fixture_module() ->
@@ -434,7 +434,7 @@ cleanup_bt745_classes() ->
                     ok;
                 Pid ->
                     gen_server:stop(Pid, normal, 1000),
-                    timer:sleep(50)
+                    beamtalk_test_wait:dead(Pid)
             end
         end,
         ['BT745Parent', 'BT745Child']
@@ -528,7 +528,7 @@ rebootstrap_actor_max_retries_direct_test_() ->
             ?_test(begin
                 {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
                 BPid ! {rebootstrap, 'TestSingletonXYZ', test_singleton_xyz_reg, 5},
-                timer:sleep(50),
+                ok = beamtalk_test_wait:sync(BPid),
                 ?assert(is_process_alive(BPid))
             end)
         ]
@@ -739,5 +739,5 @@ cleanup_test_source_class(ClassName) ->
             ok;
         Pid ->
             gen_server:stop(Pid, normal, 1000),
-            timer:sleep(50)
+            beamtalk_test_wait:dead(Pid)
     end.

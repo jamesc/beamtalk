@@ -642,7 +642,7 @@ stop_meta_if_running() ->
             ok;
         Pid ->
             gen_server:stop(Pid),
-            timer:sleep(10)
+            beamtalk_test_wait:dead(Pid)
     end.
 
 %% Canonicalise the toplevel inside an {ok, _} cache result so it compares equal

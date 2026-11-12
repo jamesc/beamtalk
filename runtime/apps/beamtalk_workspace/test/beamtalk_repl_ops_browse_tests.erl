@@ -2439,8 +2439,7 @@ protocol_of(Protocols, Selector) ->
 
 dead_pid() ->
     Pid = spawn(fun() -> ok end),
-    %% Give the process a beat to actually exit before we call against it.
-    timer:sleep(20),
+    beamtalk_test_wait:dead(Pid),
     ?assertNot(is_process_alive(Pid)),
     Pid.
 

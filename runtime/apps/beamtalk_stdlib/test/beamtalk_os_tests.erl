@@ -20,6 +20,7 @@ Tests cover:
 
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %%% ============================================================================
 %%% run: — success path
@@ -54,16 +55,10 @@ run_empty_output_test() ->
 %%% ============================================================================
 
 run_type_error_integer_test() ->
-    ?assertError(
-        #{error := #beamtalk_error{kind = type_error, class = 'OS'}},
-        beamtalk_os:'run:'(42)
-    ).
+    ?assertBtError(type_error, 'OS', beamtalk_os:'run:'(42)).
 
 run_type_error_atom_test() ->
-    ?assertError(
-        #{error := #beamtalk_error{kind = type_error, class = 'OS'}},
-        beamtalk_os:'run:'(echo)
-    ).
+    ?assertBtError(type_error, 'OS', beamtalk_os:'run:'(echo)).
 
 %%% ============================================================================
 %%% run:timeout: — success path
@@ -80,16 +75,10 @@ run_timeout_ffi_shim_test() ->
 %%% ============================================================================
 
 run_timeout_type_error_non_binary_cmd_test() ->
-    ?assertError(
-        #{error := #beamtalk_error{kind = type_error, class = 'OS'}},
-        beamtalk_os:'run:timeout:'(42, 5000)
-    ).
+    ?assertBtError(type_error, 'OS', beamtalk_os:'run:timeout:'(42, 5000)).
 
 run_timeout_type_error_non_integer_timeout_test() ->
-    ?assertError(
-        #{error := #beamtalk_error{kind = type_error, class = 'OS'}},
-        beamtalk_os:'run:timeout:'(<<"echo hi">>, <<"5000">>)
-    ).
+    ?assertBtError(type_error, 'OS', beamtalk_os:'run:timeout:'(<<"echo hi">>, <<"5000">>)).
 
 %%% ============================================================================
 %%% run:timeout: — timeout expiry
@@ -101,10 +90,7 @@ run_timeout_raises_on_expiry_test() ->
             {unix, _} -> <<"sleep 60">>;
             {win32, _} -> <<"ping -n 100 127.0.0.1">>
         end,
-    ?assertError(
-        #{error := #beamtalk_error{kind = timeout, class = 'OS'}},
-        beamtalk_os:'run:timeout:'(Cmd, 100)
-    ).
+    ?assertBtError(timeout, 'OS', beamtalk_os:'run:timeout:'(Cmd, 100)).
 
 %%% ============================================================================
 %%% output_too_large
@@ -114,8 +100,9 @@ run_output_too_large_test() ->
     case os:type() of
         {unix, _} ->
             %% Generate ~11 MB of output via dd (exceeds 10 MB limit).
-            ?assertError(
-                #{error := #beamtalk_error{kind = output_too_large, class = 'OS'}},
+            ?assertBtError(
+                output_too_large,
+                'OS',
                 beamtalk_os:'run:'(<<"dd if=/dev/zero bs=1048576 count=11 2>/dev/null | cat">>)
             );
         _ ->

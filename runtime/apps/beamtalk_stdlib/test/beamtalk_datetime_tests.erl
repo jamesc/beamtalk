@@ -13,6 +13,7 @@ FFI shims, and error paths.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -40,16 +41,10 @@ year_month_day_basic_test() ->
     ?assertEqual(0, maps:get(second, DT)).
 
 year_month_day_invalid_date_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        make_date(2024, 2, 30)
-    ).
+    ?assertBtError(type_error, make_date(2024, 2, 30)).
 
 year_month_day_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'year:month:day:'(<<"2024">>, 1, 1)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'year:month:day:'(<<"2024">>, 1, 1)).
 
 %%% ============================================================================
 %%% Constructor — year:month:day:hour:minute:second:
@@ -65,26 +60,17 @@ full_constructor_test() ->
     ?assertEqual(45, maps:get(second, DT)).
 
 full_constructor_invalid_time_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        make_dt(2024, 1, 1, 25, 0, 0)
-    ).
+    ?assertBtError(type_error, make_dt(2024, 1, 1, 25, 0, 0)).
 
 full_constructor_negative_minute_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        make_dt(2024, 1, 1, 0, -1, 0)
-    ).
+    ?assertBtError(type_error, make_dt(2024, 1, 1, 0, -1, 0)).
 
 full_constructor_second_out_of_range_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        make_dt(2024, 1, 1, 0, 0, 60)
-    ).
+    ?assertBtError(type_error, make_dt(2024, 1, 1, 0, 0, 60)).
 
 full_constructor_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+    ?assertBtError(
+        type_error,
         beamtalk_datetime:'year:month:day:hour:minute:second:'(<<"2024">>, 1, 1, 0, 0, 0)
     ).
 
@@ -110,10 +96,7 @@ from_timestamp_known_test() ->
     ?assertEqual(1, maps:get(day, DT)).
 
 from_timestamp_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'fromTimestamp:'(<<"1704067200">>)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'fromTimestamp:'(<<"1704067200">>)).
 
 %%% ============================================================================
 %%% Constructor — fromString:
@@ -133,22 +116,13 @@ from_string_no_z_test() ->
     ?assertEqual(2024, maps:get(year, DT)).
 
 from_string_bad_format_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'fromString:'(<<"not-a-date">>)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'fromString:'(<<"not-a-date">>)).
 
 from_string_invalid_date_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'fromString:'(<<"2024-02-30T00:00:00Z">>)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'fromString:'(<<"2024-02-30T00:00:00Z">>)).
 
 from_string_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'fromString:'(20240615)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'fromString:'(20240615)).
 
 %%% ============================================================================
 %%% Accessors
@@ -209,10 +183,7 @@ add_seconds_negative_test() ->
 
 add_seconds_type_error_test() ->
     DT = make_dt(2024, 1, 1, 0, 0, 0),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'addSeconds:'(DT, <<"3600">>)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'addSeconds:'(DT, <<"3600">>)).
 
 add_days_test() ->
     DT = make_dt(2024, 1, 1, 12, 0, 0),
@@ -223,10 +194,7 @@ add_days_test() ->
 
 add_days_type_error_test() ->
     DT = make_dt(2024, 1, 1, 0, 0, 0),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'addDays:'(DT, 1.5)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'addDays:'(DT, 1.5)).
 
 diff_seconds_test() ->
     DT1 = make_dt(2024, 1, 1, 1, 0, 0),
@@ -239,10 +207,7 @@ diff_seconds_zero_test() ->
 
 diff_seconds_type_error_test() ->
     DT = make_dt(2024, 1, 1, 0, 0, 0),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'diffSeconds:'(DT, <<"other">>)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'diffSeconds:'(DT, <<"other">>)).
 
 %%% ============================================================================
 %%% Comparison
@@ -285,45 +250,27 @@ not_equal_test() ->
 
 comparison_type_error_lt_test() ->
     DT = make_dt(2024, 1, 1, 0, 0, 0),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'<'(DT, <<"other">>)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'<'(DT, <<"other">>)).
 
 comparison_type_error_gt_test() ->
     DT = make_dt(2024, 1, 1, 0, 0, 0),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'>'(DT, <<"other">>)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'>'(DT, <<"other">>)).
 
 comparison_type_error_le_test() ->
     DT = make_dt(2024, 1, 1, 0, 0, 0),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'=<'(DT, <<"other">>)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'=<'(DT, <<"other">>)).
 
 comparison_type_error_ge_test() ->
     DT = make_dt(2024, 1, 1, 0, 0, 0),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'>='(DT, <<"other">>)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'>='(DT, <<"other">>)).
 
 comparison_type_error_eq_test() ->
     DT = make_dt(2024, 1, 1, 0, 0, 0),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'=:='(DT, <<"other">>)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'=:='(DT, <<"other">>)).
 
 comparison_type_error_ne_test() ->
     DT = make_dt(2024, 1, 1, 0, 0, 0),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:'/='(DT, <<"other">>)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:'/='(DT, <<"other">>)).
 
 %%% ============================================================================
 %%% FFI shims
@@ -374,10 +321,7 @@ ffi_shim_comparisons_test() ->
 
 ffi_shim_sneq_type_error_test() ->
     Dt = beamtalk_datetime:'year:month:day:'(2026, 1, 1),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_datetime:sneq(Dt, <<"other">>)
-    ).
+    ?assertBtError(type_error, beamtalk_datetime:sneq(Dt, <<"other">>)).
 
 %%% ============================================================================
 %%% monotonicNow

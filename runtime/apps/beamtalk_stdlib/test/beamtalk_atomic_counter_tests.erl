@@ -23,6 +23,7 @@ Tests cover:
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -391,10 +392,7 @@ ffi_named_shim_success_test() ->
     end.
 
 ffi_named_shim_not_found_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = not_found}},
-        beamtalk_atomic_counter:named(bt_ac_test_ffi_no_such_xyz)
-    ).
+    ?assertBtError(not_found, beamtalk_atomic_counter:named(bt_ac_test_ffi_no_such_xyz)).
 
 %%% ============================================================================
 %%% Stale counter errors

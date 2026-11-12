@@ -376,7 +376,7 @@ unknown_cast_is_ignored_test() ->
 unknown_info_is_ignored_test() ->
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     RegistryPid ! {some_random, message},
-    timer:sleep(10),
+    ok = beamtalk_test_wait:sync(RegistryPid),
     %% Registry should still be alive and functional
     ?assertEqual([], beamtalk_repl_actors:list_actors(RegistryPid)),
     gen_server:stop(RegistryPid).

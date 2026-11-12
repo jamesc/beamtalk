@@ -13,6 +13,7 @@ responds_to/2, class_name_to_module/1, print_string/1, and display_string/1
 for all primitive types, tagged maps, class objects, and edge cases.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%% ============================================================================
@@ -304,9 +305,8 @@ send_to_string_test() ->
     ),
     ?assertEqual('String', beamtalk_primitive:send(Str, 'class', [])),
     %% A bare binary is Binary: `++` is String-only, so it DNU.
-    ?assertError(
-        #{error := #beamtalk_error{kind = does_not_understand, class = 'Binary'}},
-        beamtalk_primitive:send(<<"hello">>, '++', [<<"world">>])
+    ?assertBtError(
+        does_not_understand, 'Binary', beamtalk_primitive:send(<<"hello">>, '++', [<<"world">>])
     ),
     ?assertEqual('Binary', beamtalk_primitive:send(<<"hello">>, 'class', [])).
 
@@ -2251,10 +2251,7 @@ dispatch_via_module_undefined_test() ->
     %% module_for_value for is_map falls through to Other → undefined for
     %% an unknown tagged class. We simulate via tagged map with unknown class.
     Tagged = #{'$beamtalk_class' => 'CompletelyUnknownTaggedClass'},
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand}},
-        beamtalk_primitive:send(Tagged, someSelector, [])
-    ).
+    ?assertBtError(does_not_understand, beamtalk_primitive:send(Tagged, someSelector, [])).
 
 responds_via_module_undefined_test() ->
     Tagged = #{'$beamtalk_class' => 'CompletelyUnknownTaggedClass'},
@@ -2318,9 +2315,8 @@ value_type_module_info_is_not_a_method_test_() ->
             ?assert(beamtalk_primitive:responds_to(Value, size)),
             ?assertNot(beamtalk_primitive:responds_to(Value, module_info)),
             ?assertEqual(3, beamtalk_primitive:send(Value, size, [])),
-            ?assertError(
-                #{error := #beamtalk_error{kind = does_not_understand, selector = module_info}},
-                beamtalk_primitive:send(Value, module_info, [])
+            ?assertBtError(
+                does_not_understand, _, module_info, beamtalk_primitive:send(Value, module_info, [])
             )
         end}.
 

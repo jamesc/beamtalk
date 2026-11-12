@@ -13,6 +13,7 @@ output, the `no_workspace` refusal of `recent`/`clear`, and the runtime's
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% logger handler callback (the capture handler below)
@@ -154,16 +155,10 @@ cr_is_noop_without_stream() ->
     ok = no_event().
 
 recent_raises_no_workspace() ->
-    ?assertError(
-        #{error := #beamtalk_error{kind = no_workspace, class = 'Transcript', selector = recent}},
-        beamtalk_transcript_facade:recent()
-    ).
+    ?assertBtError(no_workspace, 'Transcript', recent, beamtalk_transcript_facade:recent()).
 
 clear_raises_no_workspace() ->
-    ?assertError(
-        #{error := #beamtalk_error{kind = no_workspace, class = 'Transcript', selector = clear}},
-        beamtalk_transcript_facade:clear()
-    ).
+    ?assertBtError(no_workspace, 'Transcript', clear, beamtalk_transcript_facade:clear()).
 
 %% A user actor registered as #Transcript must not capture the output.
 user_process_not_captured() ->
@@ -182,9 +177,7 @@ user_process_not_captured() ->
     end,
     beamtalk_transcript_facade:show(<<"secret">>),
     ?assertMatch({notice, _, <<"secret">>}, next_event()),
-    ?assertError(
-        #{error := #beamtalk_error{kind = no_workspace}}, beamtalk_transcript_facade:recent()
-    ),
+    ?assertBtError(no_workspace, beamtalk_transcript_facade:recent()),
     receive
         {impostor_got, _} -> erlang:error(impostor_captured_output)
     after 100 -> ok

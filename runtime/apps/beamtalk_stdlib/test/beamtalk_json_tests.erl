@@ -13,6 +13,7 @@ aliases (parse/1, generate/1, prettyPrint/1).
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -43,10 +44,7 @@ parse_null_test() ->
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := nil}, R).
 
 parse_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_json:'parse:'(not_a_binary)
-    ).
+    ?assertBtError(type_error, beamtalk_json:'parse:'(not_a_binary)).
 
 parse_invalid_json_test() ->
     R = beamtalk_json:'parse:'(<<"{invalid">>),
@@ -183,10 +181,7 @@ generate_nil_in_list_test() ->
     ?assertEqual({beamtalk_string, <<"[1,null,\"a\"]">>}, Result).
 
 generate_unsupported_type_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_json:'generate:'({unsupported, tuple})
-    ).
+    ?assertBtError(type_error, beamtalk_json:'generate:'({unsupported, tuple})).
 
 %%% ============================================================================
 %%% generate:/1 — asJson hook
@@ -220,9 +215,8 @@ generate_as_json_hook_recursive_test() ->
 
 generate_as_json_self_return_test() ->
     %% A hook returning the receiver itself must raise, not loop forever.
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Json'}},
-        beamtalk_json:'generate:'('bt@json_hook_fixture':new(self_return))
+    ?assertBtError(
+        type_error, 'Json', beamtalk_json:'generate:'('bt@json_hook_fixture':new(self_return))
     ).
 
 generate_as_json_nlr_passes_through_test() ->
@@ -240,9 +234,8 @@ generate_as_json_nlr_passes_through_test() ->
 generate_as_json_mutual_cycle_test() ->
     %% Not a literal self-return: A's hook embeds a distinct B, whose hook
     %% embeds A back. Must raise before the recursion overflows the stack.
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Json'}},
-        beamtalk_json:'generate:'('bt@json_hook_fixture':new(mutual_a))
+    ?assertBtError(
+        type_error, 'Json', beamtalk_json:'generate:'('bt@json_hook_fixture':new(mutual_a))
     ).
 
 generate_as_json_shared_reference_not_a_cycle_test() ->
@@ -306,10 +299,7 @@ pretty_print_nested_test() ->
     ?assertEqual([1, 2, 3], Inner).
 
 pretty_print_unsupported_type_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_json:'prettyPrint:'({unsupported, tuple})
-    ).
+    ?assertBtError(type_error, beamtalk_json:'prettyPrint:'({unsupported, tuple})).
 
 %%% ============================================================================
 %%% prettify_term/1
@@ -362,10 +352,7 @@ parse_alias_test() ->
     ?assertMatch(#{'$beamtalk_class' := 'Result', 'isOk' := true, 'okValue' := 42}, R).
 
 parse_alias_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_json:parse(not_a_binary)
-    ).
+    ?assertBtError(type_error, beamtalk_json:parse(not_a_binary)).
 
 generate_alias_test() ->
     ?assertEqual({beamtalk_string, <<"42">>}, beamtalk_json:generate(42)).
@@ -447,24 +434,15 @@ parse_trailing_garbage_test() ->
 generate_nested_unsupported_type_test() ->
     %% Covers prepare_for_encode raising inside the recursive list walk,
     %% hitting the #beamtalk_error{} re-raise branch in generate:/1 (L95-96).
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Json'}},
-        beamtalk_json:'generate:'([1, {oops, bad}, 3])
-    ).
+    ?assertBtError(type_error, 'Json', beamtalk_json:'generate:'([1, {oops, bad}, 3])).
 
 generate_unsupported_in_map_test() ->
     %% Tuple as map value triggers prepare_for_encode error from inside map walk
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Json'}},
-        beamtalk_json:'generate:'(#{<<"k">> => {oops, bad}})
-    ).
+    ?assertBtError(type_error, 'Json', beamtalk_json:'generate:'(#{<<"k">> => {oops, bad}})).
 
 pretty_print_nested_unsupported_type_test() ->
     %% Covers the #beamtalk_error{} re-raise branch in prettyPrint:/1 (L117-118).
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Json'}},
-        beamtalk_json:'prettyPrint:'([1, {oops, bad}, 3])
-    ).
+    ?assertBtError(type_error, 'Json', beamtalk_json:'prettyPrint:'([1, {oops, bad}, 3])).
 
 %%% ============================================================================
 %%% Additional coverage — large / deeply nested structures

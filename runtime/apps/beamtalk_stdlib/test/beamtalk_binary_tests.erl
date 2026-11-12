@@ -15,6 +15,7 @@ print_string/1, deserialize_with_used/1).
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -62,16 +63,10 @@ deserialize_map_test() ->
     ?assertEqual(#{key => value}, beamtalk_binary:'deserialize:'(Bin)).
 
 deserialize_type_error_non_binary_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:'deserialize:'(not_a_binary)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:'deserialize:'(not_a_binary)).
 
 deserialize_invalid_binary_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:'deserialize:'(<<0, 1, 2, 3>>)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:'deserialize:'(<<0, 1, 2, 3>>)).
 
 %%% ============================================================================
 %%% size:/1
@@ -91,10 +86,7 @@ size_multibyte_utf8_test() ->
     ?assertEqual(2, beamtalk_binary:'size:'(<<"é"/utf8>>)).
 
 size_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:'size:'(not_a_binary)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:'size:'(not_a_binary)).
 
 %%% ============================================================================
 %%% fromIolist:/1
@@ -116,10 +108,7 @@ from_iolist_empty_test() ->
     ?assertEqual(<<>>, beamtalk_binary:'fromIolist:'([])).
 
 from_iolist_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:'fromIolist:'(not_an_iolist)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:'fromIolist:'(not_an_iolist)).
 
 %%% ============================================================================
 %%% Round-trip tests
@@ -145,10 +134,7 @@ deserialize_alias_test() ->
     ?assertEqual(42, beamtalk_binary:deserialize(Bin)).
 
 deserialize_alias_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:deserialize(not_a_binary)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:deserialize(not_a_binary)).
 
 size_alias_test() ->
     ?assertEqual(5, beamtalk_binary:size(<<"hello">>)).
@@ -201,16 +187,10 @@ do_single_byte_test() ->
     ).
 
 do_type_error_not_binary_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:do(not_a_binary, fun(_) -> ok end)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:do(not_a_binary, fun(_) -> ok end)).
 
 do_type_error_not_fun_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:do(<<1>>, not_a_fun)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:do(<<1>>, not_a_fun)).
 
 %%% ============================================================================
 %%% at/2 — 1-based byte access
@@ -226,28 +206,16 @@ at_single_byte_test() ->
     ?assertEqual(42, beamtalk_binary:at(<<42>>, 1)).
 
 at_index_zero_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
-        beamtalk_binary:at(<<"hello">>, 0)
-    ).
+    ?assertBtError(index_out_of_bounds, beamtalk_binary:at(<<"hello">>, 0)).
 
 at_index_too_large_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
-        beamtalk_binary:at(<<"hello">>, 6)
-    ).
+    ?assertBtError(index_out_of_bounds, beamtalk_binary:at(<<"hello">>, 6)).
 
 at_type_error_not_binary_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:at(not_a_binary, 1)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:at(not_a_binary, 1)).
 
 at_type_error_not_integer_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:at(<<"hello">>, <<"1">>)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:at(<<"hello">>, <<"1">>)).
 
 %% Indexing an empty Binary is `empty_collection`, matching the other
 %% collection `at:` implementations.
@@ -262,10 +230,7 @@ at_empty_binary_error_test() ->
 
 %% An index below 1 is malformed either way, so it stays index_out_of_bounds.
 at_empty_binary_zero_index_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
-        beamtalk_binary:at(<<>>, 0)
-    ).
+    ?assertBtError(index_out_of_bounds, beamtalk_binary:at(<<>>, 0)).
 
 %%% ============================================================================
 %%% byte_at/2 — 0-based byte access
@@ -281,34 +246,19 @@ byte_at_single_byte_test() ->
     ?assertEqual(42, beamtalk_binary:byte_at(<<42>>, 0)).
 
 byte_at_negative_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
-        beamtalk_binary:byte_at(<<"hello">>, -1)
-    ).
+    ?assertBtError(index_out_of_bounds, beamtalk_binary:byte_at(<<"hello">>, -1)).
 
 byte_at_too_large_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
-        beamtalk_binary:byte_at(<<"hello">>, 5)
-    ).
+    ?assertBtError(index_out_of_bounds, beamtalk_binary:byte_at(<<"hello">>, 5)).
 
 byte_at_type_error_not_binary_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:byte_at(not_a_binary, 0)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:byte_at(not_a_binary, 0)).
 
 byte_at_type_error_not_integer_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:byte_at(<<1>>, <<"0">>)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:byte_at(<<1>>, <<"0">>)).
 
 byte_at_empty_binary_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
-        beamtalk_binary:byte_at(<<>>, 0)
-    ).
+    ?assertBtError(index_out_of_bounds, beamtalk_binary:byte_at(<<>>, 0)).
 
 %%% ============================================================================
 %%% part/3 — zero-copy slice
@@ -330,22 +280,13 @@ part_full_binary_test() ->
     ?assertEqual(<<"hello">>, beamtalk_binary:part(<<"hello">>, 0, 5)).
 
 part_out_of_bounds_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
-        beamtalk_binary:part(<<"hello">>, 3, 5)
-    ).
+    ?assertBtError(index_out_of_bounds, beamtalk_binary:part(<<"hello">>, 3, 5)).
 
 part_type_error_not_binary_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:part(not_a_binary, 0, 1)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:part(not_a_binary, 0, 1)).
 
 part_type_error_not_integer_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:part(<<"hello">>, <<"0">>, 1)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:part(<<"hello">>, <<"0">>, 1)).
 
 %%% ============================================================================
 %%% concat/2 — concatenation
@@ -367,16 +308,10 @@ concat_raw_bytes_test() ->
     ?assertEqual(<<1, 2, 3, 4>>, beamtalk_binary:concat(<<1, 2>>, <<3, 4>>)).
 
 concat_type_error_left_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:concat(not_a_binary, <<"hello">>)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:concat(not_a_binary, <<"hello">>)).
 
 concat_type_error_right_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:concat(<<"hello">>, not_a_binary)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:concat(<<"hello">>, not_a_binary)).
 
 %%% ============================================================================
 %%% to_bytes/1 — binary to byte list
@@ -395,10 +330,7 @@ to_bytes_raw_bytes_test() ->
     ?assertEqual([0, 127, 255], beamtalk_binary:to_bytes(<<0, 127, 255>>)).
 
 to_bytes_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:to_bytes(not_a_binary)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:to_bytes(not_a_binary)).
 
 %%% ============================================================================
 %%% from_bytes/1 — byte list to binary
@@ -414,16 +346,10 @@ from_bytes_single_byte_test() ->
     ?assertEqual(<<255>>, beamtalk_binary:from_bytes([255])).
 
 from_bytes_type_error_not_list_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:from_bytes(not_a_list)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:from_bytes(not_a_list)).
 
 from_bytes_type_error_invalid_bytes_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:from_bytes([256])
-    ).
+    ?assertBtError(type_error, beamtalk_binary:from_bytes([256])).
 
 from_bytes_round_trip_test() ->
     Bin = <<0, 42, 127, 200, 255>>,
@@ -557,10 +483,7 @@ as_string_valid_four_byte_test() ->
     ).
 
 as_string_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:as_string(not_a_binary)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:as_string(not_a_binary)).
 
 %%% ============================================================================
 %%% as_string_unchecked/1
@@ -578,10 +501,7 @@ as_string_unchecked_empty_test() ->
     ?assertEqual({beamtalk_string, <<>>}, beamtalk_binary:as_string_unchecked(<<>>)).
 
 as_string_unchecked_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:as_string_unchecked(not_a_binary)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:as_string_unchecked(not_a_binary)).
 
 %%% ============================================================================
 %%% print_string/1
@@ -624,10 +544,7 @@ print_string_matches_primitive_test_() ->
     ].
 
 print_string_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:print_string(not_a_binary)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:print_string(not_a_binary)).
 
 %%% ============================================================================
 %%% deserialize_with_used/1
@@ -647,16 +564,10 @@ deserialize_with_used_with_trailing_data_test() ->
     ?assertEqual(erlang:byte_size(Bin), Used).
 
 deserialize_with_used_invalid_binary_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:deserialize_with_used(<<0, 1, 2, 3>>)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:deserialize_with_used(<<0, 1, 2, 3>>)).
 
 deserialize_with_used_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_binary:deserialize_with_used(not_a_binary)
-    ).
+    ?assertBtError(type_error, beamtalk_binary:deserialize_with_used(not_a_binary)).
 
 %%% ============================================================================
 %%% Substring search (BT-4190)

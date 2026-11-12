@@ -35,6 +35,7 @@ metadata or atom-construction call.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %% A class name whose `bt@pkg_hot_value` / `bt@stdlib@pkg_hot_value`
@@ -144,10 +145,7 @@ resolution_follows_class_redefinition() ->
         beamtalk_module_name:to_module_atom(?CLASS),
         beamtalk_primitive:class_name_to_module(?CLASS)
     ),
-    ?assertError(
-        #{error := #beamtalk_error{kind = does_not_understand, selector = getX}},
-        beamtalk_primitive:send(Self, getX, [])
-    ).
+    ?assertBtError(does_not_understand, _, getX, beamtalk_primitive:send(Self, getX, [])).
 
 module_less_class_makes_no_code_server_call() ->
     %% A builder-built class registers its own name as its "module"
@@ -285,10 +283,7 @@ purged_module_is_rederived() ->
         true = code:delete(?MOD),
         code:purge(?MOD),
         ?assertNot(erlang:module_loaded(?MOD)),
-        ?assertError(
-            #{error := #beamtalk_error{kind = does_not_understand, selector = getX}},
-            beamtalk_primitive:send(Self, getX, [])
-        ),
+        ?assertBtError(does_not_understand, _, getX, beamtalk_primitive:send(Self, getX, [])),
         ok = load_accessor_module(?MOD, x),
         ?assertEqual(7, beamtalk_primitive:send(Self, getX, [])),
         {Results, Calls} = code_server_calls_during(fun() ->
@@ -336,10 +331,7 @@ runtime_method_changes_are_seen_by_next_send() ->
     Pid = start_class(?MODULE_LESS, undefined, 'Object'),
     Self = #{'$beamtalk_class' => ?MODULE_LESS},
     try
-        ?assertError(
-            #{error := #beamtalk_error{kind = does_not_understand, selector = answer}},
-            beamtalk_primitive:send(Self, answer, [])
-        ),
+        ?assertBtError(does_not_understand, _, answer, beamtalk_primitive:send(Self, answer, [])),
         ?assertNot(beamtalk_primitive:responds_to(Self, answer)),
         ok = beamtalk_object_class:put_method(Pid, answer, fun(_Self) -> 42 end),
         ?assertEqual(42, beamtalk_primitive:send(Self, answer, [])),
@@ -529,10 +521,7 @@ memo_of_purged_module_is_rederived() ->
         true = code:delete(?MOD),
         code:purge(?MOD),
         ?assertEqual(Gen, beamtalk_class_derived_cache:generation()),
-        ?assertError(
-            #{error := #beamtalk_error{kind = does_not_understand, selector = getX}},
-            beamtalk_primitive:send(Self, getX, [])
-        ),
+        ?assertBtError(does_not_understand, _, getX, beamtalk_primitive:send(Self, getX, [])),
         ok = load_accessor_module(?MOD, x),
         ?assertEqual(7, beamtalk_primitive:send(Self, getX, []))
     after

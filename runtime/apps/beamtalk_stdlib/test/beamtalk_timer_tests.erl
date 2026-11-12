@@ -15,6 +15,7 @@ FFI shims (after/2, every/2, sleep/1), and error paths.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -55,22 +56,13 @@ after_do_zero_delay_test() ->
     ?assertEqual('Timer', maps:get('$beamtalk_class', T)).
 
 after_do_negative_delay_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_timer:'after:do:'(-1, fun() -> ok end)
-    ).
+    ?assertBtError(type_error, beamtalk_timer:'after:do:'(-1, fun() -> ok end)).
 
 after_do_non_integer_delay_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_timer:'after:do:'(1.5, fun() -> ok end)
-    ).
+    ?assertBtError(type_error, beamtalk_timer:'after:do:'(1.5, fun() -> ok end)).
 
 after_do_non_block_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_timer:'after:do:'(100, not_a_fun)
-    ).
+    ?assertBtError(type_error, beamtalk_timer:'after:do:'(100, not_a_fun)).
 
 %%% ============================================================================
 %%% every:do: — construction
@@ -84,22 +76,13 @@ every_do_returns_timer_map_test() ->
 
 every_do_zero_delay_test() ->
     %% Zero interval is invalid (must be positive)
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_timer:'every:do:'(0, fun() -> ok end)
-    ).
+    ?assertBtError(type_error, beamtalk_timer:'every:do:'(0, fun() -> ok end)).
 
 every_do_negative_delay_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_timer:'every:do:'(-10, fun() -> ok end)
-    ).
+    ?assertBtError(type_error, beamtalk_timer:'every:do:'(-10, fun() -> ok end)).
 
 every_do_non_integer_delay_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_timer:'every:do:'(1.0, fun() -> ok end)
-    ).
+    ?assertBtError(type_error, beamtalk_timer:'every:do:'(1.0, fun() -> ok end)).
 
 %%% ============================================================================
 %%% sleep:
@@ -112,16 +95,10 @@ sleep_zero_test() ->
     ?assertEqual(nil, beamtalk_timer:'sleep:'(0)).
 
 sleep_negative_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_timer:'sleep:'(-1)
-    ).
+    ?assertBtError(type_error, beamtalk_timer:'sleep:'(-1)).
 
 sleep_non_integer_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_timer:'sleep:'(<<"500">>)
-    ).
+    ?assertBtError(type_error, beamtalk_timer:'sleep:'(<<"500">>)).
 
 %%% ============================================================================
 %%% cancel/1 — ack-based protocol
@@ -212,22 +189,13 @@ ffi_shim_sleep_returns_nil_test() ->
     ?assertEqual(nil, beamtalk_timer:sleep(1)).
 
 ffi_shim_after_error_propagates_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_timer:'after'(-1, fun() -> ok end)
-    ).
+    ?assertBtError(type_error, beamtalk_timer:'after'(-1, fun() -> ok end)).
 
 ffi_shim_every_error_propagates_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_timer:every(0, fun() -> ok end)
-    ).
+    ?assertBtError(type_error, beamtalk_timer:every(0, fun() -> ok end)).
 
 ffi_shim_sleep_error_propagates_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_timer:sleep(-1)
-    ).
+    ?assertBtError(type_error, beamtalk_timer:sleep(-1)).
 
 %%% ============================================================================
 %%% spawn_link — automatic cleanup on caller death

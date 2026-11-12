@@ -30,6 +30,7 @@ directly.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -108,10 +109,7 @@ read_line_error_epipe_returns_nil_test() ->
 
 read_line_genuine_error_raises_io_error_test() ->
     with_mock_gl({error, badarg}, fun() ->
-        ?assertError(
-            #{error := #beamtalk_error{kind = io_error}},
-            beamtalk_console:readLine()
-        )
+        ?assertBtError(io_error, beamtalk_console:readLine())
     end).
 
 read_line_binary_strips_lf_test() ->

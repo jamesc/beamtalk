@@ -478,8 +478,6 @@ future_chaining_with_callbacks_test() ->
     %% Resolve first future
     beamtalk_future:resolve(Future1, 21),
 
-    %% Wait for chained future
-    timer:sleep(50),
     Result = beamtalk_future:await(Future2),
     ?assertEqual(42, Result).
 
@@ -496,8 +494,6 @@ error_propagation_through_callbacks_test() ->
     %% Reject first future
     beamtalk_future:reject(Future1, original_error),
 
-    %% Wait for chained future to be rejected
-    timer:sleep(50),
     ?assertThrow(
         {future_rejected, {propagated, original_error}}, beamtalk_future:await(Future2, 1000)
     ).
@@ -551,8 +547,6 @@ stray_timeout_in_resolved_state_test() ->
     %% Send a stray timeout message directly to the future process
     beamtalk_future:pid(Future) ! {timeout, self()},
 
-    %% Future should still work normally
-    timer:sleep(10),
     ?assertEqual(42, beamtalk_future:await(Future)).
 
 stray_timeout_in_rejected_state_test() ->
@@ -563,7 +557,6 @@ stray_timeout_in_rejected_state_test() ->
     %% Send a stray timeout message
     beamtalk_future:pid(Future) ! {timeout, self()},
 
-    timer:sleep(10),
     ?assertThrow({future_rejected, error}, beamtalk_future:await(Future)).
 
 rejected_callback_on_resolved_future_test() ->
@@ -844,8 +837,7 @@ await_very_short_timeout_already_resolved_test() ->
     %% because the resolved state responds immediately to {await, ...}
     Future = beamtalk_future:new(),
     beamtalk_future:resolve(Future, fast),
-    %% Give the future process time to transition to resolved state
-    timer:sleep(20),
+    ok = beamtalk_test_wait:idle(beamtalk_future:pid(Future)),
     %% Use 100ms — enough for the resolved process to reply
     ?assertEqual(fast, beamtalk_future:await(Future, 100)).
 
@@ -981,7 +973,7 @@ multiple_callbacks_on_already_resolved_test() ->
     %% Callbacks added after resolve should each fire immediately
     Future = beamtalk_future:new(),
     beamtalk_future:resolve(Future, done),
-    timer:sleep(10),
+    ok = beamtalk_test_wait:idle(beamtalk_future:pid(Future)),
 
     Parent = self(),
     beamtalk_future:when_resolved(Future, fun(V) -> Parent ! {late_1, V} end),
@@ -1008,7 +1000,7 @@ multiple_callbacks_on_already_rejected_test() ->
     %% Rejected callbacks added after reject should each fire immediately
     Future = beamtalk_future:new(),
     beamtalk_future:reject(Future, oops),
-    timer:sleep(10),
+    ok = beamtalk_test_wait:idle(beamtalk_future:pid(Future)),
 
     Parent = self(),
     beamtalk_future:when_rejected(Future, fun(R) -> Parent ! {late_err_1, R} end),

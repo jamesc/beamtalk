@@ -674,7 +674,7 @@ io_passthrough_forward_test() ->
     OldGL = group_leader(),
     PassPid = spawn(fun() -> beamtalk_io_capture:io_passthrough_loop(OldGL) end),
     PassPid ! {io_request, self(), make_ref(), {put_chars, unicode, <<"test">>}},
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(PassPid),
     ?assert(is_process_alive(PassPid)),
     exit(PassPid, normal).
 
@@ -1108,7 +1108,7 @@ handle_method_definition_with_source_compile_fail_test() ->
             ok;
         OldPid ->
             gen_server:stop(OldPid),
-            timer:sleep(10)
+            beamtalk_test_wait:dead(OldPid)
     end,
     {ok, WsPid} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"eval_test_ws">>,

@@ -173,7 +173,7 @@ check_idle_not_idle_reschedules_test() ->
     try
         %% Send check_idle — activity is recent, should reschedule (not stop)
         MonPid ! check_idle,
-        timer:sleep(50),
+        ok = beamtalk_test_wait:sync(MonPid),
 
         %% Process should still be alive (not idle, rescheduled)
         ?assert(is_process_alive(MonPid))
@@ -190,7 +190,7 @@ disabled_monitor_ignores_check_idle_test() ->
     try
         %% Send check_idle — should be ignored since disabled
         MonPid ! check_idle,
-        timer:sleep(50),
+        ok = beamtalk_test_wait:sync(MonPid),
 
         ?assert(is_process_alive(MonPid))
     after
@@ -243,7 +243,7 @@ has_active_sessions_no_supervisor_test() ->
 
     try
         MonPid ! check_idle,
-        timer:sleep(50),
+        ok = beamtalk_test_wait:sync(MonPid),
         ?assert(is_process_alive(MonPid))
     after
         gen_server:stop(MonPid),
@@ -261,7 +261,7 @@ get_last_activity_error_path_test() ->
         %% No workspace_meta running — get_last_activity will error
         %% Send check_idle — should_terminate returns false due to error path
         MonPid ! check_idle,
-        timer:sleep(50),
+        ok = beamtalk_test_wait:sync(MonPid),
 
         %% Process stays alive (error path → don't terminate)
         ?assert(is_process_alive(MonPid))

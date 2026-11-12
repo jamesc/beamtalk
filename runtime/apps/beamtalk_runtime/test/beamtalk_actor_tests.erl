@@ -17,6 +17,7 @@ Tests all actor behaviors:
 - Error cases
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %% Logger handler callback for the stacktrace-capture tests below
@@ -322,8 +323,7 @@ terminate_callback_test() ->
     %% Stop the actor normally
     ok = gen_server:stop(Counter, normal, 1000),
 
-    %% Verify it's stopped
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     ?assertNot(is_process_alive(Counter)).
 
 %%% Spawn helper tests
@@ -1427,10 +1427,7 @@ sync_message_to_dead_actor_returns_error_test() ->
     gen_server:stop(Counter, normal, 1000),
     beamtalk_test_wait:dead(Counter),
 
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead, selector = getValue}},
-        beamtalk_actor:sync_send(Counter, getValue, [])
-    ).
+    ?assertBtError(actor_dead, _, getValue, beamtalk_actor:sync_send(Counter, getValue, [])).
 
 %%% ===========================================================================
 %%% register_spawned callback tests
@@ -1688,7 +1685,7 @@ async_send_stop_live_actor_test() ->
     beamtalk_actor:async_send(Counter, stop, [], Future),
     Result = beamtalk_future:await(Future),
     ?assertEqual(ok, Result),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     ?assertNot(is_process_alive(Counter)).
 
 async_send_stop_dead_actor_test() ->
@@ -1748,7 +1745,7 @@ sync_send_is_alive_test() ->
 sync_send_stop_test() ->
     {ok, Counter} = test_counter:start_link(0),
     ?assertEqual(ok, beamtalk_actor:sync_send(Counter, stop, [])),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     ?assertNot(is_process_alive(Counter)).
 
 sync_send_stop_dead_actor_test() ->
@@ -1768,10 +1765,7 @@ sync_send_to_dead_actor_test() ->
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter),
     beamtalk_test_wait:dead(Counter),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
-        beamtalk_actor:sync_send(Counter, getValue, [])
-    ).
+    ?assertBtError(actor_dead, beamtalk_actor:sync_send(Counter, getValue, [])).
 
 %%% ============================================================================
 %%% sync_send/4 (explicit timeout) tests
@@ -1787,10 +1781,7 @@ sync_send_4_succeeds_with_sufficient_timeout_test() ->
 sync_send_4_times_out_with_short_timeout_test() ->
     {ok, Counter} = test_counter:start_link(42),
     %% slowGet: sleeps 500ms; 50ms timeout should trigger timeout
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = timeout}},
-        beamtalk_actor:sync_send(Counter, 'slowGet:', [500], 50)
-    ),
+    ?assertBtError(timeout, beamtalk_actor:sync_send(Counter, 'slowGet:', [500], 50)),
     gen_server:stop(Counter).
 
 sync_send_4_infinity_timeout_test() ->
@@ -1804,10 +1795,7 @@ sync_send_4_dead_actor_test() ->
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter),
     beamtalk_test_wait:dead(Counter),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
-        beamtalk_actor:sync_send(Counter, getValue, [], 5000)
-    ).
+    ?assertBtError(actor_dead, beamtalk_actor:sync_send(Counter, getValue, [], 5000)).
 
 %%% ============================================================================
 %%% cast_send/3 and fire-and-forget handle_cast wire format tests
@@ -1818,8 +1806,8 @@ cast_send_to_live_actor_returns_ok_test() ->
     %% cast_send always returns ok
     Result = beamtalk_actor:cast_send(Counter, increment, []),
     ?assertEqual(ok, Result),
-    %% Give actor time to process the cast
-    timer:sleep(20),
+    %% Wait for the actor to process the cast
+    ok = beamtalk_test_wait:sync(Counter),
     %% Verify state was updated
     ?assertEqual(1, gen_server:call(Counter, {getValue, []})),
     gen_server:stop(Counter).
@@ -2784,14 +2772,8 @@ restore_propagated_ctx_non_map_is_noop_test() ->
 sync_send_4_invalid_timeout_raises_type_error_test() ->
     {ok, Counter} = test_counter:start_link(0),
     try
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-            beamtalk_actor:sync_send(Counter, getValue, [], negative_atom)
-        ),
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-            beamtalk_actor:sync_send(Counter, getValue, [], -1)
-        )
+        ?assertBtError(type_error, beamtalk_actor:sync_send(Counter, getValue, [], negative_atom)),
+        ?assertBtError(type_error, beamtalk_actor:sync_send(Counter, getValue, [], -1))
     after
         gen_server:stop(Counter)
     end.
@@ -2803,10 +2785,7 @@ sync_send_4_invalid_timeout_raises_type_error_test() ->
 sync_send_delegate_raises_signal_error_test() ->
     {ok, Counter} = test_counter:start_link(0),
     try
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = signal}},
-            beamtalk_actor:sync_send(Counter, delegate, [])
-        )
+        ?assertBtError(signal, beamtalk_actor:sync_send(Counter, delegate, []))
     after
         gen_server:stop(Counter)
     end.
@@ -3130,10 +3109,7 @@ sync_send_to_shutdown_actor_raises_actor_dead_test() ->
     {ok, Counter} = gen_server:start(test_counter, 0, []),
     gen_server:stop(Counter, shutdown, 1000),
     beamtalk_test_wait:dead(Counter),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
-        beamtalk_actor:sync_send(Counter, getValue, [])
-    ).
+    ?assertBtError(actor_dead, beamtalk_actor:sync_send(Counter, getValue, [])).
 
 %%% ============================================================================
 %%% lookup_class returns unknown for non-actor pids
@@ -3596,10 +3572,7 @@ ffi_register_as_non_object_returns_type_error_test() ->
 
 ffi_unregister_non_object_raises_type_error_test() ->
     %% `unregister/1` mirrors ADR 0079's "raise on real failure" contract.
-    ?assertError(
-        #{error := #beamtalk_error{kind = type_error}},
-        beamtalk_actor_ffi:unregister(not_an_actor)
-    ).
+    ?assertBtError(type_error, beamtalk_actor_ffi:unregister(not_an_actor)).
 
 ffi_unregister_does_not_touch_replacement_test() ->
     %% TOCTOU guard: if the original owner's name is released and another
@@ -3761,16 +3734,10 @@ ffi_do_spawn_non_object_receiver_raises_test() ->
     %% ADR 0076 to auto-convert to `Result error:`), doSpawn/1 and
     %% doSpawnWith/2 raise — `spawn`'s declared return type is `Self`, not
     %% `Result(Self, Error)`, matching the per-class `spawn/0` export.
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_actor_ffi:doSpawn(not_an_actor)
-    ).
+    ?assertBtError(type_error, beamtalk_actor_ffi:doSpawn(not_an_actor)).
 
 ffi_do_spawn_with_non_object_receiver_raises_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_actor_ffi:doSpawnWith(not_an_actor, #{})
-    ).
+    ?assertBtError(type_error, beamtalk_actor_ffi:doSpawnWith(not_an_actor, #{})).
 
 %% Ensure the Counter class is loaded and registered, returning its live
 %% class-object pid. Mirrors (but does not share — each test module keeps
@@ -3818,10 +3785,7 @@ sync_send_to_normal_exit_actor_raises_actor_dead_test() ->
     {ok, Counter} = gen_server:start(test_counter, 0, []),
     gen_server:stop(Counter, normal, 1000),
     beamtalk_test_wait:dead(Counter),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
-        beamtalk_actor:sync_send(Counter, getValue, [])
-    ).
+    ?assertBtError(actor_dead, beamtalk_actor:sync_send(Counter, getValue, [])).
 
 sync_send_to_killed_actor_raises_actor_dead_test() ->
     %% When actor is killed, sync_send should surface actor_dead (covers the
@@ -3829,10 +3793,7 @@ sync_send_to_killed_actor_raises_actor_dead_test() ->
     {ok, Counter} = test_counter:start(0),
     exit(Counter, kill),
     beamtalk_test_wait:dead(Counter),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
-        beamtalk_actor:sync_send(Counter, getValue, [])
-    ).
+    ?assertBtError(actor_dead, beamtalk_actor:sync_send(Counter, getValue, [])).
 
 sync_send_timeout_raises_timeout_error_test() ->
     %% When the actor takes longer than the configured timeout to reply,
@@ -3840,10 +3801,7 @@ sync_send_timeout_raises_timeout_error_test() ->
     %% branch in the catch block).
     {ok, Counter} = test_counter:start_link(5),
     try
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = timeout}},
-            beamtalk_actor:sync_send(Counter, 'slowGet:', [500], 50)
-        )
+        ?assertBtError(timeout, beamtalk_actor:sync_send(Counter, 'slowGet:', [500], 50))
     after
         %% slowGet returns before test exits; give it time to drain
         timer:sleep(600),
@@ -4071,20 +4029,14 @@ sync_send_4_to_dead_actor_raises_actor_dead_test() ->
     {ok, Counter} = gen_server:start(test_counter, 0, []),
     gen_server:stop(Counter, normal, 1000),
     beamtalk_test_wait:dead(Counter),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
-        beamtalk_actor:sync_send(Counter, getValue, [], 1000)
-    ).
+    ?assertBtError(actor_dead, beamtalk_actor:sync_send(Counter, getValue, [], 1000)).
 
 sync_send_4_to_killed_actor_raises_actor_dead_test() ->
     %% Covers the exit:{_Reason, _} catch-all branch (line 836-837).
     {ok, Counter} = test_counter:start(0),
     exit(Counter, kill),
     beamtalk_test_wait:dead(Counter),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
-        beamtalk_actor:sync_send(Counter, getValue, [], 1000)
-    ).
+    ?assertBtError(actor_dead, beamtalk_actor:sync_send(Counter, getValue, [], 1000)).
 
 sync_send_4_with_infinity_timeout_succeeds_test() ->
     %% Covers the Timeout =:= infinity guard branch.
@@ -4271,10 +4223,7 @@ bt1990_proxy_send_to_vanished_name_raises_no_such_process_test() ->
     %% Wait for the registry to release the name.
     bt1990_wait_until_unregistered(Name, 1000),
     try
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = no_such_process}},
-            beamtalk_message_dispatch:send(Proxy, getValue, [])
-        )
+        ?assertBtError(no_such_process, beamtalk_message_dispatch:send(Proxy, getValue, []))
     after
         cleanup_name(Name)
     end.
@@ -4286,9 +4235,8 @@ bt1990_proxy_send_4_to_vanished_name_raises_no_such_process_test() ->
     gen_server:stop(Pid),
     bt1990_wait_until_unregistered(Name, 1000),
     try
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = no_such_process}},
-            beamtalk_actor:sync_send({registered, Name}, getValue, [], 1000)
+        ?assertBtError(
+            no_such_process, beamtalk_actor:sync_send({registered, Name}, getValue, [], 1000)
         )
     after
         cleanup_name(Name)

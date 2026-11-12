@@ -36,6 +36,7 @@ The testClassProtocol probe is a test-registered extension on `Class`
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%====================================================================
@@ -133,8 +134,9 @@ test_unknown_message_dnu() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
 
-    ?assertError(
-        #{error := #beamtalk_error{kind = does_not_understand, class = 'Counter'}},
+    ?assertBtError(
+        does_not_understand,
+        'Counter',
         beamtalk_object_class:class_send(CounterPid, totallyUnknownMessage, [])
     ).
 
@@ -164,8 +166,9 @@ test_fallthrough_absent_class() ->
 
     try
         %% Should raise does_not_understand, not crash
-        ?assertError(
-            #{error := #beamtalk_error{kind = does_not_understand, class = 'Counter'}},
+        ?assertBtError(
+            does_not_understand,
+            'Counter',
             beamtalk_object_class:class_send(CounterPid, testClassProtocol, [])
         )
     after

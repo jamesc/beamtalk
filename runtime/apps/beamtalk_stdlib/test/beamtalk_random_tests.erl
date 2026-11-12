@@ -14,6 +14,7 @@ collection integration (atRandom), FFI shims, and error paths.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -46,22 +47,13 @@ next_integer_one_test() ->
     ?assertEqual(1, beamtalk_random:'nextInteger:'(1)).
 
 next_integer_zero_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:'nextInteger:'(0)
-    ).
+    ?assertBtError(type_error, beamtalk_random:'nextInteger:'(0)).
 
 next_integer_negative_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:'nextInteger:'(-5)
-    ).
+    ?assertBtError(type_error, beamtalk_random:'nextInteger:'(-5)).
 
 next_integer_non_integer_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:'nextInteger:'(<<"10">>)
-    ).
+    ?assertBtError(type_error, beamtalk_random:'nextInteger:'(<<"10">>)).
 
 %%% ============================================================================
 %%% new/0 — constructor
@@ -100,10 +92,7 @@ seed_different_seeds_different_state_test() ->
     ?assertNotEqual(maps:get(state, R1), maps:get(state, R2)).
 
 seed_non_integer_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:'seed:'(<<"42">>)
-    ).
+    ?assertBtError(type_error, beamtalk_random:'seed:'(<<"42">>)).
 
 %%% ============================================================================
 %%% next/1 — instance float
@@ -128,10 +117,7 @@ instance_next_deterministic_test() ->
     ?assertEqual(V1, V2).
 
 instance_next_bad_receiver_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:next(not_a_random)
-    ).
+    ?assertBtError(type_error, beamtalk_random:next(not_a_random)).
 
 %%% ============================================================================
 %%% nextInteger/2 — instance integer
@@ -156,30 +142,18 @@ instance_next_integer_deterministic_test() ->
 
 instance_next_integer_zero_max_test() ->
     R = beamtalk_random:'seed:'(1),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:nextInteger(R, 0)
-    ).
+    ?assertBtError(type_error, beamtalk_random:nextInteger(R, 0)).
 
 instance_next_integer_negative_max_test() ->
     R = beamtalk_random:'seed:'(1),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:nextInteger(R, -1)
-    ).
+    ?assertBtError(type_error, beamtalk_random:nextInteger(R, -1)).
 
 instance_next_integer_non_integer_max_test() ->
     R = beamtalk_random:'seed:'(1),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:nextInteger(R, 1.5)
-    ).
+    ?assertBtError(type_error, beamtalk_random:nextInteger(R, 1.5)).
 
 instance_next_integer_bad_receiver_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:nextInteger(not_a_random, 10)
-    ).
+    ?assertBtError(type_error, beamtalk_random:nextInteger(not_a_random, 10)).
 
 %%% ============================================================================
 %%% atRandom/1 — collection integration
@@ -202,16 +176,10 @@ at_random_single_element_tuple_test() ->
     ?assertEqual(sole, beamtalk_random:'atRandom'({sole})).
 
 at_random_empty_list_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:'atRandom'([])
-    ).
+    ?assertBtError(type_error, beamtalk_random:'atRandom'([])).
 
 at_random_empty_tuple_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:'atRandom'({})
-    ).
+    ?assertBtError(type_error, beamtalk_random:'atRandom'({})).
 
 %%% ============================================================================
 %%% FFI shims
@@ -224,10 +192,7 @@ ffi_shim_next_integer_returns_integer_test() ->
     ?assert(V =< 10).
 
 ffi_shim_next_integer_error_propagates_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:nextInteger(0)
-    ).
+    ?assertBtError(type_error, beamtalk_random:nextInteger(0)).
 
 ffi_shim_seed_returns_random_map_test() ->
     R = beamtalk_random:seed(42),
@@ -239,10 +204,7 @@ ffi_shim_seed_deterministic_test() ->
     ?assertEqual(maps:get(state, R1), maps:get(state, R2)).
 
 ffi_shim_seed_error_propagates_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:seed(<<"bad">>)
-    ).
+    ?assertBtError(type_error, beamtalk_random:seed(<<"bad">>)).
 
 ffi_shim_instance_next_integer_returns_integer_test() ->
     R = beamtalk_random:'seed:'(42),
@@ -253,7 +215,4 @@ ffi_shim_instance_next_integer_returns_integer_test() ->
 
 ffi_shim_instance_next_integer_error_propagates_test() ->
     R = beamtalk_random:'seed:'(1),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_random:nextInteger(R, 0)
-    ).
+    ?assertBtError(type_error, beamtalk_random:nextInteger(R, 0)).

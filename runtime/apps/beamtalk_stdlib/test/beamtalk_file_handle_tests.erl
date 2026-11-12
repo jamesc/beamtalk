@@ -16,6 +16,7 @@ selectors raise a structured does_not_understand error.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -126,9 +127,8 @@ dispatch_printString_returns_string_test() ->
 
 dispatch_unknown_selector_raises_test() ->
     with_temp_handle(<<"data">>, fun(Handle) ->
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand}},
-            beamtalk_file_handle:dispatch(unknown_selector_xyz, [], Handle)
+        ?assertBtError(
+            does_not_understand, beamtalk_file_handle:dispatch(unknown_selector_xyz, [], Handle)
         )
     end).
 
@@ -278,25 +278,16 @@ dispatch_read_routes_to_handle_test() ->
 %%% ============================================================================
 
 read_on_non_handle_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_file_handle:read(#{}, 1)
-    ).
+    ?assertBtError(type_error, beamtalk_file_handle:read(#{}, 1)).
 
 read_with_negative_count_raises_type_error_test() ->
     with_temp_handle(<<"data">>, fun(Handle) ->
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-            beamtalk_file_handle:read(Handle, -1)
-        )
+        ?assertBtError(type_error, beamtalk_file_handle:read(Handle, -1))
     end).
 
 write_with_non_binary_raises_type_error_test() ->
     with_temp_handle(<<>>, append, fun(Handle) ->
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-            beamtalk_file_handle:write(Handle, 42)
-        )
+        ?assertBtError(type_error, beamtalk_file_handle:write(Handle, 42))
     end).
 
 lines_on_closed_handle_raises_test() ->
@@ -304,10 +295,7 @@ lines_on_closed_handle_raises_test() ->
     %% raises rather than handing back a silently empty stream.
     with_temp_handle(<<"a\nb\n">>, fun(Handle) ->
         beamtalk_file_handle:close(Handle),
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = io_error}},
-            beamtalk_file_handle:dispatch('lines', [], Handle)
-        )
+        ?assertBtError(io_error, beamtalk_file_handle:dispatch('lines', [], Handle))
     end).
 
 lines_on_write_only_handle_raises_test() ->
@@ -315,10 +303,7 @@ lines_on_write_only_handle_raises_test() ->
     %% every later write on the handle fails silently. `lines` must refuse
     %% before touching it — and the handle must survive intact.
     with_temp_handle(<<>>, append, fun(Handle) ->
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = io_error}},
-            beamtalk_file_handle:dispatch('lines', [], Handle)
-        ),
+        ?assertBtError(io_error, beamtalk_file_handle:dispatch('lines', [], Handle)),
         ?assert(beamtalk_file_handle:isOpen(Handle)),
         ?assertEqual(nil, ok_value(beamtalk_file_handle:writeLine(Handle, <<"still works">>))),
         Path = maps:get(path, Handle),
@@ -445,74 +430,41 @@ write_mode_handle_writes_but_refuses_reads_test() ->
 %%% ============================================================================
 
 read_all_on_non_handle_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_file_handle:readAll(#{})
-    ).
+    ?assertBtError(type_error, beamtalk_file_handle:readAll(#{})).
 
 write_on_non_handle_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_file_handle:write(#{}, <<"x">>)
-    ).
+    ?assertBtError(type_error, beamtalk_file_handle:write(#{}, <<"x">>)).
 
 write_line_with_non_binary_raises_type_error_test() ->
     with_temp_handle(<<>>, append, fun(Handle) ->
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-            beamtalk_file_handle:writeLine(Handle, 42)
-        )
+        ?assertBtError(type_error, beamtalk_file_handle:writeLine(Handle, 42))
     end).
 
 write_line_on_non_handle_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_file_handle:writeLine(#{}, <<"x">>)
-    ).
+    ?assertBtError(type_error, beamtalk_file_handle:writeLine(#{}, <<"x">>)).
 
 position_on_non_handle_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_file_handle:position(#{})
-    ).
+    ?assertBtError(type_error, beamtalk_file_handle:position(#{})).
 
 seek_with_bad_offset_raises_type_error_test() ->
     with_temp_handle(<<"data">>, fun(Handle) ->
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-            beamtalk_file_handle:seek(Handle, not_an_integer)
-        )
+        ?assertBtError(type_error, beamtalk_file_handle:seek(Handle, not_an_integer))
     end).
 
 seek_on_non_handle_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_file_handle:seek(#{}, 0)
-    ).
+    ?assertBtError(type_error, beamtalk_file_handle:seek(#{}, 0)).
 
 flush_on_non_handle_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_file_handle:flush(#{})
-    ).
+    ?assertBtError(type_error, beamtalk_file_handle:flush(#{})).
 
 sync_on_non_handle_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_file_handle:sync(#{})
-    ).
+    ?assertBtError(type_error, beamtalk_file_handle:sync(#{})).
 
 close_on_non_handle_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_file_handle:close(#{})
-    ).
+    ?assertBtError(type_error, beamtalk_file_handle:close(#{})).
 
 is_open_on_non_handle_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_file_handle:isOpen(#{})
-    ).
+    ?assertBtError(type_error, beamtalk_file_handle:isOpen(#{})).
 
 %%% ============================================================================
 %%% dispatch/3 — 'close' selector (GH-3173)
