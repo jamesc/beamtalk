@@ -107,4 +107,6 @@ TestCase subclass: ActorSpawnMonitoredAsyncTest
     self should: [cls spawnMonitoredAsyncWith: #{}] raise: #instantiation_error
 
   testNonDictionaryInitArgsRaiseTypeError =>
-    self should: [AsyncOrderActor spawnMonitoredAsyncWith: 42] raise: #type_error
+    self should: [
+      AsyncOrderActor spawnMonitoredAsyncWith: 42
+    ] raise: #type_error

@@ -60,4 +60,6 @@ Server subclass: SpawnMonitoredObserver
   // when the spawn answered (the expected case) or the error kind if it
   // raised.
   spawnFailingAsync =>
-    [{#returned, FailingInitializeActor spawnMonitoredAsync}] on: Exception do: [:e | e kind]
+    [
+      {#returned, FailingInitializeActor spawnMonitoredAsync}
+    ] on: Exception do: [:e | e kind]
