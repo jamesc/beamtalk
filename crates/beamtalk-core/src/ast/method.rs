@@ -311,7 +311,8 @@ impl MethodDefinition {
     /// (BT-4739): the last statement is `self` (or `^ self`), and every `^`
     /// anywhere in the body — including inside blocks, where it is a
     /// non-local return — returns `self` or raises (`^ self error: "…"`,
-    /// `^ … signal`).
+    /// `^ … signal`), and no field is assigned (`self.x := …`, legal in
+    /// `TestCase`, makes the trailing `self` an updated copy).
     ///
     /// A `Value` method cannot mutate its receiver, so one that answers
     /// `self` does its work through a side effect (process dictionary,
@@ -328,19 +329,36 @@ impl MethodDefinition {
         }
 
         // `^ self error: "…"` / `^ … signal` raise, so they answer nothing.
+        // Selector-based heuristic: `error:` only on `self`, `signal`/`signal:`
+        // on any receiver (a false negative at worst).
         fn raises(expr: &Expression) -> bool {
-            matches!(
-                expr,
-                Expression::MessageSend { selector, .. }
-                    if matches!(selector.name().as_str(), "error:" | "signal" | "signal:")
-            )
+            match expr {
+                Expression::MessageSend {
+                    receiver, selector, ..
+                } => match selector.name().as_str() {
+                    "error:" => is_self(receiver),
+                    "signal" | "signal:" => true,
+                    _ => false,
+                },
+                _ => false,
+            }
         }
 
         struct OnlyReturnsSelf(bool);
         impl<'ast> Visitor<'ast> for OnlyReturnsSelf {
             fn visit_expr(&mut self, expr: &'ast Expression) {
-                if let Expression::Return { value, .. } = expr {
-                    self.0 &= is_self(value) || raises(value);
+                match expr {
+                    Expression::Return { value, .. } => {
+                        self.0 &= is_self(value) || raises(value);
+                    }
+                    // `self.x := …` (legal in `TestCase`) makes a trailing
+                    // `self` answer the updated copy, not the receiver.
+                    Expression::Assignment { target, .. }
+                        if matches!(target.as_ref(), Expression::FieldAccess { .. }) =>
+                    {
+                        self.0 = false;
+                    }
+                    _ => {}
                 }
                 walk_expr(self, expr);
             }

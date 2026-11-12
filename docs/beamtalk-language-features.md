@@ -723,8 +723,9 @@ keeps `cascade-drops-update`, so no span is reported twice. Binary sends
 are flagged too, except pure ones such as `n + 1.` on plain operands, which
 keep the `effect_free` lint. `Dynamic` and union receivers, actors and
 non-value classes stay silent. A method whose body answers its own receiver
-on every path (BT-4739) is not an update either: a value cannot mutate itself,
-so `store: v`, `send: data` or `checkHeaders: h` that ends in `self` (or
+on every path (BT-4739) is not an update either: a value cannot mutate itself
+(`TestCase` can assign its own slots, so a body with `self.x := …` always
+counts as an update), so `store: v`, `send: data` or `checkHeaders: h` that ends in `self` (or
 `^ self`) works through a side effect or only to raise, and a call to it is
 never flagged. Every `^` in such a body must return `self` or raise
 (`^ self error: "…"`). A method that ends in a new value (`self withX: 1`),

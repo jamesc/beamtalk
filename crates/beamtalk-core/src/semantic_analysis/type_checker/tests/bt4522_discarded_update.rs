@@ -311,3 +311,23 @@ fn underscore_assignment_discards_on_purpose() {
     let diags = diagnostics_for("  run: p :: Point -> Point =>\n    _ := p withX: 3.\n    p\n");
     assert!(discarded(&diags).is_empty(), "got: {diags:#?}");
 }
+
+#[test]
+fn test_case_helper_assigning_a_field_still_warns() {
+    // `TestCase` may assign its own slots, so the trailing `self` is the
+    // updated copy and `self seed: 3.` really drops an update.
+    let source = "\
+TestCase subclass: FooTest
+  field: n :: Integer = 0
+  seed: v :: Integer -> Self =>
+    self.n := v.
+    self
+  testIt =>
+    self seed: 3.
+    self assert: self n equals: 3
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    assert_eq!(discarded(&diags).len(), 1, "got: {diags:#?}");
+}
