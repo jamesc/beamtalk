@@ -127,7 +127,9 @@ dispatch_printString_returns_string_test() ->
 
 dispatch_unknown_selector_raises_test() ->
     with_temp_handle(<<"data">>, fun(Handle) ->
-        ?assertBtError(does_not_understand, beamtalk_file_handle:dispatch(unknown_selector_xyz, [], Handle))
+        ?assertBtError(
+            does_not_understand, beamtalk_file_handle:dispatch(unknown_selector_xyz, [], Handle)
+        )
     end).
 
 %%% ============================================================================

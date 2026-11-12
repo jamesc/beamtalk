@@ -2795,7 +2795,9 @@ ffi_boundary_preserves_wrapped_error_test() ->
 
 open_mode_do_non_atom_mode_raises_test() ->
     %% Binary path + binary mode (not atom) + valid block → raises type_error.
-    ?assertBtError(type_error, beamtalk_file:'open:mode:do:'(<<"x.txt">>, <<"read">>, fun(_H) -> ok end)).
+    ?assertBtError(
+        type_error, beamtalk_file:'open:mode:do:'(<<"x.txt">>, <<"read">>, fun(_H) -> ok end)
+    ).
 
 open_mode_do_non_binary_path_raises_test() ->
     %% Non-binary path → raises type_error regardless of mode or block.

@@ -587,7 +587,11 @@ test_class_send_undefined() ->
     ?assertBtError(class_not_found, beamtalk_class_dispatch:class_send(undefined, someMethod, [])),
     %% BT-4723: generated code passes the class name when its lookup found no
     %% process; the error names that class rather than 'unknown'.
-    ?assertBtError(class_not_found, 'MissingFixture', beamtalk_class_dispatch:class_send('MissingFixture', 'new', [])).
+    ?assertBtError(
+        class_not_found,
+        'MissingFixture',
+        beamtalk_class_dispatch:class_send('MissingFixture', 'new', [])
+    ).
 
 %% class_send(Pid, spawn, []) calls gen_server and creates a Counter actor instance.
 %% Counter inherits from Actor, so spawn (not new) creates instances.
@@ -617,7 +621,11 @@ test_class_send_new() ->
 test_class_send_dnu() ->
     ok = ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
-    ?assertBtError(does_not_understand, 'Counter', beamtalk_class_dispatch:class_send(CounterPid, definitelyNotAMethod, [])).
+    ?assertBtError(
+        does_not_understand,
+        'Counter',
+        beamtalk_class_dispatch:class_send(CounterPid, definitelyNotAMethod, [])
+    ).
 
 %% class_send for a user-defined class method returns the result.
 %% Uses a small test class with a real helper module.
@@ -827,7 +835,9 @@ test_class_name_from_registered_pid() ->
         %%   handle_self_instantiation_error → class_name_from_pid(self()).
         %% Process dict has no beamtalk_class_name so error path fires.
         %% class_name_from_pid reads registered_name, strips prefix, returns ClassName.
-        ?assertBtError(instantiation_error, ClassName, beamtalk_class_dispatch:class_send(self(), spawn, []))
+        ?assertBtError(
+            instantiation_error, ClassName, beamtalk_class_dispatch:class_send(self(), spawn, [])
+        )
     after
         unregister(RegName)
     end.
@@ -859,7 +869,9 @@ test_class_name_from_wrong_prefix() ->
     RegName = bt1085_test_process_wrong_prefix,
     register(RegName, self()),
     try
-        ?assertBtError(instantiation_error, unknown, beamtalk_class_dispatch:class_send(self(), spawn, []))
+        ?assertBtError(
+            instantiation_error, unknown, beamtalk_class_dispatch:class_send(self(), spawn, [])
+        )
     after
         unregister(RegName)
     end.
@@ -1348,14 +1360,17 @@ test_invoke_nested_invocation_fails_loudly_outer_map_intact() ->
     OuterMap = #{count => 41},
     ok = beamtalk_class_vars:install(Key, OuterMap),
     try
-        ?assertBtError(internal_error, beamtalk_class_dispatch:handle_class_method_call(
+        ?assertBtError(
+            internal_error,
+            beamtalk_class_dispatch:handle_class_method_call(
                 testClassVar,
                 [],
                 ClassName,
                 beamtalk_class_dispatch_test_helper,
                 #{testClassVar => <<>>},
                 #{count => 1}
-            )),
+            )
+        ),
         ?assertEqual(OuterMap, erlang:get(Key)),
         ?assertEqual(Key, beamtalk_class_vars_test_support:home_key())
     after
@@ -1374,9 +1389,12 @@ test_invoke_extension_nested_other_class_home_fails_loudly() ->
         beamtalk_extensions:init(),
         ClassTag = beamtalk_class_registry:class_object_tag(ClassName),
         ok = beamtalk_extensions:register(ClassTag, nestedExt, Fun, test),
-        ?assertBtError(internal_error, beamtalk_class_dispatch:handle_class_method_call(
+        ?assertBtError(
+            internal_error,
+            beamtalk_class_dispatch:handle_class_method_call(
                 nestedExt, [], ClassName, beamtalk_class_dispatch_test_helper, #{}, #{}
-            )),
+            )
+        ),
         ?assertEqual(OuterMap, erlang:get(OuterKey)),
         ?assertEqual(OuterKey, beamtalk_class_vars_test_support:home_key()),
         ?assertEqual(undefined, erlang:get(beamtalk_class_vars:key(ClassName)))
@@ -1538,7 +1556,9 @@ test_self_instantiation_new_colon_error() ->
 %% class_send(self(), 'spawnWith:', [Map]) when process dict has no class metadata
 %% triggers handle_self_instantiation → handle_self_instantiation_error.
 test_self_instantiation_spawn_with_error() ->
-    ?assertBtError(instantiation_error, beamtalk_class_dispatch:class_send(self(), 'spawnWith:', [#{}])).
+    ?assertBtError(
+        instantiation_error, beamtalk_class_dispatch:class_send(self(), 'spawnWith:', [#{}])
+    ).
 
 %%% ============================================================================
 %%% 14. class_send_with_recovery — noproc crash recovery
@@ -1619,7 +1639,9 @@ test_metaclass_dead_pid() ->
         class_mod = beamtalk_class_dispatch_test_helper,
         pid = DeadPid
     },
-    ?assertBtError(class_not_found, beamtalk_class_dispatch:metaclass_send(DeadPid, someMethod, [], Self)).
+    ?assertBtError(
+        class_not_found, beamtalk_class_dispatch:metaclass_send(DeadPid, someMethod, [], Self)
+    ).
 
 %%% ============================================================================
 %%% 16. try_class_chain_fallthrough via class_send
@@ -1700,7 +1722,9 @@ class_send_self_instantiation_spawn_test() ->
     ?assertBtError(instantiation_error, beamtalk_class_dispatch:class_send(self(), spawn, [])).
 
 class_send_self_instantiation_spawn_with_test() ->
-    ?assertBtError(instantiation_error, beamtalk_class_dispatch:class_send(self(), 'spawnWith:', [#{}])).
+    ?assertBtError(
+        instantiation_error, beamtalk_class_dispatch:class_send(self(), 'spawnWith:', [#{}])
+    ).
 
 %% `self class <selector>` inside a class method routes through
 %% metaclass_send with Pid =:= self(). The previous implementation issued a
@@ -1712,21 +1736,29 @@ metaclass_send_self_call_spawn_missing_metadata_test() ->
     Self = #beamtalk_object{
         class = 'Metaclass', class_mod = undefined, pid = self()
     },
-    ?assertBtError(instantiation_error, beamtalk_class_dispatch:metaclass_send(self(), 'spawnWith:', [#{}], Self)).
+    ?assertBtError(
+        instantiation_error,
+        beamtalk_class_dispatch:metaclass_send(self(), 'spawnWith:', [#{}], Self)
+    ).
 
 metaclass_send_self_call_spawn_with_as_missing_metadata_test() ->
     Self = #beamtalk_object{
         class = 'Metaclass', class_mod = undefined, pid = self()
     },
-    ?assertBtError(instantiation_error, beamtalk_class_dispatch:metaclass_send(
+    ?assertBtError(
+        instantiation_error,
+        beamtalk_class_dispatch:metaclass_send(
             self(), 'spawnWith:as:', [#{}, anyName], Self
-        )).
+        )
+    ).
 
 metaclass_send_self_call_unknown_selector_raises_dispatch_error_test() ->
     Self = #beamtalk_object{
         class = 'Metaclass', class_mod = undefined, pid = self()
     },
-    ?assertBtError(dispatch_error, beamtalk_class_dispatch:metaclass_send(self(), someUserSelector, [], Self)).
+    ?assertBtError(
+        dispatch_error, beamtalk_class_dispatch:metaclass_send(self(), someUserSelector, [], Self)
+    ).
 
 %% Guard in handle_metaclass_self_named_spawn/3 must reject
 %% `Module = undefined` explicitly — `is_atom(undefined)` returns true, so a
@@ -1740,9 +1772,12 @@ metaclass_send_self_call_named_spawn_missing_module_metadata_test() ->
     OldModule = erase(beamtalk_class_module),
     OldAbs = put(beamtalk_class_is_abstract, false),
     try
-        ?assertBtError(instantiation_error, beamtalk_class_dispatch:metaclass_send(
+        ?assertBtError(
+            instantiation_error,
+            beamtalk_class_dispatch:metaclass_send(
                 self(), 'spawnWith:as:', [#{}, anyName], Self
-            ))
+            )
+        )
     after
         restore_pd_key(beamtalk_class_name, OldName),
         restore_pd_key(beamtalk_class_module, OldModule),
@@ -1871,7 +1906,10 @@ test_metaclass_fallthrough_dnu() ->
         %% Unknown selector → metaclass_method_call returns {error, not_found}
         %% → falls through to beamtalk_dispatch:lookup(Sel, [], Self, #{}, 'Metaclass')
         %% → 'Metaclass' not registered → class_not_found → graceful DNU raise.
-        ?assertBtError(does_not_understand, beamtalk_class_dispatch:metaclass_send(Pid, zzFakeSelector, [], Self))
+        ?assertBtError(
+            does_not_understand,
+            beamtalk_class_dispatch:metaclass_send(Pid, zzFakeSelector, [], Self)
+        )
     after
         (try
             gen_server:stop(Pid, normal, 5000)
@@ -2305,9 +2343,12 @@ test_class_self_dispatch_local() ->
             )
         ),
         %% Nothing anywhere → structured does_not_understand.
-        ?assertBtError(does_not_understand, beamtalk_class_dispatch:class_self_dispatch_local(
+        ?assertBtError(
+            does_not_understand,
+            beamtalk_class_dispatch:class_self_dispatch_local(
                 ChildName, missing, [], class_self(ChildName)
-            ))
+            )
+        )
     after
         try
             gen_server:stop(ChildPid, normal, 5000)
@@ -2965,7 +3006,10 @@ test_class_super_dispatch_passes_receiver_tag() ->
 test_class_super_dispatch_dnu() ->
     with_super_parent_child("Bt4001SuperDnu", fun(_ParentName, ChildName) ->
         ChildTag = beamtalk_class_registry:class_object_tag(ChildName),
-        ?assertBtError(does_not_understand, beamtalk_class_dispatch:class_super_dispatch(ChildName, missing, [], tag_self(ChildTag)))
+        ?assertBtError(
+            does_not_understand,
+            beamtalk_class_dispatch:class_super_dispatch(ChildName, missing, [], tag_self(ChildTag))
+        )
     end).
 
 %%% ============================================================================

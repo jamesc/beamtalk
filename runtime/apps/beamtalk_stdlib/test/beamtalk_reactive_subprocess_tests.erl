@@ -457,21 +457,27 @@ flush_and_collect_partial_result_test() ->
 open_args_notify_type_error_test() ->
     %% open/3 guard requires is_binary(Command); passing an atom fails it and
     %% raises a structured type_error (called via FFI from the native: facade).
-    ?assertBtError(type_error, beamtalk_reactive_subprocess:open(
+    ?assertBtError(
+        type_error,
+        beamtalk_reactive_subprocess:open(
             not_a_binary,
             [],
             #beamtalk_object{class = 'MockNotify', class_mod = 'mock', pid = self()}
-        )).
+        )
+    ).
 
 open_args_env_dir_notify_type_error_test() ->
     %% open/5 guard requires is_binary(Command); passing an atom fails it.
-    ?assertBtError(type_error, beamtalk_reactive_subprocess:open(
+    ?assertBtError(
+        type_error,
+        beamtalk_reactive_subprocess:open(
             not_a_binary,
             [],
             #{},
             <<"/dir">>,
             #beamtalk_object{class = 'MockNotify', class_mod = 'mock', pid = self()}
-        )).
+        )
+    ).
 
 %% BT-4236: a spawn failure keeps the supervisor's term as `details.reason`.
 open_start_failure_keeps_reason_test() ->

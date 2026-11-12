@@ -251,7 +251,11 @@ dispatch_version_returns_string_test() ->
     ?assertMatch({beamtalk_string, _}, beamtalk_interface:dispatch(version, [], fake_self())).
 
 dispatch_unknown_selector_raises_dnu_test() ->
-    ?assertBtError(does_not_understand, 'Beamtalk', beamtalk_interface:dispatch(noSuchSelectorXyz, [], fake_self())).
+    ?assertBtError(
+        does_not_understand,
+        'Beamtalk',
+        beamtalk_interface:dispatch(noSuchSelectorXyz, [], fake_self())
+    ).
 
 %%% ============================================================================
 %%% Live registry tests
@@ -393,7 +397,9 @@ live_registry_test_() ->
                 {beamtalk_string, H} = beamtalk_interface:help('Integer', <<"+">>)
             end},
             {"help:selector: unknown selector raises does_not_understand", fun() ->
-                ?assertBtError(does_not_understand, beamtalk_interface:help('Integer', zzzNoSuchMethod))
+                ?assertBtError(
+                    does_not_understand, beamtalk_interface:help('Integer', zzzNoSuchMethod)
+                )
             end},
             {"help:selector: unknown class raises class_not_found", fun() ->
                 ?assertBtError(class_not_found, beamtalk_interface:help('ZzzNoSuchClass', foo))
@@ -403,7 +409,9 @@ live_registry_test_() ->
                 ?assertNotEqual(nomatch, binary:match(H, <<"Metaclass">>))
             end},
             {"help:selector: on Metaclass unknown selector raises dnu", fun() ->
-                ?assertBtError(does_not_understand, beamtalk_interface:help('Metaclass', zzzNoSuchMeta))
+                ?assertBtError(
+                    does_not_understand, beamtalk_interface:help('Metaclass', zzzNoSuchMeta)
+                )
             end},
             {"dispatch help: routes to handle_help", fun() ->
                 {beamtalk_string, H} = beamtalk_interface:dispatch(
@@ -426,7 +434,9 @@ live_registry_test_() ->
                 )
             end},
             {"erlangHelp: unknown module raises not_found", fun() ->
-                ?assertBtError(not_found, beamtalk_interface:erlangHelp(<<"zzz_no_such_module_xyz">>))
+                ?assertBtError(
+                    not_found, beamtalk_interface:erlangHelp(<<"zzz_no_such_module_xyz">>)
+                )
             end},
             {"erlangHelp: non-binary arg raises type_error", fun() ->
                 ?assertBtError(type_error, beamtalk_interface:erlangHelp(123))
@@ -444,10 +454,14 @@ live_registry_test_() ->
                 )
             end},
             {"erlangHelp:selector: unknown function raises not_found", fun() ->
-                ?assertBtError(not_found, beamtalk_interface:erlangHelp(<<"lists">>, <<"zzzNoSuchFn">>))
+                ?assertBtError(
+                    not_found, beamtalk_interface:erlangHelp(<<"lists">>, <<"zzzNoSuchFn">>)
+                )
             end},
             {"erlangHelp:selector: unknown module raises not_found", fun() ->
-                ?assertBtError(not_found, beamtalk_interface:erlangHelp(<<"zzz_no_module">>, <<"reverse">>))
+                ?assertBtError(
+                    not_found, beamtalk_interface:erlangHelp(<<"zzz_no_module">>, <<"reverse">>)
+                )
             end},
             {"erlangHelp:selector: non-binary module raises type_error", fun() ->
                 ?assertBtError(type_error, beamtalk_interface:erlangHelp(123, <<"reverse">>))
@@ -517,9 +531,12 @@ live_registry_test_() ->
             {"dispatch help:selector: unknown class raises class_not_found", fun() ->
                 %% Drives the dispatch('help:selector:', ...) {error,Err} ->
                 %% beamtalk_error:raise branch.
-                ?assertBtError(class_not_found, beamtalk_interface:dispatch(
+                ?assertBtError(
+                    class_not_found,
+                    beamtalk_interface:dispatch(
                         'help:selector:', ['ZzzNoSuchClass', foo], fake_self()
-                    ))
+                    )
+                )
             end},
             {"findClass integer arg raises type_error", fun() ->
                 %% Drives the findClass/1 {error,Err} -> raise branch.

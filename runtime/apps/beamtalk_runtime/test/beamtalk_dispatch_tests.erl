@@ -764,7 +764,9 @@ test_super_nonexistent_class() ->
 test_super_reply_reraises() ->
     State = #{'$beamtalk_class' => 'NoSuchClass'},
     Self = make_ref(),
-    ?assertBtError(class_not_found, beamtalk_dispatch:super_reply(anyMethod, [], Self, State, 'NoSuchClass')).
+    ?assertBtError(
+        class_not_found, beamtalk_dispatch:super_reply(anyMethod, [], Self, State, 'NoSuchClass')
+    ).
 
 %% Test that when the parent class process is killed, lookup returns class_not_found.
 %% Chain walk tries to reach the parent via registry; when it's gone, class_not_found.

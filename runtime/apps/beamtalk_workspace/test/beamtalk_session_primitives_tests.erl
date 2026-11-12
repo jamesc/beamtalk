@@ -386,9 +386,17 @@ cross_session_write_rejected_test_() ->
                 seed_context(Caller, <<"prim-xw-caller">>),
                 OtherSession = beamtalk_session_primitives:withId(<<"prim-xw-other">>),
                 View = beamtalk_session_primitives:bindings(OtherSession),
-                ?assertBtError(cross_session_mutation_unsupported, beamtalk_session_primitives:at(View, x, 1)),
-                ?assertBtError(cross_session_mutation_unsupported, beamtalk_session_primitives:removeKey(View, x)),
-                ?assertBtError(cross_session_mutation_unsupported, beamtalk_session_primitives:clear(OtherSession)),
+                ?assertBtError(
+                    cross_session_mutation_unsupported, beamtalk_session_primitives:at(View, x, 1)
+                ),
+                ?assertBtError(
+                    cross_session_mutation_unsupported,
+                    beamtalk_session_primitives:removeKey(View, x)
+                ),
+                ?assertBtError(
+                    cross_session_mutation_unsupported,
+                    beamtalk_session_primitives:clear(OtherSession)
+                ),
                 beamtalk_repl_shell:stop(Caller),
                 beamtalk_repl_shell:stop(Other)
             end)
@@ -645,7 +653,9 @@ live_sessions_value_rejects_cross_session_write_test_() ->
                 View = beamtalk_session_primitives:bindings(Session),
                 %% Caller is a *different* session than the target → rejected.
                 seed_context(self(), <<"live-caller">>),
-                ?assertBtError(cross_session_mutation_unsupported, beamtalk_session_primitives:at(View, x, 1))
+                ?assertBtError(
+                    cross_session_mutation_unsupported, beamtalk_session_primitives:at(View, x, 1)
+                )
             end)
         ]
     end}.

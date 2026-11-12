@@ -305,7 +305,9 @@ send_to_string_test() ->
     ),
     ?assertEqual('String', beamtalk_primitive:send(Str, 'class', [])),
     %% A bare binary is Binary: `++` is String-only, so it DNU.
-    ?assertBtError(does_not_understand, 'Binary', beamtalk_primitive:send(<<"hello">>, '++', [<<"world">>])),
+    ?assertBtError(
+        does_not_understand, 'Binary', beamtalk_primitive:send(<<"hello">>, '++', [<<"world">>])
+    ),
     ?assertEqual('Binary', beamtalk_primitive:send(<<"hello">>, 'class', [])).
 
 send_to_float_test() ->
@@ -2313,7 +2315,9 @@ value_type_module_info_is_not_a_method_test_() ->
             ?assert(beamtalk_primitive:responds_to(Value, size)),
             ?assertNot(beamtalk_primitive:responds_to(Value, module_info)),
             ?assertEqual(3, beamtalk_primitive:send(Value, size, [])),
-            ?assertBtError(does_not_understand, _, module_info, beamtalk_primitive:send(Value, module_info, []))
+            ?assertBtError(
+                does_not_understand, _, module_info, beamtalk_primitive:send(Value, module_info, [])
+            )
         end}.
 
 %%% ============================================================================

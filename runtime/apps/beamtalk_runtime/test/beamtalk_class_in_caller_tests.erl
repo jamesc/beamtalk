@@ -180,7 +180,9 @@ in_caller_test_() ->
                     class = tag('Bt4300NoHome'), class_mod = ?HELPER, pid = Pid
                 },
                 ?assertEqual(ClassSelf, beamtalk_class_vars:clear(ClassSelf, count)),
-                ?assertBtError(class_state_unreachable, beamtalk_class_vars:put(ClassSelf, count, 1))
+                ?assertBtError(
+                    class_state_unreachable, beamtalk_class_vars:put(ClassSelf, count, 1)
+                )
             end),
             with_class('Bt4300Home', none, #{count => 0}, fun(Pid) ->
                 ?assertEqual(true, send(Pid, testHasCount, [])),

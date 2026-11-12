@@ -173,11 +173,19 @@ run_class_rejects_list_test() ->
 
 run_class_rejects_malformed_tuple_test() ->
     %% Tuple with non-atom element 2 — should raise type_error, not badarg
-    ?assertBtError(type_error, 'TestRunner', beamtalk_test_runner:run_class({beamtalk_object, 12345, mod, self()})).
+    ?assertBtError(
+        type_error,
+        'TestRunner',
+        beamtalk_test_runner:run_class({beamtalk_object, 12345, mod, self()})
+    ).
 
 run_class_rejects_tuple_without_class_suffix_test() ->
     %% Tuple with atom element 2 but no " class" suffix
-    ?assertBtError(type_error, 'TestRunner', beamtalk_test_runner:run_class({beamtalk_object, 'NotAClass', mod, self()})).
+    ?assertBtError(
+        type_error,
+        'TestRunner',
+        beamtalk_test_runner:run_class({beamtalk_object, 'NotAClass', mod, self()})
+    ).
 
 run_method_rejects_non_tuple_test() ->
     ?assertError(

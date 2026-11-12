@@ -881,7 +881,9 @@ register_self_new_in_class_method_test_() ->
                     modifiers => [abstract]
                 },
                 {ok, Pid} = beamtalk_class_builder:register(State),
-                ?assertBtError(instantiation_error, beamtalk_class_dispatch:class_send(Pid, make, [])),
+                ?assertBtError(
+                    instantiation_error, beamtalk_class_dispatch:class_send(Pid, make, [])
+                ),
                 gen_server:stop(Pid, normal, 5000)
             end)
         ]
@@ -923,7 +925,9 @@ register_class_method_fun_dropped_on_reload_test_() ->
                     )
                 ),
                 %% The selector no longer dispatches.
-                ?assertBtError(does_not_understand, beamtalk_class_dispatch:class_send(Pid2, factory, [])),
+                ?assertBtError(
+                    does_not_understand, beamtalk_class_dispatch:class_send(Pid2, factory, [])
+                ),
                 gen_server:stop(Pid2, normal, 5000)
             end)
         ]

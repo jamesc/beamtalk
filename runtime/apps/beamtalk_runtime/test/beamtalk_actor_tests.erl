@@ -4235,7 +4235,9 @@ bt1990_proxy_send_4_to_vanished_name_raises_no_such_process_test() ->
     gen_server:stop(Pid),
     bt1990_wait_until_unregistered(Name, 1000),
     try
-        ?assertBtError(no_such_process, beamtalk_actor:sync_send({registered, Name}, getValue, [], 1000))
+        ?assertBtError(
+            no_such_process, beamtalk_actor:sync_send({registered, Name}, getValue, [], 1000)
+        )
     after
         cleanup_name(Name)
     end.

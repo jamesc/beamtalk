@@ -1994,9 +1994,12 @@ start_child_via_class_method_rejects_abstract_class_test() ->
     %% class would have instantiated successfully instead of raising.
     FakeClassPid = setup_fake_class('BT3106Abstract', true),
     try
-        ?assertBtError(instantiation_error, beamtalk_supervisor:start_child_via_class_method(
+        ?assertBtError(
+            instantiation_error,
+            beamtalk_supervisor:start_child_via_class_method(
                 'BT3106Abstract', ?MODULE, class_selfNew, []
-            )),
+            )
+        ),
         %% The fabricated PD entry must not linger either way.
         ?assertEqual(undefined, get(beamtalk_class_is_abstract))
     after
@@ -2268,7 +2271,12 @@ spawn_starts_independent_unlinked_listed_instances_test() ->
 spawn_start_failure_raises_supervisor_start_failed_test() ->
     Config = bt3963_static_config(#{childSpecs => fun(_) -> error(boom) end}),
     with_bt3963_class('BT3963Sup', Config, fun() ->
-        ?assertBtError(supervisor_start_failed, _, spawn, beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, spawn, []))
+        ?assertBtError(
+            supervisor_start_failed,
+            _,
+            spawn,
+            beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, spawn, [])
+        )
     end).
 
 %% BT-4104: OTP has no atomic supervisor start+monitor, so the monitored
@@ -2330,7 +2338,9 @@ initialize_raise_answers_result_error_for_result_forms_test() ->
         %% Each failed instance was stopped: no registration is left behind.
         ?assertEqual(undefined, whereis(?BT3963_MOD)),
         ?assertEqual(undefined, whereis(Name)),
-        ?assertBtError(bt3994_init_failed, beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, spawn, []))
+        ?assertBtError(
+            bt3994_init_failed, beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, spawn, [])
+        )
     end).
 
 %% BT-3994: `supervise` serialises racing starts with a node-local FIFO lock

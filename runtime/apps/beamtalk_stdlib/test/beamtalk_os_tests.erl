@@ -100,7 +100,11 @@ run_output_too_large_test() ->
     case os:type() of
         {unix, _} ->
             %% Generate ~11 MB of output via dd (exceeds 10 MB limit).
-            ?assertBtError(output_too_large, 'OS', beamtalk_os:'run:'(<<"dd if=/dev/zero bs=1048576 count=11 2>/dev/null | cat">>));
+            ?assertBtError(
+                output_too_large,
+                'OS',
+                beamtalk_os:'run:'(<<"dd if=/dev/zero bs=1048576 count=11 2>/dev/null | cat">>)
+            );
         _ ->
             {skip, "Unix-only: no dd equivalent on Windows"}
     end.

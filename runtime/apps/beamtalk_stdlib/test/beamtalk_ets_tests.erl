@@ -401,22 +401,31 @@ lookupIfAbsent_block_badarg_is_not_reported_as_stale_table_test() ->
     %% a stale_table. BT-3836: it surfaces as a structured type_error (not a raw
     %% badarg, which would trigger the FFI proxy's charlist retry and re-run the Block).
     with_table(bt_ets_test_lookup_default_block_badarg, fun(Table) ->
-        ?assertBtError(type_error, beamtalk_ets:lookupIfAbsent(Table, <<"missing">>, fun() -> erlang:error(badarg) end))
+        ?assertBtError(
+            type_error,
+            beamtalk_ets:lookupIfAbsent(Table, <<"missing">>, fun() -> erlang:error(badarg) end)
+        )
     end).
 
 lookupIfAbsent_stale_table_still_reported_test() ->
     %% BT-3739: a table that no longer exists is still a stale-table error.
     Table = beamtalk_ets:'new:type:'(bt_ets_test_lookup_default_stale, set),
     ets:delete(bt_ets_test_lookup_default_stale),
-    ?assertBtError(stale_table, 'Ets', beamtalk_ets:lookupIfAbsent(Table, <<"key">>, fun() -> 0 end)).
+    ?assertBtError(
+        stale_table, 'Ets', beamtalk_ets:lookupIfAbsent(Table, <<"key">>, fun() -> 0 end)
+    ).
 
 lookupIfAbsent_type_error_not_block_test() ->
     with_table(bt_ets_test_lookup_default_type, fun(Table) ->
-        ?assertBtError(type_error, 'Ets', beamtalk_ets:lookupIfAbsent(Table, <<"key">>, not_a_function))
+        ?assertBtError(
+            type_error, 'Ets', beamtalk_ets:lookupIfAbsent(Table, <<"key">>, not_a_function)
+        )
     end).
 
 lookupIfAbsent_type_error_not_ets_test() ->
-    ?assertBtError(type_error, 'Ets', beamtalk_ets:lookupIfAbsent(not_an_ets, <<"key">>, fun() -> 0 end)).
+    ?assertBtError(
+        type_error, 'Ets', beamtalk_ets:lookupIfAbsent(not_an_ets, <<"key">>, fun() -> 0 end)
+    ).
 
 %%% ============================================================================
 %%% includesKey/2
@@ -760,10 +769,14 @@ bt3831_bag_rejected_test() ->
 
 bt3831_block_badarg_writes_nothing_test() ->
     with_table(bt3831_badarg, fun(T) ->
-        ?assertBtError(type_error, beamtalk_ets:updateAt(T, <<"k">>, fun(_) -> erlang:error(badarg) end)),
+        ?assertBtError(
+            type_error, beamtalk_ets:updateAt(T, <<"k">>, fun(_) -> erlang:error(badarg) end)
+        ),
         ?assertEqual([], ets:tab2list(bt3831_badarg)),
         beamtalk_ets:insert(T, <<"k">>, 1),
-        ?assertBtError(type_error, beamtalk_ets:ifPresent(T, <<"k">>, fun(_) -> erlang:error(badarg) end))
+        ?assertBtError(
+            type_error, beamtalk_ets:ifPresent(T, <<"k">>, fun(_) -> erlang:error(badarg) end)
+        )
     end).
 
 bt3831_update_ordered_set_float_key_test() ->
@@ -791,10 +804,13 @@ bt3831_keys_and_values_do_badarg_runs_once_test() ->
     with_table(bt3831_kvdo, fun(T) ->
         beamtalk_ets:insert(T, a, 1),
         Self = self(),
-        ?assertBtError(type_error, beamtalk_ets:keysAndValuesDo(T, fun(_, _) ->
+        ?assertBtError(
+            type_error,
+            beamtalk_ets:keysAndValuesDo(T, fun(_, _) ->
                 Self ! ran,
                 erlang:error(badarg)
-            end)),
+            end)
+        ),
         ?assertEqual(
             ran,
             receive
@@ -833,7 +849,9 @@ bt3831_update_map_key_rejected_test() ->
 bt3836_if_absent_block_badarg_runs_once_test() ->
     with_table(bt3836_absent, fun(T) ->
         Self = self(),
-        ?assertBtError(type_error, beamtalk_erlang_proxy:direct_call(
+        ?assertBtError(
+            type_error,
+            beamtalk_erlang_proxy:direct_call(
                 beamtalk_ets,
                 lookupIfAbsent,
                 [
@@ -844,7 +862,8 @@ bt3836_if_absent_block_badarg_runs_once_test() ->
                         erlang:error(badarg)
                     end
                 ]
-            )),
+            )
+        ),
         ?assertEqual(
             ran,
             receive

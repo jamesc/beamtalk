@@ -361,7 +361,12 @@ pairs_for_threading_untagged_map_test() ->
 pairs_for_threading_tagged_map_raises_type_error_test() ->
     %% An `Ets` handle or a value-type instance is a map tagged with its class.
     Tagged = #{'$beamtalk_class' => 'Ets', table => some_table},
-    ?assertBtError(type_error, _, 'keysAndValuesDo:', beamtalk_map:pairs_for_threading(Tagged, 'keysAndValuesDo:')).
+    ?assertBtError(
+        type_error,
+        _,
+        'keysAndValuesDo:',
+        beamtalk_map:pairs_for_threading(Tagged, 'keysAndValuesDo:')
+    ).
 
 pairs_for_threading_non_map_raises_type_error_test() ->
     ?assertBtError(type_error, _, 'doWithKey:', beamtalk_map:pairs_for_threading(42, 'doWithKey:')).

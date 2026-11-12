@@ -111,14 +111,30 @@ class(ClassName, TimeoutMs) ->
 
 -doc """
 Synchronise with a process: return once it has handled every message sent to
-it before this call. Takes a pid or registered name; uses `sys:get_state/2`
-so it works for any OTP process and fails (crashes the test) if it is dead
-or unresponsive. Returns `ok`.
+it before this call. OTP processes (pid or registered name) are synced with
+`sys:get_state/2`, which crashes the test if the process is dead or
+unresponsive; plain processes (no `$ancestors`) fall back to `idle/1`.
+Returns `ok`.
 """.
 -spec sync(pid() | atom()) -> ok.
-sync(PidOrName) ->
-    _ = sys:get_state(PidOrName, ?DEFAULT_TIMEOUT_MS),
-    ok.
+sync(Name) when is_atom(Name) ->
+    case whereis(Name) of
+        undefined -> error({noproc, Name});
+        Pid -> sync(Pid)
+    end;
+sync(Pid) when is_pid(Pid) ->
+    case process_info(Pid, dictionary) of
+        {dictionary, Dict} ->
+            case lists:keymember('$ancestors', 1, Dict) of
+                true ->
+                    _ = sys:get_state(Pid, ?DEFAULT_TIMEOUT_MS),
+                    ok;
+                false ->
+                    idle(Pid)
+            end;
+        undefined ->
+            error({noproc, Pid})
+    end.
 
 -doc """
 Synchronise with a plain (non-OTP) process, where `sync/1` cannot work:

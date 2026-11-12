@@ -215,7 +215,9 @@ generate_as_json_hook_recursive_test() ->
 
 generate_as_json_self_return_test() ->
     %% A hook returning the receiver itself must raise, not loop forever.
-    ?assertBtError(type_error, 'Json', beamtalk_json:'generate:'('bt@json_hook_fixture':new(self_return))).
+    ?assertBtError(
+        type_error, 'Json', beamtalk_json:'generate:'('bt@json_hook_fixture':new(self_return))
+    ).
 
 generate_as_json_nlr_passes_through_test() ->
     %% BT-3740: a `^` out of an asJson hook is a non-local return, not an
@@ -232,7 +234,9 @@ generate_as_json_nlr_passes_through_test() ->
 generate_as_json_mutual_cycle_test() ->
     %% Not a literal self-return: A's hook embeds a distinct B, whose hook
     %% embeds A back. Must raise before the recursion overflows the stack.
-    ?assertBtError(type_error, 'Json', beamtalk_json:'generate:'('bt@json_hook_fixture':new(mutual_a))).
+    ?assertBtError(
+        type_error, 'Json', beamtalk_json:'generate:'('bt@json_hook_fixture':new(mutual_a))
+    ).
 
 generate_as_json_shared_reference_not_a_cycle_test() ->
     %% The same asJson object referenced twice as SIBLINGS (a DAG, not a

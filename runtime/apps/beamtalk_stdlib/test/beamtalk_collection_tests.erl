@@ -253,7 +253,12 @@ to_list_for_threading_stdlib_test() ->
     ).
 
 to_list_for_threading_dnu_test() ->
-    ?assertBtError(does_not_understand, _, 'noSuchSelector:', beamtalk_collection:to_list_for_threading(make_interval(1, 3), 'noSuchSelector:')).
+    ?assertBtError(
+        does_not_understand,
+        _,
+        'noSuchSelector:',
+        beamtalk_collection:to_list_for_threading(make_interval(1, 3), 'noSuchSelector:')
+    ).
 
 to_list_for_threading_extension_test() ->
     Fun = fun(_Args, _Self, State) -> {reply, nil, State} end,
@@ -271,7 +276,10 @@ to_list_for_threading_extension_test() ->
     Tag = beamtalk_class_registry:class_object_tag('Interval'),
     ok = beamtalk_extensions:register(Tag, 'withAll:', fun(_Args, _Self) -> nil end, bt3951_test),
     try
-        ?assertBtError(stateful_block_dispatch, beamtalk_collection:to_list_for_threading(make_interval(1, 3), 'collect:'))
+        ?assertBtError(
+            stateful_block_dispatch,
+            beamtalk_collection:to_list_for_threading(make_interval(1, 3), 'collect:')
+        )
     after
         beamtalk_extensions:unregister('Interval', 'withAll:', true)
     end,
@@ -288,7 +296,10 @@ to_list_for_threading_extension_test() ->
     %% One on a different overridable selector poisons the fold.
     ok = beamtalk_extensions:register('Interval', 'inject:into:', Fun, bt3951_test),
     try
-        ?assertBtError(stateful_block_dispatch, beamtalk_collection:to_list_for_threading(make_interval(1, 3), 'collect:'))
+        ?assertBtError(
+            stateful_block_dispatch,
+            beamtalk_collection:to_list_for_threading(make_interval(1, 3), 'collect:')
+        )
     after
         beamtalk_extensions:unregister('Interval', 'inject:into:')
     end.

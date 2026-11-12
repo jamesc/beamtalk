@@ -105,9 +105,12 @@ perform_with_timeout_intercept_succeeds() ->
 perform_with_timeout_intercept_times_out() ->
     {ok, Counter} = test_counter:start_link(42),
     Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = Counter},
-    ?assertBtError(timeout, beamtalk_message_dispatch:send(
+    ?assertBtError(
+        timeout,
+        beamtalk_message_dispatch:send(
             Obj, 'perform:withArguments:timeout:', ['slowGet:', [500], 50]
-        )),
+        )
+    ),
     gen_server:stop(Counter).
 
 send4_test_() ->

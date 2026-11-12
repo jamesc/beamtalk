@@ -69,7 +69,10 @@ full_constructor_second_out_of_range_test() ->
     ?assertBtError(type_error, make_dt(2024, 1, 1, 0, 0, 60)).
 
 full_constructor_type_error_test() ->
-    ?assertBtError(type_error, beamtalk_datetime:'year:month:day:hour:minute:second:'(<<"2024">>, 1, 1, 0, 0, 0)).
+    ?assertBtError(
+        type_error,
+        beamtalk_datetime:'year:month:day:hour:minute:second:'(<<"2024">>, 1, 1, 0, 0, 0)
+    ).
 
 %%% ============================================================================
 %%% Constructor — fromTimestamp:

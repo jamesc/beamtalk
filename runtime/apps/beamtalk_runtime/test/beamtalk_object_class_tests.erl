@@ -1671,7 +1671,9 @@ test_local_call_method_not_found() ->
         class_mod = beamtalk_class_dispatch_test_helper,
         pid = Pid
     },
-    ?assertBtError(does_not_understand, beamtalk_object_class:local_call(ClassObj, nonExistentMethod, [])).
+    ?assertBtError(
+        does_not_understand, beamtalk_object_class:local_call(ClassObj, nonExistentMethod, [])
+    ).
 
 test_local_call_non_class_receiver() ->
     %% An actor instance (class name does NOT end with " class") should fail
@@ -1817,7 +1819,12 @@ test_put_class_method_rejects_n_plus_2() ->
         },
         beamtalk_object_class:put_class_method(Pid, 'at:put:', fun(_, _, _, _) -> ok end)
     ),
-    ?assertBtError(arity_mismatch, _, make, beamtalk_object_class:put_class_method(Pid, make, fun(_, _) -> ok end)),
+    ?assertBtError(
+        arity_mismatch,
+        _,
+        make,
+        beamtalk_object_class:put_class_method(Pid, make, fun(_, _) -> ok end)
+    ),
     %% The message is built after the class is known, never naming `undefined`.
     #{error := #beamtalk_error{message = Msg}} =
         try
@@ -1907,7 +1914,9 @@ crash_recovery_class_send_test_() ->
                 %% The class has no user methods, so any method call will raise
                 %% does_not_understand — but it should NOT raise noproc/timeout.
                 %% It will try the Class chain fallthrough which also raises DNU.
-                ?assertBtError(does_not_understand, beamtalk_class_dispatch:class_send(Pid1, someMethod, [])),
+                ?assertBtError(
+                    does_not_understand, beamtalk_class_dispatch:class_send(Pid1, someMethod, [])
+                ),
 
                 %% The class should be alive again after the auto-recovery
                 NewPid = beamtalk_class_registry:whereis_class('CrashRecoverySendTest'),
