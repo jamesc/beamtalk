@@ -44,3 +44,22 @@ Server subclass: SpawnMonitoredObserver
 
   // Cancel a monitor this Server owns.
   demonitor: ref => ref demonitor
+
+  // BT-4477: the asynchronous forms, from this Server so it owns the
+  // monitors. `count` QuickExitActors; answers their monitor refs.
+  spawnQuickAsync: count =>
+    (1 to: count) inject: #() into: [:refs :i |
+      refs add: (QuickExitActor spawnMonitoredAsync at: 2)
+    ]
+
+  // A QuickExitActor stopping with `reason`; answers its `{actor, ref}`.
+  spawnQuickAsyncWith: reason =>
+    QuickExitActor spawnMonitoredAsyncWith: #{#exitReason => reason}
+
+  // An async spawn whose `initialize` raises; answers `{#returned, pair}`
+  // when the spawn answered (the expected case) or the error kind if it
+  // raised.
+  spawnFailingAsync =>
+    [
+      {#returned, FailingInitializeActor spawnMonitoredAsync}
+    ] on: Exception do: [:e | e kind]

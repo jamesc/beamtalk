@@ -296,6 +296,9 @@ handle_getValue([], State) ->
 %% BT-4104: an anonymous start that leaves the caller monitoring the actor,
 %% with the monitor created atomically with the process.
 -export([safe_spawn_monitored/2]).
+%% BT-4477: the same atomic spawn+monitor, but the caller does not wait for
+%% `init/1` or `initialize`.
+-export([safe_spawn_monitored_async/2]).
 
 %% BT-3992: named spawns that must not leave the actor linked to the caller.
 -export([spawn_named_for_caller/4, spawn_named_unlinked/3]).
@@ -458,6 +461,8 @@ handle_getValue([], State) ->
     doSpawnWith/3,
     doSpawnMonitored/1,
     doSpawnMonitoredWith/2,
+    doSpawnMonitoredAsync/1,
+    doSpawnMonitoredAsyncWith/2,
     registerAs/2,
     takeDeferredCall/1,
     replyToDeferred/2,
@@ -935,6 +940,73 @@ actor's exit itself, which is not what a supervisor child needs.
     {ok, {pid(), reference()}} | {error, term()}.
 safe_spawn_monitored(Module, InitArgs) ->
     start_monitor_and_await(Module, InitArgs, keep).
+
+-doc """
+BT-4477: spawn an anonymous actor **monitored by the caller** without waiting
+for it to start. Answers `{ok, {Pid, MonRef}}` as soon as the process exists:
+the caller does not wait for `init/1` or for `initialize` (no init-ack target
+is passed, so `take_init_ack/2` and `ack_initialized/2` are no-ops).
+
+`MonRef` is created atomically with the process (`proc_lib:spawn_opt/2` with
+the `monitor` option), so an actor that stops straight away delivers
+`{'DOWN', MonRef, process, Pid, Reason}` with its real reason, never `noproc`.
+
+A failure in `init/1` or `initialize` cannot be raised to the caller, which has
+already moved on: the actor exits and the failure arrives as the `'DOWN'`
+reason. Messages sent to `Pid` before `initialize` finishes queue in the
+mailbox and run after it.
+
+The process is started with `proc_lib` and enters the `gen_server` loop with
+`gen_server:enter_loop/5` after `Module:init/1`. It carries the same
+`$initial_call` (`{Module, init, 1}`) as a `gen_server:start*` actor and is its
+own OTP parent, as an unlinked `gen_server:start*` actor is, so `sys`, observer
+and the crash-report secret redaction treat it like any other actor. Its
+`$ancestors` has the actor itself prepended (a deliberate side effect of
+making it its own parent), which shows as a duplicate in crash reports. Not linked; the monitor belongs to the process that calls this.
+`init/1` results are honoured as `gen_server` does: `{ok, State}`,
+`{ok, State, Timeout | hibernate | {continue, _}}`, `{stop, Reason}` (exit
+with `Reason`) and `ignore` (exit `normal`).
+""".
+-spec safe_spawn_monitored_async(module(), map()) -> {ok, {pid(), reference()}}.
+safe_spawn_monitored_async(Module, InitArgs) ->
+    {Pid, MonRef} = proc_lib:spawn_opt(
+        fun() -> async_init_and_loop(Module, InitArgs) end,
+        [monitor]
+    ),
+    {ok, {Pid, MonRef}}.
+
+%% Body of the process started by safe_spawn_monitored_async/2: run the
+%% module's `init/1` here (not in the caller), then become its gen_server.
+%% `gen_server:enter_loop/5` must be called from the process that ran `init/1`.
+-spec async_init_and_loop(module(), term()) -> no_return().
+async_init_and_loop(Module, InitArgs) ->
+    %% `proc_lib:spawn_opt/2` with a fun records the fun's own MFA as the
+    %% initial call. Set the one `gen_server:start*` sets, because the
+    %% crash-report secret redaction (BT-4666, `beamtalk_actor_redaction`),
+    %% observer and `proc_lib:initial_call/1` identify the actor by
+    %% `{Module, init, _}`.
+    put('$initial_call', {Module, init, 1}),
+    %% An unlinked `gen_server:start*` actor is its own OTP parent
+    %% (`gen:do_spawn` passes `self`), whereas `enter_loop/5` takes the head of
+    %% `$ancestors` — here the spawner. Make the actor its own parent so an
+    %% exit-trapping actor linked to its spawner later treats that exit as a
+    %% normal link exit (BT-3596), not parent shutdown, exactly as a
+    %% `spawnMonitored` actor does. The side effect is a duplicate self entry
+    %% in `$ancestors` (crash reports, and inherited by `proc_lib` children);
+    %% `enter_loop` has no public way to pass the parent, so this is deliberate.
+    put('$ancestors', [self() | get('$ancestors')]),
+    case Module:init(InitArgs) of
+        {ok, State} ->
+            gen_server:enter_loop(Module, [], State, self(), infinity);
+        {ok, State, Action} ->
+            gen_server:enter_loop(Module, [], State, self(), Action);
+        {stop, Reason} ->
+            exit(Reason);
+        ignore ->
+            exit(normal);
+        Other ->
+            exit({bad_return_value, Other})
+    end.
 
 %% Shared unlinked start for safe_spawn/2 and safe_spawn_monitored/2:
 %% start_monitor (not start + monitor), so the monitor exists before the
@@ -5184,7 +5256,10 @@ doSpawnWith(Self, InitArgs) ->
 %% `class_self_spawn_monitored/4` — which raises a structured
 %% `instantiation_error` on failure.
 -spec do_spawn_or_raise(
-    #beamtalk_object{}, list(), atom(), class_self_spawn | class_self_spawn_monitored
+    #beamtalk_object{},
+    list(),
+    atom(),
+    class_self_spawn | class_self_spawn_monitored | class_self_spawn_monitored_async
 ) -> #beamtalk_object{} | {#beamtalk_object{}, reference()}.
 do_spawn_or_raise(Self, Args, Selector, Helper) ->
     case class_self_to_name_and_module(Self) of
@@ -5225,6 +5300,31 @@ passed to the actor's `init/1` callback.
 -spec doSpawnMonitoredWith(#beamtalk_object{}, term()) -> {#beamtalk_object{}, reference()}.
 doSpawnMonitoredWith(Self, InitArgs) ->
     do_spawn_or_raise(Self, [InitArgs], 'spawnMonitoredWith:', class_self_spawn_monitored).
+
+-doc """
+FFI shim for `class sealed spawnMonitoredAsync -> Tuple` (BT-4477).
+
+Same shape and result as `doSpawnMonitored/1` (`{Actor, MonitorRef}`), but the
+answer comes back without waiting for the actor's `init/1` or `initialize`
+(`safe_spawn_monitored_async/2`). An `initialize` failure is not raised: it
+arrives as the monitor's `'DOWN'`.
+""".
+-spec doSpawnMonitoredAsync(#beamtalk_object{}) -> {#beamtalk_object{}, reference()}.
+doSpawnMonitoredAsync(Self) ->
+    do_spawn_or_raise(Self, [], spawnMonitoredAsync, class_self_spawn_monitored_async).
+
+-doc """
+FFI shim for `class sealed spawnMonitoredAsyncWith: initArgs -> Tuple` (BT-4477).
+
+Same contract as `doSpawnMonitoredAsync/1` plus the initialisation arguments
+passed to the actor's `init/1` callback.
+""".
+-spec doSpawnMonitoredAsyncWith(#beamtalk_object{}, term()) ->
+    {#beamtalk_object{}, reference()}.
+doSpawnMonitoredAsyncWith(Self, InitArgs) ->
+    do_spawn_or_raise(
+        Self, [InitArgs], 'spawnMonitoredAsyncWith:', class_self_spawn_monitored_async
+    ).
 
 -doc """
 FFI shim for `class spawnAs: name :: Symbol -> Result(Self, Error)`.

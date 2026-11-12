@@ -964,3 +964,51 @@ fn test_self_spawn_family_in_supervisor_class_method_lowers_to_class_start() {
         "must not use the actor class_self_spawn helper. Got:\n{code}"
     );
 }
+
+#[test]
+fn test_spawn_monitored_async_on_supervisor_lowers_to_class_start() {
+    // BT-4477: like `spawnMonitored`, the asynchronous pair has no supervisor
+    // counterpart; a supervisor receiver reaches class_start/4's unsupported
+    // error instead of a `spawn_monitored_async` export it does not have.
+    let src = "Object subclass: Foo\n  a => Leaf spawnMonitoredAsync\n  b => Leaf spawnMonitoredAsyncWith: #{#n => 1}\n\nSupervisor subclass: Leaf\n  childSpecs => #()\n";
+    let code = codegen_named(src, "foo");
+    for selector in ["'spawnMonitoredAsync', []", "'spawnMonitoredAsyncWith:', ["] {
+        assert!(
+            code.contains(&format!(
+                "call 'beamtalk_supervisor':'class_start'('Leaf', 'bt@leaf', {selector}"
+            )),
+            "Leaf {selector} must lower to class_start. Got:\n{code}"
+        );
+    }
+    assert!(
+        !code.contains("'spawn_monitored_async'"),
+        "must not call a spawn_monitored_async export on a supervisor module. Got:\n{code}"
+    );
+}
+
+#[test]
+fn test_spawn_monitored_async_on_actor_keeps_actor_intrinsics() {
+    // BT-4477: an actor receiver calls the module's own
+    // spawn_monitored_async/0,1 from the sender; `self spawnMonitoredAsync` in
+    // a class method lowers to class_self_spawn_monitored_async.
+    let src = "Object subclass: Foo\n  a => Counter spawnMonitoredAsync\n  b => Counter spawnMonitoredAsyncWith: #{#n => 1}\n\nActor subclass: Counter\n  state: n = 0\n";
+    let code = codegen_named(src, "foo");
+    assert!(
+        code.contains("call 'bt@counter':'spawn_monitored_async'()"),
+        "Got:\n{code}"
+    );
+    assert!(
+        code.contains("call 'bt@counter':'spawn_monitored_async'(~{"),
+        "Got:\n{code}"
+    );
+    assert!(!code.contains("'class_start'"), "Got:\n{code}");
+
+    let src = "Actor subclass: Counter\n  state: n = 0\n  class make => self spawnMonitoredAsync\n  class makeWith: m => self spawnMonitoredAsyncWith: m\n";
+    let code = codegen_named(src, "bt@counter");
+    assert_eq!(
+        code.matches("call 'beamtalk_class_instantiation':'class_self_spawn_monitored_async'(")
+            .count(),
+        2,
+        "self spawnMonitoredAsync… must lower to class_self_spawn_monitored_async. Got:\n{code}"
+    );
+}

@@ -19,10 +19,18 @@ use beamtalk_core::ast::Module;
 /// `spawn_monitored/0,1` (`spawnMonitored` / `spawnMonitoredWith:`, BT-4104),
 /// which answers `{Actor, MonitorRef}` with the monitor created atomically
 /// with the process (`beamtalk_actor:safe_spawn_monitored/2`).
+/// `MonitoredAsync` is `spawn_monitored_async/0,1` (`spawnMonitoredAsync` /
+/// `spawnMonitoredAsyncWith:`, BT-4477): the same `{Actor, MonitorRef}` answer
+/// but the caller does not wait for `init/1` or `initialize`
+/// (`beamtalk_actor:safe_spawn_monitored_async/2`). That helper always answers
+/// `{ok, _}`, so the shared `{error, _}` start-failure arm in the generated
+/// `spawn_monitored_async/0,1` never runs; an async start failure arrives as
+/// the monitor's `DOWN`, not as a raise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum SpawnVariant {
     Plain,
     Monitored,
+    MonitoredAsync,
 }
 
 impl SpawnVariant {
@@ -30,11 +38,11 @@ impl SpawnVariant {
     /// (`runtime_export_contract_tests`). The exhaustive `match` below makes
     /// a new variant a compile error here until it is listed.
     #[cfg(test)]
-    pub(in crate::core_erlang) const ALL: [Self; 2] = {
+    pub(in crate::core_erlang) const ALL: [Self; 3] = {
         match Self::Plain {
-            Self::Plain | Self::Monitored => {}
+            Self::Plain | Self::Monitored | Self::MonitoredAsync => {}
         }
-        [Self::Plain, Self::Monitored]
+        [Self::Plain, Self::Monitored, Self::MonitoredAsync]
     };
 
     /// The variant an anonymous class-side spawn selector belongs to, or
@@ -43,6 +51,9 @@ impl SpawnVariant {
         match (selector, arity) {
             ("spawn", 0) | ("spawnWith:", 1) => Some(Self::Plain),
             ("spawnMonitored", 0) | ("spawnMonitoredWith:", 1) => Some(Self::Monitored),
+            ("spawnMonitoredAsync", 0) | ("spawnMonitoredAsyncWith:", 1) => {
+                Some(Self::MonitoredAsync)
+            }
             _ => None,
         }
     }
@@ -52,6 +63,7 @@ impl SpawnVariant {
         match self {
             Self::Plain => "spawn",
             Self::Monitored => "spawn_monitored",
+            Self::MonitoredAsync => "spawn_monitored_async",
         }
     }
 
@@ -61,6 +73,7 @@ impl SpawnVariant {
         match self {
             Self::Plain => "class_self_spawn",
             Self::Monitored => "class_self_spawn_monitored",
+            Self::MonitoredAsync => "class_self_spawn_monitored_async",
         }
     }
 
@@ -69,6 +82,7 @@ impl SpawnVariant {
         match self {
             Self::Plain => "spawn",
             Self::Monitored => "spawnMonitored",
+            Self::MonitoredAsync => "spawnMonitoredAsync",
         }
     }
 
@@ -77,6 +91,7 @@ impl SpawnVariant {
         match self {
             Self::Plain => "spawnWith:",
             Self::Monitored => "spawnMonitoredWith:",
+            Self::MonitoredAsync => "spawnMonitoredAsyncWith:",
         }
     }
 
@@ -85,6 +100,7 @@ impl SpawnVariant {
         match self {
             Self::Plain => "safe_spawn",
             Self::Monitored => "safe_spawn_monitored",
+            Self::MonitoredAsync => "safe_spawn_monitored_async",
         }
     }
 
@@ -92,7 +108,7 @@ impl SpawnVariant {
     fn ok_pattern(self) -> &'static str {
         match self {
             Self::Plain => "<{'ok', Pid}> when 'true' ->",
-            Self::Monitored => "<{'ok', {Pid, MonRef}}> when 'true' ->",
+            Self::Monitored | Self::MonitoredAsync => "<{'ok', {Pid, MonRef}}> when 'true' ->",
         }
     }
 
@@ -120,7 +136,7 @@ impl SpawnVariant {
     fn answer(self, obj: Document<'static>) -> Document<'static> {
         match self {
             Self::Plain => obj,
-            Self::Monitored => docvec!["{", obj, ", MonRef}"],
+            Self::Monitored | Self::MonitoredAsync => docvec!["{", obj, ", MonRef}"],
         }
     }
 }
@@ -510,16 +526,18 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// Generates `spawn_monitored/0` (`with_args` false) or
-    /// `spawn_monitored/1` for a module that cannot start atomically
+    /// Generates `spawn_monitored/0` or `spawn_monitored_async/0` (`with_args`
+    /// false), or their `/1` forms, for a module that cannot start atomically
     /// monitored — a `native:` facade, whose backing module owns its own
-    /// start (BT-4104). Raises `instantiation_error` rather than leaving the
-    /// export missing (`undef`).
+    /// start (BT-4104, BT-4477). `variant` is `Monitored` or `MonitoredAsync`.
+    /// Raises `instantiation_error` rather than leaving the export missing
+    /// (`undef`).
     pub(in crate::core_erlang) fn generate_unsupported_spawn_monitored_method(
         &mut self,
+        variant: SpawnVariant,
         with_args: bool,
     ) -> Document<'static> {
-        let (fun_decl, selector) = SpawnVariant::Monitored.stub_head(with_args);
+        let (fun_decl, selector) = variant.stub_head(with_args);
         Self::instantiation_error_stub(
             fun_decl,
             self.class_name(),
@@ -1040,6 +1058,103 @@ mod tests {
         );
     }
 
+    // === BT-4477: spawn_monitored_async/0,1 ===
+
+    #[test]
+    fn generate_spawn_monitored_async_0_uses_safe_spawn_monitored_async_and_answers_pair() {
+        let mut g = generator();
+        let m = empty_module();
+        let out = g
+            .generate_spawn_function(&m, SpawnVariant::MonitoredAsync)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out.contains("'spawn_monitored_async'/0 = fun ()"),
+            "expected spawn_monitored_async/0 decl: {out}"
+        );
+        assert!(
+            out.contains("call 'beamtalk_actor':'safe_spawn_monitored_async'('counter', ~{}~)"),
+            "expected safe_spawn_monitored_async: {out}"
+        );
+        assert!(
+            out.contains("{{'beamtalk_object', 'Counter', 'counter', Pid}, MonRef}"),
+            "expected the {{Actor, MonRef}} answer: {out}"
+        );
+        assert!(
+            out.contains("'spawnMonitoredAsync'"),
+            "start failures must name spawnMonitoredAsync: {out}"
+        );
+    }
+
+    #[test]
+    fn generate_spawn_monitored_async_1_validates_map_and_names_selector() {
+        let mut g = generator();
+        let m = empty_module();
+        let out = g
+            .generate_spawn_with_args_function(&m, SpawnVariant::MonitoredAsync)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out.contains("'spawn_monitored_async'/1 = fun (InitArgs)"),
+            "expected spawn_monitored_async/1 decl: {out}"
+        );
+        assert!(out.contains("is_map"), "expected is_map check: {out}");
+        assert!(
+            out.contains(&beamtalk_cerl_doc::binary::binary_string_literal(
+                "spawnMonitoredAsyncWith: expects a Dictionary argument"
+            )),
+            "expected the async type_error hint: {out}"
+        );
+        assert!(
+            out.contains("call 'beamtalk_actor':'safe_spawn_monitored_async'('counter', InitArgs)"),
+            "expected safe_spawn_monitored_async: {out}"
+        );
+    }
+
+    #[test]
+    fn generate_abstract_and_unsupported_spawn_monitored_async_stubs_raise() {
+        let mut g = generator();
+        let out0 = g
+            .generate_abstract_spawn_error_method(SpawnVariant::MonitoredAsync)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out0.contains("'spawn_monitored_async'/0 = fun ()"),
+            "{out0}"
+        );
+        assert!(out0.contains("'spawnMonitoredAsync'"), "{out0}");
+        let out1 = g
+            .generate_abstract_spawn_with_args_error_method(SpawnVariant::MonitoredAsync)
+            .unwrap()
+            .to_pretty_string();
+        assert!(
+            out1.contains("'spawn_monitored_async'/1 = fun (_InitArgs)"),
+            "{out1}"
+        );
+        assert!(out1.contains("'spawnMonitoredAsyncWith:'"), "{out1}");
+        let native0 = g
+            .generate_unsupported_spawn_monitored_method(SpawnVariant::MonitoredAsync, false)
+            .to_pretty_string();
+        assert!(
+            native0.contains("'spawn_monitored_async'/0 = fun ()"),
+            "{native0}"
+        );
+        assert!(
+            native0.contains(&beamtalk_cerl_doc::binary::binary_string_literal(
+                "Native actors cannot be spawned monitored. Use spawn, then monitor."
+            )),
+            "{native0}"
+        );
+        let native1 = g
+            .generate_unsupported_spawn_monitored_method(SpawnVariant::MonitoredAsync, true)
+            .to_pretty_string();
+        assert!(
+            native1.contains("'spawn_monitored_async'/1 = fun (_InitArgs)"),
+            "{native1}"
+        );
+        assert!(native1.contains("'spawnMonitoredAsyncWith:'"), "{native1}");
+    }
+
     #[test]
     fn generate_abstract_spawn_monitored_stubs_raise() {
         let mut g = generator();
@@ -1073,7 +1188,7 @@ mod tests {
     fn generate_unsupported_spawn_monitored_stubs_raise() {
         let mut g = generator();
         let out0 = g
-            .generate_unsupported_spawn_monitored_method(false)
+            .generate_unsupported_spawn_monitored_method(SpawnVariant::Monitored, false)
             .to_pretty_string();
         assert!(out0.contains("'spawn_monitored'/0 = fun ()"), "{out0}");
         assert!(out0.contains("instantiation_error"), "{out0}");
@@ -1084,7 +1199,7 @@ mod tests {
             "{out0}"
         );
         let out1 = g
-            .generate_unsupported_spawn_monitored_method(true)
+            .generate_unsupported_spawn_monitored_method(SpawnVariant::Monitored, true)
             .to_pretty_string();
         assert!(
             out1.contains("'spawn_monitored'/1 = fun (_InitArgs)"),

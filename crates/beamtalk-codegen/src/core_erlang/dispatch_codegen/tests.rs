@@ -366,8 +366,17 @@ fn test_spawn_variant_of_selector() {
         SpawnVariant::of_selector("spawnMonitoredWith:", 1),
         Some(SpawnVariant::Monitored)
     );
+    assert_eq!(
+        SpawnVariant::of_selector("spawnMonitoredAsync", 0),
+        Some(SpawnVariant::MonitoredAsync)
+    );
+    assert_eq!(
+        SpawnVariant::of_selector("spawnMonitoredAsyncWith:", 1),
+        Some(SpawnVariant::MonitoredAsync)
+    );
     assert_eq!(SpawnVariant::of_selector("spawnAs:", 1), None);
     assert_eq!(SpawnVariant::of_selector("spawnMonitored", 1), None);
+    assert_eq!(SpawnVariant::of_selector("spawnMonitoredAsync", 1), None);
 }
 
 #[test]
@@ -381,6 +390,44 @@ fn test_supervisor_spawn_selector_includes_monitored() {
         1
     ));
     assert!(!super::is_supervisor_spawn_selector("spawnMonitored", 1));
+    // BT-4477: the asynchronous pair is routed the same way.
+    assert!(super::is_supervisor_spawn_selector(
+        "spawnMonitoredAsync",
+        0
+    ));
+    assert!(super::is_supervisor_spawn_selector(
+        "spawnMonitoredAsyncWith:",
+        1
+    ));
+    assert!(!super::is_supervisor_spawn_selector(
+        "spawnMonitoredAsync",
+        1
+    ));
+}
+
+#[test]
+fn test_generate_actor_spawn_monitored_async_non_repl() {
+    // BT-4477: `Counter spawnMonitoredAsync` calls the module's own
+    // `spawn_monitored_async/0` in the sender's process.
+    let mut generator = CoreErlangGenerator::new("test");
+    let doc = generator
+        .generate_actor_spawn_qualified(
+            "Counter",
+            None,
+            "spawnMonitoredAsync",
+            None,
+            SpawnVariant::MonitoredAsync,
+        )
+        .unwrap();
+    let output = doc.to_pretty_string();
+    assert!(
+        output.contains(":'spawn_monitored_async'()"),
+        "spawnMonitoredAsync should call spawn_monitored_async/0. Got: {output}"
+    );
+    assert!(
+        !output.contains(":'spawn_monitored'()") && !output.contains("'spawn'("),
+        "must call only the async entry point. Got: {output}"
+    );
 }
 
 #[test]

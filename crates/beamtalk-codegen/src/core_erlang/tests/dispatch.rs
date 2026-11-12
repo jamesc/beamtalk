@@ -337,6 +337,76 @@ fn test_generate_spawn_monitored_exports_and_functions() {
 }
 
 #[test]
+fn test_generate_spawn_monitored_async_message_send() {
+    // BT-4477: `Counter spawnMonitoredAsync` / `spawnMonitoredAsyncWith: 42`
+    // call the module's own spawn_monitored_async/0,1 in the sending process.
+    let mut generator = CoreErlangGenerator::new("bt@my_pkg@test_module");
+    let receiver = Expression::ClassReference {
+        name: Identifier::new("Counter", Span::new(0, 7)),
+        span: Span::new(0, 7),
+        package: None,
+    };
+    let unary = MessageSelector::Unary("spawnMonitoredAsync".into());
+    let output = generator
+        .generate_message_send(&receiver, &unary, &[])
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        output.contains("call 'bt@my_pkg@counter':'spawn_monitored_async'()"),
+        "spawnMonitoredAsync should call spawn_monitored_async/0. Got: {output}",
+    );
+
+    let keyword = MessageSelector::Keyword(vec![KeywordPart::new(
+        "spawnMonitoredAsyncWith:",
+        Span::new(8, 32),
+    )]);
+    let arguments = vec![Expression::Literal(Literal::Integer(42), Span::new(33, 35))];
+    let output = generator
+        .generate_message_send(&receiver, &keyword, &arguments)
+        .unwrap()
+        .to_pretty_string();
+    assert!(
+        output.contains("call 'bt@my_pkg@counter':'spawn_monitored_async'(42)"),
+        "spawnMonitoredAsyncWith: should call spawn_monitored_async/1. Got: {output}",
+    );
+    assert!(
+        !output.contains("beamtalk_future") && !output.contains("class_send"),
+        "spawnMonitoredAsyncWith: must be a direct call. Got: {output}",
+    );
+}
+
+#[test]
+fn test_generate_spawn_monitored_async_exports_and_functions() {
+    // BT-4477: every concrete actor module exports spawn_monitored_async/0,1
+    // over safe_spawn_monitored_async, answering {Actor, MonRef}.
+    use beamtalk_core::ast::*;
+    let value_assignment = Expression::Assignment {
+        target: Box::new(Expression::Identifier(Identifier::new(
+            "value",
+            Span::new(0, 5),
+        ))),
+        value: Box::new(Expression::Literal(Literal::Integer(0), Span::new(9, 10))),
+        type_annotation: None,
+        span: Span::new(0, 10),
+    };
+    let module = Module::new(vec![bare(value_assignment)], Span::new(0, 10));
+    let code =
+        generate_module(&module, CodegenOptions::new("counter")).expect("codegen should succeed");
+    assert!(
+        code.contains("'spawn_monitored_async'/0, 'spawn_monitored_async'/1"),
+        "spawn_monitored_async/0,1 must be exported. Got: {code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_actor':'safe_spawn_monitored_async'('counter', ~{}~)"),
+        "spawn_monitored_async/0 must use safe_spawn_monitored_async. Got: {code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_actor':'safe_spawn_monitored_async'('counter', InitArgs)"),
+        "spawn_monitored_async/1 must use safe_spawn_monitored_async. Got: {code}"
+    );
+}
+
+#[test]
 fn test_generate_spawn_function() {
     use beamtalk_core::ast::*;
 
@@ -4067,8 +4137,14 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
     );
     assert_eq!(
         code.matches(abstract_hint.as_str()).count(),
-        4,
-        "spawn/0,1 and spawn_monitored/0,1 stubs must all include the abstract-class hint. Got:\n{code}"
+        6,
+        "spawn, spawn_monitored and spawn_monitored_async /0,1 stubs must all include the abstract-class hint. Got:\n{code}"
+    );
+    // BT-4477: spawn_monitored_async/0,1 are abstract stubs too.
+    assert!(
+        code.contains("'spawn_monitored_async'/0 = fun () ->")
+            && code.contains("'spawn_monitored_async'/1 = fun (_InitArgs) ->"),
+        "Got:\n{code}"
     );
     // BT-4104: spawn_monitored/0,1 are abstract stubs too, naming their own selectors.
     assert!(
