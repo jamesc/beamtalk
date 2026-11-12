@@ -22,9 +22,7 @@ pub(super) fn make_expr_id(name: &str) -> Expression {
     Expression::Identifier(make_id(name))
 }
 
-pub(super) fn bare(expr: Expression) -> ExpressionStatement {
-    ExpressionStatement::bare(expr)
-}
+pub(super) use crate::test_helpers::test_support::bare;
 
 pub(super) fn parse_first_expr(src: &str) -> Expression {
     let tokens = crate::source_analysis::lex_with_eof(src);

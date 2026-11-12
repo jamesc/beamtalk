@@ -595,7 +595,10 @@ mod tests {
         Span::new(0, 10)
     }
 
-    use crate::test_helpers::test_support::ident;
+    use crate::ast::Identifier;
+    fn ident(name: &str) -> Identifier {
+        Identifier::new(name, test_span())
+    }
 
     fn kwpart(keyword: &str) -> KeywordPart {
         KeywordPart {
