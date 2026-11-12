@@ -2086,19 +2086,8 @@ impl Parser {
             }
             // Separator between fields.
             if need_separator {
-                if is_comma(self.current_kind()) {
-                    self.advance();
-                } else if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",?")
-                {
-                    pending_optional = Some(self.current_token().span());
-                    self.advance();
-                } else {
-                    self.error("Expected ',' or '}' in shape type");
-                    self.recover_shape_field();
-                    if !is_comma(self.current_kind()) {
-                        break;
-                    }
-                    self.advance();
+                if !self.parse_shape_separator(&mut pending_optional) {
+                    break;
                 }
                 need_separator = false;
                 // Allow a trailing comma before `}`.
@@ -2184,6 +2173,27 @@ impl Parser {
             open,
             span: start.merge(end),
         }
+    }
+
+    /// Consumes the `,` / `,?` separator between shape fields. A `,?` token is
+    /// split: its optional marker is returned through `pending_optional`. On a
+    /// missing separator, reports an error and recovers to the next separator;
+    /// returns `false` when none is found (the shape ends here).
+    fn parse_shape_separator(&mut self, pending_optional: &mut Option<Span>) -> bool {
+        let is_comma_question =
+            |k: &TokenKind| matches!(k, TokenKind::BinarySelector(s) if s.as_str() == ",?");
+        if !is_comma(self.current_kind()) && !is_comma_question(self.current_kind()) {
+            self.error("Expected ',' or '}' in shape type");
+            self.recover_shape_field();
+            if !is_comma(self.current_kind()) && !is_comma_question(self.current_kind()) {
+                return false;
+            }
+        }
+        if is_comma_question(self.current_kind()) {
+            *pending_optional = Some(self.current_token().span());
+        }
+        self.advance();
+        true
     }
 
     /// Appends `field` to a shape's fields, reporting a duplicate key.

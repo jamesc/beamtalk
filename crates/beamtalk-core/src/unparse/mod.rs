@@ -2948,8 +2948,7 @@ fn unparse_shape_type(fields: &[ShapeField], open: bool) -> Document<'static> {
         .map(|f| {
             docvec![
                 if f.optional { "?" } else { "" },
-                "#",
-                leaf::ident(&f.key),
+                unparse_literal(&Literal::Symbol(f.key.clone())),
                 " => ",
                 unparse_type_annotation(&f.value)
             ]

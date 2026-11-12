@@ -583,6 +583,7 @@ fn shape_type_annotations_round_trip_through_format_source() {
         "#{#a => Integer, ...}",
         "#{#user => #{#name => String, ?#id => Integer}, ...}",
         "#{#a => Integer | Nil} | Nil",
+        "#{#'content-type' => String, ?#'first name' => String}",
     ] {
         let source = format!("Object subclass: Foo\n\n  bar -> {shape} => nil\n");
         let formatted = format_source(&source).expect("should format");

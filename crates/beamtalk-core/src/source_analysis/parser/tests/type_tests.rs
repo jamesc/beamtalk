@@ -2315,6 +2315,16 @@ fn parse_shape_missing_fat_arrow_is_error_and_recovers() {
 }
 
 #[test]
+fn parse_shape_recovery_continues_at_comma_question() {
+    // A bad separator followed by `,?` must resume with the optional field.
+    let (ann, diags) = parse_shape_alias("#{#a => Integer junk,?#b => String}");
+    assert!(!diags.is_empty());
+    let (fields, _) = shape_parts(&ann);
+    assert_eq!(fields.len(), 2);
+    assert!(fields[1].1);
+}
+
+#[test]
 fn parse_shape_unclosed_is_error() {
     let (_, diags) = parse_shape_alias("#{#a => Integer");
     assert!(
