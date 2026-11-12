@@ -408,7 +408,7 @@ impl CoreErlangGenerator {
     /// block: `control_flow_has_mutations` (`blocks/tier2_value_calls.rs`: the
     /// exception-selector receiver and handler blocks, each conditional
     /// branch argument) and [`Self::conditional_needs_mutation_threading`]
-    /// (`intrinsics.rs`, which extends it with an in-loop-body-local-write
+    /// (`intrinsics/boolean.rs`, which extends it with an in-loop-body-local-write
     /// disjunct). Loops and folds read it through
     /// [`Self::loop_body_has_carried_mutations`] (BT-3834).
     ///
