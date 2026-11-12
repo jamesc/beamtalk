@@ -49,6 +49,11 @@ impl TypeChecker {
     /// leaves no later code to mislead, so it does not count. In a value-type
     /// body the callee's `self.f :=` rebinds only the callee's own `self`
     /// (functional update), so the caller's fields cannot change.
+    ///
+    /// Known gaps (the check is warning-level): only a literal `self`/`super`
+    /// receiver counts, so a self alias (`me := self. me reset`) and a block
+    /// built earlier and run later (`r := [self reset]. … r value`) are not
+    /// seen.
     #[allow(clippy::too_many_arguments)] // split from infer_message_send to share body
     pub(in crate::semantic_analysis::type_checker) fn infer_message_send_with_receiver_ty(
         &mut self,

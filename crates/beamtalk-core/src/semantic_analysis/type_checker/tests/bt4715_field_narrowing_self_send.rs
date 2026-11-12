@@ -145,3 +145,24 @@ typed Object subclass: Box
         .collect();
     assert!(diags.is_empty(), "got: {diags:#?}");
 }
+
+#[test]
+fn self_send_in_non_diverging_sibling_block_blocks_post_guard_narrowing() {
+    assert_nil_leak(
+        "  run -> Integer =>\n    self.f isNil ifTrue: [^0] ifFalse: [self reset]\n    self need: self.f",
+    );
+}
+
+#[test]
+fn self_send_in_compound_guard_receiver_blocks_post_guard_narrowing() {
+    assert_nil_leak(
+        "  stale -> Boolean => true\n  run -> Integer =>\n    (self.f isNil or: [self stale]) ifTrue: [^0]\n    self need: self.f",
+    );
+}
+
+#[test]
+fn self_send_in_diverging_guard_block_keeps_post_guard_narrowing() {
+    assert_clean(
+        "  run -> Integer =>\n    self.f isNil ifTrue: [self reset. ^0]\n    self need: self.f",
+    );
+}
