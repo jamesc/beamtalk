@@ -30,6 +30,8 @@ pub mod test_support;
 /// replies; no async deps). Same gating as [`test_ports`].
 #[cfg(any(test, feature = "test-ports"))]
 pub mod test_versions;
+#[cfg(feature = "ws-client")]
+pub mod ws_client;
 
 pub use request::{RequestBuilder, next_msg_id};
 pub use response::{ActorInfo, ClassInfo, ModuleInfo, ReplResponse, SessionInfo, Warning};

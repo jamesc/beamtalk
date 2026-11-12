@@ -23,10 +23,10 @@
 
 use std::sync::Arc;
 
+use crate::queries::cursor_context::{ClassContext, resolve_receiver_class};
 use crate::queries::{protocols_for_module, type_of_parsed};
 use crate::{ParameterInfo, Position, SignatureHelp, SignatureInfo};
-use beamtalk_core::ast::normalize::canonical_operand;
-use beamtalk_core::ast::{BinarySegment, ClassDefinition, Expression, MessageSelector, Module};
+use beamtalk_core::ast::{BinarySegment, Expression, MessageSelector, Module};
 use beamtalk_core::ast_walker::cascade_shared_receiver;
 use beamtalk_core::semantic_analysis::alias_registry::AliasRegistry;
 use beamtalk_core::semantic_analysis::class_hierarchy::MethodInfo;
@@ -39,16 +39,6 @@ use beamtalk_core::semantic_analysis::type_checker::{
 };
 use beamtalk_core::semantic_analysis::{ClassHierarchy, InferredType};
 use ecow::EcoString;
-
-/// The class context for resolving receiver types.
-#[derive(Debug)]
-enum SigHelpClassContext<'a> {
-    InstanceMethod(&'a ClassDefinition),
-    ClassMethod(&'a ClassDefinition),
-    StandaloneInstanceMethod(&'a str),
-    StandaloneClassMethod(&'a str),
-    TopLevel,
-}
 
 /// What a signature-help lookup resolves a receiver and selector against.
 struct Lookup<'a> {
@@ -98,7 +88,7 @@ pub fn compute_signature_help(
 
     // Search top-level expressions
     for stmt in &module.expressions {
-        let context = SigHelpClassContext::TopLevel;
+        let context = ClassContext::TopLevel;
         if let Some(help) = find_signature_in_expr(&stmt.expression, offset, &context, &lookup) {
             return Some(help);
         }
@@ -107,7 +97,7 @@ pub fn compute_signature_help(
     // Search class method bodies
     for class in &module.classes {
         for method in &class.methods {
-            let context = SigHelpClassContext::InstanceMethod(class);
+            let context = ClassContext::InstanceMethod(class);
             for stmt in &method.body {
                 if let Some(help) =
                     find_signature_in_expr(&stmt.expression, offset, &context, &lookup)
@@ -117,7 +107,7 @@ pub fn compute_signature_help(
             }
         }
         for method in &class.class_methods {
-            let context = SigHelpClassContext::ClassMethod(class);
+            let context = ClassContext::ClassMethod(class);
             for stmt in &method.body {
                 if let Some(help) =
                     find_signature_in_expr(&stmt.expression, offset, &context, &lookup)
@@ -131,9 +121,9 @@ pub fn compute_signature_help(
     // Search standalone method definitions
     for smd in &module.method_definitions {
         let context = if smd.is_class_method {
-            SigHelpClassContext::StandaloneClassMethod(smd.class_name.name.as_str())
+            ClassContext::StandaloneClassMethod(smd.class_name.name.as_str())
         } else {
-            SigHelpClassContext::StandaloneInstanceMethod(smd.class_name.name.as_str())
+            ClassContext::StandaloneInstanceMethod(smd.class_name.name.as_str())
         };
         for stmt in &smd.method.body {
             if let Some(help) = find_signature_in_expr(&stmt.expression, offset, &context, &lookup)
@@ -151,7 +141,7 @@ pub fn compute_signature_help(
 fn find_signature_in_expr(
     expr: &Expression,
     offset: u32,
-    context: &SigHelpClassContext<'_>,
+    context: &ClassContext<'_>,
     lookup: &Lookup<'_>,
 ) -> Option<SignatureHelp> {
     let span = expr.span();
@@ -456,7 +446,7 @@ fn determine_active_parameter(
 fn resolve_signature(
     receiver: &Expression,
     selector_name: &str,
-    context: &SigHelpClassContext<'_>,
+    context: &ClassContext<'_>,
     lookup: &Lookup<'_>,
     active_parameter: u32,
 ) -> Option<SignatureHelp> {
@@ -489,52 +479,6 @@ fn resolve_signature(
         hierarchy.find_method(receiver_class.as_str(), selector_name)
     }?;
     Some(build_signature_help(&method, active_parameter))
-}
-
-/// Resolves the class of a receiver expression.
-fn resolve_receiver_class(
-    receiver: &Expression,
-    context: &SigHelpClassContext<'_>,
-    hierarchy: &ClassHierarchy,
-    type_map: &TypeMap,
-) -> Option<(EcoString, bool)> {
-    // The receiver as analysis sees it (BT-4237): `(self) foo:` resolves like
-    // `self foo:`, while `(super) foo:` stays an ordinary send.
-    match canonical_operand(receiver) {
-        Expression::ClassReference { name, .. } => Some((name.name.clone(), true)),
-        Expression::Super(_) => match context {
-            SigHelpClassContext::InstanceMethod(class) => {
-                class.superclass.as_ref().map(|s| (s.name.clone(), false))
-            }
-            SigHelpClassContext::ClassMethod(class) => {
-                class.superclass.as_ref().map(|s| (s.name.clone(), true))
-            }
-            SigHelpClassContext::StandaloneInstanceMethod(name) => hierarchy
-                .get_class(name)
-                .and_then(|info| info.superclass.clone())
-                .map(|super_name| (super_name, false)),
-            SigHelpClassContext::StandaloneClassMethod(name) => hierarchy
-                .get_class(name)
-                .and_then(|info| info.superclass.clone())
-                .map(|super_name| (super_name, true)),
-            SigHelpClassContext::TopLevel => None,
-        },
-        Expression::Identifier(ident) if ident.name == "self" => match context {
-            SigHelpClassContext::InstanceMethod(class) => Some((class.name.name.clone(), false)),
-            SigHelpClassContext::ClassMethod(class) => Some((class.name.name.clone(), true)),
-            SigHelpClassContext::StandaloneInstanceMethod(name) => {
-                Some((EcoString::from(*name), false))
-            }
-            SigHelpClassContext::StandaloneClassMethod(name) => {
-                Some((EcoString::from(*name), true))
-            }
-            SigHelpClassContext::TopLevel => None,
-        },
-        // A map shape (`#{#a => 1}`, ADR 0147) resolves as its `Dictionary`.
-        _ => type_of_parsed(type_map, receiver)
-            .and_then(InferredType::instance_class)
-            .map(|(name, _)| (name.clone(), false)),
-    }
 }
 
 /// Builds signature help from a resolved `ClassHierarchy::MethodInfo`.

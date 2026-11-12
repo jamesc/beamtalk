@@ -25,6 +25,7 @@
 //!
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol completion requests
+use crate::queries::cursor_context::{ClassContext, find_class_context};
 use crate::queries::erlang_modules;
 use crate::queries::shape_keys;
 use crate::queries::{
@@ -33,8 +34,7 @@ use crate::queries::{
 use crate::{Completion, CompletionKind, Position};
 use beamtalk_core::ast::normalize::canonical_operand;
 use beamtalk_core::ast::{
-    BinarySegment, ClassDefinition, ClassKind, Expression, MethodDefinition, Module,
-    declared_shape_migrations,
+    BinarySegment, ClassKind, Expression, MethodDefinition, Module, declared_shape_migrations,
 };
 use beamtalk_core::ast_walker::{for_each_expr_seq, walk_expression};
 use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
@@ -44,7 +44,7 @@ use beamtalk_core::semantic_analysis::type_checker::native_type_registry::Native
 use beamtalk_core::semantic_analysis::{
     AliasRegistry, ClassHierarchy, InferredType, ProtocolRegistry,
 };
-use beamtalk_core::source_analysis::{Span, TokenKind, lex};
+use beamtalk_core::source_analysis::{TokenKind, lex};
 use ecow::EcoString;
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -91,18 +91,6 @@ fn is_cross_package_internal_method(
         return false;
     };
     class_pkg != cur_pkg
-}
-/// The class context at the cursor position.
-#[derive(Debug, Clone)]
-enum ClassContext<'a> {
-    /// Cursor is inside an instance method of the named class.
-    InstanceMethod(&'a ClassDefinition),
-    /// Cursor is inside a class-side method of the named class.
-    ClassMethod(&'a ClassDefinition),
-    /// Cursor is inside a class body but not inside any method (where `field:`/`state:` go).
-    ClassBody(&'a ClassDefinition),
-    /// Cursor is at top level (not inside any class).
-    TopLevel,
 }
 /// Computes code completions at a given position in a module.
 ///
@@ -202,17 +190,19 @@ pub fn compute_completions_with_registries(
         return erlang_completions;
     }
     // Determine class context at cursor position
-    let context = find_class_context(module, offset);
+    let context = find_class_context(module, offset, true);
     // Check for `self.` context — if cursor is right after `self.` inside an
     // instance method, return state fields + instance methods (fields are only
     // accessible via `self.`).
     if is_after_self_dot(source, offset) {
         let self_class_name = match &context {
-            ClassContext::InstanceMethod(class) => Some(class.name.name.as_str()),
-            _ => find_standalone_instance_class(module, offset),
+            ClassContext::InstanceMethod(_) | ClassContext::StandaloneInstanceMethod(_) => {
+                context.self_class()
+            }
+            _ => None,
         };
-        if let Some(class_name) = self_class_name {
-            return compute_self_dot_completions(class_name, hierarchy, current_package);
+        if let Some((class_name, _)) = self_class_name {
+            return compute_self_dot_completions(class_name.as_str(), hierarchy, current_package);
         }
     }
     // ADR 0147 (BT-4735): at a shape-key site (`at: #|`, or a key position in a
@@ -630,22 +620,6 @@ fn compute_self_dot_completions(
     }
     completions
 }
-/// Returns the class name if the cursor is inside a standalone instance method.
-fn find_standalone_instance_class(module: &Module, offset: u32) -> Option<&str> {
-    let probe = offset.saturating_sub(1);
-    for smd in &module.method_definitions {
-        if smd.is_class_method {
-            continue;
-        }
-        let span = smd.method.span;
-        if (offset >= span.start() && offset < span.end())
-            || (probe >= span.start() && probe < span.end())
-        {
-            return Some(smd.class_name.name.as_str());
-        }
-    }
-    None
-}
 /// Adds identifier completions from the module and the current method scope.
 fn add_identifier_completions(module: &Module, offset: u32, completions: &mut Vec<Completion>) {
     let mut identifiers = HashSet::new();
@@ -695,37 +669,6 @@ fn find_method_at_offset(module: &Module, offset: u32) -> Option<&MethodDefiniti
         }
     }
     None
-}
-/// Determines the class context at a given byte offset.
-///
-/// Walks the module's class definitions to find if the offset is inside
-/// an instance method or a class-side method.
-fn find_class_context(module: &Module, offset: u32) -> ClassContext<'_> {
-    // Probe one byte back so cursor at end-of-span (exclusive) still matches.
-    let probe = offset.saturating_sub(1);
-    let in_span = |span: Span| {
-        (offset >= span.start() && offset < span.end())
-            || (probe >= span.start() && probe < span.end())
-    };
-    for class in &module.classes {
-        // Check instance methods
-        for method in &class.methods {
-            if in_span(method.span) {
-                return ClassContext::InstanceMethod(class);
-            }
-        }
-        // Check class-side methods
-        for method in &class.class_methods {
-            if in_span(method.span) {
-                return ClassContext::ClassMethod(class);
-            }
-        }
-        // Check if inside class body but not in any method
-        if in_span(class.span) {
-            return ClassContext::ClassBody(class);
-        }
-    }
-    ClassContext::TopLevel
 }
 /// Adds class names as completions (from module + hierarchy builtins).
 fn add_class_name_completions(
@@ -1370,6 +1313,8 @@ fn should_exclude_delegate(
         ClassContext::InstanceMethod(class)
         | ClassContext::ClassMethod(class)
         | ClassContext::ClassBody(class) => class.backing_module.is_none(),
+        ClassContext::StandaloneInstanceMethod(name)
+        | ClassContext::StandaloneClassMethod(name) => !hierarchy.is_native(name),
         ClassContext::TopLevel => true,
     }
 }
@@ -1407,8 +1352,9 @@ fn add_hierarchy_completions(
     let mut seen = HashSet::new();
     // Fall back to context-based completions (Dynamic or no receiver)
     match context {
-        ClassContext::InstanceMethod(class) => {
-            let class_name = class.name.name.as_str();
+        ClassContext::InstanceMethod(_) | ClassContext::StandaloneInstanceMethod(_) => {
+            let (class_name, _) = context.self_class().unwrap_or_default();
+            let class_name = class_name.as_str();
             collect_method_completions(
                 hierarchy.all_methods(class_name),
                 false,
@@ -1423,8 +1369,9 @@ fn add_hierarchy_completions(
             // the `is_after_self_dot` early-return path in
             // `compute_self_dot_completions`.
         }
-        ClassContext::ClassMethod(class) => {
-            let class_name = class.name.name.as_str();
+        ClassContext::ClassMethod(_) | ClassContext::StandaloneClassMethod(_) => {
+            let (class_name, _) = context.self_class().unwrap_or_default();
+            let class_name = class_name.as_str();
             collect_method_completions(
                 hierarchy.all_class_methods(class_name),
                 true,
@@ -1795,6 +1742,32 @@ mod tests {
         assert!(
             completions.iter().any(|c| c.label == "isNil"),
             "Should include inherited 'isNil' from Object"
+        );
+    }
+    #[test]
+    fn completions_in_standalone_methods_use_the_extended_class() {
+        // BT-4682: a standalone method (`Counter >> m`) completes against the
+        // class it extends, like a method declared inside the class body.
+        let source = "Actor subclass: Counter\n  state: count = 0\n  increment => 1\n\nActor subclass: Other\n  otherOnly => 1\n\nCounter >> twice => 2\nCounter class >> make => 3";
+        let (module, _) = parse(lex_with_eof(source));
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let labels_at = |marker: &str| -> Vec<String> {
+            let offset = u32::try_from(source.find(marker).unwrap()).unwrap() + 3;
+            let position =
+                Position::from_byte_offset(source, crate::ByteOffset::new(offset)).unwrap();
+            compute_completions(&module, source, position, &hierarchy, None, None)
+                .into_iter()
+                .map(|c| c.label.to_string())
+                .collect()
+        };
+        let instance = labels_at("=> 2");
+        assert!(instance.iter().any(|l| l == "increment"));
+        assert!(!instance.iter().any(|l| l == "otherOnly"), "{instance:?}");
+        let class_side = labels_at("=> 3");
+        assert!(class_side.iter().any(|l| l == "spawn"));
+        assert!(
+            !class_side.iter().any(|l| l == "otherOnly"),
+            "{class_side:?}"
         );
     }
     #[test]

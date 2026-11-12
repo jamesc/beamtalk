@@ -26,6 +26,7 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol hover requests
 
+use crate::queries::cursor_context::{ClassContext, find_class_context, resolve_receiver_class};
 use crate::queries::shape_keys;
 use crate::queries::{
     enrich_hierarchy_with_inferred_returns, protocols_for_module, type_of_parsed,
@@ -96,7 +97,7 @@ pub fn compute_hover(
     let offset_val = offset.get();
 
     // Find the class context at this position for self-type hover
-    let class_context = find_hover_class_context(module, offset_val);
+    let class_context = find_class_context(module, offset_val, false);
 
     // Enrich hierarchy with inferred return types and get the type map in a single
     // TypeChecker pass. This enables chain-resolved hover for methods
@@ -677,43 +678,6 @@ pub(crate) fn selector_span_in_method_signature(
     }
 }
 
-/// The hover-relevant class context at a position.
-#[derive(Debug, Clone)]
-enum HoverClassContext<'a> {
-    InstanceMethod(&'a ClassDefinition),
-    ClassMethod(&'a ClassDefinition),
-    /// Inside a standalone instance method (`Counter >> method => ...`).
-    StandaloneInstanceMethod(&'a str),
-    /// Inside a standalone class method (`Counter class >> method => ...`).
-    StandaloneClassMethod(&'a str),
-    TopLevel,
-}
-
-/// Find which class/method the offset is inside of.
-fn find_hover_class_context(module: &Module, offset: u32) -> HoverClassContext<'_> {
-    for class in &module.classes {
-        for method in &class.methods {
-            if offset >= method.span.start() && offset < method.span.end() {
-                return HoverClassContext::InstanceMethod(class);
-            }
-        }
-        for method in &class.class_methods {
-            if offset >= method.span.start() && offset < method.span.end() {
-                return HoverClassContext::ClassMethod(class);
-            }
-        }
-    }
-    for smd in &module.method_definitions {
-        if offset >= smd.method.span.start() && offset < smd.method.span.end() {
-            if smd.is_class_method {
-                return HoverClassContext::StandaloneClassMethod(&smd.class_name.name);
-            }
-            return HoverClassContext::StandaloneInstanceMethod(&smd.class_name.name);
-        }
-    }
-    HoverClassContext::TopLevel
-}
-
 /// Creates hover information for a message selector.
 fn selector_hover_info(selector: &MessageSelector, span: Span) -> HoverInfo {
     let (kind, name, arity) = match selector {
@@ -821,7 +785,7 @@ fn find_hover_in_pattern(pattern: &Pattern, offset: u32, type_map: &TypeMap) -> 
 fn find_hover_in_expr(
     expr: &Expression,
     offset: u32,
-    context: &HoverClassContext<'_>,
+    context: &ClassContext<'_>,
     hierarchy: &ClassHierarchy,
     type_map: &TypeMap,
     native_types: Option<&NativeTypeRegistry>,
@@ -1099,10 +1063,10 @@ fn find_hover_in_expr(
                 // too, matching local/parameter hover; fall back to the raw
                 // annotation text otherwise.
                 let field_type = match context {
-                    HoverClassContext::InstanceMethod(class) => {
+                    ClassContext::InstanceMethod(class) => {
                         hierarchy.state_field_type(class.name.name.as_str(), field.name.as_str())
                     }
-                    HoverClassContext::StandaloneInstanceMethod(name) => {
+                    ClassContext::StandaloneInstanceMethod(name) => {
                         hierarchy.state_field_type(name, field.name.as_str())
                     }
                     _ => None,
@@ -1456,7 +1420,7 @@ fn resolved_selector_hover_info(
     receiver: &Expression,
     selector: &MessageSelector,
     span: Span,
-    context: &HoverClassContext<'_>,
+    context: &ClassContext<'_>,
     hierarchy: &ClassHierarchy,
     type_map: &TypeMap,
     native_types: Option<&NativeTypeRegistry>,
@@ -1688,55 +1652,6 @@ fn method_info_signature(
     }
 }
 
-fn resolve_receiver_class(
-    receiver: &Expression,
-    context: &HoverClassContext<'_>,
-    hierarchy: &ClassHierarchy,
-    type_map: &TypeMap,
-) -> Option<(ecow::EcoString, bool)> {
-    match receiver {
-        Expression::ClassReference { name, .. } => Some((name.name.clone(), true)),
-        Expression::Super(_) => match context {
-            HoverClassContext::InstanceMethod(class) => class
-                .superclass
-                .as_ref()
-                .map(|superclass| superclass.name.clone())
-                .map(|name| (name, false)),
-            HoverClassContext::ClassMethod(class) => class
-                .superclass
-                .as_ref()
-                .map(|superclass| superclass.name.clone())
-                .map(|name| (name, true)),
-            HoverClassContext::StandaloneInstanceMethod(name)
-            | HoverClassContext::StandaloneClassMethod(name) => hierarchy
-                .get_class(name)
-                .and_then(|info| info.superclass.clone())
-                .map(|super_name| {
-                    (
-                        super_name,
-                        matches!(context, HoverClassContext::StandaloneClassMethod(_)),
-                    )
-                }),
-            HoverClassContext::TopLevel => None,
-        },
-        Expression::Identifier(ident) if ident.name == "self" => match context {
-            HoverClassContext::InstanceMethod(class) => Some((class.name.name.clone(), false)),
-            HoverClassContext::ClassMethod(class) => Some((class.name.name.clone(), true)),
-            HoverClassContext::StandaloneInstanceMethod(name) => {
-                Some((ecow::EcoString::from(*name), false))
-            }
-            HoverClassContext::StandaloneClassMethod(name) => {
-                Some((ecow::EcoString::from(*name), true))
-            }
-            HoverClassContext::TopLevel => None,
-        },
-        // A map shape (`#{#a => 1}`, ADR 0147) resolves as its `Dictionary`.
-        _ => type_of_parsed(type_map, receiver)
-            .and_then(InferredType::instance_class)
-            .map(|(name, _)| (name.clone(), false)),
-    }
-}
-
 /// Hover for a position on a `Parenthesized` node's own `(` or `)`: the
 /// inner expression's type (BT-4237), the same type hovering the inner
 /// expression shows. `None` when that type is not known.
@@ -1750,14 +1665,14 @@ fn parenthesized_hover_info(
 }
 
 /// Creates hover info for `self` based on the class context.
-fn self_hover_info(span: Span, context: &HoverClassContext<'_>) -> HoverInfo {
+fn self_hover_info(span: Span, context: &ClassContext<'_>) -> HoverInfo {
     match context {
-        HoverClassContext::InstanceMethod(class) => {
+        ClassContext::InstanceMethod(class) => {
             HoverInfo::new(format!("self: `{}`", class.name.name), span).with_documentation(
                 format!("Reference to the current `{}` instance", class.name.name),
             )
         }
-        HoverClassContext::ClassMethod(class) => {
+        ClassContext::ClassMethod(class) => {
             HoverInfo::new(format!("self: `{} class`", class.name.name), span).with_documentation(
                 format!(
                     "Reference to the `{}` class object (class-side method)",
@@ -1765,16 +1680,16 @@ fn self_hover_info(span: Span, context: &HoverClassContext<'_>) -> HoverInfo {
                 ),
             )
         }
-        HoverClassContext::StandaloneInstanceMethod(name) => {
+        ClassContext::StandaloneInstanceMethod(name) => {
             HoverInfo::new(format!("self: `{name}`"), span)
                 .with_documentation(format!("Reference to the current `{name}` instance"))
         }
-        HoverClassContext::StandaloneClassMethod(name) => {
+        ClassContext::StandaloneClassMethod(name) => {
             HoverInfo::new(format!("self: `{name} class`"), span).with_documentation(format!(
                 "Reference to the `{name}` class object (class-side method)"
             ))
         }
-        HoverClassContext::TopLevel => {
+        ClassContext::ClassBody(_) | ClassContext::TopLevel => {
             HoverInfo::new("Keyword: `self` (current receiver)".to_string(), span)
         }
     }
@@ -2182,7 +2097,7 @@ mod tests {
         use beamtalk_core::ast::Expression;
         use beamtalk_core::source_analysis::Span;
 
-        let ctx = HoverClassContext::TopLevel;
+        let ctx = ClassContext::TopLevel;
         let hierarchy = ClassHierarchy::with_builtins();
 
         let expr = Expression::Primitive {
@@ -2204,7 +2119,7 @@ mod tests {
         use beamtalk_core::ast::Expression;
         use beamtalk_core::source_analysis::Span;
 
-        let ctx = HoverClassContext::TopLevel;
+        let ctx = ClassContext::TopLevel;
         let hierarchy = ClassHierarchy::with_builtins();
 
         let expr = Expression::Primitive {
