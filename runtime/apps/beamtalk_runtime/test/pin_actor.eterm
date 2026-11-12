@@ -1,0 +1,84 @@
+{{[{put_reflection,['PinCounter',
+                    #{instance_methods => [get,increment],
+                      method_return_types => #{get => 'Integer'},
+                      class_method_return_types => #{},
+                      instance_variables => [count]}]},
+   {put_flags,['PinCounter',
+               #{is_sealed => false,is_typed => false,shape_version => 1,
+                 is_internal => false}]},
+   {put_method_records,['PinCounter',instance,
+                        #{get =>
+                              #{info => #{arity => 0},
+                                signature => nil,doc => nil,source => <<>>},
+                          increment =>
+                              #{info => #{arity => 0},
+                                signature => nil,doc => nil,source => <<>>}}]},
+   {put_method_records,['PinCounter',class,#{}]},
+   {put_class_doc,['PinCounter',none]}],
+  []},
+ {[{put_reflection,['PinCounter',
+                    #{instance_methods => [reset,get,increment],
+                      method_return_types =>
+                          #{reset => 'Nil',get => 'Integer'},
+                      class_method_return_types => #{},
+                      instance_variables => [count]}]},
+   {put_flags,['PinCounter',
+               #{is_sealed => false,is_typed => false,shape_version => 1,
+                 is_internal => false}]},
+   {put_method_records,['PinCounter',instance,
+                        #{reset =>
+                              #{info => #{arity => 0},
+                                signature => nil,doc => nil,source => <<>>},
+                          get =>
+                              #{info => #{arity => 0},
+                                signature => nil,doc => nil,source => <<>>},
+                          increment =>
+                              #{info => #{arity => 0},
+                                signature => nil,doc => nil,source => <<>>}}]},
+   {put_method_records,['PinCounter',class,#{}]},
+   {put_class_doc,['PinCounter',none]}],
+  []},
+ {[{put_reflection,['PinCounter',
+                    #{instance_methods => [reset,get,increment,pinned],
+                      method_return_types =>
+                          #{reset => 'Nil',get => 'Integer'},
+                      class_method_return_types => #{},
+                      instance_variables => [count]}]},
+   {put_flags,['PinCounter',
+               #{is_sealed => false,is_typed => false,shape_version => 1,
+                 is_internal => false}]},
+   {put_method_records,['PinCounter',instance,
+                        #{reset =>
+                              #{info => #{arity => 0},
+                                signature => nil,doc => nil,source => <<>>},
+                          get =>
+                              #{info => #{arity => 0},
+                                signature => nil,doc => nil,source => <<>>},
+                          increment =>
+                              #{info => #{arity => 0},
+                                signature => nil,doc => nil,source => <<>>},
+                          pinned =>
+                              #{info => #{arity => 0,block => '$fun'},
+                                signature => nil,doc => nil,
+                                source => <<"pinned => 1">>}}]},
+   {put_method_records,['PinCounter',class,#{}]},
+   {put_class_doc,['PinCounter',none]}],
+  [{register_class,['PinCounter',
+                    #{module => pin_counter,
+                      fields => [count],
+                      class => 'PinCounter',superclass => nil,
+                      is_sealed => false,is_abstract => false,
+                      method_info =>
+                          #{reset =>
+                                #{arity => 0,return_type => 'Nil',
+                                  param_types => none},
+                            get =>
+                                #{arity => 0,return_type => 'Integer',
+                                  param_types => none},
+                            increment =>
+                                #{arity => 0,return_type => none,
+                                  param_types => none},
+                            pinned =>
+                                #{arity => 0,return_type => none,
+                                  param_types => none}},
+                      class_method_info => #{},meta_version => 2}]}]}}.
