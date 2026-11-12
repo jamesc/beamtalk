@@ -258,7 +258,7 @@ fn format_native_modules_entry(native_module_names: &[String]) -> String {
 /// list, matching the `native_modules` precedent).
 ///
 /// `pub(crate)` (not private): reused by
-/// [`super::build_stdlib::generate_app_file`]/`generate_app_src_file`
+/// `build_stdlib::generators::generate_app_file`/`generate_app_src_file`
 /// so `beamtalk_stdlib.app`'s `env` gets the same `{type_aliases,
 /// [...]}` key the ordinary `beamtalk build` pipeline already emits here —
 /// see this module's `AliasMetadata` doc for why that key exists.
@@ -290,6 +290,36 @@ pub(crate) fn format_type_aliases_entry(alias_metadata: &[AliasMetadata]) -> Str
     format!(",\n        {{type_aliases, [{entries}]}}")
 }
 
+/// Format a single class metadata entry in ADR 0070 Phase 4 map format.
+///
+/// Shared by [`format_classes_list`] (the `beamtalk build` pipeline) and the
+/// stdlib build's `.app` / `.app.src` generators, so both emit the same map
+/// shape.
+pub(crate) fn format_class_entry(c: &ClassMetadata) -> String {
+    let type_params = if c.type_params.is_empty() {
+        "[]".to_string()
+    } else {
+        format!(
+            "[{}]",
+            c.type_params
+                .iter()
+                .map(|tp| format!("'{tp}'"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    format!(
+        "#{{name => '{class}', module => '{module}', parent => '{parent}', \
+         package => '{package}', kind => {kind}, type_params => {type_params}}}",
+        module = c.module,
+        class = c.class_name,
+        parent = c.parent_class,
+        package = c.package,
+        kind = c.kind,
+        type_params = type_params
+    )
+}
+
 /// Format the class metadata list for the `.app` file.
 ///
 /// ADR 0070 Phase 4: Each entry is a map with module, class, parent, package,
@@ -306,30 +336,7 @@ fn format_classes_list(class_metadata: &[ClassMetadata]) -> String {
     sorted.sort_by(|a, b| a.module.cmp(&b.module));
     sorted
         .iter()
-        .map(|c| {
-            let type_params = if c.type_params.is_empty() {
-                "[]".to_string()
-            } else {
-                format!(
-                    "[{}]",
-                    c.type_params
-                        .iter()
-                        .map(|tp| format!("'{tp}'"))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            };
-            format!(
-                "#{{name => '{class}', module => '{module}', parent => '{parent}', \
-                 package => '{package}', kind => {kind}, type_params => {type_params}}}",
-                module = c.module,
-                class = c.class_name,
-                parent = c.parent_class,
-                package = c.package,
-                kind = c.kind,
-                type_params = type_params
-            )
-        })
+        .map(format_class_entry)
         .collect::<Vec<_>>()
         .join(",\n            ")
 }
