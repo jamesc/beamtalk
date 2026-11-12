@@ -430,21 +430,28 @@ const FFI_SCALAR_CLASSES: &[&str] = &[
 /// reader maps `binary()` to the union `String | Binary` (BT-4755), and a
 /// union is proved only when every member is. `string()` maps to
 /// `String | List`, so a charlist result stays on the proxy via `List`.
-/// Arguments are different: a `String`/`Binary` *argument* is unwrapped or
-/// retried by the proxy, so these two stay out of the argument rule.
+/// Arguments follow their own rule, [`FFI_ARG_EXTRA_CLASSES`].
 const FFI_RESULT_EXTRA_CLASSES: &[&str] = &["Dictionary", "Block", "String", "Binary"];
 
 /// Extra classes an *argument* may have. `Symbol` is an atom; as a result it
 /// is not proved, because `atom()` includes `ok` and `error`, which the proxy
 /// coerces to a `Result`.
-const FFI_ARG_EXTRA_CLASSES: &[&str] = &["Symbol"];
+///
+/// `String` and `Binary` (BT-4759) are proved only together with the runtime
+/// `is_binary` guard in [`FFI_ARG_RUNTIME_GUARDS`]: a `String` is a bare binary
+/// *or* the tagged `{beamtalk_string, Bin}`, and the proxy's stock-mode unwrap
+/// changes the tagged form, so a tagged String fails the guard and takes the
+/// proxy. A raw binary needs no unwrapping and carries no code.
+const FFI_ARG_EXTRA_CLASSES: &[&str] = &["Symbol", "String", "Binary"];
 
 /// The runtime check that backs [`ffi_arg_passes_unchanged`]: a value that
-/// passes one of these `erlang` guard BIFs is a number, atom or pid, so it is
-/// never a tagged `String`, a binary or a fun. Static types are not enforced at
+/// passes one of these `erlang` guard BIFs is a number, atom, pid or binary, so
+/// it is never a tagged `String`, a charlist or a fun. (A binary is unchanged by
+/// the stock-mode unwrap; the `badarg` charlist retry still applies to it and
+/// runs in `ffi_call_raised/8`.) Static types are not enforced at
 /// run time (gradual typing), so a direct call also checks each argument with
 /// these and falls back to the proxy when one fails.
-pub const FFI_ARG_RUNTIME_GUARDS: &[&str] = &["is_number", "is_atom", "is_pid"];
+pub const FFI_ARG_RUNTIME_GUARDS: &[&str] = &["is_number", "is_atom", "is_pid", "is_binary"];
 
 /// Every member of `ty` (a single type or a union) satisfies `member_ok`.
 fn all_members(ty: &InferredType, member_ok: &dyn Fn(&str) -> bool) -> bool {
@@ -470,11 +477,12 @@ pub fn ffi_result_passes_unchanged(ty: &InferredType) -> bool {
     })
 }
 
-/// An argument of static type `ty` reaches the callee unchanged and cannot
-/// carry Beamtalk code: never a tagged `String` (the proxy's stock-mode unwrap
-/// would change it) and never a fun or a container that may hold one (a block
-/// run by the callee would change how a raised error is classified). The
-/// `badarg` charlist retry is a no-op for these too: no binaries.
+/// An argument of static type `ty` reaches the callee unchanged, given the
+/// [`FFI_ARG_RUNTIME_GUARDS`] check, and cannot carry Beamtalk code: the guard
+/// rejects a tagged `String` (the proxy's stock-mode unwrap would change it) and
+/// any fun or container that may hold one (a block run by the callee would
+/// change how a raised error is classified). A binary argument may still
+/// `badarg`; the retry with charlist-coerced arguments is `ffi_call_raised/8`'s.
 #[must_use]
 pub fn ffi_arg_passes_unchanged(ty: &InferredType) -> bool {
     all_members(ty, &|name| {
@@ -574,10 +582,9 @@ mod tests {
         let int_or_list = InferredType::simple_union(&["Integer", "List"]);
         assert!(!ffi_result_passes_unchanged(&int_or_list));
         assert!(!ffi_arg_passes_unchanged(&int_or_list));
-        // `String` is proved as a result but not as an argument.
         let int_or_string = InferredType::simple_union(&["Integer", "String"]);
         assert!(ffi_result_passes_unchanged(&int_or_string));
-        assert!(!ffi_arg_passes_unchanged(&int_or_string));
+        assert!(ffi_arg_passes_unchanged(&int_or_string));
         let ok_or_other = InferredType::simple_union(&["#ok", "#other"]);
         assert!(!ffi_result_passes_unchanged(&ok_or_other));
         assert!(ffi_arg_passes_unchanged(&ok_or_other));
@@ -594,9 +601,13 @@ mod tests {
         assert!(ffi_result_passes_unchanged(&InferredType::known("String")));
         let charlist = InferredType::simple_union(&["String", "List"]);
         assert!(!ffi_result_passes_unchanged(&charlist));
-        // Arguments keep the proxy: it unwraps a tagged String and retries
-        // a binary as a charlist on `badarg`.
-        assert!(!ffi_arg_passes_unchanged(&binary));
+        // BT-4759: as an argument, `binary()` is proved behind the runtime
+        // `is_binary` guard (a tagged String fails it and takes the proxy); a
+        // `string()` charlist (`String | List`) is not.
+        assert!(ffi_arg_passes_unchanged(&binary));
+        assert!(ffi_arg_passes_unchanged(&InferredType::known("Binary")));
+        assert!(!ffi_arg_passes_unchanged(&charlist));
+        assert!(FFI_ARG_RUNTIME_GUARDS.contains(&"is_binary"));
     }
 
     #[test]

@@ -1993,12 +1993,22 @@ bt4485_result_passthrough_matches_shared_fixture_test() ->
 
 %% The runtime guards a direct call checks each argument with
 %% (`arg_runtime_guards`) reject every value the proxy would change or that
-%% could carry Beamtalk code; such an argument falls back to the proxy.
+%% could carry Beamtalk code; such an argument falls back to the proxy. A raw
+%% binary passes (BT-4759); a tagged String, a charlist and a non-binary
+%% bitstring do not.
 bt4485_runtime_guards_reject_what_the_proxy_changes_test() ->
     #{<<"arg_runtime_guards">> := Guards} = bt4485_fixture(),
     [
         ?assertNot(lists:any(fun(G) -> erlang:(binary_to_existing_atom(G))(V) end, Guards))
-     || V <- [{beamtalk_string, <<"a">>}, <<"a">>, "a", [1], fun() -> ok end, #{}, {ok, 1}]
+     || V <- [
+            {beamtalk_string, <<"a">>},
+            <<1:3>>,
+            "a",
+            [1],
+            fun() -> ok end,
+            #{},
+            {ok, 1}
+        ]
     ].
 
 %% Argument types codegen passes without the proxy: the proxy hands every
@@ -2032,6 +2042,66 @@ bt4485_arg_passthrough_matches_shared_fixture_test() ->
             )
         end,
         Cases
+    ).
+
+%% BT-4759: the full shape codegen emits for a call with guarded arguments:
+%% every argument is checked with the fixture's `arg_runtime_guards`, a pass
+%% goes direct (`bt4485_direct/4`) and anything else takes `direct_call/4`.
+bt4759_guarded(M, F, Args, Mode) ->
+    #{<<"arg_runtime_guards">> := Guards} = bt4485_fixture(),
+    Passes = fun(V) -> lists:any(fun(G) -> erlang:(binary_to_existing_atom(G))(V) end, Guards) end,
+    case lists:all(Passes, Args) of
+        true -> bt4485_direct(M, F, Args, Mode);
+        false -> beamtalk_erlang_proxy:direct_call(M, F, Args, Mode)
+    end.
+
+%% Differential test (BT-4759): for binary arguments the guarded shape and the
+%% proxied `direct_call/4` agree on results and errors, in both modes. Covers a
+%% raw binary, the `badarg` charlist retry (`list_to_integer/1` needs a
+%% charlist), a retry that still fails, and the arguments the guard rejects
+%% (a tagged String is unwrapped by the proxy, a charlist is left alone, a
+%% bitstring that is not a binary): these must take the proxy and so agree
+%% trivially, and must never reach the callee tagged.
+bt4759_guarded_binary_args_match_proxy_test_() ->
+    Cases = [
+        {erlang, phash2, [<<"abc">>]},
+        {erlang, byte_size, [<<"abc">>]},
+        {erlang, binary_to_integer, [<<"42">>]},
+        {erlang, binary_to_integer, [<<"nope">>]},
+        {erlang, list_to_integer, [<<"42">>]},
+        {erlang, list_to_integer, [<<"nope">>]},
+        {erlang, binary_to_atom, [<<"bt4759_atom">>, utf8]},
+        {erlang, binary_to_atom, [<<"x">>, not_an_encoding]},
+        {erlang, iolist_to_binary, [<<"io">>]},
+        {erlang, list_to_atom, [<<"bt4759_charlist_retry">>]},
+        {erlang, abs, [<<"not a number">>]},
+        {erlang, byte_size, [{beamtalk_string, <<"tagged">>}]},
+        {erlang, list_to_integer, [{beamtalk_string, <<"42">>}]},
+        {erlang, list_to_integer, ["42"]},
+        {erlang, byte_size, [<<1:3>>]},
+        {erlang, max, [<<"a">>, 7]}
+    ],
+    [
+        {lists:flatten(io_lib:format("~p:~p ~p ~p", [M, F, A, Mode])), fun() ->
+            ?assertEqual(
+                bt4485_outcome(fun() -> beamtalk_erlang_proxy:direct_call(M, F, A, Mode) end),
+                bt4485_outcome(fun() -> bt4759_guarded(M, F, A, Mode) end)
+            )
+        end}
+     || {M, F, A} <- Cases, Mode <- [stock, beamtalk]
+    ].
+
+%% BT-4759: a tagged String never reaches a stock callee tagged. The guard
+%% rejects it, so the call takes the proxy, which unwraps it.
+bt4759_tagged_string_falls_back_and_is_unwrapped_test() ->
+    Tagged = {beamtalk_string, <<"tagged">>},
+    ?assertEqual(
+        6,
+        bt4759_guarded(erlang, byte_size, [Tagged], stock)
+    ),
+    ?assertEqual(
+        42,
+        bt4759_guarded(erlang, list_to_integer, [{beamtalk_string, <<"42">>}], stock)
     ).
 
 %% The shape codegen emits for a proved call: the arguments are bound, then

@@ -182,9 +182,45 @@ fn beamtalk_module_keeps_its_mode() {
     );
 }
 
+/// BT-4759: a `String` argument is proved behind the `is_binary` guard (a
+/// tagged String fails it and falls back to the proxy), so the call is direct.
 #[test]
-fn string_arg_stays_on_proxy() {
-    assert_proxied(&compile("Erlang erlang phash2: s"), "erlang", "phash2");
+fn string_arg_is_direct_behind_is_binary_guard() {
+    let code = compile("Erlang erlang phash2: s");
+    assert_direct(&code, "erlang", "phash2", "stock");
+    assert_guarded(&code, "erlang", "phash2");
+    assert!(
+        code.contains("call 'erlang':'is_binary'(_FfiArg"),
+        "the String argument is guarded by is_binary:\n{code}"
+    );
+    // No proxy hop on the happy path: the only `direct_call` is the guard's
+    // fallback arm.
+    assert_eq!(
+        code.matches("'direct_call'(").count(),
+        1,
+        "only the fallback arm calls the proxy:\n{code}"
+    );
+}
+
+/// The fast path adds no sends and no proxy hops: the string argument is
+/// bound once and the call is a `try` around the remote call.
+#[test]
+fn string_arg_direct_call_adds_no_send() {
+    let code = compile("Erlang erlang phash2: s");
+    assert!(
+        !code.contains("'beamtalk_message_dispatch':'send'"),
+        "no dynamic send in:\n{code}"
+    );
+}
+
+/// A `string()` argument position holding a charlist (`List`) still proxies.
+#[test]
+fn list_arg_stays_on_proxy() {
+    assert_proxied(
+        &compile("Erlang erlang phash2: (List new)"),
+        "erlang",
+        "phash2",
+    );
 }
 
 #[test]

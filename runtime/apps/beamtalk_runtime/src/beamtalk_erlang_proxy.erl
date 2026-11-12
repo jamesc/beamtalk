@@ -290,8 +290,9 @@ native_call(Module, FunName, Args, {Class, Selector}, Mode) when
 Error path of a direct inline FFI call (BT-4485).
 
 Codegen emits `call 'M':'F'(Args...)` without the proxy when the FFI type
-table proves the result needs no coercion and every argument is a scalar
-(statically, and checked at run time with `is_number`/`is_atom`/`is_pid`;
+table proves the result needs no coercion and every argument is a scalar or a
+binary (statically, and checked at run time with `is_number`/`is_atom`/
+`is_pid`/`is_binary`;
 see `ffi_passthrough_conformance.json`). The call keeps the proxy's error
 translation: its `try` hands every exception here, and this runs the same
 `classify_ffi_exception` policy as `direct_call/4`, so a direct call raises
@@ -305,9 +306,13 @@ Beamtalk code raised the error. When the call site is not in `Stack` (a
 callee deeper than the stacktrace depth) every frame is the callee's, as on
 the proxy path when its frame is cut off.
 
-Scalar arguments make the `badarg` charlist retry a no-op (no binary or
-String to convert), so it never re-runs the call, and no class-variable
-snapshot is needed: `none` restores nothing.
+A scalar argument makes the `badarg` charlist retry a no-op (nothing to
+convert). A binary argument (BT-4759) does not: a `badarg` retries once with
+the binary as a charlist, here, exactly as on the proxy path (the retry
+result is coerced the same way). No class-variable snapshot is needed: no
+argument can be a fun or hold one, so the first attempt ran no Beamtalk code
+and `none` restores nothing. A tagged `String` fails the call site's
+`is_binary` guard and takes `direct_call/4`, which unwraps it.
 """.
 -spec ffi_call_raised(
     error | exit | throw, term(), list(), atom(), atom(), list(), coercion_mode(), term()

@@ -189,6 +189,9 @@ rows() ->
         {"13b", ffi, "FFI call, binary result, caller-typed / apply", 100000, 'ffiBinary:a:', int, [
             {apply_integer_to_binary, int}, {direct_integer_to_binary, int}
         ]},
+        {"13e", ffi, "FFI call, binary argument, integer result / apply", 100000, 'ffiBinaryArg:s:', string, [
+            {apply_phash2, string}, {direct_phash2, string}
+        ]},
         {"13c", ffi, "FFI call, {ok, V} result / apply", 100000, 'ffiOkTuple:d:', dict, [
             {apply_maps_find, dict}, {direct_maps_find, dict}
         ]},
@@ -608,6 +611,8 @@ compiles_to("13a") ->
     "direct erlang:phash2(A) in a try (BT-4485), behind an is_number/is_atom/is_pid argument guard: the spec proves the Integer result needs no coercion; errors go to ffi_call_raised/8";
 compiles_to("13b") ->
     "direct erlang:integer_to_binary(A) in a try (BT-4755), behind an is_number/is_atom/is_pid argument guard: the spec's binary() result (String | Binary) needs no coercion; errors go to ffi_call_raised/8";
+compiles_to("13e") ->
+    "direct erlang:phash2(S) in a try (BT-4759), behind an is_number/is_atom/is_pid/is_binary argument guard: a raw binary needs no unwrap_string_args, a tagged String fails the guard and takes direct_call/4; errors go to ffi_call_raised/8";
 compiles_to("13c") -> "direct_call/4 ('maps', 'find', [K, D], 'stock'): mode precomputed, {ok, V} still wraps to Result";
 compiles_to("13d") -> "direct_call/4 ('vs_bench', 'ffi_ok', [], 'stock'): mode precomputed, ok still wraps to Result";
 compiles_to("14a") -> "is_tuple-guarded direct Tuple:dispatch/3 (BT-4294); 'at:' reads an in-range element inline (BT-4400)";
