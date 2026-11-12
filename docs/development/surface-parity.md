@@ -1298,10 +1298,11 @@ applications, and the package's own dependency/`native/` modules, via
 `test`, the LSP (with a package root loaded), MCP `lint`/`diagnostic_summary`
 and the compiler port (REPL `load_project`) all use it and agree.
 
-`surface-specific:` surfaces with no filesystem context — REPL expression
-compiles and an LSP session with no package root loaded — keep the default
-`KnownErlangModules`, which has the check **disabled**, so they emit no
-unresolved-module warnings rather than false positives. `beamtalk lint foo.bt`
+`surface-specific:` REPL expression compiles and an LSP session with no
+package root loaded keep the default `KnownErlangModules`, which has the check
+**disabled**, so they emit no unresolved-module warnings. This is a deliberate
+change from the old hard-coded list: those surfaces do not start `erl` just to
+seed a default, and a missing toolchain must not yield false positives. `beamtalk lint foo.bt`
 and loose `test` files outside a package use the root-less
 `collect_installed_erlang_modules()` and do check. With no `erl` on `PATH` the
 check is disabled everywhere.

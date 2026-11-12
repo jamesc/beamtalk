@@ -2084,16 +2084,9 @@ mod tests {
         let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
         let known = collect_known_erlang_modules(&root);
         assert!(known.check_enabled());
-        for m in [
-            "lists",
-            "erlang",
-            "atomics",
-            "global",
-            "erl_epmd",
-            "pg",
-            "public_key",
-            "erl_syntax",
-        ] {
+        // Only modules every OTP install has (kernel/stdlib/preloaded): split
+        // distro packages may omit e.g. `public_key` or `syntax_tools`.
+        for m in ["lists", "erlang", "atomics", "global", "erl_epmd", "pg"] {
             assert!(known.contains(m), "{m} should be known");
         }
         assert!(!known.contains("definitely_unknown_xyz"));
