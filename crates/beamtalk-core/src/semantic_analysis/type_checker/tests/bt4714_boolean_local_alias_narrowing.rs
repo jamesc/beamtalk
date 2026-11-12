@@ -112,8 +112,10 @@ fn self_referential_alias_is_not_kept() {
     assert_rejected("    x := x notNil.\n    x ifTrue: [Repro need: x. ^0].\n    0");
 }
 
+/// `x` is assigned inside a block, so it is in `block_written_locals` and the
+/// alias is never recorded (no branch merge does the invalidating).
 #[test]
-fn alias_does_not_outlive_reassignment_in_branch() {
+fn alias_over_a_branch_written_variable_is_not_recorded() {
     assert_rejected(
         "    c := x notNil.\n    p ifTrue: [x := n].\n    c ifTrue: [Repro need: x. ^0].\n    0",
     );
@@ -156,4 +158,25 @@ fn alias_created_inside_a_block_is_not_trusted() {
     // `block_written_locals` treats every name assigned in a block as shared;
     // the alias is simply not recorded (the safe direction).
     assert_rejected("    p ifTrue: [c := x notNil. c ifTrue: [Repro need: x. ^0]].\n    0");
+}
+
+/// An alias never proves more than the inline test: a Result `isOk` guard is
+/// skipped by post-guard narrowing, so spelling it through a local must
+/// produce the same diagnostics as spelling it inline.
+#[test]
+fn result_test_alias_matches_inline_post_guard() {
+    let src = |guard: &str| {
+        format!(
+            r"
+typed Object subclass: Repro
+  go: r :: Result(Integer, String) -> Integer =>
+{guard}
+    r value
+"
+        )
+    };
+    let direct = type_diagnostics(&src("    r isOk ifTrue: [^0]."));
+    let aliased = type_diagnostics(&src("    c := r isOk.\n    c ifTrue: [^0]."));
+    let msgs = |d: &[Diagnostic]| d.iter().map(|d| d.message.to_string()).collect::<Vec<_>>();
+    assert_eq!(msgs(&direct), msgs(&aliased));
 }
