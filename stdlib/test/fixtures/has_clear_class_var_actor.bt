@@ -9,7 +9,7 @@
 // make it relaunchable. `self hasField:`/`self clearField:` compile to
 // `maps:is_key`/`maps:remove` on `ClassVars` (§4i), tested here from inside
 // a class method AND from outside (`Cls hasField:`/`Cls clearField:`
-// reaching the class gen_server's `has_class_var`/`clear_class_var`).
+// reaching the class gen_server through `dispatch_class_method/5`).
 
 typed Actor subclass: HasClearClassVarActor
   late classState: current :: Integer

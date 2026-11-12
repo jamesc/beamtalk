@@ -30,10 +30,6 @@ Provides utilities for listing, unloading, and reloading modules.
 ]).
 -endif.
 
--ifdef(TEST).
-
--endif.
-
 -export_type([module_tracker/0, module_info/0]).
 
 -record(module_info, {
