@@ -33,6 +33,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
     handle_class_self_call/1,
     lookup_direct_constructor/3,
     class_super_dispatch/4,
+    inherited_class_new/1,
     class_self_send/3,
     class_self_direct_ok/4,
     class_self_dispatch_local/4,
@@ -702,6 +703,28 @@ class_super_dispatch(ClassName, Selector, Args, #beamtalk_object{} = ClassSelf) 
     class_side_dispatch_found(
         ClassName, Selector, Args, find_class_super_method(Selector, ClassName), ClassSelf
     ).
+
+-doc """
+Run the nearest ancestor's class-side `new` for `ClassName` in this process
+(BT-4738): what a class-side `self new` does when `ClassName` has no `new` of
+its own and inherits a user `class new` (`beamtalk_class_metadata:inherits_user_class_new/1`).
+The receiver (`self`) stays `ClassName`'s class object. `skip` when the chain
+walk finds no `new` (a stale fact), so the caller falls back to the synthesized
+constructor, like the external `{new, []}` handler.
+""".
+-spec inherited_class_new(class_name()) -> {ok, term()} | skip.
+inherited_class_new(ClassName) ->
+    case find_class_super_method(new, ClassName) of
+        not_found ->
+            skip;
+        Found ->
+            case beamtalk_class_registry:resolve_class_object(ClassName) of
+                undefined ->
+                    skip;
+                ClassSelf ->
+                    {ok, class_side_dispatch_found(ClassName, new, [], Found, ClassSelf)}
+            end
+    end.
 
 -doc """
 Apply what a class-side chain walk found (`find_class_side_method/3`) for a

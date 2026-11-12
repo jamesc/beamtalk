@@ -684,12 +684,31 @@ would deadlock since the class method is already executing inside handle_call.
 """.
 -spec class_self_new(class_name(), atom(), list()) -> term().
 class_self_new(ClassName, Module, Args) ->
-    case handle_new(Args, ClassName, Module, undefined) of
-        {ok, Result, _IsConstructible} ->
-            Result;
-        {error, Error, _IsConstructible} ->
-            Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
-            error(Wrapped)
+    %% BT-4738: `self new` follows the same rule as `Sub new` (BT-4479): a class
+    %% with no `new` of its own runs the nearest ancestor's user `class new`, in
+    %% this process (a gen_server call back into the class would deadlock).
+    %% Fail-open: with no such `new` to run, build the synthesized constructor.
+    InheritedNew =
+        case Args of
+            [] ->
+                case beamtalk_class_metadata:inherits_user_class_new(ClassName) of
+                    true -> beamtalk_class_dispatch:inherited_class_new(ClassName);
+                    false -> skip
+                end;
+            _ ->
+                skip
+        end,
+    case InheritedNew of
+        {ok, Instance} ->
+            Instance;
+        skip ->
+            case handle_new(Args, ClassName, Module, undefined) of
+                {ok, Result, _IsConstructible} ->
+                    Result;
+                {error, Error, _IsConstructible} ->
+                    Wrapped = beamtalk_exception_handler:ensure_wrapped(Error),
+                    error(Wrapped)
+            end
     end.
 
 -doc """

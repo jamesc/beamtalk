@@ -6267,13 +6267,12 @@ no `new` inherits it, and `Sub new` runs it (BT-4479). `Announcer subclass:
 MyAnnouncer` then `MyAnnouncer new` therefore mints a working announcer carrying
 its `ref`, and `MyAnnouncer new class` is `MyAnnouncer`. A subclass that defines
 its own `class new` still wins; the root `new` of `Value` and `Actor` is not an
-inherited user constructor. Known gap: a class-side `self new` inside a class method still builds the
-receiving class's synthesized constructor rather than an inherited `class new`
-(`super new` does reach it). The compiler rejects `self new` only in an Object
-subclass's own class methods when it has no `new` of its own; an inherited
-factory (`Base class >> make => self new`, sent as `Sub make`) is not caught, so
-it skips the inherited `new` without a diagnostic. Name the class or override
-`new` on the subclass. One exception remains:
+inherited user constructor. A class-side `self new` follows the same rule (BT-4738): it runs
+the nearest ancestor's `class new` in the calling process, so an inherited
+factory (`Base class >> make => self new`, sent as `Sub make`) builds what
+`Sub new` builds, with `Sub` as `self`. The compiler rejects `self new` in an
+Object subclass's class methods only when neither the class nor an ancestor
+defines a `new`. One exception remains:
 `performLocally:withArguments:` applies compiled class methods only.
 
 ---

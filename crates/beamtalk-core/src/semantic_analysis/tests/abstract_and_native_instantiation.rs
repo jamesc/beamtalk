@@ -391,11 +391,9 @@ Object subclass: MyService
 }
 
 #[test]
-fn test_inherited_user_new_external_send_allowed_but_self_new_rejected() {
-    // BT-4479: `Sub new` runs the ancestor's user `class new`, so the external
-    // send is no longer an Object-kind error. A class-side `self new` still
-    // lowers to the synthesized constructor (`class_self_new`), so it stays
-    // rejected rather than silently skipping the inherited `new`.
+fn test_inherited_user_new_allows_external_self_and_super_new() {
+    // BT-4479/BT-4738: `Sub new`, a class-side `self new` and `super new` all
+    // run the ancestor's user `class new`, so none is an Object-kind error.
     let source = "
 Object subclass: Base
   class new => 1
@@ -413,8 +411,27 @@ Object subclass: User
         .iter()
         .filter(|d| d.message.contains("cannot be instantiated"))
         .collect();
+    assert!(errors.is_empty(), "got: {:?}", result.diagnostics);
+}
+
+#[test]
+fn test_self_new_rejected_without_inherited_user_new() {
+    // No ancestor defines `class new`, so `self new` still has only the
+    // synthesized constructor of an Object-kind class.
+    let source = "
+Object subclass: Base
+Base subclass: Sub
+  class make => self new
+";
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _) = crate::source_analysis::parse(tokens);
+    let result = analyse(&module);
+    let errors: Vec<_> = result
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("cannot be instantiated"))
+        .collect();
     assert_eq!(errors.len(), 1, "got: {:?}", result.diagnostics);
-    assert!(errors[0].message.contains("`Sub`"), "got: {errors:?}");
 }
 
 #[test]

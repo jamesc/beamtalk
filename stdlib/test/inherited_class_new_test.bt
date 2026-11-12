@@ -66,3 +66,23 @@ TestCase subclass: InheritedClassNewTest
       (self lookUp: #SystemAnnouncer) new
     ] raise: #instantiation_error
     self assert: SystemAnnouncer current class equals: SystemAnnouncer
+
+  // BT-4738: a class-side `self new` honours an inherited user `class new`,
+  // for the class defining the factory and for subclasses inheriting it.
+  testSelfNewInFactoryRunsOwnNew =>
+    self assert: InheritedNewBase make equals: #{#viaBase => true}
+
+  testInheritedFactorySelfNewRunsInheritedNew =>
+    self assert: InheritedNewChild make equals: #{#viaBase => true}
+    self assert: InheritedNewGrandchild make equals: #{#viaBase => true}
+    self assert: (self lookUp: #InheritedNewGrandchild) make equals: #{
+      #viaBase => true
+    }
+
+  testSelfNewInFactoryOwnNewStillWins =>
+    self assert: InheritedNewOverride make equals: #{#viaOverride => true}
+
+  testAnnouncerSubclassMakeIsWorkingAnnouncer =>
+    a := InheritedNewAnnouncer make
+    self assert: a class equals: InheritedNewAnnouncer
+    self assert: (a when: TestEvent do: [:e | nil]) isActive equals: true

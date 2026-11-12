@@ -6,3 +6,6 @@
 // inherited_class_new_test.bt.
 
 Announcer subclass: InheritedNewAnnouncer
+
+  // BT-4738: a class-side `self new` runs Announcer's constructor too.
+  class make -> Dynamic => self new

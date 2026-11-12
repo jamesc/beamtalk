@@ -8,3 +8,6 @@
 Object subclass: InheritedNewBase
 
   class new => #{#viaBase => true}
+
+  // BT-4738: an inherited factory; `Sub make` must reach the inherited `new`.
+  class make -> Dynamic => self new
