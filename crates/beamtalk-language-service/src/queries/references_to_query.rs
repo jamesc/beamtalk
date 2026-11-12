@@ -328,6 +328,11 @@ fn collect_type_lines(
                 lines.push(class_id.span.line_number(source));
             }
         }
+        TypeAnnotation::Shape { fields, .. } => {
+            for field in fields {
+                collect_type_lines(&field.value, class_name, source, lines);
+            }
+        }
         TypeAnnotation::Singleton { .. }
         | TypeAnnotation::SelfType { .. }
         | TypeAnnotation::SelfClass { .. } => {}

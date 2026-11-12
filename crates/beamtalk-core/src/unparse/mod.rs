@@ -43,8 +43,8 @@ use crate::ast::{
     Expression, ExpressionStatement, Identifier, KeywordPart, Literal, LiteralCommentSlots,
     LiteralComments, MapPair, MapPatternKey, MatchArm, MessageSelector, MethodDefinition, Module,
     NativeDeclaration, ParameterDefinition, Pattern, PipelineSends, ProtocolDefinition,
-    ProtocolMethodSignature, ProtocolUse, SlotKind, StandaloneMethodDefinition, StateDeclaration,
-    StringSegment, TypeAliasDefinition, TypeAnnotation,
+    ProtocolMethodSignature, ProtocolUse, ShapeField, SlotKind, StandaloneMethodDefinition,
+    StateDeclaration, StringSegment, TypeAliasDefinition, TypeAnnotation,
 };
 use crate::source_analysis::{Severity, binary_binding_power, lex_with_eof, parse, parse_method};
 use crate::span::Span;
@@ -2934,7 +2934,44 @@ fn unparse_type_annotation(ty: &TypeAnnotation) -> Document<'static> {
         TypeAnnotation::ClassOf { class_name, .. } => {
             docvec![leaf::ident(&class_name.name), " class"]
         }
+        TypeAnnotation::Shape { fields, open, .. } => unparse_shape_type(fields, *open),
     }
+}
+
+/// Unparses a map-shape type `#{#a => T, ?#b => U, ...}` (ADR 0147).
+///
+/// Mirrors the map-literal layout: inline when it fits, otherwise one entry
+/// per line.
+fn unparse_shape_type(fields: &[ShapeField], open: bool) -> Document<'static> {
+    let mut entries: Vec<Document<'static>> = fields
+        .iter()
+        .map(|f| {
+            docvec![
+                if f.optional { "?" } else { "" },
+                "#",
+                leaf::ident(&f.key),
+                " => ",
+                unparse_type_annotation(&f.value)
+            ]
+        })
+        .collect();
+    if open {
+        entries.push(Document::Str("..."));
+    }
+    if entries.is_empty() {
+        return Document::Str("#{}");
+    }
+    let mut body = Vec::new();
+    for (i, entry) in entries.into_iter().enumerate() {
+        if i > 0 {
+            body.push(Document::Str(","));
+            body.push(break_("", " "));
+        } else {
+            body.push(break_("", ""));
+        }
+        body.push(entry);
+    }
+    group(docvec!["#{", nest(2, concat(body)), break_("", ""), "}"])
 }
 
 /// Unparses a `\`/`&` operand, wrapping it in grouping parentheses

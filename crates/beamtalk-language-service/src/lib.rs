@@ -1481,6 +1481,9 @@ impl SimpleLanguageService {
                     None
                 }
             }
+            TypeAnnotation::Shape { fields, .. } => fields
+                .iter()
+                .find_map(|f| Self::find_identifier_in_type_annotation(&f.value, offset_val)),
             TypeAnnotation::Singleton { .. }
             | TypeAnnotation::SelfType { .. }
             | TypeAnnotation::SelfClass { .. } => None,

@@ -1389,6 +1389,11 @@ pub(crate) fn for_each_type_annotation_class_ref<'a>(
             for_each_type_annotation_class_ref(right, f);
         }
         TypeAnnotation::ClassOf { class_name, .. } => f(class_name),
+        TypeAnnotation::Shape { fields, .. } => {
+            for field in fields {
+                for_each_type_annotation_class_ref(&field.value, f);
+            }
+        }
         TypeAnnotation::Singleton { .. }
         | TypeAnnotation::SelfType { .. }
         | TypeAnnotation::SelfClass { .. } => {}

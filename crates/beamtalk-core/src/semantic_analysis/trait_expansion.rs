@@ -1318,6 +1318,11 @@ fn collect_local_type_vars(
             collect_local_type_vars(left, protocol_type_params, out);
             collect_local_type_vars(right, protocol_type_params, out);
         }
+        TypeAnnotation::Shape { fields, .. } => {
+            for field in fields {
+                collect_local_type_vars(&field.value, protocol_type_params, out);
+            }
+        }
         TypeAnnotation::Singleton { .. }
         | TypeAnnotation::SelfType { .. }
         | TypeAnnotation::SelfClass { .. }
@@ -1458,6 +1463,23 @@ fn substitute_type_annotation(
             ),
             *span,
         ),
+        TypeAnnotation::Shape { fields, open, span } => TypeAnnotation::Shape {
+            fields: fields
+                .iter()
+                .map(|f| crate::ast::ShapeField {
+                    value: substitute_type_annotation(
+                        &f.value,
+                        type_arg_subst,
+                        local_renames,
+                        self_class_name,
+                        self_class_type_params,
+                    ),
+                    ..f.clone()
+                })
+                .collect(),
+            open: *open,
+            span: *span,
+        },
         TypeAnnotation::Singleton { .. }
         | TypeAnnotation::SelfClass { .. }
         | TypeAnnotation::ClassOf { .. } => ty.clone(),

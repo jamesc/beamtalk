@@ -825,6 +825,11 @@ fn check_unbound_type_vars(
             check_unbound_type_vars(left, hierarchy, alias_name, diagnostics);
             check_unbound_type_vars(right, hierarchy, alias_name, diagnostics);
         }
+        TypeAnnotation::Shape { fields, .. } => {
+            for field in fields {
+                check_unbound_type_vars(&field.value, hierarchy, alias_name, diagnostics);
+            }
+        }
         // SelfType / SelfClass / ClassOf / Singleton have no nested
         // identifier position that could be a bare type parameter.
         TypeAnnotation::SelfType { .. }
@@ -1065,6 +1070,11 @@ fn collect_alias_references(
         TypeAnnotation::Intersection { left, right, .. } => {
             collect_alias_references(left, aliases, out);
             collect_alias_references(right, aliases, out);
+        }
+        TypeAnnotation::Shape { fields, .. } => {
+            for field in fields {
+                collect_alias_references(&field.value, aliases, out);
+            }
         }
         // SelfType / SelfClass / ClassOf / Singleton have no nested
         // identifier position that could reference another alias.

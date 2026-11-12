@@ -240,6 +240,9 @@ fn type_mentions_class(annotation: &TypeAnnotation, class_name: &str) -> bool {
         TypeAnnotation::Intersection { left, right, .. } => {
             type_mentions_class(left, class_name) || type_mentions_class(right, class_name)
         }
+        TypeAnnotation::Shape { fields, .. } => fields
+            .iter()
+            .any(|f| type_mentions_class(&f.value, class_name)),
         // A metaclass return (`Self class`, `Foo class`) is not an instance,
         // and a singleton type never names a class.
         TypeAnnotation::SelfClass { .. }

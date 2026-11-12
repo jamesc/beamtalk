@@ -337,6 +337,17 @@ fn check_annotation_for_unresolved_alias(
                 diagnostics,
             );
         }
+        TypeAnnotation::Shape { fields, .. } => {
+            for field in fields {
+                check_annotation_for_unresolved_alias(
+                    &field.value,
+                    hierarchy,
+                    protocol_registry,
+                    alias_registry,
+                    diagnostics,
+                );
+            }
+        }
         // SelfType / SelfClass / ClassOf / Singleton have no nested Simple
         // identifier position that could be an alias reference.
         TypeAnnotation::SelfType { .. }

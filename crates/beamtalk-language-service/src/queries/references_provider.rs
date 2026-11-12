@@ -319,6 +319,11 @@ fn collect_type_annotation_refs(
                 results.push(Location::new(file_path.clone(), class_name.span));
             }
         }
+        TypeAnnotation::Shape { fields, .. } => {
+            for field in fields {
+                collect_type_annotation_refs(&field.value, name, file_path, results);
+            }
+        }
         TypeAnnotation::Singleton { .. }
         | TypeAnnotation::SelfType { .. }
         | TypeAnnotation::SelfClass { .. } => {}
