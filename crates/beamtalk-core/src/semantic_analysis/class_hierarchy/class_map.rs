@@ -40,6 +40,12 @@ impl ClassMap {
         self.0.contains_key(name)
     }
 
+    /// Construction-time membership test; **not recorded** (see
+    /// [`Self::iter_unrecorded`]).
+    pub(super) fn contains_key_unrecorded(&self, name: &str) -> bool {
+        self.0.contains_key(name)
+    }
+
     /// Whole-map read: records a scan.
     pub(super) fn iter(&self) -> std::collections::hash_map::Iter<'_, EcoString, ClassInfo> {
         record_scan();

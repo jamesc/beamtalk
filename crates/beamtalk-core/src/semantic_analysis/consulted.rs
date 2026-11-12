@@ -115,7 +115,7 @@ pub(crate) fn record_name(name: &str) {
     }
 }
 
-#[cold]
+#[inline(never)]
 fn record_name_slow(name: &str) {
     RECORDER.with(|r| {
         if let Some(s) = r.borrow_mut().as_mut() {
@@ -251,6 +251,7 @@ mod tests {
         let _ = hierarchy.get_class("Integer");
         let _ = hierarchy.has_class("Missing");
         let _ = hierarchy.is_protocol_class("Printable");
+        let _ = hierarchy.has_own_class_method("OwnerClass", "new:");
         let _ = protocols.get("Proto");
         let _ = protocols.has_protocol("Proto2");
         let _ = aliases.get("Alias");
@@ -260,6 +261,7 @@ mod tests {
             "Integer",
             "Missing",
             "Printable",
+            "OwnerClass",
             "Proto",
             "Proto2",
             "Alias",

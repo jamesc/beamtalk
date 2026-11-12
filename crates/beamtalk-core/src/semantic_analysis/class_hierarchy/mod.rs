@@ -896,13 +896,13 @@ impl ClassHierarchy {
     /// definitions. A real incoming class *does* overwrite a synthetic protocol.
     pub fn merge(&mut self, other: &ClassHierarchy) {
         let mut changed = false;
-        for (name, info) in &other.classes {
+        for (name, info) in other.classes.iter_unrecorded() {
             if builtins::is_builtin_class(name) {
                 continue;
             }
             let incoming_is_protocol = other.protocol_classes.contains(name);
             let existing_is_real =
-                self.classes.contains_key(name) && !self.protocol_classes.contains(name);
+                self.classes.contains_key_unrecorded(name) && !self.protocol_classes.contains(name);
             // Don't let a synthetic protocol entry overwrite a real class
             if incoming_is_protocol && existing_is_real {
                 continue;

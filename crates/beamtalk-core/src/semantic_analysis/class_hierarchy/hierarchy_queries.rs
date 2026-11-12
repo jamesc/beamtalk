@@ -467,6 +467,8 @@ impl ClassHierarchy {
     /// define their own factory constructors (e.g. `class new:` on `AtomicCounter`).
     #[must_use]
     pub fn has_own_class_method(&self, class_name: &str, selector: &str) -> bool {
+        // Reads the selector index, not the class map, so record it by hand.
+        crate::semantic_analysis::consulted::record_name(class_name);
         self.class_method_indexes
             .get(class_name)
             .is_some_and(|idx| idx.contains_key(selector))
