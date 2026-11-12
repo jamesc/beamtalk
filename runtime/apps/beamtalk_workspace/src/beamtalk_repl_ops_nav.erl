@@ -115,12 +115,12 @@ handle_term(<<"nav-query">>, Params, _Msg, _SessionPid) ->
         {ok, {keyword_selector, {Before, Code, Suffix}}} ->
             %% Editor go-to-definition (BT-4455): the clicked keyword part's full
             %% send selector, from the SAME recognizer cockpit hover uses
-            %% (`beamtalk_repl_ops_dev:keyword_send_at/3`), so the two cannot
+            %% (`beamtalk_repl_editor_context:keyword_send_at/3`), so the two cannot
             %% drift. `null` when no send resolves (not a keyword part, an
             %% expression receiver, a keyword inside a string/comment); the
             %% client then reports "no definition" rather than guessing.
             Selector =
-                case beamtalk_repl_ops_dev:keyword_send_at(Before, Code, Suffix) of
+                case beamtalk_repl_editor_context:keyword_send_at(Before, Code, Suffix) of
                     {ok, _Receiver, Sel} -> Sel;
                     _ -> null
                 end,
