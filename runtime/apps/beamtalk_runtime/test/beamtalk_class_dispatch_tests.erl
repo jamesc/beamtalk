@@ -1769,62 +1769,51 @@ class_send_self_instantiation_error_case(Selector, Args, Precondition) ->
         erase(beamtalk_class_is_abstract)
     end.
 
-%% `self class <selector>` inside a class method routes through
-%% metaclass_send with Pid =:= self(). The previous implementation issued a
+%% `self class <selector>` inside a class method routes through metaclass_send with
+%% Pid =:= self(). The previous implementation issued a
 %% `gen_server:call(self(), {metaclass_method_call, ...})` and deadlocked with
-%% `{calling_self, ...}`. The self-call branch now short-circuits spawn/new
-%% selectors to the process-dictionary-backed helpers and raises a structured
-%% dispatch_error for anything else.
-metaclass_send_self_call_spawn_missing_metadata_test() ->
-    Self = #beamtalk_object{
-        class = 'Metaclass', class_mod = undefined, pid = self()
-    },
-    ?assertBtError(
-        instantiation_error,
-        beamtalk_class_dispatch:metaclass_send(self(), 'spawnWith:', [#{}], Self)
-    ).
+%% `{calling_self, ...}`. The self-call branch now short-circuits spawn/new selectors to the
+%% process-dictionary-backed helpers and raises a structured dispatch_error for anything
+%% else.
+%% BT-4679: the former metaclass_send_self_call_* tests.
+%% {Label, ExpectedKind, Selector, Args, ProcessDictionary}.
+metaclass_send_self_call_test_() ->
+    [
+        {Label, fun() -> metaclass_send_self_call_case(Kind, Selector, Args, Pd) end}
+     || {Label, Kind, Selector, Args, Pd} <- [
+            {"spawnWith: with missing metadata", instantiation_error, 'spawnWith:', [#{}], []},
+            {"spawnWith:as: with missing metadata", instantiation_error, 'spawnWith:as:',
+                [#{}, anyName], []},
+            {"unknown selector raises dispatch_error", dispatch_error, someUserSelector, [], []},
+            %% Guard in handle_metaclass_self_named_spawn/3 must reject `Module = undefined`
+            %% explicitly: `is_atom(undefined)` returns true, so a process dictionary with
+            %% the name/is_abstract keys set but the module key missing would otherwise
+            %% slip through into `class_self_spawn_*` and crash.
+            {"named spawn with missing module metadata", instantiation_error, 'spawnWith:as:',
+                [#{}, anyName], [
+                    {beamtalk_class_name, {put, 'BT2005GuardTestClass'}},
+                    {beamtalk_class_module, erase},
+                    {beamtalk_class_is_abstract, {put, false}}
+                ]}
+        ]
+    ].
 
-metaclass_send_self_call_spawn_with_as_missing_metadata_test() ->
+metaclass_send_self_call_case(Kind, Selector, Args, Pd) ->
     Self = #beamtalk_object{
         class = 'Metaclass', class_mod = undefined, pid = self()
     },
-    ?assertBtError(
-        instantiation_error,
-        beamtalk_class_dispatch:metaclass_send(
-            self(), 'spawnWith:as:', [#{}, anyName], Self
-        )
-    ).
-
-metaclass_send_self_call_unknown_selector_raises_dispatch_error_test() ->
-    Self = #beamtalk_object{
-        class = 'Metaclass', class_mod = undefined, pid = self()
-    },
-    ?assertBtError(
-        dispatch_error, beamtalk_class_dispatch:metaclass_send(self(), someUserSelector, [], Self)
-    ).
-
-%% Guard in handle_metaclass_self_named_spawn/3 must reject
-%% `Module = undefined` explicitly — `is_atom(undefined)` returns true, so a
-%% process dictionary with the name/is_abstract keys set but the module key
-%% missing would otherwise slip through into `class_self_spawn_*` and crash.
-metaclass_send_self_call_named_spawn_missing_module_metadata_test() ->
-    Self = #beamtalk_object{
-        class = 'Metaclass', class_mod = undefined, pid = self()
-    },
-    OldName = put(beamtalk_class_name, 'BT2005GuardTestClass'),
-    OldModule = erase(beamtalk_class_module),
-    OldAbs = put(beamtalk_class_is_abstract, false),
+    Old = [
+        {Key,
+            case Action of
+                erase -> erase(Key);
+                {put, Value} -> put(Key, Value)
+            end}
+     || {Key, Action} <- Pd
+    ],
     try
-        ?assertBtError(
-            instantiation_error,
-            beamtalk_class_dispatch:metaclass_send(
-                self(), 'spawnWith:as:', [#{}, anyName], Self
-            )
-        )
+        ?assertBtError(Kind, beamtalk_class_dispatch:metaclass_send(self(), Selector, Args, Self))
     after
-        restore_pd_key(beamtalk_class_name, OldName),
-        restore_pd_key(beamtalk_class_module, OldModule),
-        restore_pd_key(beamtalk_class_is_abstract, OldAbs)
+        lists:foreach(fun({Key, OldValue}) -> restore_pd_key(Key, OldValue) end, Old)
     end.
 
 restore_pd_key(Key, undefined) -> erase(Key);
