@@ -1360,6 +1360,7 @@ fn fresh_type_var_letter(
 /// [`substitute_provision`]'s doc). `Generic`'s own `base` identifier (e.g.
 /// `Block` in `Block(E, Object)`, or `List` in `List(E)`) is never
 /// substituted — it names a real class, not a type parameter.
+#[allow(clippy::too_many_lines)] // exhaustive match over every TypeAnnotation variant
 fn substitute_type_annotation(
     ty: &TypeAnnotation,
     type_arg_subst: &HashMap<EcoString, TypeAnnotation>,

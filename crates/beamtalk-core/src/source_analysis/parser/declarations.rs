@@ -2160,20 +2160,16 @@ impl Parser {
 
             let value = self.parse_type_annotation();
             let span = field_start.merge(value.span());
-            if fields.iter().any(|f| f.key == key) {
-                self.diagnostics.push(Diagnostic::error(
-                    format!("Duplicate key `#{key}` in shape type"),
-                    key_span,
-                ));
-            } else {
-                fields.push(ShapeField {
+            self.push_shape_field(
+                &mut fields,
+                ShapeField {
                     key,
                     key_span,
                     value,
                     optional,
                     span,
-                });
-            }
+                },
+            );
             need_separator = true;
         }
 
@@ -2187,6 +2183,18 @@ impl Parser {
             fields,
             open,
             span: start.merge(end),
+        }
+    }
+
+    /// Appends `field` to a shape's fields, reporting a duplicate key.
+    fn push_shape_field(&mut self, fields: &mut Vec<ShapeField>, field: ShapeField) {
+        if fields.iter().any(|f| f.key == field.key) {
+            self.diagnostics.push(Diagnostic::error(
+                format!("Duplicate key `#{}` in shape type", field.key),
+                field.key_span,
+            ));
+        } else {
+            fields.push(field);
         }
     }
 
