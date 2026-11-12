@@ -196,20 +196,11 @@ pub(super) fn build_detached_node_command(
     // Set compiler port binary path (for runtime compilation support).
     // Preserve any user-provided BEAMTALK_COMPILER_PORT_BIN (e.g. via Nix/Homebrew
     // wrapper), falling back to auto-discovery next to the beamtalk binary.
-    if let Ok(user_compiler_port) = std::env::var("BEAMTALK_COMPILER_PORT_BIN") {
-        cmd.env("BEAMTALK_COMPILER_PORT_BIN", user_compiler_port);
-    } else if let Ok(exe) = std::env::current_exe() {
-        if let Some(bin_dir) = exe.parent() {
-            let compiler_name = if cfg!(windows) {
-                "beamtalk-compiler-port.exe"
-            } else {
-                "beamtalk-compiler-port"
-            };
-            let compiler_port = bin_dir.join(compiler_name);
-            if compiler_port.exists() {
-                cmd.env("BEAMTALK_COMPILER_PORT_BIN", &compiler_port);
-            }
-        }
+    if let Some(compiler_port) = beamtalk_cli::compiler_port::compiler_port_binary() {
+        cmd.env(
+            beamtalk_cli::compiler_port::COMPILER_PORT_BIN_ENV,
+            compiler_port,
+        );
     }
 
     cmd

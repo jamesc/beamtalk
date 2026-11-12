@@ -312,13 +312,11 @@ fn run_script(
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
 
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(bin_dir) = exe.parent() {
-            let compiler_port = bin_dir.join("beamtalk-compiler-port");
-            if compiler_port.exists() {
-                cmd.env("BEAMTALK_COMPILER_PORT_BIN", &compiler_port);
-            }
-        }
+    if let Some(compiler_port) = beamtalk_cli::compiler_port::compiler_port_binary() {
+        cmd.env(
+            beamtalk_cli::compiler_port::COMPILER_PORT_BIN_ENV,
+            compiler_port,
+        );
     }
 
     let mut child = cmd

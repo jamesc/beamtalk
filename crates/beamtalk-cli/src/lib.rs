@@ -10,6 +10,7 @@
 //! - [`build_layout`] — centralised `_build/` path construction
 //! - [`dependency_classes`] — best-effort, offline dependency class
 //!   resolution shared with `beamtalk-mcp`
+//! - [`compiler_port`] — `beamtalk-compiler-port` binary lookup (BT-4674)
 //! - [`content_hash`] — the shared SHA-256 hex digest
 //! - [`ffi_type_registry`] — ADR 0075's FFI type resolution chain (auto-
 //!   extracted specs plus the stub tiers), shared by `beamtalk build`/`lint`
@@ -28,6 +29,7 @@
 //!   shared with `tests/repl_protocol.rs`
 
 pub mod build_layout;
+pub mod compiler_port;
 pub mod content_hash;
 pub mod dependency_classes;
 // Moved to `beamtalk-project` so the LSP applies the same rule (BT-4611).
