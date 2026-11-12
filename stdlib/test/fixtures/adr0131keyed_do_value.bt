@@ -22,7 +22,7 @@ Value subclass: Adr0131KeyedDoValue
 
   viaLocal =>
     t := 0
-    d := #{#a => 1, #b => 2}
+    d :: Dictionary := #{#a => 1, #b => 2}
     d keysAndValuesDo: [:k :v | t := t + v]
     t
 

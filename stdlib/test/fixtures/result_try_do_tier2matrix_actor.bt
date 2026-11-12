@@ -14,7 +14,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
       do: [:k |
         Result
           tryDo: [
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -60,7 +60,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
         Result
           tryDo: [
             t := t + 1
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -77,7 +77,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
       do: [:k |
         [
           t := t + 1
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -93,7 +93,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
       do: [:k |
         Result
           tryDo: [
-            #{#a => 1} at: #k ifAbsent: [t := 1]
+            (Dictionary new at: #a put: 1) at: #k ifAbsent: [t := 1]
             2
           ]
       ]
@@ -139,7 +139,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
     #(1, 2)
       do: [:k |
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -154,7 +154,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
     #(1, 2)
       do: [:k |
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -185,7 +185,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
       do: [:k |
         Result
           tryDo: [
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -234,7 +234,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
         Result
           tryDo: [
             t := t + 1
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -252,7 +252,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
       do: [:k |
         [
           t := t + 1
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -269,7 +269,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
       do: [:k |
         Result
           tryDo: [
-            #{#a => 1} at: #k ifAbsent: [t := 1]
+            (Dictionary new at: #a put: 1) at: #k ifAbsent: [t := 1]
             2
           ]
       ]
@@ -319,7 +319,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
       to: 2
       do: [:k |
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -335,7 +335,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
       to: 2
       do: [:k |
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -366,7 +366,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
       timesRepeat: [
         Result
           tryDo: [
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -412,7 +412,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
         Result
           tryDo: [
             t := t + 1
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -429,7 +429,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
       timesRepeat: [
         [
           t := t + 1
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -445,7 +445,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
       timesRepeat: [
         Result
           tryDo: [
-            #{#a => 1} at: #k ifAbsent: [t := 1]
+            (Dictionary new at: #a put: 1) at: #k ifAbsent: [t := 1]
             2
           ]
       ]
@@ -491,7 +491,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
     2
       timesRepeat: [
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -506,7 +506,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
     2
       timesRepeat: [
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -538,7 +538,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
         i := i + 1
         Result
           tryDo: [
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -590,7 +590,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
         Result
           tryDo: [
             t := t + 1
-            #{#a => 1}
+            (Dictionary new at: #a put: 1)
               at: #k
               ifAbsent: [
                 t := t + 1
@@ -609,7 +609,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
         i := i + 1
         [
           t := t + 1
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -627,7 +627,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
         i := i + 1
         Result
           tryDo: [
-            #{#a => 1} at: #k ifAbsent: [t := 1]
+            (Dictionary new at: #a put: 1) at: #k ifAbsent: [t := 1]
             2
           ]
       ]
@@ -681,7 +681,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
       whileTrue: [
         i := i + 1
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -698,7 +698,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
       whileTrue: [
         i := i + 1
         [
-          #{#a => 1}
+          (Dictionary new at: #a put: 1)
             at: #k
             ifAbsent: [
               t := t + 1
@@ -728,7 +728,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
     t := 0
     Result
       tryDo: [
-        #{#a => 1}
+        (Dictionary new at: #a put: 1)
           at: #k
           ifAbsent: [
             t := t + 1
@@ -765,7 +765,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
     Result
       tryDo: [
         t := t + 1
-        #{#a => 1}
+        (Dictionary new at: #a put: 1)
           at: #k
           ifAbsent: [
             t := t + 1
@@ -779,7 +779,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
     t := 0
     [
       t := t + 1
-      #{#a => 1}
+      (Dictionary new at: #a put: 1)
         at: #k
         ifAbsent: [
           t := t + 1
@@ -792,7 +792,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
     t := 0
     Result
       tryDo: [
-        #{#a => 1} at: #k ifAbsent: [t := 1]
+        (Dictionary new at: #a put: 1) at: #k ifAbsent: [t := 1]
         2
       ]
     t
@@ -826,7 +826,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
   onceOnDoLookup =>
     t := 0
     [
-      #{#a => 1}
+      (Dictionary new at: #a put: 1)
         at: #k
         ifAbsent: [
           t := t + 1
@@ -838,7 +838,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
   onceEnsureLookup =>
     t := 0
     [
-      #{#a => 1}
+      (Dictionary new at: #a put: 1)
         at: #k
         ifAbsent: [
           t := t + 1
@@ -867,7 +867,7 @@ Actor subclass: ResultTryDoTier2MatrixActor
           do: [:k |
             Result
               tryDo: [
-                #{#a => 1} at: #k ifAbsent: [a := 1]
+                (Dictionary new at: #a put: 1) at: #k ifAbsent: [a := 1]
                 2
               ]
           ]

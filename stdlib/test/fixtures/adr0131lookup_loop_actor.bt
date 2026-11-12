@@ -16,7 +16,7 @@ Actor subclass: Adr0131LookupLoopActor
   // A counted loop threading only locals (DirectParams).
   toDoStatement =>
     t := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     ks := #(#a, #b, #c)
     1 to: 3 do: [:i | d at: (ks at: i) ifAbsent: [t := t + 1]]
     t
@@ -25,7 +25,7 @@ Actor subclass: Adr0131LookupLoopActor
   toDoOperand =>
     t := 0
     r := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     ks := #(#a, #b, #c)
     1
       to: 3
@@ -43,7 +43,7 @@ Actor subclass: Adr0131LookupLoopActor
   timesRepeatStatement =>
     t := 0
     i := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     ks := #(#a, #b, #c)
     3
       timesRepeat: [
@@ -55,7 +55,7 @@ Actor subclass: Adr0131LookupLoopActor
   whileStatement =>
     t := 0
     i := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     ks := #(#a, #b, #c)
     [i < 3]
       whileTrue: [
@@ -67,7 +67,7 @@ Actor subclass: Adr0131LookupLoopActor
   // A `do:` body (TupleAcc), the issue's motivating shape.
   doStatement =>
     misses := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     #(#a, #b, #c)
       do: [:k |
         d
@@ -82,14 +82,14 @@ Actor subclass: Adr0131LookupLoopActor
   // Every key is present: the handler never runs and `t` is unchanged.
   doAllPresent =>
     t := 0
-    d := #{#a => 10, #b => 20, #c => 30}
+    d :: Dictionary := #{#a => 10, #b => 20, #c => 30}
     #(#a, #b, #c) do: [:k | d at: k ifAbsent: [t := t + 1]]
     t
 
   // A fold whose accumulator is the collected list (TupleAcc with a gate).
   collectLast =>
     t := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     r := #(#a, #b, #c)
       collect: [:k |
         d
@@ -103,7 +103,7 @@ Actor subclass: Adr0131LookupLoopActor
 
   injectStatement =>
     t := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     r := #(#a, #b, #c)
       inject: 0
       into: [:a :k |
@@ -119,7 +119,7 @@ Actor subclass: Adr0131LookupLoopActor
   // A loop body that writes a field threads the actor `State` (StateAcc).
   fieldWriteInToDo =>
     t := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     ks := #(#a, #b, #c)
     1
       to: 3
@@ -132,7 +132,7 @@ Actor subclass: Adr0131LookupLoopActor
   // A handler that reads a field (Hybrid: the field rides as a direct param).
   fieldReadInToDo =>
     t := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     ks := #(#a, #b, #c)
     1 to: 3 do: [:i | d at: (ks at: i) ifAbsent: [t := t + self.m]]
     t
@@ -140,7 +140,7 @@ Actor subclass: Adr0131LookupLoopActor
   // A loop in a fold.
   toDoInDo =>
     t := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     ks := #(#a, #b, #c)
     #(1, 2) do: [:j |
       1 to: 3 do: [:i | d at: (ks at: i) ifAbsent: [t := t + j]]
@@ -150,7 +150,7 @@ Actor subclass: Adr0131LookupLoopActor
   // In an arm of a conditional in a loop body.
   armInToDo =>
     t := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     ks := #(#a, #b, #c)
     1 to: 3 do: [:i | i > 2 ifTrue: [d at: (ks at: i) ifAbsent: [t := t + 1]]]
     t
@@ -158,7 +158,7 @@ Actor subclass: Adr0131LookupLoopActor
   // A fold in an arm of a conditional (the actor fold-in-arm shape).
   doInArm =>
     t := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     t =:= 0
       ifTrue: [
         #(#a, #b, #c)
@@ -176,14 +176,14 @@ Actor subclass: Adr0131LookupLoopActor
   // `at:ifPresent:` and `at:ifPresent:ifAbsent:` in a `do:` body.
   ifPresentInDo =>
     t := 0
-    d := #{#a => 10, #c => 30}
+    d :: Dictionary := #{#a => 10, #c => 30}
     #(#a, #b, #c) do: [:k | d at: k ifPresent: [:v | t := t + v]]
     t
 
   ifPresentIfAbsentInDo =>
     t := 0
     u := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     #(#a, #b, #c)
       do: [:k |
         d
@@ -197,7 +197,7 @@ Actor subclass: Adr0131LookupLoopActor
   twoLocalsInDo =>
     t := 0
     u := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     #(#a, #b, #c)
       do: [:k |
         d
@@ -212,14 +212,14 @@ Actor subclass: Adr0131LookupLoopActor
 
   handlerHoldsLoopInDo =>
     t := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     #(#a, #b, #c) do: [:k | d at: k ifAbsent: [1 to: 2 do: [:i | t := t + i]]]
     t
 
   // The handler returns from the method on the first miss.
   earlyReturnInDo =>
     t := 0
-    d := #{#a => 10}
+    d :: Dictionary := #{#a => 10}
     #(#a, #b, #c)
       do: [:k |
         d

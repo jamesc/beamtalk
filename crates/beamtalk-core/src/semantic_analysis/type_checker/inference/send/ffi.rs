@@ -257,6 +257,11 @@ impl TypeChecker {
                 ..
             } => is_erlang_term_collection(class_name) && type_args.iter().any(contains_string),
             InferredType::Union { members, .. } => members.iter().any(Self::nests_string),
+            // A map shape reaches Erlang as the plain map of its
+            // `Dictionary` view.
+            InferredType::Shape { .. } => ty
+                .dictionary_view()
+                .is_some_and(|view| Self::nests_string(&view)),
             _ => false,
         }
     }

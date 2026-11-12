@@ -160,7 +160,9 @@ Actor subclass: Adr0131LocalRebindActor
   // BT-3798 (ADR 0131 Phase 2d): `Dictionary at:ifAbsent:` whose handler writes.
   s1 =>
     t := 0
-    d := #{#a => 1}
+    // Typed `Dictionary` (not the literal's shape) so the absent-key send
+    // below stays a runtime fallback rather than a static shape error.
+    d :: Dictionary := #{#a => 1}
     r := d
       at: #k
       ifAbsent: [

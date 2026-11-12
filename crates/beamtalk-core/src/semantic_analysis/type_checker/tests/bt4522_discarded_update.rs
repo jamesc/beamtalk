@@ -205,3 +205,13 @@ fn block_argument_note_does_not_claim_no_effect() {
         hits[0].hint
     );
 }
+
+#[test]
+fn map_literal_receiver_warns() {
+    // BT-4731: a symbol-keyed literal is a shape; it must still be seen as
+    // the `Dictionary` value its `at:put:` leaves unchanged.
+    let diags = diagnostics_for(
+        "  run =>\n    opts := #{#port => 1}\n    opts at: #host put: 2.\n    opts\n",
+    );
+    assert_eq!(discarded(&diags).len(), 1, "got: {diags:#?}");
+}

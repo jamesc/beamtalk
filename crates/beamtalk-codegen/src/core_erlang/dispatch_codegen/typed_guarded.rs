@@ -369,17 +369,12 @@ impl CoreErlangGenerator {
         &self,
         receiver: &Expression,
     ) -> std::result::Result<&ecow::EcoString, StaysDynamic> {
-        let beamtalk_core::semantic_analysis::InferredType::Known {
-            class_name,
-            provenance,
-            ..
-        } = self
+        let (class_name, provenance) = self
             .type_map
             .get(receiver.span())
             .ok_or(StaysDynamic::Untyped)?
-        else {
-            return Err(StaysDynamic::Untyped);
-        };
+            .instance_class()
+            .ok_or(StaysDynamic::Untyped)?;
         if !matches!(
             provenance,
             TypeProvenance::Declared(_)
@@ -657,8 +652,8 @@ impl CoreErlangGenerator {
         let mut seen: Vec<&ecow::EcoString> = Vec::new();
         let mut arms: Vec<TypedSendTarget> = Vec::new();
         for member in members {
-            let beamtalk_core::semantic_analysis::InferredType::Known { class_name, .. } = member
-            else {
+            // A map shape member dispatches as its `Dictionary` (ADR 0147).
+            let Some((class_name, _)) = member.instance_class() else {
                 return Err(StaysDynamic::UnionMemberUntyped(
                     member.display_name().to_string(),
                 ));

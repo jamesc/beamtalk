@@ -198,10 +198,9 @@ impl CoreErlangGenerator {
         site: SiteKind,
     ) -> String {
         let ty = self.type_map.get(receiver.span());
-        let class_name = match ty {
-            Some(InferredType::Known { class_name, .. }) => Some(class_name.as_str()),
-            _ => None,
-        };
+        let class_name = ty
+            .and_then(InferredType::instance_class)
+            .map(|(class_name, _)| class_name.as_str());
         let hierarchy = self.class_hierarchy.as_ref();
         let kind = class_name.and_then(|class| {
             hierarchy

@@ -12,7 +12,7 @@ Object subclass: LookupFieldWriteClass
 
   class absent =>
     self reset
-    #{#a => 1}
+    (Dictionary new at: #a put: 1)
       at: #zz
       ifAbsent: [
         self.misses := self.misses + 1
@@ -22,7 +22,7 @@ Object subclass: LookupFieldWriteClass
 
   class present =>
     self reset
-    #{#a => 1}
+    (Dictionary new at: #a put: 1)
       at: #a
       ifPresent: [:v |
         self.misses := self.misses + v
@@ -32,7 +32,7 @@ Object subclass: LookupFieldWriteClass
 
   class presentOrAbsent =>
     self reset
-    #{#a => 1}
+    (Dictionary new at: #a put: 1)
       at: #a
       ifPresent: [:v |
         self.misses := self.misses + v

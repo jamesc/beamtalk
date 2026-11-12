@@ -518,10 +518,10 @@ pub fn resolve_receiver_class_context(
         }
         ReceiverHint::Expression(span) => type_map
             .get(*span)
-            .and_then(InferredType::as_known)
-            .cloned()
-            .map(|class_name| ReceiverClassContext {
-                class_name,
+            // A map shape (ADR 0147) resolves as its `Dictionary`.
+            .and_then(InferredType::instance_class)
+            .map(|(class_name, _)| ReceiverClassContext {
+                class_name: class_name.clone(),
                 class_side: false,
             }),
     }

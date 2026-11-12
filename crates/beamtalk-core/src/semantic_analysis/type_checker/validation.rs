@@ -5031,10 +5031,16 @@ impl TypeChecker {
                 span,
             )
             .with_category(DiagnosticCategory::Type)
-            .with_hint(format!(
-                "The right-hand side has type {} which is not assignable to {}",
-                mismatch.inferred_display, mismatch.declared_display
-            )),
+            .with_hint(match &mismatch.shape_detail {
+                Some(detail) => format!(
+                    "The right-hand side has type {} which is not assignable to {}: {detail}",
+                    mismatch.inferred_display, mismatch.declared_display
+                ),
+                None => format!(
+                    "The right-hand side has type {} which is not assignable to {}",
+                    mismatch.inferred_display, mismatch.declared_display
+                ),
+            }),
         );
     }
 
