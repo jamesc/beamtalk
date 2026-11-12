@@ -21,7 +21,15 @@
 //!   [`ConsultedSurface::extensions_unknown`].
 //!
 //! The stores (`ClassHierarchy`'s class map, `ProtocolRegistry`,
-//! `AliasRegistry`) keep their maps private, so no read can bypass recording.
+//! `AliasRegistry`) keep their maps private, so no *external* read can bypass
+//! recording. Inside the stores, registration and cycle-check passes and the
+//! `ClassMap::*_unrecorded` construction helpers read the raw maps on purpose.
+//!
+//! Known over-recording for phase 2 to narrow: hierarchy construction inside a
+//! file's scope (for example `add_external_superclasses`, which reads every
+//! name of the cross-file superclass index) records those names, and often a
+//! scan. That is a real dependency on the injected index, so it is left
+//! recorded rather than hidden; the surface is only logged in phase 1.
 //!
 //! Recording is thread-local and scoped by [`ConsultedScope`]. With no scope
 //! installed (the REPL and LSP) every hook is a single flag check.
@@ -69,6 +77,9 @@ thread_local! {
 pub struct ConsultedScope {
     previous: Option<ConsultedSurface>,
     finished: bool,
+    /// Scopes restore thread-local state in LIFO order, so one must end on the
+    /// thread that began it: this makes the guard `!Send`.
+    _not_send: std::marker::PhantomData<*const ()>,
 }
 
 impl ConsultedScope {
@@ -80,6 +91,7 @@ impl ConsultedScope {
         Self {
             previous,
             finished: false,
+            _not_send: std::marker::PhantomData,
         }
     }
 
