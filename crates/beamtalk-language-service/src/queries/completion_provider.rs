@@ -25,6 +25,7 @@
 //!
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol completion requests
+use crate::queries::cursor_context::{ClassContext, find_class_context};
 use crate::queries::erlang_modules;
 use crate::queries::shape_keys;
 use crate::queries::{
@@ -33,8 +34,7 @@ use crate::queries::{
 use crate::{Completion, CompletionKind, Position};
 use beamtalk_core::ast::normalize::canonical_operand;
 use beamtalk_core::ast::{
-    BinarySegment, ClassDefinition, ClassKind, Expression, MethodDefinition, Module,
-    declared_shape_migrations,
+    BinarySegment, ClassKind, Expression, MethodDefinition, Module, declared_shape_migrations,
 };
 use beamtalk_core::ast_walker::{for_each_expr_seq, walk_expression};
 use beamtalk_core::semantic_analysis::class_hierarchy::{ClassInfo, MethodInfo};
@@ -44,7 +44,7 @@ use beamtalk_core::semantic_analysis::type_checker::native_type_registry::Native
 use beamtalk_core::semantic_analysis::{
     AliasRegistry, ClassHierarchy, InferredType, ProtocolRegistry,
 };
-use beamtalk_core::source_analysis::{Span, TokenKind, lex};
+use beamtalk_core::source_analysis::{TokenKind, lex};
 use ecow::EcoString;
 use std::collections::HashSet;
 use std::fmt::Write;
@@ -91,18 +91,6 @@ fn is_cross_package_internal_method(
         return false;
     };
     class_pkg != cur_pkg
-}
-/// The class context at the cursor position.
-#[derive(Debug, Clone)]
-enum ClassContext<'a> {
-    /// Cursor is inside an instance method of the named class.
-    InstanceMethod(&'a ClassDefinition),
-    /// Cursor is inside a class-side method of the named class.
-    ClassMethod(&'a ClassDefinition),
-    /// Cursor is inside a class body but not inside any method (where `field:`/`state:` go).
-    ClassBody(&'a ClassDefinition),
-    /// Cursor is at top level (not inside any class).
-    TopLevel,
 }
 /// Computes code completions at a given position in a module.
 ///
@@ -202,7 +190,7 @@ pub fn compute_completions_with_registries(
         return erlang_completions;
     }
     // Determine class context at cursor position
-    let context = find_class_context(module, offset);
+    let context = find_class_context(module, offset, true);
     // Check for `self.` context — if cursor is right after `self.` inside an
     // instance method, return state fields + instance methods (fields are only
     // accessible via `self.`).
@@ -695,37 +683,6 @@ fn find_method_at_offset(module: &Module, offset: u32) -> Option<&MethodDefiniti
         }
     }
     None
-}
-/// Determines the class context at a given byte offset.
-///
-/// Walks the module's class definitions to find if the offset is inside
-/// an instance method or a class-side method.
-fn find_class_context(module: &Module, offset: u32) -> ClassContext<'_> {
-    // Probe one byte back so cursor at end-of-span (exclusive) still matches.
-    let probe = offset.saturating_sub(1);
-    let in_span = |span: Span| {
-        (offset >= span.start() && offset < span.end())
-            || (probe >= span.start() && probe < span.end())
-    };
-    for class in &module.classes {
-        // Check instance methods
-        for method in &class.methods {
-            if in_span(method.span) {
-                return ClassContext::InstanceMethod(class);
-            }
-        }
-        // Check class-side methods
-        for method in &class.class_methods {
-            if in_span(method.span) {
-                return ClassContext::ClassMethod(class);
-            }
-        }
-        // Check if inside class body but not in any method
-        if in_span(class.span) {
-            return ClassContext::ClassBody(class);
-        }
-    }
-    ClassContext::TopLevel
 }
 /// Adds class names as completions (from module + hierarchy builtins).
 fn add_class_name_completions(
@@ -1370,7 +1327,9 @@ fn should_exclude_delegate(
         ClassContext::InstanceMethod(class)
         | ClassContext::ClassMethod(class)
         | ClassContext::ClassBody(class) => class.backing_module.is_none(),
-        ClassContext::TopLevel => true,
+        ClassContext::StandaloneInstanceMethod(_)
+        | ClassContext::StandaloneClassMethod(_)
+        | ClassContext::TopLevel => true,
     }
 }
 /// Adds method completions from the class hierarchy.
@@ -1471,7 +1430,9 @@ fn add_hierarchy_completions(
                 completions,
             );
         }
-        ClassContext::TopLevel => {
+        ClassContext::StandaloneInstanceMethod(_)
+        | ClassContext::StandaloneClassMethod(_)
+        | ClassContext::TopLevel => {
             for class in &module.classes {
                 let name = class.name.name.as_str();
                 collect_method_completions(

@@ -25,6 +25,7 @@
 //! - ADR 0024: Static-First, Live-Augmented IDE Tooling
 //! - LSP specification: Language Server Protocol textDocument/definition
 
+use crate::queries::cursor_context::find_class_context;
 use crate::{Location, ProjectIndex};
 use beamtalk_core::ast::normalize::canonical_operand;
 use beamtalk_core::ast::{BinarySegment, Expression, MessageSelector, Module};
@@ -471,7 +472,7 @@ pub fn resolve_enclosing_superclass_context(
     offset: u32,
     hierarchy: &ClassHierarchy,
 ) -> Option<ReceiverClassContext> {
-    find_class_context(module, offset)
+    find_class_context(module, offset, false)
         .superclass_name(hierarchy)
         .map(|(class_name, class_side)| ReceiverClassContext {
             class_name,
@@ -493,7 +494,7 @@ pub fn resolve_receiver_class_context(
     hierarchy: &ClassHierarchy,
     native_types: Option<&NativeTypeRegistry>,
 ) -> Option<ReceiverClassContext> {
-    let class_context = find_class_context(module, offset);
+    let class_context = find_class_context(module, offset, false);
     let type_map = infer_types(module, hierarchy, native_types);
     match &selector_lookup.receiver_hint {
         ReceiverHint::ClassReference(name) => Some(ReceiverClassContext {
@@ -608,61 +609,6 @@ fn find_method_in_module(
         }
     }
     None
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ClassContext<'a> {
-    InstanceMethod(&'a str),
-    ClassMethod(&'a str),
-    StandaloneInstanceMethod(&'a str),
-    StandaloneClassMethod(&'a str),
-    TopLevel,
-}
-
-impl ClassContext<'_> {
-    fn self_class(&self) -> Option<(EcoString, bool)> {
-        match self {
-            Self::InstanceMethod(name) | Self::StandaloneInstanceMethod(name) => {
-                Some((EcoString::from(*name), false))
-            }
-            Self::ClassMethod(name) | Self::StandaloneClassMethod(name) => {
-                Some((EcoString::from(*name), true))
-            }
-            Self::TopLevel => None,
-        }
-    }
-
-    fn superclass_name(&self, hierarchy: &ClassHierarchy) -> Option<(EcoString, bool)> {
-        let (class_name, class_side) = self.self_class()?;
-        hierarchy
-            .get_class(class_name.as_str())
-            .and_then(|info| info.superclass.clone())
-            .map(|super_name| (super_name, class_side))
-    }
-}
-
-fn find_class_context(module: &Module, offset: u32) -> ClassContext<'_> {
-    for class in &module.classes {
-        for method in &class.methods {
-            if offset >= method.span.start() && offset < method.span.end() {
-                return ClassContext::InstanceMethod(class.name.name.as_str());
-            }
-        }
-        for method in &class.class_methods {
-            if offset >= method.span.start() && offset < method.span.end() {
-                return ClassContext::ClassMethod(class.name.name.as_str());
-            }
-        }
-    }
-    for smd in &module.method_definitions {
-        if offset >= smd.method.span.start() && offset < smd.method.span.end() {
-            if smd.is_class_method {
-                return ClassContext::StandaloneClassMethod(smd.class_name.name.as_str());
-            }
-            return ClassContext::StandaloneInstanceMethod(smd.class_name.name.as_str());
-        }
-    }
-    ClassContext::TopLevel
 }
 
 /// Find the selector at a given byte offset in an expression.
