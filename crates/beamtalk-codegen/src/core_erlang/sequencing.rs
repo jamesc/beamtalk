@@ -28,7 +28,7 @@ use super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
-use beamtalk_core::ast::Expression;
+use beamtalk_core::ast::{Block, Expression};
 use beamtalk_core::source_analysis::Span;
 
 /// One entry of [`CoreErlangGenerator::precompiled_subexprs`] — see that
@@ -537,11 +537,18 @@ impl CoreErlangGenerator {
         // process-dictionary lookup that a sibling *send* may write (ADR 0130)
         // but that two reads cannot disturb: it races only alongside an operand
         // that runs code, so `self.a + self.b` stays free of temps (BT-4279).
+        // A block literal whose creation-time capture reads that live state
+        // (BT-4722) is the same kind of operand.
         let mut runs: Vec<usize> = Vec::new();
         let mut class_var: Vec<usize> = Vec::new();
         for (i, e) in exprs.iter().enumerate() {
             let inner = e.unwrap_parens();
             if Self::is_trivial_subexpr(inner) {
+                if let Expression::Block(block) = inner {
+                    if self.block_capture_reads_live_state(block) {
+                        class_var.push(i);
+                    }
+                }
                 continue;
             }
             match inner {
@@ -563,6 +570,18 @@ impl CoreErlangGenerator {
             .chain(class_var.last())
             .max()
             .copied()
+    }
+
+    /// BT-4722: whether creating `block` here reads live mutable state: a
+    /// block in a class method that reads a class variable binds
+    /// `beamtalk_class_vars:capture` (a process-dictionary read), and a block
+    /// nested in an actor closure that touches actor state binds
+    /// `beamtalk_actor_state:capture` (a live cell read). A sibling operand that
+    /// runs code and writes that state must run before the capture, so the
+    /// block is sequenced like a read, never treated as a constant.
+    fn block_capture_reads_live_state(&self, block: &Block) -> bool {
+        (self.in_class_method() && self.block_reads_class_var(block))
+            || (self.in_cell_closure() && self.block_touches_actor_state(block))
     }
 
     /// Threads `exprs` via [`Self::thread_subexprs`] and returns

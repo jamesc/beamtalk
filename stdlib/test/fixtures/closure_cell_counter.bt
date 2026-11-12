@@ -37,6 +37,14 @@ Actor subclass: ClosureCellCounter
     self.n := 99
     other run: b
 
+  // BT-4722: inside an actor closure a block literal's creation-time capture
+  // is a live cell read, so it must run after the sibling write that
+  // precedes it in source order.
+  snapshotAfterWriteVia: other =>
+    mk := [#(self bump, [self.n])]
+    pair := mk value
+    other run: (pair at: 2)
+
   pokeVia: other => other run: [self.n := 0]
 
   bump => self.n := self.n + 1

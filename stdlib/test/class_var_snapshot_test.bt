@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4722: sibling-operand order for creation-time class-variable captures
+
+TestCase subclass: ClassVarSnapshotTest
+
+  testBlockLiteralCapturesAfterSiblingWrite =>
+    self assert: ClassVarSnapshot snapshotAfterWrite equals: 7
