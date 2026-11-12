@@ -46,11 +46,10 @@ teardown(_) ->
 stop_class(Name) ->
     case beamtalk_class_registry:whereis_class(Name) of
         Pid when is_pid(Pid) ->
-            Ref = erlang:monitor(process, Pid),
-            exit(Pid, kill),
-            receive
-                {'DOWN', Ref, process, Pid, _} -> ok
-            end;
+            %% A deliberate stop runs remove_class_registration/1 (BT-4622);
+            %% a kill would leave the metadata rows behind for crash recovery.
+            unlink(Pid),
+            gen_server:stop(Pid);
         _ ->
             ok
     end.
