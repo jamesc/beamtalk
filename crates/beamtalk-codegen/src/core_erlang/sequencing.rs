@@ -525,10 +525,7 @@ impl CoreErlangGenerator {
     /// the cell changes, so there it races like any send.
     pub(super) fn last_racing_operand(&self, exprs: &[&Expression]) -> Option<usize> {
         // BT-4591 fault: the in-place list builder BT-4296 removed.
-        #[cfg(test)]
-        if super::threaded_expr::fault::active()
-            == Some(super::threaded_expr::fault::LocalRebindFault::OperandsInPlace)
-        {
+        if fault!(OperandsInPlace) {
             return None;
         }
         let stable_field_reads = !self.in_cell_closure();

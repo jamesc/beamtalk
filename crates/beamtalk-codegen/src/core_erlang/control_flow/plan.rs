@@ -9,7 +9,6 @@
 //!
 //! split out of `control_flow/mod.rs`, no logic changes.
 
-use super::super::synced_call::{field_writes_block_stateless_loops, nlr_blocks_hybrid_loops};
 use super::super::threaded_ir::{
     ClassMethodDefect, FoldAccShape, FoldCarry, FrameId, RebindFrame, RebindFrameKind,
     StateAccFallbackReason, ThreadingMode, VerifyError, VersionPrefix, VersionedVar,
@@ -903,40 +902,12 @@ impl ThreadingPlan {
             return false;
         }
         !body_analysis.has_self_sends
-            && (body_analysis.field_writes.is_empty() || !field_writes_block_stateless_loops())
+            && (body_analysis.field_writes.is_empty() || fault!(StatelessFieldWrites))
             && !effects.body_has_synced_sends
             && !effects.cond_has_state_effects
             && !effects.has_tier2_threaded_assign
             && !effects.has_non_tuple_safe_list_op
             && !effects.has_nested_counted_loop_mutation
-    }
-
-    /// Test-only fault injection (BT-4116): the `ForceStateAccFold` oracle
-    /// build disables the tuple/bare accumulator for every fold.
-    fn force_stateacc_fold() -> bool {
-        #[cfg(test)]
-        {
-            super::super::threaded_expr::fault::active()
-                == Some(super::super::threaded_expr::fault::LocalRebindFault::ForceStateAccFold)
-        }
-        #[cfg(not(test))]
-        {
-            false
-        }
-    }
-
-    /// Test-only fault injection (BT-4116): `BareFoldTupleRepack` makes a
-    /// bare-shaped fold repack its accumulator as a one-element tuple.
-    pub(super) fn bare_fold_tuple_repack_faulted() -> bool {
-        #[cfg(test)]
-        {
-            super::super::threaded_expr::fault::active()
-                == Some(super::super::threaded_expr::fault::LocalRebindFault::BareFoldTupleRepack)
-        }
-        #[cfg(not(test))]
-        {
-            false
-        }
     }
 
     /// Select tuple accumulator for foldl list-ops when eligible: body has
@@ -956,7 +927,7 @@ impl ThreadingPlan {
         // `{Acc, Self}` wrapper (the map path); the tuple accumulator carries
         // locals only.
         if !allow_tuple_acc
-            || Self::force_stateacc_fold()
+            || fault!(ForceStateAccFold)
             || threaded_locals.is_empty()
             || (matches!(context, CodeGenContext::ValueType)
                 && !body_analysis.field_writes.is_empty())
@@ -964,7 +935,7 @@ impl ThreadingPlan {
             return false;
         }
         !body_analysis.has_self_sends
-            && (body_analysis.field_writes.is_empty() || !field_writes_block_stateless_loops())
+            && (body_analysis.field_writes.is_empty() || fault!(StatelessFieldWrites))
             && !effects.body_has_synced_sends
             && !effects.has_tier2_threaded_assign
             && !effects.has_cf_mutations
@@ -1047,7 +1018,7 @@ impl ThreadingPlan {
             // BT-4523: a `^` stores and carries a whole `State` (ADR 0146
             // P0); a hybrid loop's `State` omits the fields its parameters
             // hold, so the throw would drop every write the loop made.
-            && !(effects.has_nlr && nlr_blocks_hybrid_loops())
+            && (!effects.has_nlr || fault!(HybridAdmitsNlr))
     }
 
     /// Determine why `StateAcc` fallback was chosen (if no optimized mode was selected).
@@ -1588,7 +1559,7 @@ impl ThreadingPlan {
     /// The [`FoldCarry`] a tuple-acc fold's accumulator statement carries.
     pub fn fold_carry(&self) -> FoldCarry {
         match (self.fold_acc_shape, self.threaded_locals.as_slice()) {
-            (FoldAccShape::Bare, [local]) if !Self::bare_fold_tuple_repack_faulted() => {
+            (FoldAccShape::Bare, [local]) if !fault!(BareFoldTupleRepack) => {
                 FoldCarry::BareLocal(local.clone())
             }
             _ => FoldCarry::Locals(self.threaded_locals.clone()),
@@ -1601,7 +1572,7 @@ impl ThreadingPlan {
     /// every per-iteration repack of a gate-slot-free (`do:`) fold.
     pub fn acc_repack_doc(&self, generator: &CoreErlangGenerator) -> Document<'static> {
         match self.fold_acc_shape {
-            FoldAccShape::Bare if Self::bare_fold_tuple_repack_faulted() => {
+            FoldAccShape::Bare if fault!(BareFoldTupleRepack) => {
                 docvec!["{", self.current_vars_doc(generator), "}"]
             }
             FoldAccShape::Bare => self.current_vars_doc(generator),
@@ -1682,13 +1653,7 @@ impl ThreadingPlan {
         // from the ambient actor `State` whatever the scope, so the pin below
         // is shown to fire on a real compile
         // (`tests/class_side_operand_producer_corpus.rs`).
-        #[cfg(test)]
-        let force_ambient = super::super::threaded_expr::fault::active()
-            == Some(
-                super::super::threaded_expr::fault::LocalRebindFault::TupleAccRepackFromAmbientState,
-            );
-        #[cfg(not(test))]
-        let force_ambient = false;
+        let force_ambient = fault!(TupleAccRepackFromAmbientState);
         let mut docs: Vec<Document<'static>> = Vec::new();
         let take_var = if seed_from_cell && !force_ambient && !self.packs_from_fresh_map(generator)
         {

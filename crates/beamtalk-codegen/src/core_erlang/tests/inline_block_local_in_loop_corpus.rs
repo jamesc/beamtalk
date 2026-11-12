@@ -28,7 +28,7 @@
 //!    and almost every cell is accepted;
 //! 2. every accepted cell compiles through the debug `ThreadedIr` verifier,
 //!    and each (context, host) module through `erlc`;
-//! 3. with the BT-3948 lowering put back ([`LocalRebindFault::PutUncarriedLocal`]:
+//! 3. with the BT-3948 lowering put back ([`Fault::PutUncarriedLocal`]:
 //!    every assignment gets the scratch-map `Put`), every actor cell whose
 //!    block is lowered in place (the evaluated-block producer, or an arm of
 //!    another producer) fails `ArmLocalPutNotCarried`, the check that fails
@@ -38,7 +38,7 @@
 //! `stdlib/test/bt3947inline_block_loop_test.bt`.
 
 use super::{assert_compiles_through_erlc, codegen, erlc_available, verifier_report};
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::fault::Fault;
 use std::sync::OnceLock;
 
 /// Evaluated blocks; `{a}` is the argument the loop supplies. All but the last
@@ -271,10 +271,10 @@ const REPRO: &str =
 /// The two frame rules the deleted row stood in for, over every actor cell
 /// whose block assigns a local of its own. Where the block is the
 /// evaluated-block producer (with that producer switched off,
-/// [`LocalRebindFault::EvaluatedBlockNotAProducer`], the cell fails
+/// [`Fault::EvaluatedBlockNotAProducer`], the cell fails
 /// `UnthreadedEvaluatedBlock`), or is inlined in an arm of another producer,
 /// its body's assignment to the block's own local is a plain `let`: with the
-/// BT-3948 lowering put back ([`LocalRebindFault::PutUncarriedLocal`], every
+/// BT-3948 lowering put back ([`Fault::PutUncarriedLocal`], every
 /// assignment a scratch-map `Put`, whatever the frame carries) the cell fails
 /// `ArmLocalPutNotCarried`. The other cells apply the block as a plain closure
 /// (nothing threads).
@@ -288,9 +288,9 @@ fn inline_block_local_in_loop_corpus_fails_arm_local_put_not_carried_under_the_b
         .filter(|c| c.context == Context::Actor && c.assigns)
     {
         let src = module(cell.context, &cell.method);
-        let produced = verifier_report(&src, Some(LocalRebindFault::EvaluatedBlockNotAProducer))
+        let produced = verifier_report(&src, Some(Fault::EvaluatedBlockNotAProducer))
             .is_some_and(|r| r.contains("UnthreadedEvaluatedBlock"));
-        let put = verifier_report(&src, Some(LocalRebindFault::PutUncarriedLocal))
+        let put = verifier_report(&src, Some(Fault::PutUncarriedLocal))
             .is_some_and(|r| r.contains("ArmLocalPutNotCarried"));
         assert!(
             put || !produced,
@@ -302,7 +302,7 @@ fn inline_block_local_in_loop_corpus_fails_arm_local_put_not_carried_under_the_b
     assert!(producers > 1000 && puts >= producers, "{producers} {puts}");
     let repro = module(Context::Actor, &method(Context::Actor, "repro", REPRO));
     assert!(
-        verifier_report(&repro, Some(LocalRebindFault::PutUncarriedLocal))
+        verifier_report(&repro, Some(Fault::PutUncarriedLocal))
             .is_some_and(|r| r.contains("ArmLocalPutNotCarried")),
         "{repro}"
     );

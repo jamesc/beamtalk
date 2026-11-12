@@ -693,7 +693,7 @@ impl CoreErlangGenerator {
                     // advances).
                     let _ = this.lower_local_var_assignment_bind(expr, frame, span, &mut stmts)?;
                 } else if let Expression::DestructureAssignment { pattern, value, .. } = expr
-                    && !Self::condition_destructure_plain_fault()
+                    && !fault!(ConditionDestructurePlain)
                 {
                     // BT-4584: each name is written as the branch above writes
                     // `name := ...` here, a `Put` into the condition's
@@ -827,20 +827,6 @@ impl CoreErlangGenerator {
                 })
             })
             .collect()
-    }
-
-    /// Test-only fault injection (BT-4584): a destructuring statement of a
-    /// carried while condition takes the generic statement lowering, as
-    /// before BT-4584, so `ConditionWriteNotInMap` is shown to fire on a real
-    /// compile (`tests/while_condition_binding_corpus.rs`).
-    fn condition_destructure_plain_fault() -> bool {
-        #[cfg(test)]
-        if super::super::threaded_expr::fault::active()
-            == Some(super::super::threaded_expr::fault::LocalRebindFault::ConditionDestructurePlain)
-        {
-            return true;
-        }
-        false
     }
 
     /// The tail (boolean) statement of a carried while condition — see

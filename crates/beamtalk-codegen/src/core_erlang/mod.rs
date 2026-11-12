@@ -111,6 +111,9 @@
 //! - [Core Erlang Specification](https://www.it.uu.se/research/group/hipe/cerl/)
 //! - [Gleam Erlang Codegen](https://github.com/gleam-lang/gleam/blob/main/compiler-core/src/erlang.rs)
 
+// BT-4688: first, so `fault!` is in textual scope for every module below.
+#[macro_use]
+pub mod fault;
 mod actor_codegen;
 mod actor_state_access;
 mod binary_construction;

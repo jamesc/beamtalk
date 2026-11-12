@@ -387,7 +387,7 @@ pub(in crate::core_erlang) enum VerifyError {
     /// version from the same `frame_state_version()` read with no frame step
     /// in between, so this cannot fire on shipped code. It guards a future
     /// builder that reads the store earlier; only the test-only
-    /// `FAULT_PRESTORE_READS_BEFORE_OPERANDS` makes it fire now.
+    /// `Fault::PrestoreReadsBeforeOperands` makes it fire now.
     StalePrestore {
         reads: VersionedVar,
         newest: VersionedVar,

@@ -160,12 +160,8 @@ impl CoreErlangGenerator {
     /// drop) and `synced_call_value` (unpack element 1 + rebind locals vs
     /// plain value) both read, so the two cannot disagree.
     pub(in crate::core_erlang) fn tier2_operand_merges(&self, name: &str) -> bool {
-        #[cfg(test)]
-        let fault = super::super::synced_call::FAULT_NO_BRACKETS.with(std::cell::Cell::get)
-            || super::super::synced_call::FAULT_LEGACY_TIER2.with(std::cell::Cell::get);
-        #[cfg(not(test))]
-        let fault = false;
-        !fault
+        let faulted = fault!(NoBrackets) || fault!(LegacyTier2);
+        !faulted
             && !self.in_cell_closure()
             && self.tier2_local_vars.contains(name)
             && self.tier2_local_var_may_write_state.contains(name)

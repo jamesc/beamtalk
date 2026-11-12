@@ -15,7 +15,7 @@
 //! (`stdlib/test/bt3981evalblock_test.bt`, `bt3982evalblock_test.bt`).
 
 use super::{assert_compiles_through_erlc, erlc_available};
-use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
+use crate::core_erlang::fault::{self, Fault};
 use crate::core_erlang::{CodegenOptions, generate_module_surfacing_verifier};
 use beamtalk_core::test_helpers::evaluated_block_grid::{self as grid, CONTEXTS, Cell, HOSTS};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -194,7 +194,7 @@ fn every_evaluated_block_grid_corpus_pin_names_a_cell() {
 }
 
 /// The corpus is not vacuous: with the BT-3982 producer gate disabled
-/// ([`LocalRebindFault::EvaluatedBlockNotAProducer`], the lowering before the
+/// ([`Fault::EvaluatedBlockNotAProducer`], the lowering before the
 /// fix), actor cells of every `State`-threading host (`method`, `arm`,
 /// `collect`, `protected`, the hosts BT-3981 measured leaking the carrier)
 /// fail verified codegen, and no class or value-type cell does (the fault
@@ -211,7 +211,7 @@ fn the_evaluated_block_grid_corpus_fails_without_the_bt3982_producer() {
     for host in ["method", "arm", "collect", "protected"] {
         let cells = grid::cells_of(&[host]);
         for &context in CONTEXTS {
-            let failure = fault::with(LocalRebindFault::EvaluatedBlockNotAProducer, || {
+            let failure = fault::with(Fault::EvaluatedBlockNotAProducer, || {
                 compile_batch_failure(&cells, context, &compile_failure)
             });
             if context == grid::Context::Actor {

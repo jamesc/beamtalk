@@ -17,7 +17,7 @@
 //! classified `No` outside every window, compiled as a closure with no
 //! covering store. The corpus is how the closure is called x where the call
 //! sits x whether a field write precedes it: clean and `erlc`-valid, and with
-//! the fix off (`FAULT_NLR_CLOSURES_UNSTORED`) every shape that relied on it
+//! the fix off (`Fault::NlrClosuresUnstored`) every shape that relied on it
 //! reports, while the shapes covered independently (a bracketed send, the
 //! `on:do:` entry store, an inlined construct) stay clean.
 //!
@@ -33,7 +33,7 @@
 //! fallback) records the `State` version it stores and is verified after the
 //! version its frame has bound (`VerifyError::StalePrestore`). With the store
 //! read before the conditional's receiver is sequenced
-//! (`FAULT_PRESTORE_READS_BEFORE_OPERANDS`), every row whose receiver steps
+//! (`Fault::PrestoreReadsBeforeOperands`), every row whose receiver steps
 //! `State` reports and no other does. A parenthesised block literal operand
 //! (`([^5]) value`) is the literal: `ast::normalize` peels send operands
 //! before codegen (BT-4059), so every place that matches an operand as a
@@ -41,10 +41,10 @@
 //! their unparenthesised twins.
 
 use super::assert_compiles_through_erlc;
+use crate::core_erlang::fault::{self, Fault};
 use crate::core_erlang::primitive_bindings::PrimitiveBindingTable;
 use crate::core_erlang::synced_call::{
-    CLASSIFY_SEND_CALLS, DISPATCH_NLR_LITERALS, FAULT_NLR_CLOSURES_UNSTORED,
-    FAULT_PRESTORE_READS_BEFORE_OPERANDS, PRESTORE_EARLY_READ,
+    CLASSIFY_SEND_CALLS, DISPATCH_NLR_LITERALS, PRESTORE_EARLY_READ,
 };
 use crate::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
@@ -349,9 +349,9 @@ fn report(src: &str) -> Option<String> {
 }
 
 fn with_fix_off<T>(f: impl FnOnce() -> T) -> T {
-    FAULT_NLR_CLOSURES_UNSTORED.with(|flag| flag.set(true));
+    fault::set(Fault::NlrClosuresUnstored, true);
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
-    FAULT_NLR_CLOSURES_UNSTORED.with(|flag| flag.set(false));
+    fault::set(Fault::NlrClosuresUnstored, false);
     result.unwrap_or_else(|payload| std::panic::resume_unwind(payload))
 }
 
@@ -413,10 +413,10 @@ fn unstored_nlr_closure_calls_report_with_the_fix_off() {
 }
 
 /// Runs `f` with the `^`-closure pre-store reading the state before the
-/// operand its call follows (`FAULT_PRESTORE_READS_BEFORE_OPERANDS`).
+/// operand its call follows (`Fault::PrestoreReadsBeforeOperands`).
 fn with_prestore_read_early<T>(f: impl FnOnce() -> T) -> T {
     let set = |on: bool| {
-        FAULT_PRESTORE_READS_BEFORE_OPERANDS.with(|flag| flag.set(on));
+        fault::set(Fault::PrestoreReadsBeforeOperands, on);
         PRESTORE_EARLY_READ.with(|slot| slot.borrow_mut().clear());
     };
     set(true);

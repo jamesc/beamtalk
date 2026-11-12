@@ -238,11 +238,11 @@ pub(crate) fn compile(src: &str) -> std::result::Result<String, String> {
 /// Shared by the verifier corpora that prove a check fires under fault injection.
 pub(crate) fn verifier_report(
     src: &str,
-    fault: Option<crate::core_erlang::threaded_expr::fault::LocalRebindFault>,
+    fault: Option<crate::core_erlang::fault::Fault>,
 ) -> Option<String> {
     let compile = || std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| codegen(src)));
     let result = match fault {
-        Some(fault) => crate::core_erlang::threaded_expr::fault::with(fault, compile),
+        Some(fault) => crate::core_erlang::fault::with(fault, compile),
         None => compile(),
     };
     result.err().map(|payload| {

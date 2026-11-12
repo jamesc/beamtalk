@@ -21,7 +21,7 @@
 //!
 //! 1. compiles with the debug `ThreadedIr` verifier on and through `erlc`;
 //! 2. with the REPL eval boundary switched off
-//!    (`repl_nlr::boundary_fault::without_boundary`), fails with
+//!    (`Fault::ReplBoundaryOff`), fails with
 //!    `VerifyError::ReplReturnWithoutBoundary`, the check that fails on the
 //!    repro before the fix;
 //! 3. runs on a BEAM against the runtime, in eval and trace mode, and answers
@@ -30,13 +30,12 @@
 //! Both corpora hold rows whose `^` runs an `ensure:` cleanup that writes a
 //! binding (BT-4312): the cleanup's write reaches the eval's boundary with the
 //! throw (proof 3), and with the `ensure:` relay switched off
-//! (`ensure_nlr_relay::fault::without_relay`) every such row, and no other,
+//! (`Fault::RelayNoRelay`) every such row, and no other,
 //! fails with `VerifyError::EnsureCleanupLostOnNlr`.
 
 mod common;
 
-use beamtalk_codegen::core_erlang::ensure_nlr_relay::fault::without_relay;
-use beamtalk_codegen::core_erlang::repl_nlr::boundary_fault::without_boundary;
+use beamtalk_codegen::core_erlang::fault::{Fault, with as with_fault};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
@@ -796,7 +795,7 @@ fn compile_proofs(rows: &[(&Row, bool)], prefix: &str) -> Vec<String> {
                 Err(e) => failures.push(format!("{} (trace: {trace}): {e}", row.name)),
             }
         }
-        let report = without_boundary(|| verifier_report(&row.source));
+        let report = with_fault(Fault::ReplBoundaryOff, || verifier_report(&row.source));
         if *throws != report.contains("ReplReturnWithoutBoundary") {
             failures.push(format!(
                 "{}: without the boundary, expected ReplReturnWithoutBoundary: {throws}, got {report}",
@@ -954,7 +953,7 @@ fn ensure_cleanups_a_return_runs_need_their_relay() {
     let mut failures = Vec::new();
     let mut relayed = 0;
     for (row, writes) in all {
-        let report = without_relay(|| verifier_report(&row.source));
+        let report = with_fault(Fault::RelayNoRelay, || verifier_report(&row.source));
         if writes != report.contains("EnsureCleanupLostOnNlr") {
             failures.push(format!(
                 "{}: without the relay, expected EnsureCleanupLostOnNlr: {writes}, got {report}",

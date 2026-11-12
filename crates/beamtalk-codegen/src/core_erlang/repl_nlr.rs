@@ -57,7 +57,7 @@ impl CoreErlangGenerator {
     /// body with. Closed by [`Self::exit_repl_eval_boundary`].
     pub fn enter_repl_eval_boundary(&mut self, expressions: &[Expression]) -> Option<String> {
         let returns: HashSet<Span> = repl_eval_returns(expressions).into_iter().collect();
-        let token = (!returns.is_empty() && !boundary_fault::active())
+        let token = (!returns.is_empty() && !fault!(ReplBoundaryOff))
             .then(|| self.fresh_temp_var("NlrToken"));
         self.repl_context_mut().eval_boundary = ReplEvalBoundary {
             token: token.clone(),
@@ -134,47 +134,5 @@ impl CoreErlangGenerator {
             span,
         );
         None
-    }
-}
-
-/// Test-only: compiles REPL inputs without their eval boundary, as before
-/// BT-4288, so [`VerifyError::ReplReturnWithoutBoundary`] can be shown to fire
-/// on a real compile (`beamtalk-repl/tests/repl_loop_body_return.rs`).
-/// Compiled for this crate's tests and for dependents that enable the `test`
-/// feature; otherwise [`active`](boundary_fault::active) is always `false`.
-pub mod boundary_fault {
-    #[cfg(any(test, feature = "test"))]
-    use std::cell::Cell;
-
-    #[cfg(any(test, feature = "test"))]
-    thread_local! {
-        static OFF: Cell<bool> = const { Cell::new(false) };
-    }
-
-    /// Whether the REPL eval boundary is switched off on this thread.
-    #[cfg(any(test, feature = "test"))]
-    pub(crate) fn active() -> bool {
-        OFF.with(Cell::get)
-    }
-
-    /// Whether the REPL eval boundary is switched off on this thread.
-    #[cfg(not(any(test, feature = "test")))]
-    pub(crate) fn active() -> bool {
-        false
-    }
-
-    /// Runs `body` with the REPL eval boundary switched off, restoring it
-    /// afterwards even if `body` panics.
-    #[cfg(any(test, feature = "test"))]
-    pub fn without_boundary<T>(body: impl FnOnce() -> T) -> T {
-        struct Reset;
-        impl Drop for Reset {
-            fn drop(&mut self) {
-                OFF.with(|off| off.set(false));
-            }
-        }
-        OFF.with(|off| off.set(true));
-        let _reset = Reset;
-        body()
     }
 }

@@ -8,10 +8,10 @@
 //! [`VerifyError::UnbracketedGuardedOperator`], never silently.
 
 use super::synced_call::{
-    FAULT_ENTRY_STATE_READS, FAULT_NO_BRACKETS, FAULT_STALE_STATE_IN_BRACKETED_LOOP,
     GuardedOpCheckout, GuardedOpLoopMarker, GuardedOpNeed, StaleStateUseKind, ThreadedStateUse,
 };
 use super::threaded_ir::{StaleReadDefect, StateReadSite, UserCodeRegion};
+use crate::core_erlang::fault::{self, Fault};
 use crate::core_erlang::{CodegenOptions, CoreErlangGenerator, generate_module};
 use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
 
@@ -269,11 +269,11 @@ fn guarded_op_gap_fires_loud_without_marker() {
     // Under the no-brackets fault no marker is pushed, so the exemption
     // reports `UnbracketedGuardedOperator` instead of bracketing — the rule
     // is never silent.
-    FAULT_NO_BRACKETS.with(|f| f.set(true));
+    fault::set(Fault::NoBrackets, true);
     let report = enforce_report(&format!(
         "{ACTOR_PREAMBLE}  sum: items =>\n    acc := 0.\n    items do: [:m | acc := acc + m].\n    acc\n"
     ));
-    FAULT_NO_BRACKETS.with(|f| f.set(false));
+    fault::set(Fault::NoBrackets, false);
     let report = report.expect("faulted compile should report");
     assert!(
         report.contains("UnbracketedGuardedOperator"),
@@ -562,10 +562,10 @@ fn on_do_in_bracketed_loops_corpus_is_verifier_clean() {
     }
 }
 
-/// Compiles each of `srcs` under [`FAULT_STALE_STATE_IN_BRACKETED_LOOP`],
+/// Compiles each of `srcs` under [`Fault::StaleStateInBracketedLoop`],
 /// answering each source with its verifier report.
 fn faulted_reports(srcs: Vec<String>) -> Vec<(String, Option<String>)> {
-    FAULT_STALE_STATE_IN_BRACKETED_LOOP.with(|f| f.set(true));
+    fault::set(Fault::StaleStateInBracketedLoop, true);
     let reports = srcs
         .into_iter()
         .map(|src| {
@@ -573,7 +573,7 @@ fn faulted_reports(srcs: Vec<String>) -> Vec<(String, Option<String>)> {
             (src, report)
         })
         .collect();
-    FAULT_STALE_STATE_IN_BRACKETED_LOOP.with(|f| f.set(false));
+    fault::set(Fault::StaleStateInBracketedLoop, false);
     reports
 }
 
@@ -862,10 +862,10 @@ fn bracketed_read_srcs() -> Vec<String> {
         .collect()
 }
 
-/// Compiles each of `srcs` under [`FAULT_ENTRY_STATE_READS`], answering each
+/// Compiles each of `srcs` under [`Fault::EntryStateReads`], answering each
 /// source with its verifier report.
 fn entry_state_read_reports(srcs: Vec<String>) -> Vec<(String, Option<String>)> {
-    FAULT_ENTRY_STATE_READS.with(|f| f.set(true));
+    fault::set(Fault::EntryStateReads, true);
     let reports = srcs
         .into_iter()
         .map(|src| {
@@ -873,7 +873,7 @@ fn entry_state_read_reports(srcs: Vec<String>) -> Vec<(String, Option<String>)> 
             (src, report)
         })
         .collect();
-    FAULT_ENTRY_STATE_READS.with(|f| f.set(false));
+    fault::set(Fault::EntryStateReads, false);
     reports
 }
 
@@ -1087,8 +1087,8 @@ fn stale_read_fires_whatever_variable_the_read_resolved_to() {
         "{ACTOR_PREAMBLE}  run: xs =>\n    acc := 0.\n    k := 0.\n    xs do: [:e | #(1, 2) do: [:f | acc := acc + f. k := self.n]].\n    acc + k\n"
     );
     assert_eq!(enforce_report(&src), None);
-    let (_, report) = crate::core_erlang::threaded_expr::fault::with(
-        crate::core_erlang::threaded_expr::fault::LocalRebindFault::TupleAccNoEntryCapture,
+    let (_, report) = crate::core_erlang::fault::with(
+        crate::core_erlang::fault::Fault::TupleAccNoEntryCapture,
         || entry_state_read_reports(vec![src.clone()]).remove(0),
     );
     let report = report.expect("faulted compile should report");
@@ -1321,10 +1321,9 @@ fn field_write_corpus() -> Vec<(String, String)> {
 }
 
 fn with_stateless_field_writes_fault<T>(f: impl FnOnce() -> T) -> T {
-    use crate::core_erlang::synced_call::FAULT_STATELESS_FIELD_WRITES;
-    FAULT_STATELESS_FIELD_WRITES.with(|flag| flag.set(true));
+    fault::set(Fault::StatelessFieldWrites, true);
     let result = f();
-    FAULT_STATELESS_FIELD_WRITES.with(|flag| flag.set(false));
+    fault::set(Fault::StatelessFieldWrites, false);
     result
 }
 

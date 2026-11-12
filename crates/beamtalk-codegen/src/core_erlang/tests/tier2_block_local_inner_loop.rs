@@ -16,7 +16,7 @@
 //! unbroken compile of the whole corpus is clean.
 
 use super::{codegen, verifier_report};
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::fault::Fault;
 
 /// An actor whose method `name` stores a Tier 2 block (a stored block that
 /// writes the captured local `c`, so it is called with the `StateAcc` protocol)
@@ -90,7 +90,7 @@ fn the_unbroken_repro_passes_the_verifier() {
 
 #[test]
 fn withholding_the_producer_sites_is_producer_site_not_threaded() {
-    let report = verifier_report(&repro(), Some(LocalRebindFault::Tier2OpaqueProducers))
+    let report = verifier_report(&repro(), Some(Fault::Tier2OpaqueProducers))
         .expect("the opaque lowering is a verifier finding");
     assert!(
         report.contains("ProducerSiteNotThreaded"),
@@ -161,7 +161,7 @@ enum Outcome {
     Finding(String),
 }
 
-fn outcome(src: &str, fault: Option<LocalRebindFault>) -> Outcome {
+fn outcome(src: &str, fault: Option<Fault>) -> Outcome {
     match verifier_report(src, fault) {
         None => Outcome::Clean,
         Some(report) if report.contains("UnsupportedFeature") => Outcome::Unsupported,
@@ -197,7 +197,7 @@ fn every_corpus_program_compiles_clean() {
 fn the_fault_is_reported_over_the_generated_corpus() {
     let mut reported = 0;
     for src in programs() {
-        match outcome(&src, Some(LocalRebindFault::Tier2OpaqueProducers)) {
+        match outcome(&src, Some(Fault::Tier2OpaqueProducers)) {
             Outcome::Finding(report) => {
                 assert!(
                     report.contains("ProducerSiteNotThreaded"),

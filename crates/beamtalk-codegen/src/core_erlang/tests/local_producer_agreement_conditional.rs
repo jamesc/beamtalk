@@ -20,7 +20,7 @@ use super::local_producer_agreement::{
     BODY_STATEMENTS, POSITIONS, body_sources, core_arm_site_producer, core_body_producers,
     core_producers, kind_of, sources,
 };
-use crate::core_erlang::threaded_expr::fault::recording_producers;
+use crate::core_erlang::fault::recording_producers;
 use crate::core_erlang::{CodegenOptions, generate_module_with_warnings};
 use beamtalk_core::ast::{Expression, ExpressionStatement};
 use beamtalk_core::semantic_analysis::block_facts::{

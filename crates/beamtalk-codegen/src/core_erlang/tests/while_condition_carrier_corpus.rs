@@ -37,7 +37,7 @@
 
 use super::{assert_compiles_through_erlc, codegen};
 #[cfg(debug_assertions)]
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::fault::Fault;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Loop conditions that send to `self` (a state effect only where the loop
@@ -263,7 +263,7 @@ fn bt4000_actor_loop_body_self_send_conditional() {
 /// `LocalRebind` was scoped there. The arguments are now sequenced ahead of
 /// the send; the verifier's `ProducerSiteNotThreaded` check at the method root
 /// catches the pre-fix lowering
-/// ([`LocalRebindFault::ClassSendOperandsInPlace`]). The matrix is
+/// ([`Fault::ClassSendOperandsInPlace`]). The matrix is
 /// `class_side_operand_producer_corpus.rs`.
 #[test]
 fn bt4014_class_side_operand_loop_local_write() {
@@ -274,7 +274,7 @@ fn bt4014_class_side_operand_loop_local_write() {
     assert!(passes(&src));
     #[cfg(debug_assertions)]
     {
-        let report = super::verifier_report(&src, Some(LocalRebindFault::ClassSendOperandsInPlace));
+        let report = super::verifier_report(&src, Some(Fault::ClassSendOperandsInPlace));
         assert!(
             report
                 .as_deref()
@@ -290,7 +290,7 @@ fn bt4014_class_side_operand_loop_local_write() {
 /// body threads a local) compiled and looped forever, the condition's `Self1`
 /// dying with its closure. Both now compile with a silent verifier and
 /// through `erlc`. With the pre-fix body-only family answer
-/// ([`LocalRebindFault::BodyOnlyLoopFamilies`]) the verifier reports Repro B's
+/// ([`Fault::BodyOnlyLoopFamilies`]) the verifier reports Repro B's
 /// dropped write as `ConditionFamilyNotCarried`, the check that was missing.
 const REPRO_A: &str = "TestCase subclass: WhileCarrierProbe\n  field: f = 0\n  probe =>\n    [self.f := self.f + 1. self.f < 3] whileTrue: [nil]\n    self.f\n";
 const REPRO_B: &str = "TestCase subclass: WhileCarrierProbe\n  field: f = 0\n  probe =>\n    k := 0\n    [self.f := self.f + 1. self.f < 3] whileTrue: [k := k + 1]\n    k\n";
@@ -307,7 +307,7 @@ fn bt4002_value_type_condition_field_write_is_carried() {
 #[test]
 fn bt4002_verifier_reports_a_condition_family_the_loop_drops() {
     for src in [REPRO_A, REPRO_B] {
-        let report = super::verifier_report(src, Some(LocalRebindFault::BodyOnlyLoopFamilies));
+        let report = super::verifier_report(src, Some(Fault::BodyOnlyLoopFamilies));
         assert!(
             report
                 .as_deref()
@@ -667,7 +667,7 @@ fn while_field_condition_corpus_compiles() {
 }
 
 /// BT-4002: with the pre-fix body-only family answer
-/// ([`LocalRebindFault::BodyOnlyLoopFamilies`]) every value-type row in
+/// ([`Fault::BodyOnlyLoopFamilies`]) every value-type row in
 /// statement position reports `ConditionFamilyNotCarried`: the verifier, not
 /// the repro, is what catches a dropped condition write.
 #[cfg(debug_assertions)]
@@ -683,7 +683,7 @@ fn while_field_condition_corpus_reports_a_dropped_condition_write() {
             .filter(|c| c.name.ends_with("statement"))
         {
             let src = format!("{}{HELPERS}{}", ctx.header, method(ctx, 0, &case.source));
-            let report = super::verifier_report(&src, Some(LocalRebindFault::BodyOnlyLoopFamilies));
+            let report = super::verifier_report(&src, Some(Fault::BodyOnlyLoopFamilies));
             if !report
                 .as_deref()
                 .is_some_and(|r| r.contains("ConditionFamilyNotCarried"))

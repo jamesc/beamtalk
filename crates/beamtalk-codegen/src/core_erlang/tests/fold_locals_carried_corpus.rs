@@ -9,7 +9,7 @@
 //! BT-3839 found the write it guards dropped silently: the fold's gate threaded the locals a
 //! nested loop wrote, the statement classifier did not see the nested loop as a producer, and the
 //! `do:` body answered the loop's raw value as its accumulator (`erlc`-clean, the answer 0
-//! instead of 6). BT-3839 made the two one function; [`LocalRebindFault::SplitFoldStatementGate`]
+//! instead of 6). BT-3839 made the two one function; [`Fault::SplitFoldStatementGate`]
 //! splits them again. Proved over a generated corpus, not the repro alone: every fold frame whose
 //! body ends in a loop or fold writing `t` (the loop-body agreement corpus's constructs, as a
 //! bare and a parenthesised statement, alone or inside a nested loop, in class, value-type and
@@ -21,7 +21,7 @@ use super::local_producer_agreement::{
 };
 use super::local_producer_agreement_lookup::rejected;
 use super::verifier_report;
-use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
+use crate::core_erlang::fault::{self, Fault};
 
 /// The BT-3839 repro, in each method kind.
 fn repro_sources() -> [String; 3] {
@@ -74,7 +74,7 @@ fn programs() -> Vec<(String, String)> {
 fn the_bt3839_repro_is_reported_when_the_fold_statement_gate_splits() {
     for src in repro_sources() {
         assert_eq!(verifier_report(&src, None), None, "{src}");
-        let report = verifier_report(&src, Some(LocalRebindFault::SplitFoldStatementGate));
+        let report = verifier_report(&src, Some(Fault::SplitFoldStatementGate));
         assert!(
             report
                 .as_deref()
@@ -107,7 +107,7 @@ fn every_fold_ending_in_a_producer_compiles_with_a_silent_verifier() {
 fn a_fold_ending_in_a_producer_is_reported_when_the_statement_gate_splits() {
     let mut unreported = Vec::new();
     for (name, src) in programs() {
-        match verifier_report(&src, Some(LocalRebindFault::SplitFoldStatementGate)) {
+        match verifier_report(&src, Some(Fault::SplitFoldStatementGate)) {
             Some(report) if report.contains("FoldLocalsNotCarried") => {}
             Some(report) => unreported.push(format!("{name}: wrong report: {report}")),
             None => unreported.push(format!("{name}: compiled without a report")),
@@ -144,9 +144,7 @@ fn a_split_gate_in_any_other_fold_kind_is_caught_by_the_producer_agreement_check
                         ) => panic!("fails unfaulted: {failure}"),
                     }
                     let faulted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        fault::with(LocalRebindFault::SplitFoldStatementGate, || {
-                            loop_body_agreement(&src)
-                        })
+                        fault::with(Fault::SplitFoldStatementGate, || loop_body_agreement(&src))
                     }));
                     // Only a disagreement the agreement check reports counts: a panic (a
                     // verifier finding, a codegen crash) or a codegen error is not that check

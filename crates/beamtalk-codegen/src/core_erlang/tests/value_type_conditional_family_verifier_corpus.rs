@@ -14,11 +14,11 @@
 //! statement-level shapes of `field_assignment_value_position.rs` (the very programs that
 //! must compile). Each is compiled twice: unbroken (control: compiles and the verifier is
 //! silent) and with the producer's merge `Bind` deliberately dropped
-//! ([`fault::LocalRebindFault::DropFamilyBind`]), which the verifier must report.
+//! ([`fault::Fault::DropFamilyBind`]), which the verifier must report.
 
 use super::codegen;
 use super::field_assignment_value_position::{VT_HEADER, VT_POSITIONS, VT_SHAPES};
-use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
+use crate::core_erlang::fault::{self, Fault};
 
 /// Whether the position's own construct is a conditional whose ARM writes a field (the value
 /// the producer merges), as opposed to one that only holds a field write in its receiver.
@@ -59,7 +59,7 @@ fn programs() -> Vec<(String, String)> {
 
 /// The verifier's debug-build report for `src` compiled with `fault` active: the message of the
 /// panic `report_threaded_ir_verify_errors` raises, or `None` when the compile succeeds.
-fn verifier_report(src: &str, fault: Option<LocalRebindFault>) -> Option<String> {
+fn verifier_report(src: &str, fault: Option<Fault>) -> Option<String> {
     let compile = || std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| codegen(src)));
     let result = match fault {
         Some(fault) => fault::with(fault, compile),
@@ -106,7 +106,7 @@ fn every_unbroken_field_writing_arm_conditional_compiles_with_a_silent_verifier(
 fn a_dropped_family_merge_is_reported_for_every_field_writing_arm_conditional() {
     let mut unreported = Vec::new();
     for (name, src) in programs() {
-        match verifier_report(&src, Some(LocalRebindFault::DropFamilyBind)) {
+        match verifier_report(&src, Some(Fault::DropFamilyBind)) {
             Some(report) if report.contains("ConstructFamilyDropped") => {}
             Some(report) => unreported.push(format!("{name}: wrong report: {report}\n{src}")),
             None => unreported.push(format!("{name}: compiled without a report\n{src}")),
@@ -135,7 +135,7 @@ fn a_dropped_local_rebind_of_a_mixed_conditional_is_reported() {
     assert!(cases.len() >= 4, "only {} mixed cases", cases.len());
     let mut unreported = Vec::new();
     for (name, src) in cases {
-        match verifier_report(&src, Some(LocalRebindFault::DropRebind)) {
+        match verifier_report(&src, Some(Fault::DropRebind)) {
             Some(report) if report.contains("ThreadedLocalDropped") => {}
             other => unreported.push(format!("{name}: {other:?}\n{src}")),
         }

@@ -225,10 +225,7 @@ impl CoreErlangGenerator {
         &self,
         expr: &'a Expression,
     ) -> Option<(&'a Block, &'a [Expression])> {
-        #[cfg(test)]
-        if super::threaded_expr::fault::active()
-            == Some(super::threaded_expr::fault::LocalRebindFault::EvaluatedBlockNotAProducer)
-        {
+        if fault!(EvaluatedBlockNotAProducer) {
             return None;
         }
         beamtalk_core::semantic_analysis::block_facts::literal_block_value_send(expr)
@@ -579,10 +576,7 @@ impl CoreErlangGenerator {
         // Test-only fault injection: the pre-BT-4015 answer, so the verifier's
         // `ConditionFamilyNotCarried` over a `Local` family is shown to fire on
         // a real compile (`tests/while_condition_binding_corpus.rs`).
-        #[cfg(test)]
-        if super::threaded_expr::fault::active()
-            == Some(super::threaded_expr::fault::LocalRebindFault::ConditionWritesNotCarried)
-        {
+        if fault!(ConditionWritesNotCarried) {
             return false;
         }
         !self.loop_condition_written_locals(condition).is_empty()

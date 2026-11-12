@@ -31,7 +31,7 @@
 use super::while_condition_carrier_corpus::{FieldCodegen, codegen_outcome};
 use super::{assert_compiles_through_erlc, codegen};
 #[cfg(debug_assertions)]
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::fault::Fault;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Constructs that write the outer local `n` (`PRODUCER`): every loop, fold,
@@ -266,7 +266,7 @@ fn class_side_operand_producers_compile() {
 }
 
 /// BT-4014: with the pre-fix lowering
-/// ([`LocalRebindFault::ClassSendOperandsInPlace`]: a class-side self-send's
+/// ([`Fault::ClassSendOperandsInPlace`]: a class-side self-send's
 /// arguments compiled inside its closed `let`) every class-side row whose
 /// producer is a direct argument of a method-root self-send statement reports
 /// `ProducerSiteNotThreaded`: the verifier, not `erlc`, is what catches it.
@@ -284,8 +284,7 @@ fn class_side_operand_producers_report_the_pre_fix_lowering() {
                     continue;
                 }
                 checked += 1;
-                let report =
-                    super::verifier_report(&src, Some(LocalRebindFault::ClassSendOperandsInPlace));
+                let report = super::verifier_report(&src, Some(Fault::ClassSendOperandsInPlace));
                 if !report
                     .as_deref()
                     .is_some_and(|r| r.contains("ProducerSiteNotThreaded"))
@@ -306,7 +305,7 @@ fn class_side_operand_producers_report_the_pre_fix_lowering() {
 
 /// BT-4014: over every class-side row, at every position (nested sends, the
 /// arm and loop-body frames, the class-variable writes), the pre-fix
-/// lowering ([`LocalRebindFault::ClassSendOperandsInPlace`]) is never a silent
+/// lowering ([`Fault::ClassSendOperandsInPlace`]) is never a silent
 /// miscompile: either some verifier check reports it, or its output still
 /// compiles through `erlc`. A frame body checks its own statements
 /// (`ProducerSiteNotThreaded` in the Letrec and fold bodies too), so a
@@ -314,7 +313,7 @@ fn class_side_operand_producers_report_the_pre_fix_lowering() {
 #[cfg(debug_assertions)]
 #[test]
 fn class_side_operand_producers_pre_fix_lowering_is_never_silent() {
-    let fault = LocalRebindFault::ClassSendOperandsInPlace;
+    let fault = Fault::ClassSendOperandsInPlace;
     let mut silent = Vec::new();
     let mut reported = 0;
     for ctx in CONTEXTS.iter().filter(|c| c.class_side) {
@@ -328,7 +327,7 @@ fn class_side_operand_producers_pre_fix_lowering_is_never_silent() {
                 continue;
             }
             let compiles = catch_unwind(AssertUnwindSafe(|| {
-                crate::core_erlang::threaded_expr::fault::with(fault, || {
+                crate::core_erlang::fault::with(fault, || {
                     assert_compiles_through_erlc("test", &codegen(&src));
                 });
             }))
@@ -348,7 +347,7 @@ fn class_side_operand_producers_pre_fix_lowering_is_never_silent() {
 }
 
 /// BT-4089: with the pre-fix lowering
-/// ([`LocalRebindFault::TupleAccRepackFromAmbientState`]: a tuple-acc fold's
+/// ([`Fault::TupleAccRepackFromAmbientState`]: a tuple-acc fold's
 /// post-fold repack seeds from the ambient actor `State` whatever the scope)
 /// every actor class-side row whose producer is a fold reports
 /// `ActorStateInClassMethod`: the verifier, not `erlc`, is what catches it.
@@ -367,8 +366,7 @@ fn bt4089_pre_fix_repack_reports_actor_state_in_class_method() {
             continue;
         }
         checked += 1;
-        let report =
-            super::verifier_report(&src, Some(LocalRebindFault::TupleAccRepackFromAmbientState));
+        let report = super::verifier_report(&src, Some(Fault::TupleAccRepackFromAmbientState));
         if !report
             .as_deref()
             .is_some_and(|r| r.contains("ActorStateInClassMethod"))

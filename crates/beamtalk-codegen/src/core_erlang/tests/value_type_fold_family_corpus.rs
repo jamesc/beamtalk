@@ -9,7 +9,7 @@
 //!    must end in the `Return` that hands the chain's last version out through the accumulator.
 //!    The corpus is every fold-writing position of `field_assignment_value_position.rs` x every
 //!    statement-level shape; each compiles unbroken with a silent verifier, and with the lambda's
-//!    `Return` deliberately dropped ([`LocalRebindFault::DropFoldFamilySlot`]) the verifier must
+//!    `Return` deliberately dropped ([`Fault::DropFoldFamilySlot`]) the verifier must
 //!    report it. (Before the lowering threaded the family the same body was a structured
 //!    rejection, so there was no output to check; dropping the `Return` reproduces what lifting
 //!    that rejection alone would have emitted.)
@@ -32,7 +32,7 @@ use super::field_assignment_value_position::{
 };
 use super::{codegen, verifier_report};
 use crate::core_erlang::control_flow::SoloBoolean;
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::fault::Fault;
 use crate::core_erlang::{CodegenOptions, generate_module_surfacing_verifier};
 
 /// `(case name, program)` for every statement-level shape x every fold-writing position.
@@ -101,7 +101,7 @@ fn every_unbroken_field_writing_fold_compiles_with_a_silent_verifier() {
 fn a_fold_lambda_that_drops_its_self_return_is_reported_for_every_program() {
     let mut unreported = Vec::new();
     for (name, src) in verifier_programs() {
-        match verifier_report(&src, Some(LocalRebindFault::DropFoldFamilySlot)) {
+        match verifier_report(&src, Some(Fault::DropFoldFamilySlot)) {
             Some(report) if report.contains("FoldFamilyNotCarried") => {}
             Some(report) => unreported.push(format!("{name}: wrong report: {report}\n{src}")),
             None => unreported.push(format!("{name}: compiled without a report\n{src}")),

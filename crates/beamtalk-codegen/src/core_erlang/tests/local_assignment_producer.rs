@@ -9,7 +9,7 @@
 //! method:
 //!
 //! 1. each row compiles through the debug `ThreadedIr` verifier and `erlc`;
-//! 2. with the producer gate disabled ([`LocalRebindFault::NotAProducer`]), the
+//! 2. with the producer gate disabled ([`Fault::NotAProducer`]), the
 //!    assignment reaches the value-only lowering and every row fails with
 //!    `VerifyError::UnthreadedLocalAssignment`, the check that fails on the
 //!    repro before the fix;
@@ -21,7 +21,7 @@
 //! is `value_position_assignment_agreement.rs`.
 
 use super::{assert_compiles_through_erlc, codegen, erlc_available, verifier_report};
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::fault::Fault;
 
 /// The BT-3860 repro table: a row name and a body.
 const ROWS: &[(&str, &str)] = &[
@@ -110,7 +110,7 @@ fn every_repro_row_compiles_through_the_verifier_and_erlc() {
 fn the_unthreaded_assignment_check_fails_every_repro_row_when_the_producer_is_off() {
     for (row, body) in ROWS {
         for (context, src) in sources(body) {
-            match verifier_report(&src, Some(LocalRebindFault::NotAProducer)) {
+            match verifier_report(&src, Some(Fault::NotAProducer)) {
                 Some(report) if report.contains("UnthreadedLocalAssignment") => {}
                 other => panic!(
                     "{row} ({context}): expected UnthreadedLocalAssignment, got {other:?}\n{src}"
@@ -127,7 +127,7 @@ fn a_value_position_assignment_is_a_sibling_rebind() {
         .chain(sources("<<t:8, (t := 7):8, t:8>>"))
     {
         assert_eq!(verifier_report(&src, None), None, "{context}");
-        match verifier_report(&src, Some(LocalRebindFault::SkipSiblingSnapshot)) {
+        match verifier_report(&src, Some(Fault::SkipSiblingSnapshot)) {
             Some(report) if report.contains("LocalReadAfterSiblingRebind") => {}
             other => panic!("{context}: expected LocalReadAfterSiblingRebind, got {other:?}"),
         }

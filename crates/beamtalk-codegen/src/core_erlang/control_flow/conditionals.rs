@@ -1156,12 +1156,8 @@ impl CoreErlangGenerator {
         let block_refs: Vec<&Block> = blocks.iter().collect();
         // Test-only: the pre-BT-4196 ordering, seeding before the scrutinee
         // (`StaleConstructSeed`).
-        #[cfg(test)]
-        let early_seed = (super::super::threaded_expr::fault::active()
-            == Some(super::super::threaded_expr::fault::LocalRebindFault::SeedBeforeScrutinee))
-        .then(|| self.producer_scratch_seed(&block_refs, scratch, frame));
-        #[cfg(not(test))]
-        let early_seed: Option<ProducerSeed> = None;
+        let early_seed: Option<ProducerSeed> = fault!(SeedBeforeScrutinee)
+            .then(|| self.producer_scratch_seed(&block_refs, scratch, frame));
         // BT-4196: the scrutinee compiles FIRST, so its State steps (a field
         // write, a bracket reload) are in the base State the scratch seed and
         // the arms thread from, like `ifTrue:`'s receiver and the lookup
@@ -1354,12 +1350,7 @@ impl CoreErlangGenerator {
         // again in the scope the frame keeps (`VerifyError::RebindNotVisible`
         // otherwise). A parameter is never one: it is bound only inside the
         // block, and a write to it is the block's own binding.
-        #[cfg(test)]
-        let producer = producer
-            && super::super::threaded_expr::fault::active()
-                != Some(
-                    super::super::threaded_expr::fault::LocalRebindFault::EvaluatedBlockRebindsScoped,
-                );
+        let producer = producer && !fault!(EvaluatedBlockRebindsScoped);
         if producer {
             for stmt in &body.prelude {
                 if let ThreadedStmt::LocalRebind {
@@ -2109,9 +2100,9 @@ impl CoreErlangGenerator {
         if let Some(tv) = &lowered {
             self.report_rebinds_visible(&tv.prelude, expr.span());
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test"))]
         if let (Some(_), Some(locals)) = (&lowered, &root_producer_locals) {
-            super::super::threaded_expr::fault::record_producer(expr.span(), locals);
+            super::super::fault::record_producer(expr.span(), locals);
         }
         Ok(lowered)
     }
@@ -2657,10 +2648,7 @@ impl CoreErlangGenerator {
         if self.is_repl_mode() {
             return true;
         }
-        #[cfg(test)]
-        if super::super::threaded_expr::fault::active()
-            == Some(super::super::threaded_expr::fault::LocalRebindFault::PutUncarriedLocal)
-        {
+        if fault!(PutUncarriedLocal) {
             return true;
         }
         match self.rebind_frames.get(&frame) {
@@ -2799,17 +2787,12 @@ impl CoreErlangGenerator {
             threads: arm.threads.clone(),
         };
         let body = super::super::util::collect_body_exprs(&block.body);
-        #[cfg(test)]
-        let _plain = super::super::threaded_expr::fault::PlainArmScope::enter(true);
+        #[cfg(any(test, feature = "test"))]
+        let _plain = super::super::fault::PlainArmScope::enter(true);
         self.with_rebind_frame(rebind, |this| {
             // Test-only fault (`PlainArmOpaqueProducers`): the producer sites
             // BT-3949 registers, withheld.
-            #[cfg(test)]
-            if super::super::threaded_expr::fault::active()
-                == Some(
-                    super::super::threaded_expr::fault::LocalRebindFault::PlainArmOpaqueProducers,
-                )
-            {
+            if fault!(PlainArmOpaqueProducers) {
                 return this.generate_conditional_arm_statements(block, Some(&arm));
             }
             this.with_body_producer_sites(&body, false, true, |this| {
@@ -2859,8 +2842,8 @@ impl CoreErlangGenerator {
             threads: arm.threads.clone(),
         };
         let body = super::super::util::collect_body_exprs(&block.body);
-        #[cfg(test)]
-        let _plain = super::super::threaded_expr::fault::PlainArmScope::enter(false);
+        #[cfg(any(test, feature = "test"))]
+        let _plain = super::super::fault::PlainArmScope::enter(false);
         self.with_rebind_frame(rebind, |this| {
             this.with_body_producer_sites(&body, false, true, |this| {
                 this.generate_conditional_arm_statements(block, Some(arm))

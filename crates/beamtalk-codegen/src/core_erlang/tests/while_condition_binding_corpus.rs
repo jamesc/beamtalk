@@ -26,7 +26,7 @@
 //! lowering with the debug verifier on;
 //! [`repl_condition_binding_rows_report_the_pre_fix_lowering`] shows the
 //! verifier catches the pre-fix lowering
-//! ([`LocalRebindFault::ConditionWritesNotCarried`]) on every row.
+//! ([`Fault::ConditionWritesNotCarried`]) on every row.
 //! `beamtalk-repl`'s `repl_while_condition_binding.rs` compiles the REPL
 //! corpus through `erlc`. [`compiled_condition_value_position_writes_compile`]
 //! covers the issue's question for compiled methods: a state-effecting
@@ -47,7 +47,7 @@
 //! included.
 
 use super::{assert_compiles_through_erlc, codegen};
-use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
+use crate::core_erlang::fault::{self, Fault};
 use crate::core_erlang::{CodeGenContext, CodeGenError, CoreErlangGenerator};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -97,7 +97,7 @@ fn repl_rows() -> Vec<String> {
 /// Lowers the REPL input `src` the way the REPL assembler lowers each
 /// statement (`local_producer_agreement_repl.rs`), answering the debug-build
 /// panic message (a verifier finding) or a codegen error, or `None`.
-pub(super) fn repl_report(src: &str, fault_on: Option<LocalRebindFault>) -> Option<String> {
+pub(super) fn repl_report(src: &str, fault_on: Option<Fault>) -> Option<String> {
     let (parsed, diags) = parse(lex_with_eof(src));
     assert!(diags.is_empty(), "malformed row:\n{src}\n{diags:?}");
     let statements: Vec<_> = parsed
@@ -158,7 +158,7 @@ fn repl_condition_binding_rows_verify() {
 }
 
 /// BT-4015: with the pre-fix gate (a REPL condition's binding write is not a
-/// carried effect, [`LocalRebindFault::ConditionWritesNotCarried`]) every
+/// carried effect, [`Fault::ConditionWritesNotCarried`]) every
 /// row reports `ConditionFamilyNotCarried`: the verifier, not the repro, is
 /// what catches a condition write the loop drops.
 #[cfg(debug_assertions)]
@@ -167,7 +167,7 @@ fn repl_condition_binding_rows_report_the_pre_fix_lowering() {
     let missed: Vec<String> = repl_rows()
         .into_iter()
         .filter_map(|row| {
-            let report = repl_report(&row, Some(LocalRebindFault::ConditionWritesNotCarried));
+            let report = repl_report(&row, Some(Fault::ConditionWritesNotCarried));
             (!report
                 .as_deref()
                 .is_some_and(|r| r.contains("ConditionFamilyNotCarried")))
@@ -184,7 +184,7 @@ fn repl_condition_binding_rows_report_the_pre_fix_lowering() {
 
 /// BT-4584: with the pre-fix lowering (a destructuring statement of a carried
 /// condition binds its names with plain `let`s,
-/// [`LocalRebindFault::ConditionDestructurePlain`]) every destructuring row
+/// [`Fault::ConditionDestructurePlain`]) every destructuring row
 /// reports `ConditionWriteNotInMap`: the condition hands its map back, but the
 /// map lacks the write.
 #[cfg(debug_assertions)]
@@ -198,7 +198,7 @@ fn repl_condition_destructure_rows_report_the_pre_fix_lowering() {
     let missed: Vec<String> = rows
         .into_iter()
         .filter_map(|row| {
-            let report = repl_report(&row, Some(LocalRebindFault::ConditionDestructurePlain));
+            let report = repl_report(&row, Some(Fault::ConditionDestructurePlain));
             (!report
                 .as_deref()
                 .is_some_and(|r| r.contains("ConditionWriteNotInMap")))
@@ -509,7 +509,7 @@ fn compiled_pure_condition_writes_are_carried() {
 }
 
 /// BT-4602: with the pre-BT-4015 gate
-/// ([`LocalRebindFault::ConditionWritesNotCarried`]) every row fails
+/// ([`Fault::ConditionWritesNotCarried`]) every row fails
 /// `verify()`: as `ConditionFamilyNotCarried` (a `ConditionalLoop` that does not
 /// hand the write back, or a plain loop whose condition writes a local), or
 /// first as `UnthreadedLocalAssignment` for a write in value position. The
@@ -525,7 +525,7 @@ fn compiled_pure_condition_writes_are_carried() {
 #[cfg(debug_assertions)]
 #[test]
 fn compiled_pure_condition_rows_report_the_pre_fix_lowering() {
-    let fault = LocalRebindFault::ConditionWritesNotCarried;
+    let fault = Fault::ConditionWritesNotCarried;
     let mut caught = 0;
     let missed: Vec<String> = pure_condition_rows()
         .into_iter()
@@ -588,8 +588,7 @@ fn compiled_condition_destructure_rows_report_the_pre_fix_lowering() {
                 continue;
             }
             checked += 1;
-            let report =
-                super::verifier_report(&src, Some(LocalRebindFault::ConditionDestructurePlain));
+            let report = super::verifier_report(&src, Some(Fault::ConditionDestructurePlain));
             let caught = report.as_deref().is_some_and(|r| {
                 r.contains("ConditionWriteNotInMap")
                     || (*name == "actor"

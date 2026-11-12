@@ -7,11 +7,11 @@
 //! first production source of `LocalRebind`s, so these compile one §1a probe
 //! shape — `t + (<fold that writes t>)` — in each method context with one
 //! deliberately broken lowering injected
-//! ([`threaded_expr::fault`](crate::core_erlang::threaded_expr::fault)) and
+//! ([`fault`](crate::core_erlang::fault)) and
 //! assert the verifier reports it. The unbroken compile is the control.
 
 use super::codegen;
-use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
+use crate::core_erlang::fault::{self, Fault};
 
 /// `t` is read as the left operand, then rebound by the right operand's
 /// producer (ADR 0131 §1a).
@@ -29,7 +29,7 @@ fn programs() -> [String; 3] {
 /// The verifier's debug-build report for `src` compiled with `fault`
 /// active: the message of the panic `report_threaded_ir_verify_errors`
 /// raises, or `None` when the compile succeeds.
-fn verifier_report(src: &str, fault: LocalRebindFault) -> Option<String> {
+fn verifier_report(src: &str, fault: Fault) -> Option<String> {
     let result = fault::with(fault, || {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| codegen(src)))
     });
@@ -42,7 +42,7 @@ fn verifier_report(src: &str, fault: LocalRebindFault) -> Option<String> {
     })
 }
 
-fn assert_reports(fault: LocalRebindFault, error: &str) {
+fn assert_reports(fault: Fault, error: &str) {
     for src in programs() {
         let report = verifier_report(&src, fault)
             .unwrap_or_else(|| panic!("{fault:?} compiled without a verifier report:\n{src}"));
@@ -64,25 +64,22 @@ fn the_unbroken_producer_compiles_and_snapshots_the_left_operand() {
 
 #[test]
 fn a_sibling_read_in_place_after_a_later_rebind_is_local_read_after_sibling_rebind() {
-    assert_reports(
-        LocalRebindFault::SkipSiblingSnapshot,
-        "LocalReadAfterSiblingRebind",
-    );
+    assert_reports(Fault::SkipSiblingSnapshot, "LocalReadAfterSiblingRebind");
 }
 
 #[test]
 fn a_construct_tuple_without_its_rebind_is_threaded_local_dropped() {
-    assert_reports(LocalRebindFault::DropRebind, "ThreadedLocalDropped");
+    assert_reports(Fault::DropRebind, "ThreadedLocalDropped");
 }
 
 #[test]
 fn a_map_put_rebind_at_the_method_root_is_local_rebind_mode_mismatch() {
-    assert_reports(LocalRebindFault::WrongLowering, "LocalRebindModeMismatch");
+    assert_reports(Fault::WrongLowering, "LocalRebindModeMismatch");
 }
 
 #[test]
 fn a_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
-    assert_reports(LocalRebindFault::WrongFrame, "LocalRebindFrameMismatch");
+    assert_reports(Fault::WrongFrame, "LocalRebindFrameMismatch");
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +121,7 @@ fn loop_programs() -> Vec<String> {
     out
 }
 
-fn assert_loop_reports(fault: LocalRebindFault, error: &str) {
+fn assert_loop_reports(fault: Fault, error: &str) {
     for src in loop_programs() {
         let report = verifier_report(&src, fault)
             .unwrap_or_else(|| panic!("{fault:?} compiled without a verifier report:\n{src}"));
@@ -145,20 +142,17 @@ fn the_unbroken_loop_body_producer_compiles() {
 
 #[test]
 fn a_loop_body_sibling_read_in_place_is_local_read_after_sibling_rebind() {
-    assert_loop_reports(
-        LocalRebindFault::SkipSiblingSnapshot,
-        "LocalReadAfterSiblingRebind",
-    );
+    assert_loop_reports(Fault::SkipSiblingSnapshot, "LocalReadAfterSiblingRebind");
 }
 
 #[test]
 fn a_loop_body_construct_tuple_without_its_rebind_is_threaded_local_dropped() {
-    assert_loop_reports(LocalRebindFault::DropRebind, "ThreadedLocalDropped");
+    assert_loop_reports(Fault::DropRebind, "ThreadedLocalDropped");
 }
 
 #[test]
 fn a_loop_body_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
-    assert_loop_reports(LocalRebindFault::WrongFrame, "LocalRebindFrameMismatch");
+    assert_loop_reports(Fault::WrongFrame, "LocalRebindFrameMismatch");
 }
 
 #[test]
@@ -166,7 +160,7 @@ fn a_map_put_rebind_in_a_direct_params_loop_body_is_local_rebind_mode_mismatch()
     // The counted-loop frame in a class method threads its locals as letrec
     // parameters, so a `MapPut` there threads nothing.
     let src = &loop_programs()[0];
-    let report = verifier_report(src, LocalRebindFault::WrongLowering)
+    let report = verifier_report(src, Fault::WrongLowering)
         .unwrap_or_else(|| panic!("compiled without a verifier report:\n{src}"));
     assert!(
         report.contains("LocalRebindModeMismatch"),
@@ -238,7 +232,7 @@ fn exception_programs() -> Vec<String> {
     out
 }
 
-fn assert_exception_reports(fault: LocalRebindFault, error: &str) {
+fn assert_exception_reports(fault: Fault, error: &str) {
     for src in exception_programs() {
         let report = verifier_report(&src, fault)
             .unwrap_or_else(|| panic!("{fault:?} compiled without a verifier report:\n{src}"));
@@ -259,20 +253,17 @@ fn the_unbroken_exception_producer_compiles_and_snapshots_the_left_operand() {
 
 #[test]
 fn an_exception_sibling_read_in_place_is_local_read_after_sibling_rebind() {
-    assert_exception_reports(
-        LocalRebindFault::SkipSiblingSnapshot,
-        "LocalReadAfterSiblingRebind",
-    );
+    assert_exception_reports(Fault::SkipSiblingSnapshot, "LocalReadAfterSiblingRebind");
 }
 
 #[test]
 fn an_exception_construct_tuple_without_its_rebind_is_threaded_local_dropped() {
-    assert_exception_reports(LocalRebindFault::DropRebind, "ThreadedLocalDropped");
+    assert_exception_reports(Fault::DropRebind, "ThreadedLocalDropped");
 }
 
 #[test]
 fn an_exception_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
-    assert_exception_reports(LocalRebindFault::WrongFrame, "LocalRebindFrameMismatch");
+    assert_exception_reports(Fault::WrongFrame, "LocalRebindFrameMismatch");
 }
 
 // ---------------------------------------------------------------------------
@@ -342,7 +333,7 @@ fn lookup_programs() -> Vec<String> {
     out
 }
 
-fn assert_lookup_reports(fault: LocalRebindFault, error: &str) {
+fn assert_lookup_reports(fault: Fault, error: &str) {
     for src in lookup_programs() {
         let report = verifier_report(&src, fault)
             .unwrap_or_else(|| panic!("{fault:?} compiled without a verifier report:\n{src}"));
@@ -367,20 +358,17 @@ fn the_unbroken_lookup_producer_compiles_and_calls_the_guard() {
 
 #[test]
 fn a_lookup_sibling_read_in_place_is_local_read_after_sibling_rebind() {
-    assert_lookup_reports(
-        LocalRebindFault::SkipSiblingSnapshot,
-        "LocalReadAfterSiblingRebind",
-    );
+    assert_lookup_reports(Fault::SkipSiblingSnapshot, "LocalReadAfterSiblingRebind");
 }
 
 #[test]
 fn a_lookup_construct_tuple_without_its_rebind_is_threaded_local_dropped() {
-    assert_lookup_reports(LocalRebindFault::DropRebind, "ThreadedLocalDropped");
+    assert_lookup_reports(Fault::DropRebind, "ThreadedLocalDropped");
 }
 
 #[test]
 fn a_lookup_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
-    assert_lookup_reports(LocalRebindFault::WrongFrame, "LocalRebindFrameMismatch");
+    assert_lookup_reports(Fault::WrongFrame, "LocalRebindFrameMismatch");
 }
 
 // ---------------------------------------------------------------------------
@@ -437,17 +425,17 @@ fn frame_programs(cases: &[(&str, &str)]) -> Vec<String> {
     out
 }
 
-fn assert_conditional_reports(fault: LocalRebindFault, error: &str) {
+fn assert_conditional_reports(fault: Fault, error: &str) {
     assert_frame_reports(&conditional_programs(), fault, error);
 }
 
-fn assert_frame_reports(programs: &[String], fault: LocalRebindFault, error: &str) {
+fn assert_frame_reports(programs: &[String], fault: Fault, error: &str) {
     for src in programs {
         let Some(report) = verifier_report(src, fault) else {
             // A statement-position conditional has no sibling read to
             // snapshot: the fault only applies to the operand probes.
             assert!(
-                fault == LocalRebindFault::SkipSiblingSnapshot && !src.contains("r := t + "),
+                fault == Fault::SkipSiblingSnapshot && !src.contains("r := t + "),
                 "{fault:?} compiled without a verifier report:\n{src}"
             );
             continue;
@@ -472,20 +460,17 @@ fn the_unbroken_conditional_producer_compiles_in_every_frame() {
 
 #[test]
 fn a_conditional_sibling_read_in_place_is_local_read_after_sibling_rebind() {
-    assert_conditional_reports(
-        LocalRebindFault::SkipSiblingSnapshot,
-        "LocalReadAfterSiblingRebind",
-    );
+    assert_conditional_reports(Fault::SkipSiblingSnapshot, "LocalReadAfterSiblingRebind");
 }
 
 #[test]
 fn a_conditional_construct_tuple_without_its_rebind_is_threaded_local_dropped() {
-    assert_conditional_reports(LocalRebindFault::DropRebind, "ThreadedLocalDropped");
+    assert_conditional_reports(Fault::DropRebind, "ThreadedLocalDropped");
 }
 
 #[test]
 fn a_conditional_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
-    assert_conditional_reports(LocalRebindFault::WrongFrame, "LocalRebindFrameMismatch");
+    assert_conditional_reports(Fault::WrongFrame, "LocalRebindFrameMismatch");
 }
 
 // ---------------------------------------------------------------------------
@@ -529,7 +514,7 @@ fn the_unbroken_evaluated_block_producer_compiles_in_every_frame() {
 fn an_evaluated_block_sibling_read_in_place_is_local_read_after_sibling_rebind() {
     assert_frame_reports(
         &evaluated_block_programs(),
-        LocalRebindFault::SkipSiblingSnapshot,
+        Fault::SkipSiblingSnapshot,
         "LocalReadAfterSiblingRebind",
     );
 }
@@ -538,7 +523,7 @@ fn an_evaluated_block_sibling_read_in_place_is_local_read_after_sibling_rebind()
 fn an_evaluated_block_construct_tuple_without_its_rebind_is_threaded_local_dropped() {
     assert_frame_reports(
         &evaluated_block_programs(),
-        LocalRebindFault::DropRebind,
+        Fault::DropRebind,
         "ThreadedLocalDropped",
     );
 }
@@ -547,7 +532,7 @@ fn an_evaluated_block_construct_tuple_without_its_rebind_is_threaded_local_dropp
 fn an_evaluated_block_rebind_recording_another_frame_is_local_rebind_frame_mismatch() {
     assert_frame_reports(
         &evaluated_block_programs(),
-        LocalRebindFault::WrongFrame,
+        Fault::WrongFrame,
         "LocalRebindFrameMismatch",
     );
 }
@@ -577,7 +562,7 @@ fn a_stale_held_rebind_in_any_production_prelude_is_held_rebind_not_identity() {
     let mut fired = 0;
     let mut clean = 0;
     for src in all_corpus_programs() {
-        match verifier_report(&src, LocalRebindFault::StaleHeld) {
+        match verifier_report(&src, Fault::StaleHeld) {
             Some(report) => {
                 assert!(
                     report.contains("HeldRebindNotIdentity"),

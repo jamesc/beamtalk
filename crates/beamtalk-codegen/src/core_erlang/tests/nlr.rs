@@ -119,8 +119,8 @@ fn every_actor_nlr_boundary_commits_the_cell() {
 /// The debug-build panic message of compiling `src` with `fault` on (a
 /// verifier finding), or `None` when the compile succeeds.
 #[cfg(debug_assertions)]
-fn report_under(fault: crate::core_erlang::nlr::fault::NlrFault, src: &str) -> Option<String> {
-    crate::core_erlang::nlr::fault::with_fault(fault, || {
+fn report_under(fault: crate::core_erlang::fault::Fault, src: &str) -> Option<String> {
+    crate::core_erlang::fault::with(fault, || {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| codegen(src)))
     })
     .err()
@@ -138,8 +138,8 @@ fn report_under(fault: crate::core_erlang::nlr::fault::NlrFault, src: &str) -> O
 #[cfg(debug_assertions)]
 #[test]
 fn an_actor_nlr_boundary_committing_the_carried_state_is_rejected() {
-    use crate::core_erlang::nlr::fault::NlrFault;
-    let report = report_under(NlrFault::CommitCarried, ACTOR_NLR_BOUNDARIES);
+    use crate::core_erlang::fault::Fault;
+    let report = report_under(Fault::NlrCommitCarried, ACTOR_NLR_BOUNDARIES);
     assert!(
         report
             .as_deref()
@@ -270,10 +270,10 @@ fn every_actor_arm_return_stores_its_state_before_the_throw() {
 #[cfg(debug_assertions)]
 #[test]
 fn an_arm_return_without_its_cell_store_is_rejected() {
-    use crate::core_erlang::nlr::fault::NlrFault;
+    use crate::core_erlang::fault::Fault;
     let mut fired = 0;
     for (label, src) in arm_return_corpus() {
-        let report = report_under(NlrFault::ThrowWithoutCellStore, &src);
+        let report = report_under(Fault::NlrThrowWithoutCellStore, &src);
         match report {
             Some(r) if r.contains("NlrThrowWithoutCellStore") => fired += 1,
             Some(other) => panic!("{label}: unexpected report {other}"),

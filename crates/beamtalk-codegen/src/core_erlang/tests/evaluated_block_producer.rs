@@ -11,7 +11,7 @@
 //!
 //! 1. each row compiles through the debug `ThreadedIr` verifier and `erlc`;
 //! 2. with the producer gate disabled
-//!    ([`LocalRebindFault::EvaluatedBlockNotAProducer`]), the send reaches the
+//!    ([`Fault::EvaluatedBlockNotAProducer`]), the send reaches the
 //!    legacy inline lowering, whose raw `{Value, State}` tuple became the value
 //!    (`{[:y | self.count := y] value: 5, self.count}` answered
 //!    `{{5, Counter(count: 5)}, 0}`), and every row fails with
@@ -25,7 +25,7 @@
 //! (`EXPRS`).
 
 use super::{assert_compiles_through_erlc, codegen, erlc_available, verifier_report};
-use crate::core_erlang::threaded_expr::fault::LocalRebindFault;
+use crate::core_erlang::fault::Fault;
 
 /// The BT-3982 repro table: a row name and an actor method body.
 const ROWS: &[(&str, &str)] = &[
@@ -114,7 +114,7 @@ fn every_repro_row_compiles_through_the_verifier_and_erlc() {
 fn the_unthreaded_evaluated_block_check_fails_every_repro_row_when_the_producer_is_off() {
     for (row, body) in ROWS {
         let src = source(body);
-        match verifier_report(&src, Some(LocalRebindFault::EvaluatedBlockNotAProducer)) {
+        match verifier_report(&src, Some(Fault::EvaluatedBlockNotAProducer)) {
             Some(report) if report.contains("UnthreadedEvaluatedBlock") => {}
             other => panic!("{row}: expected UnthreadedEvaluatedBlock, got {other:?}\n{src}"),
         }

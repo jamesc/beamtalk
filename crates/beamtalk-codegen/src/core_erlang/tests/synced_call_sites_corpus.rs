@@ -24,6 +24,7 @@
 //! `BT4020_SITES_DUMP=1` prints every site with its count and an example).
 
 use crate::core_erlang::dropped_assignment_probe::{PRELUDE, corpus};
+use crate::core_erlang::fault::{self, Fault};
 use crate::core_erlang::synced_call::{SITE_LOG, SiteRecord, count_only};
 use crate::core_erlang::{CodegenOptions, generate_module_with_warnings};
 use beamtalk_core::ast::MessageSelector;
@@ -398,9 +399,9 @@ fn the_probe_sees_a_missing_bracket() {
     // the probe names the site that compiled it.
     let src = "Actor subclass: Probe\n  state: n = 0\n\n  poke: o =>\n    o foo.\n    self.n\n";
     assert!(gaps_of(src).is_empty());
-    crate::core_erlang::synced_call::FAULT_NO_BRACKETS.with(|f| f.set(true));
+    fault::set(Fault::NoBrackets, true);
     let gaps = gaps_of(src);
-    crate::core_erlang::synced_call::FAULT_NO_BRACKETS.with(|f| f.set(false));
+    fault::set(Fault::NoBrackets, false);
     assert!(
         gaps.iter()
             .any(|g| g.selector == "foo" && g.site.contains(".rs:")),
@@ -414,9 +415,9 @@ fn the_probe_sees_a_stale_read_in_a_bracketed_loop() {
     // a field read in a bracketed loop is logged as a `stale-read` site.
     let src = "Actor subclass: Probe\n  state: n = 0\n\n  run: xs =>\n    x := 0.\n    t := 0.\n    xs do: [:e | x := x + e. t := self.n].\n    t\n";
     assert!(gaps_of(src).is_empty());
-    crate::core_erlang::synced_call::FAULT_ENTRY_STATE_READS.with(|f| f.set(true));
+    fault::set(Fault::EntryStateReads, true);
     let gaps = gaps_of(src);
-    crate::core_erlang::synced_call::FAULT_ENTRY_STATE_READS.with(|f| f.set(false));
+    fault::set(Fault::EntryStateReads, false);
     assert!(
         gaps.iter()
             .any(|g| g.selector == "stale-read field-read" && g.site.contains(".rs:")),
@@ -424,7 +425,7 @@ fn the_probe_sees_a_stale_read_in_a_bracketed_loop() {
     );
     // The bracketed matrix is not vacuous: under the fault every read payload
     // and every construct logs a stale read somewhere in it.
-    crate::core_erlang::synced_call::FAULT_ENTRY_STATE_READS.with(|f| f.set(true));
+    fault::set(Fault::EntryStateReads, true);
     let logged: Vec<String> = bracketed_read_sources()
         .into_iter()
         .filter(|src| {
@@ -433,7 +434,7 @@ fn the_probe_sees_a_stale_read_in_a_bracketed_loop() {
                 .any(|g| g.selector.starts_with("stale-read "))
         })
         .collect();
-    crate::core_erlang::synced_call::FAULT_ENTRY_STATE_READS.with(|f| f.set(false));
+    fault::set(Fault::EntryStateReads, false);
     for payload in READ_PAYLOADS {
         assert!(
             logged.iter().any(|src| src.contains(payload)),

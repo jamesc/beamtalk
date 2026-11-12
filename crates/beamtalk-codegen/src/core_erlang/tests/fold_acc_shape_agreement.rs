@@ -10,17 +10,17 @@
 //!    `FoldAccShapeMismatch` / `TupleAccWithFamily`);
 //! 2. builds through `erlc`;
 //! 3. answers what the same program answers when built with every fold forced
-//!    onto the map path ([`LocalRebindFault::ForceStateAccFold`], the
+//!    onto the map path ([`Fault::ForceStateAccFold`], the
 //!    oracle) — `Object` and `Value` instance methods are executed; actor and
 //!    class-method contexts are compiled and `erlc`'d only (they need a
 //!    running class/actor process);
 //!
-//! and the new shape's fault ([`LocalRebindFault::BareFoldTupleRepack`]) is
+//! and the new shape's fault ([`Fault::BareFoldTupleRepack`]) is
 //! reported as `FoldAccShapeMismatch`. The execution half is skipped (unless `BEAMTALK_REQUIRE_RUNTIME` is set, as in CI) when the
 //! Erlang runtime has not been built (`runtime/_build`).
 
 use super::{assert_parses, codegen_named, verifier_report};
-use crate::core_erlang::threaded_expr::fault::{self, LocalRebindFault};
+use crate::core_erlang::fault::{self, Fault};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -160,7 +160,7 @@ fn write_pinned_modules(dir: &Path) {
     .unwrap();
     std::fs::write(
         dir.join("bt4116_pino.core"),
-        fault::with(LocalRebindFault::ForceStateAccFold, || {
+        fault::with(Fault::ForceStateAccFold, || {
             codegen_named(pinned, "bt4116_pino")
         }),
     )
@@ -191,9 +191,7 @@ fn bare_and_tuple_folds_agree_with_the_map_oracle() {
             failures.push(format!("codegen panicked:\n{src}"));
             continue;
         };
-        let old_core = fault::with(LocalRebindFault::ForceStateAccFold, || {
-            codegen_named(&src, &old)
-        });
+        let old_core = fault::with(Fault::ForceStateAccFold, || codegen_named(&src, &old));
         for (name, core) in [(&new, &new_core), (&old, &old_core)] {
             std::fs::write(dir.join(format!("{name}.core")), core).unwrap();
         }
@@ -273,7 +271,7 @@ fn bare_and_tuple_folds_agree_with_the_map_oracle() {
 fn a_bare_fold_repacked_as_a_tuple_is_reported() {
     let src = "Object subclass: Probe\n  run =>\n    s := 0.\n    #(1, 2) do: [:e | s := s + e].\n    s\n";
     assert_eq!(verifier_report(src, None), None);
-    let report = verifier_report(src, Some(LocalRebindFault::BareFoldTupleRepack))
+    let report = verifier_report(src, Some(Fault::BareFoldTupleRepack))
         .expect("the shape fault must be reported");
     assert!(report.contains("FoldAccShapeMismatch"), "{report}");
 }
