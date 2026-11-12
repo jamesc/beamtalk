@@ -235,7 +235,7 @@ jobs:
         run: just test-repl-protocol
 
       - name: Build Rust (release)
-        run: cargo build --all-targets --release --locked --quiet
+        run: cargo build --release --locked --quiet
 
       - name: Build standard library (release)
         shell: bash

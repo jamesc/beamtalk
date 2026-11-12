@@ -202,11 +202,13 @@ fn twin_outcome(stmt: &str) -> Result<FieldCodegen, String> {
 
 /// Whether `producer` is one of [`PRODUCERS`]' folds (`do:`, `collect:`,
 /// `inject:into:`), each over a literal array.
+#[cfg(debug_assertions)]
 fn is_fold_producer(producer: &str) -> bool {
     producer.starts_with("#(1, 2) ")
 }
 
 /// Whether `stmt` holds one of [`PRODUCERS`]' folds.
+#[cfg(debug_assertions)]
 fn stmt_has_fold_producer(stmt: &str) -> bool {
     PRODUCERS
         .iter()

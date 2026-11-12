@@ -191,10 +191,39 @@ build-rust:
 build-release: build-rust-release build-erlang
 
 # Build Rust in release mode
+#
+# BT-4749: deliberately NOT `--all-targets`. That flag builds the test targets,
+# which activates dev-dependencies, and a dev-dependency's `features = ["test"]`
+# (e.g. beamtalk-repl -> beamtalk-codegen) is then unified into the *library*
+# that the shipped binaries link — compiling the fault registry and test probes
+# into the release `beamtalk`. `just check-release-build` guards this.
 build-rust-release:
     @echo "🔨 Building Rust workspace (release)..."
-    @cargo build --all-targets --release --quiet
+    @cargo build --release --quiet
     @echo "✅ Rust release build complete"
+
+# BT-4749: the release workspace build must be warning-free AND must not carry
+# test-only code. Builds into its own target dir (RUSTFLAGS differ from a normal
+# build, so sharing target/release would force a full rebuild of it) and fails
+# if any `cfg(any(test, feature = "test"))` fault-injection/probe symbol is
+# linked into the shipped binaries. Unix-only (needs `nm`); Linux CI runs it.
+[unix]
+check-release-build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔍 Checking the release workspace build (warnings denied)..."
+    dir=target/release-check
+    RUSTFLAGS="-D warnings" cargo build --release --workspace --locked --quiet --target-dir "$dir"
+    leaked=0
+    for bin in "$dir"/release/beamtalk "$dir"/release/beamtalk-compiler-port; do
+        [ -f "$bin" ] || { echo "❌ $bin not built"; exit 1; }
+        if nm -C "$bin" 2>/dev/null | grep -E 'beamtalk_codegen::core_erlang::(fault|dropped_assignment_probe)::'; then
+            echo "❌ $bin links test-only codegen code (the codegen 'test' feature leaked into the release build)"
+            leaked=1
+        fi
+    done
+    [ "$leaked" = 0 ] || exit 1
+    echo "✅ Release build is warning-free and carries no test-only code"
 
 # Build the LSP server
 build-lsp:
