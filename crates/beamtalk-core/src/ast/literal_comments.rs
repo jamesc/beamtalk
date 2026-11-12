@@ -26,6 +26,7 @@
 
 use std::collections::BTreeMap;
 
+use super::span_table::{entries_within, span_key as key};
 use super::{Comment, CommentAttachment};
 use crate::span::Span;
 
@@ -71,10 +72,6 @@ impl std::fmt::Debug for LiteralComments {
     }
 }
 
-fn key(span: Span) -> (u32, u32) {
-    (span.start(), span.end())
-}
-
 impl LiteralComments {
     /// `true` if no literal has a comment.
     #[must_use]
@@ -111,12 +108,7 @@ impl LiteralComments {
     #[must_use]
     pub fn within(&self, span: Span) -> Self {
         Self {
-            literals: self
-                .literals
-                .range((span.start(), span.start())..=(span.end(), span.end()))
-                .filter(|&(&(_, end), _)| end <= span.end())
-                .map(|(&key, slots)| (key, slots.clone()))
-                .collect(),
+            literals: entries_within(&self.literals, span),
         }
     }
 }
