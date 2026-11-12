@@ -44,14 +44,23 @@ stop(Pid) ->
     beamtalk_test_class_teardown:stop_class_process(Pid).
 
 -doc """
-Ensure fixture module `Module` is loaded and its `ClassName` is registered,
-loading it from `Beam` (a path to the `.beam`, without extension) when
-needed. Returns `ok`; crashes the test if the class never registers.
+Ensure fixture `Module` (a compiled class module, e.g. `'bt@counter'`) is
+loaded and `ClassName` is registered: loads it (from the code path, or from a
+`.beam` path when `Module` is a string), calls its `register_class/0` when the
+class is not yet registered, then waits for the registration. Idempotent;
+crashes the test (never skips) if the class does not register.
 """.
 -spec ensure_fixture_loaded(atom(), atom() | file:filename()) -> ok.
 ensure_fixture_loaded(ClassName, Module) when is_atom(Module) ->
-    _ = code:ensure_loaded(Module),
-    beamtalk_test_wait:class(ClassName);
+    {module, Module} = code:ensure_loaded(Module),
+    register_if_needed(ClassName, Module);
 ensure_fixture_loaded(ClassName, BeamPath) ->
-    {module, _} = code:load_abs(BeamPath),
+    {module, Module} = code:load_abs(BeamPath),
+    register_if_needed(ClassName, Module).
+
+register_if_needed(ClassName, Module) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        undefined -> Module:register_class();
+        _ -> ok
+    end,
     beamtalk_test_wait:class(ClassName).

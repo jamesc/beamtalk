@@ -343,7 +343,7 @@ responds_to_actor_inherited_method_test_() ->
         end,
         fun(_) -> ok end, fun() ->
             %% Hard failure (not a skip) if the stdlib never registers Counter.
-            ok = beamtalk_test_wait:class('Counter'),
+            ok = beamtalk_test_class:ensure_fixture_loaded('Counter', 'bt@counter'),
             case beamtalk_class_registry:whereis_class('Counter') of
                 undefined ->
                     error({class_not_registered, 'Counter'});
