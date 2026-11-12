@@ -1330,7 +1330,7 @@ publish_init_state(#class_state{name = ClassName} = State, ClassInfo, Meta) ->
     %% class-method-call reader never observes a gap between the class
     %% process existing and its snapshot existing.
     beamtalk_class_registry:record_class_state_snapshot(self(), State#class_state.class_state),
-    ok = publish_reflection(State),
+    ok = beamtalk_class_publish:publish_reflection(reflection_view(State)),
     %% ADR 0087 Phase 2: Forward the per-method cross-reference index
     %% to beamtalk_xref synchronously, before init returns. Running inside init/1
     %% means the rows are registered before start/2 yields {ok, Pid}, so the
@@ -1512,7 +1512,7 @@ handle_call({set_method_doc, Selector, DocBinary}, _From, State) ->
     NewMethodDocs = maps:put(Selector, DocBinary, State#class_state.method_docs),
     NewState = State#class_state{method_docs = NewMethodDocs},
     %% BT-3832: the doc is part of the published CompiledMethod record.
-    ok = publish_reflection(NewState),
+    ok = beamtalk_class_publish:publish_reflection(reflection_view(NewState)),
     {reply, ok, NewState};
 %% Class method dispatch.
 %% ADR 0036 Phase 2: Also handles metaclass_method_call with identical logic.
@@ -1603,7 +1603,9 @@ call_rename_class(
                 NewName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create
             ),
             beamtalk_class_publish:seed_runtime_class_methods(NewName, ClassMethods),
-            ok = publish_reflection(State#class_state{name = NewName}),
+            ok = beamtalk_class_publish:publish_reflection(
+                reflection_view(State#class_state{name = NewName})
+            ),
             beamtalk_class_metadata:put_direct_constructors(
                 NewName, beamtalk_class_metadata:lookup_direct_constructors(OldName)
             ),
@@ -1688,8 +1690,9 @@ call_put_method(Selector, Fun, Source, #class_state{name = ClassName} = State) -
     %% __beamtalk_meta/0 is stale after hot-patching, so synthesize metadata
     %% from the live class_state record instead.  Return types are cleared for
     %% hot-patched methods — the compiler treats them as dynamic.
-    ok = publish_reflection(NewState),
-    notify_hot_patch(NewState),
+    View = reflection_view(NewState),
+    ok = beamtalk_class_publish:publish_reflection(View),
+    beamtalk_class_publish:notify_hot_patch(View),
     %% A hot-patched instance method changes what ClassName (and
     %% every subclass inheriting through it) understands, invalidating any
     %% cached conforms_to/2 result for either.
@@ -1737,8 +1740,9 @@ call_put_class_method(Selector, Fun, Source, #class_state{name = ClassName} = St
     %% (ClassSide = true) from its Source. A no-op when xref / the compiler app
     %% is unavailable.
     beamtalk_class_publish:put_method_xref(ClassName, true, Selector, Source),
-    ok = publish_reflection(NewState),
-    notify_hot_patch(NewState),
+    View = reflection_view(NewState),
+    ok = beamtalk_class_publish:publish_reflection(View),
+    beamtalk_class_publish:notify_hot_patch(View),
     %% A hot-patched class-side method changes conforms_to/2's
     %% class-method check (class_has_class_method/2) for ClassName and every
     %% descendant walked through it.
@@ -1754,7 +1758,7 @@ call_update_class(ClassInfo, #class_state{name = ClassName} = State) ->
             {reply, {error, Error}, State};
         ok ->
             NewState = apply_class_info(State, ClassInfo),
-            ok = publish_reflection(NewState),
+            ok = beamtalk_class_publish:publish_reflection(reflection_view(NewState)),
             %% ADR 0050 Phase 3: Notify compiler server of class redefinition.
             %% The new module is already loaded, so __beamtalk_meta/0 is fresh.
             NewModule = NewState#class_state.module,
@@ -2425,80 +2429,33 @@ meta_to_methods(MetaMethodInfo, _FallbackMethods) when is_map(MetaMethodInfo) ->
     {MetaMethodInfo, ReturnTypes}.
 
 -doc """
-Mirror this class's reflection state into its metadata row (BT-3826).
-
-Publishes the local instance-method selectors, declared instance variables and
-both return-type maps, so `instance_methods_safe/1`, `instance_variables_safe/1`,
-`has_method/2` and `beamtalk_class_registry:get_method_return_type/2` can answer
-for this class without a `gen_server:call` -- which, issued from inside another
-class's handler, deadlocks two busy classes against each other. Called after
-every state change to those four fields: `init/1`, `put_method`,
-`put_class_method`, `update_class` and `rename_class`. Also publishes the class
-doc (BT-4262; `set_doc` publishes it directly).
+The read-only slice of `#class_state{}` that `beamtalk_class_publish` needs to
+publish reflection metadata and notify the compiler of a hot-patch. Keeps the
+record private to this module.
 """.
--spec publish_reflection(#class_state{}) -> ok.
-publish_reflection(
-    #class_state{
-        name = ClassName,
-        instance_methods = InstanceMethods,
-        fields = Fields,
-        method_return_types = MethodReturnTypes,
-        class_method_return_types = ClassMethodReturnTypes,
-        class_methods = ClassMethods,
-        is_sealed = IsSealed,
-        is_typed = IsTyped,
-        is_internal = IsInternal,
-        shape_version = ShapeVersion,
-        doc = Doc
-    } = State
-) ->
-    beamtalk_class_metadata:put_reflection(ClassName, #{
-        instance_methods => maps:keys(InstanceMethods),
-        instance_variables => Fields,
-        method_return_types => MethodReturnTypes,
-        class_method_return_types => ClassMethodReturnTypes
-    }),
-    %% BT-3832: flags, and the per-method records behind CompiledMethod lookups.
-    beamtalk_class_metadata:put_flags(ClassName, #{
-        is_sealed => IsSealed,
-        is_typed => IsTyped,
-        is_internal => IsInternal,
-        shape_version => ShapeVersion
-    }),
-    beamtalk_class_metadata:put_method_records(
-        ClassName, instance, method_records(instance, InstanceMethods, State)
-    ),
-    beamtalk_class_metadata:put_method_records(
-        ClassName, class, method_records(class, ClassMethods, State)
-    ),
-    %% BT-4262: the class doc, read by `beamtalk_behaviour_intrinsics:classDoc/1`.
-    beamtalk_class_metadata:put_class_doc(ClassName, Doc).
-
-%% `selector => #{info, source, signature, doc}` for one side of a class.
--spec method_records(instance | class, #{selector() => map()}, #class_state{}) ->
-    #{selector() => beamtalk_class_metadata:method_record()}.
-method_records(Side, Methods, State) ->
-    maps:map(fun(Sel, Info) -> method_record(Side, Sel, Info, State) end, Methods).
-
--spec method_record(instance | class, selector(), map(), #class_state{}) ->
-    beamtalk_class_metadata:method_record().
-method_record(instance, Sel, Info, #class_state{
-    method_source = Source, method_signatures = Sigs, method_docs = Docs
-}) ->
+-spec reflection_view(#class_state{}) -> beamtalk_class_publish:reflection_view().
+reflection_view(#class_state{} = S) ->
     #{
-        info => Info,
-        source => maps:get(Sel, Source, <<"">>),
-        signature => maps:get(Sel, Sigs, nil),
-        doc => maps:get(Sel, Docs, nil)
-    };
-method_record(class, Sel, Info, #class_state{
-    class_method_source = Source, class_method_signatures = Sigs, class_method_docs = Docs
-}) ->
-    #{
-        info => Info,
-        source => maps:get(Sel, Source, <<"">>),
-        signature => maps:get(Sel, Sigs, nil),
-        doc => maps:get(Sel, Docs, nil)
+        name => S#class_state.name,
+        module => S#class_state.module,
+        superclass => S#class_state.superclass,
+        is_sealed => S#class_state.is_sealed,
+        is_abstract => S#class_state.is_abstract,
+        is_typed => S#class_state.is_typed,
+        is_internal => S#class_state.is_internal,
+        shape_version => S#class_state.shape_version,
+        doc => S#class_state.doc,
+        fields => S#class_state.fields,
+        instance_methods => S#class_state.instance_methods,
+        class_methods => S#class_state.class_methods,
+        method_return_types => S#class_state.method_return_types,
+        class_method_return_types => S#class_state.class_method_return_types,
+        method_source => S#class_state.method_source,
+        method_signatures => S#class_state.method_signatures,
+        method_docs => S#class_state.method_docs,
+        class_method_source => S#class_state.class_method_source,
+        class_method_signatures => S#class_state.class_method_signatures,
+        class_method_docs => S#class_state.class_method_docs
     }.
 
 %% `CompiledMethod` for `Selector` in this class's own state (no chain walk), or `nil`.
@@ -2513,7 +2470,7 @@ state_compiled_method(ClassName, Side, Selector, State) ->
     case Methods of
         #{Selector := Info} ->
             #{source := Source, signature := Sig, doc := Doc} =
-                method_record(Side, Selector, Info, State),
+                beamtalk_class_publish:method_record(Side, Selector, Info, reflection_view(State)),
             compiled_method_map(ClassName, Side, Selector, Info, Source, Sig, Doc);
         _ ->
             nil
@@ -2615,8 +2572,9 @@ do_remove_class_method(Selector, #class_state{name = ClassName} = State) ->
                 beamtalk_xref:purge_method(ClassName, true, Selector)
             end)
     end,
-    ok = publish_reflection(NewState),
-    notify_hot_patch(NewState),
+    View = reflection_view(NewState),
+    ok = beamtalk_class_publish:publish_reflection(View),
+    beamtalk_class_publish:notify_hot_patch(View),
     beamtalk_protocol_registry:invalidate_conforms_cache(),
     NewState.
 
@@ -2641,77 +2599,6 @@ carried_over_shadowed(
         end,
         Shadowed
     ).
-
--doc """
-Notify the compiler server of a hot-patch.
-
-ADR 0050 Phase 3: `__beamtalk_meta/0` is stale after hot-patching (it reflects
-compile-time metadata only).  This function synthesizes a minimal metadata map
-from the current live `class_state` and casts it to the compiler server.
-The compiler server replaces the class entry wholesale.
-Fire-and-forget — silently dropped if the server is not running.
-""".
--spec notify_hot_patch(#class_state{}) -> ok.
-notify_hot_patch(#class_state{
-    name = ClassName,
-    module = Module,
-    superclass = Superclass,
-    is_sealed = IsSealed,
-    is_abstract = IsAbstract,
-    instance_methods = InstanceMethods,
-    class_methods = ClassMethods,
-    fields = Fields,
-    method_return_types = MethodReturnTypes,
-    class_method_return_types = ClassMethodReturnTypes
-}) ->
-    %% Build selector→arity maps from the live instance_methods and class_methods.
-    %% param_types uses atom `none` (not empty list) per ADR 0050 format.
-    MethodInfo = maps:map(
-        fun(Sel, #{arity := Arity}) ->
-            %% Return types are cleared for hot-patched selectors — the compiler
-            %% will treat them as dynamic (none).
-            #{
-                arity => Arity,
-                return_type => maps:get(Sel, MethodReturnTypes, none),
-                param_types => none
-            }
-        end,
-        InstanceMethods
-    ),
-    ClassMethodInfo = maps:map(
-        fun(Sel, #{arity := Arity}) ->
-            #{
-                arity => Arity,
-                return_type => maps:get(Sel, ClassMethodReturnTypes, none),
-                param_types => none
-            }
-        end,
-        ClassMethods
-    ),
-    %% Normalize superclass: class_state uses `none` for root classes, but
-    %% __beamtalk_meta/0 uses `nil`.  Keep the cache consistent with the meta format.
-    SuperclassOut =
-        case Superclass of
-            none -> nil;
-            S -> S
-        end,
-    Meta = #{
-        class => ClassName,
-        superclass => SuperclassOut,
-        module => Module,
-        meta_version => 2,
-        is_sealed => IsSealed,
-        is_abstract => IsAbstract,
-        fields => Fields,
-        method_info => MethodInfo,
-        class_method_info => ClassMethodInfo
-    },
-    %% Guard: the compiler app may not be present in all deployments.
-    %% beamtalk_runtime does not formally depend on beamtalk_compiler.
-    case erlang:function_exported(beamtalk_compiler_server, register_class, 2) of
-        true -> beamtalk_compiler_server:register_class(ClassName, Meta);
-        false -> ok
-    end.
 
 -doc """
 Apply ClassInfo map to existing State, returning updated State.

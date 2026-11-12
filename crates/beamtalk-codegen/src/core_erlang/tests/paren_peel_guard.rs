@@ -120,7 +120,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ("beamtalk-codegen/src/core_erlang/field_types.rs", 1),
     ("beamtalk-codegen/src/core_erlang/gen_server/methods.rs", 4),
     ("beamtalk-codegen/src/core_erlang/generator/accessors.rs", 2),
-    ("beamtalk-codegen/src/core_erlang/intrinsics.rs", 1),
+    ("beamtalk-codegen/src/core_erlang/intrinsics/boolean.rs", 1),
     ("beamtalk-codegen/src/core_erlang/mod.rs", 1),
     (
         "beamtalk-codegen/src/core_erlang/patterns/match_lowering.rs",

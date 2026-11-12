@@ -93,7 +93,7 @@ Object subclass: Adr0131LocalRebindClass
   // BT-3798 (ADR 0131 Phase 2d): `Dictionary at:ifAbsent:` whose handler writes.
   class s1 =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := d
       at: #k
       ifAbsent: [

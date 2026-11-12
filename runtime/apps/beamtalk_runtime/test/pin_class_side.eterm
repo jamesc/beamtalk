@@ -1,0 +1,86 @@
+{{[{put_reflection,['PinFactory',
+                    #{instance_methods => [make],
+                      method_return_types =>
+                          #{make => {generic,'List',['Integer']}},
+                      class_method_return_types =>
+                          #{default => 'PinFactory',create => 'PinFactory'},
+                      instance_variables => [seed]}]},
+   {put_flags,['PinFactory',
+               #{is_sealed => false,is_typed => false,shape_version => 1,
+                 is_internal => true}]},
+   {put_method_records,['PinFactory',instance,
+                        #{make =>
+                              #{info => #{arity => 0},
+                                signature => nil,doc => nil,source => <<>>}}]},
+   {put_method_records,['PinFactory',class,
+                        #{default =>
+                              #{info => #{arity => 0},
+                                signature => nil,doc => <<"The default.">>,
+                                source => <<"default => self new">>},
+                          create =>
+                              #{info => #{arity => 1},
+                                signature => <<"create: seed">>,doc => nil,
+                                source => <<>>}}]},
+   {put_class_doc,['PinFactory',none]}],
+  []},
+ {[{put_reflection,['PinFactory',
+                    #{instance_methods => [make],
+                      method_return_types =>
+                          #{make => {generic,'List',['Integer']}},
+                      class_method_return_types => #{create => 'PinFactory'},
+                      instance_variables => [seed]}]},
+   {put_flags,['PinFactory',
+               #{is_sealed => false,is_typed => false,shape_version => 1,
+                 is_internal => true}]},
+   {put_method_records,['PinFactory',instance,
+                        #{make =>
+                              #{info => #{arity => 0},
+                                signature => nil,doc => nil,source => <<>>}}]},
+   {put_method_records,['PinFactory',class,
+                        #{create =>
+                              #{info => #{arity => 1},
+                                signature => <<"create: seed">>,doc => nil,
+                                source => <<>>}}]},
+   {put_class_doc,['PinFactory',none]}],
+  []},
+ {[{put_reflection,['PinFactory',
+                    #{instance_methods => [make,pinned],
+                      method_return_types =>
+                          #{make => {generic,'List',['Integer']}},
+                      class_method_return_types => #{create => 'PinFactory'},
+                      instance_variables => [seed]}]},
+   {put_flags,['PinFactory',
+               #{is_sealed => false,is_typed => false,shape_version => 1,
+                 is_internal => true}]},
+   {put_method_records,['PinFactory',instance,
+                        #{pinned =>
+                              #{info => #{arity => 0,block => '$fun'},
+                                signature => nil,doc => nil,
+                                source => <<"pinned => 1">>},
+                          make =>
+                              #{info => #{arity => 0},
+                                signature => nil,doc => nil,source => <<>>}}]},
+   {put_method_records,['PinFactory',class,
+                        #{create =>
+                              #{info => #{arity => 1},
+                                signature => <<"create: seed">>,doc => nil,
+                                source => <<>>}}]},
+   {put_class_doc,['PinFactory',none]}],
+  [{register_class,['PinFactory',
+                    #{module => pin_factory,
+                      fields => [seed],
+                      is_sealed => false,class => 'PinFactory',
+                      superclass => nil,is_abstract => false,
+                      method_info =>
+                          #{pinned =>
+                                #{arity => 0,return_type => none,
+                                  param_types => none},
+                            make =>
+                                #{arity => 0,
+                                  return_type => {generic,'List',['Integer']},
+                                  param_types => none}},
+                      class_method_info =>
+                          #{create =>
+                                #{arity => 1,return_type => 'PinFactory',
+                                  param_types => none}},
+                      meta_version => 2}]}]}}.

@@ -254,36 +254,13 @@ rename_selector(Self, OldSelector, NewSelector, Sent) ->
 %% selector-level-vs-class-level kind split (ADR 0112).
 -spec ensure_rename_selector_collision_free(#beamtalk_object{}, atom()) -> ok.
 ensure_rename_selector_collision_free(Self, NewSelector) ->
-    case beamtalk_behaviour_intrinsics:classIncludesSelector(Self, NewSelector) of
-        false ->
-            ok;
-        true ->
+    beamtalk_refactor_support:raise_if_colliding(
+        beamtalk_behaviour_intrinsics:classIncludesSelector(Self, NewSelector),
+        fun() ->
             ClassPid = erlang:element(4, Self),
             ClassName = beamtalk_object_class:class_name_safe(ClassPid),
-            beamtalk_error:raise(rename_selector_collision_error(ClassName, NewSelector))
-    end.
-
--spec rename_selector_collision_error(atom(), atom()) -> #beamtalk_error{}.
-rename_selector_collision_error(ClassName, NewSelector) ->
-    ClassBin = atom_to_binary(ClassName, utf8),
-    NewBin = atom_to_binary(NewSelector, utf8),
-    Error0 = beamtalk_error:new(selector_already_exists, ClassName, NewSelector),
-    Error1 = beamtalk_error:with_message(
-        Error0,
-        iolist_to_binary([
-            ClassBin,
-            <<" already defines #">>,
-            NewBin,
-            <<" locally — refusing to overwrite"/utf8>>
-        ])
-    ),
-    beamtalk_error:with_hint(
-        Error1,
-        iolist_to_binary([
-            <<"removeSelector: #">>,
-            NewBin,
-            <<" first, or choose a different target name">>
-        ])
+            beamtalk_refactor_support:rename_collision_error(selector, ClassName, NewSelector)
+        end
     ).
 
 %% Review finding on PR #3529: refuses BEFORE any mutation when a confirmed
@@ -349,31 +326,25 @@ rename_selector_dynamic_no_source_error(ClassName, OldSelectorBin) ->
     ]),
     beamtalk_error:with_message(Error0, Msg).
 
+%% `no_sites` is a defensive backstop (mirrors
+%% `beamtalk_class_refactor`'s own `no_sites` case): reachable only if a
+%% class's own classification and its `beamtalk_workspace_meta`
+%% tracked-source state have diverged (see `rewrite_class_sites/4`'s own doc
+%% for the analogous class-rename case) — not expected in practice since
+%% `OldSelector` was just confirmed to resolve locally.
 -spec rename_selector_rewrite_failed_error(atom(), binary(), term()) -> #beamtalk_error{}.
-rename_selector_rewrite_failed_error(ClassName, _OldSelectorBin, workspace_unavailable) ->
-    Error0 = beamtalk_error:new(runtime_error, ClassName),
-    beamtalk_error:with_message(
-        Error0,
-        <<"Workspace not available; renameSelector:to: requires a running workspace">>
-    );
-%% Defensive backstop (mirrors `rename_rewrite_failed_error/2`'s own
-%% `no_sites` clause): reachable only if a class's own classification and
-%% its `beamtalk_workspace_meta` tracked-source state have diverged (see
-%% `rewrite_class_sites/4`'s own doc for the analogous class-rename case) —
-%% not expected in practice since `OldSelector` was just confirmed to
-%% resolve locally.
-rename_selector_rewrite_failed_error(ClassName, OldSelectorBin, no_sites) ->
-    Error0 = beamtalk_error:new(runtime_error, ClassName),
-    Msg = iolist_to_binary([
-        <<"renameSelector: #">>,
-        OldSelectorBin,
-        <<" found no definition or reference site to rewrite">>
-    ]),
-    beamtalk_error:with_message(Error0, Msg);
-rename_selector_rewrite_failed_error(ClassName, _OldSelectorBin, Reason) ->
-    Error0 = beamtalk_error:new(runtime_error, ClassName),
-    Msg = beamtalk_error:chars_to_binary(io_lib:format("Could not rename selector: ~tp", [Reason])),
-    beamtalk_error:with_message(Error0, Msg).
+rename_selector_rewrite_failed_error(ClassName, OldSelectorBin, Reason) ->
+    beamtalk_refactor_support:rename_rewrite_failed_error(
+        ClassName,
+        <<"renameSelector:to:">>,
+        <<"selector">>,
+        iolist_to_binary([
+            <<"renameSelector: #">>,
+            OldSelectorBin,
+            <<" found no definition or reference site to rewrite">>
+        ]),
+        Reason
+    ).
 
 -doc """
 Full site list for a `(ClassName, Side, OldSelector)` rename: the
@@ -791,21 +762,14 @@ class_side_atom(false) -> instance.
 log_selector_rename(
     ClassNameBin, Side, OldSelectorBin, NewSelectorBin, CandidateSites, RewriteResult
 ) ->
-    {Author, AuthorKind} = beamtalk_refactor_support:current_author_context(),
-    Spec = #{
-        kind => 'rename-method',
-        class => ClassNameBin,
-        selector => NewSelectorBin,
-        old_selector => OldSelectorBin,
-        side => Side,
-        candidate_sites => CandidateSites,
-        intent => durable,
-        author => Author,
-        author_kind => AuthorKind
-    },
-    try
-        erlang:apply(beamtalk_repl_eval, emit_rewrite_change_entry, [Spec, RewriteResult])
-    catch
-        error:undef -> ok
-    end,
-    ok.
+    beamtalk_refactor_support:log_rename_change(
+        #{
+            kind => 'rename-method',
+            class => ClassNameBin,
+            selector => NewSelectorBin,
+            old_selector => OldSelectorBin,
+            side => Side,
+            candidate_sites => CandidateSites
+        },
+        RewriteResult
+    ).

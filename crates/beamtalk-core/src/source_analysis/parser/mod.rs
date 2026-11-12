@@ -59,8 +59,10 @@ use crate::source_analysis::{Span, Token, TokenKind, Trivia, lex_with_eof};
 use ecow::EcoString;
 
 // Submodules with additional impl blocks for Parser
+mod binary;
 mod declarations;
 mod expressions;
+mod patterns;
 
 use declarations::DoubleColonSkip;
 

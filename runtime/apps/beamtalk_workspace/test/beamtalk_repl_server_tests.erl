@@ -1123,19 +1123,19 @@ get_completions_workspace_binding_prefix_test() ->
 parse_receiver_class_and_prefix_test() ->
     ?assertEqual(
         {<<"Integer">>, <<"s">>},
-        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"Integer s">>)
+        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"Integer s">>)
     ).
 
 parse_receiver_class_empty_prefix_test() ->
     ?assertEqual(
         {<<"Integer">>, <<>>},
-        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"Integer ">>)
+        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"Integer ">>)
     ).
 
 parse_receiver_integer_literal_test() ->
     ?assertEqual(
         {<<"42">>, <<"s">>},
-        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"42 s">>)
+        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"42 s">>)
     ).
 
 parse_receiver_float_literal_no_completions_test() ->
@@ -1146,33 +1146,33 @@ parse_receiver_float_literal_no_completions_test() ->
 parse_no_receiver_single_word_test() ->
     ?assertEqual(
         {undefined, <<"Counter">>},
-        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"Counter">>)
+        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"Counter">>)
     ).
 
 parse_no_receiver_empty_test() ->
     ?assertEqual(
         {undefined, <<>>},
-        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<>>)
+        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<>>)
     ).
 
 parse_receiver_string_literal_test() ->
     ?assertEqual(
         {<<"\"hello\"">>, <<"up">>},
-        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"\"hello\" up">>)
+        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"\"hello\" up">>)
     ).
 
 parse_receiver_keyword_selector_test() ->
     %% Colons are identifier chars — "ifT:" is the prefix, not just "ifT"
     ?assertEqual(
         {<<"Integer">>, <<"ifT:">>},
-        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"Integer ifT:">>)
+        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"Integer ifT:">>)
     ).
 
 parse_receiver_multi_keyword_selector_test() ->
     %% Multi-keyword selectors like "ifTrue:ifFalse:" complete as a unit
     ?assertEqual(
         {<<"Boolean">>, <<"ifTrue:ifFalse:">>},
-        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"Boolean ifTrue:ifFalse:">>)
+        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"Boolean ifTrue:ifFalse:">>)
     ).
 
 %%% get_context_completions/1 tests
@@ -1553,30 +1553,30 @@ tokenise_send_chain_simple_chain_test() ->
     %% Single hop unary chain
     ?assertEqual(
         {ok, <<"\"hello\"">>, [size]},
-        beamtalk_repl_ops_dev:tokenise_send_chain(<<"\"hello\" size">>)
+        beamtalk_repl_editor_context:tokenise_send_chain(<<"\"hello\" size">>)
     ).
 
 tokenise_send_chain_multi_hop_test() ->
     %% Two-hop unary chain
     ?assertEqual(
         {ok, <<"counter">>, [getValue, reversed]},
-        beamtalk_repl_ops_dev:tokenise_send_chain(<<"counter getValue reversed">>)
+        beamtalk_repl_editor_context:tokenise_send_chain(<<"counter getValue reversed">>)
     ).
 
 tokenise_send_chain_single_token_returns_error_test() ->
     %% Single token — no sends to chain
-    ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_send_chain(<<"hello">>)).
+    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_send_chain(<<"hello">>)).
 
 tokenise_send_chain_empty_returns_error_test() ->
-    ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_send_chain(<<>>)).
+    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_send_chain(<<>>)).
 
 tokenise_send_chain_keyword_mid_chain_returns_error_test() ->
     %% Keyword send mid-chain is not a unary chain
-    ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_send_chain(<<"myList inject: 0">>)).
+    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_send_chain(<<"myList inject: 0">>)).
 
 tokenise_send_chain_paren_returns_error_test() ->
     %% Parenthesised subexpression — not supported
-    ?assertEqual(error, beamtalk_repl_ops_dev:tokenise_send_chain(<<"(myList size)">>)).
+    ?assertEqual(error, beamtalk_repl_editor_context:tokenise_send_chain(<<"(myList size)">>)).
 
 %%% parse_receiver_and_prefix/1 multi-token tests
 
@@ -1584,35 +1584,35 @@ parse_receiver_multi_token_expression_test() ->
     %% Multi-token receiver returns {expression, ReceiverExpr, Prefix}
     ?assertEqual(
         {expression, <<"\"hello\" size">>, <<"cl">>},
-        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"\"hello\" size cl">>)
+        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"\"hello\" size cl">>)
     ).
 
 parse_receiver_multi_token_empty_prefix_test() ->
     %% Multi-token expression with trailing space (empty prefix)
     ?assertEqual(
         {expression, <<"\"hello\" size">>, <<>>},
-        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"\"hello\" size ">>)
+        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"\"hello\" size ">>)
     ).
 
 parse_receiver_multi_token_three_tokens_test() ->
     %% Three-token expression with trailing space
     ?assertEqual(
         {expression, <<"counter getValue reversed">>, <<>>},
-        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"counter getValue reversed ">>)
+        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"counter getValue reversed ">>)
     ).
 
 parse_receiver_leading_whitespace_single_token_test() ->
     %% Leading whitespace must NOT trigger multi-token expression path
     ?assertEqual(
         {<<"Integer">>, <<"s">>},
-        beamtalk_repl_ops_dev:parse_receiver_and_prefix(<<"  Integer s">>)
+        beamtalk_repl_editor_context:parse_receiver_and_prefix(<<"  Integer s">>)
     ).
 
 %%% walk_chain/2 and walk_chain_class/2 tests
 
 walk_chain_empty_selectors_test() ->
     %% walk_chain with no selectors returns the class unchanged — no registry call
-    ?assertEqual({ok, 'String', instance}, beamtalk_repl_ops_dev:walk_chain('String', [])).
+    ?assertEqual({ok, 'String', instance}, beamtalk_repl_editor_context:walk_chain('String', [])).
 
 walk_chain_single_hop_found_test() ->
     Pid = spawn_mock_class_with_return_types(
@@ -1621,7 +1621,7 @@ walk_chain_single_hop_found_test() ->
     try
         ?assertEqual(
             {ok, 'Integer', instance},
-            beamtalk_repl_ops_dev:walk_chain('WalkChainTestA', [size])
+            beamtalk_repl_editor_context:walk_chain('WalkChainTestA', [size])
         )
     after
         cleanup_mock_class('WalkChainTestA', Pid)
@@ -1635,7 +1635,7 @@ walk_chain_broken_chain_test() ->
     try
         ?assertEqual(
             undefined,
-            beamtalk_repl_ops_dev:walk_chain('WalkChainTestB', [size])
+            beamtalk_repl_editor_context:walk_chain('WalkChainTestB', [size])
         )
     after
         cleanup_mock_class('WalkChainTestB', Pid)
@@ -1643,7 +1643,9 @@ walk_chain_broken_chain_test() ->
 
 walk_chain_class_empty_selectors_test() ->
     %% walk_chain_class with no selectors returns the class unchanged — no registry call
-    ?assertEqual({ok, 'Integer', class}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [])).
+    ?assertEqual(
+        {ok, 'Integer', class}, beamtalk_repl_editor_context:walk_chain_class('Integer', [])
+    ).
 
 walk_chain_class_single_hop_found_test() ->
     Pid = spawn_mock_class_with_return_types(
@@ -1652,7 +1654,7 @@ walk_chain_class_single_hop_found_test() ->
     try
         ?assertEqual(
             {ok, 'WalkChainClassTestA', instance},
-            beamtalk_repl_ops_dev:walk_chain_class('WalkChainClassTestA', [new])
+            beamtalk_repl_editor_context:walk_chain_class('WalkChainClassTestA', [new])
         )
     after
         cleanup_mock_class('WalkChainClassTestA', Pid)
@@ -1664,7 +1666,7 @@ walk_chain_class_single_hop_found_test() ->
 %% class side rather than returning undefined.
 walk_chain_class_class_selector_stays_on_class_side_test() ->
     ?assertEqual(
-        {ok, 'Integer', class}, beamtalk_repl_ops_dev:walk_chain_class('Integer', [class])
+        {ok, 'Integer', class}, beamtalk_repl_editor_context:walk_chain_class('Integer', [class])
     ).
 
 walk_chain_class_class_then_method_test() ->
@@ -1675,7 +1677,7 @@ walk_chain_class_class_then_method_test() ->
         %% `WalkChainClassB class new` — `class` stays on class side, then `new` resolves
         ?assertEqual(
             {ok, 'WalkChainClassB', instance},
-            beamtalk_repl_ops_dev:walk_chain_class('WalkChainClassB', [class, new])
+            beamtalk_repl_editor_context:walk_chain_class('WalkChainClassB', [class, new])
         )
     after
         cleanup_mock_class('WalkChainClassB', Pid)
@@ -1692,7 +1694,7 @@ walk_chain_multi_hop_test() ->
     try
         ?assertEqual(
             {ok, 'String', instance},
-            beamtalk_repl_ops_dev:walk_chain('WalkChainMultiA', [size, reversed])
+            beamtalk_repl_editor_context:walk_chain('WalkChainMultiA', [size, reversed])
         )
     after
         cleanup_mock_class('WalkChainMultiA', PidA),
@@ -1716,7 +1718,7 @@ walk_chain_superclass_inheritance_test() ->
     try
         ?assertEqual(
             {ok, 'Integer', instance},
-            beamtalk_repl_ops_dev:walk_chain('WalkChainSub', [size])
+            beamtalk_repl_editor_context:walk_chain('WalkChainSub', [size])
         )
     after
         cleanup_mock_class('WalkChainSub', PidSub),

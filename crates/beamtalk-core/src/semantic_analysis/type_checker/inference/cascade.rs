@@ -133,6 +133,9 @@ impl TypeChecker {
         messages: &[CascadeMessage],
         hierarchy: &ClassHierarchy,
     ) {
+        // A map shape receives its messages as its `Dictionary` view.
+        let view = dispatch_ty.dictionary_view();
+        let dispatch_ty = view.as_ref().unwrap_or(dispatch_ty);
         let InferredType::Known { class_name, .. } = dispatch_ty else {
             return;
         };
@@ -216,7 +219,9 @@ impl TypeChecker {
         if !cascade_drops_update(hierarchy, &receiver_ty, &name) {
             return;
         }
-        let InferredType::Known { class_name, .. } = &receiver_ty else {
+        // A map shape receives its messages as its `Dictionary` view.
+        let view = receiver_ty.dictionary_view();
+        let InferredType::Known { class_name, .. } = view.as_ref().unwrap_or(&receiver_ty) else {
             return;
         };
         let display = InferredType::class_name_for_diagnostic(class_name.as_str());
@@ -279,6 +284,9 @@ pub fn cascade_drops_update(
     receiver_ty: &InferredType,
     selector: &str,
 ) -> bool {
+    // A map shape receives its messages as its `Dictionary` view.
+    let view = receiver_ty.dictionary_view();
+    let receiver_ty = view.as_ref().unwrap_or(receiver_ty);
     let InferredType::Known { class_name, .. } = receiver_ty else {
         return false;
     };

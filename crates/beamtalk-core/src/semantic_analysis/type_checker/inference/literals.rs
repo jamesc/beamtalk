@@ -16,7 +16,9 @@ use crate::ast::{
 };
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
-use crate::semantic_analysis::type_checker::{DynamicReason, InferredType, TypeChecker, TypeEnv};
+use crate::semantic_analysis::type_checker::{
+    DynamicReason, InferredType, ShapeFieldType, TypeChecker, TypeEnv,
+};
 use ecow::{EcoString, eco_format};
 
 impl TypeChecker {
@@ -134,8 +136,22 @@ impl TypeChecker {
         }
     }
 
-    /// Infer a map literal `#{...}` as `Dictionary(K, V)` — the
-    /// `Expression::MapLiteral` arm of `infer_expr`'s dispatch.
+    /// Infer a map literal `#{...}` — the `Expression::MapLiteral` arm of
+    /// `infer_expr`'s dispatch.
+    ///
+    /// A non-empty literal whose keys are all distinct symbol literals infers
+    /// a *closed shape* with every key required and each
+    /// value's own inferred type, so nested literals infer nested shapes
+    /// (ADR 0147 § Map literals infer shapes). Any other literal — a computed
+    /// key, a non-symbol key, a mix, or a repeated key — infers
+    /// `Dictionary(K, V)` with `K`/`V` the joins of the key/value types. The
+    /// empty `#{}` is deliberately one of those: it is the seed of the
+    /// `inject: #{} into: [...]` / `d := d at: k put: v` idiom, whose result
+    /// is a filled `Dictionary`, never the empty record, so it keeps the
+    /// gradual `Dictionary(Dynamic, Dynamic)`. The
+    /// shape's [`dictionary_view`](InferredType::dictionary_view) equals that
+    /// same `Dictionary(K, V)`, so sends that are not shape-aware see no
+    /// difference.
     pub(in crate::semantic_analysis::type_checker) fn infer_map_literal(
         &mut self,
         pairs: &[MapPair],
@@ -154,9 +170,37 @@ impl TypeChecker {
             key_types.push(self.infer_expr(&pair.key, hierarchy, env, in_abstract_method));
             value_types.push(self.infer_expr(&pair.value, hierarchy, env, in_abstract_method));
         }
+        if let Some(shape) = Self::symbol_keyed_shape(pairs, &value_types) {
+            return shape;
+        }
         let key_ty = Self::join_element_types(&key_types);
         let value_ty = Self::join_element_types(&value_types);
         InferredType::known_with_args("Dictionary", vec![key_ty, value_ty])
+    }
+
+    /// The closed shape of a map literal whose keys are all distinct symbol
+    /// literals, or `None` for any other literal (and for `#{}`) (which stays a
+    /// `Dictionary(K, V)`). A repeated key is declined rather than collapsed
+    /// so the shape's `Dictionary` view keeps equalling the joined type.
+    fn symbol_keyed_shape(pairs: &[MapPair], value_types: &[InferredType]) -> Option<InferredType> {
+        if pairs.is_empty() {
+            return None;
+        }
+        let mut fields: Vec<ShapeFieldType> = Vec::with_capacity(pairs.len());
+        for (pair, value) in pairs.iter().zip(value_types) {
+            let Expression::Literal(Literal::Symbol(name), _) = &pair.key else {
+                return None;
+            };
+            if fields.iter().any(|f| f.key == *name) {
+                return None;
+            }
+            fields.push(ShapeFieldType {
+                key: name.clone(),
+                value: value.clone(),
+                optional: false,
+            });
+        }
+        Some(InferredType::shape(fields, false))
     }
 
     /// Infer a list literal `#(...)` (optionally with a cons `tail`) as

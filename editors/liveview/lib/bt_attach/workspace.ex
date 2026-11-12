@@ -598,7 +598,7 @@ defmodule BtAttach.Workspace do
   (`nav-query` `kind=keyword_selector`, BT-4455) — go-to-definition's resolver.
   `context` carries the same editor text the `hover` op takes: `:before`, `:suffix`
   (both default `""`). The op runs the **same** recognizer as hover
-  (`beamtalk_repl_ops_dev:keyword_send_at/3`), so the two cannot drift.
+  (`beamtalk_repl_editor_context:keyword_send_at/3`), so the two cannot drift.
 
   Returns the live `{:value, %{"selector" => selector | nil}}` term verbatim
   (`nil` when no send resolves), or `{:error, reason}` on a dispatch failure.

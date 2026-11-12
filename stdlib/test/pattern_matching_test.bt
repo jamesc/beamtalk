@@ -182,6 +182,7 @@ TestCase subclass: PatternMatchingTest
       ])
       equals: "click"
     // Dict arm fallthrough: key missing
+    @expect type
     self
       assert: (#{#kind => "x"} match: [
         #{#event => evName} -> evName;

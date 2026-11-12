@@ -43,10 +43,12 @@ TestCase subclass: DictionaryTest
 
   testAtIfabsentLookupWithDefault =>
     self assert: (#{#a => 1} at: #a ifAbsent: [42]) equals: 1
+    @expect type
     self assert: (#{#a => 1} at: #b ifAbsent: [42]) equals: 42
 
   testAtIfPresent =>
     self assert: (#{#a => 1} at: #a ifPresent: [:v | v * 10]) equals: 10
+    @expect type
     self assert: (#{#a => 1} at: #b ifPresent: [:v | v * 10]) equals: nil
     self assert: (#{} at: #a ifPresent: [:v | v * 10]) equals: nil
 
@@ -60,6 +62,7 @@ TestCase subclass: DictionaryTest
         ifPresent: [:v | v * 10]
         ifAbsent: [0])
       equals: 10
+    @expect type
     self
       assert: (#{#a => 1}
         at: #b
@@ -80,6 +83,7 @@ TestCase subclass: DictionaryTest
         ifPresent: [:v | v]
         ifAbsent: [self error: "absent ran"])
       equals: 1
+    @expect type
     self
       assert: (#{#a => 1}
         at: #b

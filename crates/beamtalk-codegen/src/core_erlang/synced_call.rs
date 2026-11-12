@@ -811,11 +811,11 @@ impl CoreErlangGenerator {
         use beamtalk_core::semantic_analysis::InferredType;
         // Only a type the compiler derived (a literal, a constructor): a declared
         // annotation is not checked at run time, so the value may be any class.
-        let Some(InferredType::Known {
-            class_name,
-            provenance: beamtalk_core::semantic_analysis::TypeProvenance::Inferred(_),
-            ..
-        }) = self.type_map.get(receiver.span())
+        use beamtalk_core::semantic_analysis::TypeProvenance;
+        let Some((class_name, TypeProvenance::Inferred(_))) = self
+            .type_map
+            .get(receiver.span())
+            .and_then(InferredType::instance_class)
         else {
             return false;
         };
