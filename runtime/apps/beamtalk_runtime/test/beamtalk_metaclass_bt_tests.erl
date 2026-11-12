@@ -9,7 +9,7 @@
 EUnit tests for beamtalk_metaclass_bt module.
 
 Tests metaclass identity predicates, dispatch error handling,
-has_method/1 queries, and class registration.
+has_method/1 queries. Registration: see beamtalk_bt_stub_registration_tests.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -73,45 +73,3 @@ has_method_unknown_selectors_test() ->
     ?assertNot(beamtalk_metaclass_bt:has_method('new')),
     ?assertNot(beamtalk_metaclass_bt:has_method('name')),
     ?assertNot(beamtalk_metaclass_bt:has_method('superclass')).
-
-%%% ============================================================================
-%%% register_class/0 (requires bootstrap)
-%%% ============================================================================
-
-register_class_test_() ->
-    {setup, fun setup_bootstrap/0, fun teardown_bootstrap/1, [
-        {"register_class creates Metaclass", fun register_class_creates_test/0},
-        {"register_class is idempotent", fun register_class_idempotent_test/0},
-        {"registered Metaclass has correct superclass", fun register_class_superclass_test/0}
-    ]}.
-
-setup_bootstrap() ->
-    case whereis(pg) of
-        undefined -> pg:start_link();
-        _ -> ok
-    end,
-    beamtalk_extensions:init(),
-    case beamtalk_bootstrap:start_link() of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
-    ok.
-
-teardown_bootstrap(_) ->
-    ok.
-
-register_class_creates_test() ->
-    %% Bootstrap already registered Metaclass; verify it's there
-    Pid = beamtalk_class_registry:whereis_class('Metaclass'),
-    ?assertNotEqual(undefined, Pid),
-    ?assertEqual('Metaclass', beamtalk_object_class:class_name(Pid)).
-
-register_class_idempotent_test() ->
-    %% Calling register_class again should not crash
-    ok = beamtalk_metaclass_bt:register_class(),
-    Pid = beamtalk_class_registry:whereis_class('Metaclass'),
-    ?assertNotEqual(undefined, Pid).
-
-register_class_superclass_test() ->
-    Pid = beamtalk_class_registry:whereis_class('Metaclass'),
-    ?assertEqual('Class', beamtalk_object_class:superclass(Pid)).

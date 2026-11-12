@@ -1696,8 +1696,13 @@ fn make_typed_state_class(name: &str, superclass: &str) -> ClassDefinition {
         span: test_span(),
     }
 }
+/// BT-4679: the former `state_field_type_returns_type_for_annotated_field`,
+/// `..._returns_none_for_untyped_field`, `..._returns_none_for_unknown_field` and
+/// `..._returns_none_for_unknown_class` tests, all queried against one hierarchy built
+/// from a typed `Counter` actor. (The unknown-class case used a bare builtins hierarchy;
+/// `build` includes the builtins, so `DoesNotExist` is unknown in both.)
 #[test]
-fn state_field_type_returns_type_for_annotated_field() {
+fn state_field_type_table() {
     let module = Module {
         pipeline_sends: crate::ast::PipelineSends::default(),
         literal_comments: crate::ast::LiteralComments::default(),
@@ -1714,52 +1719,26 @@ fn state_field_type_returns_type_for_annotated_field() {
     let (h, diags) = ClassHierarchy::build(&module);
     let h = h.unwrap();
     assert!(diags.is_empty());
-    assert_eq!(
-        h.state_field_type("Counter", "count"),
-        Some(DeclaredType::simple("Integer"))
-    );
+    let cases = [
+        (
+            "annotated field",
+            "Counter",
+            "count",
+            Some(DeclaredType::simple("Integer")),
+        ),
+        ("untyped field", "Counter", "label", None),
+        ("unknown field", "Counter", "nonexistent", None),
+        ("unknown class", "DoesNotExist", "count", None),
+    ];
+    for (label, class, field, expected) in cases {
+        assert_eq!(
+            h.state_field_type(class, field),
+            expected,
+            "[{label}] state_field_type({class}, {field})"
+        );
+    }
 }
-#[test]
-fn state_field_type_returns_none_for_untyped_field() {
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_typed_state_class("Counter", "Actor")],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
-    let h = ClassHierarchy::build(&module).0.unwrap();
-    assert_eq!(h.state_field_type("Counter", "label"), None);
-}
-#[test]
-fn state_field_type_returns_none_for_unknown_field() {
-    let module = Module {
-        pipeline_sends: crate::ast::PipelineSends::default(),
-        literal_comments: crate::ast::LiteralComments::default(),
-        classes: vec![make_typed_state_class("Counter", "Actor")],
-        method_definitions: Vec::new(),
-        protocols: Vec::new(),
-        type_aliases: Vec::new(),
-        native_declarations: Vec::new(),
-        expressions: vec![],
-        span: test_span(),
-        file_leading_comments: vec![],
-        file_trailing_comments: Vec::new(),
-    };
-    let h = ClassHierarchy::build(&module).0.unwrap();
-    assert_eq!(h.state_field_type("Counter", "nonexistent"), None);
-}
-#[test]
-fn state_field_type_returns_none_for_unknown_class() {
-    let h = ClassHierarchy::with_builtins();
-    assert_eq!(h.state_field_type("DoesNotExist", "count"), None);
-}
+
 #[test]
 fn state_field_type_inherited_from_parent() {
     let parent = make_typed_state_class("TypedParent", "Actor");
@@ -3017,47 +2996,71 @@ fn register_extensions_resolves_selector() {
     );
 }
 // --- ClassKind hierarchy propagation tests ---
+/// BT-4679: the former five `resolve_class_kind_*` tests. Each row seeds the external
+/// superclass index (when non-empty), then resolves a class's `ClassKind`.
 #[test]
-fn resolve_class_kind_for_direct_value_subclass() {
-    let mut h = ClassHierarchy::with_builtins();
-    let mut index = HashMap::new();
-    index.insert("Point".to_string(), "Value".to_string());
-    h.add_external_superclasses(&index);
-    assert_eq!(h.resolve_class_kind("Point"), ClassKind::Value);
-}
-#[test]
-fn resolve_class_kind_for_indirect_value_subclass() {
-    let mut h = ClassHierarchy::with_builtins();
-    let mut index = HashMap::new();
-    // MyValueBase inherits from Value, MyValueChild inherits from MyValueBase
-    index.insert("MyValueBase".to_string(), "Value".to_string());
-    index.insert("MyValueChild".to_string(), "MyValueBase".to_string());
-    h.add_external_superclasses(&index);
-    assert_eq!(h.resolve_class_kind("MyValueChild"), ClassKind::Value);
-    assert!(h.is_value_subclass("MyValueChild"));
-}
-#[test]
-fn resolve_class_kind_for_direct_actor_subclass() {
-    let mut h = ClassHierarchy::with_builtins();
-    let mut index = HashMap::new();
-    index.insert("Counter".to_string(), "Actor".to_string());
-    h.add_external_superclasses(&index);
-    assert_eq!(h.resolve_class_kind("Counter"), ClassKind::Actor);
-}
-#[test]
-fn resolve_class_kind_for_indirect_actor_subclass() {
-    let mut h = ClassHierarchy::with_builtins();
-    let mut index = HashMap::new();
-    index.insert("MyActor".to_string(), "Actor".to_string());
-    index.insert("SpecialActor".to_string(), "MyActor".to_string());
-    h.add_external_superclasses(&index);
-    assert_eq!(h.resolve_class_kind("SpecialActor"), ClassKind::Actor);
-}
-#[test]
-fn resolve_class_kind_supervisor_stays_object() {
-    // Supervisor inherits from Object (not Actor, not Value)
-    let h = ClassHierarchy::with_builtins();
-    assert_eq!(h.resolve_class_kind("Supervisor"), ClassKind::Object);
+fn resolve_class_kind_table() {
+    // (label, external superclass index, class to resolve, expected kind, also value subclass)
+    let cases: [(&str, &[(&str, &str)], &str, ClassKind, bool); 5] = [
+        (
+            "direct Value subclass",
+            &[("Point", "Value")],
+            "Point",
+            ClassKind::Value,
+            false,
+        ),
+        (
+            // MyValueBase inherits from Value, MyValueChild inherits from MyValueBase
+            "indirect Value subclass",
+            &[("MyValueBase", "Value"), ("MyValueChild", "MyValueBase")],
+            "MyValueChild",
+            ClassKind::Value,
+            true,
+        ),
+        (
+            "direct Actor subclass",
+            &[("Counter", "Actor")],
+            "Counter",
+            ClassKind::Actor,
+            false,
+        ),
+        (
+            "indirect Actor subclass",
+            &[("MyActor", "Actor"), ("SpecialActor", "MyActor")],
+            "SpecialActor",
+            ClassKind::Actor,
+            false,
+        ),
+        (
+            // Supervisor inherits from Object (not Actor, not Value)
+            "Supervisor stays Object",
+            &[],
+            "Supervisor",
+            ClassKind::Object,
+            false,
+        ),
+    ];
+    for (label, external, class, expected, also_value_subclass) in cases {
+        let mut h = ClassHierarchy::with_builtins();
+        if !external.is_empty() {
+            let index: HashMap<String, String> = external
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                .collect();
+            h.add_external_superclasses(&index);
+        }
+        assert_eq!(
+            h.resolve_class_kind(class),
+            expected,
+            "[{label}] resolve_class_kind({class})"
+        );
+        if also_value_subclass {
+            assert!(
+                h.is_value_subclass(class),
+                "[{label}] {class} should be a value subclass"
+            );
+        }
+    }
 }
 
 // --- ADR 0103: handleScope accessor ---
@@ -3927,121 +3930,149 @@ fn value_root_new_does_not_disable_direct_new0() {
     assert!(h.direct_constructors("Pt3").new0);
 }
 
+/// BT-4679: the former source-only `direct_constructors_*` tests (12 cases). Each row
+/// builds a hierarchy from one source and checks the class's [`DirectConstructors`]
+/// verdicts; `None` means the original test did not assert that field.
+/// Tests that edit the hierarchy by hand, pin premises or walk missing/cyclic ancestors
+/// stay separate.
 #[test]
-fn direct_constructors_stateless_value() {
-    let h = bt4099_hierarchy_for_source("Value subclass: Empty\n");
-    let ctors = h.direct_constructors("Empty");
-    assert!(ctors.new0);
-    assert!(ctors.new1);
-    assert_eq!(ctors.keyword, None);
-}
-
-#[test]
-fn direct_constructors_user_new_blocks_new0_only() {
-    let h = bt4099_hierarchy_for_source(
-        "Value subclass: Pt\n  state: x :: Integer = 0\n  class new => Pt x: 1\n",
-    );
-    let ctors = h.direct_constructors("Pt");
-    assert!(!ctors.new0, "user `new` runs in the class process");
-    assert!(ctors.new1, "user nullary `new` does not affect `new:`");
-}
-
-#[test]
-fn direct_constructors_instance_new_blocks_new0() {
-    let h =
-        bt4099_hierarchy_for_source("Value subclass: Pt\n  state: x :: Integer = 0\n  new => 42\n");
-    let ctors = h.direct_constructors("Pt");
-    assert!(
-        !ctors.new0,
-        "instance `new` suppresses the synthesized new/0"
-    );
-}
-
-#[test]
-fn direct_constructors_user_new_init_blocks_new1_only() {
-    let h = bt4099_hierarchy_for_source(
-        "Value subclass: Pt\n  state: x :: Integer = 0\n  class new: m => Pt x: 1\n",
-    );
-    let ctors = h.direct_constructors("Pt");
-    assert!(!ctors.new1, "user `new:` runs in the class process");
-    assert!(ctors.new0, "user `new:` does not affect nullary `new`");
-}
-
-#[test]
-fn direct_constructors_instance_new_init_blocks_new1() {
-    let h = bt4099_hierarchy_for_source(
-        "Value subclass: Pt\n  state: x :: Integer = 0\n  new: m => 42\n",
-    );
-    let ctors = h.direct_constructors("Pt");
-    assert!(
-        !ctors.new1,
-        "instance `new:` suppresses the synthesized new/1"
-    );
-}
-
-#[test]
-fn direct_constructors_class_state_blocks_all() {
-    let h = bt4099_hierarchy_for_source(
-        "Value subclass: Pt\n  state: x :: Integer = 0\n  classState: total = 0\n",
-    );
-    let ctors = h.direct_constructors("Pt");
-    assert!(!ctors.new0);
-    assert!(!ctors.new1);
-    assert_eq!(ctors.keyword, None);
-}
-
-#[test]
-fn direct_constructors_abstract_blocks_new_but_not_keyword() {
-    // `new`/`new:` route through the `{new, _}` handler, which rejects
-    // abstract classes; keyword constructors go through `class_method_call`,
-    // which has no abstract check — the direct call preserves both paths.
-    let h = bt4099_hierarchy_for_source("abstract Value subclass: Pt\n  state: x :: Integer = 0\n");
-    let ctors = h.direct_constructors("Pt");
-    assert!(!ctors.new0);
-    assert!(!ctors.new1);
-    assert_eq!(ctors.keyword.as_deref(), Some("x:"));
-}
-
-#[test]
-fn direct_constructors_non_value_excluded() {
-    let h = bt4099_hierarchy_for_source("Object subclass: Box\n  state: x :: Integer = 0\n");
-    let ctors = h.direct_constructors("Box");
-    assert!(!ctors.new0);
-    assert!(!ctors.new1);
-    assert_eq!(ctors.keyword, None);
-}
-
-#[test]
-fn direct_constructors_actor_excluded() {
-    let h = bt4099_hierarchy_for_source("Actor subclass: Counter\n  state: count :: Integer = 0\n");
-    let ctors = h.direct_constructors("Counter");
-    assert!(!ctors.new0);
-    assert!(!ctors.new1);
-    assert_eq!(ctors.keyword, None);
-}
-
-#[test]
-fn direct_constructors_native_excluded() {
-    let h = bt4099_hierarchy_for_source(
-        "Value subclass: Natty native: beamtalk_natty\n  state: x :: Integer = 0\n",
-    );
-    let ctors = h.direct_constructors("Natty");
-    assert!(!ctors.new0);
-    assert!(!ctors.new1);
-}
-
-#[test]
-fn direct_constructors_user_keyword_suppresses_keyword() {
-    let h = bt4099_hierarchy_for_source(
-        "Value subclass: Pt\n  state: x :: Integer = 0\n  class x: v => Pt new\n",
-    );
-    let ctors = h.direct_constructors("Pt");
-    assert_eq!(
-        ctors.keyword, None,
-        "user class-side x: suppresses the synthesized keyword constructor"
-    );
-    assert!(ctors.new0);
-    assert!(ctors.new1);
+fn direct_constructors_table() {
+    struct Row {
+        label: &'static str,
+        source: &'static str,
+        class: &'static str,
+        new0: Option<bool>,
+        new1: Option<bool>,
+        keyword: Option<Option<&'static str>>,
+    }
+    let rows = [
+        Row {
+            label: "stateless Value",
+            source: "Value subclass: Empty\n",
+            class: "Empty",
+            new0: Some(true),
+            new1: Some(true),
+            keyword: Some(None),
+        },
+        // user nullary `new` runs in the class process but does not affect `new:`
+        Row {
+            label: "user class-side new blocks new0 only",
+            source: "Value subclass: Pt\n  state: x :: Integer = 0\n  class new => Pt x: 1\n",
+            class: "Pt",
+            new0: Some(false),
+            new1: Some(true),
+            keyword: None,
+        },
+        // instance `new` suppresses the synthesized new/0
+        Row {
+            label: "instance new blocks new0",
+            source: "Value subclass: Pt\n  state: x :: Integer = 0\n  new => 42\n",
+            class: "Pt",
+            new0: Some(false),
+            new1: None,
+            keyword: None,
+        },
+        // user `new:` runs in the class process but does not affect nullary `new`
+        Row {
+            label: "user class-side new: blocks new1 only",
+            source: "Value subclass: Pt\n  state: x :: Integer = 0\n  class new: m => Pt x: 1\n",
+            class: "Pt",
+            new0: Some(true),
+            new1: Some(false),
+            keyword: None,
+        },
+        // instance `new:` suppresses the synthesized new/1
+        Row {
+            label: "instance new: blocks new1",
+            source: "Value subclass: Pt\n  state: x :: Integer = 0\n  new: m => 42\n",
+            class: "Pt",
+            new0: None,
+            new1: Some(false),
+            keyword: None,
+        },
+        Row {
+            label: "classState blocks all",
+            source: "Value subclass: Pt\n  state: x :: Integer = 0\n  classState: total = 0\n",
+            class: "Pt",
+            new0: Some(false),
+            new1: Some(false),
+            keyword: Some(None),
+        },
+        // `new`/`new:` route through the `{new, _}` handler, which rejects abstract
+        // classes; keyword constructors go through `class_method_call`, which has no
+        // abstract check — the direct call preserves both paths.
+        Row {
+            label: "abstract blocks new but not keyword",
+            source: "abstract Value subclass: Pt\n  state: x :: Integer = 0\n",
+            class: "Pt",
+            new0: Some(false),
+            new1: Some(false),
+            keyword: Some(Some("x:")),
+        },
+        Row {
+            label: "non-Value excluded",
+            source: "Object subclass: Box\n  state: x :: Integer = 0\n",
+            class: "Box",
+            new0: Some(false),
+            new1: Some(false),
+            keyword: Some(None),
+        },
+        Row {
+            label: "Actor excluded",
+            source: "Actor subclass: Counter\n  state: count :: Integer = 0\n",
+            class: "Counter",
+            new0: Some(false),
+            new1: Some(false),
+            keyword: Some(None),
+        },
+        Row {
+            label: "native excluded",
+            source: "Value subclass: Natty native: beamtalk_natty\n  state: x :: Integer = 0\n",
+            class: "Natty",
+            new0: Some(false),
+            new1: Some(false),
+            keyword: None,
+        },
+        // user class-side `x:` suppresses the synthesized keyword constructor
+        Row {
+            label: "user keyword suppresses keyword",
+            source: "Value subclass: Pt\n  state: x :: Integer = 0\n  class x: v => Pt new\n",
+            class: "Pt",
+            new0: Some(true),
+            new1: Some(true),
+            keyword: Some(None),
+        },
+        // BT-4132, revised by BT-4479: same real propagation as the ancestor-`new:`
+        // test; an ancestor's nullary user `new` now runs for `Sub new` (the
+        // `{new, []}` handler routes through class dispatch to it), so it keeps the
+        // baked `new` verdict off. It does not affect `new:`.
+        Row {
+            label: "ancestor user new is inherited",
+            source: "Value subclass: Mid\n  class new => Mid new\nMid subclass: Sub\n",
+            class: "Sub",
+            new0: Some(false),
+            new1: Some(true),
+            keyword: None,
+        },
+    ];
+    for row in rows {
+        let h = bt4099_hierarchy_for_source(row.source);
+        let ctors = h.direct_constructors(row.class);
+        if let Some(expected) = row.new0 {
+            assert_eq!(ctors.new0, expected, "[{}] new0", row.label);
+        }
+        if let Some(expected) = row.new1 {
+            assert_eq!(ctors.new1, expected, "[{}] new1", row.label);
+        }
+        if let Some(expected) = row.keyword {
+            assert_eq!(
+                ctors.keyword.as_deref(),
+                expected,
+                "[{}] keyword",
+                row.label
+            );
+        }
+    }
 }
 
 #[test]
@@ -4082,20 +4113,6 @@ fn direct_constructors_ancestor_user_new_init_blocks_new1() {
         "ancestor user `new:` wins at runtime via chain dispatch"
     );
     assert!(ctors.new0, "ancestor `new:` does not affect nullary `new`");
-}
-
-/// BT-4132, revised by BT-4479: same real propagation; an ancestor's nullary
-/// user `new` now runs for `Sub new` (the `{new, []}` handler routes through
-/// class dispatch to it), so it keeps the baked `new` verdict off. It does not
-/// affect `new:`.
-#[test]
-fn direct_constructors_ancestor_user_new_is_inherited() {
-    let h = bt4099_hierarchy_for_source(
-        "Value subclass: Mid\n  class new => Mid new\nMid subclass: Sub\n",
-    );
-    let ctors = h.direct_constructors("Sub");
-    assert!(!ctors.new0, "an inherited user `new` must run, not new/0");
-    assert!(ctors.new1);
 }
 
 /// BT-4132: `propagate_class_kind` stores the keyword decision as the

@@ -1,7 +1,7 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-use crate::core_erlang::tests::codegen;
+use crate::core_erlang::tests::{assert_has, assert_lacks, codegen};
 
 #[test]
 fn test_list_do_pure_generates_foreach() {
@@ -629,234 +629,123 @@ fn test_detect_if_none_pure_dispatches_to_runtime() {
     );
 }
 
+/// BT-4679: the former `test_{any_satisfy,all_satisfy,detect,detect_if_none}_with_field_mutation_threads_state`
+/// quartet. A search op whose block mutates a field must thread the actor state, so it
+/// uses `lists:foldl` (never the short-circuiting `lists:any`/`lists:all`) with an
+/// accumulator that decides when the block is skipped (BT-3805).
 #[test]
-fn test_any_satisfy_with_field_mutation_threads_state() {
-    // anySatisfy: with a field mutation in its body uses lists:foldl with a bool
-    // accumulator starting false (the state has to be threaded). The fold lambda
-    // skips the block once the accumulator is decided (BT-3805).
-    let src = "Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    items anySatisfy: [:item | self.count := self.count + 1. item > 0]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "anySatisfy: with field mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'any'"),
-        "anySatisfy: with field mutation must NOT use short-circuiting lists:any. Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'put'('count'"),
-        "anySatisfy: body should update 'count' field via maps:put. Got:\n{code}"
-    );
-    assert!(
-        code.contains("case BoolAcc of <'true'> when 'true' ->"),
-        "anySatisfy: must skip the block once a match decided the answer. Got:\n{code}"
-    );
+fn test_search_op_with_field_mutation_threads_state_table() {
+    // (label, sent expression, must contain, must not contain)
+    let cases: [(&str, &str, &[&str], &[&str]); 4] = [
+        (
+            // Bool accumulator starting false; the fold lambda skips the block once a
+            // match decided the answer.
+            "anySatisfy:",
+            "items anySatisfy: [:item | self.count := self.count + 1. item > 0]",
+            &[
+                "'lists':'foldl'",
+                "maps':'put'('count'",
+                "case BoolAcc of <'true'> when 'true' ->",
+            ],
+            &["'lists':'any'"],
+        ),
+        (
+            // Bool accumulator starting true (all-satisfy assumption, set to false on
+            // first failure).
+            "allSatisfy:",
+            "items allSatisfy: [:item | self.count := self.count + 1. item > 0]",
+            &[
+                "'lists':'foldl'",
+                "maps':'put'('count'",
+                "case BoolAcc of <'false'> when 'true' ->",
+            ],
+            &["'lists':'all'"],
+        ),
+        (
+            // {FoundItem, FoundFlag, State...} accumulator; the lambda skips the block
+            // once FoundFlag is true.
+            "detect:",
+            "items detect: [:item | self.count := self.count + 1. item > 0]",
+            &[
+                "'lists':'foldl'",
+                "FoundFlag",
+                "maps':'put'('count'",
+                "case FoundFlag of <'true'> when 'true' ->",
+            ],
+            &[],
+        ),
+        (
+            // foldl + FoundFlag distinguishes "found nil" from "nothing matched", then
+            // the ifNone block is evaluated when unmatched.
+            "detect:ifNone:",
+            "items detect: [:item | self.count := self.count + 1. item > 0] ifNone: [42]",
+            &["'lists':'foldl'", "FoundFlag", "maps':'put'('count'"],
+            &[],
+        ),
+    ];
+    for (label, expr, has, lacks) in cases {
+        let src =
+            format!("Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    {expr}\n");
+        let code = codegen(&src);
+        assert_has(label, &code, has);
+        assert_lacks(label, &code, lacks);
+    }
 }
 
+/// BT-4679: the former `test_{any_satisfy,detect,all_satisfy,detect_if_none}_with_local_mutation_uses_tuple_acc`
+/// quartet. A search op whose block mutates only a local uses the tuple-accumulator path
+/// (`{BoolAcc, Var1, ...}` or `{FoundItem, FoundFlag, Var1, ...}`): locals are unpacked
+/// via `element(N, AccSt)` inside the lambda, not via `maps:get`. The fold packs the final
+/// `count` into the StateAcc map at exit so the outer method body can thread it back via
+/// `maps:get` — the tuple accumulator is an internal-to-the-fold optimisation, not a reason
+/// to drop the outer-local threading.
 #[test]
-fn test_all_satisfy_with_field_mutation_threads_state() {
-    // allSatisfy: with field mutation uses foldl with bool accumulator
-    // starting true (all-satisfy assumption, set to false on first failure).
-    let src = "Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    items allSatisfy: [:item | self.count := self.count + 1. item > 0]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "allSatisfy: with field mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'all'"),
-        "allSatisfy: with field mutation must NOT use short-circuiting lists:all. Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'put'('count'"),
-        "allSatisfy: body should update 'count' field via maps:put. Got:\n{code}"
-    );
-    assert!(
-        code.contains("case BoolAcc of <'false'> when 'true' ->"),
-        "allSatisfy: must skip the block once a failure decided the answer. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_detect_with_field_mutation_threads_state() {
-    // detect: with field mutation uses foldl with a {FoundItem, FoundFlag, State...}
-    // accumulator; the lambda skips the block once FoundFlag is true (BT-3805).
-    let src = "Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    items detect: [:item | self.count := self.count + 1. item > 0]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "detect: with field mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        code.contains("FoundFlag"),
-        "detect: with field mutation should use FoundFlag accumulator. Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'put'('count'"),
-        "detect: body should update 'count' field via maps:put. Got:\n{code}"
-    );
-    assert!(
-        code.contains("case FoundFlag of <'true'> when 'true' ->"),
-        "detect: must skip the block once an element matched. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_detect_if_none_with_field_mutation_threads_state() {
-    // detect:ifNone: with field mutation uses foldl + FoundFlag to distinguish
-    // "found nil" from "nothing matched", then evaluates the ifNone block when unmatched.
-    let src = "Actor subclass: Ctr\n  state: count = 0\n\n  run: items =>\n    items detect: [:item | self.count := self.count + 1. item > 0] ifNone: [42]\n";
-    let code = codegen(src);
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "detect:ifNone: with field mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        code.contains("FoundFlag"),
-        "detect:ifNone: with mutation should use FoundFlag to distinguish no-match. Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'put'('count'"),
-        "detect:ifNone: body should update 'count' field via maps:put. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_any_satisfy_with_local_mutation_uses_tuple_acc() {
-    // anySatisfy: with only a local variable mutation uses the
-    // tuple-accumulator path: {BoolAcc, Var1, ...}. Locals are unpacked via
-    // element(N, AccSt) inside the lambda — not via maps:get.
-    let src = concat!(
-        "Actor subclass: Ctr\n",
-        "  state: x = 0\n\n",
-        "  run: items =>\n",
-        "    count := 0\n",
-        "    items anySatisfy: [:item | count := count + 1. item > 0]\n",
-        "    count\n",
-    );
-    let code = codegen(src);
-    // BoolAcc is at position 1; 'count' is the first threaded local so it lives at
-    // position 2 inside the lambda accumulator tuple.
-    assert!(
-        code.contains("let Count@ = call 'erlang':'element'(2, "),
-        "anySatisfy: with local mutation should extract 'count' via element(2, AccSt) in tuple-acc lambda. Got:\n{code}"
-    );
-    // the fold packs the final 'count' into the StateAcc map at exit so the
-    // outer method body can thread it back via maps:get — the tuple accumulator is an
-    // internal-to-the-fold optimisation, not a reason to drop the outer-local threading.
-    assert!(
-        code.contains("maps':'put'('__local__count'"),
-        "anySatisfy: with local mutation should pack '__local__count' into the StateAcc at fold exit. Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'get'('__local__count'"),
-        "anySatisfy: with local mutation should thread 'count' back via maps:get after the fold. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_detect_with_local_mutation_uses_tuple_acc() {
-    // detect: with only a local variable mutation uses the
-    // tuple-accumulator path: {FoundItem, FoundFlag, Var1, ...}. Locals are
-    // unpacked via element(N, AccSt) inside the lambda — not via maps:get.
-    let src = concat!(
-        "Actor subclass: Ctr\n",
-        "  state: x = 0\n\n",
-        "  run: items =>\n",
-        "    count := 0\n",
-        "    items detect: [:item | count := count + 1. item > 0]\n",
-        "    count\n",
-    );
-    let code = codegen(src);
-    // FoundItem=1, FoundFlag=2; 'count' is the first threaded local at position 3.
-    assert!(
-        code.contains("let Count@ = call 'erlang':'element'(3, "),
-        "detect: with local mutation should extract 'count' via element(3, AccSt) in tuple-acc lambda. Got:\n{code}"
-    );
-    assert!(
-        code.contains("FoundFlag"),
-        "detect: with local mutation should still use FoundFlag accumulator. Got:\n{code}"
-    );
-    // the fold packs the final 'count' into the StateAcc map at exit so the
-    // outer method body can thread it back via maps:get — the tuple accumulator is an
-    // internal-to-the-fold optimisation, not a reason to drop the outer-local threading.
-    assert!(
-        code.contains("maps':'put'('__local__count'"),
-        "detect: with local mutation should pack '__local__count' into the StateAcc at fold exit. Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'get'('__local__count'"),
-        "detect: with local mutation should thread 'count' back via maps:get after the fold. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_all_satisfy_with_local_mutation_uses_tuple_acc() {
-    // allSatisfy: with only a local variable mutation uses the
-    // tuple-accumulator path: {BoolAcc, Var1, ...}. Locals are unpacked via
-    // element(N, AccSt) inside the lambda — not via maps:get.
-    let src = concat!(
-        "Actor subclass: Ctr\n",
-        "  state: x = 0\n\n",
-        "  run: items =>\n",
-        "    count := 0\n",
-        "    items allSatisfy: [:item | count := count + 1. item > 0]\n",
-        "    count\n",
-    );
-    let code = codegen(src);
-    // BoolAcc is at position 1; 'count' is the first threaded local so it lives at
-    // position 2 inside the lambda accumulator tuple.
-    assert!(
-        code.contains("let Count@ = call 'erlang':'element'(2, "),
-        "allSatisfy: with local mutation should extract 'count' via element(2, AccSt) in tuple-acc lambda. Got:\n{code}"
-    );
-    // the fold packs the final 'count' into the StateAcc map at exit so the
-    // outer method body can thread it back via maps:get — the tuple accumulator is an
-    // internal-to-the-fold optimisation, not a reason to drop the outer-local threading.
-    assert!(
-        code.contains("maps':'put'('__local__count'"),
-        "allSatisfy: with local mutation should pack '__local__count' into the StateAcc at fold exit. Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'get'('__local__count'"),
-        "allSatisfy: with local mutation should thread 'count' back via maps:get after the fold. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_detect_if_none_with_local_mutation_uses_tuple_acc() {
-    // detect:ifNone: with only a local variable mutation uses the
-    // tuple-accumulator path: {FoundItem, FoundFlag, Var1, ...}. Locals are
-    // unpacked via element(N, AccSt) inside the lambda — not via maps:get.
-    let src = concat!(
-        "Actor subclass: Ctr\n",
-        "  state: x = 0\n\n",
-        "  run: items =>\n",
-        "    count := 0\n",
-        "    items detect: [:item | count := count + 1. item > 0] ifNone: [42]\n",
-        "    count\n",
-    );
-    let code = codegen(src);
-    // FoundItem=1, FoundFlag=2; 'count' is the first threaded local at position 3.
-    assert!(
-        code.contains("let Count@ = call 'erlang':'element'(3, "),
-        "detect:ifNone: with local mutation should extract 'count' via element(3, AccSt) in tuple-acc lambda. Got:\n{code}"
-    );
-    assert!(
-        code.contains("FoundFlag"),
-        "detect:ifNone: with local mutation should still use FoundFlag accumulator. Got:\n{code}"
-    );
-    // pack the final 'count' into StateAcc at fold exit and thread it back
-    // to the outer method body via maps:get.
-    assert!(
-        code.contains("maps':'put'('__local__count'"),
-        "detect:ifNone: with local mutation should pack '__local__count' into the StateAcc at fold exit. Got:\n{code}"
-    );
-    assert!(
-        code.contains("maps':'get'('__local__count'"),
-        "detect:ifNone: with local mutation should thread 'count' back via maps:get after the fold. Got:\n{code}"
-    );
+fn test_search_op_with_local_mutation_uses_tuple_acc_table() {
+    // (label, sent expression, position of `count` in the accumulator tuple, extra needles)
+    // `count` is the first threaded local: position 2 after BoolAcc (position 1), or
+    // position 3 after FoundItem=1, FoundFlag=2.
+    let cases: [(&str, &str, usize, &[&str]); 4] = [
+        (
+            "anySatisfy:",
+            "items anySatisfy: [:item | count := count + 1. item > 0]",
+            2,
+            &[],
+        ),
+        (
+            "detect:",
+            "items detect: [:item | count := count + 1. item > 0]",
+            3,
+            &["FoundFlag"],
+        ),
+        (
+            "allSatisfy:",
+            "items allSatisfy: [:item | count := count + 1. item > 0]",
+            2,
+            &[],
+        ),
+        (
+            "detect:ifNone:",
+            "items detect: [:item | count := count + 1. item > 0] ifNone: [42]",
+            3,
+            &["FoundFlag"],
+        ),
+    ];
+    for (label, expr, position, extra) in cases {
+        let src = format!(
+            "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    count := 0\n    {expr}\n    count\n"
+        );
+        let code = codegen(&src);
+        assert_has(
+            label,
+            &code,
+            &[
+                &format!("let Count@ = call 'erlang':'element'({position}, "),
+                "maps':'put'('__local__count'",
+                "maps':'get'('__local__count'",
+            ],
+        );
+        assert_has(label, &code, extra);
+    }
 }
 
 // ── list ops nested inside a direct-params loop ────────────────
@@ -865,152 +754,49 @@ fn test_detect_if_none_with_local_mutation_uses_tuple_acc() {
 // parameters, and the nested list op is a local-threading producer in that
 // loop frame (ADR 0131): its construct tuple is unpacked by the frame.
 
+/// BT-4679: the former `test_{any_satisfy,all_satisfy,detect,detect_if_none}_nested_in_direct_params_loop`
+/// quartet. A search op with a local mutation nested inside a direct-params loop is a
+/// local-threading producer in the loop frame (ADR 0131): the outer loop is a `letrec`, the
+/// inner op takes the mutation-threading `lists:foldl` path (never the pure fast path), and
+/// the direct-params outer loop rebuilds StateAcc exactly once at exit (`ExitSA`).
 #[test]
-fn test_any_satisfy_nested_in_direct_params_loop() {
-    // A list op with a local mutation nested inside a direct-params loop is a
-    // local-threading producer in the loop frame (ADR 0131).
-    let src = concat!(
-        "Actor subclass: Ctr\n",
-        "  state: x = 0\n\n",
-        "  run: items =>\n",
-        "    count := 0\n",
-        "    seen := 0\n",
-        "    1 to: 3 do: [:i |\n",
-        "      count := count + 1\n",
-        "      items anySatisfy: [:item | seen := seen + 1. item > 0]\n",
-        "    ]\n",
-        "    count\n",
-    );
-    let code = codegen(src);
-    // Outer loop is a letrec (counted loop with local mutations).
-    assert!(
-        code.contains("letrec"),
-        "Outer to:do: should generate a letrec. Got:\n{code}"
-    );
-    // Inner anySatisfy: must use foldl (mutation threading for `seen`).
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "anySatisfy: with local mutation should use lists:foldl. Got:\n{code}"
-    );
-    // Pure lists:any must NOT appear (mutation path was taken).
-    assert!(
-        !code.contains("'lists':'any'"),
-        "Mutation-threaded anySatisfy: must NOT use lists:any. Got:\n{code}"
-    );
-    // Direct-params outer loop rebuilds StateAcc exactly once at exit (ExitSA).
-    assert!(
-        code.contains("ExitSA"),
-        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_all_satisfy_nested_in_direct_params_loop() {
-    // A list op with a local mutation nested inside a direct-params loop is a
-    // local-threading producer in the loop frame (ADR 0131).
-    let src = concat!(
-        "Actor subclass: Ctr\n",
-        "  state: x = 0\n\n",
-        "  run: items =>\n",
-        "    count := 0\n",
-        "    seen := 0\n",
-        "    1 to: 3 do: [:i |\n",
-        "      count := count + 1\n",
-        "      items allSatisfy: [:item | seen := seen + 1. item > 0]\n",
-        "    ]\n",
-        "    count\n",
-    );
-    let code = codegen(src);
-    assert!(
-        code.contains("letrec"),
-        "Outer to:do: should generate a letrec. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "allSatisfy: with local mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'lists':'all'"),
-        "Mutation-threaded allSatisfy: must NOT use lists:all. Got:\n{code}"
-    );
-    assert!(
-        code.contains("ExitSA"),
-        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_detect_nested_in_direct_params_loop() {
-    // A list op with a local mutation nested inside a direct-params loop is a
-    // local-threading producer in the loop frame (ADR 0131).
-    let src = concat!(
-        "Actor subclass: Ctr\n",
-        "  state: x = 0\n\n",
-        "  run: items =>\n",
-        "    count := 0\n",
-        "    seen := 0\n",
-        "    1 to: 3 do: [:i |\n",
-        "      count := count + 1\n",
-        "      items detect: [:item | seen := seen + 1. item > 0]\n",
-        "    ]\n",
-        "    count\n",
-    );
-    let code = codegen(src);
-    assert!(
-        code.contains("letrec"),
-        "Outer to:do: should generate a letrec. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "detect: with local mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        code.contains("FoundFlag"),
-        "detect: should use FoundFlag accumulator. Got:\n{code}"
-    );
-    assert!(
-        !code.contains("'beamtalk_list':'detect'"),
-        "Mutation-threaded detect: must NOT use beamtalk_list:detect. Got:\n{code}"
-    );
-    assert!(
-        code.contains("ExitSA"),
-        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_detect_if_none_nested_in_direct_params_loop() {
-    // A list op with a local mutation nested inside a direct-params loop is a
-    // local-threading producer in the loop frame (ADR 0131).
-    let src = concat!(
-        "Actor subclass: Ctr\n",
-        "  state: x = 0\n\n",
-        "  run: items =>\n",
-        "    count := 0\n",
-        "    seen := 0\n",
-        "    1 to: 3 do: [:i |\n",
-        "      count := count + 1\n",
-        "      items detect: [:item | seen := seen + 1. item > 0] ifNone: [42]\n",
-        "    ]\n",
-        "    count\n",
-    );
-    let code = codegen(src);
-    assert!(
-        code.contains("letrec"),
-        "Outer to:do: should generate a letrec. Got:\n{code}"
-    );
-    assert!(
-        code.contains("'lists':'foldl'"),
-        "detect:ifNone: with local mutation should use lists:foldl. Got:\n{code}"
-    );
-    assert!(
-        code.contains("FoundFlag"),
-        "detect:ifNone: should use FoundFlag accumulator. Got:\n{code}"
-    );
-    assert!(
-        code.contains("ExitSA"),
-        "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
-    );
+fn test_search_op_nested_in_direct_params_loop_table() {
+    // (label, sent expression, extra must-contain, must-not-contain)
+    let cases: [(&str, &str, &[&str], &[&str]); 4] = [
+        (
+            "anySatisfy:",
+            "items anySatisfy: [:item | seen := seen + 1. item > 0]",
+            &[],
+            &["'lists':'any'"],
+        ),
+        (
+            "allSatisfy:",
+            "items allSatisfy: [:item | seen := seen + 1. item > 0]",
+            &[],
+            &["'lists':'all'"],
+        ),
+        (
+            "detect:",
+            "items detect: [:item | seen := seen + 1. item > 0]",
+            &["FoundFlag"],
+            &["'beamtalk_list':'detect'"],
+        ),
+        (
+            "detect:ifNone:",
+            "items detect: [:item | seen := seen + 1. item > 0] ifNone: [42]",
+            &["FoundFlag"],
+            &[],
+        ),
+    ];
+    for (label, expr, has, lacks) in cases {
+        let src = format!(
+            "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    count := 0\n    seen := 0\n    1 to: 3 do: [:i |\n      count := count + 1\n      {expr}\n    ]\n    count\n"
+        );
+        let code = codegen(&src);
+        assert_has(label, &code, &["letrec", "'lists':'foldl'", "ExitSA"]);
+        assert_has(label, &code, has);
+        assert_lacks(label, &code, lacks);
+    }
 }
 
 // ── count: ───────────────────────────────────────────────────
@@ -2202,153 +1988,80 @@ fn test_do_separated_by_separator_with_param_falls_through() {
     );
 }
 
+/// BT-4679: the former `test_{select,reject,any_satisfy,all_satisfy,detect,detect_if_none,
+/// do,collect}_wrong_arity_*_is_compile_error` tests. Each list op validates its block
+/// arity with `validate_block_arity_exact`; a wrong-arity literal block must surface as a
+/// compile-time `BlockArityError` (covering that call's `?` error-propagation branch).
 #[test]
-fn test_select_wrong_arity_block_is_compile_error() {
-    // select: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
-    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
-    // error-propagation branch at filter_ops.rs:27.
-    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items select: [nil]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let result = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    );
-    assert!(
-        matches!(
-            result,
-            Err(crate::core_erlang::CodeGenError::BlockArityError { .. })
+fn test_wrong_arity_block_is_compile_error_table() {
+    // (label, the sent expression, where the covered `?` branch lives)
+    let cases = [
+        // select:/reject:/anySatisfy:/allSatisfy:/detect:/do:/collect: require a 1-arg
+        // block. A 0-arg block (`[nil]`) must trigger the check.
+        (
+            "select: with a 0-arg block",
+            "items select: [nil]",
+            "filter_ops.rs:27",
         ),
-        "select: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
-    );
-}
-
-#[test]
-fn test_reject_wrong_arity_block_is_compile_error() {
-    // reject: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
-    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
-    // error-propagation branch at filter_ops.rs:50.
-    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items reject: [nil]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let result = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    );
-    assert!(
-        matches!(
-            result,
-            Err(crate::core_erlang::CodeGenError::BlockArityError { .. })
+        (
+            "reject: with a 0-arg block",
+            "items reject: [nil]",
+            "filter_ops.rs:50",
         ),
-        "reject: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
-    );
-}
-
-#[test]
-fn test_any_satisfy_wrong_arity_block_is_compile_error() {
-    // anySatisfy: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
-    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
-    // error-propagation branch at search_ops.rs:61.
-    let src =
-        "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items anySatisfy: [nil]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let result = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    );
-    assert!(
-        matches!(
-            result,
-            Err(crate::core_erlang::CodeGenError::BlockArityError { .. })
+        (
+            "anySatisfy: with a 0-arg block",
+            "items anySatisfy: [nil]",
+            "search_ops.rs:61",
         ),
-        "anySatisfy: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
-    );
-}
-
-#[test]
-fn test_all_satisfy_wrong_arity_block_is_compile_error() {
-    // allSatisfy: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
-    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
-    // error-propagation branch at search_ops.rs:108.
-    let src =
-        "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items allSatisfy: [nil]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let result = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    );
-    assert!(
-        matches!(
-            result,
-            Err(crate::core_erlang::CodeGenError::BlockArityError { .. })
+        (
+            "allSatisfy: with a 0-arg block",
+            "items allSatisfy: [nil]",
+            "search_ops.rs:108",
         ),
-        "allSatisfy: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
-    );
-}
-
-#[test]
-fn test_detect_wrong_arity_block_is_compile_error() {
-    // detect: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
-    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
-    // error-propagation branch at search_ops.rs:349.
-    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items detect: [nil]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let result = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    );
-    assert!(
-        matches!(
-            result,
-            Err(crate::core_erlang::CodeGenError::BlockArityError { .. })
+        (
+            "detect: with a 0-arg block",
+            "items detect: [nil]",
+            "search_ops.rs:349",
         ),
-        "detect: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
-    );
-}
-
-#[test]
-fn test_detect_if_none_wrong_arity_predicate_is_compile_error() {
-    // detect:ifNone: requires a 1-arg predicate block. A 0-arg predicate (`[nil]`)
-    // must trigger the first validate_block_arity_exact call and produce a
-    // BlockArityError, covering the `?` branch at search_ops.rs:401.
-    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items detect: [nil] ifNone: [42]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let result = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    );
-    assert!(
-        matches!(
-            result,
-            Err(crate::core_erlang::CodeGenError::BlockArityError { .. })
+        // detect:ifNone: requires a 1-arg predicate: the first validation call.
+        (
+            "detect:ifNone: with a 0-arg predicate block",
+            "items detect: [nil] ifNone: [42]",
+            "search_ops.rs:401",
         ),
-        "detect:ifNone: with a 0-arg predicate block must be a compile-time BlockArityError. Got: {result:?}"
-    );
-}
-
-#[test]
-fn test_detect_if_none_wrong_arity_if_none_block_is_compile_error() {
-    // detect:ifNone: requires a 0-arg ifNone block. A 1-arg ifNone block (`[:x | x]`)
-    // must trigger the second validate_block_arity_exact call and produce a
-    // BlockArityError, covering the `?` branch at search_ops.rs:408.
-    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items detect: [:item | item > 0] ifNone: [:x | x]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let result = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    );
-    assert!(
-        matches!(
-            result,
-            Err(crate::core_erlang::CodeGenError::BlockArityError { .. })
+        // detect:ifNone: requires a 0-arg ifNone block: the second validation call.
+        (
+            "detect:ifNone: with a 1-arg ifNone block",
+            "items detect: [:item | item > 0] ifNone: [:x | x]",
+            "search_ops.rs:408",
         ),
-        "detect:ifNone: with a 1-arg ifNone block must be a compile-time BlockArityError. Got: {result:?}"
-    );
+        (
+            "do: with a 0-arg block",
+            "items do: [nil]",
+            "basic_ops.rs:31",
+        ),
+        (
+            "collect: with a 0-arg block",
+            "items collect: [nil]",
+            "basic_ops.rs:219",
+        ),
+    ];
+    for (label, expr, covers) in cases {
+        let src = format!("Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    {expr}\n");
+        let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
+        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+        let result = crate::core_erlang::generate_module(
+            &module,
+            crate::core_erlang::CodegenOptions::new("test"),
+        );
+        assert!(
+            matches!(
+                result,
+                Err(crate::core_erlang::CodeGenError::BlockArityError { .. })
+            ),
+            "[{label}] must be a compile-time BlockArityError (covers {covers}). Got: {result:?}"
+        );
+    }
 }
 
 #[test]
@@ -2545,48 +2258,6 @@ fn test_collect_nested_in_direct_params_loop() {
     assert!(
         code.contains("ExitSA"),
         "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
-    );
-}
-
-#[test]
-fn test_do_wrong_arity_block_is_compile_error() {
-    // do: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
-    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
-    // error-propagation branch at basic_ops.rs:31.
-    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items do: [nil]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let result = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    );
-    assert!(
-        matches!(
-            result,
-            Err(crate::core_erlang::CodeGenError::BlockArityError { .. })
-        ),
-        "do: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
-    );
-}
-
-#[test]
-fn test_collect_wrong_arity_block_is_compile_error() {
-    // collect: requires a 1-arg block. A 0-arg block (`[nil]`) must trigger
-    // validate_block_arity_exact and produce a BlockArityError, covering the `?`
-    // error-propagation branch at basic_ops.rs:219.
-    let src = "Actor subclass: Ctr\n  state: x = 0\n\n  run: items =>\n    items collect: [nil]\n";
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module, _) = beamtalk_core::source_analysis::parse(tokens);
-    let result = crate::core_erlang::generate_module(
-        &module,
-        crate::core_erlang::CodegenOptions::new("test"),
-    );
-    assert!(
-        matches!(
-            result,
-            Err(crate::core_erlang::CodeGenError::BlockArityError { .. })
-        ),
-        "collect: with a 0-arg block must be a compile-time BlockArityError. Got: {result:?}"
     );
 }
 
