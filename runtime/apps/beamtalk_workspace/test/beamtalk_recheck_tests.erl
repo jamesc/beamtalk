@@ -467,7 +467,7 @@ recheck_setup() ->
         created_at => erlang:system_time(second),
         mode => run
     }),
-    clear_xref(),
+    beamtalk_test_repl:clear_xref(),
     beamtalk_compiler_server:clear_classes(),
     ok.
 
@@ -476,28 +476,9 @@ recheck_teardown(_) ->
         undefined -> ok;
         MetaPid -> gen_server:stop(MetaPid)
     end,
-    clear_xref(),
+    beamtalk_test_repl:clear_xref(),
     _ = application:stop(beamtalk_compiler),
     ok.
-
-clear_xref() ->
-    case whereis(beamtalk_xref) of
-        undefined ->
-            ok;
-        _Pid ->
-            try
-                sys:replace_state(beamtalk_xref, fun(S) ->
-                    ets:delete_all_objects(beamtalk_xref_methods),
-                    ets:delete_all_objects(beamtalk_xref_senders),
-                    ets:delete_all_objects(beamtalk_xref_references),
-                    ets:delete_all_objects(xref_class_gen),
-                    S
-                end)
-            catch
-                _:_ -> ok
-            end,
-            ok
-    end.
 
 %% xref payload: `ReCheckDashboard>>refresh:` sends `size` to a
 %% `ReCheckCounter`-typed parameter — the real dependent.

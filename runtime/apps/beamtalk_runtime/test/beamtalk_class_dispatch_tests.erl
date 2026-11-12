@@ -596,7 +596,7 @@ test_class_send_undefined() ->
 %% class_send(Pid, spawn, []) calls gen_server and creates a Counter actor instance.
 %% Counter inherits from Actor, so spawn (not new) creates instances.
 test_class_send_new() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
     ?assertNotEqual(undefined, CounterPid),
     Result = beamtalk_class_dispatch:class_send(CounterPid, spawn, []),
@@ -619,7 +619,7 @@ test_class_send_new() ->
 
 %% class_send for a selector not defined anywhere raises does_not_understand.
 test_class_send_dnu() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
     ?assertBtError(
         does_not_understand,
@@ -1486,7 +1486,7 @@ class_send_instantiation_test_() ->
 
 %% class_send(Pid, 'spawnWith:', [Map]) creates an actor with initial state.
 test_class_send_spawn_with_map() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
     ?assertNotEqual(undefined, CounterPid),
     InitState = #{},
@@ -1659,7 +1659,7 @@ class_chain_fallthrough_test_() ->
 %% through to try_class_chain_fallthrough which checks the Class chain.
 %% printString is defined on Object (via Class chain) and returns a string.
 test_fallthrough_print_string() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
     ?assertNotEqual(undefined, CounterPid),
     Result = beamtalk_class_dispatch:class_send(CounterPid, printString, []),
@@ -1854,7 +1854,7 @@ test_fallthrough_real_error() ->
     %% Send an unknown selector to a class object — this falls through into
     %% the Class chain and eventually surfaces DNU. We simply assert the
     %% operation raises a beamtalk exception.
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
     ?assertError(
         #{'$beamtalk_class' := _, error := _},
@@ -3034,25 +3034,6 @@ tag_self(Tag) ->
         undefined -> #beamtalk_object{class = Tag, class_mod = undefined, pid = self()}
     end.
 
-ensure_counter_loaded() ->
-    case beamtalk_class_registry:whereis_class('Counter') of
-        undefined ->
-            case code:ensure_loaded('bt@counter') of
-                {module, 'bt@counter'} ->
-                    case erlang:function_exported('bt@counter', register_class, 0) of
-                        true ->
-                            'bt@counter':register_class(),
-                            ok;
-                        false ->
-                            error(counter_no_register_function)
-                    end;
-                {error, Reason} ->
-                    error({counter_module_not_found, Reason})
-            end;
-        _Pid ->
-            ok
-    end.
-
 %%% ============================================================================
 %%% class_self_direct_ok/4 (BT-3666 compiled fast-path guard)
 %%% ============================================================================
@@ -3350,7 +3331,7 @@ class_chain_skip_test_() ->
     end}.
 
 test_class_chain_send_makes_no_gen_call() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     Counter = class_obj('Counter'),
     Actor = class_obj('Actor'),
     Object = class_obj('Object'),

@@ -21,9 +21,6 @@ and handle/4 operations that do not require a running workspace.
 %% Helpers
 %%====================================================================
 
-make_msg(Op, Id, Session) ->
-    {protocol_msg, Op, Id, Session, #{}}.
-
 %%====================================================================
 %% parse_receiver_and_prefix/1
 %%====================================================================
@@ -158,25 +155,25 @@ tokenise_keyword_send_returns_error_test() ->
 %%====================================================================
 
 base_protocol_response_with_id_and_session_test() ->
-    Msg = make_msg(<<"eval">>, <<"req-1">>, <<"sess-a">>),
+    Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"req-1">>, <<"sess-a">>),
     Result = beamtalk_repl_ops_dev:base_protocol_response(Msg),
     ?assertEqual(<<"req-1">>, maps:get(<<"id">>, Result)),
     ?assertEqual(<<"sess-a">>, maps:get(<<"session">>, Result)).
 
 base_protocol_response_no_id_test() ->
-    Msg = make_msg(<<"eval">>, undefined, <<"sess-b">>),
+    Msg = beamtalk_test_repl:make_msg(<<"eval">>, undefined, <<"sess-b">>),
     Result = beamtalk_repl_ops_dev:base_protocol_response(Msg),
     ?assertEqual(error, maps:find(<<"id">>, Result)),
     ?assertEqual(<<"sess-b">>, maps:get(<<"session">>, Result)).
 
 base_protocol_response_no_session_test() ->
-    Msg = make_msg(<<"eval">>, <<"req-2">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"eval">>, <<"req-2">>, undefined),
     Result = beamtalk_repl_ops_dev:base_protocol_response(Msg),
     ?assertEqual(<<"req-2">>, maps:get(<<"id">>, Result)),
     ?assertEqual(error, maps:find(<<"session">>, Result)).
 
 base_protocol_response_neither_test() ->
-    Msg = make_msg(<<"eval">>, undefined, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"eval">>, undefined, undefined),
     Result = beamtalk_repl_ops_dev:base_protocol_response(Msg),
     ?assertEqual(#{}, Result).
 
@@ -234,14 +231,14 @@ get_context_completions_with_bindings_empty_test() ->
 %%====================================================================
 
 handle_describe_returns_ops_map_test() ->
-    Msg = make_msg(<<"describe">>, <<"d-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"describe">>, <<"d-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     ?assert(maps:is_key(<<"ops">>, Decoded)),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
 
 handle_describe_contains_eval_op_test() ->
-    Msg = make_msg(<<"describe">>, <<"d-2">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"describe">>, <<"d-2">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     Ops = maps:get(<<"ops">>, Decoded),
@@ -250,14 +247,14 @@ handle_describe_contains_eval_op_test() ->
 %% The load-tests op is advertised so clients can discover the
 %% test-runner pane's "Load tests" affordance.
 handle_describe_contains_load_tests_op_test() ->
-    Msg = make_msg(<<"describe">>, <<"d-2b">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"describe">>, <<"d-2b">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     Ops = maps:get(<<"ops">>, Decoded),
     ?assert(maps:is_key(<<"load-tests">>, Ops)).
 
 handle_describe_contains_versions_test() ->
-    Msg = make_msg(<<"describe">>, <<"d-3">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"describe">>, <<"d-3">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     Versions = maps:get(<<"versions">>, Decoded),
@@ -272,7 +269,7 @@ handle_describe_contains_versions_test() ->
 %% (beamtalk_workspace already depends on beamtalk_runtime, so it can call
 %% both sides directly).
 handle_describe_protocol_version_matches_beamtalk_version_test() ->
-    Msg = make_msg(<<"describe">>, <<"d-4">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"describe">>, <<"d-4">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     Versions = maps:get(<<"versions">>, Decoded),
@@ -284,7 +281,7 @@ handle_describe_protocol_version_matches_beamtalk_version_test() ->
 %%====================================================================
 
 handle_show_codegen_empty_code_error_test() ->
-    Msg = make_msg(<<"show-codegen">>, <<"sc-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"show-codegen">>, <<"sc-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"show-codegen">>, #{<<"code">> => <<>>}, Msg, self()
     ),
@@ -293,7 +290,7 @@ handle_show_codegen_empty_code_error_test() ->
     ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
 
 handle_show_codegen_missing_code_error_test() ->
-    Msg = make_msg(<<"show-codegen">>, <<"sc-2">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"show-codegen">>, <<"sc-2">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"show-codegen">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     ?assert(maps:is_key(<<"error">>, Decoded)).
@@ -309,7 +306,7 @@ handle_show_codegen_missing_code_error_test() ->
 %%====================================================================
 
 diagnostics_empty_code_returns_empty_term_test() ->
-    Msg = make_msg(<<"diagnostics">>, <<"dg-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"diagnostics">>, <<"dg-1">>, undefined),
     ?assertEqual(
         {diagnostics, []},
         beamtalk_repl_ops_dev:handle_term(
@@ -319,7 +316,7 @@ diagnostics_empty_code_returns_empty_term_test() ->
 
 diagnostics_missing_code_returns_empty_term_test() ->
     %% No `code` key at all defaults to an empty buffer -> no diagnostics, no port.
-    Msg = make_msg(<<"diagnostics">>, <<"dg-2">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"diagnostics">>, <<"dg-2">>, undefined),
     ?assertEqual(
         {diagnostics, []},
         beamtalk_repl_ops_dev:handle_term(<<"diagnostics">>, #{}, Msg, self())
@@ -330,7 +327,7 @@ diagnostics_non_binary_mode_returns_empty_term_test() ->
     %% number) degrades to [] at the Erlang boundary via the diagnostics_for/3
     %% catch-all, rather than crashing the session. No compiler/port call is made,
     %% so this is covered without a running workspace.
-    Msg = make_msg(<<"diagnostics">>, <<"dg-4">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"diagnostics">>, <<"dg-4">>, undefined),
     ?assertEqual(
         {diagnostics, []},
         beamtalk_repl_ops_dev:handle_term(
@@ -340,7 +337,7 @@ diagnostics_non_binary_mode_returns_empty_term_test() ->
 
 diagnostics_empty_code_encodes_done_status_test() ->
     %% handle/4 runs the term through encode_diagnostics -> WebSocket JSON shape.
-    Msg = make_msg(<<"diagnostics">>, <<"dg-3">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"diagnostics">>, <<"dg-3">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"diagnostics">>, #{<<"code">> => <<>>}, Msg, self()),
     Decoded = json:decode(Result),
     ?assertEqual([], maps:get(<<"diagnostics">>, Decoded)),
@@ -450,7 +447,7 @@ diagnostics_op_source_path_applies_project_table_test() ->
             >>
         ),
         ok = file:write_file(SourcePath, Source),
-        Msg = make_msg(<<"diagnostics">>, <<"dg-sp">>, undefined),
+        Msg = beamtalk_test_repl:make_msg(<<"diagnostics">>, <<"dg-sp">>, undefined),
         {diagnostics, Scoped} = beamtalk_repl_ops_dev:handle_term(
             <<"diagnostics">>,
             #{
@@ -488,7 +485,7 @@ mismatch_severities(Diagnostics) ->
 
 handle_show_codegen_class_not_found_error_test() ->
     %% Non-existent class name -> class not found error
-    Msg = make_msg(<<"show-codegen">>, <<"sc-3">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"show-codegen">>, <<"sc-3">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"show-codegen">>,
         #{<<"class">> => <<"NonExistentClass99999">>},
@@ -500,7 +497,7 @@ handle_show_codegen_class_not_found_error_test() ->
 
 handle_show_codegen_class_with_selector_no_class_found_test() ->
     %% class+selector where class doesn't exist -> error
-    Msg = make_msg(<<"show-codegen">>, <<"sc-4">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"show-codegen">>, <<"sc-4">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"show-codegen">>,
         #{<<"class">> => <<"NonExistentClass99999">>, <<"selector">> => <<"someMethod">>},
@@ -512,7 +509,7 @@ handle_show_codegen_class_with_selector_no_class_found_test() ->
 
 handle_show_codegen_class_takes_priority_over_code_test() ->
     %% When both class and code are given, class takes priority and errors (non-existent class)
-    Msg = make_msg(<<"show-codegen">>, <<"sc-5">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"show-codegen">>, <<"sc-5">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"show-codegen">>,
         #{<<"class">> => <<"NonExistentClass99999">>, <<"code">> => <<"1 + 2">>},
@@ -526,7 +523,7 @@ handle_show_codegen_class_takes_priority_over_code_test() ->
 handle_show_codegen_empty_class_falls_back_to_code_test() ->
     %% Empty class binary is treated as absent; falls back to code path.
     %% Use empty code so we get the "empty expression" error without calling a real session.
-    Msg = make_msg(<<"show-codegen">>, <<"sc-6">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"show-codegen">>, <<"sc-6">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"show-codegen">>,
         #{<<"class">> => <<>>, <<"code">> => <<>>},
@@ -542,7 +539,7 @@ handle_show_codegen_empty_class_falls_back_to_code_test() ->
 handle_show_codegen_selector_without_class_test() ->
     %% Providing selector without class returns a specific "selector requires class" error,
     %% not the generic missing-parameter error — consistent with the Rust MCP boundary.
-    Msg = make_msg(<<"show-codegen">>, <<"sc-7">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"show-codegen">>, <<"sc-7">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"show-codegen">>,
         #{<<"selector">> => <<"greet">>},
@@ -595,7 +592,7 @@ handle_hover_empty_code_test() ->
     %% Empty code short-circuits before any binding/registry lookup, so this
     %% needs no runtime: hover returns empty docs ("nothing to show"), which the
     %% client renders as no tooltip.
-    Msg = make_msg(<<"hover">>, undefined, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"hover">>, undefined, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"hover">>, #{<<"code">> => <<>>}, Msg, self()
     ),
@@ -982,7 +979,7 @@ classify_receiver_unresolvable_qualified_name_is_undefined_test() ->
 %%====================================================================
 
 handle_methods_unknown_class_test() ->
-    Msg = make_msg(<<"methods">>, <<"m-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"methods">>, <<"m-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"methods">>, #{<<"class">> => <<"NonExistentXyz9999">>}, Msg, self()
     ),
@@ -1244,7 +1241,7 @@ parse_keyword_send_inject_into_returns_expression_test() ->
 handle_describe_omits_removed_ops_test() ->
     %% The deprecated ops `docs`, `load-file`, `reload`, and `modules`
     %% were removed; describe must no longer advertise them.
-    Msg = make_msg(<<"describe">>, <<"d-dep">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"describe">>, <<"d-dep">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     Ops = maps:get(<<"ops">>, Decoded),
@@ -1259,7 +1256,7 @@ handle_describe_omits_removed_ops_test() ->
     ?assertEqual(?PROTOCOL_VERSION, maps:get(<<"protocol">>, Versions)).
 
 handle_describe_contains_actors_op_test() ->
-    Msg = make_msg(<<"describe">>, <<"d-actors">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"describe">>, <<"d-actors">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     Ops = maps:get(<<"ops">>, Decoded),
@@ -1267,7 +1264,7 @@ handle_describe_contains_actors_op_test() ->
     ?assertEqual([], maps:get(<<"params">>, maps:get(<<"actors">>, Ops))).
 
 handle_describe_contains_inspect_op_test() ->
-    Msg = make_msg(<<"describe">>, <<"d-inspect">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"describe">>, <<"d-inspect">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     Ops = maps:get(<<"ops">>, Decoded),
@@ -1275,7 +1272,7 @@ handle_describe_contains_inspect_op_test() ->
     ?assertEqual([<<"actor">>], maps:get(<<"params">>, maps:get(<<"inspect">>, Ops))).
 
 handle_describe_contains_kill_op_test() ->
-    Msg = make_msg(<<"describe">>, <<"d-kill">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"describe">>, <<"d-kill">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"describe">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     Ops = maps:get(<<"ops">>, Decoded),
@@ -1288,7 +1285,7 @@ handle_describe_contains_kill_op_test() ->
 
 handle_complete_new_format_empty_prefix_test() ->
     %% New format without cursor field falls back to get_completions
-    Msg = make_msg(<<"complete">>, <<"c-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"complete">>, <<"c-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"complete">>, #{<<"code">> => <<>>}, Msg, self()
     ),
@@ -1444,7 +1441,7 @@ parse_bare_qualified_name_test() ->
 
 erlang_help_missing_module_returns_error_test() ->
     %% Empty module binary -> "Module name required" error.
-    Msg = make_msg(<<"erlang-help">>, <<"eh-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"erlang-help">>, <<"eh-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"erlang-help">>, #{<<"module">> => <<>>}, Msg, self()
     ),
@@ -1455,7 +1452,7 @@ erlang_help_missing_module_returns_error_test() ->
 
 erlang_help_unknown_module_returns_not_found_test() ->
     %% A module name that is not an existing atom -> badarg -> not-found error.
-    Msg = make_msg(<<"erlang-help">>, <<"eh-2">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"erlang-help">>, <<"eh-2">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"erlang-help">>,
         #{<<"module">> => <<"no_such_erlang_module_xyz99999">>},
@@ -1469,7 +1466,7 @@ erlang_help_unknown_module_returns_not_found_test() ->
 
 erlang_help_known_module_returns_docs_test() ->
     %% `lists` is always loaded; format_module_help should succeed and return docs.
-    Msg = make_msg(<<"erlang-help">>, <<"eh-3">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"erlang-help">>, <<"eh-3">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"erlang-help">>, #{<<"module">> => <<"lists">>}, Msg, self()
     ),
@@ -1479,7 +1476,7 @@ erlang_help_known_module_returns_docs_test() ->
 
 erlang_help_known_module_unknown_function_returns_error_test() ->
     %% Known module, function that does not exist -> function not-found error.
-    Msg = make_msg(<<"erlang-help">>, <<"eh-4">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"erlang-help">>, <<"eh-4">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"erlang-help">>,
         #{<<"module">> => <<"lists">>, <<"function">> => <<"no_such_fn_xyz99999">>},
@@ -1494,7 +1491,7 @@ erlang_help_known_module_unknown_function_returns_error_test() ->
 
 erlang_help_known_module_known_function_returns_docs_test() ->
     %% `lists:map/2` exists -> function help succeeds.
-    Msg = make_msg(<<"erlang-help">>, <<"eh-5">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"erlang-help">>, <<"eh-5">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"erlang-help">>,
         #{<<"module">> => <<"lists">>, <<"function">> => <<"map">>},
@@ -1510,7 +1507,7 @@ erlang_help_known_module_known_function_returns_docs_test() ->
 
 erlang_complete_module_prefix_test() ->
     %% No module param -> complete module names by prefix. "list" should match "lists".
-    Msg = make_msg(<<"erlang-complete">>, <<"ec-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"erlang-complete">>, <<"ec-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"erlang-complete">>, #{<<"prefix">> => <<"list">>}, Msg, self()
     ),
@@ -1527,7 +1524,7 @@ erlang_complete_module_prefix_test() ->
 erlang_complete_function_prefix_loaded_module_test() ->
     %% Module given + already loaded -> complete its exported function names.
     %% `lists` is loaded; functions like `map`, `member` start with "m".
-    Msg = make_msg(<<"erlang-complete">>, <<"ec-2">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"erlang-complete">>, <<"ec-2">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"erlang-complete">>,
         #{<<"prefix">> => <<"m">>, <<"module">> => <<"lists">>},
@@ -1548,7 +1545,7 @@ erlang_complete_function_prefix_loaded_module_test() ->
 
 erlang_complete_unknown_module_returns_empty_test() ->
     %% Module name that is not an existing atom -> badarg -> empty completions.
-    Msg = make_msg(<<"erlang-complete">>, <<"ec-3">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"erlang-complete">>, <<"ec-3">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"erlang-complete">>,
         #{<<"prefix">> => <<"x">>, <<"module">> => <<"no_such_mod_xyz99999">>},
@@ -1562,7 +1559,7 @@ erlang_complete_existing_atom_not_a_loaded_module_returns_empty_test() ->
     %% Distinct from the badarg case above — `ok` already exists as
     %% an atom (used throughout this suite) but names no loaded module, so
     %% `code:get_object_code/1`'s `error` branch is reached instead.
-    Msg = make_msg(<<"erlang-complete">>, <<"ec-4">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"erlang-complete">>, <<"ec-4">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"erlang-complete">>,
         #{<<"prefix">> => <<"x">>, <<"module">> => <<"ok">>},
@@ -1578,7 +1575,7 @@ erlang_complete_existing_atom_not_a_loaded_module_returns_empty_test() ->
 
 handle_test_class_and_file_mutually_exclusive_test() ->
     %% Both class and file given -> mutually-exclusive error.
-    Msg = make_msg(<<"test">>, <<"t-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"test">>, <<"t-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"test">>,
         #{<<"class">> => <<"FooTest">>, <<"file">> => <<"foo.bt">>},
@@ -1592,7 +1589,7 @@ handle_test_class_and_file_mutually_exclusive_test() ->
 
 handle_test_file_not_binary_test() ->
     %% file param that is not a binary -> "'file' must be a binary path" error.
-    Msg = make_msg(<<"test">>, <<"t-2">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"test">>, <<"t-2">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"test">>, #{<<"file">> => 12345}, Msg, self()
     ),
@@ -1603,7 +1600,7 @@ handle_test_file_not_binary_test() ->
 
 handle_test_unknown_class_returns_class_not_found_test() ->
     %% A class name that has never been loaded as an atom -> class-not-found error.
-    Msg = make_msg(<<"test">>, <<"t-3">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"test">>, <<"t-3">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"test">>, #{<<"class">> => <<"NoSuchTestClassXyz99999">>}, Msg, self()
     ),
@@ -1618,7 +1615,7 @@ handle_test_unknown_class_returns_class_not_found_test() ->
 
 handle_list_classes_unknown_filter_returns_error_test() ->
     %% A filter that is not stdlib/user and not an existing atom -> argument error.
-    Msg = make_msg(<<"list-classes">>, <<"lc-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"list-classes">>, <<"lc-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"list-classes">>,
         #{<<"filter">> => <<"NoSuchFilterClassXyz99999">>},
@@ -1785,7 +1782,7 @@ inherited_methods_root_class_empty() ->
     ?assertEqual([], beamtalk_repl_ops_dev:list_inherited_methods_for_ws(<<"WidgetDevBase">>)).
 
 inherited_methods_op_handle() ->
-    Msg = make_msg(<<"inherited-methods">>, <<"im-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"inherited-methods">>, <<"im-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"inherited-methods">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
     ),
@@ -1822,7 +1819,7 @@ context_completion_qualified_receiver() ->
 list_classes_user_filter_includes() ->
     %% With WidgetDev registered under a non-stdlib module, the "user" filter
     %% must include it (exercises should_include_class/4 not-stdlib branch).
-    Msg = make_msg(<<"list-classes">>, <<"lcui-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"list-classes">>, <<"lcui-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"list-classes">>, #{<<"filter">> => <<"user">>}, Msg, self()
     ),
@@ -1833,7 +1830,7 @@ list_classes_user_filter_includes() ->
 
 list_classes_single_line_doc() ->
     %% OneLineDocDev's doc has no newline; first_line/1 returns it verbatim.
-    Msg = make_msg(<<"list-classes">>, <<"lcd-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"list-classes">>, <<"lcd-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"list-classes">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     ClassList = maps:get(<<"class_list">>, Decoded),
@@ -1889,7 +1886,7 @@ test_op_known_class_returns_response() ->
     %% runs the runner branch: it either returns test results or a structured
     %% error — both are well-formed JSON with a status field. This exercises
     %% the run_class_by_name path rather than the early class-not-found return.
-    Msg = make_msg(<<"test">>, <<"tk-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"test">>, <<"tk-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"test">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
     ),
@@ -2024,7 +2021,7 @@ teardown_dev_runtime(Pids) ->
 
 complete_no_cursor_class_prefix_returns_class() ->
     %% No "cursor" field: get_completions matches the class by prefix.
-    Msg = make_msg(<<"complete">>, undefined, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"complete">>, undefined, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"complete">>, #{<<"code">> => <<"WidgetD">>}, Msg, self()
     ),
@@ -2078,7 +2075,7 @@ context_completion_unknown_lowercase() ->
     ?assertEqual([], Result).
 
 methods_op_returns_methods() ->
-    Msg = make_msg(<<"methods">>, <<"mm-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"methods">>, <<"mm-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"methods">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
     ),
@@ -2115,7 +2112,7 @@ methods_op_tags_synthetic_source_status() ->
             provenance => class_body
         }
     ]),
-    Msg = make_msg(<<"methods">>, <<"mm-4">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"methods">>, <<"mm-4">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"methods">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
     ),
@@ -2139,7 +2136,7 @@ methods_op_returns_state_vars() ->
     %% for it, so every entry's line is `null`. This is exactly the "class
     %% predates the feature / ClassBuilder-built" fallback case
     %% beamtalk.navigateToStateVar's regex fallback exists for.
-    Msg = make_msg(<<"methods">>, <<"mm-2">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"methods">>, <<"mm-2">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"methods">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
     ),
@@ -2164,7 +2161,7 @@ methods_op_state_vars_carry_line_when_registered() ->
         #{name => width, line => 12},
         #{name => height, line => 13}
     ]),
-    Msg = make_msg(<<"methods">>, <<"mm-3">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"methods">>, <<"mm-3">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"methods">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
     ),
@@ -2188,7 +2185,7 @@ list_class_methods_known_class() ->
     ?assert(lists:member(<<"create">>, Names)).
 
 list_classes_op_returns_class() ->
-    Msg = make_msg(<<"list-classes">>, <<"lc-2">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"list-classes">>, <<"lc-2">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"list-classes">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)),
@@ -2211,7 +2208,7 @@ list_classes_op_returns_class() ->
 list_classes_filter_stdlib() ->
     %% WidgetDev is registered with a non-stdlib module, so the stdlib filter
     %% must exclude it.
-    Msg = make_msg(<<"list-classes">>, <<"lc-3">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"list-classes">>, <<"lc-3">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"list-classes">>, #{<<"filter">> => <<"stdlib">>}, Msg, self()
     ),
@@ -2228,7 +2225,7 @@ list_classes_filter_stdlib() ->
 list_classes_superclass_filter() ->
     %% Filtering by superclass WidgetDevBase should include WidgetDev (which
     %% inherits from it) and exclude unrelated classes.
-    Msg = make_msg(<<"list-classes">>, <<"lc-4">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"list-classes">>, <<"lc-4">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"list-classes">>, #{<<"filter">> => <<"WidgetDevBase">>}, Msg, self()
     ),
@@ -2243,7 +2240,7 @@ list_classes_superclass_filter() ->
 show_codegen_class_selector_not_found() ->
     %% Class exists, selector does not -> "Selector ... not found" error
     %% (exercises validate_selector_if_present failure branch).
-    Msg = make_msg(<<"show-codegen">>, <<"scc-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"show-codegen">>, <<"scc-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"show-codegen">>,
         #{<<"class">> => <<"WidgetDev">>, <<"selector">> => <<"noSuchSelectorXyz">>},
@@ -2404,7 +2401,7 @@ show_codegen_class_compiles_source() ->
     %% class has a synthetic module not on disk and no workspace_meta source,
     %% so resolve_source_path returns "unknown" and we hit the no_source branch
     %% producing a "No source" runtime error (rather than a class-not-found).
-    Msg = make_msg(<<"show-codegen">>, <<"scs-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"show-codegen">>, <<"scs-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"show-codegen">>, #{<<"class">> => <<"WidgetDev">>}, Msg, self()
     ),
@@ -2449,7 +2446,7 @@ session_show_codegen_code_path(Pid) ->
     %% port up show_codegen returns a codegen result, without it a structured
     %% error. Either way the response is a well-formed, non-crashing map whose
     %% status list ends with the done marker.
-    Msg = make_msg(<<"show-codegen">>, <<"scd-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"show-codegen">>, <<"scd-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"show-codegen">>, #{<<"code">> => <<"1 + 2">>}, Msg, Pid
     ),
@@ -2461,7 +2458,7 @@ session_show_codegen_code_path(Pid) ->
 session_show_codegen_code_error(Pid) ->
     %% A syntactically invalid expression also flows through the code path's
     %% error branch and returns a structured error.
-    Msg = make_msg(<<"show-codegen">>, <<"scd-2">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"show-codegen">>, <<"scd-2">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"show-codegen">>, #{<<"code">> => <<"@@@ invalid syntax @@@">>}, Msg, Pid
     ),
@@ -2476,7 +2473,7 @@ handle_complete_with_cursor_no_session_bindings_test() ->
     %% New protocol with a "cursor" field exercises the binding-merge branch.
     %% self() is not a real session, so get_session_bindings catches and returns
     %% #{}; the merge still produces context completions (here: bare prefix → []).
-    Msg = make_msg(<<"complete">>, <<"cc-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"complete">>, <<"cc-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"complete">>,
         #{<<"code">> => <<>>, <<"cursor">> => 0},
@@ -2502,7 +2499,7 @@ handle_test_all_returns_response_test() ->
     %% subclasses loaded it returns a structured test-results response; if the
     %% runner raises, a structured error is returned. Either way it is a
     %% well-formed JSON object — never a crash.
-    Msg = make_msg(<<"test-all">>, <<"ta-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"test-all">>, <<"ta-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(<<"test-all">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     ?assert(is_map(Decoded)),
@@ -2511,7 +2508,7 @@ handle_test_all_returns_response_test() ->
 handle_test_file_returns_response_test() ->
     %% A file path with no matching TestCase subclasses returns a well-formed
     %% response (empty results or structured error), exercising run_test_op_file/2.
-    Msg = make_msg(<<"test">>, <<"tf-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"test">>, <<"tf-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"test">>, #{<<"file">> => <<"no_such_file_xyz99999.bt">>}, Msg, self()
     ),
@@ -2524,7 +2521,7 @@ handle_list_tests_returns_classes_term_test() ->
     %% The bare EUnit image loads no TestCase subclasses, so discovery returns an
     %% empty `classes` list — exercising the op routing + the `{value, _}` term
     %% shape without depending on any fixture class being present.
-    Msg = make_msg(<<"list-tests">>, <<"lt-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"list-tests">>, <<"lt-1">>, undefined),
     {value, Value} = beamtalk_repl_ops_dev:handle_term(<<"list-tests">>, #{}, Msg, self()),
     ?assert(is_list(maps:get(<<"classes">>, Value))).
 
@@ -2570,7 +2567,7 @@ handle_reload_findings_returns_empty_snapshot_test() ->
         %% recorded (the store's initial state), the op still exercises op
         %% routing + the `{value, _}` term shape and returns an empty list,
         %% not an error.
-        Msg = make_msg(<<"reload-findings">>, <<"rf-1">>, undefined),
+        Msg = beamtalk_test_repl:make_msg(<<"reload-findings">>, <<"rf-1">>, undefined),
         {value, Value} = beamtalk_repl_ops_dev:handle_term(<<"reload-findings">>, #{}, Msg, self()),
         ?assertEqual([], maps:get(<<"findings">>, Value))
     end).
@@ -2598,7 +2595,7 @@ handle_reload_findings_returns_wire_shaped_finding_test() ->
         _ = beamtalk_workspace_findings_store:put_owner_origin(
             <<"Caller">>, <<"Changed">>, [Finding]
         ),
-        Msg = make_msg(<<"reload-findings">>, <<"rf-2">>, undefined),
+        Msg = beamtalk_test_repl:make_msg(<<"reload-findings">>, <<"rf-2">>, undefined),
         {value, Value} = beamtalk_repl_ops_dev:handle_term(<<"reload-findings">>, #{}, Msg, self()),
         [Wire] = maps:get(<<"findings">>, Value),
         ?assertEqual(<<"Caller">>, maps:get(<<"owner">>, Wire)),
@@ -2611,7 +2608,7 @@ validate_list_classes_filter_user_test() ->
     %% list-classes with the "user" filter takes the not-stdlib branch and must
     %% include the (non-stdlib) WidgetDev fixture-free path: here we only assert
     %% the op succeeds and returns a class_list (the user filter resolves cheaply).
-    Msg = make_msg(<<"list-classes">>, <<"lcu-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"list-classes">>, <<"lcu-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"list-classes">>, #{<<"filter">> => <<"user">>}, Msg, self()
     ),
@@ -2632,7 +2629,7 @@ resolve_qualified_consecutive_uppercase_test() ->
 handle_list_classes_non_binary_filter_test() ->
     %% A filter that is neither undefined nor a binary hits the catch-all clause
     %% of validate_list_classes_filter/1 → {error, FilterStr} → argument error.
-    Msg = make_msg(<<"list-classes">>, <<"lcn-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"list-classes">>, <<"lcn-1">>, undefined),
     Result = beamtalk_repl_ops_dev:handle(
         <<"list-classes">>, #{<<"filter">> => 12345}, Msg, self()
     ),

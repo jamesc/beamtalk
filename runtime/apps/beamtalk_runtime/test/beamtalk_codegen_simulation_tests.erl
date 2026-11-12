@@ -55,9 +55,6 @@ See also: beamtalk_actor for the runtime implementation
 %% was reported as `cancelled` instead of `class_not_registered` (BT-4427).
 -define(ACTOR_WAIT_MS, 5000).
 -define(TEST_TIMEOUT_S, 30).
--if(?ACTOR_WAIT_MS >= ?TEST_TIMEOUT_S * 1000).
--error("beamtalk_codegen_simulation_tests: ACTOR_WAIT_MS exceeds TEST_TIMEOUT_S").
--endif.
 -include("beamtalk.hrl").
 
 %%% ===========================================================================

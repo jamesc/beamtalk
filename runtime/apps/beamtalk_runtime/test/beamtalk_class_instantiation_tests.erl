@@ -420,7 +420,7 @@ test_spawn_abstract_class() ->
 
 test_spawn_too_many_args() ->
     %% Ensure Counter is loaded for spawn
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     Result = beamtalk_class_instantiation:handle_spawn(
         [arg1, arg2], 'Counter', 'bt@counter', false
     ),
@@ -433,14 +433,14 @@ test_spawn_too_many_args() ->
     ).
 
 test_spawn_no_args() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     Result = beamtalk_class_instantiation:handle_spawn([], 'Counter', 'bt@counter', false),
     ?assertMatch({ok, #beamtalk_object{class = 'Counter'}}, Result),
     {ok, Obj} = Result,
     gen_server:stop(Obj#beamtalk_object.pid).
 
 test_spawn_with_arg() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     InitArgs = #{value => 10},
     Result = beamtalk_class_instantiation:handle_spawn([InitArgs], 'Counter', 'bt@counter', false),
     ?assertMatch({ok, #beamtalk_object{class = 'Counter'}}, Result),
@@ -454,7 +454,7 @@ test_kill_actor_spawned_via_class_survives_class() ->
     %% used gen_server:start_link, linking the new actor to the class
     %% process; exit(ActorPid, kill) then propagated over that link and
     %% killed the class gen_server too (losing class vars / hot patches).
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
     {ok, #beamtalk_object{pid = ActorPid} = Obj} = gen_server:call(CounterPid, {spawn, []}),
     ?assertEqual('Counter', Obj#beamtalk_object.class),
@@ -550,7 +550,7 @@ test_compute_abstract() ->
 
 test_compute_actor() ->
     %% Counter module has spawn/0 → not constructible
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ?assertEqual(false, beamtalk_class_instantiation:compute_is_constructible('bt@counter', false)).
 
 test_compute_value_type() ->
@@ -574,7 +574,7 @@ test_actor_registered_non_constructible() ->
 
 test_counter_inherits_non_constructible() ->
     %% Counter is a subclass of Actor — should inherit non-constructible
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
     ?assertNotEqual(undefined, CounterPid),
     ?assertEqual(false, beamtalk_object_class:is_constructible(CounterPid)).
@@ -669,7 +669,7 @@ test_compiled_value_new_excludes_shape_version() ->
 %%====================================================================
 
 test_class_self_spawn_success() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     Result = beamtalk_class_instantiation:class_self_spawn(
         'Counter', 'bt@counter', []
     ),
@@ -687,7 +687,7 @@ test_class_self_spawn_abstract() ->
 
 test_class_self_spawn_normalize_abstract() ->
     %% undefined (from erlang:get) should be treated as false (non-abstract)
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     Result = beamtalk_class_instantiation:class_self_spawn(
         'Counter', 'bt@counter', undefined, []
     ),
@@ -697,7 +697,7 @@ test_class_self_spawn_normalize_abstract() ->
 test_class_self_spawn_monitored_success() ->
     %% BT-4104: calls the compiled spawn_monitored/0 and answers its pair;
     %% the monitor belongs to this (the calling) process.
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     {Obj, MonRef} = beamtalk_class_instantiation:class_self_spawn_monitored(
         'Counter', 'bt@counter', false, []
     ),
@@ -776,7 +776,7 @@ test_spawn_abstract_spawn_with() ->
 %%====================================================================
 
 test_class_self_spawn_as_success() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     Name = bt2004_self_spawnas_ok,
     unregister_if_present(Name),
     Result = beamtalk_class_instantiation:class_self_spawn_as(
@@ -807,7 +807,7 @@ test_class_self_spawn_as_stays_linked_in_supervisor_context() ->
     %% must NOT unlink in that case — the link is the supervisor's restart
     %% mechanism — unlike the ordinary case proved by
     %% test_class_self_spawn_as_success/0 above (no marker set, unlinks).
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     Name = bt3243_self_spawnas_supervisor_context,
     unregister_if_present(Name),
     put(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY, true),
@@ -829,7 +829,7 @@ test_class_self_spawn_as_stays_linked_in_supervisor_context() ->
     end.
 
 test_class_self_spawn_as_reserved() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     Result = beamtalk_class_instantiation:class_self_spawn_as(
         'Counter', 'bt@counter', false, logger
     ),
@@ -900,7 +900,7 @@ test_class_self_spawn_as_abstract() ->
     ).
 
 test_class_self_spawn_with_success() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     Name = bt2004_self_spawnwith_ok,
     unregister_if_present(Name),
     Result = beamtalk_class_instantiation:class_self_spawn_with(
@@ -914,7 +914,7 @@ test_class_self_spawn_with_success() ->
     gen_server:stop(Obj#beamtalk_object.pid).
 
 test_class_self_spawn_with_duplicate() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     Name = bt2004_self_spawnwith_dup,
     unregister_if_present(Name),
     #{'okValue' := First} = beamtalk_class_instantiation:class_self_spawn_with(
@@ -1578,9 +1578,6 @@ register_builder_class_with_class_methods(
     },
     {ok, Pid} = beamtalk_class_builder:register(State),
     Pid.
-
-ensure_counter_loaded() ->
-    ensure_fixture_class_loaded('Counter', 'bt@counter').
 
 %% Stop process if result is a beamtalk_object with a pid
 cleanup_if_process(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->

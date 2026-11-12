@@ -181,7 +181,7 @@ test_lookup_local_method() ->
     %% Counter defines increment/0 locally
 
     %% First, ensure Counter is loaded and registered
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     %% Create a Counter instance state
     State = #{
@@ -204,7 +204,7 @@ test_lookup_inherited_method() ->
     %% This test actually tests that we can find a method in the current class
     %% (Real hierarchy walking is tested with LoggingCounter -> Counter)
 
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     State = #{
         '$beamtalk_class' => 'Counter',
@@ -221,7 +221,7 @@ test_lookup_inherited_method() ->
 
 %% Test that lookup/5 returns structured error for missing method
 test_lookup_missing_method() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     State = #{
         '$beamtalk_class' => 'Counter',
@@ -245,7 +245,7 @@ test_lookup_missing_method() ->
 
 %% Test that super/5 skips the current class and starts at superclass
 test_super_skips_current() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     %% Counter inherits from Actor. Call super on Counter for 'increment'.
     %% Counter defines 'increment', but super should NOT find it in Counter.
@@ -272,7 +272,7 @@ test_super_at_root() ->
     %% We need to know the root class name
     %% For now, assume Object is close to root
 
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     State = #{
         '$beamtalk_class' => 'Object'
@@ -289,7 +289,7 @@ test_super_at_root() ->
 %% Test that extensions are checked before class methods
 test_extension_priority() ->
     %% Register an extension method on Counter
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
 
     TestFun = fun(_Args, _Self, State) ->
@@ -324,7 +324,7 @@ test_extension_priority() ->
 %% This validates the normalization in invoke_method that converts
 %% 3-tuple {error, Error, State} from dispatch/4 to 2-tuple {error, Error}
 test_error_tuple_shape() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     State = #{
         '$beamtalk_class' => 'Counter',
@@ -348,7 +348,7 @@ test_error_tuple_shape() ->
 %% We test 'isNil' which is registered in Object's metadata but has no
 %% compiled module — demonstrating the hierarchy walk terminates correctly.
 test_super_finds_inherited() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     State = #{
         '$beamtalk_class' => 'Counter',
@@ -368,43 +368,18 @@ test_super_finds_inherited() ->
 %%% Helper Functions
 %%% ============================================================================
 
-%% Ensure the Counter class is loaded and registered
-ensure_counter_loaded() ->
-    %% Check if Counter class is already registered
-    case beamtalk_class_registry:whereis_class('Counter') of
-        undefined ->
-            %% Counter not registered - register it
-            %% The counter module is compiled from test fixture (ADR 0016: bt@ prefix)
-            case code:ensure_loaded('bt@counter') of
-                {module, 'bt@counter'} ->
-                    %% Call the module's register_class/0 if it exists
-                    case erlang:function_exported('bt@counter', register_class, 0) of
-                        true ->
-                            'bt@counter':register_class(),
-                            ok;
-                        false ->
-                            error(counter_no_register_function)
-                    end;
-                {error, Reason} ->
-                    error({counter_module_not_found, Reason})
-            end;
-        _Pid ->
-            %% Already registered
-            ok
-    end.
-
 %%% ============================================================================
 %%% Additional Test Cases
 %%% ============================================================================
 
 %% Test responds_to for a method that exists
 test_responds_to_existing_method() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ?assert(beamtalk_dispatch:responds_to(increment, 'Counter')).
 
 %% Test responds_to for a method that doesn't exist
 test_responds_to_missing_method() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ?assertNot(beamtalk_dispatch:responds_to(totallyFakeMethod, 'Counter')).
 
 %% Test responds_to for nonexistent class
@@ -413,7 +388,7 @@ test_responds_to_nonexistent_class() ->
 
 %% Test responds_to walks hierarchy (Counter inherits from Actor which inherits from Object)
 test_responds_to_inherited_method() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     %% 'class' is defined in Object (inherited through Actor -> Counter)
     ?assert(beamtalk_dispatch:responds_to(class, 'Counter')).
 
@@ -425,7 +400,7 @@ test_responds_to_inherited_method() ->
 %% raw crash and, for an actor receiver, could crash the actor process
 %% itself; see beamtalk_actor_tests:instance_side_extension_crash_test/0.
 test_extension_error_propagation() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
 
     %% Register an extension that throws
@@ -520,7 +495,7 @@ test_extension_script_exit_passthrough() ->
 
 %% Test responds_to finds extension methods
 test_responds_to_extension_method() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
 
     TestFun = fun(_Args, _Self, State0) -> {ok, State0} end,
@@ -544,7 +519,7 @@ test_responds_to_extension_method() ->
 %% Benchmark: chain walk dispatch for inherited methods
 %% ADR 0032 Phase 1: flattened table removed; direct hierarchy walk used instead.
 test_dispatch_lookup_performance() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     State = #{
         '$beamtalk_class' => 'Counter',
@@ -577,7 +552,7 @@ test_dispatch_lookup_performance() ->
 %% Test that a dynamically added method is immediately discoverable via responds_to.
 %% ADR 0032 Phase 1: no flattened table invalidation needed — chain walk is always current.
 test_dynamic_method_responds_to() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
 
@@ -591,7 +566,7 @@ test_dynamic_method_responds_to() ->
 %% Test that a method added to a parent class is immediately visible in subclass responds_to.
 %% ADR 0032 Phase 1: chain walk traverses live gen_server state; no broadcast needed.
 test_inherited_responds_to_dynamic_method() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     ActorPid = beamtalk_class_registry:whereis_class('Actor'),
     ?assertNotEqual(undefined, ActorPid),
@@ -641,7 +616,7 @@ test_out_of_order_registration() ->
 %% Test that super/5 finds extension methods registered on a superclass.
 %% Register extension on Actor class, verify it's found via super from Counter.
 test_super_finds_extension_on_superclass() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
 
     %% Register an extension method on Actor (Counter's superclass)
@@ -681,7 +656,7 @@ test_super_finds_extension_on_superclass() ->
 
 %% Test: arity-3 (actor) extension threads state correctly via runtime dispatch
 test_extension_state_threading() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
 
     %% Register an arity-3 extension that mutates state
@@ -817,7 +792,7 @@ test_continue_to_superclass_root() ->
 
 %% Test that lookup on a dead class process returns class_not_found (not a crash).
 test_dead_class_process() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     %% Create a temporary class, get its pid, then kill it
     TmpMethod = fun(_Self, [], State) -> {reply, ok, State} end,
@@ -836,7 +811,7 @@ test_dead_class_process() ->
 
 %% Test super from Object for method that doesn't exist anywhere
 test_super_object_unknown() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     State = #{'$beamtalk_class' => 'Object'},
     Self = make_ref(),
     Result = beamtalk_dispatch:super(completelyUnknownMethod, [], Self, State, 'Object'),
@@ -868,7 +843,7 @@ test_lookup_missing_superclass_in_chain() ->
 %% Test that displayString sent to an actor instance bypasses the compiled
 %% module dispatch and uses beamtalk_object_ops instead (avoids gen_server deadlock).
 test_actor_instance_displaystring() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     %% Create a fake actor instance: a #beamtalk_object{} with a real pid.
     %% The pid is just self() — displayString via beamtalk_object_ops doesn't
@@ -894,7 +869,7 @@ test_actor_instance_displaystring() ->
 %% is the EUnit process, not a live Beamtalk actor, so the cursor classifies as
 %% #foreign; we assert on the class tag, which is kind-agnostic.)
 test_actor_instance_inspect() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     ActorSelf = #beamtalk_object{
         class = 'Counter',
@@ -1039,7 +1014,7 @@ test_dispatch_throws_wrapped() ->
 %% override honoured — even if it errors — rather than being silently bypassed.
 %% Here the override resolves to a throwing module, so the error surfaces.
 test_actor_instance_bypass_throwing_module() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     %% Compile a stub dispatch module whose dispatch/4 always throws.
     %% Because the class declares its own displayString, the override is honoured
@@ -1095,7 +1070,7 @@ test_actor_instance_bypass_throwing_module() ->
 %% the base Object class, so the bypass to beamtalk_object_ops fires and yields the
 %% kind-headed Actor(ClassName, pid) label without any self-send deadlock.
 test_actor_default_displaystring_bypass() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ActorSelf = #beamtalk_object{
         class = 'Counter',
         class_mod = counter,
@@ -1111,7 +1086,7 @@ test_actor_default_displaystring_bypass() ->
 
 %% Test: extension with bad arity raises {bad_extension_arity, N}
 test_extension_bad_arity() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
 
     %% Register an extension with arity 1 (neither 2 nor 3)
@@ -1141,7 +1116,7 @@ test_extension_bad_arity() ->
 %% Test: is_actor_instance returns false for non-actor values.
 %% When Self is not a #beamtalk_object{}, displayString goes through normal dispatch.
 test_non_actor_self_displaystring() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     State = #{
         '$beamtalk_class' => 'Counter',
@@ -1156,7 +1131,7 @@ test_non_actor_self_displaystring() ->
 
 %% Test: lookup with zero-arity method succeeds
 test_lookup_zero_arity_method() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     State = #{
         '$beamtalk_class' => 'Counter',
@@ -1169,7 +1144,7 @@ test_lookup_zero_arity_method() ->
 
 %% Test: responds_to walks full hierarchy depth correctly
 test_responds_to_deep_chain() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     %% Counter -> Actor -> Object. 'class' is in Object.
     ?assert(beamtalk_dispatch:responds_to(class, 'Counter')),
@@ -1184,7 +1159,7 @@ test_responds_to_deep_chain() ->
 %% Exercises the check_extension -> not_found -> lookup_in_class_chain path.
 test_lookup_with_extensions_table() ->
     ok = beamtalk_extensions:init(),
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
 
     State = #{
         '$beamtalk_class' => 'Counter',
@@ -1235,7 +1210,7 @@ test_continue_to_superclass_missing_registry() ->
 %% above for the fuller explanation; this test pins the same contract via a
 %% second, independently-registered crashing extension.
 test_extension_raises_reraised() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
 
     ThrowingFun = fun(_Args, _Self, _State) ->
@@ -1379,7 +1354,7 @@ test_compiled_dispatch_returns_error_tuple() ->
 
 %% super finds extension on superclass (covers super -> extension -> invoke).
 test_super_extension_invoke() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
 
     TestFun = fun(_Args, _Self, State) -> {from_super_ext, State} end,
@@ -1778,7 +1753,7 @@ test_hot_patch_invalidates_cached_owner() ->
 %% the extension fun is invoked. Removal restores the DNU. Uses the real
 %% Counter/Actor classes — the stub modules do not consult extensions.
 test_extension_install_invalidates_cached_owner() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
     beamtalk_class_derived_cache:invalidate(),
     State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
@@ -1827,7 +1802,7 @@ test_extension_install_invalidates_cached_owner() ->
 %% must flip it back. Warms a hit first — a miss-warmed entry would
 %% recompute correctly with or without the flush.
 test_extension_shadow_invalidates_cached_owner() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = beamtalk_extensions:init(),
     beamtalk_class_derived_cache:invalidate(),
     State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
@@ -1874,7 +1849,7 @@ test_extension_shadow_invalidates_cached_owner() ->
 %% (stubs cannot restart): each kill awaits the new pid so all four
 %% crashes land inside the window, then the fourth leaves it dead.
 test_kill_budget_exhausted_flushes_cache() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     beamtalk_class_derived_cache:invalidate(),
     State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
     Self = make_ref(),
@@ -1905,7 +1880,7 @@ test_kill_budget_exhausted_flushes_cache() ->
             beamtalk_dispatch:lookup(increment, [], Self, State, 'Counter')
         )
     after
-        ok = ensure_counter_loaded()
+        ok = beamtalk_test_class:ensure_counter_loaded()
     end.
 
 %% Purging the cached owner's module out from under it: the export guard
@@ -1989,7 +1964,7 @@ test_cached_and_walked_agree_through_skips() ->
 %% Misses are never cached: a hundred DNU sends leave no row for the key
 %% (this is the table's memory bound — hits only).
 test_misses_never_cache_rows() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     beamtalk_class_derived_cache:invalidate(),
     State = #{'$beamtalk_class' => 'Counter', 'value' => 0},
     Self = make_ref(),
@@ -2128,7 +2103,7 @@ test_super_send_warms_shared_entry() ->
 %% is the direct call, and the second ask is a cache hit (the row is present
 %% and answers without recomputing).
 test_inherited_target_compiled() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
     beamtalk_class_derived_cache:invalidate(),
     ?assertEqual(
@@ -2147,7 +2122,7 @@ test_inherited_target_compiled() ->
 %% flag, so the verdict is not `compiled`. (BT-4260: it is Object's `value`
 %% verdict, which an actor's `dispatch/4` arm treats as `slow`.)
 test_inherited_target_object_owned_slow() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
     beamtalk_class_derived_cache:invalidate(),
     ?assertEqual(
@@ -2207,7 +2182,7 @@ test_inherited_target_value_extension_flips() ->
 %% `slow` (today's extension / super path); removing it flips it back. Both
 %% install and removal flush the derived cache.
 test_inherited_target_extension_flips() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
     ok = beamtalk_extensions:init(),
     beamtalk_class_derived_cache:invalidate(),

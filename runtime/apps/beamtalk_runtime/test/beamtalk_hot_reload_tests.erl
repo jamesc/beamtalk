@@ -231,7 +231,7 @@ trigger_code_change_3_dead_pid_test() ->
 field_migration_setup() ->
     application:ensure_all_started(beamtalk_runtime),
     beamtalk_stdlib:init(),
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     ok = ensure_init_hook_counter_loaded(),
     ok = ensure_typed_field_counter_loaded(),
     ok = ensure_logging_counter_loaded(),
@@ -830,25 +830,6 @@ field_migration_init_throws_returns_old_state_test() ->
 %%====================================================================
 %% Helpers
 %%====================================================================
-
-ensure_counter_loaded() ->
-    case code:ensure_loaded('bt@counter') of
-        {module, 'bt@counter'} ->
-            case beamtalk_class_registry:whereis_class('Counter') of
-                undefined ->
-                    case erlang:function_exported('bt@counter', register_class, 0) of
-                        true ->
-                            'bt@counter':register_class(),
-                            ok;
-                        false ->
-                            ok
-                    end;
-                _Pid ->
-                    ok
-            end;
-        {error, Reason} ->
-            error({counter_module_not_found, Reason})
-    end.
 
 %% BT-3532: InitHookCounter (defines `initialize`) exercises the codegen
 %% branch bare init(#{}) used to break field migration for.
