@@ -156,7 +156,32 @@ const CEILINGS: &[(&str, usize)] = &[
     // method body's last statement (`ends_with_self_field_write`, BT-4235), and
     // `operand_loop_constructs` (BT-4310): a statement, its assignment or `^`
     // value, and a cascade's shared receiver.
-    ("beamtalk-core/src/semantic_analysis/block_facts.rs", 38),
+    // (BT-4696: split from `block_facts.rs`; the ceilings below sum to its
+    // former 38 and each file keeps the calls it already held.)
+    (
+        "beamtalk-core/src/semantic_analysis/block_facts/escape.rs",
+        4,
+    ),
+    (
+        "beamtalk-core/src/semantic_analysis/block_facts/mutation.rs",
+        1,
+    ),
+    (
+        "beamtalk-core/src/semantic_analysis/block_facts/outer_writes.rs",
+        1,
+    ),
+    (
+        "beamtalk-core/src/semantic_analysis/block_facts/producers.rs",
+        13,
+    ),
+    (
+        "beamtalk-core/src/semantic_analysis/block_facts/sequencing.rs",
+        16,
+    ),
+    (
+        "beamtalk-core/src/semantic_analysis/block_facts/value_position.rs",
+        3,
+    ),
     // BT-4257: `is_raw_binary`, read on assignment values and send operands
     // alike.
     (

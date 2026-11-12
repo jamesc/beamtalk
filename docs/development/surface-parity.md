@@ -1255,7 +1255,7 @@ listed above and fails when:
   row or the **REPL Meta-Command Reference** table.
 - **(BT-3083)** A `ReplCommandSpec` table constant in `commands.rs` (e.g.
   `HELP`, `EXIT`) is never referenced by `commands::IDENT` in
-  `classify_command()` (`crates/beamtalk-cli/src/commands/repl/mod.rs`) —
+  `classify_command()` (`crates/beamtalk-cli/src/commands/repl/handlers.rs`) —
   i.e. a command tab-completion offers with no dispatch path behind it.
   This is the check that would have caught `:actors`/`:kill`/`:inspect`/
   `:sessions` completing with no dispatch arm before this table existed.
