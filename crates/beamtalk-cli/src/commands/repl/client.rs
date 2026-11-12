@@ -29,7 +29,6 @@ pub(crate) struct ReplClient {
     cookie: String,
 }
 
-#[allow(dead_code)]
 impl ReplClient {
     /// Connect to the REPL backend.
     pub(crate) fn connect(host: &str, port: u16, cookie: &str) -> Result<Self> {
@@ -110,7 +109,6 @@ impl ReplClient {
     }
 
     /// Send an eval request and receive the response.
-    #[allow(dead_code)] // Used in non-interruptible mode or tests
     pub(crate) fn eval(&mut self, expression: &str) -> Result<ReplResponse> {
         self.send_request(&RequestBuilder::eval(expression))
     }
@@ -340,23 +338,6 @@ impl ReplClient {
     /// List running actors.
     pub(crate) fn list_actors(&mut self) -> Result<ReplResponse> {
         self.send_request(&RequestBuilder::actors())
-    }
-
-    /// List active sessions.
-    pub(crate) fn list_sessions(&mut self) -> Result<ReplResponse> {
-        self.send_request(&RequestBuilder::sessions())
-    }
-
-    /// Inspect an actor's state.
-    pub(crate) fn inspect_actor(&mut self, pid_str: &str) -> Result<ReplResponse> {
-        self.send_request(&RequestBuilder::inspect(pid_str))
-    }
-
-    /// Get completions for a prefix.
-    ///
-    #[allow(dead_code)] // API completeness — completions use separate ProtocolClient with short timeout
-    pub(crate) fn complete(&mut self, prefix: &str) -> Result<ReplResponse> {
-        self.send_request(&RequestBuilder::complete(prefix))
     }
 
     /// Get help for an Erlang module or function.

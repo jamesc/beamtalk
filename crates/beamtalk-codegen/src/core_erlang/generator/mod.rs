@@ -215,7 +215,6 @@ pub struct CoreErlangGenerator {
         std::collections::HashSet<(EcoString, EcoString)>,
     /// Primitive binding table from compiled stdlib (ADR 0007).
     /// Used by `generate_primitive()` for method body compilation via static methods.
-    #[allow(dead_code)] // stored for future call-site optimization with static typing
     pub(in crate::core_erlang) primitive_bindings: PrimitiveBindingTable,
     /// Parameters of the current method being compiled (if any).
     /// Used by `Expression::Primitive` to generate dispatch argument lists.

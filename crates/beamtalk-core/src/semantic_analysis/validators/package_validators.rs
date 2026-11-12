@@ -155,7 +155,7 @@ fn check_expression_packages(
             }
         }
 
-        Expression::Return { value, .. } => {
+        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
             check_expression_packages(value, known_packages, diagnostics);
         }
 
@@ -185,8 +185,6 @@ fn check_expression_packages(
                 if let Some(ref guard) = arm.guard {
                     check_expression_packages(guard, known_packages, diagnostics);
                 }
-                // Check patterns for qualified class references
-                check_pattern_packages(&arm.pattern, known_packages, diagnostics);
             }
         }
 
@@ -225,11 +223,6 @@ fn check_expression_packages(
             }
         }
 
-        Expression::DestructureAssignment { pattern, value, .. } => {
-            check_expression_packages(value, known_packages, diagnostics);
-            check_pattern_packages(pattern, known_packages, diagnostics);
-        }
-
         // No package qualifiers in these expression types
         Expression::Literal(..)
         | Expression::Identifier(..)
@@ -240,23 +233,6 @@ fn check_expression_packages(
         | Expression::Spread { .. }
         | Expression::Error { .. } => {}
     }
-}
-
-/// Checks patterns for package-qualified class references (used in pattern matching).
-///
-/// Currently a no-op: `Pattern` does not have a `ClassReference` variant with a
-/// package qualifier. The `Constructor` pattern has a `class: Identifier` but no
-/// package field yet. This function will be needed when package-qualified constructor
-/// patterns are added (e.g. `json@Result ok: v`).
-#[allow(unused_variables)] // parameters are infrastructure for future pattern types
-fn check_pattern_packages(
-    _pattern: &crate::ast::Pattern,
-    _known_packages: &HashSet<String>,
-    _diagnostics: &mut Vec<Diagnostic>,
-) {
-    // No-op: Pattern types don't currently carry package qualifiers.
-    // When Constructor patterns support `package@Class ok: v` syntax,
-    // this function will recursively validate qualifiers.
 }
 
 #[cfg(test)]

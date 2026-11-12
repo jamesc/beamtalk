@@ -164,8 +164,7 @@ impl ReplClient {
     ///
     /// Call this before the tokio runtime shuts down to prevent the runtime
     /// teardown from hanging on the close handshake.
-    // Used in integration tests (#[cfg(test)]) — suppress dead_code lint for binary crate.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub async fn close(&self) {
         let mut inner = self.inner.lock().await;
         // Send the close frame and wait for the server's response, but
@@ -470,8 +469,7 @@ impl ReplClient {
     /// Uses [`send_once`] (no retry) because eval mutates workspace bindings.
     /// A retry after reconnect would re-execute the same code if the server
     /// already processed the request before the connection dropped.
-    // Used in integration tests (#[cfg(test)]) — suppress dead_code lint for binary crate.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub async fn eval(&self, code: &str) -> Result<ReplResponse, String> {
         self.send_once(&RequestBuilder::eval(code)).await
     }
@@ -482,7 +480,8 @@ impl ReplClient {
     /// behaves identically to the plain `eval` operation. When true, sets
     /// `trace: true` in the protocol request and returns `steps` in the response.
     ///
-    /// Uses [`send_once`] (no retry) — see [`eval`] for rationale.
+    /// Uses [`send_once`] (no retry) because eval mutates workspace bindings —
+    /// a retry after reconnect could re-execute code the server already ran.
     pub async fn evaluate_with_options(
         &self,
         code: &str,
@@ -506,16 +505,6 @@ impl ReplClient {
     pub async fn complete(&self, code: &str, cursor: usize) -> Result<ReplResponse, String> {
         self.send(&RequestBuilder::complete_with_cursor(code, cursor))
             .await
-    }
-
-    /// Send a load-source operation to compile inline Beamtalk source.
-    ///
-    /// Uses [`send_once`] (no retry) because loading source defines classes on
-    /// the server, same as [`load_file`].
-    // Used in integration tests (#[cfg(test)]) — suppress dead_code lint for binary crate.
-    #[allow(dead_code)]
-    pub async fn load_source(&self, source: &str) -> Result<ReplResponse, String> {
-        self.send_once(&RequestBuilder::load_source(source)).await
     }
 
     /// Send an inspect operation.
