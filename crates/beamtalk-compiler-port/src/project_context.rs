@@ -665,7 +665,7 @@ fn resolve_project_context(root: PathBuf, batch: Option<&str>) -> Option<FilePro
                 .flat_map(|(files, package)| extract_aliases(files, package))
                 .collect(),
             load_project_registry(&utf8_root),
-            beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(&utf8_root),
+            beamtalk_core::ffi_type_specs::collect_known_erlang_modules(&utf8_root),
         ),
     };
 

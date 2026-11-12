@@ -1095,12 +1095,90 @@ fn read_specs_protocol(
 /// Result of probing the OTP installation for spec extraction.
 #[derive(Debug, Default, Clone)]
 pub struct OtpDiscovery {
+    /// Module names (`.beam` file stems) of **every** installed OTP
+    /// application under `code:lib_dir()` plus `erts` (BT-4724) — a superset
+    /// of the spec-extraction subset in `beam_files`. Feeds the
+    /// `unresolved_ffi` known-module set.
+    pub module_names: std::collections::HashSet<String>,
+    /// Whether the `erl` probe succeeded. `false` means "OTP discovery is
+    /// unavailable" (no `erl` on `PATH`, or the probe failed); the
+    /// `unresolved_ffi` check is then skipped rather than warning on every
+    /// module. An explicit flag, never inferred from an empty set.
+    pub discovered: bool,
     /// OTP version key (`<otp_release>-<erts_version>`, e.g. `27-15.0.1`) used
     /// to key the shared type-spec cache. `None` if the probe could not report
     /// it, in which case the shared cache tier is skipped.
     pub version: Option<String>,
     /// Absolute paths to all `.beam` files in the common OTP library ebins.
     pub beam_files: Vec<Utf8PathBuf>,
+}
+
+/// The Erlang modules the `unresolved_ffi` check treats as known (BT-4724).
+///
+/// Carries an explicit [`check_enabled`](Self::check_enabled) signal so
+/// "OTP discovery unavailable" (no `erl`, or a context with no filesystem such
+/// as a REPL session) is never confused with "a project with no dependencies"
+/// (a legitimately small set). The default is *disabled*: callers that cannot
+/// enumerate the installed OTP get no unresolved-module warnings instead of a
+/// wall of false positives.
+///
+/// Cloning is cheap (the set is shared behind an `Arc`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct KnownErlangModules {
+    modules: std::sync::Arc<std::collections::HashSet<String>>,
+    check_enabled: bool,
+}
+
+impl KnownErlangModules {
+    /// A known-module set for which the unresolved-module check is enabled.
+    #[must_use]
+    pub fn enabled(modules: std::collections::HashSet<String>) -> Self {
+        Self {
+            modules: std::sync::Arc::new(modules),
+            check_enabled: true,
+        }
+    }
+
+    /// A set that carries modules but leaves the check disabled (OTP
+    /// discovery was unavailable). Modules are kept so other consumers (e.g.
+    /// the LSP) can still see project modules.
+    #[must_use]
+    pub fn disabled(modules: std::collections::HashSet<String>) -> Self {
+        Self {
+            modules: std::sync::Arc::new(modules),
+            check_enabled: false,
+        }
+    }
+
+    /// Whether the `unresolved_ffi` check should run at all.
+    #[must_use]
+    pub fn check_enabled(&self) -> bool {
+        self.check_enabled
+    }
+
+    /// Whether `name` is a known module.
+    #[must_use]
+    pub fn contains(&self, name: &str) -> bool {
+        self.modules.contains(name)
+    }
+
+    /// The known module names.
+    #[must_use]
+    pub fn modules(&self) -> &std::collections::HashSet<String> {
+        &self.modules
+    }
+
+    /// Union `other` into `self`. The check stays enabled only if both sides
+    /// are enabled or one side is empty-and-default (a fresh accumulator).
+    pub fn extend(&mut self, other: &KnownErlangModules) {
+        let fresh = self.modules.is_empty() && !self.check_enabled;
+        std::sync::Arc::make_mut(&mut self.modules).extend(other.modules.iter().cloned());
+        self.check_enabled = if fresh {
+            other.check_enabled
+        } else {
+            self.check_enabled && other.check_enabled
+        };
+    }
 }
 
 /// Probes the running OTP installation for its compound version key
@@ -1151,10 +1229,29 @@ pub fn discover_otp_version() -> Option<String> {
 /// find modules available for spec extraction and to key the shared type-spec
 /// cache.
 ///
+/// The result of a *successful* probe is memoized for the life of the process
+/// (BT-4724): spec extraction and the `unresolved_ffi` known-module set both
+/// read it, so a build or lint starts `erl` once. Failures are not cached, so
+/// a later call can still succeed once `erl` becomes available.
+///
 /// # Errors
 ///
 /// Returns an error if `erl` cannot be invoked to discover the OTP lib directory.
 pub fn discover_otp_beam_files() -> Result<OtpDiscovery> {
+    static CACHE: std::sync::Mutex<Option<OtpDiscovery>> = std::sync::Mutex::new(None);
+    if let Some(cached) = CACHE.lock().ok().and_then(|g| g.clone()) {
+        return Ok(cached);
+    }
+    let discovery = probe_otp_installation()?;
+    if discovery.discovered {
+        if let Ok(mut guard) = CACHE.lock() {
+            *guard = Some(discovery.clone());
+        }
+    }
+    Ok(discovery)
+}
+
+fn probe_otp_installation() -> Result<OtpDiscovery> {
     // Apps we want type specs from. `erts` is included so `erlang.beam`
     // (BIFs like `whereis/1`, `spawn/3`, `self/0`) gets covered — its specs
     // are on disk even though `code:which(erlang)` returns `preloaded`.
@@ -1170,9 +1267,15 @@ pub fn discover_otp_beam_files() -> Result<OtpDiscovery> {
     let apps_atom_list = COMMON_APPS.join(",");
     // The probe prints one `otp-version:<release>-<erts>` line (the shared
     // cache key) followed by one ebin directory per discovered app.
+    //
+    // BT-4724: the same probe also prints a `known-ebin:<dir>` line for every
+    // `<lib_dir>/*/ebin`, so the known-module set covers *all* installed OTP
+    // applications (`public_key`, `syntax_tools`, `runtime_tools`, ...) with
+    // no second `erl` start.
     let probe = format!(
         "io:format(\"otp-version:~s-~s~n\", [erlang:system_info(otp_release), erlang:system_info(version)]), \
-         lists:foreach(fun(App) -> case code:lib_dir(App) of {{error,_}} -> ok; Dir -> io:format(\"~s~n\", [filename:join(Dir, \"ebin\")]) end end, [{apps_atom_list}]), halt()."
+         lists:foreach(fun(App) -> case code:lib_dir(App) of {{error,_}} -> ok; Dir -> io:format(\"~s~n\", [filename:join(Dir, \"ebin\")]) end end, [{apps_atom_list}]), \
+         lists:foreach(fun(Dir) -> io:format(\"known-ebin:~s~n\", [Dir]) end, filelib:wildcard(filename:join(code:lib_dir(), \"*/ebin\"))), halt()."
     );
 
     let output = Command::new("erl")
@@ -1199,12 +1302,17 @@ pub fn discover_otp_beam_files() -> Result<OtpDiscovery> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut version = None;
     let mut beam_files = Vec::new();
+    let mut module_names = std::collections::HashSet::new();
     for line in stdout.lines() {
         let line = line.trim();
         if let Some(v) = line.strip_prefix("otp-version:") {
             if !v.is_empty() {
                 version = Some(v.to_string());
             }
+            continue;
+        }
+        if let Some(dir) = line.strip_prefix("known-ebin:") {
+            collect_beam_stems(std::path::Path::new(dir), &mut module_names);
             continue;
         }
         let ebin_dir = std::path::Path::new(line);
@@ -1215,6 +1323,9 @@ pub fn discover_otp_beam_files() -> Result<OtpDiscovery> {
             for file in entries.flatten() {
                 let path = file.path();
                 if path.extension().is_some_and(|e| e == "beam") {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        module_names.insert(stem.to_string());
+                    }
                     if let Ok(utf8) = Utf8PathBuf::from_path_buf(path) {
                         beam_files.push(utf8);
                     }
@@ -1225,13 +1336,33 @@ pub fn discover_otp_beam_files() -> Result<OtpDiscovery> {
 
     debug!(
         count = beam_files.len(),
+        modules = module_names.len(),
         version = ?version,
         "Discovered OTP .beam files"
     );
     Ok(OtpDiscovery {
+        // A probe that printed a version and at least one module is a usable
+        // discovery; anything else is "unavailable" (BT-4724).
+        discovered: version.is_some() && !module_names.is_empty(),
+        module_names,
         version,
         beam_files,
     })
+}
+
+/// Insert the `.beam` file stems of `ebin_dir` into `out`.
+fn collect_beam_stems(ebin_dir: &std::path::Path, out: &mut std::collections::HashSet<String>) {
+    let Ok(entries) = std::fs::read_dir(ebin_dir) else {
+        return;
+    };
+    for file in entries.flatten() {
+        let path = file.path();
+        if path.extension().is_some_and(|e| e == "beam") {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                out.insert(stem.to_string());
+            }
+        }
+    }
 }
 
 /// The package's own compiled `native/` ebin, relative to the project root.
@@ -1402,6 +1533,46 @@ pub fn collect_project_known_erlang_modules(
         "Collected project-known Erlang modules"
     );
     known
+}
+
+/// The complete known-module set for the `unresolved_ffi` check (BT-4724):
+/// the project tier ([`collect_project_known_erlang_modules`]) unioned with
+/// every module of the installed OTP and the runtime's bundled applications
+/// (`telemetry`, `cowboy`, ... — ADR 0069, not OTP).
+///
+/// OTP names come from the memoized [`discover_otp_beam_files`] probe — the
+/// same one spec extraction uses — so this starts no extra `erl`. When OTP
+/// discovery is unavailable the returned set has
+/// [`check_enabled`](KnownErlangModules::check_enabled) `false`, which makes
+/// the check skip rather than warn on every module.
+///
+/// This is the entry point every surface (CLI, LSP, compiler port, MCP) uses.
+pub fn collect_known_erlang_modules(project_root: &Utf8Path) -> KnownErlangModules {
+    let mut modules = collect_project_known_erlang_modules(project_root);
+    let otp = discover_otp_beam_files().unwrap_or_default();
+    modules.extend(otp.module_names.iter().cloned());
+    if let Ok((runtime_dir, layout)) = find_runtime_dir_with_layout() {
+        let paths = beam_paths_for_layout(&runtime_dir, layout);
+        for ebin in [
+            paths.runtime_ebin,
+            paths.workspace_ebin,
+            paths.compiler_ebin,
+            paths.stdlib_ebin,
+            paths.stdlib_erlang_ebin,
+            paths.cowboy_ebin,
+            paths.cowlib_ebin,
+            paths.ranch_ebin,
+            paths.telemetry_ebin,
+            paths.telemetry_poller_ebin,
+        ] {
+            collect_beam_stems(&ebin, &mut modules);
+        }
+    }
+    if otp.discovered {
+        KnownErlangModules::enabled(modules)
+    } else {
+        KnownErlangModules::disabled(modules)
+    }
 }
 
 /// Whether `dir` is the package's own compiled `native/` ebin
@@ -1838,6 +2009,53 @@ mod tests {
     // -----------------------------------------------------------------------
     // collect_project_known_erlang_modules tests (BT-4022)
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn known_erlang_modules_default_has_check_disabled() {
+        let k = KnownErlangModules::default();
+        assert!(!k.check_enabled());
+        assert!(k.modules().is_empty());
+    }
+
+    #[test]
+    fn known_erlang_modules_extend_unions_and_keeps_enablement() {
+        let mut acc = KnownErlangModules::default();
+        acc.extend(&KnownErlangModules::enabled(["a".to_string()].into()));
+        acc.extend(&KnownErlangModules::enabled(["b".to_string()].into()));
+        assert!(acc.check_enabled() && acc.contains("a") && acc.contains("b"));
+        // One unavailable package disables the whole merged set.
+        acc.extend(&KnownErlangModules::disabled(
+            std::collections::HashSet::new(),
+        ));
+        assert!(!acc.check_enabled());
+    }
+
+    /// BT-4724: every installed OTP app is covered, not just the
+    /// spec-extraction subset; a project with no deps is enabled-and-small,
+    /// never confused with "discovery unavailable".
+    #[test]
+    fn collect_known_erlang_modules_covers_installed_otp() {
+        let otp = discover_otp_beam_files().unwrap_or_default();
+        if !otp.discovered {
+            eprintln!("skipping: OTP discovery unavailable");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        let known = collect_known_erlang_modules(&root);
+        assert!(known.check_enabled());
+        for m in [
+            "lists",
+            "global",
+            "erl_epmd",
+            "pg",
+            "public_key",
+            "erl_syntax",
+        ] {
+            assert!(known.contains(m), "{m} should be known");
+        }
+        assert!(!known.contains("definitely_unknown_xyz"));
+    }
 
     #[test]
     fn known_erlang_modules_empty_project_yields_empty_set() {

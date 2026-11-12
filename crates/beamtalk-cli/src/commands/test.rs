@@ -242,7 +242,7 @@ fn compile_fixtures_directory(
     snapshot_only: bool,
     current_package: Option<&str>,
     native_type_registry: Option<&std::sync::Arc<NativeTypeRegistry>>,
-    known_erlang_modules: &HashSet<String>,
+    known_erlang_modules: &beamtalk_core::ffi_type_specs::KnownErlangModules,
 ) -> Result<Vec<String>> {
     if !fixtures_dir.is_dir() {
         return Ok(Vec::new());
@@ -313,7 +313,7 @@ fn compile_fixture(
     snapshot_only: bool,
     current_package: Option<&str>,
     native_type_registry: Option<&std::sync::Arc<NativeTypeRegistry>>,
-    known_erlang_modules: &HashSet<String>,
+    known_erlang_modules: &beamtalk_core::ffi_type_specs::KnownErlangModules,
 ) -> Result<String> {
     let module_name = fixture_module_name(fixture_path)?;
 
@@ -513,7 +513,7 @@ fn generate_core_file(
     warnings_as_errors: bool,
     current_package: Option<&str>,
     native_type_registry: Option<std::sync::Arc<NativeTypeRegistry>>,
-    known_erlang_modules: &HashSet<String>,
+    known_erlang_modules: &beamtalk_core::ffi_type_specs::KnownErlangModules,
 ) -> Result<Utf8PathBuf> {
     let core_file = output_dir.join(format!("{module_name}.core"));
 
@@ -773,7 +773,7 @@ fn discover_and_compile_doc_tests(
     snapshot_only: bool,
     current_package: Option<&str>,
     native_type_registry: Option<&std::sync::Arc<NativeTypeRegistry>>,
-    known_erlang_modules: &HashSet<String>,
+    known_erlang_modules: &beamtalk_core::ffi_type_specs::KnownErlangModules,
 ) -> Result<Vec<CompiledDocTestResult>> {
     let content = fs::read_to_string(source_path)
         .into_diagnostic()
@@ -1003,7 +1003,7 @@ struct TestPipeline {
     /// `generate_core_file`/`compile_fixture` call so an FFI call to a
     /// hex-dep or own-`native/` module does not warn under `beamtalk test`
     /// when it does not warn under `build`/`lint`.
-    known_erlang_modules: HashSet<String>,
+    known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules,
     /// Cross-file class metadata for type checker hierarchy resolution.
     all_class_infos: Vec<beamtalk_core::semantic_analysis::class_hierarchy::ClassInfo>,
     /// Same-package `src/` (and dependency-exported) type-alias declarations
@@ -1519,10 +1519,10 @@ fn initialize_pipeline(
     // does not compile the package's own native/hex deps first, so the ebin
     // tier reflects whatever a previous build left on disk — the `native/`
     // source tier is known regardless.
-    let mut known_erlang_modules = HashSet::new();
+    let mut known_erlang_modules = beamtalk_core::ffi_type_specs::KnownErlangModules::default();
     for (pkg_root, _pkg) in &discovered_packages {
         known_erlang_modules
-            .extend(beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(pkg_root));
+            .extend(&beamtalk_core::ffi_type_specs::collect_known_erlang_modules(pkg_root));
     }
 
     Ok(TestPipeline {

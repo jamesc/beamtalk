@@ -437,14 +437,14 @@ pub struct AnalysisContext<'a> {
     /// `false` means any caller that doesn't know about stub files (the
     /// common case today) correctly rejects it.
     pub is_stub_file: bool,
-    /// Erlang module names the `unresolved_ffi` check treats as known
-    /// beyond the static OTP list and `beamtalk_*` (BT-4022) — the
-    /// package's compiled dependency ebin dirs (rebar3 hex/git deps, path
-    /// deps) and its own `native/*.erl` sources, via
-    /// [`crate::ffi_type_specs::collect_project_known_erlang_modules`].
-    /// Empty by default, which preserves the static-list-only behaviour
-    /// for callers with no project on disk.
-    pub known_erlang_modules: std::collections::HashSet<String>,
+    /// Erlang modules the `unresolved_ffi` check treats as known: the
+    /// installed OTP, the runtime's bundled applications, and the package's
+    /// own dependency/`native/` modules (BT-4022, BT-4724), via
+    /// [`crate::ffi_type_specs::collect_known_erlang_modules`]. The default
+    /// has the check *disabled*, so callers with no filesystem (REPL
+    /// sessions, single-expression compiles) emit no unresolved-module
+    /// warnings.
+    pub known_erlang_modules: crate::ffi_type_specs::KnownErlangModules,
 }
 
 impl<'a> AnalysisContext<'a> {
@@ -573,17 +573,16 @@ impl<'a> AnalysisContext<'a> {
     }
 
     /// Erlang module names the `unresolved_ffi` check treats as known
-    /// beyond the static OTP list and `beamtalk_*` (BT-4022) — see the
+    /// (BT-4022, BT-4724) — see the
     /// `known_erlang_modules` field's own doc. Callers that build an
     /// `AnalysisContext` from [`crate::CompilerOptions`] via
     /// [`with_options`](Self::with_options) get this from
     /// [`CompilerOptions::known_erlang_modules`](crate::CompilerOptions::known_erlang_modules)
     /// automatically and should not call this as well.
-    #[allow(clippy::implicit_hasher)] // concrete HashSet is simpler for callers
     #[must_use]
     pub fn with_known_erlang_modules(
         mut self,
-        known_erlang_modules: std::collections::HashSet<String>,
+        known_erlang_modules: crate::ffi_type_specs::KnownErlangModules,
     ) -> Self {
         self.known_erlang_modules = known_erlang_modules;
         self
@@ -625,7 +624,7 @@ pub struct ProjectAnalysisContext {
     pub native_type_registry: Option<std::sync::Arc<type_checker::NativeTypeRegistry>>,
     /// The package's project-known Erlang modules, applied as
     /// [`AnalysisContext::known_erlang_modules`].
-    pub known_erlang_modules: std::collections::HashSet<String>,
+    pub known_erlang_modules: crate::ffi_type_specs::KnownErlangModules,
 }
 
 /// Perform semantic analysis on a module.

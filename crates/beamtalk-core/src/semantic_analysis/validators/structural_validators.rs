@@ -366,87 +366,28 @@ fn closest_alias_name(target: &str, alias_registry: &AliasRegistry) -> Option<Ec
 
 // ── Unresolved FFI modules ───────────────────────────────────────────────────
 
-/// Known OTP/Erlang modules that are always available on the BEAM.
-///
-/// This is intentionally generous to avoid false positives. Modules not in
-/// this list trigger a warning, not an error.
-const KNOWN_OTP_MODULES: &[&str] = &[
-    "application",
-    "atomics",
-    "base64",
-    "binary",
-    "calendar",
-    "code",
-    "counters",
-    "crypto",
-    "dict",
-    "digraph",
-    "ets",
-    "erl_syntax",
-    "erlang",
-    "error_logger",
-    "file",
-    "filelib",
-    "filename",
-    "gb_sets",
-    "gb_trees",
-    "gen_event",
-    "gen_server",
-    "gen_statem",
-    "gen_tcp",
-    "gen_udp",
-    "httpc",
-    "inet",
-    "io",
-    "io_lib",
-    "json",
-    "lists",
-    "logger",
-    "maps",
-    "math",
-    "orddict",
-    "ordsets",
-    "os",
-    "persistent_term",
-    "proc_lib",
-    "proplists",
-    "public_key",
-    "queue",
-    "rand",
-    "re",
-    "sets",
-    "ssl",
-    "string",
-    "supervisor",
-    "sys",
-    // Not OTP, but a `beamtalk_runtime` application dependency (ADR 0069),
-    // so it is loaded wherever Beamtalk code runs (BT-4480).
-    "telemetry",
-    "timer",
-    "unicode",
-    "uri_string",
-    "zlib",
-    // OTP 28+ stdlib (BT-4457).
-    "zstd",
-];
-
 /// Warn on unresolved Erlang FFI module references.
 ///
 /// Detects the `Erlang <module> <selector>` FFI call pattern where
 /// `<module>` is used as a unary message to `Erlang`.
 ///
-/// `extra_known_modules` carries the package's own project-known modules
-/// (compiled dependency ebin dirs + own `native/*.erl`, via
-/// [`crate::ffi_type_specs::collect_project_known_erlang_modules`]) —
-/// this layer still has no filesystem access itself; the driver supplies
-/// the set through [`AnalysisContext`](crate::semantic_analysis::AnalysisContext).
+/// `known_modules` is the full known-module set (installed OTP, the runtime's
+/// bundled applications, and the package's own dependency/`native/` modules,
+/// via [`crate::ffi_type_specs::collect_known_erlang_modules`]) — this layer
+/// has no filesystem access itself; the driver supplies the set through
+/// [`AnalysisContext`](crate::semantic_analysis::AnalysisContext). When the set
+/// reports the check as disabled (OTP discovery unavailable), nothing is
+/// reported (BT-4724).
 pub(crate) fn check_unresolved_ffi_modules(
     module: &Module,
-    extra_known_modules: &std::collections::HashSet<String>,
+    known_modules: &crate::ffi_type_specs::KnownErlangModules,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    if !known_modules.check_enabled() {
+        return;
+    }
     walk_module(module, &mut |expr| {
-        visit_unresolved_ffi(expr, extra_known_modules, diagnostics);
+        visit_unresolved_ffi(expr, known_modules, diagnostics);
     });
 }
 
@@ -458,7 +399,7 @@ pub(crate) fn check_unresolved_ffi_modules(
 /// and calls like `Erlang typo_mod reverse: xs` (the inner send).
 fn visit_unresolved_ffi(
     expr: &Expression,
-    extra_known_modules: &std::collections::HashSet<String>,
+    known_modules: &crate::ffi_type_specs::KnownErlangModules,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     if let Expression::MessageSend {
@@ -474,7 +415,7 @@ fn visit_unresolved_ffi(
             if package.is_none()
                 && name.name == "Erlang"
                 && !crate::ffi_receiver::is_class_protocol_selector(module_name.as_str())
-                && !is_known_erlang_module(module_name.as_str(), extra_known_modules)
+                && !is_known_erlang_module(module_name.as_str(), known_modules)
             {
                 diagnostics.push(
                     Diagnostic::warning(
@@ -482,7 +423,7 @@ fn visit_unresolved_ffi(
                         *span,
                     )
                     .with_hint(
-                        "This module is not in the known OTP module list. \
+                        "This module is not in the installed OTP, the runtime, or the package's dependencies. \
                          Suppress with @expect unresolved_ffi if the module exists at runtime.",
                     )
                     .with_category(DiagnosticCategory::UnresolvedFfi),
@@ -494,11 +435,9 @@ fn visit_unresolved_ffi(
 
 fn is_known_erlang_module(
     name: &str,
-    extra_known_modules: &std::collections::HashSet<String>,
+    known_modules: &crate::ffi_type_specs::KnownErlangModules,
 ) -> bool {
-    KNOWN_OTP_MODULES.contains(&name)
-        || name.starts_with("beamtalk_")
-        || extra_known_modules.contains(name)
+    name.starts_with("beamtalk_") || known_modules.contains(name)
 }
 
 // ── FFI arity mismatches ─────────────────────────────────────────────────────
@@ -673,10 +612,18 @@ mod tests {
         )
     }
 
-    /// Empty project-known module set, for FFI tests that exercise only the
-    /// static OTP list / `beamtalk_*` behaviour.
-    fn empty_known_modules() -> std::collections::HashSet<String> {
-        std::collections::HashSet::new()
+    /// An *enabled* known-module set containing exactly `names`: the check
+    /// runs, and only these (plus `beamtalk_*`) are known.
+    fn known_modules(names: &[&str]) -> crate::ffi_type_specs::KnownErlangModules {
+        crate::ffi_type_specs::KnownErlangModules::enabled(
+            names.iter().map(|n| (*n).to_string()).collect(),
+        )
+    }
+
+    /// Enabled but empty: OTP discovery succeeded and the project adds
+    /// nothing, so every non-`beamtalk_*` module is unknown.
+    fn empty_known_modules() -> crate::ffi_type_specs::KnownErlangModules {
+        known_modules(&[])
     }
 
     /// A `(Erlang <module>)` FFI proxy: `Erlang <module>` as a unary send
@@ -894,18 +841,34 @@ mod tests {
     // ── FFI module tests ────────────────────────────────────────────────────
 
     #[test]
-    fn test_known_otp_modules_accepted() {
-        assert!(is_known_erlang_module("lists", &empty_known_modules()));
-        assert!(is_known_erlang_module("maps", &empty_known_modules()));
-        assert!(is_known_erlang_module("erlang", &empty_known_modules()));
-        assert!(is_known_erlang_module("io", &empty_known_modules()));
-        assert!(is_known_erlang_module("crypto", &empty_known_modules()));
-        // BT-4480: a runtime application dependency, not OTP.
-        assert!(is_known_erlang_module("telemetry", &empty_known_modules()));
-        assert!(is_known_erlang_module("ssl", &empty_known_modules()));
-        assert!(is_known_erlang_module("public_key", &empty_known_modules()));
-        // BT-4457: `zstd` ships in OTP 28's stdlib.
-        assert!(is_known_erlang_module("zstd", &empty_known_modules()));
+    fn test_discovered_modules_accepted() {
+        // BT-4724: membership comes from the supplied (discovered) set, not a
+        // hand-written list.
+        let known = known_modules(&["lists", "global", "erl_epmd", "telemetry"]);
+        for name in ["lists", "global", "erl_epmd", "telemetry"] {
+            assert!(is_known_erlang_module(name, &known), "{name}");
+        }
+        assert!(!is_known_erlang_module("maps", &known));
+    }
+
+    /// BT-4724: with OTP discovery unavailable the check is skipped entirely
+    /// instead of warning on every module.
+    #[test]
+    fn test_ffi_check_skipped_when_discovery_unavailable() {
+        let module = empty_module_with_exprs(vec![ffi_proxy("lists"), ffi_proxy("typo_mod")]);
+        let mut diags = Vec::new();
+
+        check_unresolved_ffi_modules(
+            &module,
+            &crate::ffi_type_specs::KnownErlangModules::default(),
+            &mut diags,
+        );
+        assert!(diags.is_empty(), "disabled check must not warn: {diags:?}");
+
+        // An empty-but-enabled set (discovery worked, nothing known) is not
+        // the same thing and still warns.
+        check_unresolved_ffi_modules(&module, &empty_known_modules(), &mut diags);
+        assert_eq!(diags.len(), 2, "{diags:?}");
     }
 
     #[test]
@@ -964,7 +927,7 @@ mod tests {
         let module = empty_module_with_exprs(vec![send]);
         let mut diags = Vec::new();
 
-        check_unresolved_ffi_modules(&module, &empty_known_modules(), &mut diags);
+        check_unresolved_ffi_modules(&module, &known_modules(&["public_key"]), &mut diags);
 
         assert!(diags.is_empty());
     }
@@ -988,7 +951,7 @@ mod tests {
         let module = empty_module_with_exprs(vec![outer_send]);
         let mut diags = Vec::new();
 
-        check_unresolved_ffi_modules(&module, &empty_known_modules(), &mut diags);
+        check_unresolved_ffi_modules(&module, &known_modules(&["lists"]), &mut diags);
 
         assert!(diags.is_empty(), "Known OTP modules should not warn");
     }
@@ -999,9 +962,7 @@ mod tests {
     fn test_ffi_module_accepts_project_known_modules() {
         let module = empty_module_with_exprs(vec![ffi_proxy("jsx"), ffi_proxy("my_nif")]);
         let mut diags = Vec::new();
-        let extra: std::collections::HashSet<String> = ["jsx".to_string(), "my_nif".to_string()]
-            .into_iter()
-            .collect();
+        let extra = known_modules(&["jsx", "my_nif"]);
 
         check_unresolved_ffi_modules(&module, &extra, &mut diags);
 
@@ -1017,7 +978,7 @@ mod tests {
     fn test_ffi_module_still_warns_on_unknown_with_project_known_set() {
         let module = empty_module_with_exprs(vec![ffi_proxy("jsx"), ffi_proxy("typo_mod")]);
         let mut diags = Vec::new();
-        let extra: std::collections::HashSet<String> = ["jsx".to_string()].into_iter().collect();
+        let extra = known_modules(&["jsx"]);
 
         check_unresolved_ffi_modules(&module, &extra, &mut diags);
 
@@ -1184,12 +1145,21 @@ mod tests {
     #[test]
     fn test_every_curated_ffi_module_is_a_known_otp_module() {
         // BT-4371: a module the curated export table (and so LSP completion)
-        // offers must not trip the unresolved-FFI lint.
-        let none = std::collections::HashSet::new();
+        // offers must not trip the unresolved-FFI lint. BT-4724: checked
+        // against the modules discovered from the installed OTP.
+        let Ok(otp) = crate::ffi_type_specs::discover_otp_beam_files() else {
+            eprintln!("skipping: `erl` unavailable");
+            return;
+        };
+        if !otp.discovered {
+            eprintln!("skipping: OTP discovery unavailable");
+            return;
+        }
+        let known = crate::ffi_type_specs::KnownErlangModules::enabled(otp.module_names);
         for module_info in crate::ffi_exports::CURATED_MODULES {
             assert!(
-                is_known_erlang_module(module_info.name, &none),
-                "curated FFI module `{}` is missing from KNOWN_OTP_MODULES",
+                is_known_erlang_module(module_info.name, &known),
+                "curated FFI module `{}` is not in the discovered OTP module set",
                 module_info.name
             );
         }

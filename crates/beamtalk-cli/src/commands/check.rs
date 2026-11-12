@@ -77,7 +77,7 @@ pub fn run_check(path: &str) -> Result<()> {
     // `unresolved_ffi` check, plus the ADR 0075 FFI type registry (read from
     // existing `.beam` files/caches — never compiled here).
     let pass2_options = beamtalk_core::CompilerOptions {
-        known_erlang_modules: beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(
+        known_erlang_modules: beamtalk_core::ffi_type_specs::collect_known_erlang_modules(
             &env.project_root,
         ),
         ..options.clone()

@@ -849,6 +849,60 @@ fn lint_knows_hex_dep_and_native_modules_but_warns_on_unknown() {
         .stderr(contains("Unknown Erlang module `my_nif`").not());
 }
 
+/// BT-4724: modules of the *installed* OTP that the old hand-written list
+/// lacked (`global`, `erl_epmd`, ...) lint clean, discovered from the one
+/// shared `erl` probe.
+#[test]
+fn lint_knows_every_installed_otp_module() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/FfiUser.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         a := Erlang global registered_names.\n\
+         b := Erlang erl_epmd names.\n\
+         c := Erlang pg which_groups.\n\
+         d := Erlang definitely_unknown_xyz ping.\n",
+    )
+    .expect("write src/FfiUser.bt");
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .arg("lint")
+        .assert()
+        .success()
+        .stderr(contains("Unknown Erlang module `definitely_unknown_xyz`"))
+        .stderr(contains("Unknown Erlang module `global`").not())
+        .stderr(contains("Unknown Erlang module `erl_epmd`").not())
+        .stderr(contains("Unknown Erlang module `pg`").not());
+}
+
+/// BT-4724: with `erl` unavailable, OTP discovery is unavailable and the
+/// unresolved-module check is skipped rather than warning on every module.
+#[test]
+fn lint_skips_unresolved_ffi_check_without_erl() {
+    let project = cli_common::fixture_project();
+    std::fs::write(
+        project.path().join("src/FfiUser.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         a := Erlang lists reverse: #(1, 2).\n\
+         b := Erlang definitely_unknown_xyz ping.\n",
+    )
+    .expect("write src/FfiUser.bt");
+
+    // An empty directory as PATH: `erl` cannot be started.
+    let empty = tempfile::TempDir::new().expect("tempdir");
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .env("PATH", empty.path())
+        .arg("lint")
+        .assert()
+        .stderr(contains("Unknown Erlang module").not());
+}
+
 /// BT-4183: the lint passes run against `analyse_full`'s cross-file
 /// hierarchy, so a subclass whose actor ancestor is declared in another file
 /// of the package resolves as an actor and its away block warns
