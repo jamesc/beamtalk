@@ -365,7 +365,9 @@ raise_type_error_4_matches_inline_build_test() ->
     ),
     ?assertEqual(
         Inline,
-        caught_error(fun() -> beamtalk_error:raise_type_error('Block', fork, <<"h">>, #{got => 1}) end)
+        caught_error(fun() ->
+            beamtalk_error:raise_type_error('Block', fork, <<"h">>, #{got => 1})
+        end)
     ).
 
 raise_type_error_message_overrides_message_without_hint_test() ->

@@ -61,7 +61,9 @@ concat(A, B) when is_bitstring(A), is_bitstring(B) ->
 concat(A, _B) when not is_bitstring(A) ->
     beamtalk_error:raise_type_error('Bitstring', concat, <<"Receiver must be a Bitstring">>);
 concat(_A, _B) ->
-    beamtalk_error:raise_type_error('Bitstring', concat, <<"Argument must be a Bitstring, Binary or String">>).
+    beamtalk_error:raise_type_error(
+        'Bitstring', concat, <<"Argument must be a Bitstring, Binary or String">>
+    ).
 
 -doc """
 Convert to a `Binary`, as a `Result`.
@@ -112,4 +114,3 @@ displayString(_) ->
 %%% ============================================================================
 %%% Internal
 %%% ============================================================================
-

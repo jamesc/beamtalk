@@ -139,12 +139,14 @@ on(Map) when is_map(Map) ->
             Elements = maps:get(elements, Map, []),
             make_stream(make_list_gen(Elements), <<"Stream(on: Set(...))">>);
         undefined ->
-            beamtalk_error:raise_type_error('Stream', 
+            beamtalk_error:raise_type_error(
+                'Stream',
                 'on:',
                 <<"Dictionary is not streamable; use doWithKey: or keys/values">>
             );
         Other ->
-            beamtalk_error:raise_type_error('Stream', 
+            beamtalk_error:raise_type_error(
+                'Stream',
                 'on:',
                 iolist_to_binary([
                     <<"Expected a streamable collection, got ">>,
@@ -153,7 +155,9 @@ on(Map) when is_map(Map) ->
             )
     end;
 on(_) ->
-    beamtalk_error:raise_type_error('Stream', 'on:', <<"Expected a collection (List, String, Binary, or Set)">>).
+    beamtalk_error:raise_type_error(
+        'Stream', 'on:', <<"Expected a collection (List, String, Binary, or Set)">>
+    ).
 
 %%% ============================================================================
 %%% Lazy Operations (return new Stream)
@@ -241,7 +245,9 @@ inject_into(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Initial
         call_finalizer(Stream)
     end;
 inject_into(_, _, _) ->
-    beamtalk_error:raise_type_error('Stream', 'inject:into:', <<"Expected a Block with 2 arguments">>).
+    beamtalk_error:raise_type_error(
+        'Stream', 'inject:into:', <<"Expected a Block with 2 arguments">>
+    ).
 
 -doc """
 Return first element matching predicate, raising `not_found` if none does.
@@ -292,7 +298,9 @@ detect_if_none(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred
         {ok, Elem} -> Elem
     end;
 detect_if_none(_, _, _) ->
-    beamtalk_error:raise_type_error('Stream', 'detect:ifNone:', <<"Expected a Block with 1 argument">>).
+    beamtalk_error:raise_type_error(
+        'Stream', 'detect:ifNone:', <<"Expected a Block with 1 argument">>
+    ).
 
 -doc "Materialize entire stream to a List.".
 -spec as_list(t()) -> list().
@@ -314,7 +322,9 @@ any_satisfy(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred) w
         call_finalizer(Stream)
     end;
 any_satisfy(_, _) ->
-    beamtalk_error:raise_type_error('Stream', 'anySatisfy:', <<"Expected a Block with 1 argument">>).
+    beamtalk_error:raise_type_error(
+        'Stream', 'anySatisfy:', <<"Expected a Block with 1 argument">>
+    ).
 
 -doc "Return true if all elements satisfy predicate.".
 -spec all_satisfy(t(), fun((term()) -> boolean())) -> boolean().
@@ -327,7 +337,9 @@ all_satisfy(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred) w
         call_finalizer(Stream)
     end;
 all_satisfy(_, _) ->
-    beamtalk_error:raise_type_error('Stream', 'allSatisfy:', <<"Expected a Block with 1 argument">>).
+    beamtalk_error:raise_type_error(
+        'Stream', 'allSatisfy:', <<"Expected a Block with 1 argument">>
+    ).
 
 %%% ============================================================================
 %%% Display
@@ -530,4 +542,3 @@ format_value(V) when is_float(V) -> float_to_binary(V, [{decimals, 4}, compact])
 format_value(V) when is_binary(V) -> <<"'", V/binary, "'">>;
 format_value(V) when is_atom(V) -> atom_to_binary(V, utf8);
 format_value(_) -> <<"...">>.
-

@@ -168,7 +168,9 @@ Result error map if the file cannot be read.
             )
     end;
 'readAll:'(Path) ->
-    'readAll:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'readAll:', ?PATH_HINT)}).
+    'readAll:'(
+        {beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'readAll:', ?PATH_HINT)}
+    ).
 
 -doc """
 Write string contents to a file.
@@ -237,7 +239,9 @@ does not assume the contents are a UTF-8 string.
             )
     end;
 'readBinary:'(Path) ->
-    'readBinary:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'readBinary:', ?PATH_HINT)}).
+    'readBinary:'(
+        {beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'readBinary:', ?PATH_HINT)}
+    ).
 
 -doc """
 Normalize `writeBinary:`/`appendBinary:` contents to raw bytes (BT-4170).
@@ -911,7 +915,9 @@ Returns a Result ok map on success, Result error map on failure.
             )
     end;
 'mkdirAll:'(Path) ->
-    'mkdirAll:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'mkdirAll:', ?PATH_HINT)}).
+    'mkdirAll:'(
+        {beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'mkdirAll:', ?PATH_HINT)}
+    ).
 
 -doc """
 List entries in a directory as a List (Beamtalk array) of Strings.
@@ -959,7 +965,9 @@ if the directory does not exist or cannot be read.
             end
     end;
 'listDirectory:'(Path) ->
-    'listDirectory:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'listDirectory:', ?PATH_HINT)}).
+    'listDirectory:'(
+        {beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'listDirectory:', ?PATH_HINT)}
+    ).
 
 -doc """
 Delete a file or empty directory.
@@ -1012,7 +1020,9 @@ file:delete/1 returns {error, eperm} for directories on Linux
             end
     end;
 'delete:'(Path) ->
-    'delete:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'delete:', ?PATH_HINT)}).
+    'delete:'(
+        {beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'delete:', ?PATH_HINT)}
+    ).
 
 -doc """
 Recursively delete a directory tree.
@@ -1037,7 +1047,9 @@ Returns a Result ok map on success, Result error map on failure.
             )
     end;
 'deleteAll:'(Path) ->
-    'deleteAll:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'deleteAll:', ?PATH_HINT)}).
+    'deleteAll:'(
+        {beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'deleteAll:', ?PATH_HINT)}
+    ).
 
 -doc """
 Rename or move a file or directory.
@@ -1096,7 +1108,9 @@ Returns a Result ok map with the absolute path as a String.
             )
     end;
 'absolutePath:'(Path) ->
-    'absolutePath:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'absolutePath:', ?PATH_HINT)}).
+    'absolutePath:'(
+        {beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'absolutePath:', ?PATH_HINT)}
+    ).
 
 -doc """
 Get the last modification time of a file.
@@ -1127,7 +1141,9 @@ if the file does not exist.
             beamtalk_result:from_tagged_tuple({ok, DT})
     end;
 'lastModified:'(Path) ->
-    'lastModified:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'lastModified:', ?PATH_HINT)}).
+    'lastModified:'(
+        {beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'lastModified:', ?PATH_HINT)}
+    ).
 
 -doc """
 Return the current working directory.

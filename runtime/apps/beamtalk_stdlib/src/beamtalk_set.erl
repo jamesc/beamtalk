@@ -280,4 +280,3 @@ strict_del(Elem, [H | T]) when H == Elem; H < Elem ->
 strict_del(_Elem, PastIt) ->
     %% Sorted ascending, so Elem cannot appear further along.
     PastIt.
-

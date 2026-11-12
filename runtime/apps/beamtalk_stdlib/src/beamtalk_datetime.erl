@@ -93,7 +93,9 @@ now() ->
     validate_date(Y, Mo, D, 'year:month:day:'),
     make_datetime(Y, Mo, D, 0, 0, 0);
 'year:month:day:'(_, _, _) ->
-    beamtalk_error:raise_type_error('DateTime', 'year:month:day:', <<"Arguments must be Integers">>).
+    beamtalk_error:raise_type_error(
+        'DateTime', 'year:month:day:', <<"Arguments must be Integers">>
+    ).
 
 -doc "Construct a DateTime from year, month, day, hour, minute, second.".
 -spec 'year:month:day:hour:minute:second:'(
@@ -116,7 +118,9 @@ now() ->
     validate_time(H, Mi, S, 'year:month:day:hour:minute:second:'),
     make_datetime(Y, Mo, D, H, Mi, S);
 'year:month:day:hour:minute:second:'(_, _, _, _, _, _) ->
-    beamtalk_error:raise_type_error('DateTime', 'year:month:day:hour:minute:second:', <<"Arguments must be Integers">>).
+    beamtalk_error:raise_type_error(
+        'DateTime', 'year:month:day:hour:minute:second:', <<"Arguments must be Integers">>
+    ).
 
 -doc """
 Construct a DateTime from year, month, day, hour, minute, second, and a
@@ -154,8 +158,10 @@ DateTime year: 2026 month: 7 day: 25 hour: 14 minute: 30 second: 0 offsetMinutes
     validate_offset(Off, 'year:month:day:hour:minute:second:offsetMinutes:'),
     make_datetime(Y, Mo, D, H, Mi, S, Off);
 'year:month:day:hour:minute:second:offsetMinutes:'(_, _, _, _, _, _, _) ->
-    beamtalk_error:raise_type_error('DateTime', 
-        'year:month:day:hour:minute:second:offsetMinutes:', <<"Arguments must be Integers">>
+    beamtalk_error:raise_type_error(
+        'DateTime',
+        'year:month:day:hour:minute:second:offsetMinutes:',
+        <<"Arguments must be Integers">>
     ).
 
 -doc "Construct a DateTime from a Unix epoch timestamp (seconds); UTC (offsetMinutes 0).".
@@ -163,7 +169,9 @@ DateTime year: 2026 month: 7 day: 25 hour: 14 minute: 30 second: 0 offsetMinutes
 'fromTimestamp:'(Ts) when is_integer(Ts) ->
     from_timestamp_with_offset(Ts, 0);
 'fromTimestamp:'(_) ->
-    beamtalk_error:raise_type_error('DateTime', 'fromTimestamp:', <<"Argument must be an Integer (Unix epoch seconds)">>).
+    beamtalk_error:raise_type_error(
+        'DateTime', 'fromTimestamp:', <<"Argument must be an Integer (Unix epoch seconds)">>
+    ).
 
 -doc """
 Parse a strict ISO 8601 string into a DateTime.
@@ -187,7 +195,11 @@ DateTime fromString: "2026-07-25T14:30:00+02:00"
             validate_offset(Off, 'fromString:'),
             make_datetime(Y, Mo, D, H, Mi, S, Off);
         error ->
-            beamtalk_error:raise_type_error('DateTime', 'fromString:', <<"Expected ISO 8601 format: YYYY-MM-DDThh:mm:ss(Z|+hh:mm|-hh:mm)">>)
+            beamtalk_error:raise_type_error(
+                'DateTime',
+                'fromString:',
+                <<"Expected ISO 8601 format: YYYY-MM-DDThh:mm:ss(Z|+hh:mm|-hh:mm)">>
+            )
     end;
 'fromString:'(_) ->
     beamtalk_error:raise_type_error('DateTime', 'fromString:', <<"Argument must be a String">>).
@@ -228,7 +240,9 @@ DateTime parse: "2026-07-25 14:30:00" format: "yyyy-MM-dd HH:mm:ss"
             beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'parse:format:'(_, _) ->
-    beamtalk_error:raise_type_error('DateTime', 'parse:format:', <<"Both arguments must be Strings">>).
+    beamtalk_error:raise_type_error(
+        'DateTime', 'parse:format:', <<"Both arguments must be Strings">>
+    ).
 
 %%% ============================================================================
 %%% Instance Methods — Accessors
@@ -320,7 +334,9 @@ offsetMinutes change.
     validate_offset(Off, 'toOffset:'),
     from_timestamp_with_offset('asTimestamp'(Self), Off);
 'toOffset:'(_, _) ->
-    beamtalk_error:raise_type_error('DateTime', 'toOffset:', <<"Argument must be an Integer (offset minutes)">>).
+    beamtalk_error:raise_type_error(
+        'DateTime', 'toOffset:', <<"Argument must be an Integer (offset minutes)">>
+    ).
 
 -doc "Human-readable representation.".
 -spec 'printString'(t()) -> beamtalk_string:t().

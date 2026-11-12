@@ -306,9 +306,7 @@ normalize_text_list([H | T], Acc) ->
     case beamtalk_text:unwrap(H) of
         {ok, B} -> normalize_text_list(T, [B | Acc]);
         error -> error
-    end;
-normalize_text_list(_, _) ->
-    error.
+    end.
 
 -doc "Validate and clean the env field.".
 -spec validate_config_env(map(), binary(), [binary()]) -> {ok, config()} | {error, term()}.

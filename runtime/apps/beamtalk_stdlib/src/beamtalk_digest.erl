@@ -78,9 +78,13 @@ use for signatures, password storage, or integrity checks on untrusted data.
 'hmacSha256:key:'(Input, Key) when is_binary(Input), is_binary(Key) ->
     crypto:mac(hmac, sha256, Key, Input);
 'hmacSha256:key:'(Input, _Key) when is_binary(Input) ->
-    beamtalk_error:raise_type_error('Digest', 'hmacSha256:key:', <<"Key must be a String or Binary">>);
+    beamtalk_error:raise_type_error(
+        'Digest', 'hmacSha256:key:', <<"Key must be a String or Binary">>
+    );
 'hmacSha256:key:'(_Input, _Key) ->
-    beamtalk_error:raise_type_error('Digest', 'hmacSha256:key:', <<"Argument must be a String or Binary">>).
+    beamtalk_error:raise_type_error(
+        'Digest', 'hmacSha256:key:', <<"Argument must be a String or Binary">>
+    ).
 
 -doc "HMAC-SHA512 message authentication code (64 bytes) of Input using Key.".
 -spec 'hmacSha512:key:'(beamtalk_binary:binary_or_string(), beamtalk_binary:binary_or_string()) ->
@@ -92,9 +96,13 @@ use for signatures, password storage, or integrity checks on untrusted data.
 'hmacSha512:key:'(Input, Key) when is_binary(Input), is_binary(Key) ->
     crypto:mac(hmac, sha512, Key, Input);
 'hmacSha512:key:'(Input, _Key) when is_binary(Input) ->
-    beamtalk_error:raise_type_error('Digest', 'hmacSha512:key:', <<"Key must be a String or Binary">>);
+    beamtalk_error:raise_type_error(
+        'Digest', 'hmacSha512:key:', <<"Key must be a String or Binary">>
+    );
 'hmacSha512:key:'(_Input, _Key) ->
-    beamtalk_error:raise_type_error('Digest', 'hmacSha512:key:', <<"Argument must be a String or Binary">>).
+    beamtalk_error:raise_type_error(
+        'Digest', 'hmacSha512:key:', <<"Argument must be a String or Binary">>
+    ).
 
 %%% ============================================================================
 %%% FFI Shims — (Erlang beamtalk_digest) dispatch
@@ -125,4 +133,3 @@ hmacSha512(Input, Key) -> 'hmacSha512:key:'(Input, Key).
 %%% ============================================================================
 %%% Internal Functions
 %%% ============================================================================
-

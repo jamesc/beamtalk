@@ -107,7 +107,11 @@ decimal point (`PT0.5S`, not `PT.5S`).
         {ok, Ms} ->
             make_duration(Ms);
         error ->
-            beamtalk_error:raise_type_error('Duration', 'fromString:', <<"Expected ISO 8601 duration format, e.g. PT1H30M15S or P1DT2H">>)
+            beamtalk_error:raise_type_error(
+                'Duration',
+                'fromString:',
+                <<"Expected ISO 8601 duration format, e.g. PT1H30M15S or P1DT2H">>
+            )
     end;
 'fromString:'(_) ->
     beamtalk_error:raise_type_error('Duration', 'fromString:', <<"Argument must be a String">>).
@@ -244,7 +248,9 @@ Zero components are omitted; negative durations get a leading `-`.
 '*'(#{'$beamtalk_class' := 'Duration', millis := A}, Scalar) when is_float(Scalar) ->
     make_duration(round(A * Scalar));
 '*'(_, _) ->
-    beamtalk_error:raise_type_error('Duration', '*', <<"Argument must be an Integer or Float scalar">>).
+    beamtalk_error:raise_type_error(
+        'Duration', '*', <<"Argument must be an Integer or Float scalar">>
+    ).
 
 %%% ============================================================================
 %%% Instance Methods — Comparison
@@ -358,7 +364,9 @@ from_scaled(N, Scale, _Selector) when is_integer(N) ->
 from_scaled(N, Scale, _Selector) when is_float(N) ->
     make_duration(round(N * Scale));
 from_scaled(_, _, Selector) ->
-    beamtalk_error:raise_type_error('Duration', Selector, <<"Argument must be an Integer or Float">>).
+    beamtalk_error:raise_type_error(
+        'Duration', Selector, <<"Argument must be an Integer or Float">>
+    ).
 
 %% Integer division truncating toward zero (Erlang `div` already truncates
 %% toward zero for mixed-sign operands).
@@ -455,4 +463,3 @@ compare(Op, #{'$beamtalk_class' := 'Duration', millis := A}, #{
     end;
 compare(Op, _, _) ->
     beamtalk_error:raise_type_error('Duration', Op, <<"Argument must be a Duration">>).
-

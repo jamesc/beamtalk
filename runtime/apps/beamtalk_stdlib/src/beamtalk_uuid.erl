@@ -249,4 +249,3 @@ parse_uuid_string(Str) ->
         nomatch ->
             error
     end.
-

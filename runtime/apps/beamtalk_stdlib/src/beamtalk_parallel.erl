@@ -76,9 +76,11 @@ completion.
     validate_blocks('all:', Blocks),
     all_impl(Blocks, infinity);
 'all:'(Blocks) ->
-    beamtalk_error:raise_type_error('Parallel', 'all:', <<"Argument must be a List of zero-argument Blocks">>, #{
-        got => Blocks
-    }).
+    beamtalk_error:raise_type_error(
+        'Parallel', 'all:', <<"Argument must be a List of zero-argument Blocks">>, #{
+            got => Blocks
+        }
+    ).
 
 -doc """
 Like `all:`, but with an overall wall-clock deadline (Integer milliseconds
@@ -98,14 +100,18 @@ real `Result`.
     validate_blocks('all:timeout:', Blocks),
     all_impl(Blocks, TimeoutMs);
 'all:timeout:'(Blocks, TimeoutMs) when is_list(Blocks) ->
-    beamtalk_error:raise_type_error('Parallel', 
+    beamtalk_error:raise_type_error(
+        'Parallel',
         'all:timeout:',
         <<"Timeout must be a non-negative Integer or a non-negative Duration">>,
         #{got => TimeoutMs}
     );
 'all:timeout:'(Blocks, _TimeoutMs) ->
-    beamtalk_error:raise_type_error('Parallel', 
-        'all:timeout:', <<"Argument must be a List of zero-argument Blocks">>, #{got => Blocks}
+    beamtalk_error:raise_type_error(
+        'Parallel',
+        'all:timeout:',
+        <<"Argument must be a List of zero-argument Blocks">>,
+        #{got => Blocks}
     ).
 
 -doc """
@@ -120,16 +126,21 @@ meaningful call.
 """.
 -spec 'any:'([function()]) -> worker_result().
 'any:'([]) ->
-    beamtalk_error:raise_type_error('Parallel', 
-        'any:', <<"Argument must be a non-empty List of zero-argument Blocks">>, #{got => []}
+    beamtalk_error:raise_type_error(
+        'Parallel',
+        'any:',
+        <<"Argument must be a non-empty List of zero-argument Blocks">>,
+        #{got => []}
     );
 'any:'(Blocks) when is_list(Blocks) ->
     validate_blocks('any:', Blocks),
     any_impl(Blocks);
 'any:'(Blocks) ->
-    beamtalk_error:raise_type_error('Parallel', 'any:', <<"Argument must be a List of zero-argument Blocks">>, #{
-        got => Blocks
-    }).
+    beamtalk_error:raise_type_error(
+        'Parallel', 'any:', <<"Argument must be a List of zero-argument Blocks">>, #{
+            got => Blocks
+        }
+    ).
 
 %%% ============================================================================
 %%% FFI Shims
@@ -216,8 +227,11 @@ validate_blocks(Selector, Blocks) ->
         true ->
             ok;
         false ->
-            beamtalk_error:raise_type_error('Parallel', 
-                Selector, <<"Every element must be a zero-argument Block">>, #{got => Blocks}
+            beamtalk_error:raise_type_error(
+                'Parallel',
+                Selector,
+                <<"Every element must be a zero-argument Block">>,
+                #{got => Blocks}
             )
     end.
 
@@ -442,4 +456,3 @@ gather_any(CallRef, Pending, PendingByRef, IndexOrder, Errors) ->
 %%% ============================================================================
 %%% Internal — errors
 %%% ============================================================================
-
