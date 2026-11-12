@@ -3090,22 +3090,22 @@ mod tests {
             .unwrap();
         // Public method: never filtered
         assert!(
-            !is_cross_package_internal_method(&public_method, &hierarchy, Some("my_pkg")),
+            !is_cross_package_internal_method(public_method, &hierarchy, Some("my_pkg")),
             "Public method should not be filtered"
         );
         // Internal method from other package: should be filtered
         assert!(
-            is_cross_package_internal_method(&internal_method, &hierarchy, Some("my_pkg")),
+            is_cross_package_internal_method(internal_method, &hierarchy, Some("my_pkg")),
             "Internal method from other_pkg should be filtered for my_pkg"
         );
         // Internal method from same package: should NOT be filtered
         assert!(
-            !is_cross_package_internal_method(&internal_method, &hierarchy, Some("other_pkg")),
+            !is_cross_package_internal_method(internal_method, &hierarchy, Some("other_pkg")),
             "Internal method from same package should not be filtered"
         );
         // No package context (REPL): should NOT be filtered
         assert!(
-            !is_cross_package_internal_method(&internal_method, &hierarchy, None),
+            !is_cross_package_internal_method(internal_method, &hierarchy, None),
             "Internal method should not be filtered when no package context"
         );
     }

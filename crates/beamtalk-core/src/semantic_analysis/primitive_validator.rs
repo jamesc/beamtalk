@@ -11,7 +11,8 @@
 //! - Supports `--allow-primitives` escape hatch for advanced FFI use
 
 use crate::CompilerOptions;
-use crate::ast::{BinarySegment, Expression, Module};
+use crate::ast::{Expression, Module};
+use crate::ast_walker::walk_expression;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 
 /// Known structural intrinsic names (ADR 0007).
@@ -139,20 +140,22 @@ fn is_stdlib_module(options: &CompilerOptions) -> bool {
     options.stdlib_mode
 }
 
-/// Recursively validates an expression for primitive usage.
+/// Validates an expression tree for primitive usage (walked with the shared
+/// [`walk_expression`]).
 fn validate_expr(
     expr: &Expression,
     is_stdlib: bool,
     options: &CompilerOptions,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    match expr {
-        Expression::Primitive {
+    walk_expression(expr, &mut |e| {
+        if let Expression::Primitive {
             name,
             is_quoted,
             span,
             ..
-        } => {
+        } = e
+        {
             // Check stdlib restriction
             validate_stdlib_restriction(is_stdlib, options, *span, diagnostics);
 
@@ -161,99 +164,7 @@ fn validate_expr(
                 validate_intrinsic_name(name, *span, diagnostics);
             }
         }
-
-        // Recurse into subexpressions
-        Expression::Assignment { target, value, .. } => {
-            validate_expr(target, is_stdlib, options, diagnostics);
-            validate_expr(value, is_stdlib, options, diagnostics);
-        }
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            validate_expr(receiver, is_stdlib, options, diagnostics);
-            for arg in arguments {
-                validate_expr(arg, is_stdlib, options, diagnostics);
-            }
-        }
-        Expression::Block(block) => {
-            for body_stmt in &block.body {
-                validate_expr(&body_stmt.expression, is_stdlib, options, diagnostics);
-            }
-        }
-        Expression::Return { value, .. }
-        | Expression::Parenthesized {
-            expression: value, ..
-        }
-        | Expression::DestructureAssignment { value, .. } => {
-            validate_expr(value, is_stdlib, options, diagnostics);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            validate_expr(receiver, is_stdlib, options, diagnostics);
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            validate_expr(receiver, is_stdlib, options, diagnostics);
-            for msg in messages {
-                for arg in &msg.arguments {
-                    validate_expr(arg, is_stdlib, options, diagnostics);
-                }
-            }
-        }
-        Expression::Match { value, arms, .. } => {
-            validate_expr(value, is_stdlib, options, diagnostics);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    validate_expr(guard, is_stdlib, options, diagnostics);
-                }
-                validate_expr(&arm.body, is_stdlib, options, diagnostics);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                validate_expr(&pair.key, is_stdlib, options, diagnostics);
-                validate_expr(&pair.value, is_stdlib, options, diagnostics);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                validate_expr(elem, is_stdlib, options, diagnostics);
-            }
-            if let Some(t) = tail {
-                validate_expr(t, is_stdlib, options, diagnostics);
-            }
-        }
-
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for elem in elements {
-                validate_expr(elem, is_stdlib, options, diagnostics);
-            }
-        }
-
-        // Leaf expressions — no primitives to validate
-        Expression::Literal(..)
-        | Expression::Identifier(_)
-        | Expression::ClassReference { .. }
-        | Expression::Super(_)
-        | Expression::Error { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Spread { .. } => {}
-
-        Expression::StringInterpolation { segments, .. } => {
-            for segment in segments {
-                if let crate::ast::StringSegment::Interpolation(expr) = segment {
-                    validate_expr(expr, is_stdlib, options, diagnostics);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for expr in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                validate_expr(expr, is_stdlib, options, diagnostics);
-            }
-        }
-    }
+    });
 }
 
 /// Validates that `@primitive` is allowed in the current compilation context.

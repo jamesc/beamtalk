@@ -136,13 +136,13 @@ impl TypeChecker {
                         // class methods like `class wrap: v :: T -> Box(T)`)
                         // by mapping declared param types to argument types.
                         let class_subst = Self::class_method_substitution(
-                            class_name, hierarchy, &method, arg_types,
+                            class_name, hierarchy, method, arg_types,
                         );
                         // Method-local type params (`inject: initial :: A
                         // into: Block(A, E, A) -> A`) bind from the arguments
                         // exactly as on the instance side (BT-4110).
                         let method_subst = Self::infer_method_local_params(
-                            &method,
+                            method,
                             arg_types,
                             &class_subst,
                             hierarchy,
@@ -450,7 +450,7 @@ impl TypeChecker {
         // Build inference map from class method param types → argument types
         // (shared with non-`Self` returns via `class_method_substitution`).
         let mut inferred = if let Some(method) = hierarchy.find_class_method(class_name, selector) {
-            Self::class_method_substitution(class_name, hierarchy, &method, arg_types)
+            Self::class_method_substitution(class_name, hierarchy, method, arg_types)
         } else {
             HashMap::new()
         };

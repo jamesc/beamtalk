@@ -539,9 +539,7 @@ pub fn class_var_accesses(block: &Block, vars: &HashSet<String>) -> ClassVarAcce
                 }
             }
             WalkEvent::Send(send)
-                if send.site == SendSite::Plain
-                    && !send.is_cast
-                    && send.receiver.is_self() =>
+                if send.site == SendSite::Plain && !send.is_cast && send.receiver.is_self() =>
             {
                 let kind = match send.selector.well_known() {
                     Some(WellKnownSelector::FieldAtPut) => ReflectiveWriteKind::FieldAtPut,

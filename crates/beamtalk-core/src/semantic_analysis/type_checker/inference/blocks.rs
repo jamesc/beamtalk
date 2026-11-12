@@ -1041,7 +1041,7 @@ impl TypeChecker {
             &method.defined_in,
         );
         let method_subst = Self::infer_method_local_params(
-            &method,
+            method,
             &arg_types,
             &class_subst,
             hierarchy,
@@ -1225,7 +1225,7 @@ impl TypeChecker {
                 &method.defined_in,
             );
             let method_subst = Self::infer_method_local_params(
-                &method,
+                method,
                 &arg_types,
                 &class_subst,
                 hierarchy,

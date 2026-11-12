@@ -8,7 +8,8 @@
 //! Validates that package qualifiers in `ClassReference` nodes and
 //! `StandaloneMethodDefinition` targets reference declared dependencies.
 
-use crate::ast::{BinarySegment, Expression, Module};
+use crate::ast::{Expression, Module};
+use crate::ast_walker::walk_expression;
 use crate::source_analysis::Diagnostic;
 use std::collections::HashSet;
 
@@ -103,136 +104,38 @@ pub fn check_package_qualifiers(
     }
 }
 
-/// Recursively checks expressions for package-qualified class references.
-#[allow(clippy::too_many_lines)] // one arm per Expression variant; irreducible
+/// Checks `expr` and everything under it for package-qualified class
+/// references (walked with the shared [`walk_expression`]).
 fn check_expression_packages(
     expr: &Expression,
     known_packages: &HashSet<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    match expr {
-        Expression::ClassReference {
+    walk_expression(expr, &mut |e| {
+        let Expression::ClassReference {
             name,
             package: Some(pkg),
             ..
-        } => {
-            if !known_packages.contains(pkg.name.as_str()) {
-                diagnostics.push(
-                    Diagnostic::error(
-                        format!(
-                            "Unknown package '{}' in qualified reference '{}@{}'",
-                            pkg.name, pkg.name, name.name
-                        ),
-                        pkg.span,
-                    )
-                    .with_hint(format!(
-                        "Add '{}' to [dependencies] in beamtalk.toml",
-                        pkg.name
-                    )),
-                );
-            }
+        } = e
+        else {
+            return;
+        };
+        if !known_packages.contains(pkg.name.as_str()) {
+            diagnostics.push(
+                Diagnostic::error(
+                    format!(
+                        "Unknown package '{}' in qualified reference '{}@{}'",
+                        pkg.name, pkg.name, name.name
+                    ),
+                    pkg.span,
+                )
+                .with_hint(format!(
+                    "Add '{}' to [dependencies] in beamtalk.toml",
+                    pkg.name
+                )),
+            );
         }
-
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            check_expression_packages(receiver, known_packages, diagnostics);
-            for arg in arguments {
-                check_expression_packages(arg, known_packages, diagnostics);
-            }
-        }
-
-        Expression::Assignment { target, value, .. } => {
-            check_expression_packages(target, known_packages, diagnostics);
-            check_expression_packages(value, known_packages, diagnostics);
-        }
-
-        Expression::Block(block) => {
-            for stmt in &block.body {
-                check_expression_packages(&stmt.expression, known_packages, diagnostics);
-            }
-        }
-
-        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
-            check_expression_packages(value, known_packages, diagnostics);
-        }
-
-        Expression::Parenthesized { expression, .. } => {
-            check_expression_packages(expression, known_packages, diagnostics);
-        }
-
-        Expression::FieldAccess { receiver, .. } => {
-            check_expression_packages(receiver, known_packages, diagnostics);
-        }
-
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            check_expression_packages(receiver, known_packages, diagnostics);
-            for msg in messages {
-                for arg in &msg.arguments {
-                    check_expression_packages(arg, known_packages, diagnostics);
-                }
-            }
-        }
-
-        Expression::Match { value, arms, .. } => {
-            check_expression_packages(value, known_packages, diagnostics);
-            for arm in arms {
-                check_expression_packages(&arm.body, known_packages, diagnostics);
-                if let Some(ref guard) = arm.guard {
-                    check_expression_packages(guard, known_packages, diagnostics);
-                }
-            }
-        }
-
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                check_expression_packages(&pair.key, known_packages, diagnostics);
-                check_expression_packages(&pair.value, known_packages, diagnostics);
-            }
-        }
-
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                check_expression_packages(elem, known_packages, diagnostics);
-            }
-            if let Some(t) = tail {
-                check_expression_packages(t, known_packages, diagnostics);
-            }
-        }
-
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for elem in elements {
-                check_expression_packages(elem, known_packages, diagnostics);
-            }
-        }
-
-        Expression::StringInterpolation { segments, .. } => {
-            for segment in segments {
-                if let crate::ast::StringSegment::Interpolation(inner) = segment {
-                    check_expression_packages(inner, known_packages, diagnostics);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                check_expression_packages(inner, known_packages, diagnostics);
-            }
-        }
-
-        // No package qualifiers in these expression types
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::ClassReference { package: None, .. }
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Spread { .. }
-        | Expression::Error { .. } => {}
-    }
+    });
 }
 
 #[cfg(test)]

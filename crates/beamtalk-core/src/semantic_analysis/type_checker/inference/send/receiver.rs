@@ -951,7 +951,7 @@ impl TypeChecker {
                     // Infer method-local type params from arguments (works for
                     // any parametric param type: Block, Result, Array, etc.)
                     let method_subst = Self::infer_method_local_params(
-                        &method,
+                        method,
                         &arg_types,
                         &subst,
                         hierarchy,

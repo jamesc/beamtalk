@@ -306,7 +306,8 @@ impl ClassHierarchy {
     /// ancestor — a missing parent is `has_cross_file_parent`'s concern.
     #[must_use]
     pub fn has_incomplete_surface_in_chain(&self, class_name: &str) -> bool {
-        self.ancestors(class_name).any(|info| info.surface_incomplete)
+        self.ancestors(class_name)
+            .any(|info| info.surface_incomplete)
     }
 
     /// Returns true if the named class is Value or a subclass of Value (ADR 0042).
@@ -1254,7 +1255,7 @@ impl ClassHierarchy {
     pub fn state_field_has_default(&self, class_name: &str, field_name: &str) -> bool {
         self.ancestors(class_name)
             .find(|info| info.state.iter().any(|s| s == field_name))
-            .map_or(true, |info| {
+            .is_none_or(|info| {
                 info.state_has_default
                     .get(field_name)
                     .copied()

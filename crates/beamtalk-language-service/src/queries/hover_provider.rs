@@ -1457,7 +1457,7 @@ fn resolved_selector_hover_info(
     } else {
         "instance-side"
     };
-    let typed_sig = method_info_signature(&method);
+    let typed_sig = method_info_signature(method);
     let summary = format!("```beamtalk\n{typed_sig}\n```");
 
     let mut resolution_context = format!(

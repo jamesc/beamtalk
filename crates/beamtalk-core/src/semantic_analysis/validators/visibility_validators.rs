@@ -22,7 +22,8 @@
 //! whose expansion transitively reaches an internal class or alias is a leak
 //! at its own declaration — see [`check_alias_leaked_visibility`].
 
-use crate::ast::{BinarySegment, Expression, MethodDefinition, Module, TypeAnnotation};
+use crate::ast::{Expression, MethodDefinition, Module, TypeAnnotation};
+use crate::ast_walker::walk_expression;
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
@@ -249,15 +250,14 @@ pub fn check_provision_visibility(
 /// Walks all `ClassReference` nodes in the expression tree. This catches
 /// `ParserState new`, `x isKindOf: ParserState`, and similar patterns where
 /// an internal class name appears in an expression.
-#[allow(clippy::too_many_lines)] // one arm per Expression variant; irreducible
 fn check_expression_cross_package(
     expr: &Expression,
     current_pkg: &str,
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    match expr {
-        Expression::ClassReference { name, package, .. } => {
+    walk_expression(expr, &mut |e| {
+        if let Expression::ClassReference { name, package, .. } = e {
             check_qualified_cross_package_ref(
                 &name.name,
                 package.as_ref().map(|p| p.name.as_str()),
@@ -267,111 +267,7 @@ fn check_expression_cross_package(
                 diagnostics,
             );
         }
-
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            check_expression_cross_package(receiver, current_pkg, hierarchy, diagnostics);
-            for arg in arguments {
-                check_expression_cross_package(arg, current_pkg, hierarchy, diagnostics);
-            }
-        }
-
-        Expression::Assignment { target, value, .. } => {
-            check_expression_cross_package(target, current_pkg, hierarchy, diagnostics);
-            check_expression_cross_package(value, current_pkg, hierarchy, diagnostics);
-        }
-
-        Expression::Block(block) => {
-            for stmt in &block.body {
-                check_expression_cross_package(
-                    &stmt.expression,
-                    current_pkg,
-                    hierarchy,
-                    diagnostics,
-                );
-            }
-        }
-
-        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
-            check_expression_cross_package(value, current_pkg, hierarchy, diagnostics);
-        }
-
-        Expression::Parenthesized { expression, .. } => {
-            check_expression_cross_package(expression, current_pkg, hierarchy, diagnostics);
-        }
-
-        Expression::FieldAccess { receiver, .. } => {
-            check_expression_cross_package(receiver, current_pkg, hierarchy, diagnostics);
-        }
-
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            check_expression_cross_package(receiver, current_pkg, hierarchy, diagnostics);
-            for msg in messages {
-                for arg in &msg.arguments {
-                    check_expression_cross_package(arg, current_pkg, hierarchy, diagnostics);
-                }
-            }
-        }
-
-        Expression::Match { value, arms, .. } => {
-            check_expression_cross_package(value, current_pkg, hierarchy, diagnostics);
-            for arm in arms {
-                check_expression_cross_package(&arm.body, current_pkg, hierarchy, diagnostics);
-                if let Some(ref guard) = arm.guard {
-                    check_expression_cross_package(guard, current_pkg, hierarchy, diagnostics);
-                }
-            }
-        }
-
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                check_expression_cross_package(&pair.key, current_pkg, hierarchy, diagnostics);
-                check_expression_cross_package(&pair.value, current_pkg, hierarchy, diagnostics);
-            }
-        }
-
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                check_expression_cross_package(elem, current_pkg, hierarchy, diagnostics);
-            }
-            if let Some(t) = tail {
-                check_expression_cross_package(t, current_pkg, hierarchy, diagnostics);
-            }
-        }
-
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for elem in elements {
-                check_expression_cross_package(elem, current_pkg, hierarchy, diagnostics);
-            }
-        }
-
-        Expression::StringInterpolation { segments, .. } => {
-            for segment in segments {
-                if let crate::ast::StringSegment::Interpolation(inner) = segment {
-                    check_expression_cross_package(inner, current_pkg, hierarchy, diagnostics);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                check_expression_cross_package(inner, current_pkg, hierarchy, diagnostics);
-            }
-        }
-
-        // No class references in these expression types
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Spread { .. }
-        | Expression::Error { .. } => {}
-    }
+    });
 }
 
 /// Checks if a class name reference crosses a package boundary to an internal class.

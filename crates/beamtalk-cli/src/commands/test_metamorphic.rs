@@ -1650,10 +1650,7 @@ mod tests {
             "value",
             "the field name itself is never a renameable local"
         );
-        assert!(
-            self_recv.is_self(),
-            "`self` must never be renamed"
-        );
+        assert!(self_recv.is_self(), "`self` must never be renamed");
         assert!(matches!(&sum_args[0], Expression::Identifier(id) if id.name == renamed_x));
     }
 

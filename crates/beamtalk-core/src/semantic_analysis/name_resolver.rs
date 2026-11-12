@@ -16,8 +16,8 @@
 //! - `docs/beamtalk-ddd-model.md` - Semantic Analysis Context
 
 use crate::ast::{
-    BinarySegment, Block, CascadeMessage, ClassDefinition, Expression, Literal,
-    MatchArm, MessageSelector, MethodDefinition, Module, Pattern,
+    BinarySegment, Block, CascadeMessage, ClassDefinition, Expression, Literal, MatchArm,
+    MessageSelector, MethodDefinition, Module, Pattern,
 };
 use crate::ast_walker::cascade_shared_receiver;
 use crate::semantic_analysis::scope::{BindingKind, Scope};
