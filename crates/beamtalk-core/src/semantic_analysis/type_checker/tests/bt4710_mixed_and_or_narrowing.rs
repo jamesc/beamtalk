@@ -308,3 +308,54 @@ fn rhs_running_a_negation_typed_value_voids_field_facts() {
     );
     assert_field_leak(&diags);
 }
+
+// --- BT-4711: `not` swaps a condition's true and false facts -------------
+
+#[test]
+fn not_is_nil_if_true() {
+    assert_clean("    x isNil not ifTrue: [^self need: x]\n    0");
+}
+
+#[test]
+fn not_not_nil_early_return() {
+    assert_clean("    x notNil not ifTrue: [^0]\n    self need: x");
+}
+
+#[test]
+fn not_kind_of_early_return() {
+    assert_clean("    (k isKindOf: Integer) not ifTrue: [^0]\n    self need: k");
+}
+
+#[test]
+fn not_of_disjunction_narrows_both() {
+    assert_clean("    (x isNil or: [y isNil]) not ifTrue: [^self need: x and: y]\n    0");
+}
+
+#[test]
+fn not_composes_inside_and_or() {
+    assert_clean("    (x isNil not and: [p]) ifTrue: [^self need: x]\n    0");
+    assert_clean("    (p and: [x isNil not]) ifTrue: [^self need: x]\n    0");
+    assert_clean("    (x notNil not or: [p]) ifTrue: [^0]\n    self need: x");
+    assert_clean("    (x isNil not and: [x > 0]) ifTrue: [^x]\n    0");
+}
+
+#[test]
+fn double_not_cancels() {
+    assert_clean("    x notNil not not ifTrue: [^self need: x]\n    0");
+    assert_rejected("    x isNil not not ifTrue: [^self need: x]\n    0");
+}
+
+#[test]
+fn not_negative_controls_stay_rejected() {
+    assert_rejected("    x notNil not ifTrue: [^self need: x]\n    0");
+    assert_rejected("    p not ifTrue: [^self need: x]\n    0");
+    assert_rejected("    (x isNil not and: [p]) ifFalse: [^self need: x]\n    0");
+    assert_rejected("    (k isKindOf: Integer) not ifFalse: [^0]\n    self need: k");
+}
+
+#[test]
+fn not_keeps_reassignment_guard() {
+    assert_rejected(
+        "    l := x\n    (l isNil not and: [l := nil. true]) ifTrue: [^self need: l]\n    0",
+    );
+}
