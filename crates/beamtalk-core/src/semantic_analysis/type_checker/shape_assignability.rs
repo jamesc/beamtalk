@@ -42,8 +42,13 @@ use super::{InferredType, TypeChecker, TypeStringContext, type_resolver};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ShapeMismatch {
     /// The expected shape requires `key`; the actual type does not (always)
-    /// provide it.
-    MissingKey { key: EcoString },
+    /// provide it. `misspelt_as` is the key the actual shape names instead
+    /// when the expected shape is closed and that key looks like a typo of
+    /// `key` (BT-4737).
+    MissingKey {
+        key: EcoString,
+        misspelt_as: Option<EcoString>,
+    },
     /// The expected shape is optional in `key` and the actual shape is open,
     /// so it may hold `key` with any type.
     OpenMayHoldKey { key: EcoString },
@@ -122,10 +127,12 @@ impl ShapeMismatch {
                     .and_then(|(inner, field)| inner.key_span_in(&pair.value, &field.value))
                     .or_else(|| Some(pair.key.span()))
             }
-            Self::MissingKey { .. } if !expected_open => pairs
+            Self::MissingKey { misspelt_as, .. } if !expected_open => pairs
                 .iter()
-                .find(|pair| {
-                    symbol_key(pair).is_some_and(|k| !expected_fields.iter().any(|f| f.key == k))
+                .find(|pair| match misspelt_as {
+                    Some(m) => symbol_key(pair).as_ref() == Some(m),
+                    None => symbol_key(pair)
+                        .is_some_and(|k| !expected_fields.iter().any(|f| f.key == k)),
                 })
                 .map(|pair| pair.key.span()),
             _ => None,
@@ -135,7 +142,13 @@ impl ShapeMismatch {
     /// A one-line explanation naming the offending key, for a diagnostic hint.
     pub(super) fn describe(&self) -> EcoString {
         match self {
-            Self::MissingKey { key } => eco_format!("missing required key `#{key}`"),
+            Self::MissingKey { key, misspelt_as } => {
+                if let Some(m) = misspelt_as {
+                    eco_format!("missing required key `#{key}` — did you misspell it as `#{m}`?")
+                } else {
+                    eco_format!("missing required key `#{key}`")
+                }
+            }
             Self::OpenMayHoldKey { key } => eco_format!(
                 "an open shape may hold `#{key}` with any type, but the expected shape types it"
             ),
@@ -280,6 +293,7 @@ impl TypeChecker {
                     if af.optional && !ef.optional {
                         return Err(ShapeMismatch::MissingKey {
                             key: ef.key.clone(),
+                            misspelt_as: None,
                         });
                     }
                     if let Err(inner) = Self::shape_assignable(&af.value, &ef.value, hierarchy) {
@@ -293,8 +307,22 @@ impl TypeChecker {
                     }
                 }
                 None if !ef.optional => {
+                    // Against a closed expected shape, a key the actual
+                    // shape names that the expected one does not, and that
+                    // is a near miss for this key, is almost surely a typo.
+                    let misspelt_as = (!eopen)
+                        .then(|| {
+                            let stray: Vec<EcoString> = afields
+                                .iter()
+                                .filter(|af| !efields.iter().any(|e| e.key == af.key))
+                                .map(|af| af.key.clone())
+                                .collect();
+                            Self::closest_key(&ef.key, &stray)
+                        })
+                        .flatten();
                     return Err(ShapeMismatch::MissingKey {
                         key: ef.key.clone(),
+                        misspelt_as,
                     });
                 }
                 None if aopen => {

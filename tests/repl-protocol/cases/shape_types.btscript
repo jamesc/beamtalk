@@ -1,0 +1,109 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// E2E tests for map-shape types (ADR 0147, BT-4737 — the epic's required
+// final validation phase; per AGENTS.md, "EUnit and BUnit alone are
+// insufficient for user-facing features"). Covers, from a live REPL session:
+// declaring a shape alias and `:help` on it, an annotated local with a
+// matching literal, a keyed read, the warnings for a key a closed shape does
+// not name and for a missing required key, an open shape (`...`) accepting an
+// extra key, and redefining the alias so a use site is re-checked.
+//
+// As in `type_alias_repl.btscript`, a typed local's *type* is not persisted
+// across turns, so a declaration and the expression that depends on its
+// type are submitted together (period-separated).
+
+// ===========================================================================
+// Declaring a shape alias echoes its name; `:help` shows the expansion.
+// ===========================================================================
+
+type Point = #{#x => Integer, #y => Integer}
+// => "Point"
+
+:help Point
+// => "type Point = #__#x => Integer, #y => Integer}__Declared in: REPL"
+
+// ===========================================================================
+// An annotated local with a matching literal is accepted, and a keyed read
+// answers the right value. A shape-typed value is an ordinary Dictionary.
+// ===========================================================================
+
+p :: Point := #{#x => 1, #y => 2}
+// => #{#x => 1, #y => 2}
+
+p :: Point := #{#x => 1, #y => 2}. p at: #x
+// => 1
+
+p :: Point := #{#x => 1, #y => 2}. p at: #y ifAbsent: [0]
+// => 2
+
+// ===========================================================================
+// A key the closed shape does not name is reported at the read.
+// ===========================================================================
+
+p :: Point := #{#x => 1, #y => 2}. p at: #z ifAbsent: [0]
+// => WARNING: `#z` is not a key of Point HINT: The `ifAbsent:` block always runs for this key
+
+// ===========================================================================
+// A literal that omits a required key, or names an unknown one, is reported.
+// ===========================================================================
+
+q :: Point := #{#x => 1}
+// => WARNING: Type mismatch: declared as Point, got #{#x => Integer} HINT: The right-hand side has type #{#x => Integer} which is not assignable to Point: missing required key `#y`
+
+r :: Point := #{#x => 1, #y => 2, #z => 3}
+// => WARNING: Type mismatch: declared as Point, got #{#x => Integer, #y => Integer, #z => Integer} HINT: The right-hand side has type #{#x => Integer, #y => Integer, #z => Integer} which is not assignable to Point: key `#z` is not named by the closed expected shape
+
+// A misspelt required key points at the typo (BT-4737). Suggestions need a
+// key long enough to tell a typo from a different key, so this uses a longer
+// alias than `Point`.
+type Size = #{#width => Integer, #height => Integer}
+// => "Size"
+
+s :: Size := #{#widht => 1, #height => 2}
+// => WARNING: Type mismatch: declared as Size, got #{#widht => Integer, #height => Integer} HINT: The right-hand side has type #{#widht => Integer, #height => Integer} which is not assignable to Size: missing required key `#width` — did you misspell it as `#widht`?
+
+// A wrong value type names the key.
+t :: Point := #{#x => 1, #y => "two"}
+// => WARNING: Type mismatch: declared as Point, got #{#x => Integer, #y => String} HINT: The right-hand side has type #{#x => Integer, #y => String} which is not assignable to Point: key `#y` expects Integer, got String
+
+// ===========================================================================
+// An open shape (`...`) accepts an extra key silently.
+// ===========================================================================
+
+type Tagged = #{#kind => Symbol, ...}
+// => "Tagged"
+
+:help Tagged
+// => "type Tagged = #__#kind => Symbol, ...}__Declared in: REPL"
+
+tagged :: Tagged := #{#kind => #circle, #radius => 3}. tagged at: #radius
+// => 3
+
+// ===========================================================================
+// Optional keys (`?#k`) may be left out.
+// ===========================================================================
+
+type Opts = #{#name => String, ?#retries => Integer}
+// => "Opts"
+
+o :: Opts := #{#name => "job"}. o at: #retries ifAbsent: [3]
+// => 3
+
+// ===========================================================================
+// Redefining the alias is legal; the newest binding wins at the next use
+// site, which is re-checked against it. `#{#x, #y}` fit the old `Point`; the
+// new one requires `#z` too.
+// ===========================================================================
+
+type Point = #{#x => Integer, #y => Integer, #z => Integer}
+// => "Point"
+
+:help Point
+// => "type Point = #__#x => Integer, #y => Integer, #z => Integer}__Declared in: REPL"
+
+u :: Point := #{#x => 1, #y => 2}
+// => WARNING: Type mismatch: declared as Point, got #{#x => Integer, #y => Integer} HINT: The right-hand side has type #{#x => Integer, #y => Integer} which is not assignable to Point: missing required key `#z`
+
+v :: Point := #{#x => 1, #y => 2, #z => 3}. v at: #z
+// => 3
