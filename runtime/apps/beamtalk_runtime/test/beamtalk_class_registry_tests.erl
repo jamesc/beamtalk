@@ -2358,3 +2358,40 @@ bt4646_removal_does_not_evict_caller_from_pg_test() ->
         {'DOWN', HRef, process, Helper, _} -> ok
     after 5000 -> ok
     end.
+
+%%% ============================================================================
+%%% BT-4758: memoised class_object_tag/1 and change-only snapshot writes
+%%% ============================================================================
+
+bt4758_class_object_tag_memoised_test() ->
+    Name = 'BT4758TagProbe',
+    Expected = list_to_atom("BT4758TagProbe class"),
+    ?assertEqual(Expected, beamtalk_class_registry:class_object_tag(Name)),
+    %% Second call is served from the memo and answers the same atom.
+    ?assertEqual(Expected, beamtalk_class_registry:class_object_tag(Name)),
+    ?assertEqual(
+        Expected,
+        persistent_term:get({beamtalk_class_registry, class_object_tag, Name})
+    ).
+
+bt4758_snapshot_if_changed_writes_only_on_change_test() ->
+    ok = beamtalk_class_registry:ensure_class_state_table(),
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    Old = #{a => 1},
+    %% Changed map: written.
+    ok = beamtalk_class_registry:record_class_state_snapshot_if_changed(Pid, #{}, Old),
+    ?assertEqual({ok, Old}, beamtalk_class_registry:class_state_snapshot_lookup(Pid)),
+    %% Unchanged map: no write (a sentinel row proves the skip).
+    ets:insert(beamtalk_class_state_snapshot, {Pid, sentinel}),
+    ok = beamtalk_class_registry:record_class_state_snapshot_if_changed(Pid, Old, Old),
+    ?assertEqual({ok, sentinel}, beamtalk_class_registry:class_state_snapshot_lookup(Pid)),
+    %% A later change overwrites again.
+    New = Old#{b => 2},
+    ok = beamtalk_class_registry:record_class_state_snapshot_if_changed(Pid, Old, New),
+    ?assertEqual({ok, New}, beamtalk_class_registry:class_state_snapshot_lookup(Pid)),
+    ets:delete(beamtalk_class_state_snapshot, Pid),
+    Pid ! stop.

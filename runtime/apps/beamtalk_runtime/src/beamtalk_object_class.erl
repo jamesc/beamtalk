@@ -1841,8 +1841,11 @@ call_new(
         end,
     case DispatchResult of
         {reply, Result, NewClassVars} ->
-            %% Keep the live snapshot in sync with this mutation.
-            beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
+            %% Keep the live snapshot in sync with this mutation (BT-4758:
+            %% only when the map changed).
+            beamtalk_class_registry:record_class_state_snapshot_if_changed(
+                self(), ClassVars, NewClassVars
+            ),
             {reply, Result, State#class_state{class_state = NewClassVars}};
         {error, not_found} when not InheritedNew orelse ShadowedOrChain ->
             Err = beamtalk_error:new(does_not_understand, ClassName, Selector),
@@ -2195,8 +2198,11 @@ dispatch_class_method_lookup(Selector, Args, From, State, Restore) ->
         )
     of
         {reply, Result, NewClassVars} ->
-            %% Keep the live snapshot in sync with this mutation.
-            beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
+            %% Keep the live snapshot in sync with this mutation (BT-4758:
+            %% only when the map changed).
+            beamtalk_class_registry:record_class_state_snapshot_if_changed(
+                self(), ClassVars, NewClassVars
+            ),
             {reply, Result, State#class_state{class_state = NewClassVars}};
         test_spawn ->
             beamtalk_test_case:spawn_test_execution(

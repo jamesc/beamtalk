@@ -82,6 +82,7 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     classes_backing_module/1,
     ensure_class_state_table/0,
     record_class_state_snapshot/2,
+    record_class_state_snapshot_if_changed/3,
     class_state_snapshot_lookup/1,
     forget_class_state_snapshot/1,
     ensure_static_call_keys_table/0,
@@ -774,8 +775,21 @@ for is_class_object/1 detection.
 """.
 -spec class_object_tag(atom()) -> atom().
 class_object_tag(ClassName) when is_atom(ClassName) ->
-    % elp:fixme W0023 intentional atom creation
-    list_to_atom(atom_to_list(ClassName) ++ " class").
+    %% BT-4758: memoised per class in `persistent_term` (one read, no atom-table
+    %% hash or list building on the hot class-send path). The tag is a pure
+    %% function of the name, so concurrent first calls store the same term (a
+    %% no-op) and a stale entry can never be wrong. Adding a key never triggers
+    %% a global GC; entries are never erased, matching the atom they hold.
+    Key = {?MODULE, class_object_tag, ClassName},
+    case persistent_term:get(Key, undefined) of
+        undefined ->
+            % elp:fixme W0023 intentional atom creation
+            Tag = list_to_atom(atom_to_list(ClassName) ++ " class"),
+            persistent_term:put(Key, Tag),
+            Tag;
+        Tag ->
+            Tag
+    end.
 
 -doc """
 Check if a value is a class object.
@@ -1096,6 +1110,19 @@ record_class_state_snapshot(Pid, ClassVars) ->
     ensure_class_state_table(),
     ets:insert(beamtalk_class_state_snapshot, {Pid, ClassVars}),
     ok.
+
+-doc """
+`record_class_state_snapshot/2`, skipped when `NewClassVars` is the map the
+snapshot already holds (BT-4758). `OldClassVars` is the class process's own
+state before the mutation, which the snapshot mirrors (init and every rebind
+record it), so an unchanged map needs no ETS write. The comparison is
+pointer-equal in the common no-change case.
+""".
+-spec record_class_state_snapshot_if_changed(pid(), map(), map()) -> ok.
+record_class_state_snapshot_if_changed(_Pid, ClassVars, ClassVars) ->
+    ok;
+record_class_state_snapshot_if_changed(Pid, _OldClassVars, NewClassVars) ->
+    record_class_state_snapshot(Pid, NewClassVars).
 
 -doc """
 Look up the current `classState:` map for a class process, telling "no row for this pid" (`not_found`:
