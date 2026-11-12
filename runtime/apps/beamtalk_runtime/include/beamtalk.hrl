@@ -178,6 +178,15 @@
 %% its own literal (AGENTS.md "No duplicate implementations").
 -define(BT_REMOTE_CALL_TIMEOUT, 5000).
 
+%% BT-4701: the module peers are addressed by in `erpc:call/5`s that reach a
+%% `beamtalk_actor` function on another node (remote spawn/lookup, class
+%% candidates, the `global` conflict resolver's start-time read). The code
+%% behind those functions moved to `beamtalk_actor_registry` / `_remote` /
+%% `_ffi`, but a peer that predates the split only has them here, so every
+%% such call keeps naming this module (its delegates forward). One literal
+%% rather than one per caller (AGENTS.md "No duplicate implementations").
+-define(BT_ACTOR_WIRE_MODULE, beamtalk_actor).
+
 %% BT-3992: how long a starter (`spawn`, a supervisor starting an actor
 %% child) waits for the new actor's `initialize` to return, in ms. Shared by
 %% `beamtalk_actor`'s await and `beamtalk_supervisor`'s init-timeout hint

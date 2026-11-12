@@ -113,7 +113,7 @@ Runs ON the target node under `erpc:call/4` — mirrors
 spawn-then-conditionally-unlink sequence, with `erpc`'s temporary worker
 process standing in for that function's caller.
 
-Calls the **public** `beamtalk_actor:'spawnAs'/3` (reserved-name check +
+Calls the **public** `beamtalk_actor_registry:'spawnAs'/3` (reserved-name check +
 `safe_spawn_named/3`), not `safe_spawn_named/3` directly — that internal
 function is not `-export`ed, so a real `remote_spawn` (and this spike) can
 only reach it the way `do_class_self_named_spawn/6` already does. The ADR
@@ -122,7 +122,7 @@ this correction.
 """.
 -spec spawn_via_erpc(atom(), boolean()) -> pid().
 spawn_via_erpc(Name, DoUnlink) ->
-    {ok, Pid} = beamtalk_actor:'spawnAs'(Name, test_counter, 0),
+    {ok, Pid} = beamtalk_actor_registry:'spawnAs'(Name, test_counter, 0),
     case DoUnlink of
         true -> unlink(Pid);
         false -> ok

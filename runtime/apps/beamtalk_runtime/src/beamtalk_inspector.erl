@@ -170,7 +170,7 @@ on(Subject, KnownState) when is_map(KnownState), map_size(KnownState) > 0 ->
             %% own handle_call) already holds, since `sys:get_state(self())`
             %% would deadlock. A *different* pid must NOT be seeded with this
             %% caller's state — it falls back to `on/1`'s guarded snapshot.
-            case beamtalk_actor:is_beamtalk_actor(Pid) of
+            case beamtalk_actor_registry:is_beamtalk_actor(Pid) of
                 true -> actor_cursor_from_state(Pid, KnownState, nil, []);
                 false -> on(Subject)
             end;
@@ -301,7 +301,7 @@ classify(Subject, Parent, Path, Prov) ->
 process_cursor(Pid, Parent, Path) when node(Pid) =/= node() ->
     remote_cursor(Pid, Parent, Path);
 process_cursor(Pid, Parent, Path) ->
-    case beamtalk_actor:is_beamtalk_actor(Pid) of
+    case beamtalk_actor_registry:is_beamtalk_actor(Pid) of
         true -> actor_cursor(Pid, Parent, Path);
         false -> foreign_cursor(Pid, Parent, Path)
     end.
@@ -1250,11 +1250,11 @@ actor_class_label(Pid) when is_pid(Pid) ->
     end.
 
 %% The actor's behaviour class atom from its process dictionary, or nil.
-%% Delegates to the canonical `beamtalk_actor:pid_class_name/1` —
+%% Delegates to the canonical `beamtalk_actor_registry:pid_class_name/1` —
 %% previously a hand-duplicated copy here.
 -spec actor_class(pid()) -> atom() | nil.
 actor_class(Pid) ->
-    beamtalk_actor:pid_class_name(Pid).
+    beamtalk_actor_registry:pid_class_name(Pid).
 
 %% Indent padding: two spaces per level.
 -spec pad(non_neg_integer()) -> binary().
