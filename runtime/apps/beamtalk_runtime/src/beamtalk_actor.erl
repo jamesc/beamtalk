@@ -957,8 +957,9 @@ reason. Messages sent to `Pid` before `initialize` finishes queue in the
 mailbox and run after it.
 
 The process is started with `proc_lib` and enters the `gen_server` loop with
-`gen_server:enter_loop/5` after `Module:init/1`, so it carries
-`$ancestors`/`$initial_call` and works with `sys` and observer like any other
+`gen_server:enter_loop/5` after `Module:init/1`. It carries `$ancestors` and
+the same `$initial_call` (`{Module, init, 1}`) as a `gen_server:start*` actor, so
+`sys`, observer and the crash-report secret redaction treat it like any other
 actor. Not linked; the monitor belongs to the process that calls this.
 `init/1` results are honoured as `gen_server` does: `{ok, State}`,
 `{ok, State, Timeout | hibernate | {continue, _}}`, `{stop, Reason}` (exit
@@ -977,6 +978,12 @@ safe_spawn_monitored_async(Module, InitArgs) ->
 %% `gen_server:enter_loop/5` must be called from the process that ran `init/1`.
 -spec async_init_and_loop(module(), term()) -> no_return().
 async_init_and_loop(Module, InitArgs) ->
+    %% `proc_lib:spawn_opt/2` with a fun records the fun's own MFA as the
+    %% initial call. Set the one `gen_server:start*` sets, because the
+    %% crash-report secret redaction (BT-4666, `beamtalk_actor_redaction`),
+    %% observer and `proc_lib:initial_call/1` identify the actor by
+    %% `{Module, init, _}`.
+    put('$initial_call', {Module, init, 1}),
     case Module:init(InitArgs) of
         {ok, State} ->
             gen_server:enter_loop(Module, [], State, self(), infinity);

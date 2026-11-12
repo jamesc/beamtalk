@@ -2339,7 +2339,7 @@ safe_spawn_monitored_async_is_a_proc_lib_gen_server_test() ->
     ?assertMatch(#{mode := ok}, sys:get_state(Pid)),
     {dictionary, Dict} = process_info(Pid, dictionary),
     ?assertEqual([self()], proplists:get_value('$ancestors', Dict)),
-    ?assertMatch({_, _, _}, proplists:get_value('$initial_call', Dict)),
+    ?assertEqual({test_async_init_actor, init, 1}, proplists:get_value('$initial_call', Dict)),
     erlang:demonitor(MonRef, [flush]),
     gen_server:stop(Pid).
 
