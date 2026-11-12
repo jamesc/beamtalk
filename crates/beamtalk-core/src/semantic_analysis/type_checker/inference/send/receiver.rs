@@ -37,9 +37,50 @@ impl TypeChecker {
     /// the inner subtree via `infer_expr` would re-emit any DNU / type warnings
     /// it produces. By threading the receiver type through, we walk the inner
     /// subtree exactly once.
+    ///
+    /// BT-4715: this is the one place a send's effect on field narrowings is
+    /// decided. A send to `self`/`super` runs a method that may assign any
+    /// state field (`reset => self.f := nil`), so once it returns, every
+    /// `self.<field>` refinement is dropped and the field reads as its
+    /// declared type again. The epoch counter also catches a self-send
+    /// buried in a block argument, whose child env is discarded: the
+    /// enclosing send invalidates its own env. A send that diverges
+    /// (`-> Never`) leaves no later code to mislead, so it does not count.
+    #[allow(clippy::too_many_arguments)] // split from infer_message_send to share body
+    pub(in crate::semantic_analysis::type_checker) fn infer_message_send_with_receiver_ty(
+        &mut self,
+        receiver: &Expression,
+        receiver_ty: InferredType,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> InferredType {
+        let epoch_before = self.self_send_epoch;
+        let ty = self.infer_message_send_with_receiver_ty_inner(
+            receiver,
+            receiver_ty,
+            selector,
+            arguments,
+            span,
+            hierarchy,
+            env,
+            in_abstract_method,
+        );
+        if Self::is_self_or_super(receiver) && !matches!(ty, InferredType::Never) {
+            self.self_send_epoch += 1;
+        }
+        if self.self_send_epoch != epoch_before {
+            env.clear_self_field_narrowings();
+        }
+        ty
+    }
+
     #[allow(clippy::too_many_arguments)] // split from infer_message_send to share body
     #[allow(clippy::too_many_lines)] // generic substitution adds necessary branches
-    pub(in crate::semantic_analysis::type_checker) fn infer_message_send_with_receiver_ty(
+    fn infer_message_send_with_receiver_ty_inner(
         &mut self,
         receiver: &Expression,
         receiver_ty: InferredType,

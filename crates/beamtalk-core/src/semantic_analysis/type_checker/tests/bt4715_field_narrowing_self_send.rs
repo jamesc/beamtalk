@@ -1,0 +1,119 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+//! BT-4715: a `self.<field>` nil narrowing must not survive a send to `self`
+//! (or `super`), because the callee may assign the field back to `nil`.
+//! Local-variable narrowing is unaffected.
+
+use super::common::*;
+
+fn type_diagnostics(source: &str) -> Vec<Diagnostic> {
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    run_with_expect(&module, &hierarchy)
+        .into_iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect()
+}
+
+fn class_with(body: &str) -> String {
+    format!(
+        r"
+typed Actor subclass: Holder
+  state: f :: Integer | Nil = nil
+  reset -> Nil => self.f := nil
+  need: v :: Integer -> Integer => v
+{body}
+"
+    )
+}
+
+fn assert_nil_leak(body: &str) {
+    let diags = type_diagnostics(&class_with(body));
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("expects Integer, got Integer | Nil")),
+        "expected `expects Integer, got Integer | Nil`, got: {diags:#?}"
+    );
+}
+
+fn assert_clean(body: &str) {
+    let diags = type_diagnostics(&class_with(body));
+    assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
+}
+
+#[test]
+fn post_guard_narrowing_dropped_after_self_send() {
+    assert_nil_leak(
+        "  run -> Integer =>\n    self.f isNil ifTrue: [^0]\n    self reset\n    self need: self.f",
+    );
+}
+
+#[test]
+fn if_false_block_narrowing_dropped_after_self_send() {
+    assert_nil_leak(
+        "  run -> Integer =>\n    self.f isNil ifFalse: [self reset. ^self need: self.f]\n    0",
+    );
+}
+
+#[test]
+fn and_block_narrowing_dropped_after_self_send() {
+    assert_nil_leak(
+        "  run -> Boolean =>\n    self.f notNil and: [self reset. (self need: self.f) > 0]",
+    );
+}
+
+#[test]
+fn super_send_drops_narrowing() {
+    assert_nil_leak(
+        "  run -> Integer =>\n    self.f isNil ifTrue: [^0]\n    super reset\n    self need: self.f",
+    );
+}
+
+#[test]
+fn self_send_inside_unrelated_block_drops_narrowing() {
+    assert_nil_leak(
+        "  run: c :: Boolean -> Integer =>\n    self.f isNil ifTrue: [^0]\n    c ifTrue: [self reset]\n    self need: self.f",
+    );
+}
+
+#[test]
+fn cascade_on_self_drops_narrowing() {
+    assert_nil_leak(
+        "  run -> Integer =>\n    self.f isNil ifTrue: [^0]\n    self reset; reset\n    self need: self.f",
+    );
+}
+
+#[test]
+fn narrowing_still_works_with_no_send_between_test_and_use() {
+    assert_clean("  run -> Integer =>\n    self.f isNil ifTrue: [^0]\n    self need: self.f");
+    assert_clean("  run -> Integer =>\n    self.f isNil ifFalse: [^self need: self.f]\n    0");
+    assert_clean("  run -> Boolean =>\n    self.f notNil and: [(self need: self.f) > 0]");
+}
+
+#[test]
+fn argument_is_evaluated_before_the_send_so_it_stays_narrowed() {
+    assert_clean("  run -> Integer =>\n    self.f isNil ifTrue: [^0]\n    self need: self.f");
+}
+
+#[test]
+fn local_narrowing_unaffected_by_self_send() {
+    assert_clean(
+        "  run -> Integer =>\n    x := self.f\n    x isNil ifTrue: [^0]\n    self reset\n    self need: x",
+    );
+}
+
+#[test]
+fn copying_field_into_local_before_send_is_the_fix() {
+    assert_clean(
+        "  run -> Integer =>\n    v := self.f\n    v isNil ifTrue: [^0]\n    self reset\n    self need: v",
+    );
+}
+
+#[test]
+fn diverging_self_send_does_not_drop_earlier_narrowing() {
+    assert_clean(
+        "  run -> Integer =>\n    self.f isNil ifTrue: [^0]\n    self.f > 5 ifTrue: [self error: \"big\"]\n    self need: self.f",
+    );
+}
