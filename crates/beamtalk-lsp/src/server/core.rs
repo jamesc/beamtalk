@@ -637,7 +637,15 @@ impl Backend {
             let mut cache = self.type_cache.lock().expect("type_cache lock poisoned");
             cache.roots.extend(extracted);
             cache.registry.merge(registry);
-            cache.known_erlang_modules.extend(&known_erlang_modules);
+            if known_erlang_modules.check_enabled() && !cache.known_erlang_modules.check_enabled() {
+                // An earlier probe failed (e.g. `erl` was not on PATH yet);
+                // this root's succeeded, so let it re-enable the check.
+                let mut merged = known_erlang_modules.clone();
+                merged.extend_modules(cache.known_erlang_modules.modules().clone());
+                cache.known_erlang_modules = merged;
+            } else {
+                cache.known_erlang_modules.extend(&known_erlang_modules);
+            }
             (cache.registry.clone(), cache.known_erlang_modules.clone())
         };
 

@@ -1565,7 +1565,7 @@ pub fn collect_project_known_erlang_modules(
 pub fn collect_known_erlang_modules(project_root: &Utf8Path) -> KnownErlangModules {
     let mut known = collect_installed_erlang_modules();
     let project = collect_project_known_erlang_modules(project_root);
-    std::sync::Arc::make_mut(&mut known.modules).extend(project);
+    known.extend_modules(project);
     known
 }
 

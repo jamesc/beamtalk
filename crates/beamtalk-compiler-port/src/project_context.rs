@@ -651,20 +651,22 @@ fn resolve_project_context(root: PathBuf, batch: Option<&str>) -> Option<FilePro
     // fingerprint's.
     let (aliases, registry, known_erlang_modules) = match cache.get(&root) {
         Some(entry)
-            if entry.alias_files == alias_fingerprint
-                && entry.registry_files == registry_files
-                // A disabled set means the OTP probe failed (e.g. no `erl`
-                // on PATH); failures are not memoized, so retry (BT-4724).
-                && entry
-                    .context
-                    .analysis_project
-                    .known_erlang_modules
-                    .check_enabled() =>
+            if entry.alias_files == alias_fingerprint && entry.registry_files == registry_files =>
         {
             (
                 entry.context.aliases.clone(),
                 entry.context.analysis_project.native_type_registry.clone(),
-                entry.context.analysis_project.known_erlang_modules.clone(),
+                {
+                    // A disabled set means the OTP probe failed (e.g. no
+                    // `erl` on PATH). Failures are not memoized, so retry
+                    // just this set; keep the alias/registry memo (BT-4724).
+                    let cached = &entry.context.analysis_project.known_erlang_modules;
+                    if cached.check_enabled() {
+                        cached.clone()
+                    } else {
+                        beamtalk_core::ffi_type_specs::collect_known_erlang_modules(&utf8_root)
+                    }
+                },
             )
         }
         _ => (
