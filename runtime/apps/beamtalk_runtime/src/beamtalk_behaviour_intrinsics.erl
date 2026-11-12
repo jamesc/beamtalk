@@ -118,33 +118,19 @@ that the Behaviour/Class libraries can rely on.
     classRemoveFromSystem/1,
     %% Programmatic class removal by name (for workspace/MCP unload)
     classRemoveFromSystemByName/1,
-    %% ADR 0112 Phase 2: method-level removal primitives
     %% ADR 0040 Phase 2 — class-based reload
     classSourceFile/1,
     classReload/1,
-    %% ADR 0082 Phase 1: live method patch primitives
-    %% ADR 0105 Phase 3: pre-save advisory precheck
     %% ADR 0068 Phase 2c: Runtime protocol queries
     classConformsTo/2,
     classProtocols/1,
     %% ADR 0127 §12: trait `uses:` reflection
     classUsedProtocols/1,
-    %% ADR 0114 Phase 2: class rename primitive
-    %% ADR 0114 Phase 3: method rename primitives
     %% ADR 0123 §1/§3: shape versioning
     classShapeVersion/1,
     classMigrateShapeFrom/3,
     %% ADR 0079: exposed for cross-module hierarchy checks
     walk_hierarchy/3,
-    %% ADR 0114 Phase 4: `Workspace changes revert:`'s
-    %% `'rename-class'` undo needs the SAME identity-move-then-retire
-    %% sequence `classRenameTo/2`'s own forward path uses (`beamtalk_
-    %% repl_loader:finish_rename_class_revert/1` calls this directly —
-    %% `beamtalk_workspace` already depends on `beamtalk_runtime` at compile
-    %% time, so no `erlang:apply/3` indirection is needed here, unlike the
-    %% reverse direction this module's other cross-app calls use) rather
-    %% than duplicating its whereis/stop/purge sequence (AGENTS.md's
-    %% no-duplicate-implementations rule).
     publish_class_removed/2
 ]).
 

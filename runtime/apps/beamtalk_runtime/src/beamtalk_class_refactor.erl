@@ -60,6 +60,12 @@ Beamtalk-visible surface.
     classRemoveSelector/2,
     classRemoveSelectorIfAbsent/3,
     classRenameTo/2,
+    %% ADR 0114 Phase 4: `Workspace changes revert:`'s `'rename-class'` undo needs the
+    %% SAME identity-move-then-retire sequence `classRenameTo/2`'s own forward path
+    %% uses (`beamtalk_repl_loader:finish_rename_class_revert/1` calls this directly;
+    %% `beamtalk_workspace` depends on `beamtalk_runtime` at compile time, so no
+    %% `erlang:apply/3` indirection is needed) rather than duplicating its
+    %% whereis/stop/purge sequence.
     install_class_rename/3,
     classCompileSource/3,
     classTryCompileSource/3,
