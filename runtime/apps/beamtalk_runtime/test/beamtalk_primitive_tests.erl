@@ -2182,7 +2182,6 @@ pid_label_dead_pid_test() ->
     Inner = list_to_binary(lists:sublist(PidStr, 2, length(PidStr) - 2)),
     ?assertEqual(<<"#Dead<", Inner/binary, ">">>, Result).
 
-
 %%% ============================================================================
 %%% Table-driven cases (BT-4679)
 %%%
@@ -2334,7 +2333,9 @@ class_of_table_test_() ->
             {"dictionary two keys", 'Dictionary', #{key => value, x => 42}},
             %% A user Dictionary that happens to have '__class__' key (old tag)
             %% must still be treated as Dictionary, not as a tagged map
-            {"dictionary with old class key", 'Dictionary', #{'__class__' => 'Integer', value => 42}},
+            {"dictionary with old class key", 'Dictionary', #{
+                '__class__' => 'Integer', value => 42
+            }},
             %% Non-atom __class__ value was already handled, verify it still works
             {"dictionary with string class key", 'Dictionary', #{
                 '__class__' => <<"Integer">>, value => 42
