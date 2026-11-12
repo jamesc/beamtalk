@@ -4597,7 +4597,7 @@ fn test_direct_constructor_codegen_table() {
                 "'beamtalk_object_class':'class_send'(",
             ],
             // no `nil` class self (BT-4037); the hit path is the key read only
-            lacks: &["'nil'", "direct_call_ok", "function_exported"],
+            lacks: &["'nil'", "direct_call_ok", "function_exported", "try "],
             counts: &[("call 'bt@test@pt':'class_x:y:'(", 1)],
         },
         // Static `new:` keeps the `class_send` fallback even when eligible — the chain

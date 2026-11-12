@@ -1721,7 +1721,7 @@ class_send_self_instantiation_error_test_() ->
         {Label, fun() -> class_send_self_instantiation_error_case(Selector, Args, Pre) end}
      || {Label, Selector, Args, Pre} <- [
             %% All metadata unset in an eunit worker: instantiation_error.
-            {"missing metadata, new", 'new', [], Absent},
+            {"missing metadata, new", 'new', [], []},
             {"missing metadata, new:", 'new:', [#{}], Absent},
             {"missing metadata, spawn", spawn, [], Absent},
             {"missing metadata, spawnWith:", 'spawnWith:', [#{}], Absent},

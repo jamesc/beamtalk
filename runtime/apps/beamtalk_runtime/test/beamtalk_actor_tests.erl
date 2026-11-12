@@ -1611,8 +1611,9 @@ async_send_lifecycle_test_() ->
     %% BT-4679: the former async_send_{is_alive,stop,kill}_{live,dead}_actor tests.
     %% {Label, Start, Liveness, Selector, Expected, After}: `Start` is start_link, or
     %% start so a kill does not propagate to the test process; `After` is `stop` (clean up
-    %% the live actor), `dead` (the actor must now be gone: kill/stop return ok only once
-    %% the process is confirmed dead) or `none`.
+    %% the live actor), `dead` (wait for the actor to exit, then it must be gone: stop can
+    %% resolve before exit completes), `dead_now` (it must already be gone, no wait: kill
+    %% returns ok only once the process is confirmed dead) or `none`.
     [
         {Label, fun() -> async_send_lifecycle_case(Start, Liveness, Selector, Expected, After) end}
      || {Label, Start, Liveness, Selector, Expected, After} <- [
@@ -1622,7 +1623,9 @@ async_send_lifecycle_test_() ->
             {"stop on a dead actor", start_link, dead, stop, ok, none},
             %% Killing an already-dead process is idempotent.
             {"kill on a dead actor", start, dead, kill, ok, none},
-            {"kill on a live actor", start, live, kill, ok, dead}
+            %% kill must resolve only once the process is confirmed dead: assert straight
+            %% away, no wait (this guards the kill race).
+            {"kill on a live actor", start, live, kill, ok, dead_now}
         ]
     ].
 
@@ -1643,6 +1646,8 @@ async_send_lifecycle_case(Start, Liveness, Selector, Expected, After) ->
             gen_server:stop(Counter);
         dead ->
             beamtalk_test_wait:dead(Counter),
+            ?assertNot(is_process_alive(Counter));
+        dead_now ->
             ?assertNot(is_process_alive(Counter));
         none ->
             ok
@@ -4031,8 +4036,9 @@ sync_send_onExit_callback_block_raises_test() ->
     end,
     ?assertEqual(ok, beamtalk_actor:sync_send(Counter, 'onExit:', [Block])),
     exit(Counter, kill),
-    %% BT-4679: assert on the observable effect (the block ran, then raised and was
-    %% caught by the watcher) instead of sleeping and asserting `true`.
+    %% BT-4679: assert on the observable effect (the block ran) instead of sleeping and
+    %% asserting `true`. The block then raises; this does not check how the watcher
+    %% handles that error.
     receive
         onexit_block_ran -> ok
     after 2000 ->
@@ -4052,7 +4058,8 @@ async_send_onExit_callback_block_raises_test() ->
     ?assertEqual(ok, beamtalk_future:await(Future, 2000)),
     exit(Counter, kill),
     beamtalk_test_wait:dead(Counter),
-    %% BT-4679: assert the block ran and its error was contained (was `?assert(true)`).
+    %% BT-4679: assert the block ran (was `?assert(true)`); the error it then raises is not
+    %% observed here.
     receive
         onexit_block_ran -> ok
     after 2000 ->
