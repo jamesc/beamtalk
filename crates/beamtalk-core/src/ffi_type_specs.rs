@@ -1126,7 +1126,10 @@ pub struct OtpDiscovery {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct KnownErlangModules {
     modules: std::sync::Arc<std::collections::HashSet<String>>,
-    check_enabled: bool,
+    /// `None` is the merge identity ("unset", e.g. a fresh accumulator or the
+    /// `Default`); it behaves as disabled, but merging it with either `Some`
+    /// yields that `Some`, so [`extend`](Self::extend) is order-independent.
+    check_enabled: Option<bool>,
 }
 
 impl KnownErlangModules {
@@ -1135,7 +1138,7 @@ impl KnownErlangModules {
     pub fn enabled(modules: std::collections::HashSet<String>) -> Self {
         Self {
             modules: std::sync::Arc::new(modules),
-            check_enabled: true,
+            check_enabled: Some(true),
         }
     }
 
@@ -1146,14 +1149,14 @@ impl KnownErlangModules {
     pub fn disabled(modules: std::collections::HashSet<String>) -> Self {
         Self {
             modules: std::sync::Arc::new(modules),
-            check_enabled: false,
+            check_enabled: Some(false),
         }
     }
 
     /// Whether the `unresolved_ffi` check should run at all.
     #[must_use]
     pub fn check_enabled(&self) -> bool {
-        self.check_enabled
+        self.check_enabled == Some(true)
     }
 
     /// Whether `name` is a known module.
@@ -1168,15 +1171,14 @@ impl KnownErlangModules {
         &self.modules
     }
 
-    /// Union `other` into `self`. The check stays enabled only if both sides
-    /// are enabled or one side is empty-and-default (a fresh accumulator).
+    /// Union `other` into `self`. Enablement is the AND of the *set* sides
+    /// (an unset side, e.g. a fresh accumulator, is the identity), so one
+    /// unavailable package disables the merged set regardless of order.
     pub fn extend(&mut self, other: &KnownErlangModules) {
-        let fresh = self.modules.is_empty() && !self.check_enabled;
         std::sync::Arc::make_mut(&mut self.modules).extend(other.modules.iter().cloned());
-        self.check_enabled = if fresh {
-            other.check_enabled
-        } else {
-            self.check_enabled && other.check_enabled
+        self.check_enabled = match (self.check_enabled, other.check_enabled) {
+            (None, x) | (x, None) => x,
+            (Some(a), Some(b)) => Some(a && b),
         };
     }
 }
@@ -1548,7 +1550,18 @@ pub fn collect_project_known_erlang_modules(
 ///
 /// This is the entry point every surface (CLI, LSP, compiler port, MCP) uses.
 pub fn collect_known_erlang_modules(project_root: &Utf8Path) -> KnownErlangModules {
-    let mut modules = collect_project_known_erlang_modules(project_root);
+    let mut known = collect_installed_erlang_modules();
+    let project = collect_project_known_erlang_modules(project_root);
+    std::sync::Arc::make_mut(&mut known.modules).extend(project);
+    known
+}
+
+/// The root-less part of [`collect_known_erlang_modules`]: every installed OTP
+/// module plus the runtime's bundled applications, with enablement taken from
+/// the OTP probe. Needs no project, so it is also the fallback for surfaces
+/// with no package on disk (`lint foo.bt`, loose test files).
+pub fn collect_installed_erlang_modules() -> KnownErlangModules {
+    let mut modules = std::collections::HashSet::new();
     let otp = discover_otp_beam_files().unwrap_or_default();
     modules.extend(otp.module_names.iter().cloned());
     if let Ok((runtime_dir, layout)) = find_runtime_dir_with_layout() {
@@ -2028,6 +2041,20 @@ mod tests {
             std::collections::HashSet::new(),
         ));
         assert!(!acc.check_enabled());
+    }
+
+    #[test]
+    fn known_erlang_modules_extend_is_order_independent() {
+        let on = KnownErlangModules::enabled(["a".to_string()].into());
+        let off = KnownErlangModules::disabled(std::collections::HashSet::new());
+        let mut x = KnownErlangModules::default();
+        x.extend(&off);
+        x.extend(&on);
+        let mut y = KnownErlangModules::default();
+        y.extend(&on);
+        y.extend(&off);
+        assert!(!x.check_enabled() && !y.check_enabled());
+        assert_eq!(x, y);
     }
 
     /// BT-4724: every installed OTP app is covered, not just the

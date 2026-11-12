@@ -564,7 +564,9 @@ pub fn analyse_package(
 
     // BT-4022: project-known Erlang modules for the `unresolved_ffi` check.
     let known_erlang_modules = package_root.as_deref().map_or_else(
-        beamtalk_core::ffi_type_specs::KnownErlangModules::default,
+        // No package: the project tier is empty but installed OTP and the
+        // runtime still apply, so loose files keep the check.
+        beamtalk_core::ffi_type_specs::collect_installed_erlang_modules,
         beamtalk_core::ffi_type_specs::collect_known_erlang_modules,
     );
     // BT-4377: the package's `[diagnostics]` table, via the loader the

@@ -611,9 +611,8 @@ impl<'a> AnalysisContext<'a> {
 /// caller (the compiler port's `compile`, backing REPL `load_project`)
 /// fills in from the file's project; the language service's
 /// `compute_diagnostics_and_analysis` applies them. `Default` (no package,
-/// no registry, no extra modules)
-/// preserves the legacy behaviour for callers with no project on disk
-/// (REPL expressions, editor diagnostics).
+/// no registry, check disabled) leaves the `unresolved_ffi` check off for
+/// callers with no project on disk (REPL expressions, editor diagnostics).
 #[derive(Debug, Clone, Default)]
 pub struct ProjectAnalysisContext {
     /// The compiled file's package name (`[package] name`), applied as
@@ -1413,8 +1412,9 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
         &mut result.diagnostics,
     );
     // Warn on Erlang FFI calls to unknown modules. `known_erlang_modules`
-    // carries the package's own dependency/native modules (BT-4022) so a
-    // call to a module the package itself brings in does not warn.
+    // carries the installed OTP, the runtime's apps and the package's own
+    // dependency/native modules (BT-4022, BT-4724); a disabled set skips
+    // the check.
     validators::check_unresolved_ffi_modules(
         module,
         &known_erlang_modules,

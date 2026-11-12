@@ -900,6 +900,7 @@ fn lint_skips_unresolved_ffi_check_without_erl() {
         .env("PATH", empty.path())
         .arg("lint")
         .assert()
+        .success()
         .stderr(contains("Unknown Erlang module").not());
 }
 

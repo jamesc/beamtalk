@@ -1519,7 +1519,10 @@ fn initialize_pipeline(
     // does not compile the package's own native/hex deps first, so the ebin
     // tier reflects whatever a previous build left on disk — the `native/`
     // source tier is known regardless.
-    let mut known_erlang_modules = beamtalk_core::ffi_type_specs::KnownErlangModules::default();
+    // Seeded with the installed set so loose test files (no discovered
+    // package) still get the check.
+    let mut known_erlang_modules =
+        beamtalk_core::ffi_type_specs::collect_installed_erlang_modules();
     for (pkg_root, _pkg) in &discovered_packages {
         known_erlang_modules
             .extend(&beamtalk_core::ffi_type_specs::collect_known_erlang_modules(pkg_root));

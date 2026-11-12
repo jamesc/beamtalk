@@ -180,7 +180,7 @@ pub struct SimpleLanguageService {
     /// Project-known Erlang modules for the `unresolved_ffi` check (BT-4022):
     /// hex-dep/native ebin modules plus own `native/*.erl`, unioned across
     /// workspace roots by the LSP server at startup (mirrors `native_types`).
-    /// Empty until set — diagnostics then keep the static-list-only behaviour.
+    /// Default (unset) disables the check — no unresolved-module diagnostics.
     known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules,
     /// Whether workspace preload has completed with full coverage.
     ///
