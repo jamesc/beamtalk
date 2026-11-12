@@ -22,7 +22,10 @@
 //! * Anything else contributes no facts but never stops the rest of a chain
 //!   from narrowing.
 //!
-//! New connectives (aliases, say) extend `condition_facts` with one more case
+//! * A local assigned a condition (`c := x notNil`) stands for that
+//!   condition's facts until it, or a variable in them, is written (BT-4714).
+//!
+//! New connectives extend `condition_facts` with one more case
 //! that builds a [`CondFacts`]; a new consumer calls it as `loop_body_facts`
 //! does.
 
@@ -95,6 +98,11 @@ impl Facts {
         }
     }
 
+    /// Whether `key` is one of the narrowed variables.
+    fn contains(&self, key: &EnvKey) -> bool {
+        self.0.iter().any(|(k, _)| k == key)
+    }
+
     /// Forget every `self.<field>` fact (BT-4715: a self-send may reassign
     /// any field, so a fact about one cannot outlive it).
     pub(crate) fn drop_fields(&mut self) {
@@ -113,6 +121,16 @@ pub(crate) struct CondFacts {
 }
 
 impl CondFacts {
+    /// Whether either side narrows `key`.
+    pub(crate) fn mentions(&self, key: &EnvKey) -> bool {
+        self.when_true.contains(key) || self.when_false.contains(key)
+    }
+
+    /// The narrowed variables on either side.
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &EnvKey> {
+        self.when_true.keys().chain(self.when_false.keys())
+    }
+
     /// Drop `self.<field>` facts from both sides (see [`Facts::drop_fields`]).
     pub(crate) fn drop_fields(&mut self) {
         self.when_true.drop_fields();
@@ -142,6 +160,14 @@ impl FactsCtx {
         Self {
             post_guard: false,
             hint_span: Some(hint_span),
+        }
+    }
+
+    /// Facts for the right-hand side of an assignment to a local (BT-4714).
+    pub(crate) fn alias() -> Self {
+        Self {
+            post_guard: false,
+            hint_span: None,
         }
     }
 
@@ -229,6 +255,13 @@ impl TypeChecker {
             };
         }
 
+        // BT-4714: a local holding a condition stands for what it proved.
+        if let Expression::Identifier(ident) = cond {
+            return env
+                .cond_alias(&EnvKey::local(ident.name.clone()))
+                .cloned()
+                .unwrap_or_default();
+        }
         let Expression::MessageSend {
             receiver: lhs,
             selector,
