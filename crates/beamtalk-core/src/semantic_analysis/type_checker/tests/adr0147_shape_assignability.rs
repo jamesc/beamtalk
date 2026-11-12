@@ -638,22 +638,6 @@ fn spawn_with_value_is_judged_against_a_shape_slot() {
 }
 
 #[test]
-fn symbol_literal_map_stays_assignable_until_literals_infer_shapes() {
-    // A symbol-literal map still infers `Dictionary(#k, V)`; it must keep
-    // flowing into a shape slot silently (BT-4731 makes it a real shape).
-    let msgs = diagnostics(
-        "Object subclass: Probe\n  \
-           take: o :: #{#port => Integer} => o\n  \
-           go => self take: #{#port => 1}\n",
-    );
-    assert!(
-        msgs.is_empty(),
-        "got: {:#?}",
-        msgs.iter().map(|d| &d.message).collect::<Vec<_>>()
-    );
-}
-
-#[test]
 fn protocol_typed_slots_are_left_to_conformance_checks() {
     let msgs = diagnostics(
         "Protocol define: Named\n  name -> String\n\n\

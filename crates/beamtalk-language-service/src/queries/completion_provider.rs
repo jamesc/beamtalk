@@ -1043,14 +1043,15 @@ fn receiver_side_of_expr(expr: &Expression, type_map: &TypeMap) -> Option<Receiv
 /// Unions, Dynamic, and Never have no single receiver side.
 fn receiver_side_of_type(ty: &InferredType) -> Option<ReceiverSide> {
     match ty {
-        InferredType::Known { class_name: n, .. } => Some(ReceiverSide::Instance(n.clone())),
+        // A map shape (ADR 0147) is a `Dictionary` for every message that is
+        // not a shape-aware keyed operation, so it completes as one.
+        InferredType::Known { .. } | InferredType::Shape { .. } => ty
+            .instance_class()
+            .map(|(n, _)| ReceiverSide::Instance(n.clone())),
         InferredType::Meta { class_name: n, .. } => Some(ReceiverSide::Class(n.clone())),
         InferredType::ProtocolMeta {
             protocol_name: n, ..
         } => Some(ReceiverSide::ProtocolClass(n.clone())),
-        // A map shape (ADR 0147) is a `Dictionary` for every message that is
-        // not a shape-aware keyed operation, so it completes as one.
-        InferredType::Shape { .. } => Some(ReceiverSide::Instance("Dictionary".into())),
         InferredType::Union { .. }
         | InferredType::Dynamic(_)
         | InferredType::Never
@@ -1574,10 +1575,10 @@ pub fn resolve_expression_type(
     let last_expr = module.expressions.last()?;
     let type_map =
         beamtalk_core::semantic_analysis::infer_types(&module, hierarchy, native_type_registry);
-    match type_of_parsed(&type_map, &last_expr.expression) {
-        Some(InferredType::Known { class_name, .. }) => Some(class_name.to_string()),
-        _ => None,
-    }
+    // A map shape (`#{#a => 1}`, ADR 0147) resolves as its `Dictionary`.
+    type_of_parsed(&type_map, &last_expr.expression)
+        .and_then(InferredType::instance_class)
+        .map(|(class_name, _)| class_name.to_string())
 }
 #[cfg(test)]
 mod tests {
@@ -1596,6 +1597,17 @@ mod tests {
     fn completions_at(source: &str, position: Position) -> Vec<Completion> {
         completions_at_with_package(source, position, None)
     }
+    #[test]
+    fn resolve_expression_type_answers_dictionary_for_a_map_literal() {
+        // BT-4731: a symbol-keyed literal infers a shape; the REPL/MCP
+        // completion port still gets its `Dictionary` class.
+        let hierarchy = ClassHierarchy::with_builtins();
+        assert_eq!(
+            resolve_expression_type("#{#a => 1}", &hierarchy, None).as_deref(),
+            Some("Dictionary")
+        );
+    }
+
     /// Parse source and compute completions with a specific package context.
     fn completions_at_with_package(
         source: &str,

@@ -27,7 +27,7 @@ Actor subclass: Adr0131LookupActor
   // A handler that writes `t`, as the whole value of an assignment (s1).
   s1 =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := d
       at: #k
       ifAbsent: [
@@ -39,7 +39,7 @@ Actor subclass: Adr0131LookupActor
   // The handler does not run when the key is present: `t` is unchanged.
   found =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := d
       at: #a
       ifAbsent: [
@@ -51,7 +51,7 @@ Actor subclass: Adr0131LookupActor
   // A stored `nil` is a hit, not a miss: the handler does not run.
   foundNil =>
     t := 0
-    d := #{#k => nil}
+    d :: Dictionary := #{#k => nil}
     r := d
       at: #k
       ifAbsent: [
@@ -75,14 +75,14 @@ Actor subclass: Adr0131LookupActor
   // The same lookup as a statement.
   statement =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     d at: #k ifAbsent: [t := t + 1]
     t
 
   // A handler that only writes (never reads) the local.
   writeOnly =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := d
       at: #k
       ifAbsent: [
@@ -95,7 +95,7 @@ Actor subclass: Adr0131LookupActor
   twoLocals =>
     t := 0
     u := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := d
       at: #k
       ifAbsent: [
@@ -108,7 +108,7 @@ Actor subclass: Adr0131LookupActor
   // A handler-writing lookup as an argument, after a read of `t`.
   argument =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := 1 + (d
       at: #k
       ifAbsent: [
@@ -120,7 +120,7 @@ Actor subclass: Adr0131LookupActor
   // A handler-writing lookup as a binary operand after a read of `t`: the read sees the old value.
   leftRead =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := t + (d
       at: #k
       ifAbsent: [
@@ -132,7 +132,7 @@ Actor subclass: Adr0131LookupActor
   // A handler-writing lookup as the left operand of a `^` value that reads `t` afterwards.
   returned =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     ^(d
       at: #k
       ifAbsent: [
@@ -143,7 +143,7 @@ Actor subclass: Adr0131LookupActor
   // A handler-writing lookup as the last expression of the method.
   last =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     d
       at: #k
       ifAbsent: [
@@ -154,14 +154,14 @@ Actor subclass: Adr0131LookupActor
   // A parenthesised handler-writing lookup statement.
   parenthesised =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     (d at: #k ifAbsent: [t := t + 1])
     t
 
   // The assignment target is the local the handler writes: the assigned value wins.
   assignsTarget =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     t := d
       at: #k
       ifAbsent: [
@@ -173,7 +173,7 @@ Actor subclass: Adr0131LookupActor
   // Two handler-writing lookups in a row, as statements.
   twice =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     d at: #k ifAbsent: [t := t + 1]
     d at: #j ifAbsent: [t := t + 10]
     t
@@ -181,7 +181,7 @@ Actor subclass: Adr0131LookupActor
   // Two handler-writing lookups as the operands of one expression.
   bothOperands =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := (d
       at: #k
       ifAbsent: [
@@ -221,7 +221,7 @@ Actor subclass: Adr0131LookupActor
   // The key is a self-send.
   keySelfSend =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := d
       at: (self key)
       ifAbsent: [
@@ -233,7 +233,7 @@ Actor subclass: Adr0131LookupActor
   // A handler-writing lookup in an arm of a conditional producer.
   armMissing: flag =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := nil
     flag
       ifTrue: [
@@ -249,7 +249,7 @@ Actor subclass: Adr0131LookupActor
   // A handler-writing lookup in the protected body of an `on:do:` producer.
   onDoBody =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := [
       d
         at: #k
@@ -263,8 +263,8 @@ Actor subclass: Adr0131LookupActor
   // A handler-writing lookup in the handler of another.
   nestedLookup =>
     t := 0
-    d := #{#a => 1}
-    e := #{#a => 2}
+    d :: Dictionary := #{#a => 1}
+    e :: Dictionary := #{#a => 2}
     r := d
       at: #k
       ifAbsent: [
@@ -280,7 +280,7 @@ Actor subclass: Adr0131LookupActor
   // The handler holds a loop that writes `t`.
   handlerHoldsLoop =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := d
       at: #k
       ifAbsent: [
@@ -292,7 +292,7 @@ Actor subclass: Adr0131LookupActor
   // The handler holds a fold that writes `t`.
   handlerHoldsFold =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := d
       at: #k
       ifAbsent: [
@@ -308,7 +308,7 @@ Actor subclass: Adr0131LookupActor
   // The handler returns from the method; a hit continues.
   earlyReturn: key =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := d
       at: key
       ifAbsent: [
@@ -331,7 +331,7 @@ Actor subclass: Adr0131LookupActor
   // The key is a self-send that mutates a field.
   keyBumpsState =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := d
       at: (self bumpKey)
       ifAbsent: [
@@ -354,7 +354,7 @@ Actor subclass: Adr0131LookupActor
   // The handler reads a field and writes a local.
   fieldReadInHandler =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     self.n := 4
     r := d
       at: #k
@@ -367,7 +367,7 @@ Actor subclass: Adr0131LookupActor
   // BT-3824: `at:ifPresent:` runs its handler with the found value.
   ifPresentFound =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := d
       at: #a
       ifPresent: [:v |
@@ -379,7 +379,7 @@ Actor subclass: Adr0131LookupActor
   // A miss answers nil and does not run the handler.
   ifPresentMissing =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := d
       at: #k
       ifPresent: [:v |
@@ -391,7 +391,7 @@ Actor subclass: Adr0131LookupActor
   // A stored `nil` is a hit: the handler runs with `nil`.
   ifPresentStoredNil =>
     t := 0
-    d := #{#k => nil}
+    d :: Dictionary := #{#k => nil}
     r := d
       at: #k
       ifPresent: [:v |
@@ -403,14 +403,14 @@ Actor subclass: Adr0131LookupActor
   // As a statement.
   ifPresentStatement =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     d at: #a ifPresent: [:v | t := t + v]
     t
 
   // As the right operand of a send whose receiver reads the local first.
   ifPresentOperand =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := t + (d
       at: #a
       ifPresent: [:v |
@@ -424,7 +424,7 @@ Actor subclass: Adr0131LookupActor
   ifPresentIfAbsentFound =>
     t := 0
     u := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := d
       at: #a
       ifPresent: [:v |
@@ -441,7 +441,7 @@ Actor subclass: Adr0131LookupActor
   ifPresentIfAbsentMissing =>
     t := 0
     u := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := d
       at: #k
       ifPresent: [:v |
@@ -457,8 +457,8 @@ Actor subclass: Adr0131LookupActor
   // The present handler holds a lookup whose absent handler writes.
   ifPresentNested =>
     t := 0
-    d := #{#a => 1}
-    e := #{#b => 2}
+    d :: Dictionary := #{#a => 1}
+    e :: Dictionary := #{#b => 2}
     r := d
       at: #a
       ifPresent: [:v |
@@ -474,7 +474,7 @@ Actor subclass: Adr0131LookupActor
   // In a conditional arm.
   ifPresentArm: flag =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := nil
     flag
       ifTrue: [
@@ -490,7 +490,7 @@ Actor subclass: Adr0131LookupActor
   // The present handler returns from the method; a miss continues.
   ifPresentEarlyReturn: key =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     r := d
       at: key
       ifPresent: [:v |
@@ -517,7 +517,7 @@ Actor subclass: Adr0131LookupActor
   // The present handler reads a field and writes a local.
   ifPresentFieldRead =>
     t := 0
-    d := #{#a => 1}
+    d :: Dictionary := #{#a => 1}
     self.n := 3
     r := d
       at: #a

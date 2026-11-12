@@ -566,6 +566,25 @@ impl InferredType {
         }
     }
 
+    /// The class an instance of this type dispatches as, with the type's
+    /// provenance: the class of a `Known` type, or `Dictionary` for a map
+    /// shape (ADR 0147: every send that is not shape-aware goes to the
+    /// shape's [`dictionary_view`](Self::dictionary_view)). `None` for any
+    /// other variant. The one place codegen reads "the static class".
+    #[must_use]
+    pub fn instance_class(&self) -> Option<(&EcoString, &TypeProvenance)> {
+        static DICTIONARY: EcoString = EcoString::inline("Dictionary");
+        match self {
+            Self::Known {
+                class_name,
+                provenance,
+                ..
+            } => Some((class_name, provenance)),
+            Self::Shape { provenance, .. } => Some((&DICTIONARY, provenance)),
+            _ => None,
+        }
+    }
+
     /// Creates a [`Shape`](InferredType::Shape) with `Inferred` provenance.
     #[must_use]
     pub fn shape(fields: Vec<ShapeFieldType>, open: bool) -> Self {
@@ -1948,6 +1967,9 @@ pub(crate) struct OverrideReturnWidening {
 pub(in crate::semantic_analysis::type_checker) struct AssignmentTypeMismatch {
     pub(in crate::semantic_analysis::type_checker) declared_display: EcoString,
     pub(in crate::semantic_analysis::type_checker) inferred_display: EcoString,
+    /// ADR 0147: when a map shape is involved, why the value is not
+    /// assignable, naming the offending key.
+    pub(in crate::semantic_analysis::type_checker) shape_detail: Option<EcoString>,
     /// ADR 0144: when a class object `C class` misses a declared `P class`,
     /// the protocol `P` and the selectors `C` is missing — rendered as
     /// `C class does not conform to P class` instead of the plain mismatch.

@@ -20,6 +20,9 @@
 //!   [`dictionary_view`](InferredType::dictionary_view) must be assignable
 //!   (closed: its key/value unions; open: `Object`/`Object`). Bare
 //!   `Dictionary` accepts any shape.
+//! - **`Block(P1, ..., R)`** — a shape-bearing parameter slot is
+//!   contravariant (the expected parameter must be assignable to the actual
+//!   one); only the result is covariant.
 //! - **`Dictionary` to shape** — the gradual generics rule: bare
 //!   `Dictionary`, or one with a `Dynamic` argument, is accepted silently; a
 //!   fully typed `Dictionary(K, V)` is not.
@@ -296,14 +299,7 @@ impl TypeChecker {
             {
                 return Err(ShapeMismatch::Incompatible);
             }
-            // Interim (until map literals infer shapes, ADR 0147 § Map
-            // literals infer shapes): a symbol-literal map still infers
-            // `Dictionary(#k1 | #k2, V)`. Its keys are singletons, which no
-            // annotation writes, so it is the literal and is accepted like a
-            // bare `Dictionary` rather than rejected as "fully typed".
-            let literal_keys = aargs.first().is_some_and(Self::is_singleton_key_type);
             let gradual = aargs.is_empty()
-                || literal_keys
                 || aargs.iter().any(|a| {
                     matches!(a, InferredType::Dynamic(_))
                         || a.as_known()
@@ -360,16 +356,6 @@ impl TypeChecker {
                     Self::arg_assignable(a, e, hierarchy)
                 }
             })
-    }
-
-    /// `true` for `#k` or a union of `#k`s — the key type of a symbol-literal
-    /// map's current `Dictionary(K, V)` inference.
-    fn is_singleton_key_type(ty: &InferredType) -> bool {
-        match ty {
-            InferredType::Known { class_name, .. } => class_name.starts_with('#'),
-            InferredType::Union { members, .. } => members.iter().all(Self::is_singleton_key_type),
-            _ => false,
-        }
     }
 
     /// One type-argument slot. Without a shape on either side this defers to

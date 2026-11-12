@@ -200,7 +200,7 @@ Actor subclass: Bt3912GroupBy
 
   atIfAbsentAssign =>
     r := Dictionary new
-    #{#a => 1}
+    (Dictionary new at: #a put: 1)
       at: #k
       ifAbsent: [
         r := #(1, 3)
@@ -241,7 +241,7 @@ Actor subclass: Bt3912GroupBy
 
   keysAndValuesDoAssign =>
     r := Dictionary new
-    #{#a => 1}
+    (Dictionary new at: #a put: 1)
       keysAndValuesDo: [:kk :v |
         r := #(1, 3)
           groupBy: [:x |

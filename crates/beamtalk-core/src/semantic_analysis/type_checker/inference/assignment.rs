@@ -15,6 +15,7 @@ use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::type_checker::binary_string_compare;
 use crate::semantic_analysis::type_checker::known_remote;
 use crate::semantic_analysis::type_checker::narrowing::facts::AliasFacts;
+use crate::semantic_analysis::type_checker::shape_assignability::ShapeMismatch;
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::types::{
     AssignmentTypeMismatch, ClassObjectType, CrossObjectFieldMutation,
@@ -211,7 +212,10 @@ impl TypeChecker {
                 .display_for_diagnostic()
                 .unwrap_or_else(|| inferred_ty.display_name()),
         };
+        // ADR 0147: when a map shape is involved, say which key is at fault.
+        let shape_detail = Self::shape_mismatch_detail(inferred_ty, declared, hierarchy);
         Some(AssignmentTypeMismatch {
+            shape_detail,
             declared_display: declared
                 .display_for_diagnostic()
                 .unwrap_or_else(|| declared_name.clone()),
@@ -251,6 +255,45 @@ impl TypeChecker {
             )
     }
 
+    /// ADR 0147: when a map shape is involved, why the value is not
+    /// assignable, naming the offending key — from the first member of the
+    /// value that [`Self::shape_member_ok`] itself refused.
+    fn shape_mismatch_detail(
+        inferred_ty: &InferredType,
+        declared: &InferredType,
+        hierarchy: &ClassHierarchy,
+    ) -> Option<EcoString> {
+        if !(inferred_ty.contains_shape() || declared.contains_shape()) {
+            return None;
+        }
+        Self::union_members(inferred_ty)
+            .iter()
+            .filter(|member| !Self::shape_member_ok(member, declared, hierarchy))
+            .find_map(|member| {
+                Self::shape_assignable(member, declared, hierarchy)
+                    .err()
+                    .filter(|m| !matches!(m, ShapeMismatch::Incompatible))
+            })
+            .map(|m| m.describe())
+    }
+
+    /// ADR 0147: whether one member of an assigned value fits `declared` when
+    /// a shape is involved. Forward (`member` into `declared`) always; a
+    /// member that is not itself a shape may also be the narrowing cast, i.e.
+    /// some member of `declared` accepts it the other way (so a nullable
+    /// `#{...} | Nil` annotation still casts a typed `Dictionary`).
+    fn shape_member_ok(
+        member: &InferredType,
+        declared: &InferredType,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        Self::shape_assignable(member, declared, hierarchy).is_ok()
+            || (!member.contains_shape()
+                && Self::union_members(declared)
+                    .iter()
+                    .any(|d| Self::shape_assignable(d, member, hierarchy).is_ok()))
+    }
+
     /// The instance-type arm of [`Self::detect_assignment_type_mismatch`]
     /// (no class object on either side): either type assignable to the
     /// other. BT-4482: where a protocol is involved, structural conformance
@@ -263,6 +306,19 @@ impl TypeChecker {
         hierarchy: &ClassHierarchy,
         protocol_registry: Option<&ProtocolRegistry>,
     ) -> bool {
+        // ADR 0147: a map shape is judged structurally, never by display
+        // name (a shape has no class name to compare). Each member of the
+        // value is judged on its own: a member that is, or contains, a shape
+        // goes forward only (so a misspelt key in one branch of a union of
+        // literals is caught, and an open shape or a container of shapes is
+        // not silently narrowed); any other member (a typed `Dictionary`,
+        // `Object`) may also go the other way, because an annotated local is
+        // the narrowing cast (ADR 0147 § `Dictionary` to shape).
+        if inferred_ty.contains_shape() || declared.contains_shape() {
+            return Self::union_members(inferred_ty)
+                .iter()
+                .all(|member| Self::shape_member_ok(member, declared, hierarchy));
+        }
         let inferred_members = Self::union_members(inferred_ty);
         let declared_members = Self::union_members(declared);
         if !Self::protocol_involved(inferred_ty, declared, hierarchy, protocol_registry) {

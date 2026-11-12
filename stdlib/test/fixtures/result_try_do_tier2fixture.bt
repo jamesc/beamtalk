@@ -107,7 +107,7 @@ Object subclass: ResultTryDoTier2Fixture
     t := 0
     Result
       tryDo: [
-        #{#a => 1} at: #k ifAbsent: [t := t + 1]
+        (Dictionary new at: #a put: 1) at: #k ifAbsent: [t := t + 1]
         7
       ]
     t

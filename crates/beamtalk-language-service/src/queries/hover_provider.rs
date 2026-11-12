@@ -1703,10 +1703,10 @@ fn resolve_receiver_class(
             }
             HoverClassContext::TopLevel => None,
         },
+        // A map shape (`#{#a => 1}`, ADR 0147) resolves as its `Dictionary`.
         _ => type_of_parsed(type_map, receiver)
-            .and_then(InferredType::as_known)
-            .cloned()
-            .map(|name| (name, false)),
+            .and_then(InferredType::instance_class)
+            .map(|(name, _)| (name.clone(), false)),
     }
 }
 
@@ -1879,6 +1879,15 @@ mod tests {
     fn pos_at(source: &str, offset: usize) -> Position {
         let offset = u32::try_from(offset).expect("test source under 4GB");
         Position::from_byte_offset(source, ByteOffset::new(offset)).unwrap()
+    }
+
+    #[test]
+    fn hover_on_a_dictionary_method_sent_to_a_map_literal() {
+        // BT-4731: a symbol-keyed literal infers a shape; its sends still
+        // resolve against `Dictionary`.
+        let hover = hover_at("#{#a => 1} keys", Position::new(0, 12))
+            .expect("hover on `keys` of a map literal");
+        assert!(hover.contents.contains("keys"), "{}", hover.contents);
     }
 
     #[test]

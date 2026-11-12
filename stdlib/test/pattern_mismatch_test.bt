@@ -56,4 +56,5 @@ TestCase subclass: PatternMismatchTest
       raise: #pattern_mismatch
 
   testMapMissingKeyStaysKeyError =>
+    @expect type
     self should: [#{#missing => _v} := #{#present => 1}] raise: #key_error
