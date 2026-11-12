@@ -581,8 +581,9 @@ impl CoreErlangGenerator {
         let racing = self.last_racing_operand(children)?;
         children
             .iter()
-            .rposition(|c| matches!(c.unwrap_parens(), Expression::Block(b) if self.block_capture_reads_live_state(b)))
-            .filter(|_| true)
+            .rposition(
+                |c| matches!(c, Expression::Block(b) if self.block_capture_reads_live_state(b)),
+            )
             .map(|b| b.max(racing))
     }
 
