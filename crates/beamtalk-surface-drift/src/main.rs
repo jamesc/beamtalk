@@ -32,7 +32,10 @@ use std::process::ExitCode;
 
 /// Path fragments (relative to repo root) that the checker reads.
 const PARITY_DOC: &str = "docs/development/surface-parity.md";
-const REPL_OPS_DIR: &str = "runtime/apps/beamtalk_workspace/src";
+/// The REPL op table, as pinned by `beamtalk_repl_op_table_tests` (BT-4673):
+/// a JSON snapshot of `beamtalk_repl_op_table:ops/0`, the one Erlang source of
+/// every op the REPL protocol routes. Read as data — never scraped from source.
+const REPL_OP_TABLE: &str = "runtime/apps/beamtalk_workspace/test/fixtures/repl_op_table.json";
 const MCP_SERVER: &str = "crates/beamtalk-mcp/src/server/tools/";
 const REPL_DISPATCH: &str = "crates/beamtalk-cli/src/commands/repl/handlers.rs";
 /// The single source of the REPL meta-command vocabulary — every
@@ -429,7 +432,7 @@ fn split_meta_aliases(cell: &str) -> Vec<String> {
 /// Inventory of artifacts present in the codebase.
 #[derive(Debug, Default)]
 struct CodeInventory {
-    /// REPL op names declared in `*_repl_ops_*.erl` describe-ops maps.
+    /// REPL op names in the op table (`beamtalk_repl_op_table`).
     repl_ops: BTreeSet<String>,
     /// MCP tool function names from `#[tool(...)]` attributes.
     mcp_tools: BTreeSet<String>,
@@ -451,7 +454,7 @@ struct CodeInventory {
 impl CodeInventory {
     fn scan(repo_root: &Path) -> Result<Self, String> {
         let mut inv = CodeInventory::default();
-        inv.scan_repl_ops(&repo_root.join(REPL_OPS_DIR))?;
+        inv.scan_repl_ops(&repo_root.join(REPL_OP_TABLE))?;
         inv.scan_mcp_tools(&repo_root.join(MCP_SERVER))?;
         inv.scan_repl_meta(&repo_root.join(REPL_COMMANDS_TABLE))?;
         inv.scan_repl_command_dispatch(&repo_root.join(REPL_DISPATCH))?;
@@ -463,11 +466,9 @@ impl CodeInventory {
         // have broken. Fail loudly rather than producing false-positive drift
         // errors for every op/tool.
         if inv.repl_ops.is_empty() {
-            return Err(
-                "scanner found 0 REPL ops — the describe_ops()/base_ops() pattern \
-                 may have changed. Update the Erlang scanner in beamtalk-surface-drift."
-                    .into(),
-            );
+            return Err("found 0 REPL ops in the op table fixture — the \
+                 repl_op_table.json format may have changed. Update beamtalk-surface-drift."
+                .into());
         }
         if inv.mcp_tools.is_empty() {
             return Err("scanner found 0 MCP tools — the #[tool(...)] pattern \
@@ -499,25 +500,11 @@ impl CodeInventory {
         Ok(inv)
     }
 
-    fn scan_repl_ops(&mut self, dir: &Path) -> Result<(), String> {
-        let entries =
-            fs::read_dir(dir).map_err(|e| format!("failed to read {}: {e}", dir.display()))?;
-        for entry in entries {
-            let entry = entry.map_err(|e| format!("dir entry error: {e}"))?;
-            let path = entry.path();
-            let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            let is_erl = Path::new(name)
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("erl"));
-            if !name.starts_with("beamtalk_repl_ops_") || !is_erl {
-                continue;
-            }
-            let text = fs::read_to_string(&path)
-                .map_err(|e| format!("failed to read {}: {e}", path.display()))?;
-            extract_repl_ops_from_erlang(&text, &mut self.repl_ops);
-        }
+    fn scan_repl_ops(&mut self, table: &Path) -> Result<(), String> {
+        let text = fs::read_to_string(table)
+            .map_err(|e| format!("failed to read {}: {e}", table.display()))?;
+        let ops = repl_ops_from_table(&text)?;
+        self.repl_ops.extend(ops);
         Ok(())
     }
 
@@ -587,89 +574,20 @@ impl CodeInventory {
     }
 }
 
-/// Erlang scanner — collect the *top-level* map keys of the ops map literal
-/// returned by `describe_ops()` or `base_ops()`. The shape is:
-///
-/// ```erlang
-/// describe_ops() ->
-///     #{
-///         <<"eval">> => #{<<"params">> => [<<"code">>]},
-///         <<"complete">> => #{<<"params">> => [<<"code">>]}
-///     }.
-/// ```
-///
-/// We treat `#{` as the opener of a map literal and `}` as a closer, and
-/// only collect `<<"name">>` keys when the map-literal nesting depth is
-/// exactly 1 (the outer ops map). Inner keys like `<<"params">>` are at
-/// depth ≥ 2 and skipped. This is a heuristic but stable across the
-/// codebase.
-fn extract_repl_ops_from_erlang(text: &str, out: &mut BTreeSet<String>) {
-    let mut in_target_fn = false;
-    let mut map_depth: i32 = 0;
-    let mut after_arrow = false;
-    for line in text.lines() {
-        let trimmed = line.trim_start();
-        if !in_target_fn {
-            if trimmed.starts_with("describe_ops() ->") || trimmed.starts_with("base_ops() ->") {
-                in_target_fn = true;
-                map_depth = 0;
-                after_arrow = true;
-            }
-            continue;
-        }
-        let stripped = strip_erlang_line_comment(line);
-
-        // Update map nesting and harvest depth-1 keys in lockstep.
-        let bytes = stripped.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            if i + 1 < bytes.len() && bytes[i] == b'#' && bytes[i + 1] == b'{' {
-                map_depth += 1;
-                i += 2;
-                continue;
-            }
-            if bytes[i] == b'}' {
-                if map_depth > 0 {
-                    map_depth -= 1;
-                }
-                i += 1;
-                continue;
-            }
-            // Look for `<<"name">>` only when at outer-map depth.
-            if map_depth == 1
-                && i + 3 < bytes.len()
-                && bytes[i] == b'<'
-                && bytes[i + 1] == b'<'
-                && bytes[i + 2] == b'"'
-            {
-                let start = i + 3;
-                if let Some(end_off) = stripped[start..].find("\">>") {
-                    let name = &stripped[start..start + end_off];
-                    if !name.is_empty() {
-                        out.insert(name.to_string());
-                    }
-                    i = start + end_off + 3;
-                    continue;
-                }
-            }
-            i += 1;
-        }
-
-        // End the function when we see a line that ends with `.` after the
-        // outer map has closed (map_depth back to 0) — a stable terminator
-        // for the ops-builder functions.
-        if after_arrow && map_depth == 0 && stripped.trim_end().ends_with('.') {
-            in_target_fn = false;
-            after_arrow = false;
-        }
-    }
-}
-
-fn strip_erlang_line_comment(line: &str) -> &str {
-    match line.find('%') {
-        Some(idx) => &line[..idx],
-        None => line,
-    }
+/// Read the REPL op names from the op-table fixture: a JSON array of
+/// objects, each with an `op` string (see `beamtalk_repl_op_table:to_json_term/0`).
+fn repl_ops_from_table(text: &str) -> Result<Vec<String>, String> {
+    let entries: Vec<serde_json::Value> = serde_json::from_str(text)
+        .map_err(|e| format!("{REPL_OP_TABLE} is not a JSON array: {e}"))?;
+    entries
+        .iter()
+        .map(|entry| {
+            entry["op"]
+                .as_str()
+                .map(str::to_owned)
+                .ok_or_else(|| format!("{REPL_OP_TABLE}: entry without an `op` string: {entry}"))
+        })
+        .collect()
 }
 
 /// MCP scanner — every `#[tool(...)]` attribute is followed within a few
@@ -1077,7 +995,7 @@ fn check_drift(doc: &ParityDoc, code: &CodeInventory, errors: &mut Vec<String>) 
     for op in &code.repl_ops {
         if !doc.ops.contains_key(op) {
             errors.push(format!(
-                "REPL op `{op}` is registered in runtime/apps/beamtalk_workspace/src/beamtalk_repl_ops_*.erl \
+                "REPL op `{op}` is in the REPL op table (beamtalk_repl_op_table.erl) \
                  but missing from {PARITY_DOC}. Add a row to the matching table."
             ));
         }
@@ -1309,27 +1227,26 @@ pub(crate) const REPL_COMMAND_TABLE: &[&ReplCommandSpec] = &[&HELP];
     }
 
     #[test]
-    fn extracts_repl_ops_only_within_describe_ops() {
-        let src = r#"
-some_other_function() ->
-    #{<<"not-an-op">> => true}.
+    fn reads_repl_ops_from_table_fixture() {
+        let src = r#"[
+  {"op":"eval","params":["code"],"optional":["trace"]},
+  {"op":"health","params":[],"optional":[]}
+]"#;
+        let ops = repl_ops_from_table(src).unwrap();
+        assert_eq!(ops, vec!["eval", "health"]);
+        // Param names are not ops.
+        assert!(!ops.contains(&"code".to_string()));
+        assert!(repl_ops_from_table("{}").is_err());
+        assert!(repl_ops_from_table(r#"[{"params":[]}]"#).is_err());
+    }
 
-describe_ops() ->
-    #{
-        <<"eval">> => #{<<"params">> => [<<"code">>]},
-        <<"complete">> => #{<<"params">> => [<<"code">>]}
-    }.
-"#;
-        let mut out = BTreeSet::new();
-        extract_repl_ops_from_erlang(src, &mut out);
-        assert!(out.contains("eval"));
-        assert!(out.contains("complete"));
-        // Inner map keys (`<<"params">>`, `<<"code">>`) are at depth ≥ 2 and
-        // must not leak into the op set.
-        assert!(!out.contains("params"));
-        assert!(!out.contains("code"));
-        // Functions other than `describe_ops`/`base_ops` are ignored entirely.
-        assert!(!out.contains("not-an-op"));
+    #[test]
+    fn real_op_table_fixture_lists_ops() {
+        let root = find_repo_root().expect("repo root");
+        let text = fs::read_to_string(root.join(REPL_OP_TABLE)).expect("fixture");
+        let ops = repl_ops_from_table(&text).unwrap();
+        assert!(ops.contains(&"eval".to_string()));
+        assert!(ops.contains(&"save-section".to_string()));
     }
 
     #[test]

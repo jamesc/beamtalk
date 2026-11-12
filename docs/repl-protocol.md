@@ -202,51 +202,6 @@ Get completion suggestions for a partial expression.
 {"id": "msg-002", "completions": ["Counter"], "status": ["done"]}
 ```
 
-#### `info` — Symbol Information
-
-Get information about a symbol (class, method, variable). For class symbols, returns enriched metadata including superclass chain, method list, source location, and documentation.
-
-**Request:**
-```json
-{"op": "info", "id": "msg-003", "symbol": "Counter"}
-```
-
-**Response (class found):**
-```json
-{
-  "id": "msg-003",
-  "info": {
-    "found": true,
-    "symbol": "Counter",
-    "kind": "class",
-    "superclass": "Actor",
-    "superclass_chain": ["Actor", "Object"],
-    "methods": ["decrement", "increment", "value"],
-    "source": "/path/to/examples/counter.bt",
-    "doc": "A simple counter actor"
-  },
-  "status": ["done"]
-}
-```
-
-**Response (not found):**
-```json
-{"id": "msg-003", "info": {"found": false, "symbol": "Counter"}, "status": ["done"]}
-```
-
-**Enriched fields (present only when `found` is `true` and `kind` is `"class"`):**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `superclass` | string \| null | Direct superclass name, or `null` if none |
-| `superclass_chain` | string[] | Full superclass chain from parent to root |
-| `methods` | string[] | Sorted list of all method selectors (own + inherited) |
-| `source` | string | Source file path (when available from compile info) |
-| `line` | number | Reserved for future use; not currently populated by the server |
-| `doc` | string | Class documentation from EEP-48 doc chunks (when present) |
-
-Optional fields (`source`, `line`, `doc`) are omitted when not available.
-
 #### `show-codegen` — Show Generated Core Erlang (BT-700)
 
 Compile a Beamtalk expression and return the generated Core Erlang source without evaluating it. Useful for debugging, learning, and understanding how Beamtalk compiles to BEAM.
@@ -818,7 +773,6 @@ Returns the list of supported operations with their parameters, protocol version
   "ops": {
     "eval": {"params": ["code"]},
     "complete": {"params": ["code"]},
-    "info": {"params": ["symbol"]},
     "describe": {"params": []},
     "health": {"params": []}
   },
@@ -827,7 +781,7 @@ Returns the list of supported operations with their parameters, protocol version
 }
 ```
 
-The actual response includes all supported operations (e.g., `eval`, `complete`, `info`, `load-source`, `load-project`, `sessions`, `clone`, `close`, `actors`, `inspect`, `kill`, `interrupt`, `unload`, `test`, `test-all`, `list-tests`, `load-tests`, `health`, `describe`, `shutdown`). Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version. (The `clear` and `bindings` ops were removed in BT-2369 / ADR 0081 Phase 6 — read and reset session state via `eval` of the `Session` API.)
+The actual response includes all supported operations (every op in the [Op Reference](#op-reference)). Each entry lists required `params` and any `optional` parameters. The `versions` map includes the protocol version and the Beamtalk runtime version. (The `clear` and `bindings` ops were removed in BT-2369 / ADR 0081 Phase 6 — read and reset session state via `eval` of the `Session` API.)
 
 > **BT-2091 (protocol 2.0):** The deprecated ops `docs`, `load-file`, `reload`, and `modules` were removed. Use `Beamtalk help: ClassName`, `Workspace load: "path"`, `ClassName reload`, and `Workspace classes` via the `eval` op instead.
 
@@ -863,6 +817,78 @@ Initiates graceful OTP supervisor tree shutdown. Requires cookie authentication.
 ```json
 {"id": "msg-042", "error": "auth_error: Invalid cookie", "status": ["done", "error"]}
 ```
+
+## Op Reference
+
+Every op the server understands, generated from the one Erlang op table
+(`beamtalk_repl_op_table`, BT-4673) through its pinned JSON snapshot
+`runtime/apps/beamtalk_workspace/test/fixtures/repl_op_table.json`. The
+`describe` op returns the same `params` / `optional` lists. The sections above
+give the wire examples for the commonly used ops; this table is the complete
+list. *Capability* is the node class from ADR 0125 §1.5: `compiler` ops need a
+compiler on the node, `workspace` ops need a working tree, and `always` ops run
+everywhere. *Handler* names the Erlang module that serves the op.
+
+A fast test (`crates/beamtalk-repl-protocol/tests/op_table_doc.rs`) fails when
+this table drifts from the fixture. To refresh it after editing the op table:
+`just gen-op-table-fixture`, then
+`BEAMTALK_BLESS_OP_TABLE_DOC=1 cargo test -p beamtalk-repl-protocol --test op_table_doc`.
+
+<!-- op-table:begin -->
+| Op | Params | Optional | Capability | Handler |
+|----|--------|----------|------------|---------|
+| `eval` | `code` | `trace` | `compiler` | `beamtalk_repl_ops_eval` |
+| `stdin` | `value` | — | `always` | `beamtalk_ws_handler` |
+| `run-entry` | `class`, `selector` | `args` | `always` | `beamtalk_ws_handler` |
+| `interrupt` | — | — | `always` | `beamtalk_repl_ops_actors` |
+| `complete` | `code` | `cursor` | `always` | `beamtalk_repl_ops_dev` |
+| `hover` | `code` | `before`, `suffix` | `always` | `beamtalk_repl_ops_dev` |
+| `diagnostics` | `code` | `mode`, `source_path` | `compiler` | `beamtalk_repl_ops_dev` |
+| `show-codegen` | — | `code`, `class`, `selector` | `compiler` | `beamtalk_repl_ops_dev` |
+| `erlang-help` | `module` | `function` | `always` | `beamtalk_repl_ops_dev` |
+| `erlang-complete` | — | `prefix`, `module` | `always` | `beamtalk_repl_ops_dev` |
+| `test` | — | `class`, `file` | `always` | `beamtalk_repl_ops_dev` |
+| `test-all` | — | — | `always` | `beamtalk_repl_ops_dev` |
+| `list-tests` | — | — | `always` | `beamtalk_repl_ops_dev` |
+| `load-tests` | — | — | `compiler` | `beamtalk_repl_ops_dev` |
+| `load-source` | `source` | — | `compiler` | `beamtalk_repl_ops_load` |
+| `load-project` | — | `path`, `include_tests`, `force`, `package_name` | `compiler` | `beamtalk_repl_ops_load` |
+| `unload` | `module` | — | `workspace` | `beamtalk_repl_ops_load` |
+| `save-native-source` | `module`, `source` | — | `workspace` | `beamtalk_repl_ops_load` |
+| `save-section` | `class`, `new_name` | `old_name`, `before_selector`, `before_side` | `workspace` | `beamtalk_repl_ops_load` |
+| `sessions` | — | — | `always` | `beamtalk_repl_ops_session` |
+| `clone` | — | — | `always` | `beamtalk_repl_ops_session` |
+| `close` | — | — | `always` | `beamtalk_repl_ops_session` |
+| `health` | — | — | `always` | `beamtalk_repl_ops_session` |
+| `shutdown` | `cookie` | — | `always` | `beamtalk_repl_ops_session` |
+| `actors` | — | — | `always` | `beamtalk_repl_ops_actors` |
+| `inspect` | `actor` | — | `always` | `beamtalk_repl_ops_actors` |
+| `kill` | `actor` | — | `always` | `beamtalk_repl_ops_actors` |
+| `pid-stats` | `actor` | — | `always` | `beamtalk_repl_ops_watch` |
+| `describe` | — | — | `always` | `beamtalk_repl_ops_dev` |
+| `methods` | `class` | — | `always` | `beamtalk_repl_ops_dev` |
+| `inherited-methods` | `class` | — | `always` | `beamtalk_repl_ops_dev` |
+| `list-classes` | — | `filter` | `always` | `beamtalk_repl_ops_dev` |
+| `reload-findings` | — | — | `always` | `beamtalk_repl_ops_dev` |
+| `nav-query` | `kind` | `selector`, `class`, `module`, `code`, `before`, `suffix` | `always` | `beamtalk_repl_ops_nav` |
+| `nav-symbols` | — | `scope` | `always` | `beamtalk_repl_ops_nav_symbols` |
+| `enable-tracing` | — | — | `always` | `beamtalk_repl_ops_perf` |
+| `disable-tracing` | — | — | `always` | `beamtalk_repl_ops_perf` |
+| `get-traces` | — | `actor`, `selector`, `class`, `outcome`, `min_duration_ns`, `limit` | `always` | `beamtalk_repl_ops_perf` |
+| `actor-stats` | — | `actor` | `always` | `beamtalk_repl_ops_perf` |
+| `export-traces` | — | `path`, `actor`, `selector`, `class`, `outcome`, `min_duration_ns`, `limit` | `always` | `beamtalk_repl_ops_perf` |
+| `browse-classes` | — | — | `always` | `beamtalk_repl_ops_browse` |
+| `browse-protocols` | `class`, `side` | — | `always` | `beamtalk_repl_ops_browse` |
+| `browse-method-source` | `class`, `side`, `selector` | — | `always` | `beamtalk_repl_ops_browse` |
+| `browse-class-definition` | `class` | — | `always` | `beamtalk_repl_ops_browse` |
+| `browse-categories` | `class` | — | `always` | `beamtalk_repl_ops_browse` |
+| `browse-native-source` | `class`, `module` | — | `always` | `beamtalk_repl_ops_browse` |
+| `browse-native-modules` | — | — | `always` | `beamtalk_repl_ops_browse` |
+| `browse-type-aliases` | — | — | `always` | `beamtalk_repl_ops_browse` |
+| `browse-alias-source` | `name`, `package` | — | `always` | `beamtalk_repl_ops_browse` |
+| `subscribe-logs` | — | `level` | `always` | `beamtalk_ws_handler` |
+| `unsubscribe-logs` | — | — | `always` | `beamtalk_ws_handler` |
+<!-- op-table:end -->
 
 ## Push Messages
 
