@@ -72,7 +72,7 @@ const NOT_FIELD_WRITES: &[(&str, usize)] = &[("threaded_ir/emit.rs", 1)];
 /// body.
 const DYNAMIC_FIELD_WRITE_SITES: &[(&str, usize, usize)] = &[
     ("control_flow/conditionals.rs", 3, 3),
-    ("dispatch_codegen.rs", 2, 2),
+    ("dispatch_codegen/field_assignment.rs", 2, 2),
     ("gen_server/methods.rs", 1, 1),
 ];
 
