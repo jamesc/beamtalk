@@ -137,6 +137,23 @@ fn merge_aliases<'a>(
     merged
 }
 
+/// The installed OTP + runtime modules for requests with no project (REPL
+/// expressions, loose files), so `unresolved_ffi` keeps checking them (BT-4724).
+/// Memoized once the OTP probe succeeds (the set cannot change within a
+/// process); a failed probe is retried on the next request.
+fn installed_erlang_modules() -> beamtalk_core::ffi_type_specs::KnownErlangModules {
+    static INSTALLED: std::sync::OnceLock<beamtalk_core::ffi_type_specs::KnownErlangModules> =
+        std::sync::OnceLock::new();
+    if let Some(known) = INSTALLED.get() {
+        return known.clone();
+    }
+    let known = beamtalk_core::ffi_type_specs::collect_installed_erlang_modules();
+    if known.check_enabled() {
+        let _ = INSTALLED.set(known.clone());
+    }
+    known
+}
+
 /// The analysis scope one request runs under: its file's project when
 /// `source_path` sits under a manifest, otherwise the legacy port-process
 /// scope (cwd `[diagnostics]` table, no registry, session aliases only).
@@ -160,7 +177,10 @@ impl RequestScope {
     pub(crate) fn for_source(source_path: Option<&str>, batch: Option<&str>) -> Self {
         Self {
             project: source_path.and_then(|path| project_context_for_source(path, batch)),
-            legacy_project: ProjectAnalysisContext::default(),
+            legacy_project: ProjectAnalysisContext {
+                known_erlang_modules: installed_erlang_modules(),
+                ..ProjectAnalysisContext::default()
+            },
             own_file: source_path.and_then(|path| std::fs::canonicalize(path).ok()),
         }
     }
