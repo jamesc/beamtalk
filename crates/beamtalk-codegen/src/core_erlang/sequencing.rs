@@ -572,30 +572,35 @@ impl CoreErlangGenerator {
             .copied()
     }
 
-    /// BT-4722: the index of the last block-literal child whose capture reads
-    /// live state, when a sibling child runs code and so races with it
-    /// ([`Self::last_racing_operand`]) — `None` otherwise. A hoisting point for
-    /// [`Self::sequence_children`], which otherwise hoists only to the last
-    /// child that needs a prelude.
+    /// BT-4722: the hoisting point [`Self::sequence_children`] extends to when
+    /// a child is a block literal whose capture reads live state and a sibling
+    /// child runs code and so races with it: the last racing operand
+    /// ([`Self::last_racing_operand`]), or `None` when no such block exists.
+    /// Without it `sequence_children` hoists only to the last child that needs
+    /// a prelude.
     pub(super) fn last_racing_block_capture(&self, children: &[&Expression]) -> Option<usize> {
         let racing = self.last_racing_operand(children)?;
         children
             .iter()
-            .rposition(
-                |c| matches!(c, Expression::Block(b) if self.block_capture_reads_live_state(b)),
-            )
-            .map(|b| b.max(racing))
+            .any(|c| {
+                matches!(c.unwrap_parens(), Expression::Block(b) if self.block_capture_reads_live_state(b))
+            })
+            .then_some(racing)
     }
 
     /// BT-4722: whether creating `block` here reads live mutable state: a
     /// block in a class method that reads a class variable binds
     /// `beamtalk_class_vars:capture` (a process-dictionary read), and a block
     /// nested in an actor closure binds `beamtalk_actor_state:capture` (a live
-    /// cell read; any block there may, since a `^` carries the state out). A sibling operand that
-    /// runs code and writes that state must run before the capture, so the
-    /// block is sequenced like a read, never treated as a constant.
+    /// cell read) when it touches the actor state or carries it out through a
+    /// `^`. A sibling operand that runs code and writes that state must run
+    /// before the capture, so the block is sequenced like a read, never
+    /// treated as a constant.
     fn block_capture_reads_live_state(&self, block: &Block) -> bool {
-        (self.in_class_method() && self.block_reads_class_var(block)) || self.in_cell_closure()
+        (self.in_class_method() && self.block_reads_class_var(block))
+            || (self.in_cell_closure()
+                && (self.block_touches_actor_state(block)
+                    || beamtalk_core::semantic_analysis::facts::block_has_nlr(block)))
     }
 
     /// Threads `exprs` via [`Self::thread_subexprs`] and returns
