@@ -586,6 +586,12 @@ test_class_send_undefined() ->
     ?assertError(
         #{error := #beamtalk_error{kind = class_not_found}},
         beamtalk_class_dispatch:class_send(undefined, someMethod, [])
+    ),
+    %% BT-4723: generated code passes the class name when its lookup found no
+    %% process; the error names that class rather than 'unknown'.
+    ?assertError(
+        #{error := #beamtalk_error{kind = class_not_found, class = 'MissingFixture'}},
+        beamtalk_class_dispatch:class_send('MissingFixture', 'new', [])
     ).
 
 %% class_send(Pid, spawn, []) calls gen_server and creates a Counter actor instance.

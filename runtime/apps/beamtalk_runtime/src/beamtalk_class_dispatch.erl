@@ -79,7 +79,7 @@ Dispatches messages to the class gen_server, translating the Beamtalk
 message protocol ({Selector, Args}) to the class process message format.
 Unwraps {ok, Value} / {error, Error} results for seamless integration.
 """.
--spec class_send(pid() | undefined, atom(), list()) -> term().
+-spec class_send(pid() | atom(), atom(), list()) -> term().
 class_send(ClassPid, Selector, Args) ->
     class_send(ClassPid, Selector, Args, default).
 
@@ -93,9 +93,14 @@ wait to bound, so `Timeout` does not apply to it; neither does it apply to the
 instantiation and supervisor-start selectors (`new`, `new:`, `spawn`,
 `spawnWith:`, `supervise`, ...), which keep their own routes.
 """.
--spec class_send(pid() | undefined, atom(), list(), call_timeout()) -> term().
+-spec class_send(pid() | atom(), atom(), list(), call_timeout()) -> term().
 class_send(undefined, Selector, _Args, _Timeout) ->
     Error = beamtalk_error:new(class_not_found, unknown, Selector),
+    beamtalk_error:raise(Error);
+%% BT-4723: generated code passes the class's own name when its registry
+%% lookup found no process, so the error names the class.
+class_send(ClassName, Selector, _Args, _Timeout) when is_atom(ClassName) ->
+    Error = beamtalk_error:new(class_not_found, ClassName, Selector),
     beamtalk_error:raise(Error);
 %% ADR 0135 §1: `supervise` and the spawn family on a Supervisor or
 %% DynamicSupervisor class start the tree in the caller, through

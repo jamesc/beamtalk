@@ -451,3 +451,88 @@ fn test_knows_own_native_module_but_warns_on_unknown() {
         .stderr(contains("Unknown Erlang module `definitely_unknown_xyz`"))
         .stderr(contains("Unknown Erlang module `my_nif`").not());
 }
+
+/// BT-4723: `beamtalk test <file>` / `<dir>` for a test nested below `test/`
+/// must compile the package's `test/fixtures/`, as a full run does, including
+/// when the test still carries the deprecated `// @load test/fixtures/...`
+/// directive (warns, no module-collision error). The `class_not_found` naming
+/// is covered by `beamtalk_class_dispatch_tests`.
+#[test]
+fn test_scoped_run_loads_package_fixtures_bt_4723() {
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("test/fixtures")).unwrap();
+    std::fs::create_dir_all(project.path().join("test/sub")).unwrap();
+    std::fs::write(
+        project.path().join("test/fixtures/scoped_fixture.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         sealed Value subclass: ScopedFixture\n\
+         \x20\x20field: n :: Integer = 7\n\
+         \n\
+         \x20\x20seven -> Integer => self n\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("test/sub/ScopedFixtureTest.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         TestCase subclass: ScopedFixtureTest\n\
+         \n\
+         \x20\x20testUsesFixture =>\n\
+         \x20\x20\x20\x20self assert: ScopedFixture new seven equals: 7\n",
+    )
+    .unwrap();
+
+    for target in ["test/sub/ScopedFixtureTest.bt", "test/sub"] {
+        cli_common::beamtalk()
+            .current_dir(project.path())
+            .args(["test", "--quiet", target])
+            .assert()
+            .success()
+            .stdout(contains("1 passed"))
+            .stdout(contains("0 failed"));
+    }
+}
+
+/// BT-4723: a scoped run whose test still uses the deprecated `@load` of a file
+/// under the package's `test/fixtures` warns instead of bailing with a
+/// module-name collision.
+#[test]
+fn test_scoped_run_with_load_directive_into_fixtures_bt_4723() {
+    let project = cli_common::fixture_project();
+    std::fs::create_dir_all(project.path().join("test/fixtures")).unwrap();
+    std::fs::create_dir_all(project.path().join("test/sub")).unwrap();
+    std::fs::write(
+        project.path().join("test/fixtures/loaded_fixture.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         sealed Value subclass: LoadedFixture\n\
+         \x20\x20field: n :: Integer = 9\n\
+         \n\
+         \x20\x20nine -> Integer => self n\n",
+    )
+    .unwrap();
+    std::fs::write(
+        project.path().join("test/sub/LoadedFixtureTest.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         // @load test/fixtures/loaded_fixture.bt\n\
+         \n\
+         TestCase subclass: LoadedFixtureTest\n\
+         \n\
+         \x20\x20testUsesFixture =>\n\
+         \x20\x20\x20\x20self assert: LoadedFixture new nine equals: 9\n",
+    )
+    .unwrap();
+
+    cli_common::beamtalk()
+        .current_dir(project.path())
+        .args(["test", "--quiet", "test/sub/LoadedFixtureTest.bt"])
+        .assert()
+        .success()
+        .stdout(contains("1 passed"))
+        .stdout(contains("0 failed"));
+}

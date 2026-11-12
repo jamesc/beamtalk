@@ -1558,20 +1558,45 @@ fn initialize_pipeline(
     })
 }
 
+/// Resolve the fixtures directory for a test run (BT-4723).
+///
+/// A directory run containing `fixtures/` (e.g. `test/`) or a file run next to
+/// one uses it directly. Otherwise a scoped run (`test/http1/foo_test.bt`,
+/// `test/http1`) falls back to the owning package's `test/fixtures`, so a
+/// single-file run sees the same fixtures as a full run.
+fn resolve_fixtures_dir(test_path: &Utf8Path) -> Utf8PathBuf {
+    let local = if test_path.is_dir() {
+        test_path.join("fixtures")
+    } else {
+        test_path
+            .parent()
+            .map(|p| p.join("fixtures"))
+            .unwrap_or_default()
+    };
+    if local.is_dir() {
+        return local;
+    }
+    // Only a target under the package's `test/` (and not already inside
+    // `test/fixtures`) is a scoped run that should see the package fixtures.
+    if let Some(root) = canonical_package_root(test_path) {
+        let target = canonical_path(test_path);
+        let pkg_fixtures = root.join("test").join("fixtures");
+        if target.starts_with(root.join("test"))
+            && !target.starts_with(&pkg_fixtures)
+            && pkg_fixtures.is_dir()
+        {
+            return pkg_fixtures;
+        }
+    }
+    local
+}
+
 /// Phase 0: Pre-compile all fixtures in the `fixtures/` subdirectory.
 ///
 /// Makes all fixture classes available during test execution -- like
 /// a Smalltalk image where all classes exist in the running environment.
 fn compile_fixtures(pipeline: &mut TestPipeline) -> Result<()> {
-    let fixtures_dir = if pipeline.test_path.is_dir() {
-        pipeline.test_path.join("fixtures")
-    } else {
-        pipeline
-            .test_path
-            .parent()
-            .map(|p| p.join("fixtures"))
-            .unwrap_or_default()
-    };
+    let fixtures_dir = resolve_fixtures_dir(&pipeline.test_path);
 
     // Build the fixture class index separately so it can be merged per-file in
     // Phase 1. Also merge into the combined index for Phase 0 fixture compilation,
@@ -1711,15 +1736,7 @@ fn discover_and_compile_tests(pipeline: &mut TestPipeline) -> Result<()> {
     // one BEAM process startup per file.
     let mut pending_test_cores: Vec<Utf8PathBuf> = Vec::new();
 
-    let fixtures_dir = if pipeline.test_path.is_dir() {
-        pipeline.test_path.join("fixtures")
-    } else {
-        pipeline
-            .test_path
-            .parent()
-            .map(|p| p.join("fixtures"))
-            .unwrap_or_default()
-    };
+    let fixtures_dir = resolve_fixtures_dir(&pipeline.test_path);
 
     // Clone test_files to avoid borrow conflict with pipeline fields.
     let test_files = pipeline.test_files.clone();
@@ -1939,7 +1956,7 @@ fn resolve_load_directives(
 
         // Skip if already pre-compiled from the fixtures directory
         if pipeline.precompiled_modules.contains(&fixture_module) {
-            if fixture_path.starts_with(fixtures_dir) {
+            if canonical_path(&fixture_path).starts_with(canonical_path(fixtures_dir)) {
                 // This @load points into fixtures_dir itself -- already compiled in Phase 0
                 eprintln!(
                     "Deprecated: '// @load {load_path}' in '{test_file}' \u{2014} fixture is already available \

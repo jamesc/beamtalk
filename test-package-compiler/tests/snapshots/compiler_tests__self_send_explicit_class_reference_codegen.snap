@@ -123,7 +123,7 @@ module 'self_send_explicit_class_reference' ['new'/0, 'new'/1, 'dispatch'/3, 'di
     1
 
 'class_bar'/1 = fun (ClassSelf) ->
-    let _Effect@2 = case call 'erlang':'element'(2, ClassSelf) of <'ExplicitRefOpenClass class'> when 'true' -> case call 'beamtalk_class_dispatch':'class_self_direct_ok'('ExplicitRefOpenClass class', 'ExplicitRefOpenClass class', 'ExplicitRefOpenClass', 'foo') of <'true'> when 'true' -> call 'self_send_explicit_class_reference':'class_foo'(ClassSelf) <_> when 'true' -> call 'beamtalk_class_dispatch':'class_self_dispatch_local'('ExplicitRefOpenClass', 'foo', [], ClassSelf) end <_> when 'true' -> let _ClassPid@1 = call 'erlang':'whereis'('beamtalk_class_ExplicitRefOpenClass') in call 'beamtalk_object_class':'class_send'(_ClassPid@1, 'foo', []) end in _Effect@2
+    let _Effect@3 = case call 'erlang':'element'(2, ClassSelf) of <'ExplicitRefOpenClass class'> when 'true' -> case call 'beamtalk_class_dispatch':'class_self_direct_ok'('ExplicitRefOpenClass class', 'ExplicitRefOpenClass class', 'ExplicitRefOpenClass', 'foo') of <'true'> when 'true' -> call 'self_send_explicit_class_reference':'class_foo'(ClassSelf) <_> when 'true' -> call 'beamtalk_class_dispatch':'class_self_dispatch_local'('ExplicitRefOpenClass', 'foo', [], ClassSelf) end <_> when 'true' -> let _ClassPid@1 = case call 'erlang':'whereis'('beamtalk_class_ExplicitRefOpenClass') of <'undefined'> when 'true' -> 'ExplicitRefOpenClass' <_RegPid@2> when 'true' -> _RegPid@2 end in call 'beamtalk_object_class':'class_send'(_ClassPid@1, 'foo', []) end in _Effect@3
 
 'register_class'/0 = fun () ->
     try
