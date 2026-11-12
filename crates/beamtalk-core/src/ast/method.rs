@@ -324,13 +324,13 @@ impl MethodDefinition {
         use super::visitor::{Visitor, walk_block, walk_expr};
 
         fn is_self(expr: &Expression) -> bool {
-            matches!(expr.unwrap_parens(), Expression::Identifier(id) if id.name == "self")
+            matches!(expr, Expression::Identifier(id) if id.name == "self")
         }
 
         // `^ self error: "…"` / `^ … signal` raise, so they answer nothing.
         fn raises(expr: &Expression) -> bool {
             matches!(
-                expr.unwrap_parens(),
+                expr,
                 Expression::MessageSend { selector, .. }
                     if matches!(selector.name().as_str(), "error:" | "signal" | "signal:")
             )
