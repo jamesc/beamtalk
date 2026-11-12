@@ -13,6 +13,7 @@ and error paths.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -52,10 +53,7 @@ from_invalid_pattern_test() ->
     ).
 
 from_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_regex:'from:'(not_a_string)
-    ).
+    ?assertBtError(type_error, beamtalk_regex:'from:'(not_a_string)).
 
 %%% ============================================================================
 %%% from:options:/2 — Constructor with options
@@ -72,16 +70,10 @@ from_options_multiline_test() ->
     ?assert(maps:is_key(compiled, maps:get('okValue', R))).
 
 from_options_unknown_option_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = regex_error}},
-        beamtalk_regex:'from:options:'(<<"foo">>, [unknown_opt])
-    ).
+    ?assertBtError(regex_error, beamtalk_regex:'from:options:'(<<"foo">>, [unknown_opt])).
 
 from_options_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_regex:'from:options:'(42, [caseless])
-    ).
+    ?assertBtError(type_error, beamtalk_regex:'from:options:'(42, [caseless])).
 
 %%% ============================================================================
 %%% RegexOption conformance (BT-4381)
@@ -161,10 +153,7 @@ from_alias_test() ->
     ?assertEqual('Regex', maps:get('$beamtalk_class', maps:get('okValue', R))).
 
 from_alias_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_regex:from(not_a_string)
-    ).
+    ?assertBtError(type_error, beamtalk_regex:from(not_a_string)).
 
 from_two_alias_test() ->
     R = beamtalk_regex:from(<<"[a-z]+">>, [caseless]),
@@ -172,10 +161,7 @@ from_two_alias_test() ->
     ?assertEqual('Regex', maps:get('$beamtalk_class', maps:get('okValue', R))).
 
 from_two_alias_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_regex:from(42, [caseless])
-    ).
+    ?assertBtError(type_error, beamtalk_regex:from(42, [caseless])).
 
 %%% ============================================================================
 %%% source/1 and printString/1
@@ -208,16 +194,10 @@ matches_regex_compiled_false_test() ->
     ?assertNot(beamtalk_regex:matches_regex(<<"abc">>, R)).
 
 matches_regex_invalid_pattern_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = regex_error}},
-        beamtalk_regex:matches_regex(<<"hello">>, <<"[bad">>)
-    ).
+    ?assertBtError(regex_error, beamtalk_regex:matches_regex(<<"hello">>, <<"[bad">>)).
 
 matches_regex_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_regex:matches_regex(42, <<"[0-9]+">>)
-    ).
+    ?assertBtError(type_error, beamtalk_regex:matches_regex(42, <<"[0-9]+">>)).
 
 %%% ============================================================================
 %%% matches_regex_options/3
@@ -230,10 +210,7 @@ matches_regex_options_no_match_test() ->
     ?assertNot(beamtalk_regex:matches_regex_options(<<"world">>, <<"hello">>, [caseless])).
 
 matches_regex_options_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_regex:matches_regex_options(42, <<"hello">>, [caseless])
-    ).
+    ?assertBtError(type_error, beamtalk_regex:matches_regex_options(42, <<"hello">>, [caseless])).
 
 %%% ============================================================================
 %%% first_match/2
@@ -256,16 +233,10 @@ first_match_compiled_not_found_test() ->
     ?assertEqual(nil, beamtalk_regex:first_match(<<"123">>, R)).
 
 first_match_invalid_pattern_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = regex_error}},
-        beamtalk_regex:first_match(<<"hello">>, <<"[bad">>)
-    ).
+    ?assertBtError(regex_error, beamtalk_regex:first_match(<<"hello">>, <<"[bad">>)).
 
 first_match_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_regex:first_match(42, <<"\\d+">>)
-    ).
+    ?assertBtError(type_error, beamtalk_regex:first_match(42, <<"\\d+">>)).
 
 %%% ============================================================================
 %%% all_matches/2
@@ -288,16 +259,10 @@ all_matches_compiled_test() ->
     ).
 
 all_matches_invalid_pattern_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = regex_error}},
-        beamtalk_regex:all_matches(<<"hello">>, <<"[bad">>)
-    ).
+    ?assertBtError(regex_error, beamtalk_regex:all_matches(<<"hello">>, <<"[bad">>)).
 
 all_matches_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_regex:all_matches(42, <<"\\d+">>)
-    ).
+    ?assertBtError(type_error, beamtalk_regex:all_matches(42, <<"\\d+">>)).
 
 %%% ============================================================================
 %%% replace_regex/3 — first match
@@ -322,16 +287,10 @@ replace_regex_no_match_test() ->
     ).
 
 replace_regex_invalid_pattern_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = regex_error}},
-        beamtalk_regex:replace_regex(<<"hello">>, <<"[bad">>, <<"X">>)
-    ).
+    ?assertBtError(regex_error, beamtalk_regex:replace_regex(<<"hello">>, <<"[bad">>, <<"X">>)).
 
 replace_regex_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_regex:replace_regex(42, <<"e">>, <<"X">>)
-    ).
+    ?assertBtError(type_error, beamtalk_regex:replace_regex(42, <<"e">>, <<"X">>)).
 
 %%% ============================================================================
 %%% replace_all_regex/3 — all matches
@@ -351,16 +310,10 @@ replace_all_regex_compiled_test() ->
     ).
 
 replace_all_regex_invalid_pattern_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = regex_error}},
-        beamtalk_regex:replace_all_regex(<<"hello">>, <<"[bad">>, <<"X">>)
-    ).
+    ?assertBtError(regex_error, beamtalk_regex:replace_all_regex(<<"hello">>, <<"[bad">>, <<"X">>)).
 
 replace_all_regex_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_regex:replace_all_regex(42, <<"e">>, <<"X">>)
-    ).
+    ?assertBtError(type_error, beamtalk_regex:replace_all_regex(42, <<"e">>, <<"X">>)).
 
 %%% ============================================================================
 %%% split_regex/2
@@ -385,13 +338,7 @@ split_regex_no_match_test() ->
     ?assertEqual([{beamtalk_string, <<"hello">>}], Result).
 
 split_regex_invalid_pattern_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = regex_error}},
-        beamtalk_regex:split_regex(<<"hello">>, <<"[bad">>)
-    ).
+    ?assertBtError(regex_error, beamtalk_regex:split_regex(<<"hello">>, <<"[bad">>)).
 
 split_regex_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_regex:split_regex(42, <<",">>)
-    ).
+    ?assertBtError(type_error, beamtalk_regex:split_regex(42, <<",">>)).

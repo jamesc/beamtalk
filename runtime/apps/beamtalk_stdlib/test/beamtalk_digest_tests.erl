@@ -13,6 +13,7 @@ shim aliases, and the type_error paths for non-binary inputs and keys.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -70,10 +71,7 @@ sha256_deterministic_test() ->
     ).
 
 sha256_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_digest:'sha256:'(not_a_binary)
-    ).
+    ?assertBtError(type_error, beamtalk_digest:'sha256:'(not_a_binary)).
 
 %%% ============================================================================
 %%% sha512:/1
@@ -92,16 +90,10 @@ sha512_known_value_test() ->
     ?assertEqual(16#cf, binary:at(Result, 0)).
 
 sha512_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_digest:'sha512:'(42)
-    ).
+    ?assertBtError(type_error, beamtalk_digest:'sha512:'(42)).
 
 sha512_type_error_atom_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_digest:'sha512:'(hello)
-    ).
+    ?assertBtError(type_error, beamtalk_digest:'sha512:'(hello)).
 
 %%% ============================================================================
 %%% md5:/1
@@ -135,10 +127,7 @@ md5_known_value_test() ->
     ?assertEqual(Expected, beamtalk_digest:'md5:'(<<>>)).
 
 md5_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_digest:'md5:'([1, 2, 3])
-    ).
+    ?assertBtError(type_error, beamtalk_digest:'md5:'([1, 2, 3])).
 
 %%% ============================================================================
 %%% hmacSha256:key:/2
@@ -158,16 +147,10 @@ hmac_sha256_deterministic_test() ->
     ).
 
 hmac_sha256_type_error_input_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_digest:'hmacSha256:key:'(not_a_binary, <<"key">>)
-    ).
+    ?assertBtError(type_error, beamtalk_digest:'hmacSha256:key:'(not_a_binary, <<"key">>)).
 
 hmac_sha256_type_error_key_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_digest:'hmacSha256:key:'(<<"input">>, not_a_binary)
-    ).
+    ?assertBtError(type_error, beamtalk_digest:'hmacSha256:key:'(<<"input">>, not_a_binary)).
 
 %%% ============================================================================
 %%% hmacSha512:key:/2
@@ -179,16 +162,10 @@ hmac_sha512_returns_64_bytes_test() ->
     ?assertEqual(64, byte_size(Result)).
 
 hmac_sha512_type_error_input_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_digest:'hmacSha512:key:'(42, <<"key">>)
-    ).
+    ?assertBtError(type_error, beamtalk_digest:'hmacSha512:key:'(42, <<"key">>)).
 
 hmac_sha512_type_error_key_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_digest:'hmacSha512:key:'(<<"input">>, 42)
-    ).
+    ?assertBtError(type_error, beamtalk_digest:'hmacSha512:key:'(<<"input">>, 42)).
 
 %%% ============================================================================
 %%% FFI shims — verify delegation

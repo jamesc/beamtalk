@@ -27,6 +27,7 @@ the `.bt` selectors parse and wire up to the right arity.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%====================================================================
@@ -170,9 +171,7 @@ node_down_on_unreachable_node() ->
     GhostProxy = #beamtalk_object{
         class = 'Counter', class_mod = test_counter, pid = {registered, someName, GhostNode}
     },
-    ?assertError(
-        #{error := #beamtalk_error{kind = node_down}}, beamtalk_actor_ffi:unregister(GhostProxy)
-    ).
+    ?assertBtError(node_down, beamtalk_actor_ffi:unregister(GhostProxy)).
 
 %%====================================================================
 %% class_not_found

@@ -28,6 +28,7 @@ Plus one for the harness itself (BT-3929):
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %% Exported so it can be spawned remotely via
@@ -124,10 +125,7 @@ sync_send_to_dead_remote_pid_raises_actor_dead(PeerNode) ->
     %% racing the process table update is not something we want to also
     %% be testing here.
     timer:sleep(50),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
-        beamtalk_actor:sync_send(RemotePid, getValue, [])
-    ).
+    ?assertBtError(actor_dead, beamtalk_actor:sync_send(RemotePid, getValue, [])).
 
 %%====================================================================
 %% 4. Announcements deliver to remote subscribers (BT-2530 regression)

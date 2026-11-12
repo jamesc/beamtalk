@@ -63,7 +63,7 @@ stop_if_running() ->
             ok;
         Pid ->
             gen_server:stop(Pid),
-            timer:sleep(10)
+            beamtalk_test_wait:dead(Pid)
     end.
 
 %% compile and load a trivial module named after ClassNameAtom's
@@ -383,7 +383,7 @@ unregister_module_nonexistent_test() ->
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
     %% Unregistering a module that was never registered should not crash.
     ?assertEqual(ok, beamtalk_workspace_meta:unregister_module(never_registered_xyz)),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
 
     gen_server:stop(Pid).
 
@@ -840,7 +840,7 @@ remove_class_source_nonexistent_test() ->
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
     %% Removing a class source that was never set should not crash.
     ?assertEqual(ok, beamtalk_workspace_meta:remove_class_source(<<"NeverSet">>)),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
 
     gen_server:stop(Pid).
 
@@ -1226,7 +1226,7 @@ unknown_info_is_ignored_test() ->
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
     %% An unknown info message must not crash the server.
     Pid ! some_bogus_info,
-    timer:sleep(20),
+    ok = beamtalk_test_wait:sync(Pid),
     ?assert(is_process_alive(Pid)),
     gen_server:stop(Pid).
 

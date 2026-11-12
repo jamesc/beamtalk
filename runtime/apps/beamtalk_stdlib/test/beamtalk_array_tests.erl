@@ -13,6 +13,7 @@ collect, select, inject_into, print_string, and error paths.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -36,10 +37,7 @@ from_list_empty_test() ->
     ?assertEqual(0, beamtalk_array:size(A)).
 
 from_list_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_array:from_list(not_a_list)
-    ).
+    ?assertBtError(type_error, beamtalk_array:from_list(not_a_list)).
 
 %%% ============================================================================
 %%% size/1 and is_empty/1
@@ -75,17 +73,11 @@ at_middle_test() ->
 
 at_out_of_bounds_test() ->
     A = make_array([1, 2, 3]),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
-        beamtalk_array:at(A, 4)
-    ).
+    ?assertBtError(index_out_of_bounds, beamtalk_array:at(A, 4)).
 
 at_zero_index_test() ->
     A = make_array([1, 2, 3]),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
-        beamtalk_array:at(A, 0)
-    ).
+    ?assertBtError(index_out_of_bounds, beamtalk_array:at(A, 0)).
 
 %% Indexing an empty Array is `empty_collection`, matching
 %% `beamtalk_list:at/2` and `beamtalk_string:at/2`.
@@ -102,17 +94,11 @@ at_empty_array_test() ->
 %% An index below 1 is malformed either way, so it stays index_out_of_bounds.
 at_empty_array_zero_index_test() ->
     A = make_array([]),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
-        beamtalk_array:at(A, 0)
-    ).
+    ?assertBtError(index_out_of_bounds, beamtalk_array:at(A, 0)).
 
 at_non_integer_index_test() ->
     A = make_array([1, 2, 3]),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_array:at(A, <<"1">>)
-    ).
+    ?assertBtError(type_error, beamtalk_array:at(A, <<"1">>)).
 
 %%% ============================================================================
 %%% first/1, last/1
@@ -168,24 +154,15 @@ at_put_first_test() ->
 
 at_put_out_of_bounds_test() ->
     A = make_array([1, 2, 3]),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
-        beamtalk_array:at_put(A, 5, 99)
-    ).
+    ?assertBtError(index_out_of_bounds, beamtalk_array:at_put(A, 5, 99)).
 
 at_put_zero_index_test() ->
     A = make_array([1, 2, 3]),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
-        beamtalk_array:at_put(A, 0, 99)
-    ).
+    ?assertBtError(index_out_of_bounds, beamtalk_array:at_put(A, 0, 99)).
 
 at_put_non_integer_index_test() ->
     A = make_array([1, 2, 3]),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_array:at_put(A, <<"1">>, 99)
-    ).
+    ?assertBtError(type_error, beamtalk_array:at_put(A, <<"1">>, 99)).
 
 %% at_put must return an Array whose internal representation is
 %% structurally identical (=:=) to a literal-equivalent Array, so that
@@ -354,10 +331,7 @@ do_returns_nil_test() ->
 
 do_type_error_test() ->
     A = make_array([1]),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_array:do(A, not_a_function)
-    ).
+    ?assertBtError(type_error, beamtalk_array:do(A, not_a_function)).
 
 %%% ============================================================================
 %%% includes/2
@@ -393,10 +367,7 @@ collect_size_preserved_test() ->
 
 collect_type_error_test() ->
     A = make_array([1]),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_array:collect(A, not_a_function)
-    ).
+    ?assertBtError(type_error, beamtalk_array:collect(A, not_a_function)).
 
 %%% ============================================================================
 %%% select/2
@@ -421,10 +392,7 @@ select_none_match_test() ->
 
 select_type_error_test() ->
     A = make_array([1]),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_array:select(A, not_a_function)
-    ).
+    ?assertBtError(type_error, beamtalk_array:select(A, not_a_function)).
 
 %%% ============================================================================
 %%% inject_into/3
@@ -447,10 +415,7 @@ inject_into_build_list_test() ->
 
 inject_into_type_error_test() ->
     A = make_array([1]),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_array:inject_into(A, 0, not_a_function)
-    ).
+    ?assertBtError(type_error, beamtalk_array:inject_into(A, 0, not_a_function)).
 
 %%% ============================================================================
 %%% print_string/1
@@ -507,21 +472,12 @@ slice_from_empty_array_test() ->
 
 slice_from_zero_index_test() ->
     A = make_array([1, 2, 3]),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
-        beamtalk_array:slice_from(A, 0)
-    ).
+    ?assertBtError(index_out_of_bounds, beamtalk_array:slice_from(A, 0)).
 
 slice_from_negative_index_test() ->
     A = make_array([1, 2, 3]),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = index_out_of_bounds}},
-        beamtalk_array:slice_from(A, -1)
-    ).
+    ?assertBtError(index_out_of_bounds, beamtalk_array:slice_from(A, -1)).
 
 slice_from_non_integer_index_test() ->
     A = make_array([1, 2, 3]),
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_array:slice_from(A, <<"1">>)
-    ).
+    ?assertBtError(type_error, beamtalk_array:slice_from(A, <<"1">>)).

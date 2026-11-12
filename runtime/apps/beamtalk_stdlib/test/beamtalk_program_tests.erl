@@ -17,6 +17,7 @@ value/type validation that runs before the policy gate.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% Record capabilities for the duration of a test and restore whatever was
@@ -168,10 +169,7 @@ package_raises_no_program_package_when_undefined_test() ->
     Prev = save_root_package(),
     application:unset_env(beamtalk_runtime, root_package),
     try
-        ?assertError(
-            #{error := #beamtalk_error{kind = no_program_package}},
-            beamtalk_program:package()
-        )
+        ?assertBtError(no_program_package, beamtalk_program:package())
     after
         restore_root_package(Prev)
     end.
@@ -182,10 +180,7 @@ package_raises_ambiguous_program_package_test() ->
     Prev = save_root_package(),
     beamtalk_package:set_ambiguous_root_package(),
     try
-        ?assertError(
-            #{error := #beamtalk_error{kind = ambiguous_program_package}},
-            beamtalk_program:package()
-        )
+        ?assertBtError(ambiguous_program_package, beamtalk_program:package())
     after
         restore_root_package(Prev)
     end.
@@ -196,10 +191,7 @@ package_raises_package_not_loaded_when_app_missing_test() ->
     Prev = save_root_package(),
     application:set_env(beamtalk_runtime, root_package, <<"bt_nonexistent_pkg_eunit">>),
     try
-        ?assertError(
-            #{error := #beamtalk_error{kind = package_not_loaded}},
-            beamtalk_program:package()
-        )
+        ?assertBtError(package_not_loaded, beamtalk_program:package())
     after
         restore_root_package(Prev)
     end.

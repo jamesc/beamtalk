@@ -13,6 +13,7 @@ pid, atom, class object tuple, and invalid inputs.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%====================================================================
@@ -75,10 +76,7 @@ test_resolve_with_atom() ->
 
 test_resolve_unknown_class() ->
     %% beamtalk_error:raise wraps the error in a tagged map
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = does_not_understand}},
-        beamtalk_method_resolver:resolve('NonExistentClass', '+')
-    ).
+    ?assertBtError(does_not_understand, beamtalk_method_resolver:resolve('NonExistentClass', '+')).
 
 test_resolve_with_class_tuple() ->
     %% Class objects have 'ClassName class' as their tag
@@ -93,22 +91,13 @@ test_resolve_with_class_tuple() ->
 test_resolve_with_instance_tuple() ->
     %% Instance tuples (non-class tag) should raise type_error
     Obj = #beamtalk_object{class = 'Integer', class_mod = beamtalk_integer, pid = self()},
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_method_resolver:resolve(Obj, '+')
-    ).
+    ?assertBtError(type_error, beamtalk_method_resolver:resolve(Obj, '+')).
 
 test_resolve_with_invalid_ref() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_method_resolver:resolve("not_a_class", '+')
-    ).
+    ?assertBtError(type_error, beamtalk_method_resolver:resolve("not_a_class", '+')).
 
 test_resolve_with_integer() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_method_resolver:resolve(42, '+')
-    ).
+    ?assertBtError(type_error, beamtalk_method_resolver:resolve(42, '+')).
 
 %% Metaclass receivers (class = 'Metaclass') route to the
 %% class-side method dictionary instead of the instance-side one. A

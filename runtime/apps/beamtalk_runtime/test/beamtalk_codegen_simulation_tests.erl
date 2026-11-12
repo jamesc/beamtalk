@@ -47,6 +47,7 @@ callbacks do not implement, so no compiled source construct reaches it.
 See also: beamtalk_actor for the runtime implementation
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 
 %% `wait_for_class('Actor', ...)` budget. Tests that wait run under an
 %% explicit EUnit timeout (`TEST_TIMEOUT_S`) because EUnit's default 5 s
@@ -216,10 +217,7 @@ spawn_with_preserves_unspecified_defaults_test() ->
 spawn_with_multiple_overrides_test() ->
     %% spawnWith: #{value => 10, extra => bar}
     InitArgs = #{value => 10, extra => bar},
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = unknown_field}},
-        'bt@counter':spawn(InitArgs)
-    ).
+    ?assertBtError(unknown_field, 'bt@counter':spawn(InitArgs)).
 
 %%% ===========================================================================
 %%% `late` slot tests (BT-3548, ADR 0124 §2/B2)

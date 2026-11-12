@@ -14,6 +14,7 @@ pid/0, uniqueId/0, and type error paths.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -30,10 +31,7 @@ get_env_unset_variable_returns_nil_test() ->
     ?assertEqual(nil, beamtalk_system:'getEnv:'(<<"BT_TEST_UNSET_VAR">>)).
 
 get_env_non_binary_name_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_system:'getEnv:'(not_a_string)
-    ).
+    ?assertBtError(type_error, beamtalk_system:'getEnv:'(not_a_string)).
 
 %%% ============================================================================
 %%% getEnv:default:/2
@@ -55,16 +53,10 @@ get_env_default_unset_returns_default_test() ->
     ).
 
 get_env_default_non_binary_name_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_system:'getEnv:default:'(42, <<"fallback">>)
-    ).
+    ?assertBtError(type_error, beamtalk_system:'getEnv:default:'(42, <<"fallback">>)).
 
 get_env_default_non_binary_default_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_system:'getEnv:default:'(<<"NAME">>, 42)
-    ).
+    ?assertBtError(type_error, beamtalk_system:'getEnv:default:'(<<"NAME">>, 42)).
 
 %%% ============================================================================
 %%% setEnv:value:/2
@@ -82,16 +74,10 @@ set_env_value_overwrites_existing_test() ->
     os:unsetenv("BT_TEST_OVERWRITE").
 
 set_env_value_non_binary_name_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_system:'setEnv:value:'(42, <<"value">>)
-    ).
+    ?assertBtError(type_error, beamtalk_system:'setEnv:value:'(42, <<"value">>)).
 
 set_env_value_non_binary_value_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_system:'setEnv:value:'(<<"name">>, 42)
-    ).
+    ?assertBtError(type_error, beamtalk_system:'setEnv:value:'(<<"name">>, 42)).
 
 %%% ============================================================================
 %%% unsetEnv:/1
@@ -107,10 +93,7 @@ unset_env_nonexistent_returns_true_test() ->
     ?assertEqual(true, beamtalk_system:'unsetEnv:'(<<"BT_TEST_NEVER_SET">>)).
 
 unset_env_non_binary_name_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_system:'unsetEnv:'(42)
-    ).
+    ?assertBtError(type_error, beamtalk_system:'unsetEnv:'(42)).
 
 %%% ============================================================================
 %%% setEnv/2 and unsetEnv/1 shims
@@ -264,10 +247,7 @@ halt_in_shared_workspace_raises_unsupported_test() ->
     Prev = beamtalk_capability:recorded(),
     beamtalk_capability:set(#{mode => workspace, include_compiler => true, node_owning => false}),
     try
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = unsupported}},
-            beamtalk_system:'halt:'(0)
-        )
+        ?assertBtError(unsupported, beamtalk_system:'halt:'(0))
     after
         case Prev of
             none -> beamtalk_capability:clear();
@@ -276,40 +256,22 @@ halt_in_shared_workspace_raises_unsupported_test() ->
     end.
 
 halt_zero_raises_unsupported_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = unsupported}},
-        beamtalk_system:halt()
-    ).
+    ?assertBtError(unsupported, beamtalk_system:halt()).
 
 halt_colon_valid_code_raises_unsupported_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = unsupported}},
-        beamtalk_system:'halt:'(0)
-    ).
+    ?assertBtError(unsupported, beamtalk_system:'halt:'(0)).
 
 halt_colon_out_of_range_negative_raises_invalid_argument_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = invalid_argument}},
-        beamtalk_system:'halt:'(-1)
-    ).
+    ?assertBtError(invalid_argument, beamtalk_system:'halt:'(-1)).
 
 halt_colon_out_of_range_too_large_raises_invalid_argument_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = invalid_argument}},
-        beamtalk_system:'halt:'(256)
-    ).
+    ?assertBtError(invalid_argument, beamtalk_system:'halt:'(256)).
 
 halt_colon_non_integer_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_system:'halt:'(not_an_integer)
-    ).
+    ?assertBtError(type_error, beamtalk_system:'halt:'(not_an_integer)).
 
 halt_shim_delegates_to_halt_colon_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = unsupported}},
-        beamtalk_system:halt(0)
-    ).
+    ?assertBtError(unsupported, beamtalk_system:halt(0)).
 
 %%% ============================================================================
 %%% platform_name/1 (exported under TEST)

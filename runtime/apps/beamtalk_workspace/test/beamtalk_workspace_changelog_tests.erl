@@ -762,7 +762,7 @@ unknown_cast_is_ignored(#{pid := Pid}) ->
 %% An unknown info message must not crash the server.
 unknown_info_is_ignored(#{pid := Pid}) ->
     Pid ! some_bogus_info,
-    timer:sleep(20),
+    ok = beamtalk_test_wait:sync(Pid),
     [?_assert(is_process_alive(Pid))].
 
 %% code_change/3 returns the state unchanged.

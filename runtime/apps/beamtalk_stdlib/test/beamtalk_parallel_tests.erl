@@ -20,6 +20,7 @@ Erlang level, supplementing the BUnit parallel_test.bt coverage.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -235,16 +236,10 @@ all_block_error_becomes_result_error_test() ->
 %%% ============================================================================
 
 all_non_list_argument_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_parallel:'all:'(not_a_list)
-    ).
+    ?assertBtError(type_error, beamtalk_parallel:'all:'(not_a_list)).
 
 all_non_block_element_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_parallel:'all:'([fun() -> ok end, 42])
-    ).
+    ?assertBtError(type_error, beamtalk_parallel:'all:'([fun() -> ok end, 42])).
 
 %%% ============================================================================
 %%% 'all:timeout:' — timeout paths
@@ -281,16 +276,10 @@ all_timeout_with_duration_argument_test() ->
     ?assertMatch([#{'isOk' := true, 'okValue' := 42}], Results).
 
 all_timeout_negative_ms_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_parallel:'all:timeout:'([fun() -> 1 end], -1)
-    ).
+    ?assertBtError(type_error, beamtalk_parallel:'all:timeout:'([fun() -> 1 end], -1)).
 
 all_timeout_non_list_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_parallel:'all:timeout:'(not_a_list, 100)
-    ).
+    ?assertBtError(type_error, beamtalk_parallel:'all:timeout:'(not_a_list, 100)).
 
 %%% ============================================================================
 %%% 'any:' — normal paths
@@ -324,22 +313,13 @@ any_all_fail_returns_error_with_reason_list_test() ->
 %%% ============================================================================
 
 any_empty_list_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_parallel:'any:'([])
-    ).
+    ?assertBtError(type_error, beamtalk_parallel:'any:'([])).
 
 any_non_list_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_parallel:'any:'(not_a_list)
-    ).
+    ?assertBtError(type_error, beamtalk_parallel:'any:'(not_a_list)).
 
 any_non_block_element_raises_type_error_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_parallel:'any:'([fun() -> ok end, 99])
-    ).
+    ?assertBtError(type_error, beamtalk_parallel:'any:'([fun() -> ok end, 99])).
 
 %%% ============================================================================
 %%% FFI shims — all/1, all/2, any/1 delegate to canonical colon forms

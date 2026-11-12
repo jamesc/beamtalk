@@ -341,7 +341,7 @@ handle_cast_is_ignored(_Pid) ->
 %% (line 317).
 handle_info_is_ignored(Pid) ->
     Pid ! some_info,
-    timer:sleep(20),
+    ok = beamtalk_test_wait:sync(Pid),
     [
         ?_assertEqual([], beamtalk_workspace_findings_store:all())
     ].

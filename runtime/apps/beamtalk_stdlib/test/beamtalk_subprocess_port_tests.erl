@@ -22,6 +22,7 @@ write_stdin/3, close/1) require a running OS port and are not covered here.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -141,22 +142,17 @@ bt_array_to_list_empty_array_test() ->
 bt_array_to_list_invalid_data_field_test() ->
     %% Tagged map with non-array 'data' field raises type_error
     Tagged = #{'$beamtalk_class' => 'Array', 'data' => not_an_array},
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_subprocess_port:bt_array_to_list('Subprocess', Tagged, 'run:')
+    ?assertBtError(
+        type_error, beamtalk_subprocess_port:bt_array_to_list('Subprocess', Tagged, 'run:')
     ).
 
 bt_array_to_list_non_list_non_array_test() ->
     %% Any other type raises type_error
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_subprocess_port:bt_array_to_list('Subprocess', 42, 'run:')
-    ).
+    ?assertBtError(type_error, beamtalk_subprocess_port:bt_array_to_list('Subprocess', 42, 'run:')).
 
 bt_array_to_list_atom_raises_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_subprocess_port:bt_array_to_list('Subprocess', not_a_list, 'run:')
+    ?assertBtError(
+        type_error, beamtalk_subprocess_port:bt_array_to_list('Subprocess', not_a_list, 'run:')
     ).
 
 %%% ============================================================================
@@ -176,21 +172,21 @@ ensure_binary_args_empty_list_test() ->
 
 ensure_binary_args_non_binary_element_test() ->
     %% A non-binary element raises type_error
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+    ?assertBtError(
+        type_error,
         beamtalk_subprocess_port:ensure_binary_args('Subprocess', [<<"ok">>, 42], 'run:')
     ).
 
 ensure_binary_args_atom_element_test() ->
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+    ?assertBtError(
+        type_error,
         beamtalk_subprocess_port:ensure_binary_args('Subprocess', [not_a_binary], 'run:')
     ).
 
 ensure_binary_args_mixed_first_non_binary_test() ->
     %% First element is non-binary — must also raise
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+    ?assertBtError(
+        type_error,
         beamtalk_subprocess_port:ensure_binary_args('Subprocess', [123, <<"ok">>], 'run:')
     ).
 
@@ -213,8 +209,8 @@ ensure_binary_env_all_binary_pairs_test() ->
 
 ensure_binary_env_non_binary_key_test() ->
     %% Atom key raises type_error
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+    ?assertBtError(
+        type_error,
         beamtalk_subprocess_port:ensure_binary_env(
             'Subprocess', #{path => <<"/usr/bin">>}, 'run:'
         )
@@ -222,8 +218,8 @@ ensure_binary_env_non_binary_key_test() ->
 
 ensure_binary_env_non_binary_value_test() ->
     %% Integer value raises type_error
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+    ?assertBtError(
+        type_error,
         beamtalk_subprocess_port:ensure_binary_env(
             'Subprocess', #{<<"KEY">> => 42}, 'run:'
         )
@@ -231,8 +227,8 @@ ensure_binary_env_non_binary_value_test() ->
 
 ensure_binary_env_mixed_valid_invalid_test() ->
     %% One valid pair, one invalid pair — must still raise
-    ?assertError(
-        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
+    ?assertBtError(
+        type_error,
         beamtalk_subprocess_port:ensure_binary_env(
             'Subprocess',
             #{<<"GOOD">> => <<"val">>, <<"BAD">> => not_binary},
