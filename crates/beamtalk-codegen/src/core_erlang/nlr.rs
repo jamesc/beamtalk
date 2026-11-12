@@ -501,9 +501,10 @@ mod tests {
 
     #[test]
     fn nlr_arm_result_actor_reply_under_the_fault_commits_the_carried_state() {
-        let doc = crate::core_erlang::fault::with(crate::core_erlang::fault::Fault::NlrCommitCarried, || {
-            nlr_arm_result("Val", "St", &NlrBoundary::ActorReply)
-        });
+        let doc = crate::core_erlang::fault::with(
+            crate::core_erlang::fault::Fault::NlrCommitCarried,
+            || nlr_arm_result("Val", "St", &NlrBoundary::ActorReply),
+        );
         assert_eq!(doc.to_pretty_string(), "{'reply', Val, St}");
     }
 

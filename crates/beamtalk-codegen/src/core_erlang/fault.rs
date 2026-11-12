@@ -18,7 +18,7 @@
 //!   `[dev-dependencies]` (`cfg(test)` does not cross crate boundaries), e.g.
 //!   `beamtalk-repl`'s `repl_loop_body_return` test.
 //!
-//! In any other build `fault!(Variant)` expands to the constant `false`, so
+//! In any other build `fault!(Variant)` expands to the constant `false` (`disabled()`), so
 //! the call site is dead code the compiler removes and no registry, enum,
 //! thread-local or setter is compiled at all.
 //!
@@ -40,8 +40,19 @@ macro_rules! fault {
 #[cfg(not(any(test, feature = "test")))]
 macro_rules! fault {
     ($variant:ident) => {
-        false
+        $crate::core_erlang::fault::disabled()
     };
+}
+
+/// What `fault!` answers without the test configuration: always `false`. A
+/// function rather than the literal so call sites that combine several faults
+/// (`a || b`, `if .. else if ..`) do not trip clippy's constant-expression
+/// lints; it inlines to nothing.
+#[cfg(not(any(test, feature = "test")))]
+#[inline]
+#[must_use]
+pub const fn disabled() -> bool {
+    false
 }
 
 #[cfg(any(test, feature = "test"))]

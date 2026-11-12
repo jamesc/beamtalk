@@ -1018,7 +1018,7 @@ impl ThreadingPlan {
             // BT-4523: a `^` stores and carries a whole `State` (ADR 0146
             // P0); a hybrid loop's `State` omits the fields its parameters
             // hold, so the throw would drop every write the loop made.
-            && !(effects.has_nlr && !fault!(HybridAdmitsNlr))
+            && (!effects.has_nlr || fault!(HybridAdmitsNlr))
     }
 
     /// Determine why `StateAcc` fallback was chosen (if no optimized mode was selected).

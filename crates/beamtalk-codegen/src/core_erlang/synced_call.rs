@@ -553,10 +553,10 @@ impl CoreErlangGenerator {
             // variable, a parameter, any expression): a literal is judged by
             // the construct that knows whether it inlines it.
             SendUserCode::ClosureOperand => {
-                if !fault!(NlrClosuresUnstored) {
-                    UserCodeCall::Yes
-                } else {
+                if fault!(NlrClosuresUnstored) {
                     UserCodeCall::No
+                } else {
+                    UserCodeCall::Yes
                 }
             }
             // A fold the block analysis threads is lowered in place (its
