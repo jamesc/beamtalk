@@ -40,19 +40,8 @@ teardown(_) ->
     meck:unload(beamtalk_class_metadata),
     %% Stop only this module's classes: other suites rely on the bootstrap
     %% classes (e.g. `Actor`) staying registered.
-    lists:foreach(fun stop_class/1, ['PinPoint', 'PinCounter', 'PinFactory']),
+    lists:foreach(fun beamtalk_test_class:stop_graceful/1, ['PinPoint', 'PinCounter', 'PinFactory']),
     ok.
-
-stop_class(Name) ->
-    case beamtalk_class_registry:whereis_class(Name) of
-        Pid when is_pid(Pid) ->
-            %% A deliberate stop runs remove_class_registration/1 (BT-4622);
-            %% a kill would leave the metadata rows behind for crash recovery.
-            unlink(Pid),
-            gen_server:stop(Pid);
-        _ ->
-            ok
-    end.
 
 %% Calls made for `Name` since the last reset, as `{Fun, Args}` in call order.
 %% Funs are replaced by '$fun' so traces compare across runs.

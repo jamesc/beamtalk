@@ -528,7 +528,8 @@ class_current_sees_caller_session_context_test_() ->
         [
             ?_test(begin
                 Pid = start_session(<<"prim-class-current">>),
-                ClassPid = wait_for_class('Session'),
+                ok = beamtalk_test_wait:class('Session', 1000),
+                ClassPid = beamtalk_class_registry:whereis_class('Session'),
                 %% A caller with seeded context, dispatching `current` through the
                 %% real class gen_server, gets a Session value back.
                 Session = dispatch_class_method_with_context(
@@ -554,7 +555,8 @@ class_current_explicit_context_no_leak_test_() ->
         [
             ?_test(begin
                 Pid = start_session(<<"prim-explicit-ctx">>),
-                ClassPid = wait_for_class('Session'),
+                ok = beamtalk_test_wait:class('Session', 1000),
+                ClassPid = beamtalk_class_registry:whereis_class('Session'),
                 %% Explicit context tuple in the message → resolves to that session.
                 Session = unwrap_class_reply(
                     gen_server:call(
@@ -585,7 +587,8 @@ class_current_malformed_context_degrades_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                ClassPid = wait_for_class('Session'),
+                ok = beamtalk_test_wait:class('Session', 1000),
+                ClassPid = beamtalk_class_registry:whereis_class('Session'),
                 %% A bare atom (not a {Pid, Id} pair) as the context: no crash,
                 %% resolves to nil because no session context is seeded.
                 NilSession = unwrap_class_reply(
@@ -727,22 +730,6 @@ set_locals(Pid, Locals) ->
     sys:replace_state(Pid, fun({SId, State, Worker}) ->
         {SId, beamtalk_repl_state:set_bindings(Locals, State), Worker}
     end).
-
-%% Wait for a class gen_server to be registered (the stdlib classes start
-%% asynchronously when beamtalk_runtime boots).
-wait_for_class(ClassName) ->
-    wait_for_class(ClassName, 50).
-
-wait_for_class(ClassName, 0) ->
-    erlang:error({class_not_registered, ClassName});
-wait_for_class(ClassName, N) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            timer:sleep(20),
-            wait_for_class(ClassName, N - 1);
-        Pid when is_pid(Pid) ->
-            Pid
-    end.
 
 %% Dispatch a class method through the real class gen_server FROM a worker
 %% process that has the session context seeded — exactly the eval-worker path.
