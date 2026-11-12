@@ -121,20 +121,23 @@ TestCase subclass: GuardedStaticCallTest
   testClassLiteralInstallsItsReferenceUnderTheRuntimesKey =>
     mapKey := Erlang beamtalk_class_shadow_flags static_calls_key: #'GscClassSelf class'
     Erlang beamtalk_class_shadow_flags invalidate: #GscClassSelf
-    self assert: GscClassSelf name equals: #GscClassSelf
+    literal := GscClassSelf
+    self assert: literal name equals: #GscClassSelf
     warmed := Erlang persistent_term get: mapKey with: nil
     self deny: warmed isNil
     key := Erlang erlang list_to_tuple: #(#class_ref, #'GscClassSelf class')
     self assert: (Erlang maps is_key: key with: warmed) equals: true
-    planted := Erlang maps put: key with: #planted with: warmed
+    planted := Erlang maps
+      put: key
+      with: #planted
+      with: warmed
     viaKey := [
       Erlang persistent_term put: mapKey with: planted
       GscClassSelf
-    ] ensure: [
-      Erlang beamtalk_class_shadow_flags invalidate: #GscClassSelf
-    ]
+    ] ensure: [Erlang beamtalk_class_shadow_flags invalidate: #GscClassSelf]
     self assert: viaKey equals: #planted
-    self assert: GscClassSelf name equals: #GscClassSelf
+    again := GscClassSelf
+    self assert: again name equals: #GscClassSelf
 
   // === BT-4316: the static call key ===
   //

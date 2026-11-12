@@ -187,6 +187,17 @@ erasers above; a later class-side extension or `put_class_method` of `new` is
 then answered by the fallback, whose class process runs it
 (`beamtalk_object_class`'s `{new, _}` handler).
 
+BT-4756: a class literal (`x := Point`) is keyed `{class_ref, Tag}` in the same
+per-class map; its value is the class object `{beamtalk_object, Tag, Module,
+Pid}` the literal built before (the live registered pid and the module the
+published row names). The call site reads the map once and, on a miss, calls
+`class_ref/1`, which builds the object and installs it under the tag lock only
+while the pid is registered and alive and the row still names `Module`. It
+shares the per-tag index and every eraser above (a metadata write or reload, an
+ancestor's write, the class monitor's `'DOWN'`, row removal), so a reload that
+moves the class to another module or a restart is seen on the next literal. An
+unregistered class installs nothing: negative verdicts are not cached.
+
 `static_call_target/4` (the call site's miss path) derives all four and, under
 the class's tag lock, records the tag in the per-tag index
 (`beamtalk_class_registry:record_static_call_tag/1`, read only by
