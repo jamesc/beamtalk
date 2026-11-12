@@ -125,15 +125,31 @@ pub(crate) fn compute_shape_key_completions(
     protocol_registry: Option<Arc<ProtocolRegistry>>,
 ) -> Option<Vec<Completion>> {
     let site = find_key_site(source, offset)?;
-    let rest = source.get(offset as usize..)?;
+    let after_cursor = source.get(offset as usize..)?;
+    // The cursor may sit inside a symbol (`#po|rt`): the placeholder replaces
+    // the whole symbol, not just the part before the cursor.
+    let tail_len = after_cursor
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == ':'))
+        .unwrap_or(after_cursor.len());
+    let rest = if site.start == offset {
+        after_cursor
+    } else {
+        &after_cursor[tail_len..]
+    };
     let spliced = match site.kind {
         SiteKind::KeyedRead => format!("#{PLACEHOLDER}"),
         SiteKind::Literal => {
-            // A whole pair, so `#{ | }` parses; a separator only when more
-            // pairs follow the cursor.
-            let more_follows = !matches!(rest.trim_start().chars().next(), None | Some('}'));
-            let sep = if more_follows { ", " } else { "" };
-            format!("#{PLACEHOLDER} => nil{sep}")
+            // A whole pair, so `#{ | }` parses. Nothing more when the key was
+            // already followed by its value (`#po| => 1`) or a separator;
+            // a separator only when more pairs follow the cursor.
+            let next = rest.trim_start();
+            if next.starts_with("=>") {
+                format!("#{PLACEHOLDER}")
+            } else if matches!(next.chars().next(), None | Some('}' | ',')) {
+                format!("#{PLACEHOLDER} => nil")
+            } else {
+                format!("#{PLACEHOLDER} => nil, ")
+            }
         }
     };
     let patched = format!("{}{spliced}{rest}", source.get(..site.start as usize)?);

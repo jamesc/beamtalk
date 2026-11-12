@@ -141,6 +141,20 @@ fn literal_partial_key_and_following_pairs_still_complete() {
 }
 
 #[test]
+fn cursor_inside_an_existing_symbol_still_completes() {
+    let src = format!("{OPTIONS}o :: Options := #{{#port => 80}}.\no at: #po‸rt");
+    assert_eq!(labels(&completions(&src)), vec!["port", "host"]);
+    let src = format!("{OPTIONS}o :: Options := #{{#ho‸st => \"h\"}}");
+    assert_eq!(labels(&completions(&src)), vec!["port", "host"]);
+}
+
+#[test]
+fn literal_key_before_an_existing_separator_keeps_later_pairs() {
+    let src = format!("{OPTIONS}o :: Options := #{{#ho‸, #port => 80}}");
+    assert_eq!(labels(&completions(&src)), vec!["host"]);
+}
+
+#[test]
 fn literal_argument_offers_the_parameter_shape_keys() {
     let src = "type Opts = #{#timeout => Integer, ?#retries => Integer}\n\
                Object subclass: Client\n  \
