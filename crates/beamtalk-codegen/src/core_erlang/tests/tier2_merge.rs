@@ -21,19 +21,13 @@
 //! `fun` back) a field read or write in the body reports instead of
 //! threading through `StateAcc`.
 
+use super::codegen;
 use crate::core_erlang::fault::{self, Fault};
-use crate::core_erlang::{CodegenOptions, generate_module};
-use beamtalk_core::source_analysis::{lex_with_eof, parse};
-
-fn compile(src: &str) -> String {
-    let (module, _) = parse(lex_with_eof(src));
-    generate_module(&module, CodegenOptions::new("test")).expect("codegen should succeed")
-}
 
 /// The panic message of compiling `src` (a verifier finding is a
 /// debug-build panic), or `None` when it compiles.
 fn enforce_report(src: &str) -> Option<String> {
-    match std::panic::catch_unwind(|| compile(src)) {
+    match std::panic::catch_unwind(|| codegen(src)) {
         Ok(_) => None,
         Err(payload) => Some(
             payload
@@ -70,7 +64,7 @@ const STMT: &str = "  run =>\n    count := 0\n    b := [count := count + 1. self
 
 #[test]
 fn operand_merged_call_unpacks_value_and_rebinds_local() {
-    let out = compile(&format!("{PREAMBLE}{OPERAND}"));
+    let out = codegen(&format!("{PREAMBLE}{OPERAND}"));
     // The bracket binds element 1 of the apply's tuple as its value ...
     assert!(
         out.contains("element'(1, _T2Merge"),
@@ -95,7 +89,7 @@ fn operand_merged_call_unpacks_value_and_rebinds_local() {
 
 #[test]
 fn stmt_merged_call_compiles_without_findings() {
-    let out = compile(&format!("{PREAMBLE}{STMT}"));
+    let out = codegen(&format!("{PREAMBLE}{STMT}"));
     // Merged shape (cell take at the exit), no legacy `StateAcc` field path.
     assert!(
         out.contains("T2Cell"),
@@ -154,7 +148,7 @@ const NLR: &str = "  run =>\n    count := 0\n    b := [count := count + 1. self.
 
 #[test]
 fn caret_out_of_merged_fun_carries_take_plus_locals() {
-    let out = compile(&format!("{PREAMBLE}{NLR}"));
+    let out = codegen(&format!("{PREAMBLE}{NLR}"));
     // The throw bypasses the exit flush, so the `^` carries take()+locals.
     assert!(
         out.contains("T2Nlr"),
@@ -179,7 +173,7 @@ fn caret_out_of_merged_fun_carries_take_plus_locals() {
 /// `RebuildsCarriedStateAtSite` rejects (`ensure_relay_corpus.rs`).
 #[test]
 fn merged_fun_ensure_relay_keeps_the_locals_the_return_carried() {
-    let out = compile(&format!(
+    let out = codegen(&format!(
         "{PREAMBLE}  run =>\n    count := 0\n    b := [count := count + 1. self.n := self.n + 1. [count := count + 10. ^count] ensure: [self.n := 9]]\n    b value\n    0\n"
     ));
     assert!(
@@ -218,7 +212,7 @@ fn merged_fun_arm_returns_carry_the_merged_map() {
             let src = format!(
                 "{PREAMBLE}  bump => self.n := self.n + 1\n\n  run: flag =>\n    count := 0\n    b := [count := count + 1. self.n := self.n + 1. {stmt}. count]\n    b value\n    count\n"
             );
-            let out = compile(&src);
+            let out = codegen(&src);
             let body = out
                 .split("fun (StateAcc) ->")
                 .nth(1)

@@ -10,24 +10,6 @@
 use super::common::*;
 use crate::source_analysis::Severity;
 
-/// Type and DNU diagnostic messages for `source`, after asserting it parses.
-fn checker_messages(source: &str) -> Vec<String> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    crate::semantic_analysis::analyse(&module)
-        .diagnostics
-        .into_iter()
-        .filter(|d| {
-            matches!(
-                d.category,
-                Some(DiagnosticCategory::Type | DiagnosticCategory::Dnu)
-            )
-        })
-        .map(|d| d.message.to_string())
-        .collect()
-}
-
 /// A `Callable` protocol and `{body}` appended verbatim as the class
 /// methods of a typed `P`.
 fn source_with(body: &str) -> String {
@@ -43,7 +25,7 @@ typed Object subclass: P
 
 #[test]
 fn object_methods_are_not_dnu_on_a_protocol_receiver() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   class go: h :: Callable -> Object =>
     (h respondsTo: #call:) ifFalse: [^nil]
@@ -55,7 +37,7 @@ fn object_methods_are_not_dnu_on_a_protocol_receiver() {
 
 #[test]
 fn requirement_still_resolves_on_a_protocol_receiver() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   class go: h :: Callable -> Object => h call: 1
 ",
@@ -65,7 +47,7 @@ fn requirement_still_resolves_on_a_protocol_receiver() {
 
 #[test]
 fn object_method_return_types_flow_from_a_protocol_receiver() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   class str: h :: Callable -> Integer => h printString
   class responds: h :: Callable -> Integer => h respondsTo: #call:
@@ -78,7 +60,7 @@ fn object_method_return_types_flow_from_a_protocol_receiver() {
 
 #[test]
 fn unknown_selector_on_a_protocol_receiver_is_dnu() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   class go: h :: Callable -> Object => h frobnicate
 ",
@@ -92,7 +74,7 @@ fn unknown_selector_on_a_protocol_receiver_is_dnu() {
 
 #[test]
 fn union_with_protocol_after_is_kind_of_narrowing() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   class go: h :: Callable | Block(Object, Object) -> Object =>
     (h isKindOf: Block) ifTrue: [^h value: 1]
@@ -114,7 +96,7 @@ fn union_with_protocol_after_is_kind_of_narrowing() {
 fn provided_selector_is_not_dnu_on_a_protocol_receiver() {
     // A protocol's type is required ∪ provided (ADR 0127 §8), so a send of
     // a provided selector to a protocol-typed receiver is not a DNU either.
-    let msgs = checker_messages(
+    let msgs = messages(
         r#"
 Protocol define: Labelled
   label -> String
@@ -132,7 +114,7 @@ fn union_member_protocol_object_method_return_type() {
     // The receiver is still a union at the send, so this goes through the
     // per-member union loop: the `Callable` member answers `printString`
     // through `Object` (`String`), as does `Integer`.
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   class s: h :: Callable | Integer -> Integer => h printString
 ",
@@ -145,7 +127,7 @@ fn union_member_protocol_object_method_return_type() {
 fn union_member_protocol_selector_responds() {
     // `call:` is `Callable`'s own selector: that member responds, so only
     // `Integer` is reported missing.
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   class c: h :: Callable | Integer -> Object => h call: 1
 ",
@@ -161,7 +143,7 @@ fn union_member_protocol_selector_responds() {
 fn union_member_protocol_unknown_selector_is_missing() {
     // Neither member answers `frobnicate`: the protocol member is reported
     // missing (not silently skipped), though it caps the severity at `Hint`.
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   class f: h :: Callable | Integer -> Object => h frobnicate
 ",
@@ -221,7 +203,7 @@ typed Object subclass: P
 fn class_of_a_protocol_receiver_is_the_protocol_metatype() {
     // `w class` is some class conforming to `Wire` (ADR 0144), not
     // `Object class`, so its `class` requirement resolves with its type.
-    let msgs = checker_messages(&wire_source_with(
+    let msgs = messages(&wire_source_with(
         r"
   class go: w :: Wire -> String => w class label
   class bad: w :: Wire -> Integer => w class label
@@ -237,7 +219,7 @@ fn union_member_protocol_unknown_selector_widens_to_dynamic() {
     // `doesNotUnderstand:`), so — like every other uncertain union member —
     // it widens the send's type with `Dynamic` rather than letting
     // `Integer`'s `abs` alone decide it.
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   class a: h :: Callable | Integer -> String => h abs
 ",

@@ -7,20 +7,6 @@
 
 use super::common::*;
 
-fn type_diagnostics(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-        .into_iter()
-        .filter(|d| {
-            matches!(
-                d.category,
-                Some(DiagnosticCategory::Type | DiagnosticCategory::Dnu)
-            )
-        })
-        .collect()
-}
-
 fn guard_source(ty: &str, guard: &str) -> String {
     format!(
         r"
@@ -34,38 +20,38 @@ typed Object subclass: Repro
 
 #[test]
 fn bt4638_strict_eq_false_narrows_false_out() {
-    let diags = type_diagnostics(&guard_source("Integer | False", "(x =:= false)"));
+    let diags = type_dnu_diags(&guard_source("Integer | False", "(x =:= false)"));
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
 
 #[test]
 fn bt4638_loose_eq_false_narrows_false_out() {
-    let diags = type_diagnostics(&guard_source("Integer | False", "(x == false)"));
+    let diags = type_dnu_diags(&guard_source("Integer | False", "(x == false)"));
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
 
 #[test]
 fn bt4638_strict_eq_true_narrows_true_out() {
-    let diags = type_diagnostics(&guard_source("Integer | True", "(x =:= true)"));
+    let diags = type_dnu_diags(&guard_source("Integer | True", "(x =:= true)"));
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
 
 #[test]
 fn bt4638_loose_eq_true_narrows_true_out() {
-    let diags = type_diagnostics(&guard_source("Integer | True", "(x == true)"));
+    let diags = type_dnu_diags(&guard_source("Integer | True", "(x == true)"));
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
 
 #[test]
 fn bt4638_reversed_operands_narrow() {
-    let diags = type_diagnostics(&guard_source("Integer | False", "(false =:= x)"));
+    let diags = type_dnu_diags(&guard_source("Integer | False", "(false =:= x)"));
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
 
 /// Guarding on `true` must not remove `False`: the send is still unsafe.
 #[test]
 fn bt4638_guard_on_other_boolean_does_not_narrow() {
-    let diags = type_diagnostics(&guard_source("Integer | False", "(x =:= true)"));
+    let diags = type_dnu_diags(&guard_source("Integer | False", "(x =:= true)"));
     assert!(
         !diags.is_empty(),
         "`False` is still possible after a `true` guard, expected a diagnostic"
@@ -81,7 +67,7 @@ typed Object subclass: Repro
     (x =:= false) ifFalse: [^true]
     x not
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_dnu_diags(source);
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
 
@@ -93,7 +79,7 @@ typed Object subclass: Repro
   class go: x :: Integer | False -> Integer =>
     (x =:= false) ifTrue: [0] ifFalse: [x + 1]
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_dnu_diags(source);
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
 
@@ -108,7 +94,7 @@ typed Object subclass: Repro
     (x /= false) ifFalse: [^0]
     x + 1
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_dnu_diags(source);
     assert!(
         !diags.is_empty(),
         "`/=` is not recognised, so `False` is still possible; expected a diagnostic"

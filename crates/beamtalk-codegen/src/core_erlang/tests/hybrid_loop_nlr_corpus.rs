@@ -21,9 +21,8 @@
 //! (`Fault::HybridAdmitsNlr`) every shape that lowers hybrid reports.
 
 use super::assert_compiles_through_erlc;
+use super::codegen;
 use crate::core_erlang::fault::{self, Fault};
-use crate::core_erlang::{CodegenOptions, generate_module};
-use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
 const HEADER: &str = "Actor subclass: HybridNlrProbe
   state: n = 0
@@ -109,15 +108,10 @@ fn corpus() -> Vec<(String, String)> {
         .collect()
 }
 
-fn compile(src: &str) -> String {
-    let (module, _) = parse(lex_with_eof(src));
-    generate_module(&module, CodegenOptions::new("test")).expect("codegen should succeed")
-}
-
 /// The panic message of compiling `src` (a verifier finding is a debug-build
 /// panic), or `None` when it compiles.
 fn report(src: &str) -> Option<String> {
-    match std::panic::catch_unwind(|| compile(src)) {
+    match std::panic::catch_unwind(|| codegen(src)) {
         Ok(_) => None,
         Err(payload) => Some(
             payload
@@ -147,7 +141,7 @@ fn nlr_in_a_field_writing_loop_corpus_is_clean_in_every_mode() {
     let mut failures = Vec::new();
     for (name, src) in corpus() {
         match std::panic::catch_unwind(|| {
-            let code = compile(&src);
+            let code = codegen(&src);
             assert_compiles_through_erlc("test", &code);
             code
         }) {
@@ -178,7 +172,7 @@ fn hybrid_checkout_reports_nlr_in_a_hybrid_loop() {
         let finding = with_hybrid_admits_nlr(|| report(&src));
         let Some(finding) = finding else {
             // Clean under the fault too: it must not have lowered hybrid.
-            let code = with_hybrid_admits_nlr(|| compile(&src));
+            let code = with_hybrid_admits_nlr(|| codegen(&src));
             assert!(
                 !code.contains("NField"),
                 "{name}: lowered hybrid around a `^` without a finding:\n{src}"

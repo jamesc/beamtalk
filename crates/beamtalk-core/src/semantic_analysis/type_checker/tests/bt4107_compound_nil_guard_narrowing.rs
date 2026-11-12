@@ -21,15 +21,6 @@
 
 use super::common::*;
 
-fn type_diagnostics(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-        .into_iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect()
-}
-
 /// AC: the issue repro — `(c isNil or: [r isNil]) ifTrue: [^nil]` narrows
 /// both `c` and `r`, so the `use:and:` call below sees two `Pt`s.
 #[test]
@@ -44,7 +35,7 @@ typed Object subclass: N
     (c isNil or: [r isNil]) ifTrue: [^nil]
     self use: c and: r
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     assert!(
         diags.is_empty(),
         "both `c` and `r` should narrow to Pt after the combined guard, got: {diags:#?}"
@@ -64,7 +55,7 @@ typed Object subclass: Caller
     Receiver process: a
     Receiver process: b
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     assert!(
         diags.is_empty(),
         "both `a` and `b` should narrow to Integer after the guard, got: {diags:#?}"
@@ -85,7 +76,7 @@ typed Object subclass: Caller
     Receiver process: a
     Receiver process: b
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     assert!(
         diags.is_empty(),
         "both `a` and `b` should narrow to Integer after the guard, got: {diags:#?}"
@@ -105,7 +96,7 @@ typed Object subclass: Caller
     Receiver process: a
     Receiver process: b
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     let mismatches: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("'process:'") && d.message.contains("Nil"))
@@ -131,7 +122,7 @@ typed Object subclass: Caller
     Receiver process: a
     Receiver process: b
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     let mismatches: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("'process:'") && d.message.contains("Nil"))
@@ -157,7 +148,7 @@ typed Object subclass: Caller
     Receiver process: a
     Receiver process: b
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     let mismatches: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("'process:'") && d.message.contains("Nil"))
@@ -183,7 +174,7 @@ typed Object subclass: Caller
     Receiver process: a
     Receiver process: b
 "#;
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     assert!(
         diags.is_empty(),
         "both vars should narrow after the combined guard, got: {diags:#?}"
@@ -203,7 +194,7 @@ typed Object subclass: Caller
     Receiver process: a
     Receiver process: b
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     let mismatches: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("'process:'") && d.message.contains("Nil"))
@@ -230,7 +221,7 @@ typed Object subclass: Caller
     Receiver process: b
     Receiver process: c
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     assert!(
         diags.is_empty(),
         "all three vars should narrow after the chained guard, got: {diags:#?}"
@@ -252,7 +243,7 @@ typed Actor subclass: Engine
     Receiver process: self.left
     Receiver process: self.right
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     assert!(
         diags.is_empty(),
         "both fields should narrow after the guard, got: {diags:#?}"
@@ -274,7 +265,7 @@ typed Object subclass: Caller
       Receiver process: b
     ]
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     assert!(
         diags.is_empty(),
         "both vars should narrow inside the `ifFalse:` arm, got: {diags:#?}"
@@ -296,7 +287,7 @@ typed Object subclass: Caller
       Receiver process: b
     ]
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     assert!(
         diags.is_empty(),
         "both vars should narrow inside the `ifTrue:` arm, got: {diags:#?}"
@@ -318,7 +309,7 @@ typed Object subclass: Caller
       Receiver process: b
     ]
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     let mismatches: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("'process:'") && d.message.contains("Nil"))
@@ -344,7 +335,7 @@ typed Object subclass: Caller
     a notNil ifFalse: [^nil]
     Receiver process: a
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     assert!(
         diags.is_empty(),
         "`a` should narrow to Integer after the guard, got: {diags:#?}"
@@ -362,7 +353,7 @@ typed Object subclass: Caller
   run: a :: Integer | Nil =>
     a notNil ifTrue: [Receiver process: a]
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     assert!(
         diags.is_empty(),
         "`a` should narrow to Integer inside the `ifTrue:` arm, got: {diags:#?}"
@@ -384,7 +375,7 @@ typed Object subclass: Caller
       Receiver process: b
     ]
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     let mismatches: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("'process:'") && d.message.contains("Nil"))

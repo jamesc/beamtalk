@@ -958,21 +958,14 @@ pub(in crate::semantic_analysis) fn base_name_of_string(type_name: &str) -> &str
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Identifier, TypeAnnotation};
+    use crate::ast::TypeAnnotation;
     use crate::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
     use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
     use crate::source_analysis::Span;
 
-    fn span() -> Span {
-        Span::new(0, 1)
-    }
+    use crate::test_helpers::test_support::unit_span as span;
 
-    fn ident(name: &str) -> Identifier {
-        Identifier {
-            name: name.into(),
-            span: span(),
-        }
-    }
+    use crate::test_helpers::test_support::unit_ident as ident;
 
     fn empty_subst() -> SubstitutionMap {
         SubstitutionMap::new()

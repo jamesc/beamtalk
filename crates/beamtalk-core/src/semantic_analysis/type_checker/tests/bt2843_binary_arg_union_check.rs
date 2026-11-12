@@ -44,12 +44,6 @@ fn type_diagnostics(checker: &TypeChecker) -> Vec<&Diagnostic> {
         .collect()
 }
 
-fn check_source(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-}
-
 /// AC (b) — the exact repro from the issue: a `String | Nil` field flows
 /// into `++`'s `String`-only parameter. The non-nil member (`String`) is
 /// compatible but `Nil` isn't — this is the Nil-unsound case that used to
@@ -63,7 +57,7 @@ typed Value subclass: Thing
   greet -> String =>
     "Hello, " ++ self.name
 "#;
-    let diags = check_source(source);
+    let diags = diags_with_expect(source);
     let type_diags: Vec<_> = diags
         .iter()
         .filter(|d| d.category == Some(DiagnosticCategory::Type))
@@ -95,7 +89,7 @@ typed Value subclass: Thing
   greet -> String =>
     "Hello, " ++ self.count
 "#;
-    let diags = check_source(source);
+    let diags = diags_with_expect(source);
     let type_diags: Vec<_> = diags
         .iter()
         .filter(|d| d.category == Some(DiagnosticCategory::Type))
@@ -124,7 +118,7 @@ typed Value subclass: Thing
   greet -> String =>
     "Hello, " ++ "World"
 "#;
-    let diags = check_source(source);
+    let diags = diags_with_expect(source);
     assert!(
         diags
             .iter()
@@ -232,7 +226,7 @@ typed Value subclass: Thing
   greet -> String =>
     self take: self.name
 ";
-    let diags = check_source(source);
+    let diags = diags_with_expect(source);
     let type_diags: Vec<_> = diags
         .iter()
         .filter(|d| d.category == Some(DiagnosticCategory::Type))

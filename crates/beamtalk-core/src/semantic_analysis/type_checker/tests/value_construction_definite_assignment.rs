@@ -153,12 +153,6 @@ fn new_with(map: Expression) -> Expression {
     )
 }
 
-fn check(module: &Module, hierarchy: &ClassHierarchy) -> TypeChecker {
-    let mut checker = TypeChecker::new();
-    checker.check_module(module, hierarchy);
-    checker
-}
-
 fn definite_assignment_diags(checker: &TypeChecker) -> Vec<Diagnostic> {
     checker
         .diagnostics()

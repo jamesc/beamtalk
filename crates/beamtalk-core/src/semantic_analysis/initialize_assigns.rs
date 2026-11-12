@@ -516,11 +516,8 @@ fn analyze_message_send(
 mod tests {
     use super::*;
     use crate::ast::{Block, Identifier, KeywordPart, Literal};
-    use crate::source_analysis::Span;
 
-    fn span() -> Span {
-        Span::new(0, 0)
-    }
+    use crate::test_helpers::test_support::test_span as span;
 
     fn id(name: &str) -> Identifier {
         Identifier::new(name, span())
@@ -551,9 +548,7 @@ mod tests {
         }
     }
 
-    fn bare(expr: Expression) -> ExpressionStatement {
-        ExpressionStatement::bare(expr)
-    }
+    use crate::test_helpers::test_support::bare;
 
     fn block(body: Vec<Expression>) -> Block {
         Block::new(vec![], body.into_iter().map(bare).collect(), span())

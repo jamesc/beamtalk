@@ -699,11 +699,8 @@ mod tests {
         ParameterDefinition, TypeAnnotation,
     };
     use beamtalk_core::semantic_analysis::alias_registry::AliasInfo;
-    use beamtalk_core::source_analysis::Span;
 
-    fn span() -> Span {
-        Span::new(0, 0)
-    }
+    use beamtalk_core::test_helpers::test_support::test_span as span;
 
     fn render(doc: &Document<'_>) -> String {
         doc.to_pretty_string()

@@ -7,18 +7,14 @@
 //! direct/tuple-accumulator parameters; anything left unbracketed reports
 //! [`VerifyError::UnbracketedGuardedOperator`], never silently.
 
+use super::codegen;
 use super::synced_call::{
     GuardedOpCheckout, GuardedOpLoopMarker, GuardedOpNeed, StaleStateUseKind, ThreadedStateUse,
 };
 use super::threaded_ir::{StaleReadDefect, StateReadSite, UserCodeRegion};
+use crate::core_erlang::CoreErlangGenerator;
 use crate::core_erlang::fault::{self, Fault};
-use crate::core_erlang::{CodegenOptions, CoreErlangGenerator, generate_module};
-use beamtalk_core::source_analysis::{Span, lex_with_eof, parse};
-
-fn compile(src: &str) -> String {
-    let (module, _) = parse(lex_with_eof(src));
-    generate_module(&module, CodegenOptions::new("test")).expect("codegen should succeed")
-}
+use beamtalk_core::source_analysis::Span;
 
 fn count(out: &str, pat: &str) -> usize {
     out.matches(pat).count()
@@ -32,7 +28,7 @@ fn brackets(out: &str) -> usize {
 /// The panic message of compiling `src` (a verifier finding is a
 /// debug-build panic), or `None` when it compiles.
 fn enforce_report(src: &str) -> Option<String> {
-    match std::panic::catch_unwind(|| compile(src)) {
+    match std::panic::catch_unwind(|| codegen(src)) {
         Ok(_) => None,
         Err(payload) => Some(
             payload
@@ -75,7 +71,7 @@ fn value_block_over_scratch_in_stateless_loop_does_not_bracket_its_scratch() {
     let src = loop_nest_value_block("do:");
     // Verifier-clean (`SyncedCallOnPrivateScratch` would panic here).
     assert_eq!(enforce_report(&src), None);
-    let out = compile(&src);
+    let out = codegen(&src);
     let seeded = out.find("_SeededState").expect("seeded scratch map");
     let region_end = out[seeded..].find("_FoldResult").expect("fold result");
     assert!(
@@ -91,7 +87,7 @@ fn collect_twin_of_value_block_over_scratch_is_verifier_clean() {
 
 #[test]
 fn do_loop_with_guarded_op_brackets() {
-    let out = compile(&format!(
+    let out = codegen(&format!(
         "{ACTOR_PREAMBLE}  sum: items =>\n    acc := 0.\n    items do: [:m | acc := acc + m].\n    acc\n"
     ));
     // One pre-store before the loop plus the method exit store; one reload
@@ -112,7 +108,7 @@ fn do_loop_with_guarded_op_brackets() {
 fn loop_without_operators_emits_no_cell_traffic() {
     // Gate pin: a loop with no guarded operator compiles exactly as before
     // (no marker action, no store, no reload).
-    let out = compile(&format!(
+    let out = codegen(&format!(
         "{ACTOR_PREAMBLE}  run: items =>\n    acc := 0.\n    items do: [:m | acc := m].\n    acc\n"
     ));
     assert_eq!(stores(&out), 0, "stores:\n{out}");
@@ -124,7 +120,7 @@ fn numeric_loop_keeps_direct_params() {
     // Gate 3 pin (BT-4121): an arithmetic loop over untyped locals keeps
     // its direct parameters — it is bracketed around the loop, never
     // threaded through it.
-    let out = compile(&format!(
+    let out = codegen(&format!(
         "{ACTOR_PREAMBLE}  sum: items =>\n    acc := 0.\n    items do: [:m | acc := acc + 1].\n    acc\n"
     ));
     assert_eq!(takes(&out), 1, "takes:\n{out}");
@@ -137,7 +133,7 @@ fn numeric_loop_keeps_direct_params() {
 
 #[test]
 fn while_loop_with_guarded_op_brackets() {
-    let out = compile(&format!(
+    let out = codegen(&format!(
         "{ACTOR_PREAMBLE}  run: limit =>\n    acc := 0.\n    i := 0.\n    [i < limit] whileTrue: [acc := acc + i. i := i + 1].\n    acc\n"
     ));
     assert_eq!(stores(&out), 2, "stores:\n{out}");
@@ -151,7 +147,7 @@ fn while_loop_with_guarded_op_brackets() {
 
 #[test]
 fn counted_loop_with_guarded_op_brackets() {
-    let out = compile(&format!(
+    let out = codegen(&format!(
         "{ACTOR_PREAMBLE}  run: n with: m =>\n    acc := 0.\n    1 to: n do: [:i | acc := acc + m].\n    acc\n"
     ));
     assert_eq!(stores(&out), 2, "stores:\n{out}");
@@ -160,7 +156,7 @@ fn counted_loop_with_guarded_op_brackets() {
 
 #[test]
 fn collect_with_carried_guarded_op_brackets() {
-    let out = compile(&format!(
+    let out = codegen(&format!(
         "{ACTOR_PREAMBLE}  run: items =>\n    acc := 0.\n    items collect: [:m | acc := acc + m]\n"
     ));
     assert_eq!(stores(&out), 2, "stores:\n{out}");
@@ -172,7 +168,7 @@ fn hybrid_loop_with_guarded_op_threads_state() {
     // A hybrid loop cannot bracket (its field parameters advance past the
     // entry `State`), so the mode selection threads `StateAcc` instead and
     // the operators bracket normally inside it.
-    let out = compile(
+    let out = codegen(
         "Actor subclass: Probe\n  state: total = 0\n\n  run: n =>\n    i := n.\n    [i > 0] whileTrue: [self.total := self.total + i. i := i - 1].\n    self.total\n",
     );
     assert!(
@@ -195,7 +191,7 @@ fn hybrid_loop_with_guarded_op_threads_state() {
 fn noncarried_times_repeat_with_guarded_op_wraps_send() {
     // Not inlined (nothing carried): the `timesRepeat:` send itself is
     // bracketed around the closure call.
-    let out = compile(&format!(
+    let out = codegen(&format!(
         "{ACTOR_PREAMBLE}  run: g =>\n    3 timesRepeat: [g + g].\n    self.n\n"
     ));
     assert_eq!(brackets(&out), 1, "one send bracket:\n{out}");
@@ -203,7 +199,7 @@ fn noncarried_times_repeat_with_guarded_op_wraps_send() {
 
 #[test]
 fn evaluated_literal_block_with_guarded_op_wraps_send() {
-    let out = compile(&format!(
+    let out = codegen(&format!(
         "{ACTOR_PREAMBLE}  run: x =>\n    [:m | m + m] value: x.\n    self.n\n"
     ));
     assert_eq!(brackets(&out), 1, "one send bracket:\n{out}");
@@ -215,7 +211,7 @@ fn nested_stateless_loops_share_outer_bracket() {
     // one pre-store before the outer loop, and both exit packs seed from
     // the cell (the inner pack carries the inner locals through the outer
     // fun; the outer pack loads the writes back).
-    let out = compile(&format!(
+    let out = codegen(&format!(
         "{ACTOR_PREAMBLE}  run: xs with: ys =>\n    acc := 0.\n    xs do: [:x | ys do: [:y | acc := acc + y]].\n    acc\n"
     ));
     assert_eq!(stores(&out), 2, "stores:\n{out}");
@@ -237,7 +233,7 @@ fn inner_stateless_loop_in_stateful_body_brackets_itself() {
     let src = format!(
         "{ACTOR_PREAMBLE}  run: xs with: n =>\n    acc := 0.\n    xs do: [:x | i := n. [i > 0] whileTrue: [acc := acc + x. i := i - 1]].\n    acc\n"
     );
-    let out = compile(&src);
+    let out = codegen(&src);
     assert_eq!(stores(&out), 2, "stores:\n{out}");
     assert_eq!(takes(&out), 1, "takes:\n{out}");
     assert!(
@@ -258,7 +254,7 @@ fn early_return_in_bracketed_loop_carries_live_cell() {
     let src = format!(
         "{ACTOR_PREAMBLE}  run: xs =>\n    acc := 0.\n    xs do: [:m | acc := acc + m. ^ acc].\n    acc\n"
     );
-    let out = compile(&src);
+    let out = codegen(&src);
     assert_eq!(takes(&out), 3, "takes:\n{out}");
     assert!(out.contains("'$bt_nlr'"), "nlr throw:\n{out}");
     assert_eq!(enforce_report(&src), None);
@@ -504,7 +500,7 @@ fn on_do_in_bracketed_loop_snapshots_the_live_cell() {
     // loop-entry `State` (which dropped every earlier slow-path write).
     for shape in ON_DO_LOOPS {
         let src = on_do_loop_src(shape, "x - x", "[:e | nil]");
-        let out = compile(&src);
+        let out = codegen(&src);
         let entries = on_do_entries(&out);
         assert_eq!(entries.len(), 1, "one on:do: boundary in {shape}:\n{out}");
         assert!(
@@ -528,7 +524,7 @@ fn on_do_in_bracketed_loop_snapshots_the_live_cell() {
 fn on_do_outside_bracketed_loop_keeps_the_pre_state_store() {
     // Gate pin: at method level the threaded `State` is current, so the
     // boundary keeps storing the pre-region version.
-    let out = compile(&format!(
+    let out = codegen(&format!(
         "{ACTOR_PREAMBLE}  run: x =>\n    acc := x + x.\n    [x - x] on: Error do: [:e | nil].\n    acc\n"
     ));
     let entries = on_do_entries(&out);
@@ -551,7 +547,7 @@ fn on_do_in_bracketed_loops_corpus_is_verifier_clean() {
             for handler in ON_DO_HANDLERS {
                 let src = on_do_loop_src(shape, op, handler);
                 assert_eq!(enforce_report(&src), None, "{src}");
-                let out = compile(&src);
+                let out = codegen(&src);
                 let entries = on_do_entries(&out);
                 assert!(!entries.is_empty(), "{src}\n{out}");
                 for entry in entries {
@@ -612,7 +608,7 @@ fn on_do_in_hybrid_loops_corpus_keeps_the_pre_state_boundary() {
             for handler in ON_DO_HYBRID_HANDLERS {
                 let src = on_do_loop_src(shape, op, handler);
                 assert_eq!(enforce_report(&src), None, "{src}");
-                let out = compile(&src);
+                let out = codegen(&src);
                 assert!(out.contains("Field"), "hybrid loop reached:\n{src}\n{out}");
                 let entries = on_do_entries(&out);
                 assert_eq!(entries.len(), 1, "{src}\n{out}");
@@ -664,7 +660,7 @@ fn stateacc_producer_in_bracketed_loop_seeds_from_the_cell() {
         for inner in NESTED_STATEACC_PRODUCERS {
             let src = stateacc_in_loop_src(shape, inner);
             assert_eq!(enforce_report(&src), None, "{src}");
-            let out = compile(&src);
+            let out = codegen(&src);
             assert!(
                 out.contains("TakeSeed")
                     && out.contains("= call 'beamtalk_actor_state':'take'() in"),
@@ -698,7 +694,7 @@ fn arm_field_assignment_with_producer_rhs_threads_ahead() {
         "{ACTOR_PREAMBLE}  run: c =>\n    t := 0\n    c ifTrue: [self.n := #(1, 2) do: [:e | t := t + e]]\n    t\n"
     );
     assert_eq!(enforce_report(&src), None, "{src}");
-    let out = compile(&src);
+    let out = codegen(&src);
     assert!(
         out.contains("'n'"),
         "the arm puts the field it assigns:\n{src}\n{out}"
@@ -718,7 +714,7 @@ fn separated_by_in_actor_loop_nest_seeds_from_the_cell() {
         "{ACTOR_PREAMBLE}  run: c =>\n    t := 0\n    m := 0. [m < 2] whileTrue: [m := m + 1. #(1, 2) do: [:z | u := 0. #(1, 2) do: [:x | u := u + x] separatedBy: [u := u + 10]. t := t + u]]\n    t\n"
     );
     assert_eq!(enforce_report(&src), None, "{src}");
-    let out = compile(&src);
+    let out = codegen(&src);
     assert!(
         out.contains("TakeSeed") && out.contains("= call 'beamtalk_actor_state':'take'() in"),
         "nested StateAcc seeds from the cell:\n{src}\n{out}"
@@ -926,7 +922,7 @@ fn stale_read_fires_for_every_read_site_in_the_corpus() {
     // and every payload is reached at least once.
     let in_region: Vec<String> = bracketed_read_srcs()
         .into_iter()
-        .filter(|src| reads_from_the_cell(&compile(src)))
+        .filter(|src| reads_from_the_cell(&codegen(src)))
         .collect();
     for shape in BRACKETED_READ_LOOPS {
         let head = shape.split("{p}").next().unwrap_or(shape);
@@ -965,7 +961,7 @@ fn closure_created_in_bracketed_loop_captures_the_cell() {
     let src = format!(
         "{ACTOR_PREAMBLE}  run: xs =>\n    acc := 0.\n    xs collect: [:m | acc := acc + m. [self.n]]\n"
     );
-    let out = compile(&src);
+    let out = codegen(&src);
     assert!(
         out.contains("ASCapture") && out.contains("= call 'beamtalk_actor_state':'take'() in fun"),
         "closure capture bound from the cell:\n{out}"
@@ -980,7 +976,7 @@ fn closure_created_in_bracketed_loop_captures_the_cell() {
 #[test]
 fn closure_created_outside_a_bracket_captures_the_threaded_state() {
     // Gate pin: with no bracket the capture stays the threaded `State`.
-    let out = compile(&format!(
+    let out = codegen(&format!(
         "{ACTOR_PREAMBLE}  run: xs =>\n    xs collect: [:m | [self.n]]\n"
     ));
     assert!(!out.contains("'take'() in fun"), "{out}");
@@ -1066,7 +1062,7 @@ fn conditional_in_a_bracketed_loop_condition_seeds_from_the_cell() {
     let src = format!(
         "{ACTOR_PREAMBLE}  run: m =>\n    i := 0.\n    [i < m ifTrue: [x := i. x + 1]. i < 4] whileTrue: [i := i + 1].\n    i\n"
     );
-    let out = compile(&src);
+    let out = codegen(&src);
     assert!(
         out.split("SeededState@").skip(1).any(|rest| rest
             .split_once(" = ")
@@ -1210,7 +1206,7 @@ fn inner_closure_reading_the_loops_own_names_keeps_direct_params() {
     ] {
         let src = format!("{ACTOR_PREAMBLE}  run =>\n    acc := 0.\n    {stmt}.\n    acc\n");
         assert_eq!(enforce_report(&src), None, "{stmt}");
-        let out = compile(&src);
+        let out = codegen(&src);
         assert!(
             !out.contains(", StateAcc) ->"),
             "{stmt}: direct params\n{out}"
@@ -1229,7 +1225,7 @@ fn inner_closure_reading_a_field_keeps_the_loops_state() {
     ] {
         let src = format!("{ACTOR_PREAMBLE}  run =>\n    acc := 0.\n    {stmt}.\n    acc\n");
         assert_eq!(enforce_report(&src), None, "{stmt}");
-        assert!(compile(&src).contains(", StateAcc) ->"), "{stmt}: StateAcc");
+        assert!(codegen(&src).contains(", StateAcc) ->"), "{stmt}: StateAcc");
     }
 }
 
@@ -1242,7 +1238,7 @@ fn non_carried_loop_nested_in_a_bracketing_loop_brackets_its_send() {
     );
     assert_eq!(enforce_report(&src), None);
     assert!(
-        brackets(&compile(&src)) >= 1,
+        brackets(&codegen(&src)) >= 1,
         "the to:do: send is bracketed"
     );
 }

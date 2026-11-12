@@ -144,12 +144,6 @@ fn key_diags(checker: &TypeChecker) -> Vec<Diagnostic> {
         .collect()
 }
 
-fn check(module: &Module, hierarchy: &ClassHierarchy) -> TypeChecker {
-    let mut checker = TypeChecker::new();
-    checker.check_module(module, hierarchy);
-    checker
-}
-
 // --- Tests ---------------------------------------------------------------
 
 #[test]

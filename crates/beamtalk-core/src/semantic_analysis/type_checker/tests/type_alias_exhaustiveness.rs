@@ -19,19 +19,6 @@ use super::common::*;
 
 use crate::source_analysis::Severity;
 
-/// Parses `source`, runs the full semantic-analysis pipeline (so `type`
-/// declarations get registered into an `AliasRegistry` exactly as they would
-/// for a real compile — see `semantic_analysis::mod`'s `analyse_full`), and
-/// returns every diagnostic.
-fn analyse_diagnostics(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-
-    let result = crate::semantic_analysis::analyse(&module);
-    result.diagnostics
-}
-
 // ── Advisory `match:` over an alias-typed local ───────
 
 #[test]
@@ -49,7 +36,7 @@ heading match: [
   #east -> 90
 ]
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let warnings: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("non-exhaustive"))
@@ -73,7 +60,7 @@ heading match: [
   #west -> 270
 ]
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let warnings: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("non-exhaustive"))
@@ -102,7 +89,7 @@ heading matchExhaustive: [
   #east -> 90
 ]
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("matchExhaustive:"))
@@ -126,7 +113,7 @@ heading matchExhaustive: [
   #west -> 270
 ]
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("matchExhaustive:"))
@@ -148,7 +135,7 @@ heading matchExhaustive: [
   _ -> -1
 ]
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("matchExhaustive:"))
@@ -175,7 +162,7 @@ Object subclass: Compass
       #east -> 90
     ]
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("matchExhaustive:"))
@@ -197,7 +184,7 @@ type Direction = #north | #south | #east | #west
 Object subclass: Compass
   defaultHeading -> Direction => 42
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let type_mismatches: Vec<_> = diags
         .iter()
         .filter(|d| d.category == Some(DiagnosticCategory::Type))
@@ -217,7 +204,7 @@ type Foo = String
 
 Object subclass: Foo
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     assert!(
         diags
             .iter()
@@ -252,7 +239,7 @@ Actor subclass: Logger(T :: Frobnicatable)
 Object subclass: Holder
   state: thing :: Logger(NotFrobnicatable) = nil
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let bound_violations: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("does not conform to"))

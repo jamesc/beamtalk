@@ -15,11 +15,7 @@ use beamtalk_core::source_analysis::DiagnosticCategory;
 
 const BASE: &str = "Object subclass: Base\n  classState: n = 0\n\n";
 
-fn parse_module(src: &str) -> beamtalk_core::ast::Module {
-    let (module, _) =
-        beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(src));
-    module
-}
+use beamtalk_core::test_helpers::test_support::parse_source as parse_module;
 
 /// The class-state-abroad warnings the lint reports for `src`.
 fn abroad_warnings(src: &str) -> usize {

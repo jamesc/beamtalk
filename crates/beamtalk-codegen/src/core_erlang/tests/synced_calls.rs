@@ -4,13 +4,7 @@
 //! ADR 0137 Phase 2a (BT-4020): the cell bracket (`SyncedCall`) and its
 //! check (`UnbracketedUserCodeSend`).
 
-use crate::core_erlang::{CodegenOptions, generate_module};
-use beamtalk_core::source_analysis::{lex_with_eof, parse};
-
-fn compile(src: &str) -> String {
-    let (module, _) = parse(lex_with_eof(src));
-    generate_module(&module, CodegenOptions::new("test")).expect("codegen should succeed")
-}
+use super::codegen;
 
 /// How many bracketed calls `out` holds (each stores through `store/1`).
 fn brackets(out: &str) -> usize {
@@ -21,7 +15,7 @@ fn brackets(out: &str) -> usize {
 /// The panic message of compiling `src` with the flag on (a verifier finding
 /// is a debug-build panic), or `None` when it compiles.
 fn enforce_report(src: &str) -> Option<String> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| compile(src)))
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| codegen(src)))
         .err()
         .map(|payload| {
             payload
@@ -39,7 +33,7 @@ fn count(haystack: &str, needle: &str) -> usize {
 #[test]
 fn a_send_to_another_object_is_stored_called_and_reloaded() {
     let src = "Actor subclass: Probe\n  state: n = 0\n\n  poke: other =>\n    other process.\n    self.n := self.n\n";
-    let on = compile(src);
+    let on = codegen(src);
     assert_eq!(brackets(&on), 1, "{on}");
     // The reload is the next `State` version, bound right after the call.
     assert!(
@@ -54,7 +48,7 @@ fn a_compiled_self_send_keeps_explicit_threading_and_no_bracket() {
     // The callee is a compiled method of this actor, so it brackets whatever it
     // runs itself (amended ADR 0137 §1): the caller's output is unchanged.
     let src = "Actor subclass: Probe\n  state: n = 0\n\n  a => self b\n\n  b => self.n := 1\n";
-    let out = compile(src);
+    let out = codegen(src);
     assert_eq!(brackets(&out), 0, "{out}");
 }
 
@@ -65,8 +59,8 @@ fn a_self_send_that_may_reach_the_default_arm_stores_before_the_dispatch() {
     // (store-only: the explicit `{reply, R, State}` still brings `State` back).
     let src =
         "Actor subclass: Probe\n  state: n = 0\n\n  a =>\n    self printString.\n    self.n\n";
-    let on = compile(src);
-    let control = compile("Actor subclass: Probe\n  state: n = 0\n\n  a =>\n    self.n\n");
+    let on = codegen(src);
+    let control = codegen("Actor subclass: Probe\n  state: n = 0\n\n  a =>\n    self.n\n");
     let store = "let _ = call 'beamtalk_actor_state':'store'(State) in";
     assert_eq!(count(&on, store), count(&control, store) + 1, "{on}");
     assert!(!on.contains("call 'beamtalk_actor_state':'take'()"), "{on}");
@@ -75,7 +69,7 @@ fn a_self_send_that_may_reach_the_default_arm_stores_before_the_dispatch() {
 #[test]
 fn an_intrinsic_that_never_runs_user_code_is_not_bracketed() {
     let src = "Actor subclass: Probe\n  state: n = 0\n\n  a: x =>\n    x isNil.\n    x class\n";
-    let out = compile(src);
+    let out = codegen(src);
     assert_eq!(brackets(&out), 0, "{out}");
 }
 
@@ -83,7 +77,7 @@ fn an_intrinsic_that_never_runs_user_code_is_not_bracketed() {
 fn an_inlined_conditional_is_not_a_call() {
     let src =
         "Actor subclass: Probe\n  state: n = 0\n\n  a: x =>\n    x ifTrue: [1] ifFalse: [2]\n";
-    let out = compile(src);
+    let out = codegen(src);
     assert_eq!(brackets(&out), 0, "{out}");
 }
 
@@ -91,7 +85,7 @@ fn an_inlined_conditional_is_not_a_call() {
 fn arithmetic_on_a_declared_integer_field_stays_a_bare_bif() {
     let src =
         "Actor subclass: Probe\n  state: n :: Integer = 0\n\n  bump => self.n := self.n + 1\n";
-    let out = compile(src);
+    let out = codegen(src);
     assert_eq!(brackets(&out), 0, "{out}");
 }
 
@@ -99,17 +93,17 @@ fn arithmetic_on_a_declared_integer_field_stays_a_bare_bif() {
 fn arithmetic_on_an_untyped_field_is_bracketed_where_it_can_dispatch() {
     // The operator guard's dispatching branch can reach a user `+`.
     let src = "Actor subclass: Probe\n  state: n = 0\n\n  bump => self.n := self.n + 1\n";
-    let on = compile(src);
+    let on = codegen(src);
     assert_eq!(brackets(&on), 1, "{on}");
 }
 
 #[test]
 fn a_class_method_and_a_value_type_are_never_bracketed() {
     let value = "Value subclass: Pt\n  field: x = 0\n\n  plus: other => self.x + other\n";
-    assert_eq!(brackets(&compile(value)), 0);
+    assert_eq!(brackets(&codegen(value)), 0);
     let class_side =
         "Actor subclass: Probe\n  state: n = 0\n\n  class make: other => other process\n";
-    assert_eq!(brackets(&compile(class_side)), 0);
+    assert_eq!(brackets(&codegen(class_side)), 0);
 }
 
 #[test]
@@ -118,7 +112,7 @@ fn a_block_body_called_through_a_loop_is_one_bracketed_call() {
     // body is a closure that runs against the cell, and the call that hands it
     // to the runtime is the bracket. The fold keeps its plain shape.
     let src = "Actor subclass: Probe\n  state: n = 0\n\n  each: items with: other =>\n    items do: [:x | other process: x].\n    self.n\n";
-    let on = compile(src);
+    let on = codegen(src);
     assert!(!on.contains("StateAcc"), "{on}");
     assert_eq!(brackets(&on), 1, "{on}");
     assert_eq!(enforce_report(src), None);
@@ -130,7 +124,7 @@ fn a_call_in_an_inlined_block_values_argument_is_bracketed() {
     // local is compiled in the construct's own statement sequence (BT-4020).
     let src = "Actor subclass: Probe\n  state: n = 0\n\n  run: a =>\n    loc := 0.\n    [:p | loc := p] value: a < a.\n    loc\n";
     assert_eq!(enforce_report(src), None);
-    let on = compile(src);
+    let on = codegen(src);
     assert!(on.contains("let _Synced"), "{on}");
 }
 
@@ -146,7 +140,7 @@ fn a_cast_in_a_fold_body_does_not_make_the_fold_threaded() {
     // keeps its plain closure (and a `Set` receiver keeps working). Handing a
     // closure to the runtime fold is itself a call, bracketed as one.
     let src = "Actor subclass: Room\n  state: members = Set new\n\n  say: text =>\n    self.members do: [:m | m receiveMessage: text!]\n";
-    let on = compile(src);
+    let on = codegen(src);
     assert!(!on.contains("StateAcc"), "{on}");
     assert!(on.contains("let _Synced"), "{on}");
     super::assert_compiles_through_erlc("test", &on);
@@ -157,7 +151,7 @@ fn a_fold_whose_body_only_reads_a_field_is_a_plain_closure_over_the_cell() {
     // Reading a field is no state effect: the fold stays a plain closure whose
     // body reads the cell, and the call that runs it is bracketed.
     let src = "Actor subclass: Probe\n  state: count :: Integer = 0\n  state: sum = 0\n\n  run: items =>\n    items do: [:m | self.count + 1].\n    self.sum\n";
-    let on = compile(src);
+    let on = codegen(src);
     super::assert_compiles_through_erlc("test", &on);
     assert!(!on.contains("StateAcc"), "{on}");
     assert!(
@@ -170,7 +164,7 @@ fn a_fold_whose_body_only_reads_a_field_is_a_plain_closure_over_the_cell() {
 fn a_state_default_with_a_collection_op_has_no_state_to_thread() {
     // Built while the state map itself is made: no `State` to store or thread.
     let src = "Actor subclass: Probe\n  state: items = (#(1, 2, 3) collect: [:x | x printString])\n\n  run => self.items\n";
-    let out = compile(src);
+    let out = codegen(src);
     assert_eq!(brackets(&out), 0, "{out}");
     super::assert_compiles_through_erlc("test", &out);
 }
@@ -182,7 +176,7 @@ fn a_bracket_around_a_call_whose_operand_is_bracketed_inside_a_closed_document_s
     // `[^0] printString` is bracketed inside the dispatch's closed document, so
     // the outer store must name the `State` the method has, not the inner version.
     let src = "Actor subclass: Probe\n  state: n = 0\n\n  run: a =>\n    x := a ifTrue: [1] ifFalse: [^0] printString.\n    self.n\n";
-    let on = compile(src);
+    let on = codegen(src);
     super::assert_compiles_through_erlc("test", &on);
     assert_eq!(enforce_report(src), None);
 }
@@ -196,7 +190,7 @@ fn a_bracket_around_a_call_whose_operand_is_bracketed_inside_a_closed_document_s
 #[test]
 fn every_dispatch_exit_is_compiled_or_goes_through_call_foreign() {
     let src = "Actor subclass: Probe\n  state: n = 0\n\n  run => self.n\n";
-    let code = compile(src);
+    let code = codegen(src);
     let default_arm = code
         .split("<OtherSelector> when 'true' ->")
         .nth(1)
@@ -240,7 +234,7 @@ fn every_dispatch_exit_is_compiled_or_goes_through_call_foreign() {
 #[test]
 fn an_early_return_out_of_a_direct_params_loop_compiles_through_erlc() {
     let src = "Actor subclass: Probe\n  state: n = 5\n\n  run =>\n    i := 0\n    [i < 3] whileTrue: [i := i + 1. i == 2 ifTrue: [^ self.n]]\n    0\n";
-    let out = compile(src);
+    let out = codegen(src);
     super::assert_compiles_through_erlc("test", &out);
     assert_eq!(enforce_report(src), None);
 }
@@ -249,11 +243,11 @@ fn an_early_return_out_of_a_direct_params_loop_compiles_through_erlc() {
 /// reply stores the final `State` back; a method without a bracket does not.
 #[test]
 fn a_bracketed_method_stores_its_final_state_on_exit() {
-    let with = compile(
+    let with = codegen(
         "Actor subclass: Probe\n  state: n = 0\n\n  poke: other =>\n    other process.\n    self.n := 1\n",
     );
     assert!(with.contains("_ExitReply"), "{with}");
-    let without = compile("Actor subclass: Probe\n  state: n = 0\n\n  bump => self.n := 1\n");
+    let without = codegen("Actor subclass: Probe\n  state: n = 0\n\n  bump => self.n := 1\n");
     assert!(!without.contains("_ExitReply"), "{without}");
     super::assert_compiles_through_erlc("test", &with);
 }
@@ -288,11 +282,11 @@ fn a_send_as_a_match_scrutinee_after_a_field_write_is_bracketed() {
 #[test]
 fn meta_flags_threads_actor_state_only_for_actor_subclasses() {
     let flag = "'threads_actor_state' => 'true'";
-    let actor = compile("Actor subclass: Probe\n  state: n = 0\n\n  run => self.n\n");
+    let actor = codegen("Actor subclass: Probe\n  state: n = 0\n\n  run => self.n\n");
     assert!(actor.contains(flag), "{actor}");
-    let value = compile("Value subclass: Pt\n  field: x :: Integer = 0\n");
+    let value = codegen("Value subclass: Pt\n  field: x :: Integer = 0\n");
     assert!(!value.contains(flag), "{value}");
-    let object = compile("Object subclass: Thing\n  run => 1\n");
+    let object = codegen("Object subclass: Thing\n  run => 1\n");
     assert!(!object.contains(flag), "{object}");
 }
 
@@ -307,7 +301,7 @@ fn fast_path_head(out: &str) -> Option<&str> {
 /// on its fast arm (no store, no reload); only the dispatching arm brackets.
 #[test]
 fn a_guarded_operator_brackets_only_its_dispatching_arm() {
-    let out = compile("Actor subclass: Probe\n  state: n = 0\n\n  bump: v => self.n := v + 1\n");
+    let out = codegen("Actor subclass: Probe\n  state: n = 0\n\n  bump: v => self.n := v + 1\n");
     let head = fast_path_head(&out).expect("a fast-path bracket");
     assert!(head.contains("call 'erlang':'is_number'("), "{head}");
     assert!(head.contains("<call 'erlang':'+'("), "{head}");
@@ -327,7 +321,7 @@ fn a_guarded_operator_brackets_only_its_dispatching_arm() {
 #[test]
 fn a_coercing_operator_has_a_fast_path_only_for_integer_add_sub_mul() {
     let add =
-        compile("Actor subclass: Probe\n  state: n = 0\n\n  add: a to: b => self.n := a + b\n");
+        codegen("Actor subclass: Probe\n  state: n = 0\n\n  add: a to: b => self.n := a + b\n");
     let head = fast_path_head(&add).expect("a fast-path bracket");
     assert!(
         head.contains("call 'erlang':'and'(call 'erlang':'is_integer'("),
@@ -336,7 +330,7 @@ fn a_coercing_operator_has_a_fast_path_only_for_integer_add_sub_mul() {
     assert!(!head.contains("try"), "{head}");
     super::assert_compiles_through_erlc("test", &add);
     let div =
-        compile("Actor subclass: Probe\n  state: n = 0\n\n  div: a by: b => self.n := a / b\n");
+        codegen("Actor subclass: Probe\n  state: n = 0\n\n  div: a by: b => self.n := a / b\n");
     assert!(fast_path_head(&div).is_none(), "{div}");
 }
 
@@ -345,7 +339,7 @@ fn a_coercing_operator_has_a_fast_path_only_for_integer_add_sub_mul() {
 /// still the auto getter; otherwise the guarded send is bracketed.
 #[test]
 fn a_typed_slot_read_brackets_only_its_slow_arm() {
-    let out = compile(concat!(
+    let out = codegen(concat!(
         "Actor subclass: Probe\n  state: n = 0\n\n  read: p :: Pt => self.n := p x\n\n",
         "sealed Value subclass: Pt\n  field: x :: Integer = 0\n",
     ));
@@ -363,7 +357,7 @@ fn a_typed_slot_read_brackets_only_its_slow_arm() {
 /// user-written method) keeps the whole bracket.
 #[test]
 fn a_typed_method_send_keeps_the_whole_bracket() {
-    let out = compile(concat!(
+    let out = codegen(concat!(
         "Actor subclass: Probe\n  state: n = 0\n\n  read: p :: Pt => self.n := p twice\n\n",
         "sealed Value subclass: Pt\n  field: x :: Integer = 0\n\n  twice -> Integer => self.x\n",
     ));
@@ -374,7 +368,7 @@ fn a_typed_method_send_keeps_the_whole_bracket() {
 /// field whose getter the class overrides with a method is not a slot read.
 #[test]
 fn is_slot_lists_exactly_the_auto_getters() {
-    let out = compile(concat!(
+    let out = codegen(concat!(
         "Value subclass: Pt\n  field: x :: Integer = 0\n  field: y :: Integer = 0\n\n",
         "  y -> Integer => self.x + 1\n",
     ));

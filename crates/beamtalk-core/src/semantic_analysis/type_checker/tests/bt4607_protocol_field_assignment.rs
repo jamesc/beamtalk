@@ -9,24 +9,6 @@
 
 use super::common::*;
 
-/// Type and DNU diagnostic messages for `source`, after asserting it parses.
-fn checker_messages(source: &str) -> Vec<String> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    crate::semantic_analysis::analyse(&module)
-        .diagnostics
-        .into_iter()
-        .filter(|d| {
-            matches!(
-                d.category,
-                Some(DiagnosticCategory::Type | DiagnosticCategory::Dnu)
-            )
-        })
-        .map(|d| d.message.to_string())
-        .collect()
-}
-
 /// `Sized`/`Quacker` protocols, a `Duck` conformer of both, and `{body}`
 /// appended verbatim as the body of `Holder`.
 fn source_with(body: &str) -> String {
@@ -49,7 +31,7 @@ Actor subclass: Holder
 
 #[test]
 fn field_accepts_a_structural_conformer() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"
   state: q :: Quacker = Duck new
   state: s :: Sized = "abc"
@@ -63,7 +45,7 @@ fn field_accepts_a_structural_conformer() {
 
 #[test]
 fn field_rejects_a_protocol_value_it_does_not_subsume() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   state: q :: Quacker = Duck new
   put: x :: Sized => self.q := x
@@ -77,7 +59,7 @@ fn field_rejects_a_protocol_value_it_does_not_subsume() {
 
 #[test]
 fn field_rejects_a_non_conformer() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"
   state: q :: Quacker = Duck new
   put => self.q := "abc"
@@ -91,7 +73,7 @@ fn field_rejects_a_non_conformer() {
 
 #[test]
 fn nilable_protocol_field_accepts_conformer_and_nil() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   state: q :: Quacker | Nil = nil
   put => self.q := Duck new
@@ -103,7 +85,7 @@ fn nilable_protocol_field_accepts_conformer_and_nil() {
 
 #[test]
 fn nilable_protocol_field_rejects_a_non_conformer() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"
   state: q :: Quacker | Nil = nil
   put => self.q := "abc"
@@ -117,7 +99,7 @@ fn nilable_protocol_field_rejects_a_non_conformer() {
 
 #[test]
 fn union_value_with_a_protocol_field() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"
   state: q :: Quacker | Nil = nil
   put: flag :: Boolean => self.q := flag ifTrue: [Duck new] ifFalse: [nil]
@@ -133,7 +115,7 @@ fn union_value_with_a_protocol_field() {
 
 #[test]
 fn intersection_field_needs_every_part() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"
   state: q :: Quacker & Sized = Duck new
   put => self.q := Duck new
@@ -148,7 +130,7 @@ fn intersection_field_needs_every_part() {
 
 #[test]
 fn state_default_rejects_a_non_conformer() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"
   state: q :: Quacker = "abc"
 "#,

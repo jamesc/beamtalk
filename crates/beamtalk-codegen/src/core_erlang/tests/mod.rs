@@ -32,9 +32,7 @@ pub use super::*;
 pub use beamtalk_core::ast::*;
 pub use beamtalk_core::source_analysis::Span;
 
-pub(crate) fn bare(expr: Expression) -> ExpressionStatement {
-    ExpressionStatement::bare(expr)
-}
+pub(crate) use beamtalk_core::test_helpers::test_support::bare;
 
 /// Asserts that the given Core Erlang source compiles successfully through `erlc`.
 ///
@@ -97,14 +95,9 @@ pub(crate) fn assert_compiles_through_erlc(module_name: &str, core_erlang: &str)
 /// Whether `erlc` can be invoked. [`assert_compiles_through_erlc`] silently passes without
 /// it, so a test whose verdict depends on `erlc` rejecting generated code must check this
 /// before asserting that a case which only fails at `erlc` is still failing.
-/// Any error other than "not found" (e.g. a permissions failure) counts as available, so the
-/// failure surfaces in `assert_compiles_through_erlc` instead of silently skipping the check.
-pub(crate) fn erlc_available() -> bool {
-    match std::process::Command::new("erlc").arg("-v").output() {
-        Ok(_) => true,
-        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
-    }
-}
+///
+/// The one shared probe lives in `beamtalk_core::test_helpers::test_support` (BT-4678).
+pub(crate) use beamtalk_core::test_helpers::test_support::{erlang_available, erlc_available};
 
 /// The repository root, derived from this crate's own manifest directory
 /// rather than the test process's current directory (which `cargo test`

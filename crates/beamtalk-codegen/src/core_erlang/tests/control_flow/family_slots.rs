@@ -33,11 +33,8 @@ use crate::core_erlang::threaded_ir::{
 };
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
-use beamtalk_core::source_analysis::Span;
 
-fn span() -> Span {
-    Span::new(0, 1)
-}
+use beamtalk_core::test_helpers::test_support::unit_span as span;
 
 fn state(version: usize) -> VersionedVar {
     VersionedVar::new(VersionPrefix::State, version, FrameId::ROOT)

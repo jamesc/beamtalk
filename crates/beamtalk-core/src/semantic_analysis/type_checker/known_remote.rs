@@ -191,19 +191,14 @@ fn is_trivial_param_forward(block: &Block) -> bool {
 mod tests {
     use super::*;
     use crate::ast::{BlockParameter, ExpressionStatement, KeywordPart};
-    use crate::source_analysis::Span;
 
     fn stmt(expression: Expression) -> ExpressionStatement {
         ExpressionStatement::bare(expression)
     }
 
-    fn span() -> Span {
-        Span::new(0, 0)
-    }
+    use crate::test_helpers::test_support::test_span as span;
 
-    fn ident(name: &str) -> Expression {
-        Expression::Identifier(Identifier::new(name, span()))
-    }
+    use crate::test_helpers::test_support::ident_expr as ident;
 
     fn symbol(name: &str) -> Expression {
         Expression::Literal(Literal::Symbol(EcoString::from(name)), span())

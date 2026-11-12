@@ -39,15 +39,13 @@ use super::*;
 
 use crate::ast::{
     Block, BlockParameter, ClassDefinition, ClassKind, CommentAttachment, DeclaredKeyword,
-    Expression, ExpressionStatement, Identifier, Literal, MatchArm, MessageSelector,
-    MethodDefinition, Pattern, StateDeclaration, StringSegment, TypeAnnotation,
+    Expression, Identifier, Literal, MatchArm, MessageSelector, MethodDefinition, Pattern,
+    StateDeclaration, StringSegment, TypeAnnotation,
 };
 
 use crate::source_analysis::{Severity, Span};
 
-fn bare(expr: Expression) -> ExpressionStatement {
-    ExpressionStatement::bare(expr)
-}
+use crate::test_helpers::test_support::bare;
 
 /// The classes `src` declares, as `package` exports them: the cross-file
 /// declarations a build hands `analyse_full` for a dependency (BT-4283).

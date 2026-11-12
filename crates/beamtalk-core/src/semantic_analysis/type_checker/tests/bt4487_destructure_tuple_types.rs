@@ -10,14 +10,8 @@
 //! `String` yields exactly one "declares return type" mismatch, a `Dynamic`
 //! binding yields none.
 
+use super::common::analyse_diags;
 use crate::source_analysis::Diagnostic;
-
-fn analyse_diagnostics(source: &str) -> Vec<Diagnostic> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    crate::semantic_analysis::analyse(&module).diagnostics
-}
 
 fn mismatches(diags: &[Diagnostic]) -> usize {
     diags
@@ -28,7 +22,7 @@ fn mismatches(diags: &[Diagnostic]) -> usize {
 
 /// Probe: destructure a `p` of type `ty` with `pattern`, return `ret` as String.
 fn probe(ty: &str, pattern: &str, ret: &str) -> usize {
-    let diags = analyse_diagnostics(&format!(
+    let diags = analyse_diags(&format!(
         "typed Object subclass: Holder\n  run: p :: {ty} -> String =>\n    {pattern} := p\n    {ret}\n"
     ));
     mismatches(&diags)
@@ -69,7 +63,7 @@ fn object_member_of_union_column_binds_dynamic() {
 
 #[test]
 fn type_var_member_of_union_column_binds_dynamic() {
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         "typed Object subclass: Box(T)\n  run: p :: Tuple(T, String) | Tuple(Integer, String) -> String =>\n    {a, _} := p\n    a\n",
     );
     assert_eq!(mismatches(&diags), 0);
@@ -129,7 +123,7 @@ fn wildcard_and_literal_elements_bind_nothing() {
 
 #[test]
 fn send_to_binding_gets_typed_warning() {
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         "typed Object subclass: Holder\n  run: p :: Tuple(Integer, String) -> Object =>\n    {a, b} := p\n    a fooBarBaz\n",
     );
     assert!(
@@ -142,7 +136,7 @@ fn send_to_binding_gets_typed_warning() {
 fn port_shape_warns() {
     // BT-4487: `{_ip, port} := ...; port` declared `-> Integer` while the
     // position is `Integer | Binary`.
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         "typed Object subclass: Holder\n  port: addr :: Tuple(Symbol, Integer | Binary) -> Integer =>\n    {_ip, port} := addr\n    port\n",
     );
     assert_eq!(mismatches(&diags), 1, "got: {diags:#?}");

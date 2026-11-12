@@ -18,6 +18,8 @@
 
 use proptest::prelude::*;
 
+use crate::test_helpers::test_support::near_valid_from;
+
 use crate::source_analysis::{lex_with_eof, parse};
 
 use super::{AnalysisContext, ClassHierarchy, analyse, analyse_full, infer_types};
@@ -53,36 +55,8 @@ const FRAGMENTS: &[&str] = &[
     "[1] ensure: [nil]",
 ];
 
-fn valid_fragment() -> impl Strategy<Value = String> {
-    prop::sample::select(FRAGMENTS).prop_map(std::string::ToString::to_string)
-}
-
-/// Generates near-valid Beamtalk with mutations.
 fn near_valid_beamtalk() -> impl Strategy<Value = String> {
-    prop_oneof![
-        // Valid fragments
-        valid_fragment(),
-        // Truncated
-        valid_fragment().prop_flat_map(|s| {
-            let len = s.len();
-            if len <= 1 {
-                Just(s).boxed()
-            } else {
-                (1..len)
-                    .prop_map(move |cut| {
-                        let safe_cut = s.floor_char_boundary(cut);
-                        if safe_cut == 0 {
-                            s.clone()
-                        } else {
-                            s[..safe_cut].to_string()
-                        }
-                    })
-                    .boxed()
-            }
-        }),
-        // Multiple fragments concatenated
-        (valid_fragment(), valid_fragment()).prop_map(|(a, b)| format!("{a}\n{b}")),
-    ]
+    near_valid_from(FRAGMENTS)
 }
 
 /// Known variable names for REPL context testing.

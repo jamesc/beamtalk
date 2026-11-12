@@ -26,15 +26,6 @@
 
 use super::common::*;
 
-fn type_diagnostics(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-        .into_iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect()
-}
-
 /// AC: `local notNil and: [local > 0 and: [5 >= local]]` — `local` is
 /// narrowed to non-Nil inside nested `and:` blocks, including the
 /// binary-message argument position `5 >= local`, not just the receiver
@@ -49,7 +40,7 @@ typed Object subclass: Checker
       local > 0 and: [5 >= local]
     ]
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     assert!(
         diags.is_empty(),
         "`local` should be narrowed to Integer throughout the `and:` chain, got: {diags:#?}"
@@ -66,7 +57,7 @@ typed Actor subclass: Engine
   check -> Boolean =>
     self.count notNil and: [5 >= self.count]
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     assert!(
         diags.is_empty(),
         "`self.count` should be narrowed to Integer inside the `and:` block, got: {diags:#?}"
@@ -83,7 +74,7 @@ typed Object subclass: Checker
   check: flag :: Boolean -> Boolean =>
     flag and: [true]
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     assert!(
         diags.is_empty(),
         "plain `flag and: [...]` should type-check with no diagnostics, got: {diags:#?}"
@@ -106,7 +97,7 @@ typed Object subclass: Checker
     local notNil and: [local > 0]
     Consumer take: local
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     assert_eq!(
         diags.len(),
         1,

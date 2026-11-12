@@ -14,14 +14,8 @@
 //! non-stdlib compile (mirroring `with_builtins`' always-on stdlib
 //! classes and `stdlib_protocols`' last-tier `uses:` fallback).
 
-use crate::semantic_analysis::{AnalysisContext, analyse, analyse_full};
-
-fn analyse_diagnostics(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    analyse(&module).diagnostics
-}
+use super::common::analyse_diags;
+use crate::semantic_analysis::{AnalysisContext, analyse_full};
 
 fn analyse_diagnostics_as_stdlib(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
     let tokens = crate::source_analysis::lex_with_eof(source);
@@ -53,7 +47,7 @@ Value subclass: W
   field: a :: Timeout = 5
   field: c :: ShutdownTimeout = 5
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits = state_mismatches(&diags);
     assert!(
         hits.is_empty(),
@@ -70,7 +64,7 @@ fn bt4039_integer_default_accepted_for_stdlib_alias_union_state() {
 Actor subclass: W
   state: t :: Timeout = 5000
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits = state_mismatches(&diags);
     assert!(
         hits.is_empty(),
@@ -87,7 +81,7 @@ Value subclass: W
   field: b :: Timeout = #infinity
   field: d :: ShutdownTimeout = #brutalKill
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits = state_mismatches(&diags);
     assert!(
         hits.is_empty(),
@@ -105,7 +99,7 @@ fn bt4039_mismatched_default_still_warns_with_stdlib_expansion() {
 Value subclass: W
   field: t :: Timeout = "bad"
 "#;
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits = state_mismatches(&diags);
     assert_eq!(
         hits.len(),
@@ -129,7 +123,7 @@ type LocalTimeout = Integer | #infinity
 Value subclass: W
   field: t :: LocalTimeout = 5
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits = state_mismatches(&diags);
     assert!(
         hits.is_empty(),
@@ -148,7 +142,7 @@ type Timeout = String
 Value subclass: W
   field: s :: Timeout = "ok"
 "#;
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits = state_mismatches(&diags);
     assert!(
         hits.is_empty(),
@@ -161,7 +155,7 @@ type Timeout = String
 Value subclass: W
   field: n :: Timeout = 5
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits = state_mismatches(&diags);
     assert_eq!(
         hits.len(),
@@ -183,7 +177,7 @@ Value subclass: Timeout
 Value subclass: W
   field: n :: Timeout = 5
 "#;
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits = state_mismatches(&diags);
     assert_eq!(
         hits.len(),

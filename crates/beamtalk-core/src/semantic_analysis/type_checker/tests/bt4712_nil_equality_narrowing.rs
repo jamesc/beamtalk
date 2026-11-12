@@ -6,20 +6,6 @@
 
 use super::common::*;
 
-fn type_diagnostics(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-        .into_iter()
-        .filter(|d| {
-            matches!(
-                d.category,
-                Some(DiagnosticCategory::Type | DiagnosticCategory::Dnu)
-            )
-        })
-        .collect()
-}
-
 /// Wraps `body` (statements using `x :: Integer | Nil`) in a typed method.
 fn method(body: &str) -> String {
     format!(
@@ -32,7 +18,7 @@ typed Object subclass: Repro
 }
 
 fn assert_clean(body: &str) {
-    let diags = type_diagnostics(&method(body));
+    let diags = type_dnu_diags(&method(body));
     assert!(
         diags.is_empty(),
         "expected no diagnostics for:\n{body}\ngot: {diags:#?}"
@@ -42,7 +28,7 @@ fn assert_clean(body: &str) {
 /// Asserts the body is rejected *because* `x` still (or only) includes nil:
 /// the diagnostic must be the `+` send failing on the nil type.
 fn assert_rejected(body: &str) {
-    let diags = type_diagnostics(&method(body));
+    let diags = type_dnu_diags(&method(body));
     assert!(
         diags.iter().any(|d| d.message.contains('+')
             && (d.message.contains("Nil") || d.message.contains("UndefinedObject"))),
@@ -139,7 +125,7 @@ fn self_field_eq_nil_narrows() {
         "    (self.n =/= nil) ifTrue: [^self take: self.n]\n    0",
         "    (self.n /= nil) ifFalse: [^0]\n    self take: self.n",
     ] {
-        let diags = type_diagnostics(&field_source(body));
+        let diags = type_dnu_diags(&field_source(body));
         assert!(diags.is_empty(), "for:\n{body}\ngot: {diags:#?}");
     }
 }
@@ -151,7 +137,7 @@ fn self_field_without_narrowing_is_rejected() {
         "    (self.n =:= nil) ifFalse: [^0]\n    self take: self.n",
         "    (self.n =/= nil) ifTrue: [^0]\n    self take: self.n",
     ] {
-        let diags = type_diagnostics(&field_source(body));
+        let diags = type_dnu_diags(&field_source(body));
         assert!(
             diags
                 .iter()

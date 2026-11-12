@@ -39,6 +39,7 @@ use beamtalk_codegen::core_erlang::fault::{Fault, with as with_fault};
 use beamtalk_core::ast::Expression;
 use beamtalk_core::semantic_analysis::{AnalysisContext, analyse_full};
 use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
+use beamtalk_core::test_helpers::test_support::erlang_available;
 use beamtalk_repl::codegen::{
     generate_repl_expressions, generate_repl_expressions_surfacing_verifier,
     generate_repl_expressions_traced,
@@ -658,11 +659,6 @@ fn verifier_report(src: &str) -> String {
         Ok(Err(e)) => format!("codegen: {e:?}"),
         Err(payload) => format!("panic: {}", panic_message(payload.as_ref())),
     }
-}
-
-fn erlang_available() -> bool {
-    Command::new("erlc").arg("-help").output().is_ok()
-        && Command::new("erl").arg("-version").output().is_ok()
 }
 
 fn repo_root() -> PathBuf {

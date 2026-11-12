@@ -862,17 +862,13 @@ mod tests {
     };
     use crate::source_analysis::Span;
 
-    fn ts() -> Span {
-        Span::new(0, 0)
-    }
+    use crate::test_helpers::test_support::test_span as ts;
 
     fn lit(n: i64) -> Expression {
         Expression::Literal(Literal::Integer(n), ts())
     }
 
-    fn ident(name: &str) -> Expression {
-        Expression::Identifier(Identifier::new(name, ts()))
-    }
+    use crate::test_helpers::test_support::ident_expr as ident;
 
     fn ret(val: Expression) -> Expression {
         Expression::Return {
@@ -881,9 +877,7 @@ mod tests {
         }
     }
 
-    fn bare(expr: Expression) -> ExpressionStatement {
-        ExpressionStatement::bare(expr)
-    }
+    use crate::test_helpers::test_support::bare;
 
     fn empty_block(span: Span) -> Block {
         Block::new(vec![], vec![], span)

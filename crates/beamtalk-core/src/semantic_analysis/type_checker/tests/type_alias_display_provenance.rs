@@ -17,21 +17,9 @@
 //! `check_argument_types`) — see the tests below asserting a valid alias
 //! member is no longer flagged, and an invalid one still is.
 
-/// Parses `source` and runs the full semantic-analysis pipeline (alias
-/// registration + `check_module_with_protocols_and_aliases`, exactly as a
-/// real compile would — see `type_alias_exhaustiveness.rs`'s identical
-/// helper), returning every diagnostic.
-fn analyse_diagnostics(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-
-    let result = crate::semantic_analysis::analyse(&module);
-    result.diagnostics
-}
-
 // ── Membership diagnostics name the alias (ADR 0108 Error examples) ────────
 
+use super::common::analyse_diags;
 #[test]
 fn singleton_comparison_against_alias_names_alias_and_suggests_correction() {
     // ADR 0108's own example: `#premanent` vs `#permanent`. The receiver's
@@ -46,7 +34,7 @@ Object subclass: Supervisor
   restart: policy :: RestartStrategy =>
     policy =:= #premanent
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("comparison can never be true"))
@@ -76,7 +64,7 @@ Object subclass: Supervisor
   restart: policy :: #temporary | #transient | #permanent =>
     policy =:= #premanent
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("comparison can never be true"))
@@ -104,7 +92,7 @@ Object subclass: Supervisor
   restart: policy :: RestartStrategy =>
     policy =:= #zzz
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("comparison can never be true"))
@@ -144,7 +132,7 @@ Object subclass: Supervisor
   restart: policy :: RestartStrategy =>
     policy /= #premanent
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("comparison is always true"))
@@ -180,7 +168,7 @@ Actor subclass: Supervisor
   reset =>
     self.policy := 42
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Type mismatch: field"))
@@ -207,7 +195,7 @@ Actor subclass: Supervisor
   reset =>
     self.count := "oops"
 "#;
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Type mismatch: field"))
@@ -349,7 +337,7 @@ Actor subclass: Supervisor
   reset =>
     self.policy := #transient
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("Type mismatch: field"))
@@ -374,7 +362,7 @@ Actor subclass: Supervisor
 
 Supervisor spawnWith: #{#policy => #transient}
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("type mismatch for state key"))
@@ -399,7 +387,7 @@ Object subclass: Widget
 
 Widget new restart: #temporary
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("expects"))
@@ -428,7 +416,7 @@ Object subclass: Widget
 
 Widget new restart: 42
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("expects"))
@@ -475,7 +463,7 @@ Object subclass: Runner
     policy := Provider policy
     Widget new restart: policy
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("expects"))
@@ -503,7 +491,7 @@ Actor subclass: Supervisor
 
 Supervisor spawnWith: #{#policy => 42}
 ";
-    let diags = analyse_diagnostics(source);
+    let diags = analyse_diags(source);
     let hits: Vec<_> = diags
         .iter()
         .filter(|d| d.message.contains("type mismatch for state key"))

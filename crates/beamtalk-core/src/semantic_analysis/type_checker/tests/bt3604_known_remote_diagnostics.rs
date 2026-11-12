@@ -30,14 +30,6 @@
 use super::common::*;
 use crate::source_analysis::Severity;
 
-fn check_source(src: &str) -> Vec<Diagnostic> {
-    let module = parse_source(src);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
-    checker.take_diagnostics()
-}
-
 /// The full semantic-analysis pipeline (`TypeChecker` + the Phase 3
 /// validators, including `sendability_validators::check_block_capture_sendability`)
 /// — needed for the block-argument Hint, which is emitted by that separate,
@@ -118,7 +110,7 @@ fn probe_annotated(bind_expr: &str) -> String {
 
 #[test]
 fn spawn_on_binding_is_known_remote() {
-    let diags = check_source(&probe("(Worker spawnOn: node) unwrap"));
+    let diags = diags(&probe("(Worker spawnOn: node) unwrap"));
     assert_eq!(
         node_warnings(&sendability(&diags)).len(),
         1,
@@ -128,7 +120,7 @@ fn spawn_on_binding_is_known_remote() {
 
 #[test]
 fn spawn_with_on_binding_is_known_remote() {
-    let diags = check_source(&probe("(Worker spawnWith: #{} on: node) unwrap"));
+    let diags = diags(&probe("(Worker spawnWith: #{} on: node) unwrap"));
     assert_eq!(
         node_warnings(&sendability(&diags)).len(),
         1,
@@ -138,7 +130,7 @@ fn spawn_with_on_binding_is_known_remote() {
 
 #[test]
 fn spawn_as_on_binding_is_known_remote() {
-    let diags = check_source(&probe("(Worker spawnAs: #w on: node) unwrap"));
+    let diags = diags(&probe("(Worker spawnAs: #w on: node) unwrap"));
     assert_eq!(
         node_warnings(&sendability(&diags)).len(),
         1,
@@ -148,7 +140,7 @@ fn spawn_as_on_binding_is_known_remote() {
 
 #[test]
 fn spawn_with_as_on_binding_is_known_remote() {
-    let diags = check_source(&probe("(Worker spawnWith: #{} as: #w on: node) unwrap"));
+    let diags = diags(&probe("(Worker spawnWith: #{} as: #w on: node) unwrap"));
     assert_eq!(
         node_warnings(&sendability(&diags)).len(),
         1,
@@ -158,7 +150,7 @@ fn spawn_with_as_on_binding_is_known_remote() {
 
 #[test]
 fn named_on_binding_is_known_remote() {
-    let diags = check_source(&probe("(Worker named: #w on: node) unwrap"));
+    let diags = diags(&probe("(Worker named: #w on: node) unwrap"));
     assert_eq!(
         node_warnings(&sendability(&diags)).len(),
         1,
@@ -168,7 +160,7 @@ fn named_on_binding_is_known_remote() {
 
 #[test]
 fn scope_global_binding_is_known_remote() {
-    let diags = check_source(&probe_annotated(
+    let diags = diags(&probe_annotated(
         "(Worker spawnAs: #w scope: #global) unwrap",
     ));
     assert_eq!(
@@ -181,7 +173,7 @@ fn scope_global_binding_is_known_remote() {
 #[test]
 fn scope_local_binding_is_not_known_remote() {
     // `scope: #local` is explicitly NOT known-remote (ADR 0126 §6 table).
-    let diags = check_source(&probe_annotated(
+    let diags = diags(&probe_annotated(
         "(Worker spawnAs: #w scope: #local) unwrap",
     ));
     assert!(
@@ -194,7 +186,7 @@ fn scope_local_binding_is_not_known_remote() {
 fn local_spawn_binding_is_not_known_remote() {
     // Baseline: an ordinary local `spawn` is not known-remote — the #node
     // Warning must stay silent, matching ADR 0103's unchanged v1 behaviour.
-    let diags = check_source(&probe("Worker spawn"));
+    let diags = diags(&probe("Worker spawn"));
     assert!(
         node_warnings(&sendability(&diags)).is_empty(),
         "a local spawn binding must NOT be known-remote: {diags:?}"
@@ -213,7 +205,7 @@ fn provenance_does_not_flow_through_field_assignment() {
          useNode: cache :: Ets =>\n    \
          self.target useNode: cache\n"
     );
-    let diags = check_source(&src);
+    let diags = diags(&src);
     assert!(
         node_warnings(&sendability(&diags)).is_empty(),
         "known-remote must NOT survive a field write/read: {diags:?}"
@@ -230,7 +222,7 @@ fn provenance_does_not_flow_through_a_collection() {
          extracted := bag first\n    \
          extracted useNode: cache\n"
     );
-    let diags = check_source(&src);
+    let diags = diags(&src);
     assert!(
         node_warnings(&sendability(&diags)).is_empty(),
         "known-remote must NOT survive a round trip through a collection: {diags:?}"
@@ -248,7 +240,7 @@ fn provenance_survives_with_timeout() {
          proxy := remote withTimeout: 5000\n    \
          proxy useNode: cache\n"
     );
-    let diags = check_source(&src);
+    let diags = diags(&src);
     assert_eq!(
         node_warnings(&sendability(&diags)).len(),
         1,
@@ -266,7 +258,7 @@ fn provenance_survives_trivial_if_ok_if_error_forward() {
          remote := (Worker spawnOn: node) ifOk: [:v | v] ifError: [:e | Worker spawn]\n    \
          remote useNode: cache\n"
     );
-    let diags = check_source(&src);
+    let diags = diags(&src);
     assert_eq!(
         node_warnings(&sendability(&diags)).len(),
         1,
@@ -283,7 +275,7 @@ fn process_handle_warns_at_known_remote_receiver() {
          run: node :: Node with: port :: Port =>\n    \
          remote := (Worker spawnOn: node) unwrap\n    \
          remote usePort: port\n";
-    let diags = check_source(src);
+    let diags = diags(src);
     let warns = process_warnings(&sendability(&diags));
     assert_eq!(warns.len(), 1, "expected one warning, got: {diags:?}");
     assert_eq!(warns[0].severity, Severity::Warning);
@@ -298,7 +290,7 @@ fn process_handle_warns_at_non_remote_receiver_unchanged() {
          run: port :: Port =>\n    \
          w := Worker spawn\n    \
          w usePort: port\n";
-    let diags = check_source(src);
+    let diags = diags(src);
     let warns = process_warnings(&sendability(&diags));
     assert_eq!(warns.len(), 1, "expected one warning, got: {diags:?}");
     assert_eq!(warns[0].severity, Severity::Warning);
@@ -308,7 +300,7 @@ fn process_handle_warns_at_non_remote_receiver_unchanged() {
 
 #[test]
 fn node_handle_warns_at_known_remote_receiver() {
-    let diags = check_source(&probe("(Worker spawnOn: node) unwrap"));
+    let diags = diags(&probe("(Worker spawnOn: node) unwrap"));
     let warns = node_warnings(&sendability(&diags));
     assert_eq!(warns.len(), 1, "expected one warning, got: {diags:?}");
     assert_eq!(warns[0].severity, Severity::Warning);
@@ -330,7 +322,7 @@ fn node_handle_silent_at_non_remote_receiver_unchanged() {
          w := Worker spawn\n    \
          w useNode: cache\n"
     );
-    let diags = check_source(&src);
+    let diags = diags(&src);
     assert!(
         node_warnings(&sendability(&diags)).is_empty(),
         "a #node handle to a non-remote receiver must stay silent: {diags:?}"

@@ -9,24 +9,6 @@
 
 use super::common::*;
 
-/// Type and DNU diagnostic messages for `source`, after asserting it parses.
-fn checker_messages(source: &str) -> Vec<String> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    crate::semantic_analysis::analyse(&module)
-        .diagnostics
-        .into_iter()
-        .filter(|d| {
-            matches!(
-                d.category,
-                Some(DiagnosticCategory::Type | DiagnosticCategory::Dnu)
-            )
-        })
-        .map(|d| d.message.to_string())
-        .collect()
-}
-
 /// `Sized`/`Quacker`/`LoudQuacker` protocols, a `Duck` conformer of
 /// `Quacker`, a `Taker` with a `List(Quacker)` parameter, and `{body}`
 /// appended verbatim as the methods of `Caller`.
@@ -57,7 +39,7 @@ Object subclass: Caller
 
 #[test]
 fn local_accepts_a_structural_conformer() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"
   run => x :: Sized := "abc". x
   duck => q :: Quacker := Duck new. q
@@ -68,7 +50,7 @@ fn local_accepts_a_structural_conformer() {
 
 #[test]
 fn local_rejects_a_non_conformer() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"
   run => q :: Quacker := "abc". q
 "#,
@@ -81,14 +63,14 @@ fn local_rejects_a_non_conformer() {
 
 #[test]
 fn local_union_with_a_protocol_member() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   run => q :: Quacker | Nil := Duck new. q
   none => q :: Quacker | Nil := nil. q
 ",
     ));
     assert!(msgs.is_empty(), "{msgs:#?}");
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"
   run => q :: Quacker | Nil := "abc". q
 "#,
@@ -101,7 +83,7 @@ fn local_union_with_a_protocol_member() {
 
 #[test]
 fn union_value_needs_every_member_to_conform() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"
   run: flag :: Boolean =>
     q :: Sized := flag ifTrue: [Duck new] ifFalse: ["abc"]
@@ -109,7 +91,7 @@ fn union_value_needs_every_member_to_conform() {
 "#,
     ));
     assert!(msgs.is_empty(), "{msgs:#?}");
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"
   run: flag :: Boolean =>
     q :: Quacker := flag ifTrue: [Duck new] ifFalse: ["abc"]
@@ -124,13 +106,13 @@ fn union_value_needs_every_member_to_conform() {
 
 #[test]
 fn intersection_needs_every_protocol() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   run => q :: Quacker & Sized := Duck new. q
 ",
     ));
     assert!(msgs.is_empty(), "{msgs:#?}");
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"
   run => q :: Quacker & Sized := "abc". q
 "#,
@@ -144,7 +126,7 @@ fn intersection_needs_every_protocol() {
 
 #[test]
 fn protocol_typed_value_fits_a_protocol_it_subsumes() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   run: loud :: LoudQuacker => q :: Quacker := loud. q
 ",
@@ -154,13 +136,13 @@ fn protocol_typed_value_fits_a_protocol_it_subsumes() {
 
 #[test]
 fn block_parameter_accepts_a_conformer_and_rejects_a_non_conformer() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   run => [:q :: Quacker | q quack] value: Duck new
 ",
     ));
     assert!(msgs.is_empty(), "{msgs:#?}");
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"
   run => [:q :: Quacker | q] value: "abc"
 "#,
@@ -173,13 +155,13 @@ fn block_parameter_accepts_a_conformer_and_rejects_a_non_conformer() {
 
 #[test]
 fn list_literal_elements_are_checked_against_a_protocol() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   run => Taker quackers: #(Duck new)
 ",
     ));
     assert!(msgs.is_empty(), "{msgs:#?}");
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"
   run => Taker quackers: #(Duck new, "abc")
 "#,
@@ -197,7 +179,7 @@ fn list_literal_elements_are_checked_against_a_protocol() {
 /// conformance gate waves through.
 #[test]
 fn singleton_is_judged_as_a_symbol() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   run => q :: Quacker := #foo. q
 ",
@@ -213,14 +195,14 @@ fn singleton_is_judged_as_a_symbol() {
 /// ancestors, and no narrower class — not even `Protocol`.
 #[test]
 fn protocol_typed_value_fits_object_but_not_protocol() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   run: q :: Quacker => o :: Object := q. o
   root: q :: Quacker => o :: ProtoObject := q. o
 ",
     ));
     assert!(msgs.is_empty(), "{msgs:#?}");
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"
   run: q :: Quacker => p :: Protocol := q. p
 ",

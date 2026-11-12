@@ -7,20 +7,6 @@
 
 use super::common::*;
 
-fn type_diagnostics(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-        .into_iter()
-        .filter(|d| {
-            matches!(
-                d.category,
-                Some(DiagnosticCategory::Type | DiagnosticCategory::Dnu)
-            )
-        })
-        .collect()
-}
-
 /// Wraps `body` in a typed method over `x, y :: Integer | Nil`,
 /// `p :: Boolean`, `k :: Integer | String`.
 fn method(body: &str) -> String {
@@ -37,7 +23,7 @@ typed Object subclass: Repro
 }
 
 fn assert_clean(body: &str) {
-    let diags = type_diagnostics(&method(body));
+    let diags = type_dnu_diags(&method(body));
     assert!(
         diags.is_empty(),
         "expected no diagnostics for:\n{body}\ngot: {diags:#?}"
@@ -45,7 +31,7 @@ fn assert_clean(body: &str) {
 }
 
 fn assert_rejected(body: &str) {
-    let diags = type_diagnostics(&method(body));
+    let diags = type_dnu_diags(&method(body));
     assert!(
         !diags.is_empty(),
         "expected a diagnostic for:\n{body}\ngot none"
@@ -248,7 +234,7 @@ fn assert_field_leak(diags: &[Diagnostic]) {
 }
 
 fn actor_diagnostics(body: &str) -> Vec<Diagnostic> {
-    type_diagnostics(&format!(
+    type_dnu_diags(&format!(
         r"
 typed Actor subclass: Holder
   state: f :: Integer | Nil = nil

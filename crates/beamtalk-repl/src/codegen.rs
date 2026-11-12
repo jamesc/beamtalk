@@ -1282,16 +1282,14 @@ mod tests {
     use super::*;
     use beamtalk_codegen::core_erlang::CodeGenError;
     use beamtalk_core::ast::{Expression, Identifier, Literal};
-    use beamtalk_core::source_analysis::Span;
+
     use ecow::EcoString;
     use std::collections::HashMap;
 
     // ── Helpers ────────────────────────────────────────────────────────
 
     /// Creates a dummy span for test AST nodes.
-    fn span() -> Span {
-        Span::new(0, 1)
-    }
+    use beamtalk_core::test_helpers::test_support::unit_span as span;
 
     /// Creates an integer literal expression.
     fn int_expr(value: i64) -> Expression {
