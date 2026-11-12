@@ -160,3 +160,11 @@ sealed typed Object subclass: Block
   /// pid := [self stop] fork   // => Pid; the block runs in a new process
   /// ```
   fork -> Pid => (Erlang beamtalk_process_ops) fork: self
+
+  /// Return the String `"Block"` (the `Printable` contract, BT-4716).
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// [1] asString   // => "Block"
+  /// ```
+  asString -> String => "Block"
