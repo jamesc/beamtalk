@@ -195,6 +195,16 @@ fn string_arg_is_direct_behind_is_binary_guard() {
         code.contains("call 'erlang':'is_binary'(_FfiArg"),
         "the String argument is guarded by is_binary:\n{code}"
     );
+    // A binary argument can retry on `badarg`, so the call site keeps the
+    // pre-call class-variable snapshot for it (as the proxy does).
+    assert!(
+        code.contains("= call 'beamtalk_class_vars':'snapshot'() in try call 'erlang':'phash2'("),
+        "the snapshot is read before the call:\n{code}"
+    );
+    assert!(
+        code.contains("'stock', _FfiSite@") && code.contains(", _FfiSnap@"),
+        "the snapshot is handed to ffi_call_raised/9:\n{code}"
+    );
     // No proxy hop on the happy path: the only `direct_call` is the guard's
     // fallback arm.
     assert_eq!(
@@ -206,6 +216,15 @@ fn string_arg_is_direct_behind_is_binary_guard() {
         !code.contains("'beamtalk_message_dispatch':'send'"),
         "no dynamic send in:\n{code}"
     );
+}
+
+/// A scalar-typed argument is checked exactly as before BT-4759: no
+/// `is_binary`, no snapshot, `ffi_call_raised/8`.
+#[test]
+fn scalar_arg_has_no_binary_guard_or_snapshot() {
+    let code = compile("Erlang erlang phash2: n");
+    assert!(!code.contains("'is_binary'"), "{code}");
+    assert!(!code.contains("'snapshot'"), "{code}");
 }
 
 /// A `string()` argument position holding a charlist (`List`) still proxies.

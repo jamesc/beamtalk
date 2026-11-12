@@ -444,6 +444,9 @@ const FFI_RESULT_EXTRA_CLASSES: &[&str] = &["Dictionary", "Block", "String", "Bi
 /// proxy. A raw binary needs no unwrapping and carries no code.
 const FFI_ARG_EXTRA_CLASSES: &[&str] = &["Symbol", "String", "Binary"];
 
+/// The members of [`FFI_ARG_EXTRA_CLASSES`] that are binary-valued.
+const FFI_ARG_BINARY_CLASSES: &[&str] = &["String", "Binary"];
+
 /// The runtime check that backs [`ffi_arg_passes_unchanged`]: a value that
 /// passes one of these `erlang` guard BIFs is a number, atom, pid or binary, so
 /// it is never a tagged `String`, a charlist or a fun. (A binary is unchanged by
@@ -451,7 +454,30 @@ const FFI_ARG_EXTRA_CLASSES: &[&str] = &["Symbol", "String", "Binary"];
 /// runs in `ffi_call_raised/8`.) Static types are not enforced at
 /// run time (gradual typing), so a direct call also checks each argument with
 /// these and falls back to the proxy when one fails.
-pub const FFI_ARG_RUNTIME_GUARDS: &[&str] = &["is_number", "is_atom", "is_pid", "is_binary"];
+pub const FFI_ARG_RUNTIME_GUARDS: &[&str] = &["is_number", "is_atom", "is_pid"];
+
+/// The extra runtime check for an argument whose static type may be a `String`
+/// or `Binary` ([`ffi_arg_may_be_binary`], BT-4759): a raw binary passes, a
+/// tagged `String` does not. Only such an argument gets it, so a call whose
+/// arguments are all scalars is emitted exactly as before.
+pub const FFI_ARG_BINARY_GUARD: &str = "is_binary";
+
+/// `ty` (or a union member) may be a `String` or `Binary`, so a value of it can
+/// be a raw binary: the call site then also takes a class-variable snapshot for
+/// the `badarg` charlist retry (a scalar argument never retries).
+#[must_use]
+pub fn ffi_arg_may_be_binary(ty: &InferredType) -> bool {
+    fn any(ty: &InferredType) -> bool {
+        match ty {
+            InferredType::Known { class_name, .. } => {
+                FFI_ARG_BINARY_CLASSES.contains(&&**class_name)
+            }
+            InferredType::Union { members, .. } => members.iter().any(any),
+            _ => false,
+        }
+    }
+    any(ty)
+}
 
 /// Every member of `ty` (a single type or a union) satisfies `member_ok`.
 fn all_members(ty: &InferredType, member_ok: &dyn Fn(&str) -> bool) -> bool {
@@ -478,7 +504,8 @@ pub fn ffi_result_passes_unchanged(ty: &InferredType) -> bool {
 }
 
 /// An argument of static type `ty` reaches the callee unchanged, given the
-/// [`FFI_ARG_RUNTIME_GUARDS`] check, and cannot carry Beamtalk code: the guard
+/// [`FFI_ARG_RUNTIME_GUARDS`] check (plus [`FFI_ARG_BINARY_GUARD`] for a
+/// binary-typed argument), and cannot carry Beamtalk code: the guard
 /// rejects a tagged `String` (the proxy's stock-mode unwrap would change it) and
 /// any fun or container that may hold one (a block run by the callee would
 /// change how a raised error is classified). A binary argument may still
@@ -559,6 +586,14 @@ mod tests {
             guards, FFI_ARG_RUNTIME_GUARDS,
             "runtime guards match the fixture"
         );
+        assert_eq!(
+            fixture["arg_binary_guard"].as_str(),
+            Some(FFI_ARG_BINARY_GUARD),
+            "binary guard matches the fixture"
+        );
+        for class in FFI_ARG_BINARY_CLASSES {
+            assert!(FFI_ARG_EXTRA_CLASSES.contains(class), "{class}");
+        }
         // Every class the rule names has runtime samples in the fixture.
         for class in FFI_SCALAR_CLASSES.iter().chain(FFI_RESULT_EXTRA_CLASSES) {
             assert!(
@@ -607,7 +642,11 @@ mod tests {
         assert!(ffi_arg_passes_unchanged(&binary));
         assert!(ffi_arg_passes_unchanged(&InferredType::known("Binary")));
         assert!(!ffi_arg_passes_unchanged(&charlist));
-        assert!(FFI_ARG_RUNTIME_GUARDS.contains(&"is_binary"));
+        assert!(ffi_arg_may_be_binary(&binary));
+        assert!(!ffi_arg_may_be_binary(&InferredType::known("Integer")));
+        assert!(ffi_arg_may_be_binary(&InferredType::simple_union(&[
+            "Integer", "String"
+        ])));
     }
 
     #[test]
