@@ -369,23 +369,12 @@ impl CoreErlangGenerator {
         &self,
         receiver: &Expression,
     ) -> std::result::Result<&ecow::EcoString, StaysDynamic> {
-        use beamtalk_core::semantic_analysis::InferredType;
-        // A map shape (ADR 0147) is a `Dictionary` for every send that is not
-        // shape-aware, so it dispatches statically as one.
-        static DICTIONARY: ecow::EcoString = ecow::EcoString::inline("Dictionary");
-        let (class_name, provenance) = match self
+        let (class_name, provenance) = self
             .type_map
             .get(receiver.span())
             .ok_or(StaysDynamic::Untyped)?
-        {
-            InferredType::Known {
-                class_name,
-                provenance,
-                ..
-            } => (class_name, provenance),
-            InferredType::Shape { provenance, .. } => (&DICTIONARY, provenance),
-            _ => return Err(StaysDynamic::Untyped),
-        };
+            .instance_class()
+            .ok_or(StaysDynamic::Untyped)?;
         if !matches!(
             provenance,
             TypeProvenance::Declared(_)
@@ -663,8 +652,8 @@ impl CoreErlangGenerator {
         let mut seen: Vec<&ecow::EcoString> = Vec::new();
         let mut arms: Vec<TypedSendTarget> = Vec::new();
         for member in members {
-            let beamtalk_core::semantic_analysis::InferredType::Known { class_name, .. } = member
-            else {
+            // A map shape member dispatches as its `Dictionary` (ADR 0147).
+            let Some((class_name, _)) = member.instance_class() else {
                 return Err(StaysDynamic::UnionMemberUntyped(
                     member.display_name().to_string(),
                 ));

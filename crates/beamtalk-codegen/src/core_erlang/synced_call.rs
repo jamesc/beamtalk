@@ -812,22 +812,15 @@ impl CoreErlangGenerator {
         // Only a type the compiler derived (a literal, a constructor): a declared
         // annotation is not checked at run time, so the value may be any class.
         use beamtalk_core::semantic_analysis::TypeProvenance;
-        let class_name = match self.type_map.get(receiver.span()) {
-            Some(InferredType::Known {
-                class_name,
-                provenance: TypeProvenance::Inferred(_),
-                ..
-            }) => class_name.as_str(),
-            // An inferred map shape (a symbol-keyed literal, ADR 0147) is a
-            // `Dictionary` to every send that is not shape-aware.
-            Some(InferredType::Shape {
-                provenance: TypeProvenance::Inferred(_),
-                ..
-            }) => "Dictionary",
-            _ => return false,
+        let Some((class_name, TypeProvenance::Inferred(_))) = self
+            .type_map
+            .get(receiver.span())
+            .and_then(InferredType::instance_class)
+        else {
+            return false;
         };
         self.primitive_bindings
-            .is_no_user_code(class_name, selector.name().as_str())
+            .is_no_user_code(class_name.as_str(), selector.name().as_str())
     }
 
     /// BT-4633: whether the send `receiver selector arguments` runs none of

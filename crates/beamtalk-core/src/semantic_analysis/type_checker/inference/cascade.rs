@@ -219,7 +219,9 @@ impl TypeChecker {
         if !cascade_drops_update(hierarchy, &receiver_ty, &name) {
             return;
         }
-        let InferredType::Known { class_name, .. } = &receiver_ty else {
+        // A map shape receives its messages as its `Dictionary` view.
+        let view = receiver_ty.dictionary_view();
+        let InferredType::Known { class_name, .. } = view.as_ref().unwrap_or(&receiver_ty) else {
             return;
         };
         let display = InferredType::class_name_for_diagnostic(class_name.as_str());
