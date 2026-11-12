@@ -257,7 +257,7 @@ rename_selector_success(_Fixture) ->
 %% including the SAME-CLASS multi-site case (`Bt3279HappyBase`'s own
 %% definition PLUS its own self-send inside `increment`, both rewritten
 %% within the ONE `Bt3279HappyBase` class-group — exactly the shape
-%% `beamtalk_repl_loader:current_spans_for_group/1`'s cumulative-offset math
+%% `beamtalk_repl_loader_rewrite:current_spans_for_group/1`'s cumulative-offset math
 %% exists to get right, since `bump` (4 chars) -> `boost` (5 chars) shifts
 %% everything after the first site by +1), plus the subclass's own confirmed
 %% sender site.

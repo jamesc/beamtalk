@@ -240,7 +240,7 @@ from `OldName` to `NewName` in place — same pid, same state, just re-keyed.
 
 Backs `classRenameTo`'s dynamic-class row (ADR 0114 § "Refusal vs
 flushability": "Allowed, `flushable: false` (`\"dynamic\"`)") — a dynamic
-class has no source for the shared `beamtalk_repl_loader:rewrite_sites/2`
+class has no source for the shared `beamtalk_repl_loader_rewrite:rewrite_sites/2`
 mechanism to recompile, so nothing ever creates a fresh `NewName`-registered
 process the way an ordinary compiled class's rename does (see
 `beamtalk_class_refactor:classRenameTo/2`'s doc). This is the one case
