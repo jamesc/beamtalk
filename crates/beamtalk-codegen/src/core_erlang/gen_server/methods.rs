@@ -219,29 +219,21 @@ impl CoreErlangGenerator {
     /// `needs_nlr`), lowers the method body, prepends a real `NlrCatch` stmt
     /// carrying that token, and verifies + renders the whole sequence —
     /// the token is minted BEFORE lowering, matching production's real mint
-    /// order (§Gap 3). Callers still own `set_current_nlr_token(None)` /
-    /// scope cleanup on error via the `?` this returns through.
+    /// order (§Gap 3); `with_nlr_scope` clears it on every path.
     fn generate_actor_method_body_with_nlr(
         &mut self,
         method: &MethodDefinition,
         needs_nlr: bool,
     ) -> Result<Document<'static>> {
-        let nlr_token_var = if needs_nlr {
-            let token_var = self.fresh_temp_var("NlrToken");
-            self.set_current_nlr_token(Some(token_var.clone()));
-            Some(token_var)
-        } else {
-            None
-        };
-
         let span = method
             .body
             .first()
             .map_or_else(|| method.span, |s| s.expression.span());
         // The mark is scoped to one method body by the lowering wrappers
         // (`with_exit_store` takes it when the body is done).
-        let lowered = self.lower_method_definition_body_with_reply(method);
-        self.set_current_nlr_token(None);
+        let (lowered, nlr_token_var) = self.with_nlr_scope(needs_nlr, |g| {
+            g.lower_method_definition_body_with_reply(method)
+        });
         let stmts = lowered?;
 
         // Case-arm context (dispatch clause): always needs the letrec frame

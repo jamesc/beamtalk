@@ -92,14 +92,6 @@ impl CoreErlangGenerator {
                 .semantic_facts
                 .has_block_nlr_or_walk(&method.span, &method.body);
 
-            let nlr_token_var = if needs_nlr {
-                let token_var = frame.fresh_temp_var("NlrToken");
-                frame.set_current_nlr_token(Some(token_var.clone()));
-                Some(token_var)
-            } else {
-                None
-            };
-
             // ADR 0101: On a `native:` Object, a class-side
             // `self delegate` body lowers through the unified FFI boundary,
             // omitting `self` from the arg list (class methods are not
@@ -112,7 +104,10 @@ impl CoreErlangGenerator {
 
             // Generate body as Document and keep it in the Document pipeline (ADR 0089).
             let body_doc: Document<'static> = if native_class_delegate {
-                frame.set_current_nlr_token(None);
+                // The delegate body has no NLR, but the token is still minted
+                // (and cleared) so the temp numbering matches every other
+                // class-method body.
+                let ((), _) = frame.with_nlr_scope(needs_nlr, |_| ());
                 let backing = class
                     .backing_module
                     .as_ref()
@@ -126,7 +121,7 @@ impl CoreErlangGenerator {
             } else {
                 // `frame`'s `Drop` (pop scope, clear `in_class_method`, restore
                 // the selector) runs on the `?` error path as on success.
-                frame.class_method_body_doc(method, nlr_token_var.as_deref())?
+                frame.class_method_body_doc(method, needs_nlr)?
             };
 
             // BT-4301: every caller passes the real class object as
@@ -407,22 +402,13 @@ impl CoreErlangGenerator {
         let needs_nlr = self
             .semantic_facts
             .has_block_nlr_or_walk(&block.span, &block.body);
-        let nlr_token_var = if needs_nlr {
-            let token_var = self.fresh_temp_var("NlrToken");
-            self.set_current_nlr_token(Some(token_var.clone()));
-            Some(token_var)
-        } else {
-            None
+        let body_doc: Document<'static> = match self.class_method_body_doc(&method, needs_nlr) {
+            Ok(doc) => doc,
+            Err(e) => {
+                self.pop_scope();
+                return Err(e);
+            }
         };
-
-        let body_doc: Document<'static> =
-            match self.class_method_body_doc(&method, nlr_token_var.as_deref()) {
-                Ok(doc) => doc,
-                Err(e) => {
-                    self.pop_scope();
-                    return Err(e);
-                }
-            };
 
         let doc = docvec![
             "fun (ClassSelf",
@@ -437,8 +423,8 @@ impl CoreErlangGenerator {
 
     /// The body of a class-side method, shared by compiled class methods, `ClassBuilder`
     /// funs and class-side extension funs (ADR 0130 §3): the bare result, with a
-    /// real `NlrCatch` prepended when `nlr_token_var` is set (the token was minted
-    /// and installed by the caller before this runs, production's real mint
+    /// real `NlrCatch` prepended when `needs_nlr` (the token is minted by
+    /// [`Self::with_nlr_scope`] before the body lowers, production's real mint
     /// order) and the whole sequence verified and rendered once. Class variables
     /// are read and written in place, so nothing is wrapped or returned beside
     /// the result. An empty body returns `ClassSelf`. Clears the current NLR
@@ -446,23 +432,23 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn class_method_body_doc(
         &mut self,
         method: &MethodDefinition,
-        nlr_token_var: Option<&str>,
+        needs_nlr: bool,
     ) -> Result<Document<'static>> {
         if method.body.is_empty() {
-            self.set_current_nlr_token(None);
+            let ((), _) = self.with_nlr_scope(needs_nlr, |_| ());
             return Ok(docvec!["ClassSelf"]);
         }
         // BT-3719: the class key is bound once around the whole body.
         self.with_class_var_key_binding(|this| {
-            let body_stmts_result = this.lower_class_method_body(method);
-            this.set_current_nlr_token(None);
+            let (body_stmts_result, nlr_token_var) =
+                this.with_nlr_scope(needs_nlr, |g| g.lower_class_method_body(method));
             let mut body_stmts = body_stmts_result?;
             if let Some(token_var) = nlr_token_var {
                 body_stmts.insert(
                     0,
                     threaded_ir::ThreadedStmt::NlrCatch {
                         boundary: super::NlrBoundary::ClassMethod,
-                        token: threaded_ir::TokenId::new(token_var.to_string()),
+                        token: threaded_ir::TokenId::new(token_var),
                         frame: threaded_ir::FrameId::ROOT,
                         span: method.span,
                     },

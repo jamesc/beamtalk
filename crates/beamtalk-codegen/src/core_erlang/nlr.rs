@@ -480,6 +480,31 @@ impl CoreErlangGenerator {
             .and_then(|ctx| ctx.current_nlr_token.as_ref())
     }
 
+    /// The one NLR scope: when `needs_nlr`, mints a `NlrToken` temp and installs
+    /// it as the current NLR token, runs `lower`, and then always clears the
+    /// token, so an error `lower` returns (via `?` in the caller) cannot leave a
+    /// stale token behind. Answers `lower`'s result and the minted token, which
+    /// the caller hands to the `NlrCatch` that wraps the lowered body.
+    ///
+    /// The token is minted before `lower` runs, which is production's real mint
+    /// order (ADR 0111 Addendum 4 §Gap 3).
+    pub(in crate::core_erlang) fn with_nlr_scope<T>(
+        &mut self,
+        needs_nlr: bool,
+        lower: impl FnOnce(&mut Self) -> T,
+    ) -> (T, Option<String>) {
+        let token = if needs_nlr {
+            let token_var = self.fresh_temp_var("NlrToken");
+            self.set_current_nlr_token(Some(token_var.clone()));
+            Some(token_var)
+        } else {
+            None
+        };
+        let lowered = lower(self);
+        self.set_current_nlr_token(None);
+        (lowered, token)
+    }
+
     /// Sets the current NLR token variable name.
     pub(in crate::core_erlang) fn set_current_nlr_token(&mut self, token: Option<String>) {
         self.value_type_context_mut().current_nlr_token = token;
