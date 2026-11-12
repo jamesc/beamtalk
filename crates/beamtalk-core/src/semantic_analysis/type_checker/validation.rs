@@ -1913,8 +1913,6 @@ impl TypeChecker {
                             .push(diag.with_category(DiagnosticCategory::Type));
                     }
                 }
-                // Replaced by the `Dictionary` stand-in above; unreachable.
-                InferredType::Shape { .. } => {}
                 InferredType::Meta { .. } | InferredType::ProtocolMeta { .. } => {
                     // ADR 0083: a metatype value `C class` is an instance of the
                     // metaclass tower (`Meta{C} <: Class <: Behaviour <: Object`).
@@ -2034,10 +2032,13 @@ impl TypeChecker {
                 // *argument's own* inferred type is likewise skipped — see
                 // `check_protocol_argument_conformance` for the flagship
                 // "parameter declared `P1 & P2`" conformance check.
+                // A shape argument was replaced by the `Dictionary` stand-in
+                // above, so it is unreachable here.
                 InferredType::Dynamic(_)
                 | InferredType::Never
                 | InferredType::Negation { .. }
-                | InferredType::Intersection { .. } => {}
+                | InferredType::Intersection { .. }
+                | InferredType::Shape { .. } => {}
             }
         }
     }
@@ -3446,8 +3447,6 @@ impl TypeChecker {
                 self.diagnostics
                     .push(diag.with_category(DiagnosticCategory::Type));
             }
-            // Shape assignability: BT-4730.
-            InferredType::Shape { .. } => {}
             InferredType::Meta { .. } | InferredType::ProtocolMeta { .. } => {
                 // ADR 0083: a class object `C class` is assignable to a field
                 // declared `:: Class` / `:: Behaviour` / `:: Object` (the
@@ -3484,10 +3483,12 @@ impl TypeChecker {
             // conservatively like `Dynamic`/`Never` (ADR 0102). Likewise an
             // `Intersection` (`P1 & P2`, ADR 0102) as the value's own
             // inferred type — skip conservatively.
+            // Shape assignability: BT-4730.
             InferredType::Dynamic(_)
             | InferredType::Never
             | InferredType::Negation { .. }
-            | InferredType::Intersection { .. } => {}
+            | InferredType::Intersection { .. }
+            | InferredType::Shape { .. } => {}
         }
     }
 
