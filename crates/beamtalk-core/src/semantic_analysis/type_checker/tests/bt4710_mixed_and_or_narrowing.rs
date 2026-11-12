@@ -265,3 +265,11 @@ fn rhs_without_self_send_keeps_field_facts() {
     );
     assert!(diags.is_empty(), "got: {diags:#?}");
 }
+
+#[test]
+fn rhs_stored_block_voids_field_facts() {
+    let diags = actor_diagnostics(
+        "  run -> Integer =>\n    blk := [self.f := nil. true]\n    (self.f notNil and: blk) ifTrue: [^self need: self.f]\n    0",
+    );
+    assert!(!diags.is_empty(), "a stored block may clear self.f");
+}

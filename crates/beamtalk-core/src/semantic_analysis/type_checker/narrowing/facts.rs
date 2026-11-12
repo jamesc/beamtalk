@@ -259,7 +259,11 @@ impl TypeChecker {
         // sides' facts (an `or:` skips the argument when the left side held,
         // but we cannot tell which path reached the result).
         let writes = expr_writes(rhs);
-        let self_send = expr_contains_returning_self_send(rhs, &self.type_map);
+        // A block *value* (a local holding a block, a parameter, a send's
+        // answer) can write actor fields live wherever it runs (ADR 0137), so
+        // only a block literal's own body can be ruled out by reading it.
+        let self_send = !matches!(rhs, Expression::Block(_))
+            || expr_contains_returning_self_send(rhs, &self.type_map);
         for side in [&mut left, &mut right] {
             for facts in [&mut side.when_true, &mut side.when_false] {
                 facts.forget_written(&writes);
