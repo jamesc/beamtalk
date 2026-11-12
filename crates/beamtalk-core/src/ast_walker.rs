@@ -23,15 +23,27 @@
 //!
 //! Before this module, every lint pass and many validator checks had their own
 //! hand-rolled traversal. The module-level loop appeared 7+ times identically,
-//! and the expression match had 15+ arms duplicated 5+ times. This module
-//! eliminates that duplication.
+//! and the expression match had 15+ arms duplicated 5+ times. Every
+//! *context-free* walk — one that only needs to see each node, with no state
+//! that changes as it descends — is now a closure over [`walk_expression`]:
+//! the lint effect-free check, the package-qualifier and cross-package checks,
+//! `@primitive` validation, `@expect` directive collection and the
+//! method-source reference scan.
 //!
 //! # What is NOT handled here
 //!
-//! Passes with state that must be threaded through the traversal (e.g. scope
-//! tracking in `shadowed_block_param`) or passes that need sequence-level
-//! awareness (e.g. `cascade_candidate`) keep their own recursive traversal.
-//! This module handles the common pre-order-visitor pattern.
+//! Passes with state that must be threaded through the traversal (scope
+//! tracking in `shadowed_block_param`, the `local_threading` validator, the
+//! `block_facts` analyses, the `facts` state-effect pass) or passes that need
+//! sequence-level awareness (e.g. `cascade_candidate`) keep their own
+//! recursive traversal. This module handles the common pre-order-visitor
+//! pattern.
+//!
+//! A closure over [`walk_expression`] sees a node *before* its children, and
+//! the walker descends into block bodies itself: a pass that handles a
+//! `Block` node must not also recurse into the block's statements. Where a
+//! pass's output order used to follow a different traversal order, it sorts
+//! what it adds into source order.
 
 use crate::ast::{
     BinarySegment, CascadeMessage, Expression, ExpressionStatement, MessageSelector, Module,

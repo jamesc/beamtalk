@@ -699,10 +699,7 @@ impl TypeChecker {
             Expression::FieldAccess {
                 receiver, field, ..
             } => {
-                let is_self_receiver = matches!(
-                    receiver.as_ref(),
-                    Expression::Identifier(recv_id) if recv_id.name == "self"
-                );
+                let is_self_receiver = receiver.is_self();
                 if is_self_receiver {
                     // `self.field := value` — validate against declared state type
                     self.check_field_assignment(field, &ty, span, hierarchy, env);

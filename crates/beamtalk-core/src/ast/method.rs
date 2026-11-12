@@ -247,7 +247,7 @@ impl MethodDefinition {
                 ..
             } if arguments.is_empty()
                 && sel.as_str() == "delegate"
-                && matches!(receiver.as_ref(), Expression::Identifier(Identifier { name, .. }) if name.as_str() == "self")
+                && receiver.is_self()
         )
     }
 
@@ -324,10 +324,6 @@ impl MethodDefinition {
     pub fn answers_receiver(&self) -> bool {
         use super::visitor::{Visitor, walk_block, walk_expr};
 
-        fn is_self(expr: &Expression) -> bool {
-            matches!(expr, Expression::Identifier(id) if id.name == "self")
-        }
-
         // `^ self error: "…"` / `^ … signal` raise, so they answer nothing.
         // Selector-based heuristic: `error:` only on `self`, `signal`/`signal:`
         // on any receiver (a false negative at worst).
@@ -336,7 +332,7 @@ impl MethodDefinition {
                 Expression::MessageSend {
                     receiver, selector, ..
                 } => match selector.name().as_str() {
-                    "error:" => is_self(receiver),
+                    "error:" => receiver.is_self(),
                     "signal" | "signal:" => true,
                     _ => false,
                 },
@@ -349,7 +345,7 @@ impl MethodDefinition {
             fn visit_expr(&mut self, expr: &'ast Expression) {
                 match expr {
                     Expression::Return { value, .. } => {
-                        self.0 &= is_self(value) || raises(value);
+                        self.0 &= value.is_self() || raises(value);
                     }
                     // `self.x := …` (legal in `TestCase`) makes a trailing
                     // `self` answer the updated copy, not the receiver.
@@ -370,8 +366,8 @@ impl MethodDefinition {
         let Some(last) = self.body.last() else {
             return false;
         };
-        let ends_with_self = is_self(&last.expression)
-            || matches!(&last.expression, Expression::Return { value, .. } if is_self(value));
+        let ends_with_self = last.expression.is_self()
+            || matches!(&last.expression, Expression::Return { value, .. } if value.is_self());
         if !ends_with_self {
             return false;
         }

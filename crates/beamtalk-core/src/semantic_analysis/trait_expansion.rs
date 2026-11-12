@@ -1667,11 +1667,6 @@ fn check_protocol_provisions(
     }
 }
 
-/// Returns `true` when `expr` is the bare `self` pseudo-variable.
-fn is_self_identifier(expr: &Expression) -> bool {
-    matches!(expr, Expression::Identifier(id) if id.name == "self")
-}
-
 /// Runs every single-provision check (ADR 0127 §1, §5, §7, §13) on `method`,
 /// one of `protocol`'s provided methods.
 fn check_single_provision(
@@ -1708,7 +1703,7 @@ fn check_single_provision(
     // re-derives its own `Expression` match.
     for stmt in &method.body {
         walk_expression(&stmt.expression, &mut |expr| match expr {
-            Expression::FieldAccess { receiver, span, .. } if is_self_identifier(receiver) => {
+            Expression::FieldAccess { receiver, span, .. } if receiver.is_self() => {
                 diagnostics.push(Diagnostic::error(
                     "protocols are stateless — declare `slot -> Type` as a required method",
                     *span,

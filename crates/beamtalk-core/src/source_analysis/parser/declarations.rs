@@ -1680,7 +1680,7 @@ impl Parser {
     fn parse_state_declaration(&mut self) -> Option<StateDeclaration> {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
-        let mut comments = self.collect_comment_attachment();
+        let comments = self.collect_comment_attachment();
 
         // ADR 0124 §1: `late state: x :: T` / `late field: x :: T` — consumed
         // here (not by the dispatch loop) so the doc-comment/leading-comment
@@ -1705,10 +1705,36 @@ impl Parser {
         let keyword_label = declared_keyword.as_str().trim();
         self.advance();
 
-        // Parse field name and optional type annotation
+        Some(self.finish_slot_declaration(
+            start,
+            doc_comment,
+            comments,
+            slot_kind,
+            declared_keyword,
+            &format!("Expected field name after '{keyword_label}'"),
+        ))
+    }
+
+    /// The tail shared by [`Self::parse_state_declaration`] and
+    /// [`Self::parse_classvar_declaration`], entered just after the
+    /// `state:` / `field:` / `classState:` keyword has been consumed: the slot
+    /// name, optional `:: Type` annotation, optional `= default`, the trailing
+    /// comment, and the declaration's span.
+    ///
+    /// `missing_name_message` is the diagnostic when no identifier follows the
+    /// keyword.
+    fn finish_slot_declaration(
+        &mut self,
+        start: Span,
+        doc_comment: Option<String>,
+        mut comments: CommentAttachment,
+        slot_kind: SlotKind,
+        declared_keyword: DeclaredKeyword,
+        missing_name_message: &str,
+    ) -> StateDeclaration {
+        // Parse slot name and optional type annotation
         let (name, type_annotation) = if let TokenKind::Identifier(_) = self.current_kind() {
-            let name_ident =
-                self.parse_identifier(&format!("Expected field name after '{keyword_label}'"));
+            let name_ident = self.parse_identifier(missing_name_message);
 
             // Check for optional type annotation (:: TypeName)
             let type_ann = if self.match_token(&TokenKind::DoubleColon) {
@@ -1721,7 +1747,7 @@ impl Parser {
             };
             (name_ident, type_ann)
         } else {
-            self.error(format!("Expected field name after '{keyword_label}'"));
+            self.error(missing_name_message.to_string());
             let span = self.current_token().span();
             (Identifier::new("Error", span), None)
         };
@@ -1745,7 +1771,7 @@ impl Parser {
             .unwrap_or(name.span);
         let span = start.merge(end);
 
-        Some(StateDeclaration {
+        StateDeclaration {
             name,
             type_annotation,
             default_value,
@@ -1755,7 +1781,7 @@ impl Parser {
             comments,
             doc_comment,
             span,
-        })
+        }
     }
 
     /// Parses a class variable declaration.
@@ -1769,7 +1795,7 @@ impl Parser {
     fn parse_classvar_declaration(&mut self) -> Option<StateDeclaration> {
         let start = self.current_token().span();
         let doc_comment = self.collect_doc_comment();
-        let mut comments = self.collect_comment_attachment();
+        let comments = self.collect_comment_attachment();
 
         // ADR 0124 §1: consumed here, not by the dispatch loop — see the
         // matching comment in `parse_state_declaration`.
@@ -1786,52 +1812,14 @@ impl Parser {
         }
         self.advance();
 
-        let (name, type_annotation) = if let TokenKind::Identifier(_) = self.current_kind() {
-            let name_ident = self.parse_identifier("Expected variable name after 'classState:'");
-            let type_ann = if self.match_token(&TokenKind::DoubleColon) {
-                Some(self.parse_type_annotation())
-            } else if matches!(self.current_kind(), TokenKind::Colon) {
-                self.type_annotation_colon_error();
-                Some(self.parse_type_annotation())
-            } else {
-                None
-            };
-            (name_ident, type_ann)
-        } else {
-            self.error("Expected variable name after 'classState:'");
-            let span = self.current_token().span();
-            (Identifier::new("Error", span), None)
-        };
-
-        let default_value = if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s == "=")
-        {
-            self.advance();
-            Some(self.parse_expression())
-        } else {
-            None
-        };
-
-        // Collect trailing end-of-line comment (e.g. `classState: x = 0  // comment`)
-        comments.trailing = self.collect_trailing_comment();
-
-        let end = default_value
-            .as_ref()
-            .map(Expression::span)
-            .or(type_annotation.as_ref().map(TypeAnnotation::span))
-            .unwrap_or(name.span);
-        let span = start.merge(end);
-
-        Some(StateDeclaration {
-            name,
-            type_annotation,
-            default_value,
-            declared_keyword: DeclaredKeyword::State,
-            slot_kind,
-            expect: None,
-            comments,
+        Some(self.finish_slot_declaration(
+            start,
             doc_comment,
-            span,
-        })
+            comments,
+            slot_kind,
+            DeclaredKeyword::State,
+            "Expected variable name after 'classState:'",
+        ))
     }
 
     /// Parses a type annotation, including union types (`Integer | String`),

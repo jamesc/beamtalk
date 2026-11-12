@@ -83,7 +83,7 @@ impl TypeChecker {
             env,
             in_abstract_method,
         );
-        if Self::is_self_or_super(receiver)
+        if receiver.is_self_or_super()
             && !self.in_value_type_body
             && !matches!(ty, InferredType::Never)
         {
@@ -860,7 +860,7 @@ impl TypeChecker {
                     Some(env),
                     type_args,
                     receiver_known_remote.as_ref(),
-                    Self::is_self_or_super(receiver),
+                    receiver.is_self_or_super(),
                 );
             }
 
@@ -951,7 +951,7 @@ impl TypeChecker {
                     // Infer method-local type params from arguments (works for
                     // any parametric param type: Block, Result, Array, etc.)
                     let method_subst = Self::infer_method_local_params(
-                        &method,
+                        method,
                         &arg_types,
                         &subst,
                         hierarchy,

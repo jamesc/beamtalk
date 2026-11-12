@@ -563,6 +563,33 @@ impl Expression {
         current
     }
 
+    /// Whether this expression is the `self` pseudo-variable, looking through
+    /// any `Parenthesized` wrappers (`(self)` is `self`).
+    ///
+    /// Single authority for "is this `self`": every front-end pass that asks
+    /// the question must call this rather than matching
+    /// `Identifier(id) if id.name == "self"` itself.
+    #[must_use]
+    pub fn is_self(&self) -> bool {
+        matches!(self.unwrap_parens(), Self::Identifier(id) if id.name == "self")
+    }
+
+    /// Whether this expression is `super`. Deliberately *not*
+    /// paren-transparent: `(super) foo` is not a super send (`ast::normalize`
+    /// keeps `(super)` whole).
+    #[must_use]
+    pub fn is_super(&self) -> bool {
+        matches!(self, Self::Super(_))
+    }
+
+    /// Whether this expression is `self` (parentheses looked through, see
+    /// [`Self::is_self`]) or a bare `super` (see [`Self::is_super`]): the
+    /// receivers whose sends run the object's own methods.
+    #[must_use]
+    pub fn is_self_or_super(&self) -> bool {
+        self.is_self() || self.is_super()
+    }
+
     /// The reserved boolean this expression names, if any: `Some(true)` for
     /// the identifier `true`, `Some(false)` for `false`, `None` for anything
     /// else — through any number of `Parenthesized` wrappers.

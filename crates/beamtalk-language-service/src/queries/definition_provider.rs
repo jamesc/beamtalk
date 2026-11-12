@@ -238,7 +238,7 @@ pub fn find_method_definition_cross_file_with_receiver<'a>(
     if class_side != Some(true) {
         let origin = hierarchy
             .find_method(defining_class.as_str(), selector)
-            .and_then(|method| method.origin);
+            .and_then(|method| method.origin.clone());
         if let Some(protocol) = origin {
             for (file_path, module) in &files {
                 if let Some(span) = find_protocol_provision_in_module(module, &protocol, selector) {
@@ -565,11 +565,11 @@ fn find_defining_class_from_receiver(
     if receiver_context.class_side {
         hierarchy
             .find_class_method(receiver_context.class_name.as_str(), selector)
-            .map(|method| method.defined_in)
+            .map(|method| method.defined_in.clone())
     } else {
         hierarchy
             .find_method(receiver_context.class_name.as_str(), selector)
-            .map(|method| method.defined_in)
+            .map(|method| method.defined_in.clone())
     }
 }
 

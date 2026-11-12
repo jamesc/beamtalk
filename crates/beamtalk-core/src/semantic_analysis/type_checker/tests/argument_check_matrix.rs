@@ -519,7 +519,7 @@ fn matrix_cascade_continuation_class_ref_dynamic() {
 // `self` there is bound to `InferredType::Known { class_name: "Thing", .. }`
 // (see `receiver_type_for_class`, set for `class.class_methods` bodies)
 // *and* `env.in_class_method` is `true`, so this exercises the
-// `env.in_class_method && Self::is_self_receiver(...)` branch of the
+// `env.in_class_method && ....is_self()` branch of the
 // continuation loop (`inference.rs` ~lines 755-775) — the one other branch
 // besides the class-ref branch above and the instance/binary "else" branch
 // the earlier cells cover. Unlike the class-ref branch, this one additionally

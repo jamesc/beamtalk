@@ -62,14 +62,6 @@ fn is_timer_block_selector(selector: &MessageSelector) -> bool {
     )
 }
 
-/// Returns `true` if `expr` is the identifier `self`.
-fn is_self(expr: &Expression) -> bool {
-    matches!(
-        expr,
-        Expression::Identifier(Identifier { name, .. }) if name.as_str() == "self"
-    )
-}
-
 /// The lint for a synchronous `self {selector}` send inside a Timer block.
 ///
 /// `has_cast_spelling` is false for a cascade message, which has no cast
@@ -123,7 +115,7 @@ fn check_message_send(
     }
 
     // If we're inside a timer block and this is a sync self-send, flag it
-    if in_timer_block && !is_cast && is_self(receiver) {
+    if in_timer_block && !is_cast && receiver.is_self() {
         diagnostics.push(timer_self_send_diagnostic(selector, true, span));
     }
     false
@@ -194,7 +186,7 @@ fn walk_for_timer_sends(
             // spelling of its own, so each gets the generic hint.
             if in_timer_block {
                 for send in cascade_sends(expr) {
-                    if !send.is_cast && is_self(send.receiver) {
+                    if !send.is_cast && send.receiver.is_self() {
                         diagnostics.push(timer_self_send_diagnostic(send.selector, false, *span));
                     }
                 }
@@ -206,7 +198,7 @@ fn walk_for_timer_sends(
                     receiver: inner,
                     arguments,
                     ..
-                } if is_self(inner) => {
+                } if inner.is_self() => {
                     for arg in arguments {
                         walk_for_timer_sends(arg, in_timer_block, diagnostics);
                     }

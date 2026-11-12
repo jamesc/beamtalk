@@ -806,17 +806,17 @@ fn infer_stmts_stops_at_return() {
 
 #[test]
 fn is_self_receiver_true() {
-    assert!(TypeChecker::is_self_receiver(&var("self")));
+    assert!(var("self").is_self());
 }
 
 #[test]
 fn is_self_receiver_false_for_other_ident() {
-    assert!(!TypeChecker::is_self_receiver(&var("other")));
+    assert!(!var("other").is_self());
 }
 
 #[test]
 fn is_self_receiver_false_for_non_ident() {
-    assert!(!TypeChecker::is_self_receiver(&int_lit(1)));
+    assert!(!int_lit(1).is_self());
 }
 
 // ---- Binary construction result class (ADR 0143 § Result class) ----

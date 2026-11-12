@@ -983,7 +983,7 @@ impl ProtocolRegistry {
             let Some(method) = hierarchy.find_class_method(class_name, &req.selector) else {
                 continue;
             };
-            let Some(actual) = method.return_type else {
+            let Some(actual) = method.return_type.clone() else {
                 continue;
             };
             if TypeChecker::is_return_type_refinement(&actual, &expected, hierarchy) {
@@ -992,7 +992,7 @@ impl ProtocolRegistry {
             mismatches.push(ReturnTypeMismatch {
                 selector: req.selector.clone(),
                 class_side: true,
-                defined_in: method.defined_in,
+                defined_in: method.defined_in.clone(),
                 actual,
                 expected,
             });

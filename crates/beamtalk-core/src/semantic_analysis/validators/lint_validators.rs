@@ -12,8 +12,7 @@
 //! - Effect-free statements
 
 use crate::ast::{
-    BinarySegment, Expression, Identifier, MessageSelector, Module, TypeAnnotation,
-    WellKnownSelector,
+    Expression, Identifier, MessageSelector, Module, TypeAnnotation, WellKnownSelector,
 };
 use crate::ast_walker::{
     SendRef, cascade_sends, cascade_shared_receiver, walk_expression, walk_module,
@@ -262,93 +261,8 @@ fn effect_free_label(expr: &Expression) -> &'static str {
     }
 }
 
-/// Walk an expression to find nested sequences (blocks) that may contain
-/// effect-free non-last statements.
-fn walk_expr_for_effect_free(expr: &Expression, diagnostics: &mut Vec<Diagnostic>) {
-    match expr {
-        Expression::Block(block) => {
-            check_seq_for_effect_free(&block.body, diagnostics);
-        }
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            walk_expr_for_effect_free(receiver, diagnostics);
-            for arg in arguments {
-                walk_expr_for_effect_free(arg, diagnostics);
-            }
-        }
-        Expression::Assignment { target, value, .. } => {
-            walk_expr_for_effect_free(target, diagnostics);
-            walk_expr_for_effect_free(value, diagnostics);
-        }
-        Expression::Return { value, .. } => {
-            walk_expr_for_effect_free(value, diagnostics);
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            walk_expr_for_effect_free(receiver, diagnostics);
-            for msg in messages {
-                for arg in &msg.arguments {
-                    walk_expr_for_effect_free(arg, diagnostics);
-                }
-            }
-        }
-        Expression::Parenthesized { expression, .. } => {
-            walk_expr_for_effect_free(expression, diagnostics);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            walk_expr_for_effect_free(receiver, diagnostics);
-        }
-        Expression::Match { value, arms, .. } => {
-            walk_expr_for_effect_free(value, diagnostics);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    walk_expr_for_effect_free(guard, diagnostics);
-                }
-                walk_expr_for_effect_free(&arm.body, diagnostics);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                walk_expr_for_effect_free(&pair.key, diagnostics);
-                walk_expr_for_effect_free(&pair.value, diagnostics);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                walk_expr_for_effect_free(elem, diagnostics);
-            }
-            if let Some(t) = tail {
-                walk_expr_for_effect_free(t, diagnostics);
-            }
-        }
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for elem in elements {
-                walk_expr_for_effect_free(elem, diagnostics);
-            }
-        }
-        Expression::StringInterpolation { segments, .. } => {
-            for seg in segments {
-                if let crate::ast::StringSegment::Interpolation(e) = seg {
-                    walk_expr_for_effect_free(e, diagnostics);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                walk_expr_for_effect_free(e, diagnostics);
-            }
-        }
-        _ => {}
-    }
-}
-
-/// Check a sequence of expressions: warn on any non-last expression that is
-/// effect-free, then recurse into all expressions for nested sequences.
-fn check_seq_for_effect_free(
+/// Emit the effect-free warning for each non-last statement of `exprs`.
+fn warn_effect_free_in_seq(
     exprs: &[crate::ast::ExpressionStatement],
     diagnostics: &mut Vec<Diagnostic>,
 ) {
@@ -364,8 +278,29 @@ fn check_seq_for_effect_free(
                 ),
             );
         }
-        walk_expr_for_effect_free(expr, diagnostics);
     }
+}
+
+/// Check a sequence of expressions: warn on any non-last expression that is
+/// effect-free, then on every nested block sequence (found with the shared
+/// [`walk_expression`], which descends into blocks).
+///
+/// The warnings this call adds are put in source order, which is the order a
+/// statement-by-statement recursion would have produced them in.
+fn check_seq_for_effect_free(
+    exprs: &[crate::ast::ExpressionStatement],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let first_new = diagnostics.len();
+    warn_effect_free_in_seq(exprs, diagnostics);
+    for stmt in exprs {
+        walk_expression(&stmt.expression, &mut |e| {
+            if let Expression::Block(block) = e {
+                warn_effect_free_in_seq(&block.body, diagnostics);
+            }
+        });
+    }
+    diagnostics[first_new..].sort_by_key(|d| d.span.start());
 }
 
 /// Warn (as a lint) when a statement is an effect-free expression
@@ -604,12 +539,7 @@ fn is_self_field_assignment(expr: &Expression) -> bool {
     let Expression::FieldAccess { receiver, .. } = target.as_ref() else {
         return false;
     };
-    matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
-}
-
-/// Returns `true` if `expr` is the bare identifier `self`.
-fn is_bare_self(expr: &Expression) -> bool {
-    matches!(expr.unwrap_parens(), Expression::Identifier(id) if id.name == "self")
+    receiver.is_self()
 }
 
 /// Returns `true` if `selector` is a single-keyword-part send following the
@@ -661,7 +591,7 @@ fn is_self_with_field_send(expr: &Expression) -> bool {
 /// [`is_self_with_field_cascade`] used for detecting *that* a mutation
 /// happened anywhere in the body.
 fn is_self_producing(expr: &Expression) -> bool {
-    is_bare_self(expr)
+    expr.is_self()
         || is_self_field_assignment(expr)
         || is_self_with_field_send(expr)
         || cascade_value_is_self_producing(expr)

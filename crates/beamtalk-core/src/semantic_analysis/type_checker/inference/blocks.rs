@@ -495,7 +495,8 @@ impl TypeChecker {
                         WellKnownClass::Object.as_str(),
                         WellKnownSelector::IfNil.as_str(),
                     )?
-                    .return_type?;
+                    .return_type
+                    .clone()?;
                 if !matches!(ret_ty, DeclaredType::SelfType) {
                     return None;
                 }
@@ -507,7 +508,8 @@ impl TypeChecker {
                         WellKnownClass::UndefinedObject.as_str(),
                         WellKnownSelector::IfNotNil.as_str(),
                     )?
-                    .return_type?;
+                    .return_type
+                    .clone()?;
                 let is_nil_class = matches!(&ret_ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n).is_some_and(WellKnownClass::is_nil_class));
                 if !is_nil_class {
                     return None;
@@ -990,8 +992,8 @@ impl TypeChecker {
         // class-side method; otherwise the instance method. Without
         // this split, class-side block parameters never get their declared
         // types propagated to the call-site block params.
-        let method_lookup = if let Some(requirement) = protocol_meta_method {
-            requirement
+        let method_lookup = if let Some(requirement) = protocol_meta_method.as_ref() {
+            requirement.as_ref()
         } else if is_class_side_send {
             hierarchy.find_class_method(class_name, selector_name)
         } else {
@@ -1039,7 +1041,7 @@ impl TypeChecker {
             &method.defined_in,
         );
         let method_subst = Self::infer_method_local_params(
-            &method,
+            method,
             &arg_types,
             &class_subst,
             hierarchy,
@@ -1223,7 +1225,7 @@ impl TypeChecker {
                 &method.defined_in,
             );
             let method_subst = Self::infer_method_local_params(
-                &method,
+                method,
                 &arg_types,
                 &class_subst,
                 hierarchy,

@@ -56,7 +56,6 @@ use crate::ast::{
 };
 use crate::ast_walker::walk_expression;
 use crate::semantic_analysis::ClassHierarchy;
-use crate::semantic_analysis::block_facts::is_self_reference;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 use std::collections::BTreeSet;
@@ -117,7 +116,7 @@ fn check_entry_method(
             else {
                 return;
             };
-            if !is_self_reference(receiver) {
+            if !receiver.is_self() {
                 return;
             }
             let callee_selector = selector.name();
@@ -167,7 +166,7 @@ fn report_unguarded_reads(
         walk_expression(&stmt.expression, &mut |expr| match expr {
             Expression::Assignment { target, .. } => {
                 if let Expression::FieldAccess { receiver, span, .. } = target.as_ref() {
-                    if is_self_reference(receiver) {
+                    if receiver.is_self() {
                         write_target_spans.insert(*span);
                     }
                 }
@@ -176,7 +175,7 @@ fn report_unguarded_reads(
                 receiver,
                 field,
                 span,
-            } if is_self_reference(receiver)
+            } if receiver.is_self()
                 && late_slots.contains(&field.name)
                 && !write_target_spans.contains(span) =>
             {
@@ -226,29 +225,20 @@ fn has_field_guard_slot(
         selector,
         arguments,
         ..
-    } = strip_parens(receiver)
+    } = receiver.unwrap_parens()
     else {
         return None;
     };
     if selector.well_known() != Some(WellKnownSelector::HasField) {
         return None;
     }
-    if !is_self_reference(inner_receiver) {
+    if !inner_receiver.is_self() {
         return None;
     }
     let Some(Expression::Literal(Literal::Symbol(name), _)) = arguments.first() else {
         return None;
     };
     late_slots.contains(name).then(|| name.clone())
-}
-
-/// Unwraps any number of `Parenthesized` wrappers, e.g. the `(...)` around
-/// `(self hasField: #proc) ifTrue: [...]`'s receiver.
-fn strip_parens(expr: &Expression) -> &Expression {
-    match expr {
-        Expression::Parenthesized { expression, .. } => strip_parens(expression),
-        other => other,
-    }
 }
 
 fn build_diagnostic(slot: &str, entry_selector: &str, span: Span) -> Diagnostic {

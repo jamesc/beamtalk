@@ -35,6 +35,7 @@ use crate::ast::{
     BinarySegment, CascadeMessage, Expression, Identifier, MessageSelector, MethodDefinition,
     Pattern, StringSegment, TypeAnnotation,
 };
+use crate::ast_walker::walk_expression;
 use crate::source_analysis::{MethodSide, Span, SpanResolveError, lex_with_eof, parse};
 
 // ---------------------------------------------------------------------------
@@ -156,10 +157,15 @@ pub fn find_all_sends_in_source(method_source: &str) -> Vec<SendHit> {
 }
 
 fn self_or_super_kind(receiver: &Expression) -> Option<ReceiverKind> {
-    match receiver {
-        Expression::Super(..) => Some(ReceiverKind::SuperReceiver),
-        Expression::Identifier(ident) if ident.name == "self" => Some(ReceiverKind::SelfReceiver),
-        _ => None,
+    // `(super) foo` is deliberately not a super send (pinned by
+    // `sends_are_paren_transparent`), so `super` is matched without
+    // looking through parentheses.
+    if matches!(receiver, Expression::Super(..)) {
+        Some(ReceiverKind::SuperReceiver)
+    } else if receiver.is_self() {
+        Some(ReceiverKind::SelfReceiver)
+    } else {
+        None
     }
 }
 
@@ -1206,98 +1212,24 @@ pub fn find_all_references_in_source(method_source: &str) -> Vec<ReferenceHit> {
         .collect()
 }
 
+/// Collects every class reference in `expr` — expression-position
+/// `ClassReference`s plus the class names in `match:` arm patterns — walking
+/// with the shared [`walk_expression`]. Hits within one call are left in
+/// source (line) order.
 fn collect_all_references(expr: &Expression, source: &str, hits: &mut Vec<(String, u32)>) {
-    match expr {
+    let first_new = hits.len();
+    walk_expression(expr, &mut |e| match e {
         Expression::ClassReference { name, span, .. } => {
             hits.push((name.name.to_string(), span.line_number(source)));
         }
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            collect_all_references(receiver, source, hits);
-            for arg in arguments {
-                collect_all_references(arg, source, hits);
-            }
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            collect_all_references(receiver, source, hits);
-            for msg in messages {
-                for arg in &msg.arguments {
-                    collect_all_references(arg, source, hits);
-                }
-            }
-        }
-        Expression::Assignment { target, value, .. } => {
-            collect_all_references(target, source, hits);
-            collect_all_references(value, source, hits);
-        }
-        Expression::DestructureAssignment { value, .. } | Expression::Return { value, .. } => {
-            collect_all_references(value, source, hits);
-        }
-        Expression::Block(block) => {
-            for stmt in &block.body {
-                collect_all_references(&stmt.expression, source, hits);
-            }
-        }
-        Expression::Parenthesized { expression, .. } => {
-            collect_all_references(expression, source, hits);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            collect_all_references(receiver, source, hits);
-        }
-        Expression::Match { value, arms, .. } => {
-            collect_all_references(value, source, hits);
+        Expression::Match { arms, .. } => {
             for arm in arms {
                 collect_all_pattern_refs(&arm.pattern, source, hits);
-                if let Some(guard) = &arm.guard {
-                    collect_all_references(guard, source, hits);
-                }
-                collect_all_references(&arm.body, source, hits);
             }
         }
-        Expression::StringInterpolation { segments, .. } => {
-            for segment in segments {
-                if let StringSegment::Interpolation(inner) = segment {
-                    collect_all_references(inner, source, hits);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for inner in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                collect_all_references(inner, source, hits);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for element in elements {
-                collect_all_references(element, source, hits);
-            }
-            if let Some(tail_expr) = tail {
-                collect_all_references(tail_expr, source, hits);
-            }
-        }
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for element in elements {
-                collect_all_references(element, source, hits);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                collect_all_references(&pair.key, source, hits);
-                collect_all_references(&pair.value, source, hits);
-            }
-        }
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Spread { .. }
-        | Expression::Error { .. } => {}
-    }
+        _ => {}
+    });
+    hits[first_new..].sort_by_key(|hit| hit.1);
 }
 
 fn collect_all_pattern_refs(pattern: &Pattern, source: &str, hits: &mut Vec<(String, u32)>) {

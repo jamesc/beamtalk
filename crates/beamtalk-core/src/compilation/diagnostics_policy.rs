@@ -15,8 +15,8 @@
 //! downward only; `beamtalk-lsp` may depend on `beamtalk-core`, never on
 //! `beamtalk-cli`).
 
-use crate::ast::{BinarySegment, ExpectCategory, Expression, ExpressionStatement, Module};
-use crate::ast_walker::expression_contains_block;
+use crate::ast::{ExpectCategory, Expression, ExpressionStatement, Module};
+use crate::ast_walker::{expression_contains_block, walk_expression};
 use crate::semantic_analysis::stdlib_protocols::is_stdlib_package;
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
 use ecow::EcoString;
@@ -991,14 +991,10 @@ fn category_matches(expect_cat: ExpectCategory, diag_cat: Option<DiagnosticCateg
         )
 }
 
-/// Collects `@expect` directives from an expression list.
-///
-/// For each `ExpectDirective` at index `i`, the target span is the span of
-/// the expression at index `i + 1` (if present).
-///
-/// After scanning the flat statement list, recurses into expression subtrees
-/// to find `@expect` directives inside block bodies.
-fn collect_directives_from_exprs(
+/// Collects the `@expect` directives that sit directly in the statement list
+/// `exprs`: for each `ExpectDirective` at index `i`, the target span is the
+/// span of the expression at index `i + 1` (if present).
+fn collect_flat_directives(
     exprs: &[ExpressionStatement],
     directives: &mut Vec<ExpectDirectiveEntry>,
 ) {
@@ -1024,10 +1020,31 @@ fn collect_directives_from_exprs(
                 directives.push((categories.clone(), reason.clone(), *span, *span, false));
             }
         }
-        // Recurse into expression subtrees to find block bodies
-        // containing @expect directives.
-        collect_directives_from_expr(&stmt.expression, directives);
     }
+}
+
+/// Collects `@expect` directives from an expression list.
+///
+/// After scanning the flat statement list, walks the expression subtrees
+/// (with the shared [`walk_expression`], which descends into blocks) to find
+/// `@expect` directives inside block bodies — `ifTrue: [...]`,
+/// `collect: [:x | ...]`, nested blocks, match arms and so on, each with the
+/// same (i, i+1) semantics. The directives this call adds are left in source
+/// order.
+fn collect_directives_from_exprs(
+    exprs: &[ExpressionStatement],
+    directives: &mut Vec<ExpectDirectiveEntry>,
+) {
+    let first_new = directives.len();
+    collect_flat_directives(exprs, directives);
+    for stmt in exprs {
+        walk_expression(&stmt.expression, &mut |e| {
+            if let Expression::Block(block) = e {
+                collect_flat_directives(&block.body, directives);
+            }
+        });
+    }
+    directives[first_new..].sort_by_key(|entry| entry.2.start());
 }
 
 /// Returns `true` if `exprs` contains a block literal anywhere in its tree —
@@ -1036,104 +1053,6 @@ fn exprs_contain_block(exprs: &[ExpressionStatement]) -> bool {
     exprs
         .iter()
         .any(|stmt| expression_contains_block(&stmt.expression))
-}
-
-/// Recursively walks an expression tree to find nested `Block` bodies and
-/// collects `@expect` directives from them.
-///
-/// This handles `@expect` inside `ifTrue: [...]`, `collect: [:x | ...]`,
-/// nested blocks, match arms, and any other expression that contains
-/// sub-expressions with block bodies.
-fn collect_directives_from_expr(expr: &Expression, directives: &mut Vec<ExpectDirectiveEntry>) {
-    match expr {
-        Expression::Block(block) => {
-            // Found a block body — scan it for @expect directives using the
-            // same (i, i+1) semantics, then recurse into its children.
-            collect_directives_from_exprs(&block.body, directives);
-        }
-        Expression::MessageSend {
-            receiver,
-            arguments,
-            ..
-        } => {
-            collect_directives_from_expr(receiver, directives);
-            for arg in arguments {
-                collect_directives_from_expr(arg, directives);
-            }
-        }
-        Expression::Assignment { target, value, .. } => {
-            collect_directives_from_expr(target, directives);
-            collect_directives_from_expr(value, directives);
-        }
-        Expression::Return { value, .. } | Expression::DestructureAssignment { value, .. } => {
-            collect_directives_from_expr(value, directives);
-        }
-        Expression::Cascade {
-            receiver, messages, ..
-        } => {
-            collect_directives_from_expr(receiver, directives);
-            for msg in messages {
-                for arg in &msg.arguments {
-                    collect_directives_from_expr(arg, directives);
-                }
-            }
-        }
-        Expression::Parenthesized { expression, .. } => {
-            collect_directives_from_expr(expression, directives);
-        }
-        Expression::FieldAccess { receiver, .. } => {
-            collect_directives_from_expr(receiver, directives);
-        }
-        Expression::Match { value, arms, .. } => {
-            collect_directives_from_expr(value, directives);
-            for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    collect_directives_from_expr(guard, directives);
-                }
-                collect_directives_from_expr(&arm.body, directives);
-            }
-        }
-        Expression::MapLiteral { pairs, .. } => {
-            for pair in pairs {
-                collect_directives_from_expr(&pair.key, directives);
-                collect_directives_from_expr(&pair.value, directives);
-            }
-        }
-        Expression::ListLiteral { elements, tail, .. } => {
-            for elem in elements {
-                collect_directives_from_expr(elem, directives);
-            }
-            if let Some(t) = tail {
-                collect_directives_from_expr(t, directives);
-            }
-        }
-        Expression::ArrayLiteral { elements, .. } | Expression::TupleLiteral { elements, .. } => {
-            for elem in elements {
-                collect_directives_from_expr(elem, directives);
-            }
-        }
-        Expression::StringInterpolation { segments, .. } => {
-            for seg in segments {
-                if let crate::ast::StringSegment::Interpolation(e) = seg {
-                    collect_directives_from_expr(e, directives);
-                }
-            }
-        }
-        Expression::BinaryConstruction { segments, .. } => {
-            for e in segments.iter().flat_map(BinarySegment::sub_expressions) {
-                collect_directives_from_expr(e, directives);
-            }
-        }
-        // Leaf nodes — nothing to recurse into.
-        Expression::Literal(..)
-        | Expression::Identifier(..)
-        | Expression::ClassReference { .. }
-        | Expression::Super(..)
-        | Expression::Primitive { .. }
-        | Expression::ExpectDirective { .. }
-        | Expression::Error { .. }
-        | Expression::Spread { .. } => {}
-    }
 }
 
 /// What a REPL `load-project` does with one diagnostic (BT-4334, BT-4377).

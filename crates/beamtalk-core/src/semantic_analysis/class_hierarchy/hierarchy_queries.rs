@@ -17,29 +17,70 @@ use super::class_info::{ClassInfo, DirectConstructors, InitializeAssignsSummary,
 use super::declared_type::DeclaredType;
 
 impl ClassHierarchy {
+    /// Borrowing walk of `class_name` and its superclass chain, nearest first
+    /// (the class itself, then each superclass that is a known class).
+    ///
+    /// The single cycle-safe superclass-chain iterator (BT-4681): it yields
+    /// `&ClassInfo` straight out of the class map, so a walk allocates no
+    /// per-hop `String`. It stops at a root, at the first name that is not a
+    /// known class, and at a cycle (a malformed `A -> B -> A` hierarchy yields
+    /// each class once). A walk that must see the *name* of an unknown
+    /// trailing superclass reads it from the last yielded
+    /// [`ClassInfo::superclass`]; [`Self::is_subclass_of`] does exactly that.
+    #[must_use]
+    pub fn ancestors(&self, class_name: &str) -> Ancestors<'_> {
+        Ancestors {
+            hierarchy: self,
+            next: self.classes.get(class_name),
+            visited: Vec::new(),
+            ended_at_unknown: false,
+        }
+    }
+
+    /// Like [`Self::ancestors`], but when the chain ends at a superclass that
+    /// is not a known class (typically one defined in a separately-compiled
+    /// file) after at least one known class, the walk continues with `Object`'s
+    /// chain. All Beamtalk classes inherit from `Object`, so this exposes
+    /// Object-level methods (e.g. `subclassResponsibility`) without false
+    /// "does not understand" results for cross-file hierarchies.
+    #[must_use]
+    pub fn ancestors_or_object(&self, class_name: &str) -> AncestorsOrObject<'_> {
+        AncestorsOrObject {
+            inner: self.ancestors(class_name),
+            fell_back: false,
+        }
+    }
+
+    /// Whether `class_name` is `ancestor` or has `ancestor` anywhere in its
+    /// superclass chain. An `ancestor` that is only *named* as the superclass of
+    /// the last known class (a cross-file stub not in the map) still counts.
+    #[must_use]
+    pub fn is_subclass_of(&self, class_name: &str, ancestor: &str) -> bool {
+        class_name == ancestor
+            || self
+                .ancestors(class_name)
+                .any(|info| info.superclass.as_deref() == Some(ancestor))
+    }
+
     /// Returns the ordered superclass chain for a class (excluding the class itself).
     ///
     /// Example: `superclass_chain("Counter")` → `["Actor", "Object", "ProtoObject"]`
     ///
-    /// Handles cycles gracefully by tracking visited classes.
+    /// Owned-names view over [`Self::ancestors`]; prefer that (or
+    /// [`Self::is_subclass_of`]) when only walking or testing membership.
+    /// Handles cycles gracefully.
     #[must_use]
     pub fn superclass_chain(&self, class_name: &str) -> Vec<EcoString> {
-        let mut chain = Vec::new();
-        let mut current = class_name.to_string();
-        let mut visited = HashSet::new();
-        visited.insert(class_name.to_string());
-
-        while let Some(info) = self.classes.get(current.as_str()) {
-            let Some(ref superclass) = info.superclass else {
+        let mut chain: Vec<EcoString> = Vec::new();
+        for info in self.ancestors(class_name) {
+            let Some(superclass) = &info.superclass else {
                 break;
             };
-            if !visited.insert(superclass.to_string()) {
+            if superclass.as_str() == class_name || chain.contains(superclass) {
                 break; // Cycle detected
             }
             chain.push(superclass.clone());
-            current = superclass.to_string();
         }
-
         chain
     }
 
@@ -55,10 +96,7 @@ impl ClassHierarchy {
     pub fn threads_actor_state(&self, class_name: &str) -> bool {
         self.get_class(class_name).is_some_and(|c| !c.is_native)
             && class_name != "Actor"
-            && self
-                .superclass_chain(class_name)
-                .iter()
-                .any(|c| c.as_str() == "Actor")
+            && self.is_subclass_of(class_name, "Actor")
     }
 
     /// Returns the names of all classes whose immediate superclass is
@@ -141,14 +179,7 @@ impl ClassHierarchy {
     /// on itself or any ancestor). Walks the superclass chain on demand.
     #[must_use]
     pub fn is_typed(&self, name: &str) -> bool {
-        if self.classes.get(name).is_some_and(|info| info.is_typed) {
-            return true;
-        }
-        self.superclass_chain(name).iter().any(|s| {
-            self.classes
-                .get(s.as_str())
-                .is_some_and(|info| info.is_typed)
-        })
+        self.ancestors(name).any(|info| info.is_typed)
     }
 
     /// Returns true if the named class is Actor or a subclass of Actor.
@@ -171,12 +202,7 @@ impl ClassHierarchy {
     /// against.
     #[must_use]
     pub fn is_actor_subclass(&self, class_name: &str) -> bool {
-        if class_name == "Actor" {
-            return true;
-        }
-        self.superclass_chain(class_name)
-            .iter()
-            .any(|s| s.as_str() == "Actor")
+        self.is_subclass_of(class_name, "Actor")
     }
 
     /// Whether a standalone extension method (`Target >> sel => ...`) on
@@ -195,23 +221,13 @@ impl ClassHierarchy {
     /// [`Self::is_actor_subclass`] — see its doc comment.
     #[must_use]
     pub fn is_supervisor_subclass(&self, class_name: &str) -> bool {
-        if class_name == "Supervisor" {
-            return true;
-        }
-        self.superclass_chain(class_name)
-            .iter()
-            .any(|s| s.as_str() == "Supervisor")
+        self.is_subclass_of(class_name, "Supervisor")
     }
 
     /// Returns true if the named class is Server or a subclass of Server (ADR 0065).
     #[must_use]
     pub fn is_server_subclass(&self, class_name: &str) -> bool {
-        if class_name == "Server" {
-            return true;
-        }
-        self.superclass_chain(class_name)
-            .iter()
-            .any(|s| s.as_str() == "Server")
+        self.is_subclass_of(class_name, "Server")
     }
 
     /// Returns true if the named class is `DynamicSupervisor` or a subclass.
@@ -220,12 +236,7 @@ impl ClassHierarchy {
     /// [`Self::is_actor_subclass`] — see its doc comment.
     #[must_use]
     pub fn is_dynamic_supervisor_subclass(&self, class_name: &str) -> bool {
-        if class_name == "DynamicSupervisor" {
-            return true;
-        }
-        self.superclass_chain(class_name)
-            .iter()
-            .any(|s| s.as_str() == "DynamicSupervisor")
+        self.is_subclass_of(class_name, "DynamicSupervisor")
     }
 
     /// Returns true if the named class is declared `native:` (ADR 0056, ADR 0101).
@@ -276,27 +287,12 @@ impl ClassHierarchy {
     /// suppress "does not understand" hints for selectors that might be inherited.
     #[must_use]
     pub fn has_cross_file_parent(&self, class_name: &str) -> bool {
-        let mut current = class_name;
-        let mut visited = HashSet::new();
-
-        while let Some(info) = self.classes.get(current) {
-            let Some(ref superclass) = info.superclass else {
-                return false; // Reached root — fully known chain
-            };
-
-            if !visited.insert(current.to_string()) {
-                return false; // Cycle guard
-            }
-
-            // First unknown ancestor means the chain is cross-file/incomplete.
-            if !self.classes.contains_key(superclass.as_str()) {
-                return true;
-            }
-
-            current = superclass.as_str();
-        }
-
-        false
+        // First unknown ancestor means the chain is cross-file/incomplete.
+        self.ancestors(class_name).any(|info| {
+            info.superclass
+                .as_ref()
+                .is_some_and(|sup| !self.classes.contains_key(sup.as_str()))
+        })
     }
 
     /// Returns true if any class in the superclass chain (including the class
@@ -310,26 +306,8 @@ impl ClassHierarchy {
     /// ancestor — a missing parent is `has_cross_file_parent`'s concern.
     #[must_use]
     pub fn has_incomplete_surface_in_chain(&self, class_name: &str) -> bool {
-        let mut current = class_name;
-        let mut visited = HashSet::new();
-
-        while let Some(info) = self.classes.get(current) {
-            if info.surface_incomplete {
-                return true;
-            }
-
-            let Some(ref superclass) = info.superclass else {
-                return false; // Reached root — whole chain checked
-            };
-
-            if !visited.insert(current.to_string()) {
-                return false; // Cycle guard
-            }
-
-            current = superclass.as_str();
-        }
-
-        false
+        self.ancestors(class_name)
+            .any(|info| info.surface_incomplete)
     }
 
     /// Returns true if the named class is Value or a subclass of Value (ADR 0042).
@@ -338,12 +316,7 @@ impl ClassHierarchy {
     /// compile error inside their methods. Use `self withSlot: newValue` instead.
     #[must_use]
     pub fn is_value_subclass(&self, class_name: &str) -> bool {
-        if class_name == "Value" {
-            return true;
-        }
-        self.superclass_chain(class_name)
-            .iter()
-            .any(|s| s.as_str() == "Value")
+        self.is_subclass_of(class_name, "Value")
     }
 
     /// Returns true if `self.slot :=` in an instance method of the named class
@@ -393,12 +366,7 @@ impl ClassHierarchy {
     /// exempt `TestCase` subclasses from the Value `-> Nil` lint.
     #[must_use]
     pub fn is_testcase_subclass(&self, class_name: &str) -> bool {
-        if class_name == "TestCase" {
-            return true;
-        }
-        self.superclass_chain(class_name)
-            .iter()
-            .any(|s| s.as_str() == "TestCase")
+        self.is_subclass_of(class_name, "TestCase")
     }
 
     /// Resolve the `ClassKind` for a class by walking its ancestor chain.
@@ -907,7 +875,7 @@ impl ClassHierarchy {
         };
         let sent = sent.name();
         keyword
-            && matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self")
+            && receiver.is_self()
             && arguments
                 .iter()
                 .all(|arg| plain_argument(method, arg, keyword))
@@ -1146,11 +1114,9 @@ impl ClassHierarchy {
     /// or any subclass thereof, e.g. Character which inherits from Integer).
     #[must_use]
     pub fn is_numeric_type(&self, class_name: &str) -> bool {
-        matches!(class_name, "Integer" | "Float" | "Number")
-            || self
-                .superclass_chain(class_name)
-                .iter()
-                .any(|s| matches!(s.as_str(), "Integer" | "Float" | "Number"))
+        ["Integer", "Float", "Number"]
+            .iter()
+            .any(|n| self.is_subclass_of(class_name, n))
     }
 
     /// Returns the class variables `class_name` itself declares with
@@ -1186,15 +1152,14 @@ impl ClassHierarchy {
         class_name: &str,
         var_name: &str,
     ) -> Option<EcoString> {
-        self.superclass_chain(class_name)
-            .into_iter()
-            .find(|ancestor| {
-                self.classes.get(ancestor.as_str()).is_some_and(|info| {
-                    info.class_variables
-                        .iter()
-                        .any(|cv| cv.name.as_str() == var_name)
-                })
+        self.ancestors(class_name)
+            .skip(1)
+            .find(|info| {
+                info.class_variables
+                    .iter()
+                    .any(|cv| cv.name.as_str() == var_name)
             })
+            .map(|info| info.name.clone())
     }
 
     /// Returns all state (instance variable) names for a class,
@@ -1213,24 +1178,11 @@ impl ClassHierarchy {
     pub fn all_state(&self, class_name: &str) -> Vec<EcoString> {
         let mut state = Vec::new();
         let mut seen_names = HashSet::new();
-        let mut visited = HashSet::new();
-        let mut current = Some(class_name.to_string());
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            if let Some(info) = self.classes.get(name.as_str()) {
-                for field in &info.state {
-                    if seen_names.insert(field.clone()) {
-                        state.push(field.clone());
-                    }
+        for info in self.ancestors(class_name) {
+            for field in &info.state {
+                if seen_names.insert(field.clone()) {
+                    state.push(field.clone());
                 }
-                current = info
-                    .superclass
-                    .as_ref()
-                    .map(std::string::ToString::to_string);
-            } else {
-                break;
             }
         }
         state
@@ -1260,22 +1212,10 @@ impl ClassHierarchy {
         class_name: &str,
         mut settle: impl FnMut(&ClassInfo) -> ControlFlow<Option<R>>,
     ) -> Option<R> {
-        let mut visited = HashSet::new();
-        let mut current = Some(class_name.to_string());
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            let Some(info) = self.classes.get(name.as_str()) else {
-                break;
-            };
+        for info in self.ancestors(class_name) {
             if let ControlFlow::Break(value) = settle(info) {
                 return value;
             }
-            current = info
-                .superclass
-                .as_ref()
-                .map(std::string::ToString::to_string);
         }
         None
     }
@@ -1313,29 +1253,14 @@ impl ClassHierarchy {
     /// for the same reason.
     #[must_use]
     pub fn state_field_has_default(&self, class_name: &str, field_name: &str) -> bool {
-        let mut visited = HashSet::new();
-        let mut current = Some(class_name.to_string());
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            if let Some(info) = self.classes.get(name.as_str()) {
-                if info.state.iter().any(|s| s == field_name) {
-                    return info
-                        .state_has_default
-                        .get(field_name)
-                        .copied()
-                        .unwrap_or(true);
-                }
-                current = info
-                    .superclass
-                    .as_ref()
-                    .map(std::string::ToString::to_string);
-            } else {
-                break;
-            }
-        }
-        true
+        self.ancestors(class_name)
+            .find(|info| info.state.iter().any(|s| s == field_name))
+            .is_none_or(|info| {
+                info.state_has_default
+                    .get(field_name)
+                    .copied()
+                    .unwrap_or(true)
+            })
     }
 
     /// Returns the slot kind (`#eager` | `#late`, ADR 0124 §1) for a state
@@ -1615,6 +1540,66 @@ pub fn superclass_chain_includes_value<'a>(
         current = superclass_of(name);
     }
     false
+}
+
+/// Borrowing superclass-chain iterator returned by
+/// [`ClassHierarchy::ancestors`]. Cycle-guarded by a small vector of borrowed
+/// names (chains are a handful deep), so a walk allocates no `String` per hop.
+#[derive(Debug)]
+pub struct Ancestors<'a> {
+    hierarchy: &'a ClassHierarchy,
+    next: Option<&'a ClassInfo>,
+    visited: Vec<&'a str>,
+    /// Set when the walk stopped at a superclass name that is not a known class.
+    ended_at_unknown: bool,
+}
+
+impl<'a> Iterator for Ancestors<'a> {
+    type Item = &'a ClassInfo;
+
+    fn next(&mut self) -> Option<&'a ClassInfo> {
+        let info = self.next.take()?;
+        if self.visited.contains(&info.name.as_str()) {
+            return None; // Cycle detected
+        }
+        self.visited.push(info.name.as_str());
+        if let Some(superclass) = info.superclass.as_deref() {
+            self.next = self.hierarchy.classes.get(superclass);
+            self.ended_at_unknown = self.next.is_none();
+        }
+        Some(info)
+    }
+}
+
+/// [`ClassHierarchy::ancestors`] that falls through to `Object` after an
+/// unknown ancestor; returned by [`ClassHierarchy::ancestors_or_object`].
+#[derive(Debug)]
+pub struct AncestorsOrObject<'a> {
+    inner: Ancestors<'a>,
+    fell_back: bool,
+}
+
+impl<'a> Iterator for AncestorsOrObject<'a> {
+    type Item = &'a ClassInfo;
+
+    fn next(&mut self) -> Option<&'a ClassInfo> {
+        if let Some(info) = self.inner.next() {
+            return Some(info);
+        }
+        // Only fall through once, only after a known class was traversed, and
+        // never into a chain that already contains `Object`.
+        if self.fell_back
+            || !self.inner.ended_at_unknown
+            || self.inner.visited.is_empty()
+            || self.inner.visited.contains(&"Object")
+        {
+            return None;
+        }
+        self.fell_back = true;
+        self.inner.next = self.inner.hierarchy.classes.get("Object");
+        self.inner.ended_at_unknown = false;
+        self.inner.next()
+    }
 }
 
 /// A Value class's synthesized keyword-constructor decision as

@@ -534,7 +534,7 @@ impl ClassCtx<'_> {
             Expression::Identifier(id) => actors.contains(id.name.as_str()).then(to_actor),
             Expression::FieldAccess {
                 receiver, field, ..
-            } if is_self(receiver) && self.actor_fields.contains(field.name.as_str()) => {
+            } if receiver.is_self() && self.actor_fields.contains(field.name.as_str()) => {
                 Some(to_actor())
             }
             // `Worker spawn keep: [...]`.
@@ -574,7 +574,7 @@ impl ClassCtx<'_> {
                 ..
             } if class.name() == "class"
                 && arguments.is_empty()
-                && (is_self(inner) || is_super(inner)) =>
+                && (inner.is_self() || inner.is_super()) =>
             {
                 (self.class_name, false)
             }
@@ -613,7 +613,7 @@ impl ClassCtx<'_> {
 /// send.
 fn is_reflective_self_access(send: &SendRef<'_>) -> bool {
     send.site == SendSite::Plain
-        && is_self(send.receiver)
+        && send.receiver.is_self()
         && matches!(
             send.selector.well_known(),
             Some(
@@ -705,25 +705,12 @@ fn self_aliases(block: &Block) -> HashSet<String> {
             let Expression::Identifier(local) = &**target else {
                 return;
             };
-            if is_self(value) {
+            if value.is_self() {
                 aliases.insert(local.name.to_string());
             }
         });
     }
     aliases
-}
-
-/// Returns `true` if `expr` is the identifier `self`.
-fn is_self(expr: &Expression) -> bool {
-    matches!(
-        expr.unwrap_parens(),
-        Expression::Identifier(id) if id.name.as_str() == "self"
-    )
-}
-
-/// Returns `true` if `expr` is `super`.
-fn is_super(expr: &Expression) -> bool {
-    matches!(expr.unwrap_parens(), Expression::Super(_))
 }
 
 /// `what` names the write: `writes field 'n' of Counter`, or a reflective

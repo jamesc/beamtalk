@@ -2957,7 +2957,7 @@ fn register_extensions_does_not_override_existing_method() {
     use std::path::PathBuf;
     let mut h = ClassHierarchy::with_builtins();
     // "size" already exists on String
-    let original = h.find_method("String", "size").unwrap();
+    let original = h.find_method("String", "size").unwrap().clone();
     let mut index = ExtensionIndex::new();
     let key = ExtensionKey {
         class_name: "String".into(),

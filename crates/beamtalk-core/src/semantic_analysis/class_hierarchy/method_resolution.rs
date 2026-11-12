@@ -27,27 +27,14 @@ impl ClassHierarchy {
     pub fn all_methods(&self, class_name: &str) -> Vec<MethodInfo> {
         let mut seen_selectors: HashMap<EcoString, usize> = HashMap::new();
         let mut methods = Vec::new();
-        let mut visited = HashSet::new();
 
         // Walk MRO: class itself, then superclass chain
-        let mut current = Some(class_name.to_string());
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break; // Cycle detected
-            }
-            if let Some(info) = self.classes.get(name.as_str()) {
-                for method in &info.methods {
-                    if !seen_selectors.contains_key(&method.selector) {
-                        seen_selectors.insert(method.selector.clone(), methods.len());
-                        methods.push(method.clone());
-                    }
+        for info in self.ancestors(class_name) {
+            for method in &info.methods {
+                if !seen_selectors.contains_key(&method.selector) {
+                    seen_selectors.insert(method.selector.clone(), methods.len());
+                    methods.push(method.clone());
                 }
-                current = info
-                    .superclass
-                    .as_ref()
-                    .map(std::string::ToString::to_string);
-            } else {
-                break;
             }
         }
 
@@ -63,30 +50,17 @@ impl ClassHierarchy {
     pub fn all_class_methods(&self, class_name: &str) -> Vec<MethodInfo> {
         let mut seen_selectors: HashMap<EcoString, usize> = HashMap::new();
         let mut methods = Vec::new();
-        let mut visited = HashSet::new();
 
-        let mut current = Some(class_name.to_string());
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            if let Some(info) = self.classes.get(name.as_str()) {
-                for method in &info.class_methods {
-                    if method.kind == MethodKind::Primary {
-                        if !seen_selectors.contains_key(&method.selector) {
-                            seen_selectors.insert(method.selector.clone(), methods.len());
-                            methods.push(method.clone());
-                        }
-                    } else {
+        for info in self.ancestors(class_name) {
+            for method in &info.class_methods {
+                if method.kind == MethodKind::Primary {
+                    if !seen_selectors.contains_key(&method.selector) {
+                        seen_selectors.insert(method.selector.clone(), methods.len());
                         methods.push(method.clone());
                     }
+                } else {
+                    methods.push(method.clone());
                 }
-                current = info
-                    .superclass
-                    .as_ref()
-                    .map(std::string::ToString::to_string);
-            } else {
-                break;
             }
         }
 
@@ -105,42 +79,11 @@ impl ClassHierarchy {
     /// for cross-file class hierarchies.
     #[must_use]
     pub fn resolves_selector(&self, class_name: &str, selector: &str) -> bool {
-        let mut current = Some(class_name.to_string());
-        let mut visited = HashSet::new();
-        let mut traversed_known = false;
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break; // Cycle detected
-            }
-            if let Some(info) = self.classes.get(name.as_str()) {
-                traversed_known = true;
-                if self
-                    .method_indexes
-                    .get(name.as_str())
-                    .is_some_and(|idx| idx.contains_key(selector))
-                {
-                    return true;
-                }
-                current = info
-                    .superclass
-                    .as_ref()
-                    .map(std::string::ToString::to_string);
-            } else {
-                // Unknown class in the superclass chain — likely an external class
-                // defined in a separately-compiled file.  Since all Beamtalk classes
-                // ultimately inherit from Object, fall through to the Object chain so
-                // that Object-level methods (e.g. subclassResponsibility) are visible.
-                // Guard: only fall through if we already traversed at least one known
-                // class, so that a completely-unknown root class does not incorrectly
-                // resolve Object methods.
-                current = if traversed_known {
-                    Some("Object".to_string())
-                } else {
-                    None
-                };
-            }
-        }
-        false
+        self.ancestors_or_object(class_name).any(|info| {
+            self.method_indexes
+                .get(info.name.as_str())
+                .is_some_and(|idx| idx.contains_key(selector))
+        })
     }
 
     /// Check if a class can respond to a given class-side selector (local or inherited).
@@ -159,41 +102,14 @@ impl ClassHierarchy {
     /// When an intermediate class in the superclass chain is not found in the
     /// hierarchy, the walk falls through to `Object`.
     #[must_use]
-    pub fn find_method(&self, class_name: &str, selector: &str) -> Option<MethodInfo> {
-        let mut current = Some(class_name.to_string());
-        let mut visited = HashSet::new();
-        let mut traversed_known = false;
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            if let Some(info) = self.classes.get(name.as_str()) {
-                traversed_known = true;
-                if let Some(&idx) = self
-                    .method_indexes
-                    .get(name.as_str())
-                    .and_then(|mi| mi.get(selector))
-                {
-                    let method = &info.methods[idx];
-                    if method.kind == MethodKind::Primary {
-                        return Some(method.clone());
-                    }
-                }
-                current = info
-                    .superclass
-                    .as_ref()
-                    .map(std::string::ToString::to_string);
-            } else {
-                // Unknown class in the superclass chain — fall through to Object.
-                // Guard: only when at least one known class was already traversed.
-                current = if traversed_known {
-                    Some("Object".to_string())
-                } else {
-                    None
-                };
-            }
-        }
-        None
+    pub fn find_method(&self, class_name: &str, selector: &str) -> Option<&MethodInfo> {
+        self.ancestors_or_object(class_name).find_map(|info| {
+            let &idx = self
+                .method_indexes
+                .get(info.name.as_str())
+                .and_then(|mi| mi.get(selector))?;
+            Some(&info.methods[idx]).filter(|m| m.kind == MethodKind::Primary)
+        })
     }
 
     /// Find a class-side method by selector (including inherited class methods).
@@ -201,41 +117,14 @@ impl ClassHierarchy {
     /// When an intermediate class in the superclass chain is not found in the
     /// hierarchy, the walk falls through to `Object`.
     #[must_use]
-    pub fn find_class_method(&self, class_name: &str, selector: &str) -> Option<MethodInfo> {
-        let mut current = Some(class_name.to_string());
-        let mut visited = HashSet::new();
-        let mut traversed_known = false;
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            if let Some(info) = self.classes.get(name.as_str()) {
-                traversed_known = true;
-                if let Some(&idx) = self
-                    .class_method_indexes
-                    .get(name.as_str())
-                    .and_then(|mi| mi.get(selector))
-                {
-                    let method = &info.class_methods[idx];
-                    if method.kind == MethodKind::Primary {
-                        return Some(method.clone());
-                    }
-                }
-                current = info
-                    .superclass
-                    .as_ref()
-                    .map(std::string::ToString::to_string);
-            } else {
-                // Unknown class in the superclass chain — fall through to Object.
-                // Guard: only when at least one known class was already traversed.
-                current = if traversed_known {
-                    Some("Object".to_string())
-                } else {
-                    None
-                };
-            }
-        }
-        None
+    pub fn find_class_method(&self, class_name: &str, selector: &str) -> Option<&MethodInfo> {
+        self.ancestors_or_object(class_name).find_map(|info| {
+            let &idx = self
+                .class_method_indexes
+                .get(info.name.as_str())
+                .and_then(|mi| mi.get(selector))?;
+            Some(&info.class_methods[idx]).filter(|m| m.kind == MethodKind::Primary)
+        })
     }
 
     /// Collects the set of selectors that have `spawns_block: true` anywhere
@@ -286,6 +175,21 @@ impl ClassHierarchy {
         })
     }
 
+    /// The classes a sealed-method lookup from `start_class` checks: its
+    /// ancestors (falling through to `Object` after an unknown one). An unknown
+    /// start class still checks `Object`'s sealed methods, so a sealed override
+    /// cannot be bypassed through an external class.
+    fn sealed_lookup_lineage<'a>(
+        &'a self,
+        start_class: &str,
+    ) -> Box<dyn Iterator<Item = &'a ClassInfo> + 'a> {
+        if self.classes.contains_key(start_class) {
+            Box::new(self.ancestors_or_object(start_class))
+        } else {
+            Box::new(self.ancestors("Object"))
+        }
+    }
+
     /// Walk the superclass chain looking for a sealed primary method with the given selector.
     /// Returns `Some((class_name, MethodInfo))` if found, `None` otherwise.
     pub(super) fn find_sealed_method_in_ancestors(
@@ -293,36 +197,14 @@ impl ClassHierarchy {
         start_class: &str,
         selector: &str,
     ) -> Option<(EcoString, MethodInfo)> {
-        let mut current = Some(start_class.to_string());
-        let mut visited = HashSet::new();
-        let mut fell_back_to_object = false;
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            if let Some(info) = self.classes.get(name.as_str()) {
-                for method in &info.methods {
-                    if method.kind == MethodKind::Primary
-                        && method.selector.as_str() == selector
-                        && method.is_sealed
-                    {
-                        return Some((info.name.clone(), method.clone()));
-                    }
+        for info in self.sealed_lookup_lineage(start_class) {
+            for method in &info.methods {
+                if method.kind == MethodKind::Primary
+                    && method.selector.as_str() == selector
+                    && method.is_sealed
+                {
+                    return Some((info.name.clone(), method.clone()));
                 }
-                current = info
-                    .superclass
-                    .as_ref()
-                    .map(std::string::ToString::to_string);
-            } else {
-                // Unknown/external class: fall back to Object to ensure we check
-                // Object's sealed methods, then stop. This prevents sealed overrides
-                // from being bypassed when an external class is in the inheritance chain.
-                current = if fell_back_to_object {
-                    None
-                } else {
-                    fell_back_to_object = true;
-                    Some("Object".to_string())
-                };
             }
         }
         None
@@ -335,36 +217,14 @@ impl ClassHierarchy {
         start_class: &str,
         selector: &str,
     ) -> Option<(EcoString, MethodInfo)> {
-        let mut current = Some(start_class.to_string());
-        let mut visited = HashSet::new();
-        let mut fell_back_to_object = false;
-        while let Some(name) = current {
-            if !visited.insert(name.clone()) {
-                break;
-            }
-            if let Some(info) = self.classes.get(name.as_str()) {
-                for method in &info.class_methods {
-                    if method.kind == MethodKind::Primary
-                        && method.selector.as_str() == selector
-                        && method.is_sealed
-                    {
-                        return Some((info.name.clone(), method.clone()));
-                    }
+        for info in self.sealed_lookup_lineage(start_class) {
+            for method in &info.class_methods {
+                if method.kind == MethodKind::Primary
+                    && method.selector.as_str() == selector
+                    && method.is_sealed
+                {
+                    return Some((info.name.clone(), method.clone()));
                 }
-                current = info
-                    .superclass
-                    .as_ref()
-                    .map(std::string::ToString::to_string);
-            } else {
-                // Unknown/external class: fall back to Object to ensure we check
-                // Object's sealed methods, then stop. This prevents sealed overrides
-                // from being bypassed when an external class is in the inheritance chain.
-                current = if fell_back_to_object {
-                    None
-                } else {
-                    fell_back_to_object = true;
-                    Some("Object".to_string())
-                };
             }
         }
         None

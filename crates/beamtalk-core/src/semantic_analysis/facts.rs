@@ -652,11 +652,6 @@ pub fn compute_state_effects_for_expr(expr: &Expression, in_class_method: bool) 
     compute_state_effects(expr, in_class_method, &mut scratch)
 }
 
-/// Returns `true` if `expr` is a reference to `self`.
-fn is_self_reference(expr: &Expression) -> bool {
-    matches!(expr, Expression::Identifier(id) if id.name == "self")
-}
-
 /// Computes the [`StateEffects`] fact for `expr` and every sub-expression
 /// reachable from it, inserting each node's own fact into `out` (keyed by
 /// span) and returning `expr`'s own (unioned) fact so a caller can fold it
@@ -701,7 +696,7 @@ fn compute_state_effects(
             ..
         } => {
             let mut eff = compute_state_effects(receiver, in_class_method, out);
-            if !is_cast && is_self_reference(receiver) {
+            if !is_cast && receiver.is_self() {
                 if in_class_method {
                     eff.class_self_send = true;
                 } else {
@@ -729,7 +724,7 @@ fn compute_state_effects(
         Expression::Assignment { target, value, .. } => {
             let mut eff = compute_state_effects(value, in_class_method, out);
             if let Expression::FieldAccess { receiver, .. } = target.as_ref() {
-                if is_self_reference(receiver) {
+                if receiver.is_self() {
                     if in_class_method {
                         eff.class_var_write = true;
                     } else {
@@ -760,7 +755,7 @@ fn compute_state_effects(
                 } => inner.as_ref(),
                 other => other,
             };
-            if is_self_reference(cascade_receiver) {
+            if cascade_receiver.is_self() {
                 if in_class_method {
                     eff.class_self_send = true;
                 } else {

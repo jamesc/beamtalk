@@ -38,7 +38,7 @@ pub use class_info::{
     MethodInfo, SuperclassTypeArg, format_default_value,
 };
 pub use declared_type::{DeclaredShapeField, DeclaredType};
-pub use hierarchy_queries::superclass_chain_includes_value;
+pub use hierarchy_queries::{Ancestors, AncestorsOrObject, superclass_chain_includes_value};
 /// Per-class selector index: maps class name → (selector → method vec position).
 type SelectorIndexMap = HashMap<EcoString, HashMap<EcoString, usize>>;
 

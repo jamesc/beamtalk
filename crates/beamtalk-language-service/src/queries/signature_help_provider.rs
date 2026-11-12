@@ -467,7 +467,7 @@ fn resolve_signature(
         }
         return hierarchy
             .find_method("Metaclass", selector_name)
-            .map(|method| build_signature_help(&method, active_parameter));
+            .map(|method| build_signature_help(method, active_parameter));
     }
 
     let (receiver_class, class_side) =
@@ -478,7 +478,7 @@ fn resolve_signature(
     } else {
         hierarchy.find_method(receiver_class.as_str(), selector_name)
     }?;
-    Some(build_signature_help(&method, active_parameter))
+    Some(build_signature_help(method, active_parameter))
 }
 
 /// Builds signature help from a resolved `ClassHierarchy::MethodInfo`.
