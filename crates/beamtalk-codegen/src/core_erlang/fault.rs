@@ -65,14 +65,13 @@ pub(super) use registry::{PlainArmScope, in_plain_arm, record_producer, recordin
 mod registry {
     use beamtalk_core::source_analysis::Span;
     use std::cell::{Cell, RefCell};
-    use std::collections::HashSet;
 
     /// One producer lowering: the construct's span and its threaded locals.
     pub(in crate::core_erlang) type ProducerRecord = (Span, Vec<String>);
 
     /// A deliberately wrong (or pre-fix) lowering. Switch one on with
     /// [`with`] or [`set`]; production code reads it with `fault!(Variant)`.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum Fault {
         // ── Non-local return (`nlr.rs`) ─────────────────────────────────
         /// An actor `^` as it was before ADR 0146: the catch arm commits the
@@ -316,15 +315,23 @@ mod registry {
     }
 
     thread_local! {
-        static ACTIVE: RefCell<HashSet<Fault>> = RefCell::new(HashSet::new());
+        static ACTIVE: Cell<u64> = const { Cell::new(0) };
         static PRODUCERS: RefCell<Option<Vec<ProducerRecord>>> = const { RefCell::new(None) };
         static IN_PLAIN_ARM: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// The `ACTIVE` bit of `fault`: one load per `fault!` on the hot lowering
+    /// paths of test builds.
+    /// `ACTIVE` is a `u64` mask: the shift overflows (and panics in debug,
+    /// i.e. in every test) on a 65th variant, which then needs a wider mask.
+    fn bit(fault: Fault) -> u64 {
+        1u64 << (fault as u32)
     }
 
     /// Whether `fault` is switched on on this thread. Read through the
     /// `fault!` macro, not directly.
     pub fn is_active(fault: Fault) -> bool {
-        ACTIVE.with(|active| active.borrow().contains(&fault))
+        ACTIVE.with(|active| active.get() & bit(fault) != 0)
     }
 
     /// Switches `fault` on or off on this thread. Prefer [`with`], which
@@ -332,11 +339,12 @@ mod registry {
     /// hold a fault across several compiles.
     pub fn set(fault: Fault, on: bool) {
         ACTIVE.with(|active| {
-            if on {
-                active.borrow_mut().insert(fault);
+            let bits = active.get();
+            active.set(if on {
+                bits | bit(fault)
             } else {
-                active.borrow_mut().remove(&fault);
-            }
+                bits & !bit(fault)
+            });
         });
     }
 
