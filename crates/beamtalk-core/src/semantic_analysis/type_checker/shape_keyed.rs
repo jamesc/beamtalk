@@ -299,7 +299,7 @@ impl TypeChecker {
                     receiver_ty,
                     &split,
                     key,
-                    if op == KeyedOp::AtIfAbsent {
+                    if op == KeyedOp::AtIfAbsent && keys.len() == 1 {
                         "The `ifAbsent:` block always runs"
                     } else {
                         "This read can only fail at run time"

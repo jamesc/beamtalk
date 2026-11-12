@@ -140,11 +140,10 @@ impl TypeChecker {
         // ADR 0147 "Dictionary view": every message a map shape does not
         // handle specially is sent to the `Dictionary(K, V)` it behaves as
         // (`K` the join of the key types, `V` of the value types; `Object`
-        // for both when open). The shape-aware keyed operations are a later
-        // phase and will intercept before this point.
-        // The shape-aware keyed operations (`at:`, `at:ifAbsent:`,
-        // `at:ifPresent:`, `at:put:`) read the per-key types, so they keep the
-        // un-viewed receiver; everything else sees the `Dictionary` view.
+        // for both when open). The shape-aware keyed operations (`at:`,
+        // `at:ifAbsent:`, `at:ifPresent:`, `at:ifPresent:ifAbsent:`,
+        // `at:put:`) read the per-key types, so they keep the un-viewed
+        // receiver; everything else sees the `Dictionary` view.
         let shape_receiver_ty =
             crate::semantic_analysis::type_checker::shape_keyed::KeyedOp::from_selector(
                 &selector.name(),

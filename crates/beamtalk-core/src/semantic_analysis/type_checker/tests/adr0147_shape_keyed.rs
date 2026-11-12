@@ -108,10 +108,10 @@ fn at_if_present_block_gets_the_key_type() {
         "  m: o :: #{#a => Integer, ...} => o at: #q ifPresent: [:v | self takeString: v]",
         "got Object",
     );
-    expects(
-        "  m: o :: #{#a => Integer} => o at: #q ifPresent: [:v | v]",
-        "`#q` is not a key of",
-    );
+    // One warning, not a second from the generic `Dictionary` key check.
+    let msgs = one("  m: o :: #{#a => Integer} => o at: #q ifPresent: [:v | v]");
+    assert_eq!(msgs.len(), 1, "{msgs:#?}");
+    assert!(msgs[0].contains("`#q` is not a key of"), "{msgs:#?}");
 }
 
 #[test]
@@ -200,4 +200,10 @@ fn is_kind_of_dictionary_keeps_shape_members() {
         "  m: o :: #{#a => Integer} | Nil => (o isKindOf: Dictionary) ifTrue: [self takeString: (o at: #a)]",
         "got Integer",
     );
+}
+
+#[test]
+fn protocol_type_pattern_keeps_the_shape() {
+    // `Dictionary` is `Printable`, so the arm is reachable and `v` is not `Never`.
+    silent("  m: o :: #{#a => Integer} => o match: [p :: Printable -> p printString; _ -> \"\"]");
 }

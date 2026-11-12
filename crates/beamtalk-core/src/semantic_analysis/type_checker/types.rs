@@ -1381,16 +1381,22 @@ impl InferredType {
 
     /// `shape ∩ Known(class_name)` (ADR 0147): a map shape is a `Dictionary`,
     /// so a test against `Dictionary` or one of its superclasses keeps the
-    /// shape; any other class is disjoint.
+    /// shape. A protocol keeps the shape too, as the irreducible
+    /// `shape & Protocol` (like class ∩ protocol); any other class is disjoint.
     fn intersect_shape_with_class(
         shape: &Self,
+        class_ty: &Self,
         class_name: &str,
+        provenance: TypeProvenance,
         hierarchy: Option<&ClassHierarchy>,
+        protocol_registry: Option<&ProtocolRegistry>,
     ) -> Self {
         let is_dictionary = class_name == "Dictionary"
             || hierarchy.is_some_and(|h| Self::is_nominal_subtype(h, "Dictionary", class_name));
         if is_dictionary {
             shape.clone()
+        } else if protocol_registry.is_some_and(|r| r.has_protocol(class_name)) {
+            Self::normalize_intersection(vec![shape.clone(), class_ty.clone()], provenance)
         } else {
             Self::Never
         }
@@ -1552,10 +1558,24 @@ impl InferredType {
             // type-pattern test against `Dictionary` (or one of its
             // superclasses) keeps the shape; any other class is disjoint.
             (Self::Shape { .. }, Self::Known { class_name, .. }) => {
-                Self::intersect_shape_with_class(a, class_name, hierarchy)
+                Self::intersect_shape_with_class(
+                    a,
+                    b,
+                    class_name,
+                    provenance,
+                    hierarchy,
+                    protocol_registry,
+                )
             }
             (Self::Known { class_name, .. }, Self::Shape { .. }) => {
-                Self::intersect_shape_with_class(b, class_name, hierarchy)
+                Self::intersect_shape_with_class(
+                    b,
+                    a,
+                    class_name,
+                    provenance,
+                    hierarchy,
+                    protocol_registry,
+                )
             }
             // Symbol-singleton membership: `#foo <: Symbol`, so the narrower
             // singleton is kept in both orders. Checked before the general
