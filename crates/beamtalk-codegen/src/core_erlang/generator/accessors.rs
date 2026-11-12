@@ -40,6 +40,10 @@ impl CoreErlangGenerator {
                 .class_hierarchy
                 .as_ref()
                 .map(|h| h.defines_user_class_new1(&self.class_name())),
+            defines_user_class_new0: self
+                .class_hierarchy
+                .as_ref()
+                .map(|h| h.defines_user_class_new0(&self.class_name())),
             class_new1_routing: self.own_class_new1_routing,
         }
     }

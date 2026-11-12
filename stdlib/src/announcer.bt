@@ -40,12 +40,16 @@ typed Object subclass: Announcer
 
   /// Create a new Announcer handle (mints a fresh runtime ref via FFI).
   ///
+  /// Inherited by subclasses (BT-4479): `Announcer subclass: MyAnnouncer`
+  /// then `MyAnnouncer new` runs this constructor with `self` = `MyAnnouncer`,
+  /// so the handle carries the subclass name.
+  ///
   /// ## Examples
   /// ```beamtalk
   /// a := Announcer new
   /// a class   // => Announcer
   /// ```
-  class new -> Announcer => (Erlang beamtalk_announcements) newAnnouncer
+  class new -> Announcer => (Erlang beamtalk_announcements) newAnnouncer: self
 
   // === Subscribing ===
 

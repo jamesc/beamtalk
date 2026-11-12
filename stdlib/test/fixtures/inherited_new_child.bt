@@ -1,0 +1,7 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4479: defines no `new` of its own; `InheritedNewChild new` runs
+// InheritedNewBase's. See inherited_class_new_test.bt.
+
+InheritedNewBase subclass: InheritedNewChild

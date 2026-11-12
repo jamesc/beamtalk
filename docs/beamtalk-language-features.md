@@ -6254,7 +6254,13 @@ aDictionary`: an extension of `new:` on `Base class` answers it, exactly as a
 compiled `class new:` on `Base` would (BT-4588). `new` follows the same rule
 with one consequence: every class has its own synthesized `new`, and a class's
 own method is found before an ancestor's extension, so an extension of `new` on
-`Base class` answers `Base new` but not `Sub new`. One exception remains:
+`Base class` answers `Base new` but not `Sub new`. A compiled `class new` on
+`Base` is different: it is `Base`'s own constructor, so a subclass that defines
+no `new` inherits it, and `Sub new` runs it (BT-4479). `Announcer subclass:
+MyAnnouncer` then `MyAnnouncer new` therefore mints a working announcer carrying
+its `ref`, and `MyAnnouncer new class` is `MyAnnouncer`. A subclass that defines
+its own `class new` still wins; the root `new` of `Value` and `Actor` is not an
+inherited user constructor. One exception remains:
 `performLocally:withArguments:` applies compiled class methods only.
 
 ---

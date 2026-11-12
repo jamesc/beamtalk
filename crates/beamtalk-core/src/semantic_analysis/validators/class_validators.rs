@@ -324,6 +324,7 @@ fn check_object_new_in_class_methods(
                             && (matches!(receiver, Expression::Super(_))
                                 || is_self_identifier(receiver))
                             && !hierarchy.has_own_class_method(class_name, sel)
+                            && !(sel == "new" && hierarchy.chain_has_user_new0(class_name))
                         {
                             diagnostics.push(object_kind_new_error(class_name, sel, span));
                         }
@@ -382,6 +383,8 @@ fn uninstantiable_new(
         || matches!(class_name, "self" | "super")
         || !hierarchy.has_class(class_name)
         || hierarchy.has_own_class_method(class_name, selector)
+        // BT-4479: an inherited user class-side `new` is a real constructor.
+        || (selector == "new" && hierarchy.chain_has_user_new0(class_name))
     {
         return None;
     }

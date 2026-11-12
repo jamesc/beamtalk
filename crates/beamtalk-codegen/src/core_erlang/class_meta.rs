@@ -78,6 +78,13 @@ pub(crate) struct MetaProvenance<'a> {
     /// before a dynamic `new:` builds in the caller; an absent fact fails
     /// closed there.
     pub defines_user_class_new1: Option<bool>,
+    /// BT-4479: whether this class itself defines a class-side `new` that is
+    /// user code (`ClassHierarchy::defines_user_class_new0`); emitted as
+    /// `'defines_user_class_new0' => 'true' | 'false'`, omitted when unknown.
+    /// The runtime walks the ancestors' facts
+    /// (`beamtalk_class_metadata:chain_has_user_new0/1`) so a class with no
+    /// `new` of its own runs an ancestor's; an absent fact reads as `false`.
+    pub defines_user_class_new0: Option<bool>,
     /// BT-4475: where this class's `new:` runs; [`ClassNew1Routing::InCaller`]
     /// leaves `new:` out of its published `process_bound_class_selectors`.
     pub class_new1_routing: ClassNew1Routing,
@@ -445,6 +452,11 @@ impl CoreErlangGenerator {
             match provenance.defines_user_class_new1 {
                 Some(true) => Document::Str(",\n      'defines_user_class_new1' => 'true'"),
                 Some(false) => Document::Str(",\n      'defines_user_class_new1' => 'false'"),
+                None => Document::Nil,
+            },
+            match provenance.defines_user_class_new0 {
+                Some(true) => Document::Str(",\n      'defines_user_class_new0' => 'true'"),
+                Some(false) => Document::Str(",\n      'defines_user_class_new0' => 'false'"),
                 None => Document::Nil,
             },
             if provenance.overrides_collection_selector {
