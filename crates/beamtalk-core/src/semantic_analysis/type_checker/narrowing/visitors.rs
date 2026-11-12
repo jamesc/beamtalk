@@ -160,3 +160,44 @@ pub(crate) fn block_may_reassign(block: &Block, key: &EnvKey) -> bool {
         }
     })
 }
+
+/// The bindings `expr` may assign, found by a **deep** walk (nested block
+/// literals included, since a block built here may run before the code that
+/// follows) — unlike the top-level-only [`block_may_reassign`]. A write the
+/// walk cannot attribute to a key (a destructuring assignment, an unreadable
+/// target) makes the answer [`Writes::Unknown`]. Used to drop the facts a
+/// right-hand `and:` / `or:` argument may invalidate (BT-4710).
+pub(crate) fn expr_writes(expr: &Expression) -> Writes {
+    struct Finder(Writes);
+    impl<'ast> Visitor<'ast> for Finder {
+        fn visit_expr(&mut self, e: &'ast Expression) {
+            match e {
+                Expression::Assignment { target, .. } => match extract_variable_name(target) {
+                    Some(key) => {
+                        if let Writes::Keys(keys) = &mut self.0 {
+                            keys.push(key);
+                        }
+                    }
+                    None => self.0 = Writes::Unknown,
+                },
+                Expression::DestructureAssignment { .. } => self.0 = Writes::Unknown,
+                _ => {}
+            }
+            walk_expr(self, e);
+        }
+        fn visit_block(&mut self, block: &'ast Block) {
+            walk_block(self, block);
+        }
+    }
+    let mut finder = Finder(Writes::Keys(Vec::new()));
+    finder.visit_expr(expr);
+    finder.0
+}
+
+/// What an expression may assign — see [`expr_writes`].
+pub(crate) enum Writes {
+    /// Exactly these bindings (possibly none).
+    Keys(Vec<EnvKey>),
+    /// Something the walk cannot name: assume any binding.
+    Unknown,
+}

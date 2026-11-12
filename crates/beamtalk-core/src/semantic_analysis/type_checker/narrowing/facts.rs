@@ -29,6 +29,7 @@ use crate::source_analysis::Span;
 
 use super::super::{EnvKey, InferredType, TypeChecker, TypeEnv};
 use super::refinement::RefinementLayer;
+use super::visitors::{Writes, expr_contains_returning_self_send, expr_writes};
 
 /// A set of `variable -> narrowed type` facts, one entry per variable.
 #[derive(Debug, Clone, Default)]
@@ -80,6 +81,14 @@ impl Facts {
                 })
                 .collect(),
         )
+    }
+
+    /// Forget the facts about `keys` (`Writes::Unknown`: all of them).
+    fn forget_written(&mut self, writes: &Writes) {
+        match writes {
+            Writes::Keys(keys) => self.0.retain(|(key, _)| !keys.contains(key)),
+            Writes::Unknown => self.0.clear(),
+        }
     }
 
     /// Forget every `self.<field>` fact (BT-4715: a self-send may reassign
@@ -222,7 +231,7 @@ impl TypeChecker {
             return CondFacts::default();
         };
 
-        let left = self.condition_facts(lhs, env, hierarchy, ctx.nested());
+        let mut left = self.condition_facts(lhs, env, hierarchy, ctx.nested());
         // The block runs only when `lhs` answered true (`and:`) / false
         // (`or:`): check it under those facts.
         let assumed = if is_and {
@@ -233,7 +242,7 @@ impl TypeChecker {
         // Only a block holding exactly one expression is understood: any
         // other statement (notably an assignment to a tested variable) would
         // invalidate the proof.
-        let right = match single_expression_block_body(rhs) {
+        let mut right = match single_expression_block_body(rhs) {
             Some(body) => {
                 let mut rhs_env = env.child();
                 for (key, ty) in assumed.iter() {
@@ -243,6 +252,22 @@ impl TypeChecker {
             }
             None => CondFacts::default(),
         };
+
+        // Whatever the right-hand argument may assign, or a field a self-send
+        // in it may reassign, is no longer what either side proved — whether
+        // or not the argument was understood. Conservatively applied to both
+        // sides' facts (an `or:` skips the argument when the left side held,
+        // but we cannot tell which path reached the result).
+        let writes = expr_writes(rhs);
+        let self_send = expr_contains_returning_self_send(rhs, &self.type_map);
+        for side in [&mut left, &mut right] {
+            for facts in [&mut side.when_true, &mut side.when_false] {
+                facts.forget_written(&writes);
+                if self_send {
+                    facts.drop_fields();
+                }
+            }
+        }
 
         if is_and {
             CondFacts {

@@ -207,3 +207,61 @@ fn diverging_false_arm_narrows_by_true_facts() {
 fn narrowing_does_not_escape_the_block() {
     assert_rejected("    (p and: [x notNil]) ifTrue: [0]\n    self need: x");
 }
+
+// --- a right-hand argument that invalidates the left side's facts --------
+
+#[test]
+fn rhs_block_reassigning_a_tested_local_voids_and_facts() {
+    assert_rejected(
+        "    l := x\n    (l notNil and: [l := nil. true]) ifTrue: [^self need: l]\n    0",
+    );
+}
+
+#[test]
+fn rhs_single_expression_reassignment_voids_and_facts() {
+    assert_rejected(
+        "    l := x\n    (l notNil and: [(l := nil) isNil]) ifTrue: [^self need: l]\n    0",
+    );
+}
+
+#[test]
+fn rhs_block_reassigning_a_tested_local_voids_or_post_guard_facts() {
+    assert_rejected(
+        "    l := x\n    (l isNil or: [l := nil. false]) ifTrue: [^0]\n    self need: l",
+    );
+}
+
+#[test]
+fn unrelated_rhs_assignment_keeps_the_left_facts() {
+    assert_clean(
+        "    l := x\n    m := 0\n    (l notNil and: [m := 1. true]) ifTrue: [^self need: l]\n    0",
+    );
+}
+
+fn actor_diagnostics(body: &str) -> Vec<Diagnostic> {
+    type_diagnostics(&format!(
+        r"
+typed Actor subclass: Holder
+  state: f :: Integer | Nil = nil
+  reset -> Boolean => self.f := nil. true
+  need: v :: Integer -> Integer => v
+{body}
+"
+    ))
+}
+
+#[test]
+fn rhs_self_send_voids_field_facts_in_arm() {
+    let diags = actor_diagnostics(
+        "  run -> Integer =>\n    (self.f isNil or: [self reset]) ifFalse: [^self need: self.f]\n    0",
+    );
+    assert!(!diags.is_empty(), "self.f may be nil after `self reset`");
+}
+
+#[test]
+fn rhs_without_self_send_keeps_field_facts() {
+    let diags = actor_diagnostics(
+        "  run: p :: Boolean -> Integer =>\n    (self.f isNil or: [p]) ifFalse: [^self need: self.f]\n    0",
+    );
+    assert!(diags.is_empty(), "got: {diags:#?}");
+}
