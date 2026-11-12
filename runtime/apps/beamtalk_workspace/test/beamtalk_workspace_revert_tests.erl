@@ -26,7 +26,7 @@ for the same reason the `removeSelector:` coverage above does: the append
 routes through `beamtalk_repl_eval`/`beamtalk_workspace_changelog`, both of
 which are no-ops without a running workspace.
 
-Also covers `beamtalk_behaviour_intrinsics:classRemoveSelector/2` /
+Also covers `beamtalk_class_refactor:classRemoveSelector/2` /
 `classRemoveSelectorIfAbsent/3` themselves for every scenario that needs this
 module's live-workspace scaffolding — the local-method-table removal branch
 routes through `beamtalk_repl_eval:remove_method/4` exactly like the revert
@@ -405,7 +405,7 @@ remove_selector_instance_side_removes_local_method(#{tmp := Tmp, unique := U}) -
     ),
     Self = instance_self(ClassName, Pid),
     BeforeRemove = beamtalk_runtime_api:local_instance_methods(Pid),
-    Result = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, greet),
+    Result = beamtalk_class_refactor:classRemoveSelector(Self, greet),
     AfterRemove = beamtalk_runtime_api:local_instance_methods(Pid),
     [
         ?_assert(lists:member(greet, BeforeRemove)),
@@ -423,7 +423,7 @@ remove_selector_class_side_removes_local_method(#{tmp := Tmp, unique := U}) ->
     ),
     Self = metaclass_self(Pid),
     BeforeRemove = beamtalk_runtime_api:local_class_methods(Pid),
-    Result = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, build),
+    Result = beamtalk_class_refactor:classRemoveSelector(Self, build),
     AfterRemove = beamtalk_runtime_api:local_class_methods(Pid),
     [
         ?_assert(lists:member(build, BeforeRemove)),
@@ -442,7 +442,7 @@ remove_selector_absent_raises_selector_not_found(#{tmp := Tmp, unique := U}) ->
     [
         ?_assertError(
             #{'$beamtalk_class' := _, error := #beamtalk_error{kind = selector_not_found}},
-            beamtalk_behaviour_intrinsics:classRemoveSelector(Self, bogus)
+            beamtalk_class_refactor:classRemoveSelector(Self, bogus)
         )
     ].
 
@@ -452,7 +452,7 @@ remove_selector_if_absent_returns_block_value_on_absence(#{tmp := Tmp, unique :=
     ClassName = list_to_binary("Bt3186IfAbsMiss" ++ U),
     {ok, Pid} = define_project_class(Tmp, ClassName, ["  base => 1\n"]),
     Self = instance_self(ClassName, Pid),
-    Result = beamtalk_behaviour_intrinsics:classRemoveSelectorIfAbsent(
+    Result = beamtalk_class_refactor:classRemoveSelectorIfAbsent(
         Self, bogus, fun() -> not_found_marker end
     ),
     [?_assertEqual(not_found_marker, Result)].
@@ -463,7 +463,7 @@ remove_selector_if_absent_returns_receiver_on_success(#{tmp := Tmp, unique := U}
     ClassName = list_to_binary("Bt3186IfAbsHit" ++ U),
     {ok, Pid} = define_project_class(Tmp, ClassName, ["  gone => 1\n"]),
     Self = instance_self(ClassName, Pid),
-    Result = beamtalk_behaviour_intrinsics:classRemoveSelectorIfAbsent(
+    Result = beamtalk_class_refactor:classRemoveSelectorIfAbsent(
         Self, gone, fun() -> error(block_must_not_run) end
     ),
     AfterRemove = beamtalk_runtime_api:local_instance_methods(Pid),
@@ -485,7 +485,7 @@ remove_selector_allow_stdlib_removes_from_a_stdlib_class(#{tmp := Tmp, unique :=
     ),
     Self = metaclass_self(Pid),
     BeforeRemove = beamtalk_runtime_api:local_class_methods(Pid),
-    Result = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, probe),
+    Result = beamtalk_class_refactor:classRemoveSelector(Self, probe),
     AfterRemove = beamtalk_runtime_api:local_class_methods(Pid),
     [
         ?_assert(lists:member(probe, BeforeRemove)),
@@ -512,11 +512,11 @@ remove_selector_contested_extension_re_exposes_local_method(#{tmp := Tmp, unique
     HasExtBefore = beamtalk_extensions:has(ClassAtom, greet),
     LocalBefore = beamtalk_runtime_api:local_instance_methods(Pid),
     %% First removal: drops the extension only; the local `greet` is untouched.
-    Result1 = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, greet),
+    Result1 = beamtalk_class_refactor:classRemoveSelector(Self, greet),
     HasExtAfterFirst = beamtalk_extensions:has(ClassAtom, greet),
     LocalAfterFirst = beamtalk_runtime_api:local_instance_methods(Pid),
     %% Second removal: the now-dispatch-winning local method is removed too.
-    Result2 = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, greet),
+    Result2 = beamtalk_class_refactor:classRemoveSelector(Self, greet),
     LocalAfterSecond = beamtalk_runtime_api:local_instance_methods(Pid),
     [
         ?_assert(HasExtBefore),
@@ -543,7 +543,7 @@ remove_selector_instance_side_logs_remove_method_changelog_entry(#{tmp := Tmp, u
         Tmp, ClassName, ["  base => 1\n", "  greet => 2\n"]
     ),
     Self = instance_self(ClassName, Pid),
-    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, greet),
+    _ = beamtalk_class_refactor:classRemoveSelector(Self, greet),
     Entry = only_remove_method_entry(ClassName, <<"greet">>),
     [
         ?_assertEqual('remove-method', beamtalk_workspace_changelog:entry_kind(Entry)),
@@ -563,7 +563,7 @@ remove_selector_class_side_logs_remove_method_changelog_entry(#{tmp := Tmp, uniq
         Tmp, ClassName, ["  class keep => 1\n", "  class build => 2\n"]
     ),
     Self = metaclass_self(Pid),
-    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, build),
+    _ = beamtalk_class_refactor:classRemoveSelector(Self, build),
     Entry = only_remove_method_entry(ClassName, <<"build">>),
     [
         ?_assertEqual('remove-method', beamtalk_workspace_changelog:entry_kind(Entry)),
@@ -592,7 +592,7 @@ remove_selector_extension_logs_remove_method_changelog_entry(#{tmp := Tmp, uniqu
     ExtSource = <<"shout => ^ 'loud'">>,
     ok = beamtalk_extensions:register(ClassAtom, shout, ExtFun, bt3187_test_owner, ExtSource),
     Self = instance_self(ClassName, Pid),
-    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, shout),
+    _ = beamtalk_class_refactor:classRemoveSelector(Self, shout),
     Entry = only_remove_method_entry(ClassName, <<"shout">>),
     PrevBody = beamtalk_workspace_changelog:read_prev_source_body(Entry),
     [
@@ -675,7 +675,7 @@ remove_selector_and_instance_patch_do_not_shadow_across_sides(#{tmp := Tmp, uniq
         ClassName, <<"foo">>, <<"^ 99">>, durable, <<"sess">>, human, instance
     ),
     Self = metaclass_self(Pid),
-    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, foo),
+    _ = beamtalk_class_refactor:classRemoveSelector(Self, foo),
     Targeted = [
         E
      || E <- beamtalk_workspace_changelog:entries(),
@@ -701,7 +701,7 @@ revert_remove_method_entry_restores_removed_instance_method(#{tmp := Tmp, unique
         Tmp, ClassName, ["  base => 1\n", "  greet => 2\n"]
     ),
     Self = instance_self(ClassName, Pid),
-    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, greet),
+    _ = beamtalk_class_refactor:classRemoveSelector(Self, greet),
     AfterRemove = beamtalk_runtime_api:local_instance_methods(Pid),
     RevertResult = beamtalk_workspace_interface_primitives:revert_method(ClassName, <<"greet">>),
     AfterRevert = beamtalk_runtime_api:local_instance_methods(Pid),
@@ -719,7 +719,7 @@ revert_remove_method_entry_restores_removed_class_side_method(#{tmp := Tmp, uniq
         Tmp, ClassName, ["  class keep => 1\n", "  class build => 2\n"]
     ),
     Self = metaclass_self(Pid),
-    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, build),
+    _ = beamtalk_class_refactor:classRemoveSelector(Self, build),
     AfterRemove = beamtalk_runtime_api:local_class_methods(Pid),
     RevertResult = beamtalk_workspace_interface_primitives:revert_method(ClassName, <<"build">>),
     AfterRevert = beamtalk_runtime_api:local_class_methods(Pid),
@@ -750,7 +750,7 @@ revert_selects_correct_side_entry_when_both_sides_have_entries(#{tmp := Tmp, uni
     ),
     %% R1: class-side removal of #foo, logged after P1 (higher seq).
     ClassSelf = metaclass_self(Pid),
-    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(ClassSelf, foo),
+    _ = beamtalk_class_refactor:classRemoveSelector(ClassSelf, foo),
     BeforeRevertClassMethods = beamtalk_runtime_api:local_class_methods(Pid),
     BeforeRevertInstanceMethods = beamtalk_runtime_api:local_instance_methods(Pid),
     %% Revert P1 via the ChangeEntry-based surface (`Workspace changes revert:
@@ -801,7 +801,7 @@ revert_method_selects_correct_side_entry_when_both_sides_have_entries(#{tmp := T
     ),
     %% R1: class-side removal of #foo, logged after P1 (higher seq).
     ClassSelf = metaclass_self(Pid),
-    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(ClassSelf, foo),
+    _ = beamtalk_class_refactor:classRemoveSelector(ClassSelf, foo),
     BeforeRevertClassMethods = beamtalk_runtime_api:local_class_methods(Pid),
     BeforeRevertInstanceMethods = beamtalk_runtime_api:local_instance_methods(Pid),
     %% Revert P1 via `revert_method/3` with `<<"instance">>` — the (class,
@@ -847,7 +847,7 @@ revert_method_side_agnostic_fallback_still_picks_highest_seq(#{tmp := Tmp, uniqu
     ),
     %% R1: class-side removal of #foo, logged after P1 (higher seq).
     ClassSelf = metaclass_self(Pid),
-    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(ClassSelf, foo),
+    _ = beamtalk_class_refactor:classRemoveSelector(ClassSelf, foo),
     RevertResult = beamtalk_workspace_interface_primitives:revert_method(ClassName, <<"foo">>),
     AfterRevertClassMethods = beamtalk_runtime_api:local_class_methods(Pid),
     [
@@ -876,7 +876,7 @@ recover_prev_from_disk_resolves_remove_method_entry_via_entry_side(#{
         Tmp, ClassName, ["  class keep => 1\n", "  class build => 2\n"]
     ),
     Self = metaclass_self(Pid),
-    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, build),
+    _ = beamtalk_class_refactor:classRemoveSelector(Self, build),
     Entry = only_remove_method_entry(ClassName, <<"build">>),
     %% Sanity on the fixture: the entry recorded a real prior body (the normal
     %% flow — `resolve_removal_span_entry/6` found `build` on disk and
@@ -1271,7 +1271,7 @@ revert_remove_method_entry_after_flush_is_unsupported(#{tmp := Tmp, unique := U}
         Tmp, ClassName, ["  base => 1\n", "  greet => 2\n"]
     ),
     Self = instance_self(ClassName, Pid),
-    _ = beamtalk_behaviour_intrinsics:classRemoveSelector(Self, greet),
+    _ = beamtalk_class_refactor:classRemoveSelector(Self, greet),
     {ok, _Summary} = beamtalk_workspace_flush:flush(),
     RevertResult = beamtalk_workspace_interface_primitives:revert_method(ClassName, <<"greet">>),
     [

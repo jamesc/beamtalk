@@ -9,7 +9,7 @@
 Shared EUnit fixture: register a freestanding dynamic (`ClassBuilder`)
 class and wrap it as a `#beamtalk_object{}` class object, for EUnit suites
 that need a real live class with no `.bt` source file to exercise a
-dynamic-class code path (e.g. `beamtalk_behaviour_intrinsics:classRenameTo/2`'s
+dynamic-class code path (e.g. `beamtalk_class_refactor:classRenameTo/2`'s
 dynamic-class branch).
 
 Extracted from `beamtalk_behaviour_intrinsics_rename_to_tests`'s

@@ -477,7 +477,7 @@ Resolve the exact byte span(s) of every self/super-directed send of
 `OldSelector' within `MethodSource' (ADR 0114).
 
 Backs `Behaviour>>renameSelector:to:''s reference-site rewrite
-(`beamtalk_behaviour_intrinsics:classRenameSelector/3'):
+(`beamtalk_selector_refactor:classRenameSelector/3'):
 `beamtalk_xref:senders_of/1' only carries a *line* number per sending
 method, and a whole-method span is too coarse to splice a single send's
 selector token(s) without corrupting the rest of the body. `MethodSource'

@@ -195,11 +195,11 @@ direct_call_ok_test_() ->
             try
                 install(Name),
                 %% Instance side does not touch the class-side flag.
-                absent = beamtalk_behaviour_intrinsics:classRemoveSelectorIfAbsent(
+                absent = beamtalk_class_refactor:classRemoveSelectorIfAbsent(
                     InstObj, bt4299_absent, fun() -> absent end
                 ),
                 ?assert(beamtalk_class_shadow_flags:is_direct_flag_set(tag(Name))),
-                absent = beamtalk_behaviour_intrinsics:classRemoveSelectorIfAbsent(
+                absent = beamtalk_class_refactor:classRemoveSelectorIfAbsent(
                     MetaObj, bt4299_absent, fun() -> absent end
                 ),
                 ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(tag(Name))),
