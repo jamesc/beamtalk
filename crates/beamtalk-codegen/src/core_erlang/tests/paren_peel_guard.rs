@@ -178,14 +178,14 @@ const CEILINGS: &[(&str, usize)] = &[
         2,
     ),
     // Narrowing reads a send's receiver, which may be a cascade shared
-    // receiver; the compound-guard walk also reads a block's statement.
+    // receiver; the condition-facts walk also reads a block's statement.
     (
-        "beamtalk-core/src/semantic_analysis/type_checker/narrowing/mod.rs",
+        "beamtalk-core/src/semantic_analysis/type_checker/narrowing/facts.rs",
         1,
     ),
     (
-        "beamtalk-core/src/semantic_analysis/type_checker/narrowing/refine.rs",
-        3,
+        "beamtalk-core/src/semantic_analysis/type_checker/narrowing/mod.rs",
+        1,
     ),
     (
         "beamtalk-core/src/semantic_analysis/type_checker/narrowing/rules/singleton_eq.rs",

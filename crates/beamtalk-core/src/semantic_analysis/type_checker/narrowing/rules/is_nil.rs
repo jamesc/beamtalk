@@ -1,14 +1,17 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-//! `x isNil` narrowing rule.
+//! `x isNil` / `x notNil` narrowing rule.
 //!
-//! True branch narrows `x` to `UndefinedObject` (the nil type). False branch
-//! narrows `x` to non-nil via the `is_nil_check` flag — the post-guard
-//! narrowing also keys off this flag.
+//! For `isNil` the true branch narrows `x` to `UndefinedObject` (the nil
+//! type) and the false branch narrows `x` to non-nil via the `is_nil_check`
+//! flag — the post-guard narrowing also keys off this flag. `notNil` (BT-4710)
+//! is the negated reading, recorded in [`NarrowingInfo::nil_test_negated`]
+//! exactly like `x =/= nil` (BT-4712) so `refine_nil_negation` swaps the
+//! branches once the live type is known.
 //!
-//! Supports `x isNil` and `self.field isNil` (synthetic key path via
-//! [`extract_variable_name`]).
+//! Supports `x isNil`, `x notNil` and `self.field isNil` / `notNil`
+//! (synthetic key path via [`extract_variable_name`]).
 
 use crate::ast::{Expression, WellKnownSelector};
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
@@ -29,11 +32,15 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
     else {
         return None;
     };
-    if selector.well_known() != Some(WellKnownSelector::IsNil) {
-        return None;
-    }
+    let negated = match selector.well_known() {
+        Some(WellKnownSelector::IsNil) => false,
+        Some(WellKnownSelector::NotNil) => true,
+        _ => return None,
+    };
     let var_name = extract_variable_name(inner_recv)?;
-    Some(nil_check_info(var_name))
+    let mut info = nil_check_info(var_name);
+    info.nil_test_negated = negated;
+    Some(info)
 }
 
 /// The [`NarrowingInfo`] for "`variable` is nil" — shared with the `x =:= nil`

@@ -15,7 +15,7 @@
 //! Split out of `inference.rs` (ADR 0106/0107): these methods are
 //! narrowing-specific refinement, not general expression type inference.
 
-use crate::ast::{Expression, WellKnownSelector};
+use crate::ast::Expression;
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
@@ -23,9 +23,8 @@ use crate::source_analysis::Span;
 use ecow::EcoString;
 
 use super::super::well_known::WellKnownClass;
-use super::super::{EnvKey, InferredType, TypeChecker, TypeEnv, TypeProvenance};
-use super::extract::extract_variable_name;
-use super::{ClassTestInfo, ClassTestKind, CompoundNilGuardKind, NarrowingInfo};
+use super::super::{InferredType, TypeChecker, TypeEnv, TypeProvenance};
+use super::{ClassTestInfo, ClassTestKind, NarrowingInfo};
 
 impl TypeChecker {
     /// Detect control-flow narrowing from the receiver of `ifTrue:`/`ifFalse:`.
@@ -40,15 +39,15 @@ impl TypeChecker {
     }
 
     /// Detect a single-variable type test and run every refinement stage
-    /// over it — the one pipeline shared by the `ifTrue:` / `ifFalse:` path
-    /// and the `and:` / `or:` block path (BT-4635), so a stage added here
-    /// reaches both.
+    /// over it — the leaf of [`Self::condition_facts`], so a stage added here
+    /// reaches every consumer (BT-4635, BT-4710). `hint_span` is where a class
+    /// test that can never be true is reported; `None` suppresses the hint.
     pub(in crate::semantic_analysis::type_checker) fn detect_refined_narrowing(
         &mut self,
         receiver: &Expression,
         env: &TypeEnv,
         hierarchy: &ClassHierarchy,
-        span: Span,
+        hint_span: Option<Span>,
     ) -> Option<NarrowingInfo> {
         Self::detect_narrowing(receiver)
             .map(|info| self.refine_responds_to_narrowing(info))
@@ -71,7 +70,21 @@ impl TypeChecker {
                 )
             })
             .map(|info| self.refine_nil_test(info, env, hierarchy))
-            .map(|info| self.refine_class_narrowing(info, env, hierarchy, span))
+            .map(|info| match hint_span {
+                Some(span) => self.refine_class_narrowing(info, env, hierarchy, span),
+                // Already type-checked (post-guard) or nested in a chain: the
+                // same math, without re-reporting the "can never be true" hint.
+                None if info.class_test.is_some() => {
+                    let current_ty = self.narrowing_variable_type(&info.variable, env, hierarchy);
+                    Self::compute_class_narrowing(
+                        info,
+                        &current_ty,
+                        hierarchy,
+                        self.protocol_registry.as_deref(),
+                    )
+                }
+                None => info,
+            })
     }
 
     /// Resolves an inequality nil test (`x =/= nil`, `x /= nil`, BT-4712).
@@ -120,163 +133,6 @@ impl TypeChecker {
             self.alias_registry.as_deref(),
             self.protocol_registry.as_deref(),
         )
-    }
-
-    /// BT-4635: narrowing for the lazy block of `<test> and: [...]` /
-    /// `<test> or: [...]`, where `<test>` is any single-variable test the
-    /// [`super::rules::RULES`] table recognises.
-    ///
-    /// The block runs only when the test answered true (`and:`) or false
-    /// (`or:`), so it gets the true-branch type for `and:` and the
-    /// complement (via `early_return_false_branch_type`, the same rule
-    /// `ifFalse:` uses) for `or:`.
-    pub(in crate::semantic_analysis::type_checker) fn boolean_connective_narrowing(
-        &mut self,
-        selector_name: &str,
-        receiver: &Expression,
-        hierarchy: &ClassHierarchy,
-        env: &TypeEnv,
-        span: Span,
-    ) -> Option<(EnvKey, InferredType)> {
-        let info = self.detect_refined_narrowing(receiver, env, hierarchy, span)?;
-        match selector_name {
-            "and:" => Some((info.variable, info.true_type)),
-            "or:" => Self::early_return_false_branch_type(
-                &info,
-                env,
-                hierarchy,
-                self.alias_registry.as_deref(),
-                self.protocol_registry.as_deref(),
-            )
-            .map(|ty| (info.variable, ty)),
-            _ => None,
-        }
-    }
-
-    /// Detect `X notNil` as the receiver of `and:`.
-    ///
-    /// Deliberately separate from the [`super::rules::RULES`] table:
-    /// that table only fires for `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:` and
-    /// narrows to a *statically known* branch type baked into
-    /// [`NarrowingInfo`]. Here the "non-nil" branch type depends on `X`'s
-    /// current type in `env` (e.g. `Integer | Nil` → `Integer`), so the
-    /// caller resolves it live via `Self::non_nil_type` instead of
-    /// threading it through `NarrowingInfo`.
-    ///
-    /// Returns the narrowed variable's [`EnvKey`] when the receiver is
-    /// exactly `<identifier-or-self.field> notNil`; `None` for any other
-    /// shape (including `and:` sends whose receiver isn't a `notNil` test —
-    /// those fall back to the generic block-context inference).
-    pub(in crate::semantic_analysis::type_checker) fn detect_not_nil_and_narrowing(
-        receiver: &Expression,
-    ) -> Option<EnvKey> {
-        let receiver = receiver.unwrap_parens();
-        let Expression::MessageSend {
-            receiver: inner_recv,
-            selector,
-            ..
-        } = receiver
-        else {
-            return None;
-        };
-        if selector.well_known() != Some(WellKnownSelector::NotNil) {
-            return None;
-        }
-        extract_variable_name(inner_recv)
-    }
-
-    /// Detect a compound nil-guard (BT-4107): an `or:`-chain of `isNil`
-    /// tests or an `and:`-chain of `notNil` tests used as the receiver of
-    /// `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:`.
-    ///
-    /// Deliberately separate from the [`super::rules::RULES`] table, for the
-    /// same reason as [`Self::detect_not_nil_and_narrowing`]: the table
-    /// narrows one variable to a statically known branch type baked into
-    /// [`NarrowingInfo`], while a compound guard narrows *N* variables to
-    /// their live non-nil types (resolved per-variable via
-    /// [`Self::non_nil_type`]). The shapes are mutually exclusive with every
-    /// table rule (no rule matches an `or:` / `and:` send), so callers try
-    /// this only after [`super::detect`] returns `None`.
-    ///
-    /// Returns the guard kind plus every tested variable's [`EnvKey`]
-    /// (deduplicated, chain order). Returns `None` for any other shape —
-    /// including mixed chains (`a isNil or: [b notNil]`, whose fall-through
-    /// proves a *mixed* fact this machinery cannot express) and chain blocks
-    /// holding anything but a single test statement (a multi-statement block
-    /// could reassign a tested var, e.g. `[a := nil. b isNil]`).
-    pub(in crate::semantic_analysis::type_checker) fn detect_compound_nil_guard(
-        receiver: &Expression,
-    ) -> Option<(CompoundNilGuardKind, Vec<EnvKey>)> {
-        let receiver = receiver.unwrap_parens();
-        if let Some(vars) = Self::collect_or_nil_vars(receiver) {
-            return Some((CompoundNilGuardKind::OrIsNil, vars));
-        }
-        Self::collect_and_not_nil_vars(receiver).map(|vars| (CompoundNilGuardKind::AndNotNil, vars))
-    }
-
-    /// Collect the tested variables of an `or:`-chain of `isNil` tests
-    /// (`a isNil or: [b isNil]`, arbitrarily nested).
-    fn collect_or_nil_vars(expr: &Expression) -> Option<Vec<EnvKey>> {
-        Self::collect_compound_vars(expr, WellKnownSelector::IsNil, "or:")
-    }
-
-    /// Collect the tested variables of an `and:`-chain of `notNil` tests
-    /// (`a notNil and: [b notNil]`, arbitrarily nested).
-    fn collect_and_not_nil_vars(expr: &Expression) -> Option<Vec<EnvKey>> {
-        Self::collect_compound_vars(expr, WellKnownSelector::NotNil, "and:")
-    }
-
-    /// Shared engine behind [`Self::collect_or_nil_vars`] and
-    /// [`Self::collect_and_not_nil_vars`]: a `chain_selector`-chain of
-    /// `test_selector` tests over narrowable variables.
-    ///
-    /// Base case: `<var> isNil` / `<var> notNil` (identifiers and
-    /// `self.<field>` via [`extract_variable_name`]). Recursive case:
-    /// `<inner> or: [<single-test block>]`, where both sides must themselves
-    /// be pure chains of the *same* operator — mixing `or:` and `and:` (or
-    /// mixing `isNil` and `notNil` tests) fails the whole detection, since
-    /// the resulting proof obligation is not "every var is non-nil".
-    fn collect_compound_vars(
-        expr: &Expression,
-        test_selector: WellKnownSelector,
-        chain_selector: &str,
-    ) -> Option<Vec<EnvKey>> {
-        let expr = expr.unwrap_parens();
-        let Expression::MessageSend {
-            receiver: inner,
-            selector,
-            arguments,
-            ..
-        } = expr
-        else {
-            return None;
-        };
-        if selector.well_known() == Some(test_selector) {
-            return extract_variable_name(inner).map(|key| vec![key]);
-        }
-        // `or:` / `and:` stay string comparisons rather than
-        // `WellKnownSelector` variants — they are ordinary self-hosted
-        // `Boolean` methods, not type-checker intrinsics (see the `and:`
-        // special-case in `infer_message_send_with_receiver_ty`).
-        if selector.name() != chain_selector || arguments.len() != 1 {
-            return None;
-        }
-        let Expression::Block(block) = &arguments[0] else {
-            return None;
-        };
-        // The block must hold exactly one test: its value is what the chain
-        // operator observes, and any other statement (notably an assignment
-        // to a tested var) would invalidate the proof.
-        let [stmt] = block.body.as_slice() else {
-            return None;
-        };
-        let mut vars = Self::collect_compound_vars(inner, test_selector, chain_selector)?;
-        for key in Self::collect_compound_vars(&stmt.expression, test_selector, chain_selector)? {
-            if !vars.contains(&key) {
-                vars.push(key);
-            }
-        }
-        Some(vars)
     }
 
     /// Refines a `respondsTo:` narrowing from `Dynamic` to a protocol type

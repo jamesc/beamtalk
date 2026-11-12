@@ -20,6 +20,7 @@
 //! to compute concrete branch types — lives in [`refine`].
 
 pub(crate) mod extract;
+pub(crate) mod facts;
 pub(crate) mod info;
 mod refine;
 pub(crate) mod refinement;
@@ -28,9 +29,7 @@ pub(crate) mod visitors;
 
 use crate::ast::Expression;
 
-pub(crate) use info::{
-    ClassTestInfo, ClassTestKind, CompoundNilGuardKind, NarrowingInfo, SingletonName,
-};
+pub(crate) use info::{ClassTestInfo, ClassTestKind, NarrowingInfo, SingletonName};
 pub(crate) use rules::singleton_eq::detect_binary as detect_singleton_eq;
 
 /// Detect a narrowing from a receiver expression.
