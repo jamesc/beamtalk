@@ -634,7 +634,11 @@ fn test_bt906_class_module_index_overrides_heuristic_for_spawn() {
 fn test_own_package_id_table() {
     use beamtalk_core::semantic_analysis::PackageId;
     let cases = [
-        ("stdlib module", "bt@stdlib@ordered_collection", PackageId::Stdlib),
+        (
+            "stdlib module",
+            "bt@stdlib@ordered_collection",
+            PackageId::Stdlib,
+        ),
         // A deep subdirectory module still yields the top-level package name —
         // `own_package_id` only needs to identify *which* package this
         // generation unit belongs to, not its position within it.
@@ -644,7 +648,11 @@ fn test_own_package_id_table() {
             PackageId::Package("sicp".to_string()),
         ),
         ("single-file module", "bt@counter", PackageId::SingleFile),
-        ("unprefixed test fixture module", "counter", PackageId::SingleFile),
+        (
+            "unprefixed test fixture module",
+            "counter",
+            PackageId::SingleFile,
+        ),
     ];
     for (label, module_name, expected) in cases {
         let generator = CoreErlangGenerator::new(module_name);
@@ -1386,14 +1394,25 @@ fn test_cascade_multiple_field_assignments_state_threading() {
 fn test_erlang_interop_direct_call_table() {
     // (label, module, parenthesised receiver, selector, arguments, has, lacks)
     #[allow(clippy::type_complexity)]
-    let cases: Vec<(&str, &str, bool, MessageSelector, Vec<Expression>, Vec<&str>, Vec<&str>)> = vec![
+    let cases: Vec<(
+        &str,
+        &str,
+        bool,
+        MessageSelector,
+        Vec<Expression>,
+        Vec<&str>,
+        Vec<&str>,
+    )> = vec![
         (
             // `Erlang lists reverse: xs`
             "keyword single argument",
             "lists",
             false,
             MessageSelector::Keyword(vec![KeywordPart::new("reverse:", Span::new(13, 21))]),
-            vec![Expression::Identifier(Identifier::new("xs", Span::new(22, 24)))],
+            vec![Expression::Identifier(Identifier::new(
+                "xs",
+                Span::new(22, 24),
+            ))],
             vec!["call 'beamtalk_erlang_proxy':'direct_call'("],
             vec!["ErlangModule", "beamtalk_message_dispatch"],
         ),
@@ -1432,7 +1451,10 @@ fn test_erlang_interop_direct_call_table() {
             "lists",
             true,
             MessageSelector::Keyword(vec![KeywordPart::new("reverse:", Span::new(15, 23))]),
-            vec![Expression::Identifier(Identifier::new("xs", Span::new(24, 26)))],
+            vec![Expression::Identifier(Identifier::new(
+                "xs",
+                Span::new(24, 26),
+            ))],
             vec!["call 'beamtalk_erlang_proxy':'direct_call'("],
             vec!["ErlangModule", "beamtalk_message_dispatch"],
         ),
@@ -2077,7 +2099,14 @@ fn test_bt3986_generate_erlang_interop_block_stateful_is_internal_error() {
 fn test_generate_cast_send_table() {
     // (label, receiver name, selector, arguments, must contain, must not contain)
     #[allow(clippy::type_complexity)]
-    let cases: Vec<(&str, &str, MessageSelector, Vec<Expression>, Vec<&str>, Vec<&str>)> = vec![
+    let cases: Vec<(
+        &str,
+        &str,
+        MessageSelector,
+        Vec<Expression>,
+        Vec<&str>,
+        Vec<&str>,
+    )> = vec![
         (
             // `someActor increment!` should generate beamtalk_message_dispatch:cast/3
             "unary cast to a non-self receiver",
@@ -2489,7 +2518,10 @@ fn test_field_operation_codegen_table() {
                 "  getFieldNames =>\n",
                 "    self fieldNames\n",
             ),
-            expect: &[NoSyncSend("'fieldNames'"), Has("'beamtalk_primitive':'send'")],
+            expect: &[
+                NoSyncSend("'fieldNames'"),
+                Has("'beamtalk_primitive':'send'"),
+            ],
         },
         // `self fieldAt: name` inside an actor must NOT route through sync_send.
         FieldCase {
@@ -2596,7 +2628,10 @@ fn test_field_operation_codegen_table() {
                 "  has: name =>\n",
                 "    self hasField: name\n",
             ),
-            expect: &[NoSyncSend("'hasField:'"), Has("'beamtalk_primitive':'send'")],
+            expect: &[
+                NoSyncSend("'hasField:'"),
+                Has("'beamtalk_primitive':'send'"),
+            ],
         },
         // hasField: on a non-self receiver delegates to
         // beamtalk_message_dispatch:send/3, as clearField: above (a class-object
@@ -3319,7 +3354,10 @@ fn test_qualified_receiver_message_send_table() {
             "json",
             "Parser",
             MessageSelector::Keyword(vec![KeywordPart::new("parse:", Span::new(12, 18))]),
-            vec![Expression::Identifier(Identifier::new("input", Span::new(19, 24)))],
+            vec![Expression::Identifier(Identifier::new(
+                "input",
+                Span::new(19, 24),
+            ))],
             "'erlang':'whereis'('beamtalk_class_Parser')",
         ),
         (
@@ -3328,7 +3366,10 @@ fn test_qualified_receiver_message_send_table() {
             "json",
             "Parser",
             MessageSelector::Keyword(vec![KeywordPart::new("parse:", Span::new(12, 18))]),
-            vec![Expression::Identifier(Identifier::new("input", Span::new(19, 24)))],
+            vec![Expression::Identifier(Identifier::new(
+                "input",
+                Span::new(19, 24),
+            ))],
             "'beamtalk_object_class':'class_send'",
         ),
         (
