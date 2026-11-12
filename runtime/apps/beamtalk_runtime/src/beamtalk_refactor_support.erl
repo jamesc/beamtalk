@@ -18,7 +18,11 @@ into it. It holds only what two or more of those modules need:
   `require_method_capability/3`;
 * removal change-log helpers: `has_runtime_class_fun/2`,
   `capture_class_removal_snapshot/1`, `log_class_removal/2`,
-  `current_author_context/0`.
+  `current_author_context/0`;
+* the rename pipeline shared by class rename (`beamtalk_class_refactor`) and
+  method rename (`beamtalk_selector_refactor`): `raise_if_colliding/2`,
+  `rename_collision_error/3`, `rename_rewrite_failed_error/5` and
+  `log_rename_change/2`, each parameterised by class-or-selector.
 
 Extracted from `beamtalk_behaviour_intrinsics` (BT-4703); the code moved
 verbatim.
@@ -35,7 +39,12 @@ verbatim.
     has_runtime_class_fun/2,
     capture_class_removal_snapshot/1,
     log_class_removal/2,
-    current_author_context/0
+    current_author_context/0,
+    %% Shared by the class-rename and method-rename pipelines (BT-4703).
+    raise_if_colliding/2,
+    rename_collision_error/3,
+    rename_rewrite_failed_error/5,
+    log_rename_change/2
 ]).
 
 %% BT-4262: a primitive that changes the receiving class has to message it
@@ -264,3 +273,102 @@ current_author_context() ->
                 end,
             {Author, human}
     end.
+
+%%====================================================================
+%% Rename pipeline shared by class rename and method rename (ADR 0114)
+%%====================================================================
+
+%% Collision refusal (ADR 0114 § Decision): raises the error `MkError`
+%% builds when the rename target already exists, otherwise `ok`. `MkError` is
+%% a fun so the error (and anything it looks up) is only built on a collision.
+-spec raise_if_colliding(boolean(), fun(() -> #beamtalk_error{})) -> ok.
+raise_if_colliding(false, _MkError) ->
+    ok;
+raise_if_colliding(true, MkError) ->
+    beamtalk_error:raise(MkError()).
+
+%% `renameTo: #Existing` when `Existing` already names a loaded class
+%% (`class`, `class_already_exists` — a class-identity collision), or
+%% `renameSelector: #a to: #b` when `#b` is already locally defined on the
+%% same side (`selector`, `selector_already_exists` — a NEW kind, not a reuse
+%% of `class_already_exists`, mirroring `selector_not_found`'s selector-level
+%% vs class-level split, ADR 0112). Exact hint text from ADR 0114's worked
+%% examples.
+-spec rename_collision_error(class | selector, atom(), atom()) -> #beamtalk_error{}.
+rename_collision_error(class, OldName, NewName) ->
+    OldBin = atom_to_binary(OldName, utf8),
+    NewBin = atom_to_binary(NewName, utf8),
+    Error0 = beamtalk_error:new(class_already_exists, OldName),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        iolist_to_binary([
+            <<"cannot rename ">>,
+            OldBin,
+            <<" to ">>,
+            NewBin,
+            <<" — "/utf8>>,
+            NewBin,
+            <<" already exists">>
+        ])
+    ),
+    beamtalk_error:with_hint(Error1, <<"remove or rename the existing class first">>);
+rename_collision_error(selector, ClassName, NewSelector) ->
+    ClassBin = atom_to_binary(ClassName, utf8),
+    NewBin = atom_to_binary(NewSelector, utf8),
+    Error0 = beamtalk_error:new(selector_already_exists, ClassName, NewSelector),
+    Error1 = beamtalk_error:with_message(
+        Error0,
+        iolist_to_binary([
+            ClassBin,
+            <<" already defines #">>,
+            NewBin,
+            <<" locally — refusing to overwrite"/utf8>>
+        ])
+    ),
+    beamtalk_error:with_hint(
+        Error1,
+        iolist_to_binary([
+            <<"removeSelector: #">>,
+            NewBin,
+            <<" first, or choose a different target name">>
+        ])
+    ).
+
+%% The `rewrite_class_sites/5` failure shared by `renameTo:` and
+%% `renameSelector:to:`. `Op` names the message in the "requires a running
+%% workspace" text, `Noun` (`<<"class">>` | `<<"selector">>`) the generic
+%% "Could not rename ..." text, and `NoSitesMsg` the (caller-specific) text for
+%% a classification with neither a definition nor any reference site.
+-spec rename_rewrite_failed_error(atom(), binary(), binary(), binary(), term()) ->
+    #beamtalk_error{}.
+rename_rewrite_failed_error(ErrClass, Op, _Noun, _NoSitesMsg, workspace_unavailable) ->
+    Error0 = beamtalk_error:new(runtime_error, ErrClass),
+    beamtalk_error:with_message(
+        Error0,
+        <<"Workspace not available; ", Op/binary, " requires a running workspace">>
+    );
+rename_rewrite_failed_error(ErrClass, _Op, _Noun, NoSitesMsg, no_sites) ->
+    Error0 = beamtalk_error:new(runtime_error, ErrClass),
+    beamtalk_error:with_message(Error0, NoSitesMsg);
+rename_rewrite_failed_error(ErrClass, _Op, Noun, _NoSitesMsg, Reason) ->
+    Error0 = beamtalk_error:new(runtime_error, ErrClass),
+    Msg = beamtalk_error:chars_to_binary(
+        io_lib:format("Could not rename ~ts: ~tp", [Noun, Reason])
+    ),
+    beamtalk_error:with_message(Error0, Msg).
+
+%% Best-effort ChangeLog append after a successful rename (ADR 0114 §
+%% ChangeLog schema): `Fields` carries the kind-specific entries
+%% (`rename-class` or `rename-method`); the durable intent and author are
+%% common. The rename is already live in memory by this point, so a logging
+%% failure must never surface to the caller.
+-spec log_rename_change(map(), map()) -> ok.
+log_rename_change(Fields, RewriteResult) ->
+    {Author, AuthorKind} = current_author_context(),
+    Spec = Fields#{intent => durable, author => Author, author_kind => AuthorKind},
+    try
+        erlang:apply(beamtalk_repl_eval, emit_rewrite_change_entry, [Spec, RewriteResult])
+    catch
+        error:undef -> ok
+    end,
+    ok.
