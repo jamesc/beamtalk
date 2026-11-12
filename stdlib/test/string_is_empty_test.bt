@@ -1,0 +1,49 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// String isEmpty / isNotEmpty answer from the byte count, not the grapheme
+// count (BT-4752). Results must match for empty, ASCII, multi-byte and ZWJ.
+
+TestCase subclass: StringIsEmptyTest
+
+  testEmptyString =>
+    self assert: "" isEmpty equals: true
+    self assert: "" isNotEmpty equals: false
+
+  testAscii =>
+    self assert: "a" isEmpty equals: false
+    self assert: "hello" isEmpty equals: false
+    self assert: "hello" isNotEmpty equals: true
+
+  testWhitespaceIsNotEmpty =>
+    self assert: " " isEmpty equals: false
+    self assert: " " isNotEmpty equals: true
+
+  testMultiByteGrapheme =>
+    self assert: "é" isEmpty equals: false
+    self assert: "é" isNotEmpty equals: true
+    self assert: "日本語" isEmpty equals: false
+
+  testCombiningSequence =>
+    // "e" + U+0301 combining acute: two code points, one grapheme
+    s := String fromCodePoints: #(101, 769)
+    self assert: s length equals: 1
+    self assert: s isEmpty equals: false
+    self assert: s isNotEmpty equals: true
+
+  testEmojiZwjSequence =>
+    // Family emoji: man ZWJ woman ZWJ girl, one grapheme of many bytes
+    s := String fromCodePoints: #(128104, 8205, 128105, 8205, 128103)
+    self assert: s length equals: 1
+    self assert: s isEmpty equals: false
+    self assert: s isNotEmpty equals: true
+
+  testIsEmptyAgreesWithLengthZero =>
+    #("", "a", "é", "hello world") do: [:s |
+      self assert: s isEmpty equals: s length =:= 0
+      self assert: s isNotEmpty equals: s length > 0]
+
+  testBinaryViewAgrees =>
+    // Binary-typed code calling isEmpty on a String gets the same answer
+    self assert: "" bitSize equals: 0
+    self assert: "é" bitSize equals: 16
