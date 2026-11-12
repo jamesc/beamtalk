@@ -291,3 +291,15 @@ fn annotated_local_accepts_a_literal_by_structure() {
     );
     assert!(msgs.is_empty(), "got: {msgs:#?}");
 }
+
+#[test]
+fn annotated_local_is_the_narrowing_cast_into_a_shape() {
+    // ADR 0147 § `Dictionary` to shape: a typed `Dictionary` or `Object`
+    // value is asserted into a shape by annotating a local.
+    let msgs = warnings(
+        "Object subclass: Probe\n  \
+           fromDict: d :: Dictionary(Symbol, Object) =>\n    x :: #{#a => Integer} := d\n    x\n  \
+           fromObject: o :: Object =>\n    x :: #{#a => Integer} := o\n    x\n",
+    );
+    assert!(msgs.is_empty(), "got: {msgs:#?}");
+}
