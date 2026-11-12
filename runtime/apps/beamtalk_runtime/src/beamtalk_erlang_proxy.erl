@@ -311,8 +311,8 @@ convert). A binary argument (BT-4759) does not: a `badarg` retries once with
 the binary as a charlist, here, exactly as on the proxy path (the retry
 result is coerced the same way). No class-variable snapshot is needed: no
 argument can be a fun or hold one, so the first attempt ran no Beamtalk code
-and `none` restores nothing. A tagged `String` fails the call site's
-`is_binary` guard and takes `direct_call/4`, which unwraps it.
+and `none` restores nothing. A tagged `String` (what a Beamtalk
+`String` is at run time) fails the call site's `is_binary` guard and takes `direct_call/4`, which unwraps it.
 """.
 -spec ffi_call_raised(
     error | exit | throw, term(), list(), atom(), atom(), list(), coercion_mode(), term()

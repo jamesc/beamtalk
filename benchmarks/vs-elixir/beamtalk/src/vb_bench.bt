@@ -48,6 +48,9 @@ sealed Object subclass: VbBench
 
   class string -> String => "hello world"
 
+  // A raw binary (a `Binary`, not a tagged `String`), as an FFI `binary()` result is.
+  class binary -> Binary => Binary fromBytes: #(104, 101, 108, 108, 111, 32, 119, 111, 114, 108, 100)
+
   class tuple -> Tuple => Tuple withAll: #(1, 2)
 
   class openMathClass => VbOpenMath
@@ -432,7 +435,7 @@ sealed Object subclass: VbBench
       ]
     last
 
-  class ffiBinaryArg: n :: Integer s: s :: String -> Integer =>
+  class ffiBinaryArg: n :: Integer s: s :: Binary -> Integer =>
     last := 0
     n timesRepeat: [last := Erlang erlang phash2: s]
     last

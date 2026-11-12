@@ -182,8 +182,10 @@ fn beamtalk_module_keeps_its_mode() {
     );
 }
 
-/// BT-4759: a `String` argument is proved behind the `is_binary` guard (a
-/// tagged String fails it and falls back to the proxy), so the call is direct.
+/// BT-4759: a `String`/`Binary` argument is proved behind the `is_binary`
+/// guard: a raw binary (a `Binary`, or a `binary()` FFI result typed
+/// `String | Binary`) takes the direct call; a tagged String fails the guard
+/// and falls back to the proxy.
 #[test]
 fn string_arg_is_direct_behind_is_binary_guard() {
     let code = compile("Erlang erlang phash2: s");
@@ -200,13 +202,6 @@ fn string_arg_is_direct_behind_is_binary_guard() {
         1,
         "only the fallback arm calls the proxy:\n{code}"
     );
-}
-
-/// The fast path adds no sends and no proxy hops: the string argument is
-/// bound once and the call is a `try` around the remote call.
-#[test]
-fn string_arg_direct_call_adds_no_send() {
-    let code = compile("Erlang erlang phash2: s");
     assert!(
         !code.contains("'beamtalk_message_dispatch':'send'"),
         "no dynamic send in:\n{code}"
