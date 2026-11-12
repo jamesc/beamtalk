@@ -1,6 +1,10 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
+// A registered extension resolved by `liveExtensionsIn:`: the live target
+// class (or metaclass), the selector, and the extension's source text.
+type ExtensionRecord = #{#class => Object, #selector => Symbol, #source => String}
+
 /// SystemNavigation — Class-registry navigation queries ("who implements X",
 /// "where is X used").
 ///
@@ -1443,7 +1447,7 @@ sealed typed Object subclass: SystemNavigation
       into: [:acc :ext |
         extClass := ext at: #class
         extSelector := ext at: #selector
-        extSource :: String := ext at: #source
+        extSource := ext at: #source
         lines := self
           ffiSitesIn: extSource
           module: module
@@ -1724,7 +1728,7 @@ sealed typed Object subclass: SystemNavigation
       into: [:acc :ext |
         extClass := ext at: #class
         extSelector := ext at: #selector
-        extSource :: String := ext at: #source
+        extSource := ext at: #source
         lines := self sendersIn: extSource selector: aSelector
         lines
           inject: acc
@@ -1748,7 +1752,7 @@ sealed typed Object subclass: SystemNavigation
       into: [:acc :ext |
         extClass := ext at: #class
         extSelector := ext at: #selector
-        extSource :: String := ext at: #source
+        extSource := ext at: #source
         lines := self referencesIn: extSource class: targetName
         lines
           inject: acc
@@ -1773,9 +1777,7 @@ sealed typed Object subclass: SystemNavigation
       into: [:acc :ext |
         extClass := ext at: #class
         extSelector := ext at: #selector
-        extSource :: String := ext at: #source
-        // `extSource` is bound `:: String` above to re-assert the source-text
-        // invariant the `allExtensionsWithSource` seam erases (BT-2254).
+        extSource := ext at: #source
         (extSource matchesRegex: aRegex) ifTrue: [
           acc add: #{#class => extClass, #selector => extSelector}
         ] ifFalse: [acc]
@@ -2179,9 +2181,7 @@ sealed typed Object subclass: SystemNavigation
       into: [:acc :ext |
         extClass := ext at: #class
         extSelector := ext at: #selector
-        extSource :: String := ext at: #source
-        // `extSource` is bound `:: String` above to re-assert the source-text
-        // invariant the `allExtensionsWithSource` seam erases (BT-2254).
+        extSource := ext at: #source
         self
           appendAllSendsIn: extSource
           owner: extClass
@@ -2225,18 +2225,23 @@ sealed typed Object subclass: SystemNavigation
   /// #source}` record, dropping entries whose target class no longer resolves
   /// (BT-4418). Shared by the `collectExtension*` walks so the resolution and
   /// the removed-class rule live in one place.
-  class sealed liveExtensionsIn: extEntries :: List(Tuple) -> List(Dictionary) =>
+  ///
+  /// The source-text invariant of `allExtensionsWithSource` is asserted once
+  /// here, as the `:: String` local, so the `ExtensionRecord` shape carries it
+  /// to every reader and no reader re-casts `#source`.
+  class sealed liveExtensionsIn: extEntries :: List(Tuple) -> List(ExtensionRecord) =>
     extEntries
       inject: List new
       into: [:acc :entry |
         extClass := self resolveExtensionClass: (entry at: 1)
+        extSource :: String := entry at: 3
         extClass isNil
           ifTrue: [acc]
           ifFalse: [
             acc add: #{
               #class => extClass,
               #selector => (entry at: 2),
-              #source => (entry at: 3)
+              #source => extSource
             }
           ]
       ]
