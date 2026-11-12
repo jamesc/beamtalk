@@ -115,3 +115,37 @@ fn a_class_builder_block_method_reflects_its_pipeline_as_written() {
         }
     }
 }
+
+/// BT-4708: comments inside the collection literals of a `ClassBuilder` block
+/// method (`BT-3983`'s `LiteralComments`, recorded on the enclosing
+/// definition) survive in the block method's own reflected source, through
+/// both codegen paths and for all four literal forms. The entries are matched
+/// whole (`sel => …`), since the enclosing method's reflected source also
+/// contains the comment text. The REPL path (a cascade outside any method) is
+/// covered in `beamtalk-repl`'s `repl_codegen_smoke`.
+#[test]
+fn a_class_builder_block_method_reflects_comments_inside_collection_literals() {
+    let reflected = [
+        "m =>\n  {\n    1, // first\n    2\n  }",
+        "n =>\n  #(\n    // lead\n    1\n  )",
+        "o =>\n  #[\n    1 // byte\n  ]",
+        "p =>\n  #{\n    // map\n    #a => 1\n  }",
+    ];
+    let source = "Object subclass: Maker\n  class make =>\n    Object classBuilder name: #Made; \
+         methods: #{#m => [:self |\n      {\n        1, // first\n        2\n      }\n    ], \
+         #n => [:self |\n      #(\n        // lead\n        1\n      )\n    ], \
+         #o => [:self |\n      #[\n        1 // byte\n      ]\n    ], \
+         #p => [:self |\n      #{\n        // map\n        #a => 1\n      }\n    ]}; register\n";
+    for (path, code) in both_paths(&parse_clean(source)) {
+        for text in reflected {
+            let entry = format!(
+                "#{{{}}}#",
+                beamtalk_cerl_doc::binary::binary_byte_segments(text)
+            );
+            assert!(
+                code.contains(&entry),
+                "{path}: the block method should reflect `{text}` as written. Got:\n{code}"
+            );
+        }
+    }
+}

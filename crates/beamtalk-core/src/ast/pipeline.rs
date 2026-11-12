@@ -51,6 +51,7 @@
 use std::collections::BTreeMap;
 
 use super::CommentAttachment;
+use super::span_table::{entries_within, span_key as key};
 use crate::span::Span;
 
 /// The sends of one definition that were written with `|>` (ADR 0145).
@@ -75,10 +76,6 @@ impl std::fmt::Debug for PipelineSends {
             )
             .finish()
     }
-}
-
-fn key(span: Span) -> (u32, u32) {
-    (span.start(), span.end())
 }
 
 impl PipelineSends {
@@ -127,12 +124,7 @@ impl PipelineSends {
     #[must_use]
     pub fn within(&self, span: Span) -> Self {
         Self {
-            sends: self
-                .sends
-                .range((span.start(), span.start())..=(span.end(), span.end()))
-                .filter(|&(&(_, end), _)| end <= span.end())
-                .map(|(&key, comments)| (key, comments.clone()))
-                .collect(),
+            sends: entries_within(&self.sends, span),
         }
     }
 }

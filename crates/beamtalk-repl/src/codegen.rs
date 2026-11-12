@@ -27,7 +27,7 @@ use beamtalk_codegen::core_erlang::{
 use beamtalk_core::ast::normalize::{
     PeeledParens, expr_needs_normalising, peel_operand_parens_expr_recording,
 };
-use beamtalk_core::ast::{Expression, Pattern, PipelineSends};
+use beamtalk_core::ast::{Expression, LiteralComments, Pattern, PipelineSends};
 use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
 use beamtalk_core::source_analysis::Diagnostic;
 use std::borrow::Cow;
@@ -127,6 +127,7 @@ pub fn generate_repl_expressions_with_index(
     generate_repl_expressions_impl(
         expressions,
         &PipelineSends::default(),
+        &LiteralComments::default(),
         module_name,
         class_module_index,
         None,
@@ -159,6 +160,7 @@ pub fn generate_repl_expressions_with_hierarchy(
     generate_repl_expressions_impl(
         expressions,
         &PipelineSends::default(),
+        &LiteralComments::default(),
         module_name,
         class_module_index,
         Some(hierarchy),
@@ -167,10 +169,11 @@ pub fn generate_repl_expressions_with_hierarchy(
     .map(|m| m.code)
 }
 
-#[allow(clippy::implicit_hasher)]
+#[allow(clippy::implicit_hasher, clippy::too_many_arguments)]
 fn generate_repl_expressions_impl(
     expressions: &[Expression],
     pipeline_sends: &PipelineSends,
+    literal_comments: &LiteralComments,
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
     hierarchy: Option<&ClassHierarchy>,
@@ -186,6 +189,7 @@ fn generate_repl_expressions_impl(
     let mut generator = CoreErlangGenerator::new(module_name);
     generator.set_peeled_parens(peeled_parens);
     generator.set_pipeline_sends(pipeline_sends.clone());
+    generator.set_literal_comments(literal_comments.clone());
     generator.set_class_module_index(class_module_index);
     if let Some(hierarchy) = hierarchy {
         generator.set_direct_call_eligible_from_hierarchy(hierarchy);
@@ -210,6 +214,11 @@ fn generate_repl_expressions_impl(
 /// compile path uses; every other codegen warning is dropped. The diagnostics
 /// are warnings: generation still succeeds with the generator's output.
 ///
+/// `literal_comments` is the module's collection-literal comment record
+/// (BT-3983, `Module::literal_comments`), passed like `pipeline_sends` so a
+/// `ClassBuilder` block method's reflected source keeps those comments
+/// (BT-4708).
+///
 /// `pipeline_sends` is the `|>` record (ADR 0145) of the module the
 /// expressions were parsed from (`Module::pipeline_sends`): expressions
 /// outside any method record their `|>` sends there, so a `ClassBuilder`
@@ -222,10 +231,11 @@ fn generate_repl_expressions_impl(
 /// # Errors
 ///
 /// Returns [`CodeGenError`] if code generation fails.
-#[allow(clippy::implicit_hasher)]
+#[allow(clippy::implicit_hasher, clippy::too_many_arguments)]
 pub fn generate_repl_expressions_surfacing_verifier(
     expressions: &[Expression],
     pipeline_sends: &PipelineSends,
+    literal_comments: &LiteralComments,
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
     hierarchy: Option<&ClassHierarchy>,
@@ -234,6 +244,7 @@ pub fn generate_repl_expressions_surfacing_verifier(
     generate_repl_expressions_impl(
         expressions,
         pipeline_sends,
+        literal_comments,
         module_name,
         class_module_index,
         hierarchy,
@@ -264,6 +275,7 @@ pub fn generate_repl_expressions_traced(
     generate_repl_expressions_traced_impl(
         expressions,
         &PipelineSends::default(),
+        &LiteralComments::default(),
         source,
         module_name,
         class_module_index,
@@ -290,6 +302,7 @@ pub fn generate_repl_expressions_traced_with_hierarchy(
     generate_repl_expressions_traced_impl(
         expressions,
         &PipelineSends::default(),
+        &LiteralComments::default(),
         source,
         module_name,
         class_module_index,
@@ -304,10 +317,11 @@ pub fn generate_repl_expressions_traced_with_hierarchy(
 /// # Errors
 ///
 /// Returns [`CodeGenError`] if code generation fails.
-#[allow(clippy::implicit_hasher)]
+#[allow(clippy::implicit_hasher, clippy::too_many_arguments)]
 pub fn generate_repl_expressions_traced_surfacing_verifier(
     expressions: &[Expression],
     pipeline_sends: &PipelineSends,
+    literal_comments: &LiteralComments,
     source: &str,
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
@@ -317,6 +331,7 @@ pub fn generate_repl_expressions_traced_surfacing_verifier(
     generate_repl_expressions_traced_impl(
         expressions,
         pipeline_sends,
+        literal_comments,
         source,
         module_name,
         class_module_index,
@@ -326,10 +341,11 @@ pub fn generate_repl_expressions_traced_surfacing_verifier(
     .map(GeneratedModule::into_code_and_verifier_diagnostics)
 }
 
-#[allow(clippy::implicit_hasher)]
+#[allow(clippy::implicit_hasher, clippy::too_many_arguments)]
 fn generate_repl_expressions_traced_impl(
     expressions: &[Expression],
     pipeline_sends: &PipelineSends,
+    literal_comments: &LiteralComments,
     source: &str,
     module_name: &str,
     class_module_index: std::collections::HashMap<String, String>,
@@ -356,6 +372,7 @@ fn generate_repl_expressions_traced_impl(
     let mut generator = CoreErlangGenerator::new(module_name);
     generator.set_peeled_parens(peeled_parens);
     generator.set_pipeline_sends(pipeline_sends.clone());
+    generator.set_literal_comments(literal_comments.clone());
     generator.set_class_module_index(class_module_index);
     if let Some(hierarchy) = hierarchy {
         generator.set_direct_call_eligible_from_hierarchy(hierarchy);
@@ -381,14 +398,24 @@ fn generate_repl_expressions_traced_impl(
 ///
 /// Returns [`CodeGenError`] if code generation fails.
 pub fn generate_test_expression(expression: &Expression, module_name: &str) -> Result<String> {
-    generate_test_expression_surfacing_verifier(expression, &PipelineSends::default(), module_name)
-        .map(|(code, _)| code)
+    generate_test_expression_surfacing_verifier(
+        expression,
+        &PipelineSends::default(),
+        &LiteralComments::default(),
+        module_name,
+    )
+    .map(|(code, _)| code)
 }
 
 /// Like [`generate_test_expression`] but also returns the `ThreadedIr`
 /// verifier diagnostics (ADR 0111 Addendum 17, BT-3778) and any opt-in
 /// codegen report hints (BT-4292), filtered by
 /// [`GeneratedModule::into_code_and_verifier_diagnostics`].
+///
+/// `literal_comments` is the module's collection-literal comment record
+/// (BT-3983, `Module::literal_comments`), passed like `pipeline_sends` so a
+/// `ClassBuilder` block method's reflected source keeps those comments
+/// (BT-4708).
 ///
 /// `pipeline_sends` is the `|>` record (ADR 0145) of the module the
 /// expression was parsed from, so a `ClassBuilder` block method's reflected
@@ -400,12 +427,14 @@ pub fn generate_test_expression(expression: &Expression, module_name: &str) -> R
 pub fn generate_test_expression_surfacing_verifier(
     expression: &Expression,
     pipeline_sends: &PipelineSends,
+    literal_comments: &LiteralComments,
     module_name: &str,
 ) -> Result<(String, Vec<Diagnostic>)> {
     let (expression, peeled_parens) = peeled(std::slice::from_ref(expression));
     let mut generator = CoreErlangGenerator::new(module_name);
     generator.set_peeled_parens(peeled_parens);
     generator.set_pipeline_sends(pipeline_sends.clone());
+    generator.set_literal_comments(literal_comments.clone());
     let mut assembler = ReplAssembler::new(&mut generator);
     let doc = assembler.generate_test_module(&expression[0])?;
     let code = doc.to_pretty_string();

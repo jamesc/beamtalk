@@ -26,6 +26,7 @@
 
 use std::collections::BTreeMap;
 
+use super::span_table::{entries_within, span_key as key};
 use super::{Comment, CommentAttachment};
 use crate::span::Span;
 
@@ -71,10 +72,6 @@ impl std::fmt::Debug for LiteralComments {
     }
 }
 
-fn key(span: Span) -> (u32, u32) {
-    (span.start(), span.end())
-}
-
 impl LiteralComments {
     /// `true` if no literal has a comment.
     #[must_use]
@@ -100,6 +97,19 @@ impl LiteralComments {
     #[must_use]
     pub fn get(&self, span: Span) -> Option<&LiteralCommentSlots> {
         self.literals.get(&key(span))
+    }
+
+    /// The entries whose literals lie inside `span`.
+    ///
+    /// For a definition rebuilt from part of another one's code, such as a
+    /// `ClassBuilder` block method (`#sel => [:self | …]`): the block's
+    /// literals were recorded on the enclosing definition, so the rebuilt one
+    /// takes the entries inside the block (BT-4708).
+    #[must_use]
+    pub fn within(&self, span: Span) -> Self {
+        Self {
+            literals: entries_within(&self.literals, span),
+        }
     }
 }
 

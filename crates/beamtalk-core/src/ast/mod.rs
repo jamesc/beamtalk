@@ -94,6 +94,7 @@ mod method;
 pub mod normalize;
 mod pattern;
 mod pipeline;
+mod span_table;
 pub(crate) mod visitor;
 pub mod well_known;
 

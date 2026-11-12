@@ -187,6 +187,7 @@ pub(crate) fn compile_expression_to_core(
         beamtalk_repl::codegen::generate_test_expression_surfacing_verifier(
             &expr.expression,
             &module.pipeline_sends,
+            &module.literal_comments,
             module_name,
         )
         .map_err(|e| format!("{e}"))?;

@@ -568,6 +568,13 @@ pub struct CoreErlangGenerator {
     /// `ClassBuilder` block method's reflected source takes the entries that
     /// fall inside its block, so it keeps `|>` as written.
     pub(in crate::core_erlang) current_pipeline_sends: beamtalk_core::ast::PipelineSends,
+    /// The comments inside collection literals (BT-3983) of the code being
+    /// generated, scoped like [`Self::current_pipeline_sends`] (swapped in by
+    /// `MethodFrame::enter`; set per module by the driver and per expression
+    /// batch by the REPL entries via [`Self::set_literal_comments`]). A
+    /// `ClassBuilder` block method's reflected source takes the entries inside
+    /// its block (BT-4708).
+    pub(in crate::core_erlang) current_literal_comments: beamtalk_core::ast::LiteralComments,
     /// What codegen's guard-return rewrite changed (BT-4415,
     /// `guard_returns`): the bodies as written, which
     /// [`Self::as_written_method_source`] reflects in place of the rewritten
@@ -673,6 +680,15 @@ impl CoreErlangGenerator {
         self.current_pipeline_sends = pipeline_sends;
     }
 
+    /// Records the collection-literal comments (BT-3983) of the code outside
+    /// any method this generator compiles, so a `ClassBuilder` block method's
+    /// reflected source keeps them (BT-4708).
+    // `pub` — `beamtalk-repl` compiles a module's expressions without the
+    // module, so it passes the module's record here.
+    pub fn set_literal_comments(&mut self, literal_comments: beamtalk_core::ast::LiteralComments) {
+        self.current_literal_comments = literal_comments;
+    }
+
     /// Creates a new code generator for the given module name.
     // widened from `pub(crate)` — `beamtalk-repl` constructs its
     // own generator.
@@ -749,6 +765,7 @@ impl CoreErlangGenerator {
             peeled_parens: beamtalk_core::ast::normalize::PeeledParens::default(),
             current_method_span: None,
             current_pipeline_sends: beamtalk_core::ast::PipelineSends::default(),
+            current_literal_comments: beamtalk_core::ast::LiteralComments::default(),
             guard_rewrite: super::guard_returns::GuardRewrite::default(),
             guard_conditions_used: std::collections::HashSet::new(),
             boolean_comparison_lowerings: std::collections::HashMap::new(),

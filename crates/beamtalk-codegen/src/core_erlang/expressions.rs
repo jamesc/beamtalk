@@ -1109,6 +1109,7 @@ impl CoreErlangGenerator {
             &self.peeled_parens,
             self.current_peel_scope(),
             &self.current_pipeline_sends,
+            &self.current_literal_comments,
         );
         let messages: &[CascadeMessage] = augmented.as_deref().unwrap_or(messages);
 
