@@ -22,32 +22,19 @@ use tracing::debug;
 
 /// Format a single stdlib class metadata entry in ADR 0070 Phase 4 map format.
 fn format_stdlib_class_entry(m: &ClassMeta) -> String {
-    let type_params = if m.type_params.is_empty() {
-        "[]".to_string()
-    } else {
-        format!(
-            "[{}]",
-            m.type_params
-                .iter()
-                .map(|tp| format!("'{tp}'"))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
-    };
     // ADR 0103: `handle_scope` is intentionally omitted from this lightweight
     // `.app.src` registry (like `is_native`, `fields`, and `methods`). The
     // authoritative tier channel is `__beamtalk_meta/0` in the compiled `.beam`
     // (read back by the compiler-port), which does carry it. No stdlib class
     // declares `handleScope:` today, so there is no divergence to reconcile.
-    format!(
-        "#{{name => '{class}', module => '{module}', parent => '{super}', \
-         package => 'stdlib', kind => {kind}, type_params => {type_params}}}",
-        module = m.module_name,
-        class = m.class_name,
-        super = m.superclass_name,
-        kind = m.class_kind.as_str(),
-        type_params = type_params,
-    )
+    app_file::format_class_entry(&app_file::ClassMetadata {
+        module: m.module_name.clone(),
+        class_name: m.class_name.clone(),
+        parent_class: m.superclass_name.clone(),
+        package: "stdlib".to_string(),
+        kind: m.class_kind.as_str().to_string(),
+        type_params: m.type_params.clone(),
+    })
 }
 
 /// Format stdlib class metadata entries joined with the given separator.
