@@ -11,8 +11,7 @@ use clap::Subcommand;
 use miette::Result;
 
 use super::{
-    create_workspace, discovery, get_or_start_workspace, list_workspaces, stop_workspace,
-    workspace_status,
+    create_workspace, get_or_start_workspace, list_workspaces, stop_workspace, workspace_status,
 };
 use crate::commands::{attach, logs, transcript};
 
@@ -461,7 +460,7 @@ fn run_list(json: bool, status_filter: Option<&str>, project_filter: Option<&str
     // Detect current project root to mark the matching workspace
     let current_project_root = std::env::current_dir()
         .ok()
-        .map(|cwd| discovery::discover_project_root(&cwd));
+        .map(|cwd| beamtalk_project::discover_project_root(&cwd));
 
     print_list_table(
         build_list_rows(&workspaces, current_project_root.as_deref()),
@@ -551,7 +550,7 @@ fn run_status(name: Option<&str>) -> Result<()> {
 fn run_create(name: &str) -> Result<()> {
     let cwd = std::env::current_dir()
         .map_err(|e| miette::miette!("Could not determine current directory: {e}"))?;
-    let project_root = discovery::discover_project_root(&cwd);
+    let project_root = beamtalk_project::discover_project_root(&cwd);
 
     let metadata = create_workspace(&project_root, Some(name))?;
 
@@ -581,7 +580,7 @@ fn run_create_background(
 
     let cwd = std::env::current_dir()
         .map_err(|e| miette::miette!("Could not determine current directory: {e}"))?;
-    let project_root = discovery::discover_project_root(&cwd);
+    let project_root = beamtalk_project::discover_project_root(&cwd);
 
     // Check if workspace already exists and is running before validating
     // startup-only flags. This avoids spurious errors when the user just

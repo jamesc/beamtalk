@@ -14,7 +14,6 @@ use beamtalk_cli::repl_startup::BeamPaths;
 use miette::{IntoDiagnostic, Result, miette};
 use serde::Serialize;
 
-use super::discovery;
 use super::epmd::{
     EPMD_CONFLICT_DEREGISTER_TIMEOUT_SECS, EPMD_CONFLICT_MAX_RETRIES,
     EPMD_CONFLICT_RETRY_INTERVAL_MS, is_epmd_name_conflict, wait_for_epmd_deregistration,
@@ -778,7 +777,7 @@ pub(crate) fn resolve_workspace_id_or_cwd(name_or_id: Option<&str>) -> Result<St
         resolve_workspace_id(name)
     } else {
         let cwd = std::env::current_dir().into_diagnostic()?;
-        let project_root = discovery::discover_project_root(&cwd);
+        let project_root = beamtalk_project::discover_project_root(&cwd);
         Ok(find_workspace_by_project_path(&project_root)?
             .unwrap_or(beamtalk_workspace::generate_workspace_id(&project_root)?))
     }

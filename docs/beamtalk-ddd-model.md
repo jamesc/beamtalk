@@ -611,6 +611,23 @@ impl LanguageService {
 }
 ```
 
+### Build System Context (`beamtalk-package`)
+
+**Purpose:** Offline package analysis shared by tooling (CLI, MCP) without pulling in CLI-only dependencies (BT-4689)
+
+**Crate:** `beamtalk-package` — a leaf crate below `beamtalk-cli` and `beamtalk-mcp`; depends on `beamtalk-core`, `beamtalk-project`, `beamtalk-language-service`, `beamtalk-lint` and `beamtalk-sysroot`, never on `beamtalk-cli`.
+
+**Modules:**
+- `manifest`: `beamtalk.toml` parsing and validation
+- `build_layout`: `_build/` path conventions
+- `dependency_classes`: best-effort, offline dependency class resolution
+- `ffi_type_registry` / `native_type_specs`: ADR 0075 FFI type resolution
+- `lint_pipeline` / `erlang_lint`: the analysis behind `beamtalk lint` and the MCP `lint`/`diagnostic_summary` tools
+
+**Key Invariant:** One implementation of each rule; `beamtalk-cli` re-exports these modules rather than copying them.
+
+---
+
 ---
 
 ## Runtime Domain Model
