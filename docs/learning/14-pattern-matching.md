@@ -109,6 +109,7 @@ TestCase subclass: Ch14MapDestructuring
 
   testMissingKeyRaises =>
     self should: [
+      @expect type
       #{#missing => _val} := #{#present => 42}
     ] raise: #key_error
 
