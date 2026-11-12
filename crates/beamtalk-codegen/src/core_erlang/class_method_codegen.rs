@@ -104,9 +104,9 @@ impl CoreErlangGenerator {
 
             // Generate body as Document and keep it in the Document pipeline (ADR 0089).
             let body_doc: Document<'static> = if native_class_delegate {
-                // The delegate body has no NLR, but the token is still minted
-                // (and cleared) so the temp numbering matches every other
-                // class-method body.
+                // The delegate body has no NLR; run it through the shared
+                // scope anyway so the current token is cleared on this path
+                // exactly as on every other class-method body.
                 let ((), _) = frame.with_nlr_scope(needs_nlr, |_| ());
                 let backing = class
                     .backing_module
