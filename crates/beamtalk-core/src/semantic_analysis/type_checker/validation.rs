@@ -4878,7 +4878,9 @@ impl TypeChecker {
             None,
             Some(registry),
         );
-        (resolved.display_annotation(), deps)
+        // Shapes are judged as `Dictionary` until BT-4730 — erase here too, so
+        // a shape *alias* expands to `Dictionary`, not unknown `#{...}` text.
+        (resolved.erase_shapes().display_annotation(), deps)
     }
 
     // ── Renderers for facts `inference/` detects ──────────────

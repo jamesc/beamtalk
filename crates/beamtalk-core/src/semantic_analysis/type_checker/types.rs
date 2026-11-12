@@ -614,10 +614,16 @@ impl InferredType {
     #[must_use]
     pub fn erase_shapes(&self) -> Self {
         match self {
+            // The erased `Dictionary` is not structurally the alias's
+            // expansion, so an `Aliased` tag must not survive (its display
+            // invariant); other provenance is kept.
             Self::Shape { provenance, .. } => Self::Known {
                 class_name: "Dictionary".into(),
                 type_args: vec![],
-                provenance: provenance.clone(),
+                provenance: match provenance {
+                    TypeProvenance::Aliased { span, .. } => TypeProvenance::Inferred(*span),
+                    other => other.clone(),
+                },
             },
             Self::Known {
                 class_name,
@@ -628,13 +634,12 @@ impl InferredType {
                 type_args: type_args.iter().map(Self::erase_shapes).collect(),
                 provenance: provenance.clone(),
             },
-            Self::Union {
-                members,
-                provenance,
-            } => Self::Union {
-                members: members.iter().map(Self::erase_shapes).collect(),
-                provenance: provenance.clone(),
-            },
+            // Rebuilt through `union_of` so two shapes erasing to `Dictionary`
+            // collapse to one member (its normal form).
+            Self::Union { members, .. } => {
+                let erased: Vec<Self> = members.iter().map(Self::erase_shapes).collect();
+                Self::union_of(&erased)
+            }
             Self::Intersection {
                 members,
                 provenance,
@@ -2499,6 +2504,24 @@ mod display_tests {
         assert!(int().dictionary_view().is_none());
         assert!(InferredType::Never.dictionary_view().is_none());
         assert!(InferredType::meta("Foo").dictionary_view().is_none());
+    }
+
+    #[test]
+    fn erase_shapes_replaces_shapes_and_drops_alias_provenance() {
+        let a = InferredType::shape(vec![field("a", int(), false)], false)
+            .tag_alias_expansion("Opts".into(), Span::default());
+        let b = InferredType::shape(vec![field("b", int(), false)], false);
+        let erased = a.erase_shapes();
+        assert_eq!(erased, InferredType::known("Dictionary"));
+        assert!(erased.alias_display_name().is_none());
+
+        // `S1 | S2` collapses to one `Dictionary`, not `Dictionary | Dictionary`.
+        let union = InferredType::union_of(&[a, b]);
+        assert_eq!(union.erase_shapes(), InferredType::known("Dictionary"));
+
+        // Nested in a type argument.
+        let list = InferredType::known_with_args("List", vec![InferredType::shape(vec![], true)]);
+        assert_eq!(list.erase_shapes().display_name(), "List(Dictionary)");
     }
 
     #[test]

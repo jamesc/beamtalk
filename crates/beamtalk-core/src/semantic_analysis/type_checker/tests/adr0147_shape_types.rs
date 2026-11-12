@@ -223,3 +223,23 @@ fn override_return_type_against_a_shape_is_still_judged() {
         "overriding a shape return with Integer must warn, got: {msgs:#?}"
     );
 }
+
+#[test]
+fn shape_alias_typed_field_and_parameter_are_judged_as_dictionary() {
+    let msgs = checker_messages(
+        "type Options = #{#port => Integer}\n\
+         Actor subclass: Foo\n  \
+           state: cfg :: Options = #{#port => 1}\n  \
+           reset => self.cfg := Dictionary new\n  \
+           bad => self.cfg := 3\n  \
+           takes: o :: Options => o\n  \
+           ok => self takes: Dictionary new\n  \
+           wrong => self takes: 3\n",
+    );
+    assert_eq!(
+        msgs.len(),
+        2,
+        "only the two integer misuses, got: {msgs:#?}"
+    );
+    assert!(msgs.iter().all(|m| m.contains("Integer")), "{msgs:#?}");
+}
