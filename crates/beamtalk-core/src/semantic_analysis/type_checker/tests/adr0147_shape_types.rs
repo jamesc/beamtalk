@@ -3,8 +3,8 @@
 
 //! ADR 0147 (BT-4729): `InferredType::Shape` — resolution from annotations
 //! and aliases, display, and the `Dictionary` view every non-keyed send sees.
-//! Assignability is BT-4730; literal inference and keyed operations come
-//! later.
+//! Assignability lives in `adr0147_shape_assignability.rs`; literal inference
+//! and keyed operations come later.
 
 use super::common::*;
 
@@ -68,9 +68,8 @@ fn shape_union_receiver_resolves_each_member_as_dictionary() {
 
 #[test]
 fn dictionary_and_shape_interoperate_silently() {
-    // Assignability proper is BT-4730; until then a shape and a `Dictionary`
-    // flow either way without a diagnostic, exactly as the `Dictionary`
-    // fallback behaved.
+    // Bare `Dictionary` is compatible with any shape and any shape with bare
+    // `Dictionary`, silently (ADR 0147 § Subtyping).
     let msgs = probe(
         "  takesShape: opts :: #{#a => Integer} => opts\n  \
            takesDict: d :: Dictionary => d\n  \
@@ -173,7 +172,7 @@ fn redefining_a_shape_alias_changes_what_its_use_sites_resolve_to() {
     assert_ne!(before, after);
 }
 
-// ── Field and override checks judge a shape as `Dictionary` (until BT-4730) ─
+// ── Field and override checks against a shape ──────────────────────────────
 
 #[test]
 fn shape_typed_field_default_and_assignment_do_not_warn() {
@@ -225,7 +224,7 @@ fn override_return_type_against_a_shape_is_still_judged() {
 }
 
 #[test]
-fn shape_alias_typed_field_and_parameter_are_judged_as_dictionary() {
+fn shape_alias_typed_field_and_parameter_reject_non_dictionaries() {
     let msgs = checker_messages(
         "type Options = #{#port => Integer}\n\
          Actor subclass: Foo\n  \
