@@ -2076,6 +2076,7 @@ fn test_bt3986_generate_erlang_interop_block_stateful_is_internal_error() {
 #[test]
 fn test_generate_cast_send_table() {
     // (label, receiver name, selector, arguments, must contain, must not contain)
+    #[allow(clippy::type_complexity)]
     let cases: Vec<(&str, &str, MessageSelector, Vec<Expression>, Vec<&str>, Vec<&str>)> = vec![
         (
             // `someActor increment!` should generate beamtalk_message_dispatch:cast/3
@@ -2396,6 +2397,7 @@ struct FieldCase {
 /// ADR 0124 §1/§4f/B4 — `clearField:`/`hasField:` mirror `fieldAt:put:`/`fieldAt:`'s
 /// own sync_send-avoidance cases.
 #[test]
+#[allow(clippy::too_many_lines)] // a data table: one entry per former test
 fn test_field_operation_codegen_table() {
     use Expect::{Dispatches, Has, Lacks, NoSyncSend};
     let cases = [
@@ -3309,6 +3311,7 @@ fn test_qualified_class_name_only_reference_uses_bare_name() {
 #[test]
 fn test_qualified_receiver_message_send_table() {
     // (label, package, class, selector, arguments, expected substring)
+    #[allow(clippy::type_complexity)]
     let cases: Vec<(&str, &str, &str, MessageSelector, Vec<Expression>, &str)> = vec![
         (
             // Should look up by short class name in the class registry...
