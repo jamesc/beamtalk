@@ -12,7 +12,11 @@
 type ShapeTestPoint = #{#x => Integer, #y => Integer}
 type ShapeTestOpts = #{#name => String, ?#retries => Integer}
 type ShapeTestTagged = #{#kind => Symbol, ...}
-type ShapeTestUri = #{?#scheme => Object, ?#host => Object, ?#port => Integer | Symbol}
+type ShapeTestUri = #{
+  ?#scheme => Object,
+  ?#host => Object,
+  ?#port => Integer | Symbol
+}
 
 TestCase subclass: ShapeTypesTest
 
@@ -90,12 +94,11 @@ TestCase subclass: ShapeTypesTest
     parts :: ShapeTestUri := (Erlang uri_string) parse: "https://example.com:8443/a?b=c"
     self assert: (parts at: #port ifAbsent: [80]) equals: 8443
     // The text fields are `unicode:chardata()`: normalise before comparing.
-    scheme := (Erlang unicode) characters_to_list: (parts at: #scheme ifAbsent: [""])
-    self assert: scheme asString equals: "https"
-    host := (Erlang unicode) characters_to_list: (parts at: #host ifAbsent: [""])
-    self assert: host asString equals: "example.com"
+    rawScheme := parts at: #scheme ifAbsent: [""]
+    self assert: ((Erlang unicode) characters_to_list: rawScheme) asString equals: "https"
+    rawHost := parts at: #host ifAbsent: [""]
+    self assert: ((Erlang unicode) characters_to_list: rawHost) asString equals: "example.com"
 
   /// A generic helper takes `Dictionary(Symbol, Object)`, not a shape alias:
   /// a closed shape widens to it, so every shape is accepted.
-  countKeys: d :: Dictionary(Symbol, Object) -> Integer =>
-    d keys size
+  countKeys: d :: Dictionary(Symbol, Object) -> Integer => d keys size
