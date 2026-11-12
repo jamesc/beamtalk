@@ -432,7 +432,7 @@ sealed Object subclass: VbBench
       ]
     last
 
-  class ffiBinaryArg: n :: Integer s :: String -> Integer =>
+  class ffiBinaryArg: n :: Integer s: s :: String -> Integer =>
     last := 0
     n timesRepeat: [last := Erlang erlang phash2: s]
     last

@@ -2013,8 +2013,8 @@ bt4485_runtime_guards_reject_what_the_proxy_changes_test() ->
 
 %% Argument types codegen passes without the proxy: the proxy hands every
 %% sample to the callee unchanged, and it passes one of the runtime guards (a
-%% scalar, so no tagged String, no binary for the charlist retry to change, no
-%% fun that could run Beamtalk code).
+%% scalar or a raw binary, so no tagged String and no fun that could run
+%% Beamtalk code; a binary's `badarg` retry runs in `ffi_call_raised/8`).
 bt4485_arg_passthrough_matches_shared_fixture_test() ->
     #{<<"arg_passthrough">> := Cases, <<"arg_runtime_guards">> := Guards} = bt4485_fixture(),
     ?assert(length(Cases) > 0),
