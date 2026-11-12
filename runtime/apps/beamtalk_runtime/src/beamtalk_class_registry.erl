@@ -45,7 +45,6 @@ Extracted from `beamtalk_object_class` for single-responsibility.
     record_class_collision_warning/3,
     drain_class_warnings_by_names/1,
     drain_class_warnings_by_qualified_names/1,
-    extract_package_from_module/1,
     record_pending_load_error/2,
     drain_pending_load_errors_by_names/1,
     clear_pending_load_errors_by_names/1,
@@ -392,7 +391,7 @@ warnings can be drained per-package during selective reloads.
 -spec record_class_collision_warning(atom(), atom(), atom()) -> ok.
 record_class_collision_warning(ClassName, OldModule, NewModule) ->
     ensure_class_warnings_table(),
-    Package = extract_package_from_module(NewModule),
+    Package = beamtalk_module_name:package_of(NewModule),
     ets:insert(beamtalk_class_warnings, {{Package, ClassName}, OldModule, NewModule}),
     ok.
 
@@ -448,7 +447,7 @@ Atomic (`ets:take/2`) — stronger than
 context here is precise enough that a concurrent insert for the same
 {Package, ClassName} key should not silently survive the drain.
 """.
--spec drain_class_warnings_by_qualified_names([{atom() | undefined, atom()}]) ->
+-spec drain_class_warnings_by_qualified_names([{binary() | undefined, atom()}]) ->
     [{atom(), atom(), atom()}].
 drain_class_warnings_by_qualified_names(QualifiedNames) ->
     case ets:info(beamtalk_class_warnings) of
@@ -466,22 +465,6 @@ drain_class_warnings_by_qualified_names(QualifiedNames) ->
                 end,
                 QualifiedNames
             )
-    end.
-
--doc """
-Extract the package segment from a bt@{pkg}@{class} module name.
-Returns the package name atom or undefined for unqualified modules.
-Used to derive the package portion of the ETS key from module atoms.
-""".
--spec extract_package_from_module(atom()) -> atom() | undefined.
-extract_package_from_module(ModuleName) when is_atom(ModuleName) ->
-    ModStr = atom_to_list(ModuleName),
-    case string:split(ModStr, "@", all) of
-        ["bt", Pkg, _Class | _Rest] when Pkg =/= [] ->
-            % elp:fixme W0023 intentional atom creation
-            list_to_atom(Pkg);
-        _ ->
-            undefined
     end.
 
 -doc """

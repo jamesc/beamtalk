@@ -1156,13 +1156,13 @@ qualified_drain_isolates_packages_test_() ->
 
                 %% Drain only the json package's warnings.
                 JsonWarnings = beamtalk_class_registry:drain_class_warnings_by_qualified_names([
-                    {json, 'Parser'}
+                    {<<"json">>, 'Parser'}
                 ]),
                 ?assertEqual([{'Parser', 'bt@json@parser_v1', 'bt@json@parser'}], JsonWarnings),
 
                 %% The xml package's warning should still be in the table.
                 XmlWarnings = beamtalk_class_registry:drain_class_warnings_by_qualified_names([
-                    {xml, 'Parser'}
+                    {<<"xml">>, 'Parser'}
                 ]),
                 ?assertEqual([{'Parser', 'bt@xml@parser_v1', 'bt@xml@parser'}], XmlWarnings)
             end)
@@ -1197,23 +1197,6 @@ unqualified_drain_gets_all_packages_test_() ->
                 ]),
                 ?assertEqual([], Remaining)
             end)
-        ]
-    end}.
-
-%% Test extract_package_from_module/1 in beamtalk_class_registry.
-extract_package_from_module_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
-        [
-            ?_assertEqual(
-                json, beamtalk_class_registry:extract_package_from_module('bt@json@parser')
-            ),
-            ?_assertEqual(
-                xml, beamtalk_class_registry:extract_package_from_module('bt@xml@parser')
-            ),
-            ?_assertEqual(
-                undefined, beamtalk_class_registry:extract_package_from_module('bt@counter')
-            ),
-            ?_assertEqual(undefined, beamtalk_class_registry:extract_package_from_module(module_a))
         ]
     end}.
 

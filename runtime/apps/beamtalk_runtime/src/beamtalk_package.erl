@@ -175,7 +175,10 @@ package_name(ClassName) when is_atom(ClassName) ->
         Pid ->
             try beamtalk_object_class:module_name_safe(Pid) of
                 ModuleName ->
-                    extract_package_from_module(ModuleName)
+                    case beamtalk_module_name:package_of(ModuleName) of
+                        undefined -> nil;
+                        Pkg -> Pkg
+                    end
             catch
                 exit:{noproc, _} ->
                     package_name_from_app_metadata(ClassName);
@@ -365,7 +368,7 @@ refresh_app_classes(PkgName, AppAtom) ->
                 }
              || {Name, Mod, Pid} <- beamtalk_class_registry:live_class_entries(),
                 is_atom(Mod),
-                beamtalk_class_registry:extract_package_from_module(Mod) =:= AppAtom,
+                beamtalk_module_name:package_of(Mod) =:= atom_to_binary(AppAtom, utf8),
                 not lists:member(Name, Known)
             ],
             case Added of
@@ -486,17 +489,6 @@ build_package_info(AppName, PkgName) ->
         dependencies => Deps,
         source => S(Source)
     }.
-
--doc "Extract the package segment from a bt@{pkg}@{class} module name.".
--spec extract_package_from_module(atom()) -> binary() | nil.
-extract_package_from_module(ModuleName) when is_atom(ModuleName) ->
-    ModStr = atom_to_list(ModuleName),
-    case string:split(ModStr, "@", all) of
-        ["bt", Pkg | _Rest] when Pkg =/= [] ->
-            list_to_binary(Pkg);
-        _ ->
-            nil
-    end.
 
 -doc "Look up the package name for a class from .app metadata.".
 -spec package_name_from_app_metadata(atom()) -> binary() | nil.
