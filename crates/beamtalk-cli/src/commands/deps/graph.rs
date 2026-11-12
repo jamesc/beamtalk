@@ -1837,4 +1837,201 @@ middle = {{ path = "{middle_str}" }}"#
             .expect("checkout must come from repo B, which has a MARKER file");
         assert_eq!(marker, "marker-b");
     }
+
+    #[test]
+    fn test_resolve_missing_dep_directory() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            r#"[dependencies]
+utils = { path = "../nonexistent" }"#,
+        );
+        let options = beamtalk_core::CompilerOptions::default();
+
+        let result = resolve_dependency_graph(&project_root, &options);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("does not exist"),
+            "should mention missing directory: {err}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_missing_dep_manifest() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create a dependency directory without beamtalk.toml
+        let dep_dir = temp.path().join("utils");
+        fs::create_dir_all(&dep_dir).unwrap();
+
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            r#"[dependencies]
+utils = { path = "utils" }"#,
+        );
+        let options = beamtalk_core::CompilerOptions::default();
+
+        let result = resolve_dependency_graph(&project_root, &options);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("missing beamtalk.toml"),
+            "should mention missing manifest: {err}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_mismatched_package_name() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create dependency with a different package name
+        let dep_dir = temp.path().join("utils");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "wrong_name", "0.1.0", "");
+
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            r#"[dependencies]
+utils = { path = "utils" }"#,
+        );
+        let options = beamtalk_core::CompilerOptions::default();
+
+        let result = resolve_dependency_graph(&project_root, &options);
+        assert!(result.is_err());
+        let err = format!("{:?}", result.unwrap_err());
+        assert!(
+            err.contains("mismatched"),
+            "should mention name mismatch: {err}"
+        );
+    }
+
+    #[test]
+    fn test_resolve_dep_with_no_source_files() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create dependency with manifest but no source files
+        let dep_dir = temp.path().join("utils");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "utils", "0.1.0", "");
+
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            r#"[dependencies]
+utils = { path = "utils" }"#,
+        );
+        let options = beamtalk_core::CompilerOptions::default();
+
+        let result = resolve_dependency_graph(&project_root, &options).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "utils");
+        // No source files means no class index entries
+        assert!(result[0].class_module_index.is_empty());
+    }
+
+    /// A dependency with no `[stubs]` section resolves to `stubs_dir: None`.
+    #[test]
+    fn test_resolve_dep_without_stubs_section_is_none() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        let dep_dir = temp.path().join("dep_pkg");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "dep_pkg", "0.1.0", "");
+
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            r#"[dependencies]
+dep_pkg = { path = "dep_pkg" }"#,
+        );
+
+        let options = beamtalk_core::CompilerOptions::default();
+        let result = resolve_dependency_graph(&project_root, &options).unwrap();
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].stubs_dir, None);
+    }
+
+    /// Integration test: package A depends on path dep B, A can use B's classes.
+    ///
+    /// This test creates two packages on disk:
+    /// - `dep_utils` with a `Helper` class
+    /// - `my_app` with a class that references `Helper`
+    ///
+    /// Then compiles `my_app` (which resolves and compiles `dep_utils`) and verifies
+    /// the dependency's ebin directory is populated with BEAM files.
+    ///
+    /// Requires erlc and the beamtalk binary (runs via `beamtalk build`).
+    #[test]
+    #[ignore = "requires erlc"]
+    fn test_full_path_dep_compilation() {
+        let temp = TempDir::new().unwrap();
+        let project_root = Utf8PathBuf::from_path_buf(temp.path().to_path_buf()).unwrap();
+
+        // Create dependency package: dep_utils with a Helper class
+        let dep_dir = temp.path().join("dep_utils");
+        fs::create_dir_all(&dep_dir).unwrap();
+        write_manifest(&dep_dir, "dep_utils", "0.1.0", "");
+        write_source(
+            &dep_dir,
+            "helper.bt",
+            "Object subclass: Helper\n  greet => \"hello from dep\"\n",
+        );
+
+        // Create main package that depends on dep_utils
+        write_manifest(
+            temp.path(),
+            "my_app",
+            "0.1.0",
+            r#"[dependencies]
+dep_utils = { path = "dep_utils" }"#,
+        );
+        write_source(
+            temp.path(),
+            "app.bt",
+            "Object subclass: App\n  run => Helper greet\n",
+        );
+
+        let options = beamtalk_core::CompilerOptions::default();
+
+        // Resolve and compile dependencies
+        let result = resolve_dependency_graph(&project_root, &options).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "dep_utils");
+
+        // Verify the class_module_index contains the Helper class
+        assert!(
+            result[0].class_module_index.contains_key("Helper"),
+            "dep class index should contain Helper: {:?}",
+            result[0].class_module_index
+        );
+
+        // Verify ebin directory was created with .beam files
+        let dep_ebin = &result[0].ebin_path;
+        assert!(dep_ebin.exists(), "dep ebin directory should exist");
+
+        let beam_files: Vec<_> = fs::read_dir(dep_ebin.as_std_path())
+            .unwrap()
+            .filter_map(std::result::Result::ok)
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "beam"))
+            .collect();
+        assert!(
+            !beam_files.is_empty(),
+            "dep ebin should contain .beam files"
+        );
+    }
 }

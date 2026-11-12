@@ -43,6 +43,7 @@ pub fn read_cookie_file(workspace_id: &str) -> Option<String> {
 ///
 /// 1. If a workspace ID is given, use it directly.
 /// 2. Otherwise, generate from the current directory.
+#[cfg(test)]
 pub fn discover_port_and_cookie(workspace_id: Option<&str>) -> Option<(u16, String)> {
     tracing::debug!(workspace_id = ?workspace_id, "discovering REPL port and cookie");
     discover_port_cookie_and_id(workspace_id).map(|(port, cookie, _id)| (port, cookie))
@@ -67,7 +68,7 @@ pub fn discover_port_cookie_and_id(workspace_id: Option<&str>) -> Option<(u16, S
 ///
 /// 1. If a workspace ID is given, use it directly.
 /// 2. Otherwise, generate from the current directory.
-#[allow(dead_code)] // Used by tests; main uses discover_port_and_cookie
+#[cfg(test)]
 pub fn discover_port(workspace_id: Option<&str>) -> Option<u16> {
     discover_port_and_cookie(workspace_id).map(|(port, _)| port)
 }

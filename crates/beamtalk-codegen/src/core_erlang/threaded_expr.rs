@@ -383,24 +383,6 @@ pub struct ReplProducerDoc {
     pub mutated: bool,
 }
 
-/// Where a threading construct sits in its enclosing method body. Drives how the
-/// bound logical value (tuple element 1) is returned/stored.
-///
-/// Both `Last` and `Return` flow through the unified emitter (the class-method
-/// generator passes `Return` for explicit `^ expr` and `Last` for the implicit final
-/// expression; the value-type generator passes `Last`). They currently receive
-/// identical post-construct treatment — `Return` is recorded distinctly so the call
-/// site's intent is preserved for the later non-last / assign-RHS migration steps. The
-/// non-last open-let-chain paths (`generate_vt_*_open`) are already context-shared and
-/// are not (yet) routed through this emitter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ThreadingPosition {
-    /// Implicit last expression of the method body.
-    Last,
-    /// Explicit `^ expr` return.
-    Return,
-}
-
 /// The per-context threading boundary — the *only* thing that differs between the
 /// value-type and class-method consumption of a threaded construct's logical value
 /// once the transform is shared.
@@ -438,10 +420,7 @@ pub(super) enum ThreadingBoundary {
 ///
 /// The transform lowers a construct into this; the boundary lowers it out to Core
 /// Erlang via [`CoreErlangGenerator::threading_result_tail`]. `value_doc` is the open
-/// let-chain that binds the logical value (tuple element 1) to `result_var`;
-/// `threaded_locals` is the set of outer locals carried in tuple element 2 (discarded
-/// in last position, where they do not escape); `position` records last vs explicit
-/// return.
+/// let-chain that binds the logical value (tuple element 1) to `result_var`.
 pub(super) struct ThreadedExpr {
     /// Open let-chain binding the construct's logical value to `result_var`.
     pub(super) value_doc: Document<'static>,
@@ -453,14 +432,6 @@ pub(super) struct ThreadedExpr {
     /// escape and is discarded. `Some` for the Actor boundary, where element 2
     /// **is** the `gen_server` `State` map that must be returned in the reply tuple.
     pub(super) state_var: Option<String>,
-    /// Outer locals the construct threads via tuple element 2. Unused in last position
-    /// (the mutations do not escape), retained for the design's representation and any
-    /// future non-last routing through the unified emitter.
-    #[allow(dead_code)]
-    pub(super) threaded_locals: Vec<String>,
-    /// Last expression vs explicit `^`-return (same post-construct treatment).
-    #[allow(dead_code)]
-    pub(super) position: ThreadingPosition,
 }
 
 /// BT-4499: a block parameter [`CoreErlangGenerator::seed_repl_params`] put in
@@ -503,7 +474,6 @@ impl CoreErlangGenerator {
     pub(super) fn lower_threaded_last(
         &mut self,
         expr: &Expression,
-        position: ThreadingPosition,
     ) -> Result<Option<ThreadedExpr>> {
         let expr = expr.unwrap_parens();
         let mut parts: Vec<Document<'static>> = Vec::new();
@@ -589,8 +559,6 @@ impl CoreErlangGenerator {
             value_doc: Document::Vec(parts),
             result_var,
             state_var: None,
-            threaded_locals: Vec::new(),
-            position,
         }))
     }
 
@@ -713,11 +681,10 @@ impl CoreErlangGenerator {
     pub(super) fn emit_threaded_last(
         &mut self,
         expr: &Expression,
-        position: ThreadingPosition,
         boundary: ThreadingBoundary,
         body_parts: &mut Vec<Document<'static>>,
     ) -> Result<bool> {
-        let Some(threaded) = self.lower_threaded_last(expr, position)? else {
+        let Some(threaded) = self.lower_threaded_last(expr)? else {
             return Ok(false);
         };
         body_parts.push(threaded.value_doc);

@@ -81,13 +81,6 @@ impl NameResolver {
         std::mem::take(&mut self.diagnostics)
     }
 
-    /// Returns a reference to the current scope.
-    #[must_use]
-    #[allow(dead_code)] // Accessor for future analysis phases
-    pub(crate) fn scope(&self) -> &Scope {
-        &self.scope
-    }
-
     /// Consumes the name resolver and returns ownership of the scope.
     ///
     /// This allows the scope to be passed to other analysis phases (e.g., Analyser)

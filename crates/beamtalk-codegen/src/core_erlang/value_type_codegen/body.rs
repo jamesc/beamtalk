@@ -364,7 +364,6 @@ impl CoreErlangGenerator {
         // applies the value-type boundary.
         if self.emit_threaded_last(
             expr,
-            super::super::threaded_expr::ThreadingPosition::Last,
             super::super::threaded_expr::ThreadingBoundary::ValueType,
             body_parts,
         )? {

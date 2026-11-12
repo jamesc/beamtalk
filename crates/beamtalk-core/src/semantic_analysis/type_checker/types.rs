@@ -675,8 +675,6 @@ impl InferredType {
     /// Returns the [`TypeProvenance`] attached to this type, or `None` for the
     /// provenance-free variants ([`Dynamic`](Self::Dynamic) and
     /// [`Never`](Self::Never), which carry no source location).
-    // Consumed by the narrowing rules in ADR 0102's epic.
-    #[allow(dead_code)]
     #[must_use]
     pub(crate) fn provenance(&self) -> Option<TypeProvenance> {
         match self {

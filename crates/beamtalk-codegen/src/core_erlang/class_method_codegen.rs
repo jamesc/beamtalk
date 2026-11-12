@@ -680,10 +680,7 @@ impl CoreErlangGenerator {
         // `{value, StateAcc}` tuple (or crash dispatching a read+write
         // conditional's stateful block at the wrong arity). This mirrors the
         // implicit last-expression path (`generate_class_method_last_expr`).
-        if let Some(doc) = self.try_generate_class_method_threaded_last(
-            value,
-            super::threaded_expr::ThreadingPosition::Return,
-        )? {
+        if let Some(doc) = self.try_generate_class_method_threaded_last(value)? {
             return Ok(doc);
         }
         // ADR 0118 phase 5b: the prelude and value simply concatenate.
@@ -704,10 +701,7 @@ impl CoreErlangGenerator {
         // yielding a `{value, StateAcc}` tuple) or a read+write conditional must unwrap the
         // construct's logical value rather than leak the raw tuple (or crash on the 0-arg
         // stateful-block dispatch).
-        if let Some(doc) = self.try_generate_class_method_threaded_last(
-            expr,
-            super::threaded_expr::ThreadingPosition::Last,
-        )? {
+        if let Some(doc) = self.try_generate_class_method_threaded_last(expr)? {
             return Ok(doc);
         }
         // ADR 0118 phase 5b: the prelude and value simply concatenate.
@@ -726,7 +720,6 @@ impl CoreErlangGenerator {
     fn try_generate_class_method_threaded_last(
         &mut self,
         expr: &Expression,
-        position: super::threaded_expr::ThreadingPosition,
     ) -> Result<Option<Document<'static>>> {
         // Route through the shared `ThreadedExpr` transform + boundary emitter.
         // It peels redundant parentheses (e.g. `^(items collect: …)` or
@@ -736,7 +729,6 @@ impl CoreErlangGenerator {
         let mut parts: Vec<Document<'static>> = Vec::new();
         if self.emit_threaded_last(
             expr,
-            position,
             super::threaded_expr::ThreadingBoundary::ClassMethod,
             &mut parts,
         )? {

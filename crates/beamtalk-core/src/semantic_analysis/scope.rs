@@ -222,7 +222,7 @@ impl Scope {
     /// # Panics
     /// Never panics. The `expect` is for internal invariant checking only.
     /// The `levels` vec is guaranteed to have at least one element (module scope).
-    #[allow(dead_code)] // Used in tests; planned for future analysis features
+    #[cfg(test)]
     pub(crate) fn current_scope_vars(&self) -> impl Iterator<Item = (&str, &Binding)> {
         self.levels
             .last()
