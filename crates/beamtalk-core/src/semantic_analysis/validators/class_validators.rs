@@ -388,12 +388,14 @@ fn uninstantiable_new(
         || matches!(class_name, "self" | "super")
         || !hierarchy.has_class(class_name)
         || hierarchy.has_own_class_method(class_name, selector)
-        // BT-4479: an inherited user class-side `new` is a real constructor.
-        || (selector == "new" && hierarchy.chain_has_user_new0(class_name))
     {
         return None;
     }
     match hierarchy.resolve_class_kind(class_name) {
+        // BT-4479: an inherited user class-side `new` is a real constructor.
+        ClassKind::Object if selector == "new" && hierarchy.chain_has_user_new0(class_name) => {
+            return None;
+        }
         ClassKind::Object => return Some(UninstantiableNew::ObjectKind),
         // Actor `new`/`new:` is `check_actor_new_usage`'s territory: it already
         // says "must use `spawn`", which is the fix. Falling through would

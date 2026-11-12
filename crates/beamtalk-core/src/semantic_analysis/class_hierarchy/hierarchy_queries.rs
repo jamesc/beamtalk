@@ -894,6 +894,22 @@ impl ClassHierarchy {
     /// Mirrors the runtime's `has_class_new_in_chain` depth cap (50);
     /// anything unknown fails closed so the `new:` fast path stays off.
     fn chain_has_user_new_init(&self, class_name: &str) -> bool {
+        self.ancestor_chain_has(class_name, true, |name| self.defines_user_class_new1(name))
+    }
+
+    /// The one ancestor walk behind [`Self::chain_has_user_new_init`] (`new:`,
+    /// fails closed) and [`Self::chain_has_user_new0`] (`new`, fails open):
+    /// whether `holds` is true of any ancestor of `class_name`, nearest first.
+    /// `unfinished` is the answer when the walk cannot finish: an unknown
+    /// ancestor, a cycle, or a chain deeper than the runtime's cap (50,
+    /// mirroring `has_class_new_in_chain`). A single copy keeps the cap and
+    /// the superclass step from drifting between the two rules.
+    fn ancestor_chain_has(
+        &self,
+        class_name: &str,
+        unfinished: bool,
+        holds: impl Fn(&str) -> bool,
+    ) -> bool {
         let mut current = self
             .classes
             .get(class_name)
@@ -902,14 +918,14 @@ impl ClassHierarchy {
         let mut depth = 0;
         while let Some(name) = current.as_ref() {
             if depth >= 50 || !visited.insert((*name).clone()) {
-                return true;
+                return unfinished;
             }
             depth += 1;
-            if self.defines_user_class_new1(name.as_str()) {
+            if holds(name.as_str()) {
                 return true;
             }
             let Some(info) = self.classes.get(name.as_str()) else {
-                return true;
+                return unfinished;
             };
             current.clone_from(&info.superclass);
         }
@@ -957,26 +973,7 @@ impl ClassHierarchy {
     /// keeps its synthesized constructor.
     #[must_use]
     pub fn chain_has_user_new0(&self, class_name: &str) -> bool {
-        let mut current = self
-            .classes
-            .get(class_name)
-            .and_then(|info| info.superclass.clone());
-        let mut visited = HashSet::new();
-        let mut depth = 0;
-        while let Some(name) = current.as_ref() {
-            if depth >= 50 || !visited.insert((*name).clone()) {
-                return false;
-            }
-            depth += 1;
-            if self.defines_user_class_new0(name.as_str()) {
-                return true;
-            }
-            let Some(info) = self.classes.get(name.as_str()) else {
-                return false;
-            };
-            current.clone_from(&info.superclass);
-        }
-        false
+        self.ancestor_chain_has(class_name, false, |name| self.defines_user_class_new0(name))
     }
 
     /// Whether the named class itself defines a class-side `new` that is real

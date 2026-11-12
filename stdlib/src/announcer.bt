@@ -49,7 +49,7 @@ typed Object subclass: Announcer
   /// a := Announcer new
   /// a class   // => Announcer
   /// ```
-  class new -> Announcer => (Erlang beamtalk_announcements) newAnnouncer: self
+  class new -> Self => (Erlang beamtalk_announcements) newAnnouncer: self
 
   // === Subscribing ===
 
