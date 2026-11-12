@@ -574,15 +574,17 @@ impl Expression {
         matches!(self.unwrap_parens(), Self::Identifier(id) if id.name == "self")
     }
 
-    /// Whether this expression is `super`, looking through any `Parenthesized`
-    /// wrappers.
+    /// Whether this expression is `super`. Deliberately *not*
+    /// paren-transparent: `(super) foo` is not a super send (`ast::normalize`
+    /// keeps `(super)` whole).
     #[must_use]
     pub fn is_super(&self) -> bool {
-        matches!(self.unwrap_parens(), Self::Super(_))
+        matches!(self, Self::Super(_))
     }
 
-    /// Whether this expression is `self` or `super` (parentheses looked
-    /// through): the receivers whose sends run the object's own methods.
+    /// Whether this expression is `self` (parentheses looked through, see
+    /// [`Self::is_self`]) or a bare `super` (see [`Self::is_super`]): the
+    /// receivers whose sends run the object's own methods.
     #[must_use]
     pub fn is_self_or_super(&self) -> bool {
         self.is_self() || self.is_super()

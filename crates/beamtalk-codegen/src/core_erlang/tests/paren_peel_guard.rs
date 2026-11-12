@@ -140,7 +140,11 @@ const CEILINGS: &[(&str, usize)] = &[
         2,
     ),
     // Expression helpers in the AST leaf (`as_literal_bool`).
-    ("beamtalk-core/src/ast/expression.rs", 3),
+    // `Expression::is_self` is a deliberate mixed-position predicate: it peels
+    // parentheses so statement/value positions (`^ (self)`) answer correctly,
+    // and is also called on already-normalised operand positions, where the peel
+    // is a no-op. Those call sites are not counted by this ratchet (BT-4681).
+    ("beamtalk-core/src/ast/expression.rs", 2),
     // Binary segment values and sizes (ADR 0143): `BinarySegmentValue for
     // Expression` and `binary_literal_size` read a literal through the
     // parentheses the segment grammar requires (`<<(-1):4>>`, `<<v:(8)>>`).
