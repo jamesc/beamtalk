@@ -786,7 +786,13 @@ impl CoreErlangGenerator {
                 parts.push(Document::Str(", "));
             }
             let type_doc = match &s.type_annotation {
-                Some(ta) => leaf::atom(ta.type_name().to_string()),
+                // Go through `DeclaredType` like method signatures do, so a map
+                // shape (ADR 0147 phase 1) is recorded as the `Dictionary` the
+                // checker treats it as — not its raw text, which can exceed
+                // the 255-byte atom limit. `DeclaredType`'s display matches
+                // `type_name` for every variant except `Shape`, which collapses
+                // to `Dictionary` until ADR 0147 phase 3.
+                Some(ta) => leaf::atom(DeclaredType::from(ta).to_string()),
                 None => Document::Str("'none'"),
             };
             parts.push(docvec![

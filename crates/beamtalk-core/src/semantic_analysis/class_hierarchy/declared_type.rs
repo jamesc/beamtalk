@@ -489,6 +489,10 @@ impl From<&TypeAnnotation> for DeclaredType {
             TypeAnnotation::ClassOf { class_name, .. } => {
                 DeclaredType::ClassOf(class_name.name.clone())
             }
+            // Temporary (ADR 0147 phase 1): shapes carry no checking
+            // behaviour yet, so a declared shape is the bare `Dictionary`
+            // it describes until the checker learns shapes in phase 3.
+            TypeAnnotation::Shape { .. } => DeclaredType::Simple("Dictionary".into()),
         }
     }
 }

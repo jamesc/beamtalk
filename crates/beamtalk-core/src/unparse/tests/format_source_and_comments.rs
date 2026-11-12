@@ -570,3 +570,46 @@ fn literal_comments_map_pair_internal_comments_kept() {
         "m := #{\n  // why a\n  #a => 1,\n  // key note\n  #b => 2\n}\n",
     );
 }
+
+// --- Map-shape type annotation unparsing (ADR 0147) ---
+
+#[test]
+fn shape_type_annotations_round_trip_through_format_source() {
+    for shape in [
+        "#{}",
+        "#{...}",
+        "#{#a => Integer}",
+        "#{#name => String, ?#age => Integer}",
+        "#{#a => Integer, ...}",
+        "#{#user => #{#name => String, ?#id => Integer}, ...}",
+        "#{#a => Integer | Nil} | Nil",
+        "#{#'content-type' => String, ?#'first name' => String}",
+    ] {
+        let source = format!("Object subclass: Foo\n\n  bar -> {shape} => nil\n");
+        let formatted = format_source(&source).expect("should format");
+        assert_eq!(formatted, source, "shape must round-trip: {shape}");
+    }
+}
+
+#[test]
+fn shape_type_normalises_spacing_and_comma_question() {
+    let source = "Object subclass: Foo\n  bar -> #{#a=>Integer,?#b=>String,...} => nil\n";
+    let formatted = format_source(source).expect("should format");
+    assert_eq!(
+        formatted,
+        "Object subclass: Foo\n\n  bar -> #{#a => Integer, ?#b => String, ...} => nil\n"
+    );
+    assert_idempotent(&formatted);
+}
+
+#[test]
+fn long_shape_type_breaks_one_field_per_line() {
+    let source = "Object subclass: Foo\n  bar -> #{#firstName => String, #lastName => String, ?#emailAddress => String, ?#phoneNumber => Integer, ...} => nil\n";
+    let formatted = format_source(source).expect("should format");
+    assert!(
+        formatted.contains("#{\n    #firstName => String,\n"),
+        "got: {formatted}"
+    );
+    assert!(formatted.contains("    ...\n  }"), "got: {formatted}");
+    assert_idempotent(&formatted);
+}

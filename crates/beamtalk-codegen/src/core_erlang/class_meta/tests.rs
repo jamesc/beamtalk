@@ -1032,3 +1032,22 @@ fn test_meta_synthesized_value_methods_agree_with_hierarchy() {
         check(&info.class_methods, &class_side);
     }
 }
+
+// ─── ADR 0147: map-shape field types in metadata ───────────────────────────
+
+#[test]
+fn test_meta_field_types_map_records_shape_as_dictionary() {
+    // A shape lists every key, so its raw text can exceed Erlang's 255-byte
+    // atom limit; metadata records the `Dictionary` the checker treats it as.
+    let keys: String = (0..20)
+        .map(|i| format!("#aVeryLongFieldKeyName{i} => String"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let src = format!("Object subclass: Foo\n  state: cfg :: #{{{keys}}} = nil\n");
+    let (module, diags) =
+        beamtalk_core::source_analysis::parse(beamtalk_core::source_analysis::lex_with_eof(&src));
+    assert!(diags.is_empty(), "{diags:?}");
+    let doc = CoreErlangGenerator::meta_field_types_map(&module.classes[0].state);
+    let text = doc.to_pretty_string();
+    assert!(text.contains("'cfg' => 'Dictionary'"), "{text}");
+}

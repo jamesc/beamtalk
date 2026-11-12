@@ -465,6 +465,11 @@ fn check_type_annotation_cross_package(
             check_type_annotation_cross_package(left, current_pkg, hierarchy, diagnostics);
             check_type_annotation_cross_package(right, current_pkg, hierarchy, diagnostics);
         }
+        TypeAnnotation::Shape { fields, .. } => {
+            for f in fields {
+                check_type_annotation_cross_package(&f.value, current_pkg, hierarchy, diagnostics);
+            }
+        }
         TypeAnnotation::ClassOf { class_name, .. } => {
             check_cross_package_ref(
                 &class_name.name,
@@ -662,6 +667,19 @@ fn check_type_annotation_leaked(
                 alias_registry,
                 diagnostics,
             );
+        }
+        TypeAnnotation::Shape { fields, .. } => {
+            for f in fields {
+                check_type_annotation_leaked(
+                    &f.value,
+                    class_name,
+                    method_selector,
+                    current_pkg,
+                    hierarchy,
+                    alias_registry,
+                    diagnostics,
+                );
+            }
         }
         TypeAnnotation::ClassOf {
             class_name: cls, ..
@@ -918,6 +936,18 @@ fn check_type_annotation_alias_leak(
                 visited,
                 diagnostics,
             );
+        }
+        TypeAnnotation::Shape { fields, .. } => {
+            for f in fields {
+                check_type_annotation_alias_leak(
+                    &f.value,
+                    alias_name,
+                    hierarchy,
+                    alias_registry,
+                    visited,
+                    diagnostics,
+                );
+            }
         }
         TypeAnnotation::ClassOf {
             class_name: cls, ..

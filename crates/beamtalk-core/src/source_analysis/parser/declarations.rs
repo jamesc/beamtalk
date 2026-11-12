@@ -12,11 +12,11 @@ use crate::ast::{
     ClassDefinition, ClassModifiers, CommentAttachment, DeclaredKeyword, ExpectCategory,
     Expression, ExpressionStatement, Identifier, KeywordPart, Literal, MessageSelector,
     MethodDefinition, MethodKind, MethodModifiers, NativeDeclaration, ParameterDefinition,
-    ProtocolDefinition, ProtocolMethodSignature, ProtocolUse, ShapeVersionDeclaration, SlotKind,
-    StandaloneMethodDefinition, StateDeclaration, TypeAliasDefinition, TypeAnnotation,
+    ProtocolDefinition, ProtocolMethodSignature, ProtocolUse, ShapeField, ShapeVersionDeclaration,
+    SlotKind, StandaloneMethodDefinition, StateDeclaration, TypeAliasDefinition, TypeAnnotation,
     TypeParamDecl,
 };
-use crate::source_analysis::{Span, TokenKind};
+use crate::source_analysis::{Span, Token, TokenKind};
 use ecow::EcoString;
 
 use super::{Diagnostic, Parser};
@@ -1214,6 +1214,9 @@ impl Parser {
         if matches!(self.peek_at(offset), Some(TokenKind::LeftParen)) {
             return self.skip_grouped_type(offset);
         }
+        if matches!(self.peek_at(offset), Some(TokenKind::MapOpen)) {
+            return self.skip_shape_type(offset);
+        }
         if !is_type_name_token(self.peek_at(offset)) {
             return None;
         }
@@ -1225,6 +1228,57 @@ impl Parser {
             }
         }
         Some(o)
+    }
+
+    /// Skips a map-shape type `#{ ... }` (ADR 0147) in lookahead context.
+    ///
+    /// Starting at the `#{` token, advances past the matching `}` by brace
+    /// depth (a shape's contents contain `=>`, so the generic type-chain
+    /// skippers cannot be reused) and returns the offset after it. Returns
+    /// `None` if the closing `}` is missing.
+    fn skip_shape_type(&self, offset: usize) -> Option<usize> {
+        debug_assert!(matches!(self.peek_at(offset), Some(TokenKind::MapOpen)));
+        // `braces` counts `{` / `#{` openers; `nested` counts other bracket
+        // openers so an unmatched closer (which belongs to an enclosing
+        // construct) ends the scan instead of being walked past.
+        let mut braces = 0usize;
+        let mut nested = 0usize;
+        let mut o = offset;
+        loop {
+            match self.peek_at(o)? {
+                TokenKind::MapOpen | TokenKind::LeftBrace => braces += 1,
+                TokenKind::LeftParen
+                | TokenKind::LeftBracket
+                | TokenKind::ListOpen
+                | TokenKind::ArrayOpen => nested += 1,
+                TokenKind::RightParen | TokenKind::RightBracket => {
+                    nested = nested.checked_sub(1)?;
+                }
+                TokenKind::RightBrace => {
+                    braces -= 1;
+                    if braces == 0 {
+                        return Some(o + 1);
+                    }
+                }
+                TokenKind::Eof => return None,
+                // A line starting `name =>` / `name ->` is a new method
+                // definition, never part of a shape: the shape is unclosed.
+                TokenKind::Identifier(_)
+                    if o > offset
+                        && self
+                            .peek_token_at(o)
+                            .is_some_and(Token::has_leading_newline)
+                        && matches!(
+                            self.peek_at(o + 1),
+                            Some(TokenKind::FatArrow | TokenKind::Arrow)
+                        ) =>
+                {
+                    return None;
+                }
+                _ => {}
+            }
+            o += 1;
+        }
     }
 
     /// Skips a parenthesised type group `( Type (op Type)* )` in lookahead
@@ -2014,6 +2068,8 @@ impl Parser {
                     TypeAnnotation::Simple(ident)
                 }
             }
+        } else if matches!(self.current_kind(), TokenKind::MapOpen) {
+            self.parse_shape_type()
         } else if let TokenKind::Symbol(name) = self.current_kind() {
             // Singleton type annotation `#foo` — a subtype of `Symbol`
             // (ADR 0068). `#name` is lexed as `TokenKind::Symbol(name)` (the `#`
@@ -2028,6 +2084,218 @@ impl Parser {
             let span = self.current_token().span();
             self.error("Expected type name");
             TypeAnnotation::Simple(Identifier::new("Error", span))
+        }
+    }
+
+    /// Parses a map-shape type `#{ [?]#k => T, ..., ... }` (ADR 0147).
+    ///
+    /// The current token is `#{` ([`TokenKind::MapOpen`]). Fields are separated
+    /// by `,`; because `,` and `?` are both binary-selector characters, a
+    /// separator followed directly by an optional marker (`Integer,?#b`) lexes
+    /// as one `,?` token, which is split here. A trailing `...` makes the shape
+    /// open. Errors (non-symbol key, duplicate key, `...` not last, missing
+    /// `=>`) are reported and parsing recovers to the next `,` or `}`.
+    fn parse_shape_type(&mut self) -> TypeAnnotation {
+        let start = self.current_token().span();
+        self.advance(); // consume `#{`
+
+        let mut fields: Vec<ShapeField> = Vec::new();
+        let mut open = false;
+        // An optional marker already consumed as part of a `,?` token.
+        let mut pending_optional: Option<Span> = None;
+        let mut need_separator = false;
+
+        loop {
+            if matches!(self.current_kind(), TokenKind::RightBrace | TokenKind::Eof) {
+                break;
+            }
+            // Separator between fields.
+            if need_separator {
+                if !self.parse_shape_separator(&mut pending_optional) {
+                    break;
+                }
+                need_separator = false;
+                // Allow a trailing comma before `}`.
+                if matches!(self.current_kind(), TokenKind::RightBrace)
+                    && pending_optional.is_none()
+                {
+                    break;
+                }
+            }
+
+            if matches!(self.current_kind(), TokenKind::Ellipsis) {
+                open = true;
+                if self.parse_shape_ellipsis(&mut pending_optional) {
+                    continue;
+                }
+                break;
+            }
+
+            // Optional marker: `?` (separate token), or one split off `,?`.
+            let mut optional = false;
+            let mut field_start = self.current_token().span();
+            if let Some(sp) = pending_optional.take() {
+                optional = true;
+                field_start = sp;
+            } else if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == "?")
+            {
+                optional = true;
+                self.advance();
+            }
+
+            let (key, key_span) = if let TokenKind::Symbol(name) = self.current_kind() {
+                let r = (name.clone(), self.current_token().span());
+                self.advance();
+                r
+            } else {
+                self.error("Shape type keys must be symbol literals (e.g. `#name => String`)");
+                if !self.recover_shape_field() {
+                    break;
+                }
+                need_separator = true;
+                continue;
+            };
+
+            if !matches!(self.current_kind(), TokenKind::FatArrow) {
+                self.error("Expected '=>' after shape type key");
+                if !self.recover_shape_field() {
+                    break;
+                }
+                need_separator = true;
+                continue;
+            }
+            self.advance(); // consume `=>`
+
+            let value = self.parse_type_annotation();
+            let span = field_start.merge(value.span());
+            self.push_shape_field(
+                &mut fields,
+                ShapeField {
+                    key,
+                    key_span,
+                    value,
+                    optional,
+                    span,
+                },
+            );
+            need_separator = true;
+        }
+
+        let end = self.current_token().span();
+        if matches!(self.current_kind(), TokenKind::RightBrace) {
+            self.advance();
+        } else {
+            self.error("Expected '}' to close shape type");
+        }
+        TypeAnnotation::Shape {
+            fields,
+            open,
+            span: start.merge(end),
+        }
+    }
+
+    /// Consumes a shape's `...` marker. Returns `true` when more entries
+    /// follow (an error: `...` must be last), so parsing should continue.
+    fn parse_shape_ellipsis(&mut self, pending_optional: &mut Option<Span>) -> bool {
+        let ellipsis_span = self.current_token().span();
+        self.advance();
+        if pending_optional.take().is_some() {
+            self.diagnostics.push(Diagnostic::error(
+                "`?` must precede a symbol key in a shape type",
+                ellipsis_span,
+            ));
+        }
+        // Allow a trailing comma after `...` before `}`.
+        if is_comma(self.current_kind()) && matches!(self.peek_at(1), Some(TokenKind::RightBrace)) {
+            self.advance();
+        }
+        if matches!(self.current_kind(), TokenKind::RightBrace | TokenKind::Eof) {
+            return false;
+        }
+        self.diagnostics.push(Diagnostic::error(
+            "`...` must be the last entry in a shape type",
+            ellipsis_span,
+        ));
+        // Recovery: keep parsing the remaining fields.
+        if is_comma(self.current_kind()) {
+            self.advance();
+        } else if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",?")
+        {
+            *pending_optional = Some(self.current_token().span());
+            self.advance();
+        }
+        true
+    }
+
+    /// Consumes the `,` / `,?` separator between shape fields. A `,?` token is
+    /// split: its optional marker is returned through `pending_optional`. On a
+    /// missing separator, reports an error and recovers to the next separator;
+    /// returns `false` when none is found (the shape ends here).
+    fn parse_shape_separator(&mut self, pending_optional: &mut Option<Span>) -> bool {
+        let is_comma_question =
+            |k: &TokenKind| matches!(k, TokenKind::BinarySelector(s) if s.as_str() == ",?");
+        if !is_comma(self.current_kind()) && !is_comma_question(self.current_kind()) {
+            self.error("Expected ',' or '}' in shape type");
+            if !self.recover_shape_field() {
+                return false;
+            }
+        }
+        if is_comma_question(self.current_kind()) {
+            *pending_optional = Some(self.current_token().span());
+        }
+        self.advance();
+        true
+    }
+
+    /// Appends `field` to a shape's fields, reporting a duplicate key.
+    fn push_shape_field(&mut self, fields: &mut Vec<ShapeField>, field: ShapeField) {
+        if fields.iter().any(|f| f.key == field.key) {
+            self.diagnostics.push(Diagnostic::error(
+                format!("Duplicate key `#{}` in shape type", field.key),
+                field.key_span,
+            ));
+        } else {
+            fields.push(field);
+        }
+    }
+
+    /// Skips tokens to the next top-level `,` / `,?` inside a shape type.
+    ///
+    /// Returns `true` when it stopped on a separator. It stops (returning
+    /// `false`) at the shape's closing `}`, an unmatched `)` / `]`, EOF, or a
+    /// new method definition starting a line, so an unclosed shape never
+    /// swallows the declarations that follow it. Every bracket opener counts
+    /// toward nesting, so a `,` inside a later literal is not mistaken for a
+    /// field separator.
+    fn recover_shape_field(&mut self) -> bool {
+        let mut depth = 0usize;
+        loop {
+            if depth == 0
+                && self.current_token().has_leading_newline()
+                && self.is_at_method_definition()
+            {
+                return false;
+            }
+            match self.current_kind() {
+                TokenKind::Eof => return false,
+                TokenKind::LeftParen
+                | TokenKind::LeftBracket
+                | TokenKind::LeftBrace
+                | TokenKind::MapOpen
+                | TokenKind::ListOpen
+                | TokenKind::ArrayOpen => depth += 1,
+                TokenKind::RightParen | TokenKind::RightBracket | TokenKind::RightBrace => {
+                    if depth == 0 {
+                        return false;
+                    }
+                    depth -= 1;
+                }
+                TokenKind::BinarySelector(s) if depth == 0 && (s == "," || s == ",?") => {
+                    return true;
+                }
+                _ => {}
+            }
+            self.advance();
         }
     }
 

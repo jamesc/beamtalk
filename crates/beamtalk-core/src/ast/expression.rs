@@ -1155,6 +1155,34 @@ pub enum TypeAnnotation {
         /// Source location of the whole `<ClassName> class` form.
         span: Span,
     },
+    /// A map-shape type (ADR 0147), written like the map literal it describes.
+    ///
+    /// `#{#name => String, ?#age => Integer, ...}` — `#k => T` is a required
+    /// key, `?#k => T` an optional key, and a trailing `...` makes the shape
+    /// open. `#{}` is the closed empty shape; `#{...}` the open empty shape.
+    Shape {
+        /// The named fields, in source order. Keys are unique.
+        fields: Vec<ShapeField>,
+        /// `true` when the shape ends in `...` (other keys may be present).
+        open: bool,
+        /// Source location of the whole `#{ ... }` form.
+        span: Span,
+    },
+}
+
+/// One `[?]#key => Type` entry of a [`TypeAnnotation::Shape`] (ADR 0147).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ShapeField {
+    /// The symbol key name, without the leading `#`.
+    pub key: EcoString,
+    /// Source location of the key symbol.
+    pub key_span: Span,
+    /// The value type.
+    pub value: TypeAnnotation,
+    /// `true` for `?#key => T` (the key may be absent).
+    pub optional: bool,
+    /// Source location of the whole field (including a leading `?`).
+    pub span: Span,
 }
 
 impl TypeAnnotation {
@@ -1171,7 +1199,8 @@ impl TypeAnnotation {
             | Self::Intersection { span, .. }
             | Self::SelfType { span }
             | Self::SelfClass { span }
-            | Self::ClassOf { span, .. } => *span,
+            | Self::ClassOf { span, .. }
+            | Self::Shape { span, .. } => *span,
         }
     }
 
@@ -1195,7 +1224,8 @@ impl TypeAnnotation {
             | Self::Intersection { span: s, .. }
             | Self::SelfType { span: s }
             | Self::SelfClass { span: s }
-            | Self::ClassOf { span: s, .. } => *s = span,
+            | Self::ClassOf { span: s, .. }
+            | Self::Shape { span: s, .. } => *s = span,
         }
         self
     }
@@ -1355,6 +1385,27 @@ impl TypeAnnotation {
             Self::SelfType { .. } => "Self".into(),
             Self::SelfClass { .. } => "Self class".into(),
             Self::ClassOf { class_name, .. } => eco_format!("{} class", class_name.name),
+            Self::Shape { fields, open, .. } => {
+                let mut parts: Vec<EcoString> = fields
+                    .iter()
+                    .map(|f| {
+                        // Same symbol-quoting rule as the formatter, so the
+                        // printed form re-parses (`#'first name'`).
+                        eco_format!(
+                            "{}{} => {}",
+                            if f.optional { "?" } else { "" },
+                            crate::unparse::unparse_literal_display(&crate::ast::Literal::Symbol(
+                                f.key.clone()
+                            )),
+                            f.value.type_name()
+                        )
+                    })
+                    .collect();
+                if *open {
+                    parts.push("...".into());
+                }
+                eco_format!("#{{{}}}", parts.join(", "))
+            }
         }
     }
 

@@ -2109,3 +2109,295 @@ fn parse_doc_examples_for_grouped_types() {
   narrow -> A & (B \\ #c) => self",
     );
 }
+
+// ==========================================================================
+// Map-shape type annotations (ADR 0147)
+// ==========================================================================
+
+/// Parses `type T = <ann>` and returns the alias annotation plus diagnostics.
+fn parse_shape_alias(ann: &str) -> (TypeAnnotation, Vec<Diagnostic>) {
+    let tokens = lex_with_eof(&format!("type Shp = {ann}"));
+    let (module, diagnostics) = parse(tokens);
+    (module.type_aliases[0].annotation.clone(), diagnostics)
+}
+
+fn shape_parts(ann: &TypeAnnotation) -> (Vec<(String, bool, String)>, bool) {
+    let TypeAnnotation::Shape { fields, open, .. } = ann else {
+        panic!("expected Shape, got {ann:?}");
+    };
+    (
+        fields
+            .iter()
+            .map(|f| {
+                (
+                    f.key.to_string(),
+                    f.optional,
+                    f.value.type_name().to_string(),
+                )
+            })
+            .collect(),
+        *open,
+    )
+}
+
+#[test]
+fn parse_shape_required_and_optional_fields() {
+    let (ann, diags) = parse_shape_alias("#{#name => String, ?#age => Integer}");
+    assert!(diags.is_empty(), "{diags:?}");
+    let (fields, open) = shape_parts(&ann);
+    assert!(!open);
+    assert_eq!(
+        fields,
+        vec![
+            ("name".to_string(), false, "String".to_string()),
+            ("age".to_string(), true, "Integer".to_string()),
+        ]
+    );
+}
+
+#[test]
+fn parse_shape_empty_closed_and_open() {
+    let (ann, diags) = parse_shape_alias("#{}");
+    assert!(diags.is_empty(), "{diags:?}");
+    assert_eq!(shape_parts(&ann), (vec![], false));
+
+    let (ann, diags) = parse_shape_alias("#{...}");
+    assert!(diags.is_empty(), "{diags:?}");
+    assert_eq!(shape_parts(&ann), (vec![], true));
+}
+
+#[test]
+fn parse_shape_open_with_fields() {
+    let (ann, diags) = parse_shape_alias("#{#a => Integer, ...}");
+    assert!(diags.is_empty(), "{diags:?}");
+    let (fields, open) = shape_parts(&ann);
+    assert_eq!(fields.len(), 1);
+    assert!(open);
+}
+
+#[test]
+fn parse_shape_comma_question_token_is_split() {
+    // `,?` lexes as one binary selector; the parser must split it.
+    let (ann, diags) = parse_shape_alias("#{#a => Integer,?#b => String}");
+    assert!(diags.is_empty(), "{diags:?}");
+    let (fields, _) = shape_parts(&ann);
+    assert_eq!(
+        fields,
+        vec![
+            ("a".to_string(), false, "Integer".to_string()),
+            ("b".to_string(), true, "String".to_string()),
+        ]
+    );
+    // No whitespace anywhere, and an open tail.
+    let (ann, diags) = parse_shape_alias("#{#a=>Integer,?#b=>String,...}");
+    assert!(diags.is_empty(), "{diags:?}");
+    let (fields, open) = shape_parts(&ann);
+    assert_eq!(fields.len(), 2);
+    assert!(fields[1].1);
+    assert!(open);
+}
+
+#[test]
+fn parse_shape_nested() {
+    let (ann, diags) = parse_shape_alias("#{#user => #{#name => String, ?#id => Integer}}");
+    assert!(diags.is_empty(), "{diags:?}");
+    let TypeAnnotation::Shape { fields, .. } = &ann else {
+        panic!("expected Shape");
+    };
+    assert!(matches!(fields[0].value, TypeAnnotation::Shape { .. }));
+}
+
+#[test]
+fn parse_shape_in_union_and_generic_argument() {
+    let (ann, diags) = parse_shape_alias("#{#a => Integer} | Nil");
+    assert!(diags.is_empty(), "{diags:?}");
+    let TypeAnnotation::Union { types, .. } = &ann else {
+        panic!("expected Union, got {ann:?}");
+    };
+    assert!(matches!(types[0], TypeAnnotation::Shape { .. }));
+
+    let (ann, diags) = parse_shape_alias("List(#{#a => Integer})");
+    assert!(diags.is_empty(), "{diags:?}");
+    let TypeAnnotation::Generic { parameters, .. } = &ann else {
+        panic!("expected Generic, got {ann:?}");
+    };
+    assert!(matches!(parameters[0], TypeAnnotation::Shape { .. }));
+
+    // Shape as value type containing a union.
+    let (ann, diags) = parse_shape_alias("#{#a => Integer | Nil}");
+    assert!(diags.is_empty(), "{diags:?}");
+    assert_eq!(shape_parts(&ann).0[0].2, "Integer | Nil");
+}
+
+#[test]
+fn parse_shape_in_parameter_return_and_field_positions() {
+    let module = parse_ok(
+        "typed Value subclass: Spec
+  field: cfg :: #{#port => Integer} = #{#port => 1}
+  run: opts :: #{#a => Integer, ?#b => String} -> #{#ok => Boolean} => #{#ok => true}",
+    );
+    let class = &module.classes[0];
+    assert!(matches!(
+        class.state[0].type_annotation,
+        Some(TypeAnnotation::Shape { .. })
+    ));
+    let method = &class.methods[0];
+    assert!(matches!(
+        method.parameters[0].type_annotation,
+        Some(TypeAnnotation::Shape { .. })
+    ));
+    assert!(matches!(
+        method.return_type,
+        Some(TypeAnnotation::Shape { .. })
+    ));
+}
+
+#[test]
+fn parse_shape_in_annotated_local() {
+    let module = parse_ok(
+        "Object subclass: Foo
+  bar =>
+    cfg :: #{#port => Integer} := #{#port => 1}.
+    cfg",
+    );
+    assert_eq!(module.classes[0].methods.len(), 1);
+}
+
+#[test]
+fn parse_shape_non_symbol_key_is_error_and_recovers() {
+    let (ann, diags) = parse_shape_alias("#{\"a\" => Integer, #b => String}");
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("keys must be symbol literals")),
+        "{diags:?}"
+    );
+    // Recovery: the valid field after the bad one is still parsed.
+    let (fields, _) = shape_parts(&ann);
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].0, "b");
+}
+
+#[test]
+fn parse_shape_duplicate_key_is_error() {
+    let (ann, diags) = parse_shape_alias("#{#a => Integer, #a => String}");
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("Duplicate key `#a`")),
+        "{diags:?}"
+    );
+    assert_eq!(shape_parts(&ann).0.len(), 1);
+}
+
+#[test]
+fn parse_shape_ellipsis_not_last_is_error() {
+    let (ann, diags) = parse_shape_alias("#{..., #a => Integer}");
+    assert!(
+        diags.iter().any(|d| d.message.contains("must be the last")),
+        "{diags:?}"
+    );
+    let (fields, open) = shape_parts(&ann);
+    assert!(open);
+    assert_eq!(fields.len(), 1);
+}
+
+#[test]
+fn parse_shape_missing_fat_arrow_is_error_and_recovers() {
+    let (ann, diags) = parse_shape_alias("#{#a Integer, #b => String}");
+    assert!(
+        diags.iter().any(|d| d.message.contains("Expected '=>'")),
+        "{diags:?}"
+    );
+    let (fields, _) = shape_parts(&ann);
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].0, "b");
+}
+
+#[test]
+fn parse_shape_recovery_continues_at_comma_question() {
+    // A bad separator followed by `,?` must resume with the optional field.
+    let (ann, diags) = parse_shape_alias("#{#a => Integer junk,?#b => String}");
+    assert!(!diags.is_empty());
+    let (fields, _) = shape_parts(&ann);
+    assert_eq!(fields.len(), 2);
+    assert!(fields[1].1);
+}
+
+#[test]
+fn parse_shape_unclosed_does_not_swallow_following_methods() {
+    let tokens = lex_with_eof(
+        "Object subclass: Foo
+  field: cfg :: #{#a => Integer
+  baz => 1
+  qux => #(1, 2)
+",
+    );
+    let (module, diags) = parse(tokens);
+    assert!(!diags.is_empty());
+    let names: Vec<_> = module.classes[0]
+        .methods
+        .iter()
+        .map(|m| m.selector.name().to_string())
+        .collect();
+    assert!(names.contains(&"baz".to_string()), "{names:?}");
+    assert!(names.contains(&"qux".to_string()), "{names:?}");
+}
+
+#[test]
+fn parse_shape_bad_field_inside_generic_does_not_escape() {
+    let (_, diags) = parse_shape_alias("List(#{#a Integer)");
+    assert!(!diags.is_empty());
+}
+
+#[test]
+fn parse_shape_optional_marker_before_ellipsis_is_error() {
+    let (ann, diags) = parse_shape_alias("#{#a => Integer,?...}");
+    assert!(
+        diags.iter().any(|d| d.message.contains("`?` must precede")),
+        "{diags:?}"
+    );
+    assert!(shape_parts(&ann).1);
+}
+
+#[test]
+fn parse_shape_ellipsis_then_comma_question_field_recovers_cleanly() {
+    // `,?` directly after `...` must split into separator + optional marker.
+    let (ann, diags) = parse_shape_alias("#{...,?#a => Integer, #b => String}");
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    let (fields, open) = shape_parts(&ann);
+    assert!(open);
+    assert_eq!(fields.len(), 2);
+    assert!(fields[0].1);
+    assert!(!fields[1].1);
+}
+
+#[test]
+fn parse_shape_trailing_comma_after_ellipsis_is_allowed() {
+    let (ann, diags) = parse_shape_alias("#{#a => Integer, ...,}");
+    assert!(diags.is_empty(), "{diags:?}");
+    assert!(shape_parts(&ann).1);
+}
+
+#[test]
+fn shape_type_name_quotes_symbol_keys_like_the_formatter() {
+    let (ann, diags) = parse_shape_alias("#{#'first name' => String, ?#plain => Integer}");
+    assert!(diags.is_empty(), "{diags:?}");
+    assert_eq!(
+        ann.type_name(),
+        "#{#'first name' => String, ?#plain => Integer}"
+    );
+    assert_eq!(
+        crate::unparse::unparse_type_annotation_display(&ann),
+        ann.type_name()
+    );
+}
+
+#[test]
+fn parse_shape_unclosed_is_error() {
+    let (_, diags) = parse_shape_alias("#{#a => Integer");
+    assert!(
+        diags.iter().any(|d| d.message.contains("close shape type")),
+        "{diags:?}"
+    );
+}

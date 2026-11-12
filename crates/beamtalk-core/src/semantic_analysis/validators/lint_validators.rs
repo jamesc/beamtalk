@@ -983,6 +983,10 @@ pub(crate) fn check_redundant_local_type_annotation(
                 | TypeAnnotation::FalseOr { .. }
                 | TypeAnnotation::Difference { .. }
                 | TypeAnnotation::Intersection { .. }
+                // A shape resolves to bare `Dictionary` until ADR 0147
+                // phase 3, so the annotation would look redundant against
+                // `Dictionary new` while being load-bearing later.
+                | TypeAnnotation::Shape { .. }
         ) {
             return;
         }
@@ -2420,6 +2424,18 @@ mod tests {
             diags.len(),
             1,
             "Expected 1 redundant-annotation lint inside method, got: {diags:?}"
+        );
+    }
+
+    /// `cfg :: #{#port => Integer} := Dictionary new` — a shape resolves to bare
+    /// `Dictionary` until ADR 0147 phase 3, but is load-bearing: NOT flagged.
+    #[test]
+    fn shape_annotation_not_flagged_as_redundant() {
+        let src = "cfg :: #{#port => Integer} := Dictionary new";
+        let diags = redundant_local_type_lints(src);
+        assert!(
+            diags.is_empty(),
+            "Shape annotation must never be flagged, got: {diags:?}"
         );
     }
 

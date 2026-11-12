@@ -241,6 +241,7 @@ fn check_method_annotations_for_unresolved_alias(
 /// Walks a type annotation's structure, checking every [`TypeAnnotation::Simple`]
 /// position — mirroring `alias_registry.rs`'s `check_unbound_type_vars` walk
 /// shape (same recursion, different leaf check).
+#[allow(clippy::too_many_lines)] // exhaustive match over every TypeAnnotation variant
 fn check_annotation_for_unresolved_alias(
     ann: &TypeAnnotation,
     hierarchy: &ClassHierarchy,
@@ -336,6 +337,17 @@ fn check_annotation_for_unresolved_alias(
                 alias_registry,
                 diagnostics,
             );
+        }
+        TypeAnnotation::Shape { fields, .. } => {
+            for field in fields {
+                check_annotation_for_unresolved_alias(
+                    &field.value,
+                    hierarchy,
+                    protocol_registry,
+                    alias_registry,
+                    diagnostics,
+                );
+            }
         }
         // SelfType / SelfClass / ClassOf / Singleton have no nested Simple
         // identifier position that could be an alias reference.

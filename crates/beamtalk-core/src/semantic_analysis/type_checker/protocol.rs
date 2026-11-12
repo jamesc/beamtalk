@@ -502,6 +502,15 @@ impl TypeChecker {
                 self.check_bounds_in_type_annotation(left, hierarchy, protocol_registry);
                 self.check_bounds_in_type_annotation(right, hierarchy, protocol_registry);
             }
+            TypeAnnotation::Shape { fields, .. } => {
+                for field in fields {
+                    self.check_bounds_in_type_annotation(
+                        &field.value,
+                        hierarchy,
+                        protocol_registry,
+                    );
+                }
+            }
             // Simple, SelfType, Singleton — no nested generics to check
             _ => {}
         }

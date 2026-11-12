@@ -143,6 +143,9 @@ pub(super) fn type_annotation_to_spec(
         TypeAnnotation::Intersection { left, .. } => {
             type_annotation_to_spec(left, aliases, referenced)
         }
+        // A map shape (ADR 0147) has no checked codegen meaning yet; it is
+        // exactly a `Dictionary` at runtime, so spec it as one.
+        TypeAnnotation::Shape { .. } => simple_type_to_spec("Dictionary"),
         // Self / Self class / <Name> class resolve to a receiver class at call
         // sites; in specs, treat as any()
         TypeAnnotation::SelfType { .. }
