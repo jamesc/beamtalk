@@ -789,36 +789,7 @@ impl CoreErlangGenerator {
             class_docs.push(class_doc);
         }
 
-        // Build short-circuit chain (same pattern as regular register_class)
-        let last_i = class_docs.len() - 1;
-        let mut try_body: Document<'static> =
-            docvec![class_docs[last_i].clone(), "\n", line(), "in _Reg", last_i,];
-        for i in (0..last_i).rev() {
-            try_body = docvec![
-                class_docs[i].clone(),
-                "\n",
-                line(),
-                "in case _Reg",
-                i,
-                " of",
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        "<{'error', _RegErr",
-                        i,
-                        "}> when 'true' -> {'error', _RegErr",
-                        i,
-                        "}",
-                        line(),
-                        "<_> when 'true' ->",
-                        nest(INDENT, docvec![line(), try_body]),
-                    ]
-                ),
-                line(),
-                "end",
-            ];
-        }
+        let try_body = Self::build_short_circuit_chain(&class_docs);
 
         // BT-4489: extensions in a native-facade file (foreign ones before the
         // chain, same-file ones only after the classes registered successfully).
@@ -838,23 +809,7 @@ impl CoreErlangGenerator {
             Document::Str("of RegResult -> RegResult")
         };
 
-        let doc = docvec![
-            "'register_class'/0 = fun () ->",
-            nest(
-                INDENT,
-                docvec![line(), "try", nest(INDENT, docvec![try_body, "\n",]),]
-            ),
-            nest(
-                INDENT,
-                docvec![
-                    line(),
-                    of_clause,
-                    line(),
-                    "catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)",
-                ]
-            ),
-            "\n\n",
-        ];
+        let doc = Self::register_class_fn_doc(try_body, of_clause);
 
         Ok(doc)
     }
