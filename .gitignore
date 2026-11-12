@@ -171,6 +171,7 @@ tests/repl-protocol/fixtures/build/
 # covered by any existing *.json rule since other committed .json files,
 # e.g. the conformance fixtures, are legitimate source)
 stdlib/test/fixtures/build/
+examples/build/
 # Python bytecode cache (scripts/*.py are run directly, never packaged)
 __pycache__/
 *.pyc
