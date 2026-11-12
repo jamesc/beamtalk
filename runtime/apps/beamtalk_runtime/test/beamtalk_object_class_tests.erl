@@ -1855,6 +1855,13 @@ crash_recovery_restart_test_() ->
                 {ok, Pid1} = beamtalk_object_class:start('CrashRecoveryTest', ClassInfo),
                 ?assert(is_process_alive(Pid1)),
 
+                %% BT-4748: start/2 registers the class with beamtalk_class_monitor,
+                %% whose 'DOWN' handler restarts a killed class eagerly (BT-4622).
+                %% That would race the "not yet restarted" assertions below, so
+                %% unwatch (synchronous; no-op if the monitor is not running) to
+                %% keep the manual restart_class/1 path the one under test.
+                ok = beamtalk_class_monitor:unwatch('CrashRecoveryTest'),
+
                 %% Kill the class process (simulates crash)
                 MRef = monitor(process, Pid1),
                 exit(Pid1, kill),
