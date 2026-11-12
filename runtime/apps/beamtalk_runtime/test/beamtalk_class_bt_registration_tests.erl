@@ -18,12 +18,6 @@ and `beamtalk_metaclass_bt_tests`.
 
 -include_lib("eunit/include/eunit.hrl").
 
-%% NOTE: the `Class` row asserts the bootstrap-time superclass ('Object'). A module
-%% that boots the real stdlib earlier in the same VM leaves it as 'Behaviour', so
-%% this module's name keeps it adjacent to `beamtalk_class_bt_tests` (where the
-%% original assertion ran) in the alphabetical EUnit order. Do not rename it
-%% without re-running the whole suite.
-
 %% {StubModule, ClassName, ExpectedSuperclass}
 stubs() ->
     [
@@ -43,7 +37,13 @@ register_class_test_() ->
         ]
     ]}.
 
+%% Start from a clean class registry: earlier modules that boot the real stdlib
+%% leave `Class` registered under 'Behaviour', while these tests assert the
+%% bootstrap-time registration (BT-4679: the original per-stub modules only passed
+%% because of where they ran in the suite). Unwatched stop first so
+%% beamtalk_class_monitor cannot resurrect the classes mid-teardown (BT-3815).
 setup_bootstrap() ->
+    beamtalk_test_class_teardown:stop_pg_class_processes(),
     case whereis(pg) of
         undefined -> pg:start_link();
         _ -> ok
@@ -56,7 +56,7 @@ setup_bootstrap() ->
     ok.
 
 teardown_bootstrap(_) ->
-    ok.
+    beamtalk_test_class_teardown:stop_pg_class_processes().
 
 %% Bootstrap already registered the class; verify it is there.
 registered(Class) ->
