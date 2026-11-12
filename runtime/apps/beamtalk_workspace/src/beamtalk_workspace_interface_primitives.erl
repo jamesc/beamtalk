@@ -247,7 +247,7 @@ reference rewrite — every existing call site still names the class
 correctly, because the class's own identity never changes).
 
 Delegates classification, span resolution, and ChangeLog bookkeeping to
-`beamtalk_repl_loader:move_class/2` (via `beamtalk_repl_eval:move_class/2`)
+`beamtalk_repl_loader_rewrite:move_class/2` (via `beamtalk_repl_eval:move_class/2`)
 — see that function's doc for the full refusal table (`no_source_file` for a
 dynamic class, stdlib/dependency refusal mirroring `renameTo:`) and for why
 this never needs to reinstall or re-resolve a class object: the class's own
