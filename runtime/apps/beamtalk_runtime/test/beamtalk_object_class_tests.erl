@@ -703,7 +703,7 @@ async_cast_non_tuple_ignored_test_() ->
                 {ok, ClassPid} = beamtalk_object_class:start_link('AsyncIgnoreTest', ClassInfo),
 
                 gen_server:cast(ClassPid, some_random_atom),
-                timer:sleep(50),
+                ok = beamtalk_test_wait:sync(ClassPid),
                 ?assert(is_process_alive(ClassPid))
             end)
         ]
@@ -742,7 +742,7 @@ terminate_graceful_test_() ->
                 },
                 {ok, ClassPid} = beamtalk_object_class:start_link('TermTestClass', ClassInfo),
                 gen_server:stop(ClassPid),
-                timer:sleep(50),
+                beamtalk_test_wait:dead(ClassPid),
                 ?assertNot(is_process_alive(ClassPid))
             end)
         ]

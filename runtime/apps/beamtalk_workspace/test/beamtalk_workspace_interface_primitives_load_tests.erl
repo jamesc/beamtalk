@@ -93,7 +93,7 @@ suite_teardown(_) ->
 case_setup() ->
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("wi-load-e2e-" ++ Unique),
-    Tmp = filename:join(temp_dir(), "bt-wi-load-e2e-" ++ Unique),
+    Tmp = filename:join(beamtalk_test_fs:base_dir(), "bt-wi-load-e2e-" ++ Unique),
     ok = filelib:ensure_path(Tmp),
     OldHome = os:getenv("HOME"),
     true = os:putenv("HOME", Tmp),
@@ -118,7 +118,7 @@ case_setup() ->
 case_teardown(#{clog_pid := ClogPid, meta_pid := MetaPid, tmp := Tmp, old_home := OldHome}) ->
     stop_proc(MetaPid),
     stop_proc(ClogPid),
-    restore_home(OldHome),
+    beamtalk_test_fs:restore_home(OldHome),
     _ = file:del_dir_r(Tmp),
     ok.
 
@@ -577,9 +577,3 @@ stop_proc(Pid) when is_pid(Pid) ->
     end;
 stop_proc(_) ->
     ok.
-
-restore_home(false) -> os:unsetenv("HOME");
-restore_home(OldHome) -> os:putenv("HOME", OldHome).
-
-temp_dir() ->
-    unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())).

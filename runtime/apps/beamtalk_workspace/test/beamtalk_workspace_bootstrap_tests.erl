@@ -94,7 +94,7 @@ handle_cast_noop_test_() ->
             ?_test(begin
                 {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
                 gen_server:cast(BPid, some_unknown_cast),
-                timer:sleep(50),
+                ok = beamtalk_test_wait:sync(BPid),
                 ?assert(is_process_alive(BPid))
             end)
         ]
@@ -121,7 +121,7 @@ terminate_ok_test_() ->
                 {ok, BPid} = beamtalk_workspace_bootstrap:start_link(),
                 ?assert(is_process_alive(BPid)),
                 gen_server:stop(BPid, normal, 1000),
-                timer:sleep(50),
+                beamtalk_test_wait:dead(BPid),
                 ?assertNot(is_process_alive(BPid))
             end)
         ]
@@ -268,7 +268,7 @@ purge_activation_fixture_module() ->
 
 make_temp_project_dir() ->
     Base = filename:join(
-        get_temp_dir(),
+        beamtalk_test_fs:base_dir(),
         "beamtalk_proj_" ++ integer_to_list(erlang:unique_integer([positive]))
     ),
     ok = file:make_dir(Base),
@@ -492,11 +492,9 @@ find_bt_modules_skips_invalid_names_test() ->
 %% Test helpers for temp directories
 %%====================================================================
 
-get_temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
-
 make_temp_beam_dir(FileNames) ->
     Dir = filename:join(
-        get_temp_dir(),
+        beamtalk_test_fs:base_dir(),
         "beamtalk_bootstrap_test_" ++ integer_to_list(erlang:unique_integer([positive]))
     ),
     ok = file:make_dir(Dir),
@@ -663,7 +661,7 @@ store_bootstrap_class_source_success_test_() ->
                 ?_test(begin
                     ModName = 'bt@BT_SrcPresent',
                     ClassName = 'BT_SrcPresent',
-                    TempDir = get_temp_dir(),
+                    TempDir = beamtalk_test_fs:base_dir(),
                     SourceFile = filename:join(TempDir, "bt_src_present_test.bt"),
                     ok = file:write_file(
                         SourceFile, <<"Object subclass: BT_SrcPresent.\n">>

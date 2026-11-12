@@ -517,7 +517,7 @@ tcp_unload_in_use_test(Port) ->
         ?assert(maps:is_key(<<"error">>, Resp))
     after
         LoopPid ! stop,
-        timer:sleep(50),
+        beamtalk_test_wait:dead(LoopPid),
         _ = code:soft_purge(DummyMod),
         _ = code:delete(DummyMod),
         _ = code:soft_purge(DummyMod)
@@ -944,7 +944,7 @@ tcp_inspect_unknown_actor_test(Port) ->
     end),
     PidStr = list_to_binary(pid_to_list(Pid)),
     exit(Pid, kill),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(Pid),
     Msg = iolist_to_binary(
         json:encode(#{
             <<"op">> => <<"inspect">>,
@@ -965,7 +965,7 @@ tcp_kill_unknown_actor_test(Port) ->
     end),
     PidStr = list_to_binary(pid_to_list(Pid)),
     exit(Pid, kill),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(Pid),
     Msg = iolist_to_binary(
         json:encode(#{
             <<"op">> => <<"kill">>,
@@ -2232,7 +2232,7 @@ handle_op_inspect_invalid_pid_test() ->
 
 handle_op_inspect_dead_actor_test() ->
     Pid = spawn(fun() -> ok end),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(Pid),
     PidStr = list_to_binary(pid_to_list(Pid)),
     Msg = make_proto_msg(<<"inspect">>, <<"i2">>, #{<<"actor">> => PidStr}),
     Params = #{<<"actor">> => PidStr},
@@ -2421,7 +2421,7 @@ handle_op_show_codegen_no_code_param_test() ->
 handle_op_show_codegen_dead_session_test() ->
     %% Using a dead session PID should be caught by handle_protocol_request
     DeadPid = spawn(fun() -> ok end),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(DeadPid),
     Json = iolist_to_binary(
         json:encode(#{
             <<"op">> => <<"show-codegen">>,
@@ -2460,7 +2460,7 @@ handle_protocol_request_crash_test() ->
     %% Create a message that will cause handle_op to crash
     %% Use eval op with a SessionPid that's dead
     DeadPid = spawn(fun() -> ok end),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(DeadPid),
     Json = iolist_to_binary(
         json:encode(#{
             <<"op">> => <<"eval">>,

@@ -11,8 +11,6 @@
 %% Helpers
 %%====================================================================
 
-temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
-
 %%====================================================================
 %% is_stdlib_path/1
 %%====================================================================
@@ -265,11 +263,16 @@ handle_load_not_found_test() ->
 
 handle_load_directory_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
-    ?assertMatch({error, {read_error, _}, _}, beamtalk_repl_loader:handle_load(temp_dir(), State)).
+    ?assertMatch(
+        {error, {read_error, _}, _},
+        beamtalk_repl_loader:handle_load(beamtalk_test_fs:base_dir(), State)
+    ).
 
 handle_load_compile_error_test() ->
     UniqueId = erlang:unique_integer([positive]),
-    TempFile = filename:join(temp_dir(), io_lib:format("loader_test_~p.bt", [UniqueId])),
+    TempFile = filename:join(
+        beamtalk_test_fs:base_dir(), io_lib:format("loader_test_~p.bt", [UniqueId])
+    ),
     ok = file:write_file(TempFile, <<"invalid syntax @@@">>),
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_loader:handle_load(TempFile, State),
@@ -291,12 +294,14 @@ handle_load_3_directory_test() ->
     State = beamtalk_repl_state:new(undefined, 0),
     ?assertMatch(
         {error, {read_error, _}, _},
-        beamtalk_repl_loader:handle_load(temp_dir(), State, #{})
+        beamtalk_repl_loader:handle_load(beamtalk_test_fs:base_dir(), State, #{})
     ).
 
 handle_load_3_compile_error_test() ->
     UniqueId = erlang:unique_integer([positive]),
-    TempFile = filename:join(temp_dir(), io_lib:format("loader_h3_~p.bt", [UniqueId])),
+    TempFile = filename:join(
+        beamtalk_test_fs:base_dir(), io_lib:format("loader_h3_~p.bt", [UniqueId])
+    ),
     ok = file:write_file(TempFile, <<"invalid syntax @@@">>),
     State = beamtalk_repl_state:new(undefined, 0),
     Result = beamtalk_repl_loader:handle_load(TempFile, State, #{}),
@@ -331,11 +336,16 @@ reload_class_file_2_not_found_test() ->
     ).
 
 reload_class_file_directory_test() ->
-    ?assertMatch({error, {read_error, _}}, beamtalk_repl_loader:reload_class_file(temp_dir())).
+    ?assertMatch(
+        {error, {read_error, _}},
+        beamtalk_repl_loader:reload_class_file(beamtalk_test_fs:base_dir())
+    ).
 
 reload_class_file_compile_error_test() ->
     UniqueId = erlang:unique_integer([positive]),
-    TempFile = filename:join(temp_dir(), io_lib:format("loader_reload_~p.bt", [UniqueId])),
+    TempFile = filename:join(
+        beamtalk_test_fs:base_dir(), io_lib:format("loader_reload_~p.bt", [UniqueId])
+    ),
     ok = file:write_file(TempFile, <<"invalid @@@ syntax">>),
     Result = beamtalk_repl_loader:reload_class_file(TempFile),
     file:delete(TempFile),

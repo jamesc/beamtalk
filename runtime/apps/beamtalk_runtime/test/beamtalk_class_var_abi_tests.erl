@@ -122,17 +122,9 @@ compiled_class_source(Module, ClassName, AbiEntry, OnLoad) ->
 
 compile_source(Source) ->
     {ok, Tokens, _} = erl_scan:string(Source),
-    Forms = split_forms(Tokens, [], []),
+    Forms = beamtalk_test_erl_forms:split_forms(Tokens),
     {ok, _Mod, Binary} = compile:forms(Forms, [binary, return_errors]),
     Binary.
-
-split_forms([], [], Acc) ->
-    lists:reverse(Acc);
-split_forms([{dot, _} = Dot | Rest], Cur, Acc) ->
-    {ok, Form} = erl_parse:parse_form(lists:reverse([Dot | Cur])),
-    split_forms(Rest, [], [Form | Acc]);
-split_forms([Tok | Rest], Cur, Acc) ->
-    split_forms(Rest, [Tok | Cur], Acc).
 
 load(Module, Binary) ->
     code:load_binary(Module, atom_to_list(Module) ++ ".beam", Binary).

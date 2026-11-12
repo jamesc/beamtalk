@@ -1291,7 +1291,7 @@ isAlive_returns_true_for_running_actor_test() ->
 isAlive_returns_false_after_actor_stops_test() ->
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter, normal, 1000),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
 
     %% isAlive via async_send should resolve to false
     Future = beamtalk_future:new(),
@@ -1308,7 +1308,7 @@ isAlive_sync_returns_true_for_running_actor_test() ->
 isAlive_sync_returns_false_after_actor_stops_test() ->
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter, normal, 1000),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
 
     ?assertEqual(false, beamtalk_actor:sync_send(Counter, isAlive, [])).
 
@@ -1410,7 +1410,7 @@ on_exit_async_calls_block_on_death_test() ->
 async_message_to_dead_actor_rejects_future_test() ->
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter, normal, 1000),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
 
     %% Sending to dead actor should reject the future
     Future = beamtalk_future:new(),
@@ -1425,7 +1425,7 @@ sync_message_to_dead_actor_returns_error_test() ->
     %% sync_send to a dead actor now raises an actor_dead exception (not returns error tuple).
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter, normal, 1000),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
 
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead, selector = getValue}},
@@ -1676,7 +1676,7 @@ async_send_is_alive_on_live_actor_test() ->
 async_send_is_alive_on_dead_actor_test() ->
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     Future = beamtalk_future:new(),
     beamtalk_actor:async_send(Counter, isAlive, [], Future),
     Result = beamtalk_future:await(Future),
@@ -1694,7 +1694,7 @@ async_send_stop_live_actor_test() ->
 async_send_stop_dead_actor_test() ->
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     Future = beamtalk_future:new(),
     beamtalk_actor:async_send(Counter, stop, [], Future),
     Result = beamtalk_future:await(Future),
@@ -1703,7 +1703,7 @@ async_send_stop_dead_actor_test() ->
 async_send_to_dead_actor_rejects_future_test() ->
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     Future = beamtalk_future:new(),
     beamtalk_actor:async_send(Counter, increment, [], Future),
     %% Future should be rejected with actor_dead error
@@ -1742,7 +1742,7 @@ sync_send_is_alive_test() ->
     {ok, Counter} = test_counter:start_link(0),
     ?assertEqual(true, beamtalk_actor:sync_send(Counter, isAlive, [])),
     gen_server:stop(Counter),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     ?assertEqual(false, beamtalk_actor:sync_send(Counter, isAlive, [])).
 
 sync_send_stop_test() ->
@@ -1754,7 +1754,7 @@ sync_send_stop_test() ->
 sync_send_stop_dead_actor_test() ->
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     ?assertEqual(ok, beamtalk_actor:sync_send(Counter, stop, [])).
 
 sync_send_monitor_test() ->
@@ -1767,7 +1767,7 @@ sync_send_to_dead_actor_test() ->
     %% sync_send to a dead actor raises an actor_dead exception (not returns error tuple).
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
         beamtalk_actor:sync_send(Counter, getValue, [])
@@ -1803,7 +1803,7 @@ sync_send_4_infinity_timeout_test() ->
 sync_send_4_dead_actor_test() ->
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
         beamtalk_actor:sync_send(Counter, getValue, [], 5000)
@@ -1827,7 +1827,7 @@ cast_send_to_live_actor_returns_ok_test() ->
 cast_send_to_dead_actor_returns_ok_test() ->
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     %% Fire-and-forget: silently drops message if actor is dead
     Result = beamtalk_actor:cast_send(Counter, increment, []),
     ?assertEqual(ok, Result).
@@ -1838,7 +1838,7 @@ cast_send_state_mutation_test() ->
     ok = beamtalk_actor:cast_send(Counter, increment, []),
     ok = beamtalk_actor:cast_send(Counter, increment, []),
     ok = beamtalk_actor:cast_send(Counter, increment, []),
-    timer:sleep(30),
+    ok = beamtalk_test_wait:sync(Counter),
     ?assertEqual(13, gen_server:call(Counter, {getValue, []})),
     gen_server:stop(Counter).
 
@@ -1846,7 +1846,7 @@ handle_cast_fire_and_forget_dispatches_test() ->
     %% Directly test the {cast, Selector, Args} wire format via gen_server:cast
     {ok, Counter} = test_counter:start_link(5),
     gen_server:cast(Counter, {cast, increment, []}),
-    timer:sleep(20),
+    ok = beamtalk_test_wait:sync(Counter),
     ?assertEqual(6, gen_server:call(Counter, {getValue, []})),
     gen_server:stop(Counter).
 
@@ -1854,7 +1854,7 @@ handle_cast_fire_and_forget_result_discarded_test() ->
     %% {cast, Selector, Args} with a method that returns a value — result is discarded
     {ok, Counter} = test_counter:start_link(42),
     gen_server:cast(Counter, {cast, getValue, []}),
-    timer:sleep(20),
+    ok = beamtalk_test_wait:sync(Counter),
     %% Actor still alive and state unchanged
     ?assertEqual(42, gen_server:call(Counter, {getValue, []})),
     gen_server:stop(Counter).
@@ -1908,7 +1908,7 @@ async_send_kill_live_actor_resolves_ok_and_actor_is_dead_test() ->
 async_send_kill_dead_actor_resolves_ok_test() ->
     {ok, Counter} = test_counter:start(0),
     gen_server:stop(Counter),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     Future = beamtalk_future:new(),
     beamtalk_actor:async_send(Counter, kill, [], Future),
     Result = beamtalk_future:await(Future),
@@ -1925,7 +1925,7 @@ sync_send_kill_live_actor_returns_ok_and_actor_is_dead_test() ->
 sync_send_kill_dead_actor_returns_ok_test() ->
     {ok, Counter} = test_counter:start(0),
     gen_server:stop(Counter),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     Result = beamtalk_actor:sync_send(Counter, kill, []),
     %% Killing an already-dead process is idempotent
     ?assertEqual(ok, Result).
@@ -1954,7 +1954,7 @@ await_initialize_dead_process_test() ->
     %% await_initialize returns {error, _} for a dead process
     {ok, Pid} = test_counter:start(0),
     gen_server:stop(Pid),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Pid),
     ?assertMatch({error, _}, beamtalk_actor:await_initialize(Pid)).
 
 safe_spawn_success_test() ->
@@ -2938,7 +2938,7 @@ handle_cast_fire_and_forget_with_propagated_context_test() ->
     {ok, Counter} = test_counter:start_link(0),
     PropCtx = #{otel => undefined, trace_ctx => #{}},
     gen_server:cast(Counter, {cast, increment, [], PropCtx}),
-    timer:sleep(20),
+    ok = beamtalk_test_wait:sync(Counter),
     ?assertEqual(1, gen_server:call(Counter, {getValue, []})),
     gen_server:stop(Counter).
 
@@ -3129,7 +3129,7 @@ sync_send_to_shutdown_actor_raises_actor_dead_test() ->
     %% Use start (not start_link) so the test process isn't killed by the shutdown EXIT.
     {ok, Counter} = gen_server:start(test_counter, 0, []),
     gen_server:stop(Counter, shutdown, 1000),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
         beamtalk_actor:sync_send(Counter, getValue, [])
@@ -3171,7 +3171,7 @@ sync_send_pid_returns_raw_pid_test() ->
 async_send_onExit_already_dead_actor_test() ->
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter, normal, 1000),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     Self = self(),
     Block = fun(Reason) -> Self ! {exit_reason_already_dead, Reason} end,
     Future = beamtalk_future:new(),
@@ -3817,7 +3817,7 @@ sync_send_to_normal_exit_actor_raises_actor_dead_test() ->
     %% When actor stops with `normal`, sync_send should surface actor_dead.
     {ok, Counter} = gen_server:start(test_counter, 0, []),
     gen_server:stop(Counter, normal, 1000),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
         beamtalk_actor:sync_send(Counter, getValue, [])
@@ -3828,7 +3828,7 @@ sync_send_to_killed_actor_raises_actor_dead_test() ->
     %% catch-all `exit:{_Reason, _}` branch in sync_send_remote).
     {ok, Counter} = test_counter:start(0),
     exit(Counter, kill),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
         beamtalk_actor:sync_send(Counter, getValue, [])
@@ -4070,7 +4070,7 @@ sync_send_4_to_dead_actor_raises_actor_dead_test() ->
     %% Covers the exit:{noproc, _} catch in sync_send/4 (line 828-829).
     {ok, Counter} = gen_server:start(test_counter, 0, []),
     gen_server:stop(Counter, normal, 1000),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
         beamtalk_actor:sync_send(Counter, getValue, [], 1000)
@@ -4080,7 +4080,7 @@ sync_send_4_to_killed_actor_raises_actor_dead_test() ->
     %% Covers the exit:{_Reason, _} catch-all branch (line 836-837).
     {ok, Counter} = test_counter:start(0),
     exit(Counter, kill),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
         beamtalk_actor:sync_send(Counter, getValue, [], 1000)
@@ -4131,7 +4131,7 @@ sync_send_stop_on_dead_process_is_idempotent_test() ->
         end
     end),
     exit(FakePid, kill),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(FakePid),
     ?assertEqual(ok, beamtalk_actor:sync_send(FakePid, stop, [])).
 
 %%% onExit: callback block that raises — covers error logging branch
@@ -4157,7 +4157,7 @@ async_send_onExit_callback_block_raises_test() ->
     beamtalk_actor:async_send(Counter, 'onExit:', [Block], beamtalk_future:pid(Future)),
     ?assertEqual(ok, beamtalk_future:await(Future, 2000)),
     exit(Counter, kill),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(Counter),
     ?assert(true).
 
 dispatch_initialize_selector_runs_method_test() ->

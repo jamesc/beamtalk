@@ -52,17 +52,7 @@ start_class(Name, Superclass, ClassVars, Methods) ->
         class_state => ClassVars,
         meta => ?META
     },
-    {ok, Pid} = beamtalk_object_class:start_link(Name, ClassInfo),
-    unlink(Pid),
-    Pid.
-
-stop_class(Pid) ->
-    try
-        gen_server:stop(Pid, normal, 5000)
-    catch
-        _:_ -> ok
-    end,
-    ok.
+    beamtalk_test_class:start(Name, ClassInfo).
 
 tag(Name) -> beamtalk_class_registry:class_object_tag(Name).
 
@@ -84,7 +74,7 @@ with_class(Name, Superclass, ClassVars, Fun) ->
     try
         Fun(Pid)
     after
-        stop_class(Pid)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 in_caller_test_() ->
@@ -124,7 +114,7 @@ in_caller_test_() ->
                 try
                     ?assertEqual(Child, send(Child, testSelf, []))
                 after
-                    stop_class(Child)
+                    beamtalk_test_proc:stop(Child)
                 end
             end)
         end},
@@ -139,7 +129,7 @@ in_caller_test_() ->
                         send(Leaf, testClassSelf, [])
                     )
                 after
-                    stop_class(Leaf)
+                    beamtalk_test_proc:stop(Leaf)
                 end
             end)
         end},
@@ -268,7 +258,7 @@ static_guard_test_() ->
                         beamtalk_class_shadow_flags:direct_call_ok(tag('Bt4301Leaf'), 'Bt4301Leaf')
                     )
                 after
-                    stop_class(Leaf)
+                    beamtalk_test_proc:stop(Leaf)
                 end
             end),
             with_class('Bt4301StatefulRoot', none, #{count => 0}, fun(_RootPid) ->
@@ -286,7 +276,7 @@ static_guard_test_() ->
                         )
                     )
                 after
-                    stop_class(Leaf)
+                    beamtalk_test_proc:stop(Leaf)
                 end
             end)
         end},
@@ -304,7 +294,7 @@ static_guard_test_() ->
                     ok = beamtalk_class_metadata:put_class_variables('Bt4301GainRoot', false),
                     ?assert(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, 'Bt4301GainLeaf'))
                 after
-                    stop_class(Leaf)
+                    beamtalk_test_proc:stop(Leaf)
                 end
             end)
         end},
@@ -330,7 +320,7 @@ static_guard_test_() ->
                         ),
                         ?assertEqual(Leaf, send(Leaf, testSelf, []))
                     after
-                        stop_class(Leaf)
+                        beamtalk_test_proc:stop(Leaf)
                     end
                 end)
             end)
@@ -379,7 +369,7 @@ static_guard_test_() ->
             try
                 ?assertEqual(Pid, send(Pid, testSelf, []))
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end}
     ]}.

@@ -1584,7 +1584,7 @@ class_send_recovery_test_() ->
 test_send_dead_pid_unknown() ->
     %% Spawn and immediately kill a process so we have a valid-looking dead pid.
     DeadPid = spawn(fun() -> ok end),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(DeadPid),
     ?assertError(
         #{error := #beamtalk_error{kind = class_not_found}},
         beamtalk_class_dispatch:class_send(DeadPid, someMethod, [])
@@ -1593,7 +1593,7 @@ test_send_dead_pid_unknown() ->
 %% Sending to a dead class pid gives a structured error with correct hint.
 test_send_dead_pid_structured_error() ->
     DeadPid = spawn(fun() -> ok end),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(DeadPid),
     try
         beamtalk_class_dispatch:class_send(DeadPid, testSelector, []),
         ?assert(false)
@@ -1642,7 +1642,7 @@ test_metaclass_method_not_found() ->
 %% metaclass_send to a dead pid raises class_not_found (crash recovery path).
 test_metaclass_dead_pid() ->
     DeadPid = spawn(fun() -> ok end),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(DeadPid),
     Self = #beamtalk_object{
         class = 'Metaclass',
         class_mod = beamtalk_class_dispatch_test_helper,
@@ -1887,7 +1887,7 @@ test_fallthrough_real_error() ->
 class_send_recovery_unregistered_pid_test() ->
     %% Spawn and immediately kill a process whose pid isn't in the registry.
     Pid = spawn(fun() -> ok end),
-    timer:sleep(20),
+    beamtalk_test_wait:dead(Pid),
     ?assertNot(is_process_alive(Pid)),
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = class_not_found}},
@@ -1897,7 +1897,7 @@ class_send_recovery_unregistered_pid_test() ->
 %% metaclass_send_dispatch: route to a dead metaclass pid exercises recovery
 metaclass_send_unregistered_pid_test() ->
     Pid = spawn(fun() -> ok end),
-    timer:sleep(20),
+    beamtalk_test_wait:dead(Pid),
     ?assertNot(is_process_alive(Pid)),
     Self = #beamtalk_object{class = 'Metaclass', class_mod = undefined, pid = Pid},
     ?assertError(

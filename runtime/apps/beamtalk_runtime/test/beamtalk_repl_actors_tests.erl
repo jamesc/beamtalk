@@ -220,7 +220,7 @@ on_actor_spawned_returns_error_when_registry_down_test() ->
     %% Start and immediately stop a registry to get a dead pid
     {ok, RegistryPid} = gen_server:start_link(beamtalk_repl_actors, [], []),
     gen_server:stop(RegistryPid),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(RegistryPid),
 
     {ok, ActorPid} = test_counter:start_link(0),
 
@@ -233,7 +233,7 @@ on_actor_spawned_returns_error_when_registry_down_test() ->
 on_actor_spawned_returns_error_when_registry_not_a_process_test() ->
     %% Use a PID that was never a gen_server
     FakePid = spawn(fun() -> ok end),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(FakePid),
 
     {ok, ActorPid} = test_counter:start_link(0),
 

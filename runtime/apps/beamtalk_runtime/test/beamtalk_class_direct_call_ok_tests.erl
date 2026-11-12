@@ -32,17 +32,7 @@ start_class(Name, ClassVars, Meta) ->
         class_state => ClassVars,
         meta => Meta
     },
-    {ok, Pid} = beamtalk_object_class:start_link(Name, ClassInfo),
-    unlink(Pid),
-    Pid.
-
-stop_class(Pid) ->
-    try
-        gen_server:stop(Pid, normal, 5000)
-    catch
-        _:_ -> ok
-    end,
-    ok.
+    beamtalk_test_class:start(Name, ClassInfo).
 
 tag(Name) -> beamtalk_class_registry:class_object_tag(Name).
 
@@ -95,7 +85,7 @@ direct_call_ok_test_() ->
                 ),
                 ?assertNot(ok('Bt4299SelfSend'))
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"init publishes the class-variable fact from classState", fun() ->
@@ -111,8 +101,8 @@ direct_call_ok_test_() ->
                 ?assert(ok('Bt4299Stateless')),
                 ?assertNot(ok('Bt4299Stateful'))
             after
-                stop_class(Stateless),
-                stop_class(Stateful)
+                beamtalk_test_proc:stop(Stateless),
+                beamtalk_test_proc:stop(Stateful)
             end
         end},
         {"compiled class_field_kinds is the class-variable fact when present", fun() ->
@@ -125,7 +115,7 @@ direct_call_ok_test_() ->
                 ),
                 ?assertNot(ok('Bt4299Late'))
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"trigger: reload erases the derived flag", fun() ->
@@ -137,7 +127,7 @@ direct_call_ok_test_() ->
                 ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(tag(Name))),
                 ?assert(ok(Name))
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"trigger: a class-variable change on reload erases the flag and flips the answer", fun() ->
@@ -157,7 +147,7 @@ direct_call_ok_test_() ->
                     ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(tag(Name))),
                     ?assert(ok(Name))
                 after
-                    stop_class(Pid)
+                    beamtalk_test_proc:stop(Pid)
                 end
             end},
         {"trigger: put_class_variables erases the flag before publishing the fact", fun() ->
@@ -172,7 +162,7 @@ direct_call_ok_test_() ->
                 ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(tag(Name))),
                 ?assert(ok(Name))
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"trigger: put_class_method erases the derived flag", fun() ->
@@ -184,7 +174,7 @@ direct_call_ok_test_() ->
                 ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(tag(Name))),
                 ?assertNot(ok(Name))
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"trigger: class-side removeSelector: erases the derived flag", fun() ->
@@ -205,14 +195,14 @@ direct_call_ok_test_() ->
                 ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(tag(Name))),
                 ?assert(ok(Name))
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"row removal drops the class-variable input and the derived flag", fun() ->
             Name = 'Bt4299Delete',
             Pid = start_class(Name, #{count => 0}, #{}),
             install(Name),
-            stop_class(Pid),
+            beamtalk_test_proc:stop(Pid),
             ?assertNot(beamtalk_class_shadow_flags:is_set(class_vars, Name)),
             ?assertNot(beamtalk_class_shadow_flags:is_direct_flag_set(tag(Name)))
         end}

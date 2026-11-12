@@ -43,8 +43,6 @@ xref/registry state.
 %% Shared harness (mirrors beamtalk_behaviour_intrinsics_rename_to_tests.erl)
 %%====================================================================
 
-temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
-
 start_fixture(Prefix, Files) ->
     %% ADR 0129: workspace-only operations (rename/remove/revert) refuse with
     %% `no_workspace` unless this node records a workspace capability.
@@ -60,7 +58,7 @@ start_fixture(Prefix, Files) ->
         MetaPid -> gen_server:stop(MetaPid)
     end,
     Unique = integer_to_list(erlang:unique_integer([positive])),
-    ProjDir = filename:join(temp_dir(), Prefix ++ "-" ++ Unique),
+    ProjDir = filename:join(beamtalk_test_fs:base_dir(), Prefix ++ "-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
     {ok, _} = beamtalk_workspace_meta:start_link(#{
         workspace_id => list_to_binary(Prefix ++ "_ws"),
@@ -272,7 +270,9 @@ setup_happy_with_changelog() ->
     %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("bt-rename-selector-changelog-" ++ Unique),
-    ChangelogHome = filename:join(temp_dir(), "bt-rename-selector-changelog-home-" ++ Unique),
+    ChangelogHome = filename:join(
+        beamtalk_test_fs:base_dir(), "bt-rename-selector-changelog-home-" ++ Unique
+    ),
     ok = filelib:ensure_path(ChangelogHome),
     OldHome = os:getenv("HOME"),
     true = os:putenv("HOME", ChangelogHome),
@@ -788,7 +788,7 @@ start_changelog(Fixture, Prefix) ->
     %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary(Prefix ++ "-" ++ Unique),
-    ChangelogHome = filename:join(temp_dir(), Prefix ++ "-home-" ++ Unique),
+    ChangelogHome = filename:join(beamtalk_test_fs:base_dir(), Prefix ++ "-home-" ++ Unique),
     ok = filelib:ensure_path(ChangelogHome),
     OldHome = os:getenv("HOME"),
     true = os:putenv("HOME", ChangelogHome),

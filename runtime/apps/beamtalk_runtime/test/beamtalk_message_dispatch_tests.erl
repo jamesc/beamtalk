@@ -54,7 +54,7 @@ actor_dead_raises_error() ->
     %% Sending to a dead actor raises an actor_dead exception.
     {ok, Counter} = test_counter:start_link(0),
     gen_server:stop(Counter),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(Counter),
     Obj = #beamtalk_object{class = 'Counter', class_mod = test_counter, pid = Counter},
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = actor_dead}},
@@ -174,7 +174,7 @@ supervisor_is_alive_false_test() ->
     %% isAlive returns false after the supervisor is stopped.
     SupPid = anon_sup(),
     gen_server:stop(SupPid),
-    timer:sleep(20),
+    beamtalk_test_wait:dead(SupPid),
     Sup = {beamtalk_supervisor, 'TestSup', test_mod, SupPid},
     ?assertEqual(false, beamtalk_message_dispatch:send(Sup, isAlive, [])).
 
@@ -192,7 +192,7 @@ supervisor_stop_stale_handle_test() ->
     %% raw OTP exit), as the stdlib `stop` does (BT-3984).
     SupPid = anon_sup(),
     gen_server:stop(SupPid),
-    timer:sleep(20),
+    beamtalk_test_wait:dead(SupPid),
     Sup = {beamtalk_supervisor, 'TestSup', test_mod, SupPid},
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = stale_handle}},

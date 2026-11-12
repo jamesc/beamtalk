@@ -342,10 +342,11 @@ responds_to_actor_inherited_method_test_() ->
             ok
         end,
         fun(_) -> ok end, fun() ->
+            %% Hard failure (not a skip) if the stdlib never registers Counter.
+            ok = beamtalk_test_class:ensure_fixture_loaded('Counter', 'bt@counter'),
             case beamtalk_class_registry:whereis_class('Counter') of
                 undefined ->
-                    %% Counter not loaded — explicitly skip test
-                    {skip, "Counter class not loaded after beamtalk_stdlib:init()"};
+                    error({class_not_registered, 'Counter'});
                 CounterPid ->
                     CounterObj = #beamtalk_object{
                         class = 'Counter',
@@ -1809,9 +1810,10 @@ print_string_class_object_test_() ->
         end,
         fun(_) -> ok end, fun() ->
             %% Class object (registered class name) prints as the display name
+            ok = beamtalk_test_wait:class('Integer'),
             case beamtalk_class_registry:whereis_class('Integer') of
                 undefined ->
-                    {skip, "Integer class not registered"};
+                    error({class_not_registered, 'Integer'});
                 _Pid ->
                     Obj = #beamtalk_object{
                         class = 'Integer class',
@@ -1885,9 +1887,10 @@ display_string_class_object_test_() ->
             ok
         end,
         fun(_) -> ok end, fun() ->
+            ok = beamtalk_test_wait:class('Integer'),
             case beamtalk_class_registry:whereis_class('Integer') of
                 undefined ->
-                    {skip, "Integer class not registered"};
+                    error({class_not_registered, 'Integer'});
                 _Pid ->
                     Obj = #beamtalk_object{
                         class = 'Integer class',

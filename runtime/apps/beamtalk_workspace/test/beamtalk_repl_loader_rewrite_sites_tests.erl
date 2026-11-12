@@ -105,7 +105,7 @@ setup() ->
     end,
     %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
     Unique = beamtalk_test_unique:id(),
-    ProjDir = filename:join(temp_dir(), "bt-rewrite-sites-" ++ Unique),
+    ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-rewrite-sites-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
     CounterPath = filename:join(ProjDir, "counter.bt"),
     SubCounterPath = filename:join(ProjDir, "sub_counter.bt"),
@@ -134,8 +134,6 @@ teardown(_) ->
         MetaPid -> gen_server:stop(MetaPid)
     end,
     ok.
-
-temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 %%====================================================================
 %% Word-boundary span helper (test-only — mirrors what a real site-discovery
@@ -399,7 +397,9 @@ setup_with_changelog() ->
     %% Cross-invocation-unique — see `beamtalk_test_unique:id/0`.
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("bt-rewrite-sites-changelog-" ++ Unique),
-    ChangelogHome = filename:join(temp_dir(), "bt-rewrite-sites-changelog-home-" ++ Unique),
+    ChangelogHome = filename:join(
+        beamtalk_test_fs:base_dir(), "bt-rewrite-sites-changelog-home-" ++ Unique
+    ),
     ok = filelib:ensure_path(ChangelogHome),
     OldHome = os:getenv("HOME"),
     true = os:putenv("HOME", ChangelogHome),

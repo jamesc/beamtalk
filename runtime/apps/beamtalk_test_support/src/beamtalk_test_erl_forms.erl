@@ -15,7 +15,7 @@ once `beamtalk_shape_migration_tests` needed the identical helper — same
 own moduledoc documents (AGENTS.md's no-duplicate-implementations rule).
 """.
 
--export([parse_forms/1]).
+-export([parse_forms/1, split_forms/1]).
 
 -doc """
 Parse a list of complete top-level Erlang source forms (each ending in `.`)
@@ -31,3 +31,20 @@ parse_forms(SourceLines) ->
         end,
         SourceLines
     ).
+
+-doc """
+Parse a token list covering several top-level forms (as returned by
+`erl_scan:string/1` over a whole module source) into abstract forms, one per
+terminating `dot` token. Replaces the per-file `split_forms/3` copies.
+""".
+-spec split_forms([erl_scan:token()]) -> [erl_parse:abstract_form()].
+split_forms(Tokens) ->
+    split_forms(Tokens, [], []).
+
+split_forms([], [], Acc) ->
+    lists:reverse(Acc);
+split_forms([{dot, _} = Dot | Rest], Cur, Acc) ->
+    {ok, Form} = erl_parse:parse_form(lists:reverse([Dot | Cur])),
+    split_forms(Rest, [], [Form | Acc]);
+split_forms([Tok | Rest], Cur, Acc) ->
+    split_forms(Rest, [Tok | Cur], Acc).

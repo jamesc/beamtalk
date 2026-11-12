@@ -44,8 +44,6 @@ gadget_source() ->
 %% Integration fixture: real compiler port + workspace_meta, real files
 %%====================================================================
 
-temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
-
 setup() ->
     application:ensure_all_started(compiler),
     case application:ensure_all_started(beamtalk_compiler) of
@@ -58,7 +56,7 @@ setup() ->
         MetaPid -> gen_server:stop(MetaPid)
     end,
     Unique = integer_to_list(erlang:unique_integer([positive])),
-    ProjDir = filename:join(temp_dir(), "bt-move-class-" ++ Unique),
+    ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-move-class-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
     GadgetPath = filename:join(ProjDir, "bt3272_gadget.bt"),
     ok = file:write_file(GadgetPath, gadget_source()),
@@ -111,7 +109,9 @@ setup_with_changelog() ->
     end,
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("bt-move-class-changelog-" ++ Unique),
-    ChangelogHome = filename:join(temp_dir(), "bt-move-class-changelog-home-" ++ Unique),
+    ChangelogHome = filename:join(
+        beamtalk_test_fs:base_dir(), "bt-move-class-changelog-home-" ++ Unique
+    ),
     ok = filelib:ensure_path(ChangelogHome),
     OldHome = os:getenv("HOME"),
     true = os:putenv("HOME", ChangelogHome),
@@ -235,7 +235,7 @@ setup_dynamic() ->
         MetaPid -> gen_server:stop(MetaPid)
     end,
     Unique = integer_to_list(erlang:unique_integer([positive])),
-    ProjDir = filename:join(temp_dir(), "bt-move-class-dyn-" ++ Unique),
+    ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-move-class-dyn-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
     {ok, _} = beamtalk_workspace_meta:start_link(#{
         workspace_id => <<"move_class_dyn_test_ws">>,
@@ -322,8 +322,8 @@ setup_dependency() ->
     %% `ProjDir` is the active project tree; the fixture class's own source
     %% file lives OUTSIDE it (`OutsideDir`), so `classify_source_file/1`
     %% classifies it "dependency" rather than "flushable".
-    ProjDir = filename:join(temp_dir(), "bt-move-class-dep-proj-" ++ Unique),
-    OutsideDir = filename:join(temp_dir(), "bt-move-class-dep-outside-" ++ Unique),
+    ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-move-class-dep-proj-" ++ Unique),
+    OutsideDir = filename:join(beamtalk_test_fs:base_dir(), "bt-move-class-dep-outside-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
     ok = filelib:ensure_path(OutsideDir),
     GadgetPath = filename:join(OutsideDir, "bt3272_dep_gadget.bt"),

@@ -397,7 +397,7 @@ filters_dead_processes_test_() ->
 
                 %% Kill one
                 I1 ! stop,
-                timer:sleep(50),
+                beamtalk_test_wait:dead(I1),
 
                 %% all() should only return the live one
                 Instances = beamtalk_object_instances:all('Counter'),
@@ -455,7 +455,7 @@ monitor_cleanup_test_() ->
 
                 %% Kill the instance
                 Instance ! stop,
-                timer:sleep(50),
+                beamtalk_test_wait:dead(Instance),
 
                 %% Verify instance is removed from registry after death
                 ?assertEqual(0, beamtalk_object_instances:count('Counter')),
@@ -498,7 +498,7 @@ same_pid_multiple_classes_test_() ->
 
                 %% Kill the process
                 Instance ! stop,
-                timer:sleep(50),
+                beamtalk_test_wait:dead(Instance),
 
                 %% Should be removed from all classes
                 ?assertEqual(0, beamtalk_object_instances:count('Counter')),
@@ -689,7 +689,7 @@ handle_info_down_multiple_classes_test_() ->
 
                 %% Kill the instance
                 Instance ! stop,
-                timer:sleep(100),
+                beamtalk_test_wait:dead(Instance),
 
                 %% Verify cleaned up from all three classes
                 ?assertEqual(0, beamtalk_object_instances:count('ClassA')),

@@ -55,17 +55,7 @@ start_class_with_module(Name, Module, Superclass, Meta) ->
         class_state => #{},
         meta => Meta
     },
-    {ok, Pid} = beamtalk_object_class:start_link(Name, ClassInfo),
-    unlink(Pid),
-    Pid.
-
-stop_class(Pid) ->
-    try
-        gen_server:stop(Pid, normal, 5000)
-    catch
-        _:_ -> ok
-    end,
-    ok.
+    beamtalk_test_class:start(Name, ClassInfo).
 
 direct_constructor_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
@@ -74,7 +64,7 @@ direct_constructor_test_() ->
             try
                 ?assertEqual(self(), beamtalk_class_dispatch:class_send(Pid, new, []))
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"eligible new: with a map builds in the caller's process", fun() ->
@@ -85,7 +75,7 @@ direct_constructor_test_() ->
                     beamtalk_class_dispatch:class_send(Pid, 'new:', [#{a => 1}])
                 )
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"new absent from the verdict goes through the class gen_server", fun() ->
@@ -93,7 +83,7 @@ direct_constructor_test_() ->
             try
                 ?assertEqual(Pid, beamtalk_class_dispatch:class_send(Pid, new, []))
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"meta without the key never constructs directly", fun() ->
@@ -105,7 +95,7 @@ direct_constructor_test_() ->
                     beamtalk_class_dispatch:class_send(Pid, 'new:', [#{a => 1}])
                 )
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"new: with a non-map argument is never eligible", fun() ->
@@ -117,7 +107,7 @@ direct_constructor_test_() ->
                     error, beamtalk_class_dispatch:lookup_direct_constructor(Pid, 'new:', [1])
                 )
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"missing new/1 export is not called directly", fun() ->
@@ -129,7 +119,7 @@ direct_constructor_test_() ->
                     error, beamtalk_class_dispatch:lookup_direct_constructor(Pid, 'new:', [#{}])
                 )
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"missing new/0 export is not called directly", fun() ->
@@ -141,7 +131,7 @@ direct_constructor_test_() ->
                     error, beamtalk_class_dispatch:lookup_direct_constructor(Pid, new, [])
                 )
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"reload with a changed verdict set updates construction", fun() ->
@@ -157,7 +147,7 @@ direct_constructor_test_() ->
                 }),
                 ?assertEqual(self(), beamtalk_class_dispatch:class_send(Pid, new, []))
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"runtime class-method funs disable the direct path", fun() ->
@@ -169,7 +159,7 @@ direct_constructor_test_() ->
                     beamtalk_class_metadata:lookup_direct_constructor('BT4099Funs', new)
                 )
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"eligible keyword ctor builds in the caller's process", fun() ->
@@ -185,7 +175,7 @@ direct_constructor_test_() ->
                     beamtalk_class_dispatch:class_send(Pid, 'x:y:', [1, 2])
                 )
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"concurrent builders all construct correctly", fun() ->
@@ -231,7 +221,7 @@ direct_constructor_test_() ->
                     Results
                 )
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end}
     ]}.
@@ -301,7 +291,7 @@ stale_verdict_warning_test_() ->
                 [#{stale_direct_constructors := Stale}] = Warnings,
                 ?assertEqual(['BT4126Child', 'BT4126Grandchild'], lists:sort(Stale))
             after
-                [stop_class(P) || P <- [Grandchild, NewOnly, Child, Parent]]
+                [beamtalk_test_proc:stop(P) || P <- [Grandchild, NewOnly, Child, Parent]]
             end
         end},
         {"reload without a new: change stays silent", fun() ->
@@ -319,7 +309,7 @@ stale_verdict_warning_test_() ->
                     end)
                 )
             after
-                [stop_class(P) || P <- [Child, Parent]]
+                [beamtalk_test_proc:stop(P) || P <- [Child, Parent]]
             end
         end},
         {"reload keeping an existing new: stays silent", fun() ->
@@ -337,7 +327,7 @@ stale_verdict_warning_test_() ->
                     end)
                 )
             after
-                [stop_class(P) || P <- [Child, Parent]]
+                [beamtalk_test_proc:stop(P) || P <- [Child, Parent]]
             end
         end},
         {"reload gaining new: with no stale subclass stays silent", fun() ->
@@ -354,7 +344,7 @@ stale_verdict_warning_test_() ->
                     end)
                 )
             after
-                [stop_class(P) || P <- [Child, Parent]]
+                [beamtalk_test_proc:stop(P) || P <- [Child, Parent]]
             end
         end},
         {"put_class_method installing new: warns naming the stale subclass", fun() ->
@@ -387,7 +377,7 @@ stale_verdict_warning_test_() ->
                     end)
                 )
             after
-                [stop_class(P) || P <- [Child, Parent]]
+                [beamtalk_test_proc:stop(P) || P <- [Child, Parent]]
             end
         end},
         {"class-method changes leave no stale static verdict to warn about", fun() ->
@@ -414,7 +404,7 @@ stale_verdict_warning_test_() ->
                     )
                 )
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end}
     ]}.
@@ -473,7 +463,7 @@ new1_chain_test_() ->
                     beamtalk_class_dispatch:class_send(Child, 'new:', [#{a => 1}])
                 )
             after
-                [stop_class(P) || P <- [Child, Parent]]
+                [beamtalk_test_proc:stop(P) || P <- [Child, Parent]]
             end
         end},
         {"an ancestor's runtime new: fun turns a descendant's direct new: off", fun() ->
@@ -495,7 +485,7 @@ new1_chain_test_() ->
                     beamtalk_class_dispatch:lookup_direct_constructor(Child, 'new:', [#{a => 1}])
                 )
             after
-                [stop_class(P) || P <- [Child, Parent]]
+                [beamtalk_test_proc:stop(P) || P <- [Child, Parent]]
             end
         end},
         {"an ancestor that never published the fact keeps new: on the class process", fun() ->
@@ -512,7 +502,7 @@ new1_chain_test_() ->
                 ),
                 ?assertEqual(self(), beamtalk_class_dispatch:class_send(Child, new, []))
             after
-                [stop_class(P) || P <- [Child, Parent]]
+                [beamtalk_test_proc:stop(P) || P <- [Child, Parent]]
             end
         end},
         {"chain_has_user_new1 walks only the ancestors and fails closed", fun() ->
@@ -631,7 +621,7 @@ new0_chain_test_() ->
                 ?assertEqual(false, ctor_key_value('BT4479Child')),
                 ?assertEqual(false, ctor_target('BT4479Child'))
             after
-                [stop_class(P) || P <- [Grand, Child, Parent]]
+                [beamtalk_test_proc:stop(P) || P <- [Grand, Child, Parent]]
             end
         end},
         {"flipping an ancestor's fact alone erases a descendant's static new key", fun() ->
@@ -647,7 +637,7 @@ new0_chain_test_() ->
                 ?assertEqual(false, ctor_key_value('BT4479KeyChild')),
                 ?assertEqual(false, ctor_target('BT4479KeyChild'))
             after
-                [stop_class(P) || P <- [Child, Parent]]
+                [beamtalk_test_proc:stop(P) || P <- [Child, Parent]]
             end
         end},
         {"a class with its own user new wins over the chain", fun() ->
@@ -663,7 +653,7 @@ new0_chain_test_() ->
                     {ok, _}, beamtalk_class_dispatch:lookup_direct_constructor(Child, new, [])
                 )
             after
-                [stop_class(P) || P <- [Child, Parent]]
+                [beamtalk_test_proc:stop(P) || P <- [Child, Parent]]
             end
         end},
         {"chain_has_user_new0 walks only the ancestors and fails open", fun() ->
@@ -718,7 +708,7 @@ static_new_key_test_() ->
                 ?assertEqual(Ref, ctor_target(Name)),
                 ?assertEqual(Ref, ctor_key_value(Name))
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"a class-side new extension erases the key and is honoured", fun() ->
@@ -745,7 +735,7 @@ static_new_key_test_() ->
                 catch
                     _:_ -> ok
                 end,
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"a runtime new fun (put_class_method) erases the key and is honoured", fun() ->
@@ -758,7 +748,7 @@ static_new_key_test_() ->
                 ?assertEqual(false, ctor_target(Name)),
                 ?assertEqual(from_fun, beamtalk_class_dispatch:class_send(Pid, new, []))
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"a reload dropping new from the baked set erases the key", fun() ->
@@ -771,7 +761,7 @@ static_new_key_test_() ->
                 ?assertEqual(false, ctor_target(Name)),
                 ?assertEqual(Pid, beamtalk_class_dispatch:class_send(Pid, new, []))
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"a static new install racing a reload's key erase cannot survive it", fun() ->
@@ -795,7 +785,7 @@ static_new_key_test_() ->
                 ?assertEqual(Pid, beamtalk_class_dispatch:class_send(Pid, new, []))
             after
                 meck:unload(beamtalk_class_shadow_flags),
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end},
         {"a key naming another module or an unregistered class is declined", fun() ->
@@ -816,7 +806,7 @@ static_new_key_test_() ->
                     )
                 )
             after
-                stop_class(Pid)
+                beamtalk_test_proc:stop(Pid)
             end
         end}
     ]}.
@@ -869,7 +859,7 @@ indirect_value_subclass_test_() ->
                     %% `new/0` is its own override slot: Leaf's `new` stays direct.
                     ?assertEqual(self(), beamtalk_class_dispatch:class_send(Leaf, new, []))
                 after
-                    [stop_class(P) || P <- [Leaf, Mid]]
+                    [beamtalk_test_proc:stop(P) || P <- [Leaf, Mid]]
                 end
             end},
         {"an ancestor's class-side new: extension answers a descendant's new: on every path",
@@ -936,7 +926,7 @@ indirect_value_subclass_test_() ->
                         beamtalk_class_dispatch:class_send(Leaf, 'new:', [#{a => 1}])
                     )
                 after
-                    [stop_class(P) || P <- [Leaf, Mid]]
+                    [beamtalk_test_proc:stop(P) || P <- [Leaf, Mid]]
                 end
             end},
         {"an ancestor's class-side new extension does not shadow a descendant's own new", fun() ->
@@ -963,7 +953,7 @@ indirect_value_subclass_test_() ->
                 ?assertEqual({ok, Leaf}, gen_server:call(Leaf, {new, []}))
             after
                 beamtalk_extensions:unregister('BT4588NewMid', new, true),
-                [stop_class(P) || P <- [Leaf, Mid]]
+                [beamtalk_test_proc:stop(P) || P <- [Leaf, Mid]]
             end
         end},
         {"the compiled stdlib publishes the facts that let Bag's dynamic new: build in the caller",

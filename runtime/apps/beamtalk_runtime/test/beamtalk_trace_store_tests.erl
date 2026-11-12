@@ -12,20 +12,12 @@ telemetry handler callbacks, and telemetry_poller VM stats.
 """.
 -include_lib("eunit/include/eunit.hrl").
 
-%% `wait_until/1` polling budget (~5 s).
--define(WAIT_TRIES, 250).
--define(WAIT_SLEEP_MS, 20).
-%% Tests that poll with `wait_until/1` (directly or via `take_store_direct/0`)
-%% run under this explicit EUnit timeout via `?_timed/1`: EUnit's default
-%% 5 s per-test timeout is no longer than one polling budget, so a slow run
-%% would be killed as `cancelled` before the poll could assert (BT-4427).
+%% Tests that poll with `beamtalk_test_wait:until/1` (directly or via
+%% `take_store_direct/0`) run under this explicit EUnit timeout via `?_timed/1`:
+%% EUnit's default 5 s per-test timeout is shorter than one polling budget, so a
+%% slow run would be killed as `cancelled` before the poll could assert
+%% (BT-4427). Worst case per test is two waits (~12 s), under the timeout.
 -define(TEST_TIMEOUT_S, 30).
-%% Worst case per test: `per_actor_stats_need_tracing_test_`'s first case
-%% polls twice.
--define(MAX_WAITS_PER_TEST, 2).
--if(?MAX_WAITS_PER_TEST * ?WAIT_TRIES * ?WAIT_SLEEP_MS >= ?TEST_TIMEOUT_S * 1000).
--error("beamtalk_trace_store_tests: wait budget exceeds TEST_TIMEOUT_S").
--endif.
 -define(_timed(Expr), {timeout, ?TEST_TIMEOUT_S, ?_test(Expr)}).
 
 %%====================================================================
@@ -489,7 +481,7 @@ actor_health_test_() ->
             ?_test(begin
                 %% Health of a dead process
                 DeadPid = spawn(fun() -> ok end),
-                timer:sleep(50),
+                beamtalk_test_wait:dead(DeadPid),
                 Health = beamtalk_trace_store:actor_health(DeadPid),
                 ?assertEqual(dead, maps:get({beamtalk_string, <<"status">>}, Health)),
                 ?assertEqual(
@@ -783,7 +775,7 @@ take_store_direct() ->
         catch
             _:_ -> ok
         end,
-    wait_until(fun() -> whereis(beamtalk_trace_store) =:= undefined end),
+    beamtalk_test_wait:until(fun() -> whereis(beamtalk_trace_store) =:= undefined end),
     case whereis(beamtalk_ets_heir) of
         undefined -> {ok, _} = beamtalk_ets_heir:start_link();
         _ -> ok
@@ -2088,19 +2080,6 @@ agg_footprint() ->
         atomics_size => AtomicsSize
     }.
 
--doc "Poll `Fun` until it answers true (or fail after ~5 s).".
-wait_until(Fun) -> wait_until(Fun, ?WAIT_TRIES).
-wait_until(Fun, 0) ->
-    ?assert(Fun());
-wait_until(Fun, Tries) ->
-    case Fun() of
-        true ->
-            ok;
-        false ->
-            timer:sleep(?WAIT_SLEEP_MS),
-            wait_until(Fun, Tries - 1)
-    end.
-
 -doc """
 Start a real Counter actor, send it one message, then end it: a normal
 `gen_server:stop` (runs `terminate/2`, emitting the lifecycle `stop` event)
@@ -2256,7 +2235,7 @@ per_actor_stats_need_tracing_test_() ->
                     Dead2 ! stop,
                     %% No monitors: the sweep (1s timer) reclaims the dead
                     %% pids' rows once they are gone.
-                    wait_until(fun() ->
+                    beamtalk_test_wait:until(fun() ->
                         beamtalk_trace_store:get_stats(Dead1) =:= #{} andalso
                             beamtalk_trace_store:get_stats(Dead2) =:= #{}
                     end),
@@ -2299,7 +2278,9 @@ per_actor_stats_need_tracing_test_() ->
                     %% removes the last pid row.
                     Record(Live, 100, ok),
                     Live ! stop,
-                    wait_until(fun() -> beamtalk_trace_store:get_stats(Live) =:= #{} end),
+                    beamtalk_test_wait:until(fun() ->
+                        beamtalk_trace_store:get_stats(Live) =:= #{}
+                    end),
                     #{
                         {beamtalk_string, <<"methods">>} := #{
                             {beamtalk_string, <<"increment">>} := Inc2
@@ -2374,7 +2355,9 @@ per_actor_stats_need_tracing_test_() ->
                         LiveMethods
                     ),
                     Pid ! stop,
-                    wait_until(fun() -> beamtalk_trace_store:get_stats(Pid) =:= #{} end),
+                    beamtalk_test_wait:until(fun() ->
+                        beamtalk_trace_store:get_stats(Pid) =:= #{}
+                    end),
                     #{{beamtalk_string, <<"methods">>} := Methods} = class_entry(<<"Counter">>),
                     ?assertMatch(
                         #{{beamtalk_string, <<"calls">>} := 1},
@@ -2435,7 +2418,7 @@ sweep_reclaims_dead_pid_rows_test_() ->
                 Pid = idle_process(),
                 beamtalk_trace_store:record_dispatch(Pid, first, 10, ok, sync, 'Late'),
                 Pid ! stop,
-                wait_until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
+                beamtalk_test_wait:until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
                 %% Callers report dispatches for the dead pid after it was
                 %% swept, from two processes at once.
                 Parent = self(),
@@ -2452,7 +2435,7 @@ sweep_reclaims_dead_pid_rows_test_() ->
                     end
                  || W <- Writers
                 ],
-                wait_until(fun() ->
+                beamtalk_test_wait:until(fun() ->
                     ets:info(beamtalk_agg_pid, size) =:= 0 andalso
                         ets:info(beamtalk_agg_pid_keys, size) =:= 0
                 end),
@@ -2517,7 +2500,7 @@ pid_cap_drops_and_recovers_test_() ->
                 %% new pid is tracked.
                 Ghost ! stop,
                 lists:foreach(fun(P) -> exit(P, kill) end, Fill),
-                wait_until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
+                beamtalk_test_wait:until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
                 Live = idle_process(),
                 beamtalk_trace_store:record_dispatch(Live, capped_method, 10, ok, sync, 'Cap'),
                 ?assertMatch([_], ets:lookup(beamtalk_agg_pid, {Live, capped_method})),
@@ -2562,7 +2545,7 @@ concurrent_alloc_during_grow_and_clear_test_() ->
                  || I <- lists:seq(1, 1200)
                 ],
                 Burst ! stop,
-                wait_until(fun() ->
+                beamtalk_test_wait:until(fun() ->
                     ets:info(beamtalk_agg_pid, size) =:= 0 andalso
                         ets:info(beamtalk_agg_pid_keys, size) =:= 0
                 end),
@@ -2848,7 +2831,7 @@ free_list_churn_stays_flat_test_() ->
                 {T1, Win1, _} = churn_window(Workers, PerWorker, Class, Selector, 2, false),
                 ?assertEqual(Allocs, ets:info(beamtalk_agg_pid, size)),
                 [exit(P, kill) || P <- Win1],
-                wait_until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
+                beamtalk_test_wait:until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
                 ?assertEqual(Allocs, ets:info(beamtalk_agg_free_slots, size)),
                 %% Releases stripe across all shards: a fixed-shard
                 %% regression would pile every release onto one.
@@ -2898,7 +2881,7 @@ free_list_churn_stays_flat_test_() ->
 
                 %% Window 3 (traced): ~1 free-list take per new actor.
                 [exit(P, kill) || P <- Win2],
-                wait_until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
+                beamtalk_test_wait:until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
                 %% The sweep releases exactly the window-2 rows on top of
                 %% window 2's stragglers.
                 Pool3 = ets:info(beamtalk_agg_free_slots, size),
@@ -2911,7 +2894,7 @@ free_list_churn_stays_flat_test_() ->
                 ?assert(Takes > 0),
                 ?assert(Takes =< Allocs * 3 div 2),
                 [exit(P, kill) || P <- Win3],
-                wait_until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end)
+                beamtalk_test_wait:until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end)
             end)}
     end}.
 
@@ -2934,7 +2917,7 @@ free_list_release_reuse_roundtrip_test_() ->
                 ]),
                 ?assertEqual(3, length(FirstSlots)),
                 [exit(P, kill) || P <- Pids],
-                wait_until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
+                beamtalk_test_wait:until(fun() -> ets:info(beamtalk_agg_pid, size) =:= 0 end),
                 Freed = lists:sort([
                     {R, B}
                  || {{_, R, B}} <- ets:tab2list(beamtalk_agg_free_slots)

@@ -37,8 +37,6 @@ no other test in the same `rebar3 eunit` run ever sees a faulted compiler.
 %% to append — covers both `reindent_failed` call sites with one fixture.
 %%====================================================================
 
-temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
-
 setup() ->
     application:ensure_all_started(compiler),
     case application:ensure_all_started(beamtalk_compiler) of
@@ -59,8 +57,8 @@ setup() ->
         LogPid -> gen_server:stop(LogPid)
     end,
     Unique = beamtalk_test_unique:id(),
-    ProjDir = filename:join(temp_dir(), "bt-reindent-fail-" ++ Unique),
-    ChangelogHome = filename:join(temp_dir(), "bt-reindent-fail-home-" ++ Unique),
+    ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-reindent-fail-" ++ Unique),
+    ChangelogHome = filename:join(beamtalk_test_fs:base_dir(), "bt-reindent-fail-home-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
     ok = filelib:ensure_path(ChangelogHome),
     OldHome = os:getenv("HOME"),
