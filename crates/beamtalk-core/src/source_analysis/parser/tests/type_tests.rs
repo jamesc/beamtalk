@@ -2361,6 +2361,16 @@ fn parse_shape_optional_marker_before_ellipsis_is_error() {
 }
 
 #[test]
+fn parse_shape_ellipsis_then_comma_question_field_recovers_cleanly() {
+    let (ann, diags) = parse_shape_alias("#{..., #a => Integer,?#b => String}");
+    assert_eq!(diags.len(), 1, "{diags:?}");
+    let (fields, open) = shape_parts(&ann);
+    assert!(open);
+    assert_eq!(fields.len(), 2);
+    assert!(fields[1].1);
+}
+
+#[test]
 fn parse_shape_trailing_comma_after_ellipsis_is_allowed() {
     let (ann, diags) = parse_shape_alias("#{#a => Integer, ...,}");
     assert!(diags.is_empty(), "{diags:?}");

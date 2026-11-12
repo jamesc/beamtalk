@@ -2194,6 +2194,10 @@ impl Parser {
         // Recovery: keep parsing the remaining fields.
         if is_comma(self.current_kind()) {
             self.advance();
+        } else if matches!(self.current_kind(), TokenKind::BinarySelector(s) if s.as_str() == ",?")
+        {
+            *pending_optional = Some(self.current_token().span());
+            self.advance();
         }
         true
     }
