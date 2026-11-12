@@ -14,6 +14,7 @@ use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::type_checker::binary_string_compare;
 use crate::semantic_analysis::type_checker::known_remote;
+use crate::semantic_analysis::type_checker::narrowing::facts::AliasFacts;
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::types::{
     AssignmentTypeMismatch, ClassObjectType, CrossObjectFieldMutation,
@@ -490,6 +491,21 @@ impl TypeChecker {
         }
     }
 
+    /// BT-4714: the alias facts for `local := value`; `None` when a block may
+    /// rewrite a tested variable behind our back.
+    fn alias_condition_facts(
+        &mut self,
+        value: &Expression,
+        hierarchy: &ClassHierarchy,
+        env: &TypeEnv,
+    ) -> Option<AliasFacts> {
+        let facts = self.alias_facts(value, env, hierarchy);
+        let blocked = facts
+            .keys()
+            .any(|k| matches!(k, EnvKey::Local(n) if self.block_written_locals.contains(n)));
+        (!blocked).then_some(facts)
+    }
+
     /// Infer an assignment `target := value` (optionally `target :: Type :=
     /// value`) — the `Expression::Assignment` arm of `infer_expr`'s dispatch.
     ///
@@ -575,6 +591,13 @@ impl TypeChecker {
         let target_written_by_block = matches!(target, Expression::Identifier(ident)
             if self.block_written_locals.contains(&ident.name));
 
+        let alias_facts = if matches!(target, Expression::Identifier(_)) && !target_written_by_block
+        {
+            self.alias_condition_facts(value, hierarchy, env)
+        } else {
+            None
+        };
+
         match target {
             Expression::Identifier(ident) => {
                 // Track type origin for generic type params
@@ -599,6 +622,13 @@ impl TypeChecker {
                 }) {
                     Some(remote) => env.mark_known_remote(key.clone(), remote),
                     None => env.clear_known_remote(&key),
+                }
+                // BT-4714: remember what a Boolean condition proves (computed
+                // before the write, against the pre-assignment env).
+                if let Some(facts) = alias_facts {
+                    if !facts.mentions(&key) {
+                        env.set_cond_alias(key.clone(), facts);
+                    }
                 }
                 // BT-4257: the write above cleared any raw-Binary fact.
                 if value_is_raw_binary && !target_written_by_block {

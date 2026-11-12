@@ -22,7 +22,10 @@
 //! * Anything else contributes no facts but never stops the rest of a chain
 //!   from narrowing.
 //!
-//! New connectives (aliases, say) extend `condition_facts` with one more case
+//! * A local assigned a condition (`c := x notNil`) stands for that
+//!   condition's facts until it, or a variable in them, is written (BT-4714).
+//!
+//! New connectives extend `condition_facts` with one more case
 //! that builds a [`CondFacts`]; a new consumer calls it as `loop_body_facts`
 //! does.
 
@@ -95,6 +98,11 @@ impl Facts {
         }
     }
 
+    /// Whether `key` is one of the narrowed variables.
+    fn contains(&self, key: &EnvKey) -> bool {
+        self.0.iter().any(|(k, _)| k == key)
+    }
+
     /// Forget every `self.<field>` fact (BT-4715: a self-send may reassign
     /// any field, so a fact about one cannot outlive it).
     pub(crate) fn drop_fields(&mut self) {
@@ -113,10 +121,67 @@ pub(crate) struct CondFacts {
 }
 
 impl CondFacts {
+    /// Whether either side narrows `key`.
+    pub(crate) fn mentions(&self, key: &EnvKey) -> bool {
+        self.when_true.contains(key) || self.when_false.contains(key)
+    }
+
+    /// The narrowed variables on either side.
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &EnvKey> {
+        self.when_true.keys().chain(self.when_false.keys())
+    }
+
     /// Drop `self.<field>` facts from both sides (see [`Facts::drop_fields`]).
     pub(crate) fn drop_fields(&mut self) {
         self.when_true.drop_fields();
         self.when_false.drop_fields();
+    }
+}
+
+/// What a local holding a condition proves, for each kind of consumer
+/// (BT-4714): `arm` for branches and loops, `post_guard` for the statements
+/// after a diverging guard — filtered exactly as the direct test would be, so
+/// an alias never proves more than spelling the test inline.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AliasFacts {
+    arm: CondFacts,
+    post_guard: CondFacts,
+}
+
+impl AliasFacts {
+    /// Whether the alias proves nothing for any consumer.
+    pub(crate) fn is_empty(&self) -> bool {
+        [&self.arm, &self.post_guard]
+            .iter()
+            .all(|c| c.when_true.is_empty() && c.when_false.is_empty())
+    }
+
+    /// Whether the alias narrows anything for branch arms and loop bodies.
+    #[cfg(test)]
+    pub(crate) fn proves_in_arm(&self) -> bool {
+        !self.arm.when_true.is_empty() || !self.arm.when_false.is_empty()
+    }
+
+    /// Whether the alias narrows anything after a diverging guard.
+    #[cfg(test)]
+    pub(crate) fn proves_post_guard(&self) -> bool {
+        !self.post_guard.when_true.is_empty() || !self.post_guard.when_false.is_empty()
+    }
+
+    /// Whether either set of facts narrows `key`.
+    pub(crate) fn mentions(&self, key: &EnvKey) -> bool {
+        self.arm.mentions(key) || self.post_guard.mentions(key)
+    }
+
+    /// The variables either set of facts narrows.
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &EnvKey> {
+        self.arm.keys().chain(self.post_guard.keys())
+    }
+
+    /// Drop `self.<field>` facts.
+    fn drop_fields(&mut self) {
+        self.arm.drop_fields();
+        self.post_guard.drop_fields();
     }
 }
 
@@ -193,6 +258,28 @@ fn single_expression_block_body(arg: &Expression) -> Option<&Expression> {
 }
 
 impl TypeChecker {
+    /// BT-4714: what `value` (the right-hand side of `local := value`) proves
+    /// when it is a Boolean condition, for each kind of consumer. Computed
+    /// before the write, against the pre-assignment env. `self.<field>` facts
+    /// are not kept: a later self-send may reassign the field.
+    pub(in crate::semantic_analysis::type_checker) fn alias_facts(
+        &mut self,
+        value: &Expression,
+        env: &TypeEnv,
+        hierarchy: &ClassHierarchy,
+    ) -> AliasFacts {
+        let no_span = FactsCtx {
+            post_guard: false,
+            hint_span: None,
+        };
+        let mut facts = AliasFacts {
+            arm: self.condition_facts(value, env, hierarchy, no_span),
+            post_guard: self.condition_facts(value, env, hierarchy, FactsCtx::post_guard()),
+        };
+        facts.drop_fields();
+        facts
+    }
+
     /// The facts `cond` proves when true and when false — see the module docs.
     pub(in crate::semantic_analysis::type_checker) fn condition_facts(
         &mut self,
@@ -229,6 +316,19 @@ impl TypeChecker {
             };
         }
 
+        // BT-4714: a local holding a condition stands for what it proved.
+        if let Expression::Identifier(ident) = cond {
+            return env
+                .cond_alias(&EnvKey::local(ident.name.clone()))
+                .map(|alias| {
+                    if ctx.post_guard {
+                        alias.post_guard.clone()
+                    } else {
+                        alias.arm.clone()
+                    }
+                })
+                .unwrap_or_default();
+        }
         let Expression::MessageSend {
             receiver: lhs,
             selector,

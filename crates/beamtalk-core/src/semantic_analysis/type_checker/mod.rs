@@ -904,6 +904,13 @@ struct TypeEnv {
     /// to a binding clears its entry; `infer_assignment` re-marks it when
     /// the right-hand side is itself a raw-Binary producer.
     raw_binary: std::collections::HashSet<EnvKey>,
+    /// BT-4714: locals currently bound to a Boolean condition (`c := x notNil`)
+    /// and what that condition proved. Any write to the local, or to a
+    /// variable named in its facts, drops the entry (see
+    /// [`TypeEnv::invalidate_cond_aliases`]). Narrowing refinements go through
+    /// `set` too, so they drop the aliases that mention the refined variable
+    /// (safe: only precision is lost).
+    cond_aliases: HashMap<EnvKey, narrowing::facts::AliasFacts>,
 }
 
 impl TypeEnv {
@@ -914,6 +921,7 @@ impl TypeEnv {
             in_class_method: false,
             known_remote: HashMap::new(),
             raw_binary: std::collections::HashSet::new(),
+            cond_aliases: HashMap::new(),
         }
     }
 
@@ -934,6 +942,7 @@ impl TypeEnv {
 
     fn set(&mut self, key: EnvKey, ty: InferredType) {
         self.raw_binary.remove(&key);
+        self.invalidate_cond_aliases(&key);
         self.bindings.insert(key, ty);
     }
 
@@ -947,6 +956,31 @@ impl TypeEnv {
         self.origins.remove(key);
         self.known_remote.remove(key);
         self.raw_binary.remove(key);
+        self.invalidate_cond_aliases(key);
+    }
+
+    /// BT-4714: `key` was written. Forget the alias held *by* `key` and every
+    /// alias whose facts mention `key`.
+    fn invalidate_cond_aliases(&mut self, key: &EnvKey) {
+        if self.cond_aliases.is_empty() {
+            return;
+        }
+        self.cond_aliases.remove(key);
+        self.cond_aliases.retain(|_, facts| !facts.mentions(key));
+    }
+
+    /// BT-4714: record that the local `key` holds a condition proving `facts`.
+    /// Call after the binding is written — a write clears it.
+    fn set_cond_alias(&mut self, key: EnvKey, facts: narrowing::facts::AliasFacts) {
+        if facts.is_empty() {
+            return;
+        }
+        self.cond_aliases.insert(key, facts);
+    }
+
+    /// BT-4714: the condition facts the local `key` stands for, if any.
+    fn cond_alias(&self, key: &EnvKey) -> Option<&narrowing::facts::AliasFacts> {
+        self.cond_aliases.get(key)
     }
 
     /// BT-4257: record that the local `key` is bound to a provably raw
@@ -995,6 +1029,7 @@ impl TypeEnv {
             },
         );
         self.raw_binary.remove(&key);
+        self.invalidate_cond_aliases(&key);
         self.bindings.insert(key, ty);
     }
 
