@@ -201,3 +201,24 @@ fn diverging_self_send_in_non_diverging_guard_branch_keeps_narrowing() {
         "  run -> Integer =>\n    self.f isNil ifTrue: [^0] ifFalse: [self.f < 0 ifTrue: [self error: \"neg\"]]\n    self need: self.f",
     );
 }
+
+#[test]
+fn self_send_before_divergence_in_on_do_block_drops_narrowing() {
+    // The exception is caught, so control continues after the send and the
+    // earlier `self reset` has run.
+    assert_nil_leak(
+        "  run -> Integer =>\n    self.f isNil ifTrue: [^0]\n    [self reset. self error: \"x\"] on: Error do: [:e | nil]\n    self need: self.f",
+    );
+}
+
+/// Known gap (documented on `infer_message_send_with_receiver_ty`): a
+/// self-send late in a repeated block body is not seen by an earlier
+/// statement of the next iteration, so this is accepted although `self.f` is
+/// `nil` on the second pass. When loops are handled this test should flip to
+/// `assert_nil_leak`.
+#[test]
+fn known_gap_loop_body_self_send_not_seen_by_earlier_statement() {
+    assert_clean(
+        "  run -> Integer =>\n    self.f isNil ifTrue: [^0]\n    1 to: 3 do: [:i | self need: self.f. self reset]\n    0",
+    );
+}

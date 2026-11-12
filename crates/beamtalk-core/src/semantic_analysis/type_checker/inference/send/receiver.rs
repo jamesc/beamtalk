@@ -18,6 +18,7 @@ use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType, Me
 use crate::semantic_analysis::protocol_registry::ProtocolMethodRequirement;
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::type_checker::known_remote;
+use crate::semantic_analysis::type_checker::narrowing::visitors::expr_contains_returning_self_send;
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::validation::ProtocolSendResolution;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
@@ -82,6 +83,22 @@ impl TypeChecker {
         if Self::is_self_or_super(receiver)
             && !self.in_value_type_body
             && !matches!(ty, InferredType::Never)
+        {
+            self.self_send_epoch += 1;
+        }
+        // A block that ends in `self error:` diverges, but under `on:do:` /
+        // `ensure:` the exception is caught and control continues after the
+        // send, so a returning self-send before the divergence still counts
+        // (the block's own rewind in `forget_diverging_block_self_sends`
+        // assumed it did not).
+        if !self.in_value_type_body
+            && matches!(
+                selector.well_known(),
+                Some(WellKnownSelector::OnDo | WellKnownSelector::Ensure)
+            )
+            && std::iter::once(receiver)
+                .chain(arguments)
+                .any(|e| expr_contains_returning_self_send(e, &self.type_map))
         {
             self.self_send_epoch += 1;
         }
