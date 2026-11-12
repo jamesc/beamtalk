@@ -176,11 +176,19 @@ See also: docs/ADR/0069-actor-observability-and-tracing.md
 %% from schedulers_online, so releases and takes always agree however many
 %% schedulers are online.
 -define(FREE_LIST_SHARDS, 64).
+%% Rows of the pid table the dead-pid sweep handles per gen_server turn
+%% (BT-4124). Between chunks the server yields, so queued queries and counter
+%% grows wait for at most one chunk, not the whole table.
+-define(SWEEP_CHUNK, 2000).
 
 -record(state, {
     sweep_timer :: reference() | undefined,
     %% VM stats from telemetry_poller
-    vm_stats = #{} :: map()
+    vm_stats = #{} :: map(),
+    %% A chunked dead-pid sweep in progress (BT-4124): the `ets:select/3`
+    %% continuation plus the token of the `{sweep_continue, Token}` message
+    %% that resumes it. `undefined` when no sweep is running.
+    sweep_cont :: {reference(), term()} | undefined
 }).
 
 %%====================================================================
@@ -439,7 +447,10 @@ error_methods(Limit) ->
 -doc "Top N actors by message queue length (live snapshot).".
 -spec bottlenecks(pos_integer()) -> [map()].
 bottlenecks(Limit) ->
-    gen_server:call(?MODULE, {bottlenecks, Limit}).
+    %% Runs in the caller (BT-4124): it reads the public instance registry and
+    %% `process_info` only, so a large scan never queues counter grows or
+    %% queries behind it in the gen_server.
+    [to_bt_keys(M) || M <- do_bottlenecks(Limit)].
 
 -doc "Live process health for a specific actor.".
 -spec actor_health(pid()) -> map().
@@ -648,7 +659,7 @@ handle_call(disable, _From, State) ->
     ok = beamtalk_telemetry:refresh_dispatch_events(),
     drop_pid_data(),
     ?LOG_INFO("Trace capture disabled", #{}),
-    {reply, ok, State};
+    {reply, ok, drop_sweep(State)};
 handle_call({dispatch_flag, Fun}, _From, State) ->
     %% A raise in `Fun` goes back to the caller, not into this process.
     %% bt-catcher-audit: not-applicable-no-block - Fun is beamtalk_telemetry's
@@ -663,7 +674,10 @@ handle_call({dispatch_flag, Fun}, _From, State) ->
 handle_call(clear, _From, State) ->
     do_clear(),
     ?LOG_INFO("Trace store cleared", #{}),
-    {reply, ok, State};
+    {reply, ok, drop_sweep(State)};
+handle_call(sweep_pending, _From, State) ->
+    %% Whether a chunked sweep is mid-way (tests poll this to wait it out).
+    {reply, State#state.sweep_cont =/= undefined, State};
 handle_call({grow_counters, CallerRef}, _From, State) ->
     %% Serialized counters grow to prevent concurrent persistent_term overwrites.
     %% Check if another caller already grew while we were queued.
@@ -692,9 +706,6 @@ handle_call({hot_methods, Limit}, _From, State) ->
 handle_call({error_methods, Limit}, _From, State) ->
     Result = [to_bt_keys(M) || M <- do_error_methods(Limit)],
     {reply, Result, State};
-handle_call({bottlenecks, Limit}, _From, State) ->
-    Result = [to_bt_keys(M) || M <- do_bottlenecks(Limit)],
-    {reply, Result, State};
 handle_call({actor_health, Pid}, _From, State) ->
     Result = to_bt_keys(do_actor_health(Pid)),
     {reply, Result, State};
@@ -713,9 +724,14 @@ handle_cast(_Msg, State) ->
     {noreply, State}.
 
 handle_info(sweep_eviction, State) ->
-    do_sweep_eviction(),
+    State1 = do_sweep_eviction(State),
     TimerRef = start_sweep_timer(),
-    {noreply, State#state{sweep_timer = TimerRef}};
+    {noreply, State1#state{sweep_timer = TimerRef}};
+handle_info({sweep_continue, Token}, #state{sweep_cont = {Token, Cont}} = State) ->
+    {noreply, sweep_next_chunk(Cont, State#state{sweep_cont = undefined})};
+handle_info({sweep_continue, _StaleToken}, State) ->
+    %% The sweep was dropped (clear/0, disable/0) after this was queued.
+    {noreply, State};
 handle_info({'ETS-TRANSFER', TableName, _FromPid, _HeirData}, State) ->
     %% `beamtalk_ets_heir` handed a table back during init (ensure_ets_tables/0).
     ?LOG_DEBUG("Reclaimed ETS table from heir", #{table => TableName}),
@@ -744,11 +760,13 @@ code_change(OldVsn, State, Extra) ->
     beamtalk_hot_reload:code_change(OldVsn, upgrade_state(State), Extra).
 
 -doc """
-Migrate an old state record: pre-BT-4066 `{state, Sweep, Vm}` is already the
-current shape, and the BT-4066 `{state, Sweep, Vm, Monitors}` has its monitors
+Migrate an old state record: pre-BT-4066 `{state, Sweep, Vm}` gains the
+(empty) sweep continuation of BT-4124, and the BT-4066 `{state, Sweep, Vm, Monitors}` has its monitors
 dismantled (BT-4103 arms none, so inherited ones are released rather than
 left to linger on actors' `monitored_by`).
 """.
+upgrade_state({state, SweepTimer, VmStats}) ->
+    #state{sweep_timer = SweepTimer, vm_stats = VmStats};
 upgrade_state({state, SweepTimer, VmStats, Monitors}) when is_map(Monitors) ->
     lists:foreach(
         fun({_Pid, MRef}) -> erlang:demonitor(MRef, [flush]) end,
@@ -1252,8 +1270,12 @@ configure_poller() ->
 start_sweep_timer() ->
     erlang:send_after(?EVICTION_INTERVAL_MS, self(), sweep_eviction).
 
--doc "Evict oldest events if over the soft bound; sweep dead pids' pid rows.".
-do_sweep_eviction() ->
+-doc """
+Evict oldest events if over the soft bound; start a chunked sweep of dead
+pids' pid rows. A tick that finds a sweep still running (BT-4124) starts no
+second one: the running sweep owns the continuation.
+""".
+do_sweep_eviction(State) ->
     MaxEvents = max_events(),
     Size = ets:info(?TRACE_EVENTS, size),
     case Size > MaxEvents of
@@ -1264,19 +1286,27 @@ do_sweep_eviction() ->
         false ->
             ok
     end,
-    case is_enabled() of
+    case {is_enabled(), State#state.sweep_cont} of
         %% The pid table is empty unless tracing is enabled (disable/0 drops
         %% it), so there is nothing to sweep while disabled.
-        true -> sweep_dead_pids();
-        false -> ok
+        {true, undefined} -> start_sweep(State);
+        _ -> State
     end.
 
 -doc """
 Delete the pid rows of dead actors, releasing their slots (BT-4103). This is
 what bounds the enabled-only pid table: no monitors are armed, so a dead
-pid's rows linger until this sweep (at most one eviction interval). Each row
-is claimed with `ets:take/2`: a row a caller re-creates for the pid afterwards
-(a late dispatch for a dead actor) stays until the next sweep.
+pid's rows linger until this sweep (at most one eviction interval plus the
+time to walk the table). Each row is claimed with `ets:take/2`: a row a caller
+re-creates for the pid afterwards (a late dispatch for a dead actor) stays
+until the next sweep.
+
+The table is walked in chunks of `?SWEEP_CHUNK` rows (BT-4124), one chunk per
+gen_server turn; after each chunk the server sends itself
+`{sweep_continue, Token}` and returns, so queued calls are served in between.
+Rows a concurrent writer adds or removes mid-walk may be skipped or seen
+twice; both are harmless (every step is idempotent) and the next tick catches
+stragglers.
 
 The pids to check come from the rows themselves, not from the keys index
 (BT-4197): a row whose keys entry was lost (a `clear/0` racing a writer) is
@@ -1287,20 +1317,66 @@ code can never be live data: it is reclaimed too, and stops counting toward
 `?MAX_PID_KEYS`. The tables are heir-owned, so an unexpected failure here
 crashes the gen_server without losing them.
 """.
-sweep_dead_pids() ->
+start_sweep(State) ->
     case ets:info(?AGG_PID, size) of
         0 ->
-            ok;
+            State;
         _ ->
-            ByPid = ets:foldl(
-                fun({{Pid, Selector}, _Ref, _Base, _Class}, Acc) ->
-                    maps:update_with(Pid, fun(Ss) -> [Selector | Ss] end, [Selector], Acc)
-                end,
-                #{},
-                ?AGG_PID
-            ),
-            maps:foreach(fun sweep_pid_rows/2, ByPid)
+            %% Only the `{Pid, Selector}` key of each row is needed.
+            MatchSpec = [{{{'$1', '$2'}, '_', '_', '_'}, [], [{{'$1', '$2'}}]}],
+            %% `select/3` continuations hold a slot position, and the table
+            %% shrinks as the sweep deletes rows, which would skip rows
+            %% between chunks. Fixing the table pins the layout until the
+            %% sweep ends (`end_sweep/1`, `drop_sweep/1`).
+            true = ets:safe_fixtable(?AGG_PID, true),
+            sweep_step(ets:select(?AGG_PID, MatchSpec, ?SWEEP_CHUNK), State)
     end.
+
+%% Resume a sweep. A continuation that no longer matches its table (the table
+%% was recreated, BT-4124) ends the sweep: the next tick starts afresh.
+sweep_next_chunk(Cont, State) ->
+    Next =
+        try
+            ets:select(Cont)
+        catch
+            error:badarg -> '$end_of_table'
+        end,
+    sweep_step(Next, State).
+
+sweep_step('$end_of_table', State) ->
+    end_sweep(State);
+sweep_step({KeyPairs, Cont}, State) ->
+    ByPid = lists:foldl(
+        fun({Pid, Selector}, Acc) ->
+            maps:update_with(Pid, fun(Ss) -> [Selector | Ss] end, [Selector], Acc)
+        end,
+        #{},
+        KeyPairs
+    ),
+    maps:foreach(fun sweep_pid_rows/2, ByPid),
+    case Cont of
+        '$end_of_table' ->
+            end_sweep(State);
+        _ ->
+            Token = make_ref(),
+            self() ! {sweep_continue, Token},
+            State#state{sweep_cont = {Token, Cont}}
+    end.
+
+%% Release the table fixation `start_sweep/1` took.
+end_sweep(State) ->
+    try
+        ets:safe_fixtable(?AGG_PID, false)
+    catch
+        error:badarg -> ok
+    end,
+    State#state{sweep_cont = undefined}.
+
+%% Abandon a sweep in progress (`clear/0`, `disable/0`).
+drop_sweep(#state{sweep_cont = undefined} = State) ->
+    State;
+drop_sweep(State) ->
+    end_sweep(State).
 
 sweep_pid_rows(Pid, RowSelectors) ->
     case is_local_live_pid(Pid) of
