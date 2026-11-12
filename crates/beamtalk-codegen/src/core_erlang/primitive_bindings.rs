@@ -901,6 +901,11 @@ mod tests {
         // Pure Beamtalk methods should NOT be in the table
         assert!(table.lookup("Integer", "negated").is_none());
         assert!(table.lookup("Integer", "abs").is_none());
-        assert!(table.lookup("String", "isEmpty").is_none());
+        assert!(table.lookup("String", "size").is_none());
+
+        // BT-4766: String isEmpty/isNotEmpty are direct primitives (not
+        // `self bitSize =:= 0`, which compiled to a dynamic send).
+        assert!(table.lookup("String", "isEmpty").is_some());
+        assert!(table.lookup("String", "isNotEmpty").is_some());
     }
 }
