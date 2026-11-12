@@ -64,7 +64,7 @@ TestCase subclass: PrintableProtocolTest
   testStringProtocolsIncludesPrintable =>
     self assert: (String protocols includes: #Printable)
 
-  // --- Classes with auto-generated asString (codegen-synthesized) ---
+  // --- Classes with stdlib-defined asString (Boolean / UndefinedObject, BT-4716) ---
   testTrueConforms => self assert: (True conformsTo: #Printable)
 
   testFalseConforms => self assert: (False conformsTo: #Printable)

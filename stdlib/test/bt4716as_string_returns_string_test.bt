@@ -20,3 +20,10 @@ TestCase subclass: Bt4716AsStringReturnsStringTest
     self assert: false asString class equals: String
     self assert: false asString equals: "false"
     self assert: "x=" ++ false asString equals: "x=false"
+
+  testBlockAsString =>
+    block := [1]
+    @expect dnu
+    text := block asString
+    self assert: text class equals: String
+    self assert: text equals: "Block"
