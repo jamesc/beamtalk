@@ -191,10 +191,84 @@ build-rust:
 build-release: build-rust-release build-erlang
 
 # Build Rust in release mode
+#
+# BT-4749: deliberately NOT `--all-targets`. That flag builds the test targets,
+# which activates dev-dependencies, and a dev-dependency's `features = ["test"]`
+# (e.g. beamtalk-repl -> beamtalk-codegen) is then unified into the *library*
+# that the shipped binaries link — compiling the fault registry and test probes
+# into the release `beamtalk`. `just check-release-build` rejects `--all-targets`
+# on any release build command (this recipe, release.yml, nightly.yml) and checks
+# the resolved release graph and binaries for leaked test features.
 build-rust-release:
     @echo "🔨 Building Rust workspace (release)..."
-    @cargo build --all-targets --release --quiet
+    @cargo build --release --quiet
     @echo "✅ Rust release build complete"
+
+# BT-4749: the release workspace build must be warning-free AND must not carry
+# test-only code. Builds into its own target dir (RUSTFLAGS differ from a normal
+# build, so sharing target/release would force a full rebuild of it) and fails
+# if a release build command passes --all-targets, any workspace crate's `test`
+# feature is enabled in the release graph, or a fault-injection/probe symbol is
+# linked into the shipped binaries.
+# Unix-only (needs `nm`); Linux CI runs it.
+[unix]
+check-release-build:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # 0. The commands that actually produce the shipped binaries must not
+    #    build the test targets (--all-targets, --tests, --benches, --examples):
+    #    that activates dev-dependencies and unifies their `test` features into
+    #    the libraries. This recipe builds its own way, so scan the real release
+    #    build commands. Best-effort and line-based (a `\`-continued command
+    #    is not seen); steps 1-2 below check this recipe's own build. `[ ]`
+    #    keeps this line from matching itself; grep exit 1 is "no match", but
+    #    any other non-zero is a failed scan and must not read as "no leak".
+    dev_flags='--(all-targets|tests?|benches|bench|examples?)'
+    rc=0
+    grep -nE "cargo[ ]build[^#]*(${dev_flags}[^#]*--release|--release[^#]*${dev_flags})" Justfile .github/workflows/*.yml scripts/ci/*.sh || rc=$?
+    case $rc in
+        0) echo "❌ a release build builds test targets (see above); that unifies dev-dependency 'test' features into the shipped binaries"; exit 1 ;;
+        1) ;;
+        *) echo "❌ could not scan the release build commands (grep exit $rc)"; exit 1 ;;
+    esac
+    echo "🔍 Checking the release workspace build (warnings denied)..."
+    dir=target/release-check
+    RUSTFLAGS="-D warnings" cargo build --release --workspace --locked --quiet --target-dir "$dir"
+    # 1. Resolved features (linker-independent, covers every crate and every
+    #    gated module): in the graph a release build resolves (normal + build
+    #    edges, no dev), no workspace crate may have a `test*` feature on. A
+    #    dev-dependency's `features = ["test"]` only shows up here if something
+    #    (e.g. `--all-targets`) activated it. Capture first so a `cargo tree`
+    #    failure cannot read as "no leak".
+    tree="$(cargo tree --workspace --locked -e normal,build,features --prefix none)"
+    [ -n "$tree" ] || { echo "❌ cargo tree printed nothing; cannot check resolved features"; exit 1; }
+    if grep -E '^beamtalk[a-z-]* feature "test' <<<"$tree" | sort -u; then
+        echo "❌ a workspace crate's 'test' feature is enabled in the release graph (see above)"
+        exit 1
+    fi
+    # 2. Second line of defence on the binaries themselves. The linker drops
+    #    unreferenced code, so this only sees test code production code calls:
+    #    the codegen fault registry and the dropped-assignment probe (called
+    #    from cfg-gated blocks in production modules), not e.g. core's
+    #    test_helpers. Without nm it would inspect nothing and still pass.
+    command -v nm >/dev/null || { echo "❌ nm not found; cannot inspect the release binaries"; exit 1; }
+    leak_re='beamtalk_codegen::core_erlang::(fault::registry|dropped_assignment_probe)::'
+    # Scan every binary the release packages, read from the one list that
+    # package-release.sh ships so the two cannot drift apart.
+    bins="$(sed -n 's/^BINARIES=(\(.*\))$/\1/p' scripts/ci/package-release.sh)"
+    [ -n "$bins" ] || { echo "❌ could not read BINARIES from scripts/ci/package-release.sh"; exit 1; }
+    leaked=0
+    for name in $bins; do
+        bin="$dir/release/$name"
+        [ -f "$bin" ] || { echo "❌ $bin not built"; exit 1; }
+        syms="$(nm -C "$bin")"
+        if grep -E "$leak_re" <<<"$syms"; then
+            echo "❌ $bin links test-only code (a crate's 'test' feature leaked into the release build)"
+            leaked=1
+        fi
+    done
+    [ "$leaked" = 0 ] || exit 1
+    echo "✅ Release build is warning-free and carries no test-only code"
 
 # Build the LSP server
 build-lsp:

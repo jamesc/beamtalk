@@ -23,7 +23,12 @@
 //! value-type and plain-object methods, and the REPL.
 
 use super::while_condition_binding_corpus::repl_report;
-use super::{assert_compiles_through_erlc, codegen, verifier_report};
+use super::{assert_compiles_through_erlc, codegen};
+// Only the `#[cfg(debug_assertions)]` verifier test uses these (the verifier
+// itself is a debug-build check), so gate the imports the same way.
+#[cfg(debug_assertions)]
+use super::verifier_report;
+#[cfg(debug_assertions)]
 use crate::core_erlang::fault::Fault;
 
 /// Scrutinees whose evaluation steps the actor `State` (a self-send that
