@@ -1598,7 +1598,7 @@ Publish whether `Name` itself defines a class-side `new` that is user code
 contract as `put_defines_user_class_new1/2`: updates the row in place, a no-op
 without a row, and a change drops the derived-fact cache so a descendant's
 memoised `chain_has_user_new0/1` (and the constructor verdict built on it) is
-re-derived.
+re-derived, and the class's and its descendants' static call keys are erased.
 """.
 -spec put_defines_user_class_new0(class_name(), boolean() | undefined) -> ok.
 put_defines_user_class_new0(Name, Defines) when is_boolean(Defines); Defines =:= undefined ->
@@ -1615,7 +1615,12 @@ put_defines_user_class_new0(Name, Defines) when is_boolean(Defines); Defines =:=
             catch
                 error:badarg -> ok
             end,
-            beamtalk_class_derived_cache:invalidate()
+            %% Flush the memo before erasing the keys (see `put_direct_constructors/2`):
+            %% a descendant's static `new` key is installed only while the
+            %% memoised verdict, which reads this fact, allows it, and
+            %% `invalidate/1` also erases the descendants' keys.
+            beamtalk_class_derived_cache:invalidate(),
+            beamtalk_class_shadow_flags:invalidate(Name)
     end.
 
 -doc """

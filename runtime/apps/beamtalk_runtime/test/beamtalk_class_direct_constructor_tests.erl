@@ -634,6 +634,22 @@ new0_chain_test_() ->
                 [stop_class(P) || P <- [Grand, Child, Parent]]
             end
         end},
+        {"flipping an ancestor's fact alone erases a descendant's static new key", fun() ->
+            M = beamtalk_class_metadata,
+            Parent = start_class('BT4479KeyParent', #{defines_user_class_new0 => false}),
+            Child = start_subclass('BT4479KeyChild', 'BT4479KeyParent', #{
+                direct_constructors => [new], defines_user_class_new0 => false
+            }),
+            try
+                ?assertNotEqual(false, ctor_target('BT4479KeyChild')),
+                ?assertNotEqual(false, ctor_key_value('BT4479KeyChild')),
+                ok = M:put_defines_user_class_new0('BT4479KeyParent', true),
+                ?assertEqual(false, ctor_key_value('BT4479KeyChild')),
+                ?assertEqual(false, ctor_target('BT4479KeyChild'))
+            after
+                [stop_class(P) || P <- [Child, Parent]]
+            end
+        end},
         {"a class with its own user new wins over the chain", fun() ->
             Parent = start_class_with_module(
                 'BT4479OwnParent', ?NEW0_HELPER, #{defines_user_class_new0 => true}
