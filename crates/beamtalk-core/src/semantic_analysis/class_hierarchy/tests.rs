@@ -3001,6 +3001,7 @@ fn register_extensions_resolves_selector() {
 #[test]
 fn resolve_class_kind_table() {
     // (label, external superclass index, class to resolve, expected kind, also value subclass)
+    #[allow(clippy::type_complexity)]
     let cases: [(&str, &[(&str, &str)], &str, ClassKind, bool); 5] = [
         (
             "direct Value subclass",
@@ -3936,6 +3937,7 @@ fn value_root_new_does_not_disable_direct_new0() {
 /// Tests that edit the hierarchy by hand, pin premises or walk missing/cyclic ancestors
 /// stay separate.
 #[test]
+#[allow(clippy::too_many_lines)] // a data table: one row per former test
 fn direct_constructors_table() {
     struct Row {
         label: &'static str,
@@ -3943,6 +3945,7 @@ fn direct_constructors_table() {
         class: &'static str,
         new0: Option<bool>,
         new1: Option<bool>,
+        #[allow(clippy::option_option)] // outer: asserted?; inner: the expected keyword
         keyword: Option<Option<&'static str>>,
     }
     let rows = [

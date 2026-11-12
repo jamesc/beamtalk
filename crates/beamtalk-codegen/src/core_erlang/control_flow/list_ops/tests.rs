@@ -696,7 +696,7 @@ fn test_search_op_with_field_mutation_threads_state_table() {
 /// quartet. A search op whose block mutates only a local uses the tuple-accumulator path
 /// (`{BoolAcc, Var1, ...}` or `{FoundItem, FoundFlag, Var1, ...}`): locals are unpacked
 /// via `element(N, AccSt)` inside the lambda, not via `maps:get`. The fold packs the final
-/// `count` into the StateAcc map at exit so the outer method body can thread it back via
+/// `count` into the `StateAcc` map at exit so the outer method body can thread it back via
 /// `maps:get` — the tuple accumulator is an internal-to-the-fold optimisation, not a reason
 /// to drop the outer-local threading.
 #[test]
@@ -758,7 +758,7 @@ fn test_search_op_with_local_mutation_uses_tuple_acc_table() {
 /// quartet. A search op with a local mutation nested inside a direct-params loop is a
 /// local-threading producer in the loop frame (ADR 0131): the outer loop is a `letrec`, the
 /// inner op takes the mutation-threading `lists:foldl` path (never the pure fast path), and
-/// the direct-params outer loop rebuilds StateAcc exactly once at exit (`ExitSA`).
+/// the direct-params outer loop rebuilds `StateAcc` exactly once at exit (`ExitSA`).
 #[test]
 fn test_search_op_nested_in_direct_params_loop_table() {
     // (label, sent expression, extra must-contain, must-not-contain)
@@ -2093,7 +2093,7 @@ fn test_select_nested_in_direct_params_loop() {
         !code.contains("'lists':'filter'"),
         "Mutation-threaded select: must NOT use lists:filter. Got:\n{code}"
     );
-    // Direct-params outer loop rebuilds StateAcc exactly once at exit (ExitSA).
+    // Direct-params outer loop rebuilds `StateAcc` exactly once at exit (ExitSA).
     assert!(
         code.contains("ExitSA"),
         "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
@@ -2130,7 +2130,7 @@ fn test_reject_nested_in_direct_params_loop() {
         code.contains("call 'erlang':'not'"),
         "reject: (negate=true) in direct-params loop must emit erlang:not. Got:\n{code}"
     );
-    // Direct-params outer loop rebuilds StateAcc exactly once at exit (ExitSA).
+    // Direct-params outer loop rebuilds `StateAcc` exactly once at exit (ExitSA).
     assert!(
         code.contains("ExitSA"),
         "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
@@ -2166,7 +2166,7 @@ fn test_do_nested_in_direct_params_loop() {
         !code.contains("'lists':'foreach'"),
         "Mutation-threaded do: must NOT use lists:foreach. Got:\n{code}"
     );
-    // Direct-params outer loop rebuilds StateAcc exactly once at exit (ExitSA).
+    // Direct-params outer loop rebuilds `StateAcc` exactly once at exit (ExitSA).
     assert!(
         code.contains("ExitSA"),
         "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
@@ -2254,7 +2254,7 @@ fn test_collect_nested_in_direct_params_loop() {
         code.contains("'lists':'reverse'"),
         "collect: should reverse the accumulated result list. Got:\n{code}"
     );
-    // Direct-params outer loop rebuilds StateAcc exactly once at exit (ExitSA).
+    // Direct-params outer loop rebuilds `StateAcc` exactly once at exit (ExitSA).
     assert!(
         code.contains("ExitSA"),
         "Direct-params outer loop should rebuild StateAcc at exit. Got:\n{code}"
