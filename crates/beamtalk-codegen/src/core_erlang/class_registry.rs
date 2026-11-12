@@ -151,31 +151,10 @@ impl CoreErlangGenerator {
         if module.classes.is_empty() {
             let ext_reg_doc = self.generate_foreign_extension_registrations(module)?;
             let protocol_reg_doc = self.generate_protocol_registrations(module);
-            return Ok(docvec![
-                "'register_class'/0 = fun () ->",
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        "try",
-                        nest(
-                            INDENT,
-                            docvec![ext_reg_doc, protocol_reg_doc, line(), "'ok'", "\n",]
-                        ),
-                    ]
-                ),
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        "of _ProtoRegResult -> _ProtoRegResult",
-                        line(),
-                        "catch <CatchType, CatchError, CatchStack> -> primop \
-                         'raw_raise'(CatchType, CatchError, CatchStack)",
-                    ]
-                ),
-                "\n\n",
-            ]);
+            return Ok(Self::register_class_fn_doc(
+                docvec![ext_reg_doc, protocol_reg_doc, line(), "'ok'"],
+                Document::Str("of _ProtoRegResult -> _ProtoRegResult"),
+            ));
         }
 
         let mut class_docs = Vec::new();
@@ -361,67 +340,64 @@ impl CoreErlangGenerator {
         // the class registration result through.
         let protocol_reg_doc = self.generate_protocol_registrations(module);
 
-        let doc = if module.protocols.is_empty() {
-            docvec![
-                "'register_class'/0 = fun () ->",
-                nest(
-                    INDENT,
-                    docvec![line(), "try", nest(INDENT, docvec![try_body, "\n",]),]
-                ),
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        if has_same_file_ext {
-                            docvec![
-                                "of _ClassRegResult ->",
-                                nest(
-                                    INDENT,
-                                    Self::gate_on_registration_ok(
-                                        "_ClassRegResult",
-                                        same_file_ext_doc
-                                    ),
-                                ),
-                            ]
-                        } else {
-                            Document::Str("of _ClassRegResult -> _ClassRegResult")
-                        },
-                        line(),
-                        "catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)",
-                    ]
-                ),
-                "\n\n",
-            ]
+        let of_clause = if module.protocols.is_empty() {
+            if has_same_file_ext {
+                docvec![
+                    "of _ClassRegResult ->",
+                    nest(
+                        INDENT,
+                        Self::gate_on_registration_ok("_ClassRegResult", same_file_ext_doc),
+                    ),
+                ]
+            } else {
+                Document::Str("of _ClassRegResult -> _ClassRegResult")
+            }
         } else {
             // ADR 0068 Phase 2c: After class registration succeeds, register
             // protocol definitions before returning the result.
             docvec![
-                "'register_class'/0 = fun () ->",
+                "of _ClassRegResult ->",
                 nest(
                     INDENT,
-                    docvec![line(), "try", nest(INDENT, docvec![try_body, "\n",]),]
+                    Self::gate_on_registration_ok(
+                        "_ClassRegResult",
+                        docvec![same_file_ext_doc, protocol_reg_doc],
+                    )
                 ),
-                nest(
-                    INDENT,
-                    docvec![
-                        line(),
-                        "of _ClassRegResult ->",
-                        nest(
-                            INDENT,
-                            Self::gate_on_registration_ok(
-                                "_ClassRegResult",
-                                docvec![same_file_ext_doc, protocol_reg_doc],
-                            )
-                        ),
-                        line(),
-                        "catch <CatchType, CatchError, CatchStack> -> primop 'raw_raise'(CatchType, CatchError, CatchStack)",
-                    ]
-                ),
-                "\n\n",
             ]
         };
 
-        Ok(doc)
+        Ok(Self::register_class_fn_doc(try_body, of_clause))
+    }
+
+    /// The `'register_class'/0` function shell shared by every shape of
+    /// registration: `try <try_body> <of_clause> catch … raw_raise`.
+    ///
+    /// The `catch` re-raises via `primop 'raw_raise'` so the BEAM `-on_load`
+    /// mechanism reports a visible load failure instead of silently succeeding
+    /// with an unregistered class.
+    pub(in crate::core_erlang) fn register_class_fn_doc(
+        try_body: Document<'static>,
+        of_clause: Document<'static>,
+    ) -> Document<'static> {
+        docvec![
+            "'register_class'/0 = fun () ->",
+            nest(
+                INDENT,
+                docvec![line(), "try", nest(INDENT, docvec![try_body, "\n",]),]
+            ),
+            nest(
+                INDENT,
+                docvec![
+                    line(),
+                    of_clause,
+                    line(),
+                    "catch <CatchType, CatchError, CatchStack> -> primop \
+                     'raw_raise'(CatchType, CatchError, CatchStack)",
+                ]
+            ),
+            "\n\n",
+        ]
     }
 
     /// Builds a Core Erlang map document from methods, mapping each method's
@@ -975,7 +951,9 @@ impl CoreErlangGenerator {
         ]
     }
 
-    fn build_short_circuit_chain(class_docs: &[Document<'static>]) -> Document<'static> {
+    pub(in crate::core_erlang) fn build_short_circuit_chain(
+        class_docs: &[Document<'static>],
+    ) -> Document<'static> {
         let last_i = class_docs.len() - 1;
         // Innermost: last class doc + final result variable
         let mut chain: Document<'static> =
