@@ -303,69 +303,60 @@ responds_to_actor_inherited_method_test_() ->
             end
         end}.
 
-responds_to_integer_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% Integer class
-        ?assertEqual(true, beamtalk_primitive:responds_to(42, '+')),
-        ?assertEqual(true, beamtalk_primitive:responds_to(42, 'class')),
-        ?assertEqual(false, beamtalk_primitive:responds_to(42, 'unknownMethod'))
-    end}.
+%% BT-4679: the former responds_to_{integer,string,boolean,nil,block,tuple,float,symbol,
+%% list,reference}_test_ generators ({Label, Expected, Receiver, Selector} rows).
+%% responds_to_port_test_ stays separate because it owns a socket.
+responds_to_table_test_() ->
+    Str = {beamtalk_string, <<"hello">>},
+    Block = fun() -> ok end,
+    Ref = make_ref(),
+    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, [
+        {Label, ?_assertEqual(Expected, beamtalk_primitive:responds_to(Receiver, Selector))}
+     || {Label, Expected, Receiver, Selector} <- [
+            {"Integer responds to +", true, 42, '+'},
+            {"Integer responds to class", true, 42, 'class'},
+            {"Integer does not respond to unknownMethod", false, 42, 'unknownMethod'},
+            %% String class (BT-4173: tagged receiver)
+            {"String responds to ++", true, Str, '++'},
+            {"String responds to length", true, Str, 'length'},
+            {"String responds to class", true, Str, 'class'},
+            {"String does not respond to unknownMethod", false, Str, 'unknownMethod'},
+            %% A bare binary answers Binary's selectors, not String-only ones.
+            {"bare binary does not respond to ++", false, <<"hello">>, '++'},
+            {"bare binary does not respond to length", false, <<"hello">>, 'length'},
+            {"bare binary responds to size", true, <<"hello">>, size},
+            {"bare binary responds to class", true, <<"hello">>, 'class'},
+            {"true responds to not", true, true, 'not'},
+            {"false responds to not", true, false, 'not'},
+            {"true responds to ifTrue:", true, true, 'ifTrue:'},
+            {"true does not respond to unknownMethod", false, true, 'unknownMethod'},
+            {"nil responds to isNil", true, nil, 'isNil'},
+            {"nil responds to ifNil:", true, nil, 'ifNil:'},
+            {"nil does not respond to unknownMethod", false, nil, 'unknownMethod'},
+            {"Block responds to value", true, Block, 'value'},
+            {"Block responds to arity", true, Block, 'arity'},
+            {"Block does not respond to unknownMethod", false, Block, 'unknownMethod'},
+            {"Tuple responds to size", true, {a, b}, 'size'},
+            {"Result tuple responds to isOk", true, {ok, 42}, 'isOk'},
+            {"Tuple does not respond to unknownMethod", false, {a, b}, 'unknownMethod'},
+            {"Float responds to +", true, 3.14, '+'},
+            {"Float responds to class", true, 3.14, 'class'},
+            {"Float does not respond to unknownMethod", false, 3.14, 'unknownMethod'},
+            {"Symbol responds to class", true, hello, 'class'},
+            {"Symbol responds to printString", true, hello, 'printString'},
+            {"Symbol does not respond to nonexistent99", false, hello, 'nonexistent99'},
+            {"List responds to size", true, [1, 2], 'size'},
+            {"List does not respond to nonexistent99", false, [1, 2], 'nonexistent99'},
+            {"Reference responds to class", true, Ref, 'class'},
+            {"Reference does not respond to nonexistent99", false, Ref, 'nonexistent99'}
+        ]
+    ]}.
 
-responds_to_string_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% String class (BT-4173: tagged receiver)
-        Str = {beamtalk_string, <<"hello">>},
-        ?assertEqual(true, beamtalk_primitive:responds_to(Str, '++')),
-        ?assertEqual(true, beamtalk_primitive:responds_to(Str, 'length')),
-        ?assertEqual(true, beamtalk_primitive:responds_to(Str, 'class')),
-        ?assertEqual(false, beamtalk_primitive:responds_to(Str, 'unknownMethod')),
-        %% A bare binary answers Binary's selectors, not String-only ones.
-        ?assertEqual(false, beamtalk_primitive:responds_to(<<"hello">>, '++')),
-        ?assertEqual(false, beamtalk_primitive:responds_to(<<"hello">>, 'length')),
-        ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, size)),
-        ?assertEqual(true, beamtalk_primitive:responds_to(<<"hello">>, 'class'))
-    end}.
 
-responds_to_boolean_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% Boolean class
-        ?assertEqual(true, beamtalk_primitive:responds_to(true, 'not')),
-        ?assertEqual(true, beamtalk_primitive:responds_to(false, 'not')),
-        ?assertEqual(true, beamtalk_primitive:responds_to(true, 'ifTrue:')),
-        ?assertEqual(false, beamtalk_primitive:responds_to(true, 'unknownMethod'))
-    end}.
 
-responds_to_nil_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% Nil class
-        ?assertEqual(true, beamtalk_primitive:responds_to(nil, 'isNil')),
-        ?assertEqual(true, beamtalk_primitive:responds_to(nil, 'ifNil:')),
-        ?assertEqual(false, beamtalk_primitive:responds_to(nil, 'unknownMethod'))
-    end}.
 
-responds_to_block_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% Block class
-        Block = fun() -> ok end,
-        ?assertEqual(true, beamtalk_primitive:responds_to(Block, 'value')),
-        ?assertEqual(true, beamtalk_primitive:responds_to(Block, 'arity')),
-        ?assertEqual(false, beamtalk_primitive:responds_to(Block, 'unknownMethod'))
-    end}.
 
-responds_to_tuple_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        %% Tuple class
-        ?assertEqual(true, beamtalk_primitive:responds_to({a, b}, 'size')),
-        ?assertEqual(true, beamtalk_primitive:responds_to({ok, 42}, 'isOk')),
-        ?assertEqual(false, beamtalk_primitive:responds_to({a, b}, 'unknownMethod'))
-    end}.
 
-responds_to_float_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual(true, beamtalk_primitive:responds_to(3.14, '+')),
-        ?assertEqual(true, beamtalk_primitive:responds_to(3.14, 'class')),
-        ?assertEqual(false, beamtalk_primitive:responds_to(3.14, 'unknownMethod'))
-    end}.
 
 responds_to_other_primitives_test() ->
     %% Lists support size via bt@stdlib@list dispatch
@@ -1655,18 +1646,7 @@ responds_to_map_plain_dictionary_test() ->
     ?assertEqual(true, beamtalk_primitive:responds_to(#{a => 1}, 'at:')),
     ?assertEqual(false, beamtalk_primitive:responds_to(#{}, 'nonexistentMethod99')).
 
-responds_to_symbol_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual(true, beamtalk_primitive:responds_to(hello, 'class')),
-        ?assertEqual(true, beamtalk_primitive:responds_to(hello, 'printString')),
-        ?assertEqual(false, beamtalk_primitive:responds_to(hello, 'nonexistent99'))
-    end}.
 
-responds_to_list_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertEqual(true, beamtalk_primitive:responds_to([1, 2], 'size')),
-        ?assertEqual(false, beamtalk_primitive:responds_to([1, 2], 'nonexistent99'))
-    end}.
 
 responds_to_port_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
@@ -1679,12 +1659,6 @@ responds_to_port_test_() ->
         end
     end}.
 
-responds_to_reference_test_() ->
-    {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        Ref = make_ref(),
-        ?assertEqual(true, beamtalk_primitive:responds_to(Ref, 'class')),
-        ?assertEqual(false, beamtalk_primitive:responds_to(Ref, 'nonexistent99'))
-    end}.
 
 %%% ============================================================================
 %%% responds_to/2 — Tuple dispatch (non-object)

@@ -429,100 +429,68 @@ invalid_method_not_function_async_test() ->
 %% Verify that the {error, {ErlType, ErrorValue}} 2-tuple path (older
 %% compiled actors without stacktrace) preserves the exception class.
 
-compat_sync_send_exit_preserves_class_test() ->
-    %% An exit error through the backward-compat path should produce ExitError,
-    %% not RuntimeError (which would happen if ErlType were discarded).
+compat_sync_send_preserves_class_test_() ->
+    %% BT-4679: the former compat_sync_send_{exit,throw,error}_preserves_class tests.
+    %% An error through the backward-compat {error, {ErlType, ErrorValue}} path must
+    %% preserve the exception class (ExitError/ThrowError), not collapse to
+    %% RuntimeError (which would happen if ErlType were discarded).
+    [
+        {Label, fun() -> compat_sync_send_case(Selector, Class, Kind) end}
+     || {Label, Selector, Class, Kind} <- [
+            {"exit error keeps ExitError", triggerExitError, 'ExitError', erlang_exit},
+            {"throw error keeps ThrowError", triggerThrowError, 'ThrowError', erlang_throw},
+            {"plain error keeps RuntimeError", triggerPlainError, 'RuntimeError', runtime_error}
+        ]
+    ].
+
+compat_sync_send_case(Selector, Class, Kind) ->
     {ok, Actor} = test_compat_error_actor:start_link(),
     try
-        beamtalk_actor:sync_send(Actor, triggerExitError, []),
+        beamtalk_actor:sync_send(Actor, Selector, []),
         ?assert(false, "Expected error to be raised")
     catch
-        error:#{error := Inner, '$beamtalk_class' := Class} ->
-            ?assertEqual('ExitError', Class),
-            ?assertEqual(erlang_exit, Inner#beamtalk_error.kind)
+        error:#{error := Inner, '$beamtalk_class' := RaisedClass} ->
+            ?assertEqual(Class, RaisedClass),
+            ?assertEqual(Kind, Inner#beamtalk_error.kind)
     after
         gen_server:stop(Actor)
     end.
 
-compat_sync_send_throw_preserves_class_test() ->
-    %% A throw error through the backward-compat path should produce ThrowError.
-    {ok, Actor} = test_compat_error_actor:start_link(),
-    try
-        beamtalk_actor:sync_send(Actor, triggerThrowError, []),
-        ?assert(false, "Expected error to be raised")
-    catch
-        error:#{error := Inner, '$beamtalk_class' := Class} ->
-            ?assertEqual('ThrowError', Class),
-            ?assertEqual(erlang_throw, Inner#beamtalk_error.kind)
-    after
-        gen_server:stop(Actor)
-    end.
 
-compat_sync_send_error_preserves_class_test() ->
-    %% A plain error through the backward-compat path should produce RuntimeError.
-    {ok, Actor} = test_compat_error_actor:start_link(),
-    try
-        beamtalk_actor:sync_send(Actor, triggerPlainError, []),
-        ?assert(false, "Expected error to be raised")
-    catch
-        error:#{error := Inner, '$beamtalk_class' := Class} ->
-            ?assertEqual('RuntimeError', Class),
-            ?assertEqual(runtime_error, Inner#beamtalk_error.kind)
-    after
-        gen_server:stop(Actor)
-    end.
 
-compat_self_dispatch_exit_preserves_class_test() ->
-    %% Test the self_dispatch path (unwrap_dispatch_result) with backward-compat
-    %% 2-tuple errors. selfSendExitError triggers a self-send inside the actor,
-    %% which goes through self_dispatch -> safe_dispatch/3 -> unwrap_dispatch_result.
-    %% The safe_dispatch/3 for triggerExitError returns {error, {exit, ...}, State}.
+compat_self_dispatch_preserves_class_test_() ->
+    %% BT-4679: the former compat_self_dispatch_{exit,throw,error}_preserves_class tests.
+    %% The self_dispatch path (unwrap_dispatch_result) with backward-compat 2-tuple
+    %% errors. selfSend*Error triggers a self-send inside the actor, which goes through
+    %% self_dispatch -> safe_dispatch/3 -> unwrap_dispatch_result. The self-send error
+    %% bubbles up through dispatch/4's try/catch as an error exception, which
+    %% wrap_method_error catches and wraps.
+    [
+        {Label, fun() -> compat_self_dispatch_case(Message, Class) end}
+     || {Label, Message, Class} <- [
+            {"exit error keeps ExitError", selfSendExitError, 'ExitError'},
+            {"throw error keeps ThrowError", selfSendThrowError, 'ThrowError'},
+            {"plain error keeps RuntimeError", selfSendPlainError, 'RuntimeError'}
+        ]
+    ].
+
+compat_self_dispatch_case(Message, Class) ->
     {ok, Actor} = test_compat_error_actor:start_link(),
     try
-        %% The self-send error bubbles up through dispatch/4's try/catch as an
-        %% error exception, which wrap_method_error catches and wraps.
-        Result = gen_server:call(Actor, {selfSendExitError, []}),
+        Result = gen_server:call(Actor, {Message, []}),
         ?assertMatch({error, _}, Result),
         {error, Inner} = Result,
-        %% The inner error should be a #beamtalk_error{} from wrap_method_error,
-        %% with the original_reason containing the ExitError wrapped exception.
+        %% The inner error is a #beamtalk_error{} from wrap_method_error, with the
+        %% original_reason containing the wrapped exception of the original class.
         ?assertMatch(#beamtalk_error{kind = runtime_error}, Inner),
         Details = Inner#beamtalk_error.details,
         OriginalReason = maps:get(original_reason, Details),
-        ?assertMatch(#{'$beamtalk_class' := 'ExitError'}, OriginalReason)
+        ?assertEqual(Class, maps:get('$beamtalk_class', OriginalReason))
     after
         gen_server:stop(Actor)
     end.
 
-compat_self_dispatch_throw_preserves_class_test() ->
-    %% Same as above but for throw errors through the self_dispatch path.
-    {ok, Actor} = test_compat_error_actor:start_link(),
-    try
-        Result = gen_server:call(Actor, {selfSendThrowError, []}),
-        ?assertMatch({error, _}, Result),
-        {error, Inner} = Result,
-        ?assertMatch(#beamtalk_error{kind = runtime_error}, Inner),
-        Details = Inner#beamtalk_error.details,
-        OriginalReason = maps:get(original_reason, Details),
-        ?assertMatch(#{'$beamtalk_class' := 'ThrowError'}, OriginalReason)
-    after
-        gen_server:stop(Actor)
-    end.
 
-compat_self_dispatch_error_preserves_class_test() ->
-    %% Same as above but for plain errors through the self_dispatch path.
-    {ok, Actor} = test_compat_error_actor:start_link(),
-    try
-        Result = gen_server:call(Actor, {selfSendPlainError, []}),
-        ?assertMatch({error, _}, Result),
-        {error, Inner} = Result,
-        ?assertMatch(#beamtalk_error{kind = runtime_error}, Inner),
-        Details = Inner#beamtalk_error.details,
-        OriginalReason = maps:get(original_reason, Details),
-        ?assertMatch(#{'$beamtalk_class' := 'RuntimeError'}, OriginalReason)
-    after
-        gen_server:stop(Actor)
-    end.
 
 %%% Stress tests
 
@@ -1558,66 +1526,49 @@ register_spawned_noop_when_env_unset_test() ->
         exit(ActorPid, kill)
     end.
 
-register_spawned_returns_error_on_undef_callback_test() ->
-    %% Set callback to a module that doesn't export on_actor_spawned/4
-    %% beamtalk_actor_tests exists but doesn't have the function
-    application:set_env(beamtalk_runtime, actor_spawn_callback, beamtalk_actor_tests),
+register_spawned_callback_failure_test_() ->
+    %% BT-4679: the former register_spawned_returns_error_on_{undef_callback,
+    %% beamtalk_error,generic_error} tests. register_spawned surfaces callback
+    %% failures as {error, _} for a callback module that does not export
+    %% on_actor_spawned/4 (beamtalk_actor_tests itself), raises a #beamtalk_error{}, or
+    %% throws a generic error. {Label, CallbackModule, ResultMatcher}.
+    [
+        {Label, fun() -> register_spawned_callback_failure_case(CallbackMod, Matches) end}
+     || {Label, CallbackMod, Matches} <- [
+            {"callback without on_actor_spawned/4", beamtalk_actor_tests, fun
+                ({error, {callback_undef, beamtalk_actor_tests}}) -> true;
+                (_) -> false
+            end},
+            {"callback raising #beamtalk_error{}", test_spawn_callback_bt_error, fun
+                ({error, {beamtalk_error, _}}) -> true;
+                (_) -> false
+            end},
+            {"callback raising a generic error", test_spawn_callback_generic_error, fun
+                ({error, _}) -> true;
+                (_) -> false
+            end}
+        ]
+    ].
 
+register_spawned_callback_failure_case(CallbackMod, Matches) ->
+    application:set_env(beamtalk_runtime, actor_spawn_callback, CallbackMod),
     ActorPid = spawn(fun() ->
         receive
             stop -> ok
         end
     end),
     try
-        %% Returns {error, _} since register_spawned surfaces callback failures
-        ?assertMatch(
-            {error, {callback_undef, beamtalk_actor_tests}},
-            beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter)
-        )
-    after
-        exit(ActorPid, kill),
-        application:unset_env(beamtalk_runtime, actor_spawn_callback)
-    end.
-
-register_spawned_returns_error_on_beamtalk_error_test() ->
-    %% Set callback to a module that raises a #beamtalk_error{}
-    application:set_env(beamtalk_runtime, actor_spawn_callback, test_spawn_callback_bt_error),
-
-    ActorPid = spawn(fun() ->
-        receive
-            stop -> ok
+        Result = beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter),
+        case Matches(Result) of
+            true -> ok;
+            false -> error({unexpected_register_spawned_result, CallbackMod, Result})
         end
-    end),
-    try
-        %% Returns {error, _} since register_spawned surfaces callback failures
-        ?assertMatch(
-            {error, {beamtalk_error, _}},
-            beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter)
-        )
     after
         exit(ActorPid, kill),
         application:unset_env(beamtalk_runtime, actor_spawn_callback)
     end.
 
-register_spawned_returns_error_on_generic_error_test() ->
-    %% Set callback to a module that throws a generic error
-    application:set_env(beamtalk_runtime, actor_spawn_callback, test_spawn_callback_generic_error),
 
-    ActorPid = spawn(fun() ->
-        receive
-            stop -> ok
-        end
-    end),
-    try
-        %% Returns {error, _} since register_spawned surfaces callback failures
-        ?assertMatch(
-            {error, _},
-            beamtalk_actor:register_spawned(self(), ActorPid, 'Counter', test_counter)
-        )
-    after
-        exit(ActorPid, kill),
-        application:unset_env(beamtalk_runtime, actor_spawn_callback)
-    end.
 
 %%% ===========================================================================
 %%% Test helpers for the register_spawned callback tests above
@@ -1662,40 +1613,49 @@ ensure_error_callback_module() ->
 %%% Actor Lifecycle Tests (async_send/sync_send wrappers)
 %%% ============================================================================
 
-async_send_is_alive_on_live_actor_test() ->
-    {ok, Counter} = test_counter:start_link(0),
-    Future = beamtalk_future:new(),
-    beamtalk_actor:async_send(Counter, isAlive, [], Future),
-    Result = beamtalk_future:await(Future),
-    ?assertEqual(true, Result),
-    gen_server:stop(Counter).
+async_send_lifecycle_test_() ->
+    %% BT-4679: the former async_send_{is_alive,stop,kill}_{live,dead}_actor tests.
+    %% {Label, Start, Liveness, Selector, Expected, After}: `Start` is start_link, or
+    %% start so a kill does not propagate to the test process; `After` is `stop` (clean up
+    %% the live actor), `dead` (the actor must now be gone: kill/stop return ok only once
+    %% the process is confirmed dead) or `none`.
+    [
+        {Label, fun() -> async_send_lifecycle_case(Start, Liveness, Selector, Expected, After) end}
+     || {Label, Start, Liveness, Selector, Expected, After} <- [
+            {"isAlive on a live actor", start_link, live, isAlive, true, stop},
+            {"isAlive on a dead actor", start_link, dead, isAlive, false, none},
+            {"stop on a live actor", start_link, live, stop, ok, dead},
+            {"stop on a dead actor", start_link, dead, stop, ok, none},
+            %% Killing an already-dead process is idempotent.
+            {"kill on a dead actor", start, dead, kill, ok, none},
+            {"kill on a live actor", start, live, kill, ok, dead}
+        ]
+    ].
 
-async_send_is_alive_on_dead_actor_test() ->
-    {ok, Counter} = test_counter:start_link(0),
-    gen_server:stop(Counter),
-    beamtalk_test_wait:dead(Counter),
+async_send_lifecycle_case(Start, Liveness, Selector, Expected, After) ->
+    {ok, Counter} = test_counter:Start(0),
+    case Liveness of
+        live ->
+            ok;
+        dead ->
+            gen_server:stop(Counter),
+            beamtalk_test_wait:dead(Counter)
+    end,
     Future = beamtalk_future:new(),
-    beamtalk_actor:async_send(Counter, isAlive, [], Future),
-    Result = beamtalk_future:await(Future),
-    ?assertEqual(false, Result).
+    beamtalk_actor:async_send(Counter, Selector, [], Future),
+    ?assertEqual(Expected, beamtalk_future:await(Future)),
+    case After of
+        stop ->
+            gen_server:stop(Counter);
+        dead ->
+            beamtalk_test_wait:dead(Counter),
+            ?assertNot(is_process_alive(Counter));
+        none ->
+            ok
+    end.
 
-async_send_stop_live_actor_test() ->
-    {ok, Counter} = test_counter:start_link(0),
-    Future = beamtalk_future:new(),
-    beamtalk_actor:async_send(Counter, stop, [], Future),
-    Result = beamtalk_future:await(Future),
-    ?assertEqual(ok, Result),
-    beamtalk_test_wait:dead(Counter),
-    ?assertNot(is_process_alive(Counter)).
 
-async_send_stop_dead_actor_test() ->
-    {ok, Counter} = test_counter:start_link(0),
-    gen_server:stop(Counter),
-    beamtalk_test_wait:dead(Counter),
-    Future = beamtalk_future:new(),
-    beamtalk_actor:async_send(Counter, stop, [], Future),
-    Result = beamtalk_future:await(Future),
-    ?assertEqual(ok, Result).
+
 
 async_send_to_dead_actor_rejects_future_test() ->
     {ok, Counter} = test_counter:start_link(0),
@@ -1883,25 +1843,7 @@ handle_cast_fire_and_forget_unknown_selector_crashes_actor_test() ->
 %%% These guard against the bug where exit(Pid, kill) + immediate ok
 %%% meant is_process_alive could still return true on the next call.
 
-async_send_kill_live_actor_resolves_ok_and_actor_is_dead_test() ->
-    %% Use start/1 (not start_link) so kill does not propagate to the test process.
-    {ok, Counter} = test_counter:start(0),
-    Future = beamtalk_future:new(),
-    beamtalk_actor:async_send(Counter, kill, [], Future),
-    Result = beamtalk_future:await(Future),
-    %% kill must return ok only once the process is confirmed dead
-    ?assertEqual(ok, Result),
-    ?assertNot(is_process_alive(Counter)).
 
-async_send_kill_dead_actor_resolves_ok_test() ->
-    {ok, Counter} = test_counter:start(0),
-    gen_server:stop(Counter),
-    beamtalk_test_wait:dead(Counter),
-    Future = beamtalk_future:new(),
-    beamtalk_actor:async_send(Counter, kill, [], Future),
-    Result = beamtalk_future:await(Future),
-    %% Killing an already-dead process is idempotent
-    ?assertEqual(ok, Result).
 
 sync_send_kill_live_actor_returns_ok_and_actor_is_dead_test() ->
     {ok, Counter} = test_counter:start(0),
@@ -4093,24 +4035,40 @@ sync_send_onExit_callback_block_raises_test() ->
     %% Cover the Class:Err:Stack branch in the spawn fun (around lines 649-656).
     {ok, Counter} = test_counter:start(0),
     %% Block that raises when invoked
-    Block = fun(_Reason) -> error(callback_boom) end,
+    Self = self(),
+    Block = fun(_Reason) ->
+        Self ! onexit_block_ran,
+        error(callback_boom)
+    end,
     ?assertEqual(ok, beamtalk_actor:sync_send(Counter, 'onExit:', [Block])),
     exit(Counter, kill),
-    %% Give the watcher time to run the block and log the error
-    timer:sleep(50),
-    %% If we got here without crashing, the error was caught and logged
-    ?assert(true).
+    %% BT-4679: assert on the observable effect (the block ran, then raised and was
+    %% caught by the watcher) instead of sleeping and asserting `true`.
+    receive
+        onexit_block_ran -> ok
+    after 2000 ->
+        error(onexit_block_did_not_run)
+    end.
 
 async_send_onExit_callback_block_raises_test() ->
     %% Same as above but through async_send/4
     {ok, Counter} = test_counter:start(0),
-    Block = fun(_Reason) -> error(async_callback_boom) end,
+    Self = self(),
+    Block = fun(_Reason) ->
+        Self ! onexit_block_ran,
+        error(async_callback_boom)
+    end,
     Future = beamtalk_future:new(),
     beamtalk_actor:async_send(Counter, 'onExit:', [Block], beamtalk_future:pid(Future)),
     ?assertEqual(ok, beamtalk_future:await(Future, 2000)),
     exit(Counter, kill),
     beamtalk_test_wait:dead(Counter),
-    ?assert(true).
+    %% BT-4679: assert the block ran and its error was contained (was `?assert(true)`).
+    receive
+        onexit_block_ran -> ok
+    after 2000 ->
+        error(onexit_block_did_not_run)
+    end.
 
 dispatch_initialize_selector_runs_method_test() ->
     %% Exercise the `initialize -> ?LOG_DEBUG` branch in dispatch_user_method
