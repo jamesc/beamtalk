@@ -133,7 +133,13 @@ named_spawn_and_lookup_round_trip(PeerNode) ->
         ?assertMatch(
             {error, #beamtalk_error{kind = name_registered}},
             beamtalk_actor_remote:remote_spawn(PeerNode, 'Counter', Name, 'spawnAs:on:')
-        )
+        ),
+
+        %% BT-4701: unregister on a node-qualified proxy `erpc`s to a live
+        %% peer through the wire module (`beamtalk_actor`'s delegate); the
+        %% name must actually be gone on the peer afterwards.
+        ?assertEqual(ok, beamtalk_actor_ffi:unregister(Obj)),
+        ?assertEqual(undefined, rpc:call(PeerNode, erlang, whereis, [Name]))
     after
         rpc:call(PeerNode, gen_server, stop, [Pid])
     end.

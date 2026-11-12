@@ -5483,7 +5483,8 @@ actor_wire_delegates_exported_test() ->
         {remote_spawn_target, 2},
         {remote_spawn_with_target, 3},
         {remote_named_target, 2},
-        {'allRegistered', 1}
+        {'allRegistered', 1},
+        {unregister, 1}
     ],
     [
         ?assert(erlang:function_exported(beamtalk_actor, F, A))
@@ -5508,4 +5509,35 @@ actor_wire_delegates_forward_test() ->
         )
     after
         Pid ! stop
+    end.
+
+%% Every `erpc:call/5` the moved modules make through the wire module must
+%% land on a function `beamtalk_actor` still exports (a missing delegate is an
+%% `undef` on the peer at runtime, not a compile error).
+actor_wire_erpc_targets_are_exported_test() ->
+    {module, beamtalk_actor} = code:ensure_loaded(beamtalk_actor),
+    SrcDir = filename:join([filename:dirname(?FILE), "..", "src"]),
+    Files = [
+        "beamtalk_actor_registry.erl",
+        "beamtalk_actor_remote.erl",
+        "beamtalk_actor_ffi.erl"
+    ],
+    Targets = lists:usort(
+        lists:append([wire_erpc_targets(filename:join(SrcDir, F)) || F <- Files])
+    ),
+    %% `remote_spawn_erpc_call` passes its target as a variable, so the two
+    %% spawn targets are listed here; the scan covers the literal ones.
+    ?assert(length(Targets) >= 6),
+    Exported = [F || {F, _A} <- beamtalk_actor:module_info(exports)],
+    [
+        ?assert(lists:member(T, Exported))
+     || T <- [remote_spawn_target, remote_spawn_with_target | Targets]
+    ].
+
+wire_erpc_targets(Path) ->
+    {ok, Bin} = file:read_file(Path),
+    Re = "[?]BT_ACTOR_WIRE_MODULE,\\s*'?([A-Za-z_]+)'?\\s*,",
+    case re:run(Bin, Re, [global, {capture, all_but_first, list}]) of
+        {match, Ms} -> [list_to_atom(M) || [[C | _] = M] <- Ms, C >= $a];
+        nomatch -> []
     end.

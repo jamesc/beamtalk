@@ -436,7 +436,8 @@ handle_getValue([], State) ->
     remote_spawn_target/2,
     remote_spawn_with_target/3,
     remote_named_target/2,
-    'allRegistered'/1
+    'allRegistered'/1,
+    unregister/1
 ]).
 -export_type([link_mode/0]).
 
@@ -4782,6 +4783,7 @@ remote_spawn_target(A1, A2) -> beamtalk_actor_remote:remote_spawn_target(A1, A2)
 remote_spawn_with_target(A1, A2, A3) -> beamtalk_actor_remote:remote_spawn_with_target(A1, A2, A3).
 remote_named_target(A1, A2) -> beamtalk_actor_remote:remote_named_target(A1, A2).
 'allRegistered'(A1) -> beamtalk_actor_ffi:'allRegistered'(A1).
+unregister(A1) -> beamtalk_actor_ffi:unregister(A1).
 
 %%% =====================================================================
 %%% Deferred reply FFI shims (`self deferReply`, ReplyTo)
