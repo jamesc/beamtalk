@@ -7,9 +7,9 @@
 //! consumer of control-flow narrowing: the arms of `ifTrue:` / `ifFalse:` /
 //! `ifTrue:ifFalse:`, the lazy block of `and:` / `or:`, the body of
 //! `[cond] whileTrue:` / `whileFalse:` ([`TypeChecker::loop_body_facts`],
-//! BT-4713), and post-guard (early-return) narrowing. For a condition it answers a [`CondFacts`]: the
-//! [`Facts`] (variable → narrowed type) that hold when the condition is true,
-//! and those that hold when it is false.
+//! BT-4713), and post-guard (early-return) narrowing. For a condition it
+//! answers a [`CondFacts`]: the [`Facts`] (variable → narrowed type) that
+//! hold when the condition is true, and those that hold when it is false.
 //!
 //! * A single test (`isNil`, `notNil`, `isKindOf:`, …) is one entry of the
 //!   [`super::rules::RULES`] table, refined against the live type.
@@ -26,7 +26,7 @@
 //! that builds a [`CondFacts`]; a new consumer calls it as `loop_body_facts`
 //! does.
 
-use crate::ast::Expression;
+use crate::ast::{Expression, ExpressionStatement};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::source_analysis::Span;
 
@@ -174,6 +174,12 @@ fn connective_kind(selector_name: &str) -> Option<bool> {
     }
 }
 
+/// A block statement's expression, parentheses peeled. Statement positions are
+/// not touched by `ast::normalize`, so the one peel lives here.
+fn statement_expression(stmt: &ExpressionStatement) -> &Expression {
+    stmt.expression.unwrap_parens()
+}
+
 /// The sole expression of a parameterless block literal; `None` for anything
 /// else (a multi-statement block, a block with parameters, a non-block).
 fn single_expression_block_body(arg: &Expression) -> Option<&Expression> {
@@ -181,7 +187,7 @@ fn single_expression_block_body(arg: &Expression) -> Option<&Expression> {
         return None;
     };
     match (block.parameters.as_slice(), block.body.as_slice()) {
-        ([], [stmt]) => Some(stmt.expression.unwrap_parens()),
+        ([], [stmt]) => Some(statement_expression(stmt)),
         _ => None,
     }
 }
@@ -335,7 +341,7 @@ impl TypeChecker {
         if !cond_block.parameters.is_empty() {
             return None;
         }
-        let last = cond_block.body.last()?.expression.unwrap_parens();
+        let last = statement_expression(cond_block.body.last()?);
         let facts = self.condition_facts(last, env, hierarchy, FactsCtx::arm(span).nested());
         let mut facts = if on_true {
             facts.when_true
