@@ -29,7 +29,9 @@ use std::fmt;
 use ecow::EcoString;
 
 use crate::ast::{Identifier, TypeAnnotation};
-use crate::semantic_analysis::string_utils::{split_generic_base, split_top_level};
+use crate::semantic_analysis::string_utils::{
+    is_symbol_singleton_name, split_generic_base, split_top_level,
+};
 use crate::semantic_analysis::type_checker::InferredType;
 use crate::source_analysis::Span;
 
@@ -165,7 +167,10 @@ impl DeclaredType {
         }
 
         // Singleton: `#name`.
-        if let Some(rest) = trimmed.strip_prefix('#') {
+        if let Some(rest) = trimmed
+            .strip_prefix('#')
+            .filter(|_| is_symbol_singleton_name(trimmed))
+        {
             if !rest.is_empty() {
                 return DeclaredType::Singleton(rest.into());
             }
@@ -503,6 +508,18 @@ mod tests {
             name: name.into(),
             span: span(),
         }
+    }
+
+    #[test]
+    fn map_shape_string_is_not_a_singleton() {
+        assert!(!matches!(
+            DeclaredType::parse("#{#a => Integer}"),
+            DeclaredType::Singleton(_)
+        ));
+        assert!(matches!(
+            DeclaredType::parse("#ok"),
+            DeclaredType::Singleton(_)
+        ));
     }
 
     // ---- parse ∘ to_string round-trips ----

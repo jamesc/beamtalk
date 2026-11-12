@@ -986,11 +986,16 @@ impl TypeChecker {
         }
         // Union syntax in expected type (e.g., "Integer | Symbol" from builtins).
         // If expected contains `|`, split into members and check if actual matches any.
-        if expected.contains(" | ") {
-            return expected.split(" | ").any(|member| {
-                let member_eco: EcoString = member.trim().into();
-                Self::is_type_compatible(actual, &member_eco, hierarchy)
-            });
+        // Split at the top level only, so a map shape's internal `|` is not a
+        // member separator; a single piece falls through to the arms below.
+        if expected.contains('|') {
+            let members = split_top_level(expected, '|');
+            if members.len() > 1 {
+                return members.into_iter().any(|member| {
+                    let member_eco: EcoString = member.into();
+                    Self::is_type_compatible(actual, &member_eco, hierarchy)
+                });
+            }
         }
         // Singleton types: #foo is a subtype of Symbol, not the reverse.
         // Symbol is NOT compatible with a singleton like #ok.

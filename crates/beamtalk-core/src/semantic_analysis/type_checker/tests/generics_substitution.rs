@@ -288,6 +288,17 @@ fn is_assignable_to_map_shape_strings_are_not_singletons() {
     assert!(TypeChecker::is_assignable_to(&shape, &union, &hierarchy));
 }
 
+#[test]
+fn is_type_compatible_does_not_split_inside_shape() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    // Union members are found at the top level; the shape stays one member.
+    assert!(TypeChecker::is_type_compatible(
+        &eco_string("nil"),
+        &eco_string("#{#a => Integer | String} | nil"),
+        &hierarchy,
+    ));
+}
+
 // ---- Constructor type inference tests ----
 
 /// `GenResult ok: 42` infers T = Integer → GenResult(Integer, Dynamic).
