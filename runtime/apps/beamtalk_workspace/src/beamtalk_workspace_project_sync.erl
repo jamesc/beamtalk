@@ -52,7 +52,6 @@ Extracted from beamtalk_repl_ops_load (BT-4706).
     sort_bt_files_by_deps/1,
     structured_file_errors/2,
     format_collision_warning/3,
-    extract_package_from_module/1,
     classify_files_by_change/2,
     get_file_mtime/1,
     extract_native_refs/1,
@@ -1159,8 +1158,8 @@ collect_load_warnings(Classes) ->
 -spec format_collision_warning(atom(), atom(), atom()) -> binary().
 format_collision_warning(ClassName, OldModule, NewModule) ->
     ClassBin = atom_to_binary(ClassName, utf8),
-    OldPkg = extract_package_from_module(OldModule),
-    NewPkg = extract_package_from_module(NewModule),
+    OldPkg = beamtalk_module_name:package_of(OldModule),
+    NewPkg = beamtalk_module_name:package_of(NewModule),
     %% When both modules come from packages, add a qualified-name hint.
     QualifiedHint =
         case {OldPkg, NewPkg} of
@@ -1189,22 +1188,6 @@ format_collision_warning(ClassName, OldModule, NewModule) ->
         ")",
         QualifiedHint
     ]).
-
--doc """
-Extract the package segment from a bt@{pkg}@{class} module name.
-Returns the package name binary or undefined.
-Only 3-part names (bt@{pkg}@{class}) have a package; 2-part names (bt@{class})
-are stdlib/unqualified and return undefined.
-""".
--spec extract_package_from_module(atom()) -> binary() | undefined.
-extract_package_from_module(ModuleName) when is_atom(ModuleName) ->
-    ModStr = atom_to_list(ModuleName),
-    case string:split(ModStr, "@", all) of
-        ["bt", Pkg, _Class | _Rest] when Pkg =/= [] ->
-            list_to_binary(Pkg);
-        _ ->
-            undefined
-    end.
 
 -doc """
 Build a map from BEAM module atom to Beamtalk class name binary.

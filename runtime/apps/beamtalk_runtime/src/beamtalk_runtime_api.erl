@@ -37,7 +37,6 @@ See `docs/development/erlang-guidelines.md` § Approved Cross-Context API.
     class_display_name/1,
     is_class_name/1,
     drain_class_warnings_by_names/1,
-    extract_package_from_module/1,
     drain_pending_load_errors_by_names/1,
     clear_pending_load_errors_by_names/1,
     get_method_return_type/2,
@@ -186,10 +185,6 @@ is_class_name(Name) ->
 -spec drain_class_warnings_by_names([atom()]) -> [{atom(), atom(), atom()}].
 drain_class_warnings_by_names(Names) ->
     beamtalk_class_registry:drain_class_warnings_by_names(Names).
-
--spec extract_package_from_module(atom()) -> atom() | undefined.
-extract_package_from_module(ModuleName) ->
-    beamtalk_class_registry:extract_package_from_module(ModuleName).
 
 -spec drain_pending_load_errors_by_names([atom()]) -> [{atom(), #beamtalk_error{}}].
 drain_pending_load_errors_by_names(Names) ->
