@@ -363,7 +363,7 @@ do_dispatch(ClassNameBin, SelectorBin, Argv, Subscriber, State) ->
     %% detached node's stdout and the client saw nothing. Publishing the
     %% capture process as the entry group leader makes the class gen_server
     %% adopt it for the duration of the call
-    %% (`beamtalk_object_class:adopt_entry_group_leader/1`), giving
+    %% (`beamtalk_class_session:seed_session_context_from/1`), giving
     %% `--connect` the same "the program's output is my output" contract run
     %% mode gets for free from the node's own stdout. Scoped to this
     %% `run-entry` path: `do_eval` never seeds the key, so REPL `eval` keeps

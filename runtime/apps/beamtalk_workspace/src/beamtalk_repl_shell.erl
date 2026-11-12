@@ -272,7 +272,7 @@ remove_from_tracker(SessionPid, Module) ->
 init(SessionId) when is_binary(SessionId) ->
     %% Backward-compatible init for the bare-id arg shape: an in-flight start
     %% across a hot-code reload (old `start_link/1` MFA reaching new code) lands
-    %% here. Mirrors the 2-tuple compat clause in `seed_session_context_from/1`
+    %% here. Mirrors the 2-tuple compat clause in `beamtalk_class_session:seed_session_context_from/1`
     %% — default to empty origin metadata (→ `kind => unknown`).
     init({SessionId, #{}});
 init({SessionId, Meta}) when is_map(Meta) ->
