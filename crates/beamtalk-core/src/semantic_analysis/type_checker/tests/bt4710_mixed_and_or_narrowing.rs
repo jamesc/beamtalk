@@ -238,6 +238,15 @@ fn unrelated_rhs_assignment_keeps_the_left_facts() {
     );
 }
 
+fn assert_field_leak(diags: &[Diagnostic]) {
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("expects Integer, got Integer | Nil")),
+        "expected the `need:` argument mismatch, got: {diags:#?}"
+    );
+}
+
 fn actor_diagnostics(body: &str) -> Vec<Diagnostic> {
     type_diagnostics(&format!(
         r"
@@ -255,7 +264,7 @@ fn rhs_self_send_voids_field_facts_in_arm() {
     let diags = actor_diagnostics(
         "  run -> Integer =>\n    (self.f isNil or: [self reset]) ifFalse: [^self need: self.f]\n    0",
     );
-    assert!(!diags.is_empty(), "self.f may be nil after `self reset`");
+    assert_field_leak(&diags);
 }
 
 #[test]
@@ -271,5 +280,13 @@ fn rhs_stored_block_voids_field_facts() {
     let diags = actor_diagnostics(
         "  run -> Integer =>\n    blk := [self.f := nil. true]\n    (self.f notNil and: blk) ifTrue: [^self need: self.f]\n    0",
     );
-    assert!(!diags.is_empty(), "a stored block may clear self.f");
+    assert_field_leak(&diags);
+}
+
+#[test]
+fn rhs_block_literal_running_a_stored_block_voids_field_facts() {
+    let diags = actor_diagnostics(
+        "  run -> Integer =>\n    blk := [self.f := nil. true]\n    (self.f notNil and: [blk value]) ifTrue: [^self need: self.f]\n    0",
+    );
+    assert_field_leak(&diags);
 }

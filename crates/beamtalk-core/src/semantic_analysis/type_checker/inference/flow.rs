@@ -20,7 +20,7 @@ use crate::semantic_analysis::type_checker::narrowing::extract::extract_variable
 use crate::semantic_analysis::type_checker::narrowing::facts::{Facts, FactsCtx};
 use crate::semantic_analysis::type_checker::narrowing::refinement::RefinementLayer;
 use crate::semantic_analysis::type_checker::narrowing::visitors::{
-    block_has_return, block_may_reassign, expr_contains_returning_self_send,
+    block_has_return, block_may_reassign, expr_may_write_fields,
 };
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
@@ -445,13 +445,12 @@ impl TypeChecker {
     /// reaches the next statement, so a self-send in it (`[self log. ^0]`)
     /// leaves the post-guard narrowing intact.
     fn fallthrough_may_self_send(&self, receiver: &Expression, arguments: &[Expression]) -> bool {
-        expr_contains_returning_self_send(receiver, &self.type_map)
+        expr_may_write_fields(receiver, &self.type_map)
             || arguments.iter().any(|arg| match arg {
                 Expression::Block(block) => {
-                    !self.block_diverges(block)
-                        && expr_contains_returning_self_send(arg, &self.type_map)
+                    !self.block_diverges(block) && expr_may_write_fields(arg, &self.type_map)
                 }
-                other => expr_contains_returning_self_send(other, &self.type_map),
+                other => expr_may_write_fields(other, &self.type_map),
             })
     }
 

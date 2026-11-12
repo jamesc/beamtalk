@@ -201,3 +201,48 @@ pub(crate) enum Writes {
     /// Something the walk cannot name: assume any binding.
     Unknown,
 }
+
+/// Can evaluating `expr` run code that reassigns an actor field? True for a
+/// returning send to `self`/`super` ([`expr_contains_returning_self_send`]) and
+/// for any send that receives a block *value* (not a literal) as its receiver
+/// or an argument — a stored block writes actor fields live wherever it runs
+/// (ADR 0137), so `blk value`, `cb value: x` and `items anySatisfy: blk` all
+/// count. `expr` must already have been inferred.
+pub(crate) fn expr_may_write_fields(expr: &Expression, type_map: &TypeMap) -> bool {
+    struct Finder<'m>(bool, &'m TypeMap);
+    impl<'ast> Visitor<'ast> for Finder<'_> {
+        fn visit_expr(&mut self, e: &'ast Expression) {
+            if self.0 {
+                return;
+            }
+            if let Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } = e
+            {
+                let is_block_value = |operand: &Expression| {
+                    !matches!(operand, Expression::Block(_))
+                        && matches!(
+                            self.1.get(operand.span()),
+                            Some(InferredType::Known { class_name, .. }) if class_name == "Block"
+                        )
+                };
+                if is_block_value(receiver) || arguments.iter().any(is_block_value) {
+                    self.0 = true;
+                    return;
+                }
+            }
+            walk_expr(self, e);
+        }
+        fn visit_block(&mut self, block: &'ast Block) {
+            walk_block(self, block);
+        }
+    }
+    if expr_contains_returning_self_send(expr, type_map) {
+        return true;
+    }
+    let mut finder = Finder(false, type_map);
+    finder.visit_expr(expr);
+    finder.0
+}
