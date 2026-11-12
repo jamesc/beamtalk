@@ -352,12 +352,6 @@ responds_to_table_test_() ->
         ]
     ]}.
 
-
-
-
-
-
-
 responds_to_other_primitives_test() ->
     %% Lists support size via bt@stdlib@list dispatch
     ?assertEqual(true, beamtalk_primitive:responds_to([], 'size')).
@@ -1646,8 +1640,6 @@ responds_to_map_plain_dictionary_test() ->
     ?assertEqual(true, beamtalk_primitive:responds_to(#{a => 1}, 'at:')),
     ?assertEqual(false, beamtalk_primitive:responds_to(#{}, 'nonexistentMethod99')).
 
-
-
 responds_to_port_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
         {ok, Port} = gen_tcp:listen(0, []),
@@ -1658,7 +1650,6 @@ responds_to_port_test_() ->
             gen_tcp:close(Port)
         end
     end}.
-
 
 %%% ============================================================================
 %%% responds_to/2 — Tuple dispatch (non-object)

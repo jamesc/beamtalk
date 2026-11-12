@@ -456,8 +456,6 @@ compat_sync_send_case(Selector, Class, Kind) ->
         gen_server:stop(Actor)
     end.
 
-
-
 compat_self_dispatch_preserves_class_test_() ->
     %% BT-4679: the former compat_self_dispatch_{exit,throw,error}_preserves_class tests.
     %% The self_dispatch path (unwrap_dispatch_result) with backward-compat 2-tuple
@@ -489,8 +487,6 @@ compat_self_dispatch_case(Message, Class) ->
     after
         gen_server:stop(Actor)
     end.
-
-
 
 %%% Stress tests
 
@@ -1568,8 +1564,6 @@ register_spawned_callback_failure_case(CallbackMod, Matches) ->
         application:unset_env(beamtalk_runtime, actor_spawn_callback)
     end.
 
-
-
 %%% ===========================================================================
 %%% Test helpers for the register_spawned callback tests above
 %%% ===========================================================================
@@ -1653,9 +1647,6 @@ async_send_lifecycle_case(Start, Liveness, Selector, Expected, After) ->
         none ->
             ok
     end.
-
-
-
 
 async_send_to_dead_actor_rejects_future_test() ->
     {ok, Counter} = test_counter:start_link(0),
@@ -1842,8 +1833,6 @@ handle_cast_fire_and_forget_unknown_selector_crashes_actor_test() ->
 %%% Regression tests for kill semantics (race-condition fix)
 %%% These guard against the bug where exit(Pid, kill) + immediate ok
 %%% meant is_process_alive could still return true on the next call.
-
-
 
 sync_send_kill_live_actor_returns_ok_and_actor_is_dead_test() ->
     {ok, Counter} = test_counter:start(0),

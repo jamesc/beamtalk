@@ -1769,9 +1769,6 @@ class_send_self_instantiation_error_case(Selector, Args, Precondition) ->
         erase(beamtalk_class_is_abstract)
     end.
 
-
-
-
 %% `self class <selector>` inside a class method routes through
 %% metaclass_send with Pid =:= self(). The previous implementation issued a
 %% `gen_server:call(self(), {metaclass_method_call, ...})` and deadlocked with
@@ -1999,10 +1996,6 @@ test_class_send_test_selector() ->
             _:_ -> ok
         end)
     end.
-
-
-
-
 
 %% handle_self_instantiation successful type-dispatch branches — fire the
 %% Type=new/Type=spawn cases with a bogus module so instantiation itself
