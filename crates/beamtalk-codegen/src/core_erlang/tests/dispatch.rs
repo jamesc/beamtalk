@@ -3304,11 +3304,11 @@ fn test_qualified_class_reference_uses_canonical_tag() {
         .unwrap()
         .to_pretty_string();
     assert!(
-        output.contains("call 'erlang':'whereis'('beamtalk_class_Parser')"),
+        output.contains("'beamtalk_class_shadow_flags':'class_ref'('Parser')"),
         "qualified reference must look up the bare class name. Got:\n{output}"
     );
     assert!(
-        output.contains("{'beamtalk_object', 'Parser class', "),
+        output.contains("{'class_ref', 'Parser class'}"),
         "qualified reference must carry the canonical tag. Got:\n{output}"
     );
     assert!(
