@@ -214,11 +214,19 @@ check-release-build:
     echo "🔍 Checking the release workspace build (warnings denied)..."
     dir=target/release-check
     RUSTFLAGS="-D warnings" cargo build --release --workspace --locked --quiet --target-dir "$dir"
+    # Without nm the symbol scan below would inspect nothing and still pass.
+    command -v nm >/dev/null || { echo "❌ nm not found; cannot inspect the release binaries"; exit 1; }
+    # Only the test-gated parts: `fault::registry` (not the always-present
+    # `fault::disabled`), the dropped-assignment probe, and beamtalk-core's
+    # test helpers (core is also pulled in with `features = ["test"]` by
+    # dev-dependencies, so the same unification could leak it).
+    leak_re='beamtalk_codegen::core_erlang::(fault::registry|dropped_assignment_probe)::|beamtalk_core::test_helpers::'
     leaked=0
     for bin in "$dir"/release/beamtalk "$dir"/release/beamtalk-compiler-port; do
         [ -f "$bin" ] || { echo "❌ $bin not built"; exit 1; }
-        if nm -C "$bin" 2>/dev/null | grep -E 'beamtalk_codegen::core_erlang::(fault|dropped_assignment_probe)::'; then
-            echo "❌ $bin links test-only codegen code (the codegen 'test' feature leaked into the release build)"
+        syms="$(nm -C "$bin")"
+        if grep -E "$leak_re" <<<"$syms"; then
+            echo "❌ $bin links test-only code (a crate's 'test' feature leaked into the release build)"
             leaked=1
         fi
     done

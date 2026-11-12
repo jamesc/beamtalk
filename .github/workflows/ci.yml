@@ -334,6 +334,18 @@ jobs:
   # check. All three OSes (opt-in label, schedule, workflow_dispatch) are the
   # `platform-desktop` job in ci-platforms.yml. Both use the one composite
   # action, .github/actions/test-desktop.
+  test-desktop:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/test-desktop
+
   # BT-4749: the release workspace build must stay warning-free and must not
   # link test-only codegen code (the `test` feature leaking in through
   # dev-dependency feature unification, e.g. via `--all-targets`).
@@ -370,18 +382,6 @@ jobs:
 
       - name: Check release build (warnings denied, no test-only code)
         run: just check-release-build
-
-  test-desktop:
-    needs: changes
-    if: needs.changes.outputs.desktop == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: ./.github/actions/test-desktop
 
   # ─── core-diff snapshot-only vs full equivalence (BT-3934) ────────────
   # `core-diff`'s snapshot-only mode (BT-3887) is only sound if it leaves
