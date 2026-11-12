@@ -112,6 +112,22 @@ fn at_if_present_block_gets_the_key_type() {
     let msgs = one("  m: o :: #{#a => Integer} => o at: #q ifPresent: [:v | v]");
     assert_eq!(msgs.len(), 1, "{msgs:#?}");
     assert!(msgs[0].contains("`#q` is not a key of"), "{msgs:#?}");
+    // The consequence named in the hint depends on the operation.
+    let hint = |body: &str| {
+        let source = format!("Object subclass: Probe\n{body}\n");
+        let (module, _) =
+            crate::source_analysis::parse(crate::source_analysis::lex_with_eof(&source));
+        crate::semantic_analysis::analyse(&module)
+            .diagnostics
+            .into_iter()
+            .find_map(|d| d.hint.map(|h| h.to_string()))
+            .unwrap_or_default()
+    };
+    assert!(
+        hint("  m: o :: #{#a => Integer} => o at: #q ifPresent: [:v | v]").contains("never runs")
+    );
+    assert!(hint("  m: o :: #{#a => Integer} => o at: #q ifAbsent: [0]").contains("always runs"));
+    assert!(hint("  m: o :: #{#a => Integer} => o at: #q").contains("can only fail"));
 }
 
 #[test]

@@ -1556,7 +1556,8 @@ impl InferredType {
             }
             // ADR 0147: a map shape is a `Dictionary`, so an `isKindOf:` /
             // type-pattern test against `Dictionary` (or one of its
-            // superclasses) keeps the shape; any other class is disjoint.
+            // superclasses) keeps the shape, a protocol yields `shape & P`,
+            // and any other class is disjoint.
             (Self::Shape { .. }, Self::Known { class_name, .. }) => {
                 Self::intersect_shape_with_class(
                     a,
