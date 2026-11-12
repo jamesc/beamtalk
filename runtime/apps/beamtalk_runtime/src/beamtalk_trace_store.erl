@@ -1304,6 +1304,13 @@ until the next sweep.
 The table is walked in chunks of `?SWEEP_CHUNK` rows (BT-4124), one chunk per
 gen_server turn; after each chunk the server sends itself
 `{sweep_continue, Token}` and returns, so queued calls are served in between.
+The table stays fixed (`ets:safe_fixtable/2`) for the whole walk, because
+the continuation holds a slot position that a shrinking table would shift.
+The cost: deleted rows are not freed and the table does not resize until the
+sweep ends, so a sweep of a nearly full table slows pid-row inserts and
+lookups a little and holds the deleted rows in memory meanwhile. Acceptable
+for opt-in tracing.
+
 Rows a concurrent writer adds or removes mid-walk may be skipped or seen
 twice; both are harmless (every step is idempotent) and the next tick catches
 stragglers.

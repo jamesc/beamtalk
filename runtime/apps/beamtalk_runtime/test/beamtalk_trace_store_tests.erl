@@ -3107,21 +3107,28 @@ sweep_reclaims_row_without_keys_entry_test_() ->
 %% Test: chunked sweep and in-caller bottlenecks (BT-4124)
 %%====================================================================
 
-dead_pid() ->
-    Dead = spawn(fun() -> ok end),
-    Mon = erlang:monitor(process, Dead),
-    receive
-        {'DOWN', Mon, process, Dead, _} -> ok
-    end,
-    Dead.
-
-%% More dead pids than ten sweep chunks, one row each.
-fill_dead_pid_rows(Count) ->
-    lists:foreach(
+%% One row per live idle process. The sweep only reclaims dead pids, so the
+%% store's own periodic tick cannot change the row count while this fills.
+fill_live_pid_rows(Count) ->
+    lists:map(
         fun(_) ->
-            beamtalk_trace_store:record_dispatch(dead_pid(), ping, 10, ok, sync, 'Counter')
+            Pid = idle_process(),
+            beamtalk_trace_store:record_dispatch(Pid, ping, 10, ok, sync, 'Counter'),
+            Pid
         end,
         lists:seq(1, Count)
+    ).
+
+kill_and_wait(Pids) ->
+    Mons = [{erlang:monitor(process, P), P} || P <- Pids],
+    lists:foreach(fun(P) -> exit(P, kill) end, Pids),
+    lists:foreach(
+        fun({Mon, P}) ->
+            receive
+                {'DOWN', Mon, process, P, _} -> ok
+            end
+        end,
+        Mons
     ).
 
 chunked_sweep_yields_between_chunks_test_() ->
@@ -3130,8 +3137,9 @@ chunked_sweep_yields_between_chunks_test_() ->
             ?_test(begin
                 beamtalk_trace_store:enable(),
                 Count = 10 * 2000 + 500,
-                fill_dead_pid_rows(Count),
+                Pids = fill_live_pid_rows(Count),
                 ?assertEqual(Count, pid_row_count()),
+                kill_and_wait(Pids),
                 beamtalk_trace_store ! sweep_eviction,
                 %% A call queued behind the first chunk is served while the
                 %% sweep still has chunks left: the server yielded.
@@ -3151,7 +3159,7 @@ chunked_sweep_drop_continuation_test_() ->
                 ?_test(begin
                     %% clear/0 mid-sweep drops the continuation.
                     beamtalk_trace_store:enable(),
-                    fill_dead_pid_rows(3 * 2000 + 10),
+                    kill_and_wait(fill_live_pid_rows(3 * 2000 + 10)),
                     beamtalk_trace_store ! sweep_eviction,
                     ?assertEqual(true, gen_server:call(beamtalk_trace_store, sweep_pending)),
                     beamtalk_trace_store:clear(),
@@ -3162,7 +3170,7 @@ chunked_sweep_drop_continuation_test_() ->
                 ?_test(begin
                     %% disable/0 mid-sweep drops it too.
                     beamtalk_trace_store:enable(),
-                    fill_dead_pid_rows(3 * 2000 + 10),
+                    kill_and_wait(fill_live_pid_rows(3 * 2000 + 10)),
                     beamtalk_trace_store ! sweep_eviction,
                     ?assertEqual(true, gen_server:call(beamtalk_trace_store, sweep_pending)),
                     beamtalk_trace_store:disable(),
@@ -3184,7 +3192,7 @@ chunked_sweep_stale_continuation_test_() ->
         ?_test(begin
             %% A continuation whose table is gone must not crash the server.
             beamtalk_trace_store:enable(),
-            fill_dead_pid_rows(2 * 2000 + 10),
+            kill_and_wait(fill_live_pid_rows(2 * 2000 + 10)),
             Store = whereis(beamtalk_trace_store),
             Store ! sweep_eviction,
             ?assertEqual(true, gen_server:call(Store, sweep_pending)),
