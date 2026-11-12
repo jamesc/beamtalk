@@ -355,6 +355,7 @@
 
 ### Runtime
 
+- Inline FFI calls with a `binary()` result skip the proxy (BT-4755) — the spec reader types `binary()` as `String | Binary`, and the FFI type table now proves both, since the proxy returns a bitstring or a tagged String unchanged in both coercion modes. A `string()` (charlist) result still goes through the proxy. Behaviour, including error translation, is unchanged; only the call gets faster (bench row 13b).
 - Inline FFI calls skip the proxy when the Erlang spec proves coercion is a no-op — when a function's `-spec` shows the result and arguments need no unwrapping or coercion, the compiler emits a direct remote call instead of routing through `beamtalk_erlang_proxy`. An `erlang:phash2/1` call drops from 134 ns / 14 reductions to 13 ns / 1 reduction (BT-4485, #4882)
 - Class-side constant folding widened to every scalar literal kind — string, symbol, float, boolean, character and `nil` class-side method bodies are now inlined behind a constant-value key, not just integers (BT-4504, #4888)
 - **Fix: `^` in a field-writing loop now keeps the loop's field writes (BT-4523)** — a `^` inside a hybrid-params loop body stored the loop-entry state instead of the state with fields written so far; an `ensure:` cleanup also saw the stale values. Hybrid mode is now excluded when the body holds a `^`, so the loop threads the full state (#4894)

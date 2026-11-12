@@ -123,7 +123,7 @@ A `self delegate` method on a `native:` `Object` gets the same hint at each such
 
 Most FFI calls run through `beamtalk_erlang_proxy`, which unwraps `String` arguments, coerces the result (charlists, `ok`/`error` → `Result`) and turns Erlang errors into structured ones. When the function's `-spec` in the FFI type table proves none of that changes anything, the compiler emits a plain remote call instead (BT-4485). That needs both of these:
 
-- **The result** is made only of types the proxy returns unchanged: `Integer`, `Float`, `Number`, `Boolean`, `nil`, `Pid`, `Dictionary`, `Block`, or a literal atom other than `ok`/`error`. A result of `atom()`, `binary()`, a list, a tuple, `term()` or `ok | {error, _}` keeps the proxy.
+- **The result** is made only of types the proxy returns unchanged: `Integer`, `Float`, `Number`, `Boolean`, `nil`, `Pid`, `Dictionary`, `Block`, `String`, `Binary` (so a `binary()` result qualifies), or a literal atom other than `ok`/`error`. A result of `atom()`, `string()` (a charlist), a list, a tuple, `term()` or `ok | {error, _}` keeps the proxy.
 - **Every argument's static type** is a scalar: `Integer`, `Float`, `Number`, `Boolean`, `nil`, `Pid` or `Symbol`. A `String`, collection, block or untyped argument keeps the proxy.
 
 Static types aren't checked at run time, so the direct call also checks each argument (`is_number`, `is_atom` or `is_pid`) and goes through the proxy when one fails. It raises the same structured errors: its error path hands the exception to the proxy's classifier, `badarg` retry included.

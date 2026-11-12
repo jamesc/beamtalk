@@ -30,6 +30,17 @@ TestCase subclass: FfiDirectCallTest
     self assert: (Erlang beamtalk_character is_digit: 55) equals: true
     self assert: (Erlang beamtalk_character is_digit: 55) equals: (self proxy: #is_digit args: #(55))
 
+  // BT-4755: a `binary()` spec result (`String | Binary`) is proved too: same
+  // answer as the proxy, and the error translation is kept.
+  testBinaryResult =>
+    self assert: (Erlang beamtalk_character as_string: 97) equals: (self proxy: #as_string args: #(97))
+    self assert: (Erlang beamtalk_character print_string: 97) equals: (self proxy: #print_string args: #(97))
+
+  testBinaryResultErrorMatchesProxy =>
+    direct := self kindAndMessage: [Erlang beamtalk_character print_string: -1]
+    proxied := self kindAndMessage: [self proxy: #print_string args: #(-1)]
+    self assert: direct equals: proxied
+
   // The callee raises a structured error itself: passed through unchanged.
   testStructuredErrorMatchesProxy =>
     direct := self kindAndMessage: [Erlang beamtalk_character value: -1]
