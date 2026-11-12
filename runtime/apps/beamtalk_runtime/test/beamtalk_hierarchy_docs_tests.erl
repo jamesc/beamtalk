@@ -184,7 +184,9 @@ setup() ->
     {PidA, PidB, PidC, PidD, PidE, PidF, PidG, PidH, PidX, PidY}.
 
 teardown({PidA, PidB, PidC, PidD, PidE, PidF, PidG, PidH, PidX, PidY}) ->
-    lists:foreach(fun stop_class/1, [PidA, PidB, PidC, PidD, PidE, PidF, PidG, PidH, PidX, PidY]).
+    lists:foreach(fun beamtalk_test_proc:stop/1, [
+        PidA, PidB, PidC, PidD, PidE, PidF, PidG, PidH, PidX, PidY
+    ]).
 
 start_class(Name, Superclass, InstanceMethods, ClassMethods) ->
     ClassInfo = #{
@@ -198,11 +200,4 @@ start_class(Name, Superclass, InstanceMethods, ClassMethods) ->
     case beamtalk_object_class:start(Name, ClassInfo) of
         {ok, Pid} -> Pid;
         {error, {already_started, Pid}} -> Pid
-    end.
-
-stop_class(Pid) ->
-    try
-        gen_server:stop(Pid, normal, 5000)
-    catch
-        _:_ -> ok
     end.

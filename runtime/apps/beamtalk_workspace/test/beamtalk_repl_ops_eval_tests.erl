@@ -48,7 +48,7 @@ setup_with_stdlib(SessionId) ->
     {ok, _} = application:ensure_all_started(beamtalk_compiler),
     {ok, _} = application:ensure_all_started(beamtalk_stdlib),
     %% Poll until the Program class is registered (stdlib loads classes asynchronously).
-    ok = wait_for_class('Program', 50, 30),
+    ok = beamtalk_test_wait:class('Program', 1500),
     {ok, SessionPid} = beamtalk_repl_shell:start_link(SessionId),
     SessionPid.
 
@@ -62,17 +62,6 @@ teardown(SessionPid) ->
     %% that test no-compiler error paths see the expected initial state.
     _ = application:stop(beamtalk_compiler),
     ok.
-
-wait_for_class(_Class, _Interval, 0) ->
-    error(class_registry_timeout);
-wait_for_class(Class, Interval, Retries) ->
-    case beamtalk_class_registry:whereis_class(Class) of
-        undefined ->
-            timer:sleep(Interval),
-            wait_for_class(Class, Interval, Retries - 1);
-        _Pid ->
-            ok
-    end.
 
 %%====================================================================
 %% handle_term/4 — empty code (no session required)

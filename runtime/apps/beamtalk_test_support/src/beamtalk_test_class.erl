@@ -12,7 +12,9 @@ module on demand. Replaces the per-file `start_class/N`, `stop_class/1`,
 `ensure_fixture_loaded/1` copies.
 """.
 
--export([start/2, start/3, stop/1, ensure_fixture_loaded/2, ensure_counter_loaded/0]).
+-export([
+    start/2, start/3, stop/1, ensure_fixture_loaded/2, ensure_counter_loaded/0, stop_graceful/1
+]).
 
 -doc "`start/3` with the default `ClassInfo` overrides (none).".
 -spec start(atom(), map()) -> pid().
@@ -77,3 +79,19 @@ register_if_needed(ClassName, Module) ->
 -spec ensure_counter_loaded() -> ok.
 ensure_counter_loaded() ->
     ensure_fixture_loaded('Counter', 'bt@counter').
+
+-doc """
+Deliberately stop the class registered as `Name` (a normal `gen_server:stop`),
+if any. Unlike `stop/1` this runs the class's `terminate` path, which removes
+its registration and metadata rows (BT-4622) instead of leaving them for crash
+recovery.
+""".
+-spec stop_graceful(atom()) -> ok.
+stop_graceful(Name) ->
+    case beamtalk_class_registry:whereis_class(Name) of
+        Pid when is_pid(Pid) ->
+            unlink(Pid),
+            gen_server:stop(Pid);
+        _ ->
+            ok
+    end.
