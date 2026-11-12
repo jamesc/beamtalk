@@ -57,6 +57,9 @@ test = ["test-ports", "dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
 ## `test_versions` (version-lock fixtures, BT-4329) without the async WS
 ## double's `tokio` dependency, for synchronous crates' tests.
 test-ports = []
+## Expose `ws_client` (connect-with-timeout and text-frame read helpers shared by
+## the async LSP and MCP clients, BT-4682).
+ws-client = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
 
 [lints]
 workspace = true

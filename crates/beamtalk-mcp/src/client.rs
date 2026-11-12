@@ -15,7 +15,8 @@ use std::time::Duration;
 pub use beamtalk_repl_protocol::ReplResponse;
 use beamtalk_repl_protocol::RequestBuilder;
 use beamtalk_repl_protocol::handshake;
-use futures_util::{SinkExt, StreamExt};
+use beamtalk_repl_protocol::ws_client;
+use futures_util::SinkExt;
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::{
     Error as WsError, Message, error::ProtocolError as WsProtocolError,
@@ -120,16 +121,17 @@ impl ReplClient {
         workspace_id: Option<String>,
     ) -> Result<Self, String> {
         let url = format!("ws://127.0.0.1:{port}/ws");
-        let (mut ws, _response) =
-            tokio::time::timeout(CONNECT_TIMEOUT, tokio_tungstenite::connect_async(&url))
-                .await
-                .map_err(|_| {
-                    format!(
-                        "Timed out connecting to REPL at {url} ({}s)",
-                        CONNECT_TIMEOUT.as_secs()
-                    )
-                })?
-                .map_err(|e| format!("Failed to connect to REPL at {url}: {e}"))?;
+        let mut ws = ws_client::connect_with_timeout(&url, CONNECT_TIMEOUT)
+            .await
+            .map_err(|e| match e {
+                ws_client::ConnectError::TimedOut => format!(
+                    "Timed out connecting to REPL at {url} ({}s)",
+                    CONNECT_TIMEOUT.as_secs()
+                ),
+                ws_client::ConnectError::Failed(e) => {
+                    format!("Failed to connect to REPL at {url}: {e}")
+                }
+            })?;
 
         let session_id = perform_auth_handshake(&mut ws, cookie, resume).await?;
         verify_server_versions(&mut ws).await?;
@@ -886,54 +888,24 @@ async fn perform_auth_handshake<S>(
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    // Read auth-required. Frame recognition goes through
-    // `beamtalk_repl_protocol::handshake` rather than re-matching
-    // the JSON here — see that module's doc comment for why.
-    let auth_required = read_text_message_with_timeout(ws, REPL_IO_TIMEOUT).await?;
-    let auth_required_json: serde_json::Value = serde_json::from_str(&auth_required)
-        .map_err(|e| format!("Failed to parse auth-required: {e}"))?;
-    if !handshake::is_auth_required(&auth_required_json) {
-        return Err(format!("Unexpected pre-auth message: {auth_required_json}"));
-    }
-
-    // Send auth with optional resume. `client` tags the session surface so
-    // `Workspace sessions` can show it originated from the MCP server. The
-    // version fields let the node reject a mismatched toolchain (BT-4327)
-    // before any session exists.
-    let auth_msg = handshake::auth_request(
+    // The step sequence is shared (BT-4682); `client` tags the session
+    // surface so `Workspace sessions` can show it originated from the MCP
+    // server.
+    handshake::perform_auth_sequence(
+        ws,
         cookie,
         "mcp",
         resume,
-        handshake::beamtalk_version(),
-        handshake::PROTOCOL_VERSION,
-    );
-    let auth_str =
-        serde_json::to_string(&auth_msg).map_err(|e| format!("Failed to serialize auth: {e}"))?;
-    ws.send(Message::Text(auth_str.into()))
-        .await
-        .map_err(|e| format!("Failed to send auth: {e}"))?;
-
-    // Read auth response
-    let auth_response = read_text_message_with_timeout(ws, REPL_IO_TIMEOUT).await?;
-    let auth_json: serde_json::Value = serde_json::from_str(&auth_response)
-        .map_err(|e| format!("Failed to parse auth response: {e}"))?;
-    match handshake::parse_auth_ack(&auth_json) {
-        Some(handshake::AuthAck::Ok) => {}
-        Some(handshake::AuthAck::Error { message }) => {
-            let msg = message.as_deref().unwrap_or("Authentication failed");
-            return Err(format!("Workspace authentication failed: {msg}"));
-        }
-        None => return Err(format!("Unexpected auth response: {auth_json}")),
-    }
-
-    // Read session-started
-    let session_started = read_text_message_with_timeout(ws, REPL_IO_TIMEOUT).await?;
-    let session_json: serde_json::Value = serde_json::from_str(&session_started)
-        .map_err(|e| format!("Failed to parse session-started: {e}"))?;
-    if !handshake::is_session_started(&session_json) {
-        return Err(format!("Unexpected post-auth message: {session_json}"));
-    }
-    Ok(handshake::session_id(&session_json))
+        async |ws: &mut tokio_tungstenite::WebSocketStream<S>, text: String| {
+            ws.send(Message::Text(text.into()))
+                .await
+                .map_err(|e| e.to_string())
+        },
+        async |ws: &mut tokio_tungstenite::WebSocketStream<S>| {
+            read_text_message_with_timeout(ws, REPL_IO_TIMEOUT).await
+        },
+    )
+    .await
 }
 
 /// Client side of the version lock (BT-4327): refuse a stale node via
@@ -967,19 +939,13 @@ async fn read_text_message<S>(
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    loop {
-        match ws.next().await {
-            Some(Ok(Message::Text(text))) => return Ok(text.to_string()),
-            Some(Ok(Message::Close(_))) => {
-                return Err("REPL WebSocket connection closed (the server may have \
-                     restarted or the connection timed out)"
-                    .to_string());
-            }
-            Some(Ok(_)) => {} // Skip ping/pong/binary
-            Some(Err(e)) => return Err(format!("WebSocket read error: {e}")),
-            None => return Err("WebSocket stream ended".to_string()),
-        }
-    }
+    ws_client::read_text(ws).await.map_err(|e| match e {
+        ws_client::ReadError::Closed => "REPL WebSocket connection closed (the server may have \
+             restarted or the connection timed out)"
+            .to_string(),
+        ws_client::ReadError::Ended => "WebSocket stream ended".to_string(),
+        ws_client::ReadError::Failed(e) => format!("WebSocket read error: {e}"),
+    })
 }
 
 /// Read the next text message with an explicit timeout.

@@ -34,9 +34,11 @@
 //! Rust/Erlang boundary needs a shared conformance fixture, not a comment).
 //!
 //! I/O (reading/writing frames, timeouts, reconnect policy) stays with each
-//! caller — this module only builds/recognises the JSON, since the four
-//! callers use different transports (async `tokio-tungstenite` vs. sync
-//! `tungstenite`) and different retry/timeout policies.
+//! caller, since the callers use different transports (async
+//! `tokio-tungstenite` vs. sync `tungstenite`) and different retry/timeout
+//! policies. The step order itself is shared as the transport-free
+//! [`AuthHandshake`] state machine; [`perform_auth_sequence`] drives it over
+//! any async transport (BT-4682).
 
 use serde_json::Value;
 
@@ -290,6 +292,138 @@ pub fn session_id(frame: &Value) -> Option<String> {
         .get("session")
         .and_then(Value::as_str)
         .map(String::from)
+}
+
+/// What the caller does after feeding a frame to an [`AuthHandshake`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthStep {
+    /// Write this text frame to the server, then read the next frame.
+    Send(String),
+    /// Nothing to send; read the next frame.
+    Continue,
+    /// The handshake is complete. Carries the `session-started` session id.
+    Done(Option<String>),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum AuthPhase {
+    AuthRequired,
+    AuthAck,
+    SessionStarted,
+}
+
+/// The client side of the auth sequence as a transport-free state machine
+/// (BT-4682): feed it each frame the server sends, do what the returned
+/// [`AuthStep`] says. Sync (`tungstenite`) and async (`tokio-tungstenite`)
+/// clients drive the same machine, so the step order and error wording live
+/// in one place; [`perform_auth_sequence`] is the async closure-style driver.
+#[derive(Debug)]
+pub struct AuthHandshake {
+    phase: AuthPhase,
+    cookie: String,
+    client: String,
+    resume: Option<String>,
+}
+
+impl AuthHandshake {
+    /// A handshake that authenticates with `cookie`, tagging the session
+    /// surface as `client` (`"lsp"`, `"mcp"`, `"repl"`, ...) and optionally
+    /// resuming session `resume`.
+    #[must_use]
+    pub fn new(cookie: &str, client: &str, resume: Option<&str>) -> Self {
+        Self {
+            phase: AuthPhase::AuthRequired,
+            cookie: cookie.to_string(),
+            client: client.to_string(),
+            resume: resume.map(String::from),
+        }
+    }
+
+    /// Feed the next text frame from the server.
+    ///
+    /// # Errors
+    /// An undecodable or unexpected frame, or an `auth_error` from the server.
+    pub fn on_frame(&mut self, text: &str) -> Result<AuthStep, String> {
+        let what = match self.phase {
+            AuthPhase::AuthRequired => "auth-required",
+            AuthPhase::AuthAck => "auth response",
+            AuthPhase::SessionStarted => "session-started",
+        };
+        let frame: Value =
+            serde_json::from_str(text).map_err(|e| format!("failed to parse {what}: {e}"))?;
+        self.on_value(&frame)
+    }
+
+    /// As [`Self::on_frame`], for a caller that has already decoded the JSON.
+    ///
+    /// # Errors
+    /// An unexpected frame, or an `auth_error` from the server.
+    pub fn on_value(&mut self, frame: &Value) -> Result<AuthStep, String> {
+        match self.phase {
+            AuthPhase::AuthRequired => {
+                if !is_auth_required(frame) {
+                    return Err(format!("unexpected pre-auth message: {frame}"));
+                }
+                // The version fields let the node reject a mismatched
+                // toolchain (BT-4327) before any session exists.
+                let auth = auth_request(
+                    &self.cookie,
+                    &self.client,
+                    self.resume.as_deref(),
+                    beamtalk_version(),
+                    PROTOCOL_VERSION,
+                );
+                let text = serde_json::to_string(&auth)
+                    .map_err(|e| format!("failed to serialise auth: {e}"))?;
+                self.phase = AuthPhase::AuthAck;
+                Ok(AuthStep::Send(text))
+            }
+            AuthPhase::AuthAck => match parse_auth_ack(frame) {
+                Some(AuthAck::Ok) => {
+                    self.phase = AuthPhase::SessionStarted;
+                    Ok(AuthStep::Continue)
+                }
+                Some(AuthAck::Error { message }) => {
+                    let msg = message.as_deref().unwrap_or("authentication failed");
+                    Err(format!("workspace authentication failed: {msg}"))
+                }
+                None => Err(format!("unexpected auth response: {frame}")),
+            },
+            AuthPhase::SessionStarted => {
+                if !is_session_started(frame) {
+                    return Err(format!("unexpected post-auth message: {frame}"));
+                }
+                Ok(AuthStep::Done(session_id(frame)))
+            }
+        }
+    }
+}
+
+/// Run the whole auth sequence over any transport, closure style (as
+/// [`verify_server_versions_via_describe`]): `send` writes one text frame,
+/// `recv` reads the next one. Returns the `session-started` session id.
+///
+/// # Errors
+/// The first transport error from `send`/`recv`, or any [`AuthHandshake`] error.
+pub async fn perform_auth_sequence<T>(
+    io: &mut T,
+    cookie: &str,
+    client: &str,
+    resume: Option<&str>,
+    mut send: impl AsyncFnMut(&mut T, String) -> Result<(), String>,
+    mut recv: impl AsyncFnMut(&mut T) -> Result<String, String>,
+) -> Result<Option<String>, String> {
+    let mut handshake = AuthHandshake::new(cookie, client, resume);
+    loop {
+        let frame = recv(io).await?;
+        match handshake.on_frame(&frame)? {
+            AuthStep::Send(text) => send(io, text)
+                .await
+                .map_err(|e| format!("failed to send auth: {e}"))?,
+            AuthStep::Continue => {}
+            AuthStep::Done(session) => return Ok(session),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -672,5 +806,128 @@ mod tests {
                 .dynamic_fields
                 .contains(&"session".to_string())
         );
+    }
+
+    /// Drive an [`AuthHandshake`] with `frames`, returning what it asked to send.
+    fn drive(frames: &[Value]) -> (Vec<Value>, Result<Option<String>, String>) {
+        let mut handshake = AuthHandshake::new("cookie-1", "test", Some("sess-9"));
+        let mut sent = Vec::new();
+        for frame in frames {
+            match handshake.on_value(frame) {
+                Ok(AuthStep::Send(text)) => sent.push(serde_json::from_str(&text).unwrap()),
+                Ok(AuthStep::Continue) => {}
+                Ok(AuthStep::Done(session)) => return (sent, Ok(session)),
+                Err(e) => return (sent, Err(e)),
+            }
+        }
+        (sent, Err("ran out of frames".to_string()))
+    }
+
+    #[test]
+    fn auth_handshake_runs_the_four_message_sequence() {
+        let (sent, result) = drive(&[
+            serde_json::json!({"op": OP_AUTH_REQUIRED}),
+            serde_json::json!({"type": TYPE_AUTH_OK}),
+            serde_json::json!({"op": OP_SESSION_STARTED, "session": "s-1"}),
+        ]);
+        assert_eq!(result, Ok(Some("s-1".to_string())));
+        assert_eq!(
+            sent.len(),
+            1,
+            "exactly one frame (the auth request) is sent"
+        );
+        assert_eq!(sent[0]["type"], TYPE_AUTH);
+        assert_eq!(sent[0]["cookie"], "cookie-1");
+        assert_eq!(sent[0]["client"], "test");
+        assert_eq!(sent[0]["resume"], "sess-9");
+    }
+
+    #[test]
+    fn auth_handshake_rejects_each_unexpected_frame() {
+        let (_, result) = drive(&[serde_json::json!({"op": "nope"})]);
+        assert!(
+            result
+                .unwrap_err()
+                .starts_with("unexpected pre-auth message")
+        );
+
+        let (_, result) = drive(&[
+            serde_json::json!({"op": OP_AUTH_REQUIRED}),
+            serde_json::json!({"type": "weird"}),
+        ]);
+        assert!(result.unwrap_err().starts_with("unexpected auth response"));
+
+        let (_, result) = drive(&[
+            serde_json::json!({"op": OP_AUTH_REQUIRED}),
+            serde_json::json!({"type": TYPE_AUTH_OK}),
+            serde_json::json!({"op": "nope"}),
+        ]);
+        assert!(
+            result
+                .unwrap_err()
+                .starts_with("unexpected post-auth message")
+        );
+    }
+
+    #[test]
+    fn auth_handshake_reports_the_servers_auth_error() {
+        let (_, result) = drive(&[
+            serde_json::json!({"op": OP_AUTH_REQUIRED}),
+            serde_json::json!({"type": TYPE_AUTH_ERROR, "message": "invalid cookie"}),
+        ]);
+        assert_eq!(
+            result.unwrap_err(),
+            "workspace authentication failed: invalid cookie"
+        );
+        let (_, result) = drive(&[
+            serde_json::json!({"op": OP_AUTH_REQUIRED}),
+            serde_json::json!({"type": TYPE_AUTH_ERROR}),
+        ]);
+        assert_eq!(
+            result.unwrap_err(),
+            "workspace authentication failed: authentication failed"
+        );
+    }
+
+    #[test]
+    fn auth_handshake_reports_an_undecodable_frame() {
+        let mut handshake = AuthHandshake::new("c", "test", None);
+        let err = handshake.on_frame("not json").unwrap_err();
+        assert!(err.starts_with("failed to parse auth-required"), "{err}");
+    }
+
+    #[test]
+    fn perform_auth_sequence_drives_the_machine_over_closures() {
+        struct Io {
+            replies: std::collections::VecDeque<String>,
+            sent: Vec<String>,
+        }
+        let mut io = Io {
+            replies: [
+                serde_json::json!({"op": OP_AUTH_REQUIRED}),
+                serde_json::json!({"type": TYPE_AUTH_OK}),
+                serde_json::json!({"op": OP_SESSION_STARTED, "session": "s-2"}),
+            ]
+            .iter()
+            .map(Value::to_string)
+            .collect(),
+            sent: Vec::new(),
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        let session = runtime.block_on(perform_auth_sequence(
+            &mut io,
+            "c",
+            "test",
+            None,
+            async |io: &mut Io, text: String| {
+                io.sent.push(text);
+                Ok(())
+            },
+            async |io: &mut Io| io.replies.pop_front().ok_or_else(|| "ended".to_string()),
+        ));
+        assert_eq!(session, Ok(Some("s-2".to_string())));
+        assert_eq!(io.sent.len(), 1);
     }
 }
