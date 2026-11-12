@@ -3188,17 +3188,13 @@ be reached, `other` for anything else. The single place these exit shapes
 are recognised (BT-3984).
 """.
 -spec classify_call_failure(error | exit | throw, term()) -> supervisor_unavailable() | other.
-classify_call_failure(exit, noproc) -> dead;
-classify_call_failure(exit, {noproc, _}) -> dead;
-classify_call_failure(exit, {{nodedown, _Node}, _}) -> {unreachable, nodedown};
-classify_call_failure(exit, {nodedown, _Node}) -> {unreachable, nodedown};
-classify_call_failure(exit, noconnection) -> {unreachable, noconnection};
-classify_call_failure(exit, {noconnection, _}) -> {unreachable, noconnection};
-classify_call_failure(exit, timeout) -> {unreachable, timeout};
-classify_call_failure(exit, {timeout, _}) -> {unreachable, timeout};
-classify_call_failure(error, {erpc, noconnection}) -> {unreachable, noconnection};
-classify_call_failure(error, {erpc, timeout}) -> {unreachable, timeout};
-classify_call_failure(_Class, _Reason) -> other.
+classify_call_failure(Class, Reason) ->
+    %% A timeout is "unreachable" here (a slow remote supervisor); `shutdown` /
+    %% `killed` stay `other` — see beamtalk_call_failure's moduledoc.
+    case beamtalk_call_failure:classify(Class, Reason) of
+        timeout -> {unreachable, timeout};
+        Classified -> Classified
+    end.
 
 -doc """
 The `{error, #beamtalk_error{}}` for a supervisor the handle `Self` could not
@@ -3386,11 +3382,8 @@ stale_handle_error(ClassName, Selector) ->
         selector => Selector,
         domain => [beamtalk, runtime]
     }),
-    Error = beamtalk_error:new(
-        stale_handle,
-        ClassName,
-        Selector,
-        <<"supervisor is not running; the handle is stale">>
+    Error = beamtalk_error:stale_handle(
+        ClassName, Selector, <<"supervisor is not running; the handle is stale">>
     ),
     {error, Error}.
 

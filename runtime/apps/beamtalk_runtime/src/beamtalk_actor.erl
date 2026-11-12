@@ -1907,34 +1907,26 @@ sync_call(ActorPid, Selector, Args, CallTimeout, Class) ->
             end
         end)
     catch
-        exit:{noproc, _} ->
-            raise_actor_dead(Selector);
-        exit:{normal, _} ->
-            raise_actor_dead(Selector);
-        exit:{shutdown, _} ->
-            raise_actor_dead(Selector);
-        exit:{timeout, _} ->
-            raise_timeout(Selector);
-        exit:{{nodedown, Node}, _} ->
-            %% ADR 0126 §7.1: a partitioned or never-connected node —
-            %% the actor may be alive on the far side. Checked before the
-            %% catch-all so it isn't misreported as actor_dead. Verified
-            %% empirically: gen_server:call/2,3 exits with exactly this
-            %% shape (`{{nodedown, Node}, {gen_server, call, [...]}}`) for
-            %% both a mid-call partition and a never-connected node.
-            raise_node_down(Node, Selector);
-        exit:{noconnection, _} ->
-            %% Defensive: not observed from gen_server:call in practice
-            %% (that always wraps as {nodedown, Node} above), but this is
-            %% the DOWN reason erlang:monitor/2 uses for the same
-            %% condition, and ADR 0126 §7.1 names it explicitly.
-            raise_node_down(node(ActorPid), Selector);
-        exit:noconnection ->
-            raise_node_down(node(ActorPid), Selector);
-        exit:{_Reason, _} ->
-            %% Catch-all for other exit reasons: {shutdown, Term}, killed,
-            %% custom stop reasons, etc. All indicate the actor is unavailable.
-            raise_actor_dead(Selector)
+        exit:Reason:Stack ->
+            %% BT-4676: classification lives in beamtalk_call_failure. ADR 0126
+            %% §7.1: a partitioned or never-connected node is `node_down` (the
+            %% actor may be alive on the far side), not `actor_dead`.
+            case beamtalk_call_failure:classify(exit, Reason) of
+                dead ->
+                    raise_actor_dead(Selector);
+                timeout ->
+                    raise_timeout(Selector);
+                {unreachable, _Why} ->
+                    raise_node_down(
+                        beamtalk_call_failure:unreachable_node(Reason, node(ActorPid)), Selector
+                    );
+                other when is_tuple(Reason), tuple_size(Reason) =:= 2 ->
+                    %% `{normal, _}`, `{shutdown, _}`, `{killed, _}`, custom stop
+                    %% reasons: the actor died mid-call, so it is unavailable.
+                    raise_actor_dead(Selector);
+                other ->
+                    erlang:raise(exit, Reason, Stack)
+            end
     end.
 
 -doc """
@@ -2225,26 +2217,13 @@ it may be slow, overloaded, or deadlocked.
 """.
 -spec raise_timeout(atom()) -> no_return().
 raise_timeout(Selector) ->
-    Error = beamtalk_error:new(
-        timeout,
-        unknown,
-        Selector,
-        <<
-            "Actor did not respond within the timeout period. "
-            "The actor may be slow, overloaded, or deadlocked"
-        >>
-    ),
+    Error = beamtalk_error:actor_timeout(Selector),
     beamtalk_exception_handler:reraise(Error).
 
 -doc "Construct a structured actor_dead error record for the given selector.".
 -spec actor_dead_error_record(atom()) -> #beamtalk_error{}.
 actor_dead_error_record(Selector) ->
-    beamtalk_error:new(
-        actor_dead,
-        unknown,
-        Selector,
-        <<"Use 'isAlive' to check, or use monitors for lifecycle events">>
-    ).
+    beamtalk_error:actor_dead(unknown, Selector).
 
 -doc """
 Raise a structured node_down error as an Erlang exception (ADR 0126 §7.1).
@@ -2292,13 +2271,7 @@ is_remote(ActorPid, AskNode) ->
 -doc "Construct a structured node_down error record for the given node and selector.".
 -spec node_down_error_record(node(), atom()) -> #beamtalk_error{}.
 node_down_error_record(Node, Selector) ->
-    Error = beamtalk_error:new(
-        node_down,
-        unknown,
-        Selector,
-        <<"The node may come back; retry, or use monitors to detect when it does">>
-    ),
-    beamtalk_error:with_details(Error, #{node => Node}).
+    beamtalk_error:node_down(unknown, Selector, Node).
 
 -doc """
 ADR 0126 §3: resolve a `{registered, Name, Node}` proxy's live pid.
@@ -4440,12 +4413,7 @@ make_dnu_error(Selector, ClassName, State) ->
         pid => self(),
         domain => [beamtalk, runtime]
     }),
-    Error = beamtalk_error:new(
-        does_not_understand,
-        ClassName,
-        Selector,
-        <<"Check spelling or use 'respondsTo:' to verify method exists">>
-    ),
+    Error = beamtalk_error:does_not_understand(ClassName, Selector),
     {error, Error, State}.
 
 -doc """

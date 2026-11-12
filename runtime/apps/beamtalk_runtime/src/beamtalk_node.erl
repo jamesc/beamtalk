@@ -520,13 +520,7 @@ node_down_error(Name, Hint) ->
 -doc "`remote_shape_manifest/1`'s `noconnection` mapping — `shapeManifest`'s own selector, distinct from `connect`'s `node_down_error/2` above.".
 -spec remote_manifest_node_down_error(node()) -> #beamtalk_error{}.
 remote_manifest_node_down_error(Name) ->
-    Error0 = beamtalk_error:new(
-        node_down,
-        'Node',
-        shapeManifest,
-        <<"The node may come back; retry, or use monitors to detect when it does">>
-    ),
-    beamtalk_error:with_details(Error0, #{node => Name}).
+    beamtalk_error:node_down('Node', shapeManifest, Name).
 
 -doc "`remote_shape_manifest/1`'s `erpc` timeout mapping.".
 -spec remote_manifest_timeout_error(node()) -> #beamtalk_error{}.
