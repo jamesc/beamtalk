@@ -4,7 +4,7 @@
 -module(beamtalk_behaviour_intrinsics_rename_to_tests).
 
 -moduledoc """
-Integration tests for `beamtalk_behaviour_intrinsics:classRenameTo/2` (ADR
+Integration tests for `beamtalk_class_refactor:classRenameTo/2` (ADR
 0114 Phase 2) against a real, in-project fixture graph.
 
 Mirrors `beamtalk_repl_loader_rewrite_sites_tests.erl`'s fixture pattern
@@ -170,7 +170,7 @@ rename_to_success_test_() ->
 
 rename_to_success(_Fixture) ->
     OldPid = beamtalk_class_registry:whereis_class('Bt3278Widget'),
-    Result = beamtalk_behaviour_intrinsics:classRenameTo(
+    Result = beamtalk_class_refactor:classRenameTo(
         widget_class_object(), 'Bt3278WidgetRenamed'
     ),
 
@@ -277,7 +277,7 @@ teardown_with_changelog(#{old_home := OldHome} = Fixture) ->
     teardown(Fixture).
 
 rename_to_changelog(_Fixture) ->
-    _ = beamtalk_behaviour_intrinsics:classRenameTo(widget_class_object(), 'Bt3278WidgetRenamed'),
+    _ = beamtalk_class_refactor:classRenameTo(widget_class_object(), 'Bt3278WidgetRenamed'),
     [Entry] = beamtalk_workspace_changelog:entries(),
     Sites = beamtalk_workspace_changelog:entry_sites(Entry),
     [
@@ -305,7 +305,7 @@ rename_to_revert_test_() ->
     {setup, fun setup_with_changelog/0, fun teardown_with_changelog/1, fun rename_to_revert/1}.
 
 rename_to_revert(_Fixture) ->
-    _ = beamtalk_behaviour_intrinsics:classRenameTo(widget_class_object(), 'Bt3278WidgetRenamed'),
+    _ = beamtalk_class_refactor:classRenameTo(widget_class_object(), 'Bt3278WidgetRenamed'),
     RevertResult = beamtalk_workspace_interface_primitives:revert_method(
         <<"Bt3278WidgetRenamed">>, <<"new-class">>
     ),
@@ -360,7 +360,7 @@ rename_to_revert_after_flush_is_unsupported_test_() ->
         fun rename_to_revert_after_flush_is_unsupported/1}.
 
 rename_to_revert_after_flush_is_unsupported(_Fixture) ->
-    _ = beamtalk_behaviour_intrinsics:classRenameTo(widget_class_object(), 'Bt3278WidgetRenamed'),
+    _ = beamtalk_class_refactor:classRenameTo(widget_class_object(), 'Bt3278WidgetRenamed'),
     {ok, _Summary} = beamtalk_workspace_flush:flush_including_destructive(),
     RevertResult = beamtalk_workspace_interface_primitives:revert_method(
         <<"Bt3278WidgetRenamed">>, <<"new-class">>
@@ -480,7 +480,7 @@ dynamic_class_rename_orders_identity_move_before_reference_rewrite(#{class_obj :
     Worker = spawn(fun() ->
         receive
             go ->
-                Result = beamtalk_behaviour_intrinsics:classRenameTo(ClassObj, 'Bt3278DynRenamed'),
+                Result = beamtalk_class_refactor:classRenameTo(ClassObj, 'Bt3278DynRenamed'),
                 Self ! {bt3278_reorder_result, Result}
         end
     end),
@@ -587,7 +587,7 @@ dynamic_class_rename_revert_orders_identity_move_before_reference_rewrite_test_(
         fun dynamic_class_rename_revert_orders_identity_move_before_reference_rewrite/1}.
 
 dynamic_class_rename_revert_orders_identity_move_before_reference_rewrite(#{class_obj := ClassObj}) ->
-    _ = beamtalk_behaviour_intrinsics:classRenameTo(ClassObj, 'Bt3278DynRenamed'),
+    _ = beamtalk_class_refactor:classRenameTo(ClassObj, 'Bt3278DynRenamed'),
     [Entry] = beamtalk_workspace_changelog:entries(),
     'rename-class' = beamtalk_workspace_changelog:entry_kind(Entry),
 

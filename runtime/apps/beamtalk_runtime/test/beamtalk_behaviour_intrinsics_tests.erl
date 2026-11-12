@@ -2292,7 +2292,7 @@ compile_source_non_binary_raises_type_error_test_() ->
                             error := #beamtalk_error{kind = type_error}
                         },
                         %% Pass an atom (not a binary) as the source body.
-                        beamtalk_behaviour_intrinsics:classCompileSource(
+                        beamtalk_class_refactor:classCompileSource(
                             ClassObj, 'foo', not_a_binary
                         )
                     )
@@ -2321,7 +2321,7 @@ try_compile_source_non_binary_raises_type_error_test_() ->
                             '$beamtalk_class' := _,
                             error := #beamtalk_error{kind = type_error}
                         },
-                        beamtalk_behaviour_intrinsics:classTryCompileSource(
+                        beamtalk_class_refactor:classTryCompileSource(
                             ClassObj, 'foo', 12345
                         )
                     )
@@ -2351,7 +2351,7 @@ compile_source_invalid_body_raises_compile_failed_test_() ->
                             '$beamtalk_class' := _,
                             error := #beamtalk_error{kind = compile_failed}
                         },
-                        beamtalk_behaviour_intrinsics:classCompileSource(
+                        beamtalk_class_refactor:classCompileSource(
                             ClassObj, 'foo', <<"@@@ not valid beamtalk @@@">>
                         )
                     )
@@ -2383,7 +2383,7 @@ compile_source_agent_author_context_test_() ->
                             '$beamtalk_class' := _,
                             error := #beamtalk_error{kind = compile_failed}
                         },
-                        beamtalk_behaviour_intrinsics:classCompileSource(
+                        beamtalk_class_refactor:classCompileSource(
                             ClassObj, 'foo', <<"@@@ still invalid @@@">>
                         )
                     )
@@ -2773,7 +2773,7 @@ rewrite_after_identity_move_no_workspace_is_error_tuple_test() ->
     ok = beamtalk_capability:clear(),
     ?assertEqual(
         {error, workspace_unavailable},
-        beamtalk_behaviour_intrinsics:rewrite_after_identity_move(
+        beamtalk_class_refactor:rewrite_after_identity_move(
             'BTRewriteAfterMove', #{path => <<"x.bt">>}, [], #{
                 not_flushable_reason => <<"dynamic">>
             }
@@ -2783,7 +2783,7 @@ rewrite_after_identity_move_no_workspace_is_error_tuple_test() ->
 classRenameTo_dynamic_class_reregisters_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         {ClassObj, Pid} = register_class('BT3278RenameEUnitTarget', #{}, #{}),
-        Result = beamtalk_behaviour_intrinsics:classRenameTo(
+        Result = beamtalk_class_refactor:classRenameTo(
             ClassObj, 'BT3278RenameEUnitRenamed'
         ),
         [
@@ -2822,7 +2822,7 @@ classRenameTo_collision_refused_test_() ->
                                 {beamtalk_string, <<"remove or rename the existing class first">>}
                         }
                     },
-                    beamtalk_behaviour_intrinsics:classRenameTo(
+                    beamtalk_class_refactor:classRenameTo(
                         ClassObj, 'BT3278RenameEUnitExisting'
                     )
                 )
@@ -2939,7 +2939,7 @@ class_remove_selector_absent_raises_selector_not_found_test_() ->
                             '$beamtalk_class' := _,
                             error := #beamtalk_error{kind = selector_not_found}
                         },
-                        beamtalk_behaviour_intrinsics:classRemoveSelector(
+                        beamtalk_class_refactor:classRemoveSelector(
                             ClassObj, 'noSuchMethod3186'
                         )
                     )
@@ -2968,7 +2968,7 @@ class_remove_selector_extension_instance_side_test_() ->
                     ClassName, 'extensionMethod3186', fun(_Args, _Self) -> ok end, bt3186_test
                 ),
                 try
-                    Result = beamtalk_behaviour_intrinsics:classRemoveSelector(
+                    Result = beamtalk_class_refactor:classRemoveSelector(
                         ClassObj, 'extensionMethod3186'
                     ),
                     ?assertEqual(ClassObj, Result),
@@ -2993,7 +2993,7 @@ class_remove_selector_if_absent_block_called_test_() ->
                 beamtalk_extensions:init(),
                 {ClassObj, Pid} = register_class('BTRmSelIfAbsent3186', #{}, #{}),
                 try
-                    Result = beamtalk_behaviour_intrinsics:classRemoveSelectorIfAbsent(
+                    Result = beamtalk_class_refactor:classRemoveSelectorIfAbsent(
                         ClassObj, 'noSuchMethod3186', fun() -> block_was_called end
                     ),
                     ?assertEqual(block_was_called, Result)
@@ -3021,7 +3021,7 @@ class_remove_selector_if_absent_extension_hit_returns_self_test_() ->
                     ClassName, 'extMethod3186', fun(_Args, _Self) -> ok end, bt3186_test
                 ),
                 try
-                    Result = beamtalk_behaviour_intrinsics:classRemoveSelectorIfAbsent(
+                    Result = beamtalk_class_refactor:classRemoveSelectorIfAbsent(
                         ClassObj, 'extMethod3186', fun() -> block_was_called end
                     ),
                     ?assertEqual(ClassObj, Result),
@@ -3058,7 +3058,7 @@ class_remove_selector_class_side_extension_test_() ->
                     ClassEtsKey, 'classExtMethod3186', fun(_Args, _Self) -> ok end, bt3186_test
                 ),
                 try
-                    Result = beamtalk_behaviour_intrinsics:classRemoveSelector(
+                    Result = beamtalk_class_refactor:classRemoveSelector(
                         MetaObj, 'classExtMethod3186'
                     ),
                     ?assertEqual(MetaObj, Result),
@@ -3088,7 +3088,7 @@ class_remove_selector_local_method_no_workspace_raises_no_workspace_test_() ->
                 try
                     ?assertError(
                         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = no_workspace}},
-                        beamtalk_behaviour_intrinsics:classRemoveSelector(
+                        beamtalk_class_refactor:classRemoveSelector(
                             ClassObj, 'localTestMethod3186'
                         )
                     )
@@ -3155,7 +3155,7 @@ class_remove_selector_protocol_provided_refused_test_() ->
                             '$beamtalk_class' := _,
                             error := #beamtalk_error{kind = protocol_provided_selector}
                         },
-                        beamtalk_behaviour_intrinsics:classRemoveSelector(ClassObj, 'maxOf:')
+                        beamtalk_class_refactor:classRemoveSelector(ClassObj, 'maxOf:')
                     ),
                     %% Refused before any mutation — the method is still there.
                     ?assert(beamtalk_behaviour_intrinsics:classIncludesSelector(ClassObj, 'maxOf:'))
@@ -3189,7 +3189,7 @@ class_remove_selector_non_protocol_provided_still_removable_test_() ->
                 try
                     ?assertError(
                         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = no_workspace}},
-                        beamtalk_behaviour_intrinsics:classRemoveSelector(
+                        beamtalk_class_refactor:classRemoveSelector(
                             ClassObj, 'ordinaryMethod3592'
                         )
                     )
@@ -3229,7 +3229,7 @@ class_rename_selector_protocol_provided_refused_test_() ->
                             '$beamtalk_class' := _,
                             error := #beamtalk_error{kind = protocol_provided_selector}
                         },
-                        beamtalk_behaviour_intrinsics:classRenameSelector(
+                        beamtalk_selector_refactor:classRenameSelector(
                             ClassObj, 'maxOf:', 'maxOfRenamed3592'
                         )
                     ),

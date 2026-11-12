@@ -94,7 +94,7 @@ extensions, compiler cache, and workspace class source — WITHOUT touching
 module's doc for why `classRenameTo` must not call `class_removed/2` itself).
 
 Used by `class_removed/2` for a full class removal, and directly by
-`beamtalk_behaviour_intrinsics:classRenameTo/2` (ADR 0114) to retire
+`beamtalk_class_refactor:classRenameTo/2` (ADR 0114) to retire
 a class's OLD name after installing it under a new one.
 """.
 -spec purge_class_registries(atom()) -> ok.

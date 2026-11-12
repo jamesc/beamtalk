@@ -558,8 +558,12 @@ fn every_runtime_call_the_codegen_emits_is_exported() {
         calls.len() - literal_count
     );
     let heads = source_open_heads(&root);
+    // A floor against the scan silently finding nothing, not a count to keep:
+    // sites that build their head with `leaf::atom` (as `call_head` in
+    // `primitives/behaviour.rs` does) have no literal head to scan, and the
+    // primitive tables they emit for are rendered by pass 2 instead.
     assert!(
-        heads.len() > 10,
+        heads.len() > 5,
         "open-head scan found only {} sites",
         heads.len()
     );

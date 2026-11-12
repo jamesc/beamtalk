@@ -1095,5 +1095,7 @@ impl CoreErlangGenerator {
     }
 }
 
+mod tier2_value_calls;
+
 #[cfg(test)]
 mod tests;

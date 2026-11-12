@@ -290,7 +290,7 @@ compile_source_refused_without_compiler_test() ->
             ?assertEqual(
                 release_mode_no_compiler,
                 raised_kind(fun() ->
-                    beamtalk_behaviour_intrinsics:classCompileSource(
+                    beamtalk_class_refactor:classCompileSource(
                         ClassObj, increment, <<"increment => 1">>
                     )
                 end)
@@ -298,7 +298,7 @@ compile_source_refused_without_compiler_test() ->
             ?assertEqual(
                 release_mode_no_compiler,
                 raised_kind(fun() ->
-                    beamtalk_behaviour_intrinsics:classTryCompileSource(
+                    beamtalk_class_refactor:classTryCompileSource(
                         ClassObj, increment, <<"increment => 1">>
                     )
                 end)
@@ -310,7 +310,7 @@ compile_source_refusal_names_the_method_test() ->
     with_dynamic_class('BT3568CompileMsg', fun(ClassObj) ->
         with_capabilities(?RELEASE, fun() ->
             try
-                beamtalk_behaviour_intrinsics:classCompileSource(
+                beamtalk_class_refactor:classCompileSource(
                     ClassObj, increment, <<"increment => 1">>
                 ),
                 ?assert(false)
@@ -331,7 +331,7 @@ compile_source_passes_the_gate_with_include_compiler_test() ->
     with_dynamic_class('BT3568CompileInc', fun(ClassObj) ->
         with_capabilities(?RELEASE_WITH_COMPILER, fun() ->
             Kind = raised_kind(fun() ->
-                beamtalk_behaviour_intrinsics:classCompileSource(
+                beamtalk_class_refactor:classCompileSource(
                     ClassObj, increment, <<"increment => 1">>
                 )
             end),
@@ -382,13 +382,13 @@ rename_refused_in_both_release_variants_test_() ->
                     ?assertEqual(
                         release_mode_no_workspace,
                         raised_kind(fun() ->
-                            beamtalk_behaviour_intrinsics:classRenameTo(ClassObj, 'BT3568Renamed')
+                            beamtalk_class_refactor:classRenameTo(ClassObj, 'BT3568Renamed')
                         end)
                     ),
                     ?assertEqual(
                         release_mode_no_workspace,
                         raised_kind(fun() ->
-                            beamtalk_behaviour_intrinsics:classRenameSelector(ClassObj, foo, bar)
+                            beamtalk_selector_refactor:classRenameSelector(ClassObj, foo, bar)
                         end)
                     )
                 end)
