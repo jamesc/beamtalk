@@ -15,7 +15,8 @@ type ShapeTestTagged = #{#kind => Symbol, ...}
 type ShapeTestUri = #{
   ?#scheme => Object,
   ?#host => Object,
-  ?#port => Integer | Symbol
+  ?#port => Integer | Symbol,
+  ...
 }
 
 TestCase subclass: ShapeTypesTest

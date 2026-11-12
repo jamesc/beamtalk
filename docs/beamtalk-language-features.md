@@ -3371,8 +3371,8 @@ keyed read answers the union of each member's result.
 checked against a shape reports a missing required key, an unknown key in a
 closed shape, or a wrong value type. A misspelt key gets a suggestion:
 `#maxFramSize` against a closed `#maxFrameSize` reports
-`key #maxFramSize is not named by the closed expected shape — did you mean #maxFrameSize?`
-when the target key is optional, and `missing required key #maxFrameSize — did you misspell it as #maxFramSize?`
+``key `#maxFramSize` is not named by the closed expected shape — did you mean `#maxFrameSize`?``
+when the target key is optional, and ``missing required key `#maxFrameSize` — did you misspell it as `#maxFramSize`?``
 when it is required.
 
 **FFI mapping.** The spec reader maps Erlang map types with atom keys to

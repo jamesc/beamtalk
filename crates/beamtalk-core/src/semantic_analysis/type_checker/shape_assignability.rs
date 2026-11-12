@@ -127,10 +127,12 @@ impl ShapeMismatch {
                     .and_then(|(inner, field)| inner.key_span_in(&pair.value, &field.value))
                     .or_else(|| Some(pair.key.span()))
             }
-            Self::MissingKey { .. } if !expected_open => pairs
+            Self::MissingKey { misspelt_as, .. } if !expected_open => pairs
                 .iter()
-                .find(|pair| {
-                    symbol_key(pair).is_some_and(|k| !expected_fields.iter().any(|f| f.key == k))
+                .find(|pair| match misspelt_as {
+                    Some(m) => symbol_key(pair).as_ref() == Some(m),
+                    None => symbol_key(pair)
+                        .is_some_and(|k| !expected_fields.iter().any(|f| f.key == k)),
                 })
                 .map(|pair| pair.key.span()),
             _ => None,
