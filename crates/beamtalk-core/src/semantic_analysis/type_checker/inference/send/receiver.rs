@@ -185,6 +185,11 @@ impl TypeChecker {
             _ => None,
         };
 
+        // BT-4713: the body of `[cond] whileTrue: [body]` runs only when the
+        // condition block's last expression answered true (`whileFalse:`:
+        // false), so the body sees the facts that expression proves.
+        let loop_facts = self.loop_body_facts(receiver, selector, arguments, env, hierarchy, span);
+
         // `Object >> then:` (ADR 0145 § 2, BT-4515): types a literal block's
         // parameter as the receiver and answers the block's result type. Only
         // for an instance-side receiver whose every class answers `then:`
@@ -242,6 +247,15 @@ impl TypeChecker {
             )
         } else if is_object_then {
             self.infer_args_for_then(arguments, &receiver_ty, hierarchy, env, in_abstract_method)
+        } else if let (Some(assumed), Some(arg)) = (loop_facts.as_ref(), arguments.first()) {
+            let narrowings: Vec<(&EnvKey, &InferredType)> = assumed.iter().collect();
+            vec![self.infer_block_with_narrowings(
+                arg,
+                &narrowings,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )]
         } else if let (Some(assumed), Some(arg)) = (connective_facts.as_ref(), arguments.first()) {
             // `X notNil and: [...]`, `<cond> or: [...]`, any chain of tests:
             // the block sees the facts its receiver proves. Because

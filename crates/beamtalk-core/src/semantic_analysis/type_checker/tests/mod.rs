@@ -71,6 +71,7 @@ mod bt4650_block_write_widening_edges;
 mod bt4663_constructor_param_types;
 mod bt4710_mixed_and_or_narrowing;
 mod bt4712_nil_equality_narrowing;
+mod bt4713_while_condition_narrowing;
 mod bt4715_field_narrowing_self_send;
 mod cast_and_sync_send;
 mod destructure_and_extension;

@@ -5,10 +5,11 @@
 //!
 //! [`TypeChecker::condition_facts`] is the one recursive function behind every
 //! consumer of control-flow narrowing: the arms of `ifTrue:` / `ifFalse:` /
-//! `ifTrue:ifFalse:`, the lazy block of `and:` / `or:`, and post-guard
-//! (early-return) narrowing. For a condition it answers a [`CondFacts`]: the
-//! [`Facts`] (variable → narrowed type) that hold when the condition is true,
-//! and those that hold when it is false.
+//! `ifTrue:ifFalse:`, the lazy block of `and:` / `or:`, the body of
+//! `[cond] whileTrue:` / `whileFalse:` ([`TypeChecker::loop_body_facts`],
+//! BT-4713), and post-guard (early-return) narrowing. For a condition it
+//! answers a [`CondFacts`]: the [`Facts`] (variable → narrowed type) that
+//! hold when the condition is true, and those that hold when it is false.
 //!
 //! * A single test (`isNil`, `notNil`, `isKindOf:`, …) is one entry of the
 //!   [`super::rules::RULES`] table, refined against the live type.
@@ -21,10 +22,11 @@
 //! * Anything else contributes no facts but never stops the rest of a chain
 //!   from narrowing.
 //!
-//! New connectives (aliases, `whileTrue:` conditions) extend
-//! `condition_facts` with one more case that builds a [`CondFacts`].
+//! New connectives (aliases, say) extend `condition_facts` with one more case
+//! that builds a [`CondFacts`]; a new consumer calls it as `loop_body_facts`
+//! does.
 
-use crate::ast::Expression;
+use crate::ast::{Expression, ExpressionStatement};
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::source_analysis::Span;
 
@@ -172,6 +174,12 @@ fn connective_kind(selector_name: &str) -> Option<bool> {
     }
 }
 
+/// A block statement's expression, parentheses peeled. Statement positions are
+/// not touched by `ast::normalize`, so the one peel lives here.
+fn statement_expression(stmt: &ExpressionStatement) -> &Expression {
+    stmt.expression.unwrap_parens()
+}
+
 /// The sole expression of a parameterless block literal; `None` for anything
 /// else (a multi-statement block, a block with parameters, a non-block).
 fn single_expression_block_body(arg: &Expression) -> Option<&Expression> {
@@ -179,7 +187,7 @@ fn single_expression_block_body(arg: &Expression) -> Option<&Expression> {
         return None;
     };
     match (block.parameters.as_slice(), block.body.as_slice()) {
-        ([], [stmt]) => Some(stmt.expression.unwrap_parens()),
+        ([], [stmt]) => Some(statement_expression(stmt)),
         _ => None,
     }
 }
@@ -299,5 +307,53 @@ impl TypeChecker {
                 when_false: left.when_false.merge(right.when_false),
             }
         }
+    }
+
+    /// BT-4713: the facts the body of `[cond] whileTrue: [body]` (or
+    /// `whileFalse:`) may assume on entry — `cond`'s last expression's true
+    /// (false) facts. `None` when the send is not such a loop or nothing is
+    /// proved.
+    ///
+    /// The condition is re-evaluated before every iteration, so the facts hold
+    /// at the start of each pass; they are kept only for bindings the body
+    /// never assigns. `self.<field>` facts are not applied (see below).
+    pub(in crate::semantic_analysis::type_checker) fn loop_body_facts(
+        &mut self,
+        receiver: &Expression,
+        selector: &crate::ast::MessageSelector,
+        arguments: &[Expression],
+        env: &TypeEnv,
+        hierarchy: &ClassHierarchy,
+        span: Span,
+    ) -> Option<Facts> {
+        use crate::ast::WellKnownSelector;
+        let on_true = match selector.well_known() {
+            Some(WellKnownSelector::WhileTrue) => true,
+            Some(WellKnownSelector::WhileFalse) => false,
+            _ => return None,
+        };
+        let [body] = arguments else {
+            return None;
+        };
+        let Expression::Block(cond_block) = receiver else {
+            return None;
+        };
+        if !cond_block.parameters.is_empty() {
+            return None;
+        }
+        let last = statement_expression(cond_block.body.last()?);
+        let facts = self.condition_facts(last, env, hierarchy, FactsCtx::arm(span).nested());
+        let mut facts = if on_true {
+            facts.when_true
+        } else {
+            facts.when_false
+        };
+        facts.forget_written(&expr_writes(body));
+        // Field facts never reach a loop body: deciding whether the body can
+        // write a field needs its types (`expr_may_write_fields` reads the
+        // type map), and the body has not been inferred yet. Dropping them is
+        // the safe direction.
+        facts.drop_fields();
+        (!facts.is_empty()).then_some(facts)
     }
 }
