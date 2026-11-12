@@ -15,6 +15,7 @@ use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::type_checker::binary_string_compare;
 use crate::semantic_analysis::type_checker::known_remote;
 use crate::semantic_analysis::type_checker::narrowing::facts::AliasFacts;
+use crate::semantic_analysis::type_checker::shape_assignability::ShapeMismatch;
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::types::{
     AssignmentTypeMismatch, ClassObjectType, CrossObjectFieldMutation,
@@ -211,7 +212,14 @@ impl TypeChecker {
                 .display_for_diagnostic()
                 .unwrap_or_else(|| inferred_ty.display_name()),
         };
+        // ADR 0147: when a map shape is involved, say which key is at fault.
+        let shape_detail = (inferred_ty.contains_shape() || declared.contains_shape())
+            .then(|| Self::shape_assignable(inferred_ty, declared, hierarchy).err())
+            .flatten()
+            .filter(|m| !matches!(m, ShapeMismatch::Incompatible))
+            .map(|m| m.describe());
         Some(AssignmentTypeMismatch {
+            shape_detail,
             declared_display: declared
                 .display_for_diagnostic()
                 .unwrap_or_else(|| declared_name.clone()),

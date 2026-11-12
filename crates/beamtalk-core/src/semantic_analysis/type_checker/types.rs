@@ -1900,6 +1900,9 @@ pub(crate) struct OverrideReturnWidening {
 pub(in crate::semantic_analysis::type_checker) struct AssignmentTypeMismatch {
     pub(in crate::semantic_analysis::type_checker) declared_display: EcoString,
     pub(in crate::semantic_analysis::type_checker) inferred_display: EcoString,
+    /// ADR 0147: when a map shape is involved, why the value is not
+    /// assignable, naming the offending key.
+    pub(in crate::semantic_analysis::type_checker) shape_detail: Option<EcoString>,
     /// ADR 0144: when a class object `C class` misses a declared `P class`,
     /// the protocol `P` and the selectors `C` is missing — rendered as
     /// `C class does not conform to P class` instead of the plain mismatch.
