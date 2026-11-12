@@ -67,6 +67,7 @@ mod narrowing;
 pub mod native_type_registry;
 pub mod native_types;
 mod protocol;
+mod shape_assignability;
 // `pub`, not `pub(crate)` (ADR 0117 Decision step 5) —
 // `hover_tier_label` is reached by `beamtalk-language-service`'s
 // `queries::hover_provider` from the standalone crate.
