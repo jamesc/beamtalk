@@ -157,7 +157,10 @@ pub fn find_all_sends_in_source(method_source: &str) -> Vec<SendHit> {
 }
 
 fn self_or_super_kind(receiver: &Expression) -> Option<ReceiverKind> {
-    if receiver.is_super() {
+    // `(super) foo` is deliberately not a super send (pinned by
+    // `sends_are_paren_transparent`), so `super` is matched without
+    // looking through parentheses.
+    if matches!(receiver, Expression::Super(..)) {
         Some(ReceiverKind::SuperReceiver)
     } else if receiver.is_self() {
         Some(ReceiverKind::SelfReceiver)
