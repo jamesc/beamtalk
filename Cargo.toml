@@ -75,9 +75,8 @@ beamtalk-build = { path = "crates/beamtalk-build" }
 # API (see docs/development/architecture-principles.md §6, ADR 0117 step 4)
 beamtalk-cerl-doc = { path = "crates/beamtalk-cerl-doc" }
 beamtalk-home = { path = "crates/beamtalk-home" }
-# why: beamtalk-mcp's offline lint/diagnostic_summary tools share
-# beamtalk-cli's manifest/build-layout/dependency-class-resolution logic
-# (BT-2823) via this lib target.
+# why: library target of the `beamtalk` CLI (beamtalk-mcp no longer uses it;
+# see beamtalk-package, BT-4689).
 beamtalk-cli = { path = "crates/beamtalk-cli" }
 # why: ADR 0117 step 5 (BT-3362) — the Code Generation bounded context,
 # extracted from beamtalk-core into its own crate; depends on beamtalk-core,
@@ -93,6 +92,7 @@ beamtalk-examples = { path = "crates/beamtalk-examples" }
 beamtalk-language-service = { path = "crates/beamtalk-language-service" }
 beamtalk-lint = { path = "crates/beamtalk-lint" }
 beamtalk-project = { path = "crates/beamtalk-project" }
+beamtalk-package = { path = "crates/beamtalk-package" }
 beamtalk-repl = { path = "crates/beamtalk-repl" }
 beamtalk-repl-protocol = { path = "crates/beamtalk-repl-protocol" }
 beamtalk-sysroot = { path = "crates/beamtalk-sysroot" }

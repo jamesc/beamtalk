@@ -552,10 +552,7 @@ pub fn find_manifest(project_root: &Utf8Path) -> Result<Option<PackageManifest>>
 /// manifest problems, and the workspace falls back to the registry-only path.
 #[must_use]
 pub fn package_name_for_project(project_root: &str) -> Option<String> {
-    find_manifest(Utf8Path::new(project_root))
-        .ok()
-        .flatten()
-        .map(|manifest| manifest.name)
+    beamtalk_project::package::read_package_name(std::path::Path::new(project_root))
 }
 
 /// Look for `beamtalk.toml` in the given directory and parse it fully

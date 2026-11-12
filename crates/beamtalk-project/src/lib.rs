@@ -157,4 +157,61 @@ mod tests {
 
         let _ = fs::remove_dir_all(&tmp);
     }
+
+    // Marker-priority cases ported from the CLI's deleted pass-through
+    // wrapper `commands/workspace/discovery.rs` (BT-4689).
+
+    #[test]
+    fn discover_with_git_marker() {
+        let tmp = unique_temp_dir("beamtalk_project_root_git");
+        let project = tmp.join("project");
+        let subdir = project.join("src").join("lib");
+        fs::create_dir_all(&subdir).expect("create dirs");
+        fs::create_dir(project.join(".git")).expect("create .git");
+        assert_eq!(discover_project_root(&subdir), project);
+    }
+
+    #[test]
+    fn discover_with_beamtalk_dir_marker() {
+        let tmp = unique_temp_dir("beamtalk_project_root_dir");
+        let project = tmp.join("project");
+        let subdir = project.join("src");
+        fs::create_dir_all(&subdir).expect("create dirs");
+        fs::create_dir(project.join(".beamtalk")).expect("create .beamtalk");
+        assert_eq!(discover_project_root(&subdir), project);
+    }
+
+    #[test]
+    fn beamtalk_marker_takes_priority_over_git_in_parent() {
+        let tmp = unique_temp_dir("beamtalk_project_root_prio");
+        let repo = tmp.join("repo");
+        let project = repo.join("my-project");
+        let subdir = project.join("src");
+        fs::create_dir_all(&subdir).expect("create dirs");
+        fs::create_dir(repo.join(".git")).expect("create .git");
+        fs::create_dir(project.join(".beamtalk")).expect("create .beamtalk");
+        assert_eq!(discover_project_root(&subdir), project);
+    }
+
+    #[test]
+    fn git_not_escaped_by_beamtalk_dir_in_parent() {
+        let tmp = unique_temp_dir("beamtalk_project_root_noescape");
+        let home = tmp.join("home");
+        let project = home.join("project");
+        let subdir = project.join("src");
+        fs::create_dir_all(&subdir).expect("create dirs");
+        fs::create_dir(home.join(".beamtalk")).expect("create .beamtalk");
+        fs::create_dir(project.join(".git")).expect("create .git");
+        assert_eq!(discover_project_root(&subdir), project);
+    }
+
+    #[test]
+    fn beamtalk_toml_wins_over_git_at_same_level() {
+        let tmp = unique_temp_dir("beamtalk_project_root_same");
+        let project = tmp.join("project");
+        fs::create_dir_all(&project).expect("create dirs");
+        fs::File::create(project.join("beamtalk.toml")).expect("create manifest");
+        fs::create_dir(project.join(".git")).expect("create .git");
+        assert_eq!(discover_project_root(&project), project);
+    }
 }

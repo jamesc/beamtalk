@@ -119,16 +119,6 @@ impl RequestBuilder {
         req
     }
 
-    /// Build an `info` request.
-    #[must_use]
-    pub fn info(symbol: &str) -> serde_json::Value {
-        serde_json::json!({
-            "op": "info",
-            "id": next_msg_id(),
-            "symbol": symbol
-        })
-    }
-
     /// Build a `show-codegen` request for an expression.
     #[must_use]
     pub fn show_codegen(code: &str) -> serde_json::Value {
@@ -303,17 +293,6 @@ impl RequestBuilder {
             "op": "test",
             "id": next_msg_id(),
             "file": file
-        })
-    }
-
-    /// Build a `test` request for a class with an optional method filter.
-    #[must_use]
-    pub fn test_method(class: &str, method: &str) -> serde_json::Value {
-        serde_json::json!({
-            "op": "test",
-            "id": next_msg_id(),
-            "class": class,
-            "method": method
         })
     }
 
@@ -663,13 +642,6 @@ mod tests {
     }
 
     #[test]
-    fn info_request_has_correct_shape() {
-        let req = RequestBuilder::info("Counter");
-        assert_eq!(req["op"], "info");
-        assert_eq!(req["symbol"], "Counter");
-    }
-
-    #[test]
     fn show_codegen_request_has_correct_shape() {
         let req = RequestBuilder::show_codegen("1 + 2");
         assert_eq!(req["op"], "show-codegen");
@@ -808,14 +780,6 @@ mod tests {
         let req = RequestBuilder::test_file("stdlib/test/counter_test.bt");
         assert_eq!(req["op"], "test");
         assert_eq!(req["file"], "stdlib/test/counter_test.bt");
-    }
-
-    #[test]
-    fn test_method_request_has_correct_shape() {
-        let req = RequestBuilder::test_method("CounterTest", "testIncrement");
-        assert_eq!(req["op"], "test");
-        assert_eq!(req["class"], "CounterTest");
-        assert_eq!(req["method"], "testIncrement");
     }
 
     #[test]
@@ -1044,5 +1008,154 @@ mod tests {
         assert_eq!(req["op"], "stdin");
         assert_eq!(req["id"], "msg-007");
         assert_eq!(req["value"], "hello\n");
+    }
+
+    // --- Op table conformance (BT-4673) ---
+
+    /// One request from every `RequestBuilder` constructor, with every
+    /// optional argument supplied, so each param name the client can send is
+    /// exercised. Add a new constructor here; the test below fails if its op or
+    /// a param name is not in the server's op table.
+    fn every_builder_request() -> Vec<serde_json::Value> {
+        let args = vec!["a".to_string()];
+        vec![
+            RequestBuilder::eval("1"),
+            RequestBuilder::eval_with_trace("1", true),
+            RequestBuilder::run_entry("C", "main:", &args),
+            RequestBuilder::complete("x"),
+            RequestBuilder::complete_with_cursor("x", 1),
+            RequestBuilder::complete_with_session("x", 1, Some("s")),
+            RequestBuilder::erlang_complete("p", Some("m")),
+            RequestBuilder::show_codegen("1"),
+            RequestBuilder::show_codegen_class("C", Some("s")),
+            RequestBuilder::load_source("s"),
+            RequestBuilder::load_project("p", true),
+            RequestBuilder::with_package_name(
+                RequestBuilder::load_project_with_force("p", true, true),
+                Some("pkg"),
+            ),
+            RequestBuilder::sessions(),
+            RequestBuilder::clone_session(),
+            RequestBuilder::close(),
+            RequestBuilder::actors(),
+            RequestBuilder::inspect("a"),
+            RequestBuilder::kill("a"),
+            RequestBuilder::interrupt(),
+            RequestBuilder::interrupt_with_session("s"),
+            RequestBuilder::unload("m"),
+            RequestBuilder::test_class("C"),
+            RequestBuilder::test_file("f"),
+            RequestBuilder::test_all(),
+            RequestBuilder::erlang_help("m", Some("f")),
+            RequestBuilder::describe(),
+            RequestBuilder::health(),
+            RequestBuilder::shutdown("c"),
+            RequestBuilder::list_classes(Some("user")),
+            RequestBuilder::nav_query("senders", "foo"),
+            RequestBuilder::nav_query("references", "Foo"),
+            RequestBuilder::nav_symbols(Some("user")),
+            RequestBuilder::reload_findings(),
+            RequestBuilder::enable_tracing(),
+            RequestBuilder::disable_tracing(),
+            RequestBuilder::get_traces(
+                Some("a"),
+                Some("s"),
+                Some("C"),
+                Some("ok"),
+                Some(1),
+                Some(2),
+            ),
+            RequestBuilder::actor_stats(Some("a")),
+            RequestBuilder::export_traces(
+                Some("p"),
+                Some("a"),
+                Some("s"),
+                Some("C"),
+                Some("ok"),
+                Some(1),
+                Some(2),
+            ),
+            RequestBuilder::stdin("msg-1", "x"),
+        ]
+    }
+
+    /// Every op the builders emit, and every param they send, must exist in the
+    /// server's op table. The table is the Erlang `beamtalk_repl_op_table`,
+    /// consumed here through the shared fixture it is pinned to by
+    /// `beamtalk_repl_op_table_tests:table_matches_shared_fixture_test/0` —
+    /// no node boot needed. This is what stops a client builder (like the old
+    /// `info`) from outliving the server op it targets.
+    #[test]
+    fn every_builder_op_and_param_exists_in_the_server_op_table() {
+        let path = beamtalk_workspace::cargo_workspace_root!()
+            .join("runtime/apps/beamtalk_workspace/test/fixtures/repl_op_table.json");
+        let raw = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read op table fixture {}: {e}", path.display()));
+        let table: Vec<serde_json::Value> =
+            serde_json::from_str(&raw).expect("op table fixture is a JSON array");
+        let names = |entry: &serde_json::Value, key: &str| -> Vec<String> {
+            entry[key]
+                .as_array()
+                .unwrap_or_else(|| panic!("`{key}` is an array in {entry}"))
+                .iter()
+                .map(|v| v.as_str().expect("param names are strings").to_owned())
+                .collect()
+        };
+        // Envelope fields carried by every protocol message, not op params.
+        let envelope = ["op", "id", "session"];
+        let mut problems = Vec::new();
+        for req in every_builder_request() {
+            let op = req["op"].as_str().expect("request has an op");
+            let Some(entry) = table.iter().find(|e| e["op"] == op) else {
+                problems.push(format!("op `{op}` is not in the server op table"));
+                continue;
+            };
+            let known: Vec<String> = names(entry, "params")
+                .into_iter()
+                .chain(names(entry, "optional"))
+                .collect();
+            for key in req.as_object().expect("request is an object").keys() {
+                if !envelope.contains(&key.as_str()) && !known.contains(key) {
+                    problems.push(format!(
+                        "op `{op}` sends param `{key}` the server does not read"
+                    ));
+                }
+            }
+        }
+        assert!(problems.is_empty(), "{}", problems.join("\n"));
+    }
+
+    /// Keeps `every_builder_request()` honest: it must exercise every public
+    /// constructor, so a new builder cannot skip the op-table check. Builders
+    /// that only decorate another request are not counted.
+    #[test]
+    fn conformance_list_covers_every_public_builder() {
+        let src = include_str!("request.rs");
+        let impl_start = src.find("impl RequestBuilder {").expect("impl block");
+        let impl_end = src.find("#[cfg(test)]").expect("test module");
+        let builders = src[impl_start..impl_end]
+            .lines()
+            .filter(|l| l.trim_start().starts_with("pub fn "))
+            .count();
+        // `with_package_name` decorates a request instead of building one.
+        let decorators = 1;
+        // The list holds one request per constructor, plus a second
+        // `nav_query` shape; `with_package_name` wraps a request in the list.
+        let in_list = every_builder_request().len() - 1;
+        assert_eq!(
+            builders - decorators,
+            in_list,
+            "add every new RequestBuilder constructor to every_builder_request()"
+        );
+    }
+
+    #[test]
+    fn removed_ops_have_no_builder() {
+        // `info` was a builder for an op the server never had; `test` ignores a
+        // `method` filter. Neither builder exists any more (BT-4673).
+        for req in every_builder_request() {
+            assert_ne!(req["op"], "info");
+            assert!(req.get("method").is_none());
+        }
     }
 }

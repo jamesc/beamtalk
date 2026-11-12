@@ -9,7 +9,8 @@
 Term-returning op-layer seam for the curated REPL protocol (ADR 0017
 Phase 3).
 
-This module is the single dispatch table for protocol ops and the **only**
+This module is the single dispatch entry point for protocol ops (the op table
+itself is `beamtalk_repl_op_table`) and the **only**
 place JSON is produced for the WebSocket transport. It splits the curated op
 layer into two halves:
 
@@ -147,93 +148,24 @@ dispatch(Op, Params, Msg, SessionPid) ->
         {error, Err} -> {error, Err}
     end.
 
+-doc """
+Route `Op` to the module the op table (`beamtalk_repl_op_table`) names for it.
+Ops served by the WebSocket transport itself (`beamtalk_ws_handler`) are not
+routed here and, like any op the table does not name, are refused as unknown.
+""".
 -spec route(binary(), map(), protocol_msg(), pid()) -> op_result().
-route(<<"eval">>, Params, Msg, SessionPid) ->
-    beamtalk_repl_ops_eval:handle_term(<<"eval">>, Params, Msg, SessionPid);
-route(Op, Params, Msg, SessionPid) when
-    Op =:= <<"actors">>;
-    Op =:= <<"inspect">>;
-    Op =:= <<"kill">>;
-    Op =:= <<"interrupt">>
-->
-    beamtalk_repl_ops_actors:handle_term(Op, Params, Msg, SessionPid);
-route(Op, Params, Msg, SessionPid) when
-    Op =:= <<"load-source">>;
-    Op =:= <<"load-project">>;
-    Op =:= <<"unload">>;
-    %% edit → compile → reload → write-back for a project-owned native.
-    Op =:= <<"save-native-source">>;
-    %% add/rename a `// === Name ===` section-divider comment at the
-    %% file/class level.
-    Op =:= <<"save-section">>
-->
-    beamtalk_repl_ops_load:handle_term(Op, Params, Msg, SessionPid);
-route(Op, Params, Msg, SessionPid) when
-    Op =:= <<"sessions">>;
-    Op =:= <<"clone">>;
-    Op =:= <<"close">>;
-    Op =:= <<"health">>;
-    Op =:= <<"shutdown">>
-->
-    beamtalk_repl_ops_session:handle_term(Op, Params, Msg, SessionPid);
-route(Op, Params, Msg, SessionPid) when
-    Op =:= <<"complete">>;
-    Op =:= <<"hover">>;
-    Op =:= <<"diagnostics">>;
-    Op =:= <<"describe">>;
-    Op =:= <<"methods">>;
-    %% lazy per-defining-class inherited method listing, backing
-    %% the sidebar's "Inherited" tree groups.
-    Op =:= <<"inherited-methods">>;
-    Op =:= <<"list-classes">>;
-    Op =:= <<"list-tests">>;
-    Op =:= <<"load-tests">>;
-    Op =:= <<"show-codegen">>;
-    Op =:= <<"test">>;
-    Op =:= <<"test-all">>;
-    Op =:= <<"erlang-help">>;
-    Op =:= <<"erlang-complete">>;
-    %% reload-induced findings snapshot read (ADR 0105 surface-parity
-    %% gap) — mirrors the workspace/cockpit UI's dist-attached
-    %% `reload_findings` initial read for surfaces with no equivalent.
-    Op =:= <<"reload-findings">>
-->
-    beamtalk_repl_ops_dev:handle_term(Op, Params, Msg, SessionPid);
-route(Op, Params, Msg, SessionPid) when
-    Op =:= <<"enable-tracing">>;
-    Op =:= <<"disable-tracing">>;
-    Op =:= <<"get-traces">>;
-    Op =:= <<"actor-stats">>;
-    Op =:= <<"export-traces">>
-->
-    beamtalk_repl_ops_perf:handle_term(Op, Params, Msg, SessionPid);
-route(<<"pid-stats">>, Params, Msg, SessionPid) ->
-    %% ADR 0095 §5 (Cockpit Phase 3): live-Inspector process metrics
-    %% read, the request/response companion to the `object` push stream.
-    beamtalk_repl_ops_watch:handle_term(<<"pid-stats">>, Params, Msg, SessionPid);
-route(<<"nav-query">>, Params, Msg, SessionPid) ->
-    beamtalk_repl_ops_nav:handle_term(<<"nav-query">>, Params, Msg, SessionPid);
-route(<<"nav-symbols">>, Params, Msg, SessionPid) ->
-    beamtalk_repl_ops_nav_symbols:handle_term(<<"nav-symbols">>, Params, Msg, SessionPid);
-route(Op, Params, Msg, SessionPid) when
-    Op =:= <<"browse-classes">>;
-    Op =:= <<"browse-protocols">>;
-    Op =:= <<"browse-method-source">>;
-    Op =:= <<"browse-class-definition">>;
-    %% divider-grouped ("// === Name ===") method view.
-    Op =:= <<"browse-categories">>;
-    %% Native pane + native-modules enumeration.
-    Op =:= <<"browse-native-source">>;
-    Op =:= <<"browse-native-modules">>;
-    %% ADR 0108 Phase 8: type-alias enumeration.
-    Op =:= <<"browse-type-aliases">>;
-    %% read-only type-alias source view.
-    Op =:= <<"browse-alias-source">>
-->
-    %% ADR 0095: System Browser browse facade — read-only term-ops,
-    %% each returning `{value, JsonValue}`.
-    beamtalk_repl_ops_browse:handle_term(Op, Params, Msg, SessionPid);
-route(Op, _Params, _Msg, _SessionPid) ->
+route(Op, Params, Msg, SessionPid) ->
+    case beamtalk_repl_op_table:handler(Op) of
+        {ok, beamtalk_ws_handler} ->
+            unknown_op(Op);
+        {ok, Handler} ->
+            Handler:handle_term(Op, Params, Msg, SessionPid);
+        error ->
+            unknown_op(Op)
+    end.
+
+-spec unknown_op(binary()) -> op_result().
+unknown_op(Op) ->
     Err0 = beamtalk_error:new(unknown_op, 'REPL'),
     Err1 = beamtalk_error:with_message(
         Err0,

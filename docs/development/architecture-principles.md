@@ -141,13 +141,10 @@ The split's measurable win is on the consumer side: `beamtalk-lsp` and
 `beamtalk-core`) — they analyze code, never generate it — but used to
 compile all of it anyway as part of the monolithic `beamtalk-core`; now
 they don't (`cargo tree -p beamtalk-lsp -i beamtalk-codegen` and the
-`beamtalk-lint` equivalent both come up empty). `beamtalk-mcp` is the one
-exception: it already depended on `beamtalk-cli` before this split (to
-reuse its manifest/build-layout logic, BT-2823) and `beamtalk-cli`
-genuinely drives codegen (`beamtalk build`/`beamtalk test`), so
-`beamtalk-mcp` still compiles `beamtalk-codegen` transitively — a
-pre-existing coupling this split doesn't change either way, not a new gap
-it introduces. Real before/after `cargo build -p beamtalk-lsp -p
+`beamtalk-lint` equivalent both come up empty). `beamtalk-mcp` used to be the exception: it depended on `beamtalk-cli` to
+reuse its manifest/build-layout logic (BT-2823). BT-4689 moved that offline
+package-analysis pipeline into the leaf crate `beamtalk-package`, so
+`beamtalk-mcp` no longer depends on `beamtalk-cli`. Real before/after `cargo build -p beamtalk-lsp -p
 beamtalk-mcp` (and `cargo check`) timings, measured across this crate split,
 are recorded in `docs/ADR/0117-beamtalk-core-crate-split.md`'s
 Implementation Tracking section (BT-3363).

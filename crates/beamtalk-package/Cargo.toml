@@ -1,0 +1,41 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "beamtalk-package"
+description = "Offline package analysis for Beamtalk tooling: manifest, build layout, dependency classes, FFI type registry, lint pipeline"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["compiler", "beam", "smalltalk", "package"]
+categories = ["development-tools"]
+
+[dependencies]
+beamtalk-core = { workspace = true, features = ["serde"] }
+# why: `lint_pipeline` drives the unified diagnostic pipeline and lint passes.
+beamtalk-language-service.workspace = true
+beamtalk-lint.workspace = true
+beamtalk-project.workspace = true
+# why: `ffi_type_registry` locates the installation sysroot for FFI stubs.
+beamtalk-sysroot.workspace = true
+# why: `content_hash` reuses the workspace hex encoder.
+beamtalk-workspace.workspace = true
+camino.workspace = true
+miette.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+toml.workspace = true
+tracing.workspace = true
+# why: `content_hash` SHA-256 digest
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+serial_test.workspace = true
+
+[lints]
+workspace = true
