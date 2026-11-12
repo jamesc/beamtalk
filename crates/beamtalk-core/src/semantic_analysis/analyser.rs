@@ -163,7 +163,7 @@ impl Analyser {
                     FieldAccess { receiver, .. } => {
                         // For field access, analyze the target (especially the receiver)
                         self.analyse_expression(target, None);
-                        matches!(receiver.as_ref(), Identifier(id) if id.name == "self")
+                        receiver.is_self()
                     }
                     _ => {
                         self.analyse_expression(target, None);

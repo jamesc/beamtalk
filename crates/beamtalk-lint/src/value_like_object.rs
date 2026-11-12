@@ -157,10 +157,7 @@ fn is_with_setter(method: &MethodDefinition, field_names: &HashSet<&str>) -> boo
     }
 
     // Second statement: self
-    matches!(
-        &method.body[1].expression,
-        Expression::Identifier(Identifier { name, .. }) if name.as_str() == "self"
-    )
+    method.body[1].expression.is_self()
 }
 
 /// Returns `true` if `expr` is `self.field` where `field` is in `field_names`.

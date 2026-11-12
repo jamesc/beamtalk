@@ -175,6 +175,21 @@ impl ClassHierarchy {
         })
     }
 
+    /// The classes a sealed-method lookup from `start_class` checks: its
+    /// ancestors (falling through to `Object` after an unknown one). An unknown
+    /// start class still checks `Object`'s sealed methods, so a sealed override
+    /// cannot be bypassed through an external class.
+    fn sealed_lookup_lineage<'a>(
+        &'a self,
+        start_class: &str,
+    ) -> Box<dyn Iterator<Item = &'a ClassInfo> + 'a> {
+        if self.classes.contains_key(start_class) {
+            Box::new(self.ancestors_or_object(start_class))
+        } else {
+            Box::new(self.ancestors("Object"))
+        }
+    }
+
     /// Walk the superclass chain looking for a sealed primary method with the given selector.
     /// Returns `Some((class_name, MethodInfo))` if found, `None` otherwise.
     pub(super) fn find_sealed_method_in_ancestors(
@@ -182,15 +197,7 @@ impl ClassHierarchy {
         start_class: &str,
         selector: &str,
     ) -> Option<(EcoString, MethodInfo)> {
-        // An unknown start class still checks `Object`'s sealed methods, so a
-        // sealed override cannot be bypassed through an external class.
-        let known_start = self.classes.contains_key(start_class);
-        let fallback = (!known_start).then(|| self.ancestors("Object"));
-        let lineage: Box<dyn Iterator<Item = &ClassInfo>> = match fallback {
-            Some(object_chain) => Box::new(object_chain),
-            None => Box::new(self.ancestors_or_object(start_class)),
-        };
-        for info in lineage {
+        for info in self.sealed_lookup_lineage(start_class) {
             for method in &info.methods {
                 if method.kind == MethodKind::Primary
                     && method.selector.as_str() == selector
@@ -210,15 +217,7 @@ impl ClassHierarchy {
         start_class: &str,
         selector: &str,
     ) -> Option<(EcoString, MethodInfo)> {
-        // An unknown start class still checks `Object`'s sealed methods, so a
-        // sealed override cannot be bypassed through an external class.
-        let known_start = self.classes.contains_key(start_class);
-        let fallback = (!known_start).then(|| self.ancestors("Object"));
-        let lineage: Box<dyn Iterator<Item = &ClassInfo>> = match fallback {
-            Some(object_chain) => Box::new(object_chain),
-            None => Box::new(self.ancestors_or_object(start_class)),
-        };
-        for info in lineage {
+        for info in self.sealed_lookup_lineage(start_class) {
             for method in &info.class_methods {
                 if method.kind == MethodKind::Primary
                     && method.selector.as_str() == selector

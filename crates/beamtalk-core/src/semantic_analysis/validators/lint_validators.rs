@@ -542,11 +542,6 @@ fn is_self_field_assignment(expr: &Expression) -> bool {
     receiver.is_self()
 }
 
-/// Returns `true` if `expr` is the bare identifier `self`.
-fn is_bare_self(expr: &Expression) -> bool {
-    matches!(expr.unwrap_parens(), Expression::Identifier(id) if id.name == "self")
-}
-
 /// Returns `true` if `selector` is a single-keyword-part send following the
 /// `with<Field>:` copy-setter naming convention recognized by
 /// [`crate::synthetic_selectors::is_with_star_selector`] — the shared
@@ -596,7 +591,7 @@ fn is_self_with_field_send(expr: &Expression) -> bool {
 /// [`is_self_with_field_cascade`] used for detecting *that* a mutation
 /// happened anywhere in the body.
 fn is_self_producing(expr: &Expression) -> bool {
-    is_bare_self(expr)
+    expr.is_self()
         || is_self_field_assignment(expr)
         || is_self_with_field_send(expr)
         || cascade_value_is_self_producing(expr)
