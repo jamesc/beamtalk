@@ -95,7 +95,7 @@ class_chain_test_() ->
 %% falls through to 'Class' instance methods, where
 %% the testClassProtocol extension probe handles it.
 test_dispatch_fallthrough() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
     ?assertNotEqual(undefined, CounterPid),
 
@@ -112,7 +112,7 @@ test_dispatch_fallthrough() ->
 %% (the metaclass tag), not 'Counter'.
 %% This confirms that class objects retain their identity through dispatch.
 test_metaclass_tag_preserved() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
 
     {class_protocol_ok, Self} =
@@ -130,7 +130,7 @@ test_metaclass_tag_preserved() ->
 %% If a message is not in user-defined class methods AND not in Class,
 %% it must still raise does_not_understand with correct class name.
 test_unknown_message_dnu() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
 
     ?assertError(
@@ -143,7 +143,7 @@ test_unknown_message_dnu() ->
 %% try_class_chain_fallthrough/3 returns not_found when 'Class' is absent,
 %% and class_send raises does_not_understand (no crash).
 test_fallthrough_absent_class() ->
-    ok = ensure_counter_loaded(),
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     CounterPid = beamtalk_class_registry:whereis_class('Counter'),
 
     %% The probe extension is checked before the Class process is consulted,
@@ -178,23 +178,3 @@ test_fallthrough_absent_class() ->
 %%====================================================================
 %% Helpers
 %%====================================================================
-
-ensure_counter_loaded() ->
-    case erlang:function_exported('bt@counter', register_class, 0) of
-        true ->
-            'bt@counter':register_class(),
-            ok;
-        false ->
-            case code:load_file('bt@counter') of
-                {module, 'bt@counter'} ->
-                    case erlang:function_exported('bt@counter', register_class, 0) of
-                        true ->
-                            'bt@counter':register_class(),
-                            ok;
-                        false ->
-                            {error, no_register_class}
-                    end;
-                {error, nofile} ->
-                    {error, counter_not_built}
-            end
-    end.

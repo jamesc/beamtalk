@@ -12,7 +12,7 @@ module on demand. Replaces the per-file `start_class/N`, `stop_class/1`,
 `ensure_fixture_loaded/1` copies.
 """.
 
--export([start/2, start/3, stop/1, ensure_fixture_loaded/2]).
+-export([start/2, start/3, stop/1, ensure_fixture_loaded/2, ensure_counter_loaded/0]).
 
 -doc "`start/3` with the default `ClassInfo` overrides (none).".
 -spec start(atom(), map()) -> pid().
@@ -60,7 +60,20 @@ ensure_fixture_loaded(ClassName, BeamPath) ->
 
 register_if_needed(ClassName, Module) ->
     case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined -> Module:register_class();
-        _ -> ok
-    end,
-    beamtalk_test_wait:class(ClassName).
+        undefined ->
+            case erlang:function_exported(Module, register_class, 0) of
+                true ->
+                    Module:register_class(),
+                    beamtalk_test_wait:class(ClassName);
+                false ->
+                    %% Registered by the module's own on_load, if at all.
+                    beamtalk_test_wait:class(ClassName)
+            end;
+        _ ->
+            ok
+    end.
+
+-doc "Ensure the compiled `Counter` fixture (`bt@counter`) is loaded and registered.".
+-spec ensure_counter_loaded() -> ok.
+ensure_counter_loaded() ->
+    ensure_fixture_loaded('Counter', 'bt@counter').

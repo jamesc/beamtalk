@@ -23,15 +23,12 @@ Covers:
 %% Helpers
 %%====================================================================
 
-make_msg(Op, Id, Session) ->
-    {protocol_msg, Op, Id, Session, #{}}.
-
 %%====================================================================
 %% handle/4 — invalid / unknown pid paths
 %%====================================================================
 
 handle_pid_stats_invalid_pid_string_returns_error_test() ->
-    Msg = make_msg(<<"pid-stats">>, <<"s-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"pid-stats">>, <<"s-1">>, undefined),
     Result = beamtalk_repl_ops_watch:handle(
         <<"pid-stats">>, #{<<"actor">> => <<"not-a-pid">>}, Msg, self()
     ),
@@ -42,7 +39,7 @@ handle_pid_stats_invalid_pid_string_returns_error_test() ->
     ).
 
 handle_pid_stats_missing_actor_returns_error_test() ->
-    Msg = make_msg(<<"pid-stats">>, <<"s-2">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"pid-stats">>, <<"s-2">>, undefined),
     Result = beamtalk_repl_ops_watch:handle(<<"pid-stats">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     ?assert(maps:is_key(<<"error">>, Decoded)).
@@ -50,7 +47,7 @@ handle_pid_stats_missing_actor_returns_error_test() ->
 handle_pid_stats_unknown_actor_returns_error_test() ->
     %% Valid pid format but not a registered actor → unknown_actor.
     PidBin = list_to_binary(pid_to_list(self())),
-    Msg = make_msg(<<"pid-stats">>, <<"s-3">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"pid-stats">>, <<"s-3">>, undefined),
     Result = beamtalk_repl_ops_watch:handle(
         <<"pid-stats">>, #{<<"actor">> => PidBin}, Msg, self()
     ),
@@ -78,7 +75,7 @@ handle_term_pid_stats_live_actor_returns_value_map_test() ->
         {ok, ActorPid} = test_counter:start_link(0),
         ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
         PidBin = list_to_binary(pid_to_list(ActorPid)),
-        Msg = make_msg(<<"pid-stats">>, <<"s-live">>, undefined),
+        Msg = beamtalk_test_repl:make_msg(<<"pid-stats">>, <<"s-live">>, undefined),
         try
             Result = beamtalk_repl_ops_watch:handle_term(
                 <<"pid-stats">>, #{<<"actor">> => PidBin}, Msg, self()
