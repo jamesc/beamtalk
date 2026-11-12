@@ -28,16 +28,13 @@ All tests run without any live services:
 %% Helpers
 %%====================================================================
 
-make_msg(Op, Id, Session) ->
-    {protocol_msg, Op, Id, Session, #{}}.
-
 %%====================================================================
 %% shutdown op — invalid cookie (false branch)
 %%====================================================================
 
 shutdown_missing_cookie_returns_auth_error_test() ->
     %% No <<"cookie">> key → maps:get defaults to <<>> → size mismatch → false.
-    Msg = make_msg(<<"shutdown">>, <<"sd-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"shutdown">>, <<"sd-1">>, undefined),
     Result = beamtalk_repl_ops_session:handle(<<"shutdown">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     ?assert(maps:is_key(<<"error">>, Decoded)),
@@ -45,7 +42,7 @@ shutdown_missing_cookie_returns_auth_error_test() ->
 
 shutdown_empty_cookie_returns_auth_error_test() ->
     %% Explicit empty binary → byte_size(<<>>) =/= byte_size(NodeCookie) → false.
-    Msg = make_msg(<<"shutdown">>, <<"sd-2">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"shutdown">>, <<"sd-2">>, undefined),
     Result = beamtalk_repl_ops_session:handle(
         <<"shutdown">>, #{<<"cookie">> => <<>>}, Msg, self()
     ),
@@ -59,7 +56,7 @@ shutdown_wrong_length_cookie_returns_auth_error_test() ->
     NodeCookieBin = atom_to_binary(erlang:get_cookie(), utf8),
     WrongLen = byte_size(NodeCookieBin) + 1,
     WrongCookie = binary:copy(<<$X>>, WrongLen),
-    Msg = make_msg(<<"shutdown">>, <<"sd-3">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"shutdown">>, <<"sd-3">>, undefined),
     Result = beamtalk_repl_ops_session:handle(
         <<"shutdown">>, #{<<"cookie">> => WrongCookie}, Msg, self()
     ),
@@ -79,7 +76,7 @@ shutdown_same_length_wrong_cookie_exercises_hash_equals_test() ->
             NodeCookieBin -> binary:copy(<<$X>>, Len);
             Flipped -> Flipped
         end,
-    Msg = make_msg(<<"shutdown">>, <<"sd-4">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"shutdown">>, <<"sd-4">>, undefined),
     Result = beamtalk_repl_ops_session:handle(
         <<"shutdown">>, #{<<"cookie">> => WrongCookie}, Msg, self()
     ),
@@ -89,7 +86,7 @@ shutdown_same_length_wrong_cookie_exercises_hash_equals_test() ->
 
 shutdown_error_response_includes_status_done_error_test() ->
     %% The error response must include status: [done, error].
-    Msg = make_msg(<<"shutdown">>, <<"sd-5">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"shutdown">>, <<"sd-5">>, undefined),
     Result = beamtalk_repl_ops_session:handle(<<"shutdown">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     ?assertEqual([<<"done">>, <<"error">>], maps:get(<<"status">>, Decoded)).
@@ -103,7 +100,7 @@ shutdown_valid_cookie_returns_ok_status_test() ->
     %% erlang:send_after/3 targets the atom beamtalk_repl_server which is not
     %% registered in unit tests; the timer message is silently discarded on fire.
     NodeCookieBin = atom_to_binary(erlang:get_cookie(), utf8),
-    Msg = make_msg(<<"shutdown">>, <<"sd-6">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"shutdown">>, <<"sd-6">>, undefined),
     Result = beamtalk_repl_ops_session:handle(
         <<"shutdown">>, #{<<"cookie">> => NodeCookieBin}, Msg, self()
     ),

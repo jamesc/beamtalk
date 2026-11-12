@@ -45,7 +45,7 @@ shape_loader_setup() ->
         created_at => erlang:system_time(second),
         mode => run
     }),
-    clear_xref(),
+    beamtalk_test_repl:clear_xref(),
     beamtalk_compiler_server:clear_classes(),
     case whereis(beamtalk_workspace_shape_store) of
         undefined -> ok;
@@ -85,28 +85,9 @@ shape_loader_teardown(_) ->
         undefined -> ok;
         FindingsPid -> gen_server:stop(FindingsPid)
     end,
-    clear_xref(),
+    beamtalk_test_repl:clear_xref(),
     _ = application:stop(beamtalk_compiler),
     ok.
-
-clear_xref() ->
-    case whereis(beamtalk_xref) of
-        undefined ->
-            ok;
-        _Pid ->
-            try
-                sys:replace_state(beamtalk_xref, fun(S) ->
-                    ets:delete_all_objects(beamtalk_xref_methods),
-                    ets:delete_all_objects(beamtalk_xref_senders),
-                    ets:delete_all_objects(beamtalk_xref_references),
-                    ets:delete_all_objects(xref_class_gen),
-                    S
-                end)
-            catch
-                _:_ -> ok
-            end,
-            ok
-    end.
 
 subscribe_self_to_reload_check() ->
     ok = beamtalk_repl_subscriptions:subscribe(reload_check, self()).

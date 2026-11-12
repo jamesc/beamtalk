@@ -26,41 +26,15 @@ class for the `HandleScoped(#node)` row (exercising the
 setup() ->
     application:ensure_all_started(beamtalk_runtime),
     beamtalk_stdlib:init(),
-    ok = ensure_fixture_loaded(shape_point, 'ShapePoint'),
-    ok = ensure_fixture_loaded(shape_plain_object, 'ShapePlainObject'),
-    ok = ensure_fixture_loaded(shape_handle_box, 'ShapeHandleBox'),
-    ok = ensure_fixture_loaded(shape_hazard_worker, 'ShapeHazardWorker'),
-    ok = ensure_fixture_loaded(shape_hazard_cart, 'ShapeHazardCart'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('ShapePoint', 'bt@shape_point'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('ShapePlainObject', 'bt@shape_plain_object'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('ShapeHandleBox', 'bt@shape_handle_box'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('ShapeHazardWorker', 'bt@shape_hazard_worker'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('ShapeHazardCart', 'bt@shape_hazard_cart'),
     ok.
 
 teardown(_) ->
     ok.
-
-%% Load a compiled test_fixtures/*.bt module and register its class if not
-%% already registered — same convention as
-%% beamtalk_shape_migration_tests:ensure_fixture_loaded/2 (each fixture-
-%% consuming test file owns this helper locally, deliberately, so no test
-%% file has an ordering dependency on another test file registering a
-%% shared fixture first).
-ensure_fixture_loaded(Basename, ClassName) ->
-    Module = list_to_atom("bt@" ++ atom_to_list(Basename)),
-    case code:ensure_loaded(Module) of
-        {module, Module} ->
-            case beamtalk_class_registry:whereis_class(ClassName) of
-                undefined ->
-                    case erlang:function_exported(Module, register_class, 0) of
-                        true ->
-                            Module:register_class(),
-                            ok;
-                        false ->
-                            ok
-                    end;
-                _Pid ->
-                    ok
-            end;
-        {error, Reason} ->
-            error({fixture_module_not_found, Basename, Reason})
-    end.
 
 beamtalk_wire_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->

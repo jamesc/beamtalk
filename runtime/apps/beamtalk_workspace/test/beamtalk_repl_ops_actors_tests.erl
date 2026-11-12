@@ -27,9 +27,6 @@ inside the `try`).
 %% Helpers
 %%====================================================================
 
-make_msg(Op, Id, Session) ->
-    {protocol_msg, Op, Id, Session, #{}}.
-
 %%====================================================================
 %% validate_actor_pid/1
 %%====================================================================
@@ -72,7 +69,7 @@ is_known_actor_no_registry_returns_false_test() ->
 %%====================================================================
 
 handle_actors_no_registry_returns_empty_list_test() ->
-    Msg = make_msg(<<"actors">>, <<"a-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"actors">>, <<"a-1">>, undefined),
     beamtalk_test_actor_registry:without_registry(fun() ->
         Result = beamtalk_repl_ops_actors:handle(<<"actors">>, #{}, Msg, self()),
         Decoded = json:decode(Result),
@@ -86,7 +83,7 @@ handle_actors_no_registry_returns_empty_list_test() ->
 %%====================================================================
 
 handle_inspect_invalid_pid_string_returns_error_test() ->
-    Msg = make_msg(<<"inspect">>, <<"i-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"i-1">>, undefined),
     Result = beamtalk_repl_ops_actors:handle(
         <<"inspect">>, #{<<"actor">> => <<"not-a-pid">>}, Msg, self()
     ),
@@ -98,7 +95,7 @@ handle_inspect_invalid_pid_string_returns_error_test() ->
 
 handle_inspect_empty_actor_param_returns_error_test() ->
     %% Empty binary → empty string → list_to_pid raises badarg → invalid_pid.
-    Msg = make_msg(<<"inspect">>, <<"i-2">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"i-2">>, undefined),
     Result = beamtalk_repl_ops_actors:handle(
         <<"inspect">>, #{<<"actor">> => <<>>}, Msg, self()
     ),
@@ -107,7 +104,7 @@ handle_inspect_empty_actor_param_returns_error_test() ->
 
 handle_inspect_missing_actor_param_returns_error_test() ->
     %% No <<"actor">> key: defaults to <<>> → invalid_pid.
-    Msg = make_msg(<<"inspect">>, <<"i-3">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"i-3">>, undefined),
     Result = beamtalk_repl_ops_actors:handle(<<"inspect">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     ?assert(maps:is_key(<<"error">>, Decoded)).
@@ -116,7 +113,7 @@ handle_inspect_unknown_actor_pid_returns_error_test() ->
     %% Valid PID string format but not registered in actor registry → unknown_actor.
     %% invalid_pid_error wraps it with the same "Invalid actor PID" message.
     PidBin = list_to_binary(pid_to_list(self())),
-    Msg = make_msg(<<"inspect">>, <<"i-4">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"i-4">>, undefined),
     Result = beamtalk_repl_ops_actors:handle(
         <<"inspect">>, #{<<"actor">> => PidBin}, Msg, self()
     ),
@@ -131,7 +128,7 @@ handle_inspect_unknown_actor_pid_returns_error_test() ->
 %%====================================================================
 
 handle_kill_invalid_pid_actor_key_returns_error_test() ->
-    Msg = make_msg(<<"kill">>, <<"k-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"kill">>, <<"k-1">>, undefined),
     Result = beamtalk_repl_ops_actors:handle(
         <<"kill">>, #{<<"actor">> => <<"bad-pid">>}, Msg, self()
     ),
@@ -143,7 +140,7 @@ handle_kill_invalid_pid_actor_key_returns_error_test() ->
 
 handle_kill_invalid_pid_pid_key_returns_error_test() ->
     %% kill/2 falls back to <<"pid">> when <<"actor">> is absent.
-    Msg = make_msg(<<"kill">>, <<"k-2">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"kill">>, <<"k-2">>, undefined),
     Result = beamtalk_repl_ops_actors:handle(
         <<"kill">>, #{<<"pid">> => <<"bad-pid">>}, Msg, self()
     ),
@@ -152,7 +149,7 @@ handle_kill_invalid_pid_pid_key_returns_error_test() ->
 
 handle_kill_missing_pid_returns_error_test() ->
     %% No PID key → defaults to <<>> → list_to_pid raises badarg → invalid_pid.
-    Msg = make_msg(<<"kill">>, <<"k-3">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"kill">>, <<"k-3">>, undefined),
     Result = beamtalk_repl_ops_actors:handle(<<"kill">>, #{}, Msg, self()),
     Decoded = json:decode(Result),
     ?assert(maps:is_key(<<"error">>, Decoded)).
@@ -171,7 +168,7 @@ handle_interrupt_dead_session_catches_noproc_test() ->
     receive
         {'DOWN', MRef, process, Pid, _} -> ok
     end,
-    Msg = make_msg(<<"interrupt">>, <<"int-1">>, undefined),
+    Msg = beamtalk_test_repl:make_msg(<<"interrupt">>, <<"int-1">>, undefined),
     Result = beamtalk_repl_ops_actors:handle(<<"interrupt">>, #{}, Msg, Pid),
     Decoded = json:decode(Result),
     ?assertEqual([<<"done">>], maps:get(<<"status">>, Decoded)).
@@ -191,7 +188,7 @@ handle_term_inspect_live_tagged_actor_returns_inspect_map_term_test() ->
         {ok, ActorPid} = test_counter:start_link(0),
         ok = beamtalk_repl_actors:register_actor(RegistryPid, ActorPid, 'Counter', test_counter),
         PidBin = list_to_binary(pid_to_list(ActorPid)),
-        Msg = make_msg(<<"inspect">>, <<"i-live">>, undefined),
+        Msg = beamtalk_test_repl:make_msg(<<"inspect">>, <<"i-live">>, undefined),
         try
             Result = beamtalk_repl_ops_actors:handle_term(
                 <<"inspect">>, #{<<"actor">> => PidBin}, Msg, self()

@@ -64,18 +64,24 @@ apply_meta_override(Real) ->
 setup() ->
     application:ensure_all_started(beamtalk_runtime),
     beamtalk_stdlib:init(),
-    ok = ensure_fixture_loaded(typed_field_counter, 'TypedFieldCounter'),
-    ok = ensure_fixture_loaded(shape_chain_cart, 'ShapeChainCart'),
-    ok = ensure_fixture_loaded(shape_point, 'ShapePoint'),
-    ok = ensure_fixture_loaded(shape_box, 'ShapeBox'),
-    ok = ensure_fixture_loaded(shape_handle_box, 'ShapeHandleBox'),
-    ok = ensure_fixture_loaded(shape_hazard_worker, 'ShapeHazardWorker'),
-    ok = ensure_fixture_loaded(shape_hazard_cart, 'ShapeHazardCart'),
-    ok = ensure_fixture_loaded(shape_handle_cart, 'ShapeHandleCart'),
-    ok = ensure_fixture_loaded(shape_plain_object, 'ShapePlainObject'),
-    ok = ensure_fixture_loaded(typed_late_slot_actor, 'TypedLateSlotActor'),
-    ok = ensure_fixture_loaded(untyped_late_slot_actor, 'UntypedLateSlotActor'),
-    ok = ensure_fixture_loaded(untyped_field_counter, 'UntypedFieldCounter'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('TypedFieldCounter', 'bt@typed_field_counter'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('ShapeChainCart', 'bt@shape_chain_cart'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('ShapePoint', 'bt@shape_point'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('ShapeBox', 'bt@shape_box'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('ShapeHandleBox', 'bt@shape_handle_box'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('ShapeHazardWorker', 'bt@shape_hazard_worker'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('ShapeHazardCart', 'bt@shape_hazard_cart'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('ShapeHandleCart', 'bt@shape_handle_cart'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('ShapePlainObject', 'bt@shape_plain_object'),
+    ok = beamtalk_test_class:ensure_fixture_loaded(
+        'TypedLateSlotActor', 'bt@typed_late_slot_actor'
+    ),
+    ok = beamtalk_test_class:ensure_fixture_loaded(
+        'UntypedLateSlotActor', 'bt@untyped_late_slot_actor'
+    ),
+    ok = beamtalk_test_class:ensure_fixture_loaded(
+        'UntypedFieldCounter', 'bt@untyped_field_counter'
+    ),
     ok.
 
 teardown(_) ->
@@ -748,29 +754,4 @@ with_class_module_override(ClassName, TempModule, Fun) ->
         beamtalk_class_metadata:merge_identity(
             ClassName, OrigModule, Selectors, Superclass, IsAbstract
         )
-    end.
-
-%% Load a fixture .bt module (bt@<Basename>) and register its class if it
-%% is not already registered — idempotent, same convention
-%% beamtalk_hot_reload_tests.erl's several ensure_*_loaded/0 helpers use,
-%% generalised here since this module has more fixtures than any one of
-%% them repeats individually.
-ensure_fixture_loaded(Basename, ClassName) ->
-    Module = list_to_atom("bt@" ++ atom_to_list(Basename)),
-    case code:ensure_loaded(Module) of
-        {module, Module} ->
-            case beamtalk_class_registry:whereis_class(ClassName) of
-                undefined ->
-                    case erlang:function_exported(Module, register_class, 0) of
-                        true ->
-                            Module:register_class(),
-                            ok;
-                        false ->
-                            ok
-                    end;
-                _Pid ->
-                    ok
-            end;
-        {error, Reason} ->
-            error({fixture_module_not_found, Basename, Reason})
     end.
