@@ -4137,8 +4137,14 @@ fn test_abstract_actor_spawn_raises_instantiation_error() {
     );
     assert_eq!(
         code.matches(abstract_hint.as_str()).count(),
-        4,
-        "spawn/0,1 and spawn_monitored/0,1 stubs must all include the abstract-class hint. Got:\n{code}"
+        6,
+        "spawn, spawn_monitored and spawn_monitored_async /0,1 stubs must all include the abstract-class hint. Got:\n{code}"
+    );
+    // BT-4477: spawn_monitored_async/0,1 are abstract stubs too.
+    assert!(
+        code.contains("'spawn_monitored_async'/0 = fun () ->")
+            && code.contains("'spawn_monitored_async'/1 = fun (_InitArgs) ->"),
+        "Got:\n{code}"
     );
     // BT-4104: spawn_monitored/0,1 are abstract stubs too, naming their own selectors.
     assert!(
