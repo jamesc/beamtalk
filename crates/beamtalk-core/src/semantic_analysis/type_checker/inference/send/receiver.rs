@@ -53,7 +53,10 @@ impl TypeChecker {
     /// Known gaps (the check is warning-level): only a literal `self`/`super`
     /// receiver counts, so a self alias (`me := self. me reset`) and a block
     /// built earlier and run later (`r := [self reset]. … r value`) are not
-    /// seen.
+    /// seen, and neither is a block that runs repeatedly (`to:do:`, `do:`,
+    /// `[cond] whileTrue: […]`, `[…] repeat`): a self-send late in its body
+    /// can reassign a field before an earlier statement of the next
+    /// iteration reads it.
     #[allow(clippy::too_many_arguments)] // split from infer_message_send to share body
     pub(in crate::semantic_analysis::type_checker) fn infer_message_send_with_receiver_ty(
         &mut self,

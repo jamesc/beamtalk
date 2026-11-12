@@ -189,8 +189,15 @@ typed Actor subclass: Pair
 }
 
 #[test]
-fn self_send_later_in_loop_body_drops_narrowing_for_earlier_statements() {
-    assert_nil_leak(
-        "  run -> Integer =>\n    self.f isNil ifTrue: [^0]\n    1 to: 3 do: [:i | self need: self.f. self reset]\n    0",
+fn loop_body_with_only_a_diverging_self_send_keeps_narrowing() {
+    assert_clean(
+        "  run: xs :: List -> Integer =>\n    self.f isNil ifTrue: [^0]\n    xs do: [:x :: Integer | x < 0 ifTrue: [self error: \"neg\"]]\n    self need: self.f",
+    );
+}
+
+#[test]
+fn diverging_self_send_in_non_diverging_guard_branch_keeps_narrowing() {
+    assert_clean(
+        "  run -> Integer =>\n    self.f isNil ifTrue: [^0] ifFalse: [self.f < 0 ifTrue: [self error: \"neg\"]]\n    self need: self.f",
     );
 }
