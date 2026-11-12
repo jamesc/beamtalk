@@ -598,7 +598,7 @@ handle_term(<<"load-tests">>, _Params, _Msg, _SessionPid) ->
     %% (`load_files_stateless` → `beamtalk_repl_loader`), exactly as the
     %% `Workspace sync` primitive does.
     case
-        beamtalk_repl_ops_load:sync_project(".", #{
+        beamtalk_workspace_project_sync:sync_project(".", #{
             include_tests => true
         })
     of

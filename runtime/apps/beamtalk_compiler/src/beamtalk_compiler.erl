@@ -577,7 +577,7 @@ directory (extension included, `/`-joined — e.g. `<<"util/http_response.bt">>`
 and the project's package name, parses the file with the real grammar and
 computes the package-qualified module atom the CLI's own index build would
 produce for it — see `beamtalk_compiler_server:build_class_module_index_in_source/3'
-for the full doc. Backs `beamtalk_repl_ops_load:build_source_class_module_index/1'
+for the full doc. Backs `beamtalk_workspace_project_sync:build_source_class_module_index/1'
 (the REPL/workspace cold-load fallback for `class_module_index`, ADR 0050),
 replacing that module's former independent regex scan + hand-rolled
 snake-casing.

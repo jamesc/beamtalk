@@ -617,7 +617,7 @@ re-capitalizes to `'Beamerror'`, but the real class is `'BEAMError'`).
 
 Returns `not_found` when no registered class has this module, not an error —
 callers should fall back to the string heuristic in that case, exactly as
-`beamtalk_repl_ops_load:module_to_class_name_map/0` already does in bulk.
+`beamtalk_workspace_project_sync:module_to_class_name_map/0` already does in bulk.
 
 For resolving many modules at once (e.g. every frame of a stacktrace), prefer
 `module_to_class_map/0` and look up each module in the result — this function

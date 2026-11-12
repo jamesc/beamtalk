@@ -144,7 +144,7 @@ pub(crate) fn handle_class_state_field_defaults(request: &Map) -> Term {
 /// Handle a `build_class_module_index_in_source` request.
 ///
 /// Backs the REPL/workspace cold-load fallback for `class_module_index`
-/// (ADR 0050, `beamtalk_repl_ops_load:build_source_class_module_index/1`):
+/// (ADR 0050, `beamtalk_workspace_project_sync:build_source_class_module_index/1`):
 /// given the source text of a single `src/**/*.bt` file, its path relative
 /// to `src/` (extension included, `/`-joined), and the project's package
 /// name, returns every class the file declares plus the package-qualified

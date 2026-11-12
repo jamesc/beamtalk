@@ -59,14 +59,14 @@ rm_temp_dir(Dir) ->
 find_bt_files_empty_dir_test() ->
     Dir = make_temp_dir(),
     try
-        ?assertEqual([], beamtalk_repl_ops_load:find_bt_files(Dir))
+        ?assertEqual([], beamtalk_workspace_project_sync:find_bt_files(Dir))
     after
         rm_temp_dir(Dir)
     end.
 
 find_bt_files_nonexistent_dir_test() ->
     Missing = "missing_bt_ops_load_test_dir_" ++ integer_to_list(erlang:unique_integer([positive])),
-    ?assertEqual([], beamtalk_repl_ops_load:find_bt_files(Missing)).
+    ?assertEqual([], beamtalk_workspace_project_sync:find_bt_files(Missing)).
 
 find_bt_files_finds_bt_files_test() ->
     Dir = make_temp_dir(),
@@ -74,7 +74,7 @@ find_bt_files_finds_bt_files_test() ->
         write_temp_file(Dir, "a.bt", <<"Object subclass: A">>),
         write_temp_file(Dir, "b.bt", <<"A subclass: B">>),
         write_temp_file(Dir, "readme.md", <<"docs">>),
-        Found = beamtalk_repl_ops_load:find_bt_files(Dir),
+        Found = beamtalk_workspace_project_sync:find_bt_files(Dir),
         ?assertEqual(2, length(Found)),
         ?assert(lists:any(fun(F) -> lists:suffix("a.bt", F) end, Found)),
         ?assert(lists:any(fun(F) -> lists:suffix("b.bt", F) end, Found))
@@ -93,7 +93,8 @@ extract_bt_class_info_simple_test() ->
             Dir, "counter.bt", <<"Object subclass: Counter\n  state: count = 0\n">>
         ),
         ?assertEqual(
-            {<<"Counter">>, <<"Object">>}, beamtalk_repl_ops_load:extract_bt_class_info(Path)
+            {<<"Counter">>, <<"Object">>},
+            beamtalk_workspace_project_sync:extract_bt_class_info(Path)
         )
     after
         rm_temp_dir(Dir)
@@ -105,7 +106,7 @@ extract_bt_class_info_subclass_test() ->
         Path = write_temp_file(Dir, "special.bt", <<"Counter subclass: SpecialCounter\n">>),
         ?assertEqual(
             {<<"SpecialCounter">>, <<"Counter">>},
-            beamtalk_repl_ops_load:extract_bt_class_info(Path)
+            beamtalk_workspace_project_sync:extract_bt_class_info(Path)
         )
     after
         rm_temp_dir(Dir)
@@ -115,14 +116,17 @@ extract_bt_class_info_no_class_test() ->
     Dir = make_temp_dir(),
     try
         Path = write_temp_file(Dir, "empty.bt", <<"// just a comment\n">>),
-        ?assertEqual({undefined, undefined}, beamtalk_repl_ops_load:extract_bt_class_info(Path))
+        ?assertEqual(
+            {undefined, undefined}, beamtalk_workspace_project_sync:extract_bt_class_info(Path)
+        )
     after
         rm_temp_dir(Dir)
     end.
 
 extract_bt_class_info_missing_file_test() ->
     ?assertEqual(
-        {undefined, undefined}, beamtalk_repl_ops_load:extract_bt_class_info("/no/such/file.bt")
+        {undefined, undefined},
+        beamtalk_workspace_project_sync:extract_bt_class_info("/no/such/file.bt")
     ).
 
 %%====================================================================
@@ -130,7 +134,7 @@ extract_bt_class_info_missing_file_test() ->
 %%====================================================================
 
 sort_bt_files_empty_test() ->
-    ?assertEqual([], beamtalk_repl_ops_load:sort_bt_files_by_deps([])).
+    ?assertEqual([], beamtalk_workspace_project_sync:sort_bt_files_by_deps([])).
 
 sort_bt_files_superclass_before_subclass_test() ->
     Dir = make_temp_dir(),
@@ -138,7 +142,7 @@ sort_bt_files_superclass_before_subclass_test() ->
         PathA = write_temp_file(Dir, "a.bt", <<"Object subclass: A">>),
         PathB = write_temp_file(Dir, "b.bt", <<"A subclass: B">>),
         %% Provide in "wrong" order — B before A; sort must reorder so A loads first.
-        Sorted = beamtalk_repl_ops_load:sort_bt_files_by_deps([PathB, PathA]),
+        Sorted = beamtalk_workspace_project_sync:sort_bt_files_by_deps([PathB, PathA]),
         ?assertEqual([PathA, PathB], Sorted)
     after
         rm_temp_dir(Dir)
@@ -151,7 +155,7 @@ sort_bt_files_independent_files_stable_test() ->
         %% Neither depends on the other, so input order should be preserved.
         PathA = write_temp_file(Dir, "a.bt", <<"Object subclass: A">>),
         PathB = write_temp_file(Dir, "b.bt", <<"Object subclass: B">>),
-        Sorted = beamtalk_repl_ops_load:sort_bt_files_by_deps([PathA, PathB]),
+        Sorted = beamtalk_workspace_project_sync:sort_bt_files_by_deps([PathA, PathB]),
         ?assertEqual([PathA, PathB], Sorted)
     after
         rm_temp_dir(Dir)
@@ -166,7 +170,7 @@ structured_file_errors_compile_diagnostics_test() ->
         #{message => <<"undefined variable 'x'">>, line => 5, hint => <<"Did you mean 'self'?">>},
         #{message => <<"unexpected token">>}
     ],
-    Result = beamtalk_repl_ops_load:structured_file_errors(
+    Result = beamtalk_workspace_project_sync:structured_file_errors(
         "/src/Broken.bt", {compile_error, Diags}
     ),
     ?assertEqual(2, length(Result)),
@@ -182,7 +186,7 @@ structured_file_errors_compile_diagnostics_test() ->
     ?assertEqual(error, maps:find(<<"hint">>, E2)).
 
 structured_file_errors_binary_diagnostic_test() ->
-    Result = beamtalk_repl_ops_load:structured_file_errors(
+    Result = beamtalk_workspace_project_sync:structured_file_errors(
         "/src/Bad.bt", {compile_error, [<<"raw error text">>]}
     ),
     ?assertEqual(1, length(Result)),
@@ -190,7 +194,7 @@ structured_file_errors_binary_diagnostic_test() ->
     ?assertEqual(<<"raw error text">>, maps:get(<<"message">>, E)).
 
 structured_file_errors_non_compile_error_test() ->
-    Result = beamtalk_repl_ops_load:structured_file_errors(
+    Result = beamtalk_workspace_project_sync:structured_file_errors(
         "/src/Missing.bt", {file_not_found, "/src/Missing.bt"}
     ),
     ?assertEqual(1, length(Result)),
@@ -206,7 +210,7 @@ structured_file_errors_beamtalk_string_message_test() ->
         beamtalk_error:new(internal_error, 'Workspace'),
         {beamtalk_string, <<"boom">>}
     ),
-    Result = beamtalk_repl_ops_load:structured_file_errors("/src/X.bt", Err),
+    Result = beamtalk_workspace_project_sync:structured_file_errors("/src/X.bt", Err),
     ?assertEqual(1, length(Result)),
     [E] = Result,
     ?assertEqual(<<"boom">>, maps:get(<<"message">>, E)),
@@ -218,7 +222,7 @@ structured_file_errors_beamtalk_string_message_test() ->
 
 format_collision_warning_with_packages_test() ->
     %% When both modules are package-qualified, the warning should include a hint.
-    Result = beamtalk_repl_ops_load:format_collision_warning(
+    Result = beamtalk_workspace_project_sync:format_collision_warning(
         'Parser', 'bt@json@parser', 'bt@xml@parser'
     ),
     ?assert(binary:match(Result, <<"Class 'Parser' redefined">>) =/= nomatch),
@@ -228,7 +232,7 @@ format_collision_warning_with_packages_test() ->
 
 format_collision_warning_without_packages_test() ->
     %% When modules aren't package-qualified, no hint is added.
-    Result = beamtalk_repl_ops_load:format_collision_warning(
+    Result = beamtalk_workspace_project_sync:format_collision_warning(
         'Counter', 'bt@counter', 'bt@counter_v2'
     ),
     ?assert(binary:match(Result, <<"Class 'Counter' redefined">>) =/= nomatch),
@@ -236,10 +240,14 @@ format_collision_warning_without_packages_test() ->
     ?assertEqual(nomatch, binary:match(Result, <<"to be explicit">>)).
 
 extract_package_from_module_qualified_test() ->
-    ?assertEqual(<<"json">>, beamtalk_repl_ops_load:extract_package_from_module('bt@json@parser')).
+    ?assertEqual(
+        <<"json">>, beamtalk_workspace_project_sync:extract_package_from_module('bt@json@parser')
+    ).
 
 extract_package_from_module_unqualified_test() ->
-    ?assertEqual(undefined, beamtalk_repl_ops_load:extract_package_from_module('bt@counter')).
+    ?assertEqual(
+        undefined, beamtalk_workspace_project_sync:extract_package_from_module('bt@counter')
+    ).
 
 %%====================================================================
 %% classify_files_by_change/2
@@ -249,7 +257,7 @@ classify_files_all_new_test() ->
     %% No previous mtimes — all files should be classified as changed.
     Files = ["/src/a.bt", "/src/b.bt"],
     {Changed, Unchanged, Deleted} =
-        beamtalk_repl_ops_load:classify_files_by_change(Files, #{}),
+        beamtalk_workspace_project_sync:classify_files_by_change(Files, #{}),
     ?assertEqual(2, length(Changed)),
     ?assertEqual(0, length(Unchanged)),
     ?assertEqual(0, length(Deleted)).
@@ -260,11 +268,11 @@ classify_files_unchanged_test() ->
     try
         PathA = write_temp_file(Dir, "a.bt", <<"Object subclass: A">>),
         PathB = write_temp_file(Dir, "b.bt", <<"Object subclass: B">>),
-        MtimeA = beamtalk_repl_ops_load:get_file_mtime(PathA),
-        MtimeB = beamtalk_repl_ops_load:get_file_mtime(PathB),
+        MtimeA = beamtalk_workspace_project_sync:get_file_mtime(PathA),
+        MtimeB = beamtalk_workspace_project_sync:get_file_mtime(PathB),
         PrevMtimes = #{PathA => MtimeA, PathB => MtimeB},
         {Changed, Unchanged, Deleted} =
-            beamtalk_repl_ops_load:classify_files_by_change([PathA, PathB], PrevMtimes),
+            beamtalk_workspace_project_sync:classify_files_by_change([PathA, PathB], PrevMtimes),
         ?assertEqual(0, length(Changed)),
         ?assertEqual(2, length(Unchanged)),
         ?assertEqual(0, length(Deleted))
@@ -277,13 +285,13 @@ classify_files_deleted_test() ->
     Dir = make_temp_dir(),
     try
         PathA = write_temp_file(Dir, "a.bt", <<"Object subclass: A">>),
-        MtimeA = beamtalk_repl_ops_load:get_file_mtime(PathA),
+        MtimeA = beamtalk_workspace_project_sync:get_file_mtime(PathA),
         PrevMtimes = #{
             PathA => MtimeA,
             "/src/deleted.bt" => {{2025, 1, 1}, {0, 0, 0}}
         },
         {Changed, Unchanged, Deleted} =
-            beamtalk_repl_ops_load:classify_files_by_change([PathA], PrevMtimes),
+            beamtalk_workspace_project_sync:classify_files_by_change([PathA], PrevMtimes),
         ?assertEqual(0, length(Changed)),
         ?assertEqual(1, length(Unchanged)),
         ?assertEqual(1, length(Deleted)),
@@ -299,7 +307,7 @@ classify_files_mixed_test() ->
         PathA = write_temp_file(Dir, "a.bt", <<"Object subclass: A">>),
         PathB = write_temp_file(Dir, "b.bt", <<"Object subclass: B">>),
         PathC = write_temp_file(Dir, "c.bt", <<"Object subclass: C">>),
-        MtimeA = beamtalk_repl_ops_load:get_file_mtime(PathA),
+        MtimeA = beamtalk_workspace_project_sync:get_file_mtime(PathA),
         PrevMtimes = #{
             PathA => MtimeA,
             %% b.bt has a stale mtime — will be detected as changed
@@ -309,7 +317,7 @@ classify_files_mixed_test() ->
         },
         %% c.bt is new (not in PrevMtimes)
         {Changed, Unchanged, Deleted} =
-            beamtalk_repl_ops_load:classify_files_by_change(
+            beamtalk_workspace_project_sync:classify_files_by_change(
                 [PathA, PathB, PathC], PrevMtimes
             ),
         ?assertEqual(1, length(Unchanged)),
@@ -334,7 +342,7 @@ filter_mtimes_under_project_basic_test() ->
         "/projects/foo/src/b.bt" => {{2026, 4, 26}, {0, 0, 0}},
         "/projects/bar/src/c.bt" => {{2026, 4, 26}, {0, 0, 0}}
     },
-    Filtered = beamtalk_repl_ops_load:filter_mtimes_under_project(
+    Filtered = beamtalk_workspace_project_sync:filter_mtimes_under_project(
         Mtimes, "/projects/foo"
     ),
     ?assertEqual(2, maps:size(Filtered)),
@@ -350,7 +358,7 @@ filter_mtimes_under_project_prefix_boundary_test() ->
         "/projects/foo/src/a.bt" => {{2026, 4, 26}, {0, 0, 0}},
         "/projects/foobar/src/c.bt" => {{2026, 4, 26}, {0, 0, 0}}
     },
-    Filtered = beamtalk_repl_ops_load:filter_mtimes_under_project(
+    Filtered = beamtalk_workspace_project_sync:filter_mtimes_under_project(
         Mtimes, "/projects/foo"
     ),
     ?assertEqual(1, maps:size(Filtered)),
@@ -363,7 +371,7 @@ filter_mtimes_under_project_trailing_slash_test() ->
         "/projects/foo/src/a.bt" => {{2026, 4, 26}, {0, 0, 0}},
         "/projects/bar/src/b.bt" => {{2026, 4, 26}, {0, 0, 0}}
     },
-    Filtered = beamtalk_repl_ops_load:filter_mtimes_under_project(
+    Filtered = beamtalk_workspace_project_sync:filter_mtimes_under_project(
         Mtimes, "/projects/foo/"
     ),
     ?assertEqual(1, maps:size(Filtered)),
@@ -373,7 +381,7 @@ filter_mtimes_under_project_empty_test() ->
     %% Empty input map yields empty output.
     ?assertEqual(
         #{},
-        beamtalk_repl_ops_load:filter_mtimes_under_project(#{}, "/projects/foo")
+        beamtalk_workspace_project_sync:filter_mtimes_under_project(#{}, "/projects/foo")
     ).
 
 filter_mtimes_under_project_no_matches_test() ->
@@ -384,7 +392,7 @@ filter_mtimes_under_project_no_matches_test() ->
     },
     ?assertEqual(
         #{},
-        beamtalk_repl_ops_load:filter_mtimes_under_project(Mtimes, "/projects/foo")
+        beamtalk_workspace_project_sync:filter_mtimes_under_project(Mtimes, "/projects/foo")
     ).
 
 filter_mtimes_under_project_keeps_test_dir_test() ->
@@ -395,7 +403,7 @@ filter_mtimes_under_project_keeps_test_dir_test() ->
         "/projects/foo/src/a.bt" => {{2026, 4, 26}, {0, 0, 0}},
         "/projects/foo/test/b.bt" => {{2026, 4, 26}, {0, 0, 0}}
     },
-    Filtered = beamtalk_repl_ops_load:filter_mtimes_under_project(
+    Filtered = beamtalk_workspace_project_sync:filter_mtimes_under_project(
         Mtimes, "/projects/foo"
     ),
     ?assertEqual(2, maps:size(Filtered)).
@@ -408,7 +416,7 @@ get_file_mtime_existing_file_test() ->
     Dir = make_temp_dir(),
     try
         Path = write_temp_file(Dir, "test.bt", <<"hello">>),
-        Mtime = beamtalk_repl_ops_load:get_file_mtime(Path),
+        Mtime = beamtalk_workspace_project_sync:get_file_mtime(Path),
         %% Mtime should be a valid datetime tuple
         ?assertMatch({{_, _, _}, {_, _, _}}, Mtime),
         %% Should not be the zero tuple
@@ -418,7 +426,7 @@ get_file_mtime_existing_file_test() ->
     end.
 
 get_file_mtime_missing_file_test() ->
-    Mtime = beamtalk_repl_ops_load:get_file_mtime("/no/such/file.bt"),
+    Mtime = beamtalk_workspace_project_sync:get_file_mtime("/no/such/file.bt"),
     ?assertEqual({{0, 0, 0}, {0, 0, 0}}, Mtime).
 
 %%====================================================================
@@ -427,12 +435,12 @@ get_file_mtime_missing_file_test() ->
 
 find_erl_files_nonexistent_dir_test() ->
     Missing = "missing_native_test_" ++ integer_to_list(erlang:unique_integer([positive])),
-    ?assertEqual([], beamtalk_repl_ops_load:find_erl_files(Missing, false)).
+    ?assertEqual([], beamtalk_workspace_project_sync:find_erl_files(Missing, false)).
 
 find_erl_files_empty_dir_test() ->
     Dir = make_temp_dir(),
     try
-        ?assertEqual([], beamtalk_repl_ops_load:find_erl_files(Dir, false))
+        ?assertEqual([], beamtalk_workspace_project_sync:find_erl_files(Dir, false))
     after
         rm_temp_dir(Dir)
     end.
@@ -443,7 +451,7 @@ find_erl_files_finds_erl_only_test() ->
         write_temp_file(Dir, "my_mod.erl", <<"-module(my_mod).">>),
         write_temp_file(Dir, "readme.md", <<"docs">>),
         write_temp_file(Dir, "something.bt", <<"Object subclass: X">>),
-        Found = beamtalk_repl_ops_load:find_erl_files(Dir, false),
+        Found = beamtalk_workspace_project_sync:find_erl_files(Dir, false),
         ?assertEqual(1, length(Found)),
         ?assert(lists:any(fun(F) -> lists:suffix("my_mod.erl", F) end, Found))
     after
@@ -458,7 +466,7 @@ find_erl_files_skips_test_dir_test() ->
         ok = file:make_dir(TestDir),
         write_temp_file(TestDir, "my_mod_tests.erl", <<"-module(my_mod_tests).">>),
         %% include_tests=false: native/test/ helpers are excluded.
-        Found = beamtalk_repl_ops_load:find_erl_files(Dir, false),
+        Found = beamtalk_workspace_project_sync:find_erl_files(Dir, false),
         ?assertEqual(1, length(Found)),
         ?assert(lists:any(fun(F) -> lists:suffix("my_mod.erl", F) end, Found)),
         %% Test file should not be included.
@@ -476,7 +484,7 @@ find_erl_files_includes_test_dir_when_flag_set_test() ->
         TestDir = filename:join(Dir, "test"),
         ok = file:make_dir(TestDir),
         write_temp_file(TestDir, "my_helper.erl", <<"-module(my_helper).">>),
-        Found = beamtalk_repl_ops_load:find_erl_files(Dir, true),
+        Found = beamtalk_workspace_project_sync:find_erl_files(Dir, true),
         ?assertEqual(2, length(Found)),
         ?assert(lists:any(fun(F) -> lists:suffix("my_mod.erl", F) end, Found)),
         %% Test helper IS included when the flag is set.
@@ -490,7 +498,7 @@ find_erl_files_includes_test_dir_when_flag_set_test() ->
 %%====================================================================
 
 compile_native_erl_files_empty_test() ->
-    {Errors, Count} = beamtalk_repl_ops_load:compile_native_erl_files([], "/tmp"),
+    {Errors, Count} = beamtalk_workspace_project_sync:compile_native_erl_files([], "/tmp"),
     ?assertEqual([], Errors),
     ?assertEqual(0, Count).
 
@@ -505,7 +513,7 @@ compile_native_erl_files_valid_module_test() ->
             "hello() -> world.\n"
         >>,
         ErlPath = write_temp_file(NativeDir, "bt_native_test_valid_mod.erl", ErlSrc),
-        {Errors, Count} = beamtalk_repl_ops_load:compile_native_erl_files([ErlPath], Dir),
+        {Errors, Count} = beamtalk_workspace_project_sync:compile_native_erl_files([ErlPath], Dir),
         ?assertEqual([], Errors),
         ?assertEqual(1, Count),
         %% Module should be loadable and callable.
@@ -528,7 +536,7 @@ compile_native_erl_files_syntax_error_test() ->
             "hello( -> world.\n"
         >>,
         ErlPath = write_temp_file(NativeDir, "bt_native_test_bad_mod.erl", ErlSrc),
-        {Errors, Count} = beamtalk_repl_ops_load:compile_native_erl_files([ErlPath], Dir),
+        {Errors, Count} = beamtalk_workspace_project_sync:compile_native_erl_files([ErlPath], Dir),
         ?assertEqual(0, Count),
         ?assert(length(Errors) > 0),
         [ErrMap | _] = Errors,
@@ -559,7 +567,7 @@ compile_native_erl_files_with_include_test() ->
             "val() -> ?BT_TEST_VAL.\n"
         >>,
         ErlPath = write_temp_file(NativeDir, "bt_native_test_inc_mod.erl", ErlSrc),
-        {Errors, Count} = beamtalk_repl_ops_load:compile_native_erl_files([ErlPath], Dir),
+        {Errors, Count} = beamtalk_workspace_project_sync:compile_native_erl_files([ErlPath], Dir),
         ?assertEqual([], Errors),
         ?assertEqual(1, Count),
         ?assertEqual(42, bt_native_test_inc_mod:val()),
@@ -587,7 +595,7 @@ compile_native_erl_files_multiple_test() ->
         >>,
         Path1 = write_temp_file(NativeDir, "bt_native_test_multi1.erl", ErlSrc1),
         Path2 = write_temp_file(NativeDir, "bt_native_test_multi2.erl", ErlSrc2),
-        {Errors, Count} = beamtalk_repl_ops_load:compile_native_erl_files(
+        {Errors, Count} = beamtalk_workspace_project_sync:compile_native_erl_files(
             [Path1, Path2], Dir
         ),
         ?assertEqual([], Errors),
@@ -618,7 +626,7 @@ extract_native_refs_native_annotation_test() ->
                 "  start => self\n"
             >>
         ),
-        Refs = beamtalk_repl_ops_load:extract_native_refs(Path),
+        Refs = beamtalk_workspace_project_sync:extract_native_refs(Path),
         ?assertEqual([<<"beamtalk_http_server">>], Refs)
     after
         rm_temp_dir(Dir)
@@ -636,7 +644,7 @@ extract_native_refs_ffi_reference_test() ->
                 "  year => (Erlang beamtalk_datetime) year: self\n"
             >>
         ),
-        Refs = beamtalk_repl_ops_load:extract_native_refs(Path),
+        Refs = beamtalk_workspace_project_sync:extract_native_refs(Path),
         %% Should be deduplicated.
         ?assertEqual([<<"beamtalk_datetime">>], Refs)
     after
@@ -654,7 +662,7 @@ extract_native_refs_both_native_and_ffi_test() ->
                 "  helper => (Erlang my_ffi_mod) doStuff\n"
             >>
         ),
-        Refs = beamtalk_repl_ops_load:extract_native_refs(Path),
+        Refs = beamtalk_workspace_project_sync:extract_native_refs(Path),
         ?assertEqual([<<"my_ffi_mod">>, <<"my_native_mod">>], Refs)
     after
         rm_temp_dir(Dir)
@@ -672,14 +680,14 @@ extract_native_refs_no_refs_test() ->
                 "  increment => self.count := self.count + 1\n"
             >>
         ),
-        Refs = beamtalk_repl_ops_load:extract_native_refs(Path),
+        Refs = beamtalk_workspace_project_sync:extract_native_refs(Path),
         ?assertEqual([], Refs)
     after
         rm_temp_dir(Dir)
     end.
 
 extract_native_refs_missing_file_test() ->
-    Refs = beamtalk_repl_ops_load:extract_native_refs("/no/such/file.bt"),
+    Refs = beamtalk_workspace_project_sync:extract_native_refs("/no/such/file.bt"),
     ?assertEqual([], Refs).
 
 %%====================================================================
@@ -695,7 +703,7 @@ find_project_root_with_manifest_test() ->
         BtFile = filename:join(SrcDir, "Counter.bt"),
         ok = file:write_file(BtFile, <<"Object subclass: Counter">>),
         AbsDir = filename:absname(Dir),
-        ?assertEqual(AbsDir, beamtalk_repl_ops_load:find_project_root(BtFile))
+        ?assertEqual(AbsDir, beamtalk_workspace_project_sync:find_project_root(BtFile))
     after
         rm_temp_dir(Dir)
     end.
@@ -710,7 +718,7 @@ find_project_root_no_manifest_test() ->
         SrcDir = filename:join(NoProjectDir, "src"),
         ok = file:make_dir(SrcDir),
         FakePath = write_temp_file(SrcDir, "X.bt", <<"">>),
-        ?assertEqual(undefined, beamtalk_repl_ops_load:find_project_root(FakePath))
+        ?assertEqual(undefined, beamtalk_workspace_project_sync:find_project_root(FakePath))
     after
         rm_temp_dir(Dir)
     end.
@@ -722,7 +730,7 @@ find_project_root_no_manifest_test() ->
 maybe_recompile_native_deps_no_project_root_test() ->
     ?assertEqual(
         {ok, 0},
-        beamtalk_repl_ops_load:maybe_recompile_native_deps("/src/X.bt", undefined)
+        beamtalk_workspace_project_sync:maybe_recompile_native_deps("/src/X.bt", undefined)
     ).
 
 maybe_recompile_native_deps_no_refs_test() ->
@@ -739,7 +747,7 @@ maybe_recompile_native_deps_no_refs_test() ->
         ),
         ?assertEqual(
             {ok, 0},
-            beamtalk_repl_ops_load:maybe_recompile_native_deps(BtPath, Dir)
+            beamtalk_workspace_project_sync:maybe_recompile_native_deps(BtPath, Dir)
         )
     after
         rm_temp_dir(Dir)
@@ -773,7 +781,7 @@ maybe_recompile_native_deps_compiles_stale_test() ->
         code:delete(bt_native_test_demand_mod),
         ?assertEqual(
             {ok, 1},
-            beamtalk_repl_ops_load:maybe_recompile_native_deps(BtPath, Dir)
+            beamtalk_workspace_project_sync:maybe_recompile_native_deps(BtPath, Dir)
         ),
         %% Module should now be callable.
         ?assertEqual(hello, bt_native_test_demand_mod:greet()),
@@ -799,7 +807,7 @@ maybe_recompile_native_deps_skips_unchanged_test() ->
         >>,
         ErlPath = write_temp_file(NativeDir, "bt_native_test_nochange_mod.erl", ErlSrc),
         %% Pre-compile it so it's already loaded.
-        {[], 1} = beamtalk_repl_ops_load:compile_native_erl_files([ErlPath], Dir),
+        {[], 1} = beamtalk_workspace_project_sync:compile_native_erl_files([ErlPath], Dir),
         %% Write .bt file referencing it.
         BtPath = write_temp_file(
             SrcDir,
@@ -814,7 +822,7 @@ maybe_recompile_native_deps_skips_unchanged_test() ->
         %% Note: Since compile_native_erl_files uses code:load_binary which sets
         %% the file path as the .erl source, and the .erl file hasn't changed,
         %% the mtime comparison should show it's not stale.
-        Result = beamtalk_repl_ops_load:maybe_recompile_native_deps(BtPath, Dir),
+        Result = beamtalk_workspace_project_sync:maybe_recompile_native_deps(BtPath, Dir),
         ?assertEqual({ok, 0}, Result),
         %% Cleanup.
         code:purge(bt_native_test_nochange_mod),
@@ -841,7 +849,7 @@ maybe_recompile_native_deps_no_erl_file_test() ->
         ),
         ?assertEqual(
             {ok, 0},
-            beamtalk_repl_ops_load:maybe_recompile_native_deps(BtPath, Dir)
+            beamtalk_workspace_project_sync:maybe_recompile_native_deps(BtPath, Dir)
         )
     after
         rm_temp_dir(Dir)
@@ -875,7 +883,7 @@ maybe_recompile_native_deps_ffi_ref_compiles_test() ->
         code:delete(bt_native_test_ffi_demand),
         ?assertEqual(
             {ok, 1},
-            beamtalk_repl_ops_load:maybe_recompile_native_deps(BtPath, Dir)
+            beamtalk_workspace_project_sync:maybe_recompile_native_deps(BtPath, Dir)
         ),
         ?assertEqual(done, bt_native_test_ffi_demand:work()),
         %% Cleanup.
@@ -952,7 +960,7 @@ activate_dep_ebin_nonexistent_test() ->
 
 render_class_header_empty_test() ->
     %% An empty index still produces a valid, guarded header.
-    Bin = iolist_to_binary(beamtalk_repl_ops_load:render_class_header(#{})),
+    Bin = iolist_to_binary(beamtalk_workspace_project_sync:render_class_header(#{})),
     ?assert(binary:match(Bin, <<"-ifndef(BEAMTALK_CLASSES_HRL)">>) =/= nomatch),
     ?assert(binary:match(Bin, <<"-define(BEAMTALK_CLASSES_HRL, true)">>) =/= nomatch),
     ?assert(binary:match(Bin, <<"-endif">>) =/= nomatch),
@@ -964,7 +972,7 @@ render_class_header_defines_macros_test() ->
         <<"HTTPResponse">> => <<"bt@http@http_response">>,
         <<"Counter">> => <<"bt@counter">>
     },
-    Bin = iolist_to_binary(beamtalk_repl_ops_load:render_class_header(Index)),
+    Bin = iolist_to_binary(beamtalk_workspace_project_sync:render_class_header(Index)),
     ?assert(
         binary:match(
             Bin, <<"-define(BT_CLASS_MODULE_HTTPResponse, 'bt@http@http_response').">>
@@ -977,7 +985,7 @@ render_class_header_defines_macros_test() ->
 render_class_header_sorted_test() ->
     %% Entries are sorted for deterministic output (Aaa before Zzz).
     Index = #{<<"Zzz">> => <<"bt@zzz">>, <<"Aaa">> => <<"bt@aaa">>},
-    Bin = iolist_to_binary(beamtalk_repl_ops_load:render_class_header(Index)),
+    Bin = iolist_to_binary(beamtalk_workspace_project_sync:render_class_header(Index)),
     {AaaPos, _} = binary:match(Bin, <<"BT_CLASS_MODULE_Aaa">>),
     {ZzzPos, _} = binary:match(Bin, <<"BT_CLASS_MODULE_Zzz">>),
     ?assert(AaaPos < ZzzPos).
@@ -994,7 +1002,7 @@ render_class_header_skips_unsafe_names_test() ->
         %% Module name with a quote → would break the quoted atom.
         <<"Quoted">> => <<"bt@qu'ote">>
     },
-    Bin = iolist_to_binary(beamtalk_repl_ops_load:render_class_header(Index)),
+    Bin = iolist_to_binary(beamtalk_workspace_project_sync:render_class_header(Index)),
     ?assert(binary:match(Bin, <<"-define(BT_CLASS_MODULE_Good, 'bt@good').">>) =/= nomatch),
     ?assertEqual(nomatch, binary:match(Bin, <<"Bad Name">>)),
     ?assertEqual(nomatch, binary:match(Bin, <<"qu'ote">>)),
@@ -1011,9 +1019,11 @@ regenerate_native_class_header_writes_file_test() ->
     %% The first write reports `true` (content changed from nothing).
     Dir = filename:absname(make_temp_dir()),
     try
-        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir, undefined)),
+        ?assertEqual(
+            true, beamtalk_workspace_project_sync:regenerate_native_class_header(Dir, undefined)
+        ),
         HrlPath = filename:join(
-            beamtalk_repl_ops_load:native_generated_include_dir(Dir),
+            beamtalk_workspace_project_sync:native_generated_include_dir(Dir),
             "beamtalk_classes.hrl"
         ),
         ?assert(filelib:is_file(HrlPath)),
@@ -1029,9 +1039,13 @@ regenerate_native_class_header_idempotent_test() ->
     %% .tmp files should remain.
     Dir = filename:absname(make_temp_dir()),
     try
-        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir, undefined)),
-        ?assertEqual(false, beamtalk_repl_ops_load:regenerate_native_class_header(Dir, undefined)),
-        IncludeDir = beamtalk_repl_ops_load:native_generated_include_dir(Dir),
+        ?assertEqual(
+            true, beamtalk_workspace_project_sync:regenerate_native_class_header(Dir, undefined)
+        ),
+        ?assertEqual(
+            false, beamtalk_workspace_project_sync:regenerate_native_class_header(Dir, undefined)
+        ),
+        IncludeDir = beamtalk_workspace_project_sync:native_generated_include_dir(Dir),
         {ok, Entries} = file:list_dir(IncludeDir),
         ?assertEqual(
             [], [E || E <- Entries, lists:prefix("beamtalk_classes.hrl.tmp", E)]
@@ -1046,7 +1060,7 @@ native_generated_include_dir_layout_test() ->
     Dir = "/projects/foo",
     ?assertEqual(
         "/projects/foo/_build/dev/native/include",
-        beamtalk_repl_ops_load:native_generated_include_dir(Dir)
+        beamtalk_workspace_project_sync:native_generated_include_dir(Dir)
     ).
 
 %%====================================================================
@@ -1061,7 +1075,9 @@ compile_native_uses_generated_class_header_test() ->
     Dir = filename:absname(make_temp_dir()),
     try
         %% Regenerate the header into _build/dev/native/include/.
-        ?assertEqual(true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir, undefined)),
+        ?assertEqual(
+            true, beamtalk_workspace_project_sync:regenerate_native_class_header(Dir, undefined)
+        ),
         NativeDir = filename:join(Dir, "native"),
         ok = file:make_dir(NativeDir),
         %% A native module that includes the generated header. Even with an
@@ -1074,7 +1090,7 @@ compile_native_uses_generated_class_header_test() ->
             "ok() -> included.\n"
         >>,
         ErlPath = write_temp_file(NativeDir, "bt_native_test_uses_header.erl", ErlSrc),
-        {Errors, Count} = beamtalk_repl_ops_load:compile_native_erl_files([ErlPath], Dir),
+        {Errors, Count} = beamtalk_workspace_project_sync:compile_native_erl_files([ErlPath], Dir),
         ?assertEqual([], Errors),
         ?assertEqual(1, Count),
         ?assertEqual(included, bt_native_test_uses_header:ok())
@@ -1118,7 +1134,7 @@ test_load_compiles_native_test_helper_test() ->
         code:delete(bt_native_test_helper_e2e),
         ?assertEqual(false, code:is_loaded(bt_native_test_helper_e2e)),
         %% Run the shared test-load path (include_tests=true).
-        {ok, Result} = beamtalk_repl_ops_load:sync_project(
+        {ok, Result} = beamtalk_workspace_project_sync:sync_project(
             Dir, #{include_tests => true}
         ),
         ?assertEqual([], maps:get(errors, Result, [])),
@@ -1156,7 +1172,7 @@ test_load_excludes_native_test_helper_without_flag_test() ->
         ),
         code:purge(bt_native_test_helper_excluded),
         code:delete(bt_native_test_helper_excluded),
-        {ok, _Result} = beamtalk_repl_ops_load:sync_project(
+        {ok, _Result} = beamtalk_workspace_project_sync:sync_project(
             Dir, #{include_tests => false}
         ),
         %% Helper must remain unloaded under the normal load path.
@@ -1172,14 +1188,18 @@ test_load_excludes_native_test_helper_without_flag_test() ->
 resolve_package_name_request_wins_test() ->
     %% An explicit request/option name wins over the root_package env.
     with_root_package(<<"envpkg">>, fun() ->
-        ?assertEqual(<<"reqpkg">>, beamtalk_repl_ops_load:resolve_package_name("/x", <<"reqpkg">>))
+        ?assertEqual(
+            <<"reqpkg">>, beamtalk_workspace_project_sync:resolve_package_name("/x", <<"reqpkg">>)
+        )
     end).
 
 resolve_package_name_falls_back_to_root_package_test() ->
     %% No request name, no known launcher project path: the root_package fact.
     with_root_package(<<"envpkg">>, fun() ->
-        ?assertEqual(<<"envpkg">>, beamtalk_repl_ops_load:resolve_package_name("/x", undefined)),
-        ?assertEqual(<<"envpkg">>, beamtalk_repl_ops_load:resolve_package_name("/x", <<>>))
+        ?assertEqual(
+            <<"envpkg">>, beamtalk_workspace_project_sync:resolve_package_name("/x", undefined)
+        ),
+        ?assertEqual(<<"envpkg">>, beamtalk_workspace_project_sync:resolve_package_name("/x", <<>>))
     end).
 
 resolve_package_name_none_test() ->
@@ -1189,7 +1209,9 @@ resolve_package_name_none_test() ->
         Dir = filename:absname(make_temp_dir()),
         try
             write_temp_file(Dir, "beamtalk.toml", <<"[package]\nname = \"my_pkg\"\n">>),
-            ?assertEqual(undefined, beamtalk_repl_ops_load:resolve_package_name(Dir, undefined))
+            ?assertEqual(
+                undefined, beamtalk_workspace_project_sync:resolve_package_name(Dir, undefined)
+            )
         after
             rm_temp_dir(Dir)
         end
@@ -1197,7 +1219,9 @@ resolve_package_name_none_test() ->
 
 resolve_package_name_ambiguous_test() ->
     with_root_package(ambiguous, fun() ->
-        ?assertEqual(undefined, beamtalk_repl_ops_load:resolve_package_name("/x", undefined))
+        ?assertEqual(
+            undefined, beamtalk_workspace_project_sync:resolve_package_name("/x", undefined)
+        )
     end).
 
 %% Run Fun with the `root_package` app env set to Value (undefined = unset),
@@ -1238,7 +1262,7 @@ relative_bt_path_root_test() ->
         Path = filename:join(SrcDir, "http_response.bt"),
         ?assertEqual(
             <<"http_response.bt">>,
-            beamtalk_repl_ops_load:relative_bt_path(Path, SrcDir)
+            beamtalk_workspace_project_sync:relative_bt_path(Path, SrcDir)
         )
     after
         rm_temp_dir(Dir)
@@ -1254,7 +1278,7 @@ relative_bt_path_subdir_test() ->
         Path = filename:join(SubDir, "math_helper.bt"),
         ?assertEqual(
             <<"util/math_helper.bt">>,
-            beamtalk_repl_ops_load:relative_bt_path(Path, SrcDir)
+            beamtalk_workspace_project_sync:relative_bt_path(Path, SrcDir)
         )
     after
         rm_temp_dir(Dir)
@@ -1277,7 +1301,7 @@ build_source_class_module_index_cold_test() ->
             "bar.bt",
             <<"Actor subclass: Bar\n  state: x = 0\n\nValue subclass: Baz\n">>
         ),
-        Index = beamtalk_repl_ops_load:build_source_class_module_index(Dir, <<"coldpkg">>),
+        Index = beamtalk_workspace_project_sync:build_source_class_module_index(Dir, <<"coldpkg">>),
         ?assertEqual(<<"bt@coldpkg@foo">>, maps:get(<<"Foo">>, Index)),
         ?assertEqual(<<"bt@coldpkg@bar">>, maps:get(<<"Bar">>, Index)),
         ?assertEqual(<<"bt@coldpkg@bar">>, maps:get(<<"Baz">>, Index))
@@ -1293,7 +1317,9 @@ build_source_class_module_index_no_package_test() ->
         SrcDir = filename:join(Dir, "src"),
         ok = file:make_dir(SrcDir),
         write_temp_file(SrcDir, "foo.bt", <<"Object subclass: Foo\n">>),
-        ?assertEqual(#{}, beamtalk_repl_ops_load:build_source_class_module_index(Dir, undefined))
+        ?assertEqual(
+            #{}, beamtalk_workspace_project_sync:build_source_class_module_index(Dir, undefined)
+        )
     after
         rm_temp_dir(Dir)
     end.
@@ -1317,7 +1343,7 @@ build_source_class_module_index_subdir_casing_mismatch_test() ->
             "HttpResponse.bt",
             <<"Object subclass: HttpResponse\n  ok -> Boolean => true\n">>
         ),
-        Index = beamtalk_repl_ops_load:build_source_class_module_index(Dir, <<"webpkg">>),
+        Index = beamtalk_workspace_project_sync:build_source_class_module_index(Dir, <<"webpkg">>),
         ?assertEqual(<<"bt@webpkg@util@http_response">>, maps:get(<<"HttpResponse">>, Index))
     after
         rm_temp_dir(Dir)
@@ -1335,10 +1361,10 @@ regenerate_header_includes_cold_source_class_test() ->
         ok = file:make_dir(SrcDir),
         write_temp_file(SrcDir, "widget.bt", <<"Object subclass: Widget\n">>),
         ?assertEqual(
-            true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir, <<"coldhdr">>)
+            true, beamtalk_workspace_project_sync:regenerate_native_class_header(Dir, <<"coldhdr">>)
         ),
         HrlPath = filename:join(
-            beamtalk_repl_ops_load:native_generated_include_dir(Dir),
+            beamtalk_workspace_project_sync:native_generated_include_dir(Dir),
             "beamtalk_classes.hrl"
         ),
         {ok, Content} = file:read_file(HrlPath),
@@ -1367,7 +1393,7 @@ cold_load_native_macro_compiles_test() ->
         write_temp_file(SrcDir, "gadget.bt", <<"Object subclass: Gadget\n">>),
         %% Regenerate the header from source (cold path).
         ?assertEqual(
-            true, beamtalk_repl_ops_load:regenerate_native_class_header(Dir, <<"e2ecold">>)
+            true, beamtalk_workspace_project_sync:regenerate_native_class_header(Dir, <<"e2ecold">>)
         ),
         NativeDir = filename:join(Dir, "native"),
         ok = file:make_dir(NativeDir),
@@ -1379,7 +1405,7 @@ cold_load_native_macro_compiles_test() ->
             "gadget_module() -> ?BT_CLASS_MODULE_Gadget.\n"
         >>,
         ErlPath = write_temp_file(NativeDir, "bt_native_cold_macro.erl", ErlSrc),
-        {Errors, Count} = beamtalk_repl_ops_load:compile_native_erl_files([ErlPath], Dir),
+        {Errors, Count} = beamtalk_workspace_project_sync:compile_native_erl_files([ErlPath], Dir),
         ?assertEqual([], Errors),
         ?assertEqual(1, Count),
         %% The macro resolved to the package-qualified module atom.
@@ -1466,7 +1492,9 @@ parity_assert(Proj) ->
     %% The atom the source-AST index derives — built the same way the CLI does
     %% (build.rs compute_relative_module → to_module_name), so this binary is
     %% byte-identical to the CLI-generated `.beam' module name.
-    SourceIndex = beamtalk_repl_ops_load:build_source_class_module_index(Proj, <<"paritypkg">>),
+    SourceIndex = beamtalk_workspace_project_sync:build_source_class_module_index(
+        Proj, <<"paritypkg">>
+    ),
     SourceModuleBin = maps:get(<<"HttpResponse">>, SourceIndex),
     %% Compare the casing-sensitive class-name segment (the last `@'-part) of the
     %% live atom against the source/CLI atom. The package prefix can legitimately
@@ -2241,9 +2269,9 @@ provenance_unknown_schema_is_stale_test() ->
     Stamp = #{
         <<"schema">> => 999,
         <<"beamtalk_version">> => <<"9.9.9">>,
-        <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+        <<"otp_release">> => beamtalk_workspace_project_sync:current_otp_release()
     },
-    ?assertMatch({stale, _}, beamtalk_repl_ops_load:stamp_matches_current(Stamp)).
+    ?assertMatch({stale, _}, beamtalk_workspace_project_sync:stamp_matches_current(Stamp)).
 
 %% A stamp built for a different OTP release → stale even if the version matches.
 provenance_otp_mismatch_is_stale_test() ->
@@ -2252,21 +2280,21 @@ provenance_otp_mismatch_is_stale_test() ->
         <<"beamtalk_version">> => stamp_version(),
         <<"otp_release">> => <<"1-0.0">>
     },
-    ?assertMatch({stale, _}, beamtalk_repl_ops_load:stamp_matches_current(Stamp)).
+    ?assertMatch({stale, _}, beamtalk_workspace_project_sync:stamp_matches_current(Stamp)).
 
 %% A stamp with no OTP key → stale (the older-toolchain case).
 provenance_missing_otp_key_is_stale_test() ->
     Stamp = #{<<"schema">> => 1, <<"beamtalk_version">> => stamp_version()},
-    ?assertMatch({stale, _}, beamtalk_repl_ops_load:stamp_matches_current(Stamp)).
+    ?assertMatch({stale, _}, beamtalk_workspace_project_sync:stamp_matches_current(Stamp)).
 
 %% A stamp matching the running toolchain → fresh.
 provenance_matching_stamp_is_fresh_test() ->
     Stamp = #{
         <<"schema">> => 1,
         <<"beamtalk_version">> => stamp_version(),
-        <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+        <<"otp_release">> => beamtalk_workspace_project_sync:current_otp_release()
     },
-    ?assertEqual(fresh, beamtalk_repl_ops_load:stamp_matches_current(Stamp)).
+    ?assertEqual(fresh, beamtalk_workspace_project_sync:stamp_matches_current(Stamp)).
 
 %% Version mismatch → stale. Only assert when the compiler port can report a
 %% version; otherwise the version axis is not testable and the OTP axis covers
@@ -2279,9 +2307,9 @@ provenance_version_mismatch_is_stale_test() ->
             Stamp = #{
                 <<"schema">> => 1,
                 <<"beamtalk_version">> => <<"0.0.0-not-current">>,
-                <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+                <<"otp_release">> => beamtalk_workspace_project_sync:current_otp_release()
             },
-            ?assertMatch({stale, _}, beamtalk_repl_ops_load:stamp_matches_current(Stamp))
+            ?assertMatch({stale, _}, beamtalk_workspace_project_sync:stamp_matches_current(Stamp))
     end.
 
 provenance_read_stamp_round_trip_test() ->
@@ -2290,7 +2318,8 @@ provenance_read_stamp_round_trip_test() ->
         StampPath = filename:join(Dir, ".beamtalk-stamp.json"),
         ok = file:write_file(StampPath, <<"{\"schema\":1,\"beamtalk_version\":\"x\"}">>),
         ?assertMatch(
-            {ok, #{<<"schema">> := 1}}, beamtalk_repl_ops_load:read_provenance_stamp(StampPath)
+            {ok, #{<<"schema">> := 1}},
+            beamtalk_workspace_project_sync:read_provenance_stamp(StampPath)
         )
     after
         rm_temp_dir(Dir)
@@ -2301,7 +2330,7 @@ provenance_read_corrupt_stamp_is_error_test() ->
     try
         StampPath = filename:join(Dir, ".beamtalk-stamp.json"),
         ok = file:write_file(StampPath, <<"{ not json">>),
-        ?assertMatch({error, _}, beamtalk_repl_ops_load:read_provenance_stamp(StampPath))
+        ?assertMatch({error, _}, beamtalk_workspace_project_sync:read_provenance_stamp(StampPath))
     after
         rm_temp_dir(Dir)
     end.
@@ -2309,7 +2338,7 @@ provenance_read_corrupt_stamp_is_error_test() ->
 provenance_read_missing_stamp_is_error_test() ->
     ?assertMatch(
         {error, _},
-        beamtalk_repl_ops_load:read_provenance_stamp("does/not/exist/.beamtalk-stamp.json")
+        beamtalk_workspace_project_sync:read_provenance_stamp("does/not/exist/.beamtalk-stamp.json")
     ).
 
 %% A project with no stamp is NOT forced: the workspace recompiles project
@@ -2319,7 +2348,7 @@ provenance_read_missing_stamp_is_error_test() ->
 provenance_missing_stamp_does_not_force_test() ->
     Dir = make_temp_dir(),
     try
-        ?assertEqual(false, beamtalk_repl_ops_load:project_provenance_stale(Dir))
+        ?assertEqual(false, beamtalk_workspace_project_sync:project_provenance_stale(Dir))
     after
         rm_temp_dir(Dir)
     end.
@@ -2338,14 +2367,14 @@ provenance_stale_stamp_flips_attach_decision_test() ->
         Fresh = #{
             <<"schema">> => 1,
             <<"beamtalk_version">> => stamp_version(),
-            <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+            <<"otp_release">> => beamtalk_workspace_project_sync:current_otp_release()
         },
         ok = file:write_file(StampPath, iolist_to_binary(json:encode(Fresh))),
-        ?assertEqual(false, beamtalk_repl_ops_load:project_provenance_stale(Dir)),
+        ?assertEqual(false, beamtalk_workspace_project_sync:project_provenance_stale(Dir)),
 
         Tampered = Fresh#{<<"otp_release">> => <<"1-0.0">>},
         ok = file:write_file(StampPath, iolist_to_binary(json:encode(Tampered))),
-        ?assertEqual(true, beamtalk_repl_ops_load:project_provenance_stale(Dir))
+        ?assertEqual(true, beamtalk_workspace_project_sync:project_provenance_stale(Dir))
     after
         rm_temp_dir(Dir)
     end.
@@ -2369,7 +2398,7 @@ provenance_stale_dep_fails_attach_test() ->
             <<"otp_release">> => <<"1-0.0">>
         },
         ok = file:write_file(DepStamp, iolist_to_binary(json:encode(Stamp))),
-        ?assertMatch({error, _}, beamtalk_repl_ops_load:sync_project(Dir, #{}))
+        ?assertMatch({error, _}, beamtalk_workspace_project_sync:sync_project(Dir, #{}))
     after
         rm_temp_dir(Dir)
     end.
@@ -2396,7 +2425,7 @@ provenance_collect_stale_deps_test() ->
         FreshDep = filename:join([Dir, "_build", "deps", "unstamped_dep", "ebin"]),
         ok = filelib:ensure_dir(filename:join(FreshDep, ".keep")),
 
-        Stale = beamtalk_repl_ops_load:collect_stale_dep_provenance(Dir),
+        Stale = beamtalk_workspace_project_sync:collect_stale_dep_provenance(Dir),
         ?assertMatch([{"stale_dep", _}], Stale)
     after
         rm_temp_dir(Dir)
@@ -2407,13 +2436,13 @@ provenance_collect_stale_deps_test() ->
 provenance_missing_version_key_is_stale_test() ->
     Stamp = #{
         <<"schema">> => 1,
-        <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+        <<"otp_release">> => beamtalk_workspace_project_sync:current_otp_release()
     },
-    ?assertMatch({stale, _}, beamtalk_repl_ops_load:stamp_matches_current(Stamp)).
+    ?assertMatch({stale, _}, beamtalk_workspace_project_sync:stamp_matches_current(Stamp)).
 
 %% The running OTP version is the compound `<release>-<erts>` key.
 provenance_current_otp_release_is_compound_test() ->
-    Otp = beamtalk_repl_ops_load:current_otp_release(),
+    Otp = beamtalk_workspace_project_sync:current_otp_release(),
     ?assert(is_binary(Otp)),
     ?assertMatch([_Rel, _Erts], binary:split(Otp, <<"-">>)).
 
@@ -2635,7 +2664,7 @@ handle_load_source_success_encodes_json_result_test() ->
 collect_load_warnings_no_collisions_test() ->
     Name = "ClwNoCollision" ++ integer_to_list(erlang:unique_integer([positive])),
     _ = list_to_atom(Name),
-    ?assertEqual([], beamtalk_repl_ops_load:collect_load_warnings([#{name => Name}])).
+    ?assertEqual([], beamtalk_workspace_project_sync:collect_load_warnings([#{name => Name}])).
 
 collect_load_warnings_with_collision_test() ->
     Name = "ClwCollision" ++ integer_to_list(erlang:unique_integer([positive])),
@@ -2643,18 +2672,18 @@ collect_load_warnings_with_collision_test() ->
     ok = beamtalk_class_registry:record_class_collision_warning(
         ClassAtom, 'bt@pkgA@ClwFoo', 'bt@pkgB@ClwFoo'
     ),
-    [Warning] = beamtalk_repl_ops_load:collect_load_warnings([#{name => Name}]),
+    [Warning] = beamtalk_workspace_project_sync:collect_load_warnings([#{name => Name}]),
     ?assert(binary:match(Warning, list_to_binary(Name)) =/= nomatch),
     %% Draining is destructive (ets:delete_object) — a second call over the
     %% same class finds nothing left to warn about.
-    ?assertEqual([], beamtalk_repl_ops_load:collect_load_warnings([#{name => Name}])).
+    ?assertEqual([], beamtalk_workspace_project_sync:collect_load_warnings([#{name => Name}])).
 
 %% A class name that is not (yet) an existing atom is dropped by the
 %% safe_to_existing_atom filter rather than minting a fresh atom.
 collect_load_warnings_skips_unknown_atom_class_name_test() ->
     ?assertEqual(
         [],
-        beamtalk_repl_ops_load:collect_load_warnings([
+        beamtalk_workspace_project_sync:collect_load_warnings([
             #{name => "CwUnknownAtomXyzzy123456789"}
         ])
     ).
@@ -2665,19 +2694,19 @@ collect_load_warnings_skips_unknown_atom_class_name_test() ->
 %%====================================================================
 
 build_incremental_summary_no_extras_test() ->
-    Summary = beamtalk_repl_ops_load:build_incremental_summary(2, 5, 0, 0),
+    Summary = beamtalk_workspace_project_sync:build_incremental_summary(2, 5, 0, 0),
     ?assertEqual(<<"Reloaded 2 of 5 files">>, Summary).
 
 build_incremental_summary_unchanged_only_test() ->
-    Summary = beamtalk_repl_ops_load:build_incremental_summary(2, 5, 3, 0),
+    Summary = beamtalk_workspace_project_sync:build_incremental_summary(2, 5, 3, 0),
     ?assertEqual(<<"Reloaded 2 of 5 files (3 unchanged)">>, Summary).
 
 build_incremental_summary_deleted_only_test() ->
-    Summary = beamtalk_repl_ops_load:build_incremental_summary(2, 3, 0, 1),
+    Summary = beamtalk_workspace_project_sync:build_incremental_summary(2, 3, 0, 1),
     ?assertEqual(<<"Reloaded 2 of 3 files (1 deleted)">>, Summary).
 
 build_incremental_summary_unchanged_and_deleted_test() ->
-    Summary = beamtalk_repl_ops_load:build_incremental_summary(2, 6, 3, 1),
+    Summary = beamtalk_workspace_project_sync:build_incremental_summary(2, 6, 3, 1),
     ?assertEqual(<<"Reloaded 2 of 6 files (3 unchanged, 1 deleted)">>, Summary).
 
 %%====================================================================
@@ -2740,7 +2769,7 @@ read_provenance_stamp_non_map_json_is_corrupt_test() ->
         ok = file:write_file(StampPath, <<"[1,2,3]">>),
         ?assertMatch(
             {error, <<"corrupt provenance stamp">>},
-            beamtalk_repl_ops_load:read_provenance_stamp(StampPath)
+            beamtalk_workspace_project_sync:read_provenance_stamp(StampPath)
         )
     after
         rm_temp_dir(Dir)
@@ -2753,7 +2782,7 @@ read_provenance_stamp_invalid_json_is_corrupt_test() ->
         ok = file:write_file(StampPath, <<"not json at all {{{">>),
         ?assertMatch(
             {error, <<"corrupt provenance stamp">>},
-            beamtalk_repl_ops_load:read_provenance_stamp(StampPath)
+            beamtalk_workspace_project_sync:read_provenance_stamp(StampPath)
         )
     after
         rm_temp_dir(Dir)
@@ -2773,11 +2802,11 @@ provenance_collect_stale_deps_skips_fresh_dep_test() ->
                 json:encode(#{
                     <<"schema">> => 1,
                     <<"beamtalk_version">> => stamp_version(),
-                    <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+                    <<"otp_release">> => beamtalk_workspace_project_sync:current_otp_release()
                 })
             )
         ),
-        ?assertEqual([], beamtalk_repl_ops_load:collect_stale_dep_provenance(Dir))
+        ?assertEqual([], beamtalk_workspace_project_sync:collect_stale_dep_provenance(Dir))
     after
         rm_temp_dir(Dir)
     end.
@@ -2792,10 +2821,10 @@ stamp_matches_current_falls_back_to_otp_axis_when_version_unavailable_test() ->
         FreshOtp = #{
             <<"schema">> => 1,
             <<"beamtalk_version">> => <<"some-other-version">>,
-            <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+            <<"otp_release">> => beamtalk_workspace_project_sync:current_otp_release()
         },
         %% Version axis unavailable -> skipped; OTP matches -> fresh.
-        ?assertEqual(fresh, beamtalk_repl_ops_load:stamp_matches_current(FreshOtp))
+        ?assertEqual(fresh, beamtalk_workspace_project_sync:stamp_matches_current(FreshOtp))
     after
         meck:unload(beamtalk_compiler_server)
     end.
@@ -2807,9 +2836,9 @@ stamp_matches_current_version_check_survives_a_throwing_port_test() ->
         FreshOtp = #{
             <<"schema">> => 1,
             <<"beamtalk_version">> => <<"some-other-version">>,
-            <<"otp_release">> => beamtalk_repl_ops_load:current_otp_release()
+            <<"otp_release">> => beamtalk_workspace_project_sync:current_otp_release()
         },
-        ?assertEqual(fresh, beamtalk_repl_ops_load:stamp_matches_current(FreshOtp))
+        ?assertEqual(fresh, beamtalk_workspace_project_sync:stamp_matches_current(FreshOtp))
     after
         meck:unload(beamtalk_compiler_server)
     end.
@@ -2840,7 +2869,7 @@ sync_project_fails_attach_with_multiple_stale_deps_test() ->
             end,
             ["dep_one", "dep_two"]
         ),
-        Result = beamtalk_repl_ops_load:sync_project(Dir, #{}),
+        Result = beamtalk_workspace_project_sync:sync_project(Dir, #{}),
         ?assertMatch({error, #beamtalk_error{kind = stale_dependency}}, Result),
         {error, #beamtalk_error{message = Message}} = Result,
         ?assert(binary:match(element(2, Message), <<"dep_one">>) =/= nomatch),
