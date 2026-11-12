@@ -147,18 +147,11 @@ pub(crate) fn start_beam_node(
     // Tell the compiler app where to find the compiler port binary.
     // In installed mode, it lives next to the beamtalk binary in bin/.
     // In dev mode, it lives in target/{debug,release}/.
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(bin_dir) = exe.parent() {
-            let compiler_name = if cfg!(windows) {
-                "beamtalk-compiler-port.exe"
-            } else {
-                "beamtalk-compiler-port"
-            };
-            let compiler_port = bin_dir.join(compiler_name);
-            if compiler_port.exists() {
-                cmd.env("BEAMTALK_COMPILER_PORT_BIN", &compiler_port);
-            }
-        }
+    if let Some(compiler_port) = beamtalk_cli::compiler_port::compiler_port_binary() {
+        cmd.env(
+            beamtalk_cli::compiler_port::COMPILER_PORT_BIN_ENV,
+            compiler_port,
+        );
     }
 
     let child = cmd

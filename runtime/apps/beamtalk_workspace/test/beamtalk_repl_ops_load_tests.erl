@@ -239,16 +239,6 @@ format_collision_warning_without_packages_test() ->
     %% No qualified name hint when there's no second @ segment
     ?assertEqual(nomatch, binary:match(Result, <<"to be explicit">>)).
 
-extract_package_from_module_qualified_test() ->
-    ?assertEqual(
-        <<"json">>, beamtalk_workspace_project_sync:extract_package_from_module('bt@json@parser')
-    ).
-
-extract_package_from_module_unqualified_test() ->
-    ?assertEqual(
-        undefined, beamtalk_workspace_project_sync:extract_package_from_module('bt@counter')
-    ).
-
 %%====================================================================
 %% classify_files_by_change/2
 %%====================================================================

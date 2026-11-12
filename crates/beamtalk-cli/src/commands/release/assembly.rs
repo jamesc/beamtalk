@@ -1030,23 +1030,8 @@ pub fn append_shape_manifests_to_tarball(
 ///
 /// Returns an error if the binary is found but cannot be copied.
 pub fn stage_compiler_port_binary(release_dir: &Utf8Path) -> Result<Utf8PathBuf> {
-    let found = if let Ok(user_path) = std::env::var("BEAMTALK_COMPILER_PORT_BIN") {
-        Some(Utf8PathBuf::from(user_path))
-    } else {
-        std::env::current_exe()
-            .ok()
-            .and_then(|exe| {
-                let bin_dir = exe.parent()?;
-                let compiler_name = if cfg!(windows) {
-                    "beamtalk-compiler-port.exe"
-                } else {
-                    "beamtalk-compiler-port"
-                };
-                let candidate = bin_dir.join(compiler_name);
-                candidate.is_file().then_some(candidate)
-            })
-            .and_then(|p| Utf8PathBuf::from_path_buf(p).ok())
-    };
+    let found = beamtalk_cli::compiler_port::compiler_port_binary()
+        .and_then(|p| Utf8PathBuf::from_path_buf(p).ok());
 
     let Some(src) = found else {
         miette::bail!(

@@ -110,7 +110,6 @@ See `docs/ADR/0096-system-browser-data-source.md`.
     delegate_exported/2,
     self_delegate_selectors/1,
     package_of/2,
-    package_of_module/1,
     alias_visible/2,
     alias_row/3,
     package_type_aliases/1,
@@ -1815,7 +1814,9 @@ source_origin_of(ModName, SourceFile) when is_atom(ModName) ->
         true ->
             <<"stdlib">>;
         false ->
-            classify_origin(package_of_module(ModName), project_package_name(), SourceFile)
+            classify_origin(
+                beamtalk_module_name:package_of(ModName), project_package_name(), SourceFile
+            )
     end.
 
 %% Classification rule: the module's package segment is the *primary*
@@ -1828,7 +1829,7 @@ source_origin_of(ModName, SourceFile) when is_atom(ModName) ->
 %%   - package present, == project package        -> project
 %%   - package present but project package unknown -> path fallback (then project)
 %%   - no package segment                          -> path fallback (null -> project)
--spec classify_origin(binary() | nil, binary() | null, binary() | null) -> binary().
+-spec classify_origin(binary() | undefined, binary() | null, binary() | null) -> binary().
 classify_origin(Pkg, ProjectPkg, _SourceFile) when
     is_binary(Pkg), is_binary(ProjectPkg)
 ->
@@ -1839,7 +1840,7 @@ classify_origin(Pkg, ProjectPkg, _SourceFile) when
 classify_origin(Pkg, _ProjectPkg, SourceFile) when is_binary(Pkg) ->
     %% Package known but project package unresolvable: defer to the path check.
     path_origin(SourceFile);
-classify_origin(nil, _ProjectPkg, SourceFile) ->
+classify_origin(undefined, _ProjectPkg, SourceFile) ->
     %% No package segment in the module atom: fall back to the path-prefix check.
     path_origin(SourceFile).
 
@@ -1864,13 +1865,13 @@ path_origin(SourceFile) when is_binary(SourceFile) ->
 package_of(ModName, <<"stdlib">>) when is_atom(ModName) ->
     <<"stdlib">>;
 package_of(ModName, <<"dependency">>) when is_atom(ModName) ->
-    case package_of_module(ModName) of
-        nil -> null;
+    case beamtalk_module_name:package_of(ModName) of
+        undefined -> null;
         Pkg -> Pkg
     end;
 package_of(ModName, <<"project">>) when is_atom(ModName) ->
-    case package_of_module(ModName) of
-        nil -> project_package_name();
+    case beamtalk_module_name:package_of(ModName) of
+        undefined -> project_package_name();
         Pkg -> Pkg
     end.
 
@@ -1881,17 +1882,6 @@ project_package_name() ->
     case beamtalk_workspace_meta:get_package_name() of
         Name when is_binary(Name) -> Name;
         _ -> null
-    end.
-
-%% Extract the package name from a module atom (bt@{pkg}@{class} → {pkg}).
--spec package_of_module(atom()) -> binary() | nil.
-package_of_module(ModName) when is_atom(ModName) ->
-    ModStr = atom_to_list(ModName),
-    case string:split(ModStr, "@", all) of
-        ["bt", Pkg, _Class | _Rest] when Pkg =/= [] ->
-            list_to_binary(Pkg);
-        _ ->
-            nil
     end.
 
 %% Secondary fallback: determine if a source file belongs to the
@@ -2178,18 +2168,9 @@ source_file_of(ModName) ->
 %% browser groups these under "Uncategorized", Pharo convention).
 -spec category_of(atom()) -> binary() | null.
 category_of(ModName) ->
-    try beamtalk_runtime_api:extract_package_from_module(ModName) of
-        undefined ->
-            null;
-        none ->
-            null;
-        Pkg when is_atom(Pkg) ->
-            case atom_to_binary(Pkg, utf8) of
-                <<>> -> null;
-                Bin -> Bin
-            end
-    catch
-        _:_ -> null
+    case beamtalk_module_name:package_of(ModName) of
+        undefined -> null;
+        Pkg -> Pkg
     end.
 
 -spec class_doc(pid()) -> binary() | null.
