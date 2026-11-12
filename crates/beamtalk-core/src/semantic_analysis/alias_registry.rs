@@ -264,6 +264,9 @@ impl AliasRegistry {
         // aliases eagerly and lazily (pulled on reference, not pushed in
         // dependency order), with its own memo cache making a precomputed
         // order redundant for that purpose.
+        // The cycle check walks every alias, pre-loaded ones from other files
+        // included, and reports against the current file: a whole-store read.
+        crate::semantic_analysis::consulted::record_scan();
         let (cycles, _resolution_order) = find_cycles(&self.aliases);
         for (cycle, cycle_span) in cycles {
             if self.reported_cycles.insert(canonical_cycle_key(&cycle)) {
@@ -662,6 +665,9 @@ impl AliasRegistry {
         // shares, so a cycle already reported here is not reported again if
         // a subsequent `register_module` (or `add_pre_loaded`) call re-scans
         // the same still-unresolved cycle.
+        // The cycle check walks every alias, pre-loaded ones from other files
+        // included, and reports against the current file: a whole-store read.
+        crate::semantic_analysis::consulted::record_scan();
         let (cycles, _resolution_order) = find_cycles(&self.aliases);
         for (cycle, cycle_span) in cycles {
             if self.reported_cycles.insert(canonical_cycle_key(&cycle)) {

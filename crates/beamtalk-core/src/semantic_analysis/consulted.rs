@@ -317,4 +317,18 @@ mod tests {
         let s = scope.finish();
         assert!(s.extensions_unknown, "{s:?}");
     }
+
+    #[test]
+    fn alias_registration_cycle_check_records_a_scan() {
+        use crate::source_analysis::{lex_with_eof, parse};
+        let (module, diags) = parse(lex_with_eof("type Alpha = Beta\n"));
+        assert!(diags.is_empty(), "{diags:?}");
+        let mut aliases = AliasRegistry::new();
+        let hierarchy = ClassHierarchy::with_builtins();
+        let protocols = ProtocolRegistry::new();
+        let scope = ConsultedScope::begin();
+        let _ = aliases.register_module(&module, &hierarchy, &protocols);
+        let s = scope.finish();
+        assert!(s.scanned_all, "the cycle check reads every alias: {s:?}");
+    }
 }
