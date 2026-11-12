@@ -3341,6 +3341,7 @@ render: coll :: Printable | Nil -> String =>
 | `(x notNil and: [k isKindOf: Foo]) ifTrue: [...]` | `x` is non-nil and `k` is `Foo` in true block | True block |
 | `(x notNil and: [y notNil and: [p]]) ifTrue: [...]` | `x` and `y` are non-nil in true block | True block |
 | `x isNil not ifTrue: [...]`, `(k isKindOf: Integer) not ifTrue: [^...]`, `(a isNil or: [b isNil]) not ifTrue: [...]` | `not` swaps the true and false facts, so each narrows as its un-negated dual would; it composes with `and:` / `or:` in either position | True block / rest of method |
+| `[x notNil] whileTrue: [...]`, `[n notNil and: [p]] whileTrue: [...]`, `[n isNil] whileFalse: [...]` | the condition block's last expression narrows the loop body, as `ifTrue:` / `ifFalse:` would; only for variables the body never assigns, and fields only if the body cannot write one (BT-4713). Not narrowed after the loop | Loop body only |
 | `(p or: [x notNil]) ifTrue: [...]`, `(x notNil or: [p]) ifTrue: [...]`, `(x isNil and: [p]) ifFalse: [...]` | **no narrowing** — the other side may have decided the answer | — |
 | `x =:= #sym ifTrue: [^...]` | `x` is `T \ #sym` after the statement | Rest of method |
 | `x == #sym ifTrue: [^...]` | `x` is `T \ #sym` after the statement | Rest of method |

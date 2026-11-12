@@ -300,4 +300,55 @@ impl TypeChecker {
             }
         }
     }
+
+    /// BT-4713: the facts the body of `[cond] whileTrue: [body]` (or
+    /// `whileFalse:`) may assume on entry — `cond`'s last expression's true
+    /// (false) facts. `None` when the send is not such a loop or nothing is
+    /// proved.
+    ///
+    /// The condition is re-evaluated before every iteration, so the facts hold
+    /// at the start of each pass; they are kept only for bindings the body
+    /// never assigns, and fields only if the body cannot write one (a
+    /// self-send, or a stored block run — see [`expr_may_write_fields`]).
+    pub(in crate::semantic_analysis::type_checker) fn loop_body_facts(
+        &mut self,
+        receiver: &Expression,
+        selector: &crate::ast::MessageSelector,
+        arguments: &[Expression],
+        env: &TypeEnv,
+        hierarchy: &ClassHierarchy,
+        span: Span,
+    ) -> Option<Facts> {
+        use crate::ast::WellKnownSelector;
+        let on_true = match selector.well_known() {
+            Some(WellKnownSelector::WhileTrue) => true,
+            Some(WellKnownSelector::WhileFalse) => false,
+            _ => return None,
+        };
+        let [body] = arguments else {
+            return None;
+        };
+        let Expression::Block(cond_block) = receiver else {
+            return None;
+        };
+        if !cond_block.parameters.is_empty() {
+            return None;
+        }
+        let last = cond_block.body.last()?.expression.unwrap_parens();
+        let facts = self.condition_facts(last, env, hierarchy, FactsCtx::arm(span));
+        let mut facts = if on_true {
+            facts.when_true
+        } else {
+            facts.when_false
+        };
+        facts.forget_written(&expr_writes(body));
+        // The condition's own earlier statements may write too, but they run
+        // before the tested expression; the body is what runs between tests.
+        let body_may_write_fields = !matches!(body, Expression::Block(_))
+            || expr_may_write_fields(body, &self.type_map, self.protocol_registry.as_deref());
+        if body_may_write_fields {
+            facts.drop_fields();
+        }
+        (!facts.is_empty()).then_some(facts)
+    }
 }
