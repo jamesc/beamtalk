@@ -1147,6 +1147,9 @@ impl TypeChecker {
                 .iter()
                 .any(|m| Self::declared_type_is_opaque(m, hierarchy)),
             DeclaredType::FalseOr(inner) => Self::declared_type_is_opaque(inner, hierarchy),
+            DeclaredType::Shape { fields, .. } => fields
+                .iter()
+                .any(|f| Self::declared_type_is_opaque(&f.value, hierarchy)),
             DeclaredType::Difference { .. }
             | DeclaredType::Intersection { .. }
             | DeclaredType::SelfType
@@ -1709,7 +1712,13 @@ impl TypeChecker {
             // type once at this boundary (byte-
             // identical to the old stored string); `resolve_type_param`
             // itself takes the structured `DeclaredType` directly.
-            let expected_declared_str: EcoString = expected_declared.to_string().into();
+            // Shape assignability is BT-4730. Until it lands, an expected
+            // map shape (ADR 0147) is judged as the bare `Dictionary` it
+            // erases to — the compatibility helpers below are string-level
+            // and know no `#{...}` class — which is exactly what the
+            // pre-shape checker saw.
+            let expected_declared_str: EcoString =
+                expected_declared.erase_shapes().to_string().into();
             let substituted_expected;
             let expected_ty: &EcoString = if !class_subst.is_empty()
                 && Self::type_string_references_class_param(&expected_declared_str, class_subst)
@@ -1810,7 +1819,15 @@ impl TypeChecker {
                     }),
                 _ => None,
             };
-            let arg_ty = resolved_arg_ty.as_ref().unwrap_or(arg_ty);
+            // Shape assignability is ADR 0147's next phase (BT-4730). Until it
+            // lands, a shape argument is judged as the bare `Dictionary` it
+            // behaves as, exactly what the pre-shape checker saw.
+            let shape_stand_in = matches!(arg_ty, InferredType::Shape { .. })
+                .then(|| InferredType::known("Dictionary"));
+            let arg_ty = shape_stand_in
+                .as_ref()
+                .or(resolved_arg_ty.as_ref())
+                .unwrap_or(arg_ty);
             match arg_ty {
                 InferredType::Known {
                     class_name: actual_ty,
@@ -1896,6 +1913,8 @@ impl TypeChecker {
                             .push(diag.with_category(DiagnosticCategory::Type));
                     }
                 }
+                // Replaced by the `Dictionary` stand-in above; unreachable.
+                InferredType::Shape { .. } => {}
                 InferredType::Meta { .. } | InferredType::ProtocolMeta { .. } => {
                     // ADR 0083: a metatype value `C class` is an instance of the
                     // metaclass tower (`Meta{C} <: Class <: Behaviour <: Object`).
@@ -2122,6 +2141,9 @@ impl TypeChecker {
             InferredType::Union { members, .. } => members
                 .iter()
                 .any(|member| Self::element_type_is_unjudged(member, hierarchy)),
+            InferredType::Shape { fields, .. } => fields
+                .iter()
+                .any(|f| Self::element_type_is_unjudged(&f.value, hierarchy)),
             InferredType::Meta { .. }
             | InferredType::ProtocolMeta { .. }
             | InferredType::Never
@@ -2357,6 +2379,9 @@ impl TypeChecker {
                 | InferredType::ProtocolMeta { .. }
                 | InferredType::Negation { .. }
                 | InferredType::Intersection { .. }
+                // Shape assignability is ADR 0147 phase 3b (BT-4730): until
+                // then a shape body is not judged against the declared return.
+                | InferredType::Shape { .. }
                 | InferredType::Known { .. } => {}
             }
             return;
@@ -2481,7 +2506,9 @@ impl TypeChecker {
             | InferredType::ProtocolMeta { .. }
             | InferredType::Dynamic(_)
             | InferredType::Negation { .. }
-            | InferredType::Intersection { .. } => {}
+            | InferredType::Intersection { .. }
+            // Shape assignability: BT-4730.
+            | InferredType::Shape { .. } => {}
         }
     }
 
@@ -2584,7 +2611,9 @@ impl TypeChecker {
             | InferredType::ProtocolMeta { .. }
             | InferredType::Dynamic(_)
             | InferredType::Negation { .. }
-            | InferredType::Intersection { .. } => true,
+            | InferredType::Intersection { .. }
+            // Shape assignability: BT-4730 — conservative until then.
+            | InferredType::Shape { .. } => true,
         }
     }
 
@@ -3417,6 +3446,8 @@ impl TypeChecker {
                 self.diagnostics
                     .push(diag.with_category(DiagnosticCategory::Type));
             }
+            // Shape assignability: BT-4730.
+            InferredType::Shape { .. } => {}
             InferredType::Meta { .. } | InferredType::ProtocolMeta { .. } => {
                 // ADR 0083: a class object `C class` is assignable to a field
                 // declared `:: Class` / `:: Behaviour` / `:: Object` (the
@@ -5195,10 +5226,14 @@ impl TypeChecker {
             // conformer of `P`; which class it is — and so whether its class
             // side answers `Q`'s instance-side selectors — is unknown here,
             // so skip conservatively (open world, ADR 0100).
+            //
+            // A map shape (ADR 0147) is a dictionary; no user protocol is
+            // satisfied structurally by it, so there is nothing to check.
             InferredType::Never
             | InferredType::ProtocolMeta { .. }
             | InferredType::Negation { .. }
-            | InferredType::Intersection { .. } => {}
+            | InferredType::Intersection { .. }
+            | InferredType::Shape { .. } => {}
         }
     }
 
@@ -5483,7 +5518,10 @@ impl TypeChecker {
                 | InferredType::Dynamic(_)
                 | InferredType::Never
                 | InferredType::Negation { .. }
-                | InferredType::Intersection { .. } => {}
+                | InferredType::Intersection { .. }
+                // A shape type argument (`Box(#{...})`) conforms to no
+                // protocol bound structurally; skip like `Meta`.
+                | InferredType::Shape { .. } => {}
             }
         }
     }

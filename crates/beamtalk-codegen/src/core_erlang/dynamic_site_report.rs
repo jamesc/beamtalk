@@ -75,6 +75,7 @@ fn describe_type(ty: Option<&InferredType>, kind: Option<ClassKind>) -> String {
         InferredType::Intersection { .. } => "intersection".to_string(),
         InferredType::Meta { .. } => "metatype".to_string(),
         InferredType::ProtocolMeta { .. } => "protocol metatype".to_string(),
+        InferredType::Shape { .. } => "map shape".to_string(),
         InferredType::Dynamic(_) => "dynamic".to_string(),
         InferredType::Never => "never".to_string(),
     };

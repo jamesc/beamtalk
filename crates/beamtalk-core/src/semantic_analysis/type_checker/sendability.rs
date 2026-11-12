@@ -253,6 +253,12 @@ fn tier_of_depth(
             .map(|m| tier_of_depth(m, hierarchy, depth + 1, alias_registry))
             .reduce(Tier::join)
             .unwrap_or(Tier::Unknown),
+        // A map shape (ADR 0147) is a dictionary at runtime: grade it as the
+        // `Dictionary(K, V)` it behaves as, so its field values (or `Object`
+        // when open) decide the tier exactly as a plain dictionary's would.
+        InferredType::Shape { .. } => ty.dictionary_view().map_or(Tier::Unknown, |view| {
+            tier_of_depth(&view, hierarchy, depth, alias_registry)
+        }),
         // `A \ B` is still an `A`.
         InferredType::Negation { base, .. } => {
             tier_of_depth(base, hierarchy, depth, alias_registry)

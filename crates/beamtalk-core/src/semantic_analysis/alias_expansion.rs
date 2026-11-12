@@ -34,7 +34,7 @@ use std::collections::HashMap;
 use ecow::EcoString;
 
 use super::alias_registry::AliasInfo;
-use super::class_hierarchy::{ClassInfo, DeclaredType, MethodInfo};
+use super::class_hierarchy::{ClassInfo, DeclaredShapeField, DeclaredType, MethodInfo};
 use super::protocol_registry::ProtocolInfo;
 use crate::ast::{Expression, MethodDefinition, ProtocolDefinition, TypeAnnotation};
 use crate::ast_walker::walk_expression_mut;
@@ -131,6 +131,17 @@ impl InternalAliasExpander {
             DeclaredType::FalseOr(inner) => {
                 DeclaredType::FalseOr(Box::new(self.expand_inner(inner, active, shadowed)))
             }
+            DeclaredType::Shape { fields, open } => DeclaredType::Shape {
+                fields: fields
+                    .iter()
+                    .map(|f| DeclaredShapeField {
+                        key: f.key.clone(),
+                        value: self.expand_inner(&f.value, active, shadowed),
+                        optional: f.optional,
+                    })
+                    .collect(),
+                open: *open,
+            },
             DeclaredType::Difference { base, excluded } => DeclaredType::Difference {
                 base: Box::new(self.expand_inner(base, active, shadowed)),
                 excluded: Box::new(self.expand_inner(excluded, active, shadowed)),

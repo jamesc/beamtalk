@@ -179,22 +179,35 @@ struct DisplayOptions {
     /// When `true`, `Dynamic(reason)` renders as `"Dynamic (description)"` if
     /// the reason has a description. When `false`, always renders as `"Dynamic"`.
     show_dynamic_reason: bool,
+    /// When `true`, an anonymous shape with more than
+    /// [`SHAPE_DISPLAY_MAX_FIELDS`] fields renders a prefix plus `… +N more`
+    /// (diagnostics and hover). Only the source-friendly mode sets it: the
+    /// canonical and bare forms must stay complete — they feed assignability
+    /// lookups and paste-back annotation strings.
+    truncate_shapes: bool,
 }
+
+/// How many fields of an anonymous shape diagnostics and hover list before
+/// eliding the rest.
+const SHAPE_DISPLAY_MAX_FIELDS: usize = 4;
 
 impl DisplayOptions {
     const CANONICAL: Self = Self {
         nil_as_source_name: false,
         show_dynamic_reason: true,
+        truncate_shapes: false,
     };
     const SOURCE_FRIENDLY: Self = Self {
         nil_as_source_name: true,
         show_dynamic_reason: true,
+        truncate_shapes: true,
     };
     /// Produces a valid Beamtalk annotation string: no nil remapping, no
     /// dynamic-reason parenthetical. Used by [`InferredType::display_annotation`].
     const BARE: Self = Self {
         nil_as_source_name: false,
         show_dynamic_reason: false,
+        truncate_shapes: false,
     };
 }
 
@@ -349,6 +362,48 @@ pub enum InferredType {
         /// Where this intersection came from.
         provenance: TypeProvenance,
     },
+    /// A map-shape type (ADR 0147): a structural type for a dictionary with
+    /// known symbol keys, each with its own value type.
+    ///
+    /// Denotes a set of maps: a required field means the key is present with
+    /// a value in `T`; an optional field means a value in `T` or absent; a
+    /// closed shape says every unnamed key is absent, an open shape says
+    /// nothing about unnamed keys.
+    ///
+    /// **Equality ignores field order** (`#{#a => A, #b => B}` equals
+    /// `#{#b => B, #a => A}`); the stored order is the source order and
+    /// drives display only. A *dedicated variant* (like [`Meta`]) so every
+    /// match arm must decide explicitly what a shape means — none falls
+    /// through to `Dynamic`.
+    ///
+    /// Sends other than the shape-aware keyed operations see the shape as
+    /// its [`dictionary_view`](InferredType::dictionary_view).
+    ///
+    /// **Algebra.** Unions keep shape members separate (shapes are never
+    /// merged); intersection and difference are stored with ADR 0102's
+    /// existing forms and not simplified fieldwise.
+    ///
+    /// [`Meta`]: InferredType::Meta
+    Shape {
+        /// The named fields, in source order. Keys are unique.
+        fields: Vec<ShapeFieldType>,
+        /// `true` when other keys may be present.
+        open: bool,
+        /// Where this shape came from (`Aliased` when it is the expansion of
+        /// a `type` alias, ADR 0108).
+        provenance: TypeProvenance,
+    },
+}
+
+/// One field of an [`InferredType::Shape`] (ADR 0147).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShapeFieldType {
+    /// The symbol key name, without the leading `#`.
+    pub key: EcoString,
+    /// The value type (for an optional field: the type when present).
+    pub value: InferredType,
+    /// `true` for `?#key => T` — the key may be absent.
+    pub optional: bool,
 }
 
 impl PartialEq for InferredType {
@@ -395,6 +450,22 @@ impl PartialEq for InferredType {
             ) => base_a == base_b && excluded_a == excluded_b,
             (Self::Intersection { members: a, .. }, Self::Intersection { members: b, .. }) => {
                 a.len() == b.len() && a.iter().all(|m| b.contains(m))
+            }
+            (
+                Self::Shape {
+                    fields: fa,
+                    open: oa,
+                    ..
+                },
+                Self::Shape {
+                    fields: fb,
+                    open: ob,
+                    ..
+                },
+            ) => {
+                // Order-independent: keys are unique, so equal length plus
+                // every field of `a` found identically in `b` is equality.
+                oa == ob && fa.len() == fb.len() && fa.iter().all(|f| fb.iter().any(|g| f == g))
             }
             (Self::Dynamic(_), Self::Dynamic(_)) | (Self::Never, Self::Never) => true,
             _ => false,
@@ -495,6 +566,44 @@ impl InferredType {
         }
     }
 
+    /// Creates a [`Shape`](InferredType::Shape) with `Inferred` provenance.
+    #[must_use]
+    pub fn shape(fields: Vec<ShapeFieldType>, open: bool) -> Self {
+        Self::Shape {
+            fields,
+            open,
+            provenance: TypeProvenance::Inferred(Span::default()),
+        }
+    }
+
+    /// The `Dictionary(K, V)` a [`Shape`](InferredType::Shape) behaves as for
+    /// every message that is not a shape-aware keyed operation (ADR 0147
+    /// § "Every other message"): `K` is the join of the key types (each key
+    /// is the singleton `#k`) and `V` the join of the value types; both are
+    /// `Object` when the shape is open. `None` for any other variant.
+    ///
+    /// An empty closed shape has no keys or values, so it views as
+    /// `Dictionary(Never, Never)`.
+    #[must_use]
+    pub fn dictionary_view(&self) -> Option<Self> {
+        let Self::Shape { fields, open, .. } = self else {
+            return None;
+        };
+        let (key_ty, value_ty) = if *open {
+            (Self::known("Object"), Self::known("Object"))
+        } else if fields.is_empty() {
+            (Self::Never, Self::Never)
+        } else {
+            let keys: Vec<Self> = fields
+                .iter()
+                .map(|f| Self::known(eco_format!("#{}", f.key)))
+                .collect();
+            let values: Vec<Self> = fields.iter().map(|f| f.value.clone()).collect();
+            (Self::union_of(&keys), Self::union_of(&values))
+        };
+        Some(Self::known_with_args("Dictionary", vec![key_ty, value_ty]))
+    }
+
     /// Creates a `Union` from simple class names with `Inferred` provenance.
     ///
     /// Convenience for the common case of `String | nil` style unions where
@@ -536,7 +645,11 @@ impl InferredType {
             | Self::Negation { .. }
             // An intersection (`A & B`) is not a single known class either —
             // callers must handle it structurally (ADR 0102 §1).
-            | Self::Intersection { .. } => None,
+            | Self::Intersection { .. }
+            // A shape is a structural map type, not a nominal class; callers
+            // that want the `Dictionary` it behaves as use
+            // [`dictionary_view`](Self::dictionary_view).
+            | Self::Shape { .. } => None,
         }
     }
 
@@ -553,7 +666,8 @@ impl InferredType {
             | Self::Meta { provenance, .. }
             | Self::ProtocolMeta { provenance, .. }
             | Self::Negation { provenance, .. }
-            | Self::Intersection { provenance, .. } => Some(provenance.clone()),
+            | Self::Intersection { provenance, .. }
+            | Self::Shape { provenance, .. } => Some(provenance.clone()),
             Self::Dynamic(_) | Self::Never => None,
         }
     }
@@ -597,6 +711,10 @@ impl InferredType {
                     ..
                 }
                 | Self::Intersection {
+                    provenance: TypeProvenance::Aliased { name, .. },
+                    ..
+                }
+                | Self::Shape {
                     provenance: TypeProvenance::Aliased { name, .. },
                     ..
                 } => Some(name),
@@ -656,6 +774,11 @@ impl InferredType {
             },
             Self::Intersection { members, .. } => Self::Intersection {
                 members,
+                provenance: aliased,
+            },
+            Self::Shape { fields, open, .. } => Self::Shape {
+                fields,
+                open,
                 provenance: aliased,
             },
             other @ (Self::Dynamic(_) | Self::Never) => other,
@@ -772,6 +895,13 @@ impl InferredType {
     pub fn display_for_diagnostic(&self) -> Option<EcoString> {
         let structural = self.display_with_options(DisplayOptions::SOURCE_FRIENDLY);
         if let Some(alias_name) = self.alias_display_name() {
+            // ADR 0147: a shape alias is a field list too long to repeat in
+            // every diagnostic, so it prints as the alias name alone
+            // (`WebSocketOptions`, not the expansion); `:help` shows the
+            // expansion.
+            if matches!(self, Self::Shape { .. }) {
+                return Some(alias_name.clone());
+            }
             return Some(eco_format!("{alias_name} ({structural})"));
         }
         Some(structural)
@@ -845,6 +975,20 @@ impl InferredType {
                     EcoString::from(format!("{base_str} \\ {excluded_str}"))
                 }
             }
+            Self::Shape { fields, open, .. } => {
+                let shown = if opts.truncate_shapes {
+                    fields.len().min(SHAPE_DISPLAY_MAX_FIELDS)
+                } else {
+                    fields.len()
+                };
+                crate::ast::render_shape(
+                    fields[..shown]
+                        .iter()
+                        .map(|f| (f.optional, &f.key, f.value.display_with_options(opts))),
+                    *open,
+                    fields.len() - shown,
+                )
+            }
             Self::Intersection { members, .. } => {
                 let mut result = EcoString::new();
                 for (i, m) in members.iter().enumerate() {
@@ -904,6 +1048,11 @@ impl InferredType {
                 | Self::Meta { provenance, .. }
                 | Self::ProtocolMeta { provenance, .. }
                 | Self::Negation { provenance, .. }
+                // A `Shape` is opaque to `union_of` too: shape members stay
+                // separate and are never merged into a wider shape (ADR 0147
+                // § Shapes in the type algebra); duplicates collapse by
+                // order-independent structural equality.
+                | Self::Shape { provenance, .. }
                 // `Intersection` is opaque to `union_of` (ADR 0102 §1) — treated
                 // like any other opaque member: kept as-is and deduplicated by
                 // structural equality, with no absorption/flattening law of its
@@ -2089,6 +2238,233 @@ mod display_tests {
         assert!(
             debug_out.contains("UndefinedObject"),
             "Debug output must keep canonical name, got: {debug_out}"
+        );
+    }
+
+    // ── ADR 0147: `InferredType::Shape` ────────────────────────────────────
+
+    fn field(key: &str, value: InferredType, optional: bool) -> ShapeFieldType {
+        ShapeFieldType {
+            key: key.into(),
+            value,
+            optional,
+        }
+    }
+
+    fn int() -> InferredType {
+        InferredType::known("Integer")
+    }
+
+    fn string() -> InferredType {
+        InferredType::known("String")
+    }
+
+    #[test]
+    fn shape_equality_ignores_field_order_and_provenance() {
+        let ab = InferredType::shape(
+            vec![field("a", int(), false), field("b", string(), true)],
+            false,
+        );
+        let ba = InferredType::Shape {
+            fields: vec![field("b", string(), true), field("a", int(), false)],
+            open: false,
+            provenance: TypeProvenance::Declared(Span::new(3, 9)),
+        };
+        assert_eq!(ab, ba);
+    }
+
+    #[test]
+    fn shape_equality_distinguishes_optionality_openness_and_types() {
+        let base = InferredType::shape(vec![field("a", int(), false)], false);
+        assert_ne!(
+            base,
+            InferredType::shape(vec![field("a", int(), true)], false)
+        );
+        assert_ne!(
+            base,
+            InferredType::shape(vec![field("a", int(), false)], true)
+        );
+        assert_ne!(
+            base,
+            InferredType::shape(vec![field("a", string(), false)], false)
+        );
+        assert_ne!(
+            base,
+            InferredType::shape(vec![field("b", int(), false)], false)
+        );
+        assert_ne!(
+            base,
+            InferredType::shape(
+                vec![field("a", int(), false), field("b", int(), false)],
+                false
+            )
+        );
+        assert_ne!(base, InferredType::known("Dictionary"));
+    }
+
+    #[test]
+    fn shape_displays_in_source_syntax() {
+        let ty = InferredType::shape(
+            vec![
+                field("name", string(), false),
+                field("age", int(), true),
+                field("first name", InferredType::known("UndefinedObject"), false),
+            ],
+            true,
+        );
+        assert_eq!(
+            ty.display_name(),
+            "#{#name => String, ?#age => Integer, #'first name' => UndefinedObject, ...}"
+        );
+        // Diagnostics use the source spelling `Nil`.
+        assert_eq!(
+            ty.display_for_diagnostic().unwrap(),
+            "#{#name => String, ?#age => Integer, #'first name' => Nil, ...}"
+        );
+        assert_eq!(InferredType::shape(vec![], false).display_name(), "#{}");
+        assert_eq!(InferredType::shape(vec![], true).display_name(), "#{...}");
+    }
+
+    #[test]
+    fn shape_display_nests() {
+        let inner = InferredType::shape(vec![field("x", int(), false)], false);
+        let outer = InferredType::shape(
+            vec![
+                field("p", inner.clone(), false),
+                field(
+                    "xs",
+                    InferredType::known_with_args("List", vec![inner]),
+                    true,
+                ),
+            ],
+            false,
+        );
+        assert_eq!(
+            outer.display_name(),
+            "#{#p => #{#x => Integer}, ?#xs => List(#{#x => Integer})}"
+        );
+    }
+
+    #[test]
+    fn long_anonymous_shape_is_truncated_for_diagnostics_only() {
+        let fields: Vec<ShapeFieldType> = (0..7)
+            .map(|i| field(&format!("k{i}"), int(), false))
+            .collect();
+        let ty = InferredType::shape(fields, true);
+        assert_eq!(
+            ty.display_for_diagnostic().unwrap(),
+            "#{#k0 => Integer, #k1 => Integer, #k2 => Integer, #k3 => Integer, … +3 more, ...}"
+        );
+        // The canonical and annotation forms stay complete (they feed
+        // assignability lookups and paste-back).
+        assert!(ty.display_name().contains("#k6 => Integer"));
+        assert!(ty.display_annotation().contains("#k6 => Integer"));
+        assert!(!ty.display_annotation().contains('…'));
+    }
+
+    #[test]
+    fn aliased_shape_displays_as_the_alias_name() {
+        let ty = InferredType::shape(
+            vec![field("a", int(), false), field("b", int(), false)],
+            false,
+        )
+        .tag_alias_expansion("Point".into(), Span::default());
+        assert_eq!(
+            ty.alias_display_name().map(EcoString::as_str),
+            Some("Point")
+        );
+        assert_eq!(ty.display_for_diagnostic().unwrap(), "Point");
+        // The structural forms are unchanged by the tag.
+        assert_eq!(ty.display_name(), "#{#a => Integer, #b => Integer}");
+    }
+
+    #[test]
+    fn shape_has_no_single_class_name() {
+        let ty = InferredType::shape(vec![field("a", int(), false)], false);
+        assert_eq!(ty.as_known(), None);
+        assert_eq!(ty.as_meta(), None);
+        assert!(ty.provenance().is_some());
+    }
+
+    #[test]
+    fn dictionary_view_joins_key_and_value_types() {
+        let ty = InferredType::shape(
+            vec![field("a", int(), false), field("b", string(), true)],
+            false,
+        );
+        assert_eq!(
+            ty.dictionary_view().unwrap(),
+            InferredType::known_with_args(
+                "Dictionary",
+                vec![
+                    InferredType::union_of(&[InferredType::known("#a"), InferredType::known("#b")]),
+                    InferredType::union_of(&[int(), string()]),
+                ],
+            )
+        );
+    }
+
+    #[test]
+    fn dictionary_view_of_a_single_field_shape_is_not_a_union() {
+        let ty = InferredType::shape(vec![field("a", int(), false)], false);
+        assert_eq!(
+            ty.dictionary_view().unwrap(),
+            InferredType::known_with_args("Dictionary", vec![InferredType::known("#a"), int()])
+        );
+    }
+
+    #[test]
+    fn dictionary_view_of_an_open_shape_is_object_object() {
+        let ty = InferredType::shape(vec![field("a", int(), false)], true);
+        let object = InferredType::known("Object");
+        assert_eq!(
+            ty.dictionary_view().unwrap(),
+            InferredType::known_with_args("Dictionary", vec![object.clone(), object])
+        );
+        let open_empty = InferredType::shape(vec![], true);
+        assert_eq!(
+            open_empty.dictionary_view().unwrap().display_name(),
+            "Dictionary(Object, Object)"
+        );
+    }
+
+    #[test]
+    fn dictionary_view_of_the_empty_closed_shape_is_never_never() {
+        assert_eq!(
+            InferredType::shape(vec![], false)
+                .dictionary_view()
+                .unwrap()
+                .display_name(),
+            "Dictionary(Never, Never)"
+        );
+    }
+
+    #[test]
+    fn dictionary_view_is_none_for_every_other_variant() {
+        assert!(int().dictionary_view().is_none());
+        assert!(InferredType::Never.dictionary_view().is_none());
+        assert!(InferredType::meta("Foo").dictionary_view().is_none());
+    }
+
+    #[test]
+    fn union_keeps_shape_members_separate_and_dedups_by_equality() {
+        let a = InferredType::shape(vec![field("a", int(), false)], false);
+        let b = InferredType::shape(vec![field("b", int(), false)], false);
+        let union = InferredType::union_of(&[a.clone(), b.clone()]);
+        let InferredType::Union { members, .. } = &union else {
+            panic!("expected a union, got {union:?}");
+        };
+        assert_eq!(members, &vec![a.clone(), b]);
+
+        // A reordered duplicate collapses.
+        let a_again = InferredType::shape(vec![field("a", int(), false)], false);
+        assert_eq!(InferredType::union_of(&[a.clone(), a_again]), a);
+
+        // `S | Nil` keeps the shape intact.
+        let with_nil = InferredType::union_of(&[a.clone(), InferredType::known("UndefinedObject")]);
+        assert_eq!(
+            with_nil.display_name(),
+            "#{#a => Integer} | UndefinedObject"
         );
     }
 }

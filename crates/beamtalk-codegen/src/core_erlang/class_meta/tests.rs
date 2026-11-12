@@ -1038,7 +1038,7 @@ fn test_meta_synthesized_value_methods_agree_with_hierarchy() {
 #[test]
 fn test_meta_field_types_map_records_shape_as_dictionary() {
     // A shape lists every key, so its raw text can exceed Erlang's 255-byte
-    // atom limit; metadata records the `Dictionary` the checker treats it as.
+    // atom limit; metadata erases it to `Dictionary` (`DeclaredType::erase_shapes`).
     let keys: String = (0..20)
         .map(|i| format!("#aVeryLongFieldKeyName{i} => String"))
         .collect::<Vec<_>>()

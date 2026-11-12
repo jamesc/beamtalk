@@ -84,6 +84,29 @@ pub enum DeclaredType {
     SelfClass,
     /// The `<ClassName> class` metatype, carrying the named class.
     ClassOf(EcoString),
+    /// A map-shape type (ADR 0147): `#{#name => String, ?#age => Integer, ...}`.
+    ///
+    /// Fields keep their source order (it drives display); the resolved
+    /// [`InferredType::Shape`] compares them order-independently.
+    Shape {
+        /// The named fields, in source order.
+        fields: Vec<DeclaredShapeField>,
+        /// `true` when the shape ends in `...` (other keys may be present).
+        open: bool,
+    },
+}
+
+/// One `[?]#key => Type` entry of a [`DeclaredType::Shape`] — the span-free
+/// mirror of [`crate::ast::ShapeField`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct DeclaredShapeField {
+    /// The symbol key name, without the leading `#`.
+    pub key: EcoString,
+    /// The value type.
+    pub value: DeclaredType,
+    /// `true` for `?#key => T` (the key may be absent).
+    pub optional: bool,
 }
 
 impl DeclaredType {
@@ -136,6 +159,14 @@ impl DeclaredType {
         let union_parts = split_top_level(trimmed, '|');
         if union_parts.len() > 1 {
             return DeclaredType::Union(union_parts.into_iter().map(DeclaredType::parse).collect());
+        }
+
+        // Map shape: `#{#a => T, ?#b => U, ...}` (ADR 0147). Checked before
+        // the generic split so a `(` inside a field's value type is never
+        // mistaken for the head of a generic.
+        if trimmed.starts_with("#{") {
+            return Self::parse_shape(trimmed)
+                .unwrap_or_else(|| DeclaredType::Simple(trimmed.into()));
         }
 
         // Generic: `Base(Arg1, Arg2)`, nesting-aware. `split_generic_base`
@@ -196,6 +227,50 @@ impl DeclaredType {
         // Fallback: opaque nominal name, including for constructs this
         // grammar doesn't parse (`\`, `&`) and malformed input.
         DeclaredType::Simple(trimmed.into())
+    }
+
+    /// Parses the string form of a map shape (ADR 0147) — the inverse of the
+    /// shape arm of [`fmt::Display`]. `None` for anything malformed (the
+    /// caller degrades to an opaque `Simple`, as for every other
+    /// unparseable string).
+    ///
+    /// Field splitting uses the shared brace-aware [`split_top_level`], so
+    /// nested shapes and generic arguments are never split internally. A
+    /// quoted key containing a delimiter (`#'a,b'`) is not representable in
+    /// the string form and degrades to opaque.
+    fn parse_shape(s: &str) -> Option<DeclaredType> {
+        let inner = s.strip_prefix("#{")?.strip_suffix('}')?;
+        let mut fields: Vec<DeclaredShapeField> = Vec::new();
+        let mut open = false;
+        for part in split_top_level(inner, ',') {
+            if open {
+                // `...` must be the last entry.
+                return None;
+            }
+            if part == "..." {
+                open = true;
+                continue;
+            }
+            let (optional, rest) = match part.strip_prefix('?') {
+                Some(rest) => (true, rest.trim_start()),
+                None => (false, part),
+            };
+            let (key_text, value_text) = rest.split_once("=>")?;
+            let key_text = key_text.trim();
+            let key = match key_text.strip_prefix("#'") {
+                Some(quoted) => quoted.strip_suffix('\'')?,
+                None => key_text.strip_prefix('#')?,
+            };
+            if key.is_empty() || fields.iter().any(|f| f.key == key) {
+                return None;
+            }
+            fields.push(DeclaredShapeField {
+                key: key.into(),
+                value: DeclaredType::parse(value_text),
+                optional,
+            });
+        }
+        Some(DeclaredType::Shape { fields, open })
     }
 
     /// Partially convert an already-resolved [`InferredType`] back into a
@@ -300,6 +375,61 @@ impl DeclaredType {
         DeclaredType::Union(members)
     }
 
+    /// Compact constructor for a [`DeclaredShapeField`].
+    #[must_use]
+    pub fn shape_field(
+        key: impl Into<EcoString>,
+        value: DeclaredType,
+        optional: bool,
+    ) -> DeclaredShapeField {
+        DeclaredShapeField {
+            key: key.into(),
+            value,
+            optional,
+        }
+    }
+
+    /// Compact constructor for [`DeclaredType::Shape`].
+    #[must_use]
+    pub fn shape(fields: Vec<DeclaredShapeField>, open: bool) -> DeclaredType {
+        DeclaredType::Shape { fields, open }
+    }
+
+    /// This type with every map shape (ADR 0147), at any depth, replaced by
+    /// the bare `Dictionary` it erases to at runtime.
+    ///
+    /// For the flat, atom-valued encodings that cannot carry a shape's field
+    /// list — class metadata (a shape lists every key, so its text can exceed
+    /// Erlang's 255-byte atom limit). The checker never erases: it resolves
+    /// the structured [`DeclaredType::Shape`]. Metadata therefore does not
+    /// preserve a shape across a compiled-artifact boundary (the reader gets
+    /// `Dictionary`); carrying it needs a structured metadata encoding.
+    #[must_use]
+    pub fn erase_shapes(&self) -> DeclaredType {
+        match self {
+            Self::Shape { .. } => Self::Simple("Dictionary".into()),
+            Self::Simple(_)
+            | Self::Singleton(_)
+            | Self::SelfType
+            | Self::SelfClass
+            | Self::ClassOf(_) => self.clone(),
+            Self::Union(members) => Self::Union(members.iter().map(Self::erase_shapes).collect()),
+            Self::Generic { base, parameters } => Self::Generic {
+                base: base.clone(),
+                parameters: parameters.iter().map(Self::erase_shapes).collect(),
+            },
+            Self::FalseOr(inner) => Self::FalseOr(Box::new(inner.erase_shapes())),
+            Self::Difference { base, excluded } => Self::Difference {
+                base: Box::new(base.erase_shapes()),
+                excluded: Box::new(excluded.erase_shapes()),
+            },
+            Self::Intersection { left, right } => Self::Intersection {
+                left: Box::new(left.erase_shapes()),
+                right: Box::new(right.erase_shapes()),
+            },
+        }
+    }
+
     /// `true` when any bare name anywhere inside this type (a `Simple`
     /// name or a generic base) is one of `names` — e.g. a class's or
     /// protocol's own type parameters, which a caller without a substitution
@@ -322,6 +452,7 @@ impl DeclaredType {
             Self::Intersection { left, right } => {
                 left.mentions_any(names) || right.mentions_any(names)
             }
+            Self::Shape { fields, .. } => fields.iter().any(|f| f.value.mentions_any(names)),
             Self::Singleton(_) | Self::SelfType | Self::SelfClass | Self::ClassOf(_) => false,
         }
     }
@@ -359,6 +490,20 @@ impl DeclaredType {
             Self::SelfClass => TypeAnnotation::SelfClass { span },
             Self::ClassOf(name) => TypeAnnotation::ClassOf {
                 class_name: Identifier::new(name.clone(), span),
+                span,
+            },
+            Self::Shape { fields, open } => TypeAnnotation::Shape {
+                fields: fields
+                    .iter()
+                    .map(|f| crate::ast::ShapeField {
+                        key: f.key.clone(),
+                        key_span: span,
+                        value: f.value.to_annotation(span),
+                        optional: f.optional,
+                        span,
+                    })
+                    .collect(),
+                open: *open,
                 span,
             },
         }
@@ -452,6 +597,19 @@ impl fmt::Display for DeclaredType {
             Self::SelfType => write!(f, "Self"),
             Self::SelfClass => write!(f, "Self class"),
             Self::ClassOf(name) => write!(f, "{name} class"),
+            Self::Shape { fields, open } => write!(
+                f,
+                "{}",
+                crate::ast::render_shape(
+                    fields.iter().map(|fl| (
+                        fl.optional,
+                        &fl.key,
+                        EcoString::from(fl.value.to_string())
+                    )),
+                    *open,
+                    0,
+                )
+            ),
         }
     }
 }
@@ -489,10 +647,17 @@ impl From<&TypeAnnotation> for DeclaredType {
             TypeAnnotation::ClassOf { class_name, .. } => {
                 DeclaredType::ClassOf(class_name.name.clone())
             }
-            // Temporary (ADR 0147 phase 1): shapes carry no checking
-            // behaviour yet, so a declared shape is the bare `Dictionary`
-            // it describes until the checker learns shapes in phase 3.
-            TypeAnnotation::Shape { .. } => DeclaredType::Simple("Dictionary".into()),
+            TypeAnnotation::Shape { fields, open, .. } => DeclaredType::Shape {
+                fields: fields
+                    .iter()
+                    .map(|f| DeclaredShapeField {
+                        key: f.key.clone(),
+                        value: DeclaredType::from(&f.value),
+                        optional: f.optional,
+                    })
+                    .collect(),
+                open: *open,
+            },
         }
     }
 }
@@ -524,6 +689,117 @@ mod tests {
             DeclaredType::parse("#ok"),
             DeclaredType::Singleton(_)
         ));
+    }
+
+    // ---- ADR 0147: map shapes ----
+
+    #[test]
+    fn shape_annotation_converts_to_a_structured_shape() {
+        let ann = parse_return_type(
+            "Object subclass: Foo\n  bar -> #{#a => Integer, ?#b => List(String), ...} => nil\n",
+        );
+        assert_eq!(
+            DeclaredType::from(&ann),
+            DeclaredType::shape(
+                vec![
+                    DeclaredType::shape_field("a", DeclaredType::simple("Integer"), false),
+                    DeclaredType::shape_field(
+                        "b",
+                        DeclaredType::generic("List", vec![DeclaredType::simple("String")]),
+                        true
+                    ),
+                ],
+                true,
+            )
+        );
+    }
+
+    #[test]
+    fn shape_display_matches_the_other_two_renderers() {
+        for src in [
+            "Object subclass: Foo\n  bar -> #{} => nil\n",
+            "Object subclass: Foo\n  bar -> #{...} => nil\n",
+            "Object subclass: Foo\n  bar -> #{#a => Integer} => nil\n",
+            "Object subclass: Foo\n  bar -> #{#a => Integer, ?#b => String, ...} => nil\n",
+            "Object subclass: Foo\n  bar -> #{#'first name' => String} => nil\n",
+            "Object subclass: Foo\n  bar -> #{#p => #{#x => Integer, ?#y => Integer}} => nil\n",
+            "Object subclass: Foo\n  bar -> Result(#{#a => Integer}, String) => nil\n",
+            "Object subclass: Foo\n  bar -> #{#a => Integer | String} | Nil => nil\n",
+        ] {
+            assert_display_parity(src);
+        }
+    }
+
+    #[test]
+    fn shape_strings_round_trip_through_parse() {
+        for s in [
+            "#{}",
+            "#{...}",
+            "#{#a => Integer}",
+            "#{#a => Integer, ?#b => String, ...}",
+            "#{#'first name' => String}",
+            "#{#p => #{#x => Integer, ?#y => Integer}}",
+            "#{#a => Integer | String}",
+            "#{#xs => List(#{#x => Integer}), ?#d => Dictionary(Symbol, Object)}",
+            "Result(#{#a => Integer}, String)",
+            "#{#a => Integer} | Nil",
+            "#{#a => Integer} | #{#b => String}",
+        ] {
+            assert_round_trip(s);
+        }
+    }
+
+    #[test]
+    fn shape_string_parses_to_the_structured_form_the_annotation_gives() {
+        let ann = parse_return_type(
+            "Object subclass: Foo\n  bar -> #{#a => Integer, ?#b => #{#c => String}, ...} => nil\n",
+        );
+        let from_ann = DeclaredType::from(&ann);
+        assert_eq!(DeclaredType::parse(&from_ann.to_string()), from_ann);
+    }
+
+    #[test]
+    fn malformed_shape_strings_degrade_to_simple() {
+        for s in [
+            "#{#a => Integer",                // unterminated
+            "#{#a Integer}",                  // no `=>`
+            "#{a => Integer}",                // key is not a symbol
+            "#{#a => Integer, #a => String}", // duplicate key
+            "#{..., #a => Integer}",          // `...` not last
+            "#{#a => Integer,, ...}",
+        ] {
+            let parsed = DeclaredType::parse(s);
+            assert!(
+                !matches!(parsed, DeclaredType::Shape { .. }),
+                "{s:?} must not parse as a shape, got {parsed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn erase_shapes_replaces_shapes_at_any_depth_with_dictionary() {
+        let dt = DeclaredType::parse("List(#{#a => Integer}) | #{#b => #{#c => String}} | Nil");
+        assert_eq!(
+            dt.erase_shapes().to_string(),
+            "List(Dictionary) | Dictionary | Nil"
+        );
+        // A shape-free type is returned unchanged.
+        let plain = DeclaredType::parse("Result(Integer, String) | Nil");
+        assert_eq!(plain.erase_shapes(), plain);
+    }
+
+    #[test]
+    fn mentions_any_looks_inside_shape_fields() {
+        let dt = DeclaredType::parse("#{#a => List(T)}");
+        assert!(dt.mentions_any(&["T".into()]));
+        assert!(!dt.mentions_any(&["U".into()]));
+    }
+
+    #[test]
+    fn shape_to_annotation_round_trips_up_to_spans() {
+        let dt = DeclaredType::parse("#{#a => Integer, ?#b => String, ...}");
+        let ann = dt.to_annotation(Span::new(0, 1));
+        assert_eq!(DeclaredType::from(&ann), dt);
     }
 
     // ---- parse ∘ to_string round-trips ----
