@@ -39,9 +39,11 @@ TestCase subclass: StringIsEmptyTest
     self assert: s isNotEmpty equals: true
 
   testIsEmptyAgreesWithLengthZero =>
-    #("", "a", "é", "hello world") do: [:s |
-      self assert: s isEmpty equals: s length =:= 0
-      self assert: s isNotEmpty equals: s length > 0]
+    #("", "a", "é", "hello world")
+      do: [:s |
+        self assert: s isEmpty equals: s length =:= 0
+        self assert: s isNotEmpty equals: s length > 0
+      ]
 
   testBinaryViewAgrees =>
     // Binary-typed code calling isEmpty on a String gets the same answer
