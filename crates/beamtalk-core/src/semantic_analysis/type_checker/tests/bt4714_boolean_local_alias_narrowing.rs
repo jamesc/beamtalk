@@ -160,23 +160,28 @@ fn alias_created_inside_a_block_is_not_trusted() {
     assert_rejected("    p ifTrue: [c := x notNil. c ifTrue: [Repro need: x. ^0]].\n    0");
 }
 
-/// An alias never proves more than the inline test: a Result `isOk` guard is
-/// skipped by post-guard narrowing, so spelling it through a local must
-/// produce the same diagnostics as spelling it inline.
+/// An alias never proves more than the inline test: post-guard narrowing
+/// skips Result `isOk` tests, so the alias's post-guard facts must be empty
+/// while its arm facts are not (a nil test, by contrast, keeps both).
 #[test]
-fn result_test_alias_matches_inline_post_guard() {
-    let src = |guard: &str| {
-        format!(
-            r"
-typed Object subclass: Repro
-  go: r :: Result(Integer, String) -> Integer =>
-{guard}
-    r value
-"
-        )
+fn alias_post_guard_facts_are_filtered_like_the_inline_test() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    env.set_local("r", InferredType::known("Result"));
+    env.set_local("x", InferredType::known("Object"));
+    let test = |name: &str, selector: &str| {
+        msg_send(var(name), MessageSelector::Unary(selector.into()), vec![])
     };
-    let direct = type_diagnostics(&src("    r isOk ifTrue: [^0]."));
-    let aliased = type_diagnostics(&src("    c := r isOk.\n    c ifTrue: [^0]."));
-    let msgs = |d: &[Diagnostic]| d.iter().map(|d| d.message.to_string()).collect::<Vec<_>>();
-    assert_eq!(msgs(&direct), msgs(&aliased));
+
+    let is_ok = checker.alias_facts(&test("r", "isOk"), &env, &hierarchy);
+    assert!(is_ok.proves_in_arm(), "isOk narrows an ifTrue: arm");
+    assert!(
+        !is_ok.proves_post_guard(),
+        "isOk must not narrow post-guard"
+    );
+
+    let is_nil = checker.alias_facts(&test("x", "isNil"), &env, &hierarchy);
+    assert!(is_nil.proves_in_arm());
+    assert!(is_nil.proves_post_guard(), "nil tests narrow post-guard");
 }

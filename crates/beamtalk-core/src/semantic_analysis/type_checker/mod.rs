@@ -907,7 +907,9 @@ struct TypeEnv {
     /// BT-4714: locals currently bound to a Boolean condition (`c := x notNil`)
     /// and what that condition proved. Any write to the local, or to a
     /// variable named in its facts, drops the entry (see
-    /// [`TypeEnv::invalidate_cond_aliases`]).
+    /// [`TypeEnv::invalidate_cond_aliases`]). Narrowing refinements go through
+    /// `set` too, so they drop the aliases that mention the refined variable
+    /// (safe: only precision is lost).
     cond_aliases: HashMap<EnvKey, narrowing::facts::AliasFacts>,
 }
 

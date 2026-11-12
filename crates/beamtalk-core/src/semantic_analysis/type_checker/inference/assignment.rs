@@ -14,6 +14,7 @@ use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::type_checker::binary_string_compare;
 use crate::semantic_analysis::type_checker::known_remote;
+use crate::semantic_analysis::type_checker::narrowing::facts::AliasFacts;
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::types::{
     AssignmentTypeMismatch, ClassObjectType, CrossObjectFieldMutation,
@@ -497,7 +498,7 @@ impl TypeChecker {
         value: &Expression,
         hierarchy: &ClassHierarchy,
         env: &TypeEnv,
-    ) -> Option<crate::semantic_analysis::type_checker::narrowing::facts::AliasFacts> {
+    ) -> Option<AliasFacts> {
         let facts = self.alias_facts(value, env, hierarchy);
         let blocked = facts
             .keys()

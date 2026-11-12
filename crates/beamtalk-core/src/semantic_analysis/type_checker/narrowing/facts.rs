@@ -156,6 +156,18 @@ impl AliasFacts {
             .all(|c| c.when_true.is_empty() && c.when_false.is_empty())
     }
 
+    /// Whether the alias narrows anything for branch arms and loop bodies.
+    #[cfg(test)]
+    pub(crate) fn proves_in_arm(&self) -> bool {
+        !self.arm.when_true.is_empty() || !self.arm.when_false.is_empty()
+    }
+
+    /// Whether the alias narrows anything after a diverging guard.
+    #[cfg(test)]
+    pub(crate) fn proves_post_guard(&self) -> bool {
+        !self.post_guard.when_true.is_empty() || !self.post_guard.when_false.is_empty()
+    }
+
     /// Whether either set of facts narrows `key`.
     pub(crate) fn mentions(&self, key: &EnvKey) -> bool {
         self.arm.mentions(key) || self.post_guard.mentions(key)
