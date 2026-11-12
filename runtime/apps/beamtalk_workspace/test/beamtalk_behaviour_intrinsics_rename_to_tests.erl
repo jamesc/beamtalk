@@ -102,7 +102,7 @@ setup() ->
         MetaPid -> gen_server:stop(MetaPid)
     end,
     Unique = integer_to_list(erlang:unique_integer([positive])),
-    ProjDir = filename:join(temp_dir(), "bt-rename-to-" ++ Unique),
+    ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-rename-to-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
     WidgetPath = filename:join(ProjDir, "bt3278_widget.bt"),
     WidgetSubPath = filename:join(ProjDir, "bt3278_widget_sub.bt"),
@@ -153,8 +153,6 @@ teardown(_) ->
         MetaPid -> gen_server:stop(MetaPid)
     end,
     ok.
-
-temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
 
 widget_class_object() ->
     beamtalk_class_registry:class_object_from_pid(
@@ -258,7 +256,9 @@ setup_with_changelog() ->
     %% sees more than one.
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("bt-rename-to-changelog-" ++ Unique),
-    ChangelogHome = filename:join(temp_dir(), "bt-rename-to-changelog-home-" ++ Unique),
+    ChangelogHome = filename:join(
+        beamtalk_test_fs:base_dir(), "bt-rename-to-changelog-home-" ++ Unique
+    ),
     ok = filelib:ensure_path(ChangelogHome),
     OldHome = os:getenv("HOME"),
     true = os:putenv("HOME", ChangelogHome),
@@ -432,7 +432,7 @@ setup_dynamic_with_reference() ->
         MetaPid -> gen_server:stop(MetaPid)
     end,
     Unique = integer_to_list(erlang:unique_integer([positive])),
-    ProjDir = filename:join(temp_dir(), "bt-rename-to-dyn-" ++ Unique),
+    ProjDir = filename:join(beamtalk_test_fs:base_dir(), "bt-rename-to-dyn-" ++ Unique),
     ok = filelib:ensure_path(ProjDir),
     UserPath = filename:join(ProjDir, "bt3278_dyn_user.bt"),
     ok = file:write_file(UserPath, dyn_user_source()),
@@ -563,7 +563,9 @@ setup_dynamic_with_reference_and_changelog() ->
     %% same entropy fix `setup_with_changelog/0` documents.
     Unique = beamtalk_test_unique:id(),
     WorkspaceId = list_to_binary("bt-rename-to-dyn-changelog-" ++ Unique),
-    ChangelogHome = filename:join(temp_dir(), "bt-rename-to-dyn-changelog-home-" ++ Unique),
+    ChangelogHome = filename:join(
+        beamtalk_test_fs:base_dir(), "bt-rename-to-dyn-changelog-home-" ++ Unique
+    ),
     ok = filelib:ensure_path(ChangelogHome),
     OldHome = os:getenv("HOME"),
     true = os:putenv("HOME", ChangelogHome),

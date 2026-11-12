@@ -312,7 +312,7 @@ changelog_start_sweeps_stale_temps_test() ->
 %%====================================================================
 
 with_dir(Fun) ->
-    Dir = filename:join(temp_dir(), "bt-wsfile-" ++ beamtalk_test_unique:id()),
+    Dir = filename:join(beamtalk_test_fs:base_dir(), "bt-wsfile-" ++ beamtalk_test_unique:id()),
     ok = filelib:ensure_path(Dir),
     try
         Fun(Dir)
@@ -336,7 +336,9 @@ with_changelog(Fun) ->
 %% Run `Fun(Home)` with `HOME` pointing at a fresh throwaway directory, then
 %% restore `HOME` and delete the directory.
 with_home(Fun) ->
-    Home = filename:join(temp_dir(), "bt-wsfile-home-" ++ beamtalk_test_unique:id()),
+    Home = filename:join(
+        beamtalk_test_fs:base_dir(), "bt-wsfile-home-" ++ beamtalk_test_unique:id()
+    ),
     ok = filelib:ensure_path(Home),
     OldHome = os:getenv("HOME"),
     true = os:putenv("HOME", Home),
@@ -367,6 +369,3 @@ set_age(File, Seconds) ->
 tmp_files(Dir) ->
     {ok, Names} = file:list_dir(Dir),
     lists:sort([N || N <- Names, lists:suffix(".tmp", N)]).
-
-temp_dir() ->
-    unicode:characters_to_list(element(2, beamtalk_file:'tempDirectory'())).

@@ -46,10 +46,6 @@ setup() ->
 cleanup({Peer, _PeerNode}) ->
     beamtalk_dist_test_helper:stop_peer(Peer).
 
--doc "A short, run-unique atom, so repeated `just test` runs never collide on a stale name.".
-unique_name(Prefix) ->
-    list_to_atom(Prefix ++ "_" ++ integer_to_list(erlang:unique_integer([positive, monotonic]))).
-
 global_scope_test_() ->
     {timeout, 60,
         {setup, fun setup/0, fun cleanup/1, fun({_Peer, PeerNode}) ->
@@ -87,7 +83,7 @@ reserved_name_rejected_under_global_scope_test() ->
 %%====================================================================
 
 round_trip_from_either_node(PeerNode) ->
-    Name = unique_name("bt3603_roundtrip"),
+    Name = beamtalk_test_unique:atom("bt3603_roundtrip"),
     {ok, Pid} = beamtalk_actor_registry:'spawnAsGlobal'(Name, test_counter, 0),
     try
         %% Visible immediately from this (origin) node...
@@ -127,7 +123,7 @@ round_trip_from_either_node(PeerNode) ->
 %%====================================================================
 
 local_and_global_scopes_are_separate(PeerNode) ->
-    Name = unique_name("bt3603_scopesep"),
+    Name = beamtalk_test_unique:atom("bt3603_scopesep"),
     %% Same name, both scopes, no conflict — they are different registries.
     {ok, LocalPid} = beamtalk_actor_registry:'spawnAs'(Name, test_counter, 111),
     {ok, GlobalPid} = beamtalk_actor_registry:'spawnAsGlobal'(Name, test_counter, 222),
@@ -176,7 +172,7 @@ note), so spawning it via a bare `rpc:call/4` would kill it the moment
 mirrors that test's own workaround.
 """.
 named_scope_global_resolves_remote_registrant(PeerNode) ->
-    Name = unique_name("bt3603_remote_named"),
+    Name = beamtalk_test_unique:atom("bt3603_remote_named"),
     ok = beamtalk_class_metadata:insert('Counter', test_counter, undefined, none, false),
     {ok, PeerPid} = rpc:call(PeerNode, erlang, apply, [
         fun() ->
@@ -257,7 +253,7 @@ subscribe_self(EventClass) ->
 
 netsplit_heal_resolves_conflict(Peer, PeerNode) ->
     _Sub = subscribe_self('ActorStopped'),
-    Name = unique_name("bt3603_conflict"),
+    Name = beamtalk_test_unique:atom("bt3603_conflict"),
 
     %% Simulate a netsplit: sever ordinary distribution between the two
     %% nodes. Each side can now register the SAME global name independently

@@ -15,8 +15,6 @@ Tests expression evaluation, file loading, and compilation.
 %% Helpers
 %%====================================================================
 
-temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
-
 %%====================================================================
 %% Tests
 %%====================================================================
@@ -96,7 +94,7 @@ handle_load_file_not_found_test() ->
 handle_load_directory_test() ->
     %% Loading a directory should fail
     State = beamtalk_repl_state:new(undefined, 0),
-    Result = beamtalk_repl_eval:handle_load(temp_dir(), State),
+    Result = beamtalk_repl_eval:handle_load(beamtalk_test_fs:base_dir(), State),
     %% Should get read_error since it's a directory
     ?assertMatch({error, {read_error, _}, _}, Result).
 
@@ -224,7 +222,7 @@ handle_load_compile_error_test() ->
     %% Use unique filename to avoid collisions in concurrent test runs
     UniqueId = erlang:unique_integer([positive]),
     TempFile = filename:join(
-        temp_dir(),
+        beamtalk_test_fs:base_dir(),
         io_lib:format("test_invalid_bt_~p.bt", [UniqueId])
     ),
     ok = file:write_file(TempFile, <<"invalid beamtalk syntax @@@ ###">>),
@@ -604,7 +602,7 @@ handle_load_empty_file_test() ->
     %% Empty file should attempt compile (and fail without compiler)
     UniqueId = erlang:unique_integer([positive]),
     TempFile = filename:join(
-        temp_dir(),
+        beamtalk_test_fs:base_dir(),
         io_lib:format("test_empty_~p.bt", [UniqueId])
     ),
     ok = file:write_file(TempFile, <<>>),
@@ -684,7 +682,7 @@ io_passthrough_forward_test() ->
 
 io_capture_dead_capture_process_test() ->
     CapturePid = spawn(fun() -> ok end),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(CapturePid),
     OldGL = group_leader(),
     Output = beamtalk_io_capture:stop({CapturePid, OldGL}),
     ?assertEqual(<<>>, Output).
@@ -710,7 +708,7 @@ handle_io_request_put_chars_mfa_error_test() ->
 handle_load_valid_file_no_compiler_test() ->
     UniqueId = erlang:unique_integer([positive]),
     TempFile = filename:join(
-        temp_dir(),
+        beamtalk_test_fs:base_dir(),
         io_lib:format("test_valid_~p.bt", [UniqueId])
     ),
     ok = file:write_file(TempFile, <<"Object subclass: MyTest [\n]\n">>),
@@ -1146,7 +1144,7 @@ maybe_await_future_non_future_pid_v2_test() ->
 maybe_await_future_dead_pid_test() ->
     %% Test with a PID that's already dead - covers the after clause
     Pid = spawn(fun() -> ok end),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(Pid),
     Result = beamtalk_repl_eval:maybe_await_future(Pid),
     ?assertEqual(Pid, Result).
 
@@ -1272,7 +1270,7 @@ io_capture_with_output_test() ->
 io_capture_dead_capture_pid_test() ->
     %% Test stop_io_capture when capture process already died (line 600-601)
     DeadPid = spawn(fun() -> ok end),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(DeadPid),
     OldGL = group_leader(),
     Output = beamtalk_io_capture:stop({DeadPid, OldGL}),
     ?assertEqual(<<>>, Output).
@@ -1508,7 +1506,7 @@ reload_class_file_no_compiler_test() ->
     %% This exercises the code path that now includes compute_package_module_name.
     UniqueId = erlang:unique_integer([positive]),
     TempFile = filename:join(
-        temp_dir(),
+        beamtalk_test_fs:base_dir(),
         io_lib:format("test_reload_~p.bt", [UniqueId])
     ),
     ok = file:write_file(TempFile, <<"Actor subclass: TestActor [\n]\n">>),
@@ -2707,7 +2705,7 @@ emit_remove_change_entry_delegates() ->
 %%====================================================================
 
 reload_file_success() ->
-    Path = filename:join(temp_dir(), "bt3337_reload_file_test.bt"),
+    Path = filename:join(beamtalk_test_fs:base_dir(), "bt3337_reload_file_test.bt"),
     ok = file:write_file(Path, <<"Actor subclass: EvalReloadFileCls\n  v => 1\n">>),
     Result = beamtalk_repl_eval:reload_file(Path),
     file:delete(Path),
@@ -2771,7 +2769,7 @@ repopulate_class_sources_success_test() ->
         project_path => undefined,
         created_at => erlang:system_time(second)
     }),
-    Path = filename:join(temp_dir(), "bt3337_repopulate_sources_test.bt"),
+    Path = filename:join(beamtalk_test_fs:base_dir(), "bt3337_repopulate_sources_test.bt"),
     ok = file:write_file(Path, <<"Actor subclass: RepopulatedCls\n  v => 1\n">>),
     Result = beamtalk_repl_eval:repopulate_class_sources(
         Path, [#{name => 'RepopulatedCls'}, #{}]

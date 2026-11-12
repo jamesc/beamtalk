@@ -277,7 +277,7 @@ pid_to_class_unknown_pid_test() ->
 
     %% Lookup a pid that was never registered
     FakePid = spawn(fun() -> ok end),
-    timer:sleep(10),
+    beamtalk_test_wait:dead(FakePid),
     ?assertEqual(undefined, beamtalk_object_instances:class_of(FakePid)).
 
 %%====================================================================

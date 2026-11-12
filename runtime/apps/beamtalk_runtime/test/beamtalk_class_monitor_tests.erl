@@ -43,39 +43,21 @@ would rebuild from ETS metadata.
 
 -include_lib("eunit/include/eunit.hrl").
 
-%% `wait_until/1` polling budget. 100 x 20ms (~2s) proved too tight under
-%% full-suite parallel load (BT-4330: BudgetClass restart-count assertion
-%% failed once in 8583 tests when the DOWN handling was delayed by scheduler
-%% pressure). 300 x 20ms (~6s) keeps the failure signal fast while
-%% tolerating loaded runners; the loop still exits as soon as Fun() is true.
--define(WAIT_RETRIES, 300).
--define(WAIT_SLEEP_MS, 20).
+%% Polling uses `beamtalk_test_wait:until/1` (default budget, ~6s: 100 x 20ms
+%% proved too tight under full-suite parallel load, BT-4330); the loop still
+%% exits as soon as the predicate is true.
 %% `kill_and_wait/2`'s own 'DOWN' wait.
 -define(KILL_WAIT_MS, 5000).
 
-%% Every test that polls with `wait_until/1` (or waits in `kill_and_wait/2`)
+%% Every test that polls with `beamtalk_test_wait:until/1` (or waits in `kill_and_wait/2`)
 %% runs under this explicit EUnit timeout, via `timed/1`. EUnit's default
-%% is 5s — shorter than one `wait_until/1` budget — so without it a slow
+%% is 5s — shorter than one wait budget — so without it a slow
 %% 'DOWN' -> restart_class path (meck recompiling the cover-compiled
 %% registry under the full parallel suite) was killed as `cancelled`
 %% instead of reaching the assertion (BT-4427).
 -define(TEST_TIMEOUT_S, 30).
-%% Worst case per test: the budget-exhaustion test makes two
-%% `wait_until/1` calls and two `kill_and_wait/2` calls.
--define(MAX_WAITS_PER_TEST, 2).
--define(MAX_KILL_WAITS_PER_TEST, 2).
--define(WORST_CASE_TEST_MS,
-    (?MAX_WAITS_PER_TEST * ?WAIT_RETRIES * ?WAIT_SLEEP_MS +
-        ?MAX_KILL_WAITS_PER_TEST * ?KILL_WAIT_MS)
-).
-
-%% Compile-time guard: the build fails if the worst-case polling budget can
-%% reach the EUnit timeout, so raising `WAIT_RETRIES` (or `KILL_WAIT_MS`)
-%% without also raising `TEST_TIMEOUT_S` cannot silently reintroduce a
-%% cancelled-by-timeout test.
--if(?WORST_CASE_TEST_MS >= ?TEST_TIMEOUT_S * 1000).
--error("beamtalk_class_monitor_tests: wait budget exceeds TEST_TIMEOUT_S").
--endif.
+%% Worst case per test (two `until/1` waits + two `kill_and_wait/2` calls) is
+%% ~22s, under this timeout.
 
 %%====================================================================
 %% Setup/Teardown — start an isolated monitor under the module's fixed
@@ -168,26 +150,12 @@ kill_and_wait(Pid, Reason) ->
 timed(Fun) ->
     {timeout, ?TEST_TIMEOUT_S, Fun}.
 
-wait_until(Fun) ->
-    wait_until(Fun, ?WAIT_RETRIES).
-
 %% Whether the registered monitor currently watches Pid. Matches the
 %% `#state{}` tuple positionally, so a change to the record's shape fails
 %% this match loudly instead of reading the wrong field.
 is_watched(Pid) ->
     {state, _Max, _Window, Watched, _Refs, _History} = sys:get_state(beamtalk_class_monitor),
     maps:is_key(Pid, Watched).
-
-wait_until(_Fun, 0) ->
-    timeout;
-wait_until(Fun, Retries) ->
-    case Fun() of
-        true ->
-            ok;
-        false ->
-            timer:sleep(?WAIT_SLEEP_MS),
-            wait_until(Fun, Retries - 1)
-    end.
 
 %%====================================================================
 %% watch/2, unwatch/1 — no monitor registered at all
@@ -269,7 +237,7 @@ watch_dedup_test_() ->
                     kill_and_wait(Dummy, kill),
                     ?assertEqual(
                         ok,
-                        wait_until(fun() ->
+                        beamtalk_test_wait:until(fun() ->
                             meck:num_calls(beamtalk_class_registry, restart_class, ['DedupClass']) >
                                 0
                         end)
@@ -339,7 +307,7 @@ restart_failure_test_() ->
                         kill_and_wait(Dummy, kill),
                         ?assertEqual(
                             ok,
-                            wait_until(fun() ->
+                            beamtalk_test_wait:until(fun() ->
                                 meck:num_calls(
                                     beamtalk_class_registry, restart_class, ['RestartFailClass']
                                 ) > 0
@@ -362,7 +330,7 @@ restart_failure_test_() ->
                         kill_and_wait(Dummy, kill),
                         ?assertEqual(
                             ok,
-                            wait_until(fun() ->
+                            beamtalk_test_wait:until(fun() ->
                                 meck:num_calls(
                                     beamtalk_class_registry, restart_class, ['RestartCrashClass']
                                 ) > 0
@@ -394,7 +362,7 @@ restart_budget_exhausted_test_() ->
                     kill_and_wait(Dummy1, kill),
                     ?assertEqual(
                         ok,
-                        wait_until(fun() ->
+                        beamtalk_test_wait:until(fun() ->
                             meck:num_calls(beamtalk_class_registry, restart_class, ['BudgetClass']) =:=
                                 1
                         end)
@@ -412,7 +380,7 @@ restart_budget_exhausted_test_() ->
                     %% The 'DOWN' handler drops Dummy2 from `watched` in the same
                     %% step that decides (here: refuses) the restart, so once it
                     %% is gone the restart count is final (BT-4382).
-                    ?assertEqual(ok, wait_until(fun() -> not is_watched(Dummy2) end)),
+                    ?assertEqual(ok, beamtalk_test_wait:until(fun() -> not is_watched(Dummy2) end)),
                     ?assertEqual(
                         1, meck:num_calls(beamtalk_class_registry, restart_class, ['BudgetClass'])
                     )

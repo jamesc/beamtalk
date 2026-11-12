@@ -851,7 +851,7 @@ which_child_stale_handle_test() ->
     %% {error, #beamtalk_error{kind = stale_handle}}.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
-    timer:sleep(20),
+    beamtalk_test_wait:dead(SupPid),
     Self = make_supervisor_tuple('StaleSupWC', stale_mod_wc, SupPid),
     FakeClassPid = spawn(fun() ->
         (fun Loop() ->
@@ -1008,7 +1008,7 @@ terminate_child_stale_handle_test() ->
     %% {error, #beamtalk_error{kind = stale_handle, ...}}.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
-    timer:sleep(20),
+    beamtalk_test_wait:dead(SupPid),
     Self = make_supervisor_tuple('StaleSup4', stale_mod4, SupPid),
     ChildArg = {beamtalk_object, 'SomeActor', some_mod, self()},
     ?assertMatch(
@@ -1050,7 +1050,7 @@ stale_handle_whichChildren_test() ->
     %% {error, #beamtalk_error{kind = stale_handle}}.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
-    timer:sleep(20),
+    beamtalk_test_wait:dead(SupPid),
     Self = make_supervisor_tuple('StaleSup', stale_mod, SupPid),
     Result = beamtalk_supervisor:whichChildren(Self),
     ?assertMatch({error, #beamtalk_error{kind = stale_handle}}, Result),
@@ -1063,7 +1063,7 @@ stale_handle_countChildren_test() ->
     %% {error, #beamtalk_error{kind = stale_handle}}.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
-    timer:sleep(20),
+    beamtalk_test_wait:dead(SupPid),
     Self = make_supervisor_tuple('StaleSup2', stale_mod2, SupPid),
     Result = beamtalk_supervisor:countChildren(Self),
     ?assertMatch({error, #beamtalk_error{kind = stale_handle}}, Result),
@@ -1077,7 +1077,7 @@ stale_handle_stop_test() ->
     %% also exercises the second clause of with_live_supervisor/3.
     SupPid = start_anon_supervisor(),
     gen_server:stop(SupPid),
-    timer:sleep(20),
+    beamtalk_test_wait:dead(SupPid),
     Self = make_supervisor_tuple('StaleSup3', stale_mod3, SupPid),
     Result = beamtalk_supervisor:stop(Self),
     ?assertMatch({error, #beamtalk_error{kind = stale_handle}}, Result),
@@ -2055,21 +2055,6 @@ linked_to_self(Pid) ->
     {links, Links} = erlang:process_info(self(), links),
     lists:member(Pid, Links).
 
-%% Poll (yielding) until `Pred()` holds, or fail after ~2 s.
-wait_until(Pred) ->
-    wait_until(Pred, 400).
-
-wait_until(Pred, 0) ->
-    ?assert(Pred());
-wait_until(Pred, N) ->
-    case Pred() of
-        true ->
-            ok;
-        false ->
-            timer:sleep(5),
-            wait_until(Pred, N - 1)
-    end.
-
 supervise_starts_registered_unlinked_and_runs_initialize_once_test() ->
     Test = self(),
     Config = bt3963_static_config(#{
@@ -2266,7 +2251,9 @@ spawn_starts_independent_unlinked_listed_instances_test() ->
             gen_server:stop(PA),
             ?assert(is_process_alive(PB)),
             %% ... and `pg` drops a stopped one.
-            wait_until(fun() -> not lists:member(PA, beamtalk_supervisor:instance_pids()) end)
+            beamtalk_test_wait:until(fun() ->
+                not lists:member(PA, beamtalk_supervisor:instance_pids())
+            end)
         after
             try
                 gen_server:stop(PA)
@@ -2633,7 +2620,7 @@ nested_supervisor_children_with_integer_ids_restart_independently_test() ->
                     {ok, #{x => 2}}, beamtalk_supervisor:args(bt3963_sup('BT3963Sup', C2))
                 ),
                 exit(C1, kill),
-                wait_until(fun() ->
+                beamtalk_test_wait:until(fun() ->
                     case Children() of
                         #{1 := New1} when is_pid(New1), New1 =/= C1 -> true;
                         _ -> false
@@ -3805,7 +3792,7 @@ startChild_arity1_stale_handle_test() ->
         make_child_class_for_startchild('BT1997StaleStart'),
     set_child_class(SupPid, ChildClassObj),
     gen_server:stop(SupPid),
-    timer:sleep(20),
+    beamtalk_test_wait:dead(SupPid),
     try
         Self = {beamtalk_supervisor, 'BT1997StaleStartSup', ?MODULE, SupPid},
         Result = beamtalk_supervisor:startChild(Self),
@@ -3825,7 +3812,7 @@ startChild_arity2_stale_handle_test() ->
         make_child_class_for_startchild('BT1997StaleStart2'),
     set_child_class(SupPid, ChildClassObj),
     gen_server:stop(SupPid),
-    timer:sleep(20),
+    beamtalk_test_wait:dead(SupPid),
     try
         Self = {beamtalk_supervisor, 'BT1997StaleStart2Sup', ?MODULE, SupPid},
         Result = beamtalk_supervisor:startChild(Self, self()),

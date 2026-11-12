@@ -141,20 +141,6 @@ stop_if_alive(_) ->
 minimal_class_info() ->
     #{module => beamtalk_class_bt, superclass => none, methods => #{}, class_methods => #{}}.
 
-wait_until(Fun) ->
-    wait_until(Fun, 100).
-
-wait_until(_Fun, 0) ->
-    timeout;
-wait_until(Fun, Retries) ->
-    case Fun() of
-        true ->
-            ok;
-        false ->
-            timer:sleep(50),
-            wait_until(Fun, Retries - 1)
-    end.
-
 kill_and_wait(Pid) ->
     MRef = erlang:monitor(process, Pid),
     exit(Pid, kill),
@@ -246,7 +232,7 @@ eager_restart_test_() ->
                         %% must bring it back on its own.
                         ?assertEqual(
                             ok,
-                            wait_until(fun() ->
+                            beamtalk_test_wait:until(fun() ->
                                 case beamtalk_class_registry:whereis_class('SupTest3236C') of
                                     undefined -> false;
                                     NewPid -> NewPid =/= OldPid
@@ -274,7 +260,7 @@ eager_restart_test_() ->
                         %% restart_class's warning about dropped hot patches /
                         %% class-var state was logged.
                         ?assertEqual(
-                            ok, wait_until(fun restart_warning_received/0)
+                            ok, beamtalk_test_wait:until(fun restart_warning_received/0)
                         )
                     after
                         remove_capture_handler(OldLevel)
@@ -302,7 +288,7 @@ callback_crash_restart_test_() ->
                     end,
                     ?assertEqual(
                         ok,
-                        wait_until(fun() ->
+                        beamtalk_test_wait:until(fun() ->
                             case beamtalk_class_registry:whereis_class(Name) of
                                 undefined -> false;
                                 NewPid -> NewPid =/= OldPid
@@ -346,7 +332,7 @@ restart_budget_test_() ->
                     kill_and_wait(PidA),
                     ?assertEqual(
                         ok,
-                        wait_until(fun() ->
+                        beamtalk_test_wait:until(fun() ->
                             case beamtalk_class_registry:whereis_class('SupTest3236E') of
                                 undefined -> false;
                                 P -> P =/= PidA
@@ -356,13 +342,12 @@ restart_budget_test_() ->
                     Pid2 = beamtalk_class_registry:whereis_class('SupTest3236E'),
                     %% Second crash inside the window: budget exhausted → stays down.
                     kill_and_wait(Pid2),
-                    timer:sleep(300),
                     ?assertEqual(undefined, beamtalk_class_registry:whereis_class('SupTest3236E')),
                     %% The budget is per class: an unrelated class still restarts.
                     kill_and_wait(PidB),
                     ?assertEqual(
                         ok,
-                        wait_until(fun() ->
+                        beamtalk_test_wait:until(fun() ->
                             case beamtalk_class_registry:whereis_class('SupTest3236F') of
                                 undefined -> false;
                                 P -> P =/= PidB
@@ -444,7 +429,6 @@ unwatch_test_() ->
                 %% Let the watch cast land, then unwatch (synchronous).
                 ok = beamtalk_class_monitor:unwatch('SupTest3236H'),
                 kill_and_wait(Pid),
-                timer:sleep(300),
                 ?assertEqual(undefined, beamtalk_class_registry:whereis_class('SupTest3236H'))
             end}
         ]
@@ -468,7 +452,7 @@ monitor_restart_readopts_test_() ->
                     kill_and_wait(OldPid),
                     ?assertEqual(
                         ok,
-                        wait_until(fun() ->
+                        beamtalk_test_wait:until(fun() ->
                             case beamtalk_class_registry:whereis_class('SupTest3236I') of
                                 undefined -> false;
                                 P -> P =/= OldPid

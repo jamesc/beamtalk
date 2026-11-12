@@ -863,7 +863,7 @@ unknown_call() ->
 cast_ignored() ->
     %% cast should not crash the server
     gen_server:cast(beamtalk_compiler_server, {bogus_cast}),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_compiler_server),
     %% Server is still alive
     ?assert(is_pid(whereis(beamtalk_compiler_server))).
 

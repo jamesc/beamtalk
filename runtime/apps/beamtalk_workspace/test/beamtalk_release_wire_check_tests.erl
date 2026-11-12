@@ -428,8 +428,6 @@ assert_wire_check(PeerPid) ->
 
 stage_dir() ->
     filename:join(
-        get_temp_dir(),
+        beamtalk_test_fs:base_dir(),
         "beamtalk_wire_check_" ++ integer_to_list(erlang:unique_integer([positive]))
     ).
-
-get_temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).

@@ -18,14 +18,19 @@ Every waiter returns `ok` or raises `error({wait_timeout, Reason})`; none
 returns an atom like `timeout` for the caller to forget to check.
 """.
 
--export([until/2, until/3, dead/1, dead/2, class/1, class/2, sync/1, default_timeout/0]).
+-export([until/1, until/2, until/3, dead/1, dead/2, class/1, class/2, sync/1, default_timeout/0]).
 
--define(DEFAULT_TIMEOUT_MS, 5000).
+-define(DEFAULT_TIMEOUT_MS, 6000).
 -define(DEFAULT_INTERVAL_MS, 5).
 
--doc "Default wait budget in milliseconds (5 s); stay below the EUnit test timeout.".
+-doc "Default wait budget in milliseconds (6 s, the largest budget any per-file waiter used); stay below the EUnit test timeout.".
 -spec default_timeout() -> pos_integer().
 default_timeout() -> ?DEFAULT_TIMEOUT_MS.
+
+-doc "`until/2` with the default budget (`default_timeout/0`).".
+-spec until(fun(() -> boolean())) -> ok.
+until(Pred) ->
+    until(Pred, ?DEFAULT_TIMEOUT_MS).
 
 -doc "Poll `Pred` every 5 ms until it returns `true` or `TimeoutMs` elapses.".
 -spec until(fun(() -> boolean()), timeout()) -> ok.

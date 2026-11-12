@@ -258,7 +258,7 @@ register_actor_test() ->
 
     %% Registering same PID again should not duplicate
     ok = beamtalk_workspace_meta:register_actor(ActorPid),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     {ok, Actors2} = beamtalk_workspace_meta:supervised_actors(),
     ?assertEqual([ActorPid], Actors2),
 
@@ -276,10 +276,10 @@ unregister_actor_test() ->
         end
     end),
     ok = beamtalk_workspace_meta:register_actor(ActorPid),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
 
     ok = beamtalk_workspace_meta:unregister_actor(ActorPid),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
 
     ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors()),
 
@@ -297,13 +297,13 @@ actor_down_cleanup_test() ->
         end
     end),
     ok = beamtalk_workspace_meta:register_actor(ActorPid),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
 
     {ok, [ActorPid]} = beamtalk_workspace_meta:supervised_actors(),
 
     %% Kill the actor - DOWN message should auto-remove it
     ActorPid ! stop,
-    timer:sleep(100),
+    beamtalk_test_wait:dead(ActorPid),
 
     ?assertEqual({ok, []}, beamtalk_workspace_meta:supervised_actors()),
 
@@ -323,7 +323,7 @@ register_module_test() ->
     % elp:fixme W0023 intentional atom creation
     ModuleName = list_to_atom("test_module_" ++ integer_to_list(erlang:unique_integer([positive]))),
     ok = beamtalk_workspace_meta:register_module(ModuleName),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
 
     {ok, Modules} = beamtalk_workspace_meta:loaded_modules(),
     ?assertEqual(InitialCount + 1, length(Modules)),
@@ -331,7 +331,7 @@ register_module_test() ->
 
     %% Registering same module again should not duplicate
     ok = beamtalk_workspace_meta:register_module(ModuleName),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     {ok, Modules2} = beamtalk_workspace_meta:loaded_modules(),
     ?assertEqual(InitialCount + 1, length(Modules2)),
 
@@ -367,12 +367,12 @@ unregister_module_test() ->
         "test_unrg_" ++ integer_to_list(erlang:unique_integer([positive]))
     ),
     ok = beamtalk_workspace_meta:register_module(ModuleName),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     {ok, Modules1} = beamtalk_workspace_meta:loaded_modules(),
     ?assert(lists:keymember(ModuleName, 1, Modules1)),
 
     ok = beamtalk_workspace_meta:unregister_module(ModuleName),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     {ok, Modules2} = beamtalk_workspace_meta:loaded_modules(),
     ?assertNot(lists:keymember(ModuleName, 1, Modules2)),
 
@@ -416,7 +416,7 @@ persist_and_restore_modules_test() ->
     %% Wait for debounce timer to fire
     timer:sleep(2500),
     gen_server:stop(Pid1),
-    timer:sleep(50),
+    beamtalk_test_wait:dead(Pid1),
 
     %% Verify file was written
     ?assert(filelib:is_file(MetaFile)),
@@ -814,7 +814,7 @@ remove_class_source_test() ->
     ?assertEqual(Source, beamtalk_workspace_meta:get_class_source(<<"BT3105Removed">>)),
 
     ok = beamtalk_workspace_meta:remove_class_source(<<"BT3105Removed">>),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     ?assertEqual(undefined, beamtalk_workspace_meta:get_class_source(<<"BT3105Removed">>)),
 
     gen_server:stop(Pid).
@@ -828,7 +828,7 @@ remove_class_source_leaves_others_test() ->
     ok = beamtalk_workspace_meta:set_class_source(<<"BT3105B">>, "source B"),
 
     ok = beamtalk_workspace_meta:remove_class_source(<<"BT3105A">>),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
 
     ?assertEqual(undefined, beamtalk_workspace_meta:get_class_source(<<"BT3105A">>)),
     ?assertEqual("source B", beamtalk_workspace_meta:get_class_source(<<"BT3105B">>)),
@@ -876,9 +876,9 @@ debounce_coalesces_rapid_changes_test() ->
     % elp:fixme W0023 intentional atom creation
     Mod3 = list_to_atom("debounce_mod3_" ++ integer_to_list(erlang:unique_integer([positive]))),
     ok = beamtalk_workspace_meta:register_module(Mod1),
-    timer:sleep(100),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     ok = beamtalk_workspace_meta:register_module(Mod2),
-    timer:sleep(100),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     ok = beamtalk_workspace_meta:register_module(Mod3),
 
     %% All 3 should be in state immediately
@@ -1028,7 +1028,7 @@ settings_survive_restart_test() ->
         %% calls `persist_metadata_to_disk/1` (the debounced timer path could
         %% leave the test racing, so we use the deterministic shutdown path).
         gen_server:stop(Pid1),
-        timer:sleep(50),
+        beamtalk_test_wait:dead(Pid1),
         {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
         ?assertEqual(true, beamtalk_workspace_meta:get_setting(autoflush, false)),
         gen_server:stop(Pid2)
@@ -1063,13 +1063,13 @@ class_removed_cast_unregisters_module_test() ->
         "bt1242_meta_" ++ integer_to_list(erlang:unique_integer([positive]))
     ),
     ok = beamtalk_workspace_meta:register_module(ModuleName),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     {ok, Modules1} = beamtalk_workspace_meta:loaded_modules(),
     ?assert(lists:keymember(ModuleName, 1, Modules1)),
 
     %% Simulate the direct cast from publish_class_removed/2
     gen_server:cast(beamtalk_workspace_meta, {unregister_module, ModuleName}),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     {ok, Modules2} = beamtalk_workspace_meta:loaded_modules(),
     ?assertNot(lists:keymember(ModuleName, 1, Modules2)),
 
@@ -1088,7 +1088,7 @@ set_get_file_mtimes_test() ->
     Mtime2 = {{2026, 2, 2}, {9, 30, 15}},
     ok = beamtalk_workspace_meta:set_file_mtime("/bt_test/a.bt", Mtime1),
     ok = beamtalk_workspace_meta:set_file_mtime("/bt_test/b.bt", Mtime2),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
 
     {ok, Mtimes} = beamtalk_workspace_meta:get_file_mtimes(),
     ?assertEqual(Mtime1, maps:get("/bt_test/a.bt", Mtimes)),
@@ -1104,10 +1104,10 @@ remove_file_mtime_test() ->
     Mtime = {{2026, 1, 1}, {12, 0, 0}},
     ok = beamtalk_workspace_meta:set_file_mtime("/bt_test/a.bt", Mtime),
     ok = beamtalk_workspace_meta:set_file_mtime("/bt_test/b.bt", Mtime),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
 
     ok = beamtalk_workspace_meta:remove_file_mtime("/bt_test/a.bt"),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     {ok, Mtimes} = beamtalk_workspace_meta:get_file_mtimes(),
     ?assertEqual(false, maps:is_key("/bt_test/a.bt", Mtimes)),
     ?assert(maps:is_key("/bt_test/b.bt", Mtimes)),
@@ -1121,12 +1121,12 @@ clear_file_mtimes_test() ->
     Mtime = {{2026, 1, 1}, {12, 0, 0}},
     ok = beamtalk_workspace_meta:set_file_mtime("/bt_test/a.bt", Mtime),
     ok = beamtalk_workspace_meta:set_file_mtime("/bt_test/b.bt", Mtime),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     {ok, Before} = beamtalk_workspace_meta:get_file_mtimes(),
     ?assertEqual(2, map_size(Before)),
 
     ok = beamtalk_workspace_meta:clear_file_mtimes(),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     ?assertEqual({ok, #{}}, beamtalk_workspace_meta:get_file_mtimes()),
 
     gen_server:stop(Pid).
@@ -1217,7 +1217,7 @@ unknown_cast_is_ignored_test() ->
     {ok, Pid} = beamtalk_workspace_meta:start_link(test_metadata()),
     %% An unknown cast must not crash the server.
     gen_server:cast(beamtalk_workspace_meta, some_bogus_cast),
-    timer:sleep(20),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     ?assert(is_process_alive(Pid)),
     gen_server:stop(Pid).
 
@@ -1258,7 +1258,7 @@ settings_int_and_binary_survive_restart_test() ->
         ok = beamtalk_workspace_meta:set_setting(weird, [1, 2, 3]),
         ?assertEqual([1, 2, 3], beamtalk_workspace_meta:get_setting(weird, none)),
         gen_server:stop(Pid1),
-        timer:sleep(50),
+        beamtalk_test_wait:dead(Pid1),
         {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
         ?assertEqual(42, beamtalk_workspace_meta:get_setting(max_depth, none)),
         ?assertEqual(<<"hello">>, beamtalk_workspace_meta:get_setting(label, none)),
@@ -1280,7 +1280,7 @@ git_toplevel_cache_roundtrips_test() ->
 
     %% After caching, the exact project path resolves to the stored toplevel.
     ok = beamtalk_workspace_meta:set_git_toplevel(<<"/bt_test/proj">>, <<"/bt_test/repo">>),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     ?assertEqual(
         {ok, <<"/bt_test/repo">>},
         beamtalk_workspace_meta:get_git_toplevel(<<"/bt_test/proj">>)
@@ -1292,7 +1292,7 @@ git_toplevel_cache_roundtrips_test() ->
 
     %% Re-caching under a new project path overwrites the single entry.
     ok = beamtalk_workspace_meta:set_git_toplevel(<<"/bt_test/other">>, <<"/bt_test/other_repo">>),
-    timer:sleep(50),
+    ok = beamtalk_test_wait:sync(beamtalk_workspace_meta),
     ?assertEqual(
         {ok, <<"/bt_test/other_repo">>},
         beamtalk_workspace_meta:get_git_toplevel(<<"/bt_test/other">>)
@@ -1322,7 +1322,7 @@ git_toplevel_cache_not_persisted_test() ->
         ),
         %% terminate/2 persists synchronously on stop.
         gen_server:stop(Pid),
-        timer:sleep(50),
+        beamtalk_test_wait:dead(Pid),
         ?assert(filelib:is_file(MetaFile)),
         {ok, Bin} = file:read_file(MetaFile),
         ?assertEqual(nomatch, binary:match(Bin, <<"repo_toplevel_token">>))
@@ -1363,7 +1363,7 @@ class_source_survives_restart_when_module_loaded_test() ->
         ok = beamtalk_workspace_meta:register_module(ModuleAtom),
         ok = beamtalk_workspace_meta:set_class_source(<<"Bt3108Foo">>, Source),
         gen_server:stop(Pid1),
-        timer:sleep(50),
+        beamtalk_test_wait:dead(Pid1),
         {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
         ?assertEqual(Source, beamtalk_workspace_meta:get_class_source(<<"Bt3108Foo">>)),
         gen_server:stop(Pid2)
@@ -1406,7 +1406,7 @@ class_source_survives_restart_for_packaged_project_test() ->
         ok = beamtalk_workspace_meta:register_module(ModuleAtom),
         ok = beamtalk_workspace_meta:set_class_source(<<"Bt3108Pkg">>, Source),
         gen_server:stop(Pid1),
-        timer:sleep(50),
+        beamtalk_test_wait:dead(Pid1),
         {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
         ?assertEqual(Source, beamtalk_workspace_meta:get_class_source(<<"Bt3108Pkg">>)),
         gen_server:stop(Pid2)
@@ -1444,7 +1444,7 @@ class_source_dropped_when_module_not_loaded_test() ->
         Source = "Object subclass: " ++ atom_to_list(ClassAtom) ++ " [\n  bar => 1\n]\n",
         ok = beamtalk_workspace_meta:set_class_source(ClassBin, Source),
         gen_server:stop(Pid1),
-        timer:sleep(50),
+        beamtalk_test_wait:dead(Pid1),
         {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
         ?assertEqual(undefined, beamtalk_workspace_meta:get_class_source(ClassBin)),
         gen_server:stop(Pid2)
@@ -1481,7 +1481,7 @@ class_source_dropped_when_source_file_newer_than_snapshot_test() ->
         %% terminate/2 persists synchronously, so metadata.json's mtime is
         %% pinned to "now" the moment gen_server:stop/1 returns.
         gen_server:stop(Pid1),
-        timer:sleep(50),
+        beamtalk_test_wait:dead(Pid1),
         %% Bump the source file's mtime strictly past metadata.json's.
         {ok, MetaFileInfo} = file:read_file_info(MetaFile),
         NewerMtime = calendar:gregorian_seconds_to_datetime(
@@ -1520,7 +1520,7 @@ loaded_modules_dropped_when_module_not_loaded_test() ->
         %% Registered, but no module code was ever compiled/loaded for this atom.
         ok = beamtalk_workspace_meta:register_module(ModuleAtom),
         gen_server:stop(Pid1),
-        timer:sleep(50),
+        beamtalk_test_wait:dead(Pid1),
         {ok, Pid2} = beamtalk_workspace_meta:start_link(Init),
         {ok, Modules} = beamtalk_workspace_meta:loaded_modules(),
         ?assertNot(lists:keymember(ModuleAtom, 1, Modules)),

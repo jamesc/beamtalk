@@ -145,7 +145,7 @@ health_test_() ->
             {"healthFor dead process returns dead status",
                 ?_test(begin
                     Pid = spawn(fun() -> ok end),
-                    timer:sleep(50),
+                    beamtalk_test_wait:dead(Pid),
                     Result = beamtalk_tracing:healthFor(Pid),
                     ?assertEqual(dead, maps:get({beamtalk_string, <<"status">>}, Result)),
                     ?assertEqual(

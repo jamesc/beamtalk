@@ -121,7 +121,7 @@ package_value_send_makes_no_code_server_call() ->
         ?assertEqual([?MOD, 7, 7, true, false], Results),
         ?assertEqual([], Calls)
     after
-        stop_class(Pid)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 resolution_follows_class_redefinition() ->
@@ -137,7 +137,7 @@ resolution_follows_class_redefinition() ->
         ?assertEqual(?MOD2, beamtalk_primitive:class_name_to_module(?CLASS)),
         ?assertEqual(2, beamtalk_primitive:send(Self, getX, []))
     after
-        stop_class(Pid)
+        beamtalk_test_proc:stop(Pid)
     end,
     ?assertEqual(not_found, beamtalk_class_metadata:lookup_module(?CLASS)),
     ?assertEqual(
@@ -161,7 +161,7 @@ module_less_class_makes_no_code_server_call() ->
         ?assertEqual(?MODULE_LESS, Module),
         ?assertEqual([], Calls)
     after
-        stop_class(Pid)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 module_less_class_paths_make_no_code_server_call() ->
@@ -185,8 +185,8 @@ module_less_class_paths_make_no_code_server_call() ->
         ?assertEqual(ok, Result),
         ?assertEqual([], [R || {code_server, call, [R]} <- Calls])
     after
-        stop_class(Sub),
-        stop_class(Base)
+        beamtalk_test_proc:stop(Sub),
+        beamtalk_test_proc:stop(Base)
     end.
 
 warm_value_send_does_no_string_work() ->
@@ -219,7 +219,7 @@ warm_value_send_does_no_string_work() ->
         ?assertEqual([7, true, 5, true], Results),
         ?assertEqual([], Calls)
     after
-        stop_class(Pid)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 warm_class_of_object_builds_no_atoms() ->
@@ -249,7 +249,7 @@ warm_class_of_object_builds_no_atoms() ->
         ?assertEqual([Cold || _ <- lists:seq(1, 10)], Warm),
         ?assertEqual([], WarmCalls)
     after
-        stop_class(Pid)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 exception_bit_follows_superclass_change() ->
@@ -269,7 +269,7 @@ exception_bit_follows_superclass_change() ->
         ?assertNot(beamtalk_class_derived_cache:inherits_from(?CLASS, 'Exception')),
         ?assert(beamtalk_primitive:responds_to(Self, getX))
     after
-        stop_class(Pid)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 purged_module_is_rederived() ->
@@ -297,7 +297,7 @@ purged_module_is_rederived() ->
         ?assertEqual([7, 7], Results),
         ?assertEqual([], Calls)
     after
-        stop_class(Pid),
+        beamtalk_test_proc:stop(Pid),
         _ = load_accessor_module(?MOD, x)
     end.
 
@@ -327,7 +327,7 @@ inherited_object_send_makes_no_xref_call() ->
         ?assertEqual([true, false, true], Results),
         ?assertEqual([], Calls)
     after
-        stop_class(Pid)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 runtime_method_changes_are_seen_by_next_send() ->
@@ -347,7 +347,7 @@ runtime_method_changes_are_seen_by_next_send() ->
         ok = beamtalk_object_class:put_method(Pid, answer, fun(_Self) -> 43 end),
         ?assertEqual(43, beamtalk_primitive:send(Self, answer, []))
     after
-        stop_class(Pid)
+        beamtalk_test_proc:stop(Pid)
     end,
     %% Re-parenting (merge_identity/5, the hot-reload write) is seen too.
     Pid2 = start_class(?MODULE_LESS, undefined, none),
@@ -366,7 +366,7 @@ runtime_method_changes_are_seen_by_next_send() ->
             not_found, beamtalk_method_resolver:instance_method_info(?MODULE_LESS, 'hasField:')
         )
     after
-        stop_class(Pid2)
+        beamtalk_test_proc:stop(Pid2)
     end,
     %% Removing the class drops its cached resolution too.
     ?assertEqual(
@@ -410,8 +410,8 @@ perform_finds_runtime_fun_methods() ->
             <<"foo">>, beamtalk_primitive:send(Self, 'perform:', ['printString'])
         )
     after
-        stop_class(Child),
-        stop_class(Parent)
+        beamtalk_test_proc:stop(Child),
+        beamtalk_test_proc:stop(Parent)
     end.
 
 perform_relays_nlr_and_script_exit_from_runtime_fun() ->
@@ -435,7 +435,7 @@ perform_relays_nlr_and_script_exit_from_runtime_fun() ->
             Exit, beamtalk_primitive:send(Self, 'perform:withArguments:', ['do:', [ExitBlk]])
         )
     after
-        stop_class(Pid)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 method_origin_copies_no_generation_table() ->
@@ -477,7 +477,7 @@ memo_hit_reads_no_ets() ->
             {beamtalk_class_derived_cache:generation(), {value, ?MOD}}, memo(?CLASS)
         )
     after
-        stop_class(Pid)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 memo_follows_reregistration() ->
@@ -492,7 +492,7 @@ memo_follows_reregistration() ->
         ?assertEqual({value, ?CLASS, ?MOD2}, beamtalk_primitive:tagged_map_dispatch(Self)),
         ?assertMatch({_, {value, ?MOD2}}, memo(?CLASS))
     after
-        stop_class(Pid)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 memo_follows_ancestor_reparent() ->
@@ -512,8 +512,8 @@ memo_follows_ancestor_reparent() ->
         ),
         ?assertMatch({_, exception}, memo(?CLASS))
     after
-        stop_class(Child),
-        stop_class(Parent)
+        beamtalk_test_proc:stop(Child),
+        beamtalk_test_proc:stop(Parent)
     end.
 
 memo_of_purged_module_is_rederived() ->
@@ -536,7 +536,7 @@ memo_of_purged_module_is_rederived() ->
         ok = load_accessor_module(?MOD, x),
         ?assertEqual(7, beamtalk_primitive:send(Self, getX, []))
     after
-        stop_class(Pid),
+        beamtalk_test_proc:stop(Pid),
         _ = load_accessor_module(?MOD, x)
     end.
 
@@ -568,7 +568,7 @@ no_generation_memoises_nothing() ->
     after
         persistent_term:put(GenKey, Ref),
         beamtalk_class_derived_cache:invalidate(),
-        stop_class(Pid)
+        beamtalk_test_proc:stop(Pid)
     end.
 
 %%% ============================================================================
@@ -593,17 +593,7 @@ start_class(Name, Module, Superclass, Selectors) ->
             undefined -> Base;
             _ -> Base#{module => Module}
         end,
-    {ok, Pid} = beamtalk_object_class:start_link(Name, ClassInfo),
-    unlink(Pid),
-    Pid.
-
-stop_class(Pid) ->
-    try
-        gen_server:stop(Pid, normal, 5000)
-    catch
-        _:_ -> ok
-    end,
-    ok.
+    beamtalk_test_class:start(Name, ClassInfo).
 
 %% The calling process's tagged_class_dispatch/1 memo for Class (BT-4623).
 memo(Class) ->

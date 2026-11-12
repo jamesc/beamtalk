@@ -665,18 +665,6 @@ key_gone(Name) -> key_value(static_key(Name, class_testSelf)) =:= false.
 class_map_present(Tag) ->
     persistent_term:get(beamtalk_class_shadow_flags:static_calls_key(Tag), false) =/= false.
 
-%% The class monitor erases asynchronously, on its 'DOWN'.
-wait_until(Pred, 0) ->
-    ?assert(Pred());
-wait_until(Pred, N) ->
-    case Pred() of
-        true ->
-            ok;
-        false ->
-            timer:sleep(10),
-            wait_until(Pred, N - 1)
-    end.
-
 %% Hold `Tag`'s lock while an installer (whose unlocked pre-check passes) and
 %% `Writer` both block behind it, then release: whichever runs second, no
 %% static call key may be left.
@@ -1200,7 +1188,7 @@ static_call_target_test_() ->
             Pid = start_static_class('Bt4316Down', none, #{}),
             _ = warm('Bt4316Down', Pid),
             stop_static_class(Pid),
-            wait_until(fun() -> key_gone('Bt4316Down') end, 500)
+            beamtalk_test_wait:until(fun() -> key_gone('Bt4316Down') end, 500)
         end},
         {"a (re)starting class monitor erases every class's static call keys", fun() ->
             %% A class killed while no monitor ran sent no 'DOWN', so only the
@@ -1290,7 +1278,7 @@ static_call_target_test_() ->
                 OldKey = static_key('Bt4316Removed', class_testSelf),
                 _ = warm('Bt4316Removed', Old),
                 stop_static_class(Old),
-                wait_until(fun() -> key_gone('Bt4316Removed') end, 500),
+                beamtalk_test_wait:until(fun() -> key_gone('Bt4316Removed') end, 500),
                 with_static_class('Bt4316Reused', fun(New) ->
                     NewRef = warm('Bt4316Reused', New),
                     ?assertEqual('Bt4316Reused class', NewRef#beamtalk_object.class),

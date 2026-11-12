@@ -62,10 +62,6 @@ setup() ->
 cleanup({Peer, _PeerNode}) ->
     beamtalk_dist_test_helper:stop_peer(Peer).
 
--doc "A short, run-unique atom — repeated `just test` runs never collide on a stale name.".
-unique_name(Prefix) ->
-    list_to_atom(Prefix ++ "_" ++ integer_to_list(erlang:unique_integer([positive, monotonic]))).
-
 -doc "Spawn `ClassName` on `PeerNode` via `remote_spawn/4` — the `spawnOn:` runtime entry point.".
 spawn_remote(PeerNode, ClassName) ->
     {ok, Pid} = beamtalk_actor_remote:remote_spawn(PeerNode, ClassName, undefined, 'spawnOn:'),
@@ -185,7 +181,7 @@ cast_reaches_compiled_actor_over_wire(PeerNode) ->
 %%====================================================================
 
 remote_code_mismatch_undef_compiled(PeerNode) ->
-    ModName = unique_name("bt3613_undef"),
+    ModName = beamtalk_test_unique:atom("bt3613_undef"),
     Binary = beamtalk_dist_wirecheck_tests:compile_block_module_variant(ModName, "v1"),
     {module, ModName} = code:load_binary(ModName, atom_to_list(ModName) ++ ".erl", Binary),
     Fun = ModName:make_block(),
@@ -207,7 +203,7 @@ remote_code_mismatch_undef_compiled(PeerNode) ->
     end.
 
 remote_code_mismatch_badfun_compiled(PeerNode) ->
-    ModName = unique_name("bt3613_badfun"),
+    ModName = beamtalk_test_unique:atom("bt3613_badfun"),
     BinaryV1 = beamtalk_dist_wirecheck_tests:compile_block_module_variant(ModName, "v1"),
     BinaryV2 = beamtalk_dist_wirecheck_tests:compile_block_module_variant(ModName, "v2"),
     {module, ModName} = code:load_binary(ModName, atom_to_list(ModName) ++ ".erl", BinaryV1),

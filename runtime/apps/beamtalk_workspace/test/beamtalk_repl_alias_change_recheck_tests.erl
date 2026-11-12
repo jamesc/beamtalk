@@ -30,8 +30,6 @@ newly non-exhaustive.
 
 -include_lib("eunit/include/eunit.hrl").
 
-temp_dir() -> binary_to_list(element(2, beamtalk_file:'tempDirectory'())).
-
 %%====================================================================
 %% Integration fixture: real compiler port + alias_xref + workspace_meta +
 %% stores
@@ -176,7 +174,7 @@ live_alias_redefinition_invalidates_a_matchexhaustive_proof_test_() ->
                     %% the alias-xref index that trigger_alias_change/1
                     %% looks up by key, rather than sweeping every live class.
                     UserPath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("alias_recheck_user_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -260,7 +258,7 @@ live_alias_redefinition_to_same_expansion_does_not_produce_findings_test_() ->
                     ),
 
                     UserPath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("alias_recheck_user_same_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -317,7 +315,7 @@ live_alias_redefinition_back_to_sound_expansion_announces_clearing_test_() ->
                     ),
 
                     UserPath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("alias_recheck_user_fix_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -448,7 +446,7 @@ compile_method_patch_preserves_file_local_alias_dependency_test_() ->
                         "  heading: d :: AliasChangeMethodPatchFileLocalDirection => d\n"
                         "  hello => 42\n",
                     FilePath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("alias_recheck_method_patch_file_local_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -562,7 +560,7 @@ live_redefinition_of_a_deeply_transitive_alias_triggers_recheck_test_() ->
                     %% (all three chain names, per the full-transitive-walk
                     %% guarantee) land in beamtalk_alias_xref's index.
                     UserPath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("alias_recheck_deep_chain_user_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -668,7 +666,7 @@ protocol_definition_registers_alias_dependency_test_() ->
                             "  heading: d :: AliasChangeProtocolDirection -> Boolean\n"
                         >>,
                     ProtocolPath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("alias_recheck_protocol_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -737,7 +735,7 @@ protocol_definition_repl_inline_recompile_preserves_alias_dependency_test_() ->
                     %% protocol_definition_registers_alias_
                     %% dependency_test_ above).
                     ProtocolPath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("alias_recheck_protocol_clobber_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -892,7 +890,7 @@ class_definition_repl_inline_redefinition_preserves_file_local_alias_dependency_
                         "Object subclass: AliasChangeFileLocalUser\n"
                         "  heading: d :: AliasChangeFileLocalDirection => d\n",
                     FilePath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("alias_recheck_file_local_~p.bt", [
                             erlang:unique_integer([positive])
                         ])
@@ -950,7 +948,7 @@ protocol_definition_repl_inline_redefinition_preserves_file_local_alias_dependen
                         "Protocol define: AliasChangeProtocolFileLocalDirectional\n"
                         "  heading: d :: AliasChangeProtocolFileLocalDirection -> Boolean\n",
                     FilePath = filename:join(
-                        temp_dir(),
+                        beamtalk_test_fs:base_dir(),
                         io_lib:format("alias_recheck_protocol_file_local_~p.bt", [
                             erlang:unique_integer([positive])
                         ])

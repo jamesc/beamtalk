@@ -185,7 +185,7 @@ handle_cast_ignored_test_() ->
             ?_test(begin
                 {ok, Pid} = beamtalk_repl_shell:start_link(<<"test-cast-1">>),
                 gen_server:cast(Pid, some_message),
-                timer:sleep(20),
+                ok = beamtalk_test_wait:sync(Pid),
                 ?assert(is_process_alive(Pid)),
                 beamtalk_repl_shell:stop(Pid)
             end)
@@ -474,7 +474,7 @@ class_removed_drained_on_worker_crash_test_() ->
                 end),
                 %% Kill the fake worker — shell receives DOWN
                 exit(FakeWorkerPid, kill),
-                timer:sleep(50),
+                beamtalk_test_wait:dead(FakeWorkerPid),
                 %% Module must be removed from tracker
                 {ok, Tracker} = beamtalk_repl_shell:get_module_tracker(Pid),
                 ?assertNot(beamtalk_repl_modules:module_exists(DummyMod, Tracker)),
@@ -636,7 +636,7 @@ pending_mutations_discarded_on_crash_test_() ->
                     {SId, State2, {FakeWorkerPid, WorkerMonRef, {async, self()}}}
                 end),
                 exit(FakeWorkerPid, kill),
-                timer:sleep(50),
+                beamtalk_test_wait:dead(FakeWorkerPid),
                 {ok, Bindings} = beamtalk_repl_shell:get_bindings(Pid),
                 %% Mutation discarded: existing preserved, x NOT applied
                 ?assertEqual(#{existing => 5}, Bindings),
@@ -758,7 +758,7 @@ unload_module_in_use_returns_error_test_() ->
                     ?assertMatch({error, #beamtalk_error{kind = module_in_use}}, Result)
                 after
                     LoopPid ! stop,
-                    timer:sleep(50),
+                    beamtalk_test_wait:dead(LoopPid),
                     _ = code:soft_purge(DummyMod),
                     _ = code:delete(DummyMod),
                     _ = code:soft_purge(DummyMod),

@@ -40,10 +40,6 @@ setup() ->
 cleanup({Peer, _PeerNode}) ->
     beamtalk_dist_test_helper:stop_peer(Peer).
 
--doc "A short, run-unique atom, so repeated `just test` runs never collide on a stale name.".
-unique_name(Prefix) ->
-    list_to_atom(Prefix ++ "_" ++ integer_to_list(erlang:unique_integer([positive, monotonic]))).
-
 -doc """
 Register `'Counter'` -> `test_counter` in the target node's class metadata
 (ADR 0126 §3: "the class is resolved by name on the target node"), matching
@@ -108,7 +104,7 @@ anonymous_spawn_lands_on_target(PeerNode) ->
 
 named_spawn_and_lookup_round_trip(PeerNode) ->
     register_counter_class(PeerNode),
-    Name = unique_name("bt3599_named"),
+    Name = beamtalk_test_unique:atom("bt3599_named"),
     {ok, Pid} = beamtalk_actor_remote:remote_spawn(PeerNode, 'Counter', Name, 'spawnAs:on:'),
     ?assert(is_pid(Pid)),
     ?assertEqual(PeerNode, node(Pid)),
@@ -185,7 +181,7 @@ node_down_on_unreachable_node() ->
 class_not_found_for_unregistered_class(PeerNode) ->
     %% Deliberately never registered via register_counter_class/1 (or under
     %% any other name) on the peer.
-    UnknownClass = unique_name("BT3599NoSuchClass"),
+    UnknownClass = beamtalk_test_unique:atom("BT3599NoSuchClass"),
     ?assertMatch(
         {error, #beamtalk_error{kind = class_not_found, class = UnknownClass}},
         beamtalk_actor_remote:remote_spawn(PeerNode, UnknownClass, undefined, 'spawnOn:')
@@ -202,7 +198,7 @@ distinguishable state. A node-qualified ref must reach the peer's actor
 even though a same-named process also exists locally.
 """.
 registered_ref_is_node_qualified(PeerNode) ->
-    Name = unique_name("bt3599_qualified"),
+    Name = beamtalk_test_unique:atom("bt3599_qualified"),
     {ok, LocalPid} = test_counter:start(-999),
     {ok, RemotePid} = rpc:call(PeerNode, test_counter, start, [42]),
     true = erlang:register(Name, LocalPid),
@@ -235,7 +231,7 @@ registered_ref_is_node_qualified(PeerNode) ->
 
 all_registered_on_lists_target_node(PeerNode) ->
     register_counter_class(PeerNode),
-    Name = unique_name("bt3599_allreg"),
+    Name = beamtalk_test_unique:atom("bt3599_allreg"),
     {ok, Pid} = beamtalk_actor_remote:remote_spawn(PeerNode, 'Counter', Name, 'spawnAs:on:'),
     try
         {ok, List} = beamtalk_actor_remote:remote_all_registered(PeerNode),
