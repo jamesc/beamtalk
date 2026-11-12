@@ -2248,9 +2248,13 @@ package_of_project_no_segment_falls_back_test() ->
         beamtalk_repl_ops_browse:package_of(plain_project_mod, <<"project">>)
     ).
 
-package_of_module_extraction_test() ->
-    ?assertEqual(<<"http">>, beamtalk_repl_ops_browse:package_of_module('bt@http@Server')),
-    ?assertEqual(nil, beamtalk_repl_ops_browse:package_of_module(no_at_signs)).
+package_of_dependency_uses_module_package_test() ->
+    ?assertEqual(
+        <<"http">>, beamtalk_repl_ops_browse:package_of('bt@http@Server', <<"dependency">>)
+    ),
+    ?assertEqual(null, beamtalk_repl_ops_browse:package_of(no_at_signs, <<"dependency">>)),
+    %% A two-part bt@name module carries no package.
+    ?assertEqual(null, beamtalk_repl_ops_browse:package_of('bt@counter', <<"dependency">>)).
 
 %%====================================================================
 %% Package-based source_origin classification
