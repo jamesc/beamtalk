@@ -165,7 +165,8 @@ module 'self_send_open_class_side' ['new'/0, 'new'/1, 'dispatch'/3, 'dispatch'/4
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'constant_class_methods' => ~{'foo' => 1}~,
-      'defines_user_class_new1' => 'false'
+      'defines_user_class_new1' => 'false',
+      'defines_user_class_new0' => 'false'
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -204,7 +205,8 @@ module 'self_send_open_class_side' ['new'/0, 'new'/1, 'dispatch'/3, 'dispatch'/4
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'constant_class_methods' => ~{'foo' => 1}~,
-      'defines_user_class_new1' => 'false'
+      'defines_user_class_new1' => 'false',
+      'defines_user_class_new0' => 'false'
     }~
 
 'module_info'/0 = fun () ->

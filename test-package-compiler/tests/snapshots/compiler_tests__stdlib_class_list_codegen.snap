@@ -403,6 +403,7 @@ call 'erlang':'++'(Self, [_item@78|[]])
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
+      'defines_user_class_new0' => 'false',
       'overrides_collection_selector' => 'true'
     }~
         }~
@@ -442,6 +443,7 @@ call 'erlang':'++'(Self, [_item@78|[]])
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
+      'defines_user_class_new0' => 'false',
       'overrides_collection_selector' => 'true'
     }~
 

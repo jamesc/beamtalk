@@ -6261,7 +6261,19 @@ aDictionary`: an extension of `new:` on `Base class` answers it, exactly as a
 compiled `class new:` on `Base` would (BT-4588). `new` follows the same rule
 with one consequence: every class has its own synthesized `new`, and a class's
 own method is found before an ancestor's extension, so an extension of `new` on
-`Base class` answers `Base new` but not `Sub new`. One exception remains:
+`Base class` answers `Base new` but not `Sub new`. A compiled `class new` on
+`Base` is different: it is `Base`'s own constructor, so a subclass that defines
+no `new` inherits it, and `Sub new` runs it (BT-4479). `Announcer subclass:
+MyAnnouncer` then `MyAnnouncer new` therefore mints a working announcer carrying
+its `ref`, and `MyAnnouncer new class` is `MyAnnouncer`. A subclass that defines
+its own `class new` still wins; the root `new` of `Value` and `Actor` is not an
+inherited user constructor. Known gap: a class-side `self new` inside a class method still builds the
+receiving class's synthesized constructor rather than an inherited `class new`
+(`super new` does reach it). The compiler rejects `self new` only in an Object
+subclass's own class methods when it has no `new` of its own; an inherited
+factory (`Base class >> make => self new`, sent as `Sub make`) is not caught, so
+it skips the inherited `new` without a diagnostic. Name the class or override
+`new` on the subclass. One exception remains:
 `performLocally:withArguments:` applies compiled class methods only.
 
 ---

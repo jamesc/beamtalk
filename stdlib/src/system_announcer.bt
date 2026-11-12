@@ -33,6 +33,16 @@ sealed Announcer subclass: SystemAnnouncer
   class current -> SystemAnnouncer =>
     (Erlang beamtalk_announcements) systemAnnouncer
 
+  /// PROHIBITED on SystemAnnouncer — it is a singleton reached only through
+  /// `current`. It would otherwise inherit `Announcer class >> new` (BT-4479)
+  /// and mint a private-ref announcer that is not the system bus.
+  class sealed new -> Never =>
+    Exception
+      signalKind: #instantiation_error
+      class: #SystemAnnouncer
+      selector: #new
+      hint: "Use SystemAnnouncer current"
+
   // === Prohibited operations ===
 
   /// PROHIBITED on SystemAnnouncer — raises UnsupportedOperation.

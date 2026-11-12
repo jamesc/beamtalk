@@ -630,9 +630,12 @@ impl ClassHierarchy {
     /// process, so when the class is a stateless non-native `Value` whose
     /// constructors are all synthesized, sends to them compile (static) or
     /// dispatch (dynamic) to a direct module call in the caller:
-    /// - `new` needs no ancestor walk: the `{new, []}` handler calls the
-    ///   class's own `Module:new/0` unconditionally, so an ancestor's user
-    ///   `new` is shadowed identically in both paths.
+    /// - `new` is honoured from the chain too (BT-4479): a class with no
+    ///   `new` of its own whose ancestor defines a user class-side `new`
+    ///   (`Announcer subclass: MyAnnouncer`) must run that constructor, not
+    ///   its synthesized `new/0`, so the verdict is off while any ancestor
+    ///   [`Self::defines_user_class_new0`]. The run-time half is
+    ///   `beamtalk_class_metadata:chain_has_user_new0/1`.
     /// - `new:` dispatches through the chain at runtime
     ///   (`has_class_new_in_chain`), so any user `new:` in the class or its
     ///   ancestors disables the fast path — except `Value`'s own, which is
@@ -687,7 +690,7 @@ impl ClassHierarchy {
                     .iter()
                     .any(|m| m.selector.as_str() == selector)
         };
-        if !has_own("new") {
+        if !has_own("new") && !self.chain_has_user_new0(class_name) {
             result.new0 = true;
         }
         if !has_own("new:") && !self.chain_has_user_new_init(class_name) {
@@ -893,6 +896,22 @@ impl ClassHierarchy {
     /// Mirrors the runtime's `has_class_new_in_chain` depth cap (50);
     /// anything unknown fails closed so the `new:` fast path stays off.
     fn chain_has_user_new_init(&self, class_name: &str) -> bool {
+        self.ancestor_chain_has(class_name, true, |name| self.defines_user_class_new1(name))
+    }
+
+    /// The one ancestor walk behind [`Self::chain_has_user_new_init`] (`new:`,
+    /// fails closed) and [`Self::chain_has_user_new0`] (`new`, fails open):
+    /// whether `holds` is true of any ancestor of `class_name`, nearest first.
+    /// `unfinished` is the answer when the walk cannot finish: an unknown
+    /// ancestor, a cycle, or a chain deeper than the runtime's cap (50,
+    /// mirroring `has_class_new_in_chain`). A single copy keeps the cap and
+    /// the superclass step from drifting between the two rules.
+    fn ancestor_chain_has(
+        &self,
+        class_name: &str,
+        unfinished: bool,
+        holds: impl Fn(&str) -> bool,
+    ) -> bool {
         let mut current = self
             .classes
             .get(class_name)
@@ -901,14 +920,14 @@ impl ClassHierarchy {
         let mut depth = 0;
         while let Some(name) = current.as_ref() {
             if depth >= 50 || !visited.insert((*name).clone()) {
-                return true;
+                return unfinished;
             }
             depth += 1;
-            if self.defines_user_class_new1(name.as_str()) {
+            if holds(name.as_str()) {
                 return true;
             }
             let Some(info) = self.classes.get(name.as_str()) else {
-                return true;
+                return unfinished;
             };
             current.clone_from(&info.superclass);
         }
@@ -940,6 +959,50 @@ impl ClassHierarchy {
                 .class_methods
                 .iter()
                 .any(|m| m.selector.as_str() == "new:")
+    }
+
+    /// Whether any ancestor of the named class defines a class-side `new`
+    /// that is real user code ([`Self::defines_user_class_new0`], asked of
+    /// each ancestor) (BT-4479).
+    ///
+    /// The compile-time half of the `new` chain rule: it only ever keeps the
+    /// baked `direct_constructors` verdict off. The run-time half,
+    /// `beamtalk_class_metadata:chain_has_user_new0/1`, walks the same
+    /// per-class fact as each ancestor publishes it. Unlike the `new:` walk,
+    /// anything unknown (an unknown ancestor, a cycle, a chain deeper than
+    /// the runtime's cap) answers `false`: the absence of the fact means
+    /// "behave as before", so a class whose chain this compile cannot see
+    /// keeps its synthesized constructor.
+    #[must_use]
+    pub fn chain_has_user_new0(&self, class_name: &str) -> bool {
+        self.ancestor_chain_has(class_name, false, |name| self.defines_user_class_new0(name))
+    }
+
+    /// Whether the named class itself defines a class-side `new` that is real
+    /// user code (BT-4479): the one per-class rule behind the compile-time
+    /// chain walk ([`Self::chain_has_user_new0`]) and the fact baked into each
+    /// class's `__beamtalk_meta/0` as `defines_user_class_new0`.
+    ///
+    /// The root definitions do not count: `Value`'s
+    /// `class sealed new => @intrinsic basicNew` is the standard map
+    /// constructor, and `Actor`'s `class sealed new` only documents the
+    /// `instantiation_error` the runtime raises itself (both are
+    /// runtime-protected names, so no user class can shadow them). Counting
+    /// them would push every class onto the slow path. Unlike
+    /// [`Self::defines_user_class_new1`] an unknown class or an incomplete
+    /// surface answers `false`, not `true`: a missed `new` leaves today's
+    /// synthesized constructor, whereas a false positive would route a `new`
+    /// to an ancestor that has none.
+    #[must_use]
+    pub fn defines_user_class_new0(&self, class_name: &str) -> bool {
+        if matches!(class_name, "Value" | "Actor") {
+            return false;
+        }
+        self.classes.get(class_name).is_some_and(|info| {
+            info.class_methods
+                .iter()
+                .any(|m| m.selector.as_str() == "new")
+        })
     }
 
     /// Synthesize auto-generated slot methods from `ClassInfo` state fields.

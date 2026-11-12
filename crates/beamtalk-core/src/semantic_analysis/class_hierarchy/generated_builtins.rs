@@ -417,7 +417,7 @@ fn class_info_Announcer() -> ClassInfo {
                 MethodInfo { selector: "subscriptionCount".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Integer")), param_types: vec![], doc: Some("The number of live subscriptions on this announcer (ADR 0093 §7) — scoped\nto `self`. A cheap direct ETS read — the size of `subscriptions` without\nmaterialising the snapshot records.\n\n## Examples\n```beamtalk\nannouncer when: PriceChanged do: [:e | e printNl]\nannouncer subscriptionCount   // => 1\n```".into()), origin: None, primitive: None, constant_value: None },
             ],
             class_methods: vec![
-                MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Announcer")), param_types: vec![], doc: Some("Create a new Announcer handle (mints a fresh runtime ref via FFI).\n\n## Examples\n```beamtalk\na := Announcer new\na class   // => Announcer\n```".into()), origin: None, primitive: None, constant_value: None },
+                MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "Announcer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::SelfType), param_types: vec![], doc: Some("Create a new Announcer handle (mints a fresh runtime ref via FFI).\n\nInherited by subclasses (BT-4479): `Announcer subclass: MyAnnouncer`\nthen `MyAnnouncer new` runs this constructor with `self` = `MyAnnouncer`,\nso the handle carries the subclass name.\n\n## Examples\n```beamtalk\na := Announcer new\na class   // => Announcer\n```".into()), origin: None, primitive: None, constant_value: None },
             ],
             class_variables: vec![],
             type_params: vec![],
@@ -5042,6 +5042,7 @@ fn class_info_SystemAnnouncer() -> ClassInfo {
             ],
             class_methods: vec![
                 MethodInfo { selector: "current".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SystemAnnouncer".into(), is_sealed: false, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("SystemAnnouncer")), param_types: vec![], doc: Some("The singleton system announcer instance.\n\n## Examples\n```beamtalk\nSystemAnnouncer current class   // => SystemAnnouncer\n```".into()), origin: None, primitive: None, constant_value: None },
+                MethodInfo { selector: "new".into(), arity: 0, kind: MethodKind::Primary, defined_in: "SystemAnnouncer".into(), is_sealed: true, is_internal: false, spawns_block: false, return_type: Some(DeclaredType::simple("Never")), param_types: vec![], doc: Some("PROHIBITED on SystemAnnouncer — it is a singleton reached only through\n`current`. It would otherwise inherit `Announcer class >> new` (BT-4479)\nand mint a private-ref announcer that is not the system bus.".into()), origin: None, primitive: None, constant_value: None },
             ],
             class_variables: vec![],
             type_params: vec![],

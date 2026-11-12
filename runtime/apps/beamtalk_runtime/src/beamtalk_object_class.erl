@@ -1513,25 +1513,36 @@ handle_call(
             [] -> 'new';
             _ -> 'new:'
         end,
-    case
+    %%
+    %% BT-4479: `new` honours an inherited user class-side `new` the same way
+    %% (`Announcer subclass: MyAnnouncer`, `MyAnnouncer new`): when an ancestor
+    %% published `defines_user_class_new0` and this class has no `new` of its
+    %% own, the send goes through class dispatch to that ancestor's `class new`
+    %% instead of the class's synthesized `new/0`. Fail-open: should dispatch
+    %% find no `new` (a stale fact), fall back to the constructor below.
+    InheritedNew = Args =:= [] andalso beamtalk_class_metadata:inherits_user_class_new(ClassName),
+    ShadowedOrChain =
         constructor_shadowed(ClassName, Selector) orelse
-            (Args =/= [] andalso has_class_new_in_chain(ClassName, Module))
-    of
-        true ->
-            case
+            (Args =/= [] andalso has_class_new_in_chain(ClassName, Module)),
+    DispatchResult =
+        case ShadowedOrChain orelse InheritedNew of
+            true ->
                 beamtalk_class_dispatch:handle_class_method_call(
                     Selector, Args, ClassName, Module, ClassMethods, ClassVars
-                )
-            of
-                {reply, Result, NewClassVars} ->
-                    %% Keep the live snapshot in sync with this mutation.
-                    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
-                    {reply, Result, State#class_state{class_state = NewClassVars}};
-                {error, not_found} ->
-                    Err = beamtalk_error:new(does_not_understand, ClassName, Selector),
-                    {reply, {error, Err}, State}
-            end;
-        false ->
+                );
+            false ->
+                skip
+        end,
+    case DispatchResult of
+        {reply, Result, NewClassVars} ->
+            %% Keep the live snapshot in sync with this mutation.
+            beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
+            {reply, Result, State#class_state{class_state = NewClassVars}};
+        {error, not_found} when not InheritedNew orelse ShadowedOrChain ->
+            Err = beamtalk_error:new(does_not_understand, ClassName, Selector),
+            {reply, {error, Err}, State};
+        _ ->
+            %% `skip`, or an inherited-`new` fact with no `new` to run.
             case
                 beamtalk_class_instantiation:handle_new(
                     Args,
@@ -1540,8 +1551,8 @@ handle_call(
                     IsConstructible0
                 )
             of
-                {ok, Result, IsConstructible} ->
-                    {reply, {ok, Result}, State#class_state{is_constructible = IsConstructible}};
+                {ok, NewResult, IsConstructible} ->
+                    {reply, {ok, NewResult}, State#class_state{is_constructible = IsConstructible}};
                 {error, Error, IsConstructible} ->
                     {reply, {error, Error}, State#class_state{is_constructible = IsConstructible}}
             end
@@ -1603,6 +1614,13 @@ handle_call(
                 case beamtalk_class_metadata:lookup_defines_user_class_new1(OldName) of
                     unknown -> undefined;
                     Defines -> Defines
+                end
+            ),
+            beamtalk_class_metadata:put_defines_user_class_new0(
+                NewName,
+                case beamtalk_class_metadata:lookup_defines_user_class_new0(OldName) of
+                    unknown -> undefined;
+                    DefinesNew0 -> DefinesNew0
                 end
             ),
             %% BT-4299: the class-variable fact and process-bound list move too.
@@ -2838,7 +2856,8 @@ without the key (dynamic classes, older modules) clears the set, so a reload
 that makes a class ineligible takes effect immediately. Only `new`/`new:`
 atoms are kept; anything else in the list is dropped defensively.
 
-Also publishes the class's own `defines_user_class_new1` fact (BT-4409),
+Also publishes the class's own `defines_user_class_new0` (BT-4479) and
+`defines_user_class_new1` facts (BT-4409),
 which descendants' dynamic `new:` reads through
 `beamtalk_class_metadata:chain_has_user_new1/1`; Meta without it stores
 `undefined` (unknown), so the chain walk fails closed.
@@ -2856,6 +2875,13 @@ sync_direct_constructors(ClassName, Meta) ->
             _ -> undefined
         end,
     beamtalk_class_metadata:put_defines_user_class_new1(ClassName, DefinesNew1),
+    %% BT-4479: the unary counterpart; absent reads as unknown (fail-open).
+    DefinesNew0 =
+        case maps:get(defines_user_class_new0, Meta, undefined) of
+            B0 when is_boolean(B0) -> B0;
+            _ -> undefined
+        end,
+    beamtalk_class_metadata:put_defines_user_class_new0(ClassName, DefinesNew0),
     beamtalk_class_metadata:put_direct_constructors(ClassName, Ctors).
 
 -doc """

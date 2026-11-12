@@ -205,7 +205,8 @@ Self, 'set_theoretic_operators', #{#<98>(8,1,'integer',['unsigned'|['big']]),#<1
       'class_method_info' => ~{}~,
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
-      'defines_user_class_new1' => 'false'
+      'defines_user_class_new1' => 'false',
+      'defines_user_class_new0' => 'false'
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -243,7 +244,8 @@ Self, 'set_theoretic_operators', #{#<98>(8,1,'integer',['unsigned'|['big']]),#<1
       'class_method_info' => ~{}~,
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
-      'defines_user_class_new1' => 'false'
+      'defines_user_class_new1' => 'false',
+      'defines_user_class_new0' => 'false'
     }~
 
 'module_info'/0 = fun () ->

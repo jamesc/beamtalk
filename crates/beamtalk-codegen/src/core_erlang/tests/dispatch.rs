@@ -4976,6 +4976,23 @@ fn test_meta_bakes_defines_user_class_new1() {
     super::assert_compiles_through_erlc("test", &plain);
 }
 
+/// BT-4479: every class bakes its own `defines_user_class_new0` fact (the
+/// one `ClassHierarchy::defines_user_class_new0` rule): false for a plain
+/// class, true for a class defining a class-side `new`.
+#[test]
+fn test_meta_bakes_defines_user_class_new0() {
+    let plain = codegen_source("Value subclass: Pt\n  field: x = 0\n");
+    assert!(
+        plain.contains("'defines_user_class_new0' => 'false'"),
+        "a class without a user `new` bakes false. Got:\n{plain}"
+    );
+    let custom = codegen_source("Object subclass: Custom\n\n  class new => 1\n");
+    assert!(
+        custom.contains("'defines_user_class_new0' => 'true'"),
+        "a class with a user class-side `new` bakes true. Got:\n{custom}"
+    );
+}
+
 #[test]
 fn test_value_with_custom_new_omits_it_from_baked_constructors() {
     // fail-closed: a user-defined class-side `new` removes only
