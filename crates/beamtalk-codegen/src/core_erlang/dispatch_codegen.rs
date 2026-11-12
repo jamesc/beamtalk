@@ -1460,7 +1460,9 @@ impl CoreErlangGenerator {
         // once as a nullary fun and have every miss arm apply it.
         let miss_fun = (!others.is_empty()).then(|| self.fresh_temp_var("TUnionMiss"));
         let mut chain = match &miss_fun {
-            Some(name) => docvec!["apply ", leaf::var(name.clone()), "()"],
+            Some(name) => {
+                self.annotate_current_send_call(docvec!["apply ", leaf::var(name.clone()), "()"])
+            }
             None => fallback_doc.clone(),
         };
         if !tagged.is_empty() {
