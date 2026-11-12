@@ -215,15 +215,22 @@ build-rust-release:
 check-release-build:
     #!/usr/bin/env bash
     set -euo pipefail
-    # 0. The commands that actually produce the shipped binaries must not pass
-    #    --all-targets (it activates dev-dependencies and unifies their `test`
-    #    features into the libraries). This recipe builds its own way, so scan
-    #    the real release build commands. `[ ]` keeps this line from matching
-    #    itself.
-    if grep -nE 'cargo[ ]build[^#]*(--all-targets[^#]*--release|--release[^#]*--all-targets)' Justfile .github/workflows/*.yml scripts/ci/*.sh; then
-        echo "❌ a release build passes --all-targets (see above); it unifies dev-dependency 'test' features into the shipped binaries"
-        exit 1
-    fi
+    # 0. The commands that actually produce the shipped binaries must not
+    #    build the test targets (--all-targets, --tests, --benches, --examples):
+    #    that activates dev-dependencies and unifies their `test` features into
+    #    the libraries. This recipe builds its own way, so scan the real release
+    #    build commands. Best-effort and line-based (a `\`-continued command
+    #    is not seen); steps 1-2 below check this recipe's own build. `[ ]`
+    #    keeps this line from matching itself; grep exit 1 is "no match", but
+    #    any other non-zero is a failed scan and must not read as "no leak".
+    dev_flags='--(all-targets|tests?|benches|bench|examples?)'
+    rc=0
+    grep -nE "cargo[ ]build[^#]*(${dev_flags}[^#]*--release|--release[^#]*${dev_flags})" Justfile .github/workflows/*.yml scripts/ci/*.sh || rc=$?
+    case $rc in
+        0) echo "❌ a release build builds test targets (see above); that unifies dev-dependency 'test' features into the shipped binaries"; exit 1 ;;
+        1) ;;
+        *) echo "❌ could not scan the release build commands (grep exit $rc)"; exit 1 ;;
+    esac
     echo "🔍 Checking the release workspace build (warnings denied)..."
     dir=target/release-check
     RUSTFLAGS="-D warnings" cargo build --release --workspace --locked --quiet --target-dir "$dir"
