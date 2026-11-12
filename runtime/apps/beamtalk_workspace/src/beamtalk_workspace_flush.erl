@@ -260,7 +260,7 @@ between renames of the same class.
 compiled BEAM module embeds its own source path as a `beamtalk_source`
 module attribute at compile time (`beamtalk_reflection:
 source_file_from_module/1`; `Behaviour>>sourceFile`) — this is exactly what
-`beamtalk_behaviour_intrinsics:classRenameTo/2`'s *next* invocation on this
+`beamtalk_class_refactor:classRenameTo/2`'s *next* invocation on this
 same class reads to compute its own `old_path`. Flush moves the file on
 disk but never recompiled the class, so that attribute went stale the
 moment the move committed: a second `renameTo:` on the same class, flushed

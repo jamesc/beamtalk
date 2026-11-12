@@ -357,7 +357,7 @@ extSendersFun := [:a :s | s]
 // => _
 
 extSendersSource := "describe => self btTwoTwoOneSixSrcSenderMarker"
-// => _
+// => "describe => self btTwoTwoOneSixSrcSenderMarker"
 
 Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneSixSrcSenderExt fun: extSendersFun owner: #test source: extSendersSource
 // => Result ok: nil
@@ -400,7 +400,7 @@ extMetaFun := [:a :s | s]
 // => _
 
 extMetaSource := "describe => self btTwoTwoOneSixMetaSenderMarker"
-// => _
+// => "describe => self btTwoTwoOneSixMetaSenderMarker"
 
 Erlang beamtalk_extensions register: #'Integer class' selector: #btTwoTwoOneSixMetaSenderExt fun: extMetaFun owner: #test source: extMetaSource
 // => Result ok: nil
@@ -488,7 +488,7 @@ extRefsFun := [:a :s | s]
 // => _
 
 extRefsSource := "asInt => Integer new"
-// => _
+// => "asInt => Integer new"
 
 Erlang beamtalk_extensions register: #String selector: #btTwoTwoOneSixSrcRefExt fun: extRefsFun owner: #test source: extRefsSource
 // => Result ok: nil
@@ -622,7 +622,7 @@ extEmitFun := [:a :s | s]
 // => _
 
 extEmitSource := "emitExt => announcer announce: (AnnounceEventB new)"
-// => _
+// => "emitExt => announcer announce: (AnnounceEventB new)"
 
 Erlang beamtalk_extensions register: #AnnounceEmitter selector: #emitExt fun: extEmitFun owner: #test source: extEmitSource
 // => Result ok: nil
@@ -846,7 +846,7 @@ negatedMatches := SystemNavigation methodsMatching: (Regex from: "self negated")
 // empty list. The pattern is split across two literals so the script file
 // itself doesn't trigger a self-match.
 absent := "xyzzyAbsentNeed" ++ "leZZ1n0Wh3re"
-// => _
+// => "xyzzyAbsentNeedleZZ1n0Wh3re"
 
 SystemNavigation methodsMatching: (Regex from: absent) unwrap
 // => []
@@ -873,7 +873,7 @@ extMatchFun := [:a :s | s]
 // => _
 
 extMatchSource := "xyzzy => 42 // bt-two-two-one-six-method-marker"
-// => _
+// => "xyzzy => 42 // bt-two-two-one-six-method-marker"
 
 Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneSixMatchExt fun: extMatchFun owner: #test source: extMatchSource
 // => Result ok: nil
@@ -1268,7 +1268,7 @@ extFfiFun := [:a :s | s]
 // => _
 
 extFfiSource := "describe: xs => (Erlang lists) reverse: xs"
-// => _
+// => "describe: xs => (Erlang lists) reverse: xs"
 
 Erlang beamtalk_extensions register: #Integer selector: #btTwoTwoOneOneFfiExt fun: extFfiFun owner: #test source: extFfiSource
 // => Result ok: nil

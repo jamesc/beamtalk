@@ -13,7 +13,7 @@ on having, with no invalidation hook of its own.
 fresh from `beamtalk_runtime_api:all_classes/0` (the live class registry)
 on every call — there is no cross-request cache for a rename to go stale
 in. This test renames a live class via
-`beamtalk_behaviour_intrinsics:classRenameTo/2` (ADR 0114) and
+`beamtalk_class_refactor:classRenameTo/2` (ADR 0114) and
 asserts the map `build_class_module_index/0` returns immediately afterward
 already reflects the rename: the OLD name is gone, the NEW name is
 present. See `crates/beamtalk-core/src/semantic_analysis/
@@ -74,7 +74,7 @@ rename_is_visible_in_class_module_index_on_next_call_test_() ->
         fun rename_is_visible_in_class_module_index_on_next_call/1}.
 
 rename_is_visible_in_class_module_index_on_next_call(ClassObj) ->
-    _ = beamtalk_behaviour_intrinsics:classRenameTo(ClassObj, 'Bt3443RenameFreshnessTarget'),
+    _ = beamtalk_class_refactor:classRenameTo(ClassObj, 'Bt3443RenameFreshnessTarget'),
     Index = beamtalk_repl_compiler:build_class_module_index(),
     [
         %% No stale cache to invalidate: this call rebuilt the map fresh

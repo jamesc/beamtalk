@@ -243,7 +243,7 @@ flushability": "Allowed, `flushable: false` (`\"dynamic\"`)") — a dynamic
 class has no source for the shared `beamtalk_repl_loader:rewrite_sites/2`
 mechanism to recompile, so nothing ever creates a fresh `NewName`-registered
 process the way an ordinary compiled class's rename does (see
-`beamtalk_behaviour_intrinsics:classRenameTo/2`'s doc). This is the one case
+`beamtalk_class_refactor:classRenameTo/2`'s doc). This is the one case
 where the SAME class-object process answers under a new name, rather than
 being retired in favour of a freshly-installed one.
 
@@ -512,15 +512,11 @@ function correctly falls back to `module_name/1` and preserves the noproc/timeou
 module_name_safe(ClassPid) when ClassPid =:= self() ->
     get(beamtalk_class_module);
 module_name_safe(ClassPid) ->
-    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
-        {ok, ClassName} ->
-            case beamtalk_class_metadata:lookup_module(ClassName) of
-                {ok, Module} -> Module;
-                not_found -> module_name(ClassPid)
-            end;
-        not_found ->
-            module_name(ClassPid)
-    end.
+    read_published(
+        ClassPid,
+        fun beamtalk_class_metadata:lookup_module/1,
+        fun() -> module_name(ClassPid) end
+    ).
 
 -doc """
 Get the superclass, preferring a deadlock-safe metadata lookup.
@@ -542,15 +538,11 @@ Prefer this function at any reflection/hierarchy-walk call site instead.
 superclass_safe(ClassPid) when ClassPid =:= self() ->
     get(beamtalk_class_superclass);
 superclass_safe(ClassPid) ->
-    case beamtalk_class_registry:class_name_for_pid(ClassPid) of
-        {ok, ClassName} ->
-            case beamtalk_class_metadata:lookup_superclass(ClassName) of
-                {ok, Super} -> Super;
-                not_found -> superclass(ClassPid)
-            end;
-        not_found ->
-            superclass(ClassPid)
-    end.
+    read_published(
+        ClassPid,
+        fun beamtalk_class_metadata:lookup_superclass/1,
+        fun() -> superclass(ClassPid) end
+    ).
 
 -doc """
 Local (non-inherited) instance-method selectors, preferring a message-free read.
@@ -569,15 +561,11 @@ a class that has not published yet.
 """.
 -spec instance_methods_safe(pid()) -> [selector()].
 instance_methods_safe(ClassPid) ->
-    case reflection_class_name(ClassPid) of
-        {ok, ClassName} ->
-            case beamtalk_class_metadata:lookup_instance_methods(ClassName) of
-                {ok, Selectors} -> Selectors;
-                not_found -> methods(ClassPid)
-            end;
-        not_found ->
-            methods(ClassPid)
-    end.
+    read_published(
+        ClassPid,
+        fun beamtalk_class_metadata:lookup_instance_methods/1,
+        fun() -> methods(ClassPid) end
+    ).
 
 -doc """
 Own declared instance variables (not inherited), preferring a message-free read.
@@ -587,15 +575,11 @@ Same contract and fallback as `instance_methods_safe/1`, for
 """.
 -spec instance_variables_safe(pid()) -> [atom()].
 instance_variables_safe(ClassPid) ->
-    case reflection_class_name(ClassPid) of
-        {ok, ClassName} ->
-            case beamtalk_class_metadata:lookup_instance_variables(ClassName) of
-                {ok, Fields} -> Fields;
-                not_found -> instance_variables(ClassPid)
-            end;
-        not_found ->
-            instance_variables(ClassPid)
-    end.
+    read_published(
+        ClassPid,
+        fun beamtalk_class_metadata:lookup_instance_variables/1,
+        fun() -> instance_variables(ClassPid) end
+    ).
 
 -doc """
 Local (non-inherited) class-side method selectors, preferring a message-free read.
@@ -608,15 +592,16 @@ under the same conditions as `instance_methods_safe/1`.
 """.
 -spec local_class_method_selectors_safe(pid()) -> [selector()].
 local_class_method_selectors_safe(ClassPid) ->
-    case reflection_class_name(ClassPid) of
-        {ok, ClassName} ->
+    read_published(
+        ClassPid,
+        fun(ClassName) ->
             case beamtalk_class_metadata:lookup_methods(ClassName) of
-                {ok, _Module, Selectors} -> Selectors;
-                not_found -> local_class_methods(ClassPid)
-            end;
-        not_found ->
-            local_class_methods(ClassPid)
-    end.
+                {ok, _Module, Selectors} -> {ok, Selectors};
+                not_found -> not_found
+            end
+        end,
+        fun() -> local_class_methods(ClassPid) end
+    ).
 
 -doc """
 Local instance methods as `selector => MethodInfo`, preferring a message-free read.
@@ -627,16 +612,25 @@ same conditions as `instance_methods_safe/1`.
 """.
 -spec local_instance_method_infos_safe(pid()) -> #{selector() => map()}.
 local_instance_method_infos_safe(ClassPid) ->
-    case published_class_name(ClassPid) of
-        {ok, ClassName} ->
-            maps:map(
-                fun(_Sel, #{info := Info}) -> Info end,
-                beamtalk_class_metadata:lookup_method_records(ClassName, instance)
-            );
-        not_found ->
+    read_published(
+        ClassPid,
+        fun(ClassName) ->
+            case beamtalk_class_metadata:lookup_instance_methods(ClassName) of
+                {ok, _} ->
+                    {ok,
+                        maps:map(
+                            fun(_Sel, #{info := Info}) -> Info end,
+                            beamtalk_class_metadata:lookup_method_records(ClassName, instance)
+                        )};
+                not_found ->
+                    not_found
+            end
+        end,
+        fun() ->
             {ok, InstanceMethods} = gen_server:call(ClassPid, get_instance_methods),
             InstanceMethods
-    end.
+        end
+    ).
 
 -doc """
 Resolve `Selector` to a `CompiledMethod` map on `ClassPid`'s own method table
@@ -662,6 +656,28 @@ compiled_method_safe(ClassPid, Side, Selector) ->
                     class -> {class_method, Selector}
                 end,
             gen_server:call(ClassPid, Msg)
+    end.
+
+%% The one shape shared by the `*_safe` accessors: resolve `ClassPid` to its class
+%% name through the node-local reverse index (no message; `self()` reads the
+%% process dictionary), then `Lookup(ClassName)` in the published metadata. A miss
+%% at either step runs `Fallback()`, the blocking `gen_server:call` the accessor
+%% exists to avoid, so a remote pid or an unpublished class behaves as before.
+-spec read_published(
+    pid(),
+    fun((class_name()) -> {ok, Value} | not_found),
+    fun(() -> Value)
+) -> Value when
+    Value :: term().
+read_published(ClassPid, Lookup, Fallback) ->
+    case reflection_class_name(ClassPid) of
+        {ok, ClassName} ->
+            case Lookup(ClassName) of
+                {ok, Value} -> Value;
+                not_found -> Fallback()
+            end;
+        not_found ->
+            Fallback()
     end.
 
 %% A class name for a pid whose reflection state is in ETS, else `not_found`.
@@ -1126,37 +1142,11 @@ class_flag(ClassPid, Flag, CallMsg) ->
 %%====================================================================
 
 init({ClassName, ClassInfo}) ->
-    beamtalk_class_registry:ensure_pg_started(),
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
-    beamtalk_class_registry:ensure_methods_table(),
-    beamtalk_class_registry:ensure_pid_table(),
-    beamtalk_class_registry:ensure_loaded_classes_table(),
-    beamtalk_class_registry:ensure_backing_module_index_table(),
-    beamtalk_class_registry:ensure_class_state_table(),
-    ok = pg:join(beamtalk_classes, self()),
-
+    ok = join_class_registry(),
     Superclass = maps:get(superclass, ClassInfo, none),
     Module = maps:get(module, ClassInfo, ClassName),
-
-    %% ADR 0050 Phase 5: Use meta from ClassInfo when available (set by the compiler
-    %% in BuilderState.meta). During on_load, erlang:function_exported/3 returns false,
-    %% making Module:'__beamtalk_meta'() unavailable via read_meta. The meta map literal
-    %% in BuilderState provides the same data without requiring a function call.
-    %% Falls back to read_meta for hot reload (apply_class_info) and dynamic classes.
-    Meta =
-        case maps:get(meta, ClassInfo, undefined) of
-            undefined -> read_meta(Module);
-            M when is_map(M) -> M
-        end,
+    Meta = class_meta(Module, ClassInfo),
     IsAbstract = maps:get(is_abstract, Meta, maps:get(is_abstract, ClassInfo, false)),
-    %% ADR 0071 Phase 5: Read visibility from meta (the codegen emits 'visibility' => public|internal).
-    %% Also support 'is_internal' boolean for direct ClassInfo usage.
-    IsInternal =
-        case maps:get(visibility, Meta, maps:get(visibility, ClassInfo, public)) of
-            internal -> true;
-            _ -> maps:get(is_internal, Meta, maps:get(is_internal, ClassInfo, false))
-        end,
     {InstanceMethods, MethodReturnTypes} = meta_to_methods(
         maps:get(method_info, Meta, undefined),
         maps:get(instance_methods, ClassInfo, #{})
@@ -1165,85 +1155,9 @@ init({ClassName, ClassInfo}) ->
         maps:get(class_method_info, Meta, undefined),
         maps:get(class_methods, ClassInfo, #{})
     ),
-
-    %% Store class metadata in process dictionary so class_send can
-    %% bypass gen_server for self-calls (new/spawn from within class methods).
-    put(beamtalk_class_name, ClassName),
-    %% One unified metadata row carries hierarchy + module +
-    %% class-method selectors, written together with the matching PD caches by
-    %% sync_identity/6. The module name enables deadlock-free lookup during
-    %% supervisor init; the selector set lets the inherited
-    %% class-method chain walk in beamtalk_class_dispatch avoid gen_server hops.
-    %% ADR 0109 amendment: is_abstract rides along so
-    %% instantiation intrinsics can look it up by class name too, without a
-    %% gen_server hop.
-    sync_identity(ClassName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create),
-    sync_direct_constructors(ClassName, Meta),
-    sync_constant_class_methods(ClassName, Meta),
-    sync_caller_safe_primitives(ClassName, Meta),
-    sync_class_process_facts(ClassName, Meta, maps:get(class_state, ClassInfo, #{})),
-
-    %% Clear any runtime class-method funs left behind by a crash of the
-    %% previous incarnation of this class process — a crash keeps the class's
-    %% metadata (an untrappable kill skips terminate/2, and terminate/2 keeps
-    %% it for a callback exception; see module_name_safe/1's doc), so the funs
-    %% table rows from before the crash can otherwise survive into the
-    %% restarted process even though sync_identity/6 above just created a
-    %% fresh row with the gate off. Mirrors the reload path in apply_class_info/2. A no-op for a class
-    %% that never crashed (nothing to clear).
-    %% A module-less (ClassBuilder) class never reaches here after a crash:
-    %% `beamtalk_class_registry:restart_class/1` removes it instead (BT-4646),
-    %% so this clear can no longer drop the funs of a class being restarted.
-    beamtalk_class_metadata:delete_class_method_funs(ClassName),
-
-    %% ADR 0084: Seed the runtime class-method fun retrieval store for
-    %% any builder-supplied class methods that arrived as funs (#{block, arity}).
-    %% Compile-time-only classes seed nothing and keep the gate flag false, so
-    %% their dispatch never reads the funs table.
-    seed_runtime_class_methods(ClassName, ClassMethods),
-
-    %% Cache field defaults in the process dictionary so the `self new`
-    %% self-instantiation path (which runs inside this gen_server) can build a
-    %% generic instance for a module-less class without a gen_server:call to self.
-    FieldDefaults = maps:get(field_defaults, ClassInfo, #{}),
-    put(beamtalk_class_field_defaults, FieldDefaults),
-    %% Cache the local instance-method map so fun-backed instance
-    %% dispatch that happens *inside* this gen_server (e.g. a class method does
-    %% `Inst := self new` then `Inst someMethod`) can resolve the block fun
-    %% without a deadlocking `gen_server:call(self(), ...)`. The cache is the
-    %% local (non-inherited) methods only; inherited methods live in ancestor
-    %% processes and are reachable without deadlock. Kept in sync by the
-    %% {put_method, ...} handler so hot-patched methods stay visible to
-    %% self-dispatch.
-    put(beamtalk_class_instance_methods, InstanceMethods),
-
-    %% Record pid→classname mapping for crash recovery.
-    %% This entry survives process death, allowing class_send to identify
-    %% which class a dead pid belonged to and attempt auto-restart.
-    beamtalk_class_registry:record_class_pid(self(), ClassName),
-
-    %% Record this class in the fast loaded-class name index so the
-    %% ADR 0087 xref miss-policy can compute the loaded-class set with one ETS
-    %% read instead of an O(loaded-classes) gen_server walk. Mirrors the
-    %% pg:join above and the forget_loaded_class in terminate/1.
-    beamtalk_class_registry:record_loaded_class(ClassName, self()),
-
-    %% Record this class's native backing module (ADR 0056), if any,
-    %% in the reverse index so the LiveView "Callers" op on a native module
-    %% resolves its delegating classes in O(1) instead of scanning every
-    %% loaded class. Guarded/forgotten the same way at shutdown in terminate/2.
-    beamtalk_class_registry:record_backing_module_entry(ClassName, Meta, self()),
-
-    %% ADR 0050 Phase 3: Notify compiler server of this class registration.
-    %% Use Meta map availability (not function_exported, which returns false
-    %% during on_load).
-    case Meta of
-        CompilerMeta when is_map(CompilerMeta), map_size(CompilerMeta) > 0 ->
-            notify_compiler_server_register(ClassName, CompilerMeta);
-        _ ->
-            ok
-    end,
-
+    publish_init_identity(ClassName, Module, Superclass, IsAbstract, ClassMethods, Meta, ClassInfo),
+    FieldDefaults = cache_self_dispatch_state(ClassInfo, InstanceMethods),
+    register_class_indexes(ClassName, Meta),
     %% is_constructible may be set by the compiler via ClassBuilder.
     %% If not set (undefined), it will be computed lazily on first new call.
     %% ADR 0032 Phase 1: No flattened method tables — dispatch walks the chain directly.
@@ -1276,17 +1190,147 @@ init({ClassName, ClassInfo}) ->
         doc = maps:get(doc, ClassInfo, none),
         method_docs = maps:get(method_docs, ClassInfo, #{}),
         class_method_docs = maps:get(class_method_docs, ClassInfo, #{}),
-        is_internal = IsInternal,
+        is_internal = init_is_internal(Meta, ClassInfo),
         shape_version = maps:get(shape_version, Meta, maps:get(shape_version, ClassInfo, 1))
     },
+    publish_init_state(State, ClassInfo, Meta),
+    {ok, State}.
 
+%% Create the shared registry tables and join the class pg group.
+-spec join_class_registry() -> ok.
+join_class_registry() ->
+    beamtalk_class_registry:ensure_pg_started(),
+    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_registry:ensure_methods_table(),
+    beamtalk_class_registry:ensure_pid_table(),
+    beamtalk_class_registry:ensure_loaded_classes_table(),
+    beamtalk_class_registry:ensure_backing_module_index_table(),
+    beamtalk_class_registry:ensure_class_state_table(),
+    ok = pg:join(beamtalk_classes, self()).
+
+%% The class's `__beamtalk_meta/0` map, preferring the one the compiler baked into
+%% `ClassInfo` (shared by init/1 and apply_class_info/2).
+%% ADR 0050 Phase 5: during on_load, erlang:function_exported/3 returns false,
+%% making Module:'__beamtalk_meta'() unavailable via read_meta/1; the meta map
+%% literal in BuilderState provides the same data without a function call.
+%% Falls back to read_meta/1 for hot reload outside on_load and dynamic classes.
+-spec class_meta(atom(), map()) -> map().
+class_meta(Module, ClassInfo) ->
+    case maps:get(meta, ClassInfo, undefined) of
+        undefined -> read_meta(Module);
+        M when is_map(M) -> M
+    end.
+
+%% ADR 0071 Phase 5: Read visibility from meta (the codegen emits 'visibility' => public|internal).
+%% Also support 'is_internal' boolean for direct ClassInfo usage.
+-spec init_is_internal(map(), map()) -> boolean().
+init_is_internal(Meta, ClassInfo) ->
+    case maps:get(visibility, Meta, maps:get(visibility, ClassInfo, public)) of
+        internal -> true;
+        _ -> maps:get(is_internal, Meta, maps:get(is_internal, ClassInfo, false))
+    end.
+
+%% Write the class's identity and the meta-derived facts to the process dictionary
+%% and the unified metadata row (init/1's first publication step).
+-spec publish_init_identity(
+    class_name(), atom(), class_name() | none, boolean(), map(), map(), map()
+) -> ok.
+publish_init_identity(ClassName, Module, Superclass, IsAbstract, ClassMethods, Meta, ClassInfo) ->
+    %% Store class metadata in process dictionary so class_send can
+    %% bypass gen_server for self-calls (new/spawn from within class methods).
+    put(beamtalk_class_name, ClassName),
+    %% One unified metadata row carries hierarchy + module +
+    %% class-method selectors, written together with the matching PD caches by
+    %% sync_identity/6. The module name enables deadlock-free lookup during
+    %% supervisor init; the selector set lets the inherited
+    %% class-method chain walk in beamtalk_class_dispatch avoid gen_server hops.
+    %% ADR 0109 amendment: is_abstract rides along so
+    %% instantiation intrinsics can look it up by class name too, without a
+    %% gen_server hop.
+    beamtalk_class_publish:sync_identity(
+        ClassName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create
+    ),
+    beamtalk_class_publish:sync_direct_constructors(ClassName, Meta),
+    beamtalk_class_publish:sync_constant_class_methods(ClassName, Meta),
+    beamtalk_class_publish:sync_caller_safe_primitives(ClassName, Meta),
+    beamtalk_class_publish:sync_class_process_facts(
+        ClassName, Meta, maps:get(class_state, ClassInfo, #{})
+    ),
+    %% Clear any runtime class-method funs left behind by a crash of the
+    %% previous incarnation of this class process — a crash keeps the class's
+    %% metadata (an untrappable kill skips terminate/2, and terminate/2 keeps
+    %% it for a callback exception; see module_name_safe/1's doc), so the funs
+    %% table rows from before the crash can otherwise survive into the
+    %% restarted process even though sync_identity/6 above just created a
+    %% fresh row with the gate off. Mirrors the reload path in apply_class_info/2. A no-op for a class
+    %% that never crashed (nothing to clear).
+    %% A module-less (ClassBuilder) class never reaches here after a crash:
+    %% `beamtalk_class_registry:restart_class/1` removes it instead (BT-4646),
+    %% so this clear can no longer drop the funs of a class being restarted.
+    beamtalk_class_metadata:delete_class_method_funs(ClassName),
+    %% ADR 0084: Seed the runtime class-method fun retrieval store for
+    %% any builder-supplied class methods that arrived as funs (#{block, arity}).
+    %% Compile-time-only classes seed nothing and keep the gate flag false, so
+    %% their dispatch never reads the funs table.
+    beamtalk_class_publish:seed_runtime_class_methods(ClassName, ClassMethods).
+
+%% Cache, in the process dictionary, what self-dispatch inside this gen_server
+%% needs without a `gen_server:call` to self. Returns the field defaults.
+%%
+%% Field defaults let the `self new` self-instantiation path build a generic
+%% instance for a module-less class. The local instance-method map lets fun-backed
+%% instance dispatch that happens *inside* this gen_server (e.g. a class method
+%% does `Inst := self new` then `Inst someMethod`) resolve the block fun. It holds
+%% the local (non-inherited) methods only; inherited methods live in ancestor
+%% processes and are reachable without deadlock. Kept in sync by the
+%% {put_method, ...} handler so hot-patched methods stay visible to self-dispatch.
+-spec cache_self_dispatch_state(map(), map()) -> map().
+cache_self_dispatch_state(ClassInfo, InstanceMethods) ->
+    FieldDefaults = maps:get(field_defaults, ClassInfo, #{}),
+    put(beamtalk_class_field_defaults, FieldDefaults),
+    put(beamtalk_class_instance_methods, InstanceMethods),
+    FieldDefaults.
+
+%% Record this class in the registry's reverse and index tables and tell the
+%% compiler server about it.
+-spec register_class_indexes(class_name(), map()) -> ok.
+register_class_indexes(ClassName, Meta) ->
+    %% Record pid→classname mapping for crash recovery.
+    %% This entry survives process death, allowing class_send to identify
+    %% which class a dead pid belonged to and attempt auto-restart.
+    beamtalk_class_registry:record_class_pid(self(), ClassName),
+    %% Record this class in the fast loaded-class name index so the
+    %% ADR 0087 xref miss-policy can compute the loaded-class set with one ETS
+    %% read instead of an O(loaded-classes) gen_server walk. Mirrors the
+    %% pg:join above and the forget_loaded_class in terminate/1.
+    beamtalk_class_registry:record_loaded_class(ClassName, self()),
+    %% Record this class's native backing module (ADR 0056), if any,
+    %% in the reverse index so the LiveView "Callers" op on a native module
+    %% resolves its delegating classes in O(1) instead of scanning every
+    %% loaded class. Guarded/forgotten the same way at shutdown in terminate/2.
+    beamtalk_class_registry:record_backing_module_entry(ClassName, Meta, self()),
+    %% ADR 0050 Phase 3: Notify compiler server of this class registration.
+    %% Use Meta map availability (not function_exported, which returns false
+    %% during on_load).
+    case Meta of
+        CompilerMeta when is_map(CompilerMeta), map_size(CompilerMeta) > 0 ->
+            beamtalk_class_publish:notify_compiler_server_register(ClassName, CompilerMeta);
+        _ ->
+            ok
+    end.
+
+%% Publish the freshly built state to the readers outside this process: the live
+%% classVars snapshot, the reflection rows, the xref index, the protocol registry
+%% and the system bus. The order is the init/1 contract.
+-spec publish_init_state(#class_state{}, map(), map()) -> ok.
+publish_init_state(#class_state{name = ClassName} = State, ClassInfo, Meta) ->
     %% Seed the live classVars snapshot with the declared defaults
     %% before this init/1 returns, so a `static_init`/`dynamic_init`/direct
     %% class-method-call reader never observes a gap between the class
     %% process existing and its snapshot existing.
     beamtalk_class_registry:record_class_state_snapshot(self(), State#class_state.class_state),
     ok = publish_reflection(State),
-
     %% ADR 0087 Phase 2: Forward the per-method cross-reference index
     %% to beamtalk_xref synchronously, before init returns. Running inside init/1
     %% means the rows are registered before start/2 yields {ok, Pid}, so the
@@ -1294,14 +1338,13 @@ init({ClassName, ClassInfo}) ->
     %% bakes `method_xref` into the ClassInfo map (via BuilderState.methodXref);
     %% hand-coded stub classes that omit it default to [] for backward
     %% compatibility. A failure here propagates as a class-creation failure.
-    MethodXref = maps:get(method_xref, ClassInfo, []),
-    register_xref(ClassName, MethodXref),
+    beamtalk_class_publish:register_xref(ClassName, maps:get(method_xref, ClassInfo, [])),
     %% Forward the per-instance-variable declaration-line index the
     %% same way, from `ClassInfo`'s `state_var_xref` key (baked by codegen via
     %% `BuilderState.stateVarXref`, the state-var analogue of `method_xref`).
-    StateVarXref = maps:get(state_var_xref, ClassInfo, []),
-    register_state_var_xref(ClassName, StateVarXref),
-
+    beamtalk_class_publish:register_state_var_xref(
+        ClassName, maps:get(state_var_xref, ClassInfo, [])
+    ),
     %% ADR 0127 §12: Register this class's `uses:` list (declaration order)
     %% with the protocol registry's users index, the same Meta-then-ClassInfo
     %% precedence and miss-safe `[]` default as `method_xref`/`state_var_xref`
@@ -1309,164 +1352,17 @@ init({ClassName, ClassInfo}) ->
     %% yet (ADR 0127 §10a is a later phase), so this call is a no-op for every
     %% class today, ready for codegen to start populating it.
     Uses = maps:get(uses, Meta, maps:get(uses, ClassInfo, [])),
-    beamtalk_protocol_registry:register_uses(ClassName, Uses),
-
+    ok = beamtalk_protocol_registry:register_uses(ClassName, Uses),
     %% ADR 0093 §2: Announce ClassLoaded on the system bus *after* the
-    %% metadata row is written (line above), so any subscriber that reads the
+    %% metadata row is written, so any subscriber that reads the
     %% class hierarchy during dispatch sees a consistent view (announce-after-
     %% commit). Fire-and-forget; never fails class creation.
-    announce_class_lifecycle('ClassLoaded', ClassName),
+    beamtalk_class_publish:announce_class_lifecycle('ClassLoaded', ClassName),
     %% A newly-registered class may change conforms_to/2 results for
     %% ClassName itself (a prior call, made before this class existed, could
     %% have cached `false`) — flush so the next query re-walks live state.
     beamtalk_protocol_registry:invalidate_conforms_cache(),
-
-    {ok, State}.
-
--doc """
-Forward a class's per-method xref rows to `beamtalk_xref` (ADR 0087 Phase 2).
-
-A no-op when `MethodXref` is empty (hand-coded stub classes, or classes
-compiled before the codegen baked the field). The call is synchronous so the
-index is populated before the class process finishes starting. `beamtalk_xref`
-may legitimately be absent (e.g. minimal embedded runtimes, or during its own
-supervisor restart), in which case we log at debug level and continue — the
-miss-policy fallback (Phase 3) covers reads against an unpopulated index.
-""".
--spec register_xref(class_name(), [map()]) -> ok.
-register_xref(_ClassName, []) ->
-    ok;
-register_xref(ClassName, MethodXref) ->
-    case erlang:whereis(beamtalk_xref) of
-        undefined ->
-            ?LOG_DEBUG(#{
-                event => xref_not_running,
-                class => ClassName,
-                reason => "beamtalk_xref not registered; skipping index population",
-                domain => [beamtalk, runtime]
-            }),
-            ok;
-        _Pid ->
-            ok = beamtalk_xref:register_class(ClassName, MethodXref)
-    end.
-
--doc """
-Forward a class's per-instance-variable declaration-line rows to
-`beamtalk_xref`, the state-var analogue of `register_xref/2`.
-
-A no-op when `StateVarXref` is empty — a hand-coded stub class, a class
-compiled before this feature landed, or a `ClassBuilder`-built class with no
-compiler to derive lines from. Same `beamtalk_xref`-absent guard as
-`register_xref/2`.
-""".
--spec register_state_var_xref(class_name(), [map()]) -> ok.
-register_state_var_xref(_ClassName, []) ->
-    ok;
-register_state_var_xref(ClassName, StateVarXref) ->
-    case erlang:whereis(beamtalk_xref) of
-        undefined ->
-            ?LOG_DEBUG(#{
-                event => xref_not_running,
-                class => ClassName,
-                reason => "beamtalk_xref not registered; skipping state-var index population",
-                domain => [beamtalk, runtime]
-            }),
-            ok;
-        _Pid ->
-            ok = beamtalk_xref:register_state_vars(ClassName, StateVarXref)
-    end.
-
--doc """
-Refresh a class's xref rows on redefinition (ADR 0087 Phase 2).
-
-Purges the class's existing rows before re-registering, because Phase 1's
-`register_class/2` only inserts (the multi-generation sweep of stale rows lands
-in Phase 4). Purging first keeps the index consistent with the new
-class definition — e.g. when a bootstrap stub's `unindexed_runtime_fun` rows are
-replaced by the compiled class's `indexed` rows. A no-op when `beamtalk_xref`
-is not running.
-""".
--spec refresh_xref(class_name(), [map()]) -> ok.
-refresh_xref(ClassName, MethodXref) ->
-    case erlang:whereis(beamtalk_xref) of
-        undefined ->
-            ok;
-        _Pid ->
-            ok = beamtalk_xref:purge_class(ClassName),
-            register_xref(ClassName, MethodXref)
-    end.
-
--doc """
-Announce a class-lifecycle system event (`'ClassLoaded'` | `'ClassRemoved'`) on
-the `SystemAnnouncer` bus (ADR 0093 §2).
-
-The announcements bus is a `beamtalk_runtime_sup` worker started *after*
-`beamtalk_bootstrap`, so during early stdlib bootstrap (and on a minimal
-embedded runtime) it may not be running yet. The whole call is therefore wrapped
-in try/catch and a `whereis` guard: announcing is a best-effort observability
-side effect and must never fail or delay class load/teardown. The
-`beamtalk_announcements:system_announce/2` entry point builds the typed event
-payload and dispatches it caller-side, fire-and-forget.
-""".
--spec announce_class_lifecycle('ClassLoaded' | 'ClassRemoved', class_name()) -> ok.
-announce_class_lifecycle(EventClass, ClassName) ->
-    case erlang:whereis(beamtalk_announcements) of
-        undefined ->
-            ok;
-        _Pid ->
-            try
-                beamtalk_announcements:system_announce(EventClass, #{className => ClassName})
-            catch
-                _:_ -> ok
-            end
-    end,
     ok.
-
--doc """
-Re-index a single hot-patched method in `beamtalk_xref` (ADR 0087 Phase 4).
-
-Called from the `{put_method, ...}` / `{put_class_method, ...}` handlers after
-a live `>>` edit (ADR 0082). Re-parses the one method's `Source` via the
-compiler AST FFI (`beamtalk_xref:build_method_entry/5`) and replaces just that
-`{Class, ClassSide, Selector}` row set via `beamtalk_xref:put_method/4`;
-sibling methods on the same class are untouched.
-
-A no-op when `beamtalk_xref` is not running. Hot-patched methods are tagged
-`source_status = indexed` (they carry source like any compiled method) with
-`provenance = put_method`.
-""".
--spec put_method_xref(class_name(), boolean(), selector(), binary()) -> ok.
-put_method_xref(ClassName, ClassSide, Selector, Source) ->
-    %% build_method_entry/5 is pure; only the put_method/4 gen_server call must
-    %% be best-effort. A bare whereis/1 guard is racy: beamtalk_xref can die or
-    %% restart between the check and the call, which would crash this class
-    %% gen_server mid hot-patch. Degrade to a no-op on xref unavailability
-    %% instead, matching the documented behaviour.
-    Entry = beamtalk_xref:build_method_entry(
-        ClassSide, Selector, Source, indexed, put_method
-    ),
-    safe_xref(fun() -> beamtalk_xref:put_method(ClassName, ClassSide, Selector, Entry) end).
-
--doc """
-Run a `beamtalk_xref` gen_server call best-effort.
-
-The xref index is advisory tooling state; a hot patch must not crash the class
-gen_server if it is unavailable. Catches the `noproc`/`{noproc, _}` /
-`{normal, _}` / `{{nodedown, _}, _}` exits raised by `gen_server:call/2`
-against a missing or restarting `beamtalk_xref`, degrading to a no-op. Other
-exits/errors propagate.
-""".
--spec safe_xref(fun(() -> ok)) -> ok.
-safe_xref(Fun) ->
-    %% bt-catcher-audit: not-applicable-no-block - Fun is a gen_server call to beamtalk_xref
-    try Fun() of
-        ok -> ok
-    catch
-        exit:{noproc, _} -> ok;
-        exit:noproc -> ok;
-        exit:{normal, _} -> ok;
-        exit:{{nodedown, _}, _} -> ok
-    end.
 
 handle_call(
     {spawn, Args},
@@ -1481,9 +1377,465 @@ handle_call({new, Args}, _From, #class_state{name = ClassName, is_abstract = tru
             _ -> 'new:'
         end,
     {reply, {error, beamtalk_class_instantiation:abstract_class_error(ClassName, Selector)}, State};
+handle_call({new, Args}, _From, State) ->
+    call_new(Args, State);
+%% ADR 0032 Phase 1: Returns local (non-inherited) method selectors only.
+%% Full hierarchy walk is done by Behaviour.methods in Phase 2.
+handle_call(methods, _From, #class_state{instance_methods = Methods} = State) ->
+    {reply, maps:keys(Methods), State};
+handle_call(superclass, _From, #class_state{superclass = Super} = State) ->
+    {reply, Super, State};
+handle_call(class_name, _From, #class_state{name = Name} = State) ->
+    {reply, Name, State};
+handle_call(module_name, _From, #class_state{module = Module} = State) ->
+    {reply, Module, State};
+%% ADR 0114: see rename/2's doc — the dynamic-class in-place
+%% identity move `classRenameTo` calls when there is no source to recompile.
+handle_call({rename_class, NewName}, _From, State) ->
+    call_rename_class(NewName, State);
 handle_call(
-    {new, Args},
+    {method, Selector},
     _From,
+    #class_state{name = ClassName} = State
+) ->
+    {reply, state_compiled_method(ClassName, instance, Selector, State), State};
+%% ADR 0045: Local return-type lookup (no chain walk — that is done in the registry).
+handle_call(
+    {get_method_return_type, Selector},
+    _From,
+    #class_state{method_return_types = MRT} = State
+) ->
+    % elp:fixme W0032 maps:find with complex branch logic
+    case maps:find(Selector, MRT) of
+        {ok, Type} -> {reply, {ok, Type}, State};
+        error -> {reply, not_found, State}
+    end;
+handle_call(
+    {get_class_method_return_type, Selector},
+    _From,
+    #class_state{class_method_return_types = CMRT} = State
+) ->
+    % elp:fixme W0032 maps:find with complex branch logic
+    case maps:find(Selector, CMRT) of
+        {ok, Type} -> {reply, {ok, Type}, State};
+        error -> {reply, not_found, State}
+    end;
+%% Return CompiledMethod-like map for class-side methods.
+%% Walks superclass chain for inherited class methods (mirrors dispatch behaviour).
+%% Populate __source__ from class_method_source so that
+%% SystemNavigation source-text scanners (sendersOf:, referencesTo:,
+%% methodsMatching:) can walk class-side method bodies. Empty binary when no
+%% source has been registered (e.g. dynamic methods, primitives).
+handle_call(
+    {class_method, Selector},
+    _From,
+    #class_state{name = ClassName, superclass = Superclass} = State
+) ->
+    Result =
+        case state_compiled_method(ClassName, class, Selector, State) of
+            nil ->
+                %% Not found locally -- walk the superclass chain through the
+                %% published records (no call into another class process).
+                find_inherited_class_method(Selector, Superclass);
+            Method ->
+                Method
+        end,
+    {reply, Result, State};
+handle_call({put_method, Selector, Fun, Source}, _From, State) ->
+    call_put_method(Selector, Fun, Source, State);
+%% ADR 0084: Install or replace a class-side method with a runtime fun.
+%% Class-side mirror of {put_method, ...}. The fun is stored in the class_methods
+%% map (source of truth) and mirrored into the metadata retrieval store so
+%% inherited dispatch resolves it without a gen_server hop. Stale
+%% class-side signature/return-type entries are cleared (no AST for dynamic funs).
+handle_call({put_class_method, Selector, Fun, Source}, _From, State) ->
+    call_put_class_method(Selector, Fun, Source, State);
+%% BT-4438: remove a class-side runtime fun -- the inverse of
+%% {put_class_method, ...}. Restores what the first put over `Selector`
+%% replaced (see `remember_shadowed_class_method/2`), or drops the selector
+%% when the class had nothing there, so dispatch falls through to the
+%% compiled export, an inherited method, or DNU.
+handle_call({remove_class_method, Selector}, _From, #class_state{name = ClassName} = State) ->
+    case beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) of
+        error ->
+            {reply, absent, State};
+        {ok, _} ->
+            {reply, removed, do_remove_class_method(Selector, State)}
+    end;
+%% Update class metadata after redefinition (hot reload).
+%% Validation (shadowing + collision) delegated to beamtalk_class_registry.
+%% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
+handle_call({update_class, ClassInfo}, _From, State) ->
+    call_update_class(ClassInfo, State);
+handle_call(instance_variables, _From, #class_state{fields = IVars} = State) ->
+    {reply, IVars, State};
+%% Expose field defaults so the generic instantiation path can read a
+%% module-less superclass's defaults when building an inherited instance map.
+handle_call(field_defaults, _From, #class_state{field_defaults = Defaults} = State) ->
+    {reply, Defaults, State};
+handle_call(is_sealed, _From, #class_state{is_sealed = Sealed} = State) ->
+    {reply, Sealed, State};
+handle_call(shape_version, _From, #class_state{shape_version = ShapeVersion} = State) ->
+    {reply, ShapeVersion, State};
+handle_call(is_typed, _From, #class_state{is_typed = Typed} = State) ->
+    {reply, Typed, State};
+handle_call(is_internal, _From, #class_state{is_internal = Internal} = State) ->
+    {reply, Internal, State};
+handle_call(is_abstract, _From, #class_state{is_abstract = Abstract} = State) ->
+    {reply, Abstract, State};
+handle_call(
+    is_constructible,
+    _From,
+    #class_state{
+        is_constructible = IsConstructible0,
+        module = Module,
+        is_abstract = IsAbstract
+    } = State
+) ->
+    IsConstructible = beamtalk_class_instantiation:ensure_is_constructible(
+        IsConstructible0, Module, IsAbstract
+    ),
+    {reply, IsConstructible, State#class_state{is_constructible = IsConstructible}};
+%% ADR 0032 Phase 1: Returns local methods for chain walk queries.
+handle_call(get_local_class_methods, _From, #class_state{class_methods = ClassMethods} = State) ->
+    {reply, ClassMethods, State};
+handle_call(get_instance_methods, _From, #class_state{instance_methods = InstanceMethods} = State) ->
+    {reply, {ok, InstanceMethods}, State};
+%% ADR 0033: Runtime-embedded documentation — class doc accessors.
+handle_call(get_doc, _From, #class_state{doc = Doc} = State) ->
+    {reply, Doc, State};
+handle_call({set_doc, DocBinary}, _From, #class_state{name = ClassName} = State) ->
+    %% BT-4262: `doc` reads the published copy.
+    ok = beamtalk_class_metadata:put_class_doc(ClassName, DocBinary),
+    {reply, ok, State#class_state{doc = DocBinary}};
+handle_call({set_method_doc, Selector, DocBinary}, _From, State) ->
+    NewMethodDocs = maps:put(Selector, DocBinary, State#class_state.method_docs),
+    NewState = State#class_state{method_docs = NewMethodDocs},
+    %% BT-3832: the doc is part of the published CompiledMethod record.
+    ok = publish_reflection(NewState),
+    {reply, ok, NewState};
+%% Class method dispatch.
+%% ADR 0036 Phase 2: Also handles metaclass_method_call with identical logic.
+%% ADR 0032 Phase 1: Passes local class_methods; dispatch walks superclass chain.
+%%
+%% The 4-tuple message carries the caller's session context explicitly
+%% (`{Selector, Args, {SessionPid, SessionId}}`). We seed from the tuple, which
+%% avoids the `process_info(CallerPid, dictionary)` full-dictionary copy the
+%% legacy 3-tuple clause below must use.
+handle_call(
+    {MethodCallType, Selector, Args, SessionCtx},
+    From,
+    #class_state{} = State
+) when MethodCallType =:= class_method_call; MethodCallType =:= metaclass_method_call ->
+    %% No guard on SessionCtx: `seed_session_context_from/1` accepts any term and
+    %% safely no-ops on unrecognised shapes, so a malformed/empty context
+    %% degrades to "no context" rather than crashing the class gen_server with a
+    %% function_clause (it would otherwise miss both this and the 3-tuple clause).
+    Restore = beamtalk_class_session:seed_session_context_from(SessionCtx),
+    dispatch_class_method(Selector, Args, From, State, Restore);
+%% Backward-compatible fallback for the legacy 3-tuple message shape
+%% (in-flight messages across a hot-code reload). Mirrors the caller's session
+%% context by reading its process dictionary via `process_info/2`.
+handle_call(
+    {MethodCallType, Selector, Args},
+    From,
+    #class_state{} = State
+) when MethodCallType =:= class_method_call; MethodCallType =:= metaclass_method_call ->
+    Restore = beamtalk_class_session:seed_caller_session_context(From),
+    dispatch_class_method(Selector, Args, From, State, Restore);
+handle_call({initialize, _Args}, _From, #class_state{} = State) ->
+    {reply, {ok, nil}, State};
+handle_call(get_module, _From, #class_state{module = Module} = State) ->
+    {reply, Module, State};
+handle_call({get_class_var, Name}, _From, State) ->
+    call_get_class_var(Name, State);
+handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = ClassVars} = State) ->
+    NewClassVars = ClassVars#{Name => Value},
+    %% Keep the live snapshot in sync with this mutation.
+    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
+    {reply, Value, State#class_state{class_state = NewClassVars}};
+handle_call({has_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
+    %% ADR 0124 §1/§4i/B4: never raises. The presence test is
+    %% `beamtalk_class_vars:has_value/2`, shared with `get_class_var`'s
+    %% declared-`late` branch (`read_in/4`, BT-4061).
+    {reply, beamtalk_class_vars:has_value(ClassVars, Name), State};
+handle_call({clear_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
+    %% ADR 0124 §1/§4f/§4i/B4: returns the class object itself, matching
+    %% the instance-side intrinsic's `clearField: -> Self` convention.
+    NewClassVars = maps:remove(Name, ClassVars),
+    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
+    NewState = State#class_state{class_state = NewClassVars},
+    {reply, beamtalk_class_registry:class_object_from_pid(self()), NewState}.
+
+%% ADR 0114: see rename/2's doc.
+-spec call_rename_class(class_name(), #class_state{}) -> {reply, term(), #class_state{}}.
+call_rename_class(
+    NewName,
+    #class_state{
+        name = OldName,
+        module = Module,
+        superclass = Superclass,
+        is_abstract = IsAbstract,
+        class_methods = ClassMethods
+    } = State
+) ->
+    OldRegName = beamtalk_class_registry:registry_name(OldName),
+    NewRegName = beamtalk_class_registry:registry_name(NewName),
+    true = erlang:unregister(OldRegName),
+    %% TOCTOU guard (review feedback on PR #3523): `rename/2`'s own
+    %% `erlang:whereis/1` check happens before this call is even sent, so a
+    %% concurrent registration of `NewRegName` in between would otherwise
+    %% crash this gen_server on the plain `true = erlang:register(...)` this
+    %% replaced — after `OldRegName` is already gone, leaving the class
+    %% unreachable under either name. Caught and rolled back here instead,
+    %% so the caller gets the same clean `{error, {already_registered, _}}`
+    %% `rename/2`'s pre-check is meant to produce.
+    Registered =
+        try
+            erlang:register(NewRegName, self())
+        catch
+            _:_ -> false
+        end,
+    case Registered of
+        true ->
+            put(beamtalk_class_name, NewName),
+            beamtalk_class_publish:sync_identity(
+                NewName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create
+            ),
+            beamtalk_class_publish:seed_runtime_class_methods(NewName, ClassMethods),
+            ok = publish_reflection(State#class_state{name = NewName}),
+            beamtalk_class_metadata:put_direct_constructors(
+                NewName, beamtalk_class_metadata:lookup_direct_constructors(OldName)
+            ),
+            %% BT-4409: the per-class `new:` fact moves too.
+            beamtalk_class_metadata:put_defines_user_class_new1(
+                NewName,
+                case beamtalk_class_metadata:lookup_defines_user_class_new1(OldName) of
+                    unknown -> undefined;
+                    Defines -> Defines
+                end
+            ),
+            beamtalk_class_metadata:put_defines_user_class_new0(
+                NewName,
+                case beamtalk_class_metadata:lookup_defines_user_class_new0(OldName) of
+                    unknown -> undefined;
+                    DefinesNew0 -> DefinesNew0
+                end
+            ),
+            %% BT-4299: the class-variable fact and process-bound list move too.
+            beamtalk_class_metadata:put_class_variables(
+                NewName,
+                beamtalk_class_metadata:lookup_has_class_variables(OldName) =/= false
+            ),
+            beamtalk_class_metadata:put_process_bound_selectors(
+                NewName,
+                case beamtalk_class_metadata:lookup_process_bound_selectors(OldName) of
+                    {ok, ProcessBound} -> ProcessBound;
+                    unknown -> undefined
+                end
+            ),
+            beamtalk_class_registry:record_class_pid(self(), NewName),
+            %% BT-4552: kept dead incarnations follow the rename, so a class
+            %% object taken before both recovers to this class, and none is
+            %% left naming `OldName` for a later, unrelated class of that name.
+            beamtalk_class_registry:rename_class_pids(OldName, NewName),
+            beamtalk_class_registry:record_loaded_class(NewName, self()),
+            beamtalk_class_metadata:delete(OldName),
+            _ = beamtalk_class_registry:forget_loaded_class(OldName, self()),
+            beamtalk_class_monitor:unwatch(OldName),
+            beamtalk_class_monitor:watch(NewName, self()),
+            {reply, ok, State#class_state{name = NewName}};
+        false ->
+            %% Residual gap, not closed here (review feedback on PR #3523):
+            %% this rollback assumes `OldRegName` is still free. Another
+            %% process registering under `OldRegName` in the narrow window
+            %% since `erlang:unregister/1` above would crash this same
+            %% gen_server the same way the guard above was written to
+            %% avoid — one level deeper. Accepted as out of scope: closing
+            %% it fully would need the same guard nested again with no
+            %% further fallback once nesting runs out, for a race
+            %% narrower than the one this function already targets.
+            true = erlang:register(OldRegName, self()),
+            {reply, {error, {already_registered, NewName}}, State}
+    end.
+
+-spec call_put_method(selector(), fun(), binary(), #class_state{}) ->
+    {reply, ok, #class_state{}}.
+call_put_method(Selector, Fun, Source, #class_state{name = ClassName} = State) ->
+    {arity, Arity} = erlang:fun_info(Fun, arity),
+    MethodInfo = #{block => Fun, arity => Arity},
+    %% ADR 0032 Phase 1: No flattened table to rebuild or invalidate.
+    %% Dispatch finds the new method via chain walk on the next call.
+    %% Remove stale display signature — dynamically-defined methods
+    %% have no AST, so the fallback to selector atom is correct.
+    %% Also clear stale return-type entry for the same reason.
+    NewInstanceMethods = maps:put(Selector, MethodInfo, State#class_state.instance_methods),
+    %% Keep the self-dispatch process-dictionary cache in sync with the
+    %% authoritative instance_methods map so hot-patched fun-backed methods are
+    %% visible to dispatch that happens inside this gen_server.
+    put(beamtalk_class_instance_methods, NewInstanceMethods),
+    NewState = State#class_state{
+        instance_methods = NewInstanceMethods,
+        method_source = maps:put(Selector, Source, State#class_state.method_source),
+        method_signatures = maps:remove(Selector, State#class_state.method_signatures),
+        method_return_types = maps:remove(Selector, State#class_state.method_return_types)
+    },
+    %% ADR 0087 Phase 4: re-index the patched method from its Source so
+    %% the xref index reflects the live `>>` edit (ADR 0082). Instance-side, so
+    %% ClassSide = false. A no-op when xref / the compiler app is unavailable.
+    beamtalk_class_publish:put_method_xref(ClassName, false, Selector, Source),
+    %% ADR 0050 Phase 3: Notify compiler server of hot-patch.
+    %% __beamtalk_meta/0 is stale after hot-patching, so synthesize metadata
+    %% from the live class_state record instead.  Return types are cleared for
+    %% hot-patched methods — the compiler treats them as dynamic.
+    ok = publish_reflection(NewState),
+    notify_hot_patch(NewState),
+    %% A hot-patched instance method changes what ClassName (and
+    %% every subclass inheriting through it) understands, invalidating any
+    %% cached conforms_to/2 result for either.
+    beamtalk_protocol_registry:invalidate_conforms_cache(),
+    {reply, ok, NewState}.
+
+-spec call_put_class_method(selector(), fun(), binary(), #class_state{}) ->
+    {reply, ok, #class_state{}}.
+call_put_class_method(Selector, Fun, Source, #class_state{name = ClassName} = State) ->
+    %% ADR 0142 §2 (BT-4299): erase the derived direct-call flag, so the next
+    %% send re-derives it. The erase alone does not keep the fast path off: a
+    %% concurrent send re-derives from the raw flags at once. What bars it is
+    %% the raw `runtime_fun` flag, which `set_runtime_class_methods/2` below
+    %% raises before the patched method becomes visible.
+    beamtalk_class_shadow_flags:invalidate(ClassName),
+    {arity, Arity} = erlang:fun_info(Fun, arity),
+    MethodInfo = #{block => Fun, arity => Arity},
+    NewClassMethods = maps:put(Selector, MethodInfo, State#class_state.class_methods),
+    NewState = State#class_state{
+        shadowed_class_methods = remember_shadowed_class_method(Selector, State),
+        class_methods = NewClassMethods,
+        class_method_source = maps:put(Selector, Source, State#class_state.class_method_source),
+        class_method_signatures = maps:remove(
+            Selector, State#class_state.class_method_signatures
+        ),
+        class_method_return_types = maps:remove(
+            Selector, State#class_state.class_method_return_types
+        )
+    },
+    %% Write the fun first, then publish the selector + gate flag atomically so a
+    %% concurrent subclass dispatch never sees a discoverable selector whose fun
+    %% is not yet present.
+    beamtalk_class_metadata:put_class_method_fun(ClassName, Selector, MethodInfo),
+    beamtalk_class_metadata:set_runtime_class_methods(ClassName, maps:keys(NewClassMethods)),
+    %% BT-4126: the gate flag above turns this class's own direct paths off;
+    %% a gained `new:` also reaches subclasses' dynamic `new:` through the
+    %% run-time chain check (BT-4409), so the warning about their baked
+    %% `direct_constructors` is informational. Static class-method call sites
+    %% are guarded by `direct_call_ok/2`, which the raised `runtime_fun` flag
+    %% turns off (ADR 0142 §2, BT-4301).
+    beamtalk_class_publish:warn_stale_subclass_constructors(
+        ClassName, State#class_state.class_methods, NewClassMethods
+    ),
+    %% ADR 0087 Phase 4: re-index the patched class-side method
+    %% (ClassSide = true) from its Source. A no-op when xref / the compiler app
+    %% is unavailable.
+    beamtalk_class_publish:put_method_xref(ClassName, true, Selector, Source),
+    ok = publish_reflection(NewState),
+    notify_hot_patch(NewState),
+    %% A hot-patched class-side method changes conforms_to/2's
+    %% class-method check (class_has_class_method/2) for ClassName and every
+    %% descendant walked through it.
+    beamtalk_protocol_registry:invalidate_conforms_cache(),
+    {reply, ok, NewState}.
+
+-spec call_update_class(map(), #class_state{}) ->
+    {reply, {ok, [atom()]} | {error, term()}, #class_state{}}.
+call_update_class(ClassInfo, #class_state{name = ClassName} = State) ->
+    OldModule = State#class_state.module,
+    case beamtalk_class_registry:validate_class_update(ClassName, OldModule, ClassInfo) of
+        {error, Error} ->
+            {reply, {error, Error}, State};
+        ok ->
+            NewState = apply_class_info(State, ClassInfo),
+            ok = publish_reflection(NewState),
+            %% ADR 0050 Phase 3: Notify compiler server of class redefinition.
+            %% The new module is already loaded, so __beamtalk_meta/0 is fresh.
+            NewModule = NewState#class_state.module,
+            NewMeta = beamtalk_class_metadata:read_meta_detailed(NewModule),
+            case NewMeta of
+                {ok, Meta} ->
+                    %% This `update_class` path is hit by ordinary
+                    %% stdlib bootstrap too (the metaclass-tower
+                    %% stubs are registered, then `update_class`'d
+                    %% when their compiled `.bt` modules load) — not
+                    %% just live hot-reload — so it needs the same
+                    %% "compiler server may be absent" guard as the
+                    %% on_load registration path above.
+                    beamtalk_class_publish:notify_compiler_server_register(ClassName, Meta);
+                {invalid, Why} ->
+                    ?LOG_DEBUG(
+                        "Failed to read __beamtalk_meta from ~p: ~p",
+                        [NewModule, Why],
+                        #{domain => [beamtalk, runtime]}
+                    );
+                none ->
+                    ok
+            end,
+            %% ADR 0087 Phase 2: Refresh the xref index on class
+            %% redefinition. This path is hit both by interactive/hot redefinition
+            %% (Phase 4 territory) and, more importantly for Phase 2, by the normal
+            %% stdlib bootstrap: the metaclass-tower stubs (Class, Metaclass, …) are
+            %% registered by beamtalk_bootstrap, then `update_class`'d when their
+            %% compiled .bt modules load. Without this refresh those classes would
+            %% keep only their bootstrap `unindexed_runtime_fun` rows and never gain
+            %% the compiled `indexed` rows. We purge first because Phase 1's
+            %% register_class/2 only inserts (the old-generation sweep is Phase 4),
+            %% so a plain re-register would leave stale rows behind.
+            beamtalk_class_publish:refresh_xref(ClassName, maps:get(method_xref, ClassInfo, [])),
+            %% State-var rows were already cleared by refresh_xref's
+            %% purge_class/1 above (it purges every xref table, state vars
+            %% included) — a plain register (not a refresh_xref-style
+            %% purge-then-register) is enough here.
+            beamtalk_class_publish:register_state_var_xref(
+                ClassName, maps:get(state_var_xref, ClassInfo, [])
+            ),
+            %% ADR 0127 §12 / BT-3593: re-register this class's `uses:`
+            %% list on hot reload — `register_uses/2` itself clears the
+            %% class's prior reverse-index rows first, so a changed `uses:`
+            %% set never leaves stale entries in the users index. Reads the
+            %% freshly-read `Meta` above first (the only place codegen bakes
+            %% `uses` — see `init/1`'s identical `Meta`-then-`ClassInfo`
+            %% precedence for every other codegen-baked field): `ClassInfo`
+            %% here is the raw `update_class` call argument, which never
+            %% carries `uses` itself, so reading it alone (as this line
+            %% previously did) silently WIPED the users index on every
+            %% `register_class/0` call after the very first — `on_load`'s own
+            %% synchronous `register_class/0` (see `activate_module/4`'s doc)
+            %% installs the correct set via `init/1`'s `Meta` read, then
+            %% `activate_module/4`'s own explicit, "redundant, harmless"
+            %% second `register_class/0` call reached this handler instead of
+            %% `init/1` (the class already existed) and cleared it right back
+            %% out — found via BT-3593's own fan-out test coverage actually
+            %% exercising `users_of/1` end-to-end for the first time.
+            UsesForRegistration =
+                case NewMeta of
+                    {ok, #{uses := Uses}} -> Uses;
+                    _ -> maps:get(uses, ClassInfo, [])
+                end,
+            beamtalk_protocol_registry:register_uses(ClassName, UsesForRegistration),
+            %% ADR 0093 §2: hot redefinition is also a ClassLoaded —
+            %% announced from the handle_call reply path after the refreshed
+            %% metadata is committed.
+            beamtalk_class_publish:announce_class_lifecycle('ClassLoaded', ClassName),
+            %% Hot reload can change ClassName's method set (and this
+            %% is also the path classRemoveSelector/2 takes for a local-method
+            %% removal, via beamtalk_repl_eval:remove_method/4's recompile),
+            %% which changes conforms_to/2 for ClassName and every descendant
+            %% re-walked through it — flush rather than tracking descendants.
+            beamtalk_protocol_registry:invalidate_conforms_cache(),
+            {reply, {ok, NewState#class_state.fields}, NewState}
+    end.
+
+-spec call_new(list(), #class_state{}) -> {reply, term(), #class_state{}}.
+call_new(
+    Args,
     #class_state{
         name = ClassName,
         module = Module,
@@ -1556,429 +1908,10 @@ handle_call(
                 {error, Error, IsConstructible} ->
                     {reply, {error, Error}, State#class_state{is_constructible = IsConstructible}}
             end
-    end;
-%% ADR 0032 Phase 1: Returns local (non-inherited) method selectors only.
-%% Full hierarchy walk is done by Behaviour.methods in Phase 2.
-handle_call(methods, _From, #class_state{instance_methods = Methods} = State) ->
-    {reply, maps:keys(Methods), State};
-handle_call(superclass, _From, #class_state{superclass = Super} = State) ->
-    {reply, Super, State};
-handle_call(class_name, _From, #class_state{name = Name} = State) ->
-    {reply, Name, State};
-handle_call(module_name, _From, #class_state{module = Module} = State) ->
-    {reply, Module, State};
-%% ADR 0114: see rename/2's doc — the dynamic-class in-place
-%% identity move `classRenameTo` calls when there is no source to recompile.
-handle_call(
-    {rename_class, NewName},
-    _From,
-    #class_state{
-        name = OldName,
-        module = Module,
-        superclass = Superclass,
-        is_abstract = IsAbstract,
-        class_methods = ClassMethods
-    } = State
-) ->
-    OldRegName = beamtalk_class_registry:registry_name(OldName),
-    NewRegName = beamtalk_class_registry:registry_name(NewName),
-    true = erlang:unregister(OldRegName),
-    %% TOCTOU guard (review feedback on PR #3523): `rename/2`'s own
-    %% `erlang:whereis/1` check happens before this call is even sent, so a
-    %% concurrent registration of `NewRegName` in between would otherwise
-    %% crash this gen_server on the plain `true = erlang:register(...)` this
-    %% replaced — after `OldRegName` is already gone, leaving the class
-    %% unreachable under either name. Caught and rolled back here instead,
-    %% so the caller gets the same clean `{error, {already_registered, _}}`
-    %% `rename/2`'s pre-check is meant to produce.
-    Registered =
-        try
-            erlang:register(NewRegName, self())
-        catch
-            _:_ -> false
-        end,
-    case Registered of
-        true ->
-            put(beamtalk_class_name, NewName),
-            sync_identity(
-                NewName, Module, Superclass, IsAbstract, maps:keys(ClassMethods), create
-            ),
-            seed_runtime_class_methods(NewName, ClassMethods),
-            ok = publish_reflection(State#class_state{name = NewName}),
-            beamtalk_class_metadata:put_direct_constructors(
-                NewName, beamtalk_class_metadata:lookup_direct_constructors(OldName)
-            ),
-            %% BT-4409: the per-class `new:` fact moves too.
-            beamtalk_class_metadata:put_defines_user_class_new1(
-                NewName,
-                case beamtalk_class_metadata:lookup_defines_user_class_new1(OldName) of
-                    unknown -> undefined;
-                    Defines -> Defines
-                end
-            ),
-            beamtalk_class_metadata:put_defines_user_class_new0(
-                NewName,
-                case beamtalk_class_metadata:lookup_defines_user_class_new0(OldName) of
-                    unknown -> undefined;
-                    DefinesNew0 -> DefinesNew0
-                end
-            ),
-            %% BT-4299: the class-variable fact and process-bound list move too.
-            beamtalk_class_metadata:put_class_variables(
-                NewName,
-                beamtalk_class_metadata:lookup_has_class_variables(OldName) =/= false
-            ),
-            beamtalk_class_metadata:put_process_bound_selectors(
-                NewName,
-                case beamtalk_class_metadata:lookup_process_bound_selectors(OldName) of
-                    {ok, ProcessBound} -> ProcessBound;
-                    unknown -> undefined
-                end
-            ),
-            beamtalk_class_registry:record_class_pid(self(), NewName),
-            %% BT-4552: kept dead incarnations follow the rename, so a class
-            %% object taken before both recovers to this class, and none is
-            %% left naming `OldName` for a later, unrelated class of that name.
-            beamtalk_class_registry:rename_class_pids(OldName, NewName),
-            beamtalk_class_registry:record_loaded_class(NewName, self()),
-            beamtalk_class_metadata:delete(OldName),
-            _ = beamtalk_class_registry:forget_loaded_class(OldName, self()),
-            beamtalk_class_monitor:unwatch(OldName),
-            beamtalk_class_monitor:watch(NewName, self()),
-            {reply, ok, State#class_state{name = NewName}};
-        false ->
-            %% Residual gap, not closed here (review feedback on PR #3523):
-            %% this rollback assumes `OldRegName` is still free. Another
-            %% process registering under `OldRegName` in the narrow window
-            %% since `erlang:unregister/1` above would crash this same
-            %% gen_server the same way the guard above was written to
-            %% avoid — one level deeper. Accepted as out of scope: closing
-            %% it fully would need the same guard nested again with no
-            %% further fallback once nesting runs out, for a race
-            %% narrower than the one this function already targets.
-            true = erlang:register(OldRegName, self()),
-            {reply, {error, {already_registered, NewName}}, State}
-    end;
-handle_call(
-    {method, Selector},
-    _From,
-    #class_state{name = ClassName} = State
-) ->
-    {reply, state_compiled_method(ClassName, instance, Selector, State), State};
-%% ADR 0045: Local return-type lookup (no chain walk — that is done in the registry).
-handle_call(
-    {get_method_return_type, Selector},
-    _From,
-    #class_state{method_return_types = MRT} = State
-) ->
-    % elp:fixme W0032 maps:find with complex branch logic
-    case maps:find(Selector, MRT) of
-        {ok, Type} -> {reply, {ok, Type}, State};
-        error -> {reply, not_found, State}
-    end;
-handle_call(
-    {get_class_method_return_type, Selector},
-    _From,
-    #class_state{class_method_return_types = CMRT} = State
-) ->
-    % elp:fixme W0032 maps:find with complex branch logic
-    case maps:find(Selector, CMRT) of
-        {ok, Type} -> {reply, {ok, Type}, State};
-        error -> {reply, not_found, State}
-    end;
-%% Return CompiledMethod-like map for class-side methods.
-%% Walks superclass chain for inherited class methods (mirrors dispatch behaviour).
-%% Populate __source__ from class_method_source so that
-%% SystemNavigation source-text scanners (sendersOf:, referencesTo:,
-%% methodsMatching:) can walk class-side method bodies. Empty binary when no
-%% source has been registered (e.g. dynamic methods, primitives).
-handle_call(
-    {class_method, Selector},
-    _From,
-    #class_state{name = ClassName, superclass = Superclass} = State
-) ->
-    Result =
-        case state_compiled_method(ClassName, class, Selector, State) of
-            nil ->
-                %% Not found locally -- walk the superclass chain through the
-                %% published records (no call into another class process).
-                find_inherited_class_method(Selector, Superclass);
-            Method ->
-                Method
-        end,
-    {reply, Result, State};
-handle_call(
-    {put_method, Selector, Fun, Source}, _From, #class_state{name = ClassName} = State
-) ->
-    {arity, Arity} = erlang:fun_info(Fun, arity),
-    MethodInfo = #{block => Fun, arity => Arity},
-    %% ADR 0032 Phase 1: No flattened table to rebuild or invalidate.
-    %% Dispatch finds the new method via chain walk on the next call.
-    %% Remove stale display signature — dynamically-defined methods
-    %% have no AST, so the fallback to selector atom is correct.
-    %% Also clear stale return-type entry for the same reason.
-    NewInstanceMethods = maps:put(Selector, MethodInfo, State#class_state.instance_methods),
-    %% Keep the self-dispatch process-dictionary cache in sync with the
-    %% authoritative instance_methods map so hot-patched fun-backed methods are
-    %% visible to dispatch that happens inside this gen_server.
-    put(beamtalk_class_instance_methods, NewInstanceMethods),
-    NewState = State#class_state{
-        instance_methods = NewInstanceMethods,
-        method_source = maps:put(Selector, Source, State#class_state.method_source),
-        method_signatures = maps:remove(Selector, State#class_state.method_signatures),
-        method_return_types = maps:remove(Selector, State#class_state.method_return_types)
-    },
-    %% ADR 0087 Phase 4: re-index the patched method from its Source so
-    %% the xref index reflects the live `>>` edit (ADR 0082). Instance-side, so
-    %% ClassSide = false. A no-op when xref / the compiler app is unavailable.
-    put_method_xref(ClassName, false, Selector, Source),
-    %% ADR 0050 Phase 3: Notify compiler server of hot-patch.
-    %% __beamtalk_meta/0 is stale after hot-patching, so synthesize metadata
-    %% from the live class_state record instead.  Return types are cleared for
-    %% hot-patched methods — the compiler treats them as dynamic.
-    ok = publish_reflection(NewState),
-    notify_hot_patch(NewState),
-    %% A hot-patched instance method changes what ClassName (and
-    %% every subclass inheriting through it) understands, invalidating any
-    %% cached conforms_to/2 result for either.
-    beamtalk_protocol_registry:invalidate_conforms_cache(),
-    {reply, ok, NewState};
-%% ADR 0084: Install or replace a class-side method with a runtime fun.
-%% Class-side mirror of {put_method, ...}. The fun is stored in the class_methods
-%% map (source of truth) and mirrored into the metadata retrieval store so
-%% inherited dispatch resolves it without a gen_server hop. Stale
-%% class-side signature/return-type entries are cleared (no AST for dynamic funs).
-handle_call(
-    {put_class_method, Selector, Fun, Source},
-    _From,
-    #class_state{name = ClassName} = State
-) ->
-    %% ADR 0142 §2 (BT-4299): erase the derived direct-call flag, so the next
-    %% send re-derives it. The erase alone does not keep the fast path off: a
-    %% concurrent send re-derives from the raw flags at once. What bars it is
-    %% the raw `runtime_fun` flag, which `set_runtime_class_methods/2` below
-    %% raises before the patched method becomes visible.
-    beamtalk_class_shadow_flags:invalidate(ClassName),
-    {arity, Arity} = erlang:fun_info(Fun, arity),
-    MethodInfo = #{block => Fun, arity => Arity},
-    NewClassMethods = maps:put(Selector, MethodInfo, State#class_state.class_methods),
-    NewState = State#class_state{
-        shadowed_class_methods = remember_shadowed_class_method(Selector, State),
-        class_methods = NewClassMethods,
-        class_method_source = maps:put(Selector, Source, State#class_state.class_method_source),
-        class_method_signatures = maps:remove(
-            Selector, State#class_state.class_method_signatures
-        ),
-        class_method_return_types = maps:remove(
-            Selector, State#class_state.class_method_return_types
-        )
-    },
-    %% Write the fun first, then publish the selector + gate flag atomically so a
-    %% concurrent subclass dispatch never sees a discoverable selector whose fun
-    %% is not yet present.
-    beamtalk_class_metadata:put_class_method_fun(ClassName, Selector, MethodInfo),
-    beamtalk_class_metadata:set_runtime_class_methods(ClassName, maps:keys(NewClassMethods)),
-    %% BT-4126: the gate flag above turns this class's own direct paths off;
-    %% a gained `new:` also reaches subclasses' dynamic `new:` through the
-    %% run-time chain check (BT-4409), so the warning about their baked
-    %% `direct_constructors` is informational. Static class-method call sites
-    %% are guarded by `direct_call_ok/2`, which the raised `runtime_fun` flag
-    %% turns off (ADR 0142 §2, BT-4301).
-    warn_stale_subclass_constructors(
-        ClassName, State#class_state.class_methods, NewClassMethods
-    ),
-    %% ADR 0087 Phase 4: re-index the patched class-side method
-    %% (ClassSide = true) from its Source. A no-op when xref / the compiler app
-    %% is unavailable.
-    put_method_xref(ClassName, true, Selector, Source),
-    ok = publish_reflection(NewState),
-    notify_hot_patch(NewState),
-    %% A hot-patched class-side method changes conforms_to/2's
-    %% class-method check (class_has_class_method/2) for ClassName and every
-    %% descendant walked through it.
-    beamtalk_protocol_registry:invalidate_conforms_cache(),
-    {reply, ok, NewState};
-%% BT-4438: remove a class-side runtime fun -- the inverse of
-%% {put_class_method, ...}. Restores what the first put over `Selector`
-%% replaced (see `remember_shadowed_class_method/2`), or drops the selector
-%% when the class had nothing there, so dispatch falls through to the
-%% compiled export, an inherited method, or DNU.
-handle_call({remove_class_method, Selector}, _From, #class_state{name = ClassName} = State) ->
-    case beamtalk_class_metadata:lookup_class_method_fun(ClassName, Selector) of
-        error ->
-            {reply, absent, State};
-        {ok, _} ->
-            {reply, removed, do_remove_class_method(Selector, State)}
-    end;
-%% Update class metadata after redefinition (hot reload).
-%% Validation (shadowing + collision) delegated to beamtalk_class_registry.
-%% ADR 0032 Phase 1: No flattened tables to rebuild or invalidate.
-handle_call({update_class, ClassInfo}, _From, #class_state{name = ClassName} = State) ->
-    OldModule = State#class_state.module,
-    case beamtalk_class_registry:validate_class_update(ClassName, OldModule, ClassInfo) of
-        {error, Error} ->
-            {reply, {error, Error}, State};
-        ok ->
-            NewState = apply_class_info(State, ClassInfo),
-            ok = publish_reflection(NewState),
-            %% ADR 0050 Phase 3: Notify compiler server of class redefinition.
-            %% The new module is already loaded, so __beamtalk_meta/0 is fresh.
-            NewModule = NewState#class_state.module,
-            NewMeta = beamtalk_class_metadata:read_meta_detailed(NewModule),
-            case NewMeta of
-                {ok, Meta} ->
-                    %% This `update_class` path is hit by ordinary
-                    %% stdlib bootstrap too (the metaclass-tower
-                    %% stubs are registered, then `update_class`'d
-                    %% when their compiled `.bt` modules load) — not
-                    %% just live hot-reload — so it needs the same
-                    %% "compiler server may be absent" guard as the
-                    %% on_load registration path above.
-                    notify_compiler_server_register(ClassName, Meta);
-                {invalid, Why} ->
-                    ?LOG_DEBUG(
-                        "Failed to read __beamtalk_meta from ~p: ~p",
-                        [NewModule, Why],
-                        #{domain => [beamtalk, runtime]}
-                    );
-                none ->
-                    ok
-            end,
-            %% ADR 0087 Phase 2: Refresh the xref index on class
-            %% redefinition. This path is hit both by interactive/hot redefinition
-            %% (Phase 4 territory) and, more importantly for Phase 2, by the normal
-            %% stdlib bootstrap: the metaclass-tower stubs (Class, Metaclass, …) are
-            %% registered by beamtalk_bootstrap, then `update_class`'d when their
-            %% compiled .bt modules load. Without this refresh those classes would
-            %% keep only their bootstrap `unindexed_runtime_fun` rows and never gain
-            %% the compiled `indexed` rows. We purge first because Phase 1's
-            %% register_class/2 only inserts (the old-generation sweep is Phase 4),
-            %% so a plain re-register would leave stale rows behind.
-            refresh_xref(ClassName, maps:get(method_xref, ClassInfo, [])),
-            %% State-var rows were already cleared by refresh_xref's
-            %% purge_class/1 above (it purges every xref table, state vars
-            %% included) — a plain register (not a refresh_xref-style
-            %% purge-then-register) is enough here.
-            register_state_var_xref(ClassName, maps:get(state_var_xref, ClassInfo, [])),
-            %% ADR 0127 §12 / BT-3593: re-register this class's `uses:`
-            %% list on hot reload — `register_uses/2` itself clears the
-            %% class's prior reverse-index rows first, so a changed `uses:`
-            %% set never leaves stale entries in the users index. Reads the
-            %% freshly-read `Meta` above first (the only place codegen bakes
-            %% `uses` — see `init/1`'s identical `Meta`-then-`ClassInfo`
-            %% precedence for every other codegen-baked field): `ClassInfo`
-            %% here is the raw `update_class` call argument, which never
-            %% carries `uses` itself, so reading it alone (as this line
-            %% previously did) silently WIPED the users index on every
-            %% `register_class/0` call after the very first — `on_load`'s own
-            %% synchronous `register_class/0` (see `activate_module/4`'s doc)
-            %% installs the correct set via `init/1`'s `Meta` read, then
-            %% `activate_module/4`'s own explicit, "redundant, harmless"
-            %% second `register_class/0` call reached this handler instead of
-            %% `init/1` (the class already existed) and cleared it right back
-            %% out — found via BT-3593's own fan-out test coverage actually
-            %% exercising `users_of/1` end-to-end for the first time.
-            UsesForRegistration =
-                case NewMeta of
-                    {ok, #{uses := Uses}} -> Uses;
-                    _ -> maps:get(uses, ClassInfo, [])
-                end,
-            beamtalk_protocol_registry:register_uses(ClassName, UsesForRegistration),
-            %% ADR 0093 §2: hot redefinition is also a ClassLoaded —
-            %% announced from the handle_call reply path after the refreshed
-            %% metadata is committed.
-            announce_class_lifecycle('ClassLoaded', ClassName),
-            %% Hot reload can change ClassName's method set (and this
-            %% is also the path classRemoveSelector/2 takes for a local-method
-            %% removal, via beamtalk_repl_eval:remove_method/4's recompile),
-            %% which changes conforms_to/2 for ClassName and every descendant
-            %% re-walked through it — flush rather than tracking descendants.
-            beamtalk_protocol_registry:invalidate_conforms_cache(),
-            {reply, {ok, NewState#class_state.fields}, NewState}
-    end;
-handle_call(instance_variables, _From, #class_state{fields = IVars} = State) ->
-    {reply, IVars, State};
-%% Expose field defaults so the generic instantiation path can read a
-%% module-less superclass's defaults when building an inherited instance map.
-handle_call(field_defaults, _From, #class_state{field_defaults = Defaults} = State) ->
-    {reply, Defaults, State};
-handle_call(is_sealed, _From, #class_state{is_sealed = Sealed} = State) ->
-    {reply, Sealed, State};
-handle_call(shape_version, _From, #class_state{shape_version = ShapeVersion} = State) ->
-    {reply, ShapeVersion, State};
-handle_call(is_typed, _From, #class_state{is_typed = Typed} = State) ->
-    {reply, Typed, State};
-handle_call(is_internal, _From, #class_state{is_internal = Internal} = State) ->
-    {reply, Internal, State};
-handle_call(is_abstract, _From, #class_state{is_abstract = Abstract} = State) ->
-    {reply, Abstract, State};
-handle_call(
-    is_constructible,
-    _From,
-    #class_state{
-        is_constructible = IsConstructible0,
-        module = Module,
-        is_abstract = IsAbstract
-    } = State
-) ->
-    IsConstructible = beamtalk_class_instantiation:ensure_is_constructible(
-        IsConstructible0, Module, IsAbstract
-    ),
-    {reply, IsConstructible, State#class_state{is_constructible = IsConstructible}};
-%% ADR 0032 Phase 1: Returns local methods for chain walk queries.
-handle_call(get_local_class_methods, _From, #class_state{class_methods = ClassMethods} = State) ->
-    {reply, ClassMethods, State};
-handle_call(get_instance_methods, _From, #class_state{instance_methods = InstanceMethods} = State) ->
-    {reply, {ok, InstanceMethods}, State};
-%% ADR 0033: Runtime-embedded documentation — class doc accessors.
-handle_call(get_doc, _From, #class_state{doc = Doc} = State) ->
-    {reply, Doc, State};
-handle_call({set_doc, DocBinary}, _From, #class_state{name = ClassName} = State) ->
-    %% BT-4262: `doc` reads the published copy.
-    ok = beamtalk_class_metadata:put_class_doc(ClassName, DocBinary),
-    {reply, ok, State#class_state{doc = DocBinary}};
-handle_call({set_method_doc, Selector, DocBinary}, _From, State) ->
-    NewMethodDocs = maps:put(Selector, DocBinary, State#class_state.method_docs),
-    NewState = State#class_state{method_docs = NewMethodDocs},
-    %% BT-3832: the doc is part of the published CompiledMethod record.
-    ok = publish_reflection(NewState),
-    {reply, ok, NewState};
-%% Class method dispatch.
-%% ADR 0036 Phase 2: Also handles metaclass_method_call with identical logic.
-%% ADR 0032 Phase 1: Passes local class_methods; dispatch walks superclass chain.
-%%
-%% The 4-tuple message carries the caller's session context explicitly
-%% (`{Selector, Args, {SessionPid, SessionId}}`). We seed from the tuple, which
-%% avoids the `process_info(CallerPid, dictionary)` full-dictionary copy the
-%% legacy 3-tuple clause below must use.
-handle_call(
-    {MethodCallType, Selector, Args, SessionCtx},
-    From,
-    #class_state{} = State
-) when MethodCallType =:= class_method_call; MethodCallType =:= metaclass_method_call ->
-    %% No guard on SessionCtx: `seed_session_context_from/1` accepts any term and
-    %% safely no-ops on unrecognised shapes, so a malformed/empty context
-    %% degrades to "no context" rather than crashing the class gen_server with a
-    %% function_clause (it would otherwise miss both this and the 3-tuple clause).
-    Restore = seed_session_context_from(SessionCtx),
-    dispatch_class_method(Selector, Args, From, State, Restore);
-%% Backward-compatible fallback for the legacy 3-tuple message shape
-%% (in-flight messages across a hot-code reload). Mirrors the caller's session
-%% context by reading its process dictionary via `process_info/2`.
-handle_call(
-    {MethodCallType, Selector, Args},
-    From,
-    #class_state{} = State
-) when MethodCallType =:= class_method_call; MethodCallType =:= metaclass_method_call ->
-    Restore = seed_caller_session_context(From),
-    dispatch_class_method(Selector, Args, From, State, Restore);
-handle_call({initialize, _Args}, _From, #class_state{} = State) ->
-    {reply, {ok, nil}, State};
-handle_call(get_module, _From, #class_state{module = Module} = State) ->
-    {reply, Module, State};
-handle_call(
-    {get_class_var, Name}, _From, #class_state{name = ClassName, class_state = ClassVars} = State
-) ->
+    end.
+
+-spec call_get_class_var(atom(), #class_state{}) -> {reply, term(), #class_state{}}.
+call_get_class_var(Name, #class_state{name = ClassName, class_state = ClassVars} = State) ->
     %% ADR 0124 §1/§4i/B4: the read rule (declared-`late`, declared-set) is
     %% `read_class_var/4`, shared with `Cls fieldAt:` (BT-4148).
     %%
@@ -1996,24 +1929,7 @@ handle_call(
     case read_class_var(ClassName, ClassVars, Name, in_process) of
         {ok, Value} -> {reply, Value, State};
         {error, _} = Err -> {reply, Err, State}
-    end;
-handle_call({set_class_var, Name, Value}, _From, #class_state{class_state = ClassVars} = State) ->
-    NewClassVars = ClassVars#{Name => Value},
-    %% Keep the live snapshot in sync with this mutation.
-    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
-    {reply, Value, State#class_state{class_state = NewClassVars}};
-handle_call({has_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
-    %% ADR 0124 §1/§4i/B4: never raises. The presence test is
-    %% `beamtalk_class_vars:has_value/2`, shared with `get_class_var`'s
-    %% declared-`late` branch (`read_in/4`, BT-4061).
-    {reply, beamtalk_class_vars:has_value(ClassVars, Name), State};
-handle_call({clear_class_var, Name}, _From, #class_state{class_state = ClassVars} = State) ->
-    %% ADR 0124 §1/§4f/§4i/B4: returns the class object itself, matching
-    %% the instance-side intrinsic's `clearField: -> Self` convention.
-    NewClassVars = maps:remove(Name, ClassVars),
-    beamtalk_class_registry:record_class_state_snapshot(self(), NewClassVars),
-    NewState = State#class_state{class_state = NewClassVars},
-    {reply, beamtalk_class_registry:class_object_from_pid(self()), NewState}.
+    end.
 
 %% ADR 0032 Phase 1: Passes instance_methods (local only) instead of flattened table.
 handle_cast(
@@ -2117,7 +2033,7 @@ remove_dead_class_registration(ClassName, Module) ->
                 catch
                     _:_ -> ok
                 end),
-            announce_class_lifecycle('ClassRemoved', ClassName),
+            beamtalk_class_publish:announce_class_lifecycle('ClassRemoved', ClassName),
             ok
     end.
 
@@ -2126,7 +2042,7 @@ remove_registration(ClassName, ForgetPidRows) ->
     %% ADR 0093 §2: Announce ClassRemoved on the system bus as the class
     %% process shuts down (e.g. removeFromSystem). The event carries only the
     %% class name, so it is independent of the metadata-row deletion below.
-    announce_class_lifecycle('ClassRemoved', ClassName),
+    beamtalk_class_publish:announce_class_lifecycle('ClassRemoved', ClassName),
     teardown_registration(ClassName, ForgetPidRows).
 
 -spec teardown_registration(class_name(), fun((pid()) -> term())) -> ok.
@@ -2162,41 +2078,6 @@ code_change(OldVsn, State, Extra) ->
 %%====================================================================
 %% Internal functions
 %%====================================================================
-
--doc """
-ADR 0050 Phase 3: notify the compiler server of a class (re)registration —
-shared by the on_load registration path (`handle_call({start, …})`) and the
-hot-reload/redefinition path (`handle_call({update_class, …})`), which both
-call this with the class's fresh `__beamtalk_meta/0` map.
-
-Cast is fire-and-forget — silently dropped if the compiler server is not
-running. `beamtalk_compiler` is not started at all in release/escript mode
-(ADR 0099 §4 / ADR 0125 §1.5's default), and the hot-reload path is hit by
-ordinary stdlib bootstrap too (the metaclass-tower stubs are registered,
-then `update_class`'d when their compiled `.bt` modules load) — not just
-live hot-reload — so an `undef` here must never crash the class process.
-""".
--spec notify_compiler_server_register(class_name(), map()) -> ok.
-notify_compiler_server_register(ClassName, Meta) ->
-    try
-        beamtalk_compiler_server:register_class(ClassName, Meta)
-    catch
-        error:undef ->
-            %% `include-compiler = false` is the release/escript default
-            %% (ADR 0125 §1.2), so this fires for every class at every boot
-            %% in the common case — expected steady state, not an
-            %% operational concern, hence ?LOG_DEBUG rather than
-            %% ?LOG_WARNING (matching the sibling `update_class` guard just
-            %% above, which treats the same "compiler server may be absent"
-            %% condition the same way).
-            ?LOG_DEBUG(#{
-                event => register_class_undef,
-                class => ClassName,
-                reason => "beamtalk_compiler_server:register_class/2 not available",
-                domain => [beamtalk, runtime]
-            }),
-            ok
-    end.
 
 -doc """
 Read class variable `Name` from the class-state map `ClassVars` of `ClassName`:
@@ -2372,7 +2253,7 @@ dispatch_class_method_lookup(Selector, Args, From, State, Restore) ->
         {error, not_found} ->
             {reply, {error, not_found}, State}
     after
-        restore_dict_key(beamtalk_dispatch_caller_pid, PrevCaller),
+        beamtalk_class_session:restore_dict_key(beamtalk_dispatch_caller_pid, PrevCaller),
         Restore()
     end.
 
@@ -2397,170 +2278,6 @@ dispatch_caller_pid() ->
         Pid when is_pid(Pid) -> Pid;
         _ -> undefined
     end.
-
--doc """
-Seed this class gen_server with a session context passed explicitly in the
-class-method-call message, returning a zero-arity restore closure.
-
-ADR 0081: factory class methods like `Session current` /
-`Workspace currentSession` read `beamtalk_session_pid` / `beamtalk_session_id` /
-`beamtalk_session_meta` from the process dictionary. Class-method dispatch hops
-from the eval worker to this gen_server, so the worker now sends its context
-keys in the message tuple (`beamtalk_class_dispatch:local_session_context/0`)
-rather than having us copy its entire dictionary via `process_info/2`. We
-`put/2` them locally and restore the previous values (or erase) on the way out.
-
-The 4-tuple shape adds the *entry group leader* — the IO sink a
-connected `beamtalk run … --connect` dispatch streams its `Console` output to.
-This gen_server is long-lived, so it inherited the node's group leader at spawn
-and a class method's `Console` writes miss the dispatching session's IO capture
-entirely. Adopting the caller's sink for the duration of the call fixes that;
-`gen_server` serialises calls, so a concurrent call from another session queues
-behind this one and adopts *its own* caller's sink rather than seeing ours. The
-key is only ever set by the `run-entry` op, so every other dispatch path keeps
-the group leader it has today.
-
-The 3-tuple shape carries the origin metadata (`Meta`) so `Session current kind`
-reports the real client surface. The 3- and 2-tuple clauses remain for in-flight
-messages sent by a pre-upgrade caller across a hot-code reload (no metadata →
-`Session current` falls back to `kind => unknown`); both delegate to the 4-tuple
-clause with the missing fields as `undefined`, so every clause manages the same
-key set as a unit and no stale value from a previous call can leak into this one.
-""".
--spec seed_session_context_from(
-    {pid() | undefined, binary() | undefined, map() | undefined, pid() | undefined}
-    | {pid() | undefined, binary() | undefined, map() | undefined}
-    | {pid() | undefined, binary() | undefined}
-    | term()
-) -> fun(() -> ok).
-seed_session_context_from({SessionPid, SessionId, SessionMeta, EntryGroupLeader}) ->
-    PrevPid = put(beamtalk_session_pid, SessionPid),
-    PrevId = put(beamtalk_session_id, SessionId),
-    PrevMeta = put(beamtalk_session_meta, SessionMeta),
-    %% Keep the key in the dictionary as well as adopting the sink, so
-    %% a nested class-method call made from inside this one re-emits it via
-    %% `beamtalk_class_dispatch:local_session_context/0` and keeps streaming.
-    PrevEntryGl = put(beamtalk_entry_group_leader, EntryGroupLeader),
-    RestoreGroupLeader = adopt_entry_group_leader(EntryGroupLeader),
-    fun() ->
-        RestoreGroupLeader(),
-        restore_dict_key(beamtalk_session_pid, PrevPid),
-        restore_dict_key(beamtalk_session_id, PrevId),
-        restore_dict_key(beamtalk_session_meta, PrevMeta),
-        restore_dict_key(beamtalk_entry_group_leader, PrevEntryGl),
-        ok
-    end;
-seed_session_context_from({SessionPid, SessionId, SessionMeta}) ->
-    seed_session_context_from({SessionPid, SessionId, SessionMeta, undefined});
-seed_session_context_from({SessionPid, SessionId}) ->
-    %% A 2-tuple context carries no metadata, so clear any leftover `meta` for
-    %% the duration of this call (and restore it after). Managing all the keys
-    %% as a unit means `Session current kind` inside this call can never read a
-    %% stale other-session's metadata, regardless of what ran before.
-    seed_session_context_from({SessionPid, SessionId, undefined, undefined});
-seed_session_context_from(_Other) ->
-    %% Unrecognised context shape: seed nothing rather than crash the call.
-    fun() -> ok end.
-
--doc """
-Adopt `EntryGroupLeader` as this process's group leader for the duration of one
-class-method call, returning a zero-arity closure that restores the
-previous one.
-
-A no-op — returning a no-op closure — unless the caller passed a live local pid
-that differs from the group leader we already have. The liveness check matters:
-`group_leader/2` happily accepts a dead pid, and a method that then writes to
-`standard_io` blocks until the io call gives up, so a client that disconnected
-mid-dispatch would turn every `Console` write in the entry into an error. Falling
-back to the group leader we already have loses the (undeliverable) output
-instead. `group_leader/2` still raises `badarg` for a non-local pid and the sink
-can exit between the check and the swap, so both the swap and the restore are
-wrapped: losing the output sink must never crash the class gen_server.
-""".
--spec adopt_entry_group_leader(pid() | undefined | term()) -> fun(() -> ok).
-adopt_entry_group_leader(EntryGroupLeader) when
-    is_pid(EntryGroupLeader), node(EntryGroupLeader) =:= node()
-->
-    Previous = group_leader(),
-    Adopt =
-        EntryGroupLeader =/= Previous andalso
-            is_process_alive(EntryGroupLeader) andalso
-            set_group_leader(EntryGroupLeader),
-    case Adopt of
-        true ->
-            fun() ->
-                _ = set_group_leader(Previous),
-                ok
-            end;
-        false ->
-            fun() -> ok end
-    end;
-adopt_entry_group_leader(_Other) ->
-    fun() -> ok end.
-
-%% Point this process's group leader at `Pid`, reporting whether it took effect.
-%% `false` (rather than a crash) when `group_leader/2` rejects `Pid` — the same
-%% defensive shape `beamtalk_io_capture:stop/1` uses when resetting inherited
-%% group leaders.
--spec set_group_leader(pid()) -> boolean().
-set_group_leader(Pid) ->
-    try
-        group_leader(Pid, self())
-    catch
-        error:badarg -> false
-    end.
-
--doc """
-Mirror the calling process's session context into this class gen_server for the
-duration of a class-method call, returning a zero-arity closure that restores
-the prior state.
-
-ADR 0081: `seed_session_context/3` seeds the eval *worker*, but
-class-method dispatch (`Session current`, `Workspace currentSession`) hops to
-this gen_server, where those keys are absent. We read them from the caller via
-`process_info/2` (no message-shape change) and `put/2` them locally, restoring
-the previous values (or erasing) on the way out so concurrent calls from other
-sessions never see a stale context.
-
-Deliberately leaves `beamtalk_entry_group_leader` alone: only a
-legacy caller sends the 3-arity message this seeds from, and such a caller
-never set that key. It cannot read a stale one either — `gen_server` serialises
-calls and `seed_session_context_from/1` always restores the key before its call
-returns, so the key is only ever set *during* a 4-tuple call.
-""".
--spec seed_caller_session_context({pid(), term()} | term()) -> fun(() -> ok).
-seed_caller_session_context({CallerPid, _Tag}) when is_pid(CallerPid) ->
-    case process_info(CallerPid, dictionary) of
-        {dictionary, Dict} ->
-            CallerPidCtx = proplists:get_value(beamtalk_session_pid, Dict),
-            CallerIdCtx = proplists:get_value(beamtalk_session_id, Dict),
-            CallerMetaCtx = proplists:get_value(beamtalk_session_meta, Dict),
-            PrevPid = put(beamtalk_session_pid, CallerPidCtx),
-            PrevId = put(beamtalk_session_id, CallerIdCtx),
-            PrevMeta = put(beamtalk_session_meta, CallerMetaCtx),
-            fun() ->
-                restore_dict_key(beamtalk_session_pid, PrevPid),
-                restore_dict_key(beamtalk_session_id, PrevId),
-                restore_dict_key(beamtalk_session_meta, PrevMeta),
-                ok
-            end;
-        undefined ->
-            %% Caller already gone (dead before we ran): nothing to mirror.
-            fun() -> ok end
-    end;
-seed_caller_session_context(_From) ->
-    fun() -> ok end.
-
-%% Restore a process-dictionary key to its previous value, or erase it if it had
-%% none. `put/2` returns `undefined` for a key that was unset, which is exactly
-%% the value we erase back to.
--spec restore_dict_key(atom(), term()) -> ok.
-restore_dict_key(Key, undefined) ->
-    erase(Key),
-    ok;
-restore_dict_key(Key, Prev) ->
-    put(Key, Prev),
-    ok.
 
 -doc """
 Walk superclass chain to find an inherited class method.
@@ -2803,212 +2520,6 @@ state_compiled_method(ClassName, Side, Selector, State) ->
     end.
 
 -doc """
-Write a class's identity facts — module, superclass, is_abstract, and local
-class-method selectors — to the process-dictionary caches and the unified
-`beamtalk_class_metadata` ETS row in one place.
-
-`init/1` and `apply_class_info/2` used to each perform these writes via
-several separate `put/2` calls plus a trailing
-`beamtalk_class_metadata:insert/5`, spread across many lines with unrelated
-code in between — a mid-function reader (dispatch, reflection, a hot-patch
-racing the same class process) could observe the PD and ETS copies
-disagreeing. Routing both call sites through this one function collapses that
-window to this call's own internal ordering (PD first — the self-view used by
-self-dispatch inside this gen_server — ETS last, published for other
-processes), so a future edit cannot silently reintroduce "module written
-here, superclass written 40 lines later" drift.
-
-`Mode` selects the ETS write:
-
-* `create` — `beamtalk_class_metadata:insert/5`, a full fresh row. Used by
-  `init/1`; `has_runtime_class_methods` starts `false` (a brand-new row has
-  no funs yet — the caller's own `seed_runtime_class_methods/2` call raises
-  the gate afterward if needed).
-* `merge` — `beamtalk_class_metadata:merge_identity/5`, a per-field update
-  that leaves `has_runtime_class_methods` untouched. Used by
-  `apply_class_info/2`'s reload path; a caller that needs to drop the gate
-  (e.g. because it just purged the funs table) must call
-  `beamtalk_class_metadata:reset_runtime_class_methods/1` explicitly rather
-  than relying on this call's side effect.
-""".
--spec sync_identity(
-    class_name(), atom(), class_name() | none, boolean(), [selector()], create | merge
-) -> ok.
-sync_identity(ClassName, Module, Superclass, IsAbstract, Selectors, Mode) ->
-    put(beamtalk_class_module, Module),
-    put(beamtalk_class_is_abstract, IsAbstract),
-    put(beamtalk_class_superclass, Superclass),
-    case Mode of
-        create ->
-            beamtalk_class_metadata:insert(ClassName, Module, Selectors, Superclass, IsAbstract);
-        merge ->
-            beamtalk_class_metadata:merge_identity(
-                ClassName, Module, Selectors, Superclass, IsAbstract
-            )
-    end.
-
--doc """
-Publish the compiled `direct_constructors` eligibility set.
-
-Copies `direct_constructors` from `Meta` into the unified metadata row, where
-`beamtalk_class_dispatch:class_send/3` reads it without a gen_server hop. Meta
-without the key (dynamic classes, older modules) clears the set, so a reload
-that makes a class ineligible takes effect immediately. Only `new`/`new:`
-atoms are kept; anything else in the list is dropped defensively.
-
-Also publishes the class's own `defines_user_class_new0` (BT-4479) and
-`defines_user_class_new1` facts (BT-4409),
-which descendants' dynamic `new:` reads through
-`beamtalk_class_metadata:chain_has_user_new1/1`; Meta without it stores
-`undefined` (unknown), so the chain walk fails closed.
-""".
--spec sync_direct_constructors(class_name(), map()) -> ok.
-sync_direct_constructors(ClassName, Meta) ->
-    Ctors =
-        case maps:get(direct_constructors, Meta, []) of
-            L when is_list(L) -> [S || S <- L, S =:= new orelse S =:= 'new:'];
-            _ -> []
-        end,
-    DefinesNew1 =
-        case maps:get(defines_user_class_new1, Meta, undefined) of
-            B when is_boolean(B) -> B;
-            _ -> undefined
-        end,
-    beamtalk_class_metadata:put_defines_user_class_new1(ClassName, DefinesNew1),
-    %% BT-4479: the unary counterpart; absent reads as unknown (fail-open).
-    DefinesNew0 =
-        case maps:get(defines_user_class_new0, Meta, undefined) of
-            B0 when is_boolean(B0) -> B0;
-            _ -> undefined
-        end,
-    beamtalk_class_metadata:put_defines_user_class_new0(ClassName, DefinesNew0),
-    beamtalk_class_metadata:put_direct_constructors(ClassName, Ctors).
-
--doc """
-Publish the class's certified literal class-side bodies (BT-4363, BT-4504):
-`constant_class_methods` from its `__beamtalk_meta/0`, keeping only
-`Selector => constant_value()` entries
-(`beamtalk_class_metadata:is_constant_value/1`); `#{}` when absent (a ClassBuilder class, an
-older module). A constant-value static call key is certified against it.
-""".
--spec sync_constant_class_methods(class_name(), map()) -> ok.
-sync_constant_class_methods(ClassName, Meta) ->
-    Constants =
-        case maps:get(constant_class_methods, Meta, #{}) of
-            M when is_map(M) ->
-                maps:filter(
-                    fun(K, V) ->
-                        is_atom(K) andalso beamtalk_class_metadata:is_constant_value(V)
-                    end,
-                    M
-                );
-            _ ->
-                #{}
-        end,
-    beamtalk_class_metadata:put_constant_class_methods(ClassName, Constants).
-
--doc """
-Publish the class's caller-safe signal primitives (BT-4493):
-`caller_safe_class_primitives` from its `__beamtalk_meta/0`, keeping only
-`Selector => Primitive` atom entries; `#{}` when absent. A caller-safe raise
-static call key is certified against it, not against the module's own meta,
-which is the old code during a reload's `-on_load`.
-""".
--spec sync_caller_safe_primitives(class_name(), map()) -> ok.
-sync_caller_safe_primitives(ClassName, Meta) ->
-    Primitives =
-        case maps:get(caller_safe_class_primitives, Meta, #{}) of
-            M when is_map(M) ->
-                maps:filter(fun(K, V) -> is_atom(K) andalso is_atom(V) end, M);
-            _ ->
-                #{}
-        end,
-    beamtalk_class_metadata:put_caller_safe_primitives(ClassName, Primitives).
-
--doc """
-Publish the class-variable fact and the process-bound selector list (ADR 0142
-§1, BT-4299) into the unified metadata row.
-
-Whether the class declares class variables is read from the compiled
-`__beamtalk_meta/0`'s `class_field_kinds` (every declared `classState:`,
-`late` ones included); a class without it (a ClassBuilder class, an older
-module) falls back to the keys of its `classState` defaults. Never re-derived
-from source. `beamtalk_class_metadata:put_class_variables/2` erases the
-derived direct-call flag before a changed fact becomes visible.
-
-`process_bound_class_selectors` is the generated list Rust owns; a module
-without the key stores `undefined` (unknown), never a runtime copy.
-""".
--spec sync_class_process_facts(class_name(), map(), map()) -> ok.
-sync_class_process_facts(ClassName, Meta, ClassVarDefaults) ->
-    HasClassVars =
-        case maps:get(class_field_kinds, Meta, undefined) of
-            Kinds when is_map(Kinds) -> map_size(Kinds) > 0;
-            _ -> map_size(ClassVarDefaults) > 0
-        end,
-    beamtalk_class_metadata:put_class_variables(ClassName, HasClassVars),
-    ProcessBound =
-        case maps:get(process_bound_class_selectors, Meta, undefined) of
-            L when is_list(L) -> [S || S <- L, is_atom(S)];
-            _ -> undefined
-        end,
-    beamtalk_class_metadata:put_process_bound_selectors(ClassName, ProcessBound).
-
--doc """
-Warn when `ClassName` has just gained a class-side `new:` that its subclasses'
-baked `direct_constructors` verdicts do not know about (BT-4126).
-
-A subclass's `new:` verdict is baked only when no ancestor defined a
-class-side `new:` at its compile time (Rust's `chain_has_user_new_init`).
-Since BT-4409 the chain is also decided at run time: a dynamic `new:` builds
-in the caller only while `beamtalk_class_metadata:chain_has_user_new1/1`
-finds no ancestor publishing a user `new:` (nor an ancestor's runtime-fun
-`new:`), so if `ClassName` *gains* one (by a compiled reload or a runtime-fun
-`put_class_method`), its subclasses route through it at once, without being
-recompiled. This warning is therefore informational: it names the subclasses
-whose baked verdict no longer matches their ancestors, which a recompile
-brings back in line. Losing a `new:` needs no warning.
-
-"Has a class-side `new:`" is read from the class-method map, which for a
-compiled class is the module's `class_method_info` (user primary methods only,
-no synthesized `new:`) and for a runtime patch includes the installed fun.
-`class_new:/2` exports cannot be used because `erlang:function_exported/3`
-answers `false` while a reloading module's `on_load` is still running, which
-is when a reload arrives.
-""".
--spec warn_stale_subclass_constructors(class_name(), map(), map()) -> ok.
-warn_stale_subclass_constructors(ClassName, OldClassMethods, NewClassMethods) ->
-    GainedNew =
-        not maps:is_key('new:', OldClassMethods) andalso maps:is_key('new:', NewClassMethods),
-    Stale =
-        case GainedNew of
-            true ->
-                [
-                    Sub
-                 || Sub <- beamtalk_class_registry:all_subclasses(ClassName),
-                    lists:member('new:', beamtalk_class_metadata:lookup_direct_constructors(Sub))
-                ];
-            false ->
-                []
-        end,
-    case Stale of
-        [] ->
-            ok;
-        _ ->
-            ?LOG_WARNING(
-                "Class ~p gained a class-side new:, but subclasses ~p "
-                "were compiled without it and still build new: directly, "
-                "bypassing the override. Recompile them.",
-                [ClassName, Stale],
-                #{
-                    class => ClassName,
-                    stale_direct_constructors => Stale,
-                    domain => [beamtalk, runtime]
-                }
-            )
-    end.
-
--doc """
 BT-4438: record what `Selector` held on the class side before a runtime fun
 replaces it, so `remove_class_method/2` can restore it. Only the first put
 over a selector records anything: a later put replaces a runtime fun, and
@@ -3070,7 +2581,9 @@ do_remove_class_method(Selector, #class_state{name = ClassName} = State) ->
     %% `Selector` to this class may read the funs table after the delete below
     %% and run the compiled branch instead; `put_class_method` has the mirror
     %% window. Neither is new to removal (ADR 0084's lock-free reads).
-    Funs = maps:filter(fun(_, Info) -> is_runtime_fun_info(Info) end, NewClassMethods),
+    Funs = maps:filter(
+        fun(_, Info) -> beamtalk_class_publish:is_runtime_fun_info(Info) end, NewClassMethods
+    ),
     case maps:find(Selector, Funs) of
         {ok, RestoredFun} ->
             %% The first put replaced a builder-installed fun: put it back.
@@ -3091,10 +2604,16 @@ do_remove_class_method(Selector, #class_state{name = ClassName} = State) ->
     %% BT-4301 pattern: erase again now that the change is visible, so a flag
     %% derived from the half-written state in between does not survive.
     beamtalk_class_shadow_flags:invalidate(ClassName),
-    warn_stale_subclass_constructors(ClassName, OldClassMethods, NewClassMethods),
+    beamtalk_class_publish:warn_stale_subclass_constructors(
+        ClassName, OldClassMethods, NewClassMethods
+    ),
     case maps:find(source, Previous) of
-        {ok, Source} -> put_method_xref(ClassName, true, Selector, Source);
-        error -> safe_xref(fun() -> beamtalk_xref:purge_method(ClassName, true, Selector) end)
+        {ok, Source} ->
+            beamtalk_class_publish:put_method_xref(ClassName, true, Selector, Source);
+        error ->
+            beamtalk_class_publish:safe_xref(fun() ->
+                beamtalk_xref:purge_method(ClassName, true, Selector)
+            end)
     end,
     ok = publish_reflection(NewState),
     notify_hot_patch(NewState),
@@ -3116,40 +2635,12 @@ carried_over_shadowed(
     maps:filter(
         fun(Selector, _) ->
             case {maps:find(Selector, Old), maps:find(Selector, NewClassMethods)} of
-                {{ok, Info}, {ok, Info}} -> is_runtime_fun_info(Info);
+                {{ok, Info}, {ok, Info}} -> beamtalk_class_publish:is_runtime_fun_info(Info);
                 _ -> false
             end
         end,
         Shadowed
     ).
-
--spec is_runtime_fun_info(term()) -> boolean().
-is_runtime_fun_info(Info) ->
-    is_map(Info) andalso maps:is_key(block, Info).
-
--doc """
-Seed the runtime class-method fun retrieval store from a class_methods map.
-
-ADR 0084: picks out the entries that carry a `block` (runtime/builder
-funs, as opposed to compiled `#{arity => N}` references), writes each into the
-metadata retrieval store, then sets the per-class gate flag. Classes with no fun
-entries leave the gate flag false so their dispatch never reads the funs table.
-""".
--spec seed_runtime_class_methods(class_name(), map()) -> ok.
-seed_runtime_class_methods(ClassName, ClassMethods) ->
-    Funs = maps:filter(fun(_Selector, Info) -> is_runtime_fun_info(Info) end, ClassMethods),
-    case maps:size(Funs) of
-        0 ->
-            ok;
-        _ ->
-            maps:foreach(
-                fun(Selector, Info) ->
-                    beamtalk_class_metadata:put_class_method_fun(ClassName, Selector, Info)
-                end,
-                Funs
-            ),
-            beamtalk_class_metadata:set_runtime_class_methods(ClassName, maps:keys(ClassMethods))
-    end.
 
 -doc """
 Notify the compiler server of a hot-patch.
@@ -3246,16 +2737,12 @@ apply_class_info(State, ClassInfo) ->
     %% ADR 0050 Phase 5: Prefer meta from ClassInfo when available (same reason as init/1:
     %% erlang:function_exported/3 returns false during on_load, so read_meta/1 returns #{}).
     %% Falls back to read_meta for explicit hot-reload calls made outside on_load.
-    Meta =
-        case maps:get(meta, ClassInfo, undefined) of
-            undefined -> read_meta(NewModule);
-            M when is_map(M) -> M
-        end,
+    Meta = class_meta(NewModule, ClassInfo),
     %% BT-4299: a reload can add or drop `classState:` declarations. Published
     %% before every other write below (BT-4300): raising `class_vars` is what
     %% bars the in-caller fast path (ADR 0142 §1 rule 1) for a class that gains
     %% class variables, so it must land before the reloaded methods' metadata.
-    sync_class_process_facts(
+    beamtalk_class_publish:sync_class_process_facts(
         State#class_state.name,
         Meta,
         maps:get(class_state, ClassInfo, State#class_state.class_state)
@@ -3332,7 +2819,7 @@ apply_class_info(State, ClassInfo) ->
     %% funs; a builder re-register that supplies funs re-installs them.
     beamtalk_class_metadata:delete_class_method_funs(State#class_state.name),
     beamtalk_class_metadata:reset_runtime_class_methods(State#class_state.name),
-    sync_identity(
+    beamtalk_class_publish:sync_identity(
         State#class_state.name,
         NewModule,
         NewSuperclass,
@@ -3352,23 +2839,23 @@ apply_class_info(State, ClassInfo) ->
     %% any stale row for this class name before writing the current one (or
     %% none). Mirrors sync_identity/6 immediately above.
     beamtalk_class_registry:record_backing_module_entry(State#class_state.name, Meta, self()),
-    seed_runtime_class_methods(State#class_state.name, NewClassMethods),
+    beamtalk_class_publish:seed_runtime_class_methods(State#class_state.name, NewClassMethods),
     %% Refresh the direct-construction verdicts from the fresh meta (e.g. a
     %% reload adding a custom `new` drops it from the baked set immediately).
-    sync_direct_constructors(State#class_state.name, Meta),
+    beamtalk_class_publish:sync_direct_constructors(State#class_state.name, Meta),
     %% BT-4363: publish the new module's certified constants (erasing the
     %% class's static call keys on a change), so a constant-value key never
     %% certifies a literal from the old code still current during `-on_load`.
-    sync_constant_class_methods(State#class_state.name, Meta),
+    beamtalk_class_publish:sync_constant_class_methods(State#class_state.name, Meta),
     %% BT-4493: likewise the caller-safe raise primitives.
-    sync_caller_safe_primitives(State#class_state.name, Meta),
+    beamtalk_class_publish:sync_caller_safe_primitives(State#class_state.name, Meta),
     %% BT-4126: the sync above re-bakes only this class's own row; say so when
     %% the reload leaves descendants' baked `direct_constructors` behind their
     %% ancestors (informational: their dynamic `new:` re-checks the chain at
     %% run time, BT-4409). Static class-method call sites are guarded by
     %% `direct_call_ok/2` (ADR 0142 §2, BT-4301), so they cannot go stale and
     %% need no warning.
-    warn_stale_subclass_constructors(
+    beamtalk_class_publish:warn_stale_subclass_constructors(
         State#class_state.name, State#class_state.class_methods, NewClassMethods
     ),
 

@@ -563,6 +563,9 @@ impl TypeChecker {
             .map(|arm| {
                 let mut arm_env = env.child();
                 Self::bind_pattern_vars(&arm.pattern, &mut arm_env);
+                // ADR 0147: a map pattern types its variables from a shape
+                // scrutinee.
+                self.bind_map_pattern_types(&arm.pattern, &residual_scrutinee_ty, &mut arm_env);
 
                 // ADR 0107 Phase A: a `binding :: ClassName`
                 // arm narrows `binding` to `ClassName`, computed the

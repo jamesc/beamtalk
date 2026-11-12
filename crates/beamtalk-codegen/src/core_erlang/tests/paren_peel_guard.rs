@@ -97,6 +97,14 @@ const CEILINGS: &[(&str, usize)] = &[
     // needs no `String` unwrap).
     ("beamtalk-codegen/src/core_erlang/binary_construction.rs", 1),
     (
+        "beamtalk-codegen/src/core_erlang/blocks/tier2_value_calls.rs",
+        3,
+    ),
+    (
+        "beamtalk-codegen/src/core_erlang/class_method_codegen.rs",
+        2,
+    ),
+    (
         "beamtalk-codegen/src/core_erlang/control_flow/analysis.rs",
         6,
     ),
@@ -110,7 +118,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ),
     ("beamtalk-codegen/src/core_erlang/expr_shape.rs", 2),
     ("beamtalk-codegen/src/core_erlang/field_types.rs", 1),
-    ("beamtalk-codegen/src/core_erlang/gen_server/methods.rs", 9),
+    ("beamtalk-codegen/src/core_erlang/gen_server/methods.rs", 4),
     ("beamtalk-codegen/src/core_erlang/generator/accessors.rs", 2),
     ("beamtalk-codegen/src/core_erlang/intrinsics.rs", 1),
     ("beamtalk-codegen/src/core_erlang/mod.rs", 1),
@@ -123,7 +131,14 @@ const CEILINGS: &[(&str, usize)] = &[
     ("beamtalk-codegen/src/core_erlang/threaded_expr.rs", 14),
     ("beamtalk-codegen/src/core_erlang/threading_analysis.rs", 3),
     ("beamtalk-codegen/src/core_erlang/util.rs", 9),
-    ("beamtalk-codegen/src/core_erlang/value_type_codegen.rs", 11),
+    (
+        "beamtalk-codegen/src/core_erlang/value_type_codegen/body.rs",
+        9,
+    ),
+    (
+        "beamtalk-codegen/src/core_erlang/value_type_codegen/conditionals.rs",
+        2,
+    ),
     // Expression helpers in the AST leaf (`as_literal_bool`).
     ("beamtalk-core/src/ast/expression.rs", 1),
     // Binary segment values and sizes (ADR 0143): `BinarySegmentValue for

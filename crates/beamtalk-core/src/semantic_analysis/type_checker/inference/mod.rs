@@ -927,6 +927,7 @@ impl TypeChecker {
             Expression::DestructureAssignment { pattern, value, .. } => {
                 let value_ty = self.infer_expr(value, hierarchy, env, in_abstract_method);
                 Self::bind_destructure_vars(pattern, &value_ty, hierarchy, env);
+                self.bind_map_pattern_types(pattern, &value_ty, env);
                 InferredType::Dynamic(DynamicReason::Unknown)
             }
         };
