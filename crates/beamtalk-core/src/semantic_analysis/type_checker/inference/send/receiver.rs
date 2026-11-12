@@ -18,6 +18,7 @@ use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType, Me
 use crate::semantic_analysis::protocol_registry::ProtocolMethodRequirement;
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::type_checker::known_remote;
+use crate::semantic_analysis::type_checker::narrowing::visitors::expr_contains_returning_self_send;
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::validation::ProtocolSendResolution;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
@@ -37,9 +38,75 @@ impl TypeChecker {
     /// the inner subtree via `infer_expr` would re-emit any DNU / type warnings
     /// it produces. By threading the receiver type through, we walk the inner
     /// subtree exactly once.
+    ///
+    /// BT-4715: this is where a send's effect on field narrowings is
+    /// *recorded*. A send to `self`/`super` runs a method that may assign any
+    /// state field of an actor (`reset => self.f := nil`), so it bumps
+    /// `self_send_epoch`; [`TypeChecker::infer_expr`] compares the epoch
+    /// around every expression and drops the `self.<field>` refinements of
+    /// its own env when it changed. Doing the comparison there rather than
+    /// here also covers a self-send buried in a block argument or a `match:`
+    /// arm, whose child env is discarded. A send that diverges (`-> Never`)
+    /// leaves no later code to mislead, so it does not count. In a value-type
+    /// body the callee's `self.f :=` rebinds only the callee's own `self`
+    /// (functional update), so the caller's fields cannot change.
+    ///
+    /// Known gaps (the check is warning-level): only a literal `self`/`super`
+    /// receiver counts, so a self alias (`me := self. me reset`) and a block
+    /// built earlier and run later (`r := [self reset]. … r value`) are not
+    /// seen, and neither is a block that runs repeatedly (`to:do:`, `do:`,
+    /// `[cond] whileTrue: […]`, `[…] repeat`): a self-send late in its body
+    /// can reassign a field before an earlier statement of the next
+    /// iteration reads it. Likewise a diverging block passed to a user method
+    /// that catches internally (`self try: [self reset. self error: "x"]`,
+    /// where `try:` wraps `on:do:`) is still rewound.
+    #[allow(clippy::too_many_arguments)] // split from infer_message_send to share body
+    pub(in crate::semantic_analysis::type_checker) fn infer_message_send_with_receiver_ty(
+        &mut self,
+        receiver: &Expression,
+        receiver_ty: InferredType,
+        selector: &MessageSelector,
+        arguments: &[Expression],
+        span: Span,
+        hierarchy: &ClassHierarchy,
+        env: &mut TypeEnv,
+        in_abstract_method: bool,
+    ) -> InferredType {
+        let ty = self.infer_message_send_with_receiver_ty_inner(
+            receiver,
+            receiver_ty,
+            selector,
+            arguments,
+            span,
+            hierarchy,
+            env,
+            in_abstract_method,
+        );
+        if Self::is_self_or_super(receiver)
+            && !self.in_value_type_body
+            && !matches!(ty, InferredType::Never)
+        {
+            self.self_send_epoch += 1;
+        }
+        // A protected block that ends in `self error:` diverges, but under
+        // `on:do:` the exception is caught and control continues after the
+        // send, so a returning self-send before the divergence still counts
+        // (the block's own rewind in `forget_diverging_block_self_sends`
+        // assumed it did not). Only the receiver is scanned: a handler that
+        // falls through has already bumped the epoch, and one that diverges
+        // never reaches the next statement. `ensure:` does not catch.
+        if !self.in_value_type_body
+            && matches!(selector.well_known(), Some(WellKnownSelector::OnDo))
+            && expr_contains_returning_self_send(receiver, &self.type_map)
+        {
+            self.self_send_epoch += 1;
+        }
+        ty
+    }
+
     #[allow(clippy::too_many_arguments)] // split from infer_message_send to share body
     #[allow(clippy::too_many_lines)] // generic substitution adds necessary branches
-    pub(in crate::semantic_analysis::type_checker) fn infer_message_send_with_receiver_ty(
+    fn infer_message_send_with_receiver_ty_inner(
         &mut self,
         receiver: &Expression,
         receiver_ty: InferredType,

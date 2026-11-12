@@ -20,7 +20,7 @@ use crate::semantic_analysis::type_checker::narrowing::NarrowingInfo;
 use crate::semantic_analysis::type_checker::narrowing::extract::extract_variable_name;
 use crate::semantic_analysis::type_checker::narrowing::refinement::RefinementLayer;
 use crate::semantic_analysis::type_checker::narrowing::visitors::{
-    block_has_return, block_may_reassign,
+    block_has_return, block_may_reassign, expr_contains_returning_self_send,
 };
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
@@ -354,6 +354,7 @@ impl TypeChecker {
     /// `Never`), the variable is narrowed for subsequent statements. Covers
     /// both local variables and synthetic `self.field` keys via
     /// [`Self::resolve_narrowing_variable_type`].
+    #[allow(clippy::too_many_lines)] // one flat decision list per guard shape
     pub(in crate::semantic_analysis::type_checker) fn apply_early_return_narrowing(
         &mut self,
         expr: &Expression,
@@ -400,6 +401,12 @@ impl TypeChecker {
             && info.class_test.is_none()
             && info.singleton_eq.is_none()
             && info.responded_selector.is_none()
+        {
+            return;
+        }
+        // BT-4715: don't re-add a field narrowing a fall-through self-send undid.
+        if matches!(info.variable, EnvKey::SelfField(_))
+            && self.fallthrough_may_self_send(receiver, arguments)
         {
             return;
         }
@@ -511,6 +518,23 @@ impl TypeChecker {
         }
     }
 
+    /// BT-4715: can a send to `self`/`super` run on a path that falls through
+    /// to the statement after the guard `<receiver> if…: arguments`? That is
+    /// the tested expression itself (`(self.f isNil or: [self isStale])`) or
+    /// any branch block that does not diverge. A diverging branch never
+    /// reaches the next statement, so a self-send in it (`[self log. ^0]`)
+    /// leaves the post-guard narrowing intact.
+    fn fallthrough_may_self_send(&self, receiver: &Expression, arguments: &[Expression]) -> bool {
+        expr_contains_returning_self_send(receiver, &self.type_map)
+            || arguments.iter().any(|arg| match arg {
+                Expression::Block(block) => {
+                    !self.block_diverges(block)
+                        && expr_contains_returning_self_send(arg, &self.type_map)
+                }
+                other => expr_contains_returning_self_send(other, &self.type_map),
+            })
+    }
+
     /// BT-4199: `<test> ifTrue: [...] ifFalse: [diverging]` — reaching the
     /// next statement proves the test held, so narrow to the true-branch type
     /// (unless the true block reassigns the tested variable).
@@ -565,9 +589,13 @@ impl TypeChecker {
         env: &mut TypeEnv,
         hierarchy: &ClassHierarchy,
     ) {
-        let Some((kind, variables)) = Self::detect_compound_nil_guard(receiver) else {
+        let Some((kind, mut variables)) = Self::detect_compound_nil_guard(receiver) else {
             return;
         };
+        // BT-4715: see `apply_early_return_narrowing`.
+        if self.fallthrough_may_self_send(receiver, arguments) {
+            variables.retain(|v| !matches!(v, EnvKey::SelfField(_)));
+        }
         match kind {
             CompoundNilGuardKind::OrIsNil => {
                 if !(is_if_true || is_if_true_if_false) {
