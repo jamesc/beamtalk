@@ -37,6 +37,7 @@
 use crate::ast::visitor::{Visitor, walk_block, walk_expr};
 use crate::ast::{Block, Expression};
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+use crate::semantic_analysis::type_checker::types::is_generic_type_param;
 use crate::semantic_analysis::type_checker::{EnvKey, InferredType, TypeMap};
 
 use super::extract::extract_variable_name;
@@ -205,15 +206,16 @@ pub(crate) enum Writes {
 
 /// Could a value of static type `ty` (`None`: never inferred) be a block?
 /// Answers `false` only for a type provably disjoint from `Block`: a nominal
-/// class other than `Object` (`Block` is sealed, its only superclass is
-/// `Object`), a metaclass, or `Never`. `Dynamic`, `Object`, a protocol (a
+/// class that is neither `Block` nor one of its ancestors (`Object`,
+/// `ProtoObject`), nor a type variable, a metaclass, or `Never`. `Dynamic`, `Object`, a protocol (a
 /// `Block` may conform structurally), and any union, intersection or
 /// negation containing one of those could be a block.
 fn could_be_block(ty: Option<&InferredType>, protocols: Option<&ProtocolRegistry>) -> bool {
     match ty {
         Some(InferredType::Known { class_name, .. }) => {
-            class_name == "Block"
-                || class_name == "Object"
+            matches!(class_name.as_str(), "Block" | "Object" | "ProtoObject")
+                // A rigid type variable (`:: E`) may be instantiated with `Block`.
+                || is_generic_type_param(class_name)
                 || protocols.is_some_and(|registry| registry.has_protocol(class_name))
         }
         Some(
@@ -276,4 +278,35 @@ pub(crate) fn expr_may_write_fields(
     let mut finder = Finder(false, type_map, protocols);
     finder.visit_expr(expr);
     finder.0
+}
+
+#[cfg(test)]
+mod could_be_block_tests {
+    use super::*;
+
+    fn known(name: &str) -> InferredType {
+        InferredType::known(name)
+    }
+
+    #[test]
+    fn possible_blocks() {
+        for name in ["Block", "Object", "ProtoObject", "E", "T"] {
+            assert!(could_be_block(Some(&known(name)), None), "{name}");
+        }
+        assert!(could_be_block(None, None));
+        assert!(could_be_block(
+            Some(&InferredType::Dynamic(
+                crate::semantic_analysis::type_checker::DynamicReason::Unknown
+            )),
+            None
+        ));
+    }
+
+    #[test]
+    fn provably_not_blocks() {
+        for name in ["Integer", "String", "List"] {
+            assert!(!could_be_block(Some(&known(name)), None), "{name}");
+        }
+        assert!(!could_be_block(Some(&InferredType::Never), None));
+    }
 }
