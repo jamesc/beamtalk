@@ -103,13 +103,22 @@ fn unrelated_variable_still_narrowed_when_other_assigned() {
 }
 
 #[test]
-fn field_fact_not_applied_even_with_self_send() {
-    assert_rejected("    [self.f notNil] whileTrue: [self bump. Repro need: self.f. ^0]\n    0");
-}
-
-#[test]
 fn field_facts_are_not_applied_to_loop_bodies() {
     // Pins the documented limitation: no `self.<field>` narrowing in a loop
     // body, even when the body cannot write the field.
     assert_rejected("    [self.f notNil] whileTrue: [Repro need: self.f. ^0]\n    0");
+}
+
+#[test]
+fn write_from_nested_block_in_body_drops_fact() {
+    assert_rejected(
+        "    m :: Integer | Nil := n\n    [m notNil] whileTrue: [#(1) do: [:e | m := nil]. Repro need: m. ^0]\n    0",
+    );
+}
+
+#[test]
+fn class_test_condition_adds_no_new_hint() {
+    // `whileTrue:` conditions never reported the "can never be true" class-test
+    // hint; narrowing the body must not start doing so.
+    assert_clean("    [p] whileTrue: [^0]\n    [x isKindOf: String] whileTrue: [^0]\n    0");
 }

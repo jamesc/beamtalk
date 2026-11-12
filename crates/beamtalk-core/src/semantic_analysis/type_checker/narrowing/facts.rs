@@ -334,7 +334,7 @@ impl TypeChecker {
             return None;
         }
         let last = cond_block.body.last()?.expression.unwrap_parens();
-        let facts = self.condition_facts(last, env, hierarchy, FactsCtx::arm(span));
+        let facts = self.condition_facts(last, env, hierarchy, FactsCtx::arm(span).nested());
         let mut facts = if on_true {
             facts.when_true
         } else {
