@@ -29,7 +29,7 @@ beamtalk-language-service = { workspace = true, features = ["serde"] }
 # why: BT-3340 (ADR 0117 Decision step 2) — `project` (root discovery) moved
 # out of `beamtalk-core` into a standalone crate.
 beamtalk-project.workspace = true
-beamtalk-repl-protocol = { workspace = true }
+beamtalk-repl-protocol = { workspace = true, features = ["ws-client"] }
 # why: shared leaf for deriving the installation sysroot from the running
 # executable path (see docs/development/architecture-principles.md §6) —
 # used to locate installed stdlib sources under `{sysroot}/share/beamtalk/`.

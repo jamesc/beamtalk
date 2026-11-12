@@ -170,46 +170,20 @@ impl ProtocolClient {
     /// the I/O below (sync `tungstenite` reads/writes) is specific to this
     /// client.
     fn perform_auth_handshake(&mut self, resume: Option<&str>) -> Result<()> {
-        // Read auth-required message (pre-auth, no session yet).
-        let auth_required = self.read_response()?;
-        if !handshake::is_auth_required(&auth_required) {
-            return Err(miette!("Unexpected pre-auth message: {auth_required}"));
-        }
-
-        // Build auth message with optional resume field. `client` records the
+        // The step sequence is shared (BT-4682); `client` records the
         // originating surface so `Workspace sessions` can show where a session
         // came from (`repl` for repl/transcript/completion probe, `shutdown`
-        // for the version-exempt admin surface). The version fields let the
-        // node reject a mismatched toolchain (BT-4327) before any session
-        // exists.
-        let auth_msg = handshake::auth_request(
-            self.cookie.as_str(),
-            self.client_surface,
-            resume,
-            handshake::beamtalk_version(),
-            handshake::PROTOCOL_VERSION,
-        );
-        self.send_only(&auth_msg)?;
-
-        // Read auth response
-        let auth_response = self.read_response()?;
-        match handshake::parse_auth_ack(&auth_response) {
-            Some(handshake::AuthAck::Ok) => {}
-            Some(handshake::AuthAck::Error { message }) => {
-                let msg = message.as_deref().unwrap_or("Authentication failed");
-                return Err(miette!("Workspace authentication failed: {msg}"));
+        // for the version-exempt admin surface).
+        let mut auth =
+            handshake::AuthHandshake::new(self.cookie.as_str(), self.client_surface, resume);
+        self.session_id = loop {
+            let frame = self.read_response()?;
+            match auth.on_value(&frame).map_err(|e| miette!("{e}"))? {
+                handshake::AuthStep::Send(text) => self.send_text(text)?,
+                handshake::AuthStep::Continue => {}
+                handshake::AuthStep::Done(session) => break session,
             }
-            None => {
-                return Err(miette!("Unexpected auth response: {}", auth_response));
-            }
-        }
-
-        // Read session-started message (sent after auth_ok)
-        let session_msg = self.read_response()?;
-        if !handshake::is_session_started(&session_msg) {
-            return Err(miette!("Unexpected session message: {session_msg}"));
-        }
-        self.session_id = handshake::session_id(&session_msg);
+        };
 
         // Client side of the version lock (BT-4327): a node predating the
         // server gate ignores the new `auth` fields, so verify its `describe`
@@ -434,8 +408,13 @@ impl ProtocolClient {
     /// Send a JSON request without reading the response.
     pub fn send_only(&mut self, request: &serde_json::Value) -> Result<()> {
         let request_str = serde_json::to_string(request).into_diagnostic()?;
+        self.send_text(request_str)
+    }
+
+    /// Send an already-serialised text frame.
+    fn send_text(&mut self, text: String) -> Result<()> {
         self.ws
-            .send(Message::Text(request_str.into()))
+            .send(Message::Text(text.into()))
             .map_err(|e| miette!("WebSocket send error: {e}"))
     }
 

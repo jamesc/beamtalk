@@ -33,6 +33,7 @@
 pub mod all_sends_query;
 pub mod announce_sites_query;
 pub mod completion_provider;
+pub(crate) mod cursor_context;
 pub mod definition_provider;
 pub mod diagnostic_provider;
 pub mod document_symbols_provider;

@@ -55,7 +55,7 @@ beamtalk-project.workspace = true
 beamtalk-package.workspace = true
 
 # Shared REPL protocol types (request/response)
-beamtalk-repl-protocol.workspace = true
+beamtalk-repl-protocol = { workspace = true, features = ["ws-client"] }
 
 # UTF-8 path handling for lint file collection
 camino.workspace = true
