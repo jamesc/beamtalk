@@ -187,6 +187,8 @@ fn generate_string_search_bif(selector: &str, params: &[String]) -> Option<Docum
 fn generate_string_misc_bif(selector: &str, params: &[String]) -> Option<Document<'static>> {
     let p0 = param(params, 0, "_Arg0");
     match selector {
+        "isEmpty" => Some(Document::Str("call 'beamtalk_string':'is_empty'(Self)")),
+        "isNotEmpty" => Some(Document::Str("call 'beamtalk_string':'is_not_empty'(Self)")),
         "isBlank" => Some(Document::Str("call 'beamtalk_string':'is_blank'(Self)")),
         "isDigit" => Some(Document::Str("call 'beamtalk_string':'is_digit'(Self)")),
         "isAlpha" => Some(Document::Str("call 'beamtalk_string':'is_alpha'(Self)")),
@@ -699,6 +701,25 @@ mod tests {
     }
 
     // Misc group
+
+    /// BT-4752 perf regression pin: `String>>isEmpty`/`isNotEmpty` must stay a
+    /// direct primitive call. Declaring them as `self bitSize =:= 0` (the
+    /// original BT-4752 form) compiled to a dynamic
+    /// `beamtalk_message_dispatch:send(Self, 'bitSize', [])` because `bitSize`
+    /// is inherited from `Binary` (BT-4766).
+    #[test]
+    fn test_is_empty_is_direct_primitive_call() {
+        let result = doc_to_string(generate_string_bif("isEmpty", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'is_empty'(Self)".to_string())
+        );
+        let result = doc_to_string(generate_string_bif("isNotEmpty", &[]));
+        assert_eq!(
+            result,
+            Some("call 'beamtalk_string':'is_not_empty'(Self)".to_string())
+        );
+    }
 
     #[test]
     fn test_is_blank() {

@@ -430,14 +430,16 @@ sealed typed Binary subclass: String
   /// Test if the string is empty.
   ///
   /// O(1): a String is empty exactly when it has zero bytes, so this checks
-  /// `bitSize` instead of counting graphemes via `length` (BT-4752).
+  /// the byte count instead of counting graphemes via `length` (BT-4752).
+  /// It is a direct primitive, not `self bitSize =:= 0`: `bitSize` is inherited
+  /// from `Binary`, so that form compiled to a dynamic send on a hot path.
   ///
   /// ## Examples
   /// ```beamtalk
   /// "" isEmpty                  // => true
   /// "hello" isEmpty             // => false
   /// ```
-  isEmpty -> Boolean => self bitSize =:= 0
+  isEmpty -> Boolean => @primitive
 
   /// Test if the string is not empty.
   ///
@@ -448,7 +450,7 @@ sealed typed Binary subclass: String
   /// "hello" isNotEmpty          // => true
   /// "" isNotEmpty               // => false
   /// ```
-  isNotEmpty -> Boolean => self bitSize > 0
+  isNotEmpty -> Boolean => @primitive
 
   /// Test if the string is empty or contains only whitespace.
   ///

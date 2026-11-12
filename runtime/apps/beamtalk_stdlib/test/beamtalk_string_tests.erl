@@ -602,6 +602,16 @@ drop_utf8_test() ->
 %%% is_blank/1
 %%% ============================================================================
 
+is_empty_test() ->
+    ?assertEqual(true, beamtalk_string:is_empty(<<>>)),
+    ?assertEqual(true, beamtalk_string:is_empty({beamtalk_string, <<>>})),
+    ?assertEqual(false, beamtalk_string:is_empty(<<"a">>)),
+    ?assertEqual(false, beamtalk_string:is_empty({beamtalk_string, <<"a">>})).
+
+is_not_empty_test() ->
+    ?assertEqual(false, beamtalk_string:is_not_empty(<<>>)),
+    ?assertEqual(true, beamtalk_string:is_not_empty(<<"é"/utf8>>)).
+
 is_blank_empty_test() ->
     ?assertEqual(true, beamtalk_string:is_blank(<<>>)).
 
