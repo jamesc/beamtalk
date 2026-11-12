@@ -202,12 +202,30 @@ pub(crate) enum Writes {
     Unknown,
 }
 
+/// Could a value of static type `ty` (`None`: never inferred) be a block? A
+/// precise `Block` obviously; also anything the checker cannot rule out —
+/// `Dynamic`, `Object`, or a union containing either.
+fn could_be_block(ty: Option<&InferredType>) -> bool {
+    match ty {
+        None | Some(InferredType::Dynamic(_)) => true,
+        Some(InferredType::Known { class_name, .. }) => {
+            class_name == "Block" || class_name == "Object"
+        }
+        Some(InferredType::Union { members, .. }) => {
+            members.iter().any(|member| could_be_block(Some(member)))
+        }
+        Some(_) => false,
+    }
+}
+
 /// Can evaluating `expr` run code that reassigns an actor field? True for a
 /// returning send to `self`/`super` ([`expr_contains_returning_self_send`]) and
-/// for any send that receives a block *value* (not a literal) as its receiver
-/// or an argument — a stored block writes actor fields live wherever it runs
-/// (ADR 0137), so `blk value`, `cb value: x` and `items anySatisfy: blk` all
-/// count. `expr` must already have been inferred.
+/// for any send that receives a non-literal operand that *could* be a block as
+/// its receiver or an argument — a stored block writes actor fields live
+/// wherever it runs (ADR 0137), so `blk value`, `cb value: x` and
+/// `items anySatisfy: blk` all count, whether `blk` is typed `Block`,
+/// `Dynamic`, `Object` or a union containing one. Dropping a field fact is the
+/// safe direction. `expr` must already have been inferred.
 pub(crate) fn expr_may_write_fields(expr: &Expression, type_map: &TypeMap) -> bool {
     struct Finder<'m>(bool, &'m TypeMap);
     impl<'ast> Visitor<'ast> for Finder<'_> {
@@ -223,10 +241,7 @@ pub(crate) fn expr_may_write_fields(expr: &Expression, type_map: &TypeMap) -> bo
             {
                 let is_block_value = |operand: &Expression| {
                     !matches!(operand, Expression::Block(_))
-                        && matches!(
-                            self.1.get(operand.span()),
-                            Some(InferredType::Known { class_name, .. }) if class_name == "Block"
-                        )
+                        && could_be_block(self.1.get(operand.span()))
                 };
                 if is_block_value(receiver) || arguments.iter().any(is_block_value) {
                     self.0 = true;

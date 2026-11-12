@@ -52,8 +52,9 @@ impl Facts {
     }
 
     /// Both sides hold: every fact of `self` and of `other`; `other` wins on a
-    /// shared key (it was computed under `self`'s facts, so it is at least as
-    /// precise).
+    /// shared key (it was computed under `self`'s facts). A rule whose branch
+    /// type ignores the live type (`isNil`, an unupgraded `respondsTo:`) can
+    /// make that less precise than `self`'s, never unsound.
     fn merge(mut self, other: Self) -> Self {
         for (key, ty) in other.0 {
             if let Some(slot) = self.0.iter_mut().find(|(k, _)| *k == key) {
@@ -126,7 +127,9 @@ pub(crate) struct FactsCtx {
     /// Where to report "comparison can never be true" for a class test.
     /// `Some` only at the root of a receiver being type-checked for the first
     /// time; `None` when the condition was already checked (post-guard) or is
-    /// nested inside a chain (its own `and:` / `or:` send reports it).
+    /// nested inside a chain. A chain's left operand is reported by its own
+    /// `and:` / `or:` send; a test inside a right-hand block is not reported
+    /// at all (that shape was never narrowed before BT-4710).
     hint_span: Option<Span>,
 }
 

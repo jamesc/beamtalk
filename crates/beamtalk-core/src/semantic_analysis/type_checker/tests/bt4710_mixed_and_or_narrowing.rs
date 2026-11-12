@@ -290,3 +290,12 @@ fn rhs_block_literal_running_a_stored_block_voids_field_facts() {
     );
     assert_field_leak(&diags);
 }
+
+#[test]
+fn rhs_block_literal_running_a_dynamic_value_voids_field_facts() {
+    // `cb` is an unannotated parameter (Dynamic): it may be a field-writing block.
+    let diags = actor_diagnostics(
+        "  run: cb =>\n    (self.f notNil and: [cb value]) ifTrue: [^self need: self.f]\n    0",
+    );
+    assert_field_leak(&diags);
+}
