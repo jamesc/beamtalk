@@ -416,7 +416,7 @@ validate_config_non_binary_executable_test() ->
         kind = type_error,
         class = 'Subprocess',
         selector = 'spawnWith:',
-        hint = {beamtalk_string, <<"Invalid config value for executable: expected_binary">>}
+        hint = {beamtalk_string, <<"Config key executable must be a String">>}
     }} =
         beamtalk_subprocess:start(#{executable => 42}).
 
@@ -426,7 +426,7 @@ validate_config_non_binary_args_test() ->
         kind = type_error,
         class = 'Subprocess',
         selector = 'spawnWith:',
-        hint = {beamtalk_string, <<"Invalid config value for args: expected_binary_elements">>}
+        hint = {beamtalk_string, <<"Config key args must be a List of Strings">>}
     }} =
         beamtalk_subprocess:start(#{executable => EchoExe, args => [123]}).
 
@@ -436,7 +436,7 @@ validate_config_non_map_env_test() ->
         kind = type_error,
         class = 'Subprocess',
         selector = 'spawnWith:',
-        hint = {beamtalk_string, <<"Invalid config value for env: expected_map">>}
+        hint = {beamtalk_string, <<"Config key env must be a Dictionary">>}
     }} =
         beamtalk_subprocess:start(#{executable => EchoExe, args => [], env => 42}).
 
@@ -446,7 +446,7 @@ validate_config_non_binary_dir_test() ->
         kind = type_error,
         class = 'Subprocess',
         selector = 'spawnWith:',
-        hint = {beamtalk_string, <<"Invalid config value for dir: expected_binary">>}
+        hint = {beamtalk_string, <<"Config key dir must be a String">>}
     }} =
         beamtalk_subprocess:start(#{executable => EchoExe, args => [], dir => 42}).
 

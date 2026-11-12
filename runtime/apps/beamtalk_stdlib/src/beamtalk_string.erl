@@ -20,7 +20,9 @@ the single authority for constructing it. Every function here matches
 that tag in its head and wraps text results through that constructor.
 Receivers also accept a bare binary (pre-flip Erlang callers stay valid —
 see the `BT-4173` clauses); anything else raises `type_error` via
-`raise_not_string/2`, as do bare-binary join elements (`join_element/2`).
+`raise_not_string/2` or, for the unary accessors that forward a bare binary,
+`beamtalk_text:unwrap_or_raise/4`. Bare-binary join elements (`join_element/2`)
+raise via `raise_not_string/2`.
 """.
 -type t() :: {beamtalk_string, binary()}.
 -define(NOT_STRING_HINT, <<"Expected a String">>).
@@ -151,8 +153,8 @@ raise_empty(Selector) ->
 Raise `type_error` for a non-`String` receiver or argument (BT-4170).
 
 A bare binary gets the downcast hint (`asString`); anything else gets
-the plain expectation. Used as the catch-all clause of every function
-in this module so a `Binary` (or any other value) reaching a
+the plain expectation. Used as the catch-all clause of the functions that do
+not forward a bare binary through `beamtalk_text:unwrap_or_raise/4`, so a `Binary` (or any other value) reaching a
 `String`-only operation fails with an actionable error instead of a
 bare `function_clause`.
 """.

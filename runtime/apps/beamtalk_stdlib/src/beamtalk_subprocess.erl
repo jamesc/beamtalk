@@ -157,18 +157,27 @@ config_error({missing_key, Key}) ->
 config_error({type_error, Field, Expected}) ->
     config_type_error(
         iolist_to_binary([
-            <<"Invalid config value for ">>,
+            <<"Config key ">>,
             atom_to_binary(Field, utf8),
-            <<": ">>,
-            atom_to_binary(Expected, utf8)
+            <<" ">>,
+            config_expectation(Expected)
         ])
     ).
 
+%% Beamtalk-facing wording for the reasons `validate_config/1` returns.
+-spec config_expectation(atom()) -> binary().
+config_expectation(expected_binary) -> <<"must be a String">>;
+config_expectation(expected_binary_elements) -> <<"must be a List of Strings">>;
+config_expectation(expected_binary_keys_and_values) -> <<"must be a Dictionary of Strings">>;
+config_expectation(expected_list_or_array) -> <<"must be a List or Array">>;
+config_expectation(invalid_array) -> <<"must be a valid Array">>;
+config_expectation(expected_map) -> <<"must be a Dictionary">>.
+
+%% A missing or ill-typed config key is reported as a `type_error`, like every
+%% other `Subprocess` argument problem.
 -spec config_type_error(binary()) -> #beamtalk_error{}.
 config_type_error(Hint) ->
-    beamtalk_error:with_hint(
-        beamtalk_error:new(type_error, 'Subprocess', 'spawnWith:'), Hint
-    ).
+    beamtalk_error:new(type_error, 'Subprocess', 'spawnWith:', Hint).
 
 -doc "Dispatch sync calls.".
 -spec handle_call(term(), term(), map()) ->
