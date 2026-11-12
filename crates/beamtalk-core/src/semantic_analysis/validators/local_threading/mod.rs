@@ -13,29 +13,29 @@
 //! shapes no producer lowers yet, this module turns the ones that crash or
 //! silently answer wrong into compile errors, so nothing is silently wrong.
 //! Two checks share
-//! one walk and one fact, [`outer_local_writes`]:
+//! one walk and one fact, `outer_local_writes`:
 //!
 //! - **ADR 0133: a block that assigns a captured variable and escapes**
-//!   ([`DiagnosticCategory::Tier2BlockNoReturnChannel`], permanent; it began
+//!   (`DiagnosticCategory::Tier2BlockNoReturnChannel`, permanent; it began
 //!   as ADR 0131 §6). A block may assign a local it captured only where the
 //!   compiler lowers the block in place: as the direct argument (or receiver,
 //!   for `value` and the loops) of a control construct or a compiler-known
 //!   collection message ([`crate::state_threading_selectors`], the one list,
-//!   which [`threading_constructs_note`] also reads). A block literal that
+//!   which `threading_constructs_note` also reads). A block literal that
 //!   does so and **escapes** (is stored in a local, returned, stored in a
 //!   field or class variable, placed in a collection literal, passed to any
 //!   other method, a cascade message included, passed as an Erlang FFI
 //!   argument (BT-3917: Erlang calls it as a plain fun and drops the write;
 //!   ADR 0041 §Erlang Interop Boundary), or sent a message other than
-//!   `value`) is reported at the assignment, naming the shape ([`Escape`]),
+//!   `value`) is reported at the assignment, naming the shape (`Escape`),
 //!   in every context, the REPL root included (BT-3858). Reads of captured
 //!   variables and `^` inside an escaping block are unaffected.
 //! - **The retired Phase 0 position check**
-//!   ([`DiagnosticCategory::UnthreadedLocalWrite`], retired by BT-3913:
+//!   (`DiagnosticCategory::UnthreadedLocalWrite`, retired by BT-3913:
 //!   ADR 0133 Phase 3 lowered every statement shape through frames, and the
 //!   733-shape oracle reports zero silent drops and zero `erlc` failures).
-//!   A local-threading construct ([`local_threading_construct`], of a family
-//!   threaded today) whose threaded set ([`construct_outer_local_writes`],
+//!   A local-threading construct (`local_threading_construct`, of a family
+//!   threaded today) whose threaded set (`construct_outer_local_writes`,
 //!   the same recognizer and set codegen's `threaded_locals_of` reads) is not
 //!   empty is accepted as a statement wherever it sits. At any other
 //!   (operand) position it is accepted only where a local-threading producer
@@ -139,8 +139,8 @@ pub(crate) fn check_local_threading(
 }
 
 /// What the lookup-receiver rule
-/// ([`receiver_statically_not_dictionary`]) and the escaping-block message
-/// ([`Walker::passed_escape`]) read for one method body.
+/// (`receiver_statically_not_dictionary`) and the escaping-block message
+/// (`Walker::passed_escape`) read for one method body.
 #[derive(Clone)]
 struct ReceiverFacts<'a> {
     hierarchy: &'a ClassHierarchy,
