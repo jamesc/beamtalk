@@ -1865,6 +1865,14 @@ measure-adr0131-statements: build-stdlib
     cargo build --workspace
     cargo test -p beamtalk-cli --test cli adr0131_ -- --ignored --nocapture --test-threads=1
 
+# Regenerate the shared REPL op-table fixture (BT-4673) from the Erlang op table
+# (`beamtalk_repl_op_table`). The Rust RequestBuilder conformance test,
+# `beamtalk-surface-drift` and the repl-protocol.md check read this file.
+[unix]
+gen-op-table-fixture: build-erlang
+    escript scripts/gen_op_table_fixture.escript runtime/_build/default/lib/beamtalk_runtime/ebin runtime/apps/beamtalk_workspace/test/fixtures/repl_op_table.json
+    @echo "✅ Wrote runtime/apps/beamtalk_workspace/test/fixtures/repl_op_table.json"
+
 # Bare `rebar3 eunit` (no --app/--module) runs the `eunit_tests` set that
 # runtime/rebar.config.script generates: every app's source modules + their
 # `_tests` companions, plus every standalone test-dir suite (BT-3896). Never

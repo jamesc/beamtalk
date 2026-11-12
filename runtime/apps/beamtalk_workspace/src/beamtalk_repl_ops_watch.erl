@@ -130,10 +130,4 @@ invalid_pid_error(Reason, PidStr) ->
 -doc "Return op descriptors for the live-inspector pid-stats op.".
 -spec describe_ops() -> map().
 describe_ops() ->
-    #{
-        <<"pid-stats">> => #{
-            <<"params">> => [<<"actor">>],
-            <<"notes">> =>
-                <<"Live process metrics (queue depth, memory, reductions, status) for an actor pid.">>
-        }
-    }.
+    beamtalk_repl_op_table:describe_for(?MODULE).

@@ -278,7 +278,7 @@ pub fn run(
 
     // Discover project root for BEAM working directory
     let current_dir = std::env::current_dir().into_diagnostic()?;
-    let project_root = workspace::discovery::discover_project_root(&current_dir);
+    let project_root = beamtalk_project::discover_project_root(&current_dir);
 
     // Read [application] config from beamtalk.toml so the OTP application
     // supervisor is started after workspace bootstrap.

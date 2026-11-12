@@ -755,8 +755,6 @@ impl Backend {
     /// is corrected here instead of keeping a stale same-project stamp
     /// until its next edit.
     pub(in crate::server) async fn load_root_packages(&self, roots: &[PathBuf]) {
-        use beamtalk_core::compilation::parse_package_name_from_manifest_toml;
-
         let roots_owned: Vec<PathBuf> = roots.to_vec();
         let root_packages: Vec<(Utf8PathBuf, EcoString)> = tokio::task::spawn_blocking(move || {
             // Each root's dependency checkouts too (BT-4611): a path
@@ -777,9 +775,7 @@ impl Backend {
             with_dependencies
                 .into_iter()
                 .filter_map(|root| {
-                    let manifest_path = root.join("beamtalk.toml");
-                    let content = std::fs::read_to_string(&manifest_path).ok()?;
-                    let name = parse_package_name_from_manifest_toml(&content)?;
+                    let name = beamtalk_project::package::read_package_name(&root)?;
                     let utf8_root = Utf8PathBuf::from_path_buf(root).ok()?;
                     Some((utf8_root, EcoString::from(name)))
                 })
