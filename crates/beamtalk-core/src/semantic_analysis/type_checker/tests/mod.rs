@@ -11,6 +11,7 @@ mod common;
 mod actor_construction_definite_assignment;
 mod adr0144_protocol_metatypes;
 mod adr0147_shape_assignability;
+mod adr0147_shape_keyed;
 mod adr0147_shape_types;
 mod adr_0104_integration;
 mod arg_return_checking;

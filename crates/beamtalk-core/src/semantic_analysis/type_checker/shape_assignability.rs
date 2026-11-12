@@ -259,7 +259,7 @@ impl TypeChecker {
     }
 
     /// Nearest of `keys` to `target` by edit distance (a "did you mean").
-    fn closest_key(target: &str, keys: &[EcoString]) -> Option<EcoString> {
+    pub(super) fn closest_key(target: &str, keys: &[EcoString]) -> Option<EcoString> {
         keys.iter()
             .map(|k| (k, edit_distance(target, k.as_str())))
             .filter(|(_, d)| *d > 0 && *d <= 3 && *d < target.len() / 2 + 1)
