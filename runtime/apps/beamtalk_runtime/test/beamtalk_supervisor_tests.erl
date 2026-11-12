@@ -4907,21 +4907,7 @@ startChild_cached_kind_capped_test() ->
 wait_until_slots_used(SupPid, N) ->
     {{dictionary, '$beamtalk_max_children_state'}, {Tid, _MonPid}} =
         erlang:process_info(SupPid, {dictionary, '$beamtalk_max_children_state'}),
-    wait_until_slots_used(Tid, N, erlang:monotonic_time(millisecond) + 5000).
-
-wait_until_slots_used(Tid, N, Deadline) ->
-    case ets:lookup(Tid, count) of
-        [{count, N}] ->
-            ok;
-        Other ->
-            case erlang:monotonic_time(millisecond) > Deadline of
-                true ->
-                    erlang:error({slot_not_released, Other});
-                false ->
-                    timer:sleep(5),
-                    wait_until_slots_used(Tid, N, Deadline)
-            end
-    end.
+    await_capacity_count(Tid, N).
 
 wait_until_count(Self, N) ->
     case beamtalk_supervisor:countChildren(Self) of
