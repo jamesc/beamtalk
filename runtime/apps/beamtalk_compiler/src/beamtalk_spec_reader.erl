@@ -543,9 +543,10 @@ join_types(Types) ->
         Multiple -> iolist_to_binary(lists:join(<<" | ">>, Multiple))
     end.
 
-%% Split each mapped type string into its top-level union members (paren-
-%% depth aware, so a compound type parameterized by a union — e.g.
-%% `List(String | Binary)` — is kept intact as a single member, not split),
+%% Split each mapped type string into its top-level union members (paren- and
+%% brace-depth aware, so a compound type parameterized by a union — e.g.
+%% `List(String | Binary)` — or a map shape whose field value is a union is
+%% kept intact as a single member, not split),
 %% then dedup the flattened members while preserving first-seen order.
 -spec flatten_union_members([binary()]) -> [binary()].
 flatten_union_members(Types) ->
@@ -559,10 +560,10 @@ split_top_level_union(Type) ->
 
 split_top_level_union([], _Depth, Current, Acc) ->
     [Current | Acc];
-split_top_level_union([$( | Rest], Depth, Current, Acc) ->
-    split_top_level_union(Rest, Depth + 1, [$( | Current], Acc);
-split_top_level_union([$) | Rest], Depth, Current, Acc) ->
-    split_top_level_union(Rest, Depth - 1, [$) | Current], Acc);
+split_top_level_union([C | Rest], Depth, Current, Acc) when C =:= $(; C =:= ${ ->
+    split_top_level_union(Rest, Depth + 1, [C | Current], Acc);
+split_top_level_union([C | Rest], Depth, Current, Acc) when C =:= $); C =:= $} ->
+    split_top_level_union(Rest, Depth - 1, [C | Current], Acc);
 split_top_level_union([$\s, $|, $\s | Rest], 0, Current, Acc) ->
     split_top_level_union(Rest, 0, [], [Current | Acc]);
 split_top_level_union([C | Rest], Depth, Current, Acc) ->
@@ -1013,13 +1014,14 @@ map_type({type, _, tuple, Elements}) when is_list(Elements) ->
     wrap_collection_type(<<"Tuple">>, [map_type(E) || E <- Elements]);
 map_type({type, _, tuple, _}) ->
     <<"Tuple">>;
-%% Map types — check for Beamtalk tagged maps before falling back to Dictionary.
-%% A typed map with '$beamtalk_class' := ClassName is a Beamtalk object, not a
-%% Dictionary. E.g., beamtalk_result:t() defines #{'$beamtalk_class' := 'Result', ...}.
+%% Map types — check for Beamtalk tagged maps first, then map `:=` / `=>`
+%% fields with atom keys to a map shape (ADR 0147). A typed map with
+%% '$beamtalk_class' := ClassName is a Beamtalk object, not a Dictionary.
+%% E.g., beamtalk_result:t() defines #{'$beamtalk_class' := 'Result', ...}.
 map_type({type, _, map, Fields}) when is_list(Fields) ->
     case extract_beamtalk_class(Fields) of
         {ok, ClassName} -> atom_to_binary(ClassName, utf8);
-        error -> <<"Dictionary">>
+        error -> map_shape(Fields)
     end;
 map_type({type, _, map, _}) ->
     <<"Dictionary">>;
@@ -1122,6 +1124,91 @@ map_return_type(RetType) ->
     %% dispatches to map_union/2, so a separate union clause here would only
     %% duplicate that routing.
     map_type(RetType).
+
+-doc """
+Map the field list of an untagged Erlang map type to a Beamtalk map shape
+(ADR 0147 § FFI mapping, BT-4734).
+
+  * `k := T` with an atom key becomes `#k => T`; `k => T` becomes `?#k => T`.
+  * Any other field (`atom() => term()`, or a key `true`/`false`/`nil`, which
+    are not symbols in Beamtalk, or an atom key with no representable symbol
+    spelling) makes the shape open: a trailing `...`.
+  * With no representable atom key at all the result is plain `Dictionary`.
+
+The shape string is parsed on the Rust side by `DeclaredType::parse`; the
+shared fixture `test/fixtures/ffi_map_shape_conformance.json` pins both halves.
+""".
+-spec map_shape([tuple()]) -> binary().
+map_shape(Fields) ->
+    {Entries, Open} = lists:foldl(fun shape_field/2, {[], false}, Fields),
+    case lists:reverse(Entries) of
+        [] ->
+            <<"Dictionary">>;
+        Ordered ->
+            Parts =
+                [Text || {_Key, Text} <- Ordered] ++
+                    case Open of
+                        true -> [<<"...">>];
+                        false -> []
+                    end,
+            iolist_to_binary([<<"#{">>, lists:join(<<", ">>, Parts), <<"}">>])
+    end.
+
+-spec shape_field(tuple(), {[{binary(), binary()}], boolean()}) ->
+    {[{binary(), binary()}], boolean()}.
+shape_field({type, _, Kind, [{atom, _, Atom}, ValType]}, {Entries, Open}) when
+    Kind =:= map_field_exact; Kind =:= map_field_assoc
+->
+    case shape_key(Atom) of
+        {ok, Key} ->
+            case lists:keymember(Key, 1, Entries) of
+                true ->
+                    {Entries, Open};
+                false ->
+                    Optional =
+                        case Kind of
+                            map_field_assoc -> <<"?">>;
+                            map_field_exact -> <<>>
+                        end,
+                    Text = iolist_to_binary([Optional, Key, <<" => ">>, map_type(ValType)]),
+                    {[{Key, Text} | Entries], Open}
+            end;
+        error ->
+            {Entries, true}
+    end;
+shape_field(_Other, {Entries, _Open}) ->
+    {Entries, true}.
+
+%% The symbol spelling of an atom key as the Rust shape parser reads it:
+%% `#name` for identifiers, `#'quoted name'` for other plain-ASCII names.
+%% `error` for keys with no representable spelling (true/false/nil, which are
+%% not symbols, empty or non-ASCII atoms, and names holding a type-string
+%% delimiter such as `'`, `,`, `|`, `=`, `(` or `{`).
+-spec shape_key(atom()) -> {ok, binary()} | error.
+shape_key(Atom) when Atom =:= true; Atom =:= false; Atom =:= nil ->
+    error;
+shape_key(Atom) ->
+    Name = atom_to_binary(Atom, utf8),
+    Chars = binary_to_list(Name),
+    case Chars of
+        [] ->
+            error;
+        [First | Rest] ->
+            case is_ident_start(First) andalso lists:all(fun is_ident_char/1, Rest) of
+                true ->
+                    {ok, <<"#", Name/binary>>};
+                false ->
+                    case lists:all(fun is_quotable_key_char/1, Chars) of
+                        true -> {ok, <<"#'", Name/binary, "'">>};
+                        false -> error
+                    end
+            end
+    end.
+
+is_ident_start(C) -> (C >= $a andalso C =< $z) orelse (C >= $A andalso C =< $Z) orelse C =:= $_.
+is_ident_char(C) -> is_ident_start(C) orelse (C >= $0 andalso C =< $9).
+is_quotable_key_char(C) ->
+    is_ident_char(C) orelse lists:member(C, " .-@:/+*!?").
 
 -doc """
 Extract the Beamtalk class name from a typed map's field list.
