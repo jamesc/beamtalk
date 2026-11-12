@@ -15,6 +15,27 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, leaf};
 use beamtalk_core::ast::{ClassDefinition, ClassKind};
 
+/// The nine hard-coded `dispatch/3` reflection arms of a primitive value type,
+/// as `has_method/1` lists them (ADR 0124 §1/§9/B4 added `hasField:` and
+/// `clearField:` to the original seven).
+///
+/// [`DISPATCH_PREFIX_SELECTORS`] holds the same nine selectors in the order
+/// `dispatch/3` emits them; this list keeps the order the generated
+/// `has_method/1` has always had, so its output does not change.
+/// `primitive_has_method_reflection_matches_dispatch_arms` pins the two to the
+/// same set.
+const PRIMITIVE_HAS_METHOD_REFLECTION: &[&str] = &[
+    "class",
+    "respondsTo:",
+    "fieldNames",
+    "fieldAt:",
+    "fieldAt:put:",
+    "hasField:",
+    "clearField:",
+    "perform:",
+    "perform:withArguments:",
+];
+
 impl CoreErlangGenerator {
     /// Encode a string as a Core Erlang binary literal.
     /// Generates the `dispatch/3` function for a value type.
@@ -97,22 +118,14 @@ impl CoreErlangGenerator {
             )
         };
 
+        let (reflection_head, reflection_perform) =
+            Self::split_value_reflection_arms(&class_name, &mod_name);
+
         let doc = docvec![
             "'dispatch'/3 = fun (Selector, Args, Self) ->\n",
             "    case Selector of\n",
-            // class
-            "        <'class'> when 'true' ->\n",
-            "            ",
-            leaf::atom(class_name.clone()),
-            "\n",
-            // respondsTo:
-            "        <'respondsTo:'> when 'true' ->\n",
-            "            case Args of\n",
-            "                <[RtSelector | _]> when 'true' -> call ",
-            leaf::atom(mod_name.to_string()),
-            ":'has_method'(RtSelector)\n",
-            "                <_> when 'true' -> 'false'\n",
-            "            end\n",
+            // class, respondsTo:
+            Document::Vec(reflection_head),
             // fieldNames — delegates to beamtalk_reflection for value objects
             field_names_branch,
             // fieldAt: — reads from map for value objects, error for primitives
@@ -141,19 +154,8 @@ impl CoreErlangGenerator {
             leaf::binary_lit(immutable_hint),
             ") in\n",
             "            call 'beamtalk_error':'raise'(ClrErr2)\n",
-            // perform:
-            "        <'perform:'> when 'true' ->\n",
-            "            let <PerfSel> = call 'erlang':'hd'(Args) in\n",
-            "            call ",
-            leaf::atom(mod_name.to_string()),
-            ":'dispatch'(PerfSel, [], Self)\n",
-            // perform:withArguments:
-            "        <'perform:withArguments:'> when 'true' ->\n",
-            "            let <PwaSel> = call 'erlang':'hd'(Args) in\n",
-            "            let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in\n",
-            "            call ",
-            leaf::atom(mod_name.to_string()),
-            ":'dispatch'(PwaSel, PwaArgs, Self)\n",
+            // perform:, perform:withArguments:
+            Document::Vec(reflection_perform),
             // Class-defined method branches
             Document::Vec(method_branches),
             // Auto-generated getter and with*: dispatch arms
@@ -169,6 +171,25 @@ impl CoreErlangGenerator {
         ];
 
         Ok(doc)
+    }
+
+    /// [`dispatch_spec::value_core_reflection_arms`] split around the field
+    /// reflection arms the primitive dispatch puts between them: `class` and
+    /// `respondsTo:`, then `perform:` and `perform:withArguments:`.
+    fn split_value_reflection_arms(
+        class_name: &str,
+        mod_name: &str,
+    ) -> (Vec<Document<'static>>, Vec<Document<'static>>) {
+        let mut arms = dispatch_spec::value_core_reflection_arms(class_name, mod_name);
+        let split = arms
+            .iter()
+            .position(|(selector, _)| *selector == "perform:")
+            .expect("the core reflection arms include perform:");
+        let perform = arms.split_off(split);
+        let docs = |arms: Vec<(&'static str, Document<'static>)>| {
+            arms.into_iter().map(|(_, arm)| arm).collect::<Vec<_>>()
+        };
+        (docs(arms), docs(perform))
     }
 
     /// The `dispatch/3` default arm of a value type that has no inherited
@@ -214,55 +235,13 @@ impl CoreErlangGenerator {
         class_name: &str,
         super_mod: &str,
     ) -> Document<'static> {
-        let ask = docvec![
-            "call 'beamtalk_dispatch':'inherited_target'(",
-            leaf::atom(class_name.to_string()),
-            ", Selector)",
-        ];
-        let one_hop = self.one_hop_selectors(class);
-        let verdict: Document<'static> = if one_hop.is_empty() {
-            ask
-        } else {
-            let arms: Vec<Document<'static>> = one_hop
-                .into_iter()
-                .map(|sel| {
-                    docvec![
-                        "                <",
-                        leaf::atom(sel),
-                        "> when 'true' -> 'slow'\n",
-                    ]
-                })
-                .collect();
-            docvec![
-                "case Selector of\n",
-                Document::Vec(arms),
-                "                <_> when 'true' -> ",
-                ask,
-                "\n",
-                "            end",
-            ]
-        };
-        docvec![
-            "        <_Other> when 'true' ->\n",
-            "            %% BT-4260: a memoised verdict picks the direct inherited call.\n",
-            "            case ",
-            verdict,
-            " of\n",
-            "                <{'value', _InhOwner, InhModule}> when 'true' ->\n",
-            "                    call InhModule:'dispatch'(Selector, Args, Self)\n",
-            "                <_InhSlow> when 'true' ->\n",
-            "                    case call 'beamtalk_extensions':'lookup'(",
-            leaf::atom(class_name.to_string()),
-            ", Selector) of\n",
-            "                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
-            "                            apply ExtFun(Args, Self)\n",
-            "                        <'not_found'> when 'true' ->\n",
-            "                            call ",
-            leaf::atom(super_mod.to_string()),
-            ":'dispatch'(Selector, Args, Self)\n",
-            "                    end\n",
-            "            end\n",
-        ]
+        dispatch_spec::inherited_default_arm(
+            class_name,
+            dispatch_spec::DefaultArmFlavour::Value {
+                one_hop: &self.one_hop_selectors(class),
+                super_module: super_mod,
+            },
+        )
     }
 
     /// The instance selectors `class`'s superclass defines itself, per the
@@ -802,20 +781,6 @@ impl CoreErlangGenerator {
             return self.generate_minimal_has_method(class);
         }
 
-        // Build the reflection selector list — the nine hard-coded
-        // dispatch/3 arms (ADR 0124 §1/§9/B4 added `hasField:`/`clearField:`
-        // to the original seven).
-        let reflection: Vec<&'static str> = vec![
-            "class",
-            "respondsTo:",
-            "fieldNames",
-            "fieldAt:",
-            "fieldAt:put:",
-            "hasField:",
-            "clearField:",
-            "perform:",
-            "perform:withArguments:",
-        ];
         let own_methods: Vec<String> = class
             .methods
             .iter()
@@ -825,7 +790,7 @@ impl CoreErlangGenerator {
         Ok(dispatch_spec::generate_has_method_from_spec(
             &own_methods,
             &DispatchSpec {
-                reflection: &reflection,
+                reflection: PRIMITIVE_HAS_METHOD_REFLECTION,
                 class_name: &class_name,
                 superclass: superclass_mod.as_deref().map(SuperclassDelegation::Static),
                 dnu: false,
@@ -857,32 +822,13 @@ impl CoreErlangGenerator {
         let doc = docvec![
             "'dispatch'/3 = fun (Selector, Args, Self) ->\n",
             "    case Selector of\n",
-            // class
-            "        <'class'> when 'true' ->\n",
-            "            ",
-            leaf::atom(class_name.clone()),
-            "\n",
-            // respondsTo:
-            "        <'respondsTo:'> when 'true' ->\n",
-            "            case Args of\n",
-            "                <[RtSelector | _]> when 'true' -> call ",
-            leaf::atom(mod_name.clone()),
-            ":'has_method'(RtSelector)\n",
-            "                <_> when 'true' -> 'false'\n",
-            "            end\n",
-            // perform:
-            "        <'perform:'> when 'true' ->\n",
-            "            let <PerfSel> = call 'erlang':'hd'(Args) in\n",
-            "            call ",
-            leaf::atom(mod_name.clone()),
-            ":'dispatch'(PerfSel, [], Self)\n",
-            // perform:withArguments:
-            "        <'perform:withArguments:'> when 'true' ->\n",
-            "            let <PwaSel> = call 'erlang':'hd'(Args) in\n",
-            "            let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in\n",
-            "            call ",
-            leaf::atom(mod_name),
-            ":'dispatch'(PwaSel, PwaArgs, Self)\n",
+            // class, respondsTo:, perform:, perform:withArguments:
+            Document::Vec(
+                dispatch_spec::value_core_reflection_arms(&class_name, &mod_name)
+                    .into_iter()
+                    .map(|(_, arm)| arm)
+                    .collect()
+            ),
             // Default: the inherited verdict, then extension check and
             // superclass delegation
             self.value_inherited_default_arm(class, &class_name, &super_mod),
@@ -910,7 +856,7 @@ impl CoreErlangGenerator {
         Ok(dispatch_spec::generate_has_method_from_spec(
             &[],
             &DispatchSpec {
-                reflection: &["class", "respondsTo:", "perform:", "perform:withArguments:"],
+                reflection: &dispatch_spec::value_core_reflection_selectors(),
                 class_name: &class_name,
                 superclass: Some(SuperclassDelegation::Static(&super_mod)),
                 dnu: false,
@@ -919,5 +865,34 @@ impl CoreErlangGenerator {
                 emit_local_probe: true,
             },
         ))
+    }
+}
+
+#[cfg(test)]
+mod reflection_tests {
+    use super::{DISPATCH_PREFIX_SELECTORS, PRIMITIVE_HAS_METHOD_REFLECTION};
+    use crate::core_erlang::dispatch_spec;
+
+    #[test]
+    fn primitive_has_method_reflection_matches_dispatch_arms() {
+        let mut listed = PRIMITIVE_HAS_METHOD_REFLECTION.to_vec();
+        let mut emitted = DISPATCH_PREFIX_SELECTORS.to_vec();
+        listed.sort_unstable();
+        emitted.sort_unstable();
+        assert_eq!(listed, emitted);
+    }
+
+    #[test]
+    fn value_core_reflection_selectors_are_the_emitted_arm_heads() {
+        let arms = dispatch_spec::value_core_reflection_arms("Cls", "bt@cls");
+        for (selector, arm) in &arms {
+            let text = arm.to_pretty_string();
+            assert!(
+                text.starts_with(&format!("        <'{selector}'> when 'true' ->\n")),
+                "arm for {selector} does not start with its own head: {text}"
+            );
+        }
+        let selectors: Vec<_> = arms.iter().map(|(selector, _)| *selector).collect();
+        assert_eq!(selectors, dispatch_spec::value_core_reflection_selectors());
     }
 }

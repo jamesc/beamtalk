@@ -26,7 +26,7 @@
 
 use super::value_accessors::AutoSlotMethods;
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::{Document, join, leaf};
+use beamtalk_cerl_doc::{Document, INDENT, join, leaf, line, nest};
 use beamtalk_core::ast::{ClassDefinition, Expression};
 
 /// How `has_method/1` delegates to its superclass when `Selector` isn't
@@ -139,6 +139,222 @@ pub(in crate::core_erlang) fn class_has_catch_all_dnu(class: &ClassDefinition) -
                 }
             )
     })
+}
+
+/// The reflection arms every value-type `dispatch/3` carries (the primitive
+/// and the minimal one alike), in dispatch order, each paired with its
+/// selector. The arm list and the selector list handed to [`DispatchSpec`]
+/// both come from this one table, so they cannot drift apart.
+///
+/// `perform:` re-dispatches through the class's own module so extension
+/// lookup and error attribution stay correct.
+pub(in crate::core_erlang) fn value_core_reflection_arms(
+    class_name: &str,
+    mod_name: &str,
+) -> Vec<(&'static str, Document<'static>)> {
+    vec![
+        (
+            "class",
+            docvec![
+                "        <'class'> when 'true' ->\n",
+                "            ",
+                leaf::atom(class_name.to_string()),
+                "\n",
+            ],
+        ),
+        (
+            "respondsTo:",
+            docvec![
+                "        <'respondsTo:'> when 'true' ->\n",
+                "            case Args of\n",
+                "                <[RtSelector | _]> when 'true' -> call ",
+                leaf::atom(mod_name.to_string()),
+                ":'has_method'(RtSelector)\n",
+                "                <_> when 'true' -> 'false'\n",
+                "            end\n",
+            ],
+        ),
+        (
+            "perform:",
+            docvec![
+                "        <'perform:'> when 'true' ->\n",
+                "            let <PerfSel> = call 'erlang':'hd'(Args) in\n",
+                "            call ",
+                leaf::atom(mod_name.to_string()),
+                ":'dispatch'(PerfSel, [], Self)\n",
+            ],
+        ),
+        (
+            "perform:withArguments:",
+            docvec![
+                "        <'perform:withArguments:'> when 'true' ->\n",
+                "            let <PwaSel> = call 'erlang':'hd'(Args) in\n",
+                "            let <PwaArgs> = call 'erlang':'hd'(call 'erlang':'tl'(Args)) in\n",
+                "            call ",
+                leaf::atom(mod_name.to_string()),
+                ":'dispatch'(PwaSel, PwaArgs, Self)\n",
+            ],
+        ),
+    ]
+}
+
+/// The selectors of [`value_core_reflection_arms`], for a [`DispatchSpec`].
+pub(in crate::core_erlang) fn value_core_reflection_selectors() -> Vec<&'static str> {
+    value_core_reflection_arms("", "")
+        .into_iter()
+        .map(|(selector, _)| selector)
+        .collect()
+}
+
+/// The two shapes of default (unrecognised-selector) arm that ask the memoised
+/// `beamtalk_dispatch:inherited_target/2` verdict first. They live side by side
+/// here so the verdict contract (which verdict tag is a direct hit, and what the
+/// other verdicts fall back to) is stated in one place; they render separately
+/// because an actor's `dispatch/4` and a value type's `dispatch/3` differ in
+/// layout, selector variable, verdict tag and slow route.
+pub(in crate::core_erlang) enum DefaultArmFlavour<'a> {
+    /// An actor's `dispatch/4` (BT-4280): a `{'compiled', Owner, Module}`
+    /// verdict is invoked directly; any other verdict takes
+    /// `extension_route`. Every route binds `InheritedOutcome`, which
+    /// `outcome` (the reply / DNU / raise handling) then consumes.
+    Actor {
+        extension_route: Document<'static>,
+        outcome: Document<'static>,
+    },
+    /// A value type's `dispatch/3` (BT-4260): a `{'value', Owner, Module}`
+    /// verdict calls the owner's `dispatch/3` directly; any other verdict
+    /// takes this class's extensions, then the superclass's `dispatch/3`.
+    /// `one_hop` lists selectors the superclass defines itself: they skip the
+    /// verdict, since the unchanged route is cheaper than the lookup.
+    Value {
+        one_hop: &'a [String],
+        super_module: &'a str,
+    },
+}
+
+/// The default arm of a `dispatch` function for a class with an inherited
+/// route: ask the memoised `inherited_target/2` verdict, call the owner
+/// directly on a hit, and otherwise take the flavour's slow route.
+pub(in crate::core_erlang) fn inherited_default_arm(
+    class_name: &str,
+    flavour: DefaultArmFlavour<'_>,
+) -> Document<'static> {
+    match flavour {
+        DefaultArmFlavour::Actor {
+            extension_route,
+            outcome,
+        } => actor_default_arm(class_name, extension_route, outcome),
+        DefaultArmFlavour::Value {
+            one_hop,
+            super_module,
+        } => value_default_arm(class_name, one_hop, super_module),
+    }
+}
+
+fn actor_default_arm(
+    class_name: &str,
+    extension_route: Document<'static>,
+    outcome: Document<'static>,
+) -> Document<'static> {
+    docvec![
+        "<OtherSelector> when 'true' ->",
+        nest(
+            INDENT,
+            docvec![
+                line(),
+                "%% BT-4280: a memoised verdict picks the direct inherited call.",
+                line(),
+                "let InheritedOutcome =",
+                nest(
+                    INDENT,
+                    docvec![
+                        line(),
+                        "case call 'beamtalk_dispatch':'inherited_target'(",
+                        leaf::atom(class_name.to_string()),
+                        ", OtherSelector) of",
+                        nest(
+                            INDENT,
+                            docvec![
+                                line(),
+                                "<{'compiled', InhOwner, InhModule}> when 'true' ->",
+                                nest(
+                                    INDENT,
+                                    docvec![
+                                        line(),
+                                        "call 'beamtalk_dispatch':'invoke_resolved'(InhOwner, InhModule, OtherSelector, Args, Self, State)",
+                                    ]
+                                ),
+                                line(),
+                                "<_InhSlow> when 'true' ->",
+                                nest(INDENT, docvec![line(), extension_route]),
+                            ]
+                        ),
+                        line(),
+                        "end",
+                    ]
+                ),
+                line(),
+                "in",
+                line(),
+                outcome,
+            ]
+        ),
+    ]
+}
+
+fn value_default_arm(
+    class_name: &str,
+    one_hop: &[String],
+    super_module: &str,
+) -> Document<'static> {
+    let ask = docvec![
+        "call 'beamtalk_dispatch':'inherited_target'(",
+        leaf::atom(class_name.to_string()),
+        ", Selector)",
+    ];
+    let verdict: Document<'static> = if one_hop.is_empty() {
+        ask
+    } else {
+        let arms: Vec<Document<'static>> = one_hop
+            .iter()
+            .map(|sel| {
+                docvec![
+                    "                <",
+                    leaf::atom(sel.clone()),
+                    "> when 'true' -> 'slow'\n",
+                ]
+            })
+            .collect();
+        docvec![
+            "case Selector of\n",
+            Document::Vec(arms),
+            "                <_> when 'true' -> ",
+            ask,
+            "\n",
+            "            end",
+        ]
+    };
+    docvec![
+        "        <_Other> when 'true' ->\n",
+        "            %% BT-4260: a memoised verdict picks the direct inherited call.\n",
+        "            case ",
+        verdict,
+        " of\n",
+        "                <{'value', _InhOwner, InhModule}> when 'true' ->\n",
+        "                    call InhModule:'dispatch'(Selector, Args, Self)\n",
+        "                <_InhSlow> when 'true' ->\n",
+        "                    case call 'beamtalk_extensions':'lookup'(",
+        leaf::atom(class_name.to_string()),
+        ", Selector) of\n",
+        "                        <{'ok', ExtFun, _ExtOwner}> when 'true' ->\n",
+        "                            apply ExtFun(Args, Self)\n",
+        "                        <'not_found'> when 'true' ->\n",
+        "                            call ",
+        leaf::atom(super_module.to_string()),
+        ":'dispatch'(Selector, Args, Self)\n",
+        "                    end\n",
+        "            end\n",
+    ]
 }
 
 /// Emits `has_method/1` from a [`DispatchSpec`] plus the class's own

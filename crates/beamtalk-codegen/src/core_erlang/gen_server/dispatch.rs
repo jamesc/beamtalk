@@ -619,62 +619,21 @@ impl CoreErlangGenerator {
         let ext_case = Self::generate_extension_case(&class_name);
         let outcome_case = self.generate_inherited_outcome_case(&class_name);
 
-        docvec![
-            "<OtherSelector> when 'true' ->",
-            nest(
-                INDENT,
-                docvec![
+        dispatch_spec::inherited_default_arm(
+            &class_name,
+            dispatch_spec::DefaultArmFlavour::Actor {
+                extension_route: docvec![
+                    "%% BT-229/ADR 0005: Check extension registry before hierarchy walk",
                     line(),
-                    "%% BT-4280: a memoised verdict picks the direct inherited call.",
-                    line(),
-                    "let InheritedOutcome =",
-                    nest(
-                        INDENT,
-                        docvec![
-                            line(),
-                            "case call 'beamtalk_dispatch':'inherited_target'(",
-                            leaf::atom(class_name.clone()),
-                            ", OtherSelector) of",
-                            nest(
-                                INDENT,
-                                docvec![
-                                    line(),
-                                    "<{'compiled', InhOwner, InhModule}> when 'true' ->",
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            line(),
-                                            "call 'beamtalk_dispatch':'invoke_resolved'(InhOwner, InhModule, OtherSelector, Args, Self, State)",
-                                        ]
-                                    ),
-                                    line(),
-                                    "<_InhSlow> when 'true' ->",
-                                    nest(
-                                        INDENT,
-                                        docvec![
-                                            line(),
-                                            "%% BT-229/ADR 0005: Check extension registry before hierarchy walk",
-                                            line(),
-                                            ext_lookup,
-                                            line(),
-                                            "in",
-                                            line(),
-                                            ext_case,
-                                        ]
-                                    ),
-                                ]
-                            ),
-                            line(),
-                            "end",
-                        ]
-                    ),
+                    ext_lookup,
                     line(),
                     "in",
                     line(),
-                    outcome_case,
-                ]
-            ),
-        ]
+                    ext_case,
+                ],
+                outcome: outcome_case,
+            },
+        )
     }
 
     /// Generates the `try call beamtalk_extensions:lookup(...)` expression.
