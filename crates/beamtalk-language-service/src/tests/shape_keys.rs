@@ -342,6 +342,12 @@ fn annotated_local_literal_is_spanned_on_the_offending_key() {
 }
 
 #[test]
+fn nullable_shape_annotation_still_spans_the_key() {
+    let src = "type Options = #{#port => Integer}\no :: Options | Nil := #{#port => \"x\"}\n";
+    assert_eq!(shape_warning_span(src, "Type mismatch"), "#port");
+}
+
+#[test]
 fn state_default_literal_is_spanned_on_the_offending_key() {
     let src = "type Options = #{#port => Integer}\nActor subclass: Srv\n  state: o :: Options = #{#prot => 1}\n";
     assert_eq!(shape_warning_span(src, "state `o`"), "#prot");

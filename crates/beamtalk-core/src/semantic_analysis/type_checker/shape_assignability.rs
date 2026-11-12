@@ -97,6 +97,13 @@ impl ShapeMismatch {
             ..
         } = expected
         else {
+            // A nullable or other union annotation: the first shape member
+            // that locates a key.
+            if let InferredType::Union { members, .. } = expected {
+                return members
+                    .iter()
+                    .find_map(|member| self.key_span_in(value, member));
+            }
             return None;
         };
         match self {
