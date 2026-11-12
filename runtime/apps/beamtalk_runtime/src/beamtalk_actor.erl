@@ -957,11 +957,12 @@ reason. Messages sent to `Pid` before `initialize` finishes queue in the
 mailbox and run after it.
 
 The process is started with `proc_lib` and enters the `gen_server` loop with
-`gen_server:enter_loop/5` after `Module:init/1`. It carries `$ancestors` and
-the same `$initial_call` (`{Module, init, 1}`) and OTP parent (itself) as an
-unlinked `gen_server:start*` actor, so
-`sys`, observer and the crash-report secret redaction treat it like any other
-actor. Not linked; the monitor belongs to the process that calls this.
+`gen_server:enter_loop/5` after `Module:init/1`. It carries the same
+`$initial_call` (`{Module, init, 1}`) as a `gen_server:start*` actor and is its
+own OTP parent, as an unlinked `gen_server:start*` actor is, so `sys`, observer
+and the crash-report secret redaction treat it like any other actor. Its
+`$ancestors` has the actor itself prepended (a deliberate side effect of
+making it its own parent), which shows as a duplicate in crash reports. Not linked; the monitor belongs to the process that calls this.
 `init/1` results are honoured as `gen_server` does: `{ok, State}`,
 `{ok, State, Timeout | hibernate | {continue, _}}`, `{stop, Reason}` (exit
 with `Reason`) and `ignore` (exit `normal`).
@@ -990,7 +991,9 @@ async_init_and_loop(Module, InitArgs) ->
     %% `$ancestors` — here the spawner. Make the actor its own parent so an
     %% exit-trapping actor linked to its spawner later treats that exit as a
     %% normal link exit (BT-3596), not parent shutdown, exactly as a
-    %% `spawnMonitored` actor does.
+    %% `spawnMonitored` actor does. The side effect is a duplicate self entry
+    %% in `$ancestors` (crash reports, and inherited by `proc_lib` children);
+    %% `enter_loop` has no public way to pass the parent, so this is deliberate.
     put('$ancestors', [self() | get('$ancestors')]),
     case Module:init(InitArgs) of
         {ok, State} ->
