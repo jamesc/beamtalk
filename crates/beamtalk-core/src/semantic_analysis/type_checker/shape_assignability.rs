@@ -84,7 +84,7 @@ impl ShapeMismatch {
     /// nowhere) or `value` is not a literal; the caller keeps its
     /// whole-expression span.
     pub(super) fn key_span_in(&self, value: &Expression, expected: &InferredType) -> Option<Span> {
-        let Expression::MapLiteral { pairs, .. } = value.unwrap_parens() else {
+        let Expression::MapLiteral { pairs, .. } = value else {
             return None;
         };
         let symbol_key = |pair: &crate::ast::MapPair| match &pair.key {
