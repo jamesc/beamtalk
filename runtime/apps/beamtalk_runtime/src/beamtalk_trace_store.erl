@@ -676,7 +676,8 @@ handle_call(clear, _From, State) ->
     ?LOG_INFO("Trace store cleared", #{}),
     {reply, ok, drop_sweep(State)};
 handle_call(sweep_pending, _From, State) ->
-    %% Whether a chunked sweep is mid-way (tests poll this to wait it out).
+    %% Whether a chunked sweep is mid-way. Test-only: tests poll this to wait
+    %% a sweep out; not part of the API.
     {reply, State#state.sweep_cont =/= undefined, State};
 handle_call({grow_counters, CallerRef}, _From, State) ->
     %% Serialized counters grow to prevent concurrent persistent_term overwrites.
