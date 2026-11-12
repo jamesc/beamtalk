@@ -8,7 +8,9 @@
 //!
 //! Maps `@primitive "classXxx"` (declared in `behaviour.bt` / `class.bt`) and
 //! `@primitive "metaclassXxx"` (declared in `metaclass.bt`) to direct calls
-//! into `beamtalk_behaviour_intrinsics`. These are thin data-access functions —
+//! into `beamtalk_behaviour_intrinsics` (or, for the live-refactoring
+//! primitives, `beamtalk_class_refactor` / `beamtalk_selector_refactor`; see
+//! `intrinsic_module`). These are thin data-access functions —
 //! hierarchy-walking logic lives in pure Beamtalk.
 //!
 //! The whole tower shares **one** selector table
@@ -63,10 +65,32 @@ const TOWER_ZERO_ARG: &[&str] = &[
     "metaclassLocalClassMethods",
 ];
 
+/// The runtime module that implements a Behaviour/Class/Metaclass tower
+/// primitive.
+///
+/// The live-refactoring primitives live outside `beamtalk_behaviour_intrinsics`
+/// (BT-4703): method removal, class rename and live method patch in
+/// `beamtalk_class_refactor`, method rename in `beamtalk_selector_refactor`.
+/// Everything else is class introspection.
+fn intrinsic_module(func: &str) -> &'static str {
+    match func {
+        "classRemoveSelector"
+        | "classRemoveSelectorIfAbsent"
+        | "classRenameTo"
+        | "classCompileSource"
+        | "classTryCompileSource"
+        | "classPrecheckCompileSource" => "beamtalk_class_refactor",
+        "classRenameSelector" | "classRenameSelectorIfAbsent" => "beamtalk_selector_refactor",
+        _ => "beamtalk_behaviour_intrinsics",
+    }
+}
+
 /// Generates a `call 'beamtalk_behaviour_intrinsics':'func'(Self)` Document.
 fn intrinsic_self(func: &str) -> Document<'static> {
     docvec![
-        "call 'beamtalk_behaviour_intrinsics':'",
+        "call '",
+        intrinsic_module(func),
+        "':'",
         leaf::var(func.to_owned()),
         "'(Self)"
     ]
@@ -75,7 +99,9 @@ fn intrinsic_self(func: &str) -> Document<'static> {
 /// Generates a `call 'beamtalk_behaviour_intrinsics':'func'(Self, Arg)` Document.
 fn intrinsic_self_arg(func: &str, arg: &str) -> Document<'static> {
     docvec![
-        "call 'beamtalk_behaviour_intrinsics':'",
+        "call '",
+        intrinsic_module(func),
+        "':'",
         leaf::var(func.to_owned()),
         "'(Self, ",
         leaf::var(arg.to_owned()),
@@ -86,7 +112,9 @@ fn intrinsic_self_arg(func: &str, arg: &str) -> Document<'static> {
 /// Generates a `call 'beamtalk_behaviour_intrinsics':'func'(Self, Arg1, Arg2)` Document.
 fn intrinsic_self_arg2(func: &str, arg1: &str, arg2: &str) -> Document<'static> {
     docvec![
-        "call 'beamtalk_behaviour_intrinsics':'",
+        "call '",
+        intrinsic_module(func),
+        "':'",
         leaf::var(func.to_owned()),
         "'(Self, ",
         leaf::var(arg1.to_owned()),
@@ -146,7 +174,7 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
             let sel = params.first()?;
             let absent_block = params.get(1)?;
             Some(docvec![
-                "call 'beamtalk_behaviour_intrinsics':'classRemoveSelectorIfAbsent'(Self, ",
+                "call 'beamtalk_class_refactor':'classRemoveSelectorIfAbsent'(Self, ",
                 leaf::var(sel.clone()),
                 ", ",
                 leaf::var(absent_block.clone()),
@@ -172,7 +200,7 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
             let new_sel = params.get(1)?;
             let absent_block = params.get(2)?;
             Some(docvec![
-                "call 'beamtalk_behaviour_intrinsics':'classRenameSelectorIfAbsent'(Self, ",
+                "call 'beamtalk_selector_refactor':'classRenameSelectorIfAbsent'(Self, ",
                 leaf::var(old_sel.clone()),
                 ", ",
                 leaf::var(new_sel.clone()),
@@ -192,7 +220,9 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
             let sel = params.first()?;
             let source = params.get(1)?;
             Some(docvec![
-                "call 'beamtalk_behaviour_intrinsics':'",
+                "call '",
+                intrinsic_module(selector),
+                "':'",
                 leaf::var(selector.to_owned()),
                 "'(Self, ",
                 leaf::var(sel.clone()),
@@ -413,7 +443,7 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'beamtalk_behaviour_intrinsics':'classCompileSource'(Self, Selector, Source)"
+                "call 'beamtalk_class_refactor':'classCompileSource'(Self, Selector, Source)"
                     .to_string()
             )
         );
@@ -428,7 +458,7 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'beamtalk_behaviour_intrinsics':'classTryCompileSource'(Self, Selector, Source)"
+                "call 'beamtalk_class_refactor':'classTryCompileSource'(Self, Selector, Source)"
                     .to_string()
             )
         );
@@ -443,7 +473,7 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'beamtalk_behaviour_intrinsics':'classPrecheckCompileSource'(Self, Selector, Source)"
+                "call 'beamtalk_class_refactor':'classPrecheckCompileSource'(Self, Selector, Source)"
                     .to_string()
             )
         );
@@ -458,8 +488,7 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'beamtalk_behaviour_intrinsics':'classRemoveSelector'(Self, Selector)"
-                    .to_string()
+                "call 'beamtalk_class_refactor':'classRemoveSelector'(Self, Selector)".to_string()
             )
         );
     }
@@ -472,7 +501,7 @@ mod tests {
         ));
         assert_eq!(
             result,
-            Some("call 'beamtalk_behaviour_intrinsics':'classRenameTo'(Self, NewName)".to_string())
+            Some("call 'beamtalk_class_refactor':'classRenameTo'(Self, NewName)".to_string())
         );
     }
 
@@ -485,7 +514,7 @@ mod tests {
         assert_eq!(
             result,
             Some(
-                "call 'beamtalk_behaviour_intrinsics':'classRemoveSelectorIfAbsent'(Self, Selector, AbsentBlock)"
+                "call 'beamtalk_class_refactor':'classRemoveSelectorIfAbsent'(Self, Selector, AbsentBlock)"
                     .to_string()
             )
         );

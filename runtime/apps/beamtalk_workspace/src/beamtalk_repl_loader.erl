@@ -2749,7 +2749,7 @@ compile-only check) WITHOUT installing anything — same pure prefix
 `rewrite_sites/2` itself runs before its install pass, exposed standalone
 for a caller that needs to know a rewrite WOULD succeed before committing
 some other, unrelated mutation first (ADR 0114:
-`beamtalk_behaviour_intrinsics:classRenameTo/2`'s dynamic-class path moves
+`beamtalk_class_refactor:classRenameTo/2`'s dynamic-class path moves
 the class's registry identity via a completely separate call,
 `beamtalk_object_class:rename/2` — outside this module's own atomicity
 protocol entirely — so it validates the reference-site rewrite here FIRST,
@@ -3151,7 +3151,7 @@ Move `ClassName`'s `.bt` file to `NewPathBin`, leaving its name and every
 reference to it untouched (ADR 0114 Phase 2; backs `Workspace
 moveClass:to:`).
 
-Unlike `beamtalk_behaviour_intrinsics:classRenameTo/2`, nothing
+Unlike `beamtalk_class_refactor:classRenameTo/2`, nothing
 about the class's identity changes here — no collision check, no cross-file
 reference discovery, no registry re-registration — so `moveClass:to:` has no
 sites beyond the single file being moved (ADR 0114 § "`Workspace
@@ -3173,7 +3173,7 @@ class's current tracked source before anything is logged, catching a source
 that has drifted into an unparseable state rather than silently recording a
 move for a class that cannot actually be reinstalled later. Because the
 registered name never changes, `rewrite_sites/2`'s own hot-reload reuses the
-SAME pid (`beamtalk_behaviour_intrinsics:install_class_rename/3`'s doc: "a
+SAME pid (`beamtalk_class_refactor:install_class_rename/3`'s doc: "a
 NEW pid — hot-reload only reuses the SAME pid when the registered name is
 unchanged, which a rename by definition is not" — a move by definition IS
 unchanged) — the caller's own class-object reference stays valid, so this
@@ -3434,7 +3434,7 @@ reverse-splice (`sites[0]`'s `prev_source_ref`) already re-declares
 pipeline therefore registers a fresh pid under `old_class` as an ordinary
 side effect of that recompile, exactly mirroring how the FORWARD rename's own
 definition-site splice is what originally registered the NEW name
-(`beamtalk_behaviour_intrinsics:install_class_rename/3`'s doc). `finish_
+(`beamtalk_class_refactor:install_class_rename/3`'s doc). `finish_
 rename_class_revert/1` only needs to retire the now-stale registration under
 the CURRENT (post-rename) name — reusing `install_class_rename/3` itself,
 called with the two names swapped, rather than a second copy of its
@@ -3603,7 +3603,7 @@ finish_rename_class_revert(Entry) ->
                 {{ok, CurrentName}, {ok, OldName}} ->
                     Classification = capture_class_removal_snapshot(CurrentNameBin),
                     try
-                        _ = beamtalk_behaviour_intrinsics:install_class_rename(
+                        _ = beamtalk_class_refactor:install_class_rename(
                             CurrentName, OldName, Classification
                         ),
                         {ok, OldNameBin}

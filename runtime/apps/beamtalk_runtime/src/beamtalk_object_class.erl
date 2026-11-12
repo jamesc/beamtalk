@@ -243,7 +243,7 @@ flushability": "Allowed, `flushable: false` (`\"dynamic\"`)") — a dynamic
 class has no source for the shared `beamtalk_repl_loader:rewrite_sites/2`
 mechanism to recompile, so nothing ever creates a fresh `NewName`-registered
 process the way an ordinary compiled class's rename does (see
-`beamtalk_behaviour_intrinsics:classRenameTo/2`'s doc). This is the one case
+`beamtalk_class_refactor:classRenameTo/2`'s doc). This is the one case
 where the SAME class-object process answers under a new name, rather than
 being retired in favour of a freshly-installed one.
 
