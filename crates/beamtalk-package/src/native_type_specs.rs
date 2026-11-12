@@ -57,7 +57,7 @@ pub fn extract_project_type_specs(layout: &BuildLayout) -> Option<NativeTypeRegi
 /// which has no `beamtalk.toml` (BT-4643).
 #[must_use]
 pub fn extract_stdlib_type_specs() -> Option<NativeTypeRegistry> {
-    use crate::repl_startup;
+    use beamtalk_core::ffi_type_specs as repl_startup;
 
     // Use the same runtime discovery as the build worker so paths stay in sync
     // with the runtime layout (dev vs installed).

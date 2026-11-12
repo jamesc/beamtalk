@@ -5,17 +5,17 @@
 //! `diagnostic_summary` MCP tools (`server::tools::diagnostics`).
 //!
 //! The analysis is CLI `beamtalk lint`'s own pipeline,
-//! [`beamtalk_cli::lint_pipeline`] (BT-4585): the same Pass 1 extraction,
+//! [`beamtalk_package::lint_pipeline`] (BT-4585): the same Pass 1 extraction,
 //! dependency merge, knowledge scope, per-file analysis, alias-collision
 //! dedup, provision routing, `.erl` linting and verdict gate. This module
 //! supplies MCP's offline inputs — dependency metadata from the checkouts
-//! already on disk ([`beamtalk_cli::dependency_classes`]), never fetched —
+//! already on disk ([`beamtalk_package::dependency_classes`]), never fetched —
 //! and shapes the results for the tools. No REPL connection is required,
 //! which is what lets both tools work without a live workspace.
 
-use beamtalk_cli::ffi_type_registry::{ResolvedTypeRegistry, StubReport};
-use beamtalk_cli::lint_pipeline::{self, DependencyMetadata, LintGate, PackageSources};
 use beamtalk_core::source_analysis::Severity;
+use beamtalk_package::ffi_type_registry::{ResolvedTypeRegistry, StubReport};
+use beamtalk_package::lint_pipeline::{self, DependencyMetadata, LintGate, PackageSources};
 use camino::Utf8PathBuf;
 
 /// A single lint diagnostic in structured form.
@@ -69,10 +69,10 @@ impl LintResult {
 /// The offline inputs `sources`' package is analysed against: its
 /// dependencies' metadata, read from the checkouts a prior `beamtalk build`
 /// left on disk
-/// ([`beamtalk_cli::dependency_classes::resolve_dependency_class_infos_with_sources`])
+/// ([`beamtalk_package::dependency_classes::resolve_dependency_class_infos_with_sources`])
 /// — never fetched, so a diagnostics query has no network side effects —
 /// and the FFI type registry `beamtalk lint` builds
-/// ([`beamtalk_cli::ffi_type_registry::lint_type_registry`]: auto-extracted
+/// ([`beamtalk_package::ffi_type_registry::lint_type_registry`]: auto-extracted
 /// specs plus the distribution, dependency and project stub tiers, or the
 /// runtime's specs for a `stdlib/src` target; BT-4643), with those same
 /// checkouts' stub directories as the dependency tier. A dependency that
@@ -84,9 +84,9 @@ fn offline_inputs(
 ) -> (DependencyMetadata, ResolvedTypeRegistry) {
     let package_root = sources.package_root.as_deref();
     let scan = package_root
-        .map(beamtalk_cli::dependency_classes::resolve_dependency_class_infos_with_sources)
+        .map(beamtalk_package::dependency_classes::resolve_dependency_class_infos_with_sources)
         .unwrap_or_default();
-    let registry = beamtalk_cli::ffi_type_registry::lint_type_registry(
+    let registry = beamtalk_package::ffi_type_registry::lint_type_registry(
         package_root,
         source_files,
         &scan.stub_dirs,

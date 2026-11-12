@@ -36,6 +36,8 @@ beamtalk-codegen.workspace = true
 # out of `beamtalk-core` into standalone crates.
 beamtalk-lint.workspace = true
 beamtalk-project.workspace = true
+# why: BT-4689 — offline package-analysis pipeline shared with beamtalk-mcp.
+beamtalk-package.workspace = true
 beamtalk-repl.workspace = true
 beamtalk-repl-protocol.workspace = true
 # why: shared leaf for deriving the installation sysroot from the running

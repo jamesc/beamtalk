@@ -28,18 +28,18 @@
 //! - [`repl_meta_exprs`] — REPL meta-command → Beamtalk-expression builders,
 //!   shared with `tests/repl_protocol.rs`
 
-pub mod build_layout;
+pub use beamtalk_package::build_layout;
 pub mod compiler_port;
-pub mod content_hash;
-pub mod dependency_classes;
+pub use beamtalk_package::content_hash;
+pub use beamtalk_package::dependency_classes;
 // Moved to `beamtalk-project` so the LSP applies the same rule (BT-4611).
+pub use beamtalk_package::erlang_lint;
 pub use beamtalk_project::dependency_extensions;
-pub mod erlang_lint;
 pub mod erlc;
-pub mod ffi_type_registry;
-pub mod lint_pipeline;
-pub mod manifest;
-pub mod native_type_specs;
+pub use beamtalk_package::ffi_type_registry;
+pub use beamtalk_package::lint_pipeline;
+pub use beamtalk_package::manifest;
+pub use beamtalk_package::native_type_specs;
 pub mod otp_support;
 pub mod path_util;
 pub mod pid_liveness;

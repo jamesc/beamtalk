@@ -204,6 +204,7 @@ dependencies = [
  "beamtalk-core",
  "beamtalk-language-service",
  "beamtalk-lint",
+ "beamtalk-package",
  "beamtalk-project",
  "beamtalk-repl",
  "beamtalk-repl-protocol",
@@ -261,6 +262,7 @@ dependencies = [
  "beamtalk-core",
  "beamtalk-etf",
  "beamtalk-language-service",
+ "beamtalk-project",
  "beamtalk-repl",
  "beamtalk-workspace",
  "camino",
@@ -414,10 +416,10 @@ dependencies = [
 name = "beamtalk-mcp"
 version = "0.4.0"
 dependencies = [
- "beamtalk-cli",
  "beamtalk-core",
  "beamtalk-examples",
  "beamtalk-language-service",
+ "beamtalk-package",
  "beamtalk-project",
  "beamtalk-repl-protocol",
  "beamtalk-workspace",
@@ -433,6 +435,27 @@ dependencies = [
  "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "beamtalk-package"
+version = "0.4.0"
+dependencies = [
+ "beamtalk-core",
+ "beamtalk-language-service",
+ "beamtalk-lint",
+ "beamtalk-project",
+ "beamtalk-sysroot",
+ "beamtalk-workspace",
+ "camino",
+ "miette",
+ "serde",
+ "serial_test",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "toml",
+ "tracing",
 ]
 
 [[package]]

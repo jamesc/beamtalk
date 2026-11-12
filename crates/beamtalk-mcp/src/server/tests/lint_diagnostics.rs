@@ -10,7 +10,7 @@ use camino::Utf8PathBuf;
 fn lint_registry(
     dir: &std::path::Path,
 ) -> Option<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry> {
-    beamtalk_cli::ffi_type_registry::lint_type_registry(
+    beamtalk_package::ffi_type_registry::lint_type_registry(
         Some(camino::Utf8Path::from_path(dir).expect("UTF-8 temp dir")),
         &[],
         &[],
@@ -1001,7 +1001,7 @@ fn run_lint_structured_reports_dependency_stub_argument_mismatch() {
 /// twin is `lint_types_ffi_calls_into_stdlibs_own_backing_modules_bt_3597`.
 #[test]
 fn run_lint_structured_types_stdlib_ffi_with_runtime_specs() {
-    if beamtalk_cli::native_type_specs::extract_stdlib_type_specs().is_none() {
+    if beamtalk_package::native_type_specs::extract_stdlib_type_specs().is_none() {
         eprintln!(
             "skipping run_lint_structured_types_stdlib_ffi_with_runtime_specs: \
              runtime .beam files not built in this environment"
@@ -1019,7 +1019,7 @@ fn run_lint_structured_types_stdlib_ffi_with_runtime_specs() {
     .unwrap();
 
     // Non-vacuous: the runtime specs this path uses do type the call.
-    let registry = beamtalk_cli::ffi_type_registry::lint_type_registry(
+    let registry = beamtalk_package::ffi_type_registry::lint_type_registry(
         None,
         &[Utf8PathBuf::from_path_buf(stdlib_src.join("FfiTypeSpecStdlib.bt")).unwrap()],
         &[],

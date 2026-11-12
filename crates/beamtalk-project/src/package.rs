@@ -63,6 +63,20 @@ pub fn find_package_root(start: &Path) -> Option<PathBuf> {
     }
 }
 
+/// The package name declared by the `beamtalk.toml` directly inside `root`.
+///
+/// The one reader of a manifest's `[package] name` for callers that do not
+/// need a fully validated manifest (the compiler port, the LSP, `load-project`
+/// clients). Returns `None` for a missing/unreadable manifest, invalid TOML,
+/// or a missing/non-string `name` — "no known package name for this root",
+/// never a hard error. Parsing is
+/// [`beamtalk_core::compilation::parse_package_name_from_manifest_toml`].
+#[must_use]
+pub fn read_package_name(root: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(root.join("beamtalk.toml")).ok()?;
+    beamtalk_core::compilation::parse_package_name_from_manifest_toml(&content)
+}
+
 /// Returns `true` if `file` lives under `root`'s `stubs/` directory (ADR
 /// 0075) — `declare native:` is only legal there, see
 /// `beamtalk_core::semantic_analysis::validators::check_native_declaration_location`'s

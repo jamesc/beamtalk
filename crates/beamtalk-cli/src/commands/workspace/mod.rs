@@ -46,7 +46,6 @@
 /// CLI subcommands for workspace management (`workspace list`, `workspace stop`, etc.).
 pub mod cli;
 /// Project root discovery and workspace auto-detection.
-pub mod discovery;
 /// epmd client: TCP NAMES_REQ protocol, deregistration polling, conflict detection.
 mod epmd;
 /// Lint: every `erl` spawn in this crate pins epmd to loopback (BT-3987).

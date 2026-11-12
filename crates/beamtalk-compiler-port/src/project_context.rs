@@ -304,15 +304,9 @@ fn find_project_root(source_path: &str) -> Option<PathBuf> {
     } else {
         std::env::current_dir().ok()?.join(path)
     };
-    let mut dir = absolute.parent()?.to_path_buf();
-    loop {
-        if dir.join("beamtalk.toml").is_file() {
-            return std::fs::canonicalize(&dir).ok();
-        }
-        if !dir.pop() {
-            return None;
-        }
-    }
+    // The one shared walk (canonicalises, guards the empty path); the file
+    // itself is the start, so a manifest beside it is found first.
+    beamtalk_project::package::find_package_root(&absolute)
 }
 
 /// The project's source files for alias extraction: the one shared
@@ -632,8 +626,7 @@ fn resolve_project_context(root: PathBuf, batch: Option<&str>) -> Option<FilePro
     let manifest_path = root.join("beamtalk.toml");
 
     let manifest = std::fs::read_to_string(&manifest_path).unwrap_or_default();
-    let package_name = beamtalk_core::compilation::parse_package_name_from_manifest_toml(&manifest)
-        .unwrap_or_default();
+    let package_name = beamtalk_project::package::read_package_name(&root).unwrap_or_default();
     let diagnostics_table = load_diagnostics_table_for_root(root.as_path());
 
     // Alias scan inputs: project sources plus every resolved dependency's
