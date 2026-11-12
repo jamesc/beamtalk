@@ -35,7 +35,7 @@ serde = { workspace = true, optional = true }
 [dev-dependencies]
 proptest.workspace = true
 serde_json.workspace = true
-tempfile = "3.14"
+tempfile.workspace = true
 # why: BT-3100 / BT-3344 pattern — property tests (`property_tests.rs`) share
 # `beamtalk_core::test_helpers::test_support::proptest_config_default`
 # rather than duplicating it (the "No duplicate implementations" rule); the

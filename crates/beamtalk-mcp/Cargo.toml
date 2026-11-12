@@ -22,7 +22,8 @@ path = "src/main.rs"
 # why: MCP SDK for Model Context Protocol server implementation
 rmcp = { version = "3.0", features = ["server", "macros", "transport-io", "schemars"] }
 
-# Async runtime
+# why: literal instead of `workspace = true` so the feature set stays narrower than
+# the workspace entry (`full`); do not widen.
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "net", "process", "sync", "signal", "time"] }
 
 # Serialization
@@ -43,10 +44,9 @@ beamtalk-core = { workspace = true, features = ["serde"] }
 # structs.
 beamtalk-language-service = { workspace = true, features = ["serde"] }
 
-# why: BT-3340 (ADR 0117 Decision step 2) — `lint`/`project` moved out of
-# `beamtalk-core` into standalone crates; the lint/diagnostic_summary MCP
-# tools call `run_lint_passes` and project-root discovery directly.
-beamtalk-lint.workspace = true
+# why: BT-3340 (ADR 0117 Decision step 2) — `project` moved out of
+# `beamtalk-core` into a standalone crate; the lint/diagnostic_summary MCP
+# tools use its project-root discovery directly.
 beamtalk-project.workspace = true
 
 # why: shares manifest parsing / build-layout / dependency-class resolution
@@ -70,7 +70,7 @@ tracing-subscriber.workspace = true
 # why: WebSocket client for REPL protocol (ADR 0020)
 tokio-tungstenite.workspace = true
 # why: Stream/Sink combinators for WebSocket I/O
-futures-util = "0.3"
+futures-util.workspace = true
 
 # Bundled example corpus and search (ADR 0062)
 beamtalk-examples.workspace = true
@@ -81,7 +81,7 @@ sha2.workspace = true
 [dev-dependencies]
 # why: RAII temp-dir cleanup for test fixtures (auto-removes on panic, unlike
 # manual std::env::temp_dir() + remove_dir_all)
-tempfile = "3.14"
+tempfile.workspace = true
 # why: BT-3331 — `test_support`'s shared loopback WS auth-handshake double,
 # consolidating this crate's own hand-rolled `FakeRepl`/`spawn_fake_repl`.
 beamtalk-repl-protocol = { workspace = true, features = ["test"] }
