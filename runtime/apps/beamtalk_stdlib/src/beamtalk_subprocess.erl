@@ -279,9 +279,7 @@ validate_config(_Other) ->
 %% Unwrap one text value to bytes; `undefined` and junk stay distinct so
 %% callers can tell "missing" from "wrong type".
 text_bytes(undefined) -> undefined;
-text_bytes({beamtalk_string, B}) when is_binary(B) -> {ok, B};
-text_bytes(B) when is_binary(B) -> {ok, B};
-text_bytes(_) -> error.
+text_bytes(Value) -> beamtalk_text:unwrap(Value).
 
 -doc "Validate and coerce the args field.".
 -spec validate_config_args(map(), binary()) -> {ok, config()} | {error, term()}.
@@ -304,10 +302,11 @@ normalize_text_list(List) ->
 
 normalize_text_list([], Acc) ->
     {ok, lists:reverse(Acc)};
-normalize_text_list([{beamtalk_string, B} | T], Acc) when is_binary(B) ->
-    normalize_text_list(T, [B | Acc]);
-normalize_text_list([B | T], Acc) when is_binary(B) ->
-    normalize_text_list(T, [B | Acc]);
+normalize_text_list([H | T], Acc) ->
+    case beamtalk_text:unwrap(H) of
+        {ok, B} -> normalize_text_list(T, [B | Acc]);
+        error -> error
+    end;
 normalize_text_list(_, _) ->
     error.
 
@@ -366,9 +365,11 @@ normalize_text_env(Env) ->
         error:bad_text -> {error, {type_error, env, expected_binary_keys_and_values}}
     end.
 
-unwrap_text_entry({beamtalk_string, B}) when is_binary(B) -> B;
-unwrap_text_entry(B) when is_binary(B) -> B;
-unwrap_text_entry(_) -> error(bad_text).
+unwrap_text_entry(Value) ->
+    case beamtalk_text:unwrap(Value) of
+        {ok, Bin} -> Bin;
+        error -> error(bad_text)
+    end.
 
 %%% ============================================================================
 %%% Internal handlers

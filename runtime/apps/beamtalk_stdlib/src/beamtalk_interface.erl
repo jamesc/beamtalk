@@ -165,12 +165,7 @@ classesNamed(Names) when is_list(Names) ->
         Names
     );
 classesNamed(_) ->
-    Error0 = beamtalk_error:new(type_error, 'Beamtalk'),
-    Error1 = beamtalk_error:with_selector(Error0, 'classesNamed:'),
-    Error2 = beamtalk_error:with_hint(
-        Error1, <<"classesNamed: expects a list of class-name atoms">>
-    ),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('Beamtalk', 'classesNamed:', <<"classesNamed: expects a list of class-name atoms">>).
 
 -doc """
 The registered name of the class behind a class or metaclass object, or `nil`
@@ -324,16 +319,10 @@ findSendersIn(Source, Selector) when
             []
     end;
 findSendersIn(_Source, _Selector) ->
-    Err0 = beamtalk_error:new(type_error, 'Beamtalk'),
-    Err1 = beamtalk_error:with_selector(Err0, 'findSendersIn:selector:'),
-    Err2 = beamtalk_error:with_message(
-        Err1,
-        <<
+    beamtalk_error:raise_type_error_message('Beamtalk', 'findSendersIn:selector:', <<
             "findSendersIn:selector: expects a binary source and an atom or "
             "binary selector"
-        >>
-    ),
-    beamtalk_error:raise(Err2).
+        >>).
 
 -doc """
 Find every message send within a single method's source.
@@ -376,13 +365,7 @@ allSendsIn(Source) when is_binary(Source) ->
             []
     end;
 allSendsIn(_Source) ->
-    Err0 = beamtalk_error:new(type_error, 'Beamtalk'),
-    Err1 = beamtalk_error:with_selector(Err0, 'allSendsIn:'),
-    Err2 = beamtalk_error:with_message(
-        Err1,
-        <<"allSendsIn: expects a binary source">>
-    ),
-    beamtalk_error:raise(Err2).
+    beamtalk_error:raise_type_error_message('Beamtalk', 'allSendsIn:', <<"allSendsIn: expects a binary source">>).
 
 -doc """
 Find every `announce:' emission within a single method's source.
@@ -425,13 +408,7 @@ announceSitesIn(Source) when is_binary(Source) ->
             []
     end;
 announceSitesIn(_Source) ->
-    Err0 = beamtalk_error:new(type_error, 'Beamtalk'),
-    Err1 = beamtalk_error:with_selector(Err0, 'announceSitesIn:'),
-    Err2 = beamtalk_error:with_message(
-        Err1,
-        <<"announceSitesIn: expects a binary source">>
-    ),
-    beamtalk_error:raise(Err2).
+    beamtalk_error:raise_type_error_message('Beamtalk', 'announceSitesIn:', <<"announceSitesIn: expects a binary source">>).
 
 -doc """
 Find references to a class within a single method's source.
@@ -469,16 +446,10 @@ findReferencesToIn(Source, ClassName) when
             []
     end;
 findReferencesToIn(_Source, _ClassName) ->
-    Err0 = beamtalk_error:new(type_error, 'Beamtalk'),
-    Err1 = beamtalk_error:with_selector(Err0, 'findReferencesToIn:class:'),
-    Err2 = beamtalk_error:with_message(
-        Err1,
-        <<
+    beamtalk_error:raise_type_error_message('Beamtalk', 'findReferencesToIn:class:', <<
             "findReferencesToIn:class: expects a binary source and an atom or "
             "binary class name"
-        >>
-    ),
-    beamtalk_error:raise(Err2).
+        >>).
 
 -doc """
 Find reads of an field within a single method's source.
@@ -551,16 +522,10 @@ find_field_access(Source, Field, Kind, Selector) when
             []
     end;
 find_field_access(_Source, _IVar, _Kind, Selector) ->
-    Err0 = beamtalk_error:new(type_error, 'Beamtalk'),
-    Err1 = beamtalk_error:with_selector(Err0, Selector),
-    Err2 = beamtalk_error:with_message(
-        Err1,
-        <<
+    beamtalk_error:raise_type_error_message('Beamtalk', Selector, <<
             "expects a binary source and an atom or binary "
             "field name"
-        >>
-    ),
-    beamtalk_error:raise(Err2).
+        >>).
 
 -doc """
 Find Erlang FFI call sites within a single method's source.
@@ -606,17 +571,11 @@ ffiSitesIn(Source, Module, Function, Arity) when
             []
     end;
 ffiSitesIn(_Source, _Module, _Function, _Arity) ->
-    Err0 = beamtalk_error:new(type_error, 'Beamtalk'),
-    Err1 = beamtalk_error:with_selector(Err0, 'ffiSitesIn:module:function:arity:'),
-    Err2 = beamtalk_error:with_message(
-        Err1,
-        <<
+    beamtalk_error:raise_type_error_message('Beamtalk', 'ffiSitesIn:module:function:arity:', <<
             "ffiSitesIn:module:function:arity: expects a binary source, atom or "
             "binary module and function, and a non-negative integer arity or the "
             "atom any"
-        >>
-    ),
-    beamtalk_error:raise(Err2).
+        >>).
 
 %% Delegates to the canonical `beamtalk_text:to_binary/1` rather than
 %% hand-rolling an atom/binary-only copy that would raise `function_clause`
@@ -736,12 +695,7 @@ handle_erlang_help(ModuleBin) when is_binary(ModuleBin) ->
             beamtalk_error:raise(Err2)
     end;
 handle_erlang_help(_ModuleArg) ->
-    Err = beamtalk_error:new(type_error, 'Beamtalk'),
-    Err1 = beamtalk_error:with_selector(Err, 'erlangHelp:'),
-    Err2 = beamtalk_error:with_message(
-        Err1, <<"erlangHelp: expects a binary module name">>
-    ),
-    beamtalk_error:raise(Err2).
+    beamtalk_error:raise_type_error_message('Beamtalk', 'erlangHelp:', <<"erlangHelp: expects a binary module name">>).
 
 -doc "Format Erlang function help via beamtalk_erlang_help (dynamic call).".
 -spec handle_erlang_help(binary() | beamtalk_string:t(), atom() | binary()) -> binary().
@@ -786,12 +740,7 @@ handle_erlang_help(ModuleBin, SelectorArg) when
             beamtalk_error:raise(Err2)
     end;
 handle_erlang_help(_ModuleArg, _SelectorArg) ->
-    Err = beamtalk_error:new(type_error, 'Beamtalk'),
-    Err1 = beamtalk_error:with_selector(Err, 'erlangHelp:selector:'),
-    Err2 = beamtalk_error:with_message(
-        Err1, <<"erlangHelp:selector: expects a binary module name and atom/binary function name">>
-    ),
-    beamtalk_error:raise(Err2).
+    beamtalk_error:raise_type_error_message('Beamtalk', 'erlangHelp:selector:', <<"erlangHelp:selector: expects a binary module name and atom/binary function name">>).
 
 -doc "Look up a class by name and return a wrapped class object or nil.".
 -spec handle_class_named(binary() | atom() | term()) ->

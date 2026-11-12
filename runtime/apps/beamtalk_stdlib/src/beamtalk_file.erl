@@ -112,6 +112,8 @@ enforced — Beamtalk is a trusted developer tool (ADR 0058, 0063).
 
 -include_lib("kernel/include/logger.hrl").
 
+-define(PATH_HINT, <<"Path must be a String">>).
+
 %%% ============================================================================
 %%% Public API (called directly by codegen)
 %%% ============================================================================
@@ -165,9 +167,8 @@ Result error map if the file cannot be read.
                 'readAll:', path_detail(Path), Reason, read_failures(), undefined
             )
     end;
-'readAll:'(Path) when is_binary(Path) -> 'readAll:'({beamtalk_string, Path});
-'readAll:'(_) ->
-    beamtalk_error:raise_type_error('File', 'readAll:', <<"Path must be a String">>).
+'readAll:'(Path) ->
+    'readAll:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'readAll:', ?PATH_HINT)}).
 
 -doc """
 Write string contents to a file.
@@ -212,7 +213,7 @@ Returns a Result ok map on success, Result error map on failure.
 'writeAll:contents:'({beamtalk_string, _}, _) ->
     beamtalk_error:raise_type_error('File', 'writeAll:contents:', <<"Contents must be a String">>);
 'writeAll:contents:'(_, _) ->
-    beamtalk_error:raise_type_error('File', 'writeAll:contents:', <<"Path must be a String">>).
+    beamtalk_error:raise_type_error('File', 'writeAll:contents:', ?PATH_HINT).
 
 %%% ============================================================================
 %%% Binary I/O
@@ -235,9 +236,8 @@ does not assume the contents are a UTF-8 string.
                 'readBinary:', path_detail(Path), Reason, read_failures(), undefined
             )
     end;
-'readBinary:'(Path) when is_binary(Path) -> 'readBinary:'({beamtalk_string, Path});
-'readBinary:'(_) ->
-    beamtalk_error:raise_type_error('File', 'readBinary:', <<"Path must be a String">>).
+'readBinary:'(Path) ->
+    'readBinary:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'readBinary:', ?PATH_HINT)}).
 
 -doc """
 Normalize `writeBinary:`/`appendBinary:` contents to raw bytes (BT-4170).
@@ -296,7 +296,7 @@ Returns a Result ok map on success, Result error map on failure.
 'writeBinary:contents:'(Path, Contents) when is_binary(Path) ->
     'writeBinary:contents:'({beamtalk_string, Path}, Contents);
 'writeBinary:contents:'(_, _) ->
-    beamtalk_error:raise_type_error('File', 'writeBinary:contents:', <<"Path must be a String">>).
+    beamtalk_error:raise_type_error('File', 'writeBinary:contents:', ?PATH_HINT).
 
 -doc """
 Append binary data to a file, creating it if it doesn't exist.
@@ -339,7 +339,7 @@ Returns a Result ok map on success, Result error map on failure.
 'appendBinary:contents:'(Path, Contents) when is_binary(Path) ->
     'appendBinary:contents:'({beamtalk_string, Path}, Contents);
 'appendBinary:contents:'(_, _) ->
-    beamtalk_error:raise_type_error('File', 'appendBinary:contents:', <<"Path must be a String">>).
+    beamtalk_error:raise_type_error('File', 'appendBinary:contents:', ?PATH_HINT).
 
 -doc "Check if FileHandle responds to the given selector.".
 -spec handle_has_method(atom()) -> boolean().
@@ -381,9 +381,8 @@ process that created them (BEAM file handles are process-local).
                 'lines:', path_detail(Path), Reason, read_failures(), undefined
             )
     end;
-'lines:'(Path) when is_binary(Path) -> 'lines:'({beamtalk_string, Path});
-'lines:'(_) ->
-    beamtalk_error:raise_type_error('File', 'lines:', <<"Path must be a String">>).
+'lines:'(Path) ->
+    'lines:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'lines:', ?PATH_HINT)}).
 
 -doc """
 Block-scoped file handle management.
@@ -413,7 +412,7 @@ Returns a Result ok map with the result of the block.
 'open:do:'({beamtalk_string, _}, _) ->
     beamtalk_error:raise_type_error('File', 'open:do:', <<"Expected a Block with 1 argument">>);
 'open:do:'(_, _) ->
-    beamtalk_error:raise_type_error('File', 'open:do:', <<"Path must be a String">>).
+    beamtalk_error:raise_type_error('File', 'open:do:', ?PATH_HINT).
 
 %%% ============================================================================
 %%% Incremental handle I/O
@@ -461,7 +460,7 @@ Returns a Result ok map holding the handle, or a Result error map.
 'open:mode:'({beamtalk_string, _}, _) ->
     beamtalk_error:raise_type_error('File', 'open:mode:', <<"Mode must be a Symbol">>);
 'open:mode:'(_, _) ->
-    beamtalk_error:raise_type_error('File', 'open:mode:', <<"Path must be a String">>).
+    beamtalk_error:raise_type_error('File', 'open:mode:', ?PATH_HINT).
 
 -doc """
 Resolve the owner `open:mode:` registers its handle against.
@@ -582,7 +581,7 @@ file could not be opened.
 'open:mode:do:'({beamtalk_string, _}, _, _) ->
     beamtalk_error:raise_type_error('File', 'open:mode:do:', <<"Mode must be a Symbol">>);
 'open:mode:do:'(_, _, _) ->
-    beamtalk_error:raise_type_error('File', 'open:mode:do:', <<"Path must be a String">>).
+    beamtalk_error:raise_type_error('File', 'open:mode:do:', ?PATH_HINT).
 
 -doc """
 Shared open path for open:mode: and open:mode:do:. `Open` performs the actual
@@ -888,9 +887,8 @@ Returns a Result ok map on success, Result error map on failure.
                 undefined
             )
     end;
-'mkdir:'(Path) when is_binary(Path) -> 'mkdir:'({beamtalk_string, Path});
-'mkdir:'(_) ->
-    beamtalk_error:raise_type_error('File', 'mkdir:', <<"Path must be a String">>).
+'mkdir:'(Path) ->
+    'mkdir:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'mkdir:', ?PATH_HINT)}).
 
 -doc """
 Create a directory and all missing parent directories.
@@ -912,9 +910,8 @@ Returns a Result ok map on success, Result error map on failure.
                 undefined
             )
     end;
-'mkdirAll:'(Path) when is_binary(Path) -> 'mkdirAll:'({beamtalk_string, Path});
-'mkdirAll:'(_) ->
-    beamtalk_error:raise_type_error('File', 'mkdirAll:', <<"Path must be a String">>).
+'mkdirAll:'(Path) ->
+    'mkdirAll:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'mkdirAll:', ?PATH_HINT)}).
 
 -doc """
 List entries in a directory as a List (Beamtalk array) of Strings.
@@ -961,9 +958,8 @@ if the directory does not exist or cannot be read.
                     )
             end
     end;
-'listDirectory:'(Path) when is_binary(Path) -> 'listDirectory:'({beamtalk_string, Path});
-'listDirectory:'(_) ->
-    beamtalk_error:raise_type_error('File', 'listDirectory:', <<"Path must be a String">>).
+'listDirectory:'(Path) ->
+    'listDirectory:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'listDirectory:', ?PATH_HINT)}).
 
 -doc """
 Delete a file or empty directory.
@@ -1015,9 +1011,8 @@ file:delete/1 returns {error, eperm} for directories on Linux
                     )
             end
     end;
-'delete:'(Path) when is_binary(Path) -> 'delete:'({beamtalk_string, Path});
-'delete:'(_) ->
-    beamtalk_error:raise_type_error('File', 'delete:', <<"Path must be a String">>).
+'delete:'(Path) ->
+    'delete:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'delete:', ?PATH_HINT)}).
 
 -doc """
 Recursively delete a directory tree.
@@ -1041,9 +1036,8 @@ Returns a Result ok map on success, Result error map on failure.
                 undefined
             )
     end;
-'deleteAll:'(Path) when is_binary(Path) -> 'deleteAll:'({beamtalk_string, Path});
-'deleteAll:'(_) ->
-    beamtalk_error:raise_type_error('File', 'deleteAll:', <<"Path must be a String">>).
+'deleteAll:'(Path) ->
+    'deleteAll:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'deleteAll:', ?PATH_HINT)}).
 
 -doc """
 Rename or move a file or directory.
@@ -1077,7 +1071,7 @@ Returns a Result ok map on success, Result error map on failure.
 'rename:to:'({beamtalk_string, _}, _) ->
     beamtalk_error:raise_type_error('File', 'rename:to:', <<"Destination must be a String">>);
 'rename:to:'(_, _) ->
-    beamtalk_error:raise_type_error('File', 'rename:to:', <<"Path must be a String">>).
+    beamtalk_error:raise_type_error('File', 'rename:to:', ?PATH_HINT).
 
 -doc """
 Resolve a relative path to its absolute path.
@@ -1101,9 +1095,8 @@ Returns a Result ok map with the absolute path as a String.
                     )}
             )
     end;
-'absolutePath:'(Path) when is_binary(Path) -> 'absolutePath:'({beamtalk_string, Path});
-'absolutePath:'(_) ->
-    beamtalk_error:raise_type_error('File', 'absolutePath:', <<"Path must be a String">>).
+'absolutePath:'(Path) ->
+    'absolutePath:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'absolutePath:', ?PATH_HINT)}).
 
 -doc """
 Get the last modification time of a file.
@@ -1133,9 +1126,8 @@ if the file does not exist.
             DT = beamtalk_datetime:'year:month:day:hour:minute:second:'(Y, Mo, D, H, Mi, S),
             beamtalk_result:from_tagged_tuple({ok, DT})
     end;
-'lastModified:'(Path) when is_binary(Path) -> 'lastModified:'({beamtalk_string, Path});
-'lastModified:'(_) ->
-    beamtalk_error:raise_type_error('File', 'lastModified:', <<"Path must be a String">>).
+'lastModified:'(Path) ->
+    'lastModified:'({beamtalk_string, beamtalk_text:unwrap_or_raise(Path, 'File', 'lastModified:', ?PATH_HINT)}).
 
 -doc """
 Return the current working directory.

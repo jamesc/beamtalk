@@ -127,11 +127,9 @@ fork_nlr_value(Nlr) when ?IS_NLR(Nlr) ->
 
 -spec raise_fork_type_error(term()) -> no_return().
 raise_fork_type_error(Block) ->
-    Error0 = beamtalk_error:new(type_error, 'Block'),
-    Error1 = beamtalk_error:with_selector(Error0, fork),
-    Error2 = beamtalk_error:with_hint(Error1, <<"fork needs a zero-argument Block">>),
-    Error3 = beamtalk_error:with_details(Error2, #{got => Block}),
-    beamtalk_error:raise(Error3).
+    beamtalk_error:raise_type_error(
+        'Block', fork, <<"fork needs a zero-argument Block">>, #{got => Block}
+    ).
 
 -doc """
 Marker read by `beamtalk_erlang_proxy:coerce_ffi_result/2`: results of this

@@ -22,7 +22,7 @@ is_binary/1` before calling it, so it can never hit the list/other case) and
 is pinned by a golden test instead — see `beamtalk_compiler_port_tests.erl`.
 """.
 
--export([to_binary/1]).
+-export([to_binary/1, unwrap/1, unwrap_or_raise/4]).
 
 -doc "Normalise an atom, binary, String, list, or arbitrary term to a UTF-8 binary.".
 -spec to_binary(term()) -> binary().
@@ -38,3 +38,28 @@ to_binary(Name) when is_list(Name) ->
     list_to_binary(Name);
 to_binary(Name) ->
     list_to_binary(io_lib:format("~p", [Name])).
+
+-doc """
+Unwrap a text value — a tagged `String` or a bare binary — to its bytes.
+Answers `error` for anything else (including a tagged value whose payload is
+not a binary).
+""".
+-spec unwrap(term()) -> {ok, binary()} | error.
+unwrap({beamtalk_string, Bin}) when is_binary(Bin) -> {ok, Bin};
+unwrap(Bin) when is_binary(Bin) -> {ok, Bin};
+unwrap(_) -> error.
+
+-doc """
+Unwrap a text value (tagged `String` or bare binary) to its bytes, or raise a
+`type_error` for `Class`/`Selector` carrying `Hint`.
+
+Pass `undefined` as `Hint` for a type error with no hint. Shared by the
+stdlib primitives that accept either spelling of text (`File`, `String`,
+`Subprocess`, ...) so none re-types the unwrap-or-raise clauses.
+""".
+-spec unwrap_or_raise(term(), atom(), atom(), term()) -> binary() | no_return().
+unwrap_or_raise(Value, Class, Selector, Hint) ->
+    case unwrap(Value) of
+        {ok, Bin} -> Bin;
+        error -> beamtalk_error:raise_type_error(Class, Selector, Hint)
+    end.

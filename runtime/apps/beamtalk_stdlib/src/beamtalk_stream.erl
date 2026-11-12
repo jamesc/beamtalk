@@ -99,7 +99,7 @@ from(Start) when is_integer(Start) ->
         iolist_to_binary([<<"Stream(from: ">>, integer_to_binary(Start), <<")">>])
     );
 from(_) ->
-    raise_type_error('from:', <<"Expected an Integer argument">>).
+    beamtalk_error:raise_type_error('Stream', 'from:', <<"Expected an Integer argument">>).
 
 -doc """
 Create an infinite Stream starting from Start, applying StepFun to get next.
@@ -112,7 +112,7 @@ from_by(Start, StepFun) when is_function(StepFun, 1) ->
         iolist_to_binary([<<"Stream(from: ">>, format_value(Start), <<" by: [...])">>])
     );
 from_by(_, _) ->
-    raise_type_error('from:by:', <<"Expected a Block as step function">>).
+    beamtalk_error:raise_type_error('Stream', 'from:by:', <<"Expected a Block as step function">>).
 
 -doc """
 Create a Stream from a collection (list, set, or string).
@@ -139,12 +139,12 @@ on(Map) when is_map(Map) ->
             Elements = maps:get(elements, Map, []),
             make_stream(make_list_gen(Elements), <<"Stream(on: Set(...))">>);
         undefined ->
-            raise_type_error(
+            beamtalk_error:raise_type_error('Stream', 
                 'on:',
                 <<"Dictionary is not streamable; use doWithKey: or keys/values">>
             );
         Other ->
-            raise_type_error(
+            beamtalk_error:raise_type_error('Stream', 
                 'on:',
                 iolist_to_binary([
                     <<"Expected a streamable collection, got ">>,
@@ -153,7 +153,7 @@ on(Map) when is_map(Map) ->
             )
     end;
 on(_) ->
-    raise_type_error('on:', <<"Expected a collection (List, String, Binary, or Set)">>).
+    beamtalk_error:raise_type_error('Stream', 'on:', <<"Expected a collection (List, String, Binary, or Set)">>).
 
 %%% ============================================================================
 %%% Lazy Operations (return new Stream)
@@ -168,7 +168,7 @@ on(_) ->
     NewDesc = iolist_to_binary([Desc, <<" | select: [...]">>]),
     propagate_finalizer(Stream, make_stream(NewGen, NewDesc));
 'select'(_, _) ->
-    raise_type_error('select:', <<"Expected a Block with 1 argument">>).
+    beamtalk_error:raise_type_error('Stream', 'select:', <<"Expected a Block with 1 argument">>).
 
 -doc "Transform each element.".
 -spec 'collect'(t(), fun((term()) -> term())) -> t().
@@ -179,7 +179,7 @@ on(_) ->
     NewDesc = iolist_to_binary([Desc, <<" | collect: [...]">>]),
     propagate_finalizer(Stream, make_stream(NewGen, NewDesc));
 'collect'(_, _) ->
-    raise_type_error('collect:', <<"Expected a Block with 1 argument">>).
+    beamtalk_error:raise_type_error('Stream', 'collect:', <<"Expected a Block with 1 argument">>).
 
 -doc "Inverse filter — exclude elements matching predicate.".
 -spec 'reject'(t(), fun((term()) -> boolean())) -> t().
@@ -190,7 +190,7 @@ on(_) ->
     NewDesc = iolist_to_binary([Desc, <<" | reject: [...]">>]),
     propagate_finalizer(Stream, make_stream(NewGen, NewDesc));
 'reject'(_, _) ->
-    raise_type_error('reject:', <<"Expected a Block with 1 argument">>).
+    beamtalk_error:raise_type_error('Stream', 'reject:', <<"Expected a Block with 1 argument">>).
 
 -doc "Skip first N elements.".
 -spec 'drop'(t(), Count :: non_neg_integer()) -> t().
@@ -201,7 +201,7 @@ on(_) ->
     NewDesc = iolist_to_binary([Desc, <<" | drop: ">>, integer_to_binary(N)]),
     propagate_finalizer(Stream, make_stream(NewGen, NewDesc));
 'drop'(_, _) ->
-    raise_type_error('drop:', <<"Expected a non-negative Integer">>).
+    beamtalk_error:raise_type_error('Stream', 'drop:', <<"Expected a non-negative Integer">>).
 
 %%% ============================================================================
 %%% Terminal Operations (force evaluation, return result)
@@ -216,7 +216,7 @@ take(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, N) when is_int
         call_finalizer(Stream)
     end;
 take(_, _) ->
-    raise_type_error('take:', <<"Expected a non-negative Integer">>).
+    beamtalk_error:raise_type_error('Stream', 'take:', <<"Expected a non-negative Integer">>).
 
 -doc "Iterate with side effects, return nil.".
 -spec do(t(), Block :: fun((term()) -> term())) -> 'nil'.
@@ -228,7 +228,7 @@ do(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Block) when is_f
     end,
     nil;
 do(_, _) ->
-    raise_type_error('do:', <<"Expected a Block with 1 argument">>).
+    beamtalk_error:raise_type_error('Stream', 'do:', <<"Expected a Block with 1 argument">>).
 
 -doc "Fold/reduce: inject initial value, accumulate with block.".
 -spec inject_into(t(), Init :: term(), Into :: fun((term(), term()) -> term())) -> term().
@@ -241,7 +241,7 @@ inject_into(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Initial
         call_finalizer(Stream)
     end;
 inject_into(_, _, _) ->
-    raise_type_error('inject:into:', <<"Expected a Block with 2 arguments">>).
+    beamtalk_error:raise_type_error('Stream', 'inject:into:', <<"Expected a Block with 2 arguments">>).
 
 -doc """
 Return first element matching predicate, raising `not_found` if none does.
@@ -267,7 +267,7 @@ detect(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred) when
             Elem
     end;
 detect(_, _) ->
-    raise_type_error('detect:', <<"Expected a Block with 1 argument">>).
+    beamtalk_error:raise_type_error('Stream', 'detect:', <<"Expected a Block with 1 argument">>).
 
 -doc """
 Return first element matching predicate, or the `Default` value if none does.
@@ -292,7 +292,7 @@ detect_if_none(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred
         {ok, Elem} -> Elem
     end;
 detect_if_none(_, _, _) ->
-    raise_type_error('detect:ifNone:', <<"Expected a Block with 1 argument">>).
+    beamtalk_error:raise_type_error('Stream', 'detect:ifNone:', <<"Expected a Block with 1 argument">>).
 
 -doc "Materialize entire stream to a List.".
 -spec as_list(t()) -> list().
@@ -314,7 +314,7 @@ any_satisfy(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred) w
         call_finalizer(Stream)
     end;
 any_satisfy(_, _) ->
-    raise_type_error('anySatisfy:', <<"Expected a Block with 1 argument">>).
+    beamtalk_error:raise_type_error('Stream', 'anySatisfy:', <<"Expected a Block with 1 argument">>).
 
 -doc "Return true if all elements satisfy predicate.".
 -spec all_satisfy(t(), fun((term()) -> boolean())) -> boolean().
@@ -327,7 +327,7 @@ all_satisfy(#{'$beamtalk_class' := 'Stream', generator := Gen} = Stream, Pred) w
         call_finalizer(Stream)
     end;
 all_satisfy(_, _) ->
-    raise_type_error('allSatisfy:', <<"Expected a Block with 1 argument">>).
+    beamtalk_error:raise_type_error('Stream', 'allSatisfy:', <<"Expected a Block with 1 argument">>).
 
 %%% ============================================================================
 %%% Display
@@ -531,7 +531,3 @@ format_value(V) when is_binary(V) -> <<"'", V/binary, "'">>;
 format_value(V) when is_atom(V) -> atom_to_binary(V, utf8);
 format_value(_) -> <<"...">>.
 
--doc "Raise a Stream type_error by delegating to beamtalk_error:raise_type_error/3.".
--spec raise_type_error(atom(), binary()) -> no_return().
-raise_type_error(Selector, Hint) ->
-    beamtalk_error:raise_type_error('Stream', Selector, Hint).

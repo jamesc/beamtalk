@@ -76,7 +76,7 @@ completion.
     validate_blocks('all:', Blocks),
     all_impl(Blocks, infinity);
 'all:'(Blocks) ->
-    raise_type_error('all:', <<"Argument must be a List of zero-argument Blocks">>, #{
+    beamtalk_error:raise_type_error('Parallel', 'all:', <<"Argument must be a List of zero-argument Blocks">>, #{
         got => Blocks
     }).
 
@@ -98,13 +98,13 @@ real `Result`.
     validate_blocks('all:timeout:', Blocks),
     all_impl(Blocks, TimeoutMs);
 'all:timeout:'(Blocks, TimeoutMs) when is_list(Blocks) ->
-    raise_type_error(
+    beamtalk_error:raise_type_error('Parallel', 
         'all:timeout:',
         <<"Timeout must be a non-negative Integer or a non-negative Duration">>,
         #{got => TimeoutMs}
     );
 'all:timeout:'(Blocks, _TimeoutMs) ->
-    raise_type_error(
+    beamtalk_error:raise_type_error('Parallel', 
         'all:timeout:', <<"Argument must be a List of zero-argument Blocks">>, #{got => Blocks}
     ).
 
@@ -120,14 +120,14 @@ meaningful call.
 """.
 -spec 'any:'([function()]) -> worker_result().
 'any:'([]) ->
-    raise_type_error(
+    beamtalk_error:raise_type_error('Parallel', 
         'any:', <<"Argument must be a non-empty List of zero-argument Blocks">>, #{got => []}
     );
 'any:'(Blocks) when is_list(Blocks) ->
     validate_blocks('any:', Blocks),
     any_impl(Blocks);
 'any:'(Blocks) ->
-    raise_type_error('any:', <<"Argument must be a List of zero-argument Blocks">>, #{
+    beamtalk_error:raise_type_error('Parallel', 'any:', <<"Argument must be a List of zero-argument Blocks">>, #{
         got => Blocks
     }).
 
@@ -216,7 +216,7 @@ validate_blocks(Selector, Blocks) ->
         true ->
             ok;
         false ->
-            raise_type_error(
+            beamtalk_error:raise_type_error('Parallel', 
                 Selector, <<"Every element must be a zero-argument Block">>, #{got => Blocks}
             )
     end.
@@ -443,10 +443,3 @@ gather_any(CallRef, Pending, PendingByRef, IndexOrder, Errors) ->
 %%% Internal — errors
 %%% ============================================================================
 
--spec raise_type_error(atom(), binary(), map()) -> no_return().
-raise_type_error(Selector, Hint, Details) ->
-    Error0 = beamtalk_error:new(type_error, 'Parallel'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, Hint),
-    Error3 = beamtalk_error:with_details(Error2, Details),
-    beamtalk_error:raise(Error3).

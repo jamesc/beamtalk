@@ -298,17 +298,16 @@ prepare_for_encode(Other, Seen) ->
             Prepared;
         no_hook ->
             %% No selector — callers add the correct one via their catch blocks
-            Error0 = beamtalk_error:new(type_error, 'Json'),
-            Error1 = beamtalk_error:with_details(Error0, #{value => Other}),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
+            beamtalk_error:raise_type_error(
+                'Json',
+                undefined,
                 <<
                     "Only Dictionary, List, String, Integer, Float, Boolean, and nil "
                     "convert to JSON natively; implement asJson to give this class "
                     "a JSON representation"
-                >>
-            ),
-            beamtalk_error:raise(Error2)
+                >>,
+                #{value => Other}
+            )
     end.
 
 -doc """
@@ -348,16 +347,15 @@ recursing forever.
 try_as_json_hook(Value, Seen) ->
     case lists:member(Value, Seen) of
         true ->
-            Error0 = beamtalk_error:new(type_error, 'Json'),
-            Error1 = beamtalk_error:with_details(Error0, #{value => Value}),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
+            beamtalk_error:raise_type_error(
+                'Json',
+                undefined,
                 <<
                     "asJson produced a cycle: this object reappeared inside "
                     "its own JSON output"
-                >>
-            ),
-            beamtalk_error:raise(Error2);
+                >>,
+                #{value => Value}
+            );
         false ->
             case beamtalk_message_dispatch:send(Value, 'respondsTo:', ['asJson']) of
                 true ->

@@ -43,6 +43,8 @@ Queue objects are represented as tagged maps:
 """.
 
 %% Class methods
+-define(RECEIVER_HINT, <<"Receiver must be a Queue instance">>).
+
 -export(['new'/0]).
 
 %% Instance methods — no-colon forms used by the FFI proxy
@@ -77,7 +79,7 @@ O(1) amortised.
 enqueue(#{'$beamtalk_class' := 'Queue', queue := Q}, Elem) ->
     make_queue(queue:in(Elem, Q));
 enqueue(_Self, _Elem) ->
-    type_error('enqueue:').
+    beamtalk_error:raise_type_error('Queue', 'enqueue:', ?RECEIVER_HINT).
 
 -doc """
 Remove and return the front element as `{Value, NewQueue}`.
@@ -94,7 +96,7 @@ dequeue(#{'$beamtalk_class' := 'Queue', queue := Q}) ->
             {Value, make_queue(NewQ)}
     end;
 dequeue(_Self) ->
-    type_error('dequeue').
+    beamtalk_error:raise_type_error('Queue', 'dequeue', ?RECEIVER_HINT).
 
 -doc """
 Return the front element without removing it.
@@ -108,21 +110,21 @@ peek(#{'$beamtalk_class' := 'Queue', queue := Q}) ->
         {value, Value} -> Value
     end;
 peek(_Self) ->
-    type_error('peek').
+    beamtalk_error:raise_type_error('Queue', 'peek', ?RECEIVER_HINT).
 
 -doc "Return true if the queue contains no elements.".
 -spec isEmpty(t()) -> boolean().
 isEmpty(#{'$beamtalk_class' := 'Queue', queue := Q}) ->
     queue:is_empty(Q);
 isEmpty(_Self) ->
-    type_error('isEmpty').
+    beamtalk_error:raise_type_error('Queue', 'isEmpty', ?RECEIVER_HINT).
 
 -doc "Return the number of elements in the queue.".
 -spec size(t()) -> non_neg_integer().
 size(#{'$beamtalk_class' := 'Queue', queue := Q}) ->
     queue:len(Q);
 size(_Self) ->
-    type_error('size').
+    beamtalk_error:raise_type_error('Queue', 'size', ?RECEIVER_HINT).
 
 %%% ============================================================================
 %%% Internal Helpers
@@ -132,14 +134,6 @@ size(_Self) ->
 -spec make_queue(term()) -> t().
 make_queue(Q) ->
     #{'$beamtalk_class' => 'Queue', queue => Q}.
-
--doc "Raise a type_error for the given selector.".
--spec type_error(atom()) -> no_return().
-type_error(Selector) ->
-    Error0 = beamtalk_error:new(type_error, 'Queue'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, <<"Receiver must be a Queue instance">>),
-    beamtalk_error:raise(Error2).
 
 -doc "Raise an empty_queue error for the given selector.".
 -spec empty_queue_error(atom()) -> no_return().

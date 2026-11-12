@@ -30,6 +30,8 @@ disagree only for numbers, so mutually-`==` elements form a short contiguous
 run that those helpers scan strictly.
 """.
 
+-define(ARG_HINT, <<"Argument must be a Set">>).
+
 -export([
     new/0,
     from_list/1,
@@ -60,9 +62,7 @@ new() ->
 from_list(List) when is_list(List) ->
     #{'$beamtalk_class' => 'Set', elements => beamtalk_list:unique(List)};
 from_list(_NonList) ->
-    Error0 = beamtalk_error:new(type_error, 'Set'),
-    Error1 = beamtalk_error:with_selector(Error0, 'fromList:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Expected a List argument">>)).
+    beamtalk_error:raise_type_error('Set', 'fromList:', <<"Expected a List argument">>).
 
 %%% ============================================================================
 %%% Accessors
@@ -109,9 +109,9 @@ union(
 ) ->
     #{'$beamtalk_class' => 'Set', elements => beamtalk_list:unique(E1 ++ E2)};
 union(#{'$beamtalk_class' := 'Set'}, _Other) ->
-    set_type_error('union:');
+    beamtalk_error:raise_type_error('Set', 'union:', ?ARG_HINT);
 union(_, _) ->
-    set_type_error('union:').
+    beamtalk_error:raise_type_error('Set', 'union:', ?ARG_HINT).
 
 -doc "Return the intersection of two Sets.".
 -spec intersection(map(), map()) -> map().
@@ -121,9 +121,9 @@ intersection(
 ) ->
     #{'$beamtalk_class' => 'Set', elements => strict_intersection(E1, E2)};
 intersection(#{'$beamtalk_class' := 'Set'}, _Other) ->
-    set_type_error('intersection:');
+    beamtalk_error:raise_type_error('Set', 'intersection:', ?ARG_HINT);
 intersection(_, _) ->
-    set_type_error('intersection:').
+    beamtalk_error:raise_type_error('Set', 'intersection:', ?ARG_HINT).
 
 -doc "Return the difference of two Sets (elements in self but not other).".
 -spec difference(map(), map()) -> map().
@@ -133,9 +133,9 @@ difference(
 ) ->
     #{'$beamtalk_class' => 'Set', elements => strict_difference(E1, E2)};
 difference(#{'$beamtalk_class' := 'Set'}, _Other) ->
-    set_type_error('difference:');
+    beamtalk_error:raise_type_error('Set', 'difference:', ?ARG_HINT);
 difference(_, _) ->
-    set_type_error('difference:').
+    beamtalk_error:raise_type_error('Set', 'difference:', ?ARG_HINT).
 
 %%% ============================================================================
 %%% Predicates
@@ -149,9 +149,9 @@ is_subset_of(
 ) ->
     strict_is_subset(E1, E2);
 is_subset_of(#{'$beamtalk_class' := 'Set'}, _Other) ->
-    set_type_error('isSubsetOf:');
+    beamtalk_error:raise_type_error('Set', 'isSubsetOf:', ?ARG_HINT);
 is_subset_of(_, _) ->
-    set_type_error('isSubsetOf:').
+    beamtalk_error:raise_type_error('Set', 'isSubsetOf:', ?ARG_HINT).
 
 %%% ============================================================================
 %%% Conversion
@@ -172,9 +172,7 @@ do(#{'$beamtalk_class' := 'Set', elements := Elements}, Block) when is_function(
     lists:foreach(Block, Elements),
     nil;
 do(#{'$beamtalk_class' := 'Set'}, _Block) ->
-    Error0 = beamtalk_error:new(type_error, 'Set'),
-    Error1 = beamtalk_error:with_selector(Error0, 'do:'),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Block must be a unary function">>)).
+    beamtalk_error:raise_type_error('Set', 'do:', <<"Block must be a unary function">>).
 
 %%% ============================================================================
 %%% Internal Helpers
@@ -283,9 +281,3 @@ strict_del(_Elem, PastIt) ->
     %% Sorted ascending, so Elem cannot appear further along.
     PastIt.
 
--doc "Raise a type_error for binary set operations receiving a non-Set argument.".
--spec set_type_error(atom()) -> no_return().
-set_type_error(Selector) ->
-    Error0 = beamtalk_error:new(type_error, 'Set'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    beamtalk_error:raise(beamtalk_error:with_hint(Error1, <<"Argument must be a Set">>)).

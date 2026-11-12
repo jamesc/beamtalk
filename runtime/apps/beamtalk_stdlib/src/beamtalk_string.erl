@@ -23,6 +23,8 @@ see the `BT-4173` clauses); anything else raises `type_error` via
 `raise_not_string/2`, as do bare-binary join elements (`join_element/2`).
 """.
 -type t() :: {beamtalk_string, binary()}.
+-define(NOT_STRING_HINT, <<"Expected a String">>).
+
 -export_type([t/0]).
 -export([
     at/2,
@@ -114,9 +116,8 @@ first({beamtalk_string, Str}) when is_binary(Str) ->
         [] ->
             raise_empty('first')
     end;
-first(Bin) when is_binary(Bin) -> first({beamtalk_string, Bin});
-first(Str) ->
-    raise_not_string('first', Str).
+first(Bin) ->
+    first({beamtalk_string, beamtalk_text:unwrap_or_raise(Bin, 'String', 'first', ?NOT_STRING_HINT)}).
 
 -doc """
 Last grapheme cluster, as a String.
@@ -135,9 +136,8 @@ last({beamtalk_string, Str}) when is_binary(Str) ->
         <<>> -> raise_empty('last');
         Grapheme -> beamtalk_primitive:string_from_binary(unicode:characters_to_binary(Grapheme))
     end;
-last(Bin) when is_binary(Bin) -> last({beamtalk_string, Bin});
-last(Str) ->
-    raise_not_string('last', Str).
+last(Bin) ->
+    last({beamtalk_string, beamtalk_text:unwrap_or_raise(Bin, 'String', 'last', ?NOT_STRING_HINT)}).
 
 -doc "Raise `empty_collection` for an accessor called on an empty String.".
 -spec raise_empty(atom()) -> no_return().
@@ -162,7 +162,7 @@ raise_not_string(Selector, X) when is_binary(X) ->
         <<"Expected a String; bare binaries are Binary; convert with asString">>
     );
 raise_not_string(Selector, _) ->
-    beamtalk_error:raise_type_error('String', Selector, <<"Expected a String">>).
+    beamtalk_error:raise_type_error('String', Selector, ?NOT_STRING_HINT).
 
 -doc """
 Unwrap one join element to raw bytes (BT-4170).
@@ -196,9 +196,8 @@ ascii_lowercase({beamtalk_string, Str}) when is_binary(Str) ->
         >>
      || <<C>> <= Str
     >>);
-ascii_lowercase(Bin) when is_binary(Bin) -> ascii_lowercase({beamtalk_string, Bin});
-ascii_lowercase(Str) ->
-    raise_not_string('asciiLowercase', Str).
+ascii_lowercase(Bin) ->
+    ascii_lowercase({beamtalk_string, beamtalk_text:unwrap_or_raise(Bin, 'String', 'asciiLowercase', ?NOT_STRING_HINT)}).
 
 -doc "Capitalize the first grapheme, keep rest unchanged.".
 -spec capitalize(t() | binary()) -> t().
@@ -215,17 +214,15 @@ capitalize({beamtalk_string, Str}) when is_binary(Str) ->
         [] ->
             beamtalk_primitive:string_from_binary(<<>>)
     end;
-capitalize(Bin) when is_binary(Bin) -> capitalize({beamtalk_string, Bin});
-capitalize(Str) ->
-    raise_not_string('capitalize', Str).
+capitalize(Bin) ->
+    capitalize({beamtalk_string, beamtalk_text:unwrap_or_raise(Bin, 'String', 'capitalize', ?NOT_STRING_HINT)}).
 
 -doc "Grapheme-aware string reverse.".
 -spec reverse(t() | binary()) -> t().
 reverse({beamtalk_string, Str}) when is_binary(Str) ->
     beamtalk_primitive:string_from_binary(unicode:characters_to_binary(string:reverse(Str)));
-reverse(Bin) when is_binary(Bin) -> reverse({beamtalk_string, Bin});
-reverse(Str) ->
-    raise_not_string('reverse', Str).
+reverse(Bin) ->
+    reverse({beamtalk_string, beamtalk_text:unwrap_or_raise(Bin, 'String', 'reverse', ?NOT_STRING_HINT)}).
 
 -doc "Check if string contains substring.".
 -spec includes(t() | binary(), t() | binary()) -> boolean().
@@ -350,9 +347,8 @@ as_list({beamtalk_string, Str}) when is_binary(Str) ->
         beamtalk_primitive:string_from_binary(unicode:characters_to_binary([G]))
      || G <- string:to_graphemes(Str)
     ];
-as_list(Bin) when is_binary(Bin) -> as_list({beamtalk_string, Bin});
-as_list(Str) ->
-    raise_not_string('asList', Str).
+as_list(Bin) ->
+    as_list({beamtalk_string, beamtalk_text:unwrap_or_raise(Bin, 'String', 'asList', ?NOT_STRING_HINT)}).
 
 -doc """
 Convert a String to an Erlang charlist of Unicode code points (BT-4380).
@@ -473,18 +469,16 @@ lines({beamtalk_string, Str}) when is_binary(Str) ->
         beamtalk_primitive:string_from_binary(P)
      || P <- binary:split(Str, [<<"\n">>, <<"\r\n">>], [global])
     ];
-lines(Bin) when is_binary(Bin) -> lines({beamtalk_string, Bin});
-lines(Str) ->
-    raise_not_string('lines', Str).
+lines(Bin) ->
+    lines({beamtalk_string, beamtalk_text:unwrap_or_raise(Bin, 'String', 'lines', ?NOT_STRING_HINT)}).
 
 -doc "Split string by whitespace, filtering empty segments.".
 -spec words(t() | binary()) -> [t()].
 words({beamtalk_string, Str}) when is_binary(Str) ->
     Parts = binary:split(string:trim(Str), [<<" ">>, <<"\t">>, <<"\n">>, <<"\r">>], [global]),
     [beamtalk_primitive:string_from_binary(P) || P <- Parts, P =/= <<>>];
-words(Bin) when is_binary(Bin) -> words({beamtalk_string, Bin});
-words(Str) ->
-    raise_not_string('words', Str).
+words(Bin) ->
+    words({beamtalk_string, beamtalk_text:unwrap_or_raise(Bin, 'String', 'words', ?NOT_STRING_HINT)}).
 
 -doc "First N graphemes.".
 -spec take(t() | binary(), integer()) -> t().
@@ -517,9 +511,8 @@ drop(Str, _) ->
 -spec is_blank(t() | binary()) -> boolean().
 is_blank({beamtalk_string, Str}) when is_binary(Str) ->
     string:trim(Str) =:= <<>>;
-is_blank(Bin) when is_binary(Bin) -> is_blank({beamtalk_string, Bin});
-is_blank(Str) ->
-    raise_not_string('isBlank', Str).
+is_blank(Bin) ->
+    is_blank({beamtalk_string, beamtalk_text:unwrap_or_raise(Bin, 'String', 'isBlank', ?NOT_STRING_HINT)}).
 
 -doc "Test if all characters are digits.".
 -spec is_digit(t() | binary()) -> boolean().
@@ -535,9 +528,8 @@ is_digit({beamtalk_string, _} = Str) ->
         end,
         as_list(Str)
     );
-is_digit(Bin) when is_binary(Bin) -> is_digit({beamtalk_string, Bin});
-is_digit(Str) ->
-    raise_not_string('isDigit', Str).
+is_digit(Bin) ->
+    is_digit({beamtalk_string, beamtalk_text:unwrap_or_raise(Bin, 'String', 'isDigit', ?NOT_STRING_HINT)}).
 
 -doc "Test if all characters are alphabetic.".
 -spec is_alpha(t() | binary()) -> boolean().
@@ -554,9 +546,8 @@ is_alpha({beamtalk_string, _} = Str) ->
         end,
         as_list(Str)
     );
-is_alpha(Bin) when is_binary(Bin) -> is_alpha({beamtalk_string, Bin});
-is_alpha(Str) ->
-    raise_not_string('isAlpha', Str).
+is_alpha(Bin) ->
+    is_alpha({beamtalk_string, beamtalk_text:unwrap_or_raise(Bin, 'String', 'isAlpha', ?NOT_STRING_HINT)}).
 
 -doc """
 Parse text as an integer in the given radix (BT-4544).
@@ -752,9 +743,8 @@ urlEncoded({beamtalk_string, Str}) when is_binary(Str) ->
     %% `uri_string:quote/1` output is ASCII by construction, so the wrap
     %% is sound without re-validating.
     beamtalk_primitive:string_from_binary(uri_string:quote(Str));
-urlEncoded(Bin) when is_binary(Bin) -> urlEncoded({beamtalk_string, Bin});
-urlEncoded(Str) ->
-    raise_not_string('urlEncoded', Str).
+urlEncoded(Bin) ->
+    urlEncoded({beamtalk_string, beamtalk_text:unwrap_or_raise(Bin, 'String', 'urlEncoded', ?NOT_STRING_HINT)}).
 
 -doc """
 Decode a percent-encoded string via `uri_string:unquote/1`.
@@ -788,9 +778,8 @@ urlDecoded({beamtalk_string, Str}) when is_binary(Str) ->
                 <<"Malformed percent-encoding; a '%' must be followed by two hex digits">>
             )
     end;
-urlDecoded(Bin) when is_binary(Bin) -> urlDecoded({beamtalk_string, Bin});
-urlDecoded(Str) ->
-    raise_not_string('urlDecoded', Str).
+urlDecoded(Bin) ->
+    urlDecoded({beamtalk_string, beamtalk_text:unwrap_or_raise(Bin, 'String', 'urlDecoded', ?NOT_STRING_HINT)}).
 
 %%% ============================================================================
 %%% Internal Functions

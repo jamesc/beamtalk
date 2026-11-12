@@ -174,25 +174,25 @@ version(#{'$beamtalk_class' := 'Uuid', bytes := <<_:48, Version:4, _:76>>}) ->
 '<'(#{'$beamtalk_class' := 'Uuid', bytes := A}, #{'$beamtalk_class' := 'Uuid', bytes := B}) ->
     A < B;
 '<'(_, _) ->
-    raise_type_error('<', <<"Argument must be a Uuid">>).
+    beamtalk_error:raise_type_error('Uuid', '<', <<"Argument must be a Uuid">>).
 
 -spec '>'(t(), t()) -> boolean().
 '>'(#{'$beamtalk_class' := 'Uuid', bytes := A}, #{'$beamtalk_class' := 'Uuid', bytes := B}) ->
     A > B;
 '>'(_, _) ->
-    raise_type_error('>', <<"Argument must be a Uuid">>).
+    beamtalk_error:raise_type_error('Uuid', '>', <<"Argument must be a Uuid">>).
 
 -spec '=<'(t(), t()) -> boolean().
 '=<'(#{'$beamtalk_class' := 'Uuid', bytes := A}, #{'$beamtalk_class' := 'Uuid', bytes := B}) ->
     A =< B;
 '=<'(_, _) ->
-    raise_type_error('=<', <<"Argument must be a Uuid">>).
+    beamtalk_error:raise_type_error('Uuid', '=<', <<"Argument must be a Uuid">>).
 
 -spec '>='(t(), t()) -> boolean().
 '>='(#{'$beamtalk_class' := 'Uuid', bytes := A}, #{'$beamtalk_class' := 'Uuid', bytes := B}) ->
     A >= B;
 '>='(_, _) ->
-    raise_type_error('>=', <<"Argument must be a Uuid">>).
+    beamtalk_error:raise_type_error('Uuid', '>=', <<"Argument must be a Uuid">>).
 
 %% Beamtalk spells "less-or-equal" `<=`, not `=<` — this is the same-named
 %% function `self delegate` needs to reach for the `<=` method (a quoted
@@ -250,6 +250,3 @@ parse_uuid_string(Str) ->
             error
     end.
 
--spec raise_type_error(atom(), binary()) -> no_return().
-raise_type_error(Selector, Hint) ->
-    beamtalk_error:raise_type_error('Uuid', Selector, Hint).

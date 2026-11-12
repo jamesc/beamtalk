@@ -52,7 +52,7 @@ Raises `#beamtalk_error{kind = timeout}` on timeout,
 'run:'({beamtalk_string, Cmd}) when is_binary(Cmd) ->
     run_cmd(Cmd, ?DEFAULT_TIMEOUT_MS, 'run:');
 'run:'(_) ->
-    raise_type_error('run:', <<"Argument must be a String">>).
+    beamtalk_error:raise_type_error('OS', 'run:', <<"Argument must be a String">>).
 
 -doc """
 Execute a shell command with an explicit timeout in milliseconds.
@@ -70,9 +70,9 @@ within `TimeoutMs` milliseconds.
 ->
     run_cmd(Cmd, TimeoutMs, 'run:timeout:');
 'run:timeout:'({beamtalk_string, _}, _TimeoutMs) ->
-    raise_type_error('run:timeout:', <<"Timeout must be a positive Integer">>);
+    beamtalk_error:raise_type_error('OS', 'run:timeout:', <<"Timeout must be a positive Integer">>);
 'run:timeout:'(_, _) ->
-    raise_type_error('run:timeout:', <<"Argument must be a String">>).
+    beamtalk_error:raise_type_error('OS', 'run:timeout:', <<"Argument must be a String">>).
 
 -doc "FFI shim for (Erlang beamtalk_os) run: cmd dispatch.".
 -spec run(beamtalk_string:t() | binary()) -> beamtalk_string:t().
@@ -175,10 +175,6 @@ flush_timer(Timer) ->
         {timeout, Timer, os_run_timeout} -> ok
     after 0 -> ok
     end.
-
--spec raise_type_error(atom(), binary()) -> no_return().
-raise_type_error(Selector, Hint) ->
-    beamtalk_error:raise_type_error('OS', Selector, Hint).
 
 -spec raise_timeout(atom()) -> no_return().
 raise_timeout(Selector) ->

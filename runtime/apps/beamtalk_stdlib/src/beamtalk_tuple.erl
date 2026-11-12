@@ -37,10 +37,7 @@ See: ADR 0007
 at(Tuple, Idx) when is_integer(Idx), Idx >= 1, Idx =< tuple_size(Tuple) ->
     element(Idx, Tuple);
 at(_Tuple, Idx) when not is_integer(Idx) ->
-    Error0 = beamtalk_error:new(type_error, 'Tuple'),
-    Error1 = beamtalk_error:with_selector(Error0, 'at:'),
-    Error = beamtalk_error:with_hint(Error1, <<"Index must be an integer">>),
-    beamtalk_error:raise(Error);
+    beamtalk_error:raise_type_error('Tuple', 'at:', <<"Index must be an integer">>);
 at(Tuple, Idx) ->
     Error0 = beamtalk_error:new(does_not_understand, 'Tuple'),
     Error1 = beamtalk_error:with_selector(Error0, 'at:'),

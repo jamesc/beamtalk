@@ -93,7 +93,7 @@ now() ->
     validate_date(Y, Mo, D, 'year:month:day:'),
     make_datetime(Y, Mo, D, 0, 0, 0);
 'year:month:day:'(_, _, _) ->
-    raise_type_error('year:month:day:', <<"Arguments must be Integers">>).
+    beamtalk_error:raise_type_error('DateTime', 'year:month:day:', <<"Arguments must be Integers">>).
 
 -doc "Construct a DateTime from year, month, day, hour, minute, second.".
 -spec 'year:month:day:hour:minute:second:'(
@@ -116,7 +116,7 @@ now() ->
     validate_time(H, Mi, S, 'year:month:day:hour:minute:second:'),
     make_datetime(Y, Mo, D, H, Mi, S);
 'year:month:day:hour:minute:second:'(_, _, _, _, _, _) ->
-    raise_type_error('year:month:day:hour:minute:second:', <<"Arguments must be Integers">>).
+    beamtalk_error:raise_type_error('DateTime', 'year:month:day:hour:minute:second:', <<"Arguments must be Integers">>).
 
 -doc """
 Construct a DateTime from year, month, day, hour, minute, second, and a
@@ -154,7 +154,7 @@ DateTime year: 2026 month: 7 day: 25 hour: 14 minute: 30 second: 0 offsetMinutes
     validate_offset(Off, 'year:month:day:hour:minute:second:offsetMinutes:'),
     make_datetime(Y, Mo, D, H, Mi, S, Off);
 'year:month:day:hour:minute:second:offsetMinutes:'(_, _, _, _, _, _, _) ->
-    raise_type_error(
+    beamtalk_error:raise_type_error('DateTime', 
         'year:month:day:hour:minute:second:offsetMinutes:', <<"Arguments must be Integers">>
     ).
 
@@ -163,7 +163,7 @@ DateTime year: 2026 month: 7 day: 25 hour: 14 minute: 30 second: 0 offsetMinutes
 'fromTimestamp:'(Ts) when is_integer(Ts) ->
     from_timestamp_with_offset(Ts, 0);
 'fromTimestamp:'(_) ->
-    raise_type_error('fromTimestamp:', <<"Argument must be an Integer (Unix epoch seconds)">>).
+    beamtalk_error:raise_type_error('DateTime', 'fromTimestamp:', <<"Argument must be an Integer (Unix epoch seconds)">>).
 
 -doc """
 Parse a strict ISO 8601 string into a DateTime.
@@ -187,16 +187,10 @@ DateTime fromString: "2026-07-25T14:30:00+02:00"
             validate_offset(Off, 'fromString:'),
             make_datetime(Y, Mo, D, H, Mi, S, Off);
         error ->
-            Error0 = beamtalk_error:new(type_error, 'DateTime'),
-            Error1 = beamtalk_error:with_selector(Error0, 'fromString:'),
-            Error2 = beamtalk_error:with_hint(
-                Error1,
-                <<"Expected ISO 8601 format: YYYY-MM-DDThh:mm:ss(Z|+hh:mm|-hh:mm)">>
-            ),
-            beamtalk_error:raise(Error2)
+            beamtalk_error:raise_type_error('DateTime', 'fromString:', <<"Expected ISO 8601 format: YYYY-MM-DDThh:mm:ss(Z|+hh:mm|-hh:mm)">>)
     end;
 'fromString:'(_) ->
-    raise_type_error('fromString:', <<"Argument must be a String">>).
+    beamtalk_error:raise_type_error('DateTime', 'fromString:', <<"Argument must be a String">>).
 
 -doc """
 Parse `Str` using the pattern language documented at `format:` (the inverse
@@ -234,7 +228,7 @@ DateTime parse: "2026-07-25 14:30:00" format: "yyyy-MM-dd HH:mm:ss"
             beamtalk_result:from_tagged_tuple({error, Error2})
     end;
 'parse:format:'(_, _) ->
-    raise_type_error('parse:format:', <<"Both arguments must be Strings">>).
+    beamtalk_error:raise_type_error('DateTime', 'parse:format:', <<"Both arguments must be Strings">>).
 
 %%% ============================================================================
 %%% Instance Methods — Accessors
@@ -326,7 +320,7 @@ offsetMinutes change.
     validate_offset(Off, 'toOffset:'),
     from_timestamp_with_offset('asTimestamp'(Self), Off);
 'toOffset:'(_, _) ->
-    raise_type_error('toOffset:', <<"Argument must be an Integer (offset minutes)">>).
+    beamtalk_error:raise_type_error('DateTime', 'toOffset:', <<"Argument must be an Integer (offset minutes)">>).
 
 -doc "Human-readable representation.".
 -spec 'printString'(t()) -> beamtalk_string:t().
@@ -368,7 +362,7 @@ numeric tokens (e.g. `M/d`, not `Md`) — without one, an unpadded field's
         iolist_to_binary([render_pattern_token(Token, Self) || Token <- Tokens])
     );
 'format:'(_, _) ->
-    raise_type_error('format:', <<"Argument must be a String pattern">>).
+    beamtalk_error:raise_type_error('DateTime', 'format:', <<"Argument must be a String pattern">>).
 
 %%% ============================================================================
 %%% Instance Methods — Arithmetic
@@ -381,14 +375,14 @@ numeric tokens (e.g. `M/d`, not `Md`) — without one, an unpadded field's
     Off = maps:get(offsetMinutes, Self, 0),
     from_timestamp_with_offset(Ts, Off);
 'addSeconds:'(_, _) ->
-    raise_type_error('addSeconds:', <<"Argument must be an Integer">>).
+    beamtalk_error:raise_type_error('DateTime', 'addSeconds:', <<"Argument must be an Integer">>).
 
 -doc "Add days, return new DateTime.".
 -spec 'addDays:'(t(), Days :: integer()) -> t().
 'addDays:'(Self, Days) when is_integer(Days) ->
     'addSeconds:'(Self, Days * 86400);
 'addDays:'(_, _) ->
-    raise_type_error('addDays:', <<"Argument must be an Integer">>).
+    beamtalk_error:raise_type_error('DateTime', 'addDays:', <<"Argument must be an Integer">>).
 
 -doc """
 Add a Duration, return a new DateTime.
@@ -400,7 +394,7 @@ Duration are truncated toward zero.
 'addDuration:'(Self, #{'$beamtalk_class' := 'Duration'} = D) ->
     'addSeconds:'(Self, beamtalk_duration:'asSeconds'(D));
 'addDuration:'(_, _) ->
-    raise_type_error('addDuration:', <<"Argument must be a Duration">>).
+    beamtalk_error:raise_type_error('DateTime', 'addDuration:', <<"Argument must be a Duration">>).
 
 -doc """
 Difference between two DateTimes as a Duration.
@@ -411,14 +405,14 @@ Difference between two DateTimes as a Duration.
 '-'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     beamtalk_duration:'seconds:'('diffSeconds:'(Self, Other));
 '-'(_, _) ->
-    raise_type_error('-', <<"Argument must be a DateTime">>).
+    beamtalk_error:raise_type_error('DateTime', '-', <<"Argument must be a DateTime">>).
 
 -doc "Difference in seconds between this and another DateTime.".
 -spec 'diffSeconds:'(t(), t()) -> integer().
 'diffSeconds:'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) - 'asTimestamp'(Other);
 'diffSeconds:'(_, _) ->
-    raise_type_error('diffSeconds:', <<"Argument must be a DateTime">>).
+    beamtalk_error:raise_type_error('DateTime', 'diffSeconds:', <<"Argument must be a DateTime">>).
 
 %%% ============================================================================
 %%% Instance Methods — Comparison
@@ -428,25 +422,25 @@ Difference between two DateTimes as a Duration.
 '<'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) < 'asTimestamp'(Other);
 '<'(_, _) ->
-    raise_type_error('<', <<"Argument must be a DateTime">>).
+    beamtalk_error:raise_type_error('DateTime', '<', <<"Argument must be a DateTime">>).
 
 -spec '>'(t(), t()) -> boolean().
 '>'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) > 'asTimestamp'(Other);
 '>'(_, _) ->
-    raise_type_error('>', <<"Argument must be a DateTime">>).
+    beamtalk_error:raise_type_error('DateTime', '>', <<"Argument must be a DateTime">>).
 
 -spec '=<'(t(), t()) -> boolean().
 '=<'(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) =< 'asTimestamp'(Other);
 '=<'(_, _) ->
-    raise_type_error('=<', <<"Argument must be a DateTime">>).
+    beamtalk_error:raise_type_error('DateTime', '=<', <<"Argument must be a DateTime">>).
 
 -spec '>='(t(), t()) -> boolean().
 '>='(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) >= 'asTimestamp'(Other);
 '>='(_, _) ->
-    raise_type_error('>=', <<"Argument must be a DateTime">>).
+    beamtalk_error:raise_type_error('DateTime', '>=', <<"Argument must be a DateTime">>).
 
 %% Beamtalk spells "less-or-equal" `<=`, not `=<` — this is the same-named
 %% function `self delegate` needs to reach for the `<=` method (a quoted
@@ -458,13 +452,13 @@ Difference between two DateTimes as a Duration.
 '=:='(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) =:= 'asTimestamp'(Other);
 '=:='(_, _) ->
-    raise_type_error('=:=', <<"Argument must be a DateTime">>).
+    beamtalk_error:raise_type_error('DateTime', '=:=', <<"Argument must be a DateTime">>).
 
 -spec '/='(t(), t()) -> boolean().
 '/='(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) /= 'asTimestamp'(Other);
 '/='(_, _) ->
-    raise_type_error('/=', <<"Argument must be a DateTime">>).
+    beamtalk_error:raise_type_error('DateTime', '/=', <<"Argument must be a DateTime">>).
 
 %%% ============================================================================
 %%% FFI Shims — (Erlang beamtalk_datetime) dispatch
@@ -560,7 +554,7 @@ neq(Self, Other) -> '/='(Self, Other).
 sneq(Self, #{'$beamtalk_class' := 'DateTime'} = Other) ->
     'asTimestamp'(Self) =/= 'asTimestamp'(Other);
 sneq(_, _) ->
-    raise_type_error(sneq, <<"Argument must be a DateTime">>).
+    beamtalk_error:raise_type_error('DateTime', sneq, <<"Argument must be a DateTime">>).
 
 %% `toOffset:` → strips to `toOffset`, arity 2 — this is what `self delegate`
 %% for `toOffset: minutes` actually calls (first keyword, colon stripped).
@@ -642,10 +636,7 @@ validate_date(Y, Mo, D, Selector) ->
             Msg = beamtalk_error:chars_to_binary(
                 io_lib:format("Invalid date: ~tp-~tp-~tp", [Y, Mo, D])
             ),
-            Error0 = beamtalk_error:new(type_error, 'DateTime'),
-            Error1 = beamtalk_error:with_selector(Error0, Selector),
-            Error2 = beamtalk_error:with_hint(Error1, Msg),
-            beamtalk_error:raise(Error2)
+            beamtalk_error:raise_type_error('DateTime', Selector, Msg)
     end.
 
 -spec validate_time(integer(), integer(), integer(), atom()) -> ok.
@@ -655,10 +646,7 @@ validate_time(H, Mi, S, _Selector) when
     ok;
 validate_time(H, Mi, S, Selector) ->
     Msg = beamtalk_error:chars_to_binary(io_lib:format("Invalid time: ~tp:~tp:~tp", [H, Mi, S])),
-    Error0 = beamtalk_error:new(type_error, 'DateTime'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, Msg),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('DateTime', Selector, Msg).
 
 -spec validate_offset(integer(), atom()) -> ok.
 validate_offset(Off, _Selector) when is_integer(Off), Off >= -720, Off =< 840 ->
@@ -670,10 +658,7 @@ validate_offset(Off, Selector) ->
             [Off]
         )
     ),
-    Error0 = beamtalk_error:new(type_error, 'DateTime'),
-    Error1 = beamtalk_error:with_selector(Error0, Selector),
-    Error2 = beamtalk_error:with_hint(Error1, Msg),
-    beamtalk_error:raise(Error2).
+    beamtalk_error:raise_type_error('DateTime', Selector, Msg).
 
 -spec parse_iso8601(binary()) ->
     {ok, integer(), integer(), integer(), integer(), integer(), integer(), integer()}
@@ -738,10 +723,6 @@ parse_offset_suffix(<<Sign, HHB:2/binary, $:, MMB:2/binary>>) when Sign =:= $+; 
     end;
 parse_offset_suffix(_) ->
     error.
-
--spec raise_type_error(atom(), binary()) -> no_return().
-raise_type_error(Selector, Hint) ->
-    beamtalk_error:raise_type_error('DateTime', Selector, Hint).
 
 %%% ============================================================================
 %%% Internal Functions — Pattern-based format:/parse:format:
