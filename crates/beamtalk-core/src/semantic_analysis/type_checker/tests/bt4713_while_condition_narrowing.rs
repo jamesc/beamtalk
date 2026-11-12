@@ -3,7 +3,7 @@
 
 //! BT-4713: the body of `[cond] whileTrue: [...]` (`whileFalse:`) is narrowed
 //! by the facts the condition block's last expression proves, for bindings the
-//! body never assigns and fields it cannot write.
+//! body never assigns. `self.<field>` facts are never applied to a loop body.
 
 use super::common::*;
 
@@ -103,7 +103,7 @@ fn unrelated_variable_still_narrowed_when_other_assigned() {
 }
 
 #[test]
-fn field_fact_dropped_when_body_self_sends() {
+fn field_fact_not_applied_even_with_self_send() {
     assert_rejected("    [self.f notNil] whileTrue: [self bump. Repro need: self.f. ^0]\n    0");
 }
 
