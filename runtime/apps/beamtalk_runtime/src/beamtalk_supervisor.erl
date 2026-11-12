@@ -118,6 +118,7 @@ functions that call OTP APIs from the caller's process context.
 
 -include("beamtalk.hrl").
 -include("beamtalk_supervisor_config.hrl").
+-include("beamtalk_supervisor_capacity.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 %% Why a supervisor handle call could not reach its supervisor (BT-3984):
@@ -151,29 +152,6 @@ functions that call OTP APIs from the caller's process context.
 -define(INIT_WAIT_TIMEOUT, 60000).
 %% Poll interval for a waiting caller (see wait_loop/8).
 -define(INIT_POLL_MS, 200).
-
-%% BT-3964: process-dictionary key (in the DynamicSupervisor process) holding
-%% the `maxChildren` limit read by `dynamic_init/3`.
--define(MAX_CHILDREN_KEY, '$beamtalk_max_children').
-%% BT-4068: process-dictionary key (in a capped DynamicSupervisor process)
-%% holding the enforcement state installed by `dynamic_init/3`:
-%% `{Tid, MonPid}`, the ETS counter table and the monitor process that
-%% releases a child's slot when it dies. Absent on uncapped pools and on
-%% pools started before BT-4068 (which keep the legacy caller-side check).
--define(MAX_CHILDREN_STATE_KEY, '$beamtalk_max_children_state').
-%% BT-4068: refusal tag. `checked_dynamic_start/1..4` answers
-%% `{error, {?MAX_CHILDREN_REFUSED, Max}}` when a manual start finds the pool
-%% full; OTP passes it back through `supervisor:start_child/2` verbatim and
-%% `with_child_capacity/5` maps it to `#beamtalk_error{kind = max_children}`.
--define(MAX_CHILDREN_REFUSED, beamtalk_max_children_exceeded).
-%% BT-4068: manual-start token tag. `with_child_capacity/5` prepends
-%% `{?MAX_CHILDREN_TOKEN, Ref}` to the start args; the wrapper consumes it
-%% with `ets:take/2`, so an OTP restart replay — the same args verbatim —
-%% finds the token already consumed and is recognised as a restart. The tag
-%% lets the wrapper strip a consumed token instead of passing it to the
-%% child's start, and tells genuinely untokened starts (remote callers,
-%% direct `supervisor:start_child/2`) apart from replays.
--define(MAX_CHILDREN_TOKEN, beamtalk_max_children_token).
 
 %% ADR 0135: process-dictionary keys (in the supervisor process) set by
 %% `static_init/3` / `dynamic_init/3`. `?SUP_ARGS_KEY` holds the start args
@@ -209,12 +187,6 @@ functions that call OTP APIs from the caller's process context.
     "configuration methods run inside the supervisor's init; use `self args` "
     "and return specs, do not send messages to `self`"
 >>).
-
-%% BT-3965: largest Integer shutdown timeout. OTP's own child-spec check has
-%% no upper bound, but a static supervisor waits with `receive ... after`,
-%% whose timeout is limited to 16#FFFFFFFF ms; a larger value would crash the
-%% supervisor mid-shutdown. `#infinity` covers anything longer.
--define(MAX_SHUTDOWN_MS, 16#FFFFFFFF).
 
 %%% ============================================================================
 %%% Public API
@@ -1026,9 +998,15 @@ dynamic_init(Module, ClassName, Args) ->
     Self = begin_init(Module, ClassName, Args),
     ChildClass = read_config(Self, ClassName, childClass),
     {MaxR, MaxT} = read_restart_intensity(Self, ClassName),
-    MaxC = config_result(check_max_children(ClassName, read_config(Self, ClassName, maxChildren))),
+    MaxC = config_result(
+        beamtalk_supervisor_capacity:check_max_children(
+            ClassName, read_config(Self, ClassName, maxChildren)
+        )
+    ),
     ChildShutdown = config_result(
-        check_child_shutdown(ClassName, read_config(Self, ClassName, childShutdown))
+        beamtalk_supervisor_spec:check_child_shutdown(
+            ClassName, read_config(Self, ClassName, childShutdown)
+        )
     ),
     ChildClassEntry = child_class_entry_with_kind(child_class_entry(ClassName, ChildClass)),
     %% BT-3964/BT-4068: OTP's `supervisor` has no `max_children` flag (that is
@@ -1041,7 +1019,7 @@ dynamic_init(Module, ClassName, Args) ->
     %% `checked_dynamic_start/1..4` — one `supervisor:start_child/2` call per
     %% `startChild`, with no check-then-act race between concurrent starters.
     put(?MAX_CHILDREN_KEY, MaxC),
-    Capacity = init_child_capacity(MaxC),
+    Capacity = beamtalk_supervisor_capacity:init_child_capacity(MaxC),
     case Capacity of
         none ->
             ok;
@@ -1058,7 +1036,9 @@ dynamic_init(Module, ClassName, Args) ->
     %% exactly one child spec, so the value covers every dynamic child.
     Specs = config_step(ClassName, childClass, fun() ->
         [
-            wrap_capped_child_spec(apply_child_shutdown(S, ChildShutdown), MaxC, Capacity)
+            beamtalk_supervisor_capacity:wrap_capped_child_spec(
+                beamtalk_supervisor_spec:apply_child_shutdown(S, ChildShutdown), MaxC, Capacity
+            )
          || S <- build_child_specs([ChildClass], dynamic)
         ]
     end),
@@ -1102,7 +1082,7 @@ check_integer(ClassName, Selector, Value, Min) ->
 -spec check_strategy(atom(), term()) ->
     {ok, one_for_one | one_for_all | rest_for_one} | {error, #beamtalk_error{}}.
 check_strategy(ClassName, Value) ->
-    case to_otp_strategy(Value) of
+    case beamtalk_supervisor_spec:to_otp_strategy(Value) of
         Otp when Otp =:= one_for_one; Otp =:= one_for_all; Otp =:= rest_for_one ->
             {ok, Otp};
         _ ->
@@ -1649,7 +1629,7 @@ terminateChild(Self, Arg) ->
                 ChildPid = element(4, Arg),
                 TermResult = supervisor:terminate_child(SupPid, ChildPid),
                 case TermResult of
-                    ok -> release_child_capacity(SupPid, ChildPid);
+                    ok -> beamtalk_supervisor_capacity:release_child_capacity(SupPid, ChildPid);
                     _ -> ok
                 end,
                 handle_terminate_child_result(
@@ -1900,34 +1880,37 @@ startChild(Self) ->
     SupPid = element(4, Self),
     SupClass = element(2, Self),
     with_pool_child(Self, startChild, fun(ChildClass, ChildModule, ChildKind, MaxChildren) ->
-        with_child_capacity(SupClass, startChild, SupPid, MaxChildren, [], fun(StartArgs) ->
-            case supervisor:start_child(SupPid, StartArgs) of
-                {error, {?MAX_CHILDREN_REFUSED, _}} = Refused ->
-                    %% BT-4068: at the cap — pass through untouched for
-                    %% `with_child_capacity/6` to map to `max_children`
-                    %% (a debug log, no crash announcement).
-                    Refused;
-                {ok, ChildPid} ->
-                    ?LOG_INFO("DynamicSupervisor child started", #{
-                        supervisor => SupClass,
-                        child => ChildClass,
-                        module => ChildModule,
-                        child_pid => ChildPid,
-                        domain => [beamtalk, runtime]
-                    }),
-                    announce_child_added(SupClass, ChildClass, ChildPid),
-                    {ok, wrap_child(ChildClass, ChildModule, ChildKind, ChildPid)};
-                {error, Reason} ->
-                    ?LOG_ERROR("DynamicSupervisor child start failed", #{
-                        supervisor => SupClass,
-                        child => ChildClass,
-                        reason => Reason,
-                        domain => [beamtalk, runtime]
-                    }),
-                    announce_child_crashed(SupClass, ChildClass, Reason),
-                    {error, start_failed_error(child_start_failed, SupClass, startChild, Reason)}
+        beamtalk_supervisor_capacity:with_child_capacity(
+            SupClass, startChild, SupPid, MaxChildren, [], fun(StartArgs) ->
+                case supervisor:start_child(SupPid, StartArgs) of
+                    {error, {?MAX_CHILDREN_REFUSED, _}} = Refused ->
+                        %% BT-4068: at the cap — pass through untouched for
+                        %% `with_child_capacity/6` to map to `max_children`
+                        %% (a debug log, no crash announcement).
+                        Refused;
+                    {ok, ChildPid} ->
+                        ?LOG_INFO("DynamicSupervisor child started", #{
+                            supervisor => SupClass,
+                            child => ChildClass,
+                            module => ChildModule,
+                            child_pid => ChildPid,
+                            domain => [beamtalk, runtime]
+                        }),
+                        announce_child_added(SupClass, ChildClass, ChildPid),
+                        {ok, wrap_child(ChildClass, ChildModule, ChildKind, ChildPid)};
+                    {error, Reason} ->
+                        ?LOG_ERROR("DynamicSupervisor child start failed", #{
+                            supervisor => SupClass,
+                            child => ChildClass,
+                            reason => Reason,
+                            domain => [beamtalk, runtime]
+                        }),
+                        announce_child_crashed(SupClass, ChildClass, Reason),
+                        {error,
+                            start_failed_error(child_start_failed, SupClass, startChild, Reason)}
+                end
             end
-        end)
+        )
     end).
 
 -doc """
@@ -1951,34 +1934,37 @@ startChild(Self, Args) ->
     SupPid = element(4, Self),
     SupClass = element(2, Self),
     with_pool_child(Self, 'startChild:', fun(ChildClass, ChildModule, ChildKind, MaxChildren) ->
-        with_child_capacity(SupClass, 'startChild:', SupPid, MaxChildren, [Args], fun(StartArgs) ->
-            case supervisor:start_child(SupPid, StartArgs) of
-                {error, {?MAX_CHILDREN_REFUSED, _}} = Refused ->
-                    %% BT-4068: at the cap — pass through untouched for
-                    %% `with_child_capacity/6` to map to `max_children`
-                    %% (a debug log, no crash announcement).
-                    Refused;
-                {ok, ChildPid} ->
-                    ?LOG_INFO("DynamicSupervisor child started", #{
-                        supervisor => SupClass,
-                        child => ChildClass,
-                        module => ChildModule,
-                        child_pid => ChildPid,
-                        domain => [beamtalk, runtime]
-                    }),
-                    announce_child_added(SupClass, ChildClass, ChildPid),
-                    {ok, wrap_child(ChildClass, ChildModule, ChildKind, ChildPid)};
-                {error, Reason} ->
-                    ?LOG_ERROR("DynamicSupervisor child start failed", #{
-                        supervisor => SupClass,
-                        child => ChildClass,
-                        reason => Reason,
-                        domain => [beamtalk, runtime]
-                    }),
-                    announce_child_crashed(SupClass, ChildClass, Reason),
-                    {error, start_failed_error(child_start_failed, SupClass, 'startChild:', Reason)}
+        beamtalk_supervisor_capacity:with_child_capacity(
+            SupClass, 'startChild:', SupPid, MaxChildren, [Args], fun(StartArgs) ->
+                case supervisor:start_child(SupPid, StartArgs) of
+                    {error, {?MAX_CHILDREN_REFUSED, _}} = Refused ->
+                        %% BT-4068: at the cap — pass through untouched for
+                        %% `with_child_capacity/6` to map to `max_children`
+                        %% (a debug log, no crash announcement).
+                        Refused;
+                    {ok, ChildPid} ->
+                        ?LOG_INFO("DynamicSupervisor child started", #{
+                            supervisor => SupClass,
+                            child => ChildClass,
+                            module => ChildModule,
+                            child_pid => ChildPid,
+                            domain => [beamtalk, runtime]
+                        }),
+                        announce_child_added(SupClass, ChildClass, ChildPid),
+                        {ok, wrap_child(ChildClass, ChildModule, ChildKind, ChildPid)};
+                    {error, Reason} ->
+                        ?LOG_ERROR("DynamicSupervisor child start failed", #{
+                            supervisor => SupClass,
+                            child => ChildClass,
+                            reason => Reason,
+                            domain => [beamtalk, runtime]
+                        }),
+                        announce_child_crashed(SupClass, ChildClass, Reason),
+                        {error,
+                            start_failed_error(child_start_failed, SupClass, 'startChild:', Reason)}
+                end
             end
-        end)
+        )
     end).
 
 -doc """
@@ -2010,71 +1996,73 @@ startChild(Self, Args, Name) ->
     SupPid = element(4, Self),
     SupClass = element(2, Self),
     with_pool_child(Self, 'startChild:name:', fun(ChildClass, ChildModule, ChildKind, MaxChildren) ->
-        with_child_capacity(SupClass, 'startChild:name:', SupPid, MaxChildren, [Args, Name], fun(
-            StartArgs
-        ) ->
-            case supervisor:start_child(SupPid, StartArgs) of
-                {error, {?MAX_CHILDREN_REFUSED, _}} = Refused ->
-                    %% BT-4068: at the cap — pass through untouched for
-                    %% `with_child_capacity/6` to map to `max_children`
-                    %% (a debug log, no crash announcement).
-                    Refused;
-                {ok, ChildPid} ->
-                    ?LOG_INFO("DynamicSupervisor named child started", #{
-                        supervisor => SupClass,
-                        child => ChildClass,
-                        module => ChildModule,
-                        child_pid => ChildPid,
-                        name => Name,
-                        domain => [beamtalk, runtime]
-                    }),
-                    announce_child_added(SupClass, ChildClass, ChildPid),
-                    {ok, wrap_child(ChildClass, ChildModule, ChildKind, ChildPid)};
-                {error, #beamtalk_error{} = Err} ->
-                    %% `'spawnAs'/3` already returns a structured error for
-                    %% name_registered/type_error/reserved_name — re-attribute
-                    %% it to this call site rather than wrapping it again. A
-                    %% failed `initialize` arrives as `{initialize_failed, _}`
-                    %% (BT-4033, start_actor_child/3) and falls through to
-                    %% `#child_start_failed` below, with its error as the cause.
-                    ?LOG_ERROR("DynamicSupervisor named child start failed", #{
-                        supervisor => SupClass,
-                        child => ChildClass,
-                        name => Name,
-                        reason => Err#beamtalk_error.kind,
-                        domain => [beamtalk, runtime]
-                    }),
-                    announce_child_crashed(SupClass, ChildClass, Err),
-                    {error, Err#beamtalk_error{class = SupClass, selector = 'startChild:name:'}};
-                {error, {already_started, _}} ->
-                    %% A supervisor child class (ADR 0135 §3) registers
-                    %% through `supervisor:start_link({local, Name}, ...)`,
-                    %% which reports a taken name this way.
-                    announce_child_crashed(SupClass, ChildClass, name_registered),
-                    {error,
-                        beamtalk_error:new(
-                            name_registered,
-                            SupClass,
-                            'startChild:name:',
-                            beamtalk_error:chars_to_binary(
-                                io_lib:format("Name '~ts' is already registered", [Name])
-                            )
-                        )};
-                {error, Reason} ->
-                    ?LOG_ERROR("DynamicSupervisor named child start failed", #{
-                        supervisor => SupClass,
-                        child => ChildClass,
-                        name => Name,
-                        reason => Reason,
-                        domain => [beamtalk, runtime]
-                    }),
-                    announce_child_crashed(SupClass, ChildClass, Reason),
-                    {error,
-                        start_failed_error(
-                            child_start_failed, SupClass, 'startChild:name:', Reason
-                        )}
+        beamtalk_supervisor_capacity:with_child_capacity(
+            SupClass, 'startChild:name:', SupPid, MaxChildren, [Args, Name], fun(
+                StartArgs
+            ) ->
+                case supervisor:start_child(SupPid, StartArgs) of
+                    {error, {?MAX_CHILDREN_REFUSED, _}} = Refused ->
+                        %% BT-4068: at the cap — pass through untouched for
+                        %% `with_child_capacity/6` to map to `max_children`
+                        %% (a debug log, no crash announcement).
+                        Refused;
+                    {ok, ChildPid} ->
+                        ?LOG_INFO("DynamicSupervisor named child started", #{
+                            supervisor => SupClass,
+                            child => ChildClass,
+                            module => ChildModule,
+                            child_pid => ChildPid,
+                            name => Name,
+                            domain => [beamtalk, runtime]
+                        }),
+                        announce_child_added(SupClass, ChildClass, ChildPid),
+                        {ok, wrap_child(ChildClass, ChildModule, ChildKind, ChildPid)};
+                    {error, #beamtalk_error{} = Err} ->
+                        %% `'spawnAs'/3` already returns a structured error for
+                        %% name_registered/type_error/reserved_name — re-attribute
+                        %% it to this call site rather than wrapping it again. A
+                        %% failed `initialize` arrives as `{initialize_failed, _}`
+                        %% (BT-4033, start_actor_child/3) and falls through to
+                        %% `#child_start_failed` below, with its error as the cause.
+                        ?LOG_ERROR("DynamicSupervisor named child start failed", #{
+                            supervisor => SupClass,
+                            child => ChildClass,
+                            name => Name,
+                            reason => Err#beamtalk_error.kind,
+                            domain => [beamtalk, runtime]
+                        }),
+                        announce_child_crashed(SupClass, ChildClass, Err),
+                        {error, Err#beamtalk_error{class = SupClass, selector = 'startChild:name:'}};
+                    {error, {already_started, _}} ->
+                        %% A supervisor child class (ADR 0135 §3) registers
+                        %% through `supervisor:start_link({local, Name}, ...)`,
+                        %% which reports a taken name this way.
+                        announce_child_crashed(SupClass, ChildClass, name_registered),
+                        {error,
+                            beamtalk_error:new(
+                                name_registered,
+                                SupClass,
+                                'startChild:name:',
+                                beamtalk_error:chars_to_binary(
+                                    io_lib:format("Name '~ts' is already registered", [Name])
+                                )
+                            )};
+                    {error, Reason} ->
+                        ?LOG_ERROR("DynamicSupervisor named child start failed", #{
+                            supervisor => SupClass,
+                            child => ChildClass,
+                            name => Name,
+                            reason => Reason,
+                            domain => [beamtalk, runtime]
+                        }),
+                        announce_child_crashed(SupClass, ChildClass, Reason),
+                        {error,
+                            start_failed_error(
+                                child_start_failed, SupClass, 'startChild:name:', Reason
+                            )}
+                end
             end
-        end)
+        )
     end).
 
 -doc """
@@ -2261,7 +2249,65 @@ receive appended `supervisor:start_child/2` args, so the original
 """.
 -spec build_child_specs([term()], static | dynamic) -> [map()].
 build_child_specs(Children, Mode) ->
-    [build_child_spec(C, Mode) || C <- Children].
+    [beamtalk_supervisor_spec:build_child_spec(C, Mode) || C <- Children].
+
+-doc "Delegates to `beamtalk_supervisor_spec:spec_to_otp/1` (BT-4705).".
+-spec spec_to_otp(map()) -> map().
+spec_to_otp(BtSpec) ->
+    beamtalk_supervisor_spec:spec_to_otp(BtSpec).
+
+-doc "Delegates to `beamtalk_supervisor_spec:spec_to_otp/2` (BT-4705).".
+-spec spec_to_otp(map(), static | dynamic) -> map().
+spec_to_otp(BtSpec, Mode) ->
+    beamtalk_supervisor_spec:spec_to_otp(BtSpec, Mode).
+
+%% The `checked_dynamic_start/1..4` MFAs are baked into live capped pools' OTP
+%% child templates by `beamtalk_supervisor_capacity:wrap_capped_child_spec/3`
+%% and replayed on restart, so they keep their module and name here and
+%% delegate to the capacity module (BT-4705).
+-doc """
+Count one child start against a capped pool's `maxChildren` limit (BT-4068).
+
+This is the `simple_one_for_one` template MFA `wrap_capped_child_spec/3`
+installs on a capped pool: `{beamtalk_supervisor, checked_dynamic_start,
+[Params]}`, with OTP appending each start's extra args. It runs in the
+supervisor process, so the ETS check-and-increment is atomic with the start —
+concurrent `startChild` callers can never overshoot the limit, and each costs
+a single `supervisor:start_child/2` call.
+
+`Params` is `#{tid, max, monitor, m, f, args}`: the counter table, the limit,
+the monitor process that releases dead children's slots, and the wrapped
+`{M, F, StaticArgs}` template. A manual start carries a caller-minted tagged
+token as its first extra arg (`beamtalk_supervisor_capacity:with_child_capacity/6`); the token is
+consumed here with `ets:take/2`, so an OTP restart replay — the same args
+verbatim — finds its token already consumed and is recognised as a restart.
+The consumed token is stripped, never passed to the child's start; a first
+arg without the tag is a genuinely untokened start (a remote caller or a
+direct `supervisor:start_child/2`), admitted like a restart. Manual starts
+past the cap are refused with `{error, {?MAX_CHILDREN_REFUSED, Max}}` (OTP
+passes it back through `supervisor:start_child/2` verbatim); restarts are
+always admitted, because refusing one would send OTP into its try-again
+loop, burning restart intensity until the supervisor shut down.
+
+A start that fails (or raises) releases its slot before returning, so a
+failing child never consumes capacity. A refused manual start likewise
+releases the slot it just took.
+""".
+-spec checked_dynamic_start(map()) -> {ok, pid()} | {error, term()}.
+checked_dynamic_start(Params) ->
+    beamtalk_supervisor_capacity:checked_dynamic_start_n(Params, []).
+-doc "See `checked_dynamic_start/1` (`startChild:`, tokened).".
+-spec checked_dynamic_start(map(), term()) -> {ok, pid()} | {error, term()}.
+checked_dynamic_start(Params, E1) ->
+    beamtalk_supervisor_capacity:checked_dynamic_start_n(Params, [E1]).
+-doc "See `checked_dynamic_start/1` (`startChild:name:`, tokened).".
+-spec checked_dynamic_start(map(), term(), term()) -> {ok, pid()} | {error, term()}.
+checked_dynamic_start(Params, E1, E2) ->
+    beamtalk_supervisor_capacity:checked_dynamic_start_n(Params, [E1, E2]).
+-doc "See `checked_dynamic_start/1`.".
+-spec checked_dynamic_start(map(), term(), term(), term()) -> {ok, pid()} | {error, term()}.
+checked_dynamic_start(Params, E1, E2, E3) ->
+    beamtalk_supervisor_capacity:checked_dynamic_start_n(Params, [E1, E2, E3]).
 
 -doc """
 Check if a class name is a Supervisor or DynamicSupervisor subclass.
@@ -2705,40 +2751,6 @@ call_inherited_class_method_direct(ClassName, FunName, ClassSelf, ExtraArgs, Dep
             end
     end.
 
--doc "Build a single OTP child spec from a class object or SupervisionSpec map.".
--spec build_child_spec(term(), static | dynamic) -> map().
-build_child_spec(ClassObj, Mode) when
-    is_tuple(ClassObj), element(1, ClassObj) =:= beamtalk_object
-->
-    case beamtalk_class_registry:is_class_object(ClassObj) of
-        true ->
-            %% A bare class, actor or supervisor alike (ADR 0135 §3): its
-            %% `supervisionSpec`, then `childSpec`. A bare nested supervisor
-            %% is therefore an anonymous child, like any other.
-            ChildClassPid = element(4, ClassObj),
-            BtSpec = beamtalk_object_class:class_send(ChildClassPid, 'supervisionSpec', []),
-            spec_to_otp(beamtalk_message_dispatch:send(BtSpec, 'childSpec', []), Mode);
-        false ->
-            %% Actor instance passed as spec — treat as SupervisionSpec-like value
-            spec_to_otp(beamtalk_message_dispatch:send(ClassObj, 'childSpec', []), Mode)
-    end;
-build_child_spec(Spec, Mode) when is_map(Spec) ->
-    %% SupervisionSpec value (tagged map): call childSpec directly
-    spec_to_otp(beamtalk_message_dispatch:send(Spec, 'childSpec', []), Mode).
-
--doc """
-Translate Beamtalk strategy symbol to OTP supervisor strategy atom.
-
-OTP expects snake_case atoms (one_for_one), while Beamtalk uses camelCase
-symbols (#oneForOne). Unknown strategies pass through unchanged so OTP
-can report the error with context.
-""".
--spec to_otp_strategy(atom()) -> atom().
-to_otp_strategy(oneForOne) -> one_for_one;
-to_otp_strategy(oneForAll) -> one_for_all;
-to_otp_strategy(restForOne) -> rest_for_one;
-to_otp_strategy(S) -> S.
-
 -doc """
 Start a supervised child by dispatching through its keyword class method.
 
@@ -3018,373 +3030,6 @@ start_dynamic_child(ChildModule, _DefaultArgs, Args, Name) ->
     start_actor_child(ChildModule, Args, {local, Name}).
 
 -doc """
-Count one child start against a capped pool's `maxChildren` limit (BT-4068).
-
-This is the `simple_one_for_one` template MFA `wrap_capped_child_spec/3`
-installs on a capped pool: `{beamtalk_supervisor, checked_dynamic_start,
-[Params]}`, with OTP appending each start's extra args. It runs in the
-supervisor process, so the ETS check-and-increment is atomic with the start —
-concurrent `startChild` callers can never overshoot the limit, and each costs
-a single `supervisor:start_child/2` call.
-
-`Params` is `#{tid, max, monitor, m, f, args}`: the counter table, the limit,
-the monitor process that releases dead children's slots, and the wrapped
-`{M, F, StaticArgs}` template. A manual start carries a caller-minted tagged
-token as its first extra arg (`with_child_capacity/5`); the token is
-consumed here with `ets:take/2`, so an OTP restart replay — the same args
-verbatim — finds its token already consumed and is recognised as a restart.
-The consumed token is stripped, never passed to the child's start; a first
-arg without the tag is a genuinely untokened start (a remote caller or a
-direct `supervisor:start_child/2`), admitted like a restart. Manual starts
-past the cap are refused with `{error, {?MAX_CHILDREN_REFUSED, Max}}` (OTP
-passes it back through `supervisor:start_child/2` verbatim); restarts are
-always admitted, because refusing one would send OTP into its try-again
-loop, burning restart intensity until the supervisor shut down.
-
-A start that fails (or raises) releases its slot before returning, so a
-failing child never consumes capacity. A refused manual start likewise
-releases the slot it just took.
-""".
--spec checked_dynamic_start(map()) -> {ok, pid()} | {error, term()}.
-checked_dynamic_start(Params) ->
-    checked_dynamic_start_n(Params, []).
--doc "See `checked_dynamic_start/1` (`startChild`, tokened).".
--spec checked_dynamic_start(map(), term()) -> {ok, pid()} | {error, term()}.
-checked_dynamic_start(Params, E1) ->
-    checked_dynamic_start_n(Params, [E1]).
--doc "See `checked_dynamic_start/1` (`startChild:`, tokened).".
--spec checked_dynamic_start(map(), term(), term()) -> {ok, pid()} | {error, term()}.
-checked_dynamic_start(Params, E1, E2) ->
-    checked_dynamic_start_n(Params, [E1, E2]).
--doc "See `checked_dynamic_start/1` (`startChild:name:`, tokened).".
--spec checked_dynamic_start(map(), term(), term(), term()) -> {ok, pid()} | {error, term()}.
-checked_dynamic_start(Params, E1, E2, E3) ->
-    checked_dynamic_start_n(Params, [E1, E2, E3]).
-
--spec checked_dynamic_start_n(map(), [term()]) -> {ok, pid()} | {error, term()}.
-checked_dynamic_start_n(
-    #{tid := Tid, max := Max, monitor := MonPid, m := M, f := F, args := StaticArgs}, Extra
-) ->
-    {Manual, RealExtra} =
-        case Extra of
-            [{?MAX_CHILDREN_TOKEN, _Ref} = Token | Rest] ->
-                case ets:take(Tid, {manual, Token}) of
-                    [_] ->
-                        {true, Rest};
-                    [] ->
-                        %% A consumed token: an OTP restart replay of a
-                        %% manual start. Strip the token so the child
-                        %% restarts with its original args.
-                        {false, Rest}
-                end;
-            _ ->
-                %% Genuinely untokened (a remote caller, which
-                %% `with_child_capacity/5` never tokens, or a direct
-                %% `supervisor:start_child/2`): admit like a restart.
-                {false, Extra}
-        end,
-    Admitted =
-        case Manual of
-            false ->
-                _ = ets:update_counter(Tid, count, 1),
-                true;
-            true ->
-                case ets:update_counter(Tid, count, 1) of
-                    N when N =< Max -> true;
-                    _Over ->
-                        _ = ets:update_counter(Tid, count, -1),
-                        false
-                end
-        end,
-    case Admitted of
-        true -> run_capped_start(Tid, MonPid, M, F, StaticArgs ++ RealExtra);
-        false -> {error, {?MAX_CHILDREN_REFUSED, Max}}
-    end.
-
--doc """
-Apply the wrapped template MFA, tracking a started child and releasing the
-slot on any failure. Runs in the supervisor process.
-""".
--spec run_capped_start(ets:tid(), pid(), module(), atom(), [term()]) ->
-    {ok, pid()} | {error, term()}.
-run_capped_start(Tid, MonPid, M, F, Args) ->
-    %% bt-catcher-audit: not-applicable-reraises - the catch clause frees the
-    %% ETS slot and re-raises, so the failure still propagates to OTP.
-    try apply(M, F, Args) of
-        {ok, Pid} when is_pid(Pid) ->
-            track_capped_child(Tid, MonPid, Pid),
-            {ok, Pid};
-        {ok, Pid, Extra} when is_pid(Pid) ->
-            track_capped_child(Tid, MonPid, Pid),
-            {ok, Pid, Extra};
-        ignore ->
-            _ = ets:update_counter(Tid, count, -1),
-            ignore;
-        {error, _} = Error ->
-            _ = ets:update_counter(Tid, count, -1),
-            Error;
-        Other ->
-            _ = ets:update_counter(Tid, count, -1),
-            Other
-    catch
-        Class:Reason:Stack ->
-            _ = ets:update_counter(Tid, count, -1),
-            erlang:raise(Class, Reason, Stack)
-    end.
-
--doc """
-Record a started child in the capacity table and hand it to the monitor
-process, which releases the slot when the child dies.
-""".
--spec track_capped_child(ets:tid(), pid(), pid()) -> ok.
-track_capped_child(Tid, MonPid, Pid) ->
-    _ = ets:insert(Tid, {{child, Pid}}),
-    MonPid ! {beamtalk_sup_child_started, Pid},
-    ok.
-
--doc """
-Convert a Beamtalk child spec dict to an OTP-compatible child spec map.
-
-The Beamtalk dict from `SupervisionSpec childSpec` has keys:
-  id, start ([ClassObj, FnAtom, ArgsList]), restart, shutdown, type
-The `start` value is a Beamtalk Array [ClassObj, #spawn, #()] that must be
-converted to the OTP MFA tuple {Module, Function, Args}.
-
-For nested supervisor children (Supervisor/DynamicSupervisor subclasses), the
-start goes through the `start_supervisor_child` trampoline (ADR 0135 §3; see
-`supervisor_child_start/4`), so the child is anonymous, gets the spec's args
-and stays linked into the tree.
-
-For actor (worker) children other than `withClassMethod:` factories, the
-start goes through `start_actor_child/2,3` (BT-4033): an awaited, linked
-start that answers `{ok, Pid}` once the child's `initialize` has returned,
-and `{error, Reason}` when it failed — so a failing `initialize` fails the
-parent's start, as OTP `init/1` returning `{stop, Reason}` does.
-
-`Mode` selects between a static Supervisor's immediate-start semantics and
-a DynamicSupervisor's extensible `simple_one_for_one` template — see the
-`spawn` case below.
-""".
--spec spec_to_otp(map()) -> map().
-spec_to_otp(BtSpec) ->
-    spec_to_otp(BtSpec, static).
-
--spec spec_to_otp(map(), static | dynamic) -> map().
-spec_to_otp(BtSpec, Mode) ->
-    %% `start` is a Beamtalk Array #[ClassObj, StartFn, StartArgs]. Beamtalk
-    %% Arrays are tagged maps with a canonical index→value `'data'` map (ADR
-    %% 0090); read the elements as an ordered list via beamtalk_tagged_map.
-    StartBtArray = maps:get(start, BtSpec),
-    StartElems = beamtalk_tagged_map:array_to_list(StartBtArray),
-    ClassObj = lists:nth(1, StartElems),
-    ChildModule = element(3, ClassObj),
-    ChildClassPid = element(4, ClassObj),
-    ChildClass = beamtalk_object_class:class_name_safe(ChildClassPid),
-    OtpStart =
-        case is_supervisor(ChildClass) of
-            true ->
-                supervisor_child_start(ChildClass, ChildModule, StartElems, Mode);
-            false ->
-                %% Worker: start through start_actor_child/2,3 (BT-4033), the
-                %% awaited linked start answering {ok, Pid} | {error, Reason}.
-                StartFn = lists:nth(2, StartElems),
-                case StartFn of
-                    spawn when Mode =:= dynamic ->
-                        %% A DynamicSupervisor's simple_one_for_one template
-                        %% must NOT bake a static arg here. OTP appends whatever extra
-                        %% args supervisor:start_child/2 was given to this MFA's args —
-                        %% baking `[#{}]` meant `startChild: args` landed as
-                        %% `ChildModule:start_link(#{}, Args)`, a 2-arity call that
-                        %% doesn't exist as start_link/1 and gets misread by OTP as the
-                        %% 4-arity named-registration form, crashing with badarg.
-                        %% Using a zero-static-arg indirection through
-                        %% start_dynamic_child/2,3 instead lets both the no-arg
-                        %% `startChild` (arity 2: DefaultArgs) and `startChild: args`
-                        %% (arity 3: caller's Args wins) resolve to the single correct
-                        %% argument for start_actor_child/2. See
-                        %% start_dynamic_child/2,3's docs for how each restarts —
-                        %% OTP's own simple_one_for_one bookkeeping replays each
-                        %% child's own original start args, so this is unaffected
-                        %% either way.
-                        {beamtalk_supervisor, start_dynamic_child, [ChildModule, #{}]};
-                    spawn ->
-                        %% Static Supervisor: no init args — start with empty state map.
-                        %% Static children start once at supervisor-init time and never
-                        %% have extra args appended, so a single baked arg is correct.
-                        %% BT-4033: awaited start, see start_actor_child/2.
-                        {beamtalk_supervisor, start_actor_child, [ChildModule, #{}]};
-                    'spawnWith:' when Mode =:= dynamic ->
-                        %% A DynamicSupervisor childClass
-                        %% can override `class supervisionSpec` to bake default args via
-                        %% `withArgs:` (supervision_spec.bt childSpec), which also compiles
-                        %% to startFn #spawnWith:. That hits the exact same arity-mismatch
-                        %% badarg as the plain #spawn case once `startChild: args` appends
-                        %% its own args on top of the baked ones — so it needs the same
-                        %% zero-static-arg indirection, using the baked map as DefaultArgs
-                        %% instead of #{}.
-                        [InitArgsMap] = lists:nth(3, StartElems),
-                        {beamtalk_supervisor, start_dynamic_child, [ChildModule, InitArgsMap]};
-                    'spawnWith:' ->
-                        %% #(self args) uses list syntax (#(...)) so it compiles to an
-                        %% Erlang list [ArgsMap]. BT-4033: awaited start, see
-                        %% start_actor_child/2.
-                        [InitArgs] = lists:nth(3, StartElems),
-                        {beamtalk_supervisor, start_actor_child, [ChildModule, InitArgs]};
-                    'spawnAs:' ->
-                        %% ADR 0079: SupervisionSpec withName: routes
-                        %% named children through `beamtalk_actor_registry:spawnAs/3`
-                        %% (via start_actor_child/3, BT-4033) so the child registers
-                        %% under `Name` atomically inside
-                        %% gen_server:start_link({local, Name}, ...). The startArgs
-                        %% in `SupervisionSpec childSpec` carry just the Name as
-                        %% `#(name)` — i.e. an Erlang list `[Name]`.
-                        SpawnAsArgs = lists:nth(3, StartElems),
-                        [Name] = SpawnAsArgs,
-                        {beamtalk_supervisor, start_actor_child, [ChildModule, #{}, {local, Name}]};
-                    'spawnWith:as:' ->
-                        %% ADR 0079: spawn-with-args under a registered
-                        %% name. startArgs are `#(args, name)` → Erlang `[Args, Name]`.
-                        %% Goes through `beamtalk_actor_registry:spawnAs/3` (via
-                        %% start_actor_child/3) so the child is registered
-                        %% atomically with init args at start time.
-                        SpawnAsArgs2 = lists:nth(3, StartElems),
-                        [InitArgsMap, NameAtom] = SpawnAsArgs2,
-                        {beamtalk_supervisor, start_actor_child, [
-                            ChildModule, InitArgsMap, {local, NameAtom}
-                        ]};
-                    'spawnAs:scope:' ->
-                        %% ADR 0126 §4, Phase 5: `SupervisionSpec withName:
-                        %% scope: #global` — same shape as `spawnAs:` above
-                        %% (startArgs carries just the Name, `#(name)` →
-                        %% Erlang `[Name]`), but routes through
-                        %% `beamtalk_actor_registry:'spawnAsGlobal'/3` (via
-                        %% start_actor_child/3) so the child
-                        %% registers with OTP `global` instead of the local
-                        %% registry. `childSpec` only ever emits this
-                        %% startFn when `scope` is `#global` — `#local`
-                        %% still emits plain `#spawnAs:` above.
-                        SpawnAsGlobalArgs = lists:nth(3, StartElems),
-                        [GlobalName] = SpawnAsGlobalArgs,
-                        {beamtalk_supervisor, start_actor_child, [
-                            ChildModule, #{}, {global, GlobalName}
-                        ]};
-                    'spawnWith:as:scope:' ->
-                        %% ADR 0126 §4, Phase 5: cluster-global spawn-with-args
-                        %% sibling of `spawnWith:as:` above — same startArgs
-                        %% shape (`#(args, name)` → Erlang `[Args, Name]`),
-                        %% routed through `beamtalk_actor_registry:'spawnAsGlobal'/3`.
-                        SpawnAsGlobalArgs2 = lists:nth(3, StartElems),
-                        [GlobalInitArgsMap, GlobalNameAtom] = SpawnAsGlobalArgs2,
-                        {beamtalk_supervisor, start_actor_child, [
-                            ChildModule, GlobalInitArgsMap, {global, GlobalNameAtom}
-                        ]};
-                    classMethod ->
-                        %% Route through the actor's keyword class method.
-                        %% StartArgs is #(selector, argsList) — compiled as an
-                        %% Erlang list [Selector, ArgsList]. The selector is stored
-                        %% in source form (e.g., 'create:value:'); we prepend 'class_'
-                        %% to get the compiled function name for call_class_method_direct.
-                        [Selector, ArgsList] = lists:nth(3, StartElems),
-                        % elp:fixme W0023 intentional atom creation
-                        CompiledSelector = list_to_atom(
-                            "class_" ++ atom_to_list(Selector)
-                        ),
-                        {beamtalk_supervisor, start_child_via_class_method, [
-                            ChildClass, ChildModule, CompiledSelector, ArgsList
-                        ]};
-                    Other ->
-                        %% Unknown start function — raise structured error rather than crashing.
-                        %% Tag as 'SupervisionSpec'/'childSpec' to reflect where the spec
-                        %% originated (SupervisionSpec>>childSpec), not the supervisor itself.
-                        Error = beamtalk_error:new(
-                            runtime_error,
-                            'SupervisionSpec',
-                            childSpec,
-                            beamtalk_error:chars_to_binary(
-                                io_lib:format(
-                                    "unsupported child start function: ~tp "
-                                    "(expected spawn, spawnWith:, spawnAs:, "
-                                    "spawnWith:as:, spawnAs:scope:, "
-                                    "spawnWith:as:scope:, or classMethod)",
-                                    [Other]
-                                )
-                            )
-                        ),
-                        beamtalk_exception_handler:reraise(Error)
-                end
-        end,
-    #{
-        id => maps:get(id, BtSpec),
-        start => OtpStart,
-        restart => maps:get(restart, BtSpec),
-        shutdown => to_otp_shutdown('SupervisionSpec', shutdown, maps:get(shutdown, BtSpec)),
-        type => maps:get(type, BtSpec),
-        modules => [ChildModule]
-    }.
-
--doc """
-The start MFA for a nested supervisor child (ADR 0135 §3), from the
-`#[Class, StartFn, StartArgs]` that `SupervisionSpec childSpec` built.
-
-A static parent's child starts through `start_supervisor_child/2,3` with the
-spec's args (`nil` without `withArgs:`) and, for `withName:`, its name. A
-DynamicSupervisor's `simple_one_for_one` template is
-`start_dynamic_supervisor_child` with the spec's args as the default, so
-`startChild` / `startChild:` / `startChild:name:` each start a new child.
-`withClassMethod:` (a class-method factory would run the start in the class
-process and link the child there) and `scope: #global` are not supported for
-supervisor children: they raise a structured `type_error`, which fails the
-parent's start.
-""".
--spec supervisor_child_start(atom(), module(), [term()], static | dynamic) ->
-    {module(), atom(), [term()]}.
-supervisor_child_start(ChildClass, ChildModule, StartElems, Mode) ->
-    StartFn = lists:nth(2, StartElems),
-    StartArgs = lists:nth(3, StartElems),
-    {Args, Name} =
-        case {StartFn, StartArgs} of
-            {spawn, []} -> {nil, none};
-            {'spawnWith:', [A]} -> {A, none};
-            {'spawnAs:', [N]} -> {nil, N};
-            {'spawnWith:as:', [A, N]} -> {A, N};
-            _ -> unsupported_supervisor_child(ChildClass, StartFn)
-        end,
-    case {Mode, Name} of
-        {static, none} ->
-            {beamtalk_supervisor, start_supervisor_child, [ChildModule, Args]};
-        {static, _} ->
-            {beamtalk_supervisor, start_supervisor_child, [ChildModule, Args, Name]};
-        {dynamic, none} ->
-            {beamtalk_supervisor, start_dynamic_supervisor_child, [ChildModule, Args]};
-        {dynamic, _} ->
-            %% A pool's single template cannot carry one name for every
-            %% child; `startChild:name:` names each child instead.
-            unsupported_supervisor_child(ChildClass, StartFn)
-    end.
-
--spec unsupported_supervisor_child(atom(), term()) -> no_return().
-unsupported_supervisor_child(ChildClass, StartFn) ->
-    Hint = beamtalk_error:chars_to_binary(
-        io_lib:format(
-            "~ts is a supervisor: its supervisionSpec supports withId:, withArgs:, "
-            "withRestart:, withShutdown: and withName: (a static child), not ~ts",
-            [ChildClass, unsupported_field(StartFn)]
-        )
-    ),
-    Error0 = beamtalk_error:new(type_error, ChildClass, supervisionSpec, Hint),
-    beamtalk_exception_handler:reraise(
-        beamtalk_error:with_details(Error0, #{start => StartFn})
-    ).
-
--spec unsupported_field(term()) -> string().
-unsupported_field(classMethod) -> "withClassMethod:";
-unsupported_field('spawnAs:scope:') -> "scope: #global";
-unsupported_field('spawnWith:as:scope:') -> "scope: #global";
-unsupported_field('spawnAs:') -> "withName: on a DynamicSupervisor's child class";
-unsupported_field('spawnWith:as:') -> "withName: on a DynamicSupervisor's child class";
-unsupported_field(Other) -> io_lib:format("~p", [Other]).
-
--doc """
 Wrap a child pid with the correct Beamtalk tuple tag.
 Supervisor subclasses use {beamtalk_supervisor, ...} so follow-up sends
 use the supervisor dispatch path rather than the actor/gen_server path.
@@ -3591,101 +3236,6 @@ supervisor_unavailable_error(Self, Selector, {unreachable, Why}) ->
     {error, beamtalk_error:with_details(Error1, #{node => Node, reason => Why})}.
 
 -doc """
-Validate a DynamicSupervisor's `maxChildren` value (BT-3964).
-
-Accepts a non-negative integer or `infinity` (Beamtalk `#infinity`); anything
-else is a `type_error` carrying the offending value in `details`.
-""".
--spec check_max_children(atom(), term()) ->
-    {ok, non_neg_integer() | infinity} | {error, #beamtalk_error{}}.
-check_max_children(_ClassName, infinity) ->
-    {ok, infinity};
-check_max_children(_ClassName, Max) when is_integer(Max), Max >= 0 ->
-    {ok, Max};
-check_max_children(ClassName, Other) ->
-    Error0 = beamtalk_error:new(
-        type_error,
-        ClassName,
-        maxChildren,
-        beamtalk_error:chars_to_binary(
-            io_lib:format(
-                "maxChildren must be a non-negative Integer or #infinity, got ~tp", [Other]
-            )
-        )
-    ),
-    {error, beamtalk_error:with_details(Error0, #{value => Other})}.
-
--doc """
-Translate a Beamtalk shutdown value into the OTP child-spec `shutdown` term
-(BT-3965).
-
-Accepts an Integer from 0 to `?MAX_SHUTDOWN_MS` (milliseconds), `infinity`
-(Beamtalk `#infinity`) or `brutalKill` (Beamtalk `#brutalKill`, emitted as
-OTP `brutal_kill`); anything else raises a `type_error` attributed to
-`Class`/`Selector`, with the offending value in `details`. The single place
-the `ShutdownTimeout` rule is checked: both `SupervisionSpec childSpec`
-(via `spec_to_otp/2`) and `DynamicSupervisor childShutdown` go
-through it.
-""".
--spec to_otp_shutdown(atom(), atom(), term()) -> brutal_kill | infinity | non_neg_integer().
-to_otp_shutdown(Class, Selector, Value) ->
-    case check_shutdown(Class, Selector, Value) of
-        {ok, Shutdown} -> Shutdown;
-        {error, Error} -> beamtalk_error:raise(Error)
-    end.
-
--spec check_shutdown(atom(), atom(), term()) ->
-    {ok, brutal_kill | infinity | non_neg_integer()} | {error, #beamtalk_error{}}.
-check_shutdown(_Class, _Selector, infinity) ->
-    {ok, infinity};
-check_shutdown(_Class, _Selector, brutalKill) ->
-    {ok, brutal_kill};
-check_shutdown(_Class, _Selector, Ms) when is_integer(Ms), Ms >= 0, Ms =< ?MAX_SHUTDOWN_MS ->
-    {ok, Ms};
-check_shutdown(Class, Selector, Other) ->
-    Error0 = beamtalk_error:new(
-        type_error,
-        Class,
-        Selector,
-        beamtalk_error:chars_to_binary(
-            io_lib:format(
-                "~ts must be an Integer from 0 to ~b (ms), #infinity or #brutalKill, got ~tp",
-                [Selector, ?MAX_SHUTDOWN_MS, Other]
-            )
-        )
-    ),
-    {error, beamtalk_error:with_details(Error0, #{value => Other})}.
-
--doc """
-Check a DynamicSupervisor's `childShutdown` (BT-3965): `nil` (use the
-child class's own spec value) or any value `check_shutdown/3` accepts.
-""".
--spec check_child_shutdown(atom(), term()) ->
-    {ok, nil | brutal_kill | infinity | non_neg_integer()} | {error, #beamtalk_error{}}.
-check_child_shutdown(_ClassName, nil) ->
-    {ok, nil};
-check_child_shutdown(ClassName, Value) ->
-    check_shutdown(ClassName, childShutdown, Value).
-
--spec apply_child_shutdown(map(), nil | brutal_kill | infinity | non_neg_integer()) -> map().
-apply_child_shutdown(Spec, nil) ->
-    Spec;
-apply_child_shutdown(#{type := supervisor, id := Id} = Spec, Shutdown) when
-    Shutdown =/= infinity
-->
-    %% OTP allows it, but a supervisor child with a finite shutdown can be
-    %% killed while it is still stopping its own children, which then exit
-    %% with `killed` instead of their own shutdown. Applied as configured.
-    ?LOG_WARNING("DynamicSupervisor childShutdown is not #infinity for a supervisor child", #{
-        child => Id,
-        child_shutdown => Shutdown,
-        domain => [beamtalk, runtime]
-    }),
-    Spec#{shutdown => Shutdown};
-apply_child_shutdown(Spec, Shutdown) ->
-    Spec#{shutdown => Shutdown}.
-
--doc """
 Run `Fun(ChildClass, ChildModule)` for a live DynamicSupervisor, with its
 child class resolved by `pool_child_class/1`. A dead supervisor is
 `stale_handle`; an unresolvable child class is returned as its error.
@@ -3730,7 +3280,9 @@ when
 slow_pool_child(Self, SupPid, Selector, Fun) ->
     case pool_child_class(Self) of
         {ok, {ChildClass, ChildModule}} ->
-            Fun(ChildClass, ChildModule, unknown, max_children(SupPid));
+            Fun(
+                ChildClass, ChildModule, unknown, beamtalk_supervisor_capacity:max_children(SupPid)
+            );
         {error, #beamtalk_error{} = Error} ->
             {error, Error#beamtalk_error{selector = Selector}}
     end.
@@ -3823,318 +3375,6 @@ child_class_from_children(SupClass, SupPid) ->
     end.
 
 -doc """
-Read the `maxChildren` limit `dynamic_init/3` stashed in the supervisor's
-process dictionary. A supervisor not started through `dynamic_init/3` (or one
-that has already exited) has no entry and is treated as unlimited; a dead
-supervisor is then reported as `stale_handle` by the `supervisor:start_child/2`
-call that follows.
-""".
--spec max_children(pid()) -> non_neg_integer() | infinity.
-max_children(SupPid) when is_pid(SupPid), node(SupPid) =:= node() ->
-    case erlang:process_info(SupPid, {dictionary, ?MAX_CHILDREN_KEY}) of
-        {{dictionary, ?MAX_CHILDREN_KEY}, Max} when is_integer(Max) -> Max;
-        _ -> infinity
-    end;
-max_children(_SupPid) ->
-    infinity.
-
--doc """
-Run `StartFun` (a `supervisor:start_child/2` call with `ExtraArgs`, plus a
-capacity token when the pool counts starts itself) honouring the
-DynamicSupervisor's `maxChildren` limit (BT-3964); otherwise return
-`{error, #beamtalk_error{kind = max_children}}` with the limit in
-`details` (`#{max_children => Max}`) so callers can back off and retry.
-
-On a pool started with enforcement state (BT-4068, the common case) the limit
-is checked atomically inside the supervisor process by
-`checked_dynamic_start/1..4`: one `supervisor:start_child/2` call per
-`startChild`, and concurrent starters can never overshoot the limit. The
-caller's only job is to hand the wrapper a fresh token so it can tell this
-manual start (refusable) from an OTP restart replay (never refused).
-Supervisor-driven restarts are never refused on either path.
-
-`StartFun` passes a `{error, {?MAX_CHILDREN_REFUSED, Max}}` refusal through
-untouched; it is mapped to the structured error here, the one place the
-`max_children` error is built.
-
-Rejections log at debug: hitting the cap is expected back-pressure under load,
-and logging every refused start would flood the log exactly when the system
-is busiest.
-""".
--spec with_child_capacity(
-    atom(), atom(), pid(), non_neg_integer() | infinity, [term()], fun(([term()]) -> Result)
-) ->
-    Result | {error, #beamtalk_error{}}
-when
-    Result :: term().
-with_child_capacity(SupClass, Selector, SupPid, MaxChildren, ExtraArgs, StartFun) ->
-    case MaxChildren of
-        infinity ->
-            StartFun(ExtraArgs);
-        Max ->
-            case child_capacity_state(SupPid) of
-                {ok, {Tid, _MonPid}} ->
-                    Token = {?MAX_CHILDREN_TOKEN, make_ref()},
-                    %% A dead pool's table is already gone; the
-                    %% `supervisor:start_child/2` below then exits and
-                    %% `with_live_supervisor/3` reports `stale_handle`.
-                    _ =
-                        try
-                            ets:insert(Tid, {{manual, Token}})
-                        catch
-                            _:_ -> ok
-                        end,
-                    case StartFun([Token | ExtraArgs]) of
-                        {error, {?MAX_CHILDREN_REFUSED, Limit}} ->
-                            max_children_error(SupClass, Selector, Limit);
-                        Result ->
-                            Result
-                    end;
-                undefined ->
-                    with_legacy_child_capacity(
-                        SupClass, Selector, SupPid, Max, ExtraArgs, StartFun
-                    )
-            end
-    end.
-
--doc """
-Caller-side `maxChildren` check (BT-3964) for pools without enforcement
-state: pools started before BT-4068, and test supervisors that only stash the
-limit. Check-then-act (`supervisor:count_children/1`, then start), so exact
-when one process starts children (e.g. a single acceptor), but concurrent
-starters racing past the check can briefly exceed the limit by up to the
-number of racers. Pools started through `dynamic_init/3` never take this
-path.
-
-The count is every dynamic child the supervisor tracks — what
-`countChildren/1` (Beamtalk `count`) reports plus any child whose restart is
-pending retry. `supervisor:count_children/1` is O(1) for `simple_one_for_one`.
-Supervisor-driven restarts are never refused.
-""".
--spec with_legacy_child_capacity(
-    atom(), atom(), pid(), non_neg_integer(), [term()], fun(([term()]) -> Result)
-) ->
-    Result | {error, #beamtalk_error{}}
-when
-    Result :: term().
-with_legacy_child_capacity(SupClass, Selector, SupPid, Max, ExtraArgs, StartFun) ->
-    Counts = supervisor:count_children(SupPid),
-    %% `workers` + `supervisors` is every dynamic child, including one
-    %% whose supervisor-driven restart is pending retry (not yet
-    %% `active`): counting it keeps a retry that later succeeds from
-    %% pushing the pool past Max.
-    Total =
-        proplists:get_value(workers, Counts, 0) +
-            proplists:get_value(supervisors, Counts, 0),
-    case Total >= Max of
-        false ->
-            StartFun(ExtraArgs);
-        true ->
-            max_children_error(SupClass, Selector, Max)
-    end.
-
--doc """
-The `{error, #beamtalk_error{kind = max_children}}` return for a start refused
-at the cap, on either enforcement path. The single place the error is built.
-""".
--spec max_children_error(atom(), atom(), non_neg_integer()) -> {error, #beamtalk_error{}}.
-max_children_error(SupClass, Selector, Max) ->
-    ?LOG_DEBUG("DynamicSupervisor at maxChildren", #{
-        supervisor => SupClass,
-        selector => Selector,
-        max_children => Max,
-        domain => [beamtalk, runtime]
-    }),
-    Error0 = beamtalk_error:new(
-        max_children,
-        SupClass,
-        Selector,
-        <<"Back off and retry, or free a slot with terminateChild:">>
-    ),
-    Error1 = beamtalk_error:with_message(
-        Error0,
-        beamtalk_error:chars_to_binary(
-            io_lib:format("DynamicSupervisor is at its maxChildren limit (~b)", [Max])
-        )
-    ),
-    {error, beamtalk_error:with_details(Error1, #{max_children => Max})}.
-
--doc """
-Read the BT-4068 enforcement state (`?MAX_CHILDREN_STATE_KEY`, `{Tid,
-MonPid}`) from a local pool's process dictionary. `undefined` for an uncapped
-pool, a pool started before BT-4068, a dead pool, or a remote pool (whose ETS
-table is unusable from here; remote pools stay unenforced, as BT-3964 left
-them — the wrapper admits their untokened starts the way it admits restarts).
-""".
--spec child_capacity_state(pid()) -> {ok, {ets:tid(), pid()}} | undefined.
-child_capacity_state(SupPid) when is_pid(SupPid), node(SupPid) =:= node() ->
-    case erlang:process_info(SupPid, {dictionary, ?MAX_CHILDREN_STATE_KEY}) of
-        {{dictionary, ?MAX_CHILDREN_STATE_KEY}, {Tid, MonPid}} ->
-            {ok, {Tid, MonPid}};
-        _ ->
-            undefined
-    end;
-child_capacity_state(_SupPid) ->
-    undefined.
-
--doc """
-Install a capped pool's BT-4068 enforcement state. Must run in the
-supervisor process (from `dynamic_init/3`): the counter table is owned by the
-caller, so it dies with the pool, and the monitor exits with it.
-
-Returns `none` for an uncapped pool, else `{Tid, MonPid}` for
-`?MAX_CHILDREN_STATE_KEY`. The table holds `{count, N}` plus transient
-`{{manual, Token}}` rows (one per in-flight manual start, consumed by the
-wrapper) and `{{child, Pid}}` rows (one per live child, taken exactly once
-when its slot is released). A token left behind by a caller that died
-mid-start is inert: references are never re-minted, and the table dies with
-the pool.
-
-`init/1` can run again in the same process (a supervisor's `code_change`
-re-runs it with the stored args): state that is still usable is reused, so a
-re-run neither leaks a table nor resets the count of live children. If only
-the monitor died, the table is reused with a fresh monitor — which cannot
-resync the already-running children from in here (a `which_children/1` call
-to self would deadlock), so their deaths stop releasing slots and the pool
-fails closed once full.
-""".
--spec init_child_capacity(infinity | non_neg_integer()) -> none | {ets:tid(), pid()}.
-init_child_capacity(infinity) ->
-    none;
-init_child_capacity(Max) when is_integer(Max), Max >= 0 ->
-    case get(?MAX_CHILDREN_STATE_KEY) of
-        {Tid, MonPid} ->
-            case {ets:info(Tid), is_pid(MonPid) andalso is_process_alive(MonPid)} of
-                {undefined, _} ->
-                    stop_child_capacity_monitor(MonPid),
-                    fresh_child_capacity();
-                {_, false} ->
-                    {Tid, spawn_monitor_for_capacity(Tid)};
-                {_, true} ->
-                    {Tid, MonPid}
-            end;
-        _ ->
-            fresh_child_capacity()
-    end.
-
--doc """
-Allocate a fresh counter table and monitor. The caller must be the pool
-itself (see `init_child_capacity/1`).
-""".
--spec fresh_child_capacity() -> {ets:tid(), pid()}.
-fresh_child_capacity() ->
-    Tid = ets:new(beamtalk_sup_child_capacity, [public, set, {write_concurrency, true}]),
-    true = ets:insert(Tid, {count, 0}),
-    {Tid, spawn_monitor_for_capacity(Tid)}.
-
--doc """
-Spawn the monitor that releases dead children's capacity slots. Unlinked:
-a link would deliver the monitor's exit to the pool, which must never die
-for it. The monitor watches the pool instead, and exits with it.
-""".
--spec spawn_monitor_for_capacity(ets:tid()) -> pid().
-spawn_monitor_for_capacity(Tid) ->
-    SupPid = self(),
-    spawn(fun() -> child_capacity_monitor(Tid, SupPid) end).
-
--spec stop_child_capacity_monitor(term()) -> ok.
-stop_child_capacity_monitor(MonPid) when is_pid(MonPid) ->
-    _ =
-        try
-            exit(MonPid, kill)
-        catch
-            _:_ -> ok
-        end,
-    ok;
-stop_child_capacity_monitor(_) ->
-    ok.
-
--doc """
-Rewrite a capped pool's `simple_one_for_one` child template so starts go
-through `checked_dynamic_start/1..4`. Uncapped pools (`none`) keep their
-template as is. Wraps any template MFA generically — worker
-(`start_dynamic_child/2,3,4`) or nested-supervisor
-(`start_dynamic_supervisor_child/2,3,4`) — since OTP appends the start's
-extra args after the single `Params` static arg either way.
-""".
--spec wrap_capped_child_spec(map(), non_neg_integer() | infinity, none | {ets:tid(), pid()}) ->
-    map().
-wrap_capped_child_spec(Spec, _Max, none) ->
-    Spec;
-wrap_capped_child_spec(#{start := {M, F, A}} = Spec, Max, {Tid, MonPid}) ->
-    Params = #{tid => Tid, max => Max, monitor => MonPid, m => M, f => F, args => A},
-    Spec#{start => {beamtalk_supervisor, checked_dynamic_start, [Params]}}.
-
--doc """
-Monitor loop for one capped pool's capacity table: monitor each started
-child, release its slot on death. Slot release goes through
-`release_child_slot/2`, shared with the synchronous `terminateChild:` path,
-so a death racing a terminate frees the slot exactly once whichever order
-they land in.
-""".
--spec child_capacity_monitor(ets:tid(), pid()) -> no_return().
-child_capacity_monitor(Tid, SupPid) ->
-    SupRef = monitor(process, SupPid),
-    child_capacity_monitor_loop(Tid, SupPid, SupRef).
-
--spec child_capacity_monitor_loop(ets:tid(), pid(), reference()) -> no_return().
-child_capacity_monitor_loop(Tid, SupPid, SupRef) ->
-    receive
-        {'DOWN', SupRef, process, SupPid, _Reason} ->
-            exit(normal);
-        {beamtalk_sup_child_started, Pid} when is_pid(Pid) ->
-            _ = monitor(process, Pid),
-            child_capacity_monitor_loop(Tid, SupPid, SupRef);
-        {'DOWN', _Ref, process, Pid, _Reason} ->
-            release_child_slot(Tid, Pid),
-            child_capacity_monitor_loop(Tid, SupPid, SupRef);
-        _Other ->
-            child_capacity_monitor_loop(Tid, SupPid, SupRef)
-    end.
-
--doc """
-Free one child's capacity slot, exactly once: `ets:take/2` removes the
-`{{child, Pid}}` membership row, and only the taker decrements. The
-decrement floors at zero so a double release (which the take already rules
-out) could never wedge the counter negative and fail the pool open.
-""".
--spec release_child_slot(ets:tid(), pid()) -> ok.
-release_child_slot(Tid, Pid) ->
-    Taken =
-        try
-            ets:take(Tid, {child, Pid})
-        catch
-            _:_ -> []
-        end,
-    case Taken of
-        [_] ->
-            _ =
-                try
-                    ets:update_counter(Tid, count, {2, -1, 0, 0})
-                catch
-                    _:_ -> ok
-                end,
-            ok;
-        _ ->
-            ok
-    end.
-
--doc """
-Synchronously free a terminated child's capacity slot so a `startChild`
-immediately after `terminateChild:` sees it (BT-4068): without this the
-monitor's asynchronous DOWN would leave the slot occupied for a moment and
-the next start would spuriously refuse. A no-op for uncapped pools, legacy
-pools, and remote pools (whose table is unusable from here; their DOWN path
-still releases the slot, asynchronously).
-""".
--spec release_child_capacity(pid(), pid()) -> ok.
-release_child_capacity(SupPid, ChildPid) ->
-    case child_capacity_state(SupPid) of
-        {ok, {Tid, _MonPid}} -> release_child_slot(Tid, ChildPid);
-        undefined -> ok
-    end.
-
--doc """
 Build the `{error, #beamtalk_error{kind = stale_handle}}` return for
 `with_live_supervisor/3`. Logs a warning and constructs the Beamtalk
 error with class and selector context.
@@ -4181,3 +3421,17 @@ ensure_root_table() ->
 -spec init_wait_timeout() -> non_neg_integer().
 init_wait_timeout() ->
     application:get_env(beamtalk_runtime, init_wait_timeout_ms, ?INIT_WAIT_TIMEOUT).
+
+-ifdef(TEST).
+%% TEST-only delegates: the unit tests reach these through this module.
+-spec check_max_children(atom(), term()) -> term().
+check_max_children(C, V) -> beamtalk_supervisor_capacity:check_max_children(C, V).
+-spec to_otp_shutdown(atom(), atom(), term()) -> term().
+to_otp_shutdown(C, S, V) -> beamtalk_supervisor_spec:to_otp_shutdown(C, S, V).
+-spec to_otp_strategy(atom()) -> atom().
+to_otp_strategy(S) -> beamtalk_supervisor_spec:to_otp_strategy(S).
+-spec init_child_capacity(infinity | non_neg_integer()) -> term().
+init_child_capacity(M) -> beamtalk_supervisor_capacity:init_child_capacity(M).
+-spec wrap_capped_child_spec(map(), non_neg_integer() | infinity, term()) -> map().
+wrap_capped_child_spec(S, M, C) -> beamtalk_supervisor_capacity:wrap_capped_child_spec(S, M, C).
+-endif.
