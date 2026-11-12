@@ -418,6 +418,8 @@ impl ClassHierarchy {
     /// predicate codegen's `is_shadowed_class` gate also reads.
     #[must_use]
     pub fn is_shadowed_class(&self, class_name: &str) -> bool {
+        // Cross-package state: whether another package declares `class_name`.
+        crate::semantic_analysis::consulted::record_name(class_name);
         self.shadowed_class_names.is_shadowed(class_name)
     }
 

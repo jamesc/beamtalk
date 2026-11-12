@@ -693,7 +693,9 @@ impl ProtocolRegistry {
                 }
             }
 
-            // Duplicate protocol definition
+            // Duplicate protocol definition (pre-loaded entries from other
+            // files are in the map, so this read is a consulted dependency)
+            crate::semantic_analysis::consulted::record_name(name);
             if self.protocols.contains_key(name) {
                 diagnostics.push(
                     Diagnostic::error(
@@ -712,6 +714,7 @@ impl ProtocolRegistry {
 
             // Validate extending clause
             if let Some(ref parent_name) = info.extending {
+                crate::semantic_analysis::consulted::record_name(parent_name);
                 if !self.protocols.contains_key(parent_name) {
                     diagnostics.push(
                         Diagnostic::error(

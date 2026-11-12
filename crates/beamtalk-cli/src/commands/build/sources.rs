@@ -146,8 +146,22 @@ pub(crate) fn compile_file(
     ctx: &CompileContext<'_>,
     cached_ast: Option<CachedAst>,
 ) -> Result<Vec<beamtalk_core::source_analysis::Diagnostic>> {
-    compile_file_with_surface(path, module_name, core_file, options, ctx, cached_ast)
-        .map(|(diags, _surface)| diags)
+    // The surface only feeds a debug log in phase 1, so skip the recorder's
+    // bookkeeping unless debug logging is on.
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        return compile_file_with_surface(path, module_name, core_file, options, ctx, cached_ast)
+            .map(|(diags, _surface)| diags);
+    }
+    debug!("Compiling {path}");
+    compile_source_with_bindings(
+        path,
+        module_name,
+        core_file,
+        options,
+        &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
+        ctx,
+        cached_ast,
+    )
 }
 
 /// [`compile_file`], also returning the [`ConsultedSurface`] the file's

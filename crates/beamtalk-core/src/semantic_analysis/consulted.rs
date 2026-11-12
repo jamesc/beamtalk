@@ -25,6 +25,11 @@
 //! recording. Inside the stores, registration and cycle-check passes and the
 //! `ClassMap::*_unrecorded` construction helpers read the raw maps on purpose.
 //!
+//! Reads of the protocol / alias registries made while *registering* a file
+//! (duplicate and unknown-parent checks) and `is_shadowed_class` are recorded
+//! by hand, since they produce the current file's diagnostics from other
+//! files' entries.
+//!
 //! Known over-recording for phase 2 to narrow: hierarchy construction inside a
 //! file's scope (for example `add_external_superclasses`, which reads every
 //! name of the cross-file superclass index) records those names, and often a
@@ -117,6 +122,12 @@ impl Drop for ConsultedScope {
             let _ = self.restore();
         }
     }
+}
+
+/// Whether a scope is currently recording on this thread.
+#[must_use]
+pub fn is_recording() -> bool {
+    ACTIVE.with(Cell::get)
 }
 
 /// Record a by-name lookup. A flag check when no scope is installed.

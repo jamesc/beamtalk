@@ -80,7 +80,8 @@ fn file_records_the_cross_file_class_it_calls_into() {
 fn recorder_is_not_left_installed_after_a_file_compiles() {
     let files = [("a.bt", "Object subclass: A\n  value -> Integer => 1\n")];
     let _ = consulted_by(&files, "a.bt");
-    let scope = beamtalk_core::semantic_analysis::consulted::ConsultedScope::begin();
-    let leaked = scope.finish();
-    assert!(leaked.is_empty(), "{leaked:?}");
+    assert!(
+        !beamtalk_core::semantic_analysis::consulted::is_recording(),
+        "a scope was left installed after the compile"
+    );
 }

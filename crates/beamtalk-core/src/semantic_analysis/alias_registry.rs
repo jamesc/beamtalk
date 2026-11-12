@@ -207,7 +207,9 @@ impl AliasRegistry {
                 continue;
             }
 
-            // Duplicate alias definition.
+            // Duplicate alias definition (may collide with a pre-loaded alias
+            // from another file, so this read is a consulted dependency).
+            crate::semantic_analysis::consulted::record_name(name);
             if self.aliases.contains_key(name) {
                 diagnostics.push(
                     Diagnostic::error(
