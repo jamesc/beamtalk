@@ -1125,6 +1125,30 @@ mod tests {
         assert!(problems.is_empty(), "{}", problems.join("\n"));
     }
 
+    /// Keeps `every_builder_request()` honest: it must exercise every public
+    /// constructor, so a new builder cannot skip the op-table check. Builders
+    /// that only decorate another request are not counted.
+    #[test]
+    fn conformance_list_covers_every_public_builder() {
+        let src = include_str!("request.rs");
+        let impl_start = src.find("impl RequestBuilder {").expect("impl block");
+        let impl_end = src.find("#[cfg(test)]").expect("test module");
+        let builders = src[impl_start..impl_end]
+            .lines()
+            .filter(|l| l.trim_start().starts_with("pub fn "))
+            .count();
+        // `with_package_name` decorates a request instead of building one.
+        let decorators = 1;
+        // The list holds one request per constructor, plus a second
+        // `nav_query` shape; `with_package_name` wraps a request in the list.
+        let in_list = every_builder_request().len() - 1;
+        assert_eq!(
+            builders - decorators,
+            in_list,
+            "add every new RequestBuilder constructor to every_builder_request()"
+        );
+    }
+
     #[test]
     fn removed_ops_have_no_builder() {
         // `info` was a builder for an op the server never had; `test` ignores a

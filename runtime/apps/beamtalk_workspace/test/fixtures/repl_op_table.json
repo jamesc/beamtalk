@@ -44,10 +44,10 @@
   {"capability":"always","handler":"beamtalk_repl_ops_browse","op":"browse-method-source","optional":[],"params":["class","side","selector"]},
   {"capability":"always","handler":"beamtalk_repl_ops_browse","op":"browse-class-definition","optional":[],"params":["class"]},
   {"capability":"always","handler":"beamtalk_repl_ops_browse","op":"browse-categories","optional":[],"params":["class"]},
-  {"capability":"always","handler":"beamtalk_repl_ops_browse","op":"browse-native-source","optional":[],"params":["class","module"]},
+  {"capability":"always","handler":"beamtalk_repl_ops_browse","notes":"One of `class` / `module` is required.","op":"browse-native-source","optional":["class","module","selector"],"params":[]},
   {"capability":"always","handler":"beamtalk_repl_ops_browse","op":"browse-native-modules","optional":[],"params":[]},
   {"capability":"always","handler":"beamtalk_repl_ops_browse","op":"browse-type-aliases","optional":[],"params":[]},
-  {"capability":"always","handler":"beamtalk_repl_ops_browse","op":"browse-alias-source","optional":[],"params":["name","package"]},
+  {"capability":"always","handler":"beamtalk_repl_ops_browse","op":"browse-alias-source","optional":["package"],"params":["name"]},
   {"capability":"always","handler":"beamtalk_ws_handler","op":"subscribe-logs","optional":["level"],"params":[]},
   {"capability":"always","handler":"beamtalk_ws_handler","op":"unsubscribe-logs","optional":[],"params":[]}
 ]

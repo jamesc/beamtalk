@@ -882,10 +882,10 @@ this table drifts from the fixture. To refresh it after editing the op table:
 | `browse-method-source` | `class`, `side`, `selector` | — | `always` | `beamtalk_repl_ops_browse` |
 | `browse-class-definition` | `class` | — | `always` | `beamtalk_repl_ops_browse` |
 | `browse-categories` | `class` | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-native-source` | `class`, `module` | — | `always` | `beamtalk_repl_ops_browse` |
+| `browse-native-source` | — | `class`, `module`, `selector` | `always` | `beamtalk_repl_ops_browse` |
 | `browse-native-modules` | — | — | `always` | `beamtalk_repl_ops_browse` |
 | `browse-type-aliases` | — | — | `always` | `beamtalk_repl_ops_browse` |
-| `browse-alias-source` | `name`, `package` | — | `always` | `beamtalk_repl_ops_browse` |
+| `browse-alias-source` | `name` | `package` | `always` | `beamtalk_repl_ops_browse` |
 | `subscribe-logs` | — | `level` | `always` | `beamtalk_ws_handler` |
 | `unsubscribe-logs` | — | — | `always` | `beamtalk_ws_handler` |
 <!-- op-table:end -->

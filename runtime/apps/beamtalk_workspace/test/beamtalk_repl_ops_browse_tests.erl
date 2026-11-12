@@ -80,7 +80,7 @@ describe_ops_has_native_source_key_test() ->
     Ops = beamtalk_repl_ops_browse:describe_ops(),
     ?assert(maps:is_key(<<"browse-native-source">>, Ops)),
     #{<<"browse-native-source">> := Info} = Ops,
-    ?assert(lists:member(<<"class">>, maps:get(<<"params">>, Info))).
+    ?assert(lists:member(<<"class">>, maps:get(<<"optional">>, Info))).
 
 %% The `handle_call` clause line-map: quoted-atom and bare-atom selectors are
 %% captured with their 1-based line; generic clauses (uppercase var, catch-all)
@@ -381,7 +381,7 @@ describe_ops_has_native_modules_key_test() ->
     ?assertEqual([], maps:get(<<"params">>, Info)),
     %% browse-native-source advertises the `module` alternative key.
     #{<<"browse-native-source">> := NS} = Ops,
-    ?assert(lists:member(<<"module">>, maps:get(<<"params">>, NS))).
+    ?assert(lists:member(<<"module">>, maps:get(<<"optional">>, NS))).
 
 %% The enumeration: under the EUnit harness the stdlib package is loaded, so
 %% `browse-native-modules` returns the stdlib's hand-written native modules.
@@ -710,7 +710,8 @@ describe_ops_has_alias_source_key_test() ->
     Ops = beamtalk_repl_ops_browse:describe_ops(),
     ?assert(maps:is_key(<<"browse-alias-source">>, Ops)),
     #{<<"browse-alias-source">> := Info} = Ops,
-    ?assertEqual([<<"name">>, <<"package">>], maps:get(<<"params">>, Info)).
+    ?assertEqual([<<"name">>], maps:get(<<"params">>, Info)),
+    ?assertEqual([<<"package">>], maps:get(<<"optional">>, Info)).
 
 %% An unknown alias name is a structured not-found error, mirroring
 %% `browse-native-source`'s unknown-class path.

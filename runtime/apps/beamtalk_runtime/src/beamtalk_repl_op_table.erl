@@ -235,13 +235,14 @@ ops() ->
         e(<<"browse-categories">>, beamtalk_repl_ops_browse, [<<"class">>], [], always),
         %% One of `class` / `module` is required (`module` addresses a standalone
         %% native module with no backing class); `selector` narrows to a
-        %% `handle_call` clause.
+        %% `handle_call` clause. The one-of rule is enforced by the handler.
         e(
             <<"browse-native-source">>,
             beamtalk_repl_ops_browse,
-            [<<"class">>, <<"module">>],
             [],
-            always
+            [<<"class">>, <<"module">>, <<"selector">>],
+            always,
+            <<"One of `class` / `module` is required.">>
         ),
         e(<<"browse-native-modules">>, beamtalk_repl_ops_browse, [], [], always),
         %% ADR 0108 Phase 8: type-alias enumeration and source view. `package`
@@ -250,8 +251,8 @@ ops() ->
         e(
             <<"browse-alias-source">>,
             beamtalk_repl_ops_browse,
-            [<<"name">>, <<"package">>],
-            [],
+            [<<"name">>],
+            [<<"package">>],
             always
         ),
         %% --- Log streaming ---
