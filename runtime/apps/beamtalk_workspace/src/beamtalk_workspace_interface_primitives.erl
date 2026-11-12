@@ -247,7 +247,7 @@ reference rewrite — every existing call site still names the class
 correctly, because the class's own identity never changes).
 
 Delegates classification, span resolution, and ChangeLog bookkeeping to
-`beamtalk_repl_loader:move_class/2` (via `beamtalk_repl_eval:move_class/2`)
+`beamtalk_repl_loader_rewrite:move_class/2` (via `beamtalk_repl_eval:move_class/2`)
 — see that function's doc for the full refusal table (`no_source_file` for a
 dynamic class, stdlib/dependency refusal mirroring `renameTo:`) and for why
 this never needs to reinstall or re-resolve a class object: the class's own
@@ -1566,7 +1566,7 @@ dependencies() ->
 Perform an incremental project sync from the current working directory.
 
 Called via `(Erlang beamtalk_workspace_interface_primitives) sync`.
-Delegates to `beamtalk_repl_ops_load:sync_project/2` which handles
+Delegates to `beamtalk_workspace_project_sync:sync_project/2` which handles
 incremental compilation (mtime tracking, native .erl files, dependency
 ordering) and returns a result map.
 
@@ -1581,7 +1581,7 @@ Returns a Dictionary with keys:
 -spec sync() -> map().
 sync() ->
     ok = beamtalk_capability:require(sync, 'Workspace', <<"Workspace sync">>),
-    case beamtalk_repl_ops_load:sync_project(".", #{}) of
+    case beamtalk_workspace_project_sync:sync_project(".", #{}) of
         {ok, Result} ->
             #{
                 summary => maps:get(summary, Result),
@@ -1831,8 +1831,8 @@ handle_load(Path) when is_list(Path) ->
     %% so callers see the FFI break at the `load:` boundary rather than a
     %% silent log + downstream "function undefined" at runtime.
     case
-        beamtalk_repl_ops_load:maybe_recompile_native_deps(
-            Path, beamtalk_repl_ops_load:find_project_root(Path)
+        beamtalk_workspace_project_sync:maybe_recompile_native_deps(
+            Path, beamtalk_workspace_project_sync:find_project_root(Path)
         )
     of
         {ok, _Count} ->

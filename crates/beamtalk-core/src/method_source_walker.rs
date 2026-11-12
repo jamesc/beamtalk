@@ -498,7 +498,7 @@ fn selector_line(selector: &MessageSelector, fallback: Span, source: &str) -> u3
 /// One rewrite target within a single matched self/super send of the target
 /// selector: for a keyword selector, one entry per keyword part (each
 /// keyword token can be renamed independently — the multi-site rewrite
-/// mechanism in `beamtalk_repl_loader:rewrite_sites/2` already handles
+/// mechanism in `beamtalk_repl_loader_rewrite:rewrite_sites/2` already handles
 /// multiple spans per file); for unary/binary, one entry covering the bare
 /// selector token.
 #[derive(Debug, Clone, PartialEq, Eq)]
