@@ -6,7 +6,7 @@
 //! **DDD Context:** Compilation — Code Generation
 //!
 //! Generates method dispatch case clauses, method body with state threading
-//! and reply tuples for actor (gen_server) methods.
+//! and reply tuples for actor (`gen_server`) methods.
 
 use super::super::method_frame::{MethodBoundary, MethodFrame};
 use super::super::sequencing::PrecompiledScope;

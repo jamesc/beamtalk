@@ -100,7 +100,10 @@ const CEILINGS: &[(&str, usize)] = &[
         "beamtalk-codegen/src/core_erlang/blocks/tier2_value_calls.rs",
         3,
     ),
-    ("beamtalk-codegen/src/core_erlang/class_method_codegen.rs", 2),
+    (
+        "beamtalk-codegen/src/core_erlang/class_method_codegen.rs",
+        2,
+    ),
     (
         "beamtalk-codegen/src/core_erlang/control_flow/analysis.rs",
         6,
