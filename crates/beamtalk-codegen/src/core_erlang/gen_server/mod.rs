@@ -20,7 +20,11 @@
 //! - [`callbacks`] — OTP `gen_server` callbacks (`init`, `handle_cast`, etc.)
 //! - [`dispatch`] — Method routing and lookup
 //! - [`state`] — State field initialization and inheritance
-//! - [`methods`] — Method body code generation and class registration
+//! - [`methods`] — Actor method body code generation and dispatch case clauses
+//!
+//! Class-method lowering is shared with value types and lives outside this
+//! module, in `class_method_codegen`; Tier 2 value-call helpers live in
+//! `blocks::tier2_value_calls`.
 
 mod callbacks;
 mod dispatch;

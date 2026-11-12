@@ -454,7 +454,7 @@ fn test_class_method_ensure_last_position_and_assign_rhs_thread_local() {
     // `lower_threaded_last` / `emit_threaded_assign_rhs` are shared
     // by the value-type instance-method boundary AND the class-method
     // boundary (`try_generate_class_method_threaded_last` /
-    // `generate_class_method_local_var_binding`, gen_server/methods.rs) —
+    // `generate_class_method_local_var_binding`, class_method_codegen.rs) —
     // `is_exception_construct_with_vt_local_threading` gates on
     // `in_class_method() || ValueType`. So this fix also closes the
     // identical gap for a class-method `on:do:`/`ensure:` that mutates a
