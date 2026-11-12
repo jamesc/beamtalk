@@ -637,7 +637,7 @@ entry itself is appended (a site's `source_ref`/`prev_source_ref` must
 already be a written ref by the time `append/1` sees it — see that
 function's doc).
 """.
--spec emit_rewrite_change_entry(map(), beamtalk_repl_loader:rewrite_result()) -> ok.
+-spec emit_rewrite_change_entry(map(), beamtalk_repl_loader_rewrite:rewrite_result()) -> ok.
 emit_rewrite_change_entry(Spec, RewriteResult) ->
     best_effort_changelog_append(
         "Failed to emit ChangeLog entry for multi-site rewrite (rewrite still installed)",
@@ -645,7 +645,7 @@ emit_rewrite_change_entry(Spec, RewriteResult) ->
         fun() -> rewrite_change_entry(Spec, RewriteResult) end
     ).
 
--spec rewrite_change_entry(map(), beamtalk_repl_loader:rewrite_result()) -> map().
+-spec rewrite_change_entry(map(), beamtalk_repl_loader_rewrite:rewrite_result()) -> map().
 rewrite_change_entry(Spec, #{definition := Definition, sites := Sites}) ->
     #{
         kind := Kind,
@@ -684,7 +684,7 @@ rewrite_change_entry(Spec, #{definition := Definition, sites := Sites}) ->
 %% regardless of what its other sites look like. Reuses `classify_source_file/1`
 %% (already exported for exactly this kind of reuse — see its own callers)
 %% rather than re-deriving stdlib/dependency/project classification.
--spec classify_installed_site(beamtalk_repl_loader:installed_rewrite_site() | undefined) ->
+-spec classify_installed_site(beamtalk_repl_loader_rewrite:installed_rewrite_site() | undefined) ->
     flushable | {not_flushable, binary()}.
 classify_installed_site(undefined) ->
     {not_flushable, <<"dynamic">>};
@@ -696,7 +696,7 @@ classify_installed_site(#{source_file := SourceFile}) ->
         {not_flushable, Reason} -> {not_flushable, Reason}
     end.
 
--spec site_append_input(beamtalk_repl_loader:installed_rewrite_site() | undefined) ->
+-spec site_append_input(beamtalk_repl_loader_rewrite:installed_rewrite_site() | undefined) ->
     beamtalk_workspace_changelog:site() | undefined.
 site_append_input(undefined) ->
     undefined;
