@@ -217,6 +217,12 @@ supervised_start_test_() ->
         ]
     end}.
 
+%% Wait until `init/1` of a (re)started class has written the pid -> name row.
+wait_class_pid_row(Pid) ->
+    beamtalk_test_wait:until(fun() ->
+        beamtalk_class_registry:class_name_for_pid(Pid) =/= not_found
+    end).
+
 eager_restart_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
@@ -246,6 +252,10 @@ eager_restart_test_() ->
                         %% the restarted process too.
                         ?assertEqual(NewPid, erlang:whereis('beamtalk_class_SupTest3236C')),
                         %% Re-registered in the pid reverse index and pg group.
+                        %% gen_server registers the name before init/1 runs, so
+                        %% the new pid is visible by name before init/1 has
+                        %% written its reverse-index row: wait for the row.
+                        ?assertEqual(ok, wait_class_pid_row(NewPid)),
                         ?assertEqual(
                             {ok, 'SupTest3236C'},
                             beamtalk_class_registry:class_name_for_pid(NewPid)
@@ -296,6 +306,10 @@ callback_crash_restart_test_() ->
                         end)
                     ),
                     NewPid = beamtalk_class_registry:whereis_class(Name),
+                    %% The name is registered before init/1 runs (gen_server), so
+                    %% the new pid is visible before init/1 has written its
+                    %% reverse-index row: wait for the row (BT-4745).
+                    ?assertEqual(ok, wait_class_pid_row(NewPid)),
                     ?assertEqual({ok, Module}, beamtalk_class_metadata:lookup_module(Name)),
                     ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(NewPid)),
                     %% `liveClassName/1` of a class object taken before the crash.
