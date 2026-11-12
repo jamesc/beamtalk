@@ -1162,3 +1162,99 @@ from_iolist_bare_binary_invalid_utf8_raises_test() ->
         },
         beamtalk_string:from_iolist(<<255, 254>>)
     ).
+
+%%% ============================================================================
+%%% BT-4761: byte-level fast paths agree with the grapheme paths
+%%% ============================================================================
+
+%% Oracles: the pre-BT-4761 grapheme implementations.
+oracle_index_of(_Str, <<>>) ->
+    nil;
+oracle_index_of(Str, Sub) ->
+    oracle_index_of(string:to_graphemes(Str), string:to_graphemes(Sub), 1).
+oracle_index_of([], _, _) ->
+    nil;
+oracle_index_of(Gs, Sub, I) ->
+    case lists:prefix(Sub, Gs) of
+        true -> I;
+        false -> oracle_index_of(tl(Gs), Sub, I + 1)
+    end.
+
+oracle_drop(Str, N) ->
+    Gs = string:to_graphemes(Str),
+    unicode:characters_to_binary(lists:nthtail(min(N, length(Gs)), Gs)).
+
+oracle_take(Str, N) ->
+    unicode:characters_to_binary(lists:sublist(string:to_graphemes(Str), N)).
+
+%% Alphabet mixing ASCII, CR/LF, multi-byte, combining marks, ZWJ, emoji.
+rand_str(Alphabet, Max) ->
+    Len = rand:uniform(Max + 1) - 1,
+    unicode:characters_to_binary(
+        [lists:nth(rand:uniform(length(Alphabet)), Alphabet) || _ <- lists:seq(1, Len)]
+    ).
+
+ascii_alphabet() -> "abcab \t\n:/-0Z".
+mixed_alphabet() ->
+    "ab \r\n" ++ [16#E9, 16#301, 16#200D, 16#1F468, 16#1F469, 16#1F3FD, 16#4E2D, 16#1F44B].
+
+fast_paths_property_test_() ->
+    {timeout, 60, fun() ->
+        _ = rand:seed(exsss, {4761, 4761, 4761}),
+        [
+            begin
+                A =
+                    case rand:uniform(2) of
+                        1 -> ascii_alphabet();
+                        2 -> mixed_alphabet()
+                    end,
+                Str = rand_str(A, 12),
+                %% Substrings: sometimes sliced from Str (guaranteed hits), else random.
+                Sub =
+                    case rand:uniform(2) of
+                        1 when byte_size(Str) > 0 ->
+                            %% Slice by code point: may cut a grapheme, never a code point.
+                            Cps = unicode:characters_to_list(Str),
+                            P = rand:uniform(length(Cps)) - 1,
+                            L = rand:uniform(length(Cps) - P),
+                            unicode:characters_to_binary(lists:sublist(Cps, P + 1, L));
+                        _ ->
+                            rand_str(A, 3)
+                    end,
+                N = rand:uniform(16) - 3,
+                ?assertEqual(
+                    oracle_index_of(Str, Sub),
+                    beamtalk_string:index_of(Str, Sub),
+                    {index_of, Str, Sub}
+                ),
+                ?assertEqual(
+                    {beamtalk_string, oracle_drop(Str, max(N, 0))},
+                    beamtalk_string:drop(Str, N),
+                    {drop, Str, N}
+                ),
+                ?assertEqual(
+                    {beamtalk_string, oracle_take(Str, max(N, 0))},
+                    beamtalk_string:take(Str, N),
+                    {take, Str, N}
+                )
+            end
+         || _ <- lists:seq(1, 5000)
+        ]
+    end}.
+
+fast_paths_edge_cases_test() ->
+    %% CRLF is one grapheme: bare \n / \r never match inside it.
+    ?assertEqual(nil, beamtalk_string:index_of(<<"a\r\nb">>, <<"\n">>)),
+    ?assertEqual(nil, beamtalk_string:index_of(<<"a\r\nb">>, <<"\r">>)),
+    ?assertEqual(2, beamtalk_string:index_of(<<"a\r\nb">>, <<"\r\n">>)),
+    ?assertEqual(3, beamtalk_string:index_of(<<"a\r\nb">>, <<"b">>)),
+    %% Combining mark right after a match joins the last matched grapheme.
+    ?assertEqual(nil, beamtalk_string:index_of(<<"ae\x{301}"/utf8>>, <<"ae">>)),
+    %% ZWJ sequence stays one grapheme.
+    Family = <<"\x{1F468}\x{200D}\x{1F469}"/utf8>>,
+    ?assertEqual(
+        {beamtalk_string, <<"b">>}, beamtalk_string:drop(<<Family/binary, "b">>, 1)
+    ),
+    ?assertEqual({beamtalk_string, <<"ab">>}, beamtalk_string:drop(<<"a\r\nab">>, 2)),
+    ?assertEqual({beamtalk_string, <<"abc">>}, beamtalk_string:take(<<"abcdef">>, 3)),
+    ?assertEqual({beamtalk_string, <<"abcdef">>}, beamtalk_string:take(<<"abcdef">>, 99)).

@@ -306,9 +306,19 @@ index_of(_Str, {beamtalk_string, <<>>}) ->
 index_of({beamtalk_string, Str}, {beamtalk_string, Sub}) when
     is_binary(Str), is_binary(Sub)
 ->
-    StrGs = string:to_graphemes(Str),
-    SubGs = string:to_graphemes(Sub),
-    index_of_graphemes(StrGs, SubGs, 1);
+    case byte_per_grapheme(Str) andalso byte_per_grapheme(Sub) of
+        true ->
+            %% BT-4761: every byte is its own grapheme, so the byte offset is the
+            %% grapheme index and no grapheme lists are built.
+            case binary:match(Str, Sub) of
+                nomatch -> nil;
+                {Pos, _Len} -> Pos + 1
+            end;
+        false ->
+            StrGs = string:to_graphemes(Str),
+            SubGs = string:to_graphemes(Sub),
+            index_of_graphemes(StrGs, SubGs, 1)
+    end;
 index_of(S, Sub) when is_binary(S), is_binary(Sub) ->
     index_of({beamtalk_string, S}, {beamtalk_string, Sub});
 index_of({beamtalk_string, _} = S, Sub) when is_binary(Sub) -> index_of(S, {beamtalk_string, Sub});
@@ -502,12 +512,18 @@ words(Bin) ->
 -spec take(t() | binary(), integer()) -> t().
 take(_Str, N) when is_integer(N), N =< 0 ->
     beamtalk_primitive:string_from_binary(<<>>);
-take({beamtalk_string, _} = Str, N) when is_integer(N) ->
-    Graphemes = as_list(Str),
-    Taken = lists:sublist(Graphemes, N),
-    beamtalk_primitive:string_from_binary(
-        iolist_to_binary([join_element(E, 'take:') || E <- Taken])
-    );
+take({beamtalk_string, Bin} = Str, N) when is_integer(N) ->
+    case byte_per_grapheme(Bin) of
+        true ->
+            %% BT-4761: byte slice, no grapheme list.
+            beamtalk_primitive:string_from_binary(binary:part(Bin, 0, min(N, byte_size(Bin))));
+        false ->
+            Graphemes = as_list(Str),
+            Taken = lists:sublist(Graphemes, N),
+            beamtalk_primitive:string_from_binary(
+                iolist_to_binary([join_element(E, 'take:') || E <- Taken])
+            )
+    end;
 take(Bin, N) when is_binary(Bin) -> take({beamtalk_string, Bin}, N);
 take(Str, _) ->
     raise_not_string('take:', Str).
@@ -515,12 +531,19 @@ take(Str, _) ->
 -doc "Skip first N graphemes.".
 -spec drop(t() | binary(), integer()) -> t().
 drop({beamtalk_string, _} = Str, N) when is_integer(N), N =< 0 -> Str;
-drop({beamtalk_string, _} = Str, N) when is_integer(N) ->
-    Graphemes = as_list(Str),
-    Dropped = lists:nthtail(min(N, length(Graphemes)), Graphemes),
-    beamtalk_primitive:string_from_binary(
-        iolist_to_binary([join_element(E, 'drop:') || E <- Dropped])
-    );
+drop({beamtalk_string, Bin} = Str, N) when is_integer(N) ->
+    case byte_per_grapheme(Bin) of
+        true ->
+            %% BT-4761: byte slice, no grapheme list.
+            Skip = min(N, byte_size(Bin)),
+            beamtalk_primitive:string_from_binary(binary:part(Bin, Skip, byte_size(Bin) - Skip));
+        false ->
+            Graphemes = as_list(Str),
+            Dropped = lists:nthtail(min(N, length(Graphemes)), Graphemes),
+            beamtalk_primitive:string_from_binary(
+                iolist_to_binary([join_element(E, 'drop:') || E <- Dropped])
+            )
+    end;
 drop(Bin, N) when is_binary(Bin) -> drop({beamtalk_string, Bin}, N);
 drop(Str, _) ->
     raise_not_string('drop:', Str).
@@ -822,6 +845,19 @@ raise_url_decode_error(Hint) ->
     Error1 = beamtalk_error:with_selector(Error0, 'urlDecoded'),
     Error2 = beamtalk_error:with_hint(Error1, Hint),
     beamtalk_error:raise(Error2).
+
+-doc """
+True when every byte of the binary is a whole grapheme cluster on its own (BT-4761).
+
+That holds for pure ASCII with no carriage return: UTF-8 multi-byte text can
+carry combining marks / ZWJ sequences, and `\r\n` is a single grapheme. Such
+binaries take the byte-level fast paths; anything else uses the grapheme walk.
+Single O(n) pass, no allocation.
+""".
+-spec byte_per_grapheme(binary()) -> boolean().
+byte_per_grapheme(<<C, Rest/binary>>) when C < 128, C =/= $\r -> byte_per_grapheme(Rest);
+byte_per_grapheme(<<>>) -> true;
+byte_per_grapheme(_) -> false.
 
 -doc "Grapheme-aware substring search.".
 -spec index_of_graphemes([string:grapheme_cluster()], [string:grapheme_cluster()], integer()) ->
