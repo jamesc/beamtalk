@@ -116,30 +116,24 @@ impl CoreErlangGenerator {
                 // "result" value, so signal open-with-no-value rather than naming one.
                 self.loop_mode.direct_params_do_open_chain = true;
                 docvec![
-                    " in let ",
-                    leaf::var(fold_result.clone()),
-                    " = call 'lists':'foldl'(",
-                    leaf::var(lambda_var),
-                    ", ",
-                    init_tuple_doc,
-                    ", ",
-                    leaf::var(values_var),
-                    ") in ",
+                    ThreadingPlan::foldl_call_doc(
+                        &lambda_var,
+                        init_tuple_doc,
+                        &values_var,
+                        &fold_result
+                    ),
                     extract_doc,
                 ]
             } else {
                 let tail =
                     plan.closed_fold_tail_doc(self, extract_doc, guarded_op_bracket, discard);
                 docvec![
-                    " in let ",
-                    leaf::var(fold_result.clone()),
-                    " = call 'lists':'foldl'(",
-                    leaf::var(lambda_var),
-                    ", ",
-                    init_tuple_doc,
-                    ", ",
-                    leaf::var(values_var),
-                    ") in ",
+                    ThreadingPlan::foldl_call_doc(
+                        &lambda_var,
+                        init_tuple_doc,
+                        &values_var,
+                        &fold_result
+                    ),
                     tail,
                 ]
             };
@@ -352,30 +346,24 @@ impl CoreErlangGenerator {
                 // "result" value, so signal open-with-no-value rather than naming one.
                 self.loop_mode.direct_params_do_open_chain = true;
                 docvec![
-                    " in let ",
-                    leaf::var(fold_result.clone()),
-                    " = call 'lists':'foldl'(",
-                    leaf::var(lambda_var),
-                    ", ",
-                    init_tuple_doc,
-                    ", ",
-                    leaf::var(pairs_var),
-                    ") in ",
+                    ThreadingPlan::foldl_call_doc(
+                        &lambda_var,
+                        init_tuple_doc,
+                        &pairs_var,
+                        &fold_result
+                    ),
                     extract_doc,
                 ]
             } else {
                 let tail =
                     plan.closed_fold_tail_doc(self, extract_doc, guarded_op_bracket, discard);
                 docvec![
-                    " in let ",
-                    leaf::var(fold_result.clone()),
-                    " = call 'lists':'foldl'(",
-                    leaf::var(lambda_var),
-                    ", ",
-                    init_tuple_doc,
-                    ", ",
-                    leaf::var(pairs_var),
-                    ") in ",
+                    ThreadingPlan::foldl_call_doc(
+                        &lambda_var,
+                        init_tuple_doc,
+                        &pairs_var,
+                        &fold_result
+                    ),
                     tail,
                 ]
             };

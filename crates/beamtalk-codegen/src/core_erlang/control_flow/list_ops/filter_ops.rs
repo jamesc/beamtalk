@@ -189,15 +189,13 @@ impl CoreErlangGenerator {
             // Re-pack into StateAcc for outer method-body `maps:get` extraction.
             let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             docs.push(docvec![
-                " in let ",
-                leaf::var(fold_result.clone()),
-                " = call 'lists':'foldl'(",
-                leaf::var(lambda_var),
-                ", ",
-                init_tuple_doc,
-                ", ",
-                leaf::var(safe_list_var),
-                ") in let ",
+                ThreadingPlan::foldl_call_doc(
+                    &lambda_var,
+                    init_tuple_doc,
+                    &safe_list_var,
+                    &fold_result
+                ),
+                "let ",
                 leaf::var(rev_list.clone()),
                 " = call 'erlang':'element'(1, ",
                 leaf::var(fold_result),

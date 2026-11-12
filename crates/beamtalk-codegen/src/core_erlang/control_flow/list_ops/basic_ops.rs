@@ -127,15 +127,12 @@ impl CoreErlangGenerator {
                 // instead of referencing a nonexistent variable.
                 self.loop_mode.direct_params_do_open_chain = true;
                 docvec![
-                    " in let ",
-                    leaf::var(fold_result.clone()),
-                    " = call 'lists':'foldl'(",
-                    leaf::var(lambda_var),
-                    ", ",
-                    init_tuple_doc,
-                    ", ",
-                    leaf::var(safe_list_var),
-                    ") in ",
+                    ThreadingPlan::foldl_call_doc(
+                        &lambda_var,
+                        init_tuple_doc,
+                        &safe_list_var,
+                        &fold_result
+                    ),
                     extract_doc,
                 ]
             } else {
@@ -144,15 +141,12 @@ impl CoreErlangGenerator {
                 let tail =
                     plan.closed_fold_tail_doc(self, extract_doc, guarded_op_bracket, discard);
                 docvec![
-                    " in let ",
-                    leaf::var(fold_result.clone()),
-                    " = call 'lists':'foldl'(",
-                    leaf::var(lambda_var),
-                    ", ",
-                    init_tuple_doc,
-                    ", ",
-                    leaf::var(safe_list_var),
-                    ") in ",
+                    ThreadingPlan::foldl_call_doc(
+                        &lambda_var,
+                        init_tuple_doc,
+                        &safe_list_var,
+                        &fold_result
+                    ),
                     tail,
                 ]
             };
@@ -348,15 +342,13 @@ impl CoreErlangGenerator {
             // Re-pack into StateAcc for outer method-body `maps:get` extraction.
             let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
             docs.push(docvec![
-                " in let ",
-                leaf::var(fold_result.clone()),
-                " = call 'lists':'foldl'(",
-                leaf::var(lambda_var),
-                ", ",
-                init_tuple_doc,
-                ", ",
-                leaf::var(safe_list_var),
-                ") in let ",
+                ThreadingPlan::foldl_call_doc(
+                    &lambda_var,
+                    init_tuple_doc,
+                    &safe_list_var,
+                    &fold_result
+                ),
+                "let ",
                 leaf::var(rev_list.clone()),
                 " = call 'erlang':'element'(1, ",
                 leaf::var(fold_result),
