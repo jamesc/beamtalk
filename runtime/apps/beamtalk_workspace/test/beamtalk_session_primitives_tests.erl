@@ -582,7 +582,7 @@ class_current_explicit_context_no_leak_test_() ->
 
 %% A malformed explicit context (a non-pair 4th element) must degrade
 %% to "no context" (nil), not crash the class gen_server. The 4-tuple clause has
-%% no `is_tuple` guard; `seed_session_context_from/1` no-ops on unrecognised
+%% no `is_tuple` guard; `beamtalk_class_session:seed_session_context_from/1` no-ops on unrecognised
 %% shapes. We assert the gen_server survives and still serves a later call.
 class_current_malformed_context_degrades_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
