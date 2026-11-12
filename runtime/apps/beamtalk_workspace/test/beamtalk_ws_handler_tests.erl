@@ -923,7 +923,7 @@ flush_completed_normalises_file_kinds_old_file_test() ->
     ).
 
 %% ADR 0105 Phase 1: the reload_check/completed push frame —
-%% `beamtalk_repl_loader:publish_recheck_outcome/5`'s `'ReloadCheckCompleted'`
+%% `beamtalk_repl_loader_recheck:publish_recheck_outcome/5`'s `'ReloadCheckCompleted'`
 %% announcement, re-encoded as JSON.
 reload_check_completed_pushes_frame_test() ->
     Finding = #{

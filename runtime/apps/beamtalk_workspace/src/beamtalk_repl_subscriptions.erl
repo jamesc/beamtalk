@@ -219,7 +219,7 @@ announcement_classes(flush) -> ['FlushCompleted'];
 %% ADR 0123 §4 (BT-3538): 'ShapeReloadFindingsCompleted' rides the same
 %% `reload_check` stream as 'ReloadCheckCompleted' — a distinct announcement
 %% class (a different finding schema; see
-%% `beamtalk_repl_loader:publish_reload_findings/2`'s doc), not a second
+%% `beamtalk_repl_loader_recheck:publish_reload_findings/2`'s doc), not a second
 %% subscription a client would have to know to ask for separately.
 announcement_classes(reload_check) -> ['ReloadCheckCompleted', 'ShapeReloadFindingsCompleted'].
 

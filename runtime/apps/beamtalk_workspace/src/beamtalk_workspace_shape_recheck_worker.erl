@@ -13,7 +13,7 @@ Single-worker queue for ADR 0105 Phase 2's shape re-check.
 class-body install — far more often than the method-signature path's
 `maybe_trigger_recheck/4`, which only runs on an explicit `>>` patch or
 removal (see that function's doc). Running its shape re-check
-(`beamtalk_repl_loader:maybe_trigger_shape_recheck/1`, in turn
+(`beamtalk_repl_loader_recheck:maybe_trigger_shape_recheck/1`, in turn
 `beamtalk_recheck:trigger_shape/2`) synchronously on the install's response
 path measurably regressed a heavy sequential-reload scenario (the
 `repl_protocol` e2e suite): the per-reload caller-cap's up-to-20 compiler
@@ -42,7 +42,7 @@ backpressure or cancellation because there is no unbounded fan-out left to
 bound.
 
 **ADR 0107 Phase A** reuses this same queue for the leaf-change
-re-check (`beamtalk_repl_loader:maybe_trigger_leaf_change_recheck/1`,
+re-check (`beamtalk_repl_loader_recheck:maybe_trigger_leaf_change_recheck/1`,
 enqueued via `enqueue_leaf_change/1`) instead of a second dedicated worker:
 `trigger_leaf_change/1` is at least as expensive a compiler-port sweep as a
 shape re-check (a whole-image recompile, per its own doc), so it needs the
@@ -54,7 +54,7 @@ with the identical contention concern.
 
 ## Crash isolation
 
-`beamtalk_repl_loader:maybe_trigger_shape_recheck_for_class/1` and
+`beamtalk_repl_loader_recheck:maybe_trigger_shape_recheck_for_class/1` and
 `maybe_trigger_leaf_change_recheck_for_class/1` are both already documented
 as self-swallowing end-to-end (store read/compute, the `trigger_*/*` call,
 and publish are each wrapped in their own `try/catch`), so this worker
@@ -106,7 +106,7 @@ enqueue(Classes) ->
 -doc """
 ADR 0107 Phase A: queue a leaf-change re-check for
 `NewlyNonLeafSuperclasses` (the same list
-`beamtalk_repl_loader:superclasses_losing_leaf_status/1` produces) and
+`beamtalk_repl_loader_recheck:superclasses_losing_leaf_status/1` produces) and
 return immediately — see the moduledoc's "reuses this same queue" note for
 why this shares `enqueue/1`'s worker rather than getting its own.
 """.
@@ -117,7 +117,7 @@ enqueue_leaf_change(NewlyNonLeafSuperclasses) ->
 -doc """
 ADR 0108 hot-reload re-check trigger: queue an alias-change
 re-check for `AliasNameBins` (the redefined alias name, primary first — see
-`beamtalk_repl_loader:maybe_trigger_alias_change_recheck/1`) and return
+`beamtalk_repl_loader_recheck:maybe_trigger_alias_change_recheck/1`) and return
 immediately — reuses this worker's queue for the same reason
 `enqueue_leaf_change/1` does: `beamtalk_recheck:trigger_alias_change/1`'s
 `diagnostics/3` round trips per candidate would otherwise compete with a
@@ -166,7 +166,7 @@ init([]) ->
 
 handle_cast({leaf_change, Superclasses}, State) ->
     try
-        beamtalk_repl_loader:maybe_trigger_leaf_change_recheck(Superclasses)
+        beamtalk_repl_loader_recheck:maybe_trigger_leaf_change_recheck(Superclasses)
     catch
         %% Defensive only — see the moduledoc's "Crash isolation" section.
         %% maybe_trigger_leaf_change_recheck/1 is already self-swallowing, so
@@ -185,7 +185,7 @@ handle_cast({leaf_change, Superclasses}, State) ->
     {noreply, State};
 handle_cast({recheck, Classes}, State) ->
     try
-        beamtalk_repl_loader:maybe_trigger_shape_recheck(Classes)
+        beamtalk_repl_loader_recheck:maybe_trigger_shape_recheck(Classes)
     catch
         %% Defensive only — see the moduledoc's "Crash isolation" section.
         %% maybe_trigger_shape_recheck/1 is already self-swallowing, so this
@@ -204,7 +204,7 @@ handle_cast({recheck, Classes}, State) ->
     {noreply, State};
 handle_cast({alias_change, AliasNameBins}, State) ->
     try
-        beamtalk_repl_loader:maybe_trigger_alias_change_recheck(AliasNameBins)
+        beamtalk_repl_loader_recheck:maybe_trigger_alias_change_recheck(AliasNameBins)
     catch
         %% Defensive only — see the moduledoc's "Crash isolation" section.
         %% maybe_trigger_alias_change_recheck/1 is already self-swallowing,

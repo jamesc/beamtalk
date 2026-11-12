@@ -9,7 +9,7 @@
 // This drives the exact mechanism the ADR's "demo" and "removal" examples
 // describe (`docs/ADR/0105-live-image-recheck-on-reload.md`): every `>>`
 // redefinition below goes through the real reload path
-// (`beamtalk_repl_loader:maybe_trigger_recheck/4`) and fires the same
+// (`beamtalk_repl_loader_recheck:maybe_trigger_recheck/4`) and fires the same
 // `reload_check`/`completed` push the CLI prints inline. The REPL-protocol
 // test harness intentionally discards push frames (see
 // `crates/beamtalk-cli/tests/repl_protocol.rs`, `handle_push`) — there is no

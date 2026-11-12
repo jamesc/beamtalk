@@ -282,7 +282,7 @@ websocket_info(
     ),
     {[{text, Push}], State};
 %% ADR 0105 Phase 1: reload-induced re-check outcome — broadcast
-%% whenever `beamtalk_repl_loader:maybe_trigger_recheck/4` has something for a
+%% whenever `beamtalk_repl_loader_recheck:maybe_trigger_recheck/4` has something for a
 %% live surface to act on (a dependent re-check ran, or a caller's stale
 %% findings were cleared because its own source just changed). `checkedOwners`
 %% is the clearing-by-replacement signal: every surface subscriber should
@@ -309,7 +309,7 @@ websocket_info(
 %% reaches every existing `reload_check` subscriber without a new
 %% subscription, but does not match the CLI/LSP's existing
 %% `(reload_check, completed)` pattern — see
-%% `beamtalk_repl_loader:publish_reload_findings/2`'s doc for why this is a
+%% `beamtalk_repl_loader_recheck:publish_reload_findings/2`'s doc for why this is a
 %% new event rather than folded into `'ReloadCheckCompleted'`'s existing
 %% payload shape (a different finding schema: `class`/`kind`/`fields`/
 %% `migrated`/`suspended`/`pids`, not `owner`/`selector`/`sites`).
@@ -1211,7 +1211,7 @@ encode_class_event(Event) ->
 
 -doc """
 ADR 0105 Phase 1: encode a `'ReloadCheckCompleted'` announcement
-payload (built by `beamtalk_repl_loader:publish_recheck_outcome/5`) for the
+payload (built by `beamtalk_repl_loader_recheck:publish_recheck_outcome/5`) for the
 `reload_check`/`completed` push frame.
 """.
 -spec encode_reload_check_event(map()) -> map().
@@ -1237,7 +1237,7 @@ encode_reload_check_event(Event) ->
 
 -doc """
 ADR 0123 §4 (BT-3538): encode a `'ShapeReloadFindingsCompleted'` announcement
-payload (built by `beamtalk_repl_loader:publish_reload_findings/2`) for the
+payload (built by `beamtalk_repl_loader_recheck:publish_reload_findings/2`) for the
 `reload_check`/`shape_findings` push frame — the class-body reload/migration
 findings table (dropped-without-bump, added-only, bumped-without-migration,
 version-decreased, instances-suspended), distinct from

@@ -324,7 +324,7 @@ Redeclaring an existing name overwrites its entry — ADR 0108 Semantics
 treats a live REPL redefinition as legal. `handle_type_alias_definition/3`
 follows this call with `beamtalk_compiler_server:register_aliases/1` (keeps
 the compiler port's ambient alias cache in sync) and
-`beamtalk_repl_loader:spawn_alias_change_recheck/1` (ADR 0108 hot-reload
+`beamtalk_repl_loader_recheck:spawn_alias_change_recheck/1` (ADR 0108 hot-reload
 re-check trigger) — re-checking annotation sites that referenced
 the old binding, once out of scope here, is now that trigger's job.
 """.

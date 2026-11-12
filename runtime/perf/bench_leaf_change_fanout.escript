@@ -8,7 +8,7 @@
 %% Measures whether `beamtalk_recheck:trigger_leaf_change/1`'s "recompile
 %% every live class" sweep (fired automatically once per distinct superclass
 %% that gains its first subclass, via
-%% `beamtalk_repl_loader:maybe_trigger_leaf_change_recheck/1`) is a real cost
+%% `beamtalk_repl_loader_recheck:maybe_trigger_leaf_change_recheck/1`) is a real cost
 %% concern for a bulk `:load dir` of a project with a deep class hierarchy,
 %% following BT-2781's "measure, then decide" methodology
 %% (`bench_recheck_fanout.escript`).

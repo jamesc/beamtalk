@@ -532,7 +532,7 @@ trigger_image() ->
 ADR 0107 Phase A: re-check for every superclass in
 `SuperclassBins` that a live class-body reload just made non-leaf (gained
 its first subclass — see
-`beamtalk_repl_loader:superclasses_losing_leaf_status/1`, the detection
+`beamtalk_repl_loader_recheck:superclasses_losing_leaf_status/1`, the detection
 half this composes with).
 
 `SuperclassBins` is the *whole* list a single reload event
@@ -1623,7 +1623,7 @@ see `recheck_owner_for_leaf_change/3`). Structurally mirrors
 regardless of how many superclasses are in `SuperclassBins`) but
 returns a `result()` — not an `image_result()` — since `checked_owners`/
 `not_verified_owners` are what the publish path
-(`beamtalk_repl_loader:publish_leaf_change_recheck_outcome/2`, called once
+(`beamtalk_repl_loader_recheck:publish_leaf_change_recheck_outcome/2`, called once
 per superclass in the batch against this one shared `result()`) needs to
 reuse the exact same findings-store/announcement plumbing
 `publish_shape_recheck_outcome/3` already established. There is no

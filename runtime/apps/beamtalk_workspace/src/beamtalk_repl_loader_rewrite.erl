@@ -18,8 +18,9 @@ ChangeLog entry's sites in reverse.
 Extracted from `beamtalk_repl_loader` (BT-4702). It is a client of the loader's
 compile/install/source-tracking primitives (`compile_reload_source/5`,
 `install_reload_result/2`, `patch_module_target/1`, …), which stay in
-`beamtalk_repl_loader`; nothing in the loader calls back into this module
-except for the `rewrite_span()` type used by its single-site splice helpers.
+`beamtalk_repl_loader`; the loader makes no runtime calls into this module — it
+only references the exported rewrite types (`rewrite_span()`, `rewrite_result()`,
+`installed_rewrite_site()`).
 """.
 
 -export([

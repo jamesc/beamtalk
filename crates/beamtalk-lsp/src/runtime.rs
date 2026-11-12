@@ -234,7 +234,7 @@ pub struct ReloadFinding {
 }
 
 /// A `reload_check`/`completed` push event (ADR 0105 Phase 1): the
-/// outcome of `beamtalk_repl_loader:maybe_trigger_recheck/4` for one live
+/// outcome of `beamtalk_repl_loader_recheck:maybe_trigger_recheck/4` for one live
 /// reload, surfaced to the LSP so it can publish/clear reload-induced
 /// diagnostics on the caller classes' documents.
 ///

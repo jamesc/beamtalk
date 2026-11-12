@@ -1299,7 +1299,7 @@ defmodule BtAttach.Workspace do
   Subscribe `pid` to the reload-check push stream (ADR 0105 Phase 1,
   BT-2779), mirroring `subscribe_classes/1` exactly. The subscriber receives
   a native `{:beamtalk_announcement, sub_ref, :ReloadCheckCompleted,
-  handler, event}` message whenever `beamtalk_repl_loader:maybe_trigger_recheck/4`
+  handler, event}` message whenever `beamtalk_repl_loader_recheck:maybe_trigger_recheck/4`
   has something for a live surface to act on — a dependent re-check ran, or
   a caller's stale findings were cleared because its own source changed
   (including a `Workspace changes revert:` re-install). On that signal the
@@ -1952,7 +1952,7 @@ defmodule BtAttach.Workspace do
 
   @doc """
   Normalize a `'ReloadCheckCompleted'` announcement payload (ADR 0105 Phase
-  1, BT-2779 — built by `beamtalk_repl_loader:publish_recheck_outcome/5`)
+  1, BT-2779 — built by `beamtalk_repl_loader_recheck:publish_recheck_outcome/5`)
   into `{changed_class, checked_owners, findings}`: `changed_class` as a
   binary, `checked_owners` as a list of binaries, `findings` normalized via
   `normalize_finding/1`.
