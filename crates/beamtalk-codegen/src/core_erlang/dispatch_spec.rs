@@ -206,10 +206,12 @@ pub(in crate::core_erlang) fn value_core_reflection_selectors() -> Vec<&'static 
         .collect()
 }
 
-/// What a default (unrecognised-selector) arm does once the memoised
-/// `beamtalk_dispatch:inherited_target/2` verdict has been asked. The one
-/// emitter, [`inherited_default_arm`], renders the arm for both flavours; only
-/// these values differ.
+/// The two shapes of default (unrecognised-selector) arm that ask the memoised
+/// `beamtalk_dispatch:inherited_target/2` verdict first. They live side by side
+/// here so the verdict contract (which verdict tag is a direct hit, and what the
+/// other verdicts fall back to) is stated in one place; they render separately
+/// because an actor's `dispatch/4` and a value type's `dispatch/3` differ in
+/// layout, selector variable, verdict tag and slow route.
 pub(in crate::core_erlang) enum DefaultArmFlavour<'a> {
     /// An actor's `dispatch/4` (BT-4280): a `{'compiled', Owner, Module}`
     /// verdict is invoked directly; any other verdict takes

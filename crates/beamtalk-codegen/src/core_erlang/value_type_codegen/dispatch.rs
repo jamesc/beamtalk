@@ -17,8 +17,13 @@ use beamtalk_core::ast::{ClassDefinition, ClassKind};
 
 /// The nine hard-coded `dispatch/3` reflection arms of a primitive value type,
 /// as `has_method/1` lists them (ADR 0124 §1/§9/B4 added `hasField:` and
-/// `clearField:` to the original seven). Checked against the emitted arms
-/// ([`DISPATCH_PREFIX_SELECTORS`]) by `primitive_has_method_reflection_matches_dispatch_arms`.
+/// `clearField:` to the original seven).
+///
+/// [`DISPATCH_PREFIX_SELECTORS`] holds the same nine selectors in the order
+/// `dispatch/3` emits them; this list keeps the order the generated
+/// `has_method/1` has always had, so its output does not change.
+/// `primitive_has_method_reflection_matches_dispatch_arms` pins the two to the
+/// same set.
 const PRIMITIVE_HAS_METHOD_REFLECTION: &[&str] = &[
     "class",
     "respondsTo:",
@@ -175,12 +180,16 @@ impl CoreErlangGenerator {
         class_name: &str,
         mod_name: &str,
     ) -> (Vec<Document<'static>>, Vec<Document<'static>>) {
-        let mut arms = dispatch_spec::value_core_reflection_arms(class_name, mod_name)
-            .into_iter()
-            .map(|(_, arm)| arm)
-            .collect::<Vec<_>>();
-        let perform = arms.split_off(2);
-        (arms, perform)
+        let mut arms = dispatch_spec::value_core_reflection_arms(class_name, mod_name);
+        let split = arms
+            .iter()
+            .position(|(selector, _)| *selector == "perform:")
+            .expect("the core reflection arms include perform:");
+        let perform = arms.split_off(split);
+        let docs = |arms: Vec<(&'static str, Document<'static>)>| {
+            arms.into_iter().map(|(_, arm)| arm).collect::<Vec<_>>()
+        };
+        (docs(arms), docs(perform))
     }
 
     /// The `dispatch/3` default arm of a value type that has no inherited
