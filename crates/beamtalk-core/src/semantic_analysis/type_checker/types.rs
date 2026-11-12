@@ -1379,6 +1379,23 @@ impl InferredType {
         *flat = deduped;
     }
 
+    /// `shape ∩ Known(class_name)` (ADR 0147): a map shape is a `Dictionary`,
+    /// so a test against `Dictionary` or one of its superclasses keeps the
+    /// shape; any other class is disjoint.
+    fn intersect_shape_with_class(
+        shape: &Self,
+        class_name: &str,
+        hierarchy: Option<&ClassHierarchy>,
+    ) -> Self {
+        let is_dictionary = class_name == "Dictionary"
+            || hierarchy.is_some_and(|h| Self::is_nominal_subtype(h, "Dictionary", class_name));
+        if is_dictionary {
+            shape.clone()
+        } else {
+            Self::Never
+        }
+    }
+
     /// Normalising **intersection** `A ∩ B` (ADR 0102 §1).
     ///
     /// Symbol-singleton membership IS modelled — a singleton `#foo` is a subtype
@@ -1437,6 +1454,7 @@ impl InferredType {
     /// - Generics compare exactly, including `type_args`.
     ///
     /// The result is re-normalised through [`union_of`](Self::union_of).
+    #[allow(clippy::too_many_lines)] // one arm per type-pair rule; splitting hides the ordering
     pub(crate) fn intersect(
         a: &Self,
         b: &Self,
@@ -1529,6 +1547,15 @@ impl InferredType {
                 let mut merged = members.clone();
                 merged.push(a.clone());
                 Self::normalize_intersection(merged, provenance)
+            }
+            // ADR 0147: a map shape is a `Dictionary`, so an `isKindOf:` /
+            // type-pattern test against `Dictionary` (or one of its
+            // superclasses) keeps the shape; any other class is disjoint.
+            (Self::Shape { .. }, Self::Known { class_name, .. }) => {
+                Self::intersect_shape_with_class(a, class_name, hierarchy)
+            }
+            (Self::Known { class_name, .. }, Self::Shape { .. }) => {
+                Self::intersect_shape_with_class(b, class_name, hierarchy)
             }
             // Symbol-singleton membership: `#foo <: Symbol`, so the narrower
             // singleton is kept in both orders. Checked before the general

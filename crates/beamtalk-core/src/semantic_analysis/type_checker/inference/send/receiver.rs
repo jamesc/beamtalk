@@ -142,6 +142,14 @@ impl TypeChecker {
         // (`K` the join of the key types, `V` of the value types; `Object`
         // for both when open). The shape-aware keyed operations are a later
         // phase and will intercept before this point.
+        // The shape-aware keyed operations (`at:`, `at:ifAbsent:`,
+        // `at:ifPresent:`, `at:put:`) read the per-key types, so they keep the
+        // un-viewed receiver; everything else sees the `Dictionary` view.
+        let shape_receiver_ty =
+            crate::semantic_analysis::type_checker::shape_keyed::KeyedOp::from_selector(
+                &selector.name(),
+            )
+            .map(|_| receiver_ty.clone());
         let receiver_ty = receiver_ty.dictionary_view().unwrap_or(receiver_ty);
 
         let selector_name = selector.name();
@@ -251,6 +259,17 @@ impl TypeChecker {
                 env,
                 in_abstract_method,
             )
+        } else if let Some(types) = shape_receiver_ty.as_ref().and_then(|shape_ty| {
+            self.infer_args_for_shape_if_present(
+                &selector_name,
+                arguments,
+                shape_ty,
+                hierarchy,
+                env,
+                in_abstract_method,
+            )
+        }) {
+            types
         } else if is_object_then {
             self.infer_args_for_then(arguments, &receiver_ty, hierarchy, env, in_abstract_method)
         } else if let (Some(assumed), Some(arg)) = (loop_facts.as_ref(), arguments.first()) {
@@ -304,6 +323,21 @@ impl TypeChecker {
             &arg_types,
             hierarchy,
         );
+
+        // ADR 0147: shape-aware keyed operations on a shape (or a union with
+        // a shape member) receiver.
+        if let Some(shape_ty) = &shape_receiver_ty {
+            if let Some(ty) = self.infer_shape_keyed_send(
+                shape_ty,
+                &selector_name,
+                arguments,
+                &arg_types,
+                span,
+                hierarchy,
+            ) {
+                return ty;
+            }
+        }
 
         // Handle asType: compile-time type assertion (ADR 0025 Phase 2b)
         // `expr asType: SomeClass` asserts expr is SomeClass, returns Known(SomeClass)
