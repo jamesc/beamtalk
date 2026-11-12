@@ -137,6 +137,12 @@ impl TypeChecker {
         } else {
             receiver_ty
         };
+        // ADR 0147 "Dictionary view": every message a map shape does not
+        // handle specially is sent to the `Dictionary(K, V)` it behaves as
+        // (`K` the join of the key types, `V` of the value types; `Object`
+        // for both when open). The shape-aware keyed operations are a later
+        // phase and will intercept before this point.
+        let receiver_ty = receiver_ty.dictionary_view().unwrap_or(receiver_ty);
 
         let selector_name = selector.name();
 
@@ -1360,6 +1366,23 @@ impl TypeChecker {
         span: Span,
         hierarchy: &ClassHierarchy,
     ) -> InferredType {
+        // ADR 0147: a shape member answers every message as the
+        // `Dictionary(K, V)` view it behaves as — resolved here, so it is
+        // judged like any other `Known` member instead of falling into the
+        // "no single class name" Dynamic arm below.
+        let viewed_members: Vec<InferredType>;
+        let members = if members
+            .iter()
+            .any(|m| matches!(m, InferredType::Shape { .. }))
+        {
+            viewed_members = members
+                .iter()
+                .map(|m| m.dictionary_view().unwrap_or_else(|| m.clone()))
+                .collect();
+            &viewed_members[..]
+        } else {
+            members
+        };
         let mut missing_names: Vec<EcoString> = Vec::new();
         let mut return_types: Vec<InferredType> = Vec::new();
         let mut responding_count: usize = 0;

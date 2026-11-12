@@ -2427,8 +2427,8 @@ mod tests {
         );
     }
 
-    /// `cfg :: #{#port => Integer} := Dictionary new` — a shape resolves to bare
-    /// `Dictionary` until ADR 0147 phase 3, but is load-bearing: NOT flagged.
+    /// `cfg :: #{#port => Integer} := Dictionary new` — a shape is a
+    /// structured `InferredType::Shape` (ADR 0147), never the inferred `Dictionary`: NOT flagged.
     #[test]
     fn shape_annotation_not_flagged_as_redundant() {
         let src = "cfg :: #{#port => Integer} := Dictionary new";

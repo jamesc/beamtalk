@@ -1119,8 +1119,10 @@ impl TypeChecker {
                     || Self::is_return_type_refinement(actual, &false_ty(), hierarchy)
             }
             _ => {
-                let actual_str: EcoString = actual.to_string().into();
-                let expected_str: EcoString = expected.to_string().into();
+                // Shapes are judged as `Dictionary` until BT-4730 (the string
+                // helper knows no `#{...}` class and would call it compatible).
+                let actual_str: EcoString = actual.erase_shapes().to_string().into();
+                let expected_str: EcoString = expected.erase_shapes().to_string().into();
                 Self::is_type_compatible(&actual_str, &expected_str, hierarchy)
             }
         }
@@ -1147,6 +1149,9 @@ impl TypeChecker {
                 .iter()
                 .any(|m| Self::declared_type_is_opaque(m, hierarchy)),
             DeclaredType::FalseOr(inner) => Self::declared_type_is_opaque(inner, hierarchy),
+            DeclaredType::Shape { fields, .. } => fields
+                .iter()
+                .any(|f| Self::declared_type_is_opaque(&f.value, hierarchy)),
             DeclaredType::Difference { .. }
             | DeclaredType::Intersection { .. }
             | DeclaredType::SelfType
@@ -1709,7 +1714,13 @@ impl TypeChecker {
             // type once at this boundary (byte-
             // identical to the old stored string); `resolve_type_param`
             // itself takes the structured `DeclaredType` directly.
-            let expected_declared_str: EcoString = expected_declared.to_string().into();
+            // Shape assignability is BT-4730. Until it lands, an expected
+            // map shape (ADR 0147) is judged as the bare `Dictionary` it
+            // erases to — the compatibility helpers below are string-level
+            // and know no `#{...}` class — which is exactly what the
+            // pre-shape checker saw.
+            let expected_declared_str: EcoString =
+                expected_declared.erase_shapes().to_string().into();
             let substituted_expected;
             let expected_ty: &EcoString = if !class_subst.is_empty()
                 && Self::type_string_references_class_param(&expected_declared_str, class_subst)
@@ -1810,7 +1821,15 @@ impl TypeChecker {
                     }),
                 _ => None,
             };
-            let arg_ty = resolved_arg_ty.as_ref().unwrap_or(arg_ty);
+            // Shape assignability is ADR 0147's next phase (BT-4730). Until it
+            // lands, a shape argument is judged as the bare `Dictionary` it
+            // behaves as, exactly what the pre-shape checker saw.
+            let shape_stand_in = matches!(arg_ty, InferredType::Shape { .. })
+                .then(|| InferredType::known("Dictionary"));
+            let arg_ty = shape_stand_in
+                .as_ref()
+                .or(resolved_arg_ty.as_ref())
+                .unwrap_or(arg_ty);
             match arg_ty {
                 InferredType::Known {
                     class_name: actual_ty,
@@ -2015,10 +2034,13 @@ impl TypeChecker {
                 // *argument's own* inferred type is likewise skipped — see
                 // `check_protocol_argument_conformance` for the flagship
                 // "parameter declared `P1 & P2`" conformance check.
+                // A shape argument was replaced by the `Dictionary` stand-in
+                // above, so it is unreachable here.
                 InferredType::Dynamic(_)
                 | InferredType::Never
                 | InferredType::Negation { .. }
-                | InferredType::Intersection { .. } => {}
+                | InferredType::Intersection { .. }
+                | InferredType::Shape { .. } => {}
             }
         }
     }
@@ -2122,6 +2144,9 @@ impl TypeChecker {
             InferredType::Union { members, .. } => members
                 .iter()
                 .any(|member| Self::element_type_is_unjudged(member, hierarchy)),
+            InferredType::Shape { fields, .. } => fields
+                .iter()
+                .any(|f| Self::element_type_is_unjudged(&f.value, hierarchy)),
             InferredType::Meta { .. }
             | InferredType::ProtocolMeta { .. }
             | InferredType::Never
@@ -2357,6 +2382,9 @@ impl TypeChecker {
                 | InferredType::ProtocolMeta { .. }
                 | InferredType::Negation { .. }
                 | InferredType::Intersection { .. }
+                // Shape assignability is ADR 0147 phase 3b (BT-4730): until
+                // then a shape body is not judged against the declared return.
+                | InferredType::Shape { .. }
                 | InferredType::Known { .. } => {}
             }
             return;
@@ -2481,7 +2509,9 @@ impl TypeChecker {
             | InferredType::ProtocolMeta { .. }
             | InferredType::Dynamic(_)
             | InferredType::Negation { .. }
-            | InferredType::Intersection { .. } => {}
+            | InferredType::Intersection { .. }
+            // Shape assignability: BT-4730.
+            | InferredType::Shape { .. } => {}
         }
     }
 
@@ -2584,7 +2614,9 @@ impl TypeChecker {
             | InferredType::ProtocolMeta { .. }
             | InferredType::Dynamic(_)
             | InferredType::Negation { .. }
-            | InferredType::Intersection { .. } => true,
+            | InferredType::Intersection { .. }
+            // Shape assignability: BT-4730 — conservative until then.
+            | InferredType::Shape { .. } => true,
         }
     }
 
@@ -2872,8 +2904,8 @@ impl TypeChecker {
             // `is_type_compatible` is a string-level nominal-chain walker
             // shared across many call sites — render
             // the structured types once at this boundary.
-            let child_t_str: EcoString = child_t.to_string().into();
-            let parent_t_str: EcoString = parent_t.to_string().into();
+            let child_t_str: EcoString = child_t.erase_shapes().to_string().into();
+            let parent_t_str: EcoString = parent_t.erase_shapes().to_string().into();
             if !Self::is_type_compatible(&child_t_str, &parent_t_str, hierarchy) {
                 let param_pos = i + 1;
                 self.diagnostics.push(
@@ -3266,7 +3298,10 @@ impl TypeChecker {
             self.alias_registry.as_deref(),
             super::TypeStringContext::Declared,
         );
-        let declared_type: EcoString = declared_type.to_string().into();
+        // Shapes are judged as `Dictionary` until BT-4730: `is_assignable_to`
+        // has no unknown-class escape hatch for a `#{...}` string.
+        let declared_resolved = declared_resolved.erase_shapes();
+        let declared_type: EcoString = declared_type.erase_shapes().to_string().into();
         // `ClassHierarchy::state_field_type` predates ADR 0108 and
         // returns a bare `EcoString` with no alias provenance — unlike an
         // `InferredType`, which tags via
@@ -3453,10 +3488,12 @@ impl TypeChecker {
             // conservatively like `Dynamic`/`Never` (ADR 0102). Likewise an
             // `Intersection` (`P1 & P2`, ADR 0102) as the value's own
             // inferred type — skip conservatively.
+            // Shape assignability: BT-4730.
             InferredType::Dynamic(_)
             | InferredType::Never
             | InferredType::Negation { .. }
-            | InferredType::Intersection { .. } => {}
+            | InferredType::Intersection { .. }
+            | InferredType::Shape { .. } => {}
         }
     }
 
@@ -3547,7 +3584,7 @@ impl TypeChecker {
                 if let Some(declared_ty) = hierarchy.state_field_type(class_name, key_name) {
                     // `check_spawn_with_value` is a string-level helper —
                     // render once at this boundary.
-                    let declared_ty: EcoString = declared_ty.to_string().into();
+                    let declared_ty: EcoString = declared_ty.erase_shapes().to_string().into();
                     self.check_spawn_with_value(
                         class_name,
                         key_name,
@@ -4067,7 +4104,8 @@ impl TypeChecker {
             if matches!(resolved_declared, InferredType::Dynamic(_)) {
                 continue;
             }
-            let declared_type = resolved_declared.display_annotation();
+            // Shapes are judged as `Dictionary` until BT-4730.
+            let declared_type = resolved_declared.erase_shapes().display_annotation();
             if type_param_names.contains(&declared_type.as_str()) {
                 continue;
             }
@@ -4840,7 +4878,9 @@ impl TypeChecker {
             None,
             Some(registry),
         );
-        (resolved.display_annotation(), deps)
+        // Shapes are judged as `Dictionary` until BT-4730 — erase here too, so
+        // a shape *alias* expands to `Dictionary`, not unknown `#{...}` text.
+        (resolved.erase_shapes().display_annotation(), deps)
     }
 
     // ── Renderers for facts `inference/` detects ──────────────
@@ -5195,10 +5235,14 @@ impl TypeChecker {
             // conformer of `P`; which class it is — and so whether its class
             // side answers `Q`'s instance-side selectors — is unknown here,
             // so skip conservatively (open world, ADR 0100).
+            //
+            // A map shape (ADR 0147) is a dictionary; no user protocol is
+            // satisfied structurally by it, so there is nothing to check.
             InferredType::Never
             | InferredType::ProtocolMeta { .. }
             | InferredType::Negation { .. }
-            | InferredType::Intersection { .. } => {}
+            | InferredType::Intersection { .. }
+            | InferredType::Shape { .. } => {}
         }
     }
 
@@ -5483,7 +5527,10 @@ impl TypeChecker {
                 | InferredType::Dynamic(_)
                 | InferredType::Never
                 | InferredType::Negation { .. }
-                | InferredType::Intersection { .. } => {}
+                | InferredType::Intersection { .. }
+                // A shape type argument (`Box(#{...})`) conforms to no
+                // protocol bound structurally; skip like `Meta`.
+                | InferredType::Shape { .. } => {}
             }
         }
     }

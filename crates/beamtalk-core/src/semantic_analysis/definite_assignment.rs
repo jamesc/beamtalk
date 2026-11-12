@@ -263,9 +263,11 @@ fn inferred_admits_nil(
                 && !inferred_admits_nil(excluded, known_admits_nil, dynamic_admits_nil)
         }
         InferredType::Dynamic(_) => dynamic_admits_nil,
-        InferredType::Meta { .. } | InferredType::ProtocolMeta { .. } | InferredType::Never => {
-            false
-        }
+        // A map shape (ADR 0147) is a dictionary, never `nil`.
+        InferredType::Meta { .. }
+        | InferredType::ProtocolMeta { .. }
+        | InferredType::Shape { .. }
+        | InferredType::Never => false,
     }
 }
 

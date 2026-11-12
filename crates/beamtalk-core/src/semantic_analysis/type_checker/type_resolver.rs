@@ -29,7 +29,7 @@ use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::source_analysis::Span;
 
 use super::well_known::WellKnownClass;
-use super::{DynamicReason, InferredType, TypeProvenance, TypeStringContext};
+use super::{DynamicReason, InferredType, ShapeFieldType, TypeProvenance, TypeStringContext};
 use super::{is_generic_type_param, is_type_var_placeholder};
 
 /// Substitution map from a generic type parameter name to its concrete
@@ -718,6 +718,34 @@ fn resolve_declared_type_inner(
             InferredType::Dynamic(DynamicReason::Unknown)
         }
         DeclaredType::Singleton(name) => InferredType::known(eco_format!("#{name}")),
+        DeclaredType::Shape { fields, open } => {
+            // ADR 0147: a shape resolves field by field through this same
+            // recursion, so nested shapes, generic arguments, aliases and
+            // type parameters in value position all resolve exactly as they
+            // do anywhere else.
+            let fields = fields
+                .iter()
+                .map(|f| ShapeFieldType {
+                    key: f.key.clone(),
+                    value: resolve_declared_type_inner(
+                        &f.value,
+                        subst,
+                        protocol_registry,
+                        alias_registry,
+                        ctx,
+                        hierarchy,
+                        expanding,
+                        memo,
+                    ),
+                    optional: f.optional,
+                })
+                .collect();
+            InferredType::Shape {
+                fields,
+                open: *open,
+                provenance: declared_type_provenance(ctx),
+            }
+        }
     }
 }
 
@@ -2334,5 +2362,151 @@ mod tests {
             ),
             resolve_type_annotation(&ann_inter, &empty_subst(), None, None)
         );
+    }
+
+    // ---- ADR 0147: map shapes ----
+
+    fn parse_shape_annotation(src: &str) -> TypeAnnotation {
+        let tokens = crate::source_analysis::lex_with_eof(&format!(
+            "Object subclass: Foo\n  bar -> {src} => nil\n"
+        ));
+        let (module, diags) = crate::source_analysis::parse(tokens);
+        assert!(diags.is_empty(), "parse failed for {src:?}: {diags:?}");
+        module.classes[0].methods[0].return_type.clone().unwrap()
+    }
+
+    fn resolve_src(src: &str) -> InferredType {
+        resolve_type_annotation(&parse_shape_annotation(src), &empty_subst(), None, None)
+    }
+
+    #[test]
+    fn shape_annotation_resolves_to_inferred_shape() {
+        let ty = resolve_src("#{#name => String, ?#age => Integer, ...}");
+        assert_eq!(
+            ty,
+            InferredType::shape(
+                vec![
+                    ShapeFieldType {
+                        key: "name".into(),
+                        value: InferredType::known("String"),
+                        optional: false,
+                    },
+                    ShapeFieldType {
+                        key: "age".into(),
+                        value: InferredType::known("Integer"),
+                        optional: true,
+                    },
+                ],
+                true,
+            )
+        );
+        // Declared provenance, like every other annotation-built type.
+        assert!(matches!(ty.provenance(), Some(TypeProvenance::Declared(_))));
+        assert_eq!(
+            ty.display_name(),
+            "#{#name => String, ?#age => Integer, ...}"
+        );
+    }
+
+    #[test]
+    fn nested_shape_and_generic_arguments_resolve_structurally() {
+        let ty = resolve_src("#{#items => List(#{#id => Integer}), ?#inner => #{#x => nil}}");
+        assert_eq!(
+            ty.display_name(),
+            "#{#items => List(#{#id => Integer}), ?#inner => #{#x => UndefinedObject}}"
+        );
+        let generic = resolve_src("Result(#{#a => Integer}, String)");
+        assert_eq!(generic.display_name(), "Result(#{#a => Integer}, String)");
+    }
+
+    #[test]
+    fn shape_in_union_stays_a_separate_member() {
+        let ty = resolve_src("#{#a => Integer} | #{#b => String} | nil");
+        let InferredType::Union { members, .. } = &ty else {
+            panic!("expected union, got {ty:?}");
+        };
+        assert_eq!(members.len(), 3);
+        assert!(matches!(members[0], InferredType::Shape { .. }));
+        assert!(matches!(members[1], InferredType::Shape { .. }));
+    }
+
+    #[test]
+    fn shape_field_type_parameter_substitutes() {
+        let mut subst = empty_subst();
+        subst.insert("T".into(), InferredType::known("Integer"));
+        let ann = parse_shape_annotation("#{#value => T}");
+        let ty = resolve_type_annotation(&ann, &subst, None, None);
+        assert_eq!(ty.display_name(), "#{#value => Integer}");
+    }
+
+    #[test]
+    fn shape_alias_expands_and_carries_alias_provenance() {
+        let registry = alias_registry_with(
+            "Point",
+            parse_shape_annotation("#{#x => Integer, #y => Integer}"),
+        );
+        let reference = TypeAnnotation::Simple(ident("Point"));
+        let (ty, deps) = resolve_type_annotation_with_alias_deps(
+            &reference,
+            &empty_subst(),
+            None,
+            Some(&registry),
+        );
+        assert!(matches!(ty, InferredType::Shape { .. }), "got {ty:?}");
+        assert_eq!(deps, vec![EcoString::from("Point")]);
+        assert_eq!(
+            ty.alias_display_name().map(EcoString::as_str),
+            Some("Point")
+        );
+        assert_eq!(ty.display_for_diagnostic().unwrap(), "Point");
+        // Structurally identical to the written-out shape.
+        assert_eq!(ty, resolve_src("#{#y => Integer, #x => Integer}"));
+    }
+
+    #[test]
+    fn alias_inside_a_shape_field_expands() {
+        let registry = alias_registry_with("Port", TypeAnnotation::Simple(ident("Integer")));
+        let ann = parse_shape_annotation("#{#port => Port}");
+        let (ty, deps) =
+            resolve_type_annotation_with_alias_deps(&ann, &empty_subst(), None, Some(&registry));
+        assert_eq!(deps, vec![EcoString::from("Port")]);
+        let InferredType::Shape { fields, .. } = &ty else {
+            panic!("expected shape, got {ty:?}");
+        };
+        assert_eq!(
+            fields[0].value.alias_display_name().map(EcoString::as_str),
+            Some("Port")
+        );
+    }
+
+    #[test]
+    fn shape_string_and_annotation_resolve_identically() {
+        for src in [
+            "#{#a => Integer, ?#b => String, ...}",
+            "#{#p => #{#x => Integer}}",
+            "List(#{#a => Integer}) | nil",
+        ] {
+            let from_annotation = resolve_src(src);
+            let from_string = resolve_declared_type(
+                &DeclaredType::parse(&parse_shape_annotation(src).type_name()),
+                &empty_subst(),
+                None,
+                None,
+                TypeStringContext::Declared,
+            );
+            assert_eq!(from_annotation, from_string, "{src}");
+        }
+    }
+
+    #[test]
+    fn shape_resolves_with_substituted_and_extracted_contexts() {
+        let dt = DeclaredType::parse("#{#a => Integer}");
+        for ctx in [
+            TypeStringContext::Substitution,
+            TypeStringContext::Extracted,
+        ] {
+            let ty = resolve_declared_type(&dt, &empty_subst(), None, None, ctx);
+            assert!(matches!(ty, InferredType::Shape { .. }), "{ctx:?}");
+        }
     }
 }

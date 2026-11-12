@@ -786,13 +786,10 @@ impl CoreErlangGenerator {
                 parts.push(Document::Str(", "));
             }
             let type_doc = match &s.type_annotation {
-                // Go through `DeclaredType` like method signatures do, so a map
-                // shape (ADR 0147 phase 1) is recorded as the `Dictionary` the
-                // checker treats it as — not its raw text, which can exceed
-                // the 255-byte atom limit. `DeclaredType`'s display matches
-                // `type_name` for every variant except `Shape`, which collapses
-                // to `Dictionary` until ADR 0147 phase 3.
-                Some(ta) => leaf::atom(DeclaredType::from(ta).to_string()),
+                // Go through `DeclaredType` like method signatures do, with
+                // map shapes (ADR 0147) erased to `Dictionary`: a shape lists
+                // every key, so its text can exceed the 255-byte atom limit.
+                Some(ta) => leaf::atom(DeclaredType::from(ta).erase_shapes().to_string()),
                 None => Document::Str("'none'"),
             };
             parts.push(docvec![
@@ -1077,9 +1074,12 @@ impl CoreErlangGenerator {
                     .collect(),
             ),
             DeclaredType::Singleton(name) => MetaTypeRepr::Singleton(name.to_string()),
+            // A map shape (ADR 0147) is a flat `Dictionary` in metadata —
+            // see `DeclaredType::erase_shapes`.
+            DeclaredType::Shape { .. } => MetaTypeRepr::Atom("Dictionary".to_string()),
             // FalseOr, Difference, Intersection, SelfType, SelfClass, ClassOf
             // → fall back to flat atom string (see doc above).
-            _ => MetaTypeRepr::Atom(dt.to_string()),
+            _ => MetaTypeRepr::Atom(dt.erase_shapes().to_string()),
         }
     }
 

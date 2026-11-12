@@ -1185,6 +1185,43 @@ pub struct ShapeField {
     pub span: Span,
 }
 
+/// Renders a map-shape type (ADR 0147) in source syntax:
+/// `#{#a => Integer, ?#b => String, ...}`.
+///
+/// The single renderer behind [`TypeAnnotation::type_name`],
+/// `DeclaredType`'s `Display` and `InferredType`'s display, so the three
+/// cannot drift. Each item is `(optional, key, rendered value type)`; keys use
+/// the formatter's symbol-quoting rule so the printed form re-parses
+/// (`#'first name'`).
+///
+/// `elided` > 0 appends `… +N more` after the listed fields, for diagnostic
+/// and hover display of a long shape (the listed prefix is the caller's
+/// choice); the non-truncated forms pass `0`.
+pub fn render_shape<'a>(
+    fields: impl IntoIterator<Item = (bool, &'a EcoString, EcoString)>,
+    open: bool,
+    elided: usize,
+) -> EcoString {
+    let mut parts: Vec<EcoString> = fields
+        .into_iter()
+        .map(|(optional, key, value)| {
+            eco_format!(
+                "{}{} => {}",
+                if optional { "?" } else { "" },
+                crate::unparse::unparse_literal_display(&crate::ast::Literal::Symbol(key.clone())),
+                value
+            )
+        })
+        .collect();
+    if elided > 0 {
+        parts.push(eco_format!("… +{elided} more"));
+    }
+    if open {
+        parts.push("...".into());
+    }
+    eco_format!("#{{{}}}", parts.join(", "))
+}
+
 impl TypeAnnotation {
     /// Returns the span of this type annotation.
     #[must_use]
@@ -1385,27 +1422,13 @@ impl TypeAnnotation {
             Self::SelfType { .. } => "Self".into(),
             Self::SelfClass { .. } => "Self class".into(),
             Self::ClassOf { class_name, .. } => eco_format!("{} class", class_name.name),
-            Self::Shape { fields, open, .. } => {
-                let mut parts: Vec<EcoString> = fields
+            Self::Shape { fields, open, .. } => render_shape(
+                fields
                     .iter()
-                    .map(|f| {
-                        // Same symbol-quoting rule as the formatter, so the
-                        // printed form re-parses (`#'first name'`).
-                        eco_format!(
-                            "{}{} => {}",
-                            if f.optional { "?" } else { "" },
-                            crate::unparse::unparse_literal_display(&crate::ast::Literal::Symbol(
-                                f.key.clone()
-                            )),
-                            f.value.type_name()
-                        )
-                    })
-                    .collect();
-                if *open {
-                    parts.push("...".into());
-                }
-                eco_format!("#{{{}}}", parts.join(", "))
-            }
+                    .map(|f| (f.optional, &f.key, f.value.type_name())),
+                *open,
+                0,
+            ),
         }
     }
 

@@ -1048,6 +1048,9 @@ fn receiver_side_of_type(ty: &InferredType) -> Option<ReceiverSide> {
         InferredType::ProtocolMeta {
             protocol_name: n, ..
         } => Some(ReceiverSide::ProtocolClass(n.clone())),
+        // A map shape (ADR 0147) is a `Dictionary` for every message that is
+        // not a shape-aware keyed operation, so it completes as one.
+        InferredType::Shape { .. } => Some(ReceiverSide::Instance("Dictionary".into())),
         InferredType::Union { .. }
         | InferredType::Dynamic(_)
         | InferredType::Never

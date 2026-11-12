@@ -90,7 +90,7 @@ pub use native_types::{
 pub(in crate::semantic_analysis) use type_resolver::{
     resolve_declared_type, resolve_type_annotation,
 };
-pub use types::{DynamicReason, InferredType, TypeProvenance};
+pub use types::{DynamicReason, InferredType, ShapeFieldType, TypeProvenance};
 pub(in crate::semantic_analysis) use types::{is_generic_type_param, is_type_var_placeholder};
 
 pub(crate) use env_key::EnvKey;

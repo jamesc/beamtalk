@@ -1351,7 +1351,7 @@ pub(crate) fn check_shape_version_and_migrations(
             }
 
             if let Some(rt) = &method.return_type {
-                // A shape is exactly a `Dictionary` until ADR 0147 phase 3.
+                // A map shape (ADR 0147) is a `Dictionary` at runtime, so it satisfies this.
                 if rt.type_name() != "Dictionary"
                     && !matches!(rt, crate::ast::TypeAnnotation::Shape { .. })
                 {

@@ -2408,6 +2408,20 @@ fn declared_type_to_rust_expr(dt: &DeclaredType) -> String {
             declared_type_to_rust_expr(left),
             declared_type_to_rust_expr(right)
         ),
+        DeclaredType::Shape { fields, open } => {
+            let parts: Vec<String> = fields
+                .iter()
+                .map(|f| {
+                    format!(
+                        "DeclaredType::shape_field({}, {}, {})",
+                        rust_str_lit(&f.key),
+                        declared_type_to_rust_expr(&f.value),
+                        f.optional
+                    )
+                })
+                .collect();
+            format!("DeclaredType::shape(vec![{}], {open})", parts.join(", "))
+        }
         DeclaredType::SelfType => "DeclaredType::SelfType".to_string(),
         DeclaredType::SelfClass => "DeclaredType::SelfClass".to_string(),
         DeclaredType::ClassOf(name) => {
