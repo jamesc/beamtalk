@@ -337,16 +337,50 @@ fn alias_typed_value_class_send_is_converted() {
 }
 
 #[test]
-fn alias_of_a_union_stays_dynamic() {
-    // BT-4412: trusting `Aliased` does not widen anything else — an alias
-    // whose expansion is a union is not a single `Known` class.
+fn alias_of_a_union_with_an_unrouted_member_stays_dynamic() {
+    // BT-4412, BT-4595: trusting `Aliased` does not widen anything else — an
+    // alias whose expansion is a union follows the union rules, so a member
+    // with no guarded route (`Boolean`) keeps the whole send dynamic, and the
+    // report names that member.
+    let hints = report_full(concat!(
+        "type Either = Integer | Boolean\n\n",
+        "Object subclass: Caller\n",
+        "  run: v :: Either => v frobnicate\n",
+    ));
+    assert!(
+        hints
+            .iter()
+            .any(|h| h.starts_with("Send 'frobnicate'") && h.contains("union-member — Boolean")),
+        "{hints:?}"
+    );
+}
+
+/// BT-4595: a union whose members all have routes is converted.
+#[test]
+fn alias_of_a_routed_union_is_converted() {
     let hints = report_full(concat!(
         "type Either = Integer | String\n\n",
         "Object subclass: Caller\n",
         "  run: v :: Either => v frobnicate\n",
     ));
     assert!(
-        hints.iter().any(|h| h.starts_with("Send 'frobnicate'")),
+        !hints.iter().any(|h| h.starts_with("Send 'frobnicate'")),
+        "{hints:?}"
+    );
+}
+
+/// BT-4595: a union over the arm cap reports `union-too-many`.
+#[test]
+fn union_over_the_cap_reports_union_too_many() {
+    let hints = report_full(concat!(
+        "type Many = Integer | Float | String | Symbol | List\n\n",
+        "Object subclass: Caller\n",
+        "  run: v :: Many => v frobnicate\n",
+    ));
+    assert!(
+        hints
+            .iter()
+            .any(|h| h.starts_with("Send 'frobnicate'") && h.contains("union-too-many")),
         "{hints:?}"
     );
 }

@@ -53,6 +53,10 @@ type GuardedDiffPair = Tuple(Integer, Integer)
 type GuardedDiffOptions = Dictionary(Symbol, Integer)
 type GuardedDiffPointAlias = GuardedDiffPoint
 
+// BT-4595: a union receiver takes one guard per member, the dynamic send last
+// (`testUnionTypedReceivers`).
+type GuardedDiffUnion = Integer | GuardedDiffPoint | List
+
 DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
 
   // === Receivers ===
@@ -104,6 +108,11 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
   typedUnknown: r :: GuardedDiffPoint =>
     @expect dnu
     r noSuchSelector
+
+  // BT-4595: a union receiver that answers no member's selector.
+  typedUnionUnknown: r :: GuardedDiffUnion =>
+    @expect dnu
+    r frobnicate
 
   typedUnknownKeyword: r :: GuardedDiffPoint =>
     @expect dnu
@@ -361,6 +370,41 @@ DispatchDifferentialCase subclass: GuardedDispatchDifferentialTest
       typed: [:r :: GuardedDiffPointAlias | r baseOnly]
       dynamic: [:r | r baseOnly]
       on: #{#x => 1}
+
+  // BT-4595: a union-typed receiver holds each member kind (one chain arm
+  // each), a subclass instance and values matching no member (every guard
+  // misses and the dynamic send answers, DNU included).
+  testUnionTypedReceivers =>
+    self
+      send: #unionInteger
+      typed: [:r :: GuardedDiffUnion | r printString]
+      dynamic: [:r | r printString]
+      on: 42
+    self
+      send: #unionPoint
+      typed: [:r :: GuardedDiffUnion | r printString]
+      dynamic: [:r | r printString]
+      on: self point
+    self
+      send: #unionList
+      typed: [:r :: GuardedDiffUnion | r printString]
+      dynamic: [:r | r printString]
+      on: #(1, 2)
+    self
+      send: #unionSubclass
+      typed: [:r :: GuardedDiffUnion | r printString]
+      dynamic: [:r | r printString]
+      on: self pointSub
+    self
+      send: #unionNoMember
+      typed: [:r :: GuardedDiffUnion | r printString]
+      dynamic: [:r | r printString]
+      on: "not a member"
+    self
+      send: #unionNoMemberDnu
+      typed: [:r | self typedUnionUnknown: r]
+      dynamic: [:r | r frobnicate]
+      on: #{#a => 1}
 
   // One hit per guarded row of the routing fixture.
   testBuiltinReceivers =>

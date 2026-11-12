@@ -61,6 +61,23 @@ so they are not re-proposed without new evidence:
   class process restarts, and an identifier must mean the same thing in every
   context (principles §4). A `whereis/1` on a compile-time atom is enough.
 
+**4. Union receivers and `-spec`-extracted types (BT-4595).** A receiver typed
+as a union (`A | B | C`) compiles to a chain of guards, one per distinct
+member class, with the dynamic send as the last miss arm.
+- Members are deduped by class and the chain is capped at four arms, as for
+  protocol conformers. If any member has no guarded route (`Dynamic`, `Boolean`,
+  abstract, module-less, no single built-in route, …), or the union is over
+  the cap, the whole union stays dynamic and the dynamic-site report names
+  the member and its reason.
+- Member guards do not overlap, so their order never changes meaning. A value
+  matching no member takes the dynamic send, exactly as before.
+- Provenance is not consulted for union members. A single-class receiver
+  still needs a declared, inferred, substituted or aliased type, and
+  `Extracted` (`-spec`-derived) stays untrusted there. For a union member the
+  guard decides: a wrong `-spec` only makes a guard miss, and the chain ends
+  in the dynamic send. Rejecting `Extracted` would keep exactly the
+  `erlang:decode_packet/3` results dynamic.
+
 The ADR's statements below that "bytecode is identical" and "runtime
 performance is unaffected" now read as "results are identical".
 
