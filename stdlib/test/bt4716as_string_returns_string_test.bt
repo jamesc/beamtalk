@@ -1,0 +1,29 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4716: `asString` on nil / true / false answers a String (not a bare
+// Binary), so it concatenates with `++`.
+
+TestCase subclass: Bt4716AsStringReturnsStringTest
+
+  testNilAsString =>
+    self assert: nil asString class equals: String
+    self assert: nil asString equals: "nil"
+    self assert: "a" ++ nil asString equals: "anil"
+
+  testTrueAsString =>
+    self assert: true asString class equals: String
+    self assert: true asString equals: "true"
+    self assert: "x=" ++ true asString equals: "x=true"
+
+  testFalseAsString =>
+    self assert: false asString class equals: String
+    self assert: false asString equals: "false"
+    self assert: "x=" ++ false asString equals: "x=false"
+
+  testBlockAsString =>
+    block := [1]
+    @expect dnu
+    text := block asString
+    self assert: text class equals: String
+    self assert: text equals: "Block"
