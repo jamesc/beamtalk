@@ -217,12 +217,18 @@ check-release-build:
     # Without nm the symbol scan below would inspect nothing and still pass.
     command -v nm >/dev/null || { echo "❌ nm not found; cannot inspect the release binaries"; exit 1; }
     # Only the test-gated parts: `fault::registry` (not the always-present
-    # `fault::disabled`), the dropped-assignment probe, and beamtalk-core's
-    # test helpers (core is also pulled in with `features = ["test"]` by
-    # dev-dependencies, so the same unification could leak it).
-    leak_re='beamtalk_codegen::core_erlang::(fault::registry|dropped_assignment_probe)::|beamtalk_core::test_helpers::'
+    # `fault::disabled`), the dropped-assignment probe, and the cfg-gated
+    # submodules of beamtalk-core's `test_helpers` (not the ungated
+    # `unique_temp_dir`). Core is also pulled in with `features = ["test"]` by
+    # dev-dependencies, so the same unification could leak it.
+    leak_re='beamtalk_codegen::core_erlang::(fault::registry|dropped_assignment_probe)::|beamtalk_core::test_helpers::(test_support|class_var_program|statement_probes|corpus_families|evaluated_block_grid)::'
+    # Scan every binary the release packages, read from the one list that
+    # package-release.sh ships so the two cannot drift apart.
+    bins="$(sed -n 's/^BINARIES=(\(.*\))$/\1/p' scripts/ci/package-release.sh)"
+    [ -n "$bins" ] || { echo "❌ could not read BINARIES from scripts/ci/package-release.sh"; exit 1; }
     leaked=0
-    for bin in "$dir"/release/beamtalk "$dir"/release/beamtalk-compiler-port; do
+    for name in $bins; do
+        bin="$dir/release/$name"
         [ -f "$bin" ] || { echo "❌ $bin not built"; exit 1; }
         syms="$(nm -C "$bin")"
         if grep -E "$leak_re" <<<"$syms"; then
