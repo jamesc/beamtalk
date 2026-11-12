@@ -39,6 +39,7 @@
 
 pub mod binary;
 pub mod escape;
+pub mod form;
 pub mod hash;
 pub mod leaf;
 

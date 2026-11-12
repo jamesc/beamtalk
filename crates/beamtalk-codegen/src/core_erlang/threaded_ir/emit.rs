@@ -7,6 +7,7 @@
 //! emission path. Depends only on [`super::ir`]; nothing here verifies IR.
 
 use super::super::actor_state_access::{Helper, actor_state_call, actor_state_helper};
+use super::super::exception_forms::{CatchVars, wrap_and_reraise_doc};
 use super::super::{CoreErlangGenerator, NlrBoundary};
 use super::ir::{
     AccParam, BindOp, CallSiteLine, CarrierSlot, CatchClause, CatchEntry, CatchStep, CellBoundary,
@@ -16,6 +17,7 @@ use super::ir::{
     VersionedVar,
 };
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form::Layout;
 use beamtalk_cerl_doc::{Document, join, leaf};
 
 // ─── RenderCtx (ADR 0111 §Addendum "Renderer design sketch") ──────
@@ -1027,22 +1029,18 @@ fn render_catch_step(vars: &OnDoCatchVars, step: &CatchStep) -> Document<'static
         CatchStep::CellRestore(boundary) => {
             CoreErlangGenerator::cell_boundary_restore_doc(boundary)
         }
-        CatchStep::WrapException => docvec![
-            "let ",
+        CatchStep::WrapException => wrap_and_reraise_doc(
+            &CatchVars {
+                class: leaf::var(vars.type_var.clone()),
+                reason: leaf::var(vars.error_var.clone()),
+                stack: leaf::var(vars.stack_var.clone()),
+            },
             leaf::var(vars.built_stack_var.clone()),
-            " = primop 'build_stacktrace'(",
-            leaf::var(vars.stack_var.clone()),
-            ") in ",
-            "let ",
             leaf::var(vars.ex_obj_var.clone()),
-            " = call 'beamtalk_exception_handler':'ensure_wrapped'(",
-            leaf::var(vars.type_var.clone()),
-            ", ",
-            leaf::var(vars.error_var.clone()),
-            ", ",
-            leaf::var(vars.built_stack_var.clone()),
-            ") in ",
-        ],
+            None,
+            Document::Nil,
+            Layout::Flat,
+        ),
         CatchStep::ClassFilter => docvec![
             "let ",
             leaf::var(vars.match_var.clone()),

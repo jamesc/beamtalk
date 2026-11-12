@@ -10,8 +10,10 @@
 //! and `terminate/2`.
 
 use super::super::actor_state_access::{actor_state_call, actor_state_helper};
+use super::super::exception_forms::{CatchVars, wrap_and_reraise_doc};
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form::Layout;
 use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{ClassDefinition, Expression, Module, SlotKind};
 use ecow::EcoString;
@@ -2679,29 +2681,18 @@ fn noreply_error_arms(var_prefix: &str) -> Document<'static> {
             INDENT,
             docvec![
                 line(),
-                "let ",
-                built_v.clone(),
-                " = primop ",
-                leaf::atom("build_stacktrace"),
-                "(",
-                stack_v.clone(),
-                ") in",
-                line(),
-                "let ",
-                wrapped_v.clone(),
-                " = call ",
-                leaf::atom("beamtalk_exception_handler"),
-                ":",
-                leaf::atom("ensure_wrapped"),
-                "(",
-                type_v.clone(),
-                ", ",
-                reason_v.clone(),
-                ", ",
-                built_v,
-                ") in",
-                line(),
-                noreply_raise_tail(type_v, reason_v, stack_v, wrapped_v),
+                wrap_and_reraise_doc(
+                    &CatchVars {
+                        class: type_v.clone(),
+                        reason: reason_v.clone(),
+                        stack: stack_v.clone(),
+                    },
+                    built_v,
+                    wrapped_v.clone(),
+                    None,
+                    noreply_raise_tail(type_v, reason_v, stack_v, wrapped_v),
+                    Layout::Block,
+                ),
             ],
         ),
         line(),

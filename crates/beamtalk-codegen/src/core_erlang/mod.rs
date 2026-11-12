@@ -137,6 +137,7 @@ pub mod ensure_nlr_relay;
 pub mod erlang_types;
 mod error;
 mod errors;
+mod exception_forms;
 mod expr_shape;
 mod expressions;
 mod field_types;

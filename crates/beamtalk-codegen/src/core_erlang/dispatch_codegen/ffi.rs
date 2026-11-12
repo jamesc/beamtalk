@@ -8,10 +8,12 @@
 //!
 //! **DDD Context:** Compilation — Code Generation
 
+use crate::core_erlang::exception_forms::{CatchVars, try_catch_doc};
 use crate::core_erlang::{CoreErlangGenerator, Result};
 
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
+use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::type_checker::{
@@ -370,50 +372,55 @@ impl CoreErlangGenerator {
         let built_var = self.fresh_temp_var("FfiBuiltStk");
         let self_var = self.fresh_temp_var("FfiSelf");
         let site_var = self.fresh_temp_var("FfiSite");
-        docvec![
-            "try call ",
-            module_atom.clone(),
-            ":",
-            function_atom.clone(),
-            "(",
-            Document::Vec(arg_vars.to_vec()),
-            ") of <",
-            leaf::var(result_var.clone()),
-            "> -> ",
-            leaf::var(result_var),
-            " catch <",
-            leaf::var(cls_var.clone()),
-            ", ",
-            leaf::var(err_var.clone()),
-            ", ",
-            leaf::var(stk_var.clone()),
-            "> -> let ",
-            leaf::var(built_var.clone()),
-            " = primop 'build_stacktrace'(",
-            leaf::var(stk_var),
-            ") in let ",
-            leaf::var(self_var.clone()),
-            " = call 'erlang':'self'() in let ",
-            leaf::var(site_var.clone()),
-            " = call 'erlang':'process_info'(",
-            leaf::var(self_var),
-            ", 'current_stacktrace') in call 'beamtalk_erlang_proxy':'ffi_call_raised'(",
-            leaf::var(cls_var),
-            ", ",
-            leaf::var(err_var),
-            ", ",
+        let catch = CatchVars {
+            class: leaf::var(cls_var.clone()),
+            reason: leaf::var(err_var.clone()),
+            stack: leaf::var(stk_var.clone()),
+        };
+        let raised = form::call(
+            "beamtalk_erlang_proxy",
+            "ffi_call_raised",
+            [
+                leaf::var(cls_var),
+                leaf::var(err_var),
+                leaf::var(built_var.clone()),
+                module_atom.clone(),
+                function_atom.clone(),
+                docvec!["[", Document::Vec(arg_vars.to_vec()), "]"],
+                mode_atom.clone(),
+                leaf::var(site_var.clone()),
+            ],
+        );
+        let handler = form::let_in(
             leaf::var(built_var),
-            ", ",
-            module_atom.clone(),
-            ", ",
-            function_atom.clone(),
-            ", [",
-            Document::Vec(arg_vars.to_vec()),
-            "], ",
-            mode_atom.clone(),
-            ", ",
-            leaf::var(site_var),
-            ")",
-        ]
+            form::primop("build_stacktrace", [leaf::var(stk_var)]),
+            form::let_in(
+                leaf::var(self_var.clone()),
+                form::call("erlang", "self", []),
+                form::let_in(
+                    leaf::var(site_var),
+                    form::call(
+                        "erlang",
+                        "process_info",
+                        [leaf::var(self_var), leaf::atom("current_stacktrace")],
+                    ),
+                    raised,
+                    Layout::Flat,
+                ),
+                Layout::Flat,
+            ),
+            Layout::Flat,
+        );
+        try_catch_doc(
+            form::call_atoms(
+                module_atom.clone(),
+                function_atom.clone(),
+                [Document::Vec(arg_vars.to_vec())],
+            ),
+            leaf::var(result_var),
+            catch,
+            handler,
+            Layout::Flat,
+        )
     }
 }
