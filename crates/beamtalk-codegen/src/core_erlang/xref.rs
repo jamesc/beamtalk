@@ -87,7 +87,11 @@ fn project_recv_type(ty: &InferredType) -> RecvType {
         InferredType::Meta { class_name, .. } => RecvType::ClassObject(class_name.clone()),
         // A map shape (ADR 0147) is a `Dictionary` at runtime (shapes are
         // erased), so a send to it keys on `Dictionary`.
-        InferredType::Shape { .. } => RecvType::Name("Dictionary".into()),
+        InferredType::Shape { .. } => ty
+            .instance_class()
+            .map_or(RecvType::Dynamic, |(class_name, _)| {
+                RecvType::Name(class_name.clone())
+            }),
         // Project each member the same way a single-name receiver
         // would be projected; if every member resolves cleanly, key on the
         // member list instead of coarsening the whole composed type away.
