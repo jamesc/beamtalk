@@ -29,6 +29,9 @@
 
 use ecow::{EcoString, eco_format};
 
+use crate::ast::{Expression, Literal};
+use crate::source_analysis::Span;
+
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::string_utils::edit_distance;
 
@@ -67,6 +70,61 @@ pub(super) enum ShapeMismatch {
 }
 
 impl ShapeMismatch {
+    /// The span of the offending key where `value` is a map literal written
+    /// at the site and `expected` the shape it was judged against (BT-4735):
+    ///
+    /// - the key a closed shape does not name ([`UnexpectedKey`](Self::UnexpectedKey));
+    /// - the key whose value has the wrong type ([`ValueType`](Self::ValueType)),
+    ///   descending into a nested literal to the innermost key;
+    /// - for a [`MissingKey`](Self::MissingKey) against a closed shape, the
+    ///   first key written that the shape does not name, since a required
+    ///   key that is absent next to an unnamed one is usually a typo.
+    ///
+    /// `None` when there is nothing to point at (a missing key is written
+    /// nowhere) or `value` is not a literal; the caller keeps its
+    /// whole-expression span.
+    pub(super) fn key_span_in(&self, value: &Expression, expected: &InferredType) -> Option<Span> {
+        let Expression::MapLiteral { pairs, .. } = value.unwrap_parens() else {
+            return None;
+        };
+        let symbol_key = |pair: &crate::ast::MapPair| match &pair.key {
+            Expression::Literal(Literal::Symbol(k), _) => Some(k.clone()),
+            _ => None,
+        };
+        let InferredType::Shape {
+            fields: expected_fields,
+            open: expected_open,
+            ..
+        } = expected
+        else {
+            return None;
+        };
+        match self {
+            Self::UnexpectedKey { key, .. } => pairs
+                .iter()
+                .find(|pair| symbol_key(pair).as_ref() == Some(key))
+                .map(|pair| pair.key.span()),
+            Self::ValueType { key, inner, .. } => {
+                let pair = pairs
+                    .iter()
+                    .find(|pair| symbol_key(pair).as_ref() == Some(key))?;
+                let field = expected_fields.iter().find(|f| f.key == *key);
+                inner
+                    .as_deref()
+                    .zip(field)
+                    .and_then(|(inner, field)| inner.key_span_in(&pair.value, &field.value))
+                    .or_else(|| Some(pair.key.span()))
+            }
+            Self::MissingKey { .. } if !expected_open => pairs
+                .iter()
+                .find(|pair| {
+                    symbol_key(pair).is_some_and(|k| !expected_fields.iter().any(|f| f.key == k))
+                })
+                .map(|pair| pair.key.span()),
+            _ => None,
+        }
+    }
+
     /// A one-line explanation naming the offending key, for a diagnostic hint.
     pub(super) fn describe(&self) -> EcoString {
         match self {
@@ -427,6 +485,7 @@ impl TypeChecker {
         expected: &InferredType,
         hierarchy: &ClassHierarchy,
         span: crate::source_analysis::Span,
+        value_expr: Option<&Expression>,
         headline: impl FnOnce(&str, &str) -> String,
     ) -> bool {
         if !(expected.contains_shape() || actual.contains_shape()) {
@@ -441,7 +500,9 @@ impl TypeChecker {
                 headline(&show(actual), &show(expected)),
                 &mismatch,
                 expected,
-                span,
+                value_expr
+                    .and_then(|expr| mismatch.key_span_in(expr, expected))
+                    .unwrap_or(span),
             );
             self.diagnostics.push(diag);
         }

@@ -213,9 +213,9 @@ impl TypeChecker {
                 .unwrap_or_else(|| inferred_ty.display_name()),
         };
         // ADR 0147: when a map shape is involved, say which key is at fault.
-        let shape_detail = Self::shape_mismatch_detail(inferred_ty, declared, hierarchy);
+        let shape_mismatch = Self::shape_mismatch_of(inferred_ty, declared, hierarchy);
         Some(AssignmentTypeMismatch {
-            shape_detail,
+            shape_mismatch,
             declared_display: declared
                 .display_for_diagnostic()
                 .unwrap_or_else(|| declared_name.clone()),
@@ -258,11 +258,11 @@ impl TypeChecker {
     /// ADR 0147: when a map shape is involved, why the value is not
     /// assignable, naming the offending key — from the first member of the
     /// value that [`Self::shape_member_ok`] itself refused.
-    fn shape_mismatch_detail(
+    fn shape_mismatch_of(
         inferred_ty: &InferredType,
         declared: &InferredType,
         hierarchy: &ClassHierarchy,
-    ) -> Option<EcoString> {
+    ) -> Option<ShapeMismatch> {
         if !(inferred_ty.contains_shape() || declared.contains_shape()) {
             return None;
         }
@@ -274,7 +274,6 @@ impl TypeChecker {
                     .err()
                     .filter(|m| !matches!(m, ShapeMismatch::Incompatible))
             })
-            .map(|m| m.describe())
     }
 
     /// ADR 0147: whether one member of an assigned value fits `declared` when
@@ -632,6 +631,12 @@ impl TypeChecker {
                 hierarchy,
                 self.protocol_registry.as_deref(),
             ) {
+                // ADR 0147: a literal value points at the offending key.
+                let span = mismatch
+                    .shape_mismatch
+                    .as_ref()
+                    .and_then(|m| m.key_span_in(value, &declared))
+                    .unwrap_or(span);
                 self.emit_assignment_type_mismatch(&mismatch, span);
             }
             declared

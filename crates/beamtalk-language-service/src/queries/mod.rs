@@ -47,6 +47,7 @@ pub mod references_to_query;
 pub mod return_value_fix_provider;
 pub mod selector_rename_query;
 pub mod senders_query;
+pub(crate) mod shape_keys;
 pub mod signature_help_provider;
 
 use beamtalk_core::ast::{Expression, Module};

@@ -26,6 +26,7 @@
 //! - DDD model: `docs/beamtalk-ddd-model.md` (Language Service Context)
 //! - LSP specification: Language Server Protocol hover requests
 
+use crate::queries::shape_keys;
 use crate::queries::{
     enrich_hierarchy_with_inferred_returns, protocols_for_module, type_of_parsed,
 };
@@ -953,6 +954,20 @@ fn find_hover_in_expr(
             ) {
                 return Some(hover);
             }
+            // ADR 0147: the key of a shape-aware keyed read (`o at: #port`)
+            // shows that key's value type.
+            if let (Some(key_arg), Some(receiver_ty)) =
+                (arguments.first(), type_of_parsed(type_map, receiver))
+            {
+                let key_span = key_arg.span();
+                if offset >= key_span.start() && offset < key_span.end() {
+                    if let Some(text) =
+                        shape_keys::keyed_send_hover_text(&selector.name(), key_arg, receiver_ty)
+                    {
+                        return Some(HoverInfo::new(text, key_span));
+                    }
+                }
+            }
             if let Some(hover) = arguments.iter().find_map(|arg| {
                 find_hover_in_expr(
                     arg,
@@ -1225,6 +1240,18 @@ fn find_hover_in_expr(
             if offset >= span.start() && offset < span.end() {
                 // Check if hovering over a specific key or value
                 for pair in pairs {
+                    // ADR 0147: a symbol key of a literal that infers a shape
+                    // shows that key's value type.
+                    let key_span = pair.key.span();
+                    if let (Expression::Literal(Literal::Symbol(key), _), Some(literal_ty)) =
+                        (&pair.key, type_of_parsed(type_map, expr))
+                    {
+                        if offset >= key_span.start() && offset < key_span.end() {
+                            if let Some(text) = shape_keys::key_hover_text(key, literal_ty, false) {
+                                return Some(HoverInfo::new(text, key_span));
+                            }
+                        }
+                    }
                     if let Some(hover) = find_hover_in_expr(
                         &pair.key,
                         offset,

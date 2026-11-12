@@ -14,6 +14,7 @@ use crate::source_analysis::{Diagnostic, DiagnosticCategory, Severity, Span};
 use ecow::EcoString;
 
 use super::super::TypeChecker;
+use super::super::shape_assignability::ShapeMismatch;
 use super::super::types::{AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass};
 
 impl TypeChecker {
@@ -42,16 +43,22 @@ impl TypeChecker {
                 span,
             )
             .with_category(DiagnosticCategory::Type)
-            .with_hint(match &mismatch.shape_detail {
-                Some(detail) => format!(
-                    "The right-hand side has type {} which is not assignable to {}: {detail}",
-                    mismatch.inferred_display, mismatch.declared_display
-                ),
-                None => format!(
-                    "The right-hand side has type {} which is not assignable to {}",
-                    mismatch.inferred_display, mismatch.declared_display
-                ),
-            }),
+            .with_hint(
+                match mismatch
+                    .shape_mismatch
+                    .as_ref()
+                    .map(ShapeMismatch::describe)
+                {
+                    Some(detail) => format!(
+                        "The right-hand side has type {} which is not assignable to {}: {detail}",
+                        mismatch.inferred_display, mismatch.declared_display
+                    ),
+                    None => format!(
+                        "The right-hand side has type {} which is not assignable to {}",
+                        mismatch.inferred_display, mismatch.declared_display
+                    ),
+                },
+            ),
         );
     }
 

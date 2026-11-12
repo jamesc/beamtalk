@@ -89,6 +89,7 @@ pub use native_types::{
     is_specs_line, is_specs_result_error, is_specs_result_ok, load_native_declarations,
     map_type_name, parse_specs_line,
 };
+pub use shape_keyed::is_shape_keyed_selector;
 pub(in crate::semantic_analysis) use type_resolver::{
     resolve_declared_type, resolve_type_annotation,
 };
