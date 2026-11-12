@@ -41,6 +41,7 @@ fn detect(receiver: &Expression) -> Option<NarrowingInfo> {
         true_type: InferredType::Dynamic(DynamicReason::Unknown),
         false_type: None,
         is_nil_check: false,
+        nil_test_negated: false,
         is_result_ok_check: false,
         is_result_error_check: false,
         responded_selector: Some(sel_name.clone()),

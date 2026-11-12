@@ -24,6 +24,10 @@ use crate::semantic_analysis::type_checker::{EnvKey, InferredType};
 /// then `refine_responds_to_narrowing` consults the protocol registry: if exactly
 /// one protocol requires the tested selector, the type is refined to that
 /// protocol. Multiple or zero matches fall back to `Dynamic`.
+// The bools are independent detector flags, one per test shape; folding them
+// into an enum would not be simpler (the shapes are not mutually exclusive in
+// the consumers).
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
 pub(crate) struct NarrowingInfo {
     /// The env key being narrowed (local variable or synthetic
@@ -40,6 +44,11 @@ pub(crate) struct NarrowingInfo {
     /// Whether this is a nil-check (`isNil`). If so, the *false* branch
     /// narrows to non-nil and early-return narrowing applies.
     pub(crate) is_nil_check: bool,
+    /// Whether the nil test was an *inequality* (`x =/= nil`, `x /= nil`,
+    /// BT-4712), i.e. the `notNil` reading. Only meaningful with
+    /// `is_nil_check`; `detect` leaves the branch types as for `isNil` and
+    /// `refine_nil_negation` swaps them once the live type is known.
+    pub(crate) nil_test_negated: bool,
     /// Whether this is a Result `isOk` / `ok` check.
     ///
     /// When true, the true branch knows `value` is safe (ok variant) and the

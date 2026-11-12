@@ -432,6 +432,8 @@ impl TypeChecker {
                 self.protocol_registry.as_deref(),
             );
         }
+        // BT-4712: `x =/= nil` swaps the `isNil` branches (no-op otherwise).
+        info = self.refine_nil_test(info, env, hierarchy);
         if info.responded_selector.is_some() {
             // Resolve `true_type` (upgrading `Dynamic` to a concrete
             // `Protocol` type when exactly one protocol requires the tested

@@ -70,7 +70,56 @@ impl TypeChecker {
                     self.protocol_registry.as_deref(),
                 )
             })
+            .map(|info| self.refine_nil_test(info, env, hierarchy))
             .map(|info| self.refine_class_narrowing(info, env, hierarchy, span))
+    }
+
+    /// Resolves an inequality nil test (`x =/= nil`, `x /= nil`, BT-4712).
+    ///
+    /// `detect` produces the `isNil` shape; for a negated test the true
+    /// branch is the non-nil type (resolved against the variable's live type,
+    /// like the `isNil` false branch) and the false branch is `UndefinedObject`.
+    /// Idempotent and a no-op for every other shape, so each pipeline that
+    /// refines singleton/class tests can call it unconditionally.
+    pub(in crate::semantic_analysis::type_checker) fn refine_nil_negation(
+        mut info: NarrowingInfo,
+        env: &TypeEnv,
+        hierarchy: &ClassHierarchy,
+        alias_registry: Option<&AliasRegistry>,
+        protocol_registry: Option<&ProtocolRegistry>,
+    ) -> NarrowingInfo {
+        if !(info.is_nil_check && info.nil_test_negated) || info.false_type.is_some() {
+            return info;
+        }
+        let current_ty = Self::resolve_narrowing_variable_type(
+            &info.variable,
+            env,
+            hierarchy,
+            alias_registry,
+            protocol_registry,
+        );
+        info.false_type = Some(std::mem::replace(
+            &mut info.true_type,
+            Self::non_nil_type(&current_ty),
+        ));
+        info
+    }
+
+    /// [`Self::refine_nil_negation`] with this checker's registries, so
+    /// pipeline call sites stay one line.
+    pub(in crate::semantic_analysis::type_checker) fn refine_nil_test(
+        &self,
+        info: NarrowingInfo,
+        env: &TypeEnv,
+        hierarchy: &ClassHierarchy,
+    ) -> NarrowingInfo {
+        Self::refine_nil_negation(
+            info,
+            env,
+            hierarchy,
+            self.alias_registry.as_deref(),
+            self.protocol_registry.as_deref(),
+        )
     }
 
     /// BT-4635: narrowing for the lazy block of `<test> and: [...]` /

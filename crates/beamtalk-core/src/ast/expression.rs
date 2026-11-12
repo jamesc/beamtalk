@@ -575,9 +575,30 @@ impl Expression {
     /// re-matching the identifier names.
     #[must_use]
     pub fn as_literal_bool(&self) -> Option<bool> {
+        match self.reserved_identifier()? {
+            "true" => Some(true),
+            "false" => Some(false),
+            _ => None,
+        }
+    }
+
+    /// Whether this expression is the reserved `nil` identifier, through any
+    /// number of `Parenthesized` wrappers (BT-4712).
+    ///
+    /// Like `true`/`false`, `nil` is a reserved identifier rather than a
+    /// `Literal`. Single authority for "literal nil" in the type checker's
+    /// narrowing rules.
+    #[must_use]
+    pub fn is_literal_nil(&self) -> bool {
+        self.reserved_identifier() == Some("nil")
+    }
+
+    /// The identifier name of this expression through any number of
+    /// `Parenthesized` wrappers, or `None` if it is not a bare identifier.
+    /// The one place `as_literal_bool` and `is_literal_nil` peel parens.
+    fn reserved_identifier(&self) -> Option<&str> {
         match self.unwrap_parens() {
-            Self::Identifier(Identifier { name, .. }) if name == "true" => Some(true),
-            Self::Identifier(Identifier { name, .. }) if name == "false" => Some(false),
+            Self::Identifier(Identifier { name, .. }) => Some(name.as_str()),
             _ => None,
         }
     }
