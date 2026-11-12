@@ -604,64 +604,6 @@ impl InferredType {
         Some(Self::known_with_args("Dictionary", vec![key_ty, value_ty]))
     }
 
-    /// This type with every map shape (ADR 0147), at any depth, replaced by
-    /// the bare `Dictionary` it erases to — the [`InferredType`] counterpart
-    /// of `DeclaredType::erase_shapes`.
-    ///
-    /// For the string-level compatibility checks that know no `#{...}` class.
-    /// Until shape assignability lands (BT-4730) they judge a shape as a
-    /// plain `Dictionary`, exactly as the pre-shape checker did.
-    #[must_use]
-    pub fn erase_shapes(&self) -> Self {
-        match self {
-            // The erased `Dictionary` is not structurally the alias's
-            // expansion, so an `Aliased` tag must not survive (its display
-            // invariant); other provenance is kept.
-            Self::Shape { provenance, .. } => Self::Known {
-                class_name: "Dictionary".into(),
-                type_args: vec![],
-                provenance: match provenance {
-                    TypeProvenance::Aliased { span, .. } => TypeProvenance::Inferred(*span),
-                    other => other.clone(),
-                },
-            },
-            Self::Known {
-                class_name,
-                type_args,
-                provenance,
-            } => Self::Known {
-                class_name: class_name.clone(),
-                type_args: type_args.iter().map(Self::erase_shapes).collect(),
-                provenance: provenance.clone(),
-            },
-            // Rebuilt through `union_of` so two shapes erasing to `Dictionary`
-            // collapse to one member (its normal form).
-            Self::Union { members, .. } => {
-                let erased: Vec<Self> = members.iter().map(Self::erase_shapes).collect();
-                Self::union_of(&erased)
-            }
-            Self::Intersection {
-                members,
-                provenance,
-            } => Self::Intersection {
-                members: members.iter().map(Self::erase_shapes).collect(),
-                provenance: provenance.clone(),
-            },
-            Self::Negation {
-                base,
-                excluded,
-                provenance,
-            } => Self::Negation {
-                base: Box::new(base.erase_shapes()),
-                excluded: Box::new(excluded.erase_shapes()),
-                provenance: provenance.clone(),
-            },
-            Self::Meta { .. } | Self::ProtocolMeta { .. } | Self::Dynamic(_) | Self::Never => {
-                self.clone()
-            }
-        }
-    }
-
     /// Creates a `Union` from simple class names with `Inferred` provenance.
     ///
     /// Convenience for the common case of `String | nil` style unions where
@@ -2504,24 +2446,6 @@ mod display_tests {
         assert!(int().dictionary_view().is_none());
         assert!(InferredType::Never.dictionary_view().is_none());
         assert!(InferredType::meta("Foo").dictionary_view().is_none());
-    }
-
-    #[test]
-    fn erase_shapes_replaces_shapes_and_drops_alias_provenance() {
-        let a = InferredType::shape(vec![field("a", int(), false)], false)
-            .tag_alias_expansion("Opts".into(), Span::default());
-        let b = InferredType::shape(vec![field("b", int(), false)], false);
-        let erased = a.erase_shapes();
-        assert_eq!(erased, InferredType::known("Dictionary"));
-        assert!(erased.alias_display_name().is_none());
-
-        // `S1 | S2` collapses to one `Dictionary`, not `Dictionary | Dictionary`.
-        let union = InferredType::union_of(&[a, b]);
-        assert_eq!(union.erase_shapes(), InferredType::known("Dictionary"));
-
-        // Nested in a type argument.
-        let list = InferredType::known_with_args("List", vec![InferredType::shape(vec![], true)]);
-        assert_eq!(list.erase_shapes().display_name(), "List(Dictionary)");
     }
 
     #[test]

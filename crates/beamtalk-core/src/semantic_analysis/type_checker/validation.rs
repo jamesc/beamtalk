@@ -39,6 +39,7 @@ use ecow::EcoString;
 
 use super::known_remote;
 use super::sendability;
+use super::shape_assignability::declared_type_has_shape;
 use super::type_resolver;
 use super::types::{
     AssignmentTypeMismatch, CrossObjectFieldMutation, DynamicInTypedClass, OverrideReturnWidening,
@@ -1119,10 +1120,26 @@ impl TypeChecker {
                     || Self::is_return_type_refinement(actual, &false_ty(), hierarchy)
             }
             _ => {
-                // Shapes are judged as `Dictionary` until BT-4730 (the string
-                // helper knows no `#{...}` class and would call it compatible).
-                let actual_str: EcoString = actual.erase_shapes().to_string().into();
-                let expected_str: EcoString = expected.erase_shapes().to_string().into();
+                // ADR 0147: the string helper knows no `#{...}` class (and
+                // would call it compatible), so a shape on either side is
+                // judged structurally.
+                if declared_type_has_shape(actual) || declared_type_has_shape(expected) {
+                    let subst = type_resolver::SubstitutionMap::new();
+                    let resolve = |t: &DeclaredType| {
+                        type_resolver::resolve_declared_type_in(
+                            t,
+                            &subst,
+                            None,
+                            None,
+                            super::TypeStringContext::Declared,
+                            Some(hierarchy),
+                        )
+                    };
+                    return Self::shape_assignable(&resolve(actual), &resolve(expected), hierarchy)
+                        .is_ok();
+                }
+                let actual_str: EcoString = actual.to_string().into();
+                let expected_str: EcoString = expected.to_string().into();
                 Self::is_type_compatible(&actual_str, &expected_str, hierarchy)
             }
         }
@@ -1240,7 +1257,7 @@ impl TypeChecker {
     /// incompatible `Union` member like `Nil`. Generic type-param
     /// placeholders (T, E, K, V) are treated as compatible since they're
     /// symbolic.
-    fn type_args_compatible(
+    pub(super) fn type_args_compatible(
         expected: &InferredType,
         actual: &InferredType,
         hierarchy: &ClassHierarchy,
@@ -1714,13 +1731,45 @@ impl TypeChecker {
             // type once at this boundary (byte-
             // identical to the old stored string); `resolve_type_param`
             // itself takes the structured `DeclaredType` directly.
-            // Shape assignability is BT-4730. Until it lands, an expected
-            // map shape (ADR 0147) is judged as the bare `Dictionary` it
-            // erases to — the compatibility helpers below are string-level
-            // and know no `#{...}` class — which is exactly what the
-            // pre-shape checker saw.
-            let expected_declared_str: EcoString =
-                expected_declared.erase_shapes().to_string().into();
+            // ADR 0147: a shape on either side (an alias to one included) is
+            // judged structurally; everything else keeps the string-level
+            // nominal rules below, which know no `#{...}` class.
+            let expected_resolved = (arg_ty.contains_shape()
+                || class_subst.values().any(InferredType::contains_shape)
+                || self.declared_may_be_shape(expected_declared))
+            .then(|| self.resolve_declared_recording_aliases(expected_declared, class_subst))
+            .filter(|resolved| resolved.contains_shape() || arg_ty.contains_shape());
+            if let Some(expected_resolved) = expected_resolved {
+                if let Err(mismatch) = Self::shape_assignable(arg_ty, &expected_resolved, hierarchy)
+                {
+                    let param_pos = i + 1;
+                    let actual_display = arg_ty
+                        .display_for_diagnostic()
+                        .unwrap_or_else(|| EcoString::from("Dynamic"));
+                    let expected_display = expected_resolved
+                        .display_for_diagnostic()
+                        .unwrap_or_else(|| EcoString::from("Dynamic"));
+                    let mut diag = Self::shape_mismatch_diagnostic(
+                        format!(
+                            "Argument {param_pos} of '{selector}' on {class_name} expects {expected_display}, got {actual_display}"
+                        ),
+                        &mismatch,
+                        &expected_resolved,
+                        span,
+                    );
+                    if let (Some(exprs), Some(e)) = (arg_exprs, env) {
+                        if let Some(Expression::Identifier(ident)) = exprs.get(i) {
+                            if let Some(origin) = e.get_local_origin(&ident.name) {
+                                diag =
+                                    diag.with_note(origin.description.clone(), Some(origin.span));
+                            }
+                        }
+                    }
+                    self.diagnostics.push(diag);
+                }
+                continue;
+            }
+            let expected_declared_str: EcoString = expected_declared.to_string().into();
             let substituted_expected;
             let expected_ty: &EcoString = if !class_subst.is_empty()
                 && Self::type_string_references_class_param(&expected_declared_str, class_subst)
@@ -1821,15 +1870,7 @@ impl TypeChecker {
                     }),
                 _ => None,
             };
-            // Shape assignability is ADR 0147's next phase (BT-4730). Until it
-            // lands, a shape argument is judged as the bare `Dictionary` it
-            // behaves as, exactly what the pre-shape checker saw.
-            let shape_stand_in = matches!(arg_ty, InferredType::Shape { .. })
-                .then(|| InferredType::known("Dictionary"));
-            let arg_ty = shape_stand_in
-                .as_ref()
-                .or(resolved_arg_ty.as_ref())
-                .unwrap_or(arg_ty);
+            let arg_ty = resolved_arg_ty.as_ref().unwrap_or(arg_ty);
             match arg_ty {
                 InferredType::Known {
                     class_name: actual_ty,
@@ -2350,6 +2391,32 @@ impl TypeChecker {
             return;
         }
 
+        // ADR 0147: a shape in the body or the declared return type is judged
+        // structurally. A `Dynamic` body keeps its dedicated hint path.
+        if !matches!(body_type, InferredType::Dynamic(_))
+            && (expected.contains_shape() || body_type.contains_shape())
+        {
+            if let Err(mismatch) = Self::shape_assignable(body_type, &expected, hierarchy) {
+                let show = |t: &InferredType| {
+                    t.display_for_diagnostic()
+                        .unwrap_or_else(|| EcoString::from("Dynamic"))
+                };
+                let selector = method.selector.name();
+                let diag = Self::shape_mismatch_diagnostic(
+                    format!(
+                        "Method '{selector}' in {class_name} declares return type {}, but body returns {}",
+                        show(&expected),
+                        show(body_type)
+                    ),
+                    &mismatch,
+                    &expected,
+                    method.span,
+                );
+                self.diagnostics.push(diag);
+            }
+            return;
+        }
+
         let InferredType::Known {
             class_name: actual_ty,
             type_args: actual_args,
@@ -2382,8 +2449,7 @@ impl TypeChecker {
                 | InferredType::ProtocolMeta { .. }
                 | InferredType::Negation { .. }
                 | InferredType::Intersection { .. }
-                // Shape assignability is ADR 0147 phase 3b (BT-4730): until
-                // then a shape body is not judged against the declared return.
+                // A shape body is judged before this match (ADR 0147).
                 | InferredType::Shape { .. }
                 | InferredType::Known { .. } => {}
             }
@@ -2510,7 +2576,7 @@ impl TypeChecker {
             | InferredType::Dynamic(_)
             | InferredType::Negation { .. }
             | InferredType::Intersection { .. }
-            // Shape assignability: BT-4730.
+            // A shape is judged before this match (ADR 0147).
             | InferredType::Shape { .. } => {}
         }
     }
@@ -2615,7 +2681,7 @@ impl TypeChecker {
             | InferredType::Dynamic(_)
             | InferredType::Negation { .. }
             | InferredType::Intersection { .. }
-            // Shape assignability: BT-4730 — conservative until then.
+            // A shape is judged by `shape_assignable` (ADR 0147).
             | InferredType::Shape { .. } => true,
         }
     }
@@ -2904,9 +2970,19 @@ impl TypeChecker {
             // `is_type_compatible` is a string-level nominal-chain walker
             // shared across many call sites — render
             // the structured types once at this boundary.
-            let child_t_str: EcoString = child_t.erase_shapes().to_string().into();
-            let parent_t_str: EcoString = parent_t.erase_shapes().to_string().into();
-            if !Self::is_type_compatible(&child_t_str, &parent_t_str, hierarchy) {
+            let child_t_str: EcoString = child_t.to_string().into();
+            let parent_t_str: EcoString = parent_t.to_string().into();
+            // ADR 0147: a shape on either side is judged structurally.
+            let compatible =
+                if declared_type_has_shape(child_t) || declared_type_has_shape(parent_t) {
+                    let subst = type_resolver::SubstitutionMap::new();
+                    let child_r = self.resolve_declared_recording_aliases(child_t, &subst);
+                    let parent_r = self.resolve_declared_recording_aliases(parent_t, &subst);
+                    Self::shape_assignable(&child_r, &parent_r, hierarchy).is_ok()
+                } else {
+                    Self::is_type_compatible(&child_t_str, &parent_t_str, hierarchy)
+                };
+            if !compatible {
                 let param_pos = i + 1;
                 self.diagnostics.push(
                     Diagnostic::warning(
@@ -3298,10 +3374,23 @@ impl TypeChecker {
             self.alias_registry.as_deref(),
             super::TypeStringContext::Declared,
         );
-        // Shapes are judged as `Dictionary` until BT-4730: `is_assignable_to`
-        // has no unknown-class escape hatch for a `#{...}` string.
-        let declared_resolved = declared_resolved.erase_shapes();
-        let declared_type: EcoString = declared_type.erase_shapes().to_string().into();
+        // ADR 0147: a shape on either side is judged structurally;
+        // `is_assignable_to` below knows no `#{...}` class.
+        if self.check_shape_slot(
+            value_ty,
+            &declared_resolved,
+            hierarchy,
+            span,
+            |value, declared| {
+                format!(
+                    "Type mismatch: field `{}` declared as {declared}, got {value}",
+                    field.name
+                )
+            },
+        ) {
+            return;
+        }
+        let declared_type: EcoString = declared_type.to_string().into();
         // `ClassHierarchy::state_field_type` predates ADR 0108 and
         // returns a bare `EcoString` with no alias provenance — unlike an
         // `InferredType`, which tags via
@@ -3488,7 +3577,7 @@ impl TypeChecker {
             // conservatively like `Dynamic`/`Never` (ADR 0102). Likewise an
             // `Intersection` (`P1 & P2`, ADR 0102) as the value's own
             // inferred type — skip conservatively.
-            // Shape assignability: BT-4730.
+            // A shape is judged before this match (ADR 0147).
             InferredType::Dynamic(_)
             | InferredType::Never
             | InferredType::Negation { .. }
@@ -3582,9 +3671,6 @@ impl TypeChecker {
             if slots.iter().any(|s| s.as_str() == key_name.as_str()) {
                 // Known slot — value-check against the declared type when typed.
                 if let Some(declared_ty) = hierarchy.state_field_type(class_name, key_name) {
-                    // `check_spawn_with_value` is a string-level helper —
-                    // render once at this boundary.
-                    let declared_ty: EcoString = declared_ty.erase_shapes().to_string().into();
                     self.check_spawn_with_value(
                         class_name,
                         key_name,
@@ -3944,13 +4030,30 @@ impl TypeChecker {
         &mut self,
         class_name: &EcoString,
         slot_name: &EcoString,
-        declared_ty: &EcoString,
+        declared: &DeclaredType,
         value_expr: &Expression,
         hierarchy: &ClassHierarchy,
     ) {
         let Some(value_ty) = self.type_map.get(value_expr.span()).cloned() else {
             return; // Dynamic / unknown value type — skip conservatively.
         };
+        // ADR 0147: a shape on either side is judged structurally.
+        let declared_resolved = self
+            .resolve_declared_recording_aliases(declared, &type_resolver::SubstitutionMap::new());
+        if self.check_shape_slot(
+            &value_ty,
+            &declared_resolved,
+            hierarchy,
+            value_expr.span(),
+            |value, declared_display| {
+                format!(
+                    "type mismatch for state key `{slot_name}` on `{class_name}`: declared {declared_display}, got {value}"
+                )
+            },
+        ) {
+            return;
+        }
+        let declared_ty: &EcoString = &declared.to_string().into();
         // `declared_ty` is a bare `EcoString` pulled from
         // `ClassHierarchy::state_field_type` — the same pre-ADR-0108
         // storage `check_field_assignment` sits on. Re-resolve through
@@ -4104,8 +4207,7 @@ impl TypeChecker {
             if matches!(resolved_declared, InferredType::Dynamic(_)) {
                 continue;
             }
-            // Shapes are judged as `Dictionary` until BT-4730.
-            let declared_type = resolved_declared.erase_shapes().display_annotation();
+            let declared_type = resolved_declared.display_annotation();
             if type_param_names.contains(&declared_type.as_str()) {
                 continue;
             }
@@ -4133,6 +4235,21 @@ impl TypeChecker {
             else {
                 continue;
             };
+            // ADR 0147: shapes are judged structurally.
+            if self.check_shape_slot(
+                &inferred,
+                &resolved_declared,
+                hierarchy,
+                decl.span,
+                |value, declared| {
+                    format!(
+                        "Type mismatch: state `{}` declared as {declared}, default is {value}",
+                        decl.name.name
+                    )
+                },
+            ) {
+                continue;
+            }
             match &inferred {
                 InferredType::Known {
                     class_name: value_type,
@@ -4878,9 +4995,7 @@ impl TypeChecker {
             None,
             Some(registry),
         );
-        // Shapes are judged as `Dictionary` until BT-4730 — erase here too, so
-        // a shape *alias* expands to `Dictionary`, not unknown `#{...}` text.
-        (resolved.erase_shapes().display_annotation(), deps)
+        (resolved.display_annotation(), deps)
     }
 
     // ── Renderers for facts `inference/` detects ──────────────
