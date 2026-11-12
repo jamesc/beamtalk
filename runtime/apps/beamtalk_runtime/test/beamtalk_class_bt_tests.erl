@@ -8,8 +8,8 @@
 -moduledoc """
 EUnit tests for beamtalk_class_bt module.
 
-Tests Class bootstrap stub dispatch error handling, has_method/1 queries,
-and class registration. Models beamtalk_metaclass_bt_tests.erl.
+Tests Class bootstrap stub dispatch error handling, has_method/1 queries
+(registration is covered by beamtalk_class_bt_registration_tests).
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -85,45 +85,3 @@ has_method_unknown_selectors_test() ->
     ?assertNot(beamtalk_class_bt:has_method('name')),
     ?assertNot(beamtalk_class_bt:has_method('superclass')),
     ?assertNot(beamtalk_class_bt:has_method('printString')).
-
-%%% ============================================================================
-%%% register_class/0 (requires bootstrap)
-%%% ============================================================================
-
-register_class_test_() ->
-    {setup, fun setup_bootstrap/0, fun teardown_bootstrap/1, [
-        {"register_class creates Class", fun register_class_creates_test/0},
-        {"register_class is idempotent", fun register_class_idempotent_test/0},
-        {"registered Class has correct superclass", fun register_class_superclass_test/0}
-    ]}.
-
-setup_bootstrap() ->
-    case whereis(pg) of
-        undefined -> pg:start_link();
-        _ -> ok
-    end,
-    beamtalk_extensions:init(),
-    case beamtalk_bootstrap:start_link() of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
-    ok.
-
-teardown_bootstrap(_) ->
-    ok.
-
-register_class_creates_test() ->
-    %% Bootstrap already registered Class; verify it's there
-    Pid = beamtalk_class_registry:whereis_class('Class'),
-    ?assertNotEqual(undefined, Pid),
-    ?assertEqual('Class', beamtalk_object_class:class_name(Pid)).
-
-register_class_idempotent_test() ->
-    %% Calling register_class again must not crash and Class must still be there
-    ok = beamtalk_class_bt:register_class(),
-    Pid = beamtalk_class_registry:whereis_class('Class'),
-    ?assertNotEqual(undefined, Pid).
-
-register_class_superclass_test() ->
-    Pid = beamtalk_class_registry:whereis_class('Class'),
-    ?assertEqual('Object', beamtalk_object_class:superclass(Pid)).

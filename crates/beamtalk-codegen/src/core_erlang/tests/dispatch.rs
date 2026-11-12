@@ -3411,6 +3411,7 @@ fn test_qualified_receiver_message_send_table() {
         assert_has(label, &output, &[expected]);
     }
 }
+
 #[test]
 fn test_unqualified_class_reference_unchanged() {
     // ADR 0070 Phase 2: Unqualified class references should continue to
