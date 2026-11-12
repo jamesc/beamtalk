@@ -1456,7 +1456,7 @@ fn test_project_complete_without_deps_still_warns_conformance() {
 
 /// BT-3481 regression: a Generic-typed state field's default-value
 /// expression used to be inferred twice per compile — once by
-/// `validation/::check_state_defaults` (Phase 1) and again, independently,
+/// `validation/construction.rs::check_state_defaults` (Phase 1) and again, independently,
 /// by `check_state_variance` in this module (Phase 2f) — because both called
 /// `infer_expr` directly instead of sharing one cached result. A default
 /// value containing an unknown-selector send makes that duplication

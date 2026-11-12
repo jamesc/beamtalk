@@ -1952,7 +1952,7 @@ impl std::fmt::Display for ClassObjectType<'_> {
 }
 
 /// An instance-method override whose declared return type does not refine
-/// the one it inherits. Found by `validation/::override_return_widening`,
+/// the one it inherits. Found by `validation/overrides.rs::override_return_widening`,
 /// rendered by `check_override_return_compatibility`, and consulted by
 /// `ProtocolRegistry::conformance_return_type_mismatches` (BT-4175).
 pub(crate) struct OverrideReturnWidening {
@@ -1963,7 +1963,7 @@ pub(crate) struct OverrideReturnWidening {
 
 /// A declared-vs-inferred type mismatch on an assignment's type annotation
 /// (`x :: Declared := value`). Detected in `inference/assignment.rs`,
-/// rendered by `validation/::emit_assignment_type_mismatch`.
+/// rendered by `validation/emit.rs::emit_assignment_type_mismatch`.
 pub(in crate::semantic_analysis::type_checker) struct AssignmentTypeMismatch {
     pub(in crate::semantic_analysis::type_checker) declared_display: EcoString,
     pub(in crate::semantic_analysis::type_checker) inferred_display: EcoString,
@@ -1992,7 +1992,7 @@ pub(in crate::semantic_analysis::type_checker) struct MetatypeNonconformance {
 /// rather than `self.field := value`) — objects cannot mutate another
 /// object's state (Value types are immutable; actors only mutate their own
 /// state via `self.x :=`). Detected in `inference/assignment.rs`, rendered
-/// by `validation/::emit_cross_object_field_mutation`.
+/// by `validation/emit.rs::emit_cross_object_field_mutation`.
 pub(in crate::semantic_analysis::type_checker) struct CrossObjectFieldMutation {
     pub(in crate::semantic_analysis::type_checker) receiver_name: EcoString,
     pub(in crate::semantic_analysis::type_checker) field_name: EcoString,
@@ -2002,7 +2002,7 @@ pub(in crate::semantic_analysis::type_checker) struct CrossObjectFieldMutation {
 /// `Dynamic` for a root-cause reason (not a propagated `DynamicReceiver`, an
 /// inert `Unknown`, or an author-acknowledged `ExplicitDynamic`). Detected
 /// in `inference/mod.rs`, rendered by
-/// `validation/::emit_dynamic_in_typed_class`.
+/// `validation/emit.rs::emit_dynamic_in_typed_class`.
 pub(in crate::semantic_analysis::type_checker) struct DynamicInTypedClass {
     pub(in crate::semantic_analysis::type_checker) class_name: EcoString,
     pub(in crate::semantic_analysis::type_checker) description: &'static str,

@@ -83,7 +83,7 @@ impl TypeChecker {
 
     /// Detect a declared-vs-inferred type mismatch on an assignment's type
     /// annotation — pure data, no diagnostic construction; see
-    /// `validation/::emit_assignment_type_mismatch` for the rendering.
+    /// `validation/emit.rs::emit_assignment_type_mismatch` for the rendering.
     ///
     /// Returns `None` when the RHS is `Dynamic` (the primary use case for
     /// annotations — accepted silently) or `Never` (a diverging expression

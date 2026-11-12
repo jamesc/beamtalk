@@ -600,7 +600,7 @@ impl TypeChecker {
         // Read the pre-computed type instead of re-inferring: `inference/
         // mod.rs::check_module` (Phase 1) already inferred this same
         // default-value expression and cached it in `state_default_types`
-        // (BT-3481) — the same entry `validation/::check_state_defaults`
+        // (BT-3481) — the same entry `validation/construction.rs::check_state_defaults`
         // reads. Looking it up here (Phase 2f, which always runs after
         // Phase 1) keeps the module dependency direction one-way and avoids
         // inferring the same expression twice.

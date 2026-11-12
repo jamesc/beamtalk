@@ -247,7 +247,7 @@ impl TypeChecker {
     /// (BT-3481).
     ///
     /// Only infers fields that declare *both* a type annotation and a
-    /// default value — `validation/::check_state_defaults` and
+    /// default value — `validation/construction.rs::check_state_defaults` and
     /// `protocol.rs::check_state_variance` (this map's only two readers)
     /// both require both to be present before they look anything up, so a
     /// field missing either would never be read back and inferring it here
@@ -976,7 +976,7 @@ impl TypeChecker {
     /// Detect the "Dynamic in typed class" fact for `ty` (an
     /// expression's freshly-inferred type) under `typed_class_context` (the
     /// enclosing `typed` class's name, if any) — pure data, no diagnostic
-    /// construction; see `validation/::emit_dynamic_in_typed_class` for
+    /// construction; see `validation/emit.rs::emit_dynamic_in_typed_class` for
     /// the rendering.
     ///
     /// Only warns for root-cause Dynamic reasons: not `DynamicReceiver`

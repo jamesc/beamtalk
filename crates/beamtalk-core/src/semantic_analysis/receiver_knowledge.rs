@@ -104,7 +104,7 @@ impl ReceiverKnowledge {
 /// **Not folded in here:** the "sealed value type dispatches class-side
 /// messages through instance dispatch" carve-out (`is_sealed_with_instance_dnu`)
 /// is specific to the class-side DNU *hint* decision in
-/// `validation/::check_class_side_send` — it does not apply to
+/// `validation/selectors.rs::check_class_side_send` — it does not apply to
 /// `protocol_registry.rs`'s class-side conformance check, which has never
 /// granted that carve-out. Folding it into this shared classifier would
 /// silently change conformance behaviour for sealed classes, so it stays
@@ -279,7 +279,7 @@ mod tests {
     #[test]
     fn sealed_instance_dnu_does_not_open_class_side_here() {
         // The sealed+instance-DNU carve-out is call-site-local to
-        // `validation/::check_class_side_send`, not part of the shared
+        // `validation/selectors.rs::check_class_side_send`, not part of the shared
         // classifier (see the doc comment on `classify_receiver`) — folding
         // it in here would change `protocol_registry.rs`'s conformance
         // behaviour for sealed classes, which must not happen.
