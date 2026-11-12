@@ -798,16 +798,22 @@ impl CoreErlangGenerator {
         &self,
         receiver: &Expression,
     ) -> std::result::Result<&ecow::EcoString, StaysDynamic> {
-        let beamtalk_core::semantic_analysis::InferredType::Known {
-            class_name,
-            provenance,
-            ..
-        } = self
+        use beamtalk_core::semantic_analysis::InferredType;
+        // A map shape (ADR 0147) is a `Dictionary` for every send that is not
+        // shape-aware, so it dispatches statically as one.
+        static DICTIONARY: ecow::EcoString = ecow::EcoString::inline("Dictionary");
+        let (class_name, provenance) = match self
             .type_map
             .get(receiver.span())
             .ok_or(StaysDynamic::Untyped)?
-        else {
-            return Err(StaysDynamic::Untyped);
+        {
+            InferredType::Known {
+                class_name,
+                provenance,
+                ..
+            } => (class_name, provenance),
+            InferredType::Shape { provenance, .. } => (&DICTIONARY, provenance),
+            _ => return Err(StaysDynamic::Untyped),
         };
         if !matches!(
             provenance,
