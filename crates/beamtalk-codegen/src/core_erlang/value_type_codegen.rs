@@ -187,8 +187,7 @@ fn native_constructor_selectors(class: &ClassDefinition, rejected: &str) -> Vec<
 
 /// BT-4473: the selectors a value type's `dispatch/3` answers ahead of its
 /// method arms, in [`CoreErlangGenerator::generate_primitive_dispatch`]'s
-/// fixed prefix (`asString` is left out: its arm is emitted only when the
-/// class defines no `asString`, so it never shadows a method). A method of
+/// fixed prefix. A method of
 /// one of these names is never reached through `dispatch/3`, so it is never a
 /// direct-call target. Pinned to the emitted prefix by
 /// `dispatch_prefix_selectors_match_emitted_arms`.
@@ -4572,13 +4571,6 @@ impl CoreErlangGenerator {
             return self.generate_minimal_dispatch(class);
         }
 
-        // asString — generate default for classes that don't define it
-        let has_as_string = self
-            .semantic_facts
-            .class_facts(&class_name)
-            .is_some_and(|cf| cf.has_instance_method("asString"));
-        let as_string_branch = Self::generate_dispatch_as_string_branch(&class_name, has_as_string);
-
         // User-defined value objects (ClassKind::Value) store slots in the
         // underlying map and support read-only reflection via fieldAt: and fieldNames.
         // Stdlib primitive types (ClassKind::Object) have no map slots — block both.
@@ -4645,8 +4637,6 @@ impl CoreErlangGenerator {
             ":'has_method'(RtSelector)\n",
             "                <_> when 'true' -> 'false'\n",
             "            end\n",
-            // asString (conditional)
-            as_string_branch,
             // fieldNames — delegates to beamtalk_reflection for value objects
             field_names_branch,
             // fieldAt: — reads from map for value objects, error for primitives
@@ -4825,31 +4815,6 @@ impl CoreErlangGenerator {
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()
             .collect()
-    }
-
-    /// Generates the `asString` dispatch arm if the class does not define it itself.
-    ///
-    /// Returns `Document::Nil` (empty vec) when the class already provides `asString`,
-    /// or when there is no built-in default for the class name.
-    fn generate_dispatch_as_string_branch(
-        class_name: &str,
-        has_as_string: bool,
-    ) -> Document<'static> {
-        if has_as_string {
-            return Document::Vec(Vec::new());
-        }
-        // `True`/`False`/`UndefinedObject` get `asString` from stdlib
-        // (`Boolean`, `UndefinedObject`); only `Block` has no `.bt` source for it.
-        if class_name == "Block" {
-            docvec![
-                "        <'asString'> when 'true' ->\n",
-                "            call 'beamtalk_primitive':'string_from_binary'(",
-                leaf::binary_lit("Block"),
-                ")\n",
-            ]
-        } else {
-            Document::Vec(Vec::new())
-        }
     }
 
     /// Generates the `fieldNames` and `fieldAt:` dispatch arms.
@@ -5360,9 +5325,8 @@ impl CoreErlangGenerator {
 
         // Build the reflection selector list — the nine hard-coded
         // dispatch/3 arms (ADR 0124 §1/§9/B4 added `hasField:`/`clearField:`
-        // to the original seven), plus the default `asString` dispatch/3
-        // generates for classes that don't define it themselves.
-        let mut reflection: Vec<&'static str> = vec![
+        // to the original seven).
+        let reflection: Vec<&'static str> = vec![
             "class",
             "respondsTo:",
             "fieldNames",
@@ -5373,19 +5337,6 @@ impl CoreErlangGenerator {
             "perform:",
             "perform:withArguments:",
         ];
-        let has_explicit_as_string = self
-            .semantic_facts
-            .class_facts(&class_name)
-            .is_some_and(|cf| cf.has_instance_method("asString"));
-        if !has_explicit_as_string
-            && matches!(
-                class_name.as_str(),
-                "True" | "False" | "UndefinedObject" | "Block"
-            )
-        {
-            reflection.push("asString");
-        }
-
         let own_methods: Vec<String> = class
             .methods
             .iter()
