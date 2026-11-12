@@ -37,7 +37,7 @@ beamtalk-etf = { workspace = true }
 # why: load_type_cache_registry (BT-2891) takes a Utf8Path for _build/type_cache/
 camino = { workspace = true }
 # why: encode/decode Erlang External Term Format for compiler port protocol
-eetf = "0.12"
+eetf.workspace = true
 # why: EcoString is the string type used by ClassInfo/MethodInfo in beamtalk-core
 ecow = { workspace = true }
 # why: CLI argument parsing for -v/--verbose flag
@@ -54,7 +54,7 @@ proptest = { workspace = true }
 # generator (test_helpers::test_support) instead of duplicating it.
 beamtalk-core = { workspace = true, features = ["test"] }
 # why: isolated beamtalk.toml fixtures for load_diagnostics_overrides_from tests (BT-2839)
-tempfile = "3.14"
+tempfile.workspace = true
 # why: parse the shared compiler-port command-vocabulary conformance corpus (BT-3095)
 serde_json = { workspace = true }
 # why: `cargo_workspace_root!()` macro — shared leaf for the identical

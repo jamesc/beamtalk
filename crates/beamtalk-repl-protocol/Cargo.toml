@@ -25,7 +25,7 @@ serde_json.workspace = true
 # (their own async servers), so this adds nothing new to their build graph.
 tokio = { workspace = true, optional = true }
 tokio-tungstenite = { workspace = true, optional = true }
-futures-util = { version = "0.3", optional = true }
+futures-util = { workspace = true, optional = true }
 
 [build-dependencies]
 beamtalk-build.workspace = true
@@ -39,7 +39,7 @@ insta.workspace = true
 # `[dependencies]` entries above that dependent crates opt into.
 tokio.workspace = true
 tokio-tungstenite.workspace = true
-futures-util = "0.3"
+futures-util.workspace = true
 # why: `cargo_workspace_root!()` macro — shared leaf for the identical
 # `CARGO_MANIFEST_DIR/../..` walk used by corpus fixture tests (see
 # docs/development/architecture-principles.md § Duplication &

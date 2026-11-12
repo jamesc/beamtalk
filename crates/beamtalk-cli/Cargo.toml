@@ -71,7 +71,7 @@ sha2.workspace = true
 # why: render markdown doc comments and README to HTML (replaces hand-rolled renderer)
 pulldown-cmark.workspace = true
 # why: temporary files for REPL evaluation and workspace management
-tempfile = "3.14"
+tempfile.workspace = true
 # why: WebSocket client for REPL protocol (ADR 0020)
 tungstenite.workspace = true
 # why: unified diff output for beamtalk fmt-check (BT-978)
@@ -82,7 +82,7 @@ similar.workspace = true
 windows-sys.workspace = true
 
 [dev-dependencies]
-serial_test = "4"
+serial_test.workspace = true
 criterion.workspace = true
 # why: subprocess testing for the `beamtalk` CLI binary (BT-2084)
 assert_cmd = "2"
@@ -92,7 +92,6 @@ predicates = "3"
 # feature gates it) with a deterministic proptest runner, rather than a second
 # generator in this crate.
 beamtalk-core = { workspace = true, features = ["test"] }
-proptest.workspace = true
 # why: BT-4382 — shared `closed_port()` test helper (no async deps).
 beamtalk-repl-protocol = { workspace = true, features = ["test-ports"] }
 

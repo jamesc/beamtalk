@@ -21,8 +21,6 @@ thiserror.workspace = true
 miette.workspace = true
 stacker.workspace = true
 dirs.workspace = true
-# why: shared leaf for ~/.beamtalk resolution (see docs/development/architecture-principles.md §6)
-beamtalk-home.workspace = true
 # why: shared leaf for the Core Erlang Document/leaf/docvec! pretty-printing
 # API (ADR 0089), so `codegen` and `unparse` depend on it directly instead of
 # `unparse` depending on `codegen` for it (see
@@ -61,13 +59,12 @@ ignore.workspace = true
 proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
-insta.workspace = true
 proptest.workspace = true
 criterion.workspace = true
-tempfile = "3.14"
+tempfile.workspace = true
 # why: BT-2859 — serialises env-var-mutating tests in `ffi_type_specs`
 # (mirrors the same pattern in `beamtalk-cli`).
-serial_test = "4"
+serial_test.workspace = true
 # why: ADR 0117 step 5 (BT-3362) — `benches/compiler_pipeline.rs` and
 # `examples/compile_pipeline_corpus.rs` exercise the full pipeline
 # (lex → parse → analyse → codegen) end to end, so they need the

@@ -40,7 +40,7 @@ rand.workspace = true
 base64.workspace = true
 
 [dev-dependencies]
-tempfile = "3.14"
+tempfile.workspace = true
 # why: BT-4382 — shared `closed_port()` test helper (no async deps).
 beamtalk-repl-protocol = { workspace = true, features = ["test-ports"] }
 

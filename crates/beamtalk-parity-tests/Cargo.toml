@@ -19,12 +19,12 @@ path = "src/lib.rs"
 [dependencies]
 beamtalk-repl-protocol.workspace = true
 beamtalk-workspace.workspace = true
-serde.workspace = true
 serde_json.workspace = true
+# why: literal instead of `workspace = true` so the feature set stays narrower than
+# the workspace entry (`full`); do not widen.
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "io-std", "io-util", "net", "process", "sync", "time"] }
 tokio-tungstenite.workspace = true
-futures-util = "0.3"
-tracing.workspace = true
+futures-util.workspace = true
 
 [[test]]
 name = "parity"
