@@ -1,0 +1,11 @@
+---
+source: test-package-compiler/tests/compiler_tests.rs
+expression: output
+---
+Error 167..168: Expected ']' to close block
+Error 167..168: Unexpected token: expected expression, found ,
+Error 182..183: Unexpected token: expected expression, found ]
+Error 229..230: Unexpected token: expected expression, found ]
+Error 649..650: Unexpected token: expected expression, found ]
+Error 708..709: Unexpected token: expected expression, found ]
+Error 765..766: Unexpected token: expected expression, found ]

@@ -6,10 +6,16 @@
 //! Test cases are discovered from the `cases/` directory.
 //! Each subdirectory with a `main.bt` file becomes a test.
 //!
-//! Each test case generates three snapshots:
-//! - `{case}_lexer` - Token stream from the lexer
-//! - `{case}_parser` - AST from the parser
+//! Each test case generates:
+//! - parser check - a span-free parse -> unparse -> re-parse round trip for
+//!   error-free cases; `{case}_parser_diagnostics` (compact) for cases with
+//!   parse errors; `{case}_parser` (full AST dump) only for the cases in
+//!   `PARSER_DUMP_CASES`, which exercise error recovery
+//! - `{case}_semantic` - Semantic error diagnostics
 //! - `{case}_codegen` - Generated Core Erlang code
+//!
+//! There is deliberately no lexer snapshot: the lexer is covered by unit and
+//! property tests in `beamtalk-core`.
 //!
 //! Additionally, a compilation test verifies the generated Core Erlang
 //! compiles successfully with `erlc +from_core` (skipped if erlc unavailable).
@@ -98,38 +104,100 @@ fn sibling_protocols(
     (defs, sources)
 }
 
-/// Test the lexer output for a given test case
-fn test_lexer_snapshot(case_name: &str) {
+/// Cases whose parser test pins the full `{:#?}` AST dump plus diagnostics.
+///
+/// Reserved for cases that exercise error recovery or parser diagnostics,
+/// where the (partial) AST shape is the thing under test. Every other case
+/// gets the span-free round-trip check in [`test_parser_check`], so adding an
+/// AST field does not rewrite dozens of snapshots.
+const PARSER_DUMP_CASES: &[&str] = &[
+    "boundary_deeply_nested",
+    "boundary_mixed_errors",
+    "boundary_unicode_identifiers",
+    "character_literals",
+    "control_flow_mutations",
+    "control_flow_mutations_errors",
+    "error_recovery_invalid_syntax",
+    "error_recovery_malformed_message",
+    "future_pattern_matching",
+    "set_theoretic_operators",
+];
+
+/// Parser check for a given test case.
+///
+/// * Allowlisted cases ([`PARSER_DUMP_CASES`]): full AST dump + diagnostics.
+/// * Other cases with parse errors: a compact `severity span: message`
+///   diagnostics snapshot (no AST).
+/// * Error-free cases: parse, unparse, re-parse and unparse again, asserting
+///   the re-parse is error-free and the unparse is a fixed point.
+fn test_parser_check(case_name: &str) {
     let source = read_test_case(case_name);
-    let tokens = lex_with_eof(&source);
+    let (module, diagnostics) = parse(lex_with_eof(&source));
 
-    // Format tokens for snapshot
-    let output = tokens
-        .iter()
-        .map(|t| format!("{:?}", t))
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    insta::assert_snapshot!(format!("{}_lexer", case_name), output);
-}
-
-/// Test the parser AST output for a given test case
-fn test_parser_snapshot(case_name: &str) {
-    let source = read_test_case(case_name);
-    let tokens = lex_with_eof(&source);
-    let (module, diagnostics) = parse(tokens);
-
-    // Format AST and diagnostics for snapshot
-    let mut output = format!("AST:\n{:#?}\n", module);
-
-    if !diagnostics.is_empty() {
-        output.push_str("\nDiagnostics:\n");
-        for diag in &diagnostics {
-            output.push_str(&format!("{:?}\n", diag));
+    if PARSER_DUMP_CASES.contains(&case_name) {
+        let mut output = format!("AST:\n{module:#?}\n");
+        if !diagnostics.is_empty() {
+            output.push_str("\nDiagnostics:\n");
+            for diag in &diagnostics {
+                output.push_str(&format!("{diag:?}\n"));
+            }
         }
+        insta::assert_snapshot!(format!("{case_name}_parser"), output);
+        return;
     }
 
-    insta::assert_snapshot!(format!("{}_parser", case_name), output);
+    let has_errors = diagnostics
+        .iter()
+        .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
+    if has_errors {
+        let output = diagnostics
+            .iter()
+            .map(|d| {
+                format!(
+                    "{:?} {}..{}: {}",
+                    d.severity,
+                    d.span.start(),
+                    d.span.end(),
+                    d.message
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        insta::assert_snapshot!(format!("{case_name}_parser_diagnostics"), output);
+        return;
+    }
+
+    let pass1 = beamtalk_core::unparse::unparse_module(&module);
+    let (module2, diagnostics2) = parse(lex_with_eof(&pass1));
+    let errors2: Vec<_> = diagnostics2
+        .iter()
+        .filter(|d| d.severity == beamtalk_core::source_analysis::Severity::Error)
+        .collect();
+    assert!(
+        errors2.is_empty(),
+        "unparsed output of '{case_name}' fails to re-parse: {errors2:?}\n\n{pass1}"
+    );
+    let pass2 = beamtalk_core::unparse::unparse_module(&module2);
+    // Compared modulo `//` comments and whitespace: the unparser currently
+    // re-joins trailing line comments that follow a case's last statement
+    // (the tail comment moves onto the preceding line on each pass), which is
+    // comment layout, not parse structure.
+    assert_eq!(
+        strip_line_comments(&pass1),
+        strip_line_comments(&pass2),
+        "unparse is not a fixed point for '{case_name}':\n--- pass 1\n{pass1}\n--- pass 2\n{pass2}"
+    );
+}
+
+/// Drops `//` comments to end of line and collapses whitespace runs.
+fn strip_line_comments(text: &str) -> String {
+    text.lines()
+        .map(|line| line.split("//").next().unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Test the Core Erlang codegen output for a given test case
