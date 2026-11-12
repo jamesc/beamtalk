@@ -1753,8 +1753,8 @@ is_cross_package_internal(Pid) ->
                     not_found ->
                         false;
                     {ok, Mod} ->
-                        case extract_package_from_module_name(Mod) of
-                            nil -> false;
+                        case beamtalk_module_name:package_of(Mod) of
+                            undefined -> false;
                             _ -> true
                         end
                 end
@@ -1821,8 +1821,8 @@ collect_internal_selectors_for_class(ClassName, Side) ->
         not_found ->
             #{};
         {ok, Mod} ->
-            case extract_package_from_module_name(Mod) of
-                nil ->
+            case beamtalk_module_name:package_of(Mod) of
+                undefined ->
                     #{};
                 _ ->
                     Meta = read_class_meta(Mod),
@@ -1842,22 +1842,6 @@ collect_internal_selectors_for_class(ClassName, Side) ->
                         MethodInfo
                     )
             end
-    end.
-
--doc """
-Extract the package name from a BEAM module name.
-Returns a binary package name or nil.
-""".
--spec extract_package_from_module_name(atom()) -> binary() | nil.
-extract_package_from_module_name(ModuleName) when is_atom(ModuleName) ->
-    ModStr = atom_to_list(ModuleName),
-    case string:split(ModStr, "@", all) of
-        %% Qualified module name: bt@{pkg}@{class}[...]
-        ["bt", Pkg, _Class | _Rest] when Pkg =/= [] ->
-            list_to_binary(Pkg);
-        %% Unqualified or non-standard names (bt@foo) have no explicit package.
-        _ ->
-            nil
     end.
 
 -doc """

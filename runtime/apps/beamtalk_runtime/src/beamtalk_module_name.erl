@@ -68,6 +68,7 @@ to this heuristic only when a module isn't a registered class.
     to_stdlib_module_atom/1,
     to_qualified_module_atom/2,
     is_stdlib_module/1,
+    package_of/1,
     snake_to_class/1,
     repl_eval_module/1,
     inspector_eval_module/1,
@@ -211,6 +212,47 @@ is_stdlib_module(Module) when is_atom(Module) ->
     end;
 is_stdlib_module(_) ->
     false.
+
+%%====================================================================
+%% package_of/1
+%%
+%% Single source of truth for "which package does this module belong to".
+%%====================================================================
+
+-doc """
+Package segment of a package-qualified module name, or `undefined`.
+
+Only modules shaped `bt@{pkg}@{class}[@…]` (three or more `@`-separated
+segments, non-empty `{pkg}`) have a package, returned as a binary — no atom
+is created from the module name. Everything else answers `undefined`:
+
+- `bt@counter` — a two-part name is an unqualified static class module
+  (`to_module_atom/1`), whose second segment is the *class*, not a package.
+  (`beamtalk_package:package_name/1` used to read it as package `counter`;
+  that was a drift, not an intent — BT-4675.)
+- `bt@stdlib@integer` — package `<<"stdlib">>` (the stdlib is a package
+  here; use `is_stdlib_module/1` to tell it apart).
+- a module that does not start with `bt@` (`lists`, `beamtalk_actor`).
+
+## Examples
+
+```
+1> beamtalk_module_name:package_of('bt@json@parser').
+<<"json">>
+2> beamtalk_module_name:package_of('bt@json@sub@parser').
+<<"json">>
+3> beamtalk_module_name:package_of('bt@counter').
+undefined
+4> beamtalk_module_name:package_of(lists).
+undefined
+```
+""".
+-spec package_of(atom()) -> binary() | undefined.
+package_of(Module) when is_atom(Module) ->
+    case binary:split(atom_to_binary(Module, utf8), <<"@">>, [global]) of
+        [<<"bt">>, Pkg, _Class | _Rest] when Pkg =/= <<>> -> Pkg;
+        _ -> undefined
+    end.
 
 %%====================================================================
 %% Per-evaluation modules (REPL, inspector) and compiled-code detection

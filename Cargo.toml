@@ -145,6 +145,12 @@ rustyline = { version = "19", features = ["derive"] }
 tower-lsp = "0.20"
 tokio = { version = "1", features = ["full"] }
 
+# Async streams (WebSocket client/server plumbing)
+futures-util = "0.3"
+
+# Erlang External Term Format
+eetf = "0.12"
+
 # Stack safety
 stacker = "0.1"
 
@@ -169,6 +175,8 @@ ignore = "0.4"
 
 # Testing
 insta = { version = "1", features = ["yaml"] }
+tempfile = "3.14"
+serial_test = "4"
 proptest = "1"
 criterion = { version = "0.8", features = ["html_reports"] }
 

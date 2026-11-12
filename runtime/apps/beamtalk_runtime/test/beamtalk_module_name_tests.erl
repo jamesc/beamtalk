@@ -160,3 +160,38 @@ eval_module_names_are_compiled_beamtalk_modules_test() ->
     ?assertNot(beamtalk_module_name:is_compiled_beamtalk_module(beamtalk_repl_eval)),
     ?assertNot(beamtalk_module_name:is_compiled_beamtalk_module(beamtalk_repl_eval_tests)),
     ?assertNot(beamtalk_module_name:is_compiled_beamtalk_module(beamtalk_erlang_proxy)).
+
+%%% package_of/1 (BT-4675) — the one answer for "which package is this module in".
+
+package_of_qualified_test() ->
+    ?assertEqual(<<"json">>, beamtalk_module_name:package_of('bt@json@parser')),
+    ?assertEqual(<<"mypackage">>, beamtalk_module_name:package_of('bt@mypackage@MyClass')).
+
+package_of_nested_test() ->
+    ?assertEqual(<<"json">>, beamtalk_module_name:package_of('bt@json@sub@parser')).
+
+package_of_stdlib_is_a_package_test() ->
+    ?assertEqual(<<"stdlib">>, beamtalk_module_name:package_of('bt@stdlib@integer')).
+
+package_of_two_part_name_has_no_package_test() ->
+    %% bt@counter is an unqualified static class module: "counter" is the class.
+    ?assertEqual(undefined, beamtalk_module_name:package_of('bt@counter')).
+
+package_of_non_bt_module_test() ->
+    ?assertEqual(undefined, beamtalk_module_name:package_of(lists)),
+    ?assertEqual(undefined, beamtalk_module_name:package_of(beamtalk_actor)),
+    ?assertEqual(undefined, beamtalk_module_name:package_of(no_at_signs)),
+    ?assertEqual(undefined, beamtalk_module_name:package_of('other@json@parser')).
+
+package_of_degenerate_names_test() ->
+    ?assertEqual(undefined, beamtalk_module_name:package_of(bt)),
+    ?assertEqual(undefined, beamtalk_module_name:package_of('bt@')),
+    ?assertEqual(undefined, beamtalk_module_name:package_of('bt@@bt4675_degenerate')).
+
+package_of_does_not_create_atoms_test() ->
+    ?assertEqual(
+        <<"bt4675_never_an_atom_pkg">>,
+        beamtalk_module_name:package_of(binary_to_atom(<<"bt@bt4675_never_an_atom_pkg@x">>, utf8))
+    ),
+    %% The package segment is a binary: no atom exists for it.
+    ?assertError(badarg, binary_to_existing_atom(<<"bt4675_never_an_atom_pkg">>, utf8)).

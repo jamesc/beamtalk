@@ -38,7 +38,7 @@ beamtalk-core = { workspace = true, features = ["test"] }
 # why: used in codegen tests to assert on Core Erlang shape without
 # hardcoding fresh-variable counter values.
 regex = "1"
-tempfile = "3.14"
+tempfile.workspace = true
 # why: `selector_mangler`'s shared-corpus conformance test reads the same
 # fixture JSON the Erlang side's `beamtalk_class_dispatch_tests` asserts
 # against.

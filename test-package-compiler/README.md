@@ -1,6 +1,6 @@
 # Test Package Compiler
 
-Snapshot tests for the beamtalk compiler. This crate validates compiler output across all compilation stages: lexing, parsing, and code generation.
+Snapshot tests for the beamtalk compiler. This crate validates compiler output across the compilation stages: parsing, semantic analysis, and code generation.
 
 ## Overview
 
@@ -53,24 +53,29 @@ test-package-compiler/
 
 ## Test Stages
 
-Each test case generates two snapshot tests:
+Each test case generates the following tests. There is deliberately no lexer
+snapshot: the lexer is covered by unit and property tests in `beamtalk-core`.
 
-### 1. Lexer Test (`test_{case_name}_lexer`)
-Validates the token stream produced by the lexer, including:
-- Token kinds (identifiers, keywords, literals, operators)
-- Source spans for error reporting
-- Leading and trailing trivia (comments, whitespace)
+### 1. Parser check (`test_{case_name}_parser`)
+- **Error-free cases:** parse, unparse, re-parse and unparse again; the
+  re-parse must be error-free and the unparse must be a fixed point (modulo
+  `//` comments and whitespace). No snapshot, so adding an AST field does not
+  churn files.
+- **Cases with parse errors:** a compact `{case}_parser_diagnostics` snapshot
+  (`severity start..end: message`), no AST.
+- **Error-recovery cases:** the full `{:#?}` AST dump plus diagnostics
+  (`{case}_parser`), only for the cases listed in `PARSER_DUMP_CASES` in
+  `tests/compiler_tests.rs`, where the AST shape is the thing under test.
 
-### 2. Parser Test (`test_{case_name}_parser`)
-Validates the Abstract Syntax Tree (AST) structure:
-- Expression types and nesting
-- Message send structure (unary/binary/keyword)
-- Blocks and closures
-- Error nodes (for error recovery tests)
-- Diagnostics (parse errors and warnings)
+### 2. Semantic test (`test_{case_name}_semantic`)
+Snapshot of the semantic analysis error diagnostics.
 
-### 3. Code Generation Test (Future)
-Will validate the generated Core Erlang output.
+### 3. Code generation test (`test_{case_name}_codegen`)
+Snapshot of the generated Core Erlang.
+
+### 4. Compilation test (`test_{case_name}_compiles`)
+Checks the generated Core Erlang compiles with `erlc +from_core`
+(skipped if `erlc` is unavailable).
 
 ## Snapshot Management
 

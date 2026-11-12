@@ -1160,34 +1160,6 @@ class_name_for_pid_test_() ->
         ]}.
 
 %%% ============================================================================
-%%% extract_package_from_module tests
-%%% ============================================================================
-
-extract_package_from_module_qualified_test() ->
-    ?assertEqual(
-        mypackage,
-        beamtalk_class_registry:extract_package_from_module('bt@mypackage@MyClass')
-    ).
-
-extract_package_from_module_unqualified_test() ->
-    ?assertEqual(
-        undefined,
-        beamtalk_class_registry:extract_package_from_module('bt@MyClass')
-    ).
-
-extract_package_from_module_no_prefix_test() ->
-    ?assertEqual(
-        undefined,
-        beamtalk_class_registry:extract_package_from_module(some_module)
-    ).
-
-extract_package_from_module_stdlib_test() ->
-    ?assertEqual(
-        stdlib,
-        beamtalk_class_registry:extract_package_from_module('bt@stdlib@Integer')
-    ).
-
-%%% ============================================================================
 %%% is_stdlib_module tests
 %%% ============================================================================
 
@@ -1244,14 +1216,14 @@ drain_warnings_by_qualified_names_test() ->
     ),
     %% Drain by the specific package of the new module (pkgB)
     Warnings = beamtalk_class_registry:drain_class_warnings_by_qualified_names(
-        [{pkgB, 'QualDrainClass'}]
+        [{<<"pkgB">>, 'QualDrainClass'}]
     ),
     ?assertEqual(1, length(Warnings)),
     %% Draining with the wrong package should find nothing
     ?assertEqual(
         [],
         beamtalk_class_registry:drain_class_warnings_by_qualified_names(
-            [{pkgA, 'QualDrainClass'}]
+            [{<<"pkgA">>, 'QualDrainClass'}]
         )
     ).
 
