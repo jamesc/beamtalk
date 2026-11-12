@@ -534,23 +534,65 @@ impl CoreErlangGenerator {
             ]);
         }
 
-        let class_pid_var = self.fresh_var("ClassPid");
-        let object_clause = if let Some(module) = self.pinned_builtin_class_module(class_name) {
-            Self::class_object_with_module_clause(&class_pid_var, module, class_name)
-        } else {
-            let class_mod_var = self.fresh_var("ClassModName");
-            Self::class_object_from_registry_clause(&class_pid_var, &class_mod_var, class_name)
-        };
-        let error_doc = self.class_not_found_error_doc(class_name);
+        if let Some(module) = self.pinned_builtin_class_module(class_name) {
+            let class_pid_var = self.fresh_var("ClassPid");
+            let object_clause =
+                Self::class_object_with_module_clause(&class_pid_var, module, class_name);
+            let error_doc = self.class_not_found_error_doc(class_name);
+            return Ok(docvec![
+                "case ",
+                Self::registered_class_pid_doc(class_name),
+                " of ",
+                error_doc,
+                object_clause,
+                "end",
+            ]);
+        }
 
+        // BT-4756: read the class reference from the class's static call map
+        // (one atom-keyed `persistent_term:get`), as a static class send reads
+        // its target. A miss asks the runtime, which does the `whereis` +
+        // `module_name_safe/1` lookup and installs the entry; an unregistered
+        // class answers `undefined` (negative verdicts are never cached,
+        // ADR 0142 §2) and raises `class_not_found` as before.
+        let ref_var = self.fresh_var("ClassRef");
+        let miss_var = self.fresh_var("ClassRef");
+        let error_doc = self.class_not_found_error_doc(class_name);
         Ok(docvec![
-            "case ",
-            Self::registered_class_pid_doc(class_name),
-            " of ",
+            "case call 'persistent_term':'get'(",
+            leaf::atom(util::static_calls_key(class_name)),
+            ", ~{}~) of <~{",
+            Self::class_ref_key_doc(class_name),
+            " := ",
+            leaf::var(ref_var.clone()),
+            "}~> when 'true' -> ",
+            leaf::var(ref_var),
+            " <_> when 'true' -> case call 'beamtalk_class_shadow_flags':'class_ref'(",
+            leaf::atom(class_name.to_string()),
+            ") of ",
             error_doc,
-            object_clause,
-            "end",
+            "<",
+            leaf::var(miss_var.clone()),
+            "> when 'true' -> ",
+            leaf::var(miss_var),
+            " end end",
         ])
+    }
+
+    /// BT-4756: `{'class_ref', '<Name> class'}`, the class literal's key in
+    /// the class's static call map
+    /// (`beamtalk_class_shadow_flags:static_call_key()`). Spelled by the
+    /// runtime in `class_ref/1`;
+    /// `GuardedStaticCallTest>>testClassLiteralInstallsItsReferenceUnderTheRuntimesKey`
+    /// fails if the two differ.
+    fn class_ref_key_doc(class_name: &str) -> Document<'static> {
+        docvec![
+            "{",
+            leaf::atom("class_ref".to_string()),
+            ", ",
+            leaf::atom(util::metaclass_tag(class_name)),
+            "}",
+        ]
     }
 
     /// BT-4411: the compile-time module of a built-in class literal, when its
