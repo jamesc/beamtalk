@@ -240,10 +240,12 @@ impl TypeChecker {
         } else if is_assignable_local(receiver) {
             format!(
                 "assign the result (`{receiver_text} := {receiver_text} {shape}`) or \
-                 chain with `|>`"
+                 chain with `|>`; to discard it on purpose, write `_ := {receiver_text} {shape}`"
             )
         } else {
-            "use the result (assign it, return it, or pass it on)".to_string()
+            "use the result (assign it, return it, or pass it on), or discard it on \
+             purpose with `_ := …`"
+                .to_string()
         };
         self.diagnostics.push(
             Diagnostic::warning(format!("the result of `{name}` is discarded"), *span)

@@ -729,7 +729,9 @@ so `store: v`, `send: data` or `checkHeaders: h` that ends in `self` (or
 never flagged. Every `^` in such a body must return `self` or raise
 (`^ self error: "…"`). A method that ends in a new value (`self withX: 1`),
 has a `^` that answers something else, or is a bare `@primitive` still counts
-as an update. Silence one with `@expect discarded_update`,
+as an update. To discard a result on purpose, assign it to an
+underscore-prefixed local (`_ := p withX: 3.`); an assigned result is never
+flagged. Silence one with `@expect discarded_update`,
 or a package with `discarded-update = "off"` under `[diagnostics]`.
 
 ### Pipelines (`|>`) (ADR 0145)

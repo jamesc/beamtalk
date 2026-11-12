@@ -50,7 +50,8 @@ fn non_final_with_star_statement_warns() {
     assert_eq!(d.severity, Severity::Warning);
     let hint = d.hint.as_deref().unwrap_or_default();
     assert!(
-        hint.contains("assign the result (`p := p withX: …`) or chain with `|>`"),
+        hint.contains("assign the result (`p := p withX: …`) or chain with `|>`")
+            && hint.contains("`_ := p withX: …`"),
         "got: {hint}"
     );
 }
@@ -165,7 +166,7 @@ fn help_only_suggests_assignment_for_a_plain_local() {
         .collect();
     assert!(!hints.is_empty(), "got: {diags:#?}");
     assert!(
-        hints.iter().all(|h| !h.contains(":=")),
+        hints.iter().all(|h| !h.contains("assign the result (`")),
         "no assignment help for a non-local receiver, got: {hints:?}"
     );
 }
@@ -303,4 +304,10 @@ fn method_with_a_non_self_return_on_any_path_still_warns() {
 fn empty_body_is_not_a_self_answer() {
     let diags = effect_diagnostics("  run: h :: Handle -> Integer =>\n    h emptyBody.\n    3\n");
     assert_eq!(discarded(&diags).len(), 1, "got: {diags:#?}");
+}
+
+#[test]
+fn underscore_assignment_discards_on_purpose() {
+    let diags = diagnostics_for("  run: p :: Point -> Point =>\n    _ := p withX: 3.\n    p\n");
+    assert!(discarded(&diags).is_empty(), "got: {diags:#?}");
 }
