@@ -594,6 +594,9 @@ fn expect_category_unchecked(
         ExpectCategory::ActorStateAbroad => {
             unchecked.contains(&DiagnosticCategory::ActorStateAbroad)
         }
+        // BT-4724: unchecked only when OTP discovery was unavailable, so the
+        // check never ran (see `AnalysisResult::unresolved_ffi_checked`).
+        ExpectCategory::UnresolvedFfi => unchecked.contains(&DiagnosticCategory::UnresolvedFfi),
         // Every other category (including `all`, deliberately — see this
         // function's doc) is produced by `analyse_full`'s semantic analysis,
         // which every caller of this function always runs, so none of them
@@ -606,7 +609,6 @@ fn expect_category_unchecked(
         | ExpectCategory::ActorNew
         | ExpectCategory::Visibility
         | ExpectCategory::UnresolvedClass
-        | ExpectCategory::UnresolvedFfi
         | ExpectCategory::ArityMismatch
         | ExpectCategory::ShadowedClass
         | ExpectCategory::TypeAnnotation
@@ -659,6 +661,29 @@ pub fn apply_expect_directives_excluding_lint_only(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     apply_expect_directives_impl(module, diagnostics, LINT_PASS_ONLY_CATEGORIES);
+}
+
+/// [`apply_expect_directives`] / [`apply_expect_directives_excluding_lint_only`]
+/// with the `unresolved_ffi` check's outcome folded in (BT-4724): when
+/// `unresolved_ffi_checked` is `false` (OTP discovery unavailable, so the check
+/// was skipped), `@expect unresolved_ffi` is left alone instead of being
+/// reported stale. `exclude_lint_only` selects the
+/// [`apply_expect_directives_excluding_lint_only`] behaviour.
+pub fn apply_expect_directives_with_ffi_check(
+    module: &Module,
+    diagnostics: &mut Vec<Diagnostic>,
+    exclude_lint_only: bool,
+    unresolved_ffi_checked: bool,
+) {
+    let mut unchecked: Vec<DiagnosticCategory> = if exclude_lint_only {
+        LINT_PASS_ONLY_CATEGORIES.to_vec()
+    } else {
+        Vec::new()
+    };
+    if !unresolved_ffi_checked {
+        unchecked.push(DiagnosticCategory::UnresolvedFfi);
+    }
+    apply_expect_directives_impl(module, diagnostics, &unchecked);
 }
 
 /// A collected `@expect` directive: its (possibly multi-category)
@@ -1618,6 +1643,49 @@ dnu = "error"
             !diagnostics
                 .iter()
                 .any(|d| d.message.contains("stale @expect")),
+            "got: {diagnostics:?}"
+        );
+    }
+
+    // ── `@expect unresolved_ffi` when the check was skipped (BT-4724) ──
+
+    /// With OTP discovery unavailable the `unresolved_ffi` check never ran, so
+    /// the directive cannot be validated and must not be reported stale
+    /// (which `--warnings-as-errors` would turn into a failure).
+    #[test]
+    fn expect_unresolved_ffi_not_stale_when_check_skipped() {
+        let source = "@expect unresolved_ffi\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        for exclude_lint_only in [false, true] {
+            let mut diagnostics = parse_diags.clone();
+            apply_expect_directives_with_ffi_check(
+                &module,
+                &mut diagnostics,
+                exclude_lint_only,
+                false,
+            );
+            assert!(
+                !diagnostics
+                    .iter()
+                    .any(|d| d.message.contains("stale @expect")),
+                "skipped check must not flag the directive stale, got: {diagnostics:?}"
+            );
+        }
+    }
+
+    /// When the check ran and found nothing, the directive is genuinely stale.
+    #[test]
+    fn expect_unresolved_ffi_stale_when_check_ran() {
+        let source = "@expect unresolved_ffi\n42";
+        let tokens = lex_with_eof(source);
+        let (module, parse_diags) = parse(tokens);
+        let mut diagnostics = parse_diags;
+        apply_expect_directives_with_ffi_check(&module, &mut diagnostics, false, true);
+        assert!(
+            diagnostics
+                .iter()
+                .any(|d| d.message.contains("stale @expect unresolved_ffi")),
             "got: {diagnostics:?}"
         );
     }

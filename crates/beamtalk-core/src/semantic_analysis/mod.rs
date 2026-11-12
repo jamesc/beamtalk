@@ -147,6 +147,11 @@ pub struct AnalysisResult {
     /// Diagnostics (errors and warnings) from analysis.
     pub diagnostics: Vec<Diagnostic>,
 
+    /// Whether the `unresolved_ffi` check actually ran (BT-4724). `false` when
+    /// OTP discovery was unavailable, so an `@expect unresolved_ffi` cannot
+    /// be validated and must not be reported as stale.
+    pub unresolved_ffi_checked: bool,
+
     /// Block metadata indexed by block span.
     pub block_info: HashMap<Span, BlockInfo>,
 
@@ -260,6 +265,7 @@ impl AnalysisResult {
     pub fn new() -> Self {
         Self {
             diagnostics: Vec::new(),
+            unresolved_ffi_checked: false,
             block_info: HashMap::new(),
             class_hierarchy: ClassHierarchy::with_builtins(),
             protocol_registry: ProtocolRegistry::new(),
@@ -1415,6 +1421,7 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // carries the installed OTP, the runtime's apps and the package's own
     // dependency/native modules (BT-4022, BT-4724); a disabled set skips
     // the check.
+    result.unresolved_ffi_checked = known_erlang_modules.check_enabled();
     validators::check_unresolved_ffi_modules(
         module,
         &known_erlang_modules,
