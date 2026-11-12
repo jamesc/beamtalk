@@ -460,7 +460,7 @@ complete), while a dynamic (`ClassBuilder`) class is allowed with
    detection logic — see that function's own doc). Still read-only.
 4. Site discovery (`discover_rename_sites/3`) — read-only: computes the
    union of `referencesTo:`/`direct_subclasses/1` translated into
-   `beamtalk_repl_loader:rewrite_site()` maps, plus the class's own
+   `beamtalk_repl_loader_rewrite:rewrite_site()` maps, plus the class's own
    declaration-header span as the definition site.
 5. Mutate: for an ordinary (project) class, `rewrite_sites/2` (the shared
    mechanism) installs every site transactionally and that same

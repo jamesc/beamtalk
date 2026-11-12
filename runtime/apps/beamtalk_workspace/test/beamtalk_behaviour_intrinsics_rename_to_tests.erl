@@ -602,9 +602,9 @@ dynamic_class_rename_revert_orders_identity_move_before_reference_rewrite(#{clas
         end
     end),
     1 = erlang:trace(Worker, true, [call, {tracer, Self}]),
-    1 = erlang:trace_pattern({beamtalk_repl_loader, validate_sites, 2}, true, [local]),
+    1 = erlang:trace_pattern({beamtalk_repl_loader_rewrite, validate_sites, 2}, true, [local]),
     1 = erlang:trace_pattern({beamtalk_object_class, rename, 2}, true, [global]),
-    1 = erlang:trace_pattern({beamtalk_repl_loader, rewrite_sites, 2}, true, [local]),
+    1 = erlang:trace_pattern({beamtalk_repl_loader_rewrite, rewrite_sites, 2}, true, [local]),
     Worker ! go,
     Result =
         receive
@@ -612,9 +612,9 @@ dynamic_class_rename_revert_orders_identity_move_before_reference_rewrite(#{clas
         after 5000 ->
             erlang:error(bt3278_revert_reorder_worker_timeout)
         end,
-    _ = erlang:trace_pattern({beamtalk_repl_loader, validate_sites, 2}, false, [local]),
+    _ = erlang:trace_pattern({beamtalk_repl_loader_rewrite, validate_sites, 2}, false, [local]),
     _ = erlang:trace_pattern({beamtalk_object_class, rename, 2}, false, [global]),
-    _ = erlang:trace_pattern({beamtalk_repl_loader, rewrite_sites, 2}, false, [local]),
+    _ = erlang:trace_pattern({beamtalk_repl_loader_rewrite, rewrite_sites, 2}, false, [local]),
     (try
         erlang:trace(Worker, false, [call])
     catch
@@ -651,11 +651,11 @@ bt3278_drain_revert_call_order() ->
 
 bt3278_drain_revert_call_order(Acc) ->
     receive
-        {trace, _Pid, call, {beamtalk_repl_loader, validate_sites, _Args}} ->
+        {trace, _Pid, call, {beamtalk_repl_loader_rewrite, validate_sites, _Args}} ->
             bt3278_drain_revert_call_order([validate_sites | Acc]);
         {trace, _Pid, call, {beamtalk_object_class, rename, _Args}} ->
             bt3278_drain_revert_call_order([rename | Acc]);
-        {trace, _Pid, call, {beamtalk_repl_loader, rewrite_sites, _Args}} ->
+        {trace, _Pid, call, {beamtalk_repl_loader_rewrite, rewrite_sites, _Args}} ->
             bt3278_drain_revert_call_order([rewrite_sites | Acc])
     after 200 ->
         lists:reverse(Acc)
