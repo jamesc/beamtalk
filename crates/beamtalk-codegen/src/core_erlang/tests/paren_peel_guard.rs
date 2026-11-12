@@ -123,7 +123,14 @@ const CEILINGS: &[(&str, usize)] = &[
     ("beamtalk-codegen/src/core_erlang/threaded_expr.rs", 14),
     ("beamtalk-codegen/src/core_erlang/threading_analysis.rs", 3),
     ("beamtalk-codegen/src/core_erlang/util.rs", 9),
-    ("beamtalk-codegen/src/core_erlang/value_type_codegen.rs", 11),
+    (
+        "beamtalk-codegen/src/core_erlang/value_type_codegen/body.rs",
+        9,
+    ),
+    (
+        "beamtalk-codegen/src/core_erlang/value_type_codegen/conditionals.rs",
+        2,
+    ),
     // Expression helpers in the AST leaf (`as_literal_bool`).
     ("beamtalk-core/src/ast/expression.rs", 1),
     // Binary segment values and sizes (ADR 0143): `BinarySegmentValue for
