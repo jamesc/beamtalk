@@ -3,7 +3,11 @@
 
 // A registered extension resolved by `liveExtensionsIn:`: the live target
 // class (or metaclass), the selector, and the extension's source text.
-type ExtensionRecord = #{#class => Object, #selector => Symbol, #source => String}
+type ExtensionRecord = #{
+  #class => Object,
+  #selector => Symbol,
+  #source => String
+}
 
 /// SystemNavigation — Class-registry navigation queries ("who implements X",
 /// "where is X used").

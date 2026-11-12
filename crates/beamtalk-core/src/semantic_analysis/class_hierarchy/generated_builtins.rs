@@ -6185,7 +6185,7 @@ pub(super) fn generated_stdlib_alias_sources() -> Vec<&'static str> {
     vec![
         "type EtsTableType = #set | #orderedSet | #bag | #duplicateBag",
         "type ExceptionKind = #does_not_understand | #arity_mismatch | #immutable_value | #runtime_error | #index_out_of_bounds | #empty_collection | #empty_queue | #not_found | #class_not_found | #no_superclass | #class_already_exists | #dispatch_error | #callback_failed | #actor_dead | #future_not_awaited | #internal_error | #key_error | #argument_error | #resource_error | #process_not_found | #timeout_error | #type_error | #instantiation_error | #erlang_exit | #erlang_throw | #signal",
-        "type ExtensionRecord = #{#class => Object, #selector => Symbol, #source => String}",
+        "type ExtensionRecord = #{\n  #class => Object,\n  #selector => Symbol,\n  #source => String\n}",
         "type FileMode = #read | #write | #append | #readWrite",
         "type JsonValue = Nil | Boolean | Integer | Float | String | List | Dictionary",
         "type LogFormat = #text | #json",
