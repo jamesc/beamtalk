@@ -57,7 +57,9 @@ impl TypeChecker {
     /// seen, and neither is a block that runs repeatedly (`to:do:`, `do:`,
     /// `[cond] whileTrue: […]`, `[…] repeat`): a self-send late in its body
     /// can reassign a field before an earlier statement of the next
-    /// iteration reads it.
+    /// iteration reads it. Likewise a diverging block passed to a user method
+    /// that catches internally (`self try: [self reset. self error: "x"]`,
+    /// where `try:` wraps `on:do:`) is still rewound.
     #[allow(clippy::too_many_arguments)] // split from infer_message_send to share body
     pub(in crate::semantic_analysis::type_checker) fn infer_message_send_with_receiver_ty(
         &mut self,
@@ -86,19 +88,16 @@ impl TypeChecker {
         {
             self.self_send_epoch += 1;
         }
-        // A block that ends in `self error:` diverges, but under `on:do:` /
-        // `ensure:` the exception is caught and control continues after the
+        // A protected block that ends in `self error:` diverges, but under
+        // `on:do:` the exception is caught and control continues after the
         // send, so a returning self-send before the divergence still counts
         // (the block's own rewind in `forget_diverging_block_self_sends`
-        // assumed it did not).
+        // assumed it did not). Only the receiver is scanned: a handler that
+        // falls through has already bumped the epoch, and one that diverges
+        // never reaches the next statement. `ensure:` does not catch.
         if !self.in_value_type_body
-            && matches!(
-                selector.well_known(),
-                Some(WellKnownSelector::OnDo | WellKnownSelector::Ensure)
-            )
-            && std::iter::once(receiver)
-                .chain(arguments)
-                .any(|e| expr_contains_returning_self_send(e, &self.type_map))
+            && matches!(selector.well_known(), Some(WellKnownSelector::OnDo))
+            && expr_contains_returning_self_send(receiver, &self.type_map)
         {
             self.self_send_epoch += 1;
         }
