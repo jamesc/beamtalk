@@ -536,10 +536,7 @@ fn a_file_without_a_stored_surface_keys_on_the_full_hash() {
     super::super::super::build_cache::save_beam_hash_cache(&env.build_dir, &hashes);
     // Nothing stored: the first build re-keys every file, then it is clean.
     let rebuilt = plan(&pkg);
-    assert!(
-        rebuilt.len() == FIXTURE.len() || rebuilt.is_empty(),
-        "{rebuilt:?}"
-    );
+    assert_eq!(rebuilt.len(), FIXTURE.len(), "{rebuilt:?}");
 
     build(&pkg);
     let hashes = super::super::super::build_cache::load_beam_hash_cache(&env.build_dir);

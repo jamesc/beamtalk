@@ -74,7 +74,8 @@ impl SurfaceKeys {
         class_module_index: &HashMap<String, String>,
     ) -> Option<Self> {
         let mut parts = Parts::default();
-        let mut superclass_of: HashMap<EcoString, EcoString> = HashMap::new();
+        // Every declared superclass of a name: two packages can share one.
+        let mut superclass_of: HashMap<EcoString, BTreeSet<EcoString>> = HashMap::new();
 
         for info in class_infos {
             let value = serde_json::to_value(signature_only_class_info(info)).ok()?;
@@ -86,7 +87,8 @@ impl SurfaceKeys {
             if let Some(sup) = &info.superclass {
                 superclass_of
                     .entry(info.name.clone())
-                    .or_insert_with(|| sup.clone());
+                    .or_default()
+                    .insert(sup.clone());
             }
         }
         for (name, sup) in class_superclass_index {
@@ -97,7 +99,8 @@ impl SurfaceKeys {
                 .push(format!("superclass:{sup}"));
             superclass_of
                 .entry(name.as_str().into())
-                .or_insert_with(|| sup.as_str().into());
+                .or_default()
+                .insert(sup.as_str().into());
         }
         for (name, module) in class_module_index {
             parts
@@ -165,17 +168,26 @@ impl SurfaceKeys {
             // The class part, closed over the superclass chain: a class's
             // normalised flags and inherited surface come from its ancestors.
             let mut seen: BTreeSet<&str> = BTreeSet::new();
-            let mut cursor: Option<&str> = Some(name.as_str());
-            while let Some(current) = cursor {
+            let mut pending: Vec<&str> = vec![name.as_str()];
+            while let Some(current) = pending.pop() {
                 if !seen.insert(current) {
-                    break; // a cycle in the declared hierarchy
+                    continue; // already visited, or a cycle in the declared hierarchy
                 }
+                pending.extend(
+                    superclass_of
+                        .get(current)
+                        .into_iter()
+                        .flatten()
+                        .map(EcoString::as_str),
+                );
+            }
+            // Sorted, so the hash does not depend on the walk order.
+            for current in seen {
                 buf.push_str("class:");
                 buf.push_str(current);
                 buf.push('=');
                 buf.push_str(&own_part(&parts.class, current).unwrap_or_else(|| ABSENT.into()));
                 buf.push('\u{1}');
-                cursor = superclass_of.get(current).map(EcoString::as_str);
             }
             buf.push_str("protocol=");
             buf.push_str(&own_part(&parts.protocol, name).unwrap_or_else(|| ABSENT.into()));
