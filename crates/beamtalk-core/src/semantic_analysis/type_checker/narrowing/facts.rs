@@ -17,10 +17,11 @@
 //!   them held, so only a variable both sides narrow stays narrowed, to the
 //!   union of its types).
 //! * `a or: [b]` — the dual.
+//! * `c not` — `c`'s two fact sets, swapped.
 //! * Anything else contributes no facts but never stops the rest of a chain
 //!   from narrowing.
 //!
-//! New connectives (`not`, aliases, `whileTrue:` conditions) extend
+//! New connectives (aliases, `whileTrue:` conditions) extend
 //! `condition_facts` with one more case that builds a [`CondFacts`].
 
 use crate::ast::Expression;
@@ -229,6 +230,17 @@ impl TypeChecker {
         else {
             return CondFacts::default();
         };
+        // `c not`: the same facts, swapped. The receiver is already peeled.
+        if arguments.is_empty() && selector.name() == "not" {
+            let CondFacts {
+                when_true,
+                when_false,
+            } = self.condition_facts(lhs, env, hierarchy, ctx.nested());
+            return CondFacts {
+                when_true: when_false,
+                when_false: when_true,
+            };
+        }
         let (Some(is_and), [rhs]) = (connective_kind(&selector.name()), arguments.as_slice())
         else {
             return CondFacts::default();
