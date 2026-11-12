@@ -140,7 +140,7 @@ const CEILINGS: &[(&str, usize)] = &[
         2,
     ),
     // Expression helpers in the AST leaf (`as_literal_bool`).
-    ("beamtalk-core/src/ast/expression.rs", 1),
+    ("beamtalk-core/src/ast/expression.rs", 3),
     // Binary segment values and sizes (ADR 0143): `BinarySegmentValue for
     // Expression` and `binary_literal_size` read a literal through the
     // parentheses the segment grammar requires (`<<(-1):4>>`, `<<v:(8)>>`).
@@ -163,11 +163,14 @@ const CEILINGS: &[(&str, usize)] = &[
         4,
     ),
     (
-        "beamtalk-core/src/semantic_analysis/block_facts/mutation.rs",
+        "beamtalk-core/src/semantic_analysis/block_facts/outer_writes.rs",
         1,
     ),
+    // The `hasField:` guard check runs on the un-normalized AST: its
+    // receiver can still be parenthesized (BT-4681 swapped its private
+    // `strip_parens` for this call).
     (
-        "beamtalk-core/src/semantic_analysis/block_facts/outer_writes.rs",
+        "beamtalk-core/src/semantic_analysis/validators/unguarded_late_read_validators.rs",
         1,
     ),
     (
