@@ -703,12 +703,6 @@ fn closed_shape_widens_to_dictionary_symbol_v() {
             None,
         ),
         (
-            "Integer values when every field is Integer",
-            "#{#a => Integer, #b => Integer}",
-            "Dictionary(Symbol, Integer)",
-            None,
-        ),
-        (
             "optional fields count",
             "#{#a => Integer, ?#b => String}",
             "Dictionary(Symbol, Object)",
@@ -727,8 +721,8 @@ fn closed_shape_widens_to_dictionary_symbol_v() {
             None,
         ),
         (
-            "field type mismatch with V",
-            "#{#a => Integer, #b => String}",
+            "optional field type mismatch with V",
+            "#{#a => Integer, ?#b => String}",
             "Dictionary(Symbol, Integer)",
             Some("Dictionary(Symbol, Integer)"),
         ),

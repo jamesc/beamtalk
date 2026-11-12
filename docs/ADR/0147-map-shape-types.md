@@ -194,8 +194,8 @@ In particular a closed shape is assignable to `Dictionary(Symbol, V)` whenever
 every field type is assignable to `V`, so `Dictionary(Symbol, Object)` accepts
 every closed shape, and `Dictionary(Symbol, Integer)` accepts one whose fields
 are all `Integer`. Maps are immutable values, so a helper that takes a
-`Dictionary` cannot break the shape. Generic validators over symbol-keyed maps
-(such as `checkPositiveInteger:key:`) should therefore be annotated
+`Dictionary` cannot break the shape. A generic validator over symbol-keyed maps
+(for example one taking `d :: Dictionary(Symbol, Object)` and a key) should therefore be annotated
 `Dictionary(Symbol, Object)`, not with a particular shape alias. A field type
 that is not assignable to `V`, or a non-`Symbol` key type, is still rejected,
 and the shape-specific checks (missing key, did-you-mean on a misspelt key) are
