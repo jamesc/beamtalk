@@ -82,6 +82,93 @@ pub(in crate::core_erlang) struct DirectCallClassInfo {
     pub direct_new1: bool,
 }
 
+/// The direct-call eligibility table, answering per class on demand.
+///
+/// Module codegen used to scan every class of the hierarchy up front, which
+/// made each file's incremental-build key depend on the whole class surface
+/// (BT-4690). A module only asks about the classes it names, so the table is
+/// lazy: [`CoreErlangGenerator::direct_call_info`] computes an entry from
+/// `class_hierarchy` when first asked and memoises it. REPL expression codegen
+/// has no stashed hierarchy and fills the table eagerly instead.
+#[derive(Debug, Clone, Default)]
+pub(in crate::core_erlang) struct DirectCallTable {
+    /// Entries known so far; `None` records "not eligible".
+    entries: std::cell::RefCell<
+        std::collections::HashMap<String, Option<std::rc::Rc<DirectCallClassInfo>>>,
+    >,
+    /// Classes compiled here whose own explicit class-side `new` builds in the
+    /// caller (BT-4464), applied on top of the computed entry.
+    explicit_new0: std::collections::HashSet<String>,
+    /// Whether a miss is computed from `class_hierarchy` (module codegen).
+    lazy: bool,
+}
+
+impl DirectCallTable {
+    /// A table whose misses are computed on demand from the hierarchy.
+    pub(in crate::core_erlang) fn lazy() -> Self {
+        Self {
+            lazy: true,
+            ..Self::default()
+        }
+    }
+
+    /// A table holding exactly `entries`; a miss means "not eligible".
+    pub(in crate::core_erlang) fn eager(
+        entries: std::collections::HashMap<String, DirectCallClassInfo>,
+    ) -> Self {
+        Self {
+            entries: std::cell::RefCell::new(
+                entries
+                    .into_iter()
+                    .map(|(name, info)| (name, Some(std::rc::Rc::new(info))))
+                    .collect(),
+            ),
+            ..Self::default()
+        }
+    }
+
+    /// Records a ready-made entry for `class_name` (tests only).
+    #[cfg(test)]
+    pub(in crate::core_erlang) fn insert(&mut self, class_name: String, info: DirectCallClassInfo) {
+        self.entries
+            .get_mut()
+            .insert(class_name, Some(std::rc::Rc::new(info)));
+    }
+
+    /// Marks `class_name`'s own explicit class-side `new` as building in the caller.
+    pub(in crate::core_erlang) fn mark_explicit_new0(&mut self, class_name: String) {
+        self.entries.get_mut().remove(&class_name);
+        self.explicit_new0.insert(class_name);
+    }
+
+    pub(in crate::core_erlang) fn is_lazy(&self) -> bool {
+        self.lazy
+    }
+
+    pub(in crate::core_erlang) fn is_explicit_new0(&self, class_name: &str) -> bool {
+        self.explicit_new0.contains(class_name)
+    }
+
+    /// `None`: not asked yet. `Some(None)`: asked, and not eligible.
+    #[allow(clippy::option_option)]
+    pub(in crate::core_erlang) fn known(
+        &self,
+        class_name: &str,
+    ) -> Option<Option<std::rc::Rc<DirectCallClassInfo>>> {
+        self.entries.borrow().get(class_name).cloned()
+    }
+
+    pub(in crate::core_erlang) fn remember(
+        &self,
+        class_name: &str,
+        info: Option<std::rc::Rc<DirectCallClassInfo>>,
+    ) {
+        self.entries
+            .borrow_mut()
+            .insert(class_name.to_string(), info);
+    }
+}
+
 /// Class/actor-specific codegen state.
 ///
 /// Groups fields that are only relevant when compiling a class definition

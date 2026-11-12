@@ -26,7 +26,7 @@ pub(in crate::core_erlang) mod context;
 pub(in crate::core_erlang) mod version;
 
 pub(in crate::core_erlang) use context::{
-    ClassContext, DirectCallClassInfo, ReplContext, ValueTypeContext,
+    ClassContext, DirectCallClassInfo, DirectCallTable, ReplContext, ValueTypeContext,
 };
 
 use crate::core_erlang::control_flow::LoopMode;
@@ -435,8 +435,7 @@ pub struct CoreErlangGenerator {
     /// Maps class name → `DirectCallClassInfo` for sealed classes whose class methods
     /// can be called directly (without `gen_server` dispatch). Computed from the class
     /// hierarchy in `generate_module_with_warnings`.
-    pub(in crate::core_erlang) direct_call_eligible:
-        std::collections::HashMap<String, DirectCallClassInfo>,
+    pub(in crate::core_erlang) direct_call_eligible: DirectCallTable,
     /// ADR 0135 §1: names of `Supervisor` / `DynamicSupervisor` subclasses, for
     /// REPL expression codegen, which has no `class_hierarchy`. Set by
     /// `set_supervisor_classes_from_hierarchy`; module codegen asks
@@ -743,7 +742,7 @@ impl CoreErlangGenerator {
             warn_stateacc: std::env::var("BEAMTALK_WARN_STATEACC").is_ok_and(|v| v == "1"),
             current_method_selector: None,
             is_server_subclass: false,
-            direct_call_eligible: std::collections::HashMap::new(),
+            direct_call_eligible: DirectCallTable::default(),
             supervisor_classes: std::collections::HashSet::new(),
             own_direct_constructors: Vec::new(),
             own_stdlib_trait_methods: Vec::new(),

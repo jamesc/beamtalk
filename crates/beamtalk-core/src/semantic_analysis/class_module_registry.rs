@@ -386,6 +386,9 @@ impl ClassModuleRegistry {
     /// panics.
     #[must_use]
     pub fn module_for_class(&self, pkg: &PackageId, class_name: &str) -> Option<&ModuleName> {
+        // The module a class compiles to is cross-file state: a file that
+        // resolves it depends on that name's module entry (BT-4690).
+        crate::semantic_analysis::consulted::record_name(class_name);
         if let Some(module) = self
             .class_to_module
             .get(&(pkg.clone(), class_name.to_string()))

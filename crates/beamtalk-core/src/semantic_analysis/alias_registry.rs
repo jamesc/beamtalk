@@ -266,7 +266,9 @@ impl AliasRegistry {
         // order redundant for that purpose.
         // The cycle check walks every alias, pre-loaded ones from other files
         // included, and reports against the current file: a whole-store read.
-        crate::semantic_analysis::consulted::record_scan();
+        crate::semantic_analysis::consulted::record_scan(
+            crate::semantic_analysis::consulted::ScanKind::Aliases,
+        );
         let (cycles, _resolution_order) = find_cycles(&self.aliases);
         for (cycle, cycle_span) in cycles {
             if self.reported_cycles.insert(canonical_cycle_key(&cycle)) {
@@ -667,7 +669,9 @@ impl AliasRegistry {
         // the same still-unresolved cycle.
         // The cycle check walks every alias, pre-loaded ones from other files
         // included, and reports against the current file: a whole-store read.
-        crate::semantic_analysis::consulted::record_scan();
+        crate::semantic_analysis::consulted::record_scan(
+            crate::semantic_analysis::consulted::ScanKind::Aliases,
+        );
         let (cycles, _resolution_order) = find_cycles(&self.aliases);
         for (cycle, cycle_span) in cycles {
             if self.reported_cycles.insert(canonical_cycle_key(&cycle)) {
@@ -735,13 +739,17 @@ impl AliasRegistry {
 
     /// Returns an iterator over all alias names in the registry.
     pub fn alias_names(&self) -> impl Iterator<Item = &EcoString> {
-        crate::semantic_analysis::consulted::record_scan();
+        crate::semantic_analysis::consulted::record_scan(
+            crate::semantic_analysis::consulted::ScanKind::Aliases,
+        );
         self.aliases.keys()
     }
 
     /// Returns an iterator over all aliases in the registry.
     pub fn aliases(&self) -> impl Iterator<Item = (&EcoString, &AliasInfo)> {
-        crate::semantic_analysis::consulted::record_scan();
+        crate::semantic_analysis::consulted::record_scan(
+            crate::semantic_analysis::consulted::ScanKind::Aliases,
+        );
         self.aliases.iter()
     }
 

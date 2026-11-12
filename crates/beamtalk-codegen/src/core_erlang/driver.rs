@@ -15,7 +15,7 @@
 use crate::core_erlang::generator::CoreErlangGenerator;
 use crate::core_erlang::guard_returns;
 use crate::core_erlang::{
-    CodeGenError, CodegenOptions, DirectCallClassInfo, GeneratedModule, Result,
+    CodeGenError, CodegenOptions, DirectCallClassInfo, DirectCallTable, GeneratedModule, Result,
 };
 use beamtalk_core::ast::{Module, normalize};
 use ecow::EcoString;
@@ -359,16 +359,18 @@ pub fn generate_module_with_warnings(
         generator.is_server_subclass = hierarchy.is_server_subclass(&class.name.name);
     }
 
+    // Stash the hierarchy for use by actor callback generation
+    // (auto-chained initialize dispatch in handle_continue and inherited
+    // typed-no-default field validation).
+    generator.class_hierarchy = Some(hierarchy.clone());
+    // Stashed first: the direct-call table is answered lazily per class from it
+    // (BT-4690).
     // Pre-compute direct-call eligible class methods from the hierarchy.
     // For sealed classes with no class variables, their class methods can be called
     // directly (bypassing gen_server dispatch). This is safe because the methods
     // are pure functions that don't mutate class state.
     generator.set_direct_call_eligible(&hierarchy, module);
 
-    // Stash the hierarchy for use by actor callback generation
-    // (auto-chained initialize dispatch in handle_continue and inherited
-    // typed-no-default field validation).
-    generator.class_hierarchy = Some(hierarchy.clone());
     // BT-4486/BT-4630: protocol conformers are computed lazily per protocol
     // from this registry and the hierarchy.
     generator.protocol_registry = protocol_registry;
@@ -517,7 +519,7 @@ impl CoreErlangGenerator {
         hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
         module: &Module,
     ) {
-        self.direct_call_eligible = Self::compute_direct_call_eligible(hierarchy, self);
+        self.direct_call_eligible = DirectCallTable::lazy();
         self.add_explicit_class_new_verdicts(hierarchy, module);
         if let Some(class) = module.classes.first() {
             self.own_direct_constructors = self.own_direct_constructors_for(&class.name.name);
@@ -550,17 +552,8 @@ impl CoreErlangGenerator {
             if !hierarchy.explicit_class_new_builds_in_caller(class) {
                 continue;
             }
-            let class_name = class.name.name.to_string();
-            let module_name = EcoString::from(self.compiled_module_name(&class_name));
             self.direct_call_eligible
-                .entry(class_name)
-                .or_insert_with(|| DirectCallClassInfo {
-                    module_name,
-                    selectors: std::collections::HashSet::new(),
-                    direct_new0: false,
-                    direct_new1: false,
-                })
-                .direct_new0 = true;
+                .mark_explicit_new0(class.name.name.to_string());
         }
     }
 
@@ -660,7 +653,7 @@ impl CoreErlangGenerator {
     /// `new` and/or `new:`, in that order. Empty for classes with
     /// none (and for native facades).
     fn own_direct_constructors_for(&self, class_name: &str) -> Vec<String> {
-        let Some(info) = self.direct_call_eligible.get(class_name) else {
+        let Some(info) = self.direct_call_info(class_name) else {
             return Vec::new();
         };
         let mut own = Vec::new();
@@ -675,12 +668,12 @@ impl CoreErlangGenerator {
 
     /// Computes the classes whose class methods may run in the caller (ADR
     /// 0142 §1), each compiled to a guarded direct call at static call sites
-    /// (ADR 0142 §2).
+    /// (ADR 0142 §2), for every class of `hierarchy`.
     ///
-    /// Eligibility is `ClassHierarchy::is_direct_call_eligible` in
-    /// `beamtalk-core` (the class defines the method, no class variables in
-    /// its chain, not a process-bound selector); the class must also have
-    /// class methods.
+    /// Only REPL expression codegen, which has no stashed hierarchy to ask
+    /// lazily, builds the whole table; module codegen answers per class
+    /// through [`Self::direct_call_info`] (BT-4690), so a module's
+    /// incremental-build key depends on the classes it names, not on every class.
     ///
     /// Returns a mapping from class name to `DirectCallClassInfo` with the module
     /// name and set of eligible selectors.
@@ -688,63 +681,99 @@ impl CoreErlangGenerator {
         hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
         generator: &CoreErlangGenerator,
     ) -> std::collections::HashMap<String, DirectCallClassInfo> {
-        let mut result = std::collections::HashMap::new();
+        // ADR 0119 Context: this is the only place that iterates *every*
+        // hierarchy class unconditionally; the per-class rule is
+        // `direct_call_info_for`.
+        hierarchy
+            .class_names()
+            .filter_map(|class_name| {
+                Self::direct_call_info_for(hierarchy, generator, class_name)
+                    .map(|info| (class_name.to_string(), info))
+            })
+            .collect()
+    }
 
-        for (class_name, class_info) in hierarchy.iter_classes() {
-            // Gate: class must have class methods
-            //
-            // ADR 0119 Context: this is the only place that
-            // iterates *every* hierarchy class unconditionally, including
-            // Runtime-only builtins without `.bt` source (e.g. `Future` —
-            // see `class_hierarchy/builtins.rs`) have empty `class_methods`
-            // and no constructor anchor, so the insert condition below keeps
-            // them from reaching `compiled_module_name` (which would emit a
-            // reference to a nonexistent `bt@...` module). If `Future` (or
-            // another no-`.bt`-source builtin) ever gains real class methods
-            // or constructors, its module resolution needs a real registry
-            // answer (`ClassModuleRegistry`'s `ModuleName::Native` variant
-            // exists for exactly this) — not implemented speculatively now,
-            // since no current call site resolves such a module at all.
-            let mut selectors = std::collections::HashSet::new();
-            // Skip the method scan (but not the constructor rule below) for
-            // method-less classes: it only avoids resolving runtime-only
-            // builtins' modules (e.g. `Future`), while a method-less Value
-            // still gets a direct `new/0`.
-            if !class_info.class_methods.is_empty() {
-                for method in &class_info.class_methods {
-                    // ADR 0142 §1: own method, no class variables in the
-                    // chain, not process-bound. The single rule shared with
-                    // REPL codegen and the lints.
-                    if !hierarchy.is_direct_call_eligible(class_name, &method.selector) {
-                        continue;
-                    }
-                    selectors.insert(method.selector.to_string());
-                }
-            }
-            // constructors. Keyword constructors share the guarded direct
-            // `(ClassRef, args...)` shape, so they join the selector set;
-            // `new`/`new:` need arity-specific emission/lookup and travel in
-            // dedicated flags instead (never in `selectors`).
-            let ctors = hierarchy.direct_constructors(class_name);
-            if let Some(keyword) = &ctors.keyword {
-                selectors.insert(keyword.to_string());
-            }
+    /// The direct-call entry for `class_name`, or `None` when it is not eligible.
+    ///
+    /// Eager tables answer from what they hold; the lazy table of module
+    /// codegen computes the entry from `class_hierarchy` on first use and
+    /// memoises it. This is the one place a send's target class is classified.
+    pub(in crate::core_erlang) fn direct_call_info(
+        &self,
+        class_name: &str,
+    ) -> Option<std::rc::Rc<DirectCallClassInfo>> {
+        if let Some(known) = self.direct_call_eligible.known(class_name) {
+            return known;
+        }
+        if !self.direct_call_eligible.is_lazy() {
+            return None;
+        }
+        let hierarchy = self.class_hierarchy.as_ref()?;
+        let mut info = Self::direct_call_info_for(hierarchy, self, class_name);
+        if self.direct_call_eligible.is_explicit_new0(class_name) {
+            // BT-4464: the class's own explicit class-side `new` builds in the caller.
+            info.get_or_insert_with(|| DirectCallClassInfo {
+                module_name: EcoString::from(self.compiled_module_name(class_name)),
+                selectors: std::collections::HashSet::new(),
+                direct_new0: false,
+                direct_new1: false,
+            })
+            .direct_new0 = true;
+        }
+        let info = info.map(std::rc::Rc::new);
+        self.direct_call_eligible.remember(class_name, info.clone());
+        info
+    }
 
-            if !selectors.is_empty() || ctors.new0 || ctors.new1 {
-                let module_name = EcoString::from(generator.compiled_module_name(class_name));
-                result.insert(
-                    class_name.to_string(),
-                    DirectCallClassInfo {
-                        module_name,
-                        selectors,
-                        direct_new0: ctors.new0,
-                        direct_new1: ctors.new1,
-                    },
-                );
+    /// The per-class eligibility rule behind [`Self::direct_call_info`].
+    ///
+    /// Eligibility is `ClassHierarchy::is_direct_call_eligible` in
+    /// `beamtalk-core` (the class defines the method, no class variables in
+    /// its chain, not a process-bound selector); the class must also have
+    /// class methods or a direct constructor.
+    fn direct_call_info_for(
+        hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
+        generator: &CoreErlangGenerator,
+        class_name: &str,
+    ) -> Option<DirectCallClassInfo> {
+        let class_info = hierarchy.get_class(class_name)?;
+        // Runtime-only builtins without `.bt` source (e.g. `Future` — see
+        // `class_hierarchy/builtins.rs`) have empty `class_methods` and no
+        // constructor anchor, so the insert condition below keeps them from
+        // reaching `compiled_module_name` (which would emit a reference to a
+        // nonexistent `bt@...` module). If `Future` (or another no-`.bt`-source
+        // builtin) ever gains real class methods or constructors, its module
+        // resolution needs a real registry answer (`ClassModuleRegistry`'s
+        // `ModuleName::Native` variant exists for exactly this) — not
+        // implemented speculatively now, since no current call site resolves
+        // such a module at all.
+        let mut selectors = std::collections::HashSet::new();
+        // Skip the method scan (but not the constructor rule below) for
+        // method-less classes: a method-less Value still gets a direct `new/0`.
+        for method in &class_info.class_methods {
+            // ADR 0142 §1: own method, no class variables in the chain, not
+            // process-bound. The single rule shared with REPL codegen and the lints.
+            if hierarchy.is_direct_call_eligible(class_name, &method.selector) {
+                selectors.insert(method.selector.to_string());
             }
         }
-
-        result
+        // Keyword constructors share the guarded direct `(ClassRef, args...)`
+        // shape, so they join the selector set; `new`/`new:` need
+        // arity-specific emission/lookup and travel in dedicated flags instead
+        // (never in `selectors`).
+        let ctors = hierarchy.direct_constructors(class_name);
+        if let Some(keyword) = &ctors.keyword {
+            selectors.insert(keyword.to_string());
+        }
+        if selectors.is_empty() && !ctors.new0 && !ctors.new1 {
+            return None;
+        }
+        Some(DirectCallClassInfo {
+            module_name: EcoString::from(generator.compiled_module_name(class_name)),
+            selectors,
+            direct_new0: ctors.new0,
+            direct_new1: ctors.new1,
+        })
     }
 
     /// Determines if a class is an actor (process-based) or value type (plain term).

@@ -617,7 +617,11 @@ impl ClassHierarchy {
         // fixup loop only walks them and their descendants, not everything.
         let mut newly_inserted: HashSet<EcoString> = HashSet::new();
         for (class_name, superclass_name) in index {
-            if !self.classes.contains_key(class_name.as_str()) {
+            // Construction: backfilling stubs reads every name of the injected
+            // index to write the map. A file observes a stub only through a
+            // by-name read (recorded), and the build keys a name on its index
+            // entry too, so the backfill itself is not a dependency (BT-4690).
+            if !self.classes.contains_key_unrecorded(class_name.as_str()) {
                 let eco_name = EcoString::from(class_name.as_str());
                 newly_inserted.insert(eco_name.clone());
                 self.classes.insert(
@@ -683,7 +687,7 @@ impl ClassHierarchy {
             let parent = to_check[i].clone();
             i += 1;
             // Find all classes whose direct superclass is `parent`.
-            for (name, info) in &self.classes {
+            for (name, info) in self.classes.iter_unrecorded() {
                 if !visited.contains(name) {
                     if let Some(ref sup) = info.superclass {
                         if sup == &parent {

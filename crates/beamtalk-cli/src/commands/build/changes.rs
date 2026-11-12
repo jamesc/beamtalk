@@ -15,7 +15,9 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use tracing::{debug, info, warn};
 
+use super::surface_key::{SurfaceKeys, consulted_key, decode_surface, encode_surface};
 use crate::commands::util::{content_hash_of, sha256_hex};
+use beamtalk_core::semantic_analysis::consulted::ConsultedSurface;
 
 /// Result of per-file change detection.
 ///
@@ -41,6 +43,43 @@ pub(crate) struct ChangeDetectionResult {
     pub source_hashes: HashMap<String, String>,
 }
 
+/// Re-key `source_file` in `source_hashes` after it was compiled this build:
+/// its new cache key folds in the slice of the surface that compile just
+/// consulted, and the consulted surface is stored for the next build's
+/// decision (BT-4690). A no-op when the build has no per-name surface keys
+/// (manifest-less builds).
+pub(crate) fn record_compiled_surface(
+    source_hashes: &mut HashMap<String, String>,
+    edges: &BuildGraphEdges,
+    source_file: &Utf8Path,
+    surface: &ConsultedSurface,
+) {
+    if edges.surface_keys.is_none() {
+        return;
+    }
+    let Some(own_hash) = source_hashes.get(&own_hash_key(source_file)).cloned() else {
+        return;
+    };
+    let consulted = edges.consulted_part(Some(surface));
+    let surface_part = consulted.as_deref().map_or(
+        SurfacePart::Full(&edges.analysis_surface_hash),
+        SurfacePart::Consulted,
+    );
+    let used_protocols = edges
+        .file_protocol_uses
+        .get(source_file)
+        .map_or(&[][..], Vec::as_slice);
+    let combined = combined_content_hash(
+        &own_hash,
+        used_protocols,
+        &edges.protocol_hashes,
+        surface_part,
+        &edges.stub_inputs_hash,
+    );
+    source_hashes.insert(source_file.as_str().to_string(), combined);
+    source_hashes.insert(consulted_key(source_file), encode_surface(surface));
+}
+
 /// Cross-file build-graph inputs to `detect_changes`' per-file cache key
 /// (ADR 0127 §10a; BT-3591, BT-3674) — see its doc. `Default` is "no edges":
 /// every file's key reduces to its own content hash.
@@ -57,6 +96,29 @@ pub(crate) struct BuildGraphEdges {
     /// from, across all tiers (empty = no stubs; BT-4393) — see
     /// `stubs::ResolvedTypeRegistry::stub_inputs_hash`.
     pub stub_inputs_hash: String,
+    /// Per-name hashes of the same surface (BT-4690). With these, a file whose
+    /// last build stored a [`ConsultedSurface`] keys on just the slice of the
+    /// surface it consulted; without them (or without a stored surface) it
+    /// keys on `analysis_surface_hash`.
+    pub surface_keys: Option<SurfaceKeys>,
+}
+
+/// The surface component of a file's cache key.
+#[derive(Debug, Clone, Copy)]
+enum SurfacePart<'a> {
+    /// The package-wide `analysis_surface_hash` (empty = nothing cross-file).
+    Full(&'a str),
+    /// The hash of the slice of the surface the file consulted.
+    Consulted(&'a str),
+}
+
+impl BuildGraphEdges {
+    /// The surface component for a file that last consulted `stored`, or the
+    /// full hash when it cannot be keyed on its consulted slice. Returns the
+    /// consulted-slice text by value, so the caller owns it.
+    fn consulted_part(&self, stored: Option<&ConsultedSurface>) -> Option<String> {
+        self.surface_keys.as_ref()?.key_part(stored?)
+    }
 }
 
 /// Log why a file whose own content is unchanged is being rebuilt. A file
@@ -150,6 +212,7 @@ fn log_rebuild_reason(source_file: &Utf8Path, used_protocols: &[EcoString]) {
 /// builds, `--stdlib-mode`'s own separate pre-pass, tests), in which case
 /// every file's combined hash reduces to its own content hash — unchanged
 /// behaviour.
+#[allow(clippy::too_many_lines)] // one linear pass: hash, key, then decide
 pub(crate) fn detect_changes(
     source_files: &[Utf8PathBuf],
     build_dir: &Utf8Path,
@@ -163,6 +226,7 @@ pub(crate) fn detect_changes(
         protocol_hashes,
         analysis_surface_hash,
         stub_inputs_hash,
+        surface_keys: _,
     } = edges;
     // Content hash of each source file as of the last successful
     // `.beam` build, keyed by path string. Also carries each file's
@@ -188,11 +252,20 @@ pub(crate) fn detect_changes(
             continue;
         };
         let used_protocols = file_protocol_uses.get(source_file).unwrap_or(&empty_uses);
+        // BT-4690: key on the slice of the surface the file consulted when it
+        // was last built; no stored surface means the full package-wide hash.
+        let stored_text = previous_hashes.get(&consulted_key(source_file));
+        let stored = stored_text.and_then(|text| decode_surface(text));
+        let consulted = edges.consulted_part(stored.as_ref());
+        let surface_part = consulted.as_deref().map_or(
+            SurfacePart::Full(analysis_surface_hash),
+            SurfacePart::Consulted,
+        );
         let combined_hash = combined_content_hash(
             &own_hash,
             used_protocols,
             protocol_hashes,
-            analysis_surface_hash,
+            surface_part,
             stub_inputs_hash,
         );
 
@@ -210,6 +283,11 @@ pub(crate) fn detect_changes(
 
         source_hashes.insert(source_file.as_str().to_string(), combined_hash);
         source_hashes.insert(own_hash_key(source_file), own_hash);
+        // Carry the stored surface forward: a skipped file keeps it, a rebuilt
+        // one is overwritten by `record_compiled_surface`.
+        if let (Some(text), Some(_)) = (stored_text, &stored) {
+            source_hashes.insert(consulted_key(source_file), text.clone());
+        }
     }
 
     if force {
@@ -305,7 +383,7 @@ fn combined_content_hash(
     own_hash: &str,
     used_protocols: &[EcoString],
     protocol_hashes: &HashMap<EcoString, String>,
-    analysis_surface_hash: &str,
+    surface: SurfacePart<'_>,
     stub_inputs_hash: &str,
 ) -> String {
     let mut protocol_hash_parts: Vec<&str> = used_protocols
@@ -313,10 +391,8 @@ fn combined_content_hash(
         .filter_map(|name| protocol_hashes.get(name))
         .map(String::as_str)
         .collect();
-    if protocol_hash_parts.is_empty()
-        && analysis_surface_hash.is_empty()
-        && stub_inputs_hash.is_empty()
-    {
+    let surface_is_empty = matches!(surface, SurfacePart::Full(hash) if hash.is_empty());
+    if protocol_hash_parts.is_empty() && surface_is_empty && stub_inputs_hash.is_empty() {
         return own_hash.to_string();
     }
     protocol_hash_parts.sort_unstable();
@@ -326,9 +402,16 @@ fn combined_content_hash(
         buf.push('\n');
         buf.push_str(part);
     }
-    if !analysis_surface_hash.is_empty() {
-        buf.push_str("\nsurface:");
-        buf.push_str(analysis_surface_hash);
+    match surface {
+        SurfacePart::Full(hash) if !hash.is_empty() => {
+            buf.push_str("\nsurface:");
+            buf.push_str(hash);
+        }
+        SurfacePart::Full(_) => {}
+        SurfacePart::Consulted(hash) => {
+            buf.push_str("\nconsulted:");
+            buf.push_str(hash);
+        }
     }
     if !stub_inputs_hash.is_empty() {
         buf.push_str("\nstubs:");

@@ -4987,11 +4987,11 @@ impl CoreErlangGenerator {
     fn class_reference_direct_call_info(
         &self,
         class_name: &str,
-    ) -> Option<&super::generator::DirectCallClassInfo> {
+    ) -> Option<std::rc::Rc<super::generator::DirectCallClassInfo>> {
         if self.is_shadowed_class(class_name) {
             return None;
         }
-        self.direct_call_eligible.get(class_name)
+        self.direct_call_info(class_name)
     }
 
     /// Shared `direct_call_eligible` gate — returns the target module name

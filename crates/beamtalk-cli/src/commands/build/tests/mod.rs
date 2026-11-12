@@ -11,6 +11,8 @@
 //!   package/module naming, including declared-alias metadata
 //! - [`consulted_surface`] — the per-file consulted-surface recorder
 //!   (BT-4586)
+//! - [`per_file_surface_key`] — keying each file on the surface it consulted
+//!   (BT-4690)
 //! - [`cross_file_resolution`] — the class-module index and cross-file
 //!   class/alias resolution
 //! - [`flattened_provision_reporting`] — flattened-provision diagnostics are
@@ -26,6 +28,7 @@
 //!   `collect_erl_files`
 
 pub use super::*;
+pub(crate) use beamtalk_core::semantic_analysis::consulted::ConsultedSurface;
 pub(crate) use std::fs;
 pub(crate) use tempfile::TempDir;
 
@@ -53,5 +56,6 @@ mod module_naming;
 mod native_deps_and_headers;
 mod native_erlang_build;
 mod native_erlang_compile;
+mod per_file_surface_key;
 mod rebar3_integration;
 mod stub_registry;

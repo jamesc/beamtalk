@@ -13,7 +13,7 @@ use crate::core_erlang::field_types::{
     BareOperator, COMPARABLE_TYPES, FieldTypeFact, NUMERIC_TYPES, classify_fields,
 };
 use crate::core_erlang::generator::CoreErlangGenerator;
-use crate::core_erlang::generator::{ClassContext, ReplContext, ValueTypeContext};
+use crate::core_erlang::generator::{ClassContext, DirectCallTable, ReplContext, ValueTypeContext};
 use crate::core_erlang::util;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::leaf;
@@ -347,7 +347,8 @@ impl CoreErlangGenerator {
         &mut self,
         hierarchy: &beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy,
     ) {
-        self.direct_call_eligible = Self::compute_direct_call_eligible(hierarchy, self);
+        self.direct_call_eligible =
+            DirectCallTable::eager(Self::compute_direct_call_eligible(hierarchy, self));
     }
 
     /// Records which classes in `hierarchy` are `Supervisor` / `DynamicSupervisor`

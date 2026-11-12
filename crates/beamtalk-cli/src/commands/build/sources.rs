@@ -134,43 +134,17 @@ pub(crate) fn compute_file_module_pairs(
     Ok(pairs)
 }
 
-/// Compile a single `.bt` source file to Core Erlang, printing progress.
+/// Compile a single `.bt` source file to Core Erlang, printing progress, and
+/// return the diagnostics with the consulted surface.
 ///
 /// When `cached_ast` is `Some`, reuses the pre-parsed source and `Module` from
 /// Pass 1 instead of re-reading and re-parsing the file.
-pub(crate) fn compile_file(
-    path: &Utf8Path,
-    module_name: &str,
-    core_file: &Utf8Path,
-    options: &beamtalk_core::CompilerOptions,
-    ctx: &CompileContext<'_>,
-    cached_ast: Option<CachedAst>,
-) -> Result<Vec<beamtalk_core::source_analysis::Diagnostic>> {
-    // The surface only feeds a debug log in phase 1, so skip the recorder's
-    // bookkeeping unless debug logging is on.
-    if tracing::enabled!(tracing::Level::DEBUG) {
-        return compile_file_with_surface(path, module_name, core_file, options, ctx, cached_ast)
-            .map(|(diags, _surface)| diags);
-    }
-    debug!("Compiling {path}");
-    compile_source_with_bindings(
-        path,
-        module_name,
-        core_file,
-        options,
-        &beamtalk_codegen::core_erlang::primitive_bindings::PrimitiveBindingTable::new(),
-        ctx,
-        cached_ast,
-    )
-}
-
-/// [`compile_file`], also returning the [`ConsultedSurface`] the file's
-/// semantic analysis and codegen consulted (BT-4586, phase 1).
 ///
-/// A recorder scope is installed for the whole per-file compile, so every
-/// class / protocol / alias lookup and whole-hierarchy scan is captured. The
-/// surface is logged at debug level and returned for in-memory use; it is not
-/// persisted and not part of the incremental cache key yet.
+/// Returns the file's diagnostics and the [`ConsultedSurface`] its semantic
+/// analysis and codegen consulted (BT-4586), which keys the file's incremental
+/// build (BT-4690). A recorder scope is installed for the whole per-file
+/// compile, so every class / protocol / alias lookup and whole-store scan is
+/// captured.
 pub(crate) fn compile_file_with_surface(
     path: &Utf8Path,
     module_name: &str,
@@ -199,7 +173,9 @@ pub(crate) fn compile_file_with_surface(
 
     debug!(
         file = %path,
-        scanned_all = surface.scanned_all,
+        scanned_classes = surface.scanned_classes,
+        scanned_protocols = surface.scanned_protocols,
+        scanned_aliases = surface.scanned_aliases,
         extensions_unknown = surface.extensions_unknown,
         consulted = surface.names.len(),
         names = ?surface.names,
@@ -208,6 +184,21 @@ pub(crate) fn compile_file_with_surface(
     debug!("Generated Core Erlang: {core_file}");
 
     Ok((diags, surface))
+}
+
+/// [`compile_file_with_surface`] keeping only the diagnostics, for tests that
+/// do not look at what the file consulted.
+#[cfg(test)]
+pub(crate) fn compile_file(
+    path: &Utf8Path,
+    module_name: &str,
+    core_file: &Utf8Path,
+    options: &beamtalk_core::CompilerOptions,
+    ctx: &CompileContext<'_>,
+    cached_ast: Option<CachedAst>,
+) -> Result<Vec<beamtalk_core::source_analysis::Diagnostic>> {
+    compile_file_with_surface(path, module_name, core_file, options, ctx, cached_ast)
+        .map(|(diags, _surface)| diags)
 }
 
 /// Compile Core Erlang files to BEAM bytecode, reporting incremental build
