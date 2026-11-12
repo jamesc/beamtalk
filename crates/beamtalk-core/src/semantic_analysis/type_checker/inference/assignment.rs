@@ -214,7 +214,13 @@ impl TypeChecker {
         };
         // ADR 0147: when a map shape is involved, say which key is at fault.
         let shape_detail = (inferred_ty.contains_shape() || declared.contains_shape())
-            .then(|| Self::shape_assignable(inferred_ty, declared, hierarchy).err())
+            .then(|| {
+                // The first member `instance_assignable` itself refused.
+                Self::union_members(inferred_ty)
+                    .iter()
+                    .filter(|member| !Self::shape_member_ok(member, declared, hierarchy))
+                    .find_map(|member| Self::shape_assignable(member, declared, hierarchy).err())
+            })
             .flatten()
             .filter(|m| !matches!(m, ShapeMismatch::Incompatible))
             .map(|m| m.describe());
@@ -259,6 +265,23 @@ impl TypeChecker {
             )
     }
 
+    /// ADR 0147: whether one member of an assigned value fits `declared` when
+    /// a shape is involved. Forward (`member` into `declared`) always; a
+    /// member that is not itself a shape may also be the narrowing cast, i.e.
+    /// some member of `declared` accepts it the other way (so a nullable
+    /// `#{...} | Nil` annotation still casts a typed `Dictionary`).
+    fn shape_member_ok(
+        member: &InferredType,
+        declared: &InferredType,
+        hierarchy: &ClassHierarchy,
+    ) -> bool {
+        Self::shape_assignable(member, declared, hierarchy).is_ok()
+            || (!member.contains_shape()
+                && Self::union_members(declared)
+                    .iter()
+                    .any(|d| Self::shape_assignable(d, member, hierarchy).is_ok()))
+    }
+
     /// The instance-type arm of [`Self::detect_assignment_type_mismatch`]
     /// (no class object on either side): either type assignable to the
     /// other. BT-4482: where a protocol is involved, structural conformance
@@ -280,11 +303,9 @@ impl TypeChecker {
         // `Object`) may also go the other way, because an annotated local is
         // the narrowing cast (ADR 0147 § `Dictionary` to shape).
         if inferred_ty.contains_shape() || declared.contains_shape() {
-            return Self::union_members(inferred_ty).iter().all(|member| {
-                Self::shape_assignable(member, declared, hierarchy).is_ok()
-                    || (!member.contains_shape()
-                        && Self::shape_assignable(declared, member, hierarchy).is_ok())
-            });
+            return Self::union_members(inferred_ty)
+                .iter()
+                .all(|member| Self::shape_member_ok(member, declared, hierarchy));
         }
         let inferred_members = Self::union_members(inferred_ty);
         let declared_members = Self::union_members(declared);

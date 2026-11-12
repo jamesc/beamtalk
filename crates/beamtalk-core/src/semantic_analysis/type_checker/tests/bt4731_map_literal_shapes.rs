@@ -339,3 +339,28 @@ fn open_shape_is_not_narrowed_by_an_annotated_local() {
     );
     assert_eq!(msgs.len(), 1, "got: {msgs:#?}");
 }
+
+#[test]
+fn nullable_shape_annotation_keeps_the_narrowing_cast() {
+    let msgs = warnings(
+        "Object subclass: Probe\n  \
+           go: d :: Dictionary(Symbol, Object) =>\n    \
+             x :: #{#a => Integer} | Nil := d\n    x\n",
+    );
+    assert!(msgs.is_empty(), "got: {msgs:#?}");
+}
+
+#[test]
+fn hint_names_the_member_actually_at_fault() {
+    let msgs = warnings(
+        "Object subclass: Probe\n  \
+           go: flag :: Boolean d: d :: Dictionary(Symbol, Object) =>\n    \
+             x :: #{#a => Integer} := flag ifTrue: [d] ifFalse: [#{#b => 1}]\n    x\n",
+    );
+    assert_eq!(msgs.len(), 1, "got: {msgs:#?}");
+    assert!(
+        msgs[0].1.contains("missing required key `#a`"),
+        "{:?}",
+        msgs[0]
+    );
+}
