@@ -606,7 +606,8 @@ compiles_to("15a") -> "DynamicSupervisor:startChild -> beamtalk_supervisor:start
 compiles_to("15b") -> "as 15a, with the atomic maxChildren cap: capacity token, monitor and slot release per child";
 compiles_to("13a") ->
     "direct erlang:phash2(A) in a try (BT-4485), behind an is_number/is_atom/is_pid argument guard: the spec proves the Integer result needs no coercion; errors go to ffi_call_raised/8";
-compiles_to("13b") -> "direct_call/4 ('erlang', 'integer_to_binary', [A], 'stock'): binary fast path";
+compiles_to("13b") ->
+    "direct erlang:integer_to_binary(A) in a try (BT-4755), behind an is_number/is_atom/is_pid argument guard: the spec's binary() result (String | Binary) needs no coercion; errors go to ffi_call_raised/8";
 compiles_to("13c") -> "direct_call/4 ('maps', 'find', [K, D], 'stock'): mode precomputed, {ok, V} still wraps to Result";
 compiles_to("13d") -> "direct_call/4 ('vs_bench', 'ffi_ok', [], 'stock'): mode precomputed, ok still wraps to Result";
 compiles_to("14a") -> "is_tuple-guarded direct Tuple:dispatch/3 (BT-4294); 'at:' reads an in-range element inline (BT-4400)";

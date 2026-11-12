@@ -423,8 +423,16 @@ const FFI_SCALAR_CLASSES: &[&str] = &[
 ];
 
 /// Extra classes a *result* may have: their values are not scalars, but
-/// `coerce_ffi_result/3` returns them unchanged (maps and funs).
-const FFI_RESULT_EXTRA_CLASSES: &[&str] = &["Dictionary", "Block"];
+/// `coerce_ffi_result/3` returns them unchanged in both modes: maps, funs,
+/// binaries (`Binary`) and Strings (`String`: a bare binary or the tagged
+/// `{beamtalk_string, Bin}` 2-tuple, which is neither `{ok, _}` nor
+/// `{error, _}`). `String` must be here for `binary()` to count: the spec
+/// reader maps `binary()` to the union `String | Binary` (BT-4755), and a
+/// union is proved only when every member is. `string()` maps to
+/// `String | List`, so a charlist result stays on the proxy via `List`.
+/// Arguments are different: a `String`/`Binary` *argument* is unwrapped or
+/// retried by the proxy, so these two stay out of the argument rule.
+const FFI_RESULT_EXTRA_CLASSES: &[&str] = &["Dictionary", "Block", "String", "Binary"];
 
 /// Extra classes an *argument* may have. `Symbol` is an atom; as a result it
 /// is not proved, because `atom()` includes `ok` and `error`, which the proxy
@@ -448,8 +456,7 @@ fn all_members(ty: &InferredType, member_ok: &dyn Fn(&str) -> bool) -> bool {
 }
 
 /// A result of type `ty` passes through `coerce_ffi_result/3` unchanged in
-/// both coercion modes: no list (charlist coercion), no `String`/`Binary`, no
-/// tuple or `Result` (`{ok, _}`/`{error, _}` coercion), no atom that may be
+/// both coercion modes: no list (charlist coercion), no tuple or `Result` (`{ok, _}`/`{error, _}` coercion), no atom that may be
 /// `ok`/`error`, and no `Dynamic`/`Object`.
 #[must_use]
 pub fn ffi_result_passes_unchanged(ty: &InferredType) -> bool {
@@ -563,12 +570,32 @@ mod tests {
         let int_or_nil = InferredType::simple_union(&["Integer", "UndefinedObject"]);
         assert!(ffi_result_passes_unchanged(&int_or_nil));
         assert!(ffi_arg_passes_unchanged(&int_or_nil));
+        let int_or_list = InferredType::simple_union(&["Integer", "List"]);
+        assert!(!ffi_result_passes_unchanged(&int_or_list));
+        assert!(!ffi_arg_passes_unchanged(&int_or_list));
+        // `String` is proved as a result but not as an argument.
         let int_or_string = InferredType::simple_union(&["Integer", "String"]);
-        assert!(!ffi_result_passes_unchanged(&int_or_string));
+        assert!(ffi_result_passes_unchanged(&int_or_string));
         assert!(!ffi_arg_passes_unchanged(&int_or_string));
         let ok_or_other = InferredType::simple_union(&["#ok", "#other"]);
         assert!(!ffi_result_passes_unchanged(&ok_or_other));
         assert!(ffi_arg_passes_unchanged(&ok_or_other));
+    }
+
+    /// BT-4755: `binary()` reaches the checker as `String | Binary`, so both
+    /// members must be proved for a binary result to skip the proxy. A
+    /// `string()` result (`String | List`, a charlist) must not.
+    #[test]
+    fn binary_spec_result_is_proved_but_charlist_is_not() {
+        let binary = InferredType::simple_union(&["String", "Binary"]);
+        assert!(ffi_result_passes_unchanged(&binary));
+        assert!(ffi_result_passes_unchanged(&InferredType::known("Binary")));
+        assert!(ffi_result_passes_unchanged(&InferredType::known("String")));
+        let charlist = InferredType::simple_union(&["String", "List"]);
+        assert!(!ffi_result_passes_unchanged(&charlist));
+        // Arguments keep the proxy: it unwraps a tagged String and retries
+        // a binary as a charlist on `badarg`.
+        assert!(!ffi_arg_passes_unchanged(&binary));
     }
 
     #[test]

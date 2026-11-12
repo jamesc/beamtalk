@@ -37,6 +37,14 @@ fn sig(name: &str, params: &[&str], ret: &str) -> FunctionSignature {
     }
 }
 
+/// A signature whose return type is a union, as the spec reader emits for
+/// `binary()` (`String | Binary`) and `string()` (`String | List`).
+fn sig_union(name: &str, params: &[&str], members: &[&str]) -> FunctionSignature {
+    let mut s = sig(name, params, "Dynamic");
+    s.return_type = InferredType::simple_union(members);
+    s
+}
+
 fn registry() -> NativeTypeRegistry {
     let mut registry = NativeTypeRegistry::new();
     registry.register_module(
@@ -45,7 +53,8 @@ fn registry() -> NativeTypeRegistry {
             sig("monotonic_time", &[], "Integer"),
             sig("phash2", &["Dynamic"], "Integer"),
             sig("abs", &["Number"], "Number"),
-            sig("integer_to_binary", &["Integer"], "Binary"),
+            sig_union("integer_to_binary", &["Integer"], &["String", "Binary"]),
+            sig_union("integer_to_list", &["Integer"], &["String", "List"]),
             sig("get", &["Dynamic"], "Dynamic"),
             sig("node", &[], "Symbol"),
         ],
@@ -183,12 +192,24 @@ fn block_arg_stays_on_proxy() {
     assert_proxied(&compile("Erlang erlang phash2: [n]"), "erlang", "phash2");
 }
 
+/// BT-4755: a `binary()` result (`String | Binary`) crosses the proxy
+/// unchanged in both modes, so the call is direct and keeps the proxy's error
+/// translation.
 #[test]
-fn binary_result_stays_on_proxy() {
+fn binary_result_is_direct() {
+    let code = compile("Erlang erlang integer_to_binary: n");
+    assert_direct(&code, "erlang", "integer_to_binary", "stock");
+    assert_guarded(&code, "erlang", "integer_to_binary");
+}
+
+/// `string()` (`String | List`) is a charlist the proxy converts, so it keeps
+/// the proxy even though its `String` member is now proved.
+#[test]
+fn charlist_result_stays_on_proxy() {
     assert_proxied(
-        &compile("Erlang erlang integer_to_binary: n"),
+        &compile("Erlang erlang integer_to_list: n"),
         "erlang",
-        "integer_to_binary",
+        "integer_to_list",
     );
 }
 
