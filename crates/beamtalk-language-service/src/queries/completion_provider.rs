@@ -196,11 +196,13 @@ pub fn compute_completions_with_registries(
     // accessible via `self.`).
     if is_after_self_dot(source, offset) {
         let self_class_name = match &context {
-            ClassContext::InstanceMethod(class) => Some(class.name.name.as_str()),
-            _ => find_standalone_instance_class(module, offset),
+            ClassContext::InstanceMethod(_) | ClassContext::StandaloneInstanceMethod(_) => {
+                context.self_class()
+            }
+            _ => None,
         };
-        if let Some(class_name) = self_class_name {
-            return compute_self_dot_completions(class_name, hierarchy, current_package);
+        if let Some((class_name, _)) = self_class_name {
+            return compute_self_dot_completions(class_name.as_str(), hierarchy, current_package);
         }
     }
     // ADR 0147 (BT-4735): at a shape-key site (`at: #|`, or a key position in a
@@ -617,22 +619,6 @@ fn compute_self_dot_completions(
         }
     }
     completions
-}
-/// Returns the class name if the cursor is inside a standalone instance method.
-fn find_standalone_instance_class(module: &Module, offset: u32) -> Option<&str> {
-    let probe = offset.saturating_sub(1);
-    for smd in &module.method_definitions {
-        if smd.is_class_method {
-            continue;
-        }
-        let span = smd.method.span;
-        if (offset >= span.start() && offset < span.end())
-            || (probe >= span.start() && probe < span.end())
-        {
-            return Some(smd.class_name.name.as_str());
-        }
-    }
-    None
 }
 /// Adds identifier completions from the module and the current method scope.
 fn add_identifier_completions(module: &Module, offset: u32, completions: &mut Vec<Completion>) {
@@ -1327,9 +1313,9 @@ fn should_exclude_delegate(
         ClassContext::InstanceMethod(class)
         | ClassContext::ClassMethod(class)
         | ClassContext::ClassBody(class) => class.backing_module.is_none(),
-        ClassContext::StandaloneInstanceMethod(_)
-        | ClassContext::StandaloneClassMethod(_)
-        | ClassContext::TopLevel => true,
+        ClassContext::StandaloneInstanceMethod(name)
+        | ClassContext::StandaloneClassMethod(name) => !hierarchy.is_native(name),
+        ClassContext::TopLevel => true,
     }
 }
 /// Adds method completions from the class hierarchy.
@@ -1366,8 +1352,9 @@ fn add_hierarchy_completions(
     let mut seen = HashSet::new();
     // Fall back to context-based completions (Dynamic or no receiver)
     match context {
-        ClassContext::InstanceMethod(class) => {
-            let class_name = class.name.name.as_str();
+        ClassContext::InstanceMethod(_) | ClassContext::StandaloneInstanceMethod(_) => {
+            let (class_name, _) = context.self_class().unwrap_or_default();
+            let class_name = class_name.as_str();
             collect_method_completions(
                 hierarchy.all_methods(class_name),
                 false,
@@ -1382,8 +1369,9 @@ fn add_hierarchy_completions(
             // the `is_after_self_dot` early-return path in
             // `compute_self_dot_completions`.
         }
-        ClassContext::ClassMethod(class) => {
-            let class_name = class.name.name.as_str();
+        ClassContext::ClassMethod(_) | ClassContext::StandaloneClassMethod(_) => {
+            let (class_name, _) = context.self_class().unwrap_or_default();
+            let class_name = class_name.as_str();
             collect_method_completions(
                 hierarchy.all_class_methods(class_name),
                 true,
@@ -1430,9 +1418,7 @@ fn add_hierarchy_completions(
                 completions,
             );
         }
-        ClassContext::StandaloneInstanceMethod(_)
-        | ClassContext::StandaloneClassMethod(_)
-        | ClassContext::TopLevel => {
+        ClassContext::TopLevel => {
             for class in &module.classes {
                 let name = class.name.name.as_str();
                 collect_method_completions(
@@ -1756,6 +1742,32 @@ mod tests {
         assert!(
             completions.iter().any(|c| c.label == "isNil"),
             "Should include inherited 'isNil' from Object"
+        );
+    }
+    #[test]
+    fn completions_in_standalone_methods_use_the_extended_class() {
+        // BT-4682: a standalone method (`Counter >> m`) completes against the
+        // class it extends, like a method declared inside the class body.
+        let source = "Actor subclass: Counter\n  state: count = 0\n  increment => 1\n\nActor subclass: Other\n  otherOnly => 1\n\nCounter >> twice => 2\nCounter class >> make => 3";
+        let (module, _) = parse(lex_with_eof(source));
+        let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+        let labels_at = |marker: &str| -> Vec<String> {
+            let offset = u32::try_from(source.find(marker).unwrap()).unwrap() + 3;
+            let position =
+                Position::from_byte_offset(source, crate::ByteOffset::new(offset)).unwrap();
+            compute_completions(&module, source, position, &hierarchy, None, None)
+                .into_iter()
+                .map(|c| c.label.to_string())
+                .collect()
+        };
+        let instance = labels_at("=> 2");
+        assert!(instance.iter().any(|l| l == "increment"));
+        assert!(!instance.iter().any(|l| l == "otherOnly"), "{instance:?}");
+        let class_side = labels_at("=> 3");
+        assert!(class_side.iter().any(|l| l == "spawn"));
+        assert!(
+            !class_side.iter().any(|l| l == "otherOnly"),
+            "{class_side:?}"
         );
     }
     #[test]
