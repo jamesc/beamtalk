@@ -172,3 +172,54 @@ fn redefining_a_shape_alias_changes_what_its_use_sites_resolve_to() {
     );
     assert_ne!(before, after);
 }
+
+// ── Field and override checks judge a shape as `Dictionary` (until BT-4730) ─
+
+#[test]
+fn shape_typed_field_default_and_assignment_do_not_warn() {
+    let msgs = checker_messages(
+        "Actor subclass: Foo\n  \
+           state: cfg :: #{#port => Integer} = #{#port => 1}\n  \
+           state: other :: #{#a => Integer} | Nil = nil\n  \
+           reset => self.cfg := Dictionary new\n  \
+           fill => self.cfg := #{#port => 2}\n",
+    );
+    assert!(msgs.is_empty(), "no warnings expected, got: {msgs:#?}");
+}
+
+#[test]
+fn shape_typed_field_still_rejects_a_non_dictionary_assignment() {
+    let msgs = checker_messages(
+        "Actor subclass: Foo\n  \
+           state: cfg :: #{#port => Integer} = #{#port => 1}\n  \
+           bad => self.cfg := 3\n",
+    );
+    assert!(
+        msgs.iter()
+            .any(|m| m.contains("cfg") && m.contains("Integer")),
+        "got: {msgs:#?}"
+    );
+}
+
+#[test]
+fn shape_typed_slot_accepts_spawn_with_dictionary() {
+    let msgs = checker_messages(
+        "Actor subclass: Holder\n  \
+           state: cfg :: #{#port => Integer} = #{#port => 1}\n\n\
+         Object subclass: Maker\n  \
+           make => Holder spawnWith: #{#cfg => Dictionary new}\n",
+    );
+    assert!(msgs.is_empty(), "no warnings expected, got: {msgs:#?}");
+}
+
+#[test]
+fn override_return_type_against_a_shape_is_still_judged() {
+    let msgs = checker_messages(
+        "Object subclass: Parent\n  foo -> #{#a => Integer} => Dictionary new\n\n\
+         Parent subclass: Child\n  foo -> Integer => 3\n",
+    );
+    assert!(
+        msgs.iter().any(|m| m.contains("foo")),
+        "overriding a shape return with Integer must warn, got: {msgs:#?}"
+    );
+}

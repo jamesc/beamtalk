@@ -1119,8 +1119,10 @@ impl TypeChecker {
                     || Self::is_return_type_refinement(actual, &false_ty(), hierarchy)
             }
             _ => {
-                let actual_str: EcoString = actual.to_string().into();
-                let expected_str: EcoString = expected.to_string().into();
+                // Shapes are judged as `Dictionary` until BT-4730 (the string
+                // helper knows no `#{...}` class and would call it compatible).
+                let actual_str: EcoString = actual.erase_shapes().to_string().into();
+                let expected_str: EcoString = expected.erase_shapes().to_string().into();
                 Self::is_type_compatible(&actual_str, &expected_str, hierarchy)
             }
         }
@@ -2902,8 +2904,8 @@ impl TypeChecker {
             // `is_type_compatible` is a string-level nominal-chain walker
             // shared across many call sites — render
             // the structured types once at this boundary.
-            let child_t_str: EcoString = child_t.to_string().into();
-            let parent_t_str: EcoString = parent_t.to_string().into();
+            let child_t_str: EcoString = child_t.erase_shapes().to_string().into();
+            let parent_t_str: EcoString = parent_t.erase_shapes().to_string().into();
             if !Self::is_type_compatible(&child_t_str, &parent_t_str, hierarchy) {
                 let param_pos = i + 1;
                 self.diagnostics.push(
@@ -3296,7 +3298,10 @@ impl TypeChecker {
             self.alias_registry.as_deref(),
             super::TypeStringContext::Declared,
         );
-        let declared_type: EcoString = declared_type.to_string().into();
+        // Shapes are judged as `Dictionary` until BT-4730: `is_assignable_to`
+        // has no unknown-class escape hatch for a `#{...}` string.
+        let declared_resolved = declared_resolved.erase_shapes();
+        let declared_type: EcoString = declared_type.erase_shapes().to_string().into();
         // `ClassHierarchy::state_field_type` predates ADR 0108 and
         // returns a bare `EcoString` with no alias provenance — unlike an
         // `InferredType`, which tags via
@@ -3579,7 +3584,7 @@ impl TypeChecker {
                 if let Some(declared_ty) = hierarchy.state_field_type(class_name, key_name) {
                     // `check_spawn_with_value` is a string-level helper —
                     // render once at this boundary.
-                    let declared_ty: EcoString = declared_ty.to_string().into();
+                    let declared_ty: EcoString = declared_ty.erase_shapes().to_string().into();
                     self.check_spawn_with_value(
                         class_name,
                         key_name,
@@ -4099,7 +4104,8 @@ impl TypeChecker {
             if matches!(resolved_declared, InferredType::Dynamic(_)) {
                 continue;
             }
-            let declared_type = resolved_declared.display_annotation();
+            // Shapes are judged as `Dictionary` until BT-4730.
+            let declared_type = resolved_declared.erase_shapes().display_annotation();
             if type_param_names.contains(&declared_type.as_str()) {
                 continue;
             }

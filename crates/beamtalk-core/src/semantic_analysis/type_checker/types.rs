@@ -604,6 +604,59 @@ impl InferredType {
         Some(Self::known_with_args("Dictionary", vec![key_ty, value_ty]))
     }
 
+    /// This type with every map shape (ADR 0147), at any depth, replaced by
+    /// the bare `Dictionary` it erases to — the [`InferredType`] counterpart
+    /// of `DeclaredType::erase_shapes`.
+    ///
+    /// For the string-level compatibility checks that know no `#{...}` class.
+    /// Until shape assignability lands (BT-4730) they judge a shape as a
+    /// plain `Dictionary`, exactly as the pre-shape checker did.
+    #[must_use]
+    pub fn erase_shapes(&self) -> Self {
+        match self {
+            Self::Shape { provenance, .. } => Self::Known {
+                class_name: "Dictionary".into(),
+                type_args: vec![],
+                provenance: provenance.clone(),
+            },
+            Self::Known {
+                class_name,
+                type_args,
+                provenance,
+            } => Self::Known {
+                class_name: class_name.clone(),
+                type_args: type_args.iter().map(Self::erase_shapes).collect(),
+                provenance: provenance.clone(),
+            },
+            Self::Union {
+                members,
+                provenance,
+            } => Self::Union {
+                members: members.iter().map(Self::erase_shapes).collect(),
+                provenance: provenance.clone(),
+            },
+            Self::Intersection {
+                members,
+                provenance,
+            } => Self::Intersection {
+                members: members.iter().map(Self::erase_shapes).collect(),
+                provenance: provenance.clone(),
+            },
+            Self::Negation {
+                base,
+                excluded,
+                provenance,
+            } => Self::Negation {
+                base: Box::new(base.erase_shapes()),
+                excluded: Box::new(excluded.erase_shapes()),
+                provenance: provenance.clone(),
+            },
+            Self::Meta { .. } | Self::ProtocolMeta { .. } | Self::Dynamic(_) | Self::Never => {
+                self.clone()
+            }
+        }
+    }
+
     /// Creates a `Union` from simple class names with `Inferred` provenance.
     ///
     /// Convenience for the common case of `String | nil` style unions where
@@ -876,7 +929,9 @@ impl InferredType {
     /// anywhere else, so diagnostics must never echo `UndefinedObject` back at them.
     ///
     /// Use this for any user-facing string: diagnostic messages, hover
-    /// contents, signature help labels, and code-action inserts. Keep
+    /// contents and signature help labels. (Not for text inserted into source,
+    /// such as code actions: this form truncates long map shapes — use
+    /// [`display_annotation`](Self::display_annotation) there.) Keep
     /// [`display_name`](Self::display_name) for internal bookkeeping where the
     /// canonical name is required (e.g., `is_assignable_to` lookups).
     ///
