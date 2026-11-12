@@ -89,7 +89,7 @@ into REPL session state. Workspace readiness is detected via
 %% for callers with no side information.
 -export([revert_method/2, revert_method/3]).
 -export([autoflush/0, setAutoflush/1]).
-%% Shared with beamtalk_repl_loader:new_class/2 to surface created classes to the
+%% Shared with beamtalk_repl_loader_newclass:new_class/2 to surface created classes to the
 %% REPL identically to a file load.
 -export([loaded_class_objects/1]).
 

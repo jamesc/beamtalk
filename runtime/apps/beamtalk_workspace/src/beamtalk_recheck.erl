@@ -156,7 +156,7 @@ than only counted (`not_checked`). A candidate dropped by the cap
 this reload may already have a stored finding from an earlier reload where
 it *was* checked — that finding was never re-verified against the current
 generation and must not keep asserting itself as current forever.
-`beamtalk_repl_loader:maybe_run_recheck/4` uses this field to mark any such
+`beamtalk_repl_loader_recheck:maybe_run_recheck/4` uses this field to mark any such
 pre-existing finding's `note` as possibly-stale in place, rather than either
 silently dropping it (could hide a real, still-live problem) or leaving it
 looking freshly-verified.

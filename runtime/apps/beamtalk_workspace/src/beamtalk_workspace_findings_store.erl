@@ -56,7 +56,7 @@ statement that the dropped candidates are fine. The same "never actually
 re-verified" gap also reaches a candidate that stayed *inside* the cap but
 whose individual re-check came back `skipped` (no live source recorded) or
 `failed` (a compile/compiler-port error). `get_origin/2` exists so
-`beamtalk_repl_loader:maybe_run_recheck/4` can check, for each such
+`beamtalk_repl_loader_recheck:maybe_run_recheck/4` can check, for each such
 not-verified candidate (`beamtalk_recheck:result()`'s `not_verified_owners`
 — the cap-dropped set unioned with the skipped/failed one), whether this
 changed class already left a finding on it — and if so, overwrite that
@@ -233,7 +233,7 @@ for_owner(OwnerBin) when is_binary(OwnerBin) ->
 Read-only lookup of the single `{OwnerBin, ChangedClassBin}` origin bucket
 — `[]` when nothing is stored for that exact pair. Unlike
 `for_owner/1`, this does not flatten across origins: a caller
-(`beamtalk_repl_loader:maybe_run_recheck/4`) needs to know whether *this
+(`beamtalk_repl_loader_recheck:maybe_run_recheck/4`) needs to know whether *this
 specific* changed class already left a finding on `OwnerBin` before deciding
 whether there is anything to mark stale when `OwnerBin` gets dropped by the
 caller cap on a later reload of the same changed class. Does not mutate the

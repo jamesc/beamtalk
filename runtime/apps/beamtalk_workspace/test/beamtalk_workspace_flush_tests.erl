@@ -901,7 +901,7 @@ filter_by_new_class_selector(#{proj_dir := ProjDir}) ->
 
 %% Fix #2: target path that already exists *as a directory* must surface as
 %% a `target_exists` conflict during Phase A, not as a `rename_failed` later
-%% on. Mirrors the equivalent fix in beamtalk_repl_loader:validate_target_path/1.
+%% on. Mirrors the equivalent fix in beamtalk_repl_loader_newclass:validate_target_path/1.
 new_class_target_is_directory_is_conflict(#{proj_dir := ProjDir}) ->
     File = filename:join([ProjDir, "src", "greeter.bt"]),
     %% Create a directory *at the target path*. filelib:is_regular/1 would

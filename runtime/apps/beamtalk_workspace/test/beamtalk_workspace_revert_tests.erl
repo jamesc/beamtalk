@@ -48,7 +48,7 @@ ADR 0113 Phase 3: also covers `revert:` itself for `"remove-class"`
 entries — recompile+reinstall the whole class from `prev_source_ref`, reusing
 the `newClass:at:` install path (`find_revert_target/3`'s `reinstall_class`
 outcome, `beamtalk_workspace_interface_primitives:reinstall_reverted_class/3`,
-`beamtalk_repl_loader:revert_remove_class/2`) — and the post-flush "nothing to
+`beamtalk_repl_loader_newclass:revert_remove_class/2`) — and the post-flush "nothing to
 revert" degrade for both `"remove-method"` and `"remove-class"` entries (an
 entry drops out of the active ChangeLog view once flushed, matching ADR
 0082/0113's documented "best-effort, pre-flush semantics only" contract).

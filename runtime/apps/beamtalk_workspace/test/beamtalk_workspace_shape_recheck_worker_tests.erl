@@ -25,7 +25,7 @@ Specifically covers (from the 2026-07-20 coverage artifact, 30.8% baseline):
 
 Each test uses a minimal setup — only the worker itself is started. The
 `leaf_change` and `alias_change` cast handlers call
-`beamtalk_repl_loader:maybe_trigger_*` functions that require the full compiler
+`beamtalk_repl_loader_recheck:maybe_trigger_*` functions that require the full compiler
 stack; without it those functions will fail, but each handler's try/catch (see
 the moduledoc's "Crash isolation" section) swallows any exception and returns
 `{noreply, State}` — the worker stays alive.

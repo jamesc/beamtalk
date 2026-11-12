@@ -822,13 +822,13 @@ class_name_binary(_) -> undefined.
 
 -doc """
 Create a brand-new class from a source String at a target path (ADR 0082 Phase 1).
-Delegates to `beamtalk_repl_loader:new_class/2`; see there for the
+Delegates to `beamtalk_repl_loader_newclass:new_class/2`; see there for the
 validation contract. Returns `{ok, [ClassObject]}` or `{error, #beamtalk_error{}}`.
 """.
 -spec new_class(binary() | string(), binary() | string()) ->
     {ok, [tuple()]} | {error, term()}.
 new_class(Source, TargetPath) ->
-    beamtalk_repl_loader:new_class(Source, TargetPath).
+    beamtalk_repl_loader_newclass:new_class(Source, TargetPath).
 
 -doc """
 Move a class's `.bt` file to a new path without changing its name (ADR 0114
@@ -842,14 +842,14 @@ move_class(ClassName, NewPathBin) ->
 -doc """
 Recompile and reinstall a class from a recorded prior source (ADR 0113
 — `Workspace changes revert:` extension for a pending `'remove-class'`
-entry). Delegates to `beamtalk_repl_loader:revert_remove_class/2`; see there
+entry). Delegates to `beamtalk_repl_loader_newclass:revert_remove_class/2`; see there
 for the validation contract (same as `new_class/2` minus the target-must-not-
 exist check). Returns `{ok, [ClassObject]}` or `{error, #beamtalk_error{}}`.
 """.
 -spec revert_remove_class(binary() | string(), binary() | string()) ->
     {ok, [tuple()]} | {error, term()}.
 revert_remove_class(Source, TargetPath) ->
-    beamtalk_repl_loader:revert_remove_class(Source, TargetPath).
+    beamtalk_repl_loader_newclass:revert_remove_class(Source, TargetPath).
 
 -doc """
 Evaluate `Source` (a Beamtalk expression) with `self` bound to `Self`, returning

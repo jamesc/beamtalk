@@ -602,10 +602,10 @@ sibling_method_indent_skips_unindented_comment_test() ->
 
 declared_class_name_single_class_test() ->
     Classes = [#{name => "Greeter", superclass => "Object"}],
-    ?assertEqual({ok, <<"Greeter">>}, beamtalk_repl_loader:declared_class_name(Classes)).
+    ?assertEqual({ok, <<"Greeter">>}, beamtalk_repl_loader_newclass:declared_class_name(Classes)).
 
 declared_class_name_no_class_is_error_test() ->
-    {error, Err} = beamtalk_repl_loader:declared_class_name([]),
+    {error, Err} = beamtalk_repl_loader_newclass:declared_class_name([]),
     ?assertEqual(no_class_declared, Err#beamtalk_error.kind),
     ?assertEqual('newClass:at:', Err#beamtalk_error.selector).
 
@@ -616,7 +616,7 @@ declared_class_name_multiple_classes_is_error_test() ->
         #{name => "Foo", superclass => "Object"},
         #{name => "Bar", superclass => "Object"}
     ],
-    {error, Err} = beamtalk_repl_loader:declared_class_name(Classes),
+    {error, Err} = beamtalk_repl_loader_newclass:declared_class_name(Classes),
     ?assertEqual(multiple_classes_declared, Err#beamtalk_error.kind),
     Msg = Err#beamtalk_error.message,
     ?assertNotEqual(nomatch, binary:match(element(2, Msg), <<"Foo">>)),
@@ -630,12 +630,12 @@ validate_new_class_matching_name_not_loaded_ok_test() ->
     %% Declared name == basename(path) and not already loaded → ok.
     ?assertEqual(
         ok,
-        beamtalk_repl_loader:validate_new_class(<<"Greeter">>, "src/greeter.bt", false)
+        beamtalk_repl_loader_newclass:validate_new_class(<<"Greeter">>, "src/greeter.bt", false)
     ).
 
 validate_new_class_name_mismatch_is_error_test() ->
     %% (c) declared class name must match the path basename.
-    {error, Err} = beamtalk_repl_loader:validate_new_class(
+    {error, Err} = beamtalk_repl_loader_newclass:validate_new_class(
         <<"Greeter">>, "src/welcomer.bt", false
     ),
     ?assertEqual(class_name_mismatch, Err#beamtalk_error.kind),
@@ -647,7 +647,7 @@ validate_new_class_name_mismatch_is_error_test() ->
 validate_new_class_already_loaded_is_error_test() ->
     %% (d) a class of that name is already loaded → error even when the basename
     %% matches.
-    {error, Err} = beamtalk_repl_loader:validate_new_class(
+    {error, Err} = beamtalk_repl_loader_newclass:validate_new_class(
         <<"Greeter">>, "src/greeter.bt", true
     ),
     ?assertEqual(class_already_loaded, Err#beamtalk_error.kind),
@@ -656,7 +656,7 @@ validate_new_class_already_loaded_is_error_test() ->
 validate_new_class_name_mismatch_takes_precedence_over_loaded_test() ->
     %% Name mismatch is checked before the loaded check, so a mismatched name
     %% surfaces the mismatch error regardless of load state.
-    {error, Err} = beamtalk_repl_loader:validate_new_class(
+    {error, Err} = beamtalk_repl_loader_newclass:validate_new_class(
         <<"Greeter">>, "src/other.bt", true
     ),
     ?assertEqual(class_name_mismatch, Err#beamtalk_error.kind).
@@ -671,7 +671,7 @@ validate_target_path_existing_directory_is_target_exists_test() ->
             integer_to_list(erlang:unique_integer([positive])),
     ok = file:make_dir(Dir),
     try
-        {error, Err} = beamtalk_repl_loader:validate_target_path(Dir),
+        {error, Err} = beamtalk_repl_loader_newclass:validate_target_path(Dir),
         ?assertEqual(target_exists, Err#beamtalk_error.kind),
         ?assertEqual('newClass:at:', Err#beamtalk_error.selector)
     after
@@ -685,7 +685,7 @@ validate_target_path_existing_directory_is_target_exists_test() ->
 new_class_non_string_args_type_error_test() ->
     %% Neither argument is a String/list, so the catch-all clause raises a
     %% type_error #beamtalk_error{} without touching the filesystem or compiler.
-    {error, Err} = beamtalk_repl_loader:new_class(42, 99),
+    {error, Err} = beamtalk_repl_loader_newclass:new_class(42, 99),
     ?assertEqual(type_error, Err#beamtalk_error.kind),
     ?assertEqual('newClass:at:', Err#beamtalk_error.selector).
 
@@ -1438,14 +1438,14 @@ t_new_class_success(_Proj) ->
     Path = filename:join(Proj, Name ++ ".bt"),
     file:delete(Path),
     Src = "Object subclass: " ++ Name ++ "\n  greet => 1\n",
-    Result = beamtalk_repl_loader:new_class(list_to_binary(Src), list_to_binary(Path)),
+    Result = beamtalk_repl_loader_newclass:new_class(list_to_binary(Src), list_to_binary(Path)),
     ?assertMatch({ok, [_ | _]}, Result).
 
 t_new_class_target_exists(_Proj) ->
     Proj = live_project_dir(),
     Path = filename:join(Proj, "NewClassExists.bt"),
     ok = file:write_file(Path, <<"placeholder">>),
-    {error, Err} = beamtalk_repl_loader:new_class(
+    {error, Err} = beamtalk_repl_loader_newclass:new_class(
         <<"Object subclass: NewClassExists">>, list_to_binary(Path)
     ),
     ?assertEqual(target_exists, Err#beamtalk_error.kind).
@@ -1456,7 +1456,7 @@ t_new_class_outside_project() ->
     Path =
         Tmp ++ "/bt_outside_" ++ integer_to_list(erlang:unique_integer([positive])) ++
             "/Outsider.bt",
-    {error, Err} = beamtalk_repl_loader:new_class(
+    {error, Err} = beamtalk_repl_loader_newclass:new_class(
         <<"Object subclass: Outsider">>, list_to_binary(Path)
     ),
     ?assertEqual(target_outside_project, Err#beamtalk_error.kind).
@@ -1466,7 +1466,7 @@ t_new_class_name_mismatch(_Proj) ->
     %% Declared class name does not match the file basename.
     Path = filename:join(Proj, "MismatchFile.bt"),
     file:delete(Path),
-    {error, Err} = beamtalk_repl_loader:new_class(
+    {error, Err} = beamtalk_repl_loader_newclass:new_class(
         <<"Object subclass: SomethingElse\n  v => 1\n">>, list_to_binary(Path)
     ),
     ?assertEqual(class_name_mismatch, Err#beamtalk_error.kind).
@@ -1479,20 +1479,22 @@ t_new_class_already_loaded(_Proj) ->
     Path1 = filename:join(Proj, Name ++ ".bt"),
     file:delete(Path1),
     Src = "Object subclass: " ++ Name ++ "\n  v => 1\n",
-    {ok, _} = beamtalk_repl_loader:new_class(list_to_binary(Src), list_to_binary(Path1)),
+    {ok, _} = beamtalk_repl_loader_newclass:new_class(list_to_binary(Src), list_to_binary(Path1)),
     %% Second attempt at a different in-project path whose basename equals the
     %% class name (so the name check passes) reaches the already-loaded branch.
     Path3 = filename:join(filename:join(Proj, "sub"), Name ++ ".bt"),
     ok = filelib:ensure_dir(Path3),
     file:delete(Path3),
-    {error, Err} = beamtalk_repl_loader:new_class(list_to_binary(Src), list_to_binary(Path3)),
+    {error, Err} = beamtalk_repl_loader_newclass:new_class(
+        list_to_binary(Src), list_to_binary(Path3)
+    ),
     ?assertEqual(class_already_loaded, Err#beamtalk_error.kind).
 
 t_new_class_compile_error(_Proj) ->
     Proj = live_project_dir(),
     Path = filename:join(Proj, "BadNewClass.bt"),
     file:delete(Path),
-    {error, Err} = beamtalk_repl_loader:new_class(
+    {error, Err} = beamtalk_repl_loader_newclass:new_class(
         <<"@@@ not valid beamtalk @@@">>, list_to_binary(Path)
     ),
     %% Compile failure is surfaced as a structured #beamtalk_error{}.
@@ -1534,7 +1536,7 @@ t_new_class_agent_author(_Proj) ->
     erlang:put('$beamtalk_author_kind', agent),
     try
         Src = "Object subclass: " ++ Name ++ "\n  v => 1\n",
-        Result = beamtalk_repl_loader:new_class(list_to_binary(Src), list_to_binary(Path)),
+        Result = beamtalk_repl_loader_newclass:new_class(list_to_binary(Src), list_to_binary(Path)),
         ?assertMatch({ok, [_ | _]}, Result)
     after
         erlang:erase('$beamtalk_author'),
@@ -1572,7 +1574,7 @@ t_new_class_author_kind_only(_Proj) ->
     erlang:put('$beamtalk_author_kind', agent),
     try
         Src = "Object subclass: " ++ Name ++ "\n  v => 1\n",
-        Result = beamtalk_repl_loader:new_class(list_to_binary(Src), list_to_binary(Path)),
+        Result = beamtalk_repl_loader_newclass:new_class(list_to_binary(Src), list_to_binary(Path)),
         ?assertMatch({ok, [_ | _]}, Result)
     after
         erlang:erase('$beamtalk_author_kind')
@@ -1935,7 +1937,7 @@ t_new_class_multiple_classes(_Proj) ->
     Path = filename:join(Proj, "MultiClass.bt"),
     file:delete(Path),
     Src = "Object subclass: MultiClass\n  v => 1\nObject subclass: SecondClass\n  w => 2\n",
-    Result = beamtalk_repl_loader:new_class(list_to_binary(Src), list_to_binary(Path)),
+    Result = beamtalk_repl_loader_newclass:new_class(list_to_binary(Src), list_to_binary(Path)),
     ?assertMatch({error, _}, Result).
 
 t_reload_method_definition_existing(_Proj) ->
