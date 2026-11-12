@@ -650,6 +650,10 @@ impl LanguageService {
 - `MessageDispatcher`: Routes selector to method implementation
 - `SuperDispatcher`: Walks class chain for super method
 - `ErrorIsolator`: Catches errors, converts to future rejections (from Flavors)
+- `NameRegistry` (`beamtalk_actor_registry`): Named registration over OTP's local registry and `global` (ADR 0079, ADR 0126 §4): `register_name/2`, `spawnAs/2,3`, `spawnAsGlobal/2,3`, the reserved-name policy, pid → class / name lookups, and the `global` partition-heal conflict resolver. Not the `beamtalk_actor_registry` *process* (the node-wide actor tracker in `beamtalk_repl_actors`), which only shares its name
+- `RemoteSpawner` (`beamtalk_actor_remote`): Remote spawn and lookup (ADR 0126 §3): the `erpc` origin entry points and their `*_target` functions that run on the peer node
+- `ActorFfi` (`beamtalk_actor_ffi`): The `(Erlang beamtalk_actor_ffi)` shims behind `stdlib/src/actor.bt` (`doSpawn*`, `registerAs:`, `named:`, `spawnOn:` and friends). The deferred-reply shims (`takeDeferredCall`, `ReplyTo`) stay in `beamtalk_actor`, next to the call-from machinery they read
+- `beamtalk_actor` keeps one-line delegates for the functions peers or persisted MFAs address by module name (the `erpc` targets, `spawnAs`/`spawnAsGlobal`, the `global` resolve function) so mixed-version clusters keep working; see BT-4701
 
 **Key Patterns:**
 - **Process-per-Actor:** Each Beamtalk object is a BEAM process

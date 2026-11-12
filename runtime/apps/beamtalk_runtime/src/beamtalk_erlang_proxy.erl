@@ -1058,7 +1058,7 @@ coerce_arg(#beamtalk_object{pid = Pid}) when is_pid(Pid) ->
 coerce_arg(Arg) ->
     %% ADR 0079: name-resolving proxies (`pid = {registered, _}`)
     %% deliberately pass through unchanged so the receiving FFI shim
-    %% (e.g. `beamtalk_actor:registeredName/1`, `unregister/1`) can answer
+    %% (e.g. `beamtalk_actor_ffi:registeredName/1`, `unregister/1`) can answer
     %% from the proxy's identity slot rather than resolving the name. Code
     %% that needs a raw pid (e.g. `Erlang erlang monitor: actor`) should
     %% call `actor pid` first to materialise the current pid explicitly.

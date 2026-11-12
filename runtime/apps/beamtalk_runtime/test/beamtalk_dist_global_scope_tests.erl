@@ -7,7 +7,7 @@
 
 -moduledoc """
 Two-node EUnit tests for cluster-unique names, `scope: #global` (ADR 0126
-§4, Phase 5, BT-3603): `beamtalk_actor:'spawnAsGlobal'/2,3`, the `{global,
+§4, Phase 5, BT-3603): `beamtalk_actor_registry:'spawnAsGlobal'/2,3`, the `{global,
 Name}` ref shape, and `resolve_global_conflict/3` (the partition-heal
 conflict resolver).
 
@@ -79,7 +79,7 @@ global_scope_test_() ->
 reserved_name_rejected_under_global_scope_test() ->
     ?assertMatch(
         {error, #beamtalk_error{kind = reserved_name}},
-        beamtalk_actor:'spawnAsGlobal'(logger, test_counter, 0)
+        beamtalk_actor_registry:'spawnAsGlobal'(logger, test_counter, 0)
     ).
 
 %%====================================================================
@@ -88,7 +88,7 @@ reserved_name_rejected_under_global_scope_test() ->
 
 round_trip_from_either_node(PeerNode) ->
     Name = unique_name("bt3603_roundtrip"),
-    {ok, Pid} = beamtalk_actor:'spawnAsGlobal'(Name, test_counter, 0),
+    {ok, Pid} = beamtalk_actor_registry:'spawnAsGlobal'(Name, test_counter, 0),
     try
         %% Visible immediately from this (origin) node...
         ?assertEqual(Pid, global:whereis_name(Name)),
@@ -129,8 +129,8 @@ round_trip_from_either_node(PeerNode) ->
 local_and_global_scopes_are_separate(PeerNode) ->
     Name = unique_name("bt3603_scopesep"),
     %% Same name, both scopes, no conflict — they are different registries.
-    {ok, LocalPid} = beamtalk_actor:'spawnAs'(Name, test_counter, 111),
-    {ok, GlobalPid} = beamtalk_actor:'spawnAsGlobal'(Name, test_counter, 222),
+    {ok, LocalPid} = beamtalk_actor_registry:'spawnAs'(Name, test_counter, 111),
+    {ok, GlobalPid} = beamtalk_actor_registry:'spawnAsGlobal'(Name, test_counter, 222),
     ?assertNotEqual(LocalPid, GlobalPid),
     try
         %% The local registration is invisible to `global` — separate
@@ -180,7 +180,7 @@ named_scope_global_resolves_remote_registrant(PeerNode) ->
     ok = beamtalk_class_metadata:insert('Counter', test_counter, undefined, none, false),
     {ok, PeerPid} = rpc:call(PeerNode, erlang, apply, [
         fun() ->
-            {ok, P} = beamtalk_actor:'spawnAsGlobal'(Name, test_counter, 5),
+            {ok, P} = beamtalk_actor_registry:'spawnAsGlobal'(Name, test_counter, 5),
             unlink(P),
             {ok, P}
         end,
@@ -190,7 +190,7 @@ named_scope_global_resolves_remote_registrant(PeerNode) ->
         ?assertNotEqual(node(), node(PeerPid)),
         %% Before the fix: badarg crash inside pid_class_name/1. After: a
         %% normal {ok, #beamtalk_object{}} carrying the {global, Name} ref.
-        {ok, Obj} = beamtalk_actor:named_lookup(global, 'Counter', Name, 'named:scope:'),
+        {ok, Obj} = beamtalk_actor_ffi:named_lookup(global, 'Counter', Name, 'named:scope:'),
         ?assertEqual('Counter', Obj#beamtalk_object.class),
         ?assertEqual({global, Name}, Obj#beamtalk_object.pid),
         %% The returned proxy actually resolves and dispatches to the
@@ -276,7 +276,7 @@ netsplit_heal_resolves_conflict(Peer, PeerNode) ->
     %% die the moment that worker exits.
     {ok, PeerPid} = peer:call(Peer, erlang, apply, [
         fun() ->
-            {ok, P} = beamtalk_actor:'spawnAsGlobal'(Name, test_counter, 100),
+            {ok, P} = beamtalk_actor_registry:'spawnAsGlobal'(Name, test_counter, 100),
             unlink(P),
             {ok, P}
         end,
@@ -294,14 +294,14 @@ netsplit_heal_resolves_conflict(Peer, PeerNode) ->
     %% otherwise die when the conflict resolver later stops OriginPid with a
     %% non-`normal` reason (a linked, non-trapping process is killed by
     %% ANY non-`normal` exit signal from its link partner).
-    {ok, OriginPid} = beamtalk_actor:'spawnAsGlobal'(Name, test_counter, 200),
+    {ok, OriginPid} = beamtalk_actor_registry:'spawnAsGlobal'(Name, test_counter, 200),
     unlink(OriginPid),
     OriginMon = erlang:monitor(process, OriginPid),
 
     %% Heal: reconnect distribution. `global`'s mesh sync now discovers
     %% `Name` registered on both (previously partitioned) sides and invokes
     %% the resolver both registrations were bound to,
-    %% `beamtalk_actor:resolve_global_conflict/3`.
+    %% `beamtalk_actor_registry:resolve_global_conflict/3`.
     pong = net_adm:ping(PeerNode),
     %% Blocks until this node's global_name_server has fully synced with
     %% every currently-connected node — the conflict is resolved by the

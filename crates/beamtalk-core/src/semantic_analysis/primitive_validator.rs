@@ -29,7 +29,7 @@ pub const STRUCTURAL_INTRINSICS: &[&str] = &[
     "basicNew",
     "basicNewWith",
     // `actorSpawn` / `actorSpawnWith` are retired — `class sealed spawn`
-    // / `spawnWith:` have real FFI bodies (`(Erlang beamtalk_actor)
+    // / `spawnWith:` have real FFI bodies (`(Erlang beamtalk_actor_ffi)
     // doSpawn: self`) instead of `@intrinsic` markers, so these names are
     // not used anywhere and are intentionally not in this registry.
     // `actorNewError` / `actorNewWithArgsError` are retired the same

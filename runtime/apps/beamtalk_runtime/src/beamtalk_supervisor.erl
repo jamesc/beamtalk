@@ -626,7 +626,7 @@ spawn_named_instance(ClassName, _Module, _Args, Name, Selector) when not is_atom
             )
         )};
 spawn_named_instance(ClassName, Module, Args, Name, Selector) ->
-    case beamtalk_actor:reserved_name(Name) of
+    case beamtalk_actor_registry:reserved_name(Name) of
         true ->
             {error,
                 beamtalk_error:new(
@@ -752,7 +752,7 @@ falls back to `start_link/0`.
 """.
 -spec start_supervisor_child(module(), term(), atom()) -> {ok, pid()} | ignore | {error, term()}.
 start_supervisor_child(Module, Args, Name) ->
-    case beamtalk_actor:reserved_name(Name) of
+    case beamtalk_actor_registry:reserved_name(Name) of
         true ->
             %% Same reserved-name policy as `spawnAs:` (ADR 0079).
             {error,
@@ -2865,7 +2865,7 @@ fails the start with a hint naming the rule.
 
 `Name` is `none` (an anonymous child, `beamtalk_actor:safe_spawn_linked/2`)
 or `{local | global, Atom}` (`withName:` / `startChild:name:`, through
-`beamtalk_actor:'spawnAs'/3` / `'spawnAsGlobal'/3`, ADR 0079 / ADR 0126 §4).
+`beamtalk_actor_registry:'spawnAs'/3` / `'spawnAsGlobal'/3`, ADR 0079 / ADR 0126 §4).
 Both are the same linked, trap-exit, init-ack-awaited start
 (`beamtalk_actor:start_link_and_await/3`); the link is what lets the calling
 supervisor see the child's exit. The answer is `{ok, Pid}` or `{error,
@@ -2888,9 +2888,12 @@ start_actor_child(ChildModule, Args) ->
 start_actor_child(ChildModule, Args, Name) ->
     Result =
         case Name of
-            none -> beamtalk_actor:safe_spawn_linked(ChildModule, Args);
-            {local, LocalName} -> beamtalk_actor:'spawnAs'(LocalName, ChildModule, Args);
-            {global, GlobalName} -> beamtalk_actor:'spawnAsGlobal'(GlobalName, ChildModule, Args)
+            none ->
+                beamtalk_actor:safe_spawn_linked(ChildModule, Args);
+            {local, LocalName} ->
+                beamtalk_actor_registry:'spawnAs'(LocalName, ChildModule, Args);
+            {global, GlobalName} ->
+                beamtalk_actor_registry:'spawnAsGlobal'(GlobalName, ChildModule, Args)
         end,
     case Result of
         {ok, Pid} -> {ok, Pid};
@@ -2999,7 +3002,7 @@ The arity-4 entry point `startChild: args name: aName` lands on:
 `supervisor:start_child/2` appends `[Args, Name]` to the template's
 `[ChildModule, DefaultArgs]` static args. Starts the child through
 `start_actor_child/3` with `{local, Name}`, so it registers under `Name`
-(through `beamtalk_actor:'spawnAs'/3`) — the same start
+(through `beamtalk_actor_registry:'spawnAs'/3`) — the same start
 `SupervisionSpec withName:` uses for static children (ADR 0079) — and the
 start waits for its `initialize` (BT-4033).
 
@@ -3229,7 +3232,7 @@ spec_to_otp(BtSpec, Mode) ->
                         {beamtalk_supervisor, start_actor_child, [ChildModule, InitArgs]};
                     'spawnAs:' ->
                         %% ADR 0079: SupervisionSpec withName: routes
-                        %% named children through `beamtalk_actor:spawnAs/3`
+                        %% named children through `beamtalk_actor_registry:spawnAs/3`
                         %% (via start_actor_child/3, BT-4033) so the child registers
                         %% under `Name` atomically inside
                         %% gen_server:start_link({local, Name}, ...). The startArgs
@@ -3241,7 +3244,7 @@ spec_to_otp(BtSpec, Mode) ->
                     'spawnWith:as:' ->
                         %% ADR 0079: spawn-with-args under a registered
                         %% name. startArgs are `#(args, name)` → Erlang `[Args, Name]`.
-                        %% Goes through `beamtalk_actor:spawnAs/3` (via
+                        %% Goes through `beamtalk_actor_registry:spawnAs/3` (via
                         %% start_actor_child/3) so the child is registered
                         %% atomically with init args at start time.
                         SpawnAsArgs2 = lists:nth(3, StartElems),
@@ -3254,7 +3257,7 @@ spec_to_otp(BtSpec, Mode) ->
                         %% scope: #global` — same shape as `spawnAs:` above
                         %% (startArgs carries just the Name, `#(name)` →
                         %% Erlang `[Name]`), but routes through
-                        %% `beamtalk_actor:'spawnAsGlobal'/3` (via
+                        %% `beamtalk_actor_registry:'spawnAsGlobal'/3` (via
                         %% start_actor_child/3) so the child
                         %% registers with OTP `global` instead of the local
                         %% registry. `childSpec` only ever emits this
@@ -3269,7 +3272,7 @@ spec_to_otp(BtSpec, Mode) ->
                         %% ADR 0126 §4, Phase 5: cluster-global spawn-with-args
                         %% sibling of `spawnWith:as:` above — same startArgs
                         %% shape (`#(args, name)` → Erlang `[Args, Name]`),
-                        %% routed through `beamtalk_actor:'spawnAsGlobal'/3`.
+                        %% routed through `beamtalk_actor_registry:'spawnAsGlobal'/3`.
                         SpawnAsGlobalArgs2 = lists:nth(3, StartElems),
                         [GlobalInitArgsMap, GlobalNameAtom] = SpawnAsGlobalArgs2,
                         {beamtalk_supervisor, start_actor_child, [

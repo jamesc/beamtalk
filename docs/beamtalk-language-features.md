@@ -5009,7 +5009,7 @@ The reserved set covers:
 - OTP kernel and stdlib processes: `application_controller`, `code_server`, `erl_prim_loader`, `erl_signal_server`, `error_logger`, `erts_code_purger`, `file_server_2`, `global_group`, `global_name_server`, `inet_db`, `init`, `kernel_refc`, `kernel_safe_sup`, `kernel_sup`, `logger`, `logger_handler_watcher`, `logger_proxy`, `logger_std_h_default`, `logger_sup`, `net_kernel`, `net_sup`, `rex`, `socket_registry`, `standard_error`, `standard_error_sup`, `standard_error_writer`, `user`, `user_drv`, `user_drv_reader`, `user_drv_writer`.
 - Any atom prefixed with `beamtalk_` (reserves the namespace for runtime infrastructure).
 
-See `beamtalk_actor:reserved_name/1` in the runtime for the authoritative list and the policy rationale (ADR 0079 §Errors).
+See `beamtalk_actor_registry:reserved_name/1` in the runtime for the authoritative list and the policy rationale (ADR 0079 §Errors).
 
 ### Scope
 
@@ -5026,7 +5026,7 @@ This release covers **local (per-node)** registration. Cluster-wide (`#global`) 
 | `Class named: #foo` | `erlang:whereis(foo)` + Beamtalk class check via `'$beamtalk_actor'` process-dict marker |
 | `Actor allRegistered` | `erlang:registered/0` filtered by the process-dict marker |
 | Proxy send (`proxy foo`) | `gen_server:call(foo, ...)` — name-resolved per send |
-| `SupervisionSpec withName:` | Child MFA uses `{beamtalk_actor, spawnAs, [Name, Module, ...]}` so the supervisor re-registers the name on every restart |
+| `SupervisionSpec withName:` | Child MFA uses `{beamtalk_actor_registry, spawnAs, [Name, Module, ...]}` so the supervisor re-registers the name on every restart |
 
 ---
 
@@ -8855,7 +8855,7 @@ hash => @intrinsic hash
 
 The full list of structural intrinsics: `blockValue`, `blockValue1`–`blockValue3`, `whileTrue`, `whileFalse`, `unaryWhileTrue`, `unaryWhileFalse`, `repeat`, `onDo`, `ensure`, `timesRepeat`, `toDo`, `toByDo`, `basicNew`, `basicNewWith`, `hash`, `respondsTo`, `fieldNames`, `fieldAt`, `fieldAtPut`, `dynamicSend`, `dynamicSendWithArgs`, `error`.
 
-**`Actor>>spawn`/`spawnWith:` (BT-3072).** Unlike the intrinsics above, `spawn`/`spawnWith:` are *not* `@intrinsic` — `actor.bt` declares real FFI bodies (`(Erlang beamtalk_actor) doSpawn: self`). The compiler's static `Counter spawn` / `self spawn` call sites still lower directly to `beamtalk_actor:safe_spawn`/`class_self_spawn` (unchanged, to avoid serializing every spawn through the class `gen_server`) — the declared body is the documented source of behaviour for the dynamic dispatch path, mirroring `spawnAs:`/`spawnWith:as:`'s existing FFI-body shape. See `stdlib/src/actor.bt`.
+**`Actor>>spawn`/`spawnWith:` (BT-3072).** Unlike the intrinsics above, `spawn`/`spawnWith:` are *not* `@intrinsic` — `actor.bt` declares real FFI bodies (`(Erlang beamtalk_actor_ffi) doSpawn: self`). The compiler's static `Counter spawn` / `self spawn` call sites still lower directly to `beamtalk_actor:safe_spawn`/`class_self_spawn` (unchanged, to avoid serializing every spawn through the class `gen_server`) — the declared body is the documented source of behaviour for the dynamic dispatch path, mirroring `spawnAs:`/`spawnWith:as:`'s existing FFI-body shape. See `stdlib/src/actor.bt`.
 
 **`Actor>>new`/`new:` (BT-3074).** Also not `@intrinsic` — `actor.bt` declares real bodies that send `Exception signalKind:class:selector:hint:` (BT-3042), the general-purpose pure-Beamtalk way to raise a named error kind with a hint. `class_send` intercepts `new`/`new:` before class-method dispatch ever reaches these declarations (routing instead to the compiled per-actor-module `new/0`/`new/1` stub the runtime's `{new, Args}` fast path requires), so this is purely the documented, xref-visible source for the selector — never the code path an actual send executes. The type checker correctly proves these bodies diverge via the class-side keyword send to `Exception signalKind:class:selector:hint:` (BT-3075 unified the type-string resolver).
 

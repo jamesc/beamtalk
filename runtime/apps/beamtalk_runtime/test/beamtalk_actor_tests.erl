@@ -1985,7 +1985,7 @@ safe_spawn_named_still_links_caller_test() ->
     %% beamtalk_class_instantiation_tests:test_class_self_spawn_as_success/0.
     Name = bt_3243_named_actor_test,
     unregister_if_alive(Name),
-    {ok, Pid} = beamtalk_actor:'spawnAs'(Name, test_counter, #{init_count => 0}),
+    {ok, Pid} = beamtalk_actor_registry:'spawnAs'(Name, test_counter, #{init_count => 0}),
     {links, CallerLinks} = process_info(self(), links),
     ?assert(lists:member(Pid, CallerLinks)),
     gen_server:stop(Pid).
@@ -2110,7 +2110,7 @@ safe_spawn_named_does_not_wait_for_initialize_continuation_test_() ->
         Name = bt_3992_named_ack_actor,
         unregister_if_alive(Name),
         T0 = erlang:monotonic_time(millisecond),
-        {ok, Pid} = beamtalk_actor:'spawnAs'(
+        {ok, Pid} = beamtalk_actor_registry:'spawnAs'(
             Name, test_init_ack_actor, #{mode => slow_continue, delay => 6000}
         ),
         ?assert(erlang:monotonic_time(millisecond) - T0 < 2000),
@@ -2135,7 +2135,7 @@ spawn_named_for_caller_unlinks_before_continuations_can_kill_caller_test_() ->
                     Name = list_to_atom("bt_3992_unlink_" ++ integer_to_list(I)),
                     {Caller, MRef} = spawn_monitor(fun() ->
                         false = process_flag(trap_exit, false),
-                        R = beamtalk_actor:spawn_named_for_caller(
+                        R = beamtalk_actor_registry:spawn_named_for_caller(
                             local, Name, test_init_ack_actor, #{mode => stop_continue}
                         ),
                         {ok, Pid} = R,
@@ -3223,7 +3223,7 @@ cleanup_name(Name) ->
 
 is_beamtalk_actor_true_for_actor_test() ->
     {ok, Counter} = test_counter:start_link(0),
-    ?assert(beamtalk_actor:is_beamtalk_actor(Counter)),
+    ?assert(beamtalk_actor_registry:is_beamtalk_actor(Counter)),
     gen_server:stop(Counter).
 
 is_beamtalk_actor_false_for_raw_process_test() ->
@@ -3239,7 +3239,7 @@ is_beamtalk_actor_false_for_raw_process_test() ->
         ready -> ok
     end,
     try
-        ?assertNot(beamtalk_actor:is_beamtalk_actor(Pid))
+        ?assertNot(beamtalk_actor_registry:is_beamtalk_actor(Pid))
     after
         %% Ensure the spawned process is reaped even if the assertion fails.
         exit(Pid, kill)
@@ -3248,7 +3248,7 @@ is_beamtalk_actor_false_for_raw_process_test() ->
 is_beamtalk_actor_false_for_kernel_process_test() ->
     %% `init` is always running and is not a beamtalk actor.
     InitPid = erlang:whereis(init),
-    ?assertNot(beamtalk_actor:is_beamtalk_actor(InitPid)).
+    ?assertNot(beamtalk_actor_registry:is_beamtalk_actor(InitPid)).
 
 is_beamtalk_actor_false_for_dead_process_test() ->
     Pid = spawn(fun() -> ok end),
@@ -3259,11 +3259,11 @@ is_beamtalk_actor_false_for_dead_process_test() ->
     after 1000 ->
         ?assert(false)
     end,
-    ?assertNot(beamtalk_actor:is_beamtalk_actor(Pid)).
+    ?assertNot(beamtalk_actor_registry:is_beamtalk_actor(Pid)).
 
 is_beamtalk_actor_false_for_non_pid_test() ->
     %% Guarded against non-pid input: must not crash.
-    ?assertNot(beamtalk_actor:is_beamtalk_actor(not_a_pid)).
+    ?assertNot(beamtalk_actor_registry:is_beamtalk_actor(not_a_pid)).
 
 %%% register_name / unregister_name / whereis_name
 
@@ -3272,10 +3272,10 @@ register_name_success_test() ->
     cleanup_name(Name),
     {ok, Counter} = test_counter:start_link(0),
     try
-        ?assertEqual({ok, Name}, beamtalk_actor:register_name(Name, Counter)),
-        ?assertEqual({ok, Counter}, beamtalk_actor:whereis_name(Name))
+        ?assertEqual({ok, Name}, beamtalk_actor_registry:register_name(Name, Counter)),
+        ?assertEqual({ok, Counter}, beamtalk_actor_registry:whereis_name(Name))
     after
-        beamtalk_actor:unregister_name(Name),
+        beamtalk_actor_registry:unregister_name(Name),
         gen_server:stop(Counter)
     end.
 
@@ -3285,11 +3285,11 @@ register_name_duplicate_test() ->
     {ok, A} = test_counter:start_link(0),
     {ok, B} = test_counter:start_link(0),
     try
-        ?assertEqual({ok, Name}, beamtalk_actor:register_name(Name, A)),
-        Result = beamtalk_actor:register_name(Name, B),
+        ?assertEqual({ok, Name}, beamtalk_actor_registry:register_name(Name, A)),
+        Result = beamtalk_actor_registry:register_name(Name, B),
         ?assertMatch({error, #beamtalk_error{kind = name_registered}}, Result)
     after
-        beamtalk_actor:unregister_name(Name),
+        beamtalk_actor_registry:unregister_name(Name),
         gen_server:stop(A),
         gen_server:stop(B)
     end.
@@ -3298,10 +3298,10 @@ register_name_reserved_test() ->
     {ok, Counter} = test_counter:start_link(0),
     try
         %% Reserved kernel name
-        R1 = beamtalk_actor:register_name(logger, Counter),
+        R1 = beamtalk_actor_registry:register_name(logger, Counter),
         ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R1),
         %% Reserved beamtalk_ prefix
-        R2 = beamtalk_actor:register_name(beamtalk_something_internal, Counter),
+        R2 = beamtalk_actor_registry:register_name(beamtalk_something_internal, Counter),
         ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R2)
     after
         gen_server:stop(Counter)
@@ -3310,14 +3310,14 @@ register_name_reserved_test() ->
 register_name_non_atom_test() ->
     {ok, Counter} = test_counter:start_link(0),
     try
-        Result = beamtalk_actor:register_name(<<"not_atom">>, Counter),
+        Result = beamtalk_actor_registry:register_name(<<"not_atom">>, Counter),
         ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result)
     after
         gen_server:stop(Counter)
     end.
 
 register_name_non_pid_test() ->
-    Result = beamtalk_actor:register_name(some_name, not_a_pid),
+    Result = beamtalk_actor_registry:register_name(some_name, not_a_pid),
     ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).
 
 unregister_name_success_test() ->
@@ -3325,30 +3325,30 @@ unregister_name_success_test() ->
     cleanup_name(Name),
     {ok, Counter} = test_counter:start_link(0),
     try
-        {ok, Name} = beamtalk_actor:register_name(Name, Counter),
-        ?assertEqual(ok, beamtalk_actor:unregister_name(Name)),
-        ?assertEqual(undefined, beamtalk_actor:whereis_name(Name))
+        {ok, Name} = beamtalk_actor_registry:register_name(Name, Counter),
+        ?assertEqual(ok, beamtalk_actor_registry:unregister_name(Name)),
+        ?assertEqual(undefined, beamtalk_actor_registry:whereis_name(Name))
     after
         gen_server:stop(Counter)
     end.
 
 unregister_name_not_registered_test() ->
-    Result = beamtalk_actor:unregister_name('bt1987_never_registered_name'),
+    Result = beamtalk_actor_registry:unregister_name('bt1987_never_registered_name'),
     ?assertMatch({error, #beamtalk_error{kind = name_registered}}, Result).
 
 unregister_name_non_atom_test() ->
-    Result = beamtalk_actor:unregister_name(<<"bin">>),
+    Result = beamtalk_actor_registry:unregister_name(<<"bin">>),
     ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).
 
 unregister_name_reserved_test() ->
     %% unregister_name/1 must reject reserved names before touching the
     %% registry — otherwise `unregister_name(logger)` would silently
     %% deregister the OTP logger process.
-    R1 = beamtalk_actor:unregister_name(logger),
+    R1 = beamtalk_actor_registry:unregister_name(logger),
     ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R1),
-    R2 = beamtalk_actor:unregister_name(kernel_sup),
+    R2 = beamtalk_actor_registry:unregister_name(kernel_sup),
     ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R2),
-    R3 = beamtalk_actor:unregister_name(beamtalk_something),
+    R3 = beamtalk_actor_registry:unregister_name(beamtalk_something),
     ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R3),
     %% OTP logger must still be registered after the attempt.
     ?assertNotEqual(undefined, erlang:whereis(logger)).
@@ -3366,16 +3366,16 @@ register_name_dead_pid_test() ->
     after 1000 ->
         ?assert(false)
     end,
-    Result = beamtalk_actor:register_name(Name, DeadPid),
+    Result = beamtalk_actor_registry:register_name(Name, DeadPid),
     ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result),
     %% And no ghost registration was left behind.
     ?assertEqual(undefined, erlang:whereis(Name)).
 
 whereis_name_undefined_test() ->
-    ?assertEqual(undefined, beamtalk_actor:whereis_name('bt1987_nonexistent_name')).
+    ?assertEqual(undefined, beamtalk_actor_registry:whereis_name('bt1987_nonexistent_name')).
 
 whereis_name_non_atom_test() ->
-    Result = beamtalk_actor:whereis_name(<<"bin">>),
+    Result = beamtalk_actor_registry:whereis_name(<<"bin">>),
     ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).
 
 %%% all_registered/0
@@ -3383,7 +3383,7 @@ whereis_name_non_atom_test() ->
 all_registered_filters_kernel_processes_test() ->
     %% Kernel processes (e.g. `init`, `logger`) are registered but are not
     %% beamtalk actors — they must be excluded.
-    All = beamtalk_actor:all_registered(),
+    All = beamtalk_actor_registry:all_registered(),
     ?assertNot(lists:member(init, All)),
     ?assertNot(lists:member(logger, All)),
     ?assertNot(lists:member(kernel_sup, All)).
@@ -3393,11 +3393,11 @@ all_registered_includes_beamtalk_actor_test() ->
     cleanup_name(Name),
     {ok, Counter} = test_counter:start_link(0),
     try
-        {ok, Name} = beamtalk_actor:register_name(Name, Counter),
-        All = beamtalk_actor:all_registered(),
+        {ok, Name} = beamtalk_actor_registry:register_name(Name, Counter),
+        All = beamtalk_actor_registry:all_registered(),
         ?assert(lists:member(Name, All))
     after
-        beamtalk_actor:unregister_name(Name),
+        beamtalk_actor_registry:unregister_name(Name),
         gen_server:stop(Counter)
     end.
 
@@ -3407,9 +3407,9 @@ spawnAs_success_test() ->
     Name = 'bt1987_test_spawnas_success',
     cleanup_name(Name),
     try
-        {ok, Pid} = beamtalk_actor:'spawnAs'(Name, test_counter, 0),
-        ?assertEqual({ok, Pid}, beamtalk_actor:whereis_name(Name)),
-        ?assert(beamtalk_actor:is_beamtalk_actor(Pid)),
+        {ok, Pid} = beamtalk_actor_registry:'spawnAs'(Name, test_counter, 0),
+        ?assertEqual({ok, Pid}, beamtalk_actor_registry:whereis_name(Name)),
+        ?assert(beamtalk_actor_registry:is_beamtalk_actor(Pid)),
         gen_server:stop(Pid)
     after
         cleanup_name(Name)
@@ -3420,21 +3420,21 @@ spawnAs_arity_2_uses_empty_map_test() ->
     %% map) — matching `doSpawnAs/2` and the shape the compiler-generated
     %% `init/1` expects. We verify via reserved-name rejection which runs
     %% before start_link, so this test doesn't depend on the init path.
-    Result = beamtalk_actor:'spawnAs'(logger, test_counter),
+    Result = beamtalk_actor_registry:'spawnAs'(logger, test_counter),
     ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, Result).
 
 spawnAs_reserved_test() ->
-    R1 = beamtalk_actor:'spawnAs'(logger, test_counter, 0),
+    R1 = beamtalk_actor_registry:'spawnAs'(logger, test_counter, 0),
     ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R1),
-    R2 = beamtalk_actor:'spawnAs'(beamtalk_foo, test_counter, 0),
+    R2 = beamtalk_actor_registry:'spawnAs'(beamtalk_foo, test_counter, 0),
     ?assertMatch({error, #beamtalk_error{kind = reserved_name}}, R2).
 
 spawnAs_duplicate_test() ->
     Name = 'bt1987_test_spawnas_duplicate',
     cleanup_name(Name),
     try
-        {ok, Pid1} = beamtalk_actor:'spawnAs'(Name, test_counter, 0),
-        Result = beamtalk_actor:'spawnAs'(Name, test_counter, 0),
+        {ok, Pid1} = beamtalk_actor_registry:'spawnAs'(Name, test_counter, 0),
+        Result = beamtalk_actor_registry:'spawnAs'(Name, test_counter, 0),
         ?assertMatch({error, #beamtalk_error{kind = name_registered}}, Result),
         gen_server:stop(Pid1)
     after
@@ -3442,59 +3442,59 @@ spawnAs_duplicate_test() ->
     end.
 
 spawnAs_non_atom_test() ->
-    R1 = beamtalk_actor:'spawnAs'(<<"not_atom">>, test_counter, 0),
+    R1 = beamtalk_actor_registry:'spawnAs'(<<"not_atom">>, test_counter, 0),
     ?assertMatch({error, #beamtalk_error{kind = type_error}}, R1),
-    R2 = beamtalk_actor:'spawnAs'(my_name, "not_module", 0),
+    R2 = beamtalk_actor_registry:'spawnAs'(my_name, "not_module", 0),
     ?assertMatch({error, #beamtalk_error{kind = type_error}}, R2).
 
 %%% Reserved-name policy
 
 reserved_name_kernel_test() ->
-    ?assert(beamtalk_actor:reserved_name(logger)),
-    ?assert(beamtalk_actor:reserved_name(kernel_sup)),
-    ?assert(beamtalk_actor:reserved_name(application_controller)),
-    ?assert(beamtalk_actor:reserved_name(code_server)),
-    ?assert(beamtalk_actor:reserved_name(init)),
-    ?assert(beamtalk_actor:reserved_name(error_logger)),
-    ?assert(beamtalk_actor:reserved_name(erl_prim_loader)),
-    ?assert(beamtalk_actor:reserved_name(erl_signal_server)),
-    ?assert(beamtalk_actor:reserved_name(erts_code_purger)),
-    ?assert(beamtalk_actor:reserved_name(file_server_2)),
-    ?assert(beamtalk_actor:reserved_name(global_name_server)),
-    ?assert(beamtalk_actor:reserved_name(inet_db)),
-    ?assert(beamtalk_actor:reserved_name(kernel_refc)),
-    ?assert(beamtalk_actor:reserved_name(kernel_safe_sup)),
-    ?assert(beamtalk_actor:reserved_name(logger_handler_watcher)),
-    ?assert(beamtalk_actor:reserved_name(logger_proxy)),
-    ?assert(beamtalk_actor:reserved_name(logger_std_h_default)),
-    ?assert(beamtalk_actor:reserved_name(logger_sup)),
-    ?assert(beamtalk_actor:reserved_name(net_kernel)),
-    ?assert(beamtalk_actor:reserved_name(net_sup)),
-    ?assert(beamtalk_actor:reserved_name(rex)),
-    ?assert(beamtalk_actor:reserved_name(socket_registry)),
-    ?assert(beamtalk_actor:reserved_name(standard_error)),
-    ?assert(beamtalk_actor:reserved_name(standard_error_sup)),
-    ?assert(beamtalk_actor:reserved_name(standard_error_writer)),
-    ?assert(beamtalk_actor:reserved_name(user)),
-    ?assert(beamtalk_actor:reserved_name(user_drv)),
-    ?assert(beamtalk_actor:reserved_name(user_drv_reader)),
-    ?assert(beamtalk_actor:reserved_name(user_drv_writer)).
+    ?assert(beamtalk_actor_registry:reserved_name(logger)),
+    ?assert(beamtalk_actor_registry:reserved_name(kernel_sup)),
+    ?assert(beamtalk_actor_registry:reserved_name(application_controller)),
+    ?assert(beamtalk_actor_registry:reserved_name(code_server)),
+    ?assert(beamtalk_actor_registry:reserved_name(init)),
+    ?assert(beamtalk_actor_registry:reserved_name(error_logger)),
+    ?assert(beamtalk_actor_registry:reserved_name(erl_prim_loader)),
+    ?assert(beamtalk_actor_registry:reserved_name(erl_signal_server)),
+    ?assert(beamtalk_actor_registry:reserved_name(erts_code_purger)),
+    ?assert(beamtalk_actor_registry:reserved_name(file_server_2)),
+    ?assert(beamtalk_actor_registry:reserved_name(global_name_server)),
+    ?assert(beamtalk_actor_registry:reserved_name(inet_db)),
+    ?assert(beamtalk_actor_registry:reserved_name(kernel_refc)),
+    ?assert(beamtalk_actor_registry:reserved_name(kernel_safe_sup)),
+    ?assert(beamtalk_actor_registry:reserved_name(logger_handler_watcher)),
+    ?assert(beamtalk_actor_registry:reserved_name(logger_proxy)),
+    ?assert(beamtalk_actor_registry:reserved_name(logger_std_h_default)),
+    ?assert(beamtalk_actor_registry:reserved_name(logger_sup)),
+    ?assert(beamtalk_actor_registry:reserved_name(net_kernel)),
+    ?assert(beamtalk_actor_registry:reserved_name(net_sup)),
+    ?assert(beamtalk_actor_registry:reserved_name(rex)),
+    ?assert(beamtalk_actor_registry:reserved_name(socket_registry)),
+    ?assert(beamtalk_actor_registry:reserved_name(standard_error)),
+    ?assert(beamtalk_actor_registry:reserved_name(standard_error_sup)),
+    ?assert(beamtalk_actor_registry:reserved_name(standard_error_writer)),
+    ?assert(beamtalk_actor_registry:reserved_name(user)),
+    ?assert(beamtalk_actor_registry:reserved_name(user_drv)),
+    ?assert(beamtalk_actor_registry:reserved_name(user_drv_reader)),
+    ?assert(beamtalk_actor_registry:reserved_name(user_drv_writer)).
 
 reserved_name_beamtalk_prefix_test() ->
-    ?assert(beamtalk_actor:reserved_name(beamtalk_runtime_sup)),
-    ?assert(beamtalk_actor:reserved_name(beamtalk_anything)),
-    ?assert(beamtalk_actor:reserved_name(beamtalk_)).
+    ?assert(beamtalk_actor_registry:reserved_name(beamtalk_runtime_sup)),
+    ?assert(beamtalk_actor_registry:reserved_name(beamtalk_anything)),
+    ?assert(beamtalk_actor_registry:reserved_name(beamtalk_)).
 
 reserved_name_allows_user_names_test() ->
-    ?assertNot(beamtalk_actor:reserved_name(counter)),
-    ?assertNot(beamtalk_actor:reserved_name(my_app_service)),
-    ?assertNot(beamtalk_actor:reserved_name('MyActor')),
+    ?assertNot(beamtalk_actor_registry:reserved_name(counter)),
+    ?assertNot(beamtalk_actor_registry:reserved_name(my_app_service)),
+    ?assertNot(beamtalk_actor_registry:reserved_name('MyActor')),
     %% A name that merely contains "beamtalk" but isn't prefixed:
-    ?assertNot(beamtalk_actor:reserved_name(my_beamtalk_app)).
+    ?assertNot(beamtalk_actor_registry:reserved_name(my_beamtalk_app)).
 
 reserved_name_non_atom_test() ->
-    ?assertNot(beamtalk_actor:reserved_name(<<"logger">>)),
-    ?assertNot(beamtalk_actor:reserved_name("logger")).
+    ?assertNot(beamtalk_actor_registry:reserved_name(<<"logger">>)),
+    ?assertNot(beamtalk_actor_registry:reserved_name("logger")).
 
 %%% Process-dict marker
 
@@ -3545,7 +3545,7 @@ ffi_do_spawn_with_selector_does_not_link_class_process_test() ->
             },
             Name = bt_4017_do_spawn_as_test,
             cleanup_name(Name),
-            {ok, #beamtalk_object{pid = Pid}} = beamtalk_actor:doSpawnAs(Self, Name),
+            {ok, #beamtalk_object{pid = Pid}} = beamtalk_actor_ffi:doSpawnAs(Self, Name),
             try
                 {links, CallerLinks} = process_info(self(), links),
                 {links, ClassLinks} = process_info(ClassPid, links),
@@ -3579,7 +3579,7 @@ ffi_do_spawn_with_selector_stays_linked_in_supervisor_context_test() ->
             cleanup_name(Name),
             put(?BT_SUPERVISOR_SPAWN_CONTEXT_KEY, true),
             try
-                {ok, #beamtalk_object{pid = Pid}} = beamtalk_actor:doSpawnAs(Self, Name),
+                {ok, #beamtalk_object{pid = Pid}} = beamtalk_actor_ffi:doSpawnAs(Self, Name),
                 {links, CallerLinks} = process_info(self(), links),
                 ?assert(lists:member(Pid, CallerLinks)),
                 unlink(Pid),
@@ -3591,14 +3591,14 @@ ffi_do_spawn_with_selector_stays_linked_in_supervisor_context_test() ->
 
 ffi_register_as_non_object_returns_type_error_test() ->
     %% Covers the guard clause that rejects non-`beamtalk_object` receivers.
-    Result = beamtalk_actor:registerAs(not_an_actor, some_name),
+    Result = beamtalk_actor_ffi:registerAs(not_an_actor, some_name),
     ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).
 
 ffi_unregister_non_object_raises_type_error_test() ->
     %% `unregister/1` mirrors ADR 0079's "raise on real failure" contract.
     ?assertError(
         #{error := #beamtalk_error{kind = type_error}},
-        beamtalk_actor:unregister(not_an_actor)
+        beamtalk_actor_ffi:unregister(not_an_actor)
     ).
 
 ffi_unregister_does_not_touch_replacement_test() ->
@@ -3613,7 +3613,7 @@ ffi_unregister_does_not_touch_replacement_test() ->
     {ok, Original} = test_counter:start_link(0),
     try
         %% Step 1: original actor claims the name, just as spawnAs: would.
-        {ok, Name} = beamtalk_actor:register_name(Name, Original),
+        {ok, Name} = beamtalk_actor_registry:register_name(Name, Original),
         OriginalObj = #beamtalk_object{
             class = 'Counter',
             class_mod = test_counter,
@@ -3622,7 +3622,7 @@ ffi_unregister_does_not_touch_replacement_test() ->
 
         %% Step 2: simulate the race — external unregister then a replacement
         %% pid claims the freed name.
-        ok = beamtalk_actor:unregister_name(Name),
+        ok = beamtalk_actor_registry:unregister_name(Name),
         Replacement = spawn(fun() ->
             receive
                 stop -> ok
@@ -3633,7 +3633,7 @@ ffi_unregister_does_not_touch_replacement_test() ->
         try
             %% Step 3: original caller requests unregister — must be a no-op
             %% because the registry no longer points at its pid.
-            ?assertEqual(ok, beamtalk_actor:unregister(OriginalObj)),
+            ?assertEqual(ok, beamtalk_actor_ffi:unregister(OriginalObj)),
 
             %% Step 4: replacement must still be registered under `Name`.
             ?assertEqual(Replacement, erlang:whereis(Name))
@@ -3651,21 +3651,21 @@ ffi_unregister_does_not_touch_replacement_test() ->
 
 ffi_registered_name_on_non_object_returns_nil_test() ->
     %% Tolerant accessor — callers get `nil` rather than an exception.
-    ?assertEqual(nil, beamtalk_actor:registeredName(not_an_actor)).
+    ?assertEqual(nil, beamtalk_actor_ffi:registeredName(not_an_actor)).
 
 ffi_is_registered_on_non_object_returns_false_test() ->
-    ?assertEqual(false, beamtalk_actor:isRegistered(not_an_actor)).
+    ?assertEqual(false, beamtalk_actor_ffi:isRegistered(not_an_actor)).
 
 ffi_named_non_atom_returns_type_error_test() ->
     %% Non-atom name is rejected before any class lookup happens.
     FakeSelf = dummy_class_self(),
-    Result = beamtalk_actor:named(FakeSelf, <<"not_atom">>),
+    Result = beamtalk_actor_ffi:named(FakeSelf, <<"not_atom">>),
     ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).
 
 ffi_named_bad_self_returns_type_error_test() ->
     %% Valid atom name but bogus receiver — the class-object probe surfaces
     %% a structured `type_error` rather than crashing.
-    Result = beamtalk_actor:named(not_a_class, my_name),
+    Result = beamtalk_actor_ffi:named(not_a_class, my_name),
     ?assertMatch({error, #beamtalk_error{kind = type_error}}, Result).
 
 ffi_named_not_registered_on_valid_class_test() ->
@@ -3684,7 +3684,7 @@ ffi_named_not_registered_on_valid_class_test() ->
                 class_mod = counter,
                 pid = ClassPid
             },
-            Result = beamtalk_actor:named(Self, 'bt1988_ffi_not_registered'),
+            Result = beamtalk_actor_ffi:named(Self, 'bt1988_ffi_not_registered'),
             ?assertMatch(
                 {error, #beamtalk_error{kind = name_not_registered}}, Result
             )
@@ -3703,7 +3703,7 @@ ffi_all_registered_filters_non_beamtalk_processes_test() ->
     cleanup_name(RawName),
     true = erlang:register(RawName, Raw),
     try
-        Actors = beamtalk_actor:allRegistered(dummy_class_self()),
+        Actors = beamtalk_actor_ffi:allRegistered(dummy_class_self()),
         RegisteredNames = [O#beamtalk_object.class || O <- Actors],
         ReturnedPids = [O#beamtalk_object.pid || O <- Actors],
         %% Every returned class must be an atom (sanity check).
@@ -3742,16 +3742,16 @@ dummy_class_self() ->
 ffi_do_spawn_success_test() ->
     ClassPid = ensure_counter_class_pid(),
     Self = #beamtalk_object{class = 'Counter class', class_mod = counter, pid = ClassPid},
-    Obj = beamtalk_actor:doSpawn(Self),
+    Obj = beamtalk_actor_ffi:doSpawn(Self),
     ?assertMatch(#beamtalk_object{class = 'Counter'}, Obj),
-    ?assert(beamtalk_actor:is_beamtalk_actor(Obj#beamtalk_object.pid)),
+    ?assert(beamtalk_actor_registry:is_beamtalk_actor(Obj#beamtalk_object.pid)),
     ?assertEqual({ok, 0}, gen_server:call(Obj#beamtalk_object.pid, {getValue, []})),
     gen_server:stop(Obj#beamtalk_object.pid).
 
 ffi_do_spawn_with_applies_init_args_test() ->
     ClassPid = ensure_counter_class_pid(),
     Self = #beamtalk_object{class = 'Counter class', class_mod = counter, pid = ClassPid},
-    Obj = beamtalk_actor:doSpawnWith(Self, #{value => 9}),
+    Obj = beamtalk_actor_ffi:doSpawnWith(Self, #{value => 9}),
     ?assertMatch(#beamtalk_object{class = 'Counter'}, Obj),
     ?assertEqual({ok, 9}, gen_server:call(Obj#beamtalk_object.pid, {getValue, []})),
     gen_server:stop(Obj#beamtalk_object.pid).
@@ -3763,13 +3763,13 @@ ffi_do_spawn_non_object_receiver_raises_test() ->
     %% `Result(Self, Error)`, matching the per-class `spawn/0` export.
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_actor:doSpawn(not_an_actor)
+        beamtalk_actor_ffi:doSpawn(not_an_actor)
     ).
 
 ffi_do_spawn_with_non_object_receiver_raises_test() ->
     ?assertError(
         #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-        beamtalk_actor:doSpawnWith(not_an_actor, #{})
+        beamtalk_actor_ffi:doSpawnWith(not_an_actor, #{})
     ).
 
 %% Ensure the Counter class is loaded and registered, returning its live
@@ -4224,7 +4224,7 @@ cast_send_to_non_actor_pid_ok_test() ->
 %% Cleans up the name first so the test is hermetic across reruns.
 bt1990_setup_named_counter(Name, Initial) ->
     cleanup_name(Name),
-    {ok, Pid} = beamtalk_actor:'spawnAs'(Name, test_counter, Initial),
+    {ok, Pid} = beamtalk_actor_registry:'spawnAs'(Name, test_counter, Initial),
     Proxy = #beamtalk_object{
         class = 'Counter',
         class_mod = test_counter,
@@ -4312,7 +4312,7 @@ bt1990_proxy_isRegistered_is_always_true_test() ->
     Name = bt1990_proxy_is_registered,
     {Pid, Proxy} = bt1990_setup_named_counter(Name, 0),
     try
-        ?assertEqual(true, beamtalk_actor:isRegistered(Proxy)),
+        ?assertEqual(true, beamtalk_actor_ffi:isRegistered(Proxy)),
         ?assertEqual(true, beamtalk_message_dispatch:send(Proxy, isRegistered, []))
     after
         gen_server:stop(Pid),
@@ -4323,7 +4323,7 @@ bt1990_proxy_registeredName_returns_the_name_test() ->
     Name = bt1990_proxy_named,
     {Pid, Proxy} = bt1990_setup_named_counter(Name, 0),
     try
-        ?assertEqual(Name, beamtalk_actor:registeredName(Proxy)),
+        ?assertEqual(Name, beamtalk_actor_ffi:registeredName(Proxy)),
         ?assertEqual(Name, beamtalk_message_dispatch:send(Proxy, registeredName, []))
     after
         gen_server:stop(Pid),
@@ -4397,14 +4397,14 @@ bt1990_named_returns_registered_proxy_not_pid_test() ->
         undefined ->
             ?assertEqual(undefined, erlang:whereis(beamtalk_class_Counter));
         ClassPid when is_pid(ClassPid) ->
-            {ok, Pid} = beamtalk_actor:'spawnAs'(Name, test_counter, 0),
+            {ok, Pid} = beamtalk_actor_registry:'spawnAs'(Name, test_counter, 0),
             try
                 Self = #beamtalk_object{
                     class = 'Counter class',
                     class_mod = counter,
                     pid = ClassPid
                 },
-                {ok, Proxy} = beamtalk_actor:named(Self, Name),
+                {ok, Proxy} = beamtalk_actor_ffi:named(Self, Name),
                 ?assertMatch(
                     #beamtalk_object{pid = {registered, Name}}, Proxy
                 ),
@@ -4443,7 +4443,7 @@ bt1990_named_lookup_wrong_class_returns_error_test() ->
                     class_mod = counter,
                     pid = ClassPid
                 },
-                Result = beamtalk_actor:named(Self, Name),
+                Result = beamtalk_actor_ffi:named(Self, Name),
                 ?assertMatch(
                     {error, #beamtalk_error{kind = wrong_class}}, Result
                 )
@@ -4461,7 +4461,7 @@ bt1990_proxy_unregister_releases_name_test() ->
     {Pid, Proxy} = bt1990_setup_named_counter(Name, 0),
     try
         ?assertEqual(Pid, erlang:whereis(Name)),
-        ok = beamtalk_actor:unregister(Proxy),
+        ok = beamtalk_actor_ffi:unregister(Proxy),
         ?assertEqual(undefined, erlang:whereis(Name))
     after
         gen_server:stop(Pid),
@@ -4476,7 +4476,7 @@ bt1990_proxy_unregister_dead_proxy_is_idempotent_test() ->
     gen_server:stop(Pid),
     bt1990_wait_until_unregistered(Name, 1000),
     try
-        ?assertEqual(ok, beamtalk_actor:unregister(Proxy))
+        ?assertEqual(ok, beamtalk_actor_ffi:unregister(Proxy))
     after
         cleanup_name(Name)
     end.
@@ -4601,8 +4601,8 @@ bt2717_watch_teardown(_) ->
 %% pid_class_name/1 and registered_name_for_pid/1 — consolidated
 %% sentinel policy.
 %%
-%% Previously, `beamtalk_actor:pid_class_name/1` and
-%% `beamtalk_actor:registered_name_for_pid/1` returned Erlang's `undefined`
+%% Previously, `beamtalk_actor_registry:pid_class_name/1` and
+%% `beamtalk_actor_registry:registered_name_for_pid/1` returned Erlang's `undefined`
 %% on a miss, while the (now-deleted) copies in `beamtalk_inspector` and
 %% `beamtalk_process_navigation` returned Beamtalk's `nil`. This pins the
 %% decided policy: `nil` everywhere, because these values flow into
@@ -4619,7 +4619,7 @@ pid_class_name_returns_nil_on_non_beamtalk_pid_test() ->
         end
     end),
     try
-        ?assertEqual(nil, beamtalk_actor:pid_class_name(Pid))
+        ?assertEqual(nil, beamtalk_actor_registry:pid_class_name(Pid))
     after
         Pid ! stop
     end.
@@ -4660,25 +4660,25 @@ pid_class_name_native_backing_module_test() ->
         %% A stale row (class process gone) is ignored.
         ets:insert(beamtalk_backing_module_index, {Backing, Stale, self()}),
         ets:insert(beamtalk_backing_module_index, {Backing, Live, LivePid}),
-        ?assertEqual(Live, beamtalk_actor:pid_class_name(Pid)),
-        ?assertEqual(nil, beamtalk_actor:pid_class_name(Helper)),
+        ?assertEqual(Live, beamtalk_actor_registry:pid_class_name(Pid)),
+        ?assertEqual(nil, beamtalk_actor_registry:pid_class_name(Helper)),
         %% Two live classes sharing the module are ambiguous.
         ets:insert(beamtalk_backing_module_index, {Backing, Other, OtherPid}),
-        ?assertEqual(nil, beamtalk_actor:pid_class_name(Pid)),
+        ?assertEqual(nil, beamtalk_actor_registry:pid_class_name(Pid)),
         %% BT-4664: the candidates stay visible, and `named:` resolves
         %% through them instead of reporting a non-Beamtalk process.
-        ?assertEqual(lists:sort([Live, Other]), beamtalk_actor:pid_class_candidates(Pid)),
-        ?assertEqual([], beamtalk_actor:pid_class_candidates(Helper)),
+        ?assertEqual(lists:sort([Live, Other]), beamtalk_actor_registry:pid_class_candidates(Pid)),
+        ?assertEqual([], beamtalk_actor_registry:pid_class_candidates(Helper)),
         Name = bt4664_shared_native,
         register(Name, Pid),
         try
             %% Receiver is one of the sharing classes: it is resolved (the
             %% fake class has no loaded module, so it stops at that check).
-            {error, MatchErr} = beamtalk_actor:named_lookup(local, Other, Name, 'named:'),
+            {error, MatchErr} = beamtalk_actor_ffi:named_lookup(local, Other, Name, 'named:'),
             ?assertMatch(#beamtalk_error{kind = wrong_class}, MatchErr),
             ?assertNotEqual(nomatch, binary:match(bt4664_hint(MatchErr), <<"no loaded module">>)),
             %% Receiver is not among them: the error names the candidates.
-            {error, SharedErr} = beamtalk_actor:named_lookup(
+            {error, SharedErr} = beamtalk_actor_ffi:named_lookup(
                 local, 'Bt4664Unrelated', Name, 'named:'
             ),
             Hint = bt4664_hint(SharedErr),
@@ -4724,7 +4724,7 @@ registered_name_for_pid_returns_nil_when_unregistered_test() ->
         end
     end),
     try
-        ?assertEqual(nil, beamtalk_actor:registered_name_for_pid(Pid))
+        ?assertEqual(nil, beamtalk_actor_registry:registered_name_for_pid(Pid))
     after
         Pid ! stop
     end.
@@ -4738,7 +4738,7 @@ registered_name_for_pid_returns_name_when_registered_test() ->
     Name = bt3090_test_registered_name,
     true = erlang:register(Name, Pid),
     try
-        ?assertEqual(Name, beamtalk_actor:registered_name_for_pid(Pid))
+        ?assertEqual(Name, beamtalk_actor_registry:registered_name_for_pid(Pid))
     after
         try
             erlang:unregister(Name)
@@ -5458,3 +5458,86 @@ bt4090_mailbox_check_rejects_defer_reply_test() ->
         )
     ),
     ?assertEqual(ok, beamtalk_actor:mailbox_continuation_check(wait, [])).
+
+%%% ============================================================================
+%%% BT-4701: wire-compat delegates
+%%%
+%%% Named registration, remote spawn/lookup and the stdlib FFI shims moved to
+%%% `beamtalk_actor_registry` / `_remote` / `_ffi`. A peer node that predates
+%%% the split (rolling upgrade, ADR 0125) still addresses its `erpc` targets,
+%%% and `global` its conflict resolver, through `beamtalk_actor`, so those
+%%% entry points must stay exported here and forward.
+%%% ============================================================================
+
+actor_wire_delegates_exported_test() ->
+    {module, beamtalk_actor} = code:ensure_loaded(beamtalk_actor),
+    Delegates = [
+        {'spawnAs', 2},
+        {'spawnAs', 3},
+        {'spawnAsGlobal', 2},
+        {'spawnAsGlobal', 3},
+        {resolve_global_conflict, 3},
+        {started_at_from_dictionary, 1},
+        {pid_class_candidates, 1},
+        {pid_class_name, 1},
+        {remote_spawn_target, 2},
+        {remote_spawn_with_target, 3},
+        {remote_named_target, 2},
+        {'allRegistered', 1},
+        {unregister, 1}
+    ],
+    [
+        ?assert(erlang:function_exported(beamtalk_actor, F, A))
+     || {F, A} <- Delegates
+    ].
+
+actor_wire_delegates_forward_test() ->
+    %% A fresh plain process (the eunit process may carry a leaked actor
+    %% marker): the probes a peer runs via `erpc` on `beamtalk_actor` answer
+    %% the same as the registry they forward to.
+    Pid = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    try
+        ?assertEqual([], beamtalk_actor:pid_class_candidates(Pid)),
+        ?assertEqual(nil, beamtalk_actor:pid_class_name(Pid)),
+        ?assertEqual(
+            beamtalk_actor_registry:started_at_from_dictionary(Pid),
+            beamtalk_actor:started_at_from_dictionary(Pid)
+        )
+    after
+        Pid ! stop
+    end.
+
+%% Every `erpc:call/5` the moved modules make through the wire module must
+%% land on a function `beamtalk_actor` still exports (a missing delegate is an
+%% `undef` on the peer at runtime, not a compile error).
+actor_wire_erpc_targets_are_exported_test() ->
+    {module, beamtalk_actor} = code:ensure_loaded(beamtalk_actor),
+    SrcDir = filename:join([filename:dirname(?FILE), "..", "src"]),
+    Files = [
+        "beamtalk_actor_registry.erl",
+        "beamtalk_actor_remote.erl",
+        "beamtalk_actor_ffi.erl"
+    ],
+    Targets = lists:usort(
+        lists:append([wire_erpc_targets(filename:join(SrcDir, F)) || F <- Files])
+    ),
+    %% `remote_spawn_erpc_call` passes its target as a variable, so the two
+    %% spawn targets are listed here; the scan covers the literal ones.
+    ?assert(length(Targets) >= 6),
+    Exported = [F || {F, _A} <- beamtalk_actor:module_info(exports)],
+    [
+        ?assert(lists:member(T, Exported))
+     || T <- [remote_spawn_target, remote_spawn_with_target | Targets]
+    ].
+
+wire_erpc_targets(Path) ->
+    {ok, Bin} = file:read_file(Path),
+    Re = "[?]BT_ACTOR_WIRE_MODULE,\\s*'?([A-Za-z_]+)'?\\s*,",
+    case re:run(Bin, Re, [global, {capture, all_but_first, list}]) of
+        {match, Ms} -> [list_to_atom(M) || [[C | _] = M] <- Ms, C >= $a];
+        nomatch -> []
+    end.

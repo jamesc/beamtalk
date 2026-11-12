@@ -943,7 +943,7 @@ is_supervisor_kind(_) -> false.
 -spec classify(pid(), term(), atom() | undefined) ->
     {atom(), beamtalk_object() | nil}.
 classify(Pid, Id, Type) ->
-    case beamtalk_actor:is_beamtalk_actor(Pid) of
+    case beamtalk_actor_registry:is_beamtalk_actor(Pid) of
         true ->
             {beamtalkActor, class_object(actor_class_name(Pid))};
         false ->
@@ -1500,14 +1500,14 @@ class_object(_) ->
 
 %% The Beamtalk class name for an actor pid, read from the `'$beamtalk_actor'`
 %% process-dictionary marker planted by every actor's `init/1`.
-%% Delegates to the canonical `beamtalk_actor:pid_class_name/1`.
+%% Delegates to the canonical `beamtalk_actor_registry:pid_class_name/1`.
 -spec actor_class_name(pid()) -> atom() | nil.
 actor_class_name(Pid) ->
-    beamtalk_actor:pid_class_name(Pid).
+    beamtalk_actor_registry:pid_class_name(Pid).
 
 %% The registered name of a pid, or the Beamtalk `nil` atom when unregistered
 %% or dead.
-%% Delegates to the canonical `beamtalk_actor:registered_name_for_pid/1`.
+%% Delegates to the canonical `beamtalk_actor_registry:registered_name_for_pid/1`.
 -spec registered_name(pid()) -> atom() | nil.
 registered_name(Pid) when is_pid(Pid) ->
-    beamtalk_actor:registered_name_for_pid(Pid).
+    beamtalk_actor_registry:registered_name_for_pid(Pid).

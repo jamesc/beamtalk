@@ -927,7 +927,7 @@ map_return_type_union_test() ->
 map_return_type_other_test() ->
     ?assertEqual(<<"Integer">>, beamtalk_spec_reader:map_return_type({type, 0, integer, []})).
 
-%% beamtalk_actor:unregister/1's actual spec shape — a bare, non-union
+%% beamtalk_actor_ffi:unregister/1's actual spec shape — a bare, non-union
 %% `-> ok.` return — now infers Result(Nil, Exception) end-to-end via
 %% extract_specs_from_forms/1, not just via the map_return_type/1 unit.
 extract_specs_bare_ok_return_test() ->
