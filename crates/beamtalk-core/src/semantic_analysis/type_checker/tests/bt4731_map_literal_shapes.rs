@@ -269,20 +269,13 @@ fn literal_flows_into_dictionary_slots_via_its_view() {
 }
 
 #[test]
-fn derived_value_into_a_shape_slot_is_a_typed_dictionary_until_keyed_ops_are_shape_aware() {
-    // Pinned (BT-4731): `at:put:` answers `Dictionary(K, V)` through the
-    // shape's Dictionary view, so a value *derived* from a literal is a fully
-    // typed `Dictionary` and no longer a shape. Shape-aware keyed operations
-    // (BT-4732) will make this result a shape; update this pin then.
+fn build_then_pass_idiom_is_silent_now_keyed_ops_are_shape_aware() {
+    // BT-4732 made `at:put:` on a shape answer a shape, so a value derived
+    // from a literal still satisfies a shape slot.
     let msgs = warnings(
         "Object subclass: Probe\n  \
            take: o :: #{#port => Integer, #host => Integer} => o\n  \
            go =>\n    o := #{#port => 1}\n    o := o at: #host put: 2\n    self take: o\n",
     );
-    assert_eq!(msgs.len(), 1, "got: {msgs:#?}");
-    assert!(
-        msgs[0].1.contains("not assignable to a shape"),
-        "{:?}",
-        msgs[0]
-    );
+    assert!(msgs.is_empty(), "got: {msgs:#?}");
 }
