@@ -36,6 +36,8 @@
 
 use crate::ast::visitor::{Visitor, walk_block, walk_expr};
 use crate::ast::{Block, Expression};
+use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
+use crate::semantic_analysis::type_checker::types::is_generic_type_param;
 use crate::semantic_analysis::type_checker::{EnvKey, InferredType, TypeMap};
 
 use super::extract::extract_variable_name;
@@ -159,4 +161,152 @@ pub(crate) fn block_may_reassign(block: &Block, key: &EnvKey) -> bool {
             false
         }
     })
+}
+
+/// The bindings `expr` may assign, found by a **deep** walk (nested block
+/// literals included, since a block built here may run before the code that
+/// follows) — unlike the top-level-only [`block_may_reassign`]. A write the
+/// walk cannot attribute to a key (a destructuring assignment, an unreadable
+/// target) makes the answer [`Writes::Unknown`]. Used to drop the facts a
+/// right-hand `and:` / `or:` argument may invalidate (BT-4710).
+pub(crate) fn expr_writes(expr: &Expression) -> Writes {
+    struct Finder(Writes);
+    impl<'ast> Visitor<'ast> for Finder {
+        fn visit_expr(&mut self, e: &'ast Expression) {
+            match e {
+                Expression::Assignment { target, .. } => match extract_variable_name(target) {
+                    Some(key) => {
+                        if let Writes::Keys(keys) = &mut self.0 {
+                            keys.push(key);
+                        }
+                    }
+                    None => self.0 = Writes::Unknown,
+                },
+                Expression::DestructureAssignment { .. } => self.0 = Writes::Unknown,
+                _ => {}
+            }
+            walk_expr(self, e);
+        }
+        fn visit_block(&mut self, block: &'ast Block) {
+            walk_block(self, block);
+        }
+    }
+    let mut finder = Finder(Writes::Keys(Vec::new()));
+    finder.visit_expr(expr);
+    finder.0
+}
+
+/// What an expression may assign — see [`expr_writes`].
+pub(crate) enum Writes {
+    /// Exactly these bindings (possibly none).
+    Keys(Vec<EnvKey>),
+    /// Something the walk cannot name: assume any binding.
+    Unknown,
+}
+
+/// Could a value of static type `ty` (`None`: never inferred) be a block?
+/// Answers `false` only for a type provably disjoint from `Block`: a nominal
+/// class that is neither `Block` nor one of its ancestors (`Object`,
+/// `ProtoObject`), nor a type variable, a metaclass, or `Never`. `Dynamic`, `Object`, a protocol (a
+/// `Block` may conform structurally), and any union, intersection or
+/// negation containing one of those could be a block.
+fn could_be_block(ty: Option<&InferredType>, protocols: Option<&ProtocolRegistry>) -> bool {
+    match ty {
+        Some(InferredType::Known { class_name, .. }) => {
+            matches!(class_name.as_str(), "Block" | "Object" | "ProtoObject")
+                // A rigid type variable (`:: E`) may be instantiated with `Block`.
+                || is_generic_type_param(class_name)
+                || protocols.is_some_and(|registry| registry.has_protocol(class_name))
+        }
+        Some(
+            InferredType::Meta { .. } | InferredType::ProtocolMeta { .. } | InferredType::Never,
+        ) => false,
+        Some(InferredType::Negation { base, .. }) => could_be_block(Some(base), protocols),
+        Some(InferredType::Union { members, .. } | InferredType::Intersection { members, .. }) => {
+            members
+                .iter()
+                .any(|member| could_be_block(Some(member), protocols))
+        }
+        // `Dynamic`, no recorded type, or a shape added later: assume it could.
+        _ => true,
+    }
+}
+
+/// Can evaluating `expr` run code that reassigns an actor field? True for a
+/// returning send to `self`/`super` ([`expr_contains_returning_self_send`]) and
+/// for any send that receives a non-literal operand that *could* be a block as
+/// its receiver or an argument — a stored block writes actor fields live
+/// wherever it runs (ADR 0137), so `blk value`, `cb value: x` and
+/// `items anySatisfy: blk` all count, whether `blk` is typed `Block`,
+/// `Dynamic`, `Object` or a union containing one. Dropping a field fact is the
+/// safe direction. `expr` must already have been inferred.
+pub(crate) fn expr_may_write_fields(
+    expr: &Expression,
+    type_map: &TypeMap,
+    protocols: Option<&ProtocolRegistry>,
+) -> bool {
+    struct Finder<'m>(bool, &'m TypeMap, Option<&'m ProtocolRegistry>);
+    impl<'ast> Visitor<'ast> for Finder<'_> {
+        fn visit_expr(&mut self, e: &'ast Expression) {
+            if self.0 {
+                return;
+            }
+            if let Expression::MessageSend {
+                receiver,
+                arguments,
+                ..
+            } = e
+            {
+                let is_block_value = |operand: &Expression| {
+                    !matches!(operand, Expression::Block(_))
+                        && could_be_block(self.1.get(operand.span()), self.2)
+                };
+                if is_block_value(receiver) || arguments.iter().any(is_block_value) {
+                    self.0 = true;
+                    return;
+                }
+            }
+            walk_expr(self, e);
+        }
+        fn visit_block(&mut self, block: &'ast Block) {
+            walk_block(self, block);
+        }
+    }
+    if expr_contains_returning_self_send(expr, type_map) {
+        return true;
+    }
+    let mut finder = Finder(false, type_map, protocols);
+    finder.visit_expr(expr);
+    finder.0
+}
+
+#[cfg(test)]
+mod could_be_block_tests {
+    use super::*;
+
+    fn known(name: &str) -> InferredType {
+        InferredType::known(name)
+    }
+
+    #[test]
+    fn possible_blocks() {
+        for name in ["Block", "Object", "ProtoObject", "E", "T"] {
+            assert!(could_be_block(Some(&known(name)), None), "{name}");
+        }
+        assert!(could_be_block(None, None));
+        assert!(could_be_block(
+            Some(&InferredType::Dynamic(
+                crate::semantic_analysis::type_checker::DynamicReason::Unknown
+            )),
+            None
+        ));
+    }
+
+    #[test]
+    fn provably_not_blocks() {
+        for name in ["Integer", "String", "List"] {
+            assert!(!could_be_block(Some(&known(name)), None), "{name}");
+        }
+        assert!(!could_be_block(Some(&InferredType::Never), None));
+    }
 }

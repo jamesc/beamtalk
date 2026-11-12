@@ -18,6 +18,7 @@ use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType, Me
 use crate::semantic_analysis::protocol_registry::ProtocolMethodRequirement;
 use crate::semantic_analysis::receiver_knowledge;
 use crate::semantic_analysis::type_checker::known_remote;
+use crate::semantic_analysis::type_checker::narrowing::facts::FactsCtx;
 use crate::semantic_analysis::type_checker::narrowing::visitors::expr_contains_returning_self_send;
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::validation::ProtocolSendResolution;
@@ -151,32 +152,37 @@ impl TypeChecker {
                     | WellKnownSelector::IfTrueIfFalse
             )
         );
-        let narrowing = if is_branching {
-            self.detect_refined_narrowing(receiver, env, hierarchy, span)
+        // BT-4710: one recursive function answers what the receiver proves
+        // when true and when false — single tests, `and:` / `or:` chains of
+        // them (mixed with conditions it cannot read), all alike.
+        let branch_facts = if is_branching {
+            let facts = self.condition_facts(receiver, env, hierarchy, FactsCtx::arm(span));
+            // A bare recognised test keeps the narrowing dispatch even for an
+            // arm with nothing to narrow (a solo `ifFalse:` over
+            // `respondsTo:` still types its block's return); a chain narrows
+            // only when this send's arm gains a fact.
+            let narrows = match selector.well_known() {
+                Some(WellKnownSelector::IfTrue) => !facts.when_true.is_empty(),
+                Some(WellKnownSelector::IfFalse) => !facts.when_false.is_empty(),
+                _ => !facts.when_true.is_empty() || !facts.when_false.is_empty(),
+            };
+            (narrows || Self::detect_narrowing(receiver).is_some()).then_some(facts)
         } else {
             None
         };
-        // Compound nil-guards (BT-4107): `(a isNil or: [b isNil])`,
-        // `(a notNil and: [b notNil])`. Tried only when no single-variable
-        // narrowing matched (the shapes are mutually exclusive), and only in
-        // the proving direction — the disjunctive direction (solo `ifTrue:`
-        // over an `or:` guard, solo `ifFalse:` over an `and:` guard) keeps
-        // the generic path below, exactly as today.
-        let compound_nil_guard = if is_branching && narrowing.is_none() {
-            Self::detect_compound_nil_guard(receiver).filter(|(kind, _)| {
-                matches!(
-                    (kind, selector.well_known()),
-                    (
-                        narrowing::CompoundNilGuardKind::OrIsNil,
-                        Some(WellKnownSelector::IfFalse | WellKnownSelector::IfTrueIfFalse)
-                    ) | (
-                        narrowing::CompoundNilGuardKind::AndNotNil,
-                        Some(WellKnownSelector::IfTrue | WellKnownSelector::IfTrueIfFalse)
-                    )
-                )
-            })
-        } else {
-            None
+        // The lazy block of `<cond> and: [...]` runs only when `<cond>`
+        // answered true; of `<cond> or: [...]`, only when it answered false.
+        let connective_facts = match selector_name.as_str() {
+            "and:" | "or:" => {
+                let facts = self.condition_facts(receiver, env, hierarchy, FactsCtx::arm(span));
+                let assumed = if selector_name == "and:" {
+                    facts.when_true
+                } else {
+                    facts.when_false
+                };
+                (!assumed.is_empty()).then_some(assumed)
+            }
+            _ => None,
         };
 
         // `Object >> then:` (ADR 0145 § 2, BT-4515): types a literal block's
@@ -195,21 +201,11 @@ impl TypeChecker {
         let outer_deferred = std::mem::take(&mut self.deferred_block_widenings);
 
         // Infer argument types, applying narrowing to block arguments when detected.
-        let arg_types: Vec<InferredType> = if let Some(ref info) = narrowing {
-            self.infer_args_with_narrowing(
+        let arg_types: Vec<InferredType> = if let Some(ref facts) = branch_facts {
+            self.infer_args_with_facts(
                 arguments,
                 &selector_name,
-                info,
-                hierarchy,
-                env,
-                in_abstract_method,
-            )
-        } else if let Some((kind, ref variables)) = compound_nil_guard {
-            self.infer_args_with_compound_narrowing(
-                arguments,
-                &selector_name,
-                kind,
-                variables,
+                facts,
                 hierarchy,
                 env,
                 in_abstract_method,
@@ -246,53 +242,18 @@ impl TypeChecker {
             )
         } else if is_object_then {
             self.infer_args_for_then(arguments, &receiver_ty, hierarchy, env, in_abstract_method)
-        } else if let (true, Some(var_key), Some(arg)) = (
-            // `and:` stays a string comparison rather than a
-            // `WellKnownSelector` variant, matching `state_threading_selectors`'s
-            // module doc — `and:`/`or:` are ordinary self-hosted `Boolean`
-            // methods (`boolean.bt`), not selectors the type checker or
-            // codegen intrinsify, so adding a lone `And` variant (with no
-            // `Or` counterpart) would misrepresent that boundary.
-            selector_name == "and:",
-            Self::detect_not_nil_and_narrowing(receiver),
-            arguments.first(),
-        ) {
-            // `X notNil and: [...]` narrows `X` to non-nil inside the
-            // block argument. Unlike the `ifTrue:`/`ifFalse:`/`ifTrue:ifFalse:`
-            // narrowing table (which narrows to a statically known branch
-            // type), the non-nil type here depends on `X`'s current type in
-            // `env`, so it's resolved here rather than through `NarrowingInfo`.
-            // Because `TypeEnv::child()` clones the whole binding map instead
-            // of layering scopes, nested sends inside the block — including
+        } else if let (Some(assumed), Some(arg)) = (connective_facts.as_ref(), arguments.first()) {
+            // `X notNil and: [...]`, `<cond> or: [...]`, any chain of tests:
+            // the block sees the facts its receiver proves. Because
+            // `TypeEnv::child()` clones the whole binding map instead of
+            // layering scopes, nested sends inside the block — including
             // further `and:` chains and binary-message argument positions
             // like `5 >= local` in `local > 0 and: [5 >= local]` — see the
-            // narrowed type too, closing the gap where only receiver
-            // positions were narrowed.
-            let current_ty = self.narrowing_variable_type(&var_key, env, hierarchy);
-            let non_nil_ty = Self::non_nil_type(&current_ty);
-            vec![self.infer_block_with_narrowing(
+            // narrowed type too.
+            let narrowings: Vec<(&EnvKey, &InferredType)> = assumed.iter().collect();
+            vec![self.infer_block_with_narrowings(
                 arg,
-                &var_key,
-                &non_nil_ty,
-                hierarchy,
-                env,
-                in_abstract_method,
-            )]
-        } else if let (true, Some((var_key, narrowed_ty)), Some(arg)) = (
-            // BT-4635: any other single-variable type test (`isKindOf:`,
-            // `class =`, `respondsTo:`, `isOk`, singleton equality, ...) on
-            // the receiver of `and:` / `or:`. The lazy block runs only when
-            // the test answered true (`and:`) or false (`or:`), so it gets
-            // the same narrowing the matching `ifTrue:` / `ifFalse:` arm
-            // would. `notNil` is handled by the branch above.
-            matches!(selector_name.as_str(), "and:" | "or:"),
-            self.boolean_connective_narrowing(&selector_name, receiver, hierarchy, env, span),
-            arguments.first(),
-        ) {
-            vec![self.infer_block_with_narrowing(
-                arg,
-                &var_key,
-                &narrowed_ty,
+                &narrowings,
                 hierarchy,
                 env,
                 in_abstract_method,

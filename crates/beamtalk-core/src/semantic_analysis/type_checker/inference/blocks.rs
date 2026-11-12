@@ -15,8 +15,7 @@
 use crate::ast::{Expression, WellKnownSelector};
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType, MethodInfo};
 use crate::semantic_analysis::method_validators::block_arity_diagnostic;
-use crate::semantic_analysis::type_checker::narrowing::CompoundNilGuardKind;
-use crate::semantic_analysis::type_checker::narrowing::NarrowingInfo;
+use crate::semantic_analysis::type_checker::narrowing::facts::{CondFacts, Facts};
 use crate::semantic_analysis::type_checker::narrowing::refinement::RefinementLayer;
 use crate::semantic_analysis::type_checker::narrowing::visitors::{
     block_has_any_return, block_has_return,
@@ -622,82 +621,44 @@ impl TypeChecker {
         ]))
     }
 
-    /// Infer argument types for `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:` with
-    /// narrowed type environments for block arguments.
+    /// Infer argument types for `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:`
+    /// with each block narrowed by the [`CondFacts`] of the receiver
+    /// (BT-4710): the true block gets the facts that hold when the condition
+    /// is true, the false block those that hold when it is false.
     ///
-    /// For `ifTrue:`, the true-block gets the narrowed type.
-    /// For `ifFalse:`, the false-block gets the complement (non-nil for nil checks).
-    /// For `ifTrue:ifFalse:`, both blocks get their respective narrowings.
-    #[allow(clippy::too_many_lines)]
-    pub(in crate::semantic_analysis::type_checker) fn infer_args_with_narrowing(
+    /// An arm with no facts is inferred without narrowing, in the shape the
+    /// pre-facts paths used: a solo `ifFalse:` block keeps its own return type
+    /// as `Block(..., R)` (so `if_true_false_solo_boolean_ret_ty` can union it
+    /// with the `Boolean` self-branch), and the arms of `ifTrue:ifFalse:` are
+    /// joined with branch semantics (`join_branch_arms`), so a Dynamic true arm
+    /// and a `nil` false arm stay Dynamic rather than collapsing to `Nil`
+    /// (BT-4207).
+    pub(in crate::semantic_analysis::type_checker) fn infer_args_with_facts(
         &mut self,
         arguments: &[Expression],
         selector_name: &str,
-        info: &NarrowingInfo,
+        facts: &CondFacts,
         hierarchy: &ClassHierarchy,
         env: &mut TypeEnv,
         in_abstract_method: bool,
     ) -> Vec<InferredType> {
         let mut arg_types = Vec::new();
-
         match WellKnownSelector::from_name(selector_name) {
             Some(WellKnownSelector::IfTrue) => {
-                // Single argument: narrow in the true branch
                 if let Some(arg) = arguments.first() {
-                    let ty = self.infer_block_with_narrowing(
+                    arg_types.push(self.infer_arm(
                         arg,
-                        &info.variable,
-                        &info.true_type,
+                        &facts.when_true,
                         hierarchy,
                         env,
                         in_abstract_method,
-                    );
-                    arg_types.push(ty);
+                    ));
                 }
             }
             Some(WellKnownSelector::IfFalse) => {
-                // Single argument: narrow in the false branch (complement)
                 if let Some(arg) = arguments.first() {
-                    if let Some(ref false_ty) = info.false_type {
-                        // Explicit false type (e.g., Result isOk/isError;
-                        // singleton (in)equality complement; or
-                        // class = / isKindOf: nominal-class complement)
-                        let ty = self.infer_block_with_narrowing(
-                            arg,
-                            &info.variable,
-                            false_ty,
-                            hierarchy,
-                            env,
-                            in_abstract_method,
-                        );
-                        arg_types.push(ty);
-                    } else if info.is_nil_check {
-                        // isNil ifFalse: → variable is non-nil
-                        let current_ty =
-                            self.narrowing_variable_type(&info.variable, env, hierarchy);
-                        let non_nil = Self::non_nil_type(&current_ty);
-                        let ty = self.infer_block_with_narrowing(
-                            arg,
-                            &info.variable,
-                            &non_nil,
-                            hierarchy,
-                            env,
-                            in_abstract_method,
-                        );
-                        arg_types.push(ty);
-                    } else {
-                        // respondsTo: ifFalse: → no useful narrowing. (isKindOf:
-                        // populates `false_type` above; class =:=
-                        // still leaves it None, since its false branch can't be
-                        // narrowed via subtree exclusion.)
-                        //
-                        // Still preserve the block's own return type
-                        // as `Block(..., R)` (mirrors the rationale for
-                        // the narrowed branches above) — without this, a solo
-                        // `respondsTo: ifFalse: [...]` on `Boolean` lost `R`
-                        // entirely and `if_true_false_solo_boolean_ret_ty`
-                        // couldn't union it with the `Boolean` self-branch.
-                        let ty = if let Expression::Block(block) = arg {
+                    let ty = if facts.when_false.is_empty() {
+                        if let Expression::Block(block) = arg {
                             self.infer_block_with_typed_params(
                                 block,
                                 arg.span(),
@@ -708,64 +669,31 @@ impl TypeChecker {
                             )
                         } else {
                             self.infer_expr(arg, hierarchy, env, in_abstract_method)
-                        };
-                        arg_types.push(ty);
-                    }
+                        }
+                    } else {
+                        self.infer_arm(arg, &facts.when_false, hierarchy, env, in_abstract_method)
+                    };
+                    arg_types.push(ty);
                 }
             }
             Some(WellKnownSelector::IfTrueIfFalse) => {
-                // Two arguments: true block then false block
                 if let Some(true_arg) = arguments.first() {
-                    let ty = self.infer_block_with_narrowing(
+                    arg_types.push(self.infer_arm(
                         true_arg,
-                        &info.variable,
-                        &info.true_type,
+                        &facts.when_true,
                         hierarchy,
                         env,
                         in_abstract_method,
-                    );
-                    arg_types.push(ty);
+                    ));
                 }
                 if let Some(false_arg) = arguments.get(1) {
-                    if let Some(ref false_ty) = info.false_type {
-                        // Explicit false type (e.g., Result isOk/isError;
-                        // singleton (in)equality complement; or
-                        // class = / isKindOf: nominal-class complement)
-                        let ty = self.infer_block_with_narrowing(
-                            false_arg,
-                            &info.variable,
-                            false_ty,
-                            hierarchy,
-                            env,
-                            in_abstract_method,
-                        );
-                        arg_types.push(ty);
-                    } else if info.is_nil_check {
-                        // isNil ifTrue: [...] ifFalse: [block] → non-nil in false block
-                        let current_ty =
-                            self.narrowing_variable_type(&info.variable, env, hierarchy);
-                        let non_nil = Self::non_nil_type(&current_ty);
-                        let ty = self.infer_block_with_narrowing(
-                            false_arg,
-                            &info.variable,
-                            &non_nil,
-                            hierarchy,
-                            env,
-                            in_abstract_method,
-                        );
-                        arg_types.push(ty);
-                    } else {
-                        // respondsTo: ifTrue: [...] ifFalse: [...] — no useful
-                        // narrowing for false block. (isKindOf: populates
-                        // `false_type` above; class =:= still leaves
-                        // it None, since its false branch can't be narrowed via
-                        // subtree exclusion.) The arms' shared `R` is joined
-                        // with branch semantics (`join_branch_arms`), so a
-                        // Dynamic true arm and a `nil` false arm stay Dynamic
-                        // rather than collapsing to `Nil` (BT-4207).
-                        let ty = self.infer_expr(false_arg, hierarchy, env, in_abstract_method);
-                        arg_types.push(ty);
-                    }
+                    arg_types.push(self.infer_arm(
+                        false_arg,
+                        &facts.when_false,
+                        hierarchy,
+                        env,
+                        in_abstract_method,
+                    ));
                 }
                 // Handle any remaining arguments (shouldn't happen, but be safe)
                 for arg in arguments.iter().skip(2) {
@@ -773,163 +701,40 @@ impl TypeChecker {
                 }
             }
             _ => {
-                // Fallback: no narrowing
                 for arg in arguments {
                     arg_types.push(self.infer_expr(arg, hierarchy, env, in_abstract_method));
                 }
             }
         }
-
         arg_types
     }
 
-    /// Infer argument types for `ifTrue:` / `ifFalse:` / `ifTrue:ifFalse:`
-    /// over a compound nil-guard (BT-4107), narrowing *every* tested variable
-    /// to non-nil in the proving arm.
-    ///
-    /// Each variable resolves its *current* type live and narrows through
-    /// `non_nil_type`, exactly like the `isNil ifFalse:` arm of
-    /// [`Self::infer_args_with_narrowing`]. Only the proving arm narrows
-    /// ([`CompoundNilGuardKind`]): the disjunctive arm (true arm of an `or:`
-    /// guard, false arm of an `and:` guard) proves nothing about any single
-    /// var, so it is inferred with no narrowing — mirroring the
-    /// non-narrowed `respondsTo:` combined arm in
-    /// [`Self::infer_args_with_narrowing`]. Callers only divert
-    /// here when at least one arm narrows; solo sends over the disjunctive
-    /// direction keep the generic path.
-    #[allow(clippy::too_many_arguments)] // mirrors infer_args_with_narrowing's dispatch arity, plus the guard kind
-    pub(in crate::semantic_analysis::type_checker) fn infer_args_with_compound_narrowing(
+    /// One arm of [`Self::infer_args_with_facts`]: narrowed by `facts`, or
+    /// plainly inferred when there are none.
+    fn infer_arm(
         &mut self,
-        arguments: &[Expression],
-        selector_name: &str,
-        kind: CompoundNilGuardKind,
-        variables: &[EnvKey],
+        arg: &Expression,
+        facts: &Facts,
         hierarchy: &ClassHierarchy,
         env: &mut TypeEnv,
         in_abstract_method: bool,
-    ) -> Vec<InferredType> {
-        let narrowed: Vec<(EnvKey, InferredType)> = variables
-            .iter()
-            .map(|var| {
-                let current_ty = self.narrowing_variable_type(var, env, hierarchy);
-                (var.clone(), Self::non_nil_type(&current_ty))
-            })
-            .collect();
-        let narrowings: Vec<(&EnvKey, &InferredType)> =
-            narrowed.iter().map(|(var, ty)| (var, ty)).collect();
-
-        let mut arg_types = Vec::new();
-        match WellKnownSelector::from_name(selector_name) {
-            Some(WellKnownSelector::IfTrue) if kind == CompoundNilGuardKind::AndNotNil => {
-                if let Some(arg) = arguments.first() {
-                    arg_types.push(self.infer_block_with_narrowings(
-                        arg,
-                        &narrowings,
-                        hierarchy,
-                        env,
-                        in_abstract_method,
-                    ));
-                }
-            }
-            Some(WellKnownSelector::IfFalse) if kind == CompoundNilGuardKind::OrIsNil => {
-                if let Some(arg) = arguments.first() {
-                    arg_types.push(self.infer_block_with_narrowings(
-                        arg,
-                        &narrowings,
-                        hierarchy,
-                        env,
-                        in_abstract_method,
-                    ));
-                }
-            }
-            Some(WellKnownSelector::IfTrueIfFalse) => {
-                if let Some(true_arg) = arguments.first() {
-                    if kind == CompoundNilGuardKind::AndNotNil {
-                        arg_types.push(self.infer_block_with_narrowings(
-                            true_arg,
-                            &narrowings,
-                            hierarchy,
-                            env,
-                            in_abstract_method,
-                        ));
-                    } else {
-                        // Disjunctive true arm — no narrowing (mirrors the
-                        // non-narrowed `respondsTo:` combined arm).
-                        arg_types.push(self.infer_expr(
-                            true_arg,
-                            hierarchy,
-                            env,
-                            in_abstract_method,
-                        ));
-                    }
-                }
-                if let Some(false_arg) = arguments.get(1) {
-                    if kind == CompoundNilGuardKind::OrIsNil {
-                        arg_types.push(self.infer_block_with_narrowings(
-                            false_arg,
-                            &narrowings,
-                            hierarchy,
-                            env,
-                            in_abstract_method,
-                        ));
-                    } else {
-                        // Disjunctive false arm — no narrowing.
-                        arg_types.push(self.infer_expr(
-                            false_arg,
-                            hierarchy,
-                            env,
-                            in_abstract_method,
-                        ));
-                    }
-                }
-                // Handle any remaining arguments (shouldn't happen, but be safe)
-                for arg in arguments.iter().skip(2) {
-                    arg_types.push(self.infer_expr(arg, hierarchy, env, in_abstract_method));
-                }
-            }
-            _ => {
-                // Unreachable when callers divert correctly (solo sends over
-                // the disjunctive direction keep the generic path) — fall
-                // back to plain inference rather than mis-narrowing.
-                for arg in arguments {
-                    arg_types.push(self.infer_expr(arg, hierarchy, env, in_abstract_method));
-                }
-            }
+    ) -> InferredType {
+        if facts.is_empty() {
+            self.infer_expr(arg, hierarchy, env, in_abstract_method)
+        } else {
+            let narrowings: Vec<(&EnvKey, &InferredType)> = facts.iter().collect();
+            self.infer_block_with_narrowings(arg, &narrowings, hierarchy, env, in_abstract_method)
         }
-
-        arg_types
     }
 
-    /// Type-check a block expression (or any expression) with a variable narrowed
-    /// to a specific type in a child environment.
+    /// Type-check a block expression with the given variables narrowed in one
+    /// child environment (the facts of a condition, BT-4710).
     ///
     /// Preserves the block body's inferred return type as a `type_arg`
     /// on the returned `Block(..., R)` type. Without this, `ifTrue:ifFalse:`
     /// return types collapsed to `Dynamic` because `infer_method_local_params`
     /// requires the Block argument to carry its return type before it can unify
     /// the method-local `R` type parameter.
-    pub(in crate::semantic_analysis::type_checker) fn infer_block_with_narrowing(
-        &mut self,
-        arg: &Expression,
-        var_key: &EnvKey,
-        narrowed_type: &InferredType,
-        hierarchy: &ClassHierarchy,
-        env: &mut TypeEnv,
-        in_abstract_method: bool,
-    ) -> InferredType {
-        self.infer_block_with_narrowings(
-            arg,
-            &[(var_key, narrowed_type)],
-            hierarchy,
-            env,
-            in_abstract_method,
-        )
-    }
-
-    /// Type-check a block expression with *several* variables narrowed in one
-    /// child environment — the multi-variable generalisation of
-    /// [`Self::infer_block_with_narrowing`] for compound nil-guards
-    /// (BT-4107), which narrow every tested var in the same arm.
     pub(in crate::semantic_analysis::type_checker) fn infer_block_with_narrowings(
         &mut self,
         arg: &Expression,

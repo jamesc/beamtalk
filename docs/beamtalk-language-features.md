@@ -3329,11 +3329,18 @@ render: coll :: Printable | Nil -> String =>
 | `x isNil ifTrue: [^...] ifFalse: [...]` | `x` is non-nil in false block | False block |
 | `x ifNotNil: [:v \| ...]` | `v` is non-nil in block | Block only |
 | `x ifNil: [...] ifNotNil: [:v \| ...]` | `v` is non-nil in notNil block | NotNil block |
+| `x notNil ifTrue: [...]` / `x notNil ifFalse: [^...]` | same as `x isNil` with the branches swapped: `x` is non-nil in the true block / after the statement | True block / rest of method |
 | `x notNil and: [...]` | `x` is non-nil in block, including nested block-argument positions | Block only |
+| `x isNil or: [...]` | `x` is non-nil in the block (it runs only when `x isNil` was false) | Block only |
 | `(a isNil or: [b isNil]) ifTrue: [^...]` | every tested var is non-nil after the statement | Rest of method |
 | `(a isNil or: [b isNil]) ifFalse: [...]` | every tested var is non-nil in false block | False block |
 | `(a notNil and: [b notNil]) ifFalse: [^...]` | every tested var is non-nil after the statement | Rest of method |
 | `(a notNil and: [b notNil]) ifTrue: [...]` | every tested var is non-nil in true block | True block |
+| `(p and: [x notNil]) ifTrue: [...]` (`p` is any condition the checker does not read) | `x` is non-nil in true block | True block |
+| `(x isNil or: [p]) ifTrue: [^...]` / `(x isNil or: [p]) ifFalse: [...]` | `x` is non-nil after the statement / in the false block | Rest of method / false block |
+| `(x notNil and: [k isKindOf: Foo]) ifTrue: [...]` | `x` is non-nil and `k` is `Foo` in true block | True block |
+| `(x notNil and: [y notNil and: [p]]) ifTrue: [...]` | `x` and `y` are non-nil in true block | True block |
+| `(p or: [x notNil]) ifTrue: [...]`, `(x notNil or: [p]) ifTrue: [...]`, `(x isNil and: [p]) ifFalse: [...]` | **no narrowing** — the other side may have decided the answer | — |
 | `x =:= #sym ifTrue: [^...]` | `x` is `T \ #sym` after the statement | Rest of method |
 | `x == #sym ifTrue: [^...]` | `x` is `T \ #sym` after the statement | Rest of method |
 | `x respondsTo: #sel ifFalse: [^...]` | `x` narrows post-guard | Rest of method |
@@ -3346,6 +3353,8 @@ render: coll :: Printable | Nil -> String =>
 The diverging-guard pattern (`isNil ifTrue: [self error: "..."]`) recognises any block whose body infers as `Never` — including calls to `error:`, `notImplemented`, or any `-> Never` method — not just non-local returns (`^`). Narrowing also works on `self.field` reads: inside `self.field isNil ifFalse: [...]`, the field narrows to non-nil within the block.
 
 **`notNil and:` (BT-2872):** `x notNil and: [...]` narrows `x` to non-nil for the whole block argument — not just where `x` is a further send's receiver, but in any nested position, including as an argument to a binary send inside a further-nested block (`local notNil and: [local > 0 and: [5 >= local]]` narrows `local` inside `5 >= local` too). The narrowing does not survive past the block — a later unguarded use of `x` after the `and:` send is unaffected.
+
+**Mixed `and:` / `or:` chains (BT-4710):** every condition has two sets of facts — what is true of each variable when it answers `true`, and when it answers `false`. A single test (`isNil`, `notNil`, `isKindOf:`, …) contributes its own narrowing. `a and: [b]` is true only when both are, so it carries both sides' true facts (`b` is checked under `a`'s); it is false when *either* is, so only a variable both sides narrow stays narrowed, to the union of the two types. `or:` is the dual. A part the checker does not understand (a plain `Boolean`, a multi-statement block, a call) contributes no facts but does not stop the rest of the chain from narrowing. `ifTrue:`, `ifFalse:`, `ifTrue:ifFalse:`, early return and the lazy `and:` / `or:` blocks all read the same facts.
 
 **Combined nil-guards (BT-4107):** an `or:`-chain of `isNil` tests narrows *every* tested variable — `(a isNil or: [b isNil]) ifTrue: [^nil]` proves both `a` and `b` non-nil afterwards (`or:` is false only when both disjuncts are false), and both are non-nil inside the `ifFalse:` arm. Dually, `(a notNil and: [b notNil]) ifFalse: [^nil]` proves both non-nil afterwards, and both are non-nil inside the `ifTrue:` arm. The complementary directions are disjunctive and never narrow: an `or:` guard that holds (or an `and:` guard that fails) only proves *some* variable is nil, not which. As a consequence, a lone `a notNil` test narrows too (`ifFalse: [^...]` post-guard, `ifTrue:` in-branch).
 

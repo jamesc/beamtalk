@@ -15,12 +15,12 @@ use crate::ast::{Expression, MatchArm, MessageSelector, Pattern, WellKnownSelect
 use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
-use crate::semantic_analysis::type_checker::narrowing::CompoundNilGuardKind;
 use crate::semantic_analysis::type_checker::narrowing::NarrowingInfo;
 use crate::semantic_analysis::type_checker::narrowing::extract::extract_variable_name;
+use crate::semantic_analysis::type_checker::narrowing::facts::{Facts, FactsCtx};
 use crate::semantic_analysis::type_checker::narrowing::refinement::RefinementLayer;
 use crate::semantic_analysis::type_checker::narrowing::visitors::{
-    block_has_return, block_may_reassign, expr_contains_returning_self_send,
+    block_has_return, block_may_reassign, expr_may_write_fields,
 };
 use crate::semantic_analysis::type_checker::type_resolver;
 use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
@@ -346,26 +346,21 @@ impl TypeChecker {
 
     /// Apply early-return narrowing to the environment after a statement.
     ///
-    /// Detects `x isNil ifTrue: [<diverge>]` and `x isKindOf:
-    /// C ifTrue: [<diverge>]` / `ifFalse: [<diverge>]` / `ifTrue: [<diverge>]
-    /// ifFalse: [...]` — if the branch whose test is *not* the one we fall
-    /// through cannot fall through (either a non-local return `^` or a
-    /// diverging call such as `self error: "..."` whose inferred type is
-    /// `Never`), the variable is narrowed for subsequent statements. Covers
-    /// both local variables and synthetic `self.field` keys via
-    /// [`Self::resolve_narrowing_variable_type`].
-    #[allow(clippy::too_many_lines)] // one flat decision list per guard shape
+    /// Detects `<cond> ifTrue: [<diverge>]` / `ifFalse: [<diverge>]` /
+    /// `ifTrue: [<diverge>] ifFalse: [...]` (and the dual) — if the branch
+    /// whose test is *not* the one we fall through cannot fall through (either
+    /// a non-local return `^` or a diverging call such as `self error: "..."`
+    /// whose inferred type is `Never`), the facts the condition proves on the
+    /// other path (BT-4710: [`Self::condition_facts`], so `isNil`, `notNil`,
+    /// `isKindOf:`, … and `and:` / `or:` chains of them) narrow the rest of
+    /// the method. Covers both local variables and synthetic `self.field`
+    /// keys via [`Self::resolve_narrowing_variable_type`].
     pub(in crate::semantic_analysis::type_checker) fn apply_early_return_narrowing(
         &mut self,
         expr: &Expression,
         env: &mut TypeEnv,
         hierarchy: &ClassHierarchy,
     ) {
-        // Match: `<receiver> ifTrue: [diverging]`, `<receiver> ifFalse:
-        // [diverging]`, or `<receiver> ifTrue: [diverging]
-        // ifFalse: [...]` — whichever block diverges, any execution reaching
-        // the next statement came through the *other* path, narrowing the
-        // variable accordingly.
         let Expression::MessageSend {
             receiver,
             selector: selector @ MessageSelector::Keyword(_),
@@ -381,74 +376,13 @@ impl TypeChecker {
         if !(is_if_true || is_if_false || is_if_true_if_false) {
             return;
         }
-        let Some(mut info) = Self::detect_narrowing(receiver) else {
-            // No single-variable narrowing matched — fall back to the
-            // compound nil-guard shapes (BT-4107), which are mutually
-            // exclusive with every `RULES` entry (no rule matches an `or:` /
-            // `and:` send).
-            self.apply_compound_nil_guard_narrowing(
-                receiver,
-                arguments,
-                is_if_true,
-                is_if_false,
-                is_if_true_if_false,
-                env,
-                hierarchy,
-            );
-            return;
-        };
-        if !info.is_nil_check
-            && info.class_test.is_none()
-            && info.singleton_eq.is_none()
-            && info.responded_selector.is_none()
-        {
+        let mut facts = self.condition_facts(receiver, env, hierarchy, FactsCtx::post_guard());
+        if facts.when_true.is_empty() && facts.when_false.is_empty() {
             return;
         }
         // BT-4715: don't re-add a field narrowing a fall-through self-send undid.
-        if matches!(info.variable, EnvKey::SelfField(_))
-            && self.fallthrough_may_self_send(receiver, arguments)
-        {
-            return;
-        }
-        if info.class_test.is_some() {
-            // Resolve `true_type`/`false_type` the same way the
-            // primary `ifTrue:`/`ifFalse:` dispatch does
-            // (`refine_class_narrowing`), but through the diagnostic-free
-            // `compute_class_narrowing` — `expr` (this exact guard) was
-            // already fully type-checked by `infer_stmts` above, so the
-            // "comparison can never be true" hint already fired once.
-            let current_ty = self.narrowing_variable_type(&info.variable, env, hierarchy);
-            info = Self::compute_class_narrowing(
-                info,
-                &current_ty,
-                hierarchy,
-                self.protocol_registry.as_deref(),
-            );
-        }
-        if info.singleton_eq.is_some() {
-            // Resolve `true_type`/`false_type` the same way the
-            // primary `ifTrue:`/`ifFalse:` dispatch does, via the existing
-            // (diagnostic-free) `refine_singleton_narrowing` — the "comparison
-            // can never be true" hint for this guard already fired once
-            // during `infer_stmts` above.
-            info = Self::refine_singleton_narrowing(
-                info,
-                env,
-                hierarchy,
-                self.alias_registry.as_deref(),
-                self.protocol_registry.as_deref(),
-            );
-        }
-        // BT-4712: `x =/= nil` swaps the `isNil` branches (no-op otherwise).
-        info = self.refine_nil_test(info, env, hierarchy);
-        if info.responded_selector.is_some() {
-            // Resolve `true_type` (upgrading `Dynamic` to a concrete
-            // `Protocol` type when exactly one protocol requires the tested
-            // selector) via the existing `refine_responds_to_narrowing`.
-            // `false_type` stays `None` — there is no sound type for "doesn't
-            // respond to X" — so only the `ifFalse: [<diverge>]` guard shape
-            // below can narrow post-guard for this kind.
-            info = self.refine_responds_to_narrowing(info);
+        if self.fallthrough_may_self_send(receiver, arguments) {
+            facts.drop_fields();
         }
 
         if is_if_true || is_if_true_if_false {
@@ -457,64 +391,50 @@ impl TypeChecker {
                 return;
             };
             if !self.block_diverges(true_block) {
-                // BT-4199: the dual `ifTrue: [...] ifFalse: [diverging]` shape.
+                // BT-4199: the dual `ifTrue: [...] ifFalse: [diverging]` shape —
+                // reaching the next statement proves the condition held.
                 if is_if_true_if_false {
-                    self.narrow_after_diverging_false_block(&info, arguments, env);
+                    self.narrow_after_diverging_false_block(&facts.when_true, arguments, env);
                 }
                 return;
             }
             // For `ifTrue:ifFalse:`, execution may reach the next
             // statement through the `ifFalse:` block. If that block
-            // reassigns the tested variable (e.g. `[self.user := nil]`
+            // reassigns a tested variable (e.g. `[self.user := nil]`
             // or `[x := nil]`), the post-statement narrowing would be
             // unsound — skip it.
             if is_if_true_if_false {
                 if let Some(Expression::Block(false_block)) = arguments.get(1) {
-                    if block_may_reassign(false_block, &info.variable) {
+                    if facts
+                        .when_false
+                        .keys()
+                        .any(|key| block_may_reassign(false_block, key))
+                    {
                         return;
                     }
                 }
             }
-            let Some(narrowed) = Self::early_return_false_branch_type(
-                &info,
-                env,
-                hierarchy,
-                self.alias_registry.as_deref(),
-                self.protocol_registry.as_deref(),
-            ) else {
-                return;
-            };
-            // After this statement, the variable is narrowed.
-            // Use method-remainder scope: the refinement outlives the
-            // guard send and applies to the rest of the enclosing method
-            // body (unlike the block-scoped narrowings pushed inside
-            // `infer_block_with_narrowing`).
-            env.push_refinement(RefinementLayer::method_remainder(
-                info.variable.clone(),
-                narrowed,
-            ));
+            // The true block diverges, so any execution reaching the next
+            // statement came through the false path.
+            Self::push_method_remainder(&facts.when_false, env);
         } else if is_if_false {
-            // `<receiver> ifFalse: [diverging]` — the sole
-            // argument is the false block. If it diverges, execution
-            // reaching the next statement proves the guard's test held,
-            // so the variable narrows to the *true*-branch type.
-            //
-            // For `isKindOf:` this is `compute_class_narrowing`'s resolved
-            // `true_type` (set above). For plain `isNil` checks, `info` was
-            // never routed through `compute_class_narrowing` — `true_type`
-            // instead comes straight from `detect_narrowing`'s `isNil` rule,
-            // which sets it to `InferredType::known("UndefinedObject")`
-            // (see `narrowing/rules/is_nil.rs`).
+            // `<receiver> ifFalse: [diverging]` — reaching the next statement
+            // proves the condition held.
             let Some(Expression::Block(false_block)) = arguments.first() else {
                 return;
             };
-            if !self.block_diverges(false_block) {
-                return;
+            if self.block_diverges(false_block) {
+                Self::push_method_remainder(&facts.when_true, env);
             }
-            env.push_refinement(RefinementLayer::method_remainder(
-                info.variable.clone(),
-                info.true_type.clone(),
-            ));
+        }
+    }
+
+    /// Narrow the rest of the enclosing method by `facts`. Unlike the
+    /// block-scoped narrowings pushed inside `infer_block_with_narrowings`,
+    /// the refinement outlives the guard send.
+    fn push_method_remainder(facts: &Facts, env: &mut TypeEnv) {
+        for (key, ty) in facts.iter() {
+            env.push_refinement(RefinementLayer::method_remainder(key.clone(), ty.clone()));
         }
     }
 
@@ -525,22 +445,28 @@ impl TypeChecker {
     /// reaches the next statement, so a self-send in it (`[self log. ^0]`)
     /// leaves the post-guard narrowing intact.
     fn fallthrough_may_self_send(&self, receiver: &Expression, arguments: &[Expression]) -> bool {
-        expr_contains_returning_self_send(receiver, &self.type_map)
+        expr_may_write_fields(receiver, &self.type_map, self.protocol_registry.as_deref())
             || arguments.iter().any(|arg| match arg {
                 Expression::Block(block) => {
                     !self.block_diverges(block)
-                        && expr_contains_returning_self_send(arg, &self.type_map)
+                        && expr_may_write_fields(
+                            arg,
+                            &self.type_map,
+                            self.protocol_registry.as_deref(),
+                        )
                 }
-                other => expr_contains_returning_self_send(other, &self.type_map),
+                other => {
+                    expr_may_write_fields(other, &self.type_map, self.protocol_registry.as_deref())
+                }
             })
     }
 
     /// BT-4199: `<test> ifTrue: [...] ifFalse: [diverging]` — reaching the
-    /// next statement proves the test held, so narrow to the true-branch type
-    /// (unless the true block reassigns the tested variable).
+    /// next statement proves the test held, so narrow by the facts true of it
+    /// (unless the true block reassigns a tested variable).
     fn narrow_after_diverging_false_block(
         &self,
-        info: &NarrowingInfo,
+        when_true: &Facts,
         arguments: &[Expression],
         env: &mut TypeEnv,
     ) {
@@ -549,121 +475,12 @@ impl TypeChecker {
         else {
             return;
         };
-        if self.block_diverges(false_block) && !block_may_reassign(true_block, &info.variable) {
-            env.push_refinement(RefinementLayer::method_remainder(
-                info.variable.clone(),
-                info.true_type.clone(),
-            ));
-        }
-    }
-
-    /// Apply post-guard narrowing for a compound nil-guard (BT-4107).
-    ///
-    /// Mirrors [`Self::apply_early_return_narrowing`]'s single-variable logic
-    /// for every variable in an `or:`-chain of `isNil` tests or an
-    /// `and:`-chain of `notNil` tests:
-    /// - [`CompoundNilGuardKind::OrIsNil`]: `or:` is false only when every
-    ///   disjunct is false, so a diverging true block (`ifTrue: [^...]`, or
-    ///   the combined `ifTrue: [^...] ifFalse: [...]` whose false block does
-    ///   not reassign a tested var) proves every tested var non-nil on
-    ///   fall-through. A diverging *false* block proves only the disjunction
-    ///   (some var is nil, but not which), so solo `ifFalse:` never narrows.
-    /// - [`CompoundNilGuardKind::AndNotNil`]: the dual — `and:` is true only
-    ///   when every conjunct is true, so a diverging false block
-    ///   (`ifFalse: [^...]`, or the combined `ifTrue: [...] ifFalse: [^...]`
-    ///   whose true block does not reassign a tested var) proves every tested
-    ///   var non-nil. Solo `ifTrue:` never narrows.
-    ///
-    /// Each variable resolves its *current* type live (locals and previously
-    /// narrowed `self.field` keys via
-    /// [`Self::resolve_narrowing_variable_type`]) and narrows through
-    /// [`Self::non_nil_type`], exactly like the `isNil` post-guard above.
-    #[allow(clippy::too_many_arguments)] // mirrors apply_early_return_narrowing's destructured call-site shape
-    pub(in crate::semantic_analysis::type_checker) fn apply_compound_nil_guard_narrowing(
-        &mut self,
-        receiver: &Expression,
-        arguments: &[Expression],
-        is_if_true: bool,
-        is_if_false: bool,
-        is_if_true_if_false: bool,
-        env: &mut TypeEnv,
-        hierarchy: &ClassHierarchy,
-    ) {
-        let Some((kind, mut variables)) = Self::detect_compound_nil_guard(receiver) else {
-            return;
-        };
-        // BT-4715: see `apply_early_return_narrowing`.
-        if self.fallthrough_may_self_send(receiver, arguments) {
-            variables.retain(|v| !matches!(v, EnvKey::SelfField(_)));
-        }
-        match kind {
-            CompoundNilGuardKind::OrIsNil => {
-                if !(is_if_true || is_if_true_if_false) {
-                    return;
-                }
-                let Some(Expression::Block(true_block)) = arguments.first() else {
-                    return;
-                };
-                if !self.block_diverges(true_block) {
-                    return;
-                }
-                if is_if_true_if_false {
-                    if let Some(Expression::Block(false_block)) = arguments.get(1) {
-                        if variables
-                            .iter()
-                            .any(|var| block_may_reassign(false_block, var))
-                        {
-                            return;
-                        }
-                    }
-                }
-                self.push_non_nil_remainders(&variables, env, hierarchy);
-            }
-            CompoundNilGuardKind::AndNotNil => {
-                if !(is_if_false || is_if_true_if_false) {
-                    return;
-                }
-                // `ifFalse:` carries the false block first; `ifTrue:ifFalse:`
-                // carries it second (BT-4199).
-                let false_idx = usize::from(is_if_true_if_false);
-                let Some(Expression::Block(false_block)) = arguments.get(false_idx) else {
-                    return;
-                };
-                if !self.block_diverges(false_block) {
-                    return;
-                }
-                if is_if_true_if_false {
-                    if let Some(Expression::Block(true_block)) = arguments.first() {
-                        if variables
-                            .iter()
-                            .any(|var| block_may_reassign(true_block, var))
-                        {
-                            return;
-                        }
-                    }
-                }
-                self.push_non_nil_remainders(&variables, env, hierarchy);
-            }
-        }
-    }
-
-    /// Push a method-remainder non-nil refinement for each of `variables`.
-    ///
-    /// Shared by both [`CompoundNilGuardKind`] arms of
-    /// [`Self::apply_compound_nil_guard_narrowing`] — every compound guard
-    /// that narrows post-guard narrows to non-nil.
-    fn push_non_nil_remainders(
-        &self,
-        variables: &[EnvKey],
-        env: &mut TypeEnv,
-        hierarchy: &ClassHierarchy,
-    ) {
-        for var in variables {
-            let current_ty = self.narrowing_variable_type(var, env, hierarchy);
-            env.push_refinement(RefinementLayer::method_remainder(
-                var.clone(),
-                Self::non_nil_type(&current_ty),
-            ));
+        if self.block_diverges(false_block)
+            && !when_true
+                .keys()
+                .any(|key| block_may_reassign(true_block, key))
+        {
+            Self::push_method_remainder(when_true, env);
         }
     }
 
