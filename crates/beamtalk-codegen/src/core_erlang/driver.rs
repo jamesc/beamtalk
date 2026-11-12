@@ -117,6 +117,7 @@ pub fn generate_module_with_warnings(
     };
     generator.peeled_parens = peeled_parens;
     generator.current_pipeline_sends = module.pipeline_sends.clone();
+    generator.current_literal_comments = module.literal_comments.clone();
     generator.source_text = options.source_text;
     generator.set_stdlib_mode(options.stdlib_mode);
     generator.protocol_sources = options.protocol_sources;

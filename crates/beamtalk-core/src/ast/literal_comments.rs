@@ -101,6 +101,24 @@ impl LiteralComments {
     pub fn get(&self, span: Span) -> Option<&LiteralCommentSlots> {
         self.literals.get(&key(span))
     }
+
+    /// The entries whose literals lie inside `span`.
+    ///
+    /// For a definition rebuilt from part of another one's code, such as a
+    /// `ClassBuilder` block method (`#sel => [:self | …]`): the block's
+    /// literals were recorded on the enclosing definition, so the rebuilt one
+    /// takes the entries inside the block (BT-4708).
+    #[must_use]
+    pub fn within(&self, span: Span) -> Self {
+        Self {
+            literals: self
+                .literals
+                .range((span.start(), span.start())..=(span.end(), span.end()))
+                .filter(|&(&(_, end), _)| end <= span.end())
+                .map(|(&key, slots)| (key, slots.clone()))
+                .collect(),
+        }
+    }
 }
 
 impl FromIterator<(Span, LiteralCommentSlots)> for LiteralComments {

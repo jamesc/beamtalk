@@ -644,6 +644,7 @@ fn verifier_report(src: &str) -> String {
         generate_repl_expressions_surfacing_verifier(
             &expressions,
             &beamtalk_core::ast::PipelineSends::default(),
+            &beamtalk_core::ast::LiteralComments::default(),
             "bt4288_off",
             HashMap::new(),
             None,

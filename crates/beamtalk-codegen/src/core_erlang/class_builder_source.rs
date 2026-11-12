@@ -30,8 +30,8 @@
 
 use beamtalk_core::ast::normalize::{PeelScope, PeeledParens};
 use beamtalk_core::ast::{
-    Block, CascadeMessage, Expression, Identifier, KeywordPart, Literal, MapPair, MessageSelector,
-    MethodDefinition, ParameterDefinition, PipelineSends,
+    Block, CascadeMessage, Expression, Identifier, KeywordPart, Literal, LiteralComments, MapPair,
+    MessageSelector, MethodDefinition, ParameterDefinition, PipelineSends,
 };
 use beamtalk_core::source_analysis::{Span, is_binary_selector_char};
 
@@ -99,6 +99,9 @@ pub(super) fn selector_from_symbol(sym: &str) -> Option<MessageSelector> {
 /// parentheses are kept as written: `peeled` is what codegen's peel removed
 /// from the tree the block came from, and `scope` the reflection unit the
 /// block sits in — the enclosing method's, or the module level (BT-4059).
+/// Comments inside its collection literals are kept too (BT-4708):
+/// `literal_comments` is that unit's record, and the rebuilt method takes the
+/// entries inside the block.
 /// Its `|>` sends are kept as written too: `pipeline_sends` is the record of
 /// that same reflection unit, and the rebuilt method takes the entries that
 /// fall inside the block (ADR 0145).
@@ -114,6 +117,7 @@ fn block_method_source(
     peeled: &PeeledParens,
     scope: PeelScope,
     pipeline_sends: &PipelineSends,
+    literal_comments: &LiteralComments,
 ) -> Option<String> {
     let selector = selector_from_symbol(selector_sym)?;
     // A method fun receives `self` plus one argument per selector slot, so the
@@ -133,6 +137,8 @@ fn block_method_source(
     // The block's `|>` sends were recorded on the enclosing definition, not
     // on this rebuilt one.
     method.pipeline_sends = pipeline_sends.within(block.span);
+    // Likewise the comments inside the block's collection literals (BT-4708).
+    method.literal_comments = literal_comments.within(block.span);
     Some(as_written_method_source(&method, peeled, scope))
 }
 
@@ -146,15 +152,22 @@ fn build_source_map(
     peeled: &PeeledParens,
     scope: PeelScope,
     pipeline_sends: &PipelineSends,
+    literal_comments: &LiteralComments,
 ) -> Option<Expression> {
     let mut source_pairs: Vec<MapPair> = Vec::new();
     for pair in pairs {
         if let (Expression::Literal(Literal::Symbol(sym), _), Expression::Block(block)) =
             (&pair.key, &pair.value)
         {
-            if let Some(source) =
-                block_method_source(sym, block, is_class_method, peeled, scope, pipeline_sends)
-            {
+            if let Some(source) = block_method_source(
+                sym,
+                block,
+                is_class_method,
+                peeled,
+                scope,
+                pipeline_sends,
+                literal_comments,
+            ) {
                 source_pairs.push(MapPair {
                     key: pair.key.clone(),
                     value: Expression::Literal(Literal::String(source.into()), pair.span),
@@ -200,13 +213,15 @@ fn keyword_setter(name: &str) -> MessageSelector {
 /// side. `peeled` is the generator's record of the operand parentheses its
 /// peel removed and `scope` the reflection unit the cascade sits in, so the
 /// synthesised source keeps them as written. `pipeline_sends` is that
-/// unit's `|>` record (ADR 0145), so it keeps `|>` as written too.
+/// unit's `|>` record (ADR 0145), so it keeps `|>` as written too, and
+/// `literal_comments` its collection-literal comments (BT-4708).
 pub(super) fn inject_method_source(
     receiver: &Expression,
     messages: &[CascadeMessage],
     peeled: &PeeledParens,
     scope: PeelScope,
     pipeline_sends: &PipelineSends,
+    literal_comments: &LiteralComments,
 ) -> Option<Vec<CascadeMessage>> {
     // The parser keeps the first cascade message inside `receiver` (as the
     // outer MessageSend); the object the cascade targets is that send's
@@ -266,12 +281,16 @@ pub(super) fn inject_method_source(
     // map); the class side likewise for `classMethodSource:` / `classMethods:`.
     let method_source = (!has_method_source)
         .then(|| {
-            methods_map.and_then(|m| build_source_map(m, false, peeled, scope, pipeline_sends))
+            methods_map.and_then(|m| {
+                build_source_map(m, false, peeled, scope, pipeline_sends, literal_comments)
+            })
         })
         .flatten();
     let class_method_source = (!has_class_method_source)
         .then(|| {
-            class_methods_map.and_then(|m| build_source_map(m, true, peeled, scope, pipeline_sends))
+            class_methods_map.and_then(|m| {
+                build_source_map(m, true, peeled, scope, pipeline_sends, literal_comments)
+            })
         })
         .flatten();
 
@@ -469,6 +488,7 @@ mod tests {
             &PeeledParens::default(),
             PeelScope::Module,
             &PipelineSends::default(),
+            &LiteralComments::default(),
         )
         .expect("should inject");
         let entries = injected_source_map(&augmented, "methodSource:");
@@ -510,6 +530,7 @@ mod tests {
                 peeled,
                 PeelScope::Module,
                 &PipelineSends::default(),
+                &LiteralComments::default(),
             )
             .expect("should inject");
             injected_source_map(&augmented, "methodSource:")
@@ -542,6 +563,7 @@ mod tests {
             &PeeledParens::default(),
             PeelScope::Module,
             &PipelineSends::default(),
+            &LiteralComments::default(),
         )
         .expect("should inject");
         let entries = injected_source_map(&augmented, "methodSource:");
@@ -562,7 +584,8 @@ mod tests {
                 &msgs,
                 &PeeledParens::default(),
                 PeelScope::Module,
-                &PipelineSends::default()
+                &PipelineSends::default(),
+                &LiteralComments::default()
             )
             .is_none()
         );
@@ -579,7 +602,8 @@ mod tests {
                 &msgs,
                 &PeeledParens::default(),
                 PeelScope::Module,
-                &PipelineSends::default()
+                &PipelineSends::default(),
+                &LiteralComments::default()
             )
             .is_none()
         );
@@ -596,7 +620,8 @@ mod tests {
                 &msgs,
                 &PeeledParens::default(),
                 PeelScope::Module,
-                &PipelineSends::default()
+                &PipelineSends::default(),
+                &LiteralComments::default()
             )
             .is_none()
         );
@@ -614,7 +639,8 @@ mod tests {
                 &msgs,
                 &PeeledParens::default(),
                 PeelScope::Module,
-                &PipelineSends::default()
+                &PipelineSends::default(),
+                &LiteralComments::default()
             )
             .is_none()
         );
@@ -632,7 +658,8 @@ mod tests {
                 &msgs,
                 &PeeledParens::default(),
                 PeelScope::Module,
-                &PipelineSends::default()
+                &PipelineSends::default(),
+                &LiteralComments::default()
             )
             .is_none()
         );
@@ -652,6 +679,7 @@ mod tests {
             &PeeledParens::default(),
             PeelScope::Module,
             &PipelineSends::default(),
+            &LiteralComments::default(),
         )
         .expect("should inject");
         let entries = injected_source_map(&augmented, "methodSource:");
@@ -671,7 +699,8 @@ mod tests {
                 &msgs,
                 &PeeledParens::default(),
                 PeelScope::Module,
-                &PipelineSends::default()
+                &PipelineSends::default(),
+                &LiteralComments::default()
             )
             .is_none()
         );
@@ -695,6 +724,7 @@ mod tests {
             &PeeledParens::default(),
             PeelScope::Module,
             &PipelineSends::default(),
+            &LiteralComments::default(),
         )
         .expect("should inject");
         let entries = injected_source_map(&augmented, "classMethodSource:");
@@ -723,6 +753,7 @@ mod tests {
             &PeeledParens::default(),
             PeelScope::Module,
             &PipelineSends::default(),
+            &LiteralComments::default(),
         )
         .expect("should inject");
         let entries = injected_source_map(&augmented, "classMethodSource:");
@@ -746,7 +777,8 @@ mod tests {
                 &msgs,
                 &PeeledParens::default(),
                 PeelScope::Module,
-                &PipelineSends::default()
+                &PipelineSends::default(),
+                &LiteralComments::default()
             )
             .is_none()
         );
@@ -765,7 +797,8 @@ mod tests {
                 &msgs,
                 &PeeledParens::default(),
                 PeelScope::Module,
-                &PipelineSends::default()
+                &PipelineSends::default(),
+                &LiteralComments::default()
             )
             .is_none()
         );
@@ -782,7 +815,8 @@ mod tests {
                 &msgs,
                 &PeeledParens::default(),
                 PeelScope::Module,
-                &PipelineSends::default()
+                &PipelineSends::default(),
+                &LiteralComments::default()
             )
             .is_none()
         );
@@ -800,7 +834,8 @@ mod tests {
                 &msgs,
                 &PeeledParens::default(),
                 PeelScope::Module,
-                &PipelineSends::default()
+                &PipelineSends::default(),
+                &LiteralComments::default()
             )
             .is_none()
         );
@@ -818,6 +853,7 @@ mod tests {
             &PeeledParens::default(),
             PeelScope::Module,
             &PipelineSends::default(),
+            &LiteralComments::default(),
         )
         .expect("should inject");
         let entries = injected_source_map(&augmented, "classMethodSource:");
@@ -840,6 +876,7 @@ mod tests {
             &PeeledParens::default(),
             PeelScope::Module,
             &PipelineSends::default(),
+            &LiteralComments::default(),
         )
         .expect("should inject");
 
@@ -869,6 +906,7 @@ mod tests {
             &PeeledParens::default(),
             PeelScope::Module,
             &PipelineSends::default(),
+            &LiteralComments::default(),
         )
         .expect("should inject");
         // Instance side not re-injected (already present once).
@@ -895,6 +933,7 @@ mod tests {
             &PeeledParens::default(),
             PeelScope::Module,
             &PipelineSends::default(),
+            &LiteralComments::default(),
         )
         .expect("should inject");
         assert!(has_setter(&augmented, "methodSource:"));

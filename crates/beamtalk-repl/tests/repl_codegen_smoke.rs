@@ -1797,6 +1797,7 @@ fn test_repl_surfacing_verifier_reports_only_internal_findings() {
     let (code, diags) = generate_repl_expressions_surfacing_verifier(
         &exprs,
         &PipelineSends::default(),
+        &beamtalk_core::ast::LiteralComments::default(),
         "repl_surf",
         std::collections::HashMap::new(),
         None,
@@ -1813,6 +1814,7 @@ fn test_repl_surfacing_verifier_reports_only_internal_findings() {
     let (code, diags) = generate_repl_expressions_surfacing_verifier(
         &exprs,
         &PipelineSends::default(),
+        &beamtalk_core::ast::LiteralComments::default(),
         "repl_surf",
         std::collections::HashMap::new(),
         None,
@@ -1830,6 +1832,7 @@ fn test_repl_surfacing_verifier_reports_only_internal_findings() {
     let (_, traced) = generate_repl_expressions_traced_surfacing_verifier(
         &exprs,
         &PipelineSends::default(),
+        &beamtalk_core::ast::LiteralComments::default(),
         src,
         "repl_surf_t",
         std::collections::HashMap::new(),
@@ -1843,6 +1846,7 @@ fn test_repl_surfacing_verifier_reports_only_internal_findings() {
     let (_, diags) = generate_test_expression_surfacing_verifier(
         &exprs[1],
         &PipelineSends::default(),
+        &beamtalk_core::ast::LiteralComments::default(),
         "test_surf",
     )
     .expect("codegen should work");
@@ -1875,6 +1879,7 @@ fn test_repl_class_builder_block_method_reflects_pipeline_as_written() {
     let (code, _) = generate_repl_expressions_surfacing_verifier(
         &exprs,
         &module.pipeline_sends,
+        &module.literal_comments,
         "repl_pipe",
         std::collections::HashMap::new(),
         None,
@@ -1886,8 +1891,59 @@ fn test_repl_class_builder_block_method_reflects_pipeline_as_written() {
     let (code, _) = generate_repl_expressions_traced_surfacing_verifier(
         &exprs,
         &module.pipeline_sends,
+        &module.literal_comments,
         src,
         "repl_pipe_t",
+        std::collections::HashMap::new(),
+        None,
+        false,
+    )
+    .expect("trace codegen should work");
+    assert!(code.contains(&entry), "Got:\n{code}");
+}
+
+/// BT-4708: a `ClassBuilder` block method typed at the REPL reflects the
+/// comments inside its collection literals. The REPL compiles the module's
+/// expressions without the module, so the entries take the module's
+/// `LiteralComments` record alongside them.
+#[test]
+fn test_repl_class_builder_block_method_reflects_literal_comments() {
+    use beamtalk_repl::codegen::{
+        generate_repl_expressions_surfacing_verifier,
+        generate_repl_expressions_traced_surfacing_verifier,
+    };
+
+    let src = "Object classBuilder name: #Made; \
+               methods: #{#m => [:self |\n  {\n    1, // first\n    2\n  }\n]}; register";
+    let module = parse_source(src);
+    let exprs: Vec<_> = module
+        .expressions
+        .iter()
+        .map(|s| s.expression.clone())
+        .collect();
+    let entry = format!(
+        "#{{{}}}#",
+        beamtalk_cerl_doc::binary::binary_byte_segments("m =>\n  {\n    1, // first\n    2\n  }")
+    );
+
+    let (code, _) = generate_repl_expressions_surfacing_verifier(
+        &exprs,
+        &module.pipeline_sends,
+        &module.literal_comments,
+        "repl_lit",
+        std::collections::HashMap::new(),
+        None,
+        false,
+    )
+    .expect("codegen should work");
+    assert!(code.contains(&entry), "Got:\n{code}");
+
+    let (code, _) = generate_repl_expressions_traced_surfacing_verifier(
+        &exprs,
+        &module.pipeline_sends,
+        &module.literal_comments,
+        src,
+        "repl_lit_t",
         std::collections::HashMap::new(),
         None,
         false,
