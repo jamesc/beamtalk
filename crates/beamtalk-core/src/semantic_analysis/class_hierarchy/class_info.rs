@@ -47,6 +47,7 @@ pub struct ClassVarInfo {
 /// Information about a method in the hierarchy.
 ///
 /// **DDD Context:** Semantic Analysis — Value Object
+#[allow(clippy::struct_excessive_bools)] // independent per-method flags, each documented
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct MethodInfo {
@@ -118,6 +119,12 @@ pub struct MethodInfo {
     /// (BT-4363, BT-4504).
     #[cfg_attr(feature = "serde", serde(default))]
     pub constant_value: Option<ConstantValue>,
+    /// Whether the method's body answers its own receiver on every path
+    /// ([`MethodDefinition::answers_receiver`], BT-4739): a side-effecting
+    /// method that returns `self`, not one that builds an updated copy. The
+    /// `discarded-update` lint stays silent on a call to such a method.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub answers_receiver: bool,
 }
 
 impl MethodInfo {
@@ -566,6 +573,7 @@ impl ClassInfo {
                 origin: None,
                 primitive: m.quoted_primitive_name().cloned(),
                 constant_value: MethodInfo::recorded_constant(m, false),
+                answers_receiver: m.answers_receiver(),
             })
             .collect();
 
@@ -592,6 +600,7 @@ impl ClassInfo {
                 origin: None,
                 primitive: m.quoted_primitive_name().cloned(),
                 constant_value: MethodInfo::recorded_constant(m, true),
+                answers_receiver: m.answers_receiver(),
             })
             .collect();
 

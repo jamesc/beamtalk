@@ -1152,6 +1152,7 @@ impl TypeChecker {
             origin: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         })
     }
 

@@ -205,3 +205,102 @@ fn block_argument_note_does_not_claim_no_effect() {
         hits[0].hint
     );
 }
+
+// ── BT-4739: a method that answers its receiver is not an updated copy ──────
+//
+// Every false positive found in beamtalk-buccaneer is a `-> Self` method on a
+// value that works through a side effect (or only to raise) and then answers
+// `self`. A value cannot mutate itself, so that answer is the receiver.
+
+const EFFECTS: &str = "\
+Value subclass: Handle
+  field: id :: Integer = 0
+  store: v :: Integer -> Self =>
+    Erlang erlang put: #handle value: v.
+    self
+  send: data :: String -> Self =>
+    Erlang gen_tcp send: self id data: data.
+    ^ self
+  logError: reason :: String -> Self =>
+    Logger error: reason.
+    self
+  stopWith: meta :: Object -> Self =>
+    Erlang telemetry execute: #stop meta: meta.
+    self
+  checkPseudo: n :: Integer -> Self =>
+    n < 0 ifTrue: [^ self error: \"bad\"].
+    self
+  checkBlock: n :: Integer -> Self =>
+    n < 0 ifTrue: [^ self].
+    self
+  rebuilt -> Self =>
+    self withId: 9
+  mixed: n :: Integer -> Self =>
+    n < 0 ifTrue: [^ self withId: 1].
+    self
+  emptyBody -> Self =>
+";
+
+fn effect_diagnostics(body: &str) -> Vec<Diagnostic> {
+    let source = format!("{EFFECTS}\nObject subclass: Probe\n{body}");
+    let module = parse_source(&source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    run_with_expect(&module, &hierarchy)
+}
+
+#[test]
+fn side_effect_then_answer_self_is_silent() {
+    // Process-dictionary store, socket send, Logger, telemetry: Buccaneer
+    // categories 1, 3, 4, 6, 7, 8, 9.
+    let diags = effect_diagnostics(
+        "  run: h :: Handle -> Integer =>\n    h store: 1.\n    h send: \"x\".\n    h logError: \"e\".\n    h stopWith: 1.\n    3\n",
+    );
+    assert!(discarded(&diags).is_empty(), "got: {diags:#?}");
+}
+
+#[test]
+fn validator_that_only_raises_is_silent() {
+    // Buccaneer category 5: `checkPseudo:` and friends answer `self` when valid.
+    let diags = effect_diagnostics(
+        "  run: h :: Handle -> Integer =>\n    h checkPseudo: 1.\n    h checkBlock: 2.\n    3\n",
+    );
+    assert!(discarded(&diags).is_empty(), "got: {diags:#?}");
+}
+
+#[test]
+fn self_send_to_a_side_effecting_method_is_silent() {
+    let diags = effect_diagnostics(
+        "  run: h :: Handle -> Integer =>\n    h store: 1; send: \"x\".\n    3\n",
+    );
+    assert!(discarded(&diags).is_empty(), "got: {diags:#?}");
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.category == Some(DiagnosticCategory::CascadeDropsUpdate)),
+        "a cascade through a self-answering method drops nothing, got: {diags:#?}"
+    );
+}
+
+#[test]
+fn method_that_builds_a_copy_still_warns() {
+    // The BT-4522 true positives: the generated `withId:` and a hand-written
+    // method whose answer is a new value.
+    let diags = effect_diagnostics(
+        "  run: h :: Handle -> Integer =>\n    h withId: 5.\n    h rebuilt.\n    3\n",
+    );
+    assert_eq!(discarded(&diags).len(), 2, "got: {diags:#?}");
+}
+
+#[test]
+fn method_with_a_non_self_return_on_any_path_still_warns() {
+    // `^ self withId: 1` inside the block can answer a new copy, so the method
+    // does not answer its receiver on every path.
+    let diags = effect_diagnostics("  run: h :: Handle -> Integer =>\n    h mixed: 1.\n    3\n");
+    assert_eq!(discarded(&diags).len(), 1, "got: {diags:#?}");
+}
+
+#[test]
+fn empty_body_is_not_a_self_answer() {
+    let diags = effect_diagnostics("  run: h :: Handle -> Integer =>\n    h emptyBody.\n    3\n");
+    assert_eq!(discarded(&diags).len(), 1, "got: {diags:#?}");
+}

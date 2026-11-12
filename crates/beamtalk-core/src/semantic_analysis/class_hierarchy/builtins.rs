@@ -57,6 +57,7 @@ pub(super) fn builtin_method(selector: &str, arity: usize, defined_in: &str) -> 
         origin: None,
         primitive: None,
         constant_value: None,
+        answers_receiver: false,
     }
 }
 

@@ -852,6 +852,7 @@ struct ClassVarMeta {
 }
 
 /// Metadata for a single method, extracted from the AST.
+#[allow(clippy::struct_excessive_bools)] // independent per-method flags, each documented
 struct MethodMeta {
     /// Message selector (e.g., `"increment"` or `"add:"`).
     selector: String,
@@ -877,6 +878,9 @@ struct MethodMeta {
     /// The scalar literal when it is the whole body (BT-4363, BT-4504,
     /// `MethodInfo::constant_value`).
     constant_value: Option<beamtalk_core::ast::ConstantValue>,
+    /// Whether the body answers its receiver on every path (BT-4739,
+    /// `MethodInfo::answers_receiver`).
+    answers_receiver: bool,
 }
 
 /// Simplified method kind for code generation.
@@ -920,6 +924,7 @@ fn method_def_to_meta(m: &beamtalk_core::ast::MethodDefinition, class_side: bool
         doc: m.doc_comment.clone(),
         primitive: m.quoted_primitive_name().map(ToString::to_string),
         constant_value: MethodInfo::recorded_constant(m, class_side),
+        answers_receiver: m.answers_receiver(),
     }
 }
 
@@ -973,6 +978,7 @@ fn synthesize_value_auto_methods(
                 doc: Some(getter_doc),
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             });
         }
 
@@ -997,6 +1003,7 @@ fn synthesize_value_auto_methods(
                 doc: Some(setter_doc),
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             });
         }
     }
@@ -1040,6 +1047,7 @@ fn synthesize_value_auto_methods(
         doc: Some(ctor_doc),
         primitive: None,
         constant_value: None,
+        answers_receiver: false,
     });
     Some(kw_sel)
 }
@@ -2519,12 +2527,13 @@ fn generate_method_list(
              is_internal: {internal}, spawns_block: {spawns_block}, \
              return_type: {return_type_expr}, param_types: {param_types_expr}, doc: {doc_expr}, \
              origin: None, primitive: {primitive_expr}, \
-             constant_value: {constant_value_expr} }},",
+             constant_value: {constant_value_expr}, answers_receiver: {answers_receiver} }},",
             arity = m.arity,
             class = class_name,
             sealed = m.is_sealed,
             internal = m.is_internal,
             spawns_block = m.spawns_block,
+            answers_receiver = m.answers_receiver,
         );
     }
     code.push_str("            ],\n");
@@ -3355,6 +3364,7 @@ mod tests {
                     doc: None,
                     primitive: None,
                     constant_value: None,
+                    answers_receiver: false,
                 },
                 MethodMeta {
                     selector: "add:".to_string(),
@@ -3368,6 +3378,7 @@ mod tests {
                     doc: None,
                     primitive: None,
                     constant_value: None,
+                    answers_receiver: false,
                 },
             ],
             class_methods: vec![MethodMeta {
@@ -3382,6 +3393,7 @@ mod tests {
                 doc: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             }],
             class_variables: vec![],
             type_params: vec![],
@@ -3770,6 +3782,7 @@ mod tests {
             doc: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         }];
         let mut code = String::new();
         generate_method_list(&mut code, "methods", &methods, "Counter");
@@ -3797,6 +3810,7 @@ mod tests {
             doc: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         }];
         let mut code = String::new();
         generate_method_list(&mut code, "methods", &methods, "Counter");
@@ -3824,6 +3838,7 @@ mod tests {
             doc: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         }];
         let mut code = String::new();
         generate_method_list(&mut code, "class_methods", &methods, "Timer");
@@ -3850,6 +3865,7 @@ mod tests {
             doc: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         }];
         let mut code = String::new();
         generate_method_list(&mut code, "methods", &methods, "SystemNavigation");
@@ -4440,6 +4456,7 @@ mod tests {
             doc: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         }
     }
 
@@ -5007,6 +5024,7 @@ mod tests {
             doc: Some("Line one\nLine \"two\"\tend\r".to_string()),
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         }];
         let mut code = String::new();
         generate_method_list(&mut code, "methods", &methods, "Help");

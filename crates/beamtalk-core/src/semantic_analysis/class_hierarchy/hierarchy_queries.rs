@@ -1081,6 +1081,7 @@ impl ClassHierarchy {
                     origin: None,
                     primitive: None,
                     constant_value: None,
+                    answers_receiver: false,
                 });
             }
 
@@ -1102,6 +1103,7 @@ impl ClassHierarchy {
                     origin: None,
                     primitive: None,
                     constant_value: None,
+                    answers_receiver: false,
                 });
             }
         }
@@ -1135,6 +1137,7 @@ impl ClassHierarchy {
             origin: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         });
         KeywordDecision::Known(Some(kw_sel))
     }
@@ -1509,6 +1512,7 @@ impl ClassHierarchy {
                     origin: None,
                     primitive: None,
                     constant_value: None,
+                    answers_receiver: false,
                 });
             }
 
@@ -1535,6 +1539,7 @@ impl ClassHierarchy {
                     origin: None,
                     primitive: None,
                     constant_value: None,
+                    answers_receiver: false,
                 });
             }
         }
@@ -1580,6 +1585,7 @@ impl ClassHierarchy {
             origin: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         });
         Some(kw_sel)
     }

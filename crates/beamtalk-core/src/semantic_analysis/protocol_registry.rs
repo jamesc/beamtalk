@@ -1836,6 +1836,7 @@ Value subclass: Version
                     origin: None,
                     primitive: None,
                     constant_value: None,
+                    answers_receiver: false,
                 })
                 .collect(),
             class_variables: vec![],
@@ -1919,6 +1920,7 @@ Value subclass: Version
                     origin: None,
                     primitive: None,
                     constant_value: None,
+                    answers_receiver: false,
                 }],
                 class_methods: vec![],
                 class_variables: vec![],

@@ -289,6 +289,13 @@ pub fn cascade_drops_update(
     if !hierarchy.is_value_subclass(&method.defined_in) {
         return false;
     }
+    // A method whose body answers its own receiver (BT-4739) does its work
+    // through a side effect (process dictionary, socket, logger, telemetry)
+    // or only to raise; a value cannot mutate itself, so the answer is the
+    // receiver, never an updated copy.
+    if method.answers_receiver {
+        return false;
+    }
     match &method.return_type {
         Some(DeclaredType::SelfType) => true,
         Some(DeclaredType::Simple(name) | DeclaredType::Generic { base: name, .. }) => {

@@ -51,6 +51,7 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
             MethodInfo {
                 selector: eco_string("size"),
@@ -67,6 +68,7 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
             MethodInfo {
                 selector: eco_string("select:"),
@@ -83,6 +85,7 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
         ],
         class_methods: vec![],
@@ -128,6 +131,7 @@ fn add_generic_collection_hierarchy(hierarchy: &mut ClassHierarchy) {
             origin: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         }],
         class_methods: vec![],
         class_variables: vec![],
@@ -702,6 +706,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
             origin: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         }],
         class_methods: vec![MethodInfo {
             selector: eco_string("wrap:"),
@@ -718,6 +723,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
             origin: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         }],
         class_variables: vec![],
         type_params: vec![eco_string("T")],
@@ -767,6 +773,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
             MethodInfo {
                 selector: eco_string("value:"),
@@ -783,6 +790,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
         ],
         class_methods: vec![],
@@ -860,6 +868,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
             MethodInfo {
                 selector: eco_string("setActor:"),
@@ -876,6 +885,7 @@ fn setup_variance_test_env() -> (ClassHierarchy, ProtocolRegistry) {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
         ],
         class_methods: vec![],
@@ -1313,6 +1323,7 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
             MethodInfo {
                 selector: "buildHeaders:".into(),
@@ -1329,6 +1340,7 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
         ],
         class_methods: vec![MethodInfo {
@@ -1346,6 +1358,7 @@ fn make_hierarchy_with_internal_method() -> ClassHierarchy {
             origin: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         }],
         class_variables: vec![],
         type_params: vec![],

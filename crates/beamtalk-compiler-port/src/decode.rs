@@ -342,6 +342,10 @@ pub(crate) fn parse_method_infos_from_map(
                 origin: None,
                 primitive: None,
                 constant_value,
+                // Method bodies are not part of `__beamtalk_meta`, so a
+                // reloaded class cannot say whether a method answers its
+                // receiver; `false` keeps `discarded-update` conservative.
+                answers_receiver: false,
             })
         })
         .collect()

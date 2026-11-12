@@ -409,6 +409,7 @@ pub(super) fn method_info(
         origin: None,
         primitive: None,
         constant_value: None,
+        answers_receiver: false,
     }
 }
 
@@ -462,6 +463,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
             MethodInfo {
                 selector: eco_string("error"),
@@ -478,6 +480,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
             MethodInfo {
                 selector: eco_string("map:"),
@@ -494,6 +497,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
             MethodInfo {
                 selector: eco_string("isOk"),
@@ -510,6 +514,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
         ],
         class_methods: vec![
@@ -528,6 +533,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
             MethodInfo {
                 selector: eco_string("error:"),
@@ -544,6 +550,7 @@ pub(super) fn add_generic_result_class(hierarchy: &mut ClassHierarchy) {
                 origin: None,
                 primitive: None,
                 constant_value: None,
+                answers_receiver: false,
             },
         ],
         class_variables: vec![],

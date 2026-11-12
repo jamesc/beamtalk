@@ -1138,6 +1138,7 @@ mod tests {
             origin: _,
             primitive: _,
             constant_value: _,
+            answers_receiver: _,
         } = base.methods[0].clone();
         type MethodMutator = fn(&mut MethodInfo);
         let method_fields: Vec<(&str, Class, MethodMutator)> = vec![
@@ -1168,6 +1169,10 @@ mod tests {
             }),
             ("constant_value", Signature, |m| {
                 m.constant_value = Some(ConstantValue::Integer(7));
+            }),
+            // Body-derived: the `discarded-update` lint in other files reads it.
+            ("answers_receiver", Signature, |m| {
+                m.answers_receiver = !m.answers_receiver
             }),
         ];
         for (field, class, mutate) in &method_fields {

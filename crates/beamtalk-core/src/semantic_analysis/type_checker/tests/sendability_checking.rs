@@ -55,6 +55,7 @@ fn hierarchy_with(class: &str, superclass: &str) -> ClassHierarchy {
             origin: None,
             primitive: None,
             constant_value: None,
+            answers_receiver: false,
         }],
         class_methods: vec![],
         class_variables: vec![],
