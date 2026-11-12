@@ -28,9 +28,10 @@ use std::fmt;
 
 use ecow::EcoString;
 
-use crate::ast::TypeAnnotation;
+use crate::ast::{Identifier, TypeAnnotation};
 use crate::semantic_analysis::string_utils::{split_generic_base, split_top_level};
 use crate::semantic_analysis::type_checker::InferredType;
+use crate::source_analysis::Span;
 
 /// A span-free, structured type signature — the value-object counterpart to
 /// [`TypeAnnotation`], with every [`crate::source_analysis::Span`] and
@@ -317,6 +318,44 @@ impl DeclaredType {
                 left.mentions_any(names) || right.mentions_any(names)
             }
             Self::Singleton(_) | Self::SelfType | Self::SelfClass | Self::ClassOf(_) => false,
+        }
+    }
+
+    /// Rebuilds a [`TypeAnnotation`] from this value, every node carrying
+    /// `span` — the inverse of [`From<&TypeAnnotation>`] up to spans, which a
+    /// span-free `DeclaredType` no longer has. Used where a rewritten type must
+    /// go back into an AST (BT-4707).
+    #[must_use]
+    pub fn to_annotation(&self, span: Span) -> TypeAnnotation {
+        match self {
+            Self::Simple(name) => TypeAnnotation::Simple(Identifier::new(name.clone(), span)),
+            Self::Union(members) => TypeAnnotation::union(
+                members.iter().map(|m| m.to_annotation(span)).collect(),
+                span,
+            ),
+            Self::Singleton(name) => TypeAnnotation::singleton(name.clone(), span),
+            Self::Generic { base, parameters } => TypeAnnotation::generic(
+                Identifier::new(base.clone(), span),
+                parameters.iter().map(|p| p.to_annotation(span)).collect(),
+                span,
+            ),
+            Self::FalseOr(inner) => TypeAnnotation::false_or(inner.to_annotation(span), span),
+            Self::Difference { base, excluded } => TypeAnnotation::difference(
+                base.to_annotation(span),
+                excluded.to_annotation(span),
+                span,
+            ),
+            Self::Intersection { left, right } => TypeAnnotation::intersection(
+                left.to_annotation(span),
+                right.to_annotation(span),
+                span,
+            ),
+            Self::SelfType => TypeAnnotation::SelfType { span },
+            Self::SelfClass => TypeAnnotation::SelfClass { span },
+            Self::ClassOf(name) => TypeAnnotation::ClassOf {
+                class_name: Identifier::new(name.clone(), span),
+                span,
+            },
         }
     }
 
@@ -667,6 +706,37 @@ mod tests {
         );
         let opaque = DeclaredType::parse("not a name class");
         assert_eq!(opaque, DeclaredType::Simple("not a name class".into()));
+    }
+
+    #[test]
+    fn to_annotation_round_trips_every_variant() {
+        for src in [
+            "Integer",
+            "Integer | String",
+            "#north",
+            "Result(Integer, List(String))",
+            "Symbol \\ #foo",
+            "Collection(Object) & Comparable",
+            "Self",
+            "Self class",
+            "Actor class | Nil",
+        ] {
+            let declared = DeclaredType::parse(src);
+            if matches!(&declared, DeclaredType::Simple(n) if n.contains(['\\', '&'])) {
+                continue; // `parse` cannot read `\`/`&`; covered via the AST below.
+            }
+            let ann = declared.to_annotation(Span::new(3, 9));
+            assert_eq!(ann.span(), Span::new(3, 9));
+            assert_eq!(DeclaredType::from(&ann), declared, "{src}");
+        }
+        let ann = parse_return_type(
+            "Object subclass: Foo\n  bar -> (Symbol \\ #foo) & Comparable => 1\n",
+        );
+        let declared = DeclaredType::from(&ann);
+        assert_eq!(
+            DeclaredType::from(&declared.to_annotation(Span::new(0, 1))),
+            declared
+        );
     }
 
     // ---- Display parity with TypeAnnotation::type_name() ----

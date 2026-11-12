@@ -1015,6 +1015,12 @@ impl DepIndexScan {
             &metadata.alias_infos,
             &mut extensions,
         );
+        // BT-4707: the exported protocol ASTs too — flattened (above) against
+        // the unexpanded ones in this dependency's own alias scope.
+        beamtalk_cli::dependency_extensions::expand_dependency_protocol_defs(
+            &metadata.alias_infos,
+            &mut metadata.protocol_defs,
+        );
         (
             class_module_index,
             class_infos,
@@ -1594,6 +1600,76 @@ dep_utils = { path = "dep_utils" }"#,
                 .map(|m| &m.selector)
                 .collect::<Vec<_>>()
         );
+    }
+
+    /// BT-4707: the protocol ASTs a dependency exports have its own
+    /// `internal type` aliases expanded, so a dependency compiled after it —
+    /// with its own, clashing `internal type Secret` — flattens `uses:
+    /// dep_a@Tagged` against the right types, including an alias that expands
+    /// to a difference type.
+    #[test]
+    fn build_dep_class_index_expands_internal_aliases_in_exported_protocol_defs() {
+        let temp = TempDir::new().unwrap();
+        let a_dir = temp.path().join("dep_a");
+        fs::create_dir_all(&a_dir).unwrap();
+        write_manifest(&a_dir, "dep_a", "0.1.0", "");
+        write_source(
+            &a_dir,
+            "tagged.bt",
+            "internal type Secret = Integer\n\
+             internal type Label = Symbol \\ #hidden\n\n\
+             Protocol define: Tagged\n  \
+             name -> String\n\n  \
+             tag -> Secret => 1\n\n  \
+             label -> Label => #shown\n",
+        );
+        let a_root = Utf8PathBuf::from_path_buf(a_dir).unwrap();
+        let (_, _, protocol_infos, protocol_defs, alias_infos, protocol_sources, _) =
+            build_dep_class_index(&a_root, "dep_a", &[]).unwrap();
+
+        // The exported AST names no internal alias.
+        let tagged = &protocol_defs[0];
+        let returns: Vec<_> = tagged
+            .provided_methods
+            .iter()
+            .map(|m| m.return_type.as_ref().unwrap().type_name().to_string())
+            .collect();
+        assert_eq!(returns, ["Integer", "Symbol \\ #hidden"]);
+
+        let mut dep_a = named_dep("dep_a");
+        dep_a.protocol_infos = protocol_infos;
+        dep_a.protocol_defs = protocol_defs;
+        dep_a.protocol_sources = protocol_sources;
+        dep_a.alias_infos = alias_infos;
+
+        // A later dependency with a clashing internal alias flattens `dep_a`'s
+        // provisions without re-reading them in its own alias scope.
+        let b_dir = temp.path().join("dep_b");
+        fs::create_dir_all(&b_dir).unwrap();
+        write_manifest(&b_dir, "dep_b", "0.1.0", "");
+        write_source(
+            &b_dir,
+            "widget.bt",
+            "internal type Secret = String\n\
+             internal type Label = Boolean\n\n\
+             Object subclass: Widget\n  \
+             uses: dep_a@Tagged\n  \
+             name -> String => \"w\"\n",
+        );
+        let b_root = Utf8PathBuf::from_path_buf(b_dir).unwrap();
+        let (_, class_infos, _, _, _, _, _) =
+            build_dep_class_index(&b_root, "dep_b", &[dep_a]).unwrap();
+        let widget = class_infos.iter().find(|c| c.name == "Widget").unwrap();
+        let ret = |sel: &str| {
+            widget
+                .methods
+                .iter()
+                .find(|m| m.selector == sel)
+                .and_then(|m| m.return_type.as_ref())
+                .map(ToString::to_string)
+        };
+        assert_eq!(ret("tag").as_deref(), Some("Integer"));
+        assert_eq!(ret("label").as_deref(), Some("Symbol \\ #hidden"));
     }
 
     /// BT-4615: a dependency's own `internal type` aliases are expanded out of

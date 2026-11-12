@@ -202,7 +202,7 @@ pub fn resolve_dependency_class_infos_with_sources(project_root: &Utf8Path) -> D
         .map(|dep| (dep.name.clone(), dep.dependencies.clone()))
         .collect();
     // Each dependency flattened so far, with its own protocol ASTs.
-    let mut flattened: Vec<(String, &[ProtocolDefinition])> = Vec::new();
+    let mut flattened: Vec<(String, Vec<ProtocolDefinition>)> = Vec::new();
     let ordered = compile_order(scanned, &parsed.package.name);
     for dep in &ordered {
         let closure =
@@ -228,7 +228,14 @@ pub fn resolve_dependency_class_infos_with_sources(project_root: &Utf8Path) -> D
         );
         protocol_infos.extend(dep_protocol_infos);
         alias_infos.extend(dep.scan.alias_infos.iter().cloned());
-        let own_protocol_defs = dep.scan.trait_users.protocol_defs();
+        // BT-4707: export the ASTs with this dependency's own internal
+        // aliases expanded — after its own flatten (above, in its own alias
+        // scope), before a later dependency or the consumer flattens them.
+        let mut own_protocol_defs = dep.scan.trait_users.protocol_defs().to_vec();
+        crate::dependency_extensions::expand_dependency_protocol_defs(
+            &dep.scan.alias_infos,
+            &mut own_protocol_defs,
+        );
         protocol_defs.extend(own_protocol_defs.iter().cloned());
         flattened.push((dep.name.clone(), own_protocol_defs));
     }
@@ -1181,6 +1188,62 @@ mod tests {
             protocol_defs.len(),
             1,
             "only a's Tagged is provision-bearing"
+        );
+    }
+
+    /// BT-4707: dependency `a`'s `internal type Secret` is expanded in the
+    /// protocol AST it exports, so dependency `b` — which has its *own*
+    /// `internal type Secret = String` — flattens `a@Tagged`'s `tag` as
+    /// `Integer`, not `b`'s `String`; and the exported AST itself (what a
+    /// consumer's `uses: a@Tagged` flattens) names no internal alias.
+    #[test]
+    #[serial_test::serial(dependency_class_cache)]
+    fn dependency_internal_aliases_are_expanded_in_exported_protocol_defs() {
+        let tmp = TempDir::new().unwrap();
+        let app_dir = tmp.path().join("app");
+        let root = Utf8Path::from_path(app_dir.as_path()).unwrap();
+        write(
+            app_dir.join("beamtalk.toml").as_path(),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nb = { path = \"../b\" }\n",
+        );
+        write(
+            tmp.path().join("b/beamtalk.toml").as_path(),
+            "[package]\nname = \"b\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\na = { path = \"../a\" }\n",
+        );
+        write(
+            tmp.path().join("b/src/widget.bt").as_path(),
+            "internal type Secret = String\n\
+             Object subclass: Widget\n  uses: a@Tagged\n  name -> String => \"w\"\n",
+        );
+        write(
+            tmp.path().join("a/src/tagged.bt").as_path(),
+            "internal type Secret = Integer\n\
+             Protocol define: Tagged\n  name -> String\n\n  tag -> Secret => 1\n",
+        );
+
+        let (_, infos, protocol_defs) = resolve_dependency_class_infos(root);
+        let widget = infos.iter().find(|c| c.name == "Widget").unwrap();
+        let tag = widget
+            .methods
+            .iter()
+            .find(|m| m.selector == "tag")
+            .and_then(|m| m.return_type.as_ref())
+            .map(ToString::to_string);
+        assert_eq!(tag.as_deref(), Some("Integer"), "not b's own `Secret`");
+
+        let tagged = protocol_defs
+            .iter()
+            .find(|p| p.name.name == "Tagged")
+            .expect("a's Tagged");
+        assert_eq!(
+            tagged.provided_methods[0]
+                .return_type
+                .as_ref()
+                .map(beamtalk_core::ast::TypeAnnotation::type_name)
+                .as_deref(),
+            Some("Integer"),
         );
     }
 
