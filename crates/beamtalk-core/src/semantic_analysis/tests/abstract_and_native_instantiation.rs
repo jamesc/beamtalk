@@ -616,3 +616,46 @@ Value subclass: Caller
     let hint = errors[0].hint.as_ref().expect("should carry a hint");
     assert!(hint.contains("Q new"), "got: {hint}");
 }
+
+// ── BT-4747: unresolved (cross-file) parent must not read as Object-kind ──
+
+#[test]
+fn test_bt_4747_unresolved_parent_class_new_colon_not_object_kind() {
+    // `Base` lives in another file (manifest-less directory build), so the
+    // chain is incomplete. The kind is unknowable; it must not default to
+    // Object and refuse `self new:`.
+    let errors = uninstantiable_new_errors(
+        "
+Base subclass: Child
+  field: x = nil
+  class wrap: v => self new: #{#x => v}
+",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn test_bt_4747_unresolved_parent_external_receiver_not_object_kind() {
+    let errors = uninstantiable_new_errors(
+        "
+Base subclass: Child
+  field: x = nil
+
+Value subclass: Caller
+  test => Child new: #{#x => 1}
+",
+    );
+    assert!(errors.is_empty(), "{errors:?}");
+}
+
+#[test]
+fn test_bt_4747_resolved_object_parent_still_rejected() {
+    let errors = uninstantiable_new_errors(
+        "
+Object subclass: Base
+Base subclass: Child
+  class wrap: v => self new: #{#x => v}
+",
+    );
+    assert_eq!(errors.len(), 1, "{errors:?}");
+}

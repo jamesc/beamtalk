@@ -649,10 +649,20 @@ coverage-build: build-erlang
     echo "✅ Coverage prerequisites complete"
 
 # Build all example programs (examples/**/*.bt → BEAM)
+[unix]
 build-examples: build-stdlib
-    @echo "🔨 Building examples..."
-    @cargo run --bin beamtalk --quiet -- build examples/
-    @echo "✅ Examples build complete"
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "🔨 Building examples..."
+    # Each example is its own package: build per package so cross-file class
+    # lookups resolve (a manifest-less `build examples/` has no class index; BT-4747).
+    for dir in examples/*/; do
+        if [ -f "${dir}beamtalk.toml" ]; then
+            echo "  Building $(basename "$dir")..."
+            cargo run --bin beamtalk --quiet -- build "${dir%/}"
+        fi
+    done
+    echo "✅ Examples build complete"
 
 # Run tests for every example package that has a test/ directory
 [unix]
