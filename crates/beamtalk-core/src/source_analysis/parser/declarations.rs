@@ -16,7 +16,7 @@ use crate::ast::{
     SlotKind, StandaloneMethodDefinition, StateDeclaration, TypeAliasDefinition, TypeAnnotation,
     TypeParamDecl,
 };
-use crate::source_analysis::{Span, TokenKind};
+use crate::source_analysis::{Span, Token, TokenKind};
 use ecow::EcoString;
 
 use super::{Diagnostic, Parser};
@@ -1238,18 +1238,43 @@ impl Parser {
     /// `None` if the closing `}` is missing.
     fn skip_shape_type(&self, offset: usize) -> Option<usize> {
         debug_assert!(matches!(self.peek_at(offset), Some(TokenKind::MapOpen)));
-        let mut depth = 0usize;
+        // `braces` counts `{` / `#{` openers; `nested` counts other bracket
+        // openers so an unmatched closer (which belongs to an enclosing
+        // construct) ends the scan instead of being walked past.
+        let mut braces = 0usize;
+        let mut nested = 0usize;
         let mut o = offset;
         loop {
             match self.peek_at(o)? {
-                TokenKind::MapOpen | TokenKind::LeftBrace => depth += 1,
+                TokenKind::MapOpen | TokenKind::LeftBrace => braces += 1,
+                TokenKind::LeftParen
+                | TokenKind::LeftBracket
+                | TokenKind::ListOpen
+                | TokenKind::ArrayOpen => nested += 1,
+                TokenKind::RightParen | TokenKind::RightBracket => {
+                    nested = nested.checked_sub(1)?;
+                }
                 TokenKind::RightBrace => {
-                    depth -= 1;
-                    if depth == 0 {
+                    braces -= 1;
+                    if braces == 0 {
                         return Some(o + 1);
                     }
                 }
                 TokenKind::Eof => return None,
+                // A line starting `name =>` / `name ->` is a new method
+                // definition, never part of a shape: the shape is unclosed.
+                TokenKind::Identifier(_)
+                    if o > offset
+                        && self
+                            .peek_token_at(o)
+                            .is_some_and(Token::has_leading_newline)
+                        && matches!(
+                            self.peek_at(o + 1),
+                            Some(TokenKind::FatArrow | TokenKind::Arrow)
+                        ) =>
+                {
+                    return None;
+                }
                 _ => {}
             }
             o += 1;

@@ -1389,10 +1389,14 @@ impl TypeAnnotation {
                 let mut parts: Vec<EcoString> = fields
                     .iter()
                     .map(|f| {
+                        // Same symbol-quoting rule as the formatter, so the
+                        // printed form re-parses (`#'first name'`).
                         eco_format!(
-                            "{}#{} => {}",
+                            "{}{} => {}",
                             if f.optional { "?" } else { "" },
-                            f.key,
+                            crate::unparse::unparse_literal_display(&crate::ast::Literal::Symbol(
+                                f.key.clone()
+                            )),
                             f.value.type_name()
                         )
                     })

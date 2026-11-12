@@ -2380,6 +2380,20 @@ fn parse_shape_trailing_comma_after_ellipsis_is_allowed() {
 }
 
 #[test]
+fn shape_type_name_quotes_symbol_keys_like_the_formatter() {
+    let (ann, diags) = parse_shape_alias("#{#'first name' => String, ?#plain => Integer}");
+    assert!(diags.is_empty(), "{diags:?}");
+    assert_eq!(
+        ann.type_name(),
+        "#{#'first name' => String, ?#plain => Integer}"
+    );
+    assert_eq!(
+        crate::unparse::unparse_type_annotation_display(&ann),
+        ann.type_name()
+    );
+}
+
+#[test]
 fn parse_shape_unclosed_is_error() {
     let (_, diags) = parse_shape_alias("#{#a => Integer");
     assert!(
