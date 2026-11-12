@@ -33,7 +33,7 @@ until(Pred) ->
     until(Pred, ?DEFAULT_TIMEOUT_MS).
 
 -doc "Poll `Pred` every 5 ms until it returns `true` or `TimeoutMs` elapses.".
--spec until(fun(() -> boolean()), timeout()) -> ok.
+-spec until(fun(() -> boolean()), non_neg_integer()) -> ok.
 until(Pred, TimeoutMs) ->
     until(Pred, TimeoutMs, ?DEFAULT_INTERVAL_MS).
 
@@ -43,7 +43,7 @@ Poll `Pred` every `IntervalMs` until it returns `true`. Raises
 predicate is evaluated one final time at the deadline, so a condition that
 becomes true just as the budget ends still passes.
 """.
--spec until(fun(() -> boolean()), timeout(), pos_integer()) -> ok.
+-spec until(fun(() -> boolean()), non_neg_integer(), pos_integer()) -> ok.
 until(Pred, TimeoutMs, IntervalMs) when is_function(Pred, 0) ->
     Deadline = erlang:monotonic_time(millisecond) + TimeoutMs,
     poll(Pred, Deadline, IntervalMs).
@@ -72,7 +72,7 @@ Block until every pid is dead, using a monitor and its `'DOWN'` message (no
 sleep, no polling). An already-dead pid returns immediately. Raises
 `error({wait_timeout, {alive, Pids}})` on timeout.
 """.
--spec dead(pid() | [pid()], timeout()) -> ok.
+-spec dead(pid() | [pid()], non_neg_integer()) -> ok.
 dead(Pid, TimeoutMs) when is_pid(Pid) ->
     dead([Pid], TimeoutMs);
 dead(Pids, TimeoutMs) when is_list(Pids) ->
@@ -96,7 +96,7 @@ await_down([{Ref, Pid} | Rest] = All, Deadline) ->
 class(ClassName) -> class(ClassName, ?DEFAULT_TIMEOUT_MS).
 
 -doc "Block until `ClassName` is registered as a live class process.".
--spec class(atom(), timeout()) -> ok.
+-spec class(atom(), non_neg_integer()) -> ok.
 class(ClassName, TimeoutMs) ->
     try
         until(
