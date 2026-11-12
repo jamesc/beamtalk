@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4479: a non-sealed Object subclass whose class-side `new` does real
+// work (it answers a marker map). Subclasses that define no `new` of their own must inherit it.
+// See inherited_class_new_test.bt.
+
+Object subclass: InheritedNewBase
+
+  class new => #{#viaBase => true}

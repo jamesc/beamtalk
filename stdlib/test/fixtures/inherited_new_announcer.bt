@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4479: `Announcer subclass:` with no `new` of its own inherits
+// Announcer's constructor (which mints the `ref`). See
+// inherited_class_new_test.bt.
+
+Announcer subclass: InheritedNewAnnouncer

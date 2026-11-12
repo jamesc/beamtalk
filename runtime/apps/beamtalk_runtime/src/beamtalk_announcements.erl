@@ -135,7 +135,7 @@ See also: docs/ADR/0093-announcements-event-substrate.md §1
 
 %% FFI shims for stdlib veneer
 -export([
-    'newAnnouncer'/0,
+    'newAnnouncer'/1,
     'systemAnnouncer'/0,
     'systemAnnounceAndWaitError'/1,
     'whenDo'/3,
@@ -1371,11 +1371,20 @@ bad_subscribe_args(AnnouncementClass, SubscriberPid, OnceFlag) ->
 
 -doc """
 Mint a fresh Announcer handle (a tagged map wrapping a unique reference).
-Called from `Announcer new` via `(Erlang beamtalk_announcements) newAnnouncer`.
+Called from `Announcer new` via `(Erlang beamtalk_announcements) newAnnouncer: self`.
+
+`Self` is the receiving class object, so a subclass that inherits `new`
+(`Announcer subclass: MyAnnouncer`, BT-4479) gets a handle tagged with its own
+class name: `MyAnnouncer new class` is `MyAnnouncer`.
 """.
--spec 'newAnnouncer'() -> announcer().
-'newAnnouncer'() ->
-    #{'$beamtalk_class' => 'Announcer', ref => make_ref()}.
+-spec 'newAnnouncer'(beamtalk_object() | undefined) -> announcer().
+'newAnnouncer'(undefined) ->
+    %% `Announcer`'s own compiled `new/0` has no receiver to pass
+    %% (`class_new('undefined')`), and is only ever `Announcer new`.
+    #{'$beamtalk_class' => 'Announcer', ref => make_ref()};
+'newAnnouncer'(#beamtalk_object{pid = ClassPid}) ->
+    ClassName = beamtalk_object_class:class_name_safe(ClassPid),
+    #{'$beamtalk_class' => ClassName, ref => make_ref()}.
 
 -doc """
 Return the singleton SystemAnnouncer handle. The system bus uses the atom

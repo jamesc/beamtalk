@@ -3851,6 +3851,79 @@ fn chain_walk_uses_per_class_user_new1_fact() {
     );
 }
 
+/// BT-4479: the per-class fact baked as `defines_user_class_new0` (and asked
+/// of each ancestor by the compile-time chain walk) is false for the root
+/// definitions (`Value`'s `basicNew` router, `Actor`'s `Use spawn` error,
+/// `Object` which has none) and true for a class with a real class-side `new`.
+/// Unlike the `new:` rule, unknown classes read as false (fail open).
+#[test]
+fn defines_user_class_new0_roots_and_user_override() {
+    let h = ClassHierarchy::with_builtins();
+    assert!(
+        !h.defines_user_class_new0("Value"),
+        "Value's `new` is basicNew"
+    );
+    assert!(
+        !h.defines_user_class_new0("Actor"),
+        "Actor's `new` only raises"
+    );
+    assert!(
+        !h.defines_user_class_new0("Object"),
+        "Object has no class-side `new`"
+    );
+    assert!(
+        !h.defines_user_class_new0("NoSuchClass"),
+        "an unknown class fails open"
+    );
+    assert!(
+        h.defines_user_class_new0("Announcer"),
+        "Announcer defines a user class-side `new`"
+    );
+    assert!(
+        h.chain_has_user_new0("SystemAnnouncer") == h.defines_user_class_new0("Announcer"),
+        "SystemAnnouncer's chain reaches Announcer's `new`"
+    );
+    assert!(
+        !h.chain_has_user_new0("Announcer"),
+        "a class's own `new` is not part of its chain answer"
+    );
+}
+
+/// BT-4479: an ancestor's user `new` is seen by every descendant's chain walk,
+/// and keeps the descendant's baked `new` verdict off; a class with its own
+/// `new` and an unrelated class are unaffected.
+#[test]
+fn chain_walk_uses_per_class_user_new0_fact() {
+    let h = bt4099_hierarchy_for_source(
+        "Object subclass: Base\n  class new => 1\n\
+         Base subclass: Leaf\n\
+         Leaf subclass: Grand\n\
+         Base subclass: Own\n  class new => 2\n\
+         Object subclass: Plain\n",
+    );
+    assert!(h.defines_user_class_new0("Base"));
+    assert!(!h.defines_user_class_new0("Leaf"));
+    assert!(h.defines_user_class_new0("Own"));
+    assert!(!h.chain_has_user_new0("Base"));
+    assert!(h.chain_has_user_new0("Leaf"));
+    assert!(h.chain_has_user_new0("Grand"));
+    assert!(h.chain_has_user_new0("Own"));
+    assert!(!h.chain_has_user_new0("Plain"));
+    assert!(
+        !h.direct_constructors("Leaf").new0,
+        "an inherited user `new` keeps the baked `new` off"
+    );
+}
+
+/// BT-4479: a Value descendant of a plain Value keeps its fast `new` verdict:
+/// `Value`'s own `new` does not count as user code.
+#[test]
+fn value_root_new_does_not_disable_direct_new0() {
+    let h = bt4099_hierarchy_for_source("Value subclass: Pt\n  field: x = 0\nPt subclass: Pt3\n");
+    assert!(h.direct_constructors("Pt").new0);
+    assert!(h.direct_constructors("Pt3").new0);
+}
+
 #[test]
 fn direct_constructors_stateless_value() {
     let h = bt4099_hierarchy_for_source("Value subclass: Empty\n");
@@ -4008,16 +4081,17 @@ fn direct_constructors_ancestor_user_new_init_blocks_new1() {
     assert!(ctors.new0, "ancestor `new:` does not affect nullary `new`");
 }
 
-/// BT-4132: same real propagation; an ancestor's nullary user `new` never
-/// runs for `Sub new` (the `{new, []}` handler calls Sub's own new/0), so it
-/// blocks nothing.
+/// BT-4132, revised by BT-4479: same real propagation; an ancestor's nullary
+/// user `new` now runs for `Sub new` (the `{new, []}` handler routes through
+/// class dispatch to it), so it keeps the baked `new` verdict off. It does not
+/// affect `new:`.
 #[test]
-fn direct_constructors_ancestor_user_new_is_shadowed() {
+fn direct_constructors_ancestor_user_new_is_inherited() {
     let h = bt4099_hierarchy_for_source(
         "Value subclass: Mid\n  class new => Mid new\nMid subclass: Sub\n",
     );
     let ctors = h.direct_constructors("Sub");
-    assert!(ctors.new0);
+    assert!(!ctors.new0, "an inherited user `new` must run, not new/0");
     assert!(ctors.new1);
 }
 
@@ -4525,7 +4599,9 @@ fn explicit_class_new_stdlib_audit() {
         ("reference.bt", true),
         ("random.bt", true),
         ("queue.bt", true),
-        ("announcer.bt", true),
+        // BT-4479: passes `self` (so a subclass's instances carry its name),
+        // which is not a literal-argument forward.
+        ("announcer.bt", false),
         // `@primitive "metaclassNew"` builds a metaclass: not a plain forward.
         ("metaclass.bt", false),
     ] {

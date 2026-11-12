@@ -149,6 +149,11 @@ a table deleted between an existence check and the op (teardown/shutdown).
     put_defines_user_class_new1/2,
     lookup_defines_user_class_new1/1,
     chain_has_user_new1/1,
+    %% BT-4479: the unary counterpart.
+    put_defines_user_class_new0/2,
+    lookup_defines_user_class_new0/1,
+    chain_has_user_new0/1,
+    inherits_user_class_new/1,
     %% ADR 0125 §2.2/§3.4, BT-3574: the `field_types`/`field_kinds` ->
     %% `beamtalk_shape_diff:shape()`-shaped normalisation shared by the live
     %% (`beamtalk_workspace_shape_store`) and build-time
@@ -251,6 +256,14 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% classes and modules compiled before the key existed.
     %% `chain_has_user_new1/1` walks it over a class's ancestors.
     defines_user_class_new1 :: boolean() | undefined,
+    %% BT-4479: `defines_user_class_new0` from the compiled module's
+    %% `__beamtalk_meta/0`: whether this class itself defines a class-side
+    %% `new` that is user code (Rust's `defines_user_class_new0`; `Value`'s
+    %% and `Actor`'s root definitions are not). Written only by
+    %% `put_defines_user_class_new0/2`; `undefined` (unknown) for dynamic
+    %% classes and modules compiled before the key existed, which
+    %% `chain_has_user_new0/1` reads as "no user `new`" (today's behaviour).
+    defines_user_class_new0 :: boolean() | undefined,
     %% ADR 0142 §1 rule 1 (BT-4299): whether the class declares class
     %% variables (`classState:`), from the compiled `__beamtalk_meta/0`'s
     %% `class_field_kinds` or the builder's `classState`. Written only by
@@ -1577,6 +1590,108 @@ ancestors_have_user_new1(Start) ->
     end,
     %% `not_found`: every ancestor up to the root published `false`.
     beamtalk_hierarchy:walk_ancestors(Start, StepFun, ?MAX_HIERARCHY_DEPTH) =/= not_found.
+
+-doc """
+Publish whether `Name` itself defines a class-side `new` that is user code
+(BT-4479): the `defines_user_class_new0` value of its `__beamtalk_meta/0`, or
+`undefined` when the module carries none (dynamic class, older module). Same
+contract as `put_defines_user_class_new1/2`: updates the row in place, a no-op
+without a row, and a change drops the derived-fact cache so a descendant's
+memoised `chain_has_user_new0/1` (and the constructor verdict built on it) is
+re-derived, and the class's and its descendants' static call keys are erased.
+""".
+-spec put_defines_user_class_new0(class_name(), boolean() | undefined) -> ok.
+put_defines_user_class_new0(Name, Defines) when is_boolean(Defines); Defines =:= undefined ->
+    new(),
+    case field(Name, #class_metadata.defines_user_class_new0) of
+        Defines ->
+            ok;
+        _ ->
+            try
+                _ = ets:update_element(
+                    ?TABLE, Name, {#class_metadata.defines_user_class_new0, Defines}
+                ),
+                ok
+            catch
+                error:badarg -> ok
+            end,
+            %% Flush the memo before erasing the keys (see `put_direct_constructors/2`):
+            %% a descendant's static `new` key is installed only while the
+            %% memoised verdict, which reads this fact, allows it, and
+            %% `invalidate/1` also erases the descendants' keys.
+            beamtalk_class_derived_cache:invalidate(),
+            beamtalk_class_shadow_flags:invalidate(Name)
+    end.
+
+-doc """
+Whether `Name` itself defines a user class-side `new`: the fact
+`put_defines_user_class_new0/2` published, or `unknown` when it never did.
+""".
+-spec lookup_defines_user_class_new0(class_name()) -> boolean() | unknown.
+lookup_defines_user_class_new0(Name) ->
+    case field(Name, #class_metadata.defines_user_class_new0) of
+        B when is_boolean(B) -> B;
+        _ -> unknown
+    end.
+
+-doc """
+Does any ancestor of `Name` define a class-side `new` that is user code
+(BT-4479)? A class with no `new` of its own must run that ancestor's
+constructor, not its synthesized `new/0` (`Announcer subclass: MyAnnouncer`,
+then `MyAnnouncer new`): the class process routes `{new, []}` through class
+dispatch and the direct constructor path declines
+(`beamtalk_class_dispatch:lookup_direct_constructor/3`) while this is `true`.
+
+Walks the ancestors' published `defines_user_class_new0` facts, not `Name`'s
+own (a class's own `new` is already what its `new/0` delegates to). Unlike
+`chain_has_user_new1/1` this fails *open*: an unpublished fact (an older
+module or a dynamic ancestor), a missing row, a missing superclass link or a
+cycle stop the walk with `false`, which is the behaviour before the fact
+existed. `Value` and `Actor` publish `false` (their root `new` definitions
+are the standard constructor and the `Use spawn` error).
+
+Memoised as `{chain_has_user_new0, Name}` in `beamtalk_class_derived_cache`,
+flushed by every class-metadata write, so an ancestor reloaded with or without
+a user `new` is re-read by its descendants.
+""".
+-spec chain_has_user_new0(class_name()) -> boolean().
+chain_has_user_new0(Name) ->
+    beamtalk_class_derived_cache:fetch({chain_has_user_new0, Name}, fun() ->
+        case lookup_superclass(Name) of
+            {ok, Super} -> {cache, ancestors_have_user_new0(Super)};
+            not_found -> {nocache, false}
+        end
+    end).
+
+-doc """
+Whether `Name` has no `new` of its own and inherits a user class-side `new`
+(BT-4479): the one rule both the class process's `{new, []}` handler
+(`beamtalk_object_class`) and the direct constructor verdict
+(`beamtalk_class_dispatch:lookup_direct_constructor/3`) apply, so the two
+paths run the same `new`. A class whose own `defines_user_class_new0` is
+`true` has its own `class new`, which dispatch finds first, so the chain is
+not consulted for it.
+""".
+-spec inherits_user_class_new(class_name()) -> boolean().
+inherits_user_class_new(Name) ->
+    lookup_defines_user_class_new0(Name) =/= true andalso chain_has_user_new0(Name).
+
+-spec ancestors_have_user_new0(superclass()) -> boolean().
+ancestors_have_user_new0(Start) ->
+    StepFun = fun(Class, _Depth) ->
+        case lookup_defines_user_class_new0(Class) of
+            true ->
+                {found, true};
+            _ ->
+                case lookup_superclass(Class) of
+                    {ok, Super} -> {next, Super};
+                    not_found -> not_found
+                end
+        end
+    end,
+    %% `not_found` (top of the chain) and `{max_depth_exceeded, _}` (a cycle)
+    %% both fail open.
+    beamtalk_hierarchy:walk_ancestors(Start, StepFun, ?MAX_HIERARCHY_DEPTH) =:= {found, true}.
 
 -doc "Read a class's whole direct-construction eligibility set (`[]` when none or unknown).".
 -spec lookup_direct_constructors(class_name()) -> [selector()].

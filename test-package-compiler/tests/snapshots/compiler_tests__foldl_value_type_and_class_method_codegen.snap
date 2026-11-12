@@ -191,7 +191,8 @@ let _temp@18 = _coll@17 in let _temp@19 = case call 'erlang':'is_list'(_temp@18)
       'class_method_info' => ~{}~,
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
-      'defines_user_class_new1' => 'false'
+      'defines_user_class_new1' => 'false',
+      'defines_user_class_new0' => 'false'
     }~
         }~
         in let _Reg0 = case call 'beamtalk_class_builder':'register'(_BuilderState0) of
@@ -240,7 +241,8 @@ let _temp@18 = _coll@17 in let _temp@19 = case call 'erlang':'is_list'(_temp@18)
       'class_method_info' => ~{'sumDo:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'Integer', 'is_sealed' => 'false', 'visibility' => 'public'}~, 'totalInject:' => ~{'arity' => 1, 'param_types' => ['none'], 'return_type' => 'none', 'is_sealed' => 'false', 'visibility' => 'public'}~}~,
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
-      'defines_user_class_new1' => 'false'
+      'defines_user_class_new1' => 'false',
+      'defines_user_class_new0' => 'false'
     }~
                 }~
                 in let _Reg1 = case call 'beamtalk_class_builder':'register'(_BuilderState1) of
@@ -279,7 +281,8 @@ let _temp@18 = _coll@17 in let _temp@19 = case call 'erlang':'is_list'(_temp@18)
       'class_method_info' => ~{}~,
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
-      'defines_user_class_new1' => 'false'
+      'defines_user_class_new1' => 'false',
+      'defines_user_class_new0' => 'false'
     }~
 
 'module_info'/0 = fun () ->

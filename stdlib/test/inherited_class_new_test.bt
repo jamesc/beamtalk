@@ -1,0 +1,68 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4479: a class with no class-side `new` of its own runs an inherited
+// user-defined class-side `new`, exactly as `new:` already does
+// (BT-4409/BT-4588). Both paths must agree: a static `X new` and a send to a
+// class held as a Dynamic value (`class_send`, then the class process).
+//
+// Fixtures: fixtures/inherited_new_base.bt, inherited_new_child.bt,
+// inherited_new_grandchild.bt, inherited_new_override.bt,
+// inherited_new_announcer.bt.
+
+TestCase subclass: InheritedClassNewTest
+
+  lookUp: name :: Symbol -> Dynamic => Beamtalk classNamed: name
+
+  testBaseRunsItsOwnNew =>
+    self assert: InheritedNewBase new equals: #{#viaBase => true}
+
+  testChildInheritsNewStatic =>
+    self assert: InheritedNewChild new equals: #{#viaBase => true}
+
+  testChildInheritsNewDynamic =>
+    self assert: (self lookUp: #InheritedNewChild) new equals: #{
+      #viaBase => true
+    }
+
+  testGrandchildInheritsNewStatic =>
+    self assert: InheritedNewGrandchild new equals: #{#viaBase => true}
+
+  testGrandchildInheritsNewDynamic =>
+    self assert: (self lookUp: #InheritedNewGrandchild) new equals: #{
+      #viaBase => true
+    }
+
+  testOwnNewStillWins =>
+    self assert: InheritedNewOverride new equals: #{#viaOverride => true}
+    self assert: (self lookUp: #InheritedNewOverride) new equals: #{
+      #viaOverride => true
+    }
+
+  // The Announcer case from the issue: the inherited constructor mints the
+  // `ref`, and the instance carries the subclass name.
+  testAnnouncerSubclassNewIsWorkingAnnouncer =>
+    a := InheritedNewAnnouncer new
+    self assert: a class equals: InheritedNewAnnouncer
+    received := AtomicCounter new: #inheritedClassNewAnnouncer
+    a when: TestEvent do: [:e | received incrementBy: e payload]
+    a announce: (TestEvent payload: 7)
+    50 timesRepeat: [received value < 7 ifTrue: [Timer sleep: 10]]
+    self assert: received value equals: 7
+    received delete
+
+  testAnnouncerSubclassNewDynamic =>
+    a := (self lookUp: #InheritedNewAnnouncer) new
+    self assert: a class equals: InheritedNewAnnouncer
+    self assert: (a when: TestEvent do: [:e | nil]) isActive equals: true
+
+  testAnnouncerStillBuildsAnnouncer =>
+    self assert: Announcer new class equals: Announcer
+
+  // The singleton system bus is reached only through `current`; it must not
+  // inherit Announcer's constructor and mint a private-ref lookalike.
+  testSystemAnnouncerNewRaises =>
+    self should: [
+      (self lookUp: #SystemAnnouncer) new
+    ] raise: #instantiation_error
+    self assert: SystemAnnouncer current class equals: SystemAnnouncer

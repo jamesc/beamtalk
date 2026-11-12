@@ -1,0 +1,9 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4479: defines its own class-side `new`, which wins over the
+// ancestor's. See inherited_class_new_test.bt.
+
+InheritedNewBase subclass: InheritedNewOverride
+
+  class new => #{#viaOverride => true}

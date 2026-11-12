@@ -537,8 +537,10 @@ direct_constructor_owner_of(ClassName, Selector) ->
     case beamtalk_class_metadata:lookup_direct_constructor(ClassName, Selector) of
         {ok, Module} ->
             case
-                Selector =:= 'new:' andalso
-                    beamtalk_class_metadata:chain_has_user_new1(ClassName)
+                (Selector =:= 'new:' andalso
+                    beamtalk_class_metadata:chain_has_user_new1(ClassName)) orelse
+                    (Selector =:= new andalso
+                        beamtalk_class_metadata:inherits_user_class_new(ClassName))
             of
                 true -> error;
                 false -> {ok, ClassName, receiver_tag(ClassName), Module}
