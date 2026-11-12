@@ -456,8 +456,9 @@ fn all_members(ty: &InferredType, member_ok: &dyn Fn(&str) -> bool) -> bool {
 }
 
 /// A result of type `ty` passes through `coerce_ffi_result/3` unchanged in
-/// both coercion modes: no list (charlist coercion), no tuple or `Result` (`{ok, _}`/`{error, _}` coercion), no atom that may be
-/// `ok`/`error`, and no `Dynamic`/`Object`.
+/// both coercion modes: no list (charlist coercion), no tuple or `Result`
+/// (`{ok, _}`/`{error, _}` coercion), no atom that may be `ok`/`error`, and
+/// no `Dynamic`/`Object`.
 #[must_use]
 pub fn ffi_result_passes_unchanged(ty: &InferredType) -> bool {
     all_members(ty, &|name| {

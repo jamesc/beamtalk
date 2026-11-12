@@ -33,7 +33,7 @@ TestCase subclass: FfiDirectCallTest
   // BT-4755: a `binary()` spec result (`String | Binary`) is proved too: same
   // answer as the proxy, and the error translation is kept.
   testBinaryResult =>
-    self assert: (Erlang beamtalk_character as_string: 97) equals: "a"
+    self assert: (Erlang beamtalk_character as_string: 97) equals: (self proxy: #as_string args: #(97))
     self assert: (Erlang beamtalk_character print_string: 97) equals: (self proxy: #print_string args: #(97))
 
   testBinaryResultErrorMatchesProxy =>
