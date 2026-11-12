@@ -908,7 +908,7 @@ struct TypeEnv {
     /// and what that condition proved. Any write to the local, or to a
     /// variable named in its facts, drops the entry (see
     /// [`TypeEnv::invalidate_cond_aliases`]).
-    cond_aliases: HashMap<EnvKey, narrowing::facts::CondFacts>,
+    cond_aliases: HashMap<EnvKey, narrowing::facts::AliasFacts>,
 }
 
 impl TypeEnv {
@@ -969,15 +969,15 @@ impl TypeEnv {
 
     /// BT-4714: record that the local `key` holds a condition proving `facts`.
     /// Call after the binding is written — a write clears it.
-    fn set_cond_alias(&mut self, key: EnvKey, facts: narrowing::facts::CondFacts) {
-        if facts.when_true.is_empty() && facts.when_false.is_empty() {
+    fn set_cond_alias(&mut self, key: EnvKey, facts: narrowing::facts::AliasFacts) {
+        if facts.is_empty() {
             return;
         }
         self.cond_aliases.insert(key, facts);
     }
 
     /// BT-4714: the condition facts the local `key` stands for, if any.
-    fn cond_alias(&self, key: &EnvKey) -> Option<&narrowing::facts::CondFacts> {
+    fn cond_alias(&self, key: &EnvKey) -> Option<&narrowing::facts::AliasFacts> {
         self.cond_aliases.get(key)
     }
 

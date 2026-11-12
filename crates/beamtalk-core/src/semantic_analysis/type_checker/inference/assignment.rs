@@ -490,24 +490,15 @@ impl TypeChecker {
         }
     }
 
-    /// BT-4714: what the right-hand side of `local := value` proves when it
-    /// is a Boolean condition, to be remembered against the local. `None`
-    /// when a block may rewrite a tested variable behind our back.
-    /// `self.<field>` facts are not kept: a later self-send may reassign the
-    /// field. Computed before the write, against the pre-assignment env.
+    /// BT-4714: the alias facts for `local := value`; `None` when a block may
+    /// rewrite a tested variable behind our back.
     fn alias_condition_facts(
         &mut self,
         value: &Expression,
         hierarchy: &ClassHierarchy,
         env: &TypeEnv,
-    ) -> Option<crate::semantic_analysis::type_checker::narrowing::facts::CondFacts> {
-        let mut facts = self.condition_facts(
-            value,
-            env,
-            hierarchy,
-            crate::semantic_analysis::type_checker::narrowing::facts::FactsCtx::alias(),
-        );
-        facts.drop_fields();
+    ) -> Option<crate::semantic_analysis::type_checker::narrowing::facts::AliasFacts> {
+        let facts = self.alias_facts(value, env, hierarchy);
         let blocked = facts
             .keys()
             .any(|k| matches!(k, EnvKey::Local(n) if self.block_written_locals.contains(n)));

@@ -130,3 +130,30 @@ fn block_written_alias_is_not_trusted() {
 fn field_facts_are_not_kept() {
     assert_rejected("    c := self.f notNil.\n    c ifTrue: [Repro need: self.f. ^0].\n    0");
 }
+
+#[test]
+fn copied_alias_is_dropped_with_the_tested_variable() {
+    assert_clean("    c := x notNil.\n    d := c.\n    d ifTrue: [Repro need: x. ^0].\n    0");
+    assert_rejected(
+        "    c := x notNil.\n    d := c.\n    x := n.\n    d ifTrue: [Repro need: x. ^0].\n    0",
+    );
+}
+
+#[test]
+fn negated_alias_in_place_swaps_facts() {
+    assert_clean("    c := x isNil.\n    c := c not.\n    c ifTrue: [Repro need: x. ^0].\n    0");
+}
+
+#[test]
+fn shadowing_block_parameter_is_not_narrowed() {
+    assert_rejected(
+        "    c := x notNil.\n    ^[:x | c ifTrue: [Repro need: x] ifFalse: [0]] value: n",
+    );
+}
+
+#[test]
+fn alias_created_inside_a_block_is_not_trusted() {
+    // `block_written_locals` treats every name assigned in a block as shared;
+    // the alias is simply not recorded (the safe direction).
+    assert_rejected("    p ifTrue: [c := x notNil. c ifTrue: [Repro need: x. ^0]].\n    0");
+}

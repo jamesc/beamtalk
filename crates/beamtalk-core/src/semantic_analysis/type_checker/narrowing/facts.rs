@@ -138,6 +138,41 @@ impl CondFacts {
     }
 }
 
+/// What a local holding a condition proves, for each kind of consumer
+/// (BT-4714): `arm` for branches and loops, `post_guard` for the statements
+/// after a diverging guard — filtered exactly as the direct test would be, so
+/// an alias never proves more than spelling the test inline.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct AliasFacts {
+    arm: CondFacts,
+    post_guard: CondFacts,
+}
+
+impl AliasFacts {
+    /// Whether the alias proves nothing for any consumer.
+    pub(crate) fn is_empty(&self) -> bool {
+        [&self.arm, &self.post_guard]
+            .iter()
+            .all(|c| c.when_true.is_empty() && c.when_false.is_empty())
+    }
+
+    /// Whether either set of facts narrows `key`.
+    pub(crate) fn mentions(&self, key: &EnvKey) -> bool {
+        self.arm.mentions(key) || self.post_guard.mentions(key)
+    }
+
+    /// The variables either set of facts narrows.
+    pub(crate) fn keys(&self) -> impl Iterator<Item = &EnvKey> {
+        self.arm.keys().chain(self.post_guard.keys())
+    }
+
+    /// Drop `self.<field>` facts.
+    fn drop_fields(&mut self) {
+        self.arm.drop_fields();
+        self.post_guard.drop_fields();
+    }
+}
+
 /// Which consumer is asking for facts.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct FactsCtx {
@@ -160,14 +195,6 @@ impl FactsCtx {
         Self {
             post_guard: false,
             hint_span: Some(hint_span),
-        }
-    }
-
-    /// Facts for the right-hand side of an assignment to a local (BT-4714).
-    pub(crate) fn alias() -> Self {
-        Self {
-            post_guard: false,
-            hint_span: None,
         }
     }
 
@@ -219,6 +246,28 @@ fn single_expression_block_body(arg: &Expression) -> Option<&Expression> {
 }
 
 impl TypeChecker {
+    /// BT-4714: what `value` (the right-hand side of `local := value`) proves
+    /// when it is a Boolean condition, for each kind of consumer. Computed
+    /// before the write, against the pre-assignment env. `self.<field>` facts
+    /// are not kept: a later self-send may reassign the field.
+    pub(in crate::semantic_analysis::type_checker) fn alias_facts(
+        &mut self,
+        value: &Expression,
+        env: &TypeEnv,
+        hierarchy: &ClassHierarchy,
+    ) -> AliasFacts {
+        let no_span = FactsCtx {
+            post_guard: false,
+            hint_span: None,
+        };
+        let mut facts = AliasFacts {
+            arm: self.condition_facts(value, env, hierarchy, no_span),
+            post_guard: self.condition_facts(value, env, hierarchy, FactsCtx::post_guard()),
+        };
+        facts.drop_fields();
+        facts
+    }
+
     /// The facts `cond` proves when true and when false — see the module docs.
     pub(in crate::semantic_analysis::type_checker) fn condition_facts(
         &mut self,
@@ -259,7 +308,13 @@ impl TypeChecker {
         if let Expression::Identifier(ident) = cond {
             return env
                 .cond_alias(&EnvKey::local(ident.name.clone()))
-                .cloned()
+                .map(|alias| {
+                    if ctx.post_guard {
+                        alias.post_guard.clone()
+                    } else {
+                        alias.arm.clone()
+                    }
+                })
                 .unwrap_or_default();
         }
         let Expression::MessageSend {
