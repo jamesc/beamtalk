@@ -2099,18 +2099,8 @@ impl Parser {
             }
 
             if matches!(self.current_kind(), TokenKind::Ellipsis) {
-                let ellipsis_span = self.current_token().span();
-                self.advance();
                 open = true;
-                if !matches!(self.current_kind(), TokenKind::RightBrace | TokenKind::Eof) {
-                    self.diagnostics.push(Diagnostic::error(
-                        "`...` must be the last entry in a shape type",
-                        ellipsis_span,
-                    ));
-                    // Recovery: keep parsing the remaining fields.
-                    if is_comma(self.current_kind()) {
-                        self.advance();
-                    }
+                if self.parse_shape_ellipsis(&mut pending_optional) {
                     continue;
                 }
                 break;
@@ -2134,14 +2124,18 @@ impl Parser {
                 r
             } else {
                 self.error("Shape type keys must be symbol literals (e.g. `#name => String`)");
-                self.recover_shape_field();
+                if !self.recover_shape_field() {
+                    break;
+                }
                 need_separator = true;
                 continue;
             };
 
             if !matches!(self.current_kind(), TokenKind::FatArrow) {
                 self.error("Expected '=>' after shape type key");
-                self.recover_shape_field();
+                if !self.recover_shape_field() {
+                    break;
+                }
                 need_separator = true;
                 continue;
             }
@@ -2175,6 +2169,35 @@ impl Parser {
         }
     }
 
+    /// Consumes a shape's `...` marker. Returns `true` when more entries
+    /// follow (an error: `...` must be last), so parsing should continue.
+    fn parse_shape_ellipsis(&mut self, pending_optional: &mut Option<Span>) -> bool {
+        let ellipsis_span = self.current_token().span();
+        self.advance();
+        if pending_optional.take().is_some() {
+            self.diagnostics.push(Diagnostic::error(
+                "`?` must precede a symbol key in a shape type",
+                ellipsis_span,
+            ));
+        }
+        // Allow a trailing comma after `...` before `}`.
+        if is_comma(self.current_kind()) && matches!(self.peek_at(1), Some(TokenKind::RightBrace)) {
+            self.advance();
+        }
+        if matches!(self.current_kind(), TokenKind::RightBrace | TokenKind::Eof) {
+            return false;
+        }
+        self.diagnostics.push(Diagnostic::error(
+            "`...` must be the last entry in a shape type",
+            ellipsis_span,
+        ));
+        // Recovery: keep parsing the remaining fields.
+        if is_comma(self.current_kind()) {
+            self.advance();
+        }
+        true
+    }
+
     /// Consumes the `,` / `,?` separator between shape fields. A `,?` token is
     /// split: its optional marker is returned through `pending_optional`. On a
     /// missing separator, reports an error and recovers to the next separator;
@@ -2184,8 +2207,7 @@ impl Parser {
             |k: &TokenKind| matches!(k, TokenKind::BinarySelector(s) if s.as_str() == ",?");
         if !is_comma(self.current_kind()) && !is_comma_question(self.current_kind()) {
             self.error("Expected ',' or '}' in shape type");
-            self.recover_shape_field();
-            if !is_comma(self.current_kind()) && !is_comma_question(self.current_kind()) {
+            if !self.recover_shape_field() {
                 return false;
             }
         }
@@ -2208,21 +2230,40 @@ impl Parser {
         }
     }
 
-    /// Skips tokens to the next top-level `,` / `,?` / `}` inside a shape type.
-    fn recover_shape_field(&mut self) {
+    /// Skips tokens to the next top-level `,` / `,?` inside a shape type.
+    ///
+    /// Returns `true` when it stopped on a separator. It stops (returning
+    /// `false`) at the shape's closing `}`, an unmatched `)` / `]`, EOF, or a
+    /// new method definition starting a line, so an unclosed shape never
+    /// swallows the declarations that follow it. Every bracket opener counts
+    /// toward nesting, so a `,` inside a later literal is not mistaken for a
+    /// field separator.
+    fn recover_shape_field(&mut self) -> bool {
         let mut depth = 0usize;
         loop {
+            if depth == 0
+                && self.current_token().has_leading_newline()
+                && self.is_at_method_definition()
+            {
+                return false;
+            }
             match self.current_kind() {
-                TokenKind::Eof => break,
-                TokenKind::LeftParen | TokenKind::MapOpen | TokenKind::LeftBrace => depth += 1,
-                TokenKind::RightParen => depth = depth.saturating_sub(1),
-                TokenKind::RightBrace => {
+                TokenKind::Eof => return false,
+                TokenKind::LeftParen
+                | TokenKind::LeftBracket
+                | TokenKind::LeftBrace
+                | TokenKind::MapOpen
+                | TokenKind::ListOpen
+                | TokenKind::ArrayOpen => depth += 1,
+                TokenKind::RightParen | TokenKind::RightBracket | TokenKind::RightBrace => {
                     if depth == 0 {
-                        break;
+                        return false;
                     }
                     depth -= 1;
                 }
-                TokenKind::BinarySelector(s) if depth == 0 && (s == "," || s == ",?") => break,
+                TokenKind::BinarySelector(s) if depth == 0 && (s == "," || s == ",?") => {
+                    return true;
+                }
                 _ => {}
             }
             self.advance();

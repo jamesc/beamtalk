@@ -2325,6 +2325,49 @@ fn parse_shape_recovery_continues_at_comma_question() {
 }
 
 #[test]
+fn parse_shape_unclosed_does_not_swallow_following_methods() {
+    let tokens = lex_with_eof(
+        "Object subclass: Foo
+  field: cfg :: #{#a => Integer
+  baz => 1
+  qux => #(1, 2)
+",
+    );
+    let (module, diags) = parse(tokens);
+    assert!(!diags.is_empty());
+    let names: Vec<_> = module.classes[0]
+        .methods
+        .iter()
+        .map(|m| m.selector.name().to_string())
+        .collect();
+    assert!(names.contains(&"baz".to_string()), "{names:?}");
+    assert!(names.contains(&"qux".to_string()), "{names:?}");
+}
+
+#[test]
+fn parse_shape_bad_field_inside_generic_does_not_escape() {
+    let (_, diags) = parse_shape_alias("List(#{#a Integer)");
+    assert!(!diags.is_empty());
+}
+
+#[test]
+fn parse_shape_optional_marker_before_ellipsis_is_error() {
+    let (ann, diags) = parse_shape_alias("#{#a => Integer,?...}");
+    assert!(
+        diags.iter().any(|d| d.message.contains("`?` must precede")),
+        "{diags:?}"
+    );
+    assert!(shape_parts(&ann).1);
+}
+
+#[test]
+fn parse_shape_trailing_comma_after_ellipsis_is_allowed() {
+    let (ann, diags) = parse_shape_alias("#{#a => Integer, ...,}");
+    assert!(diags.is_empty(), "{diags:?}");
+    assert!(shape_parts(&ann).1);
+}
+
+#[test]
 fn parse_shape_unclosed_is_error() {
     let (_, diags) = parse_shape_alias("#{#a => Integer");
     assert!(

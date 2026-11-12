@@ -1351,7 +1351,10 @@ pub(crate) fn check_shape_version_and_migrations(
             }
 
             if let Some(rt) = &method.return_type {
-                if rt.type_name() != "Dictionary" {
+                // A shape is exactly a `Dictionary` until ADR 0147 phase 3.
+                if rt.type_name() != "Dictionary"
+                    && !matches!(rt, crate::ast::TypeAnnotation::Shape { .. })
+                {
                     diagnostics.push(
                         Diagnostic::error(
                             format!(
