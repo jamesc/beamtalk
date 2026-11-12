@@ -684,3 +684,27 @@ fn shape_arriving_through_a_receiver_type_parameter_is_checked_at_send_sites() {
         msgs.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn block_parameters_are_contravariant_in_shapes() {
+    run(&[
+        (
+            "block accepting a wider shape fits",
+            "Block(#{#port => Integer, ...}, Integer)",
+            "Block(#{#port => Integer, #host => String}, Integer)",
+            None,
+        ),
+        (
+            "block needing more keys is rejected",
+            "Block(#{#port => Integer, #host => String}, Integer)",
+            "Block(#{#port => Integer, ...}, Integer)",
+            Some("Block("),
+        ),
+        (
+            "block result is covariant",
+            "Block(Integer, #{#a => Integer, #b => Integer})",
+            "Block(Integer, #{#a => Integer, ...})",
+            None,
+        ),
+    ]);
+}

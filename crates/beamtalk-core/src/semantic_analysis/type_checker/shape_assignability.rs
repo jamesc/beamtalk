@@ -338,10 +338,21 @@ impl TypeChecker {
         if aargs.is_empty() || eargs.is_empty() || aargs.len() != eargs.len() {
             return Ok(());
         }
+        // `Block(P1, ..., R)`: parameters are contravariant, only the result
+        // is covariant.
+        let last = aargs.len() - 1;
+        let is_block = aname == "Block" && ename == "Block";
         aargs
             .iter()
             .zip(eargs.iter())
-            .try_for_each(|(a, e)| Self::arg_assignable(a, e, hierarchy))
+            .enumerate()
+            .try_for_each(|(i, (a, e))| {
+                if is_block && i < last {
+                    Self::arg_assignable(e, a, hierarchy)
+                } else {
+                    Self::arg_assignable(a, e, hierarchy)
+                }
+            })
     }
 
     /// `true` for `#k` or a union of `#k`s — the key type of a symbol-literal
