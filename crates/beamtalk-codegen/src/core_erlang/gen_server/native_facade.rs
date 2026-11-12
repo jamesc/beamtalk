@@ -17,6 +17,7 @@ use super::super::selector_mangler::dispatch_fn_name;
 use super::super::spec_codegen;
 use super::super::util::omit_late_defaultless_slot;
 use super::super::{CodeGenContext, CoreErlangGenerator, Result};
+use super::spawn::SpawnVariant;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::{Document, INDENT, join, leaf, line, nest};
 use beamtalk_core::ast::{MethodDefinition, MethodKind, Module};
@@ -186,11 +187,15 @@ impl CoreErlangGenerator {
 
         // BT-4104: the backing module's own start_link has no atomic monitor,
         // so spawn_monitored/0,1 raise instead of failing with `undef`.
-        push_fn(self.generate_unsupported_spawn_monitored_method(false));
-        push_fn(self.generate_unsupported_spawn_monitored_method(true));
+        push_fn(self.generate_unsupported_spawn_monitored_method(SpawnVariant::Monitored, false));
+        push_fn(self.generate_unsupported_spawn_monitored_method(SpawnVariant::Monitored, true));
         // BT-4477: same for the asynchronous monitored pair.
-        push_fn(self.generate_unsupported_spawn_monitored_async_method(false));
-        push_fn(self.generate_unsupported_spawn_monitored_async_method(true));
+        push_fn(
+            self.generate_unsupported_spawn_monitored_method(SpawnVariant::MonitoredAsync, false),
+        );
+        push_fn(
+            self.generate_unsupported_spawn_monitored_method(SpawnVariant::MonitoredAsync, true),
+        );
 
         // new/0 and new/1 error methods (actors can't use new)
         push_fn(self.generate_actor_new_error_method()?);

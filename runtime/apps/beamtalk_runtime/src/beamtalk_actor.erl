@@ -958,7 +958,8 @@ mailbox and run after it.
 
 The process is started with `proc_lib` and enters the `gen_server` loop with
 `gen_server:enter_loop/5` after `Module:init/1`. It carries `$ancestors` and
-the same `$initial_call` (`{Module, init, 1}`) as a `gen_server:start*` actor, so
+the same `$initial_call` (`{Module, init, 1}`) and OTP parent (itself) as an
+unlinked `gen_server:start*` actor, so
 `sys`, observer and the crash-report secret redaction treat it like any other
 actor. Not linked; the monitor belongs to the process that calls this.
 `init/1` results are honoured as `gen_server` does: `{ok, State}`,
@@ -984,6 +985,13 @@ async_init_and_loop(Module, InitArgs) ->
     %% observer and `proc_lib:initial_call/1` identify the actor by
     %% `{Module, init, _}`.
     put('$initial_call', {Module, init, 1}),
+    %% An unlinked `gen_server:start*` actor is its own OTP parent
+    %% (`gen:do_spawn` passes `self`), whereas `enter_loop/5` takes the head of
+    %% `$ancestors` — here the spawner. Make the actor its own parent so an
+    %% exit-trapping actor linked to its spawner later treats that exit as a
+    %% normal link exit (BT-3596), not parent shutdown, exactly as a
+    %% `spawnMonitored` actor does.
+    put('$ancestors', [self() | get('$ancestors')]),
     case Module:init(InitArgs) of
         {ok, State} ->
             gen_server:enter_loop(Module, [], State, self(), infinity);

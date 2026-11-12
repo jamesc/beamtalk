@@ -22,7 +22,10 @@ use beamtalk_core::ast::Module;
 /// `MonitoredAsync` is `spawn_monitored_async/0,1` (`spawnMonitoredAsync` /
 /// `spawnMonitoredAsyncWith:`, BT-4477): the same `{Actor, MonitorRef}` answer
 /// but the caller does not wait for `init/1` or `initialize`
-/// (`beamtalk_actor:safe_spawn_monitored_async/2`).
+/// (`beamtalk_actor:safe_spawn_monitored_async/2`). That helper always answers
+/// `{ok, _}`, so the shared `{error, _}` start-failure arm in the generated
+/// `spawn_monitored_async/0,1` never runs; an async start failure arrives as
+/// the monitor's `DOWN`, not as a raise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::core_erlang) enum SpawnVariant {
     Plain,
@@ -523,31 +526,18 @@ impl CoreErlangGenerator {
         ))
     }
 
-    /// Generates `spawn_monitored/0` (`with_args` false) or
-    /// `spawn_monitored/1` for a module that cannot start atomically
+    /// Generates `spawn_monitored/0` or `spawn_monitored_async/0` (`with_args`
+    /// false), or their `/1` forms, for a module that cannot start atomically
     /// monitored — a `native:` facade, whose backing module owns its own
-    /// start (BT-4104). Raises `instantiation_error` rather than leaving the
-    /// export missing (`undef`).
+    /// start (BT-4104, BT-4477). `variant` is `Monitored` or `MonitoredAsync`.
+    /// Raises `instantiation_error` rather than leaving the export missing
+    /// (`undef`).
     pub(in crate::core_erlang) fn generate_unsupported_spawn_monitored_method(
         &mut self,
+        variant: SpawnVariant,
         with_args: bool,
     ) -> Document<'static> {
-        let (fun_decl, selector) = SpawnVariant::Monitored.stub_head(with_args);
-        Self::instantiation_error_stub(
-            fun_decl,
-            self.class_name(),
-            selector,
-            "Native actors cannot be spawned monitored. Use spawn, then monitor.",
-        )
-    }
-
-    /// `spawn_monitored_async/0,1` counterpart of
-    /// [`Self::generate_unsupported_spawn_monitored_method`] (BT-4477).
-    pub(in crate::core_erlang) fn generate_unsupported_spawn_monitored_async_method(
-        &mut self,
-        with_args: bool,
-    ) -> Document<'static> {
-        let (fun_decl, selector) = SpawnVariant::MonitoredAsync.stub_head(with_args);
+        let (fun_decl, selector) = variant.stub_head(with_args);
         Self::instantiation_error_stub(
             fun_decl,
             self.class_name(),
@@ -1143,7 +1133,7 @@ mod tests {
         );
         assert!(out1.contains("'spawnMonitoredAsyncWith:'"), "{out1}");
         let native0 = g
-            .generate_unsupported_spawn_monitored_async_method(false)
+            .generate_unsupported_spawn_monitored_method(SpawnVariant::MonitoredAsync, false)
             .to_pretty_string();
         assert!(
             native0.contains("'spawn_monitored_async'/0 = fun ()"),
@@ -1156,7 +1146,7 @@ mod tests {
             "{native0}"
         );
         let native1 = g
-            .generate_unsupported_spawn_monitored_async_method(true)
+            .generate_unsupported_spawn_monitored_method(SpawnVariant::MonitoredAsync, true)
             .to_pretty_string();
         assert!(
             native1.contains("'spawn_monitored_async'/1 = fun (_InitArgs)"),
@@ -1198,7 +1188,7 @@ mod tests {
     fn generate_unsupported_spawn_monitored_stubs_raise() {
         let mut g = generator();
         let out0 = g
-            .generate_unsupported_spawn_monitored_method(false)
+            .generate_unsupported_spawn_monitored_method(SpawnVariant::Monitored, false)
             .to_pretty_string();
         assert!(out0.contains("'spawn_monitored'/0 = fun ()"), "{out0}");
         assert!(out0.contains("instantiation_error"), "{out0}");
@@ -1209,7 +1199,7 @@ mod tests {
             "{out0}"
         );
         let out1 = g
-            .generate_unsupported_spawn_monitored_method(true)
+            .generate_unsupported_spawn_monitored_method(SpawnVariant::Monitored, true)
             .to_pretty_string();
         assert!(
             out1.contains("'spawn_monitored'/1 = fun (_InitArgs)"),
