@@ -250,7 +250,7 @@ pub enum InferredType {
     /// infers the element type from the argument, not the class object).
     ///
     /// Subtyping: `Meta{C} <: Class <: Behaviour <: Object` (see
-    /// `validation.rs`), so a metatype value still satisfies `:: Class` /
+    /// `validation/`), so a metatype value still satisfies `:: Class` /
     /// `:: Behaviour` parameters.
     ///
     /// A *dedicated variant* (rather than an `is_meta` flag on [`Known`]) is
@@ -1907,18 +1907,18 @@ pub(in crate::semantic_analysis) fn is_type_var_placeholder(
 
 // ── Diagnostic facts ──────────────────────────────────────────────────────
 //
-// A shared leaf between `inference/` and `validation.rs` (this module is a
+// A shared leaf between `inference/` and `validation/` (this module is a
 // dependency of both already, via `InferredType`/`DynamicReason`): each
 // struct below is a plain data record of something an `inference/` site
 // *detected*, with no `Diagnostic`/message-formatting logic of its own.
-// `inference/` constructs one and hands it to the matching `validation.rs`
+// `inference/` constructs one and hands it to the matching `validation/`
 // `emit_*` method, which does the actual rendering (message text, hint,
 // category, severity) and pushes it. Splitting detection from rendering
 // this way means inference never
 // constructs `Diagnostic`s itself for these four sites. (The cons-tail site
 // already had this split, via `InferredType::improper_cons_tail_display`'s
 // existing `Option<EcoString>` — that one carries no new struct here, only
-// its `validation.rs` renderer moved.)
+// its `validation/` renderer moved.)
 
 /// A class-object type as the slot/argument assignability check sees it
 /// (ADR 0083, ADR 0144): the class object of one named class (`Meta{C}`) or
@@ -1952,7 +1952,7 @@ impl std::fmt::Display for ClassObjectType<'_> {
 }
 
 /// An instance-method override whose declared return type does not refine
-/// the one it inherits. Found by `validation.rs::override_return_widening`,
+/// the one it inherits. Found by `validation/::override_return_widening`,
 /// rendered by `check_override_return_compatibility`, and consulted by
 /// `ProtocolRegistry::conformance_return_type_mismatches` (BT-4175).
 pub(crate) struct OverrideReturnWidening {
@@ -1963,7 +1963,7 @@ pub(crate) struct OverrideReturnWidening {
 
 /// A declared-vs-inferred type mismatch on an assignment's type annotation
 /// (`x :: Declared := value`). Detected in `inference/assignment.rs`,
-/// rendered by `validation.rs::emit_assignment_type_mismatch`.
+/// rendered by `validation/::emit_assignment_type_mismatch`.
 pub(in crate::semantic_analysis::type_checker) struct AssignmentTypeMismatch {
     pub(in crate::semantic_analysis::type_checker) declared_display: EcoString,
     pub(in crate::semantic_analysis::type_checker) inferred_display: EcoString,
@@ -1992,7 +1992,7 @@ pub(in crate::semantic_analysis::type_checker) struct MetatypeNonconformance {
 /// rather than `self.field := value`) — objects cannot mutate another
 /// object's state (Value types are immutable; actors only mutate their own
 /// state via `self.x :=`). Detected in `inference/assignment.rs`, rendered
-/// by `validation.rs::emit_cross_object_field_mutation`.
+/// by `validation/::emit_cross_object_field_mutation`.
 pub(in crate::semantic_analysis::type_checker) struct CrossObjectFieldMutation {
     pub(in crate::semantic_analysis::type_checker) receiver_name: EcoString,
     pub(in crate::semantic_analysis::type_checker) field_name: EcoString,
@@ -2002,7 +2002,7 @@ pub(in crate::semantic_analysis::type_checker) struct CrossObjectFieldMutation {
 /// `Dynamic` for a root-cause reason (not a propagated `DynamicReceiver`, an
 /// inert `Unknown`, or an author-acknowledged `ExplicitDynamic`). Detected
 /// in `inference/mod.rs`, rendered by
-/// `validation.rs::emit_dynamic_in_typed_class`.
+/// `validation/::emit_dynamic_in_typed_class`.
 pub(in crate::semantic_analysis::type_checker) struct DynamicInTypedClass {
     pub(in crate::semantic_analysis::type_checker) class_name: EcoString,
     pub(in crate::semantic_analysis::type_checker) description: &'static str,

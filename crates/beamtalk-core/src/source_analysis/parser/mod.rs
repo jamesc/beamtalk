@@ -204,7 +204,7 @@ pub fn is_equality_operator(op: &str) -> bool {
 /// a detected `x =:= #foo` / `x /= #foo` comparison is a match or a mismatch
 /// test, by `narrowing::rules::boolean_eq` to accept only the positive
 /// spellings, by `narrowing::rules::nil_eq` to swap the branches of a `nil`
-/// inequality, and by the type checker's `validation.rs`, without any of them
+/// inequality, and by the type checker's `validation/`, without any of them
 /// re-deriving the operator set itself.
 #[must_use]
 pub fn equality_operator_is_negated(op: &str) -> Option<bool> {

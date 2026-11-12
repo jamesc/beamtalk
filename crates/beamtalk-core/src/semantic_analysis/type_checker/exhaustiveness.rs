@@ -136,7 +136,7 @@ impl TypeChecker {
     /// Finds the closest singleton member of `ty` (a closed singleton union)
     /// to `target` by edit distance, for the "did you mean" suggestion in
     /// [`check_impossible_singleton_comparison`]. Mirrors
-    /// `validation.rs`'s `closest_state_slot` thresholding (distance > 0,
+    /// `validation/`'s `closest_state_slot` thresholding (distance > 0,
     /// distance ≤ 3, distance less than half the target's length) so typo
     /// suggestions read consistently across the checker. Returns `None` for
     /// anything other than a closed singleton union (including `Symbol`

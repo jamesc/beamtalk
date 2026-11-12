@@ -3,7 +3,7 @@
 
 //! ADR 0147 (BT-4730): assignability for map shapes (`#{#a => Integer, ...}`).
 //!
-//! The string-level compatibility helpers in `validation.rs` know no `#{...}`
+//! The string-level compatibility helpers in `validation/` know no `#{...}`
 //! class, so every check that can see a shape — on either side, at any depth —
 //! is routed through [`TypeChecker::shape_assignable`] instead. It works on
 //! structured [`InferredType`]s and, when the answer is "no", says *why* as a

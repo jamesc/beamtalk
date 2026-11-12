@@ -148,7 +148,7 @@ fn visit_unresolved_class(
 /// diagnostic ADR 0108's Error examples call for
 /// (`unknown type RestartStrateg (did you mean RestartStrategy?)`), reusing
 /// [`visit_unresolved_class`]'s diagnostic category/message shape and the
-/// same `edit_distance` "did you mean" machinery `validation.rs` already
+/// same `edit_distance` "did you mean" machinery `validation/` already
 /// uses for state-key typos.
 ///
 /// Deliberately scoped to near-misses of an *alias* name specifically, not
@@ -359,7 +359,7 @@ fn check_annotation_for_unresolved_alias(
 }
 
 /// Finds the closest registered alias name to `target` by edit distance,
-/// mirroring `validation.rs`'s `closest_state_slot` thresholding (distance
+/// mirroring `validation/`'s `closest_state_slot` thresholding (distance
 /// > 0, distance ≤ 3, distance less than half the target's length).
 fn closest_alias_name(target: &str, alias_registry: &AliasRegistry) -> Option<EcoString> {
     let mut best: Option<(EcoString, usize)> = None;

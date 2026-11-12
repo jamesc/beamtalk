@@ -600,7 +600,7 @@ impl TypeChecker {
         // Read the pre-computed type instead of re-inferring: `inference/
         // mod.rs::check_module` (Phase 1) already inferred this same
         // default-value expression and cached it in `state_default_types`
-        // (BT-3481) — the same entry `validation.rs::check_state_defaults`
+        // (BT-3481) — the same entry `validation/::check_state_defaults`
         // reads. Looking it up here (Phase 2f, which always runs after
         // Phase 1) keeps the module dependency direction one-way and avoids
         // inferring the same expression twice.
@@ -691,7 +691,7 @@ impl TypeChecker {
                             // Widen singleton (or union-of-singleton)
                             // substitution values to `Symbol` — see the
                             // identical widening and its doc in
-                            // `validation.rs`'s `check_argument_types`
+                            // `validation/`'s `check_argument_types`
                             // (`widen_singleton_type_arg`). Without this, a
                             // `Dictionary`/`List`/`Result` inferred from
                             // symbol literals (`d1 merge: d2` with

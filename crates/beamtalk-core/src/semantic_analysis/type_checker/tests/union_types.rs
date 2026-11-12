@@ -332,7 +332,7 @@ fn union_receiver_nullable_hint_with_non_nil_missing() {
 }
 
 /// the single-culprit union DNU now reuses
-/// `validation.rs::emit_unknown_selector_warning`, which gives union sends a
+/// `validation/::emit_unknown_selector_warning`, which gives union sends a
 /// "did you mean" suggestion for the first time — previously
 /// `infer_union_message_send` built its own message with only a generic
 /// `respondsTo:` hint, never a per-selector suggestion. `String | Nil`

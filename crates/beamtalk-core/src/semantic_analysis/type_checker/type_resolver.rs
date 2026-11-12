@@ -669,7 +669,7 @@ fn resolve_declared_type_inner(
             // The name is carried directly in the annotation, so resolve it to a
             // dedicated `Meta` here (no enclosing-class context needed). A
             // metatype value still satisfies `:: Class` / `:: Behaviour`
-            // parameters via the tower subtyping in `validation.rs`.
+            // parameters via the tower subtyping in `validation/`.
             InferredType::Meta {
                 class_name: class_name.clone(),
                 provenance: declared_type_provenance(ctx),
@@ -946,7 +946,7 @@ pub(in crate::semantic_analysis) use crate::semantic_analysis::string_utils::spl
 /// `"Array(Integer)"` → `"Array"`. `"Integer"` → `"Integer"`.
 ///
 /// Convenience wrapper around [`split_generic_base`] for callers that only
-/// need the base name and discard the args slice. Used in `validation.rs`
+/// need the base name and discard the args slice. Used in `validation/`
 /// where only the base name participates in the comparison
 /// (`is_assignable_to`, protocol-conformance checks). Callers that also need
 /// the args should use [`split_generic_base`] directly to avoid re-parsing.
