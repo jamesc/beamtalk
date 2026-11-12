@@ -445,12 +445,19 @@ impl TypeChecker {
     /// reaches the next statement, so a self-send in it (`[self log. ^0]`)
     /// leaves the post-guard narrowing intact.
     fn fallthrough_may_self_send(&self, receiver: &Expression, arguments: &[Expression]) -> bool {
-        expr_may_write_fields(receiver, &self.type_map)
+        expr_may_write_fields(receiver, &self.type_map, self.protocol_registry.as_deref())
             || arguments.iter().any(|arg| match arg {
                 Expression::Block(block) => {
-                    !self.block_diverges(block) && expr_may_write_fields(arg, &self.type_map)
+                    !self.block_diverges(block)
+                        && expr_may_write_fields(
+                            arg,
+                            &self.type_map,
+                            self.protocol_registry.as_deref(),
+                        )
                 }
-                other => expr_may_write_fields(other, &self.type_map),
+                other => {
+                    expr_may_write_fields(other, &self.type_map, self.protocol_registry.as_deref())
+                }
             })
     }
 

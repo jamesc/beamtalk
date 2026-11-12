@@ -299,3 +299,12 @@ fn rhs_block_literal_running_a_dynamic_value_voids_field_facts() {
     );
     assert_field_leak(&diags);
 }
+
+#[test]
+fn rhs_running_a_negation_typed_value_voids_field_facts() {
+    // `cb` is `Object \ Number` in the `ifFalse:` arm: still possibly a block.
+    let diags = actor_diagnostics(
+        "  run: cb :: Object -> Integer =>\n    (cb isKindOf: Number) ifFalse: [(self.f notNil and: [cb value]) ifTrue: [^self need: self.f]]\n    0",
+    );
+    assert_field_leak(&diags);
+}

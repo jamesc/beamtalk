@@ -265,8 +265,8 @@ impl TypeChecker {
         // A block *value* (a local holding a block, a parameter, a send's
         // answer) can write actor fields live wherever it runs (ADR 0137), so
         // only a block literal's own body can be ruled out by reading it.
-        let self_send =
-            !matches!(rhs, Expression::Block(_)) || expr_may_write_fields(rhs, &self.type_map);
+        let self_send = !matches!(rhs, Expression::Block(_))
+            || expr_may_write_fields(rhs, &self.type_map, self.protocol_registry.as_deref());
         for side in [&mut left, &mut right] {
             for facts in [&mut side.when_true, &mut side.when_false] {
                 facts.forget_written(&writes);

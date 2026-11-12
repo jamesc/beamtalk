@@ -36,6 +36,7 @@
 
 use crate::ast::visitor::{Visitor, walk_block, walk_expr};
 use crate::ast::{Block, Expression};
+use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 use crate::semantic_analysis::type_checker::{EnvKey, InferredType, TypeMap};
 
 use super::extract::extract_variable_name;
@@ -202,19 +203,30 @@ pub(crate) enum Writes {
     Unknown,
 }
 
-/// Could a value of static type `ty` (`None`: never inferred) be a block? A
-/// precise `Block` obviously; also anything the checker cannot rule out —
-/// `Dynamic`, `Object`, or a union containing either.
-fn could_be_block(ty: Option<&InferredType>) -> bool {
+/// Could a value of static type `ty` (`None`: never inferred) be a block?
+/// Answers `false` only for a type provably disjoint from `Block`: a nominal
+/// class other than `Object` (`Block` is sealed, its only superclass is
+/// `Object`), a metaclass, or `Never`. `Dynamic`, `Object`, a protocol (a
+/// `Block` may conform structurally), and any union, intersection or
+/// negation containing one of those could be a block.
+fn could_be_block(ty: Option<&InferredType>, protocols: Option<&ProtocolRegistry>) -> bool {
     match ty {
-        None | Some(InferredType::Dynamic(_)) => true,
         Some(InferredType::Known { class_name, .. }) => {
-            class_name == "Block" || class_name == "Object"
+            class_name == "Block"
+                || class_name == "Object"
+                || protocols.is_some_and(|registry| registry.has_protocol(class_name))
         }
-        Some(InferredType::Union { members, .. }) => {
-            members.iter().any(|member| could_be_block(Some(member)))
+        Some(
+            InferredType::Meta { .. } | InferredType::ProtocolMeta { .. } | InferredType::Never,
+        ) => false,
+        Some(InferredType::Negation { base, .. }) => could_be_block(Some(base), protocols),
+        Some(InferredType::Union { members, .. } | InferredType::Intersection { members, .. }) => {
+            members
+                .iter()
+                .any(|member| could_be_block(Some(member), protocols))
         }
-        Some(_) => false,
+        // `Dynamic`, no recorded type, or a shape added later: assume it could.
+        _ => true,
     }
 }
 
@@ -226,8 +238,12 @@ fn could_be_block(ty: Option<&InferredType>) -> bool {
 /// `items anySatisfy: blk` all count, whether `blk` is typed `Block`,
 /// `Dynamic`, `Object` or a union containing one. Dropping a field fact is the
 /// safe direction. `expr` must already have been inferred.
-pub(crate) fn expr_may_write_fields(expr: &Expression, type_map: &TypeMap) -> bool {
-    struct Finder<'m>(bool, &'m TypeMap);
+pub(crate) fn expr_may_write_fields(
+    expr: &Expression,
+    type_map: &TypeMap,
+    protocols: Option<&ProtocolRegistry>,
+) -> bool {
+    struct Finder<'m>(bool, &'m TypeMap, Option<&'m ProtocolRegistry>);
     impl<'ast> Visitor<'ast> for Finder<'_> {
         fn visit_expr(&mut self, e: &'ast Expression) {
             if self.0 {
@@ -241,7 +257,7 @@ pub(crate) fn expr_may_write_fields(expr: &Expression, type_map: &TypeMap) -> bo
             {
                 let is_block_value = |operand: &Expression| {
                     !matches!(operand, Expression::Block(_))
-                        && could_be_block(self.1.get(operand.span()))
+                        && could_be_block(self.1.get(operand.span()), self.2)
                 };
                 if is_block_value(receiver) || arguments.iter().any(is_block_value) {
                     self.0 = true;
@@ -257,7 +273,7 @@ pub(crate) fn expr_may_write_fields(expr: &Expression, type_map: &TypeMap) -> bo
     if expr_contains_returning_self_send(expr, type_map) {
         return true;
     }
-    let mut finder = Finder(false, type_map);
+    let mut finder = Finder(false, type_map, protocols);
     finder.visit_expr(expr);
     finder.0
 }
