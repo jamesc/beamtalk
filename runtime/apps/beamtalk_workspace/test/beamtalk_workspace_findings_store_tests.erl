@@ -19,10 +19,16 @@ Covers:
   every finding about it is stale regardless of origin")
 - for_owner/1 flattens every origin for that owner, unaffected by other
   owners
+- for_owner/1 (tagged-string path, BT-4173): accepts a `beamtalk_string:t()`
+  owner and returns tagged findings via `tag_findings/1`, exercising both
+  branches of its `MaybeS` helper (category binary → tagged; note undefined
+  → unchanged)
 - all/0 flattens every owner/origin, sorted deterministically
 - clear/0 resets every owner (the explicit-reset half of the ADR's
   session-only clearing rule; the implicit half — a workspace restart starts
   a fresh, empty gen_server — is a supervision property, not testable here)
+- gen_server boilerplate: handle_cast/2, handle_info/2 are no-ops; an unknown
+  handle_call returns `{error, unknown_request}`; code_change/3 preserves state
 
 The end-to-end thread from `beamtalk_repl_loader:maybe_trigger_recheck/4`
 through to a correctly-populated/cleared store entry, and the
@@ -86,7 +92,12 @@ store_test_() ->
         fun all_is_sorted_deterministically/1,
         fun clear_resets_every_owner/1,
         fun get_origin_returns_empty_for_unknown_pair/1,
-        fun get_origin_is_scoped_to_exact_owner_and_changed_class/1
+        fun get_origin_is_scoped_to_exact_owner_and_changed_class/1,
+        fun for_owner_tagged_string_returns_tagged_findings/1,
+        fun handle_call_unknown_returns_error/1,
+        fun handle_cast_is_ignored/1,
+        fun handle_info_is_ignored/1,
+        fun code_change_preserves_state/1
     ]}.
 
 fresh_store_has_no_findings(_Pid) ->
@@ -287,5 +298,63 @@ get_origin_is_scoped_to_exact_owner_and_changed_class(_Pid) ->
         ?_assertEqual(
             [],
             beamtalk_workspace_findings_store:get_origin(<<"StatsView">>, <<"Widget">>)
+        )
+    ].
+
+%% `for_owner/1` with a `beamtalk_string:t()` owner (BT-4173): exercises the
+%% tagged clause (line 228) and the entire `tag_findings/1` helper (lines
+%% 331–347), including both branches of `MaybeS` — `category => <<"Dnu">>`
+%% (binary → tagged) and `note => undefined` (undefined → unchanged).
+for_owner_tagged_string_returns_tagged_findings(_Pid) ->
+    F = finding(<<"Dashboard">>, <<"Counter">>, <<"getCount">>, <<"some msg">>),
+    _ = beamtalk_workspace_findings_store:put_owner_origin(<<"Dashboard">>, <<"Counter">>, [F]),
+    Tagged = beamtalk_workspace_findings_store:for_owner({beamtalk_string, <<"Dashboard">>}),
+    [TaggedF] = Tagged,
+    [
+        ?_assertEqual({beamtalk_string, <<"Dashboard">>}, maps:get(owner, TaggedF)),
+        ?_assertEqual({beamtalk_string, <<"Counter">>}, maps:get(changed_class, TaggedF)),
+        ?_assertEqual({beamtalk_string, <<"getCount">>}, maps:get(selector, TaggedF)),
+        ?_assertEqual({beamtalk_string, <<"warning">>}, maps:get(severity, TaggedF)),
+        ?_assertEqual({beamtalk_string, <<"Dnu">>}, maps:get(category, TaggedF)),
+        ?_assertEqual({beamtalk_string, <<"some msg">>}, maps:get(message, TaggedF)),
+        ?_assertEqual(undefined, maps:get(note, TaggedF))
+    ].
+
+%% The defensive `handle_call` fallback returns `{error, unknown_request}`
+%% rather than crashing the gen_server (line 311).
+handle_call_unknown_returns_error(Pid) ->
+    Result = gen_server:call(Pid, unknown_message),
+    [
+        ?_assertEqual({error, unknown_request}, Result)
+    ].
+
+%% `handle_cast/2` is a no-op; the store's state is unaffected (line 314).
+handle_cast_is_ignored(_Pid) ->
+    gen_server:cast(beamtalk_workspace_findings_store, some_cast),
+    %% Give the cast time to be processed before reading state.
+    timer:sleep(20),
+    [
+        ?_assertEqual([], beamtalk_workspace_findings_store:all())
+    ].
+
+%% `handle_info/2` is a no-op; unexpected messages are silently dropped
+%% (line 317).
+handle_info_is_ignored(Pid) ->
+    Pid ! some_info,
+    timer:sleep(20),
+    [
+        ?_assertEqual([], beamtalk_workspace_findings_store:all())
+    ].
+
+%% `code_change/3` passes state through unchanged (line 323).
+%% `code_change/3` is an exported gen_server callback — call it directly
+%% rather than via `sys:change_code/4`, which requires a full OTP boot with
+%% the code server and does not work reliably from EUnit.
+code_change_preserves_state(_Pid) ->
+    SomeState = {state, dummy},
+    [
+        ?_assertEqual(
+            {ok, SomeState},
+            beamtalk_workspace_findings_store:code_change(undefined, SomeState, [])
         )
     ].
