@@ -34,9 +34,9 @@
 //! nested expressions) so the [`Visitor`] trait's structural recursion
 //! wouldn't be in scope anyway.
 
-use crate::ast::visitor::{Visitor, walk_expr};
+use crate::ast::visitor::{Visitor, walk_block, walk_expr};
 use crate::ast::{Block, Expression};
-use crate::semantic_analysis::type_checker::EnvKey;
+use crate::semantic_analysis::type_checker::{EnvKey, InferredType, TypeMap};
 
 use super::extract::extract_variable_name;
 
@@ -95,6 +95,42 @@ pub(crate) fn expr_contains_return(expr: &Expression) -> bool {
         // cause the enclosing expression to diverge.
     }
     let mut finder = Finder(false);
+    finder.visit_expr(expr);
+    finder.0
+}
+
+/// Does `expr` contain a message send to `self`/`super` that can return,
+/// anywhere, **including inside nested block literals**?
+///
+/// Unlike [`expr_contains_return`] a nested block is not opaque: a block that
+/// is built here may run before the code that follows, so a self-send inside
+/// it counts. A send the checker already typed `Never` (`self error: "…"`)
+/// does not count: it never hands control back, so it cannot have
+/// reassigned a field the code after it reads. Used to decide whether a
+/// `self.<field>` narrowing proved by a guard can still be trusted after the
+/// guard statement (BT-4715), so `expr` must already have been inferred.
+pub(crate) fn expr_contains_returning_self_send(expr: &Expression, type_map: &TypeMap) -> bool {
+    struct Finder<'m>(bool, &'m TypeMap);
+    impl<'ast> Visitor<'ast> for Finder<'_> {
+        fn visit_expr(&mut self, e: &'ast Expression) {
+            if self.0 {
+                return;
+            }
+            if let Expression::MessageSend { receiver, .. } = e {
+                let to_self = matches!(receiver.as_ref(), Expression::Super(_))
+                    || matches!(receiver.as_ref(), Expression::Identifier(id) if id.name == "self");
+                if to_self && !matches!(self.1.get(e.span()), Some(InferredType::Never)) {
+                    self.0 = true;
+                    return;
+                }
+            }
+            walk_expr(self, e);
+        }
+        fn visit_block(&mut self, block: &'ast Block) {
+            walk_block(self, block);
+        }
+    }
+    let mut finder = Finder(false, type_map);
     finder.visit_expr(expr);
     finder.0
 }
