@@ -170,7 +170,7 @@ impl TypeChecker {
     /// symbol literal or a local whose type is a singleton symbol. Pure — used
     /// before the argument is inferred.
     fn syntactic_singleton_keys(arg: &Expression, env: &TypeEnv) -> Option<Vec<EcoString>> {
-        match arg.unwrap_parens() {
+        match arg {
             Expression::Literal(Literal::Symbol(name), _) => Some(vec![name.clone()]),
             Expression::Identifier(id) => singleton_keys(&env.get_local(&id.name)?),
             _ => None,

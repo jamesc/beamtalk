@@ -26,12 +26,8 @@ fn messages(body: &str) -> Vec<String> {
         .collect()
 }
 
-fn one(body: &str) -> Vec<String> {
-    messages(body)
-}
-
 fn expects(body: &str, fragment: &str) {
-    let msgs = one(body);
+    let msgs = messages(body);
     assert!(
         msgs.iter().any(|m| m.contains(fragment)),
         "expected `{fragment}` in {msgs:#?} for {body}"
@@ -39,7 +35,7 @@ fn expects(body: &str, fragment: &str) {
 }
 
 fn silent(body: &str) {
-    let msgs = one(body);
+    let msgs = messages(body);
     assert!(
         msgs.is_empty(),
         "expected no warnings, got {msgs:#?} for {body}"
@@ -109,7 +105,7 @@ fn at_if_present_block_gets_the_key_type() {
         "got Object",
     );
     // One warning, not a second from the generic `Dictionary` key check.
-    let msgs = one("  m: o :: #{#a => Integer} => o at: #q ifPresent: [:v | v]");
+    let msgs = messages("  m: o :: #{#a => Integer} => o at: #q ifPresent: [:v | v]");
     assert_eq!(msgs.len(), 1, "{msgs:#?}");
     assert!(msgs[0].contains("`#q` is not a key of"), "{msgs:#?}");
     // The consequence named in the hint depends on the operation.
