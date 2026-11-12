@@ -1087,8 +1087,10 @@ class_self_to_name_and_module(Other) ->
 -doc """
 ADR 0079: derive a current pid from a `#beamtalk_object{}`
 identity slot. Pid identities pass through unchanged; name-resolving
-proxies look up the current pid via `whereis/1`. Returns a structured
-`no_such_process` error when a proxy's name is not currently registered.
+proxies (`{registered, Name}`, `{registered, Name, Node}`, `{global, Name}`) resolve
+via `beamtalk_actor:resolve_proxy_or_error/2`. Returns a structured
+`no_such_process` error when the name is not currently registered, or
+`node_down` when a node-qualified ref's node is unreachable.
 """.
 -spec proxy_pid(#beamtalk_object{}, atom()) ->
     {ok, pid()} | {error, #beamtalk_error{}}.
@@ -1099,41 +1101,18 @@ proxies look up the current pid via `whereis/1`. Returns a structured
 -dialyzer({no_match, proxy_pid/2}).
 proxy_pid(#beamtalk_object{pid = Pid}, _Selector) when is_pid(Pid) ->
     {ok, Pid};
-proxy_pid(#beamtalk_object{pid = {registered, Name}}, Selector) when is_atom(Name) ->
-    case erlang:whereis(Name) of
-        undefined ->
-            {error, beamtalk_actor:no_such_process_error_record(Name, Selector)};
-        Pid when is_pid(Pid) ->
-            {ok, Pid}
-    end;
-proxy_pid(#beamtalk_object{pid = {registered, Name, Node}}, Selector) when
-    is_atom(Name), is_atom(Node)
-->
-    %% ADR 0126 §3: node-qualified proxy — see resolve_remote_registered/2.
-    case beamtalk_actor:resolve_remote_registered(Name, Node) of
-        Pid when is_pid(Pid) ->
-            {ok, Pid};
-        undefined ->
-            {error, beamtalk_actor:no_such_process_error_record(Name, Selector)};
-        node_down ->
-            {error, beamtalk_actor:node_down_error_record(Node, Selector)}
-    end;
-proxy_pid(#beamtalk_object{pid = {global, Name}}, Selector) when is_atom(Name) ->
-    %% ADR 0126 §4: cluster-unique `scope: #global` proxy.
-    case global:whereis_name(Name) of
-        undefined ->
-            {error, beamtalk_actor:no_such_process_error_record(Name, Selector)};
-        Pid when is_pid(Pid) ->
-            {ok, Pid}
-    end;
+proxy_pid(#beamtalk_object{pid = Ref}, Selector) when ?IS_PROXY_REF(Ref) ->
+    %% BT-4676: the one proxy resolver lives in beamtalk_actor.
+    beamtalk_actor:resolve_proxy_or_error(Ref, Selector);
 proxy_pid(#beamtalk_object{class = ClassName, pid = Other}, Selector) ->
     {error,
         beamtalk_error:with_hint(
             beamtalk_error:new(type_error, ClassName, Selector),
             beamtalk_error:chars_to_binary(
                 io_lib:format(
-                    "proxy_pid/2 expects pid(), {registered, atom()}, or "
-                    "{global, atom()} in #beamtalk_object.pid, got ~tp",
+                    "proxy_pid/2 expects pid(), {registered, atom()}, "
+                    "{registered, atom(), node()}, or {global, atom()} in "
+                    "#beamtalk_object.pid, got ~tp",
                     [Other]
                 )
             )

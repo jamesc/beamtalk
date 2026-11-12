@@ -30,6 +30,12 @@ See docs/internal/design-self-as-object.md Section 3.8 for error taxonomy.
     format_safe/2,
     extract_beamtalk_error/2,
     raise/1,
+    node_down/3,
+    timeout/3,
+    actor_timeout/1,
+    actor_dead/2,
+    stale_handle/3,
+    does_not_understand/2,
     raise_type_error/3,
     raise_type_error/4,
     raise_type_error_message/3,
@@ -730,3 +736,65 @@ chars_to_binary(Chars) ->
         Bin when is_binary(Bin) -> Bin;
         _ -> erlang:error(badarg, [Chars])
     end.
+
+%%% ============================================================================
+%%% Shared system-error constructors (BT-4676)
+%%% ============================================================================
+%%% Shared hints for `node_down`, `actor_dead`, `does_not_understand` and the
+%%% actor-send `timeout` live here; `timeout/3` and `stale_handle/3` take the
+%%% hint from the caller.
+
+-doc "A `node_down` error: `Node` is unreachable. The hint is shared by every site.".
+-spec node_down(atom(), atom(), node()) -> #beamtalk_error{}.
+node_down(Class, Selector, Node) ->
+    with_details(
+        new(
+            node_down,
+            Class,
+            Selector,
+            <<"The node may come back; retry, or use monitors to detect when it does">>
+        ),
+        #{node => Node}
+    ).
+
+-doc "A `timeout` error whose hint says what ran out of time (varies by site).".
+-spec timeout(atom(), atom(), binary()) -> #beamtalk_error{}.
+timeout(Class, Selector, Hint) ->
+    new(timeout, Class, Selector, Hint).
+
+-doc "The `timeout` error for an actor that did not answer a send in time.".
+-spec actor_timeout(atom()) -> #beamtalk_error{}.
+actor_timeout(Selector) ->
+    timeout(
+        unknown,
+        Selector,
+        <<
+            "Actor did not respond within the timeout period. "
+            "The actor may be slow, overloaded, or deadlocked"
+        >>
+    ).
+
+-doc "An `actor_dead` error with the shared lifecycle hint.".
+-spec actor_dead(atom(), atom()) -> #beamtalk_error{}.
+actor_dead(Class, Selector) when is_atom(Class) ->
+    new(
+        actor_dead,
+        Class,
+        Selector,
+        <<"Use 'isAlive' to check, or use monitors for lifecycle events">>
+    ).
+
+-doc "A `stale_handle` error; `Hint` names what the handle pointed at.".
+-spec stale_handle(atom(), atom(), binary()) -> #beamtalk_error{}.
+stale_handle(Class, Selector, Hint) ->
+    new(stale_handle, Class, Selector, Hint).
+
+-doc "A `does_not_understand` error with the shared `respondsTo:` hint.".
+-spec does_not_understand(atom(), atom()) -> #beamtalk_error{}.
+does_not_understand(Class, Selector) ->
+    new(
+        does_not_understand,
+        Class,
+        Selector,
+        <<"Check spelling or use 'respondsTo:' to verify method exists">>
+    ).

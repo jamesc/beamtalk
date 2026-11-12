@@ -416,7 +416,8 @@ handle_getValue([], State) ->
     safe_spawn_named/5,
     node_down_error_record/2,
     no_such_process_error_record/2,
-    resolve_remote_registered/2
+    resolve_remote_registered/2,
+    resolve_proxy_or_error/2
 ]).
 
 %% BT-4701: delegates kept under the old module name for at least one release —
@@ -1364,79 +1365,19 @@ For all other messages, checks if the actor is alive first:
     pid()
 ) ->
     ok.
-%% ADR 0079: name-resolving proxy fan-out. Name-only selectors
+%% ADR 0079 / ADR 0126: name-resolving proxy fan-out. Name-only selectors
 %% answer from the proxy itself; other selectors resolve the name to the
 %% currently-registered pid and re-enter the pid-based clauses below.
-async_send({registered, Name}, isAlive, [], FuturePid) when is_atom(Name) ->
-    Result = erlang:whereis(Name) =/= undefined,
-    beamtalk_future:resolve(FuturePid, Result),
-    ok;
-async_send({registered, _Name}, isRegistered, [], FuturePid) ->
-    beamtalk_future:resolve(FuturePid, true),
-    ok;
-async_send({registered, Name}, registeredName, [], FuturePid) when is_atom(Name) ->
-    beamtalk_future:resolve(FuturePid, Name),
-    ok;
-async_send({registered, Name} = Ref, Selector, Args, FuturePid) when is_atom(Name) ->
-    case erlang:whereis(Name) of
-        undefined ->
-            Error = no_such_process_error(Ref, Selector),
-            beamtalk_future:reject(FuturePid, Error),
+async_send(Ref, Selector, Args, FuturePid) when ?IS_PROXY_REF(Ref) ->
+    case proxy_route(Ref, Selector, Args) of
+        {answer, Value} ->
+            beamtalk_future:resolve(FuturePid, Value),
             ok;
-        Pid when is_pid(Pid) ->
-            async_send(Pid, Selector, Args, FuturePid)
-    end;
-%% ADR 0126 §3: node-qualified proxy fan-out (`named:on:`/`allRegisteredOn:`,
-%% or a local `{registered, Name}` rewritten crossing a node boundary) —
-%% mirrors the two-tuple clauses above, resolving via `resolve_remote_registered/2`
-%% (a remote `erpc` `whereis/1` when `Node` is not this node) instead of a
-%% bare local `whereis/1`.
-async_send({registered, Name, Node}, isAlive, [], FuturePid) when is_atom(Name), is_atom(Node) ->
-    Result = is_pid(resolve_remote_registered(Name, Node)),
-    beamtalk_future:resolve(FuturePid, Result),
-    ok;
-async_send({registered, _Name, _Node}, isRegistered, [], FuturePid) ->
-    beamtalk_future:resolve(FuturePid, true),
-    ok;
-async_send({registered, Name, _Node}, registeredName, [], FuturePid) when is_atom(Name) ->
-    beamtalk_future:resolve(FuturePid, Name),
-    ok;
-async_send({registered, Name, Node} = Ref, Selector, Args, FuturePid) when
-    is_atom(Name), is_atom(Node)
-->
-    case resolve_remote_registered(Name, Node) of
-        Pid when is_pid(Pid) ->
+        {pid, Pid} ->
             async_send(Pid, Selector, Args, FuturePid);
-        undefined ->
-            Error = no_such_process_error(Ref, Selector),
+        {error, Error} ->
             beamtalk_future:reject(FuturePid, Error),
-            ok;
-        node_down ->
-            beamtalk_future:reject(FuturePid, node_down_error_record(Node, Selector)),
             ok
-    end;
-%% ADR 0126 §4: cluster-unique `scope: #global` proxy fan-out (`named:
-%% scope: #global`) — mirrors the `{registered, Name}` clauses above,
-%% resolving via `global:whereis_name/1` (cluster-wide, no `Node` to target)
-%% instead of a local `whereis/1`.
-async_send({global, Name}, isAlive, [], FuturePid) when is_atom(Name) ->
-    Result = is_pid(global:whereis_name(Name)),
-    beamtalk_future:resolve(FuturePid, Result),
-    ok;
-async_send({global, _Name}, isRegistered, [], FuturePid) ->
-    beamtalk_future:resolve(FuturePid, true),
-    ok;
-async_send({global, Name}, registeredName, [], FuturePid) when is_atom(Name) ->
-    beamtalk_future:resolve(FuturePid, Name),
-    ok;
-async_send({global, Name} = Ref, Selector, Args, FuturePid) when is_atom(Name) ->
-    case global:whereis_name(Name) of
-        undefined ->
-            Error = no_such_process_error(Ref, Selector),
-            beamtalk_future:reject(FuturePid, Error),
-            ok;
-        Pid when is_pid(Pid) ->
-            async_send(Pid, Selector, Args, FuturePid)
     end;
 async_send(ActorPid, isAlive, [], FuturePid) ->
     %% isAlive is handled locally - no message to the actor
@@ -1616,30 +1557,17 @@ there is no liveness pre-check (BT-4113).
 -spec cast_send(
     pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()}, atom(), list()
 ) -> ok.
-%% ADR 0079: name-resolving proxy fan-out for fire-and-forget
-%% sends. If the name is not currently registered, silently drop the cast
-%% (consistent with cast_send's existing `actor dead -> ok` semantics).
-cast_send({registered, Name}, Selector, Args) when is_atom(Name) ->
-    case erlang:whereis(Name) of
+%% ADR 0079: name-resolving proxy fan-out for fire-and-forget sends.
+%% A vanished name or an unreachable node silently drops the cast (the
+%% "actor dead -> ok" contract). Intended difference from the other three
+%% send paths (BT-4676): the name-only selectors (`isAlive`, `isRegistered`,
+%% `registeredName`) are NOT answered locally — a cast has no reply to carry
+%% an answer, so they are forwarded like any other selector.
+cast_send(Ref, Selector, Args) when ?IS_PROXY_REF(Ref) ->
+    case resolve_proxy(Ref) of
+        {ok, Pid} -> cast_send(Pid, Selector, Args);
         undefined -> ok;
-        Pid when is_pid(Pid) -> cast_send(Pid, Selector, Args)
-    end;
-%% ADR 0126 §3: node-qualified proxy — see async_send/4's matching clause.
-%% A `node_down` here is silently dropped too, matching the "actor dead ->
-%% ok" fire-and-forget contract this function already has for a stale name.
-cast_send({registered, Name, Node}, Selector, Args) when is_atom(Name), is_atom(Node) ->
-    case resolve_remote_registered(Name, Node) of
-        Pid when is_pid(Pid) -> cast_send(Pid, Selector, Args);
-        undefined -> ok;
-        node_down -> ok
-    end;
-%% ADR 0126 §4: cluster-unique `scope: #global` proxy — see async_send/4's
-%% matching clause. A stale/never-registered name is silently dropped, same
-%% fire-and-forget contract.
-cast_send({global, Name}, Selector, Args) when is_atom(Name) ->
-    case global:whereis_name(Name) of
-        undefined -> ok;
-        Pid when is_pid(Pid) -> cast_send(Pid, Selector, Args)
+        {node_down, _Node} -> ok
     end;
 cast_send(ActorPid, Selector, Args) ->
     cast_send_pid(ActorPid, Selector, Args, undefined).
@@ -1736,57 +1664,11 @@ All other messages go via gen_server:call and the result is unwrapped:
     pid() | {registered, atom()} | {registered, atom(), node()} | {global, atom()}, atom(), list()
 ) ->
     term().
-%% ADR 0079: name-resolving proxy fan-out. Name-only methods
-%% answer from the proxy itself; other methods resolve to the currently-
-%% registered pid, raising `no_such_process` if the name has vanished.
-sync_send({registered, Name}, isAlive, []) when is_atom(Name) ->
-    erlang:whereis(Name) =/= undefined;
-sync_send({registered, _Name}, isRegistered, []) ->
-    true;
-sync_send({registered, Name}, registeredName, []) when is_atom(Name) ->
-    Name;
-sync_send({registered, Name} = Ref, Selector, Args) when is_atom(Name) ->
-    case erlang:whereis(Name) of
-        undefined ->
-            raise_no_such_process(Ref, Selector);
-        Pid when is_pid(Pid) ->
-            sync_send(Pid, Selector, Args)
-    end;
-%% ADR 0126 §3: node-qualified proxy fan-out — see async_send/4's matching
-%% clause for the shared `resolve_remote_registered/2` helper. Answers
-%% `isAlive`/`isRegistered`/`registeredName` without a network hop except
-%% for `isAlive`, which genuinely needs to know whether the name still
-%% resolves on `Node`.
-sync_send({registered, Name, Node}, isAlive, []) when is_atom(Name), is_atom(Node) ->
-    is_pid(resolve_remote_registered(Name, Node));
-sync_send({registered, _Name, _Node}, isRegistered, []) ->
-    true;
-sync_send({registered, Name, _Node}, registeredName, []) when is_atom(Name) ->
-    Name;
-sync_send({registered, Name, Node} = Ref, Selector, Args) when is_atom(Name), is_atom(Node) ->
-    case resolve_remote_registered(Name, Node) of
-        undefined ->
-            raise_no_such_process(Ref, Selector);
-        node_down ->
-            raise_node_down(Node, Selector);
-        Pid when is_pid(Pid) ->
-            sync_send(Pid, Selector, Args)
-    end;
-%% ADR 0126 §4: cluster-unique `scope: #global` proxy fan-out — mirrors the
-%% `{registered, Name}` clauses above, resolving via `global:whereis_name/1`.
-sync_send({global, Name}, isAlive, []) when is_atom(Name) ->
-    is_pid(global:whereis_name(Name));
-sync_send({global, _Name}, isRegistered, []) ->
-    true;
-sync_send({global, Name}, registeredName, []) when is_atom(Name) ->
-    Name;
-sync_send({global, Name} = Ref, Selector, Args) when is_atom(Name) ->
-    case global:whereis_name(Name) of
-        undefined ->
-            raise_no_such_process(Ref, Selector);
-        Pid when is_pid(Pid) ->
-            sync_send(Pid, Selector, Args)
-    end;
+%% ADR 0079: name-resolving proxy fan-out. Name-only methods answer from the
+%% proxy itself; other methods resolve to the currently-registered pid,
+%% raising `no_such_process` if the name has vanished.
+sync_send(Ref, Selector, Args) when ?IS_PROXY_REF(Ref) ->
+    sync_send_proxy(Ref, Selector, Args, fun(Pid) -> sync_send(Pid, Selector, Args) end);
 sync_send(ActorPid, Selector, Args) ->
     sync_send_pid(ActorPid, Selector, Args, undefined).
 
@@ -2015,34 +1897,26 @@ sync_call(ActorPid, Selector, Args, CallTimeout, Class) ->
             end
         end)
     catch
-        exit:{noproc, _} ->
-            raise_actor_dead(Selector);
-        exit:{normal, _} ->
-            raise_actor_dead(Selector);
-        exit:{shutdown, _} ->
-            raise_actor_dead(Selector);
-        exit:{timeout, _} ->
-            raise_timeout(Selector);
-        exit:{{nodedown, Node}, _} ->
-            %% ADR 0126 §7.1: a partitioned or never-connected node —
-            %% the actor may be alive on the far side. Checked before the
-            %% catch-all so it isn't misreported as actor_dead. Verified
-            %% empirically: gen_server:call/2,3 exits with exactly this
-            %% shape (`{{nodedown, Node}, {gen_server, call, [...]}}`) for
-            %% both a mid-call partition and a never-connected node.
-            raise_node_down(Node, Selector);
-        exit:{noconnection, _} ->
-            %% Defensive: not observed from gen_server:call in practice
-            %% (that always wraps as {nodedown, Node} above), but this is
-            %% the DOWN reason erlang:monitor/2 uses for the same
-            %% condition, and ADR 0126 §7.1 names it explicitly.
-            raise_node_down(node(ActorPid), Selector);
-        exit:noconnection ->
-            raise_node_down(node(ActorPid), Selector);
-        exit:{_Reason, _} ->
-            %% Catch-all for other exit reasons: {shutdown, Term}, killed,
-            %% custom stop reasons, etc. All indicate the actor is unavailable.
-            raise_actor_dead(Selector)
+        exit:Reason:Stack ->
+            %% BT-4676: classification lives in beamtalk_call_failure. ADR 0126
+            %% §7.1: a partitioned or never-connected node is `node_down` (the
+            %% actor may be alive on the far side), not `actor_dead`.
+            case beamtalk_call_failure:classify(exit, Reason) of
+                dead ->
+                    raise_actor_dead(Selector);
+                timeout ->
+                    raise_timeout(Selector);
+                {unreachable, _Why} ->
+                    raise_node_down(
+                        beamtalk_call_failure:unreachable_node(Reason, node(ActorPid)), Selector
+                    );
+                other when is_tuple(Reason), tuple_size(Reason) =:= 2 ->
+                    %% `{normal, _}`, `{shutdown, _}`, `{killed, _}`, custom stop
+                    %% reasons: the actor died mid-call, so it is unavailable.
+                    raise_actor_dead(Selector);
+                other ->
+                    erlang:raise(exit, Reason, Stack)
+            end
     end.
 
 -doc """
@@ -2117,55 +1991,10 @@ Used by TimeoutProxy to forward messages with a custom timeout.
     timeout()
 ) ->
     term().
-%% ADR 0079: name-resolving proxy fan-out for the explicit-
-%% timeout path. Mirror sync_send/3's name-only handling and resolution.
-sync_send({registered, Name}, isAlive, [], _Timeout) when is_atom(Name) ->
-    erlang:whereis(Name) =/= undefined;
-sync_send({registered, _Name}, isRegistered, [], _Timeout) ->
-    true;
-sync_send({registered, Name}, registeredName, [], _Timeout) when is_atom(Name) ->
-    Name;
-sync_send({registered, Name} = Ref, Selector, Args, Timeout) when is_atom(Name) ->
-    case erlang:whereis(Name) of
-        undefined ->
-            raise_no_such_process(Ref, Selector);
-        Pid when is_pid(Pid) ->
-            sync_send(Pid, Selector, Args, Timeout)
-    end;
-%% ADR 0126 §3: node-qualified proxy fan-out for the explicit-timeout path —
-%% see sync_send/3's matching clause.
-sync_send({registered, Name, Node}, isAlive, [], _Timeout) when is_atom(Name), is_atom(Node) ->
-    is_pid(resolve_remote_registered(Name, Node));
-sync_send({registered, _Name, _Node}, isRegistered, [], _Timeout) ->
-    true;
-sync_send({registered, Name, _Node}, registeredName, [], _Timeout) when is_atom(Name) ->
-    Name;
-sync_send({registered, Name, Node} = Ref, Selector, Args, Timeout) when
-    is_atom(Name), is_atom(Node)
-->
-    case resolve_remote_registered(Name, Node) of
-        undefined ->
-            raise_no_such_process(Ref, Selector);
-        node_down ->
-            raise_node_down(Node, Selector);
-        Pid when is_pid(Pid) ->
-            sync_send(Pid, Selector, Args, Timeout)
-    end;
-%% ADR 0126 §4: cluster-unique `scope: #global` proxy fan-out for the
-%% explicit-timeout path — see sync_send/3's matching clause.
-sync_send({global, Name}, isAlive, [], _Timeout) when is_atom(Name) ->
-    is_pid(global:whereis_name(Name));
-sync_send({global, _Name}, isRegistered, [], _Timeout) ->
-    true;
-sync_send({global, Name}, registeredName, [], _Timeout) when is_atom(Name) ->
-    Name;
-sync_send({global, Name} = Ref, Selector, Args, Timeout) when is_atom(Name) ->
-    case global:whereis_name(Name) of
-        undefined ->
-            raise_no_such_process(Ref, Selector);
-        Pid when is_pid(Pid) ->
-            sync_send(Pid, Selector, Args, Timeout)
-    end;
+%% ADR 0079: name-resolving proxy fan-out for the explicit-timeout path;
+%% shares one body with sync_send/3 (BT-4676).
+sync_send(Ref, Selector, Args, Timeout) when ?IS_PROXY_REF(Ref) ->
+    sync_send_proxy(Ref, Selector, Args, fun(Pid) -> sync_send(Pid, Selector, Args, Timeout) end);
 sync_send(ActorPid, Selector, Args, Timeout) ->
     sync_send_pid(ActorPid, Selector, Args, Timeout, undefined).
 
@@ -2378,26 +2207,13 @@ it may be slow, overloaded, or deadlocked.
 """.
 -spec raise_timeout(atom()) -> no_return().
 raise_timeout(Selector) ->
-    Error = beamtalk_error:new(
-        timeout,
-        unknown,
-        Selector,
-        <<
-            "Actor did not respond within the timeout period. "
-            "The actor may be slow, overloaded, or deadlocked"
-        >>
-    ),
+    Error = beamtalk_error:actor_timeout(Selector),
     beamtalk_exception_handler:reraise(Error).
 
 -doc "Construct a structured actor_dead error record for the given selector.".
 -spec actor_dead_error_record(atom()) -> #beamtalk_error{}.
 actor_dead_error_record(Selector) ->
-    beamtalk_error:new(
-        actor_dead,
-        unknown,
-        Selector,
-        <<"Use 'isAlive' to check, or use monitors for lifecycle events">>
-    ).
+    beamtalk_error:actor_dead(unknown, Selector).
 
 -doc """
 Raise a structured node_down error as an Erlang exception (ADR 0126 §7.1).
@@ -2445,13 +2261,7 @@ is_remote(ActorPid, AskNode) ->
 -doc "Construct a structured node_down error record for the given node and selector.".
 -spec node_down_error_record(node(), atom()) -> #beamtalk_error{}.
 node_down_error_record(Node, Selector) ->
-    Error = beamtalk_error:new(
-        node_down,
-        unknown,
-        Selector,
-        <<"The node may come back; retry, or use monitors to detect when it does">>
-    ),
-    beamtalk_error:with_details(Error, #{node => Node}).
+    beamtalk_error:node_down(unknown, Selector, Node).
 
 -doc """
 ADR 0126 §3: resolve a `{registered, Name, Node}` proxy's live pid.
@@ -2485,20 +2295,74 @@ resolve_remote_registered(Name, Node) ->
     end.
 
 -doc """
-ADR 0079: raise a `no_such_process` error for sends through a
-name-resolving proxy when the registered name no longer points at any
-process. Distinct from `actor_dead`, which fires when a held pid points
-at a dead process — `no_such_process` says the *name* failed to resolve.
+BT-4676: the one resolver for name-resolving proxy refs (ADR 0079, 0126).
+Answers the live pid, `undefined` when the name is not registered, or
+`{node_down, Node}` when a node-qualified ref cannot be resolved because
+`Node` is unreachable. Used by every send path (`async_send/4`, `cast_send/3`,
+`sync_send/3,4`) so the three ref shapes are handled in exactly one place.
 """.
--spec raise_no_such_process(
-    {registered, atom()} | {registered, atom(), node()} | {global, atom()}, atom()
-) -> no_return().
-raise_no_such_process({registered, Name}, Selector) ->
-    beamtalk_exception_handler:reraise(no_such_process_error_record(Name, Selector));
-raise_no_such_process({registered, Name, _Node}, Selector) ->
-    beamtalk_exception_handler:reraise(no_such_process_error_record(Name, Selector));
-raise_no_such_process({global, Name}, Selector) ->
-    beamtalk_exception_handler:reraise(no_such_process_error_record(Name, Selector)).
+-spec resolve_proxy(proxy_ref()) -> {ok, pid()} | undefined | {node_down, node()}.
+resolve_proxy({registered, Name}) ->
+    wrap_resolved(erlang:whereis(Name), undefined);
+resolve_proxy({registered, Name, Node}) ->
+    wrap_resolved(resolve_remote_registered(Name, Node), Node);
+resolve_proxy({global, Name}) ->
+    wrap_resolved(global:whereis_name(Name), undefined).
+
+-spec wrap_resolved(pid() | undefined | node_down, node() | undefined) ->
+    {ok, pid()} | undefined | {node_down, node()}.
+wrap_resolved(Pid, _Node) when is_pid(Pid) -> {ok, Pid};
+wrap_resolved(undefined, _Node) -> undefined;
+wrap_resolved(node_down, Node) -> {node_down, Node}.
+
+-doc """
+BT-4676: route a send through a proxy ref. Name-only selectors (`isAlive`,
+`isRegistered`, `registeredName`) are answered by the proxy itself; every
+other selector resolves to a pid or a structured error. The caller decides
+how to deliver the outcome (resolve/reject a future, or raise).
+""".
+-spec proxy_route(proxy_ref(), atom(), list()) ->
+    {answer, term()} | {pid, pid()} | {error, #beamtalk_error{}}.
+proxy_route(Ref, isAlive, []) ->
+    {answer, is_pid_result(resolve_proxy(Ref))};
+proxy_route(_Ref, isRegistered, []) ->
+    {answer, true};
+proxy_route({_Kind, Name}, registeredName, []) ->
+    {answer, Name};
+proxy_route({registered, Name, _Node}, registeredName, []) ->
+    {answer, Name};
+proxy_route(Ref, Selector, _Args) ->
+    case resolve_or_error(Ref, Selector) of
+        {ok, Pid} -> {pid, Pid};
+        {error, _} = Error -> Error
+    end.
+
+-doc "The pid a proxy ref currently resolves to, or the structured error (for the FFI's `proxy_pid/2`).".
+-spec resolve_proxy_or_error(proxy_ref(), atom()) -> {ok, pid()} | {error, #beamtalk_error{}}.
+resolve_proxy_or_error(Ref, Selector) ->
+    resolve_or_error(Ref, Selector).
+
+%% The one resolve -> structured-error mapping; selector-independent.
+-spec resolve_or_error(proxy_ref(), atom()) -> {ok, pid()} | {error, #beamtalk_error{}}.
+resolve_or_error(Ref, Selector) ->
+    case resolve_proxy(Ref) of
+        {ok, Pid} -> {ok, Pid};
+        undefined -> {error, no_such_process_error(Ref, Selector)};
+        {node_down, Node} -> {error, node_down_error_record(Node, Selector)}
+    end.
+
+-spec is_pid_result({ok, pid()} | undefined | {node_down, node()}) -> boolean().
+is_pid_result({ok, _Pid}) -> true;
+is_pid_result(_) -> false.
+
+-doc "Sync half of `proxy_route/3`: answer, raise, or continue with the resolved pid.".
+-spec sync_send_proxy(proxy_ref(), atom(), list(), fun((pid()) -> term())) -> term().
+sync_send_proxy(Ref, Selector, Args, WithPid) ->
+    case proxy_route(Ref, Selector, Args) of
+        {answer, Value} -> Value;
+        {pid, Pid} -> WithPid(Pid);
+        {error, Error} -> beamtalk_exception_handler:reraise(Error)
+    end.
 
 -doc "Construct a structured `no_such_process` error for the given proxy ref.".
 -spec no_such_process_error(
@@ -4552,12 +4416,7 @@ make_dnu_error(Selector, ClassName, State) ->
         pid => self(),
         domain => [beamtalk, runtime]
     }),
-    Error = beamtalk_error:new(
-        does_not_understand,
-        ClassName,
-        Selector,
-        <<"Check spelling or use 'respondsTo:' to verify method exists">>
-    ),
+    Error = beamtalk_error:does_not_understand(ClassName, Selector),
     {error, Error, State}.
 
 -doc """

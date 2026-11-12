@@ -4387,6 +4387,23 @@ bt1990_cast_send_through_proxy_to_vanished_name_is_silent_test() ->
         cleanup_name(Name)
     end.
 
+bt4676_cast_send_proxy_name_only_selectors_are_forwarded_test() ->
+    %% Intended drift (BT-4676): unlike async_send/sync_send, cast_send does
+    %% not answer isAlive/isRegistered/registeredName from the proxy — a
+    %% cast has no reply channel. It forwards them (and never raises), for
+    %% live and vanished names alike.
+    Name = bt4676_proxy_cast_name_only,
+    {Pid, _Proxy} = bt1990_setup_named_counter(Name, 0),
+    try
+        ?assertEqual(ok, beamtalk_actor:cast_send({registered, Name}, isAlive, [])),
+        ?assertEqual(ok, beamtalk_actor:cast_send({registered, Name}, registeredName, [])),
+        gen_server:stop(Pid),
+        bt1990_wait_until_unregistered(Name, 1000),
+        ?assertEqual(ok, beamtalk_actor:cast_send({registered, Name}, isRegistered, []))
+    after
+        cleanup_name(Name)
+    end.
+
 bt1990_named_returns_registered_proxy_not_pid_test() ->
     %% `Actor named:` must return a `{registered, Name}` proxy so that
     %% subsequent sends survive restarts. Using the pid would make the

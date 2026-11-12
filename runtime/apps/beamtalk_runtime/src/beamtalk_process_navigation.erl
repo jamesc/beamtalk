@@ -404,13 +404,7 @@ class_ref_in(Node) ->
 
 -spec on_node_down_error(node()) -> #beamtalk_error{}.
 on_node_down_error(Name) ->
-    Error0 = beamtalk_error:new(
-        node_down,
-        'ProcessNavigation',
-        'on:',
-        <<"The node may come back; retry, or use monitors to detect when it does">>
-    ),
-    beamtalk_error:with_details(Error0, #{node => Name}).
+    beamtalk_error:node_down('ProcessNavigation', 'on:', Name).
 
 -spec on_timeout_error(node()) -> #beamtalk_error{}.
 on_timeout_error(Name) ->

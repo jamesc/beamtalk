@@ -582,12 +582,7 @@ class_chain_step(Selector, Args, Self, State, ClassName, _Depth) ->
                             }),
                             %% Derive class from Self when State is empty (class objects).
                             ErrorClass = class_name_from(Self, State, ClassName),
-                            Error = beamtalk_error:new(
-                                does_not_understand,
-                                ErrorClass,
-                                Selector,
-                                <<"Check spelling or use 'respondsTo:' to verify method exists">>
-                            ),
+                            Error = beamtalk_error:does_not_understand(ErrorClass, Selector),
                             {found, {error, Error}};
                         SuperclassName ->
                             {next, SuperclassName}
@@ -608,12 +603,7 @@ invoke_step(ClassName, ClassPid, Selector, Args, Self, State) ->
             %% Reached root without finding a dispatchable method.
             %% Derive class from Self when State is empty (class objects).
             ErrorClass = class_name_from(Self, State, unknown),
-            Error = beamtalk_error:new(
-                does_not_understand,
-                ErrorClass,
-                Selector,
-                <<"Check spelling or use 'respondsTo:' to verify method exists">>
-            ),
+            Error = beamtalk_error:does_not_understand(ErrorClass, Selector),
             {found, {error, Error}};
         {continue, SuperclassName} ->
             {next, SuperclassName};

@@ -258,3 +258,14 @@
     '__method_info__' := map(),
     '__doc__' := binary() | nil
 }.
+
+%% BT-4676: name-resolving proxy refs (ADR 0079 / 0126) accepted by the send
+%% functions; resolved by resolve_proxy/1.
+-type proxy_ref() :: {registered, atom()} | {registered, atom(), node()} | {global, atom()}.
+-define(IS_PROXY_REF(R),
+    (is_tuple(R) andalso
+        ((tuple_size(R) =:= 2 andalso is_atom(element(2, R)) andalso
+            (element(1, R) =:= registered orelse element(1, R) =:= global)) orelse
+            (tuple_size(R) =:= 3 andalso element(1, R) =:= registered andalso
+                is_atom(element(2, R)) andalso is_atom(element(3, R)))))
+).
