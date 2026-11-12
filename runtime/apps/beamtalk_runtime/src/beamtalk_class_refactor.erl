@@ -580,29 +580,10 @@ do_rename_and_rewrite(
 %% overwriting — exact hint text from the ADR's own worked example.
 -spec ensure_rename_collision_free(atom(), atom()) -> ok.
 ensure_rename_collision_free(OldName, NewName) ->
-    case beamtalk_class_registry:whereis_class(NewName) of
-        undefined -> ok;
-        _Pid -> beamtalk_error:raise(rename_collision_error(OldName, NewName))
-    end.
-
--spec rename_collision_error(atom(), atom()) -> #beamtalk_error{}.
-rename_collision_error(OldName, NewName) ->
-    OldBin = atom_to_binary(OldName, utf8),
-    NewBin = atom_to_binary(NewName, utf8),
-    Error0 = beamtalk_error:new(class_already_exists, OldName),
-    Error1 = beamtalk_error:with_message(
-        Error0,
-        iolist_to_binary([
-            <<"cannot rename ">>,
-            OldBin,
-            <<" to ">>,
-            NewBin,
-            <<" — "/utf8>>,
-            NewBin,
-            <<" already exists">>
-        ])
-    ),
-    beamtalk_error:with_hint(Error1, <<"remove or rename the existing class first">>).
+    beamtalk_refactor_support:raise_if_colliding(
+        beamtalk_class_registry:whereis_class(NewName) =/= undefined,
+        fun() -> beamtalk_refactor_support:rename_collision_error(class, OldName, NewName) end
+    ).
 
 %% Stdlib/dependency refusal (ADR 0114 § "Refusal vs flushability"): a
 %% dynamic class (`not_flushable_reason: "dynamic"`) and an ordinary project
@@ -655,28 +636,20 @@ dependency_rename_refusal_error(ClassName, Reason) ->
         ])
     ).
 
--spec rename_rewrite_failed_error(atom(), term()) -> #beamtalk_error{}.
-rename_rewrite_failed_error(OldName, workspace_unavailable) ->
-    Error0 = beamtalk_error:new(runtime_error, OldName),
-    beamtalk_error:with_message(
-        Error0,
-        <<"Workspace not available; renameTo: requires a running workspace">>
-    );
 %% A non-dynamic classification with neither a definition nor any reference
-%% site — the divergent-classification edge case `rewrite_class_sites/4`'s
-%% own doc describes, falling through to a real `{error, no_sites}` from
-%% `rewrite_sites/2` instead of that function's dynamic-only trivial-success
-%% shortcut.
-rename_rewrite_failed_error(OldName, no_sites) ->
-    Error0 = beamtalk_error:new(runtime_error, OldName),
-    beamtalk_error:with_message(
-        Error0,
-        <<"renameTo: found no declaration or reference site to rewrite">>
-    );
+%% site (`no_sites`) — the divergent-classification edge case
+%% `rewrite_class_sites/4`'s own doc describes, falling through to a real
+%% `{error, no_sites}` from `rewrite_sites/2` instead of that function's
+%% dynamic-only trivial-success shortcut.
+-spec rename_rewrite_failed_error(atom(), term()) -> #beamtalk_error{}.
 rename_rewrite_failed_error(OldName, Reason) ->
-    Error0 = beamtalk_error:new(runtime_error, OldName),
-    Msg = beamtalk_error:chars_to_binary(io_lib:format("Could not rename class: ~tp", [Reason])),
-    beamtalk_error:with_message(Error0, Msg).
+    beamtalk_refactor_support:rename_rewrite_failed_error(
+        OldName,
+        <<"renameTo:">>,
+        <<"class">>,
+        <<"renameTo: found no declaration or reference site to rewrite">>,
+        Reason
+    ).
 
 %% A dynamic class's identity move committed AFTER `validate_class_sites/4`
 %% already passed, yet the real rewrite still failed (`do_rename_and_rewrite/7`'s
@@ -1086,23 +1059,16 @@ rename_install_incomplete_error(OldName, NewName) ->
 %% class rename has no method-level target, matching the schema.
 -spec log_class_rename(binary(), binary(), map(), map()) -> ok.
 log_class_rename(OldNameBin, NewNameBin, Classification, RewriteResult) ->
-    {Author, AuthorKind} = beamtalk_refactor_support:current_author_context(),
-    Spec = #{
-        kind => 'rename-class',
-        class => NewNameBin,
-        old_class => OldNameBin,
-        old_path => maps:get(source_file, Classification, undefined),
-        new_path => undefined,
-        intent => durable,
-        author => Author,
-        author_kind => AuthorKind
-    },
-    try
-        erlang:apply(beamtalk_repl_eval, emit_rewrite_change_entry, [Spec, RewriteResult])
-    catch
-        error:undef -> ok
-    end,
-    ok.
+    beamtalk_refactor_support:log_rename_change(
+        #{
+            kind => 'rename-class',
+            class => NewNameBin,
+            old_class => OldNameBin,
+            old_path => maps:get(source_file, Classification, undefined),
+            new_path => undefined
+        },
+        RewriteResult
+    ).
 
 %% Structured `selector_not_found` error for the bare `removeSelector:` form
 %% (ADR 0112 § Error behaviour on absent selector) — deliberately distinct
