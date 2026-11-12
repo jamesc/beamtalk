@@ -50,7 +50,7 @@ pub use cascade::cascade_drops_update;
 /// name resolves through itself. Callers keep the original name for
 /// user-facing messages and `Self`-typed returns.
 pub(super) fn method_resolution_class(name: &str) -> &str {
-    if name.starts_with('#') {
+    if crate::semantic_analysis::string_utils::is_symbol_singleton_name(name) {
         "Symbol"
     } else {
         name

@@ -1644,11 +1644,14 @@ impl TypeChecker {
                 // (`#foo`) resolves its suggestions through `Symbol` — the
                 // same singleton-as-Symbol convention `resolve_name` above
                 // (and `resolve_class` elsewhere in this file) applies.
-                let suggestion_class = if only_missing.starts_with('#') {
-                    EcoString::from("Symbol")
-                } else {
-                    only_missing.clone()
-                };
+                let suggestion_class =
+                    if crate::semantic_analysis::string_utils::is_symbol_singleton_name(
+                        only_missing,
+                    ) {
+                        EcoString::from("Symbol")
+                    } else {
+                        only_missing.clone()
+                    };
                 let display_name = InferredType::class_name_for_diagnostic(only_missing.as_str());
                 // Every DNU shape carries actionable advice, so pass the
                 // same generic hint the multi-culprit branch below always

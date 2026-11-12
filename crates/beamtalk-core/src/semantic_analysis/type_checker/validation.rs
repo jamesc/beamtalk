@@ -29,7 +29,9 @@ use crate::semantic_analysis::alias_registry::AliasRegistry;
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::protocol_registry::{ProtocolRegistry, ReturnTypeMismatch};
 use crate::semantic_analysis::receiver_knowledge;
-use crate::semantic_analysis::string_utils::edit_distance;
+use crate::semantic_analysis::string_utils::{
+    edit_distance, is_symbol_singleton_name, split_top_level,
+};
 use crate::source_analysis::{
     Diagnostic, DiagnosticCategory, Severity, Span, equality_operator_is_negated,
 };
@@ -759,7 +761,7 @@ impl TypeChecker {
         // `Symbol`.
         let symbol: EcoString;
         let effective_class: &EcoString =
-            if class_name.starts_with('#') && !class_name.contains('|') {
+            if is_symbol_singleton_name(class_name) && !class_name.contains('|') {
                 symbol = EcoString::from("Symbol");
                 &symbol
             } else {
@@ -984,11 +986,16 @@ impl TypeChecker {
         }
         // Union syntax in expected type (e.g., "Integer | Symbol" from builtins).
         // If expected contains `|`, split into members and check if actual matches any.
-        if expected.contains(" | ") {
-            return expected.split(" | ").any(|member| {
-                let member_eco: EcoString = member.trim().into();
-                Self::is_type_compatible(actual, &member_eco, hierarchy)
-            });
+        // Split at the top level only, so a map shape's internal `|` is not a
+        // member separator; a single piece falls through to the arms below.
+        if expected.contains('|') {
+            let members = split_top_level(expected, '|');
+            if members.len() > 1 {
+                return members.into_iter().any(|member| {
+                    let member_eco: EcoString = member.into();
+                    Self::is_type_compatible(actual, &member_eco, hierarchy)
+                });
+            }
         }
         // Singleton types: #foo is a subtype of Symbol, not the reverse.
         // Symbol is NOT compatible with a singleton like #ok.
@@ -1006,12 +1013,12 @@ impl TypeChecker {
         // bound by the receiver's own type args) becomes literal `Dynamic`,
         // and comparing it against a substituted singleton E (e.g. `#x`)
         // must not fail just because it's unresolved.
-        if expected.starts_with('#') && !expected.contains('|') {
+        if is_symbol_singleton_name(expected) && !expected.contains('|') {
             return actual == expected
                 || super::is_type_var_placeholder(actual, hierarchy)
                 || WellKnownClass::from_str(actual) == Some(WellKnownClass::Dynamic);
         }
-        if actual.starts_with('#') && !actual.contains('|') {
+        if is_symbol_singleton_name(actual) && !actual.contains('|') {
             // Singletons are subtypes of Symbol — check if expected is Symbol
             // or an ancestor of Symbol in the class hierarchy.
             if super::is_type_var_placeholder(expected, hierarchy) {
@@ -3050,7 +3057,7 @@ impl TypeChecker {
         if is_concat
             && WellKnownClass::from_str(arg_ty) != Some(WellKnownClass::String)
             && arg_ty.as_str() != "Symbol"
-            && !arg_ty.starts_with('#')
+            && !is_symbol_singleton_name(arg_ty)
         {
             // Use hint severity for generic type params (likely false positive)
             let mut diag = if is_generic {
@@ -3218,7 +3225,7 @@ impl TypeChecker {
             Some(ComparisonArgKind::Numeric)
         } else if WellKnownClass::from_str(receiver_ty) == Some(WellKnownClass::String) {
             Some(ComparisonArgKind::String)
-        } else if receiver_ty == "Symbol" || receiver_ty.starts_with('#') {
+        } else if receiver_ty == "Symbol" || is_symbol_singleton_name(receiver_ty) {
             Some(ComparisonArgKind::Symbol)
         } else {
             None
@@ -4516,29 +4523,33 @@ impl TypeChecker {
         }
         // Singleton declared types: value must be the exact same singleton.
         // Symbol is NOT assignable to a singleton like #ok (wrong subtyping direction).
-        if declared_type.starts_with('#') && !declared_type.contains('|') {
+        if is_symbol_singleton_name(declared_type) && !declared_type.contains('|') {
             return value_type == declared_type;
         }
         // Singleton value types: check union membership first, then fall back to
         // Symbol hierarchy (e.g., #ok is assignable to Object, Symbol | nil, etc.)
-        if value_type.starts_with('#') && !value_type.contains('|') {
+        if is_symbol_singleton_name(value_type) && !value_type.contains('|') {
             // For union declared types, check if the singleton is a member
             if declared_type.contains('|') {
-                return declared_type.split('|').map(str::trim).any(|member| {
-                    let member_eco: EcoString = Self::resolve_type_keyword_static(member);
-                    value_type.as_str() == member_eco.as_str()
-                        || Self::is_type_compatible(value_type, &member_eco, hierarchy)
-                });
+                return split_top_level(declared_type, '|')
+                    .into_iter()
+                    .any(|member| {
+                        let member_eco: EcoString = Self::resolve_type_keyword_static(member);
+                        value_type.as_str() == member_eco.as_str()
+                            || Self::is_type_compatible(value_type, &member_eco, hierarchy)
+                    });
             }
             let symbol: EcoString = "Symbol".into();
             return Self::is_assignable_to(&symbol, declared_type, hierarchy);
         }
         // Union declared types: value must be compatible with at least one member
         if declared_type.contains('|') {
-            return declared_type.split('|').map(str::trim).any(|member| {
-                let member_eco: EcoString = Self::resolve_type_keyword_static(member);
-                Self::is_type_compatible(value_type, &member_eco, hierarchy)
-            });
+            return split_top_level(declared_type, '|')
+                .into_iter()
+                .any(|member| {
+                    let member_eco: EcoString = Self::resolve_type_keyword_static(member);
+                    Self::is_type_compatible(value_type, &member_eco, hierarchy)
+                });
         }
         // For generic declared types like "Result(Integer, Error)", extract
         // the base type name and compare structurally, going through
@@ -4719,7 +4730,7 @@ impl TypeChecker {
     /// singleton preserved for narrowing/exhaustiveness — widening there
     /// would lose real information a caller might depend on.
     pub(super) fn widen_singleton_type_arg(ty: &InferredType) -> InferredType {
-        let is_singleton = |t: &InferredType| matches!(t, InferredType::Known { class_name, .. } if class_name.starts_with('#'));
+        let is_singleton = |t: &InferredType| matches!(t, InferredType::Known { class_name, .. } if is_symbol_singleton_name(class_name));
         let widens = match ty {
             InferredType::Known { .. } => is_singleton(ty),
             InferredType::Union { members, .. } => {
@@ -5512,7 +5523,7 @@ impl ComparisonArgKind {
             Self::Numeric => hierarchy.is_numeric_type(arg_ty),
             Self::Character => arg_ty == "Character",
             Self::String => WellKnownClass::from_str(arg_ty) == Some(WellKnownClass::String),
-            Self::Symbol => arg_ty == "Symbol" || arg_ty.starts_with('#'),
+            Self::Symbol => arg_ty == "Symbol" || is_symbol_singleton_name(arg_ty),
         }
     }
 }

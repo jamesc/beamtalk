@@ -258,6 +258,47 @@ fn is_assignable_to_generic_declared_type() {
     );
 }
 
+/// ADR 0147: a map-shape string is neither a singleton nor split inside its
+/// braces, even when it holds `|` / `,` and sits in a union.
+#[test]
+fn is_assignable_to_map_shape_strings_are_not_singletons() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    let shape = eco_string("#{#a => Integer | String, #b => Float}");
+
+    // Not a singleton: a Symbol is not exactly-equal to it, and the shape is
+    // not treated as a Symbol subtype.
+    assert!(!TypeChecker::is_assignable_to(
+        &eco_string("Symbol"),
+        &eco_string("#{#a => Integer}"),
+        &hierarchy,
+    ));
+    assert!(!TypeChecker::is_assignable_to(
+        &eco_string("#{#a => Integer}"),
+        &eco_string("Symbol"),
+        &hierarchy,
+    ));
+
+    // Union members are found at the top level, not inside the braces.
+    let union = eco_string("#{#a => Integer | String, #b => Float} | nil");
+    assert!(TypeChecker::is_assignable_to(
+        &eco_string("nil"),
+        &union,
+        &hierarchy
+    ));
+    assert!(TypeChecker::is_assignable_to(&shape, &union, &hierarchy));
+}
+
+#[test]
+fn is_type_compatible_does_not_split_inside_shape() {
+    let hierarchy = ClassHierarchy::with_builtins();
+    // Union members are found at the top level; the shape stays one member.
+    assert!(TypeChecker::is_type_compatible(
+        &eco_string("nil"),
+        &eco_string("#{#a => Integer | String} | nil"),
+        &hierarchy,
+    ));
+}
+
 // ---- Constructor type inference tests ----
 
 /// `GenResult ok: 42` infers T = Integer → GenResult(Integer, Dynamic).

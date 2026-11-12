@@ -269,7 +269,7 @@ fn tier_of_known(
 ) -> Tier {
     let name = class_name.as_str();
     // Symbol singletons (`#foo`) are plain atoms.
-    if name.starts_with('#') {
+    if crate::semantic_analysis::string_utils::is_symbol_singleton_name(name) {
         return Tier::Sendable;
     }
     // The builtin hazard table takes precedence over class kind: `Pid` is

@@ -454,7 +454,8 @@ fn all_members(ty: &InferredType, member_ok: &dyn Fn(&str) -> bool) -> bool {
 #[must_use]
 pub fn ffi_result_passes_unchanged(ty: &InferredType) -> bool {
     all_members(ty, &|name| {
-        if let Some(atom) = name.strip_prefix('#') {
+        if crate::semantic_analysis::string_utils::is_symbol_singleton_name(name) {
+            let atom = &name[1..];
             return atom != "ok" && atom != "error";
         }
         FFI_SCALAR_CLASSES.contains(&name) || FFI_RESULT_EXTRA_CLASSES.contains(&name)
@@ -469,7 +470,7 @@ pub fn ffi_result_passes_unchanged(ty: &InferredType) -> bool {
 #[must_use]
 pub fn ffi_arg_passes_unchanged(ty: &InferredType) -> bool {
     all_members(ty, &|name| {
-        name.starts_with('#')
+        crate::semantic_analysis::string_utils::is_symbol_singleton_name(name)
             || FFI_SCALAR_CLASSES.contains(&name)
             || FFI_ARG_EXTRA_CLASSES.contains(&name)
     })
@@ -478,6 +479,17 @@ pub fn ffi_arg_passes_unchanged(ty: &InferredType) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ffi_result_map_shape_is_not_a_passthrough_atom() {
+        assert!(ffi_result_passes_unchanged(&InferredType::known("#done")));
+        assert!(!ffi_result_passes_unchanged(&InferredType::known(
+            "#{#a => Integer}"
+        )));
+        assert!(!ffi_arg_passes_unchanged(&InferredType::known(
+            "#{#a => Integer}"
+        )));
+    }
 
     /// BT-4485: the FFI pass-through rule matches the shared fixture the
     /// runtime's `beamtalk_erlang_proxy_tests` checks sample values against.
