@@ -122,3 +122,11 @@ fn class_test_condition_adds_no_new_hint() {
     // hint; narrowing the body must not start doing so.
     assert_clean("    [p] whileTrue: [^0]\n    [x isKindOf: String] whileTrue: [^0]\n    0");
 }
+
+#[test]
+fn condition_block_assigns_the_tested_variable() {
+    // The common shape: the condition block reads into a local, then tests it.
+    assert_clean(
+        "    m :: Integer | Nil := nil\n    [m := n. m notNil] whileTrue: [Repro need: m. ^0]\n    0",
+    );
+}

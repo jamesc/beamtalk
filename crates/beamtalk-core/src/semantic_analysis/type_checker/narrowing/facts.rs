@@ -5,8 +5,9 @@
 //!
 //! [`TypeChecker::condition_facts`] is the one recursive function behind every
 //! consumer of control-flow narrowing: the arms of `ifTrue:` / `ifFalse:` /
-//! `ifTrue:ifFalse:`, the lazy block of `and:` / `or:`, and post-guard
-//! (early-return) narrowing. For a condition it answers a [`CondFacts`]: the
+//! `ifTrue:ifFalse:`, the lazy block of `and:` / `or:`, the body of
+//! `[cond] whileTrue:` / `whileFalse:` ([`TypeChecker::loop_body_facts`],
+//! BT-4713), and post-guard (early-return) narrowing. For a condition it answers a [`CondFacts`]: the
 //! [`Facts`] (variable → narrowed type) that hold when the condition is true,
 //! and those that hold when it is false.
 //!
@@ -21,8 +22,9 @@
 //! * Anything else contributes no facts but never stops the rest of a chain
 //!   from narrowing.
 //!
-//! New connectives (aliases, `whileTrue:` conditions) extend
-//! `condition_facts` with one more case that builds a [`CondFacts`].
+//! New connectives (aliases, say) extend `condition_facts` with one more case
+//! that builds a [`CondFacts`]; a new consumer calls it as `loop_body_facts`
+//! does.
 
 use crate::ast::Expression;
 use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
