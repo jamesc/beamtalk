@@ -16,6 +16,8 @@
 
 use proptest::prelude::*;
 
+use crate::test_helpers::test_support::near_valid_from;
+
 use super::super::{format_source, unparse_module};
 use crate::source_analysis::{lex_with_eof, parse};
 
@@ -48,34 +50,8 @@ const FRAGMENTS: &[&str] = &[
     "sealed Object subclass: Shape",
 ];
 
-fn valid_fragment() -> impl Strategy<Value = String> {
-    prop::sample::select(FRAGMENTS).prop_map(std::string::ToString::to_string)
-}
-
 fn near_valid_beamtalk() -> impl Strategy<Value = String> {
-    prop_oneof![
-        valid_fragment(),
-        // Truncated
-        valid_fragment().prop_flat_map(|s| {
-            let len = s.len();
-            if len <= 1 {
-                Just(s).boxed()
-            } else {
-                (1..len)
-                    .prop_map(move |cut| {
-                        let safe_cut = s.floor_char_boundary(cut);
-                        if safe_cut == 0 {
-                            s.clone()
-                        } else {
-                            s[..safe_cut].to_string()
-                        }
-                    })
-                    .boxed()
-            }
-        }),
-        // Multiple fragments
-        (valid_fragment(), valid_fragment()).prop_map(|(a, b)| format!("{a}\n{b}")),
-    ]
+    near_valid_from(FRAGMENTS)
 }
 
 // ============================================================================

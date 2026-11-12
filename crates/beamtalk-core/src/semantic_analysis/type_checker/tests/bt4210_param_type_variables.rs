@@ -11,12 +11,6 @@
 
 use super::common::*;
 
-fn diagnostics(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-}
-
 fn assert_placeholder(ty: &InferredType, name: &str, what: &str) {
     match ty {
         InferredType::Known {
@@ -119,7 +113,7 @@ fn method_param_type_variable_resolves_to_placeholder_not_dynamic() {
 
 #[test]
 fn method_param_type_variable_flows_to_matching_return() {
-    let diags = diagnostics(
+    let diags = diags_with_expect(
         r"
 typed Object subclass: H
   pass: x :: E -> E => x
@@ -131,7 +125,7 @@ typed Object subclass: H
 
 #[test]
 fn method_param_type_variable_into_annotated_local_does_not_warn() {
-    let diags = diagnostics(
+    let diags = diags_with_expect(
         r"
 typed Object subclass: H
   a: x :: E -> Integer =>
@@ -147,7 +141,7 @@ typed Object subclass: H
 
 #[test]
 fn class_level_type_variable_param_resolves_to_placeholder() {
-    let diags = diagnostics(
+    let diags = diags_with_expect(
         r"
 typed Object subclass: Box(T)
   field: item :: T
@@ -208,7 +202,7 @@ typed Object subclass: H
 /// placeholder exemption is for type variables only.
 #[test]
 fn concrete_block_param_mismatch_still_warns() {
-    let diags = diagnostics(
+    let diags = diags_with_expect(
         r"
 typed Object subclass: H
   each: x :: E -> Integer =>

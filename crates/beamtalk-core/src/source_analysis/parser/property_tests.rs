@@ -18,6 +18,7 @@ use proptest::prelude::*;
 
 use crate::ast::{BinarySegment, Expression, Module};
 use crate::source_analysis::{lex_with_eof, parse};
+use crate::test_helpers::test_support::{fragment_from, truncated_from};
 
 // ============================================================================
 // Near-valid Beamtalk generators
@@ -69,29 +70,12 @@ const FRAGMENTS: &[&str] = &[
 
 /// Generates a Beamtalk fragment from the seed corpus.
 fn valid_fragment() -> impl Strategy<Value = String> {
-    prop::sample::select(FRAGMENTS).prop_map(std::string::ToString::to_string)
+    fragment_from(FRAGMENTS)
 }
 
 /// Generates a truncated valid expression (cut at a random point).
 fn truncated_expression() -> impl Strategy<Value = String> {
-    valid_fragment().prop_flat_map(|s| {
-        let len = s.len();
-        if len <= 1 {
-            Just(s).boxed()
-        } else {
-            (1..len)
-                .prop_map(move |cut| {
-                    // Find nearest char boundary to avoid panicking on multi-byte chars
-                    let safe_cut = s.floor_char_boundary(cut);
-                    if safe_cut == 0 {
-                        s.clone()
-                    } else {
-                        s[..safe_cut].to_string()
-                    }
-                })
-                .boxed()
-        }
-    })
+    truncated_from(FRAGMENTS)
 }
 
 /// Generates input with mismatched brackets via single-pass char mapping.

@@ -11,20 +11,6 @@
 
 use super::common::*;
 
-fn type_diagnostics(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-        .into_iter()
-        .filter(|d| {
-            matches!(
-                d.category,
-                Some(DiagnosticCategory::Type | DiagnosticCategory::Dnu)
-            )
-        })
-        .collect()
-}
-
 /// The issue repro: `isKindOf:` on the receiver of `and:`.
 #[test]
 fn bt4635_is_kind_of_and_narrows_block() {
@@ -36,7 +22,7 @@ typed Object subclass: Repro
     ]
     0
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_dnu_diags(source);
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
 
@@ -54,7 +40,7 @@ typed Object subclass: Repro
     ]
     0
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_dnu_diags(source);
     assert!(
         diags.iter().any(|d| d.message.contains("at:")),
         "`each` is not a Tuple in the `or:` block, so `at:` must still be flagged, got: {diags:#?}"
@@ -72,7 +58,7 @@ typed Object subclass: Repro
     ]
     0
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_dnu_diags(source);
     assert!(
         diags.iter().any(|d| d.message.contains("at:")),
         "expected DNU for `at:` on Object, got: {diags:#?}"
@@ -89,7 +75,7 @@ typed Object subclass: Repro
   check: x :: Integer | Nil -> Boolean =>
     x isNil or: [x + 1 > 0]
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_dnu_diags(source);
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
 
@@ -102,7 +88,7 @@ typed Object subclass: Repro
   check: x :: Integer | String -> Boolean =>
     (x isKindOf: String) or: [x + 1 > 0]
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_dnu_diags(source);
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
 
@@ -114,7 +100,7 @@ typed Object subclass: Repro
   check: x :: Integer | String -> Boolean =>
     (x isKindOf: Integer) and: [x + 1 > 0]
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_dnu_diags(source);
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
 
@@ -128,7 +114,7 @@ typed Object subclass: Repro
     x := 3
     (x isKindOf: String) and: [true]
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_dnu_diags(source);
     let hints = diags
         .iter()
         .filter(|d| d.message.contains("can never be true"))

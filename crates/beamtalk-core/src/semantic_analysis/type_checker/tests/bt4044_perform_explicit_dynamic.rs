@@ -26,17 +26,11 @@ fn dynamic_diags(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
         .collect()
 }
 
-fn check(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-}
-
 /// Acceptance: `x perform: #s withArguments: #()` in a typed class
 /// method declared `-> Object` produces no warning.
 #[test]
 fn perform_with_arguments_in_typed_method_is_silent() {
-    let diags = check(
+    let diags = diags_with_expect(
         "typed Object subclass: PerformClient\n\
          \x20 performIt: x :: Object -> Object =>\n\
          \x20\x20\x20 x perform: #name withArguments: #()\n",
@@ -53,7 +47,7 @@ fn perform_with_arguments_in_typed_method_is_silent() {
 /// (`c :: Latetest class`) performing into a `-> Object` method.
 #[test]
 fn perform_through_metaclass_receiver_is_silent() {
-    let diags = check(
+    let diags = diags_with_expect(
         "typed Actor subclass: Latetest\n\
          \x20 performLocal: c :: Latetest class -> Object =>\n\
          \x20\x20\x20 c perform: #name withArguments: #()\n",
@@ -69,7 +63,7 @@ fn perform_through_metaclass_receiver_is_silent() {
 /// Assigning the reflective result to a typed local is silent too.
 #[test]
 fn perform_result_assigned_to_typed_local_is_silent() {
-    let diags = check(
+    let diags = diags_with_expect(
         "typed Object subclass: PerformAssign\n\
          \x20 performIt: x :: Object -> Object =>\n\
          \x20\x20\x20 r :: Object := x perform: #name withArguments: #()\n\
@@ -86,7 +80,7 @@ fn perform_result_assigned_to_typed_local_is_silent() {
 /// All reflective siblings share the explicit `-> Dynamic` declaration.
 #[test]
 fn perform_siblings_in_typed_method_are_silent() {
-    let diags = check(
+    let diags = diags_with_expect(
         "typed Object subclass: PerformSiblings\n\
          \x20 unary: x :: Object -> Object => x perform: #name\n\
          \x20 withTimeout: x :: Object -> Object =>\n\
@@ -108,7 +102,7 @@ fn perform_siblings_in_typed_method_are_silent() {
 /// covered by `bt2868_unannotated_return_method_reports_honest_reason`.)
 #[test]
 fn unannotated_user_method_still_warns() {
-    let diags = check(
+    let diags = diags_with_expect(
         "typed Object subclass: StillWarns\n\
          \x20 helper: x => x\n\
          \x20 callIt: x :: Object -> Object => self helper: x\n",

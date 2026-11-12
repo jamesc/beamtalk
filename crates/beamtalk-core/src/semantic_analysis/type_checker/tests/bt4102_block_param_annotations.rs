@@ -7,12 +7,6 @@
 
 use super::common::*;
 
-fn type_diagnostics(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-}
-
 fn dynamic_warnings(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
     diags
         .iter()
@@ -35,7 +29,7 @@ fn mentions(diags: &[Diagnostic], needle: &str) -> bool {
 
 #[test]
 fn annotation_honored_in_dict_literal() {
-    let diags = type_diagnostics(&with_pt(
+    let diags = diags_with_expect(&with_pt(
         r"
 typed Object subclass: H
   class opts -> Dictionary => #{#handler => [:p :: Pt | p x]}
@@ -46,7 +40,7 @@ typed Object subclass: H
 
 #[test]
 fn annotation_types_param_so_dnu_fires() {
-    let diags = type_diagnostics(&with_pt(
+    let diags = diags_with_expect(&with_pt(
         r"
 typed Object subclass: H
   class opts -> Dictionary => #{#handler => [:p :: Pt | p nonexistent]}
@@ -57,7 +51,7 @@ typed Object subclass: H
 
 #[test]
 fn return_position_tail_block_typed_from_declared_return() {
-    let diags = type_diagnostics(&with_pt(
+    let diags = diags_with_expect(&with_pt(
         r"
 typed Object subclass: H
   class handler -> Block(Pt, Integer) => [:p | p x]
@@ -68,7 +62,7 @@ typed Object subclass: H
 
 #[test]
 fn return_position_tail_block_param_is_really_typed() {
-    let diags = type_diagnostics(&with_pt(
+    let diags = diags_with_expect(&with_pt(
         r"
 typed Object subclass: H
   class handler -> Block(Pt, Integer) => [:p | p nonexistent. 1]
@@ -79,7 +73,7 @@ typed Object subclass: H
 
 #[test]
 fn return_position_mid_body_caret_block_typed() {
-    let diags = type_diagnostics(&with_pt(
+    let diags = diags_with_expect(&with_pt(
         r"
 typed Object subclass: H
   class handler -> Block(Pt, Integer) =>
@@ -92,7 +86,7 @@ typed Object subclass: H
 
 #[test]
 fn annotated_local_block_typed() {
-    let diags = type_diagnostics(&with_pt(
+    let diags = diags_with_expect(&with_pt(
         r"
 typed Object subclass: H
   class run -> Integer =>
@@ -105,7 +99,7 @@ typed Object subclass: H
 
 #[test]
 fn annotation_beats_pushdown() {
-    let diags = type_diagnostics(&with_pt(
+    let diags = diags_with_expect(&with_pt(
         r"
 typed Object subclass: H
   class handler -> Block(Object, Integer) => [:p :: Pt | p x]
@@ -116,7 +110,7 @@ typed Object subclass: H
 
 #[test]
 fn annotation_vs_pushdown_mismatch_warns() {
-    let diags = type_diagnostics(&with_pt(
+    let diags = diags_with_expect(&with_pt(
         r"
 typed Object subclass: H
   class handler -> Block(Pt, Integer) => [:p :: String | 1]
@@ -127,7 +121,7 @@ typed Object subclass: H
 
 #[test]
 fn responds_to_branch_with_nil_arm_does_not_collapse_to_nil() {
-    let diags = type_diagnostics(
+    let diags = diags_with_expect(
         r"
 typed Object subclass: S
   class f: aScope :: Behaviour sel: sel :: Symbol -> Integer =>
@@ -142,7 +136,7 @@ typed Object subclass: S
 
 #[test]
 fn body_return_mismatch_against_declared_block_warns() {
-    let diags = type_diagnostics(&with_pt(
+    let diags = diags_with_expect(&with_pt(
         r"
 typed Object subclass: H
   class handler -> Block(Pt, String) => [:p | p x]
@@ -152,7 +146,7 @@ typed Object subclass: H
 }
 
 fn no_dnu_on_nil(src: &str) {
-    let diags = type_diagnostics(src);
+    let diags = diags_with_expect(src);
     assert!(
         !diags.iter().any(|d| d.message.contains("UndefinedObject")),
         "got: {diags:#?}"
@@ -249,7 +243,7 @@ typed Object subclass: M
 /// `Integer` and an unknown send on it reports against `Integer`.
 #[test]
 fn literal_block_placeholder_is_not_an_unknown_arm() {
-    let diags = type_diagnostics(
+    let diags = diags_with_expect(
         r"
 typed Object subclass: M
   pick: a :: Block(R) or: b :: Block(R) then: c :: Block(R, Nil) -> Nil => nil
@@ -270,7 +264,7 @@ typed Object subclass: M
 /// `Integer | Nil`, so a sibling `nil` arm cannot claim `R` alone.
 #[test]
 fn union_of_blocks_arm_does_not_collapse_to_nil() {
-    let diags = type_diagnostics(
+    let diags = diags_with_expect(
         r"
 typed Object subclass: M
   run: flag :: Boolean with: blk :: Block(Integer) | Block(Nil) -> Integer =>

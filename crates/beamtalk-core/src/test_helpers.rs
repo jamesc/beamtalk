@@ -155,6 +155,31 @@ pub mod test_support {
         Span::new(0, 0)
     }
 
+    /// Returns the one-byte [`Span`] `0..1`, for tests whose assertions need a
+    /// non-empty span (a zero-length span can be mistaken for "no span").
+    #[must_use]
+    pub fn unit_span() -> Span {
+        Span::new(0, 1)
+    }
+
+    /// Builds an [`Identifier`] named `name` with [`test_span`].
+    #[must_use]
+    pub fn ident(name: impl Into<ecow::EcoString>) -> Identifier {
+        Identifier::new(name, test_span())
+    }
+
+    /// Builds an [`Identifier`] named `name` with [`unit_span`].
+    #[must_use]
+    pub fn unit_ident(name: &str) -> Identifier {
+        Identifier::new(name, unit_span())
+    }
+
+    /// Builds an identifier [`Expression`] named `name` with [`test_span`].
+    #[must_use]
+    pub fn ident_expr(name: &str) -> Expression {
+        Expression::Identifier(ident(name))
+    }
+
     /// Builds a minimal [`ClassDefinition`] with the given name, no superclass,
     /// no state, and no methods.
     #[must_use]
@@ -310,43 +335,89 @@ pub mod test_support {
         "x match: { 1 => \"one\", _ => \"other\" }",
     ];
 
-    fn valid_beamtalk_fragment() -> impl Strategy<Value = String> {
-        prop::sample::select(NEAR_VALID_BEAMTALK_FRAGMENTS)
-            .prop_map(std::string::ToString::to_string)
+    /// A strategy that picks one of `fragments`.
+    ///
+    /// The fragment list is a parameter because each property-test module seeds
+    /// the generator with the syntax its subsystem cares about (BT-4678).
+    pub fn fragment_from(
+        fragments: &'static [&'static str],
+    ) -> impl Strategy<Value = String> + Clone {
+        prop::sample::select(fragments).prop_map(std::string::ToString::to_string)
     }
 
-    /// Near-valid Beamtalk source: a valid fragment, a valid fragment
-    /// truncated at a random (char-boundary-safe) point, or two valid
-    /// fragments concatenated on separate lines.
-    pub fn near_valid_beamtalk() -> impl Strategy<Value = String> {
+    /// A strategy that picks one of `fragments` and truncates it at a random
+    /// (char-boundary-safe) point.
+    ///
+    /// A cut that floors to 0 (a fragment starting with a multi-byte char)
+    /// yields the empty string; the per-module copies this replaced returned
+    /// the whole fragment in that case. Empty input is still a valid
+    /// "never panics" case.
+    pub fn truncated_from(
+        fragments: &'static [&'static str],
+    ) -> impl Strategy<Value = String> + Clone {
+        fragment_from(fragments).prop_flat_map(|s| {
+            let len = s.len();
+            if len <= 1 {
+                Just(s).boxed()
+            } else {
+                (1..len)
+                    .prop_map(move |cut| {
+                        // MSRV-1.85-compatible stand-in for
+                        // `str::floor_char_boundary` (stable since 1.91,
+                        // past this crate's pinned MSRV). Always floors
+                        // to a valid boundary, including 0 (an empty
+                        // prefix) -- no special-casing needed.
+                        let mut safe_cut = cut;
+                        while safe_cut > 0 && !s.is_char_boundary(safe_cut) {
+                            safe_cut -= 1;
+                        }
+                        s[..safe_cut].to_string()
+                    })
+                    .boxed()
+            }
+        })
+    }
+
+    /// Near-valid Beamtalk source built from `fragments`: a fragment, a
+    /// fragment truncated at a random point, or two fragments concatenated
+    /// on separate lines.
+    pub fn near_valid_from(fragments: &'static [&'static str]) -> impl Strategy<Value = String> {
         prop_oneof![
-            valid_beamtalk_fragment(),
-            // Truncated
-            valid_beamtalk_fragment().prop_flat_map(|s| {
-                let len = s.len();
-                if len <= 1 {
-                    Just(s).boxed()
-                } else {
-                    (1..len)
-                        .prop_map(move |cut| {
-                            // MSRV-1.85-compatible stand-in for
-                            // `str::floor_char_boundary` (stable since 1.91,
-                            // past this crate's pinned MSRV). Always floors
-                            // to a valid boundary, including 0 (an empty
-                            // prefix) -- no special-casing needed.
-                            let mut safe_cut = cut;
-                            while safe_cut > 0 && !s.is_char_boundary(safe_cut) {
-                                safe_cut -= 1;
-                            }
-                            s[..safe_cut].to_string()
-                        })
-                        .boxed()
-                }
-            }),
-            // Multiple fragments
-            (valid_beamtalk_fragment(), valid_beamtalk_fragment())
+            fragment_from(fragments),
+            truncated_from(fragments),
+            (fragment_from(fragments), fragment_from(fragments))
                 .prop_map(|(a, b)| format!("{a}\n{b}")),
         ]
+    }
+
+    /// Near-valid Beamtalk source over the default fragment list
+    /// ([`NEAR_VALID_BEAMTALK_FRAGMENTS`]).
+    pub fn near_valid_beamtalk() -> impl Strategy<Value = String> {
+        near_valid_from(NEAR_VALID_BEAMTALK_FRAGMENTS)
+    }
+
+    /// Whether `erlc` can be invoked. One probe, one flag, for every test that
+    /// compiles generated Core Erlang (BT-4678).
+    ///
+    /// Any error other than "not found" (e.g. a permissions failure) counts as
+    /// available, so the failure surfaces in the test's own `erlc` invocation
+    /// instead of silently skipping it.
+    #[must_use]
+    pub fn erlc_available() -> bool {
+        tool_available("erlc", "-v")
+    }
+
+    /// Whether both `erlc` and `erl` can be invoked.
+    #[must_use]
+    pub fn erlang_available() -> bool {
+        erlc_available() && tool_available("erl", "-version")
+    }
+
+    fn tool_available(tool: &str, flag: &str) -> bool {
+        match std::process::Command::new(tool).arg(flag).output() {
+            Ok(_) => true,
+            Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+        }
     }
 
     // ========================================================================
@@ -385,14 +456,6 @@ pub mod test_support {
     /// blocks-within-blocks and `ifTrue:ifFalse:`-within-a-block shapes.
     const PROGRAM_GEN_MAX_DEPTH: u32 = 3;
 
-    fn zero_span() -> Span {
-        Span::new(0, 0)
-    }
-
-    fn ident(name: impl Into<ecow::EcoString>) -> Identifier {
-        Identifier::new(name, zero_span())
-    }
-
     /// A leaf expression: an integer/string literal, or (once `scope` is
     /// non-empty) a reference to one of its names -- including the
     /// reserved-word identifiers `true`/`false`/`nil`, which Beamtalk parses
@@ -400,9 +463,9 @@ pub mod test_support {
     fn arb_leaf_expr(scope: Vec<EcoStr>) -> BoxedStrategy<Expression> {
         let literals = prop_oneof![
             any::<i32>()
-                .prop_map(|n| Expression::Literal(Literal::Integer(i64::from(n)), zero_span())),
+                .prop_map(|n| Expression::Literal(Literal::Integer(i64::from(n)), test_span())),
             "[a-zA-Z0-9 ]{0,8}"
-                .prop_map(|s| Expression::Literal(Literal::String(s.into()), zero_span())),
+                .prop_map(|s| Expression::Literal(Literal::String(s.into()), test_span())),
             Just(Expression::Identifier(ident("true"))),
             Just(Expression::Identifier(ident("false"))),
             Just(Expression::Identifier(ident("nil"))),
@@ -438,7 +501,7 @@ pub mod test_support {
                 selector: MessageSelector::Unary(selector),
                 arguments: vec![],
                 is_cast: false,
-                span: zero_span(),
+                span: test_span(),
             })
             .boxed()
     }
@@ -461,7 +524,7 @@ pub mod test_support {
                 selector: MessageSelector::Binary(selector),
                 arguments: vec![right],
                 is_cast: false,
-                span: zero_span(),
+                span: test_span(),
             })
             .boxed()
     }
@@ -475,10 +538,10 @@ pub mod test_support {
         )
             .prop_map(|(receiver, arg)| Expression::MessageSend {
                 receiver: Box::new(receiver),
-                selector: MessageSelector::Keyword(vec![KeywordPart::new("at:", zero_span())]),
+                selector: MessageSelector::Keyword(vec![KeywordPart::new("at:", test_span())]),
                 arguments: vec![arg],
                 is_cast: false,
-                span: zero_span(),
+                span: test_span(),
             });
         let two_part = (
             arb_expr(depth - 1, scope.clone()),
@@ -488,12 +551,12 @@ pub mod test_support {
             .prop_map(|(receiver, arg1, arg2)| Expression::MessageSend {
                 receiver: Box::new(receiver),
                 selector: MessageSelector::Keyword(vec![
-                    KeywordPart::new("at:", zero_span()),
-                    KeywordPart::new("put:", zero_span()),
+                    KeywordPart::new("at:", test_span()),
+                    KeywordPart::new("put:", test_span()),
                 ]),
                 arguments: vec![arg1, arg2],
                 is_cast: false,
-                span: zero_span(),
+                span: test_span(),
             });
         prop_oneof![one_part, two_part].boxed()
     }
@@ -512,15 +575,15 @@ pub mod test_support {
             .prop_map(|(cond, then_body, else_body)| Expression::MessageSend {
                 receiver: Box::new(cond),
                 selector: MessageSelector::Keyword(vec![
-                    KeywordPart::new("ifTrue:", zero_span()),
-                    KeywordPart::new("ifFalse:", zero_span()),
+                    KeywordPart::new("ifTrue:", test_span()),
+                    KeywordPart::new("ifFalse:", test_span()),
                 ]),
                 arguments: vec![
-                    Expression::Block(Block::new(vec![], then_body, zero_span())),
-                    Expression::Block(Block::new(vec![], else_body, zero_span())),
+                    Expression::Block(Block::new(vec![], then_body, test_span())),
+                    Expression::Block(Block::new(vec![], else_body, test_span())),
                 ],
                 is_cast: false,
-                span: zero_span(),
+                span: test_span(),
             })
             .boxed()
     }
@@ -537,7 +600,7 @@ pub mod test_support {
                     (0..arity).map(|i| EcoStr::from(format!("p{i}"))).collect();
                 let params: Vec<BlockParameter> = param_names
                     .iter()
-                    .map(|n| BlockParameter::new(n.as_str(), zero_span()))
+                    .map(|n| BlockParameter::new(n.as_str(), test_span()))
                     .collect();
                 let block_scope: Vec<EcoStr> =
                     scope.iter().cloned().chain(param_names.clone()).collect();
@@ -548,16 +611,16 @@ pub mod test_support {
                 )
                     .prop_map(move |(body, call_args)| {
                         let block =
-                            Expression::Block(Block::new(params.clone(), body, zero_span()));
+                            Expression::Block(Block::new(params.clone(), body, test_span()));
                         let selector = match arity {
                             0 => MessageSelector::Unary("value".into()),
                             1 => MessageSelector::Keyword(vec![KeywordPart::new(
                                 "value:",
-                                zero_span(),
+                                test_span(),
                             )]),
                             _ => MessageSelector::Keyword(vec![
-                                KeywordPart::new("value:", zero_span()),
-                                KeywordPart::new("value:", zero_span()),
+                                KeywordPart::new("value:", test_span()),
+                                KeywordPart::new("value:", test_span()),
                             ]),
                         };
                         Expression::MessageSend {
@@ -565,7 +628,7 @@ pub mod test_support {
                             selector,
                             arguments: call_args,
                             is_cast: false,
-                            span: zero_span(),
+                            span: test_span(),
                         }
                     })
             })
@@ -587,7 +650,7 @@ pub mod test_support {
             selector: MessageSelector::Unary(selector),
             arguments: vec![],
             is_cast: false,
-            span: zero_span(),
+            span: test_span(),
         })
         .boxed()
     }
@@ -604,16 +667,16 @@ pub mod test_support {
                 Expression::MessageSend {
                     receiver: Box::new(Expression::Parenthesized {
                         expression: Box::new(send),
-                        span: zero_span(),
+                        span: test_span(),
                     }),
-                    selector: MessageSelector::Keyword(vec![KeywordPart::new("and:", zero_span())]),
+                    selector: MessageSelector::Keyword(vec![KeywordPart::new("and:", test_span())]),
                     arguments: vec![Expression::Block(Block::new(
                         vec![],
                         vec![ExpressionStatement::bare(rhs)],
-                        zero_span(),
+                        test_span(),
                     ))],
                     is_cast: false,
-                    span: zero_span(),
+                    span: test_span(),
                 }
             });
         let condition = prop_oneof![
@@ -630,12 +693,12 @@ pub mod test_support {
                 receiver: Box::new(Expression::Block(Block::new(
                     vec![],
                     vec![ExpressionStatement::bare(cond)],
-                    zero_span(),
+                    test_span(),
                 ))),
-                selector: MessageSelector::Keyword(vec![KeywordPart::new(keyword, zero_span())]),
-                arguments: vec![Expression::Block(Block::new(vec![], body, zero_span()))],
+                selector: MessageSelector::Keyword(vec![KeywordPart::new(keyword, test_span())]),
+                arguments: vec![Expression::Block(Block::new(vec![], body, test_span()))],
                 is_cast: false,
-                span: zero_span(),
+                span: test_span(),
             })
             .boxed()
     }
@@ -675,7 +738,7 @@ pub mod test_support {
         let ret = arb_expr(depth, scope).prop_map(|value| {
             ExpressionStatement::bare(Expression::Return {
                 value: Box::new(value),
-                span: zero_span(),
+                span: test_span(),
             })
         });
         prop_oneof![4 => plain, 1 => ret].boxed()
@@ -715,7 +778,7 @@ pub mod test_support {
                             target: Box::new(Expression::Identifier(ident(name.as_str()))),
                             value: Box::new(value),
                             type_annotation: None,
-                            span: zero_span(),
+                            span: test_span(),
                         })
                     })
                     .collect();
@@ -744,16 +807,16 @@ pub mod test_support {
                 MessageSelector::Unary("run".into()),
                 vec![],
                 body,
-                zero_span(),
+                test_span(),
             );
             let class = ClassDefinition::new(
                 ident(class_name),
                 ident("Object"),
                 vec![],
                 vec![method],
-                zero_span(),
+                test_span(),
             );
-            let mut module = Module::new(vec![], zero_span());
+            let mut module = Module::new(vec![], test_span());
             module.classes.push(class);
             module
         })
@@ -809,8 +872,8 @@ pub mod test_support {
         let mut programs = draw_programs(class_name, n);
         for module in &mut programs {
             for class in &mut module.classes {
-                let mut field = crate::ast::StateDeclaration::new(ident("f"), zero_span());
-                field.default_value = Some(Expression::Literal(Literal::Integer(0), zero_span()));
+                let mut field = crate::ast::StateDeclaration::new(ident("f"), test_span());
+                field.default_value = Some(Expression::Literal(Literal::Integer(0), test_span()));
                 field.declared_keyword = crate::ast::DeclaredKeyword::Field;
                 class.state.push(field);
                 for method in &mut class.methods {
@@ -828,19 +891,19 @@ pub mod test_support {
         let field = || Expression::FieldAccess {
             receiver: Box::new(Expression::Identifier(ident("self"))),
             field: ident("f"),
-            span: zero_span(),
+            span: test_span(),
         };
         Expression::Assignment {
             target: Box::new(field()),
             value: Box::new(Expression::MessageSend {
                 receiver: Box::new(field()),
                 selector: MessageSelector::Binary("+".into()),
-                arguments: vec![Expression::Literal(Literal::Integer(1), zero_span())],
+                arguments: vec![Expression::Literal(Literal::Integer(1), test_span())],
                 is_cast: false,
-                span: zero_span(),
+                span: test_span(),
             }),
             type_annotation: None,
-            span: zero_span(),
+            span: test_span(),
         }
     }
 

@@ -9,16 +9,8 @@
 //! behaves exactly like the inferred one (literal-index `at:` typing,
 //! assignability against bare `Tuple` and between positional tuples).
 
+use super::common::analyse_diags;
 use crate::source_analysis::Diagnostic;
-
-/// Parses `source` and runs the full semantic-analysis pipeline, returning
-/// every diagnostic (so the Phase 2d generic-arity check runs too).
-fn analyse_diagnostics(source: &str) -> Vec<Diagnostic> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    crate::semantic_analysis::analyse(&module).diagnostics
-}
 
 fn mismatches(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
     diags
@@ -33,7 +25,7 @@ fn mismatches(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
 
 #[test]
 fn bt4220_tuple_annotation_accepted_in_every_position() {
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         r#"
 typed Actor subclass: Holder
   state: pair :: Tuple(Symbol, Integer) = {#a, 1}
@@ -54,7 +46,7 @@ typed Actor subclass: Holder
 
 #[test]
 fn bt4220_tuple_annotation_no_type_parameters_warning() {
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         r"
 Object subclass: Holder
   marker -> Tuple(Symbol) => {#marker}
@@ -70,7 +62,7 @@ Object subclass: Holder
 
 #[test]
 fn bt4220_bare_tuple_annotation_unchanged() {
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         r"
 typed Object subclass: Holder
   marker -> Tuple => {#marker, 1}
@@ -84,7 +76,7 @@ typed Object subclass: Holder
 fn bt4220_annotated_param_literal_index_at_is_typed() {
     // `p at: 1` is `Symbol`, so returning it as `String` is a mismatch —
     // the same as on an inferred `Tuple(Symbol, Integer)`.
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         r"
 typed Object subclass: Holder
   take: p :: Tuple(Symbol, Integer) -> String => p at: 1
@@ -95,7 +87,7 @@ typed Object subclass: Holder
 
 #[test]
 fn bt4220_annotated_local_literal_index_at_is_typed() {
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         r"
 typed Object subclass: Holder
   run =>
@@ -109,7 +101,7 @@ typed Object subclass: Holder
 
 #[test]
 fn bt4220_out_of_range_or_non_literal_index_is_dynamic() {
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         r"
 typed Object subclass: Holder
   take: p :: Tuple(Symbol, Integer) at: i :: Integer -> String =>
@@ -123,7 +115,7 @@ typed Object subclass: Holder
 
 #[test]
 fn bt4220_positional_tuple_flows_into_bare_tuple() {
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         r"
 typed Object subclass: Holder
   take: p :: Tuple -> Integer => p size
@@ -138,7 +130,7 @@ typed Object subclass: Holder
 fn bt4220_bare_tuple_flows_into_positional_tuple() {
     // Gradual: an unparameterised `Tuple` (and `Dynamic`) flows into a
     // positional tuple annotation without a warning.
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         r"
 typed Object subclass: Holder
   take: p :: Tuple(Symbol, Integer) -> Integer => p at: 2
@@ -152,7 +144,7 @@ typed Object subclass: Holder
 
 #[test]
 fn bt4220_arity_mismatch_return_is_type_error() {
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         r"
 typed Object subclass: Holder
   marker -> Tuple(Symbol, Integer) => {#a, 1, 2}
@@ -163,7 +155,7 @@ typed Object subclass: Holder
 
 #[test]
 fn bt4220_arity_mismatch_argument_is_type_error() {
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         r"
 typed Object subclass: Holder
   take: p :: Tuple(Symbol, Integer) -> Integer => p at: 2
@@ -179,7 +171,7 @@ typed Object subclass: Holder
 
 #[test]
 fn bt4220_arity_mismatch_local_is_type_error() {
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         r"
 typed Object subclass: Holder
   run -> Tuple(Symbol) =>
@@ -192,7 +184,7 @@ typed Object subclass: Holder
 
 #[test]
 fn bt4220_element_type_mismatch_is_type_error() {
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         r#"
 typed Object subclass: Holder
   marker -> Tuple(Symbol, Integer) => {#a, "x"}
@@ -205,7 +197,7 @@ typed Object subclass: Holder
 fn bt4220_zero_arity_tuple_annotation_accepted() {
     // `Tuple()` is the arity-0 positional tuple; like the `{}` literal it
     // carries no element types, so it behaves as bare `Tuple`.
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         r"
 typed Object subclass: Holder
   empty -> Tuple() => {}
@@ -219,7 +211,7 @@ typed Object subclass: Holder
 fn bt4220_nested_positional_tuple_in_list_annotation() {
     // The Catalina `getstat` shape: `List(Tuple(Symbol, Integer))` — the
     // element's literal-index `at:` is typed through the block parameter.
-    let diags = analyse_diagnostics(
+    let diags = analyse_diags(
         r"
 typed Object subclass: Holder
   stats: s :: List(Tuple(Symbol, Integer)) -> Integer =>

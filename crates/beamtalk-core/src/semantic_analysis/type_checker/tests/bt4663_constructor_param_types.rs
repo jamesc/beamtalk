@@ -21,12 +21,6 @@ fn arg_mismatches(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
         .collect()
 }
 
-fn check(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-}
-
 const POINT: &str = "\
 Value subclass: Point\n\
   field: x :: Integer = 0\n\
@@ -34,7 +28,7 @@ Value subclass: Point\n\
 
 #[test]
 fn mistyped_keyword_constructor_argument_warns() {
-    let diags = check(&format!(
+    let diags = diags_with_expect(&format!(
         "{POINT}Object subclass: User\n  run => Point x: \"a\" y: 0\n"
     ));
     assert_eq!(arg_mismatches(&diags).len(), 1, "{diags:#?}");
@@ -42,7 +36,7 @@ fn mistyped_keyword_constructor_argument_warns() {
 
 #[test]
 fn well_typed_keyword_constructor_does_not_warn() {
-    let diags = check(&format!(
+    let diags = diags_with_expect(&format!(
         "{POINT}Object subclass: User\n  run => Point x: 1 y: 2\n"
     ));
     assert!(arg_mismatches(&diags).is_empty(), "{diags:#?}");
@@ -50,7 +44,7 @@ fn well_typed_keyword_constructor_does_not_warn() {
 
 #[test]
 fn generic_field_is_not_flagged() {
-    let diags = check(
+    let diags = diags_with_expect(
         "Value subclass: Box(T)\n  field: item :: T = nil\n\
          Object subclass: User\n  run => Box item: \"a\"\n",
     );
@@ -61,7 +55,7 @@ fn generic_field_is_not_flagged() {
 /// still checked: exactly one mismatch, on `count:`.
 #[test]
 fn concrete_field_on_generic_class_is_still_checked() {
-    let diags = check(
+    let diags = diags_with_expect(
         "Value subclass: Box(T)\n  field: item :: T = nil\n  field: count :: Integer = 0\n\
          Object subclass: User\n  run => Box item: \"a\" count: \"b\"\n",
     );

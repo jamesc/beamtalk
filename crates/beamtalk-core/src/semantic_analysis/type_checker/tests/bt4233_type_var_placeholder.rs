@@ -8,12 +8,6 @@
 use super::common::*;
 use crate::semantic_analysis::type_checker::is_type_var_placeholder;
 
-fn type_diagnostics(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-}
-
 fn mismatches(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
     diags
         .iter()
@@ -39,7 +33,7 @@ fn placeholder_predicate_excludes_real_classes() {
 /// nominally: `List(Integer)` does not satisfy `List(E)` when `E` is a class.
 #[test]
 fn real_single_letter_class_type_arg_is_judged_nominally() {
-    let diags = type_diagnostics(
+    let diags = diags_with_expect(
         r"
 typed Object subclass: E
 
@@ -55,7 +49,7 @@ typed Object subclass: M
 /// The same shape with an unbound type variable stays symbolic: no warning.
 #[test]
 fn type_variable_type_arg_stays_symbolic() {
-    let diags = type_diagnostics(
+    let diags = diags_with_expect(
         r"
 typed Object subclass: M
   run: xs :: List(Integer) -> List(E) => xs
@@ -119,7 +113,7 @@ fn substitution_resolver_keeps_real_single_letter_class() {
 /// keeps `E`, so a DNU on the result is reported against `E`.
 #[test]
 fn substituting_send_keeps_real_single_letter_class_for_dnu() {
-    let diags = type_diagnostics(
+    let diags = diags_with_expect(
         r"
 typed Object subclass: E
 

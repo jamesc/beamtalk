@@ -7,15 +7,6 @@
 
 use super::common::*;
 
-fn type_diagnostics(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-        .into_iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect()
-}
-
 fn class_with(body: &str) -> String {
     format!(
         r"
@@ -29,7 +20,7 @@ typed Actor subclass: Holder
 }
 
 fn assert_nil_leak(body: &str) {
-    let diags = type_diagnostics(&class_with(body));
+    let diags = type_diags(&class_with(body));
     assert!(
         diags
             .iter()
@@ -39,7 +30,7 @@ fn assert_nil_leak(body: &str) {
 }
 
 fn assert_clean(body: &str) {
-    let diags = type_diagnostics(&class_with(body));
+    let diags = type_diags(&class_with(body));
     assert!(diags.is_empty(), "expected no diagnostics, got: {diags:#?}");
 }
 
@@ -139,7 +130,7 @@ typed Object subclass: Box
     self with: nil
     self need: self.f
 ";
-    let diags: Vec<_> = type_diagnostics(source)
+    let diags: Vec<_> = type_diags(source)
         .into_iter()
         .filter(|d| d.message.contains("expects Integer"))
         .collect();
@@ -184,7 +175,7 @@ typed Actor subclass: Pair
     self.f isNil ifTrue: [self reset. ^0]
     self need: self.g
 ";
-    let diags = type_diagnostics(source);
+    let diags = type_diags(source);
     assert!(diags.is_empty(), "got: {diags:#?}");
 }
 

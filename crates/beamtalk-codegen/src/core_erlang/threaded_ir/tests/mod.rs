@@ -31,9 +31,7 @@
 
 use super::*;
 
-fn span() -> Span {
-    Span::new(0, 1)
-}
+use beamtalk_core::test_helpers::test_support::unit_span as span;
 
 fn local(name: &str, version: usize, frame: FrameId) -> VersionedVar {
     VersionedVar::new(VersionPrefix::Local(name.to_string()), version, frame)

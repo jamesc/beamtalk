@@ -24,12 +24,6 @@ fn return_mismatches(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
         .collect()
 }
 
-fn check(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-}
-
 const BOX: &str = "\
 Value subclass: Box(T)\n\
   field: item :: T = nil\n";
@@ -37,7 +31,7 @@ Value subclass: Box(T)\n\
 /// Control: the synthesized getter on `Box(Integer)` answers `Integer`.
 #[test]
 fn getter_on_parameterized_receiver_answers_type_argument() {
-    let diags = check(&format!(
+    let diags = diags_with_expect(&format!(
         "{BOX}Object subclass: User\n  run: b :: Box(Integer) -> String => b item\n"
     ));
     let hits = return_mismatches(&diags);
@@ -51,7 +45,7 @@ fn getter_on_parameterized_receiver_answers_type_argument() {
 /// The copy keeps `Box(Integer)`, so its getter still answers `Integer`.
 #[test]
 fn with_star_copy_keeps_type_arguments() {
-    let diags = check(&format!(
+    let diags = diags_with_expect(&format!(
         "{BOX}Object subclass: User\n  run: b :: Box(Integer) -> String => (b withItem: 3) item\n"
     ));
     let hits = return_mismatches(&diags);
@@ -65,7 +59,7 @@ fn with_star_copy_keeps_type_arguments() {
 /// The copy itself is `Box(Integer)`, not bare `Box`.
 #[test]
 fn with_star_copy_is_the_receiver_type() {
-    let diags = check(&format!(
+    let diags = diags_with_expect(&format!(
         "{BOX}Object subclass: User\n  run: b :: Box(Integer) -> String => b withItem: 3\n"
     ));
     let hits = return_mismatches(&diags);
@@ -80,7 +74,7 @@ fn with_star_copy_is_the_receiver_type() {
 /// class (`Self` on a class-side send is the instance type).
 #[test]
 fn keyword_constructor_answers_the_class() {
-    let diags = check(&format!(
+    let diags = diags_with_expect(&format!(
         "{BOX}Object subclass: User\n  run -> String => Box item: 3\n"
     ));
     let hits = return_mismatches(&diags);
@@ -91,7 +85,7 @@ fn keyword_constructor_answers_the_class() {
 /// A non-generic value class's copy is still the class itself.
 #[test]
 fn with_star_on_plain_value_class_answers_the_class() {
-    let diags = check(
+    let diags = diags_with_expect(
         "Value subclass: Point\n  field: x :: Integer = 0\n\
          Object subclass: User\n  run: p :: Point -> String => p withX: 3\n",
     );
@@ -111,7 +105,7 @@ Box subclass: Sub\n\
 /// so `Sub item: 3` is a `Box`, not a `Sub`: `subOnly` on it is a DNU.
 #[test]
 fn inherited_keyword_constructor_answers_the_defining_class() {
-    let diags = check(&format!(
+    let diags = diags_with_expect(&format!(
         "{BOX_AND_SUB}Object subclass: User\n  run -> String => Sub item: 3\n"
     ));
     let hits = return_mismatches(&diags);
@@ -123,7 +117,7 @@ fn inherited_keyword_constructor_answers_the_defining_class() {
 /// `maps:put` on the receiver, which keeps its `$beamtalk_class`.
 #[test]
 fn with_star_on_subclass_instance_answers_the_subclass() {
-    let diags = check(&format!(
+    let diags = diags_with_expect(&format!(
         "{BOX_AND_SUB}Object subclass: User\n  run: s :: Sub -> String => s withItem: 3\n"
     ));
     let hits = return_mismatches(&diags);
@@ -143,7 +137,7 @@ fn argument_mismatches(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
 /// `(b withItem: 'hi') item` can't silently infer `Integer`.
 #[test]
 fn with_star_argument_checked_against_type_argument() {
-    let diags = check(&format!(
+    let diags = diags_with_expect(&format!(
         "{BOX}Object subclass: User\n  run: b :: Box(Integer) => b withItem: \"hi\"\n"
     ));
     let hits = argument_mismatches(&diags);
@@ -157,7 +151,7 @@ fn with_star_argument_checked_against_type_argument() {
 /// A matching argument passes.
 #[test]
 fn with_star_matching_argument_no_warning() {
-    let diags = check(&format!(
+    let diags = diags_with_expect(&format!(
         "{BOX}Object subclass: User\n  run: b :: Box(Integer) => b withItem: 3\n"
     ));
     assert!(argument_mismatches(&diags).is_empty(), "{diags:#?}");
@@ -166,7 +160,7 @@ fn with_star_matching_argument_no_warning() {
 /// A non-generic class checks the argument against the field's own type.
 #[test]
 fn with_star_argument_checked_on_plain_value_class() {
-    let diags = check(
+    let diags = diags_with_expect(
         "Value subclass: Point\n  field: x :: Integer = 0\n\
          Object subclass: User\n  run: p :: Point => p withX: \"a\"\n",
     );

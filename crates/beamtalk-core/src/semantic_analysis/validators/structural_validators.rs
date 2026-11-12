@@ -596,10 +596,7 @@ mod tests {
     }
 
     fn ident(name: &str) -> Identifier {
-        Identifier {
-            name: name.into(),
-            span: test_span(),
-        }
+        Identifier::new(name, test_span())
     }
 
     fn kwpart(keyword: &str) -> KeywordPart {

@@ -18,6 +18,8 @@
 
 use proptest::prelude::*;
 
+use beamtalk_core::test_helpers::test_support::near_valid_from;
+
 use crate::core_erlang::{CodegenOptions, generate_module};
 use beamtalk_core::source_analysis::{lex_with_eof, parse};
 use beamtalk_core::test_helpers::test_support::parse_source;
@@ -56,34 +58,8 @@ const FRAGMENTS: &[&str] = &[
     "ParentThing subclass: ChildThing\n  state: extra = 0\n  bump => extra := extra + 1",
 ];
 
-fn valid_fragment() -> impl Strategy<Value = String> {
-    prop::sample::select(FRAGMENTS).prop_map(std::string::ToString::to_string)
-}
-
 fn near_valid_beamtalk() -> impl Strategy<Value = String> {
-    prop_oneof![
-        valid_fragment(),
-        // Truncated
-        valid_fragment().prop_flat_map(|s| {
-            let len = s.len();
-            if len <= 1 {
-                Just(s).boxed()
-            } else {
-                (1..len)
-                    .prop_map(move |cut| {
-                        let safe_cut = s.floor_char_boundary(cut);
-                        if safe_cut == 0 {
-                            s.clone()
-                        } else {
-                            s[..safe_cut].to_string()
-                        }
-                    })
-                    .boxed()
-            }
-        }),
-        // Multiple fragments
-        (valid_fragment(), valid_fragment()).prop_map(|(a, b)| format!("{a}\n{b}")),
-    ]
+    near_valid_from(FRAGMENTS)
 }
 
 // `has_balanced_delimiters`/`FORMAT_ARTIFACT_PATTERNS` live in

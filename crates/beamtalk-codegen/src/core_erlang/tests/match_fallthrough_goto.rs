@@ -18,7 +18,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::process::Command;
 
-use super::{CodegenOptions, codegen, corpus_files, erlc_available, generate_module, repo_root};
+use super::{CodegenOptions, codegen, corpus_files, erlang_available, generate_module, repo_root};
 
 /// Erlang side of the tests: `check/1` counts a Core module's `letrec_goto`
 /// labels and lists every apply of one that is not in tail position of its
@@ -117,7 +117,7 @@ struct HarnessRun {
 /// A temp directory holding the compiled harness; `None` without an Erlang
 /// toolchain.
 fn harness_dir() -> Option<tempfile::TempDir> {
-    if !erlc_available() || Command::new("erl").arg("-version").output().is_err() {
+    if !erlang_available() {
         return None;
     }
     let dir = tempfile::tempdir().expect("temp dir");

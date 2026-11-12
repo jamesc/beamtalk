@@ -13,18 +13,9 @@
 
 use super::common::*;
 
-fn type_diagnostics(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-        .into_iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect()
-}
-
 #[test]
 fn bt4199_dynamic_field_accepts_any_assignment() {
-    let diags = type_diagnostics(
+    let diags = type_diags(
         r"
 typed Actor subclass: Foo
   state: t :: Dynamic = 0
@@ -38,7 +29,7 @@ typed Actor subclass: Foo
 
 #[test]
 fn bt4199_non_dynamic_field_still_warns() {
-    let diags = type_diagnostics(
+    let diags = type_diags(
         r"
 typed Actor subclass: Foo
   state: t :: String = ''
@@ -55,7 +46,7 @@ typed Actor subclass: Foo
 
 #[test]
 fn bt4199_metaclass_slot_accepts_subclass_value() {
-    let diags = type_diagnostics(
+    let diags = type_diags(
         r"
 typed Actor subclass: Holder
   state: kind :: Number class = Number
@@ -68,7 +59,7 @@ typed Actor subclass: Holder
 
 #[test]
 fn bt4199_metaclass_slot_rejects_unrelated_class() {
-    let diags = type_diagnostics(
+    let diags = type_diags(
         r"
 typed Actor subclass: Holder
   state: kind :: Number class = Number
@@ -84,7 +75,7 @@ typed Actor subclass: Holder
 
 #[test]
 fn bt4199_and_not_nil_if_true_if_false_narrows() {
-    let diags = type_diagnostics(
+    let diags = type_diags(
         r"
 typed Object subclass: N
   class f: a :: Integer | Nil g: b :: Integer | Nil -> Integer =>
@@ -97,7 +88,7 @@ typed Object subclass: N
 
 #[test]
 fn bt4199_lone_not_nil_if_true_if_false_narrows() {
-    let diags = type_diagnostics(
+    let diags = type_diags(
         r"
 typed Object subclass: N
   class f: a :: Integer | Nil -> Integer =>
@@ -110,7 +101,7 @@ typed Object subclass: N
 
 #[test]
 fn bt4199_non_diverging_false_block_does_not_narrow() {
-    let diags = type_diagnostics(
+    let diags = type_diags(
         r"
 typed Object subclass: N
   class f: a :: Integer | Nil -> Integer =>
@@ -123,7 +114,7 @@ typed Object subclass: N
 
 #[test]
 fn bt4199_interval_includes_accepts_any_object() {
-    let diags = type_diagnostics(
+    let diags = type_diags(
         r"
 typed Object subclass: N
   class f: x :: Number -> Boolean =>
@@ -148,7 +139,7 @@ fn mismatches(diags: &[Diagnostic]) -> usize {
 fn bt4206_metaclass_union_member_is_checked_per_member() {
     // `Integer` (an `Integer class` value) is not an `Integer`, nor a
     // `String class`.
-    let rejected = type_diagnostics(
+    let rejected = type_diags(
         r"
 typed Actor subclass: Holder
   state: kind :: Integer | String class = 1
@@ -157,7 +148,7 @@ typed Actor subclass: Holder
 ",
     );
     assert_eq!(mismatches(&rejected), 1, "got: {rejected:#?}");
-    let accepted = type_diagnostics(
+    let accepted = type_diags(
         r"
 typed Actor subclass: Holder
   state: kind :: Integer | String class = 1
@@ -170,7 +161,7 @@ typed Actor subclass: Holder
 
 #[test]
 fn bt4206_metaclass_or_nil_slot_rejects_an_unrelated_metaclass() {
-    let diags = type_diagnostics(
+    let diags = type_diags(
         r"
 typed Actor subclass: Holder
   state: kind :: Number class | Nil = nil
@@ -185,14 +176,14 @@ typed Actor subclass: Holder
 
 #[test]
 fn bt4206_metaclass_state_default_is_checked() {
-    let rejected = type_diagnostics(
+    let rejected = type_diags(
         r"
 typed Actor subclass: Holder
   state: kind :: Number class = String
 ",
     );
     assert_eq!(mismatches(&rejected), 1, "got: {rejected:#?}");
-    let accepted = type_diagnostics(
+    let accepted = type_diags(
         r"
 typed Actor subclass: Holder
   state: kind :: Number class = Integer
@@ -204,7 +195,7 @@ typed Actor subclass: Holder
 
 #[test]
 fn bt4206_bag_occurrences_of_accepts_any_object() {
-    let diags = type_diagnostics(
+    let diags = type_diags(
         r"
 typed Object subclass: N
   class f: b :: Bag(Integer) -> Integer =>
@@ -216,7 +207,7 @@ typed Object subclass: N
 
 #[test]
 fn bt4206_metaclass_into_type_param_union_is_not_judged() {
-    let diags = type_diagnostics(
+    let diags = type_diags(
         r"
 typed Actor subclass: Holder(T)
   state: kind :: T | Nil = Integer
@@ -229,7 +220,7 @@ typed Actor subclass: Holder(T)
 
 #[test]
 fn bt4206_metaclass_into_type_param_metaclass_is_not_judged() {
-    let diags = type_diagnostics(
+    let diags = type_diags(
         r"
 typed Actor subclass: Holder(T)
   state: kind :: T class | Nil = Integer

@@ -6,10 +6,7 @@
 
 use super::*;
 
-fn parse_module(src: &str) -> Module {
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    beamtalk_core::source_analysis::parse(tokens).0
-}
+use beamtalk_core::test_helpers::test_support::parse_source as parse_module;
 
 fn generate_named(module: &Module, name: &str) -> String {
     generate_module(module, CodegenOptions::new(name)).expect("codegen should succeed")

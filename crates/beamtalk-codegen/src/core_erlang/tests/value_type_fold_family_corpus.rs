@@ -318,7 +318,7 @@ pub(super) fn run_probes(
     self_map: &str,
 ) -> Option<std::collections::HashMap<String, String>> {
     use std::process::Command;
-    if !super::erlc_available() || Command::new("erl").arg("-version").output().is_err() {
+    if !super::erlang_available() {
         return None;
     }
     // The probes need no Beamtalk runtime (arithmetic, `maps`, list literals), but the module's

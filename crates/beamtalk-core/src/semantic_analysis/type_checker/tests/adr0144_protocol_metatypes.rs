@@ -10,17 +10,9 @@
 use super::common::*;
 use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 
-/// Every diagnostic `analyse` reports, after asserting the source parses.
-fn diagnostics(source: &str) -> Vec<Diagnostic> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    crate::semantic_analysis::analyse(&module).diagnostics
-}
-
 /// Type and DNU diagnostics only (the ones this feature produces).
 fn checker_diagnostics(source: &str) -> Vec<Diagnostic> {
-    diagnostics(source)
+    analyse_diags(source)
         .into_iter()
         .filter(|d| {
             matches!(

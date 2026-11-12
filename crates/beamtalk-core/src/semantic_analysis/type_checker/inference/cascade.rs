@@ -373,16 +373,11 @@ fn send_shape(selector: &MessageSelector) -> String {
 #[cfg(test)]
 mod tests {
     use super::receiver_display;
-    use crate::ast::{Expression, Identifier, Literal, MessageSelector};
-    use crate::source_analysis::Span;
+    use crate::ast::{Expression, Literal, MessageSelector};
 
-    fn span() -> Span {
-        Span::new(0, 1)
-    }
+    use crate::test_helpers::test_support::unit_span as span;
 
-    fn ident(name: &str) -> Identifier {
-        Identifier::new(name, span())
-    }
+    use crate::test_helpers::test_support::unit_ident as ident;
 
     fn lit(literal: Literal) -> Expression {
         Expression::Literal(literal, span())

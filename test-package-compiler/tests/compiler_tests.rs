@@ -256,8 +256,7 @@ fn generate_core_erlang(case_name: &str) -> (String, String) {
 /// `erlc +from_core` to verify the syntax is valid.
 fn test_codegen_compiles(case_name: &str) {
     // Check if erlc is available
-    let erlc_check = Command::new("erlc").arg("--version").output();
-    if erlc_check.is_err() {
+    if !beamtalk_core::test_helpers::test_support::erlc_available() {
         eprintln!(
             "Skipping {} compilation test - erlc not available",
             case_name

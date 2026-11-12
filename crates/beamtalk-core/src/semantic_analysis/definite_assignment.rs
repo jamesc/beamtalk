@@ -276,11 +276,8 @@ mod tests {
     use super::*;
     use crate::ast::{CommentAttachment, DeclaredKeyword, Identifier};
     use crate::semantic_analysis::alias_registry::AliasInfo;
-    use crate::source_analysis::Span;
 
-    fn span() -> Span {
-        Span::new(0, 0)
-    }
+    use crate::test_helpers::test_support::test_span as span;
 
     fn decl(
         type_annotation: Option<TypeAnnotation>,

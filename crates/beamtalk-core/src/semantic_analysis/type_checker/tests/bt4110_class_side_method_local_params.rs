@@ -6,12 +6,6 @@
 
 use super::common::*;
 
-fn type_diagnostics(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-}
-
 fn mentions(diags: &[Diagnostic], needle: &str) -> bool {
     diags.iter().any(|d| d.message.contains(needle))
 }
@@ -21,7 +15,7 @@ fn mentions(diags: &[Diagnostic], needle: &str) -> bool {
 /// is reported against `Integer`.
 #[test]
 fn class_side_inject_into_result_substitutes_method_local_param() {
-    let diags = type_diagnostics(
+    let diags = diags_with_expect(
         r"
 typed Object subclass: Folder
   class sealed fold: xs :: List(Integer) inject: initial :: A into: aBlock :: Block(A, Integer, A) -> A =>
@@ -45,7 +39,7 @@ typed Object subclass: Folder
 /// was untyped).
 #[test]
 fn class_side_method_local_result_mismatches_typed_local() {
-    let diags = type_diagnostics(
+    let diags = diags_with_expect(
         r"
 typed Object subclass: Folder
   class sealed fold: xs :: List(Integer) inject: initial :: A into: aBlock :: Block(A, Integer, A) -> A =>
@@ -65,7 +59,7 @@ typed Object subclass: Folder
 /// result), the send stays `Dynamic`: no false DNU on the result.
 #[test]
 fn class_side_unbound_method_local_result_stays_dynamic() {
-    let diags = type_diagnostics(
+    let diags = diags_with_expect(
         r"
 Object subclass: Folder
   class sealed fold: xs :: List(Integer) inject: initial :: A into: aBlock :: Block(A, Integer, A) -> A =>

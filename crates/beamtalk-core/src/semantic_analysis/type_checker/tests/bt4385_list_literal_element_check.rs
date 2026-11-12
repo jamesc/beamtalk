@@ -8,23 +8,6 @@
 
 use super::common::*;
 
-fn checker_messages(source: &str) -> Vec<String> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    crate::semantic_analysis::analyse(&module)
-        .diagnostics
-        .into_iter()
-        .filter(|d| {
-            matches!(
-                d.category,
-                Some(DiagnosticCategory::Type | DiagnosticCategory::Dnu)
-            )
-        })
-        .map(|d| d.message.to_string())
-        .collect()
-}
-
 /// `Opt` mirrors `RegexOption`'s shape (a symbol-union alias); `Taker`
 /// declares one parameter per element shape the issue names.
 fn source_with(body: &str) -> String {
@@ -51,7 +34,7 @@ Object subclass: Caller
 
 #[test]
 fn symbol_alias_rejects_symbol_outside_union() {
-    let msgs = checker_messages(&source_with("  run => Taker flags: #(#bogus)\n"));
+    let msgs = messages(&source_with("  run => Taker flags: #(#bogus)\n"));
     assert_eq!(
         msgs,
         vec![
@@ -63,7 +46,7 @@ fn symbol_alias_rejects_symbol_outside_union() {
 
 #[test]
 fn symbol_alias_rejects_non_symbol_element() {
-    let msgs = checker_messages(&source_with("  run => Taker flags: #(#a, 3)\n"));
+    let msgs = messages(&source_with("  run => Taker flags: #(#a, 3)\n"));
     assert_eq!(
         msgs,
         vec![
@@ -75,13 +58,13 @@ fn symbol_alias_rejects_non_symbol_element() {
 
 #[test]
 fn symbol_alias_accepts_union_members() {
-    let msgs = checker_messages(&source_with("  run => Taker flags: #(#a, #b)\n"));
+    let msgs = messages(&source_with("  run => Taker flags: #(#a, #b)\n"));
     assert_eq!(msgs, Vec::<String>::new());
 }
 
 #[test]
 fn keyword_send_checks_the_matching_argument() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"  run => Taker from: "x" options: #(#bogus)
 "#,
     ));
@@ -96,7 +79,7 @@ fn keyword_send_checks_the_matching_argument() {
 
 #[test]
 fn plain_element_type_rejects_mismatch() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"  run => Taker ints: #("a")
 "#,
     ));
@@ -108,13 +91,13 @@ fn plain_element_type_rejects_mismatch() {
 
 #[test]
 fn plain_element_type_accepts_matching_elements() {
-    let msgs = checker_messages(&source_with("  run => Taker ints: #(1, 2)\n"));
+    let msgs = messages(&source_with("  run => Taker ints: #(1, 2)\n"));
     assert_eq!(msgs, Vec::<String>::new());
 }
 
 #[test]
 fn tuple_element_type_rejects_mismatch() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"  run => Taker pairs: #({#a, "x"})
 "#,
     ));
@@ -123,19 +106,19 @@ fn tuple_element_type_rejects_mismatch() {
 
 #[test]
 fn tuple_element_type_accepts_matching_tuple() {
-    let msgs = checker_messages(&source_with("  run => Taker pairs: #({#a, 1})\n"));
+    let msgs = messages(&source_with("  run => Taker pairs: #({#a, 1})\n"));
     assert_eq!(msgs, Vec::<String>::new());
 }
 
 #[test]
 fn empty_list_is_accepted() {
-    let msgs = checker_messages(&source_with("  run => Taker ints: #()\n"));
+    let msgs = messages(&source_with("  run => Taker ints: #()\n"));
     assert_eq!(msgs, Vec::<String>::new());
 }
 
 #[test]
 fn parenthesised_literal_is_checked() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"  run => Taker ints: (#(1, "a"))
 "#,
     ));
@@ -147,7 +130,7 @@ fn parenthesised_literal_is_checked() {
 
 #[test]
 fn every_mismatched_element_is_reported() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"  run => Taker ints: #("a", 1, #b)
 "#,
     ));
@@ -162,19 +145,19 @@ fn every_mismatched_element_is_reported() {
 
 #[test]
 fn symbol_typed_element_is_accepted_as_a_possible_member() {
-    let msgs = checker_messages(&source_with("  run: s :: Symbol => Taker flags: #(s)\n"));
+    let msgs = messages(&source_with("  run: s :: Symbol => Taker flags: #(s)\n"));
     assert_eq!(msgs, Vec::<String>::new());
 }
 
 #[test]
 fn dynamic_element_is_not_checked() {
-    let msgs = checker_messages(&source_with("  run: s => Taker ints: #(s)\n"));
+    let msgs = messages(&source_with("  run: s => Taker ints: #(s)\n"));
     assert_eq!(msgs, Vec::<String>::new());
 }
 
 #[test]
 fn non_literal_argument_keeps_nominal_check() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         "  run: xs :: List(Symbol) => Taker flags: xs\n",
     ));
     assert_eq!(msgs, Vec::<String>::new());
@@ -185,7 +168,7 @@ fn non_literal_argument_keeps_nominal_check() {
 /// placeholder, not a signature constraint.
 #[test]
 fn class_type_param_element_is_not_checked() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"  run => #(1, 2) ++ #("a")
 "#,
     ));
@@ -206,14 +189,14 @@ Object subclass: Caller
   run: b :: Box(Integer) => b addAll: #("a")
 "#;
     assert_eq!(
-        checker_messages(source),
+        messages(source),
         vec!["Argument 1 of 'addAll:' on Box expects List(Integer), got List(String)".to_string()]
     );
 }
 
 #[test]
 fn method_local_type_variable_element_is_not_checked() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"  run => Taker anyOf: #("a", 1)
 "#,
     ));
@@ -225,7 +208,7 @@ fn method_local_type_variable_element_is_not_checked() {
 /// element check judges.
 #[test]
 fn instance_side_send_reports_once() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"  run: t :: Taker => t takeInts: #("a")
 "#,
     ));
@@ -246,7 +229,7 @@ Object subclass: Holder
   run => self takeInts: #("a")
 "#;
     assert_eq!(
-        checker_messages(source),
+        messages(source),
         vec![
             "Element 1 of argument 1 of 'takeInts:' on Holder expects Integer, got String"
                 .to_string()
@@ -256,7 +239,7 @@ Object subclass: Holder
 
 #[test]
 fn cascade_send_is_checked() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r#"  run: t :: Taker => t takeInts: #(1); takeInts: #("a")
 "#,
     ));
@@ -281,7 +264,7 @@ Object subclass: Caller
   run: d :: Derived => d takeInts: #("a")
 "#;
     assert_eq!(
-        checker_messages(source),
+        messages(source),
         vec![
             "Element 1 of argument 1 of 'takeInts:' on Derived expects Integer, got String"
                 .to_string()
@@ -292,7 +275,7 @@ Object subclass: Caller
 /// A parameter typed through an alias of the whole list type is checked.
 #[test]
 fn alias_of_list_parameter_is_checked() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"  run => Taker opts: #(#bogus)
 ",
     ));
@@ -310,7 +293,7 @@ fn alias_of_list_parameter_is_checked() {
 #[test]
 fn optional_list_parameter_is_checked() {
     assert_eq!(
-        checker_messages(&source_with(
+        messages(&source_with(
             r"  run => Taker maybe: #(#bogus)
 "
         )),
@@ -320,7 +303,7 @@ fn optional_list_parameter_is_checked() {
         ]
     );
     assert_eq!(
-        checker_messages(&source_with(
+        messages(&source_with(
             r"  run => Taker maybe: nil
 "
         )),
@@ -347,7 +330,7 @@ Object subclass: Caller
   run => Taker sized: #("abc", #(1))
   bad => Taker quackers: #("abc")
 "#;
-    let msgs = checker_messages(source);
+    let msgs = messages(source);
     assert_eq!(
         msgs.iter()
             .filter(|m| m.starts_with("Element "))
@@ -359,12 +342,12 @@ Object subclass: Caller
 
 #[test]
 fn class_reference_and_nil_elements_against_behaviour() {
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"  run => Taker classes: #(Integer, String)
 ",
     ));
     assert_eq!(msgs, Vec::<String>::new());
-    let msgs = checker_messages(&source_with(
+    let msgs = messages(&source_with(
         r"  run => Taker classes: #(Integer, 3)
 ",
     ));
@@ -380,7 +363,7 @@ fn class_reference_and_nil_elements_against_behaviour() {
 /// A cons literal checks its heads and its tail's element type.
 #[test]
 fn cons_literal_checks_heads_and_tail() {
-    let run = |body: &str| checker_messages(&source_with(body));
+    let run = |body: &str| messages(&source_with(body));
     assert_eq!(
         run("  run: t :: Taker rest: r :: List(String) => t takeInts: #(1 | r)\n"),
         vec![

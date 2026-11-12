@@ -766,12 +766,10 @@ pub fn format_default_value(expr: &Expression) -> String {
 mod tests {
     use super::format_default_value;
     use crate::ast::{Expression, Literal};
-    use crate::source_analysis::Span;
+
     use crate::unparse::unparse_literal_display;
 
-    fn span() -> Span {
-        Span::new(0, 0)
-    }
+    use crate::test_helpers::test_support::test_span as span;
 
     // Parity tests: the stdlib-metadata path (`format_default_value`) must
     // render literals identically to the unparse path

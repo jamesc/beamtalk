@@ -15,23 +15,9 @@ fn analyse_source(source: &str) -> crate::semantic_analysis::AnalysisResult {
     crate::semantic_analysis::analyse(&module)
 }
 
-fn checker_messages(source: &str) -> Vec<String> {
-    analyse_source(source)
-        .diagnostics
-        .into_iter()
-        .filter(|d| {
-            matches!(
-                d.category,
-                Some(DiagnosticCategory::Type | DiagnosticCategory::Dnu)
-            )
-        })
-        .map(|d| d.message.to_string())
-        .collect()
-}
-
 /// A source with one method per case; `{body}` is spliced into class `Probe`.
 fn probe(body: &str) -> Vec<String> {
-    checker_messages(&format!("Object subclass: Probe\n{body}\n"))
+    messages(&format!("Object subclass: Probe\n{body}\n"))
 }
 
 #[test]
@@ -176,7 +162,7 @@ fn redefining_a_shape_alias_changes_what_its_use_sites_resolve_to() {
 
 #[test]
 fn shape_typed_field_default_and_assignment_do_not_warn() {
-    let msgs = checker_messages(
+    let msgs = messages(
         "Actor subclass: Foo\n  \
            state: cfg :: #{#port => Integer} = #{#port => 1}\n  \
            state: other :: #{#a => Integer} | Nil = nil\n  \
@@ -188,7 +174,7 @@ fn shape_typed_field_default_and_assignment_do_not_warn() {
 
 #[test]
 fn shape_typed_field_still_rejects_a_non_dictionary_assignment() {
-    let msgs = checker_messages(
+    let msgs = messages(
         "Actor subclass: Foo\n  \
            state: cfg :: #{#port => Integer} = #{#port => 1}\n  \
            bad => self.cfg := 3\n",
@@ -202,7 +188,7 @@ fn shape_typed_field_still_rejects_a_non_dictionary_assignment() {
 
 #[test]
 fn shape_typed_slot_accepts_spawn_with_dictionary() {
-    let msgs = checker_messages(
+    let msgs = messages(
         "Actor subclass: Holder\n  \
            state: cfg :: #{#port => Integer} = #{#port => 1}\n\n\
          Object subclass: Maker\n  \
@@ -213,7 +199,7 @@ fn shape_typed_slot_accepts_spawn_with_dictionary() {
 
 #[test]
 fn override_return_type_against_a_shape_is_still_judged() {
-    let msgs = checker_messages(
+    let msgs = messages(
         "Object subclass: Parent\n  foo -> #{#a => Integer} => Dictionary new\n\n\
          Parent subclass: Child\n  foo -> Integer => 3\n",
     );
@@ -225,7 +211,7 @@ fn override_return_type_against_a_shape_is_still_judged() {
 
 #[test]
 fn shape_alias_typed_field_and_parameter_reject_non_dictionaries() {
-    let msgs = checker_messages(
+    let msgs = messages(
         "type Options = #{#port => Integer}\n\
          Actor subclass: Foo\n  \
            state: cfg :: Options = #{#port => 1}\n  \

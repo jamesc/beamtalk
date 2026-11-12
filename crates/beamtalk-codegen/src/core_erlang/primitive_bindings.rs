@@ -373,11 +373,8 @@ mod tests {
         ClassDefinition, Expression, ExpressionStatement, Identifier, KeywordPart, MessageSelector,
         MethodDefinition, Module, ParameterDefinition,
     };
-    use beamtalk_core::source_analysis::Span;
 
-    fn span() -> Span {
-        Span::new(0, 0)
-    }
+    use beamtalk_core::test_helpers::test_support::test_span as span;
 
     fn make_primitive_method(
         selector: MessageSelector,

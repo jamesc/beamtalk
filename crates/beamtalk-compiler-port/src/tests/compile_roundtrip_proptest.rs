@@ -4,6 +4,7 @@
 //! ADR 0011 Phase 4 property-based tests: `handle_compile()` / `handle_compile_expression()` must never panic and must always return a well-formed ETF response for near-valid Beamtalk input.
 
 use super::*;
+use beamtalk_core::test_helpers::test_support::{fragment_from, truncated_from};
 
 /// Near-valid Beamtalk source fragments (reuses patterns from parser property tests).
 const FRAGMENTS: &[&str] = &[
@@ -33,25 +34,9 @@ const FRAGMENTS: &[&str] = &[
 fn near_valid_beamtalk() -> impl Strategy<Value = String> {
     prop_oneof![
         // Valid fragments
-        prop::sample::select(FRAGMENTS).prop_map(std::string::ToString::to_string),
+        fragment_from(FRAGMENTS),
         // Truncated valid expressions
-        prop::sample::select(FRAGMENTS).prop_flat_map(|s| {
-            let len = s.len();
-            if len <= 1 {
-                Just(s.to_string()).boxed()
-            } else {
-                (1..len)
-                    .prop_map(move |cut| {
-                        let safe_cut = s.floor_char_boundary(cut);
-                        if safe_cut == 0 {
-                            s.to_string()
-                        } else {
-                            s[..safe_cut].to_string()
-                        }
-                    })
-                    .boxed()
-            }
-        }),
+        truncated_from(FRAGMENTS),
         // Mismatched brackets
         prop::sample::select(FRAGMENTS).prop_map(|s| {
             s.chars()

@@ -179,12 +179,6 @@ fn field_at_put_count() -> Expression {
     )
 }
 
-fn check(module: &Module, hierarchy: &ClassHierarchy) -> TypeChecker {
-    let mut checker = TypeChecker::new();
-    checker.check_module(module, hierarchy);
-    checker
-}
-
 fn definite_assignment_diags(checker: &TypeChecker) -> Vec<Diagnostic> {
     checker
         .diagnostics()

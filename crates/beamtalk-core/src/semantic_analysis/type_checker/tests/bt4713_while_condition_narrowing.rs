@@ -7,20 +7,6 @@
 
 use super::common::*;
 
-fn type_diagnostics(source: &str) -> Vec<Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
-        .into_iter()
-        .filter(|d| {
-            matches!(
-                d.category,
-                Some(DiagnosticCategory::Type | DiagnosticCategory::Dnu)
-            )
-        })
-        .collect()
-}
-
 fn method(body: &str) -> String {
     format!(
         r"
@@ -40,12 +26,12 @@ typed Object subclass: Repro
 }
 
 fn assert_clean(body: &str) {
-    let diags = type_diagnostics(&method(body));
+    let diags = type_dnu_diags(&method(body));
     assert!(diags.is_empty(), "expected clean:\n{body}\ngot: {diags:#?}");
 }
 
 fn assert_rejected(body: &str) {
-    let diags = type_diagnostics(&method(body));
+    let diags = type_dnu_diags(&method(body));
     assert!(!diags.is_empty(), "expected a diagnostic:\n{body}");
 }
 

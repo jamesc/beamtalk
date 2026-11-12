@@ -15,14 +15,6 @@
 
 use super::common::*;
 
-fn check_source(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
-    checker.take_diagnostics()
-}
-
 fn type_mismatches(
     diags: &[crate::source_analysis::Diagnostic],
 ) -> Vec<&crate::source_analysis::Diagnostic> {
@@ -36,7 +28,7 @@ fn type_mismatches(
 /// defaults on `:: Dynamic` fields are all accepted.
 #[test]
 fn bt4032_dynamic_fields_accept_any_literal_default() {
-    let diags = check_source(
+    let diags = diags(
         "typed Value subclass: Dv\n\
          \x20 field: t :: Dynamic = 3\n\
          \x20 field: h :: Dynamic = nil\n\
@@ -54,7 +46,7 @@ fn bt4032_dynamic_fields_accept_any_literal_default() {
 /// in a typed Actor accepts literal defaults too.
 #[test]
 fn bt4032_dynamic_state_accepts_literal_default() {
-    let diags = check_source(
+    let diags = diags(
         "typed Actor subclass: DvActor\n\
          \x20 state: t :: Dynamic = 3\n\
          \x20 state: h :: Dynamic = nil\n",
@@ -71,7 +63,7 @@ fn bt4032_dynamic_state_accepts_literal_default() {
 /// mismatches.
 #[test]
 fn bt4032_non_dynamic_mismatch_still_warns() {
-    let diags = check_source(
+    let diags = diags(
         "typed Value subclass: DvControl\n\
          \x20 field: c :: Integer = \"bad\"\n",
     );

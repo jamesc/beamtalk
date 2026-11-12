@@ -19,20 +19,7 @@ pub(super) use crate::semantic_analysis::class_hierarchy::DeclaredType;
 pub(super) use crate::semantic_analysis::class_hierarchy::MethodInfo;
 pub(super) use crate::source_analysis::{DiagnosticCategory, Span};
 
-pub(super) fn span() -> Span {
-    Span::new(0, 1)
-}
-
-pub(super) fn ident(name: &str) -> Identifier {
-    Identifier {
-        name: name.into(),
-        span: span(),
-    }
-}
-
-pub(super) fn bare(expr: Expression) -> ExpressionStatement {
-    ExpressionStatement::bare(expr)
-}
+pub(super) use crate::test_helpers::test_support::{bare, unit_ident as ident, unit_span as span};
 
 pub(super) fn make_module(expressions: Vec<Expression>) -> Module {
     Module::new(
@@ -121,6 +108,78 @@ pub(super) fn run_with_expect(module: &Module, hierarchy: &ClassHierarchy) -> Ve
     let mut diags = checker.take_diagnostics();
     crate::compilation::diagnostics_policy::apply_expect_directives(module, &mut diags);
     diags
+}
+
+/// Source to diagnostics through the full pipeline: parse (lenient), build the
+/// hierarchy, type check, then apply `@expect` suppression (BT-4678).
+///
+/// Panics if the hierarchy cannot be built. Use [`diags`] to skip suppression.
+pub(super) fn diags_with_expect(source: &str) -> Vec<Diagnostic> {
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    run_with_expect(&module, &hierarchy)
+}
+
+/// Source to the type checker's raw diagnostics: parse (lenient), build the
+/// hierarchy, type check. No `@expect` suppression (BT-4678).
+pub(super) fn diags(source: &str) -> Vec<Diagnostic> {
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = TypeChecker::new();
+    checker.check_module(&module, &hierarchy);
+    checker.take_diagnostics()
+}
+
+/// Type checks an already-built `module` against `hierarchy` and hands back the
+/// checker, for tests that inspect more than its diagnostics (BT-4678).
+pub(super) fn check(module: &Module, hierarchy: &ClassHierarchy) -> TypeChecker {
+    let mut checker = TypeChecker::new();
+    checker.check_module(module, hierarchy);
+    checker
+}
+
+/// [`diags_with_expect`] keeping only `Type` diagnostics.
+pub(super) fn type_diags(source: &str) -> Vec<Diagnostic> {
+    diags_with_expect(source)
+        .into_iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect()
+}
+
+/// [`diags_with_expect`] keeping only `Type` and `Dnu` diagnostics.
+pub(super) fn type_dnu_diags(source: &str) -> Vec<Diagnostic> {
+    diags_with_expect(source)
+        .into_iter()
+        .filter(|d| {
+            matches!(
+                d.category,
+                Some(DiagnosticCategory::Type | DiagnosticCategory::Dnu)
+            )
+        })
+        .collect()
+}
+
+/// Source to the diagnostics of the whole semantic `analyse` pass. The source
+/// must parse without any diagnostic (BT-4678).
+pub(super) fn analyse_diags(source: &str) -> Vec<Diagnostic> {
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    crate::semantic_analysis::analyse(&module).diagnostics
+}
+
+/// Messages of the `Type` and `Dnu` diagnostics from [`analyse_diags`].
+pub(super) fn messages(source: &str) -> Vec<String> {
+    analyse_diags(source)
+        .into_iter()
+        .filter(|d| {
+            matches!(
+                d.category,
+                Some(DiagnosticCategory::Type | DiagnosticCategory::Dnu)
+            )
+        })
+        .map(|d| d.message.to_string())
+        .collect()
 }
 
 /// Helper: Build an `Erlang <module>` receiver expression.

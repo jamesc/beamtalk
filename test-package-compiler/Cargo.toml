@@ -9,7 +9,9 @@ publish = false
 description = "Snapshot tests for beamtalk compiler"
 
 [dev-dependencies]
-beamtalk-core = { workspace = true }
+# why: BT-4678 — the shared `erlc_available` probe lives in `test_support`,
+# which the `test` feature gates.
+beamtalk-core = { workspace = true, features = ["test"] }
 beamtalk-codegen = { workspace = true }
 insta = { workspace = true, features = ["glob"] }
 camino = { workspace = true }
