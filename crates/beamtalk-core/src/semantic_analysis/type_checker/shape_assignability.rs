@@ -29,6 +29,7 @@ use ecow::{EcoString, eco_format};
 use crate::semantic_analysis::class_hierarchy::{ClassHierarchy, DeclaredType};
 use crate::semantic_analysis::string_utils::edit_distance;
 
+use super::well_known::WellKnownClass;
 use super::{InferredType, TypeChecker, TypeStringContext, type_resolver};
 
 /// Why a value is not assignable to a shape-bearing type.
@@ -341,14 +342,20 @@ impl TypeChecker {
         // `Block(P1, ..., R)`: parameters are contravariant, only the result
         // is covariant.
         let last = aargs.len() - 1;
-        let is_block = aname == "Block" && ename == "Block";
+        let is_block = WellKnownClass::from_str(aname) == Some(WellKnownClass::Block)
+            && WellKnownClass::from_str(ename) == Some(WellKnownClass::Block);
         aargs
             .iter()
             .zip(eargs.iter())
             .enumerate()
             .try_for_each(|(i, (a, e))| {
-                if is_block && i < last {
-                    Self::arg_assignable(e, a, hierarchy)
+                // Only shape-bearing slots: a non-shape slot keeps the
+                // pre-existing (covariant) rule exactly as before.
+                if is_block && i < last && (a.contains_shape() || e.contains_shape()) {
+                    // The mismatch is about the *actual* block needing more
+                    // than callers supply, so the detail would point the
+                    // wrong way.
+                    Self::arg_assignable(e, a, hierarchy).map_err(|_| ShapeMismatch::Incompatible)
                 } else {
                     Self::arg_assignable(a, e, hierarchy)
                 }
