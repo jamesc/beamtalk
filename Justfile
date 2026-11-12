@@ -205,8 +205,9 @@ build-rust-release:
 # BT-4749: the release workspace build must be warning-free AND must not carry
 # test-only code. Builds into its own target dir (RUSTFLAGS differ from a normal
 # build, so sharing target/release would force a full rebuild of it) and fails
-# if any `cfg(any(test, feature = "test"))` fault-injection/probe symbol is
-# linked into the shipped binaries. Unix-only (needs `nm`); Linux CI runs it.
+# if any workspace crate's `test` feature is enabled in the release graph, or
+# a fault-injection/probe symbol is linked into the shipped binaries.
+# Unix-only (needs `nm`); Linux CI runs it.
 [unix]
 check-release-build:
     #!/usr/bin/env bash
@@ -214,14 +215,25 @@ check-release-build:
     echo "🔍 Checking the release workspace build (warnings denied)..."
     dir=target/release-check
     RUSTFLAGS="-D warnings" cargo build --release --workspace --locked --quiet --target-dir "$dir"
-    # Without nm the symbol scan below would inspect nothing and still pass.
+    # 1. Resolved features (linker-independent, covers every crate and every
+    #    gated module): in the graph a release build resolves (normal + build
+    #    edges, no dev), no workspace crate may have a `test*` feature on. A
+    #    dev-dependency's `features = ["test"]` only shows up here if something
+    #    (e.g. `--all-targets`) activated it. Capture first so a `cargo tree`
+    #    failure cannot read as "no leak".
+    tree="$(cargo tree --workspace --locked -e normal,build,features --prefix none)"
+    [ -n "$tree" ] || { echo "❌ cargo tree printed nothing; cannot check resolved features"; exit 1; }
+    if grep -E '^beamtalk[a-z-]* feature "test' <<<"$tree" | sort -u; then
+        echo "❌ a workspace crate's 'test' feature is enabled in the release graph (see above)"
+        exit 1
+    fi
+    # 2. Second line of defence on the binaries themselves. The linker drops
+    #    unreferenced code, so this only sees test code production code calls:
+    #    the codegen fault registry and the dropped-assignment probe (called
+    #    from cfg-gated blocks in production modules), not e.g. core's
+    #    test_helpers. Without nm it would inspect nothing and still pass.
     command -v nm >/dev/null || { echo "❌ nm not found; cannot inspect the release binaries"; exit 1; }
-    # Only the test-gated parts: `fault::registry` (not the always-present
-    # `fault::disabled`), the dropped-assignment probe, and the cfg-gated
-    # submodules of beamtalk-core's `test_helpers` (not the ungated
-    # `unique_temp_dir`). Core is also pulled in with `features = ["test"]` by
-    # dev-dependencies, so the same unification could leak it.
-    leak_re='beamtalk_codegen::core_erlang::(fault::registry|dropped_assignment_probe)::|beamtalk_core::test_helpers::(test_support|class_var_program|statement_probes|corpus_families|evaluated_block_grid)::'
+    leak_re='beamtalk_codegen::core_erlang::(fault::registry|dropped_assignment_probe)::'
     # Scan every binary the release packages, read from the one list that
     # package-release.sh ships so the two cannot drift apart.
     bins="$(sed -n 's/^BINARIES=(\(.*\))$/\1/p' scripts/ci/package-release.sh)"
