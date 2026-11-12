@@ -15,28 +15,32 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::type_checker::{
-    FFI_ARG_RUNTIME_GUARDS, ffi_arg_passes_unchanged,
+    FFI_ARG_BINARY_GUARD, FFI_ARG_RUNTIME_GUARDS, ffi_arg_may_be_binary, ffi_arg_passes_unchanged,
 };
 
-/// BT-4485: the Core Erlang guard that holds when every one of `arg_names`
-/// passes one of the FFI type table's [`FFI_ARG_RUNTIME_GUARDS`].
-fn ffi_arg_runtime_guard(arg_names: &[String]) -> Document<'static> {
-    arg_names
-        .iter()
-        .map(|name| {
-            FFI_ARG_RUNTIME_GUARDS
+/// BT-4485: the Core Erlang guard that holds when every one of `args` passes
+/// one of the FFI type table's [`FFI_ARG_RUNTIME_GUARDS`]. An argument whose
+/// static type may be a `String`/`Binary` (BT-4759, the `bool`) also passes the
+/// table's [`FFI_ARG_BINARY_GUARD`]; a scalar-typed argument is checked exactly
+/// as before.
+fn ffi_arg_runtime_guard(args: &[(String, bool)]) -> Document<'static> {
+    args.iter()
+        .map(|(name, may_be_binary)| {
+            let bifs = FFI_ARG_RUNTIME_GUARDS
                 .iter()
-                .map(|bif| {
-                    docvec![
-                        "call 'erlang':",
-                        leaf::atom(*bif),
-                        "(",
-                        leaf::var(name.clone()),
-                        ")"
-                    ]
-                })
-                .reduce(|acc, test| docvec!["call 'erlang':'or'(", acc, ", ", test, ")"])
-                .unwrap_or(Document::Str("'true'"))
+                .copied()
+                .chain(may_be_binary.then_some(FFI_ARG_BINARY_GUARD));
+            bifs.map(|bif| {
+                docvec![
+                    "call 'erlang':",
+                    leaf::atom(bif),
+                    "(",
+                    leaf::var(name.clone()),
+                    ")"
+                ]
+            })
+            .reduce(|acc, test| docvec!["call 'erlang':'or'(", acc, ", ", test, ")"])
+            .unwrap_or(Document::Str("'true'"))
         })
         .reduce(|acc, test| docvec!["call 'erlang':'and'(", acc, ", ", test, ")"])
         .unwrap_or(Document::Str("'true'"))
@@ -275,6 +279,9 @@ impl CoreErlangGenerator {
     ///       let S = primop 'build_stacktrace'(Raw) in
     ///       let Site = call 'erlang':'process_info'(self(), 'current_stacktrace') in
     ///       call 'beamtalk_erlang_proxy':'ffi_call_raised'(C, E, S, 'M', 'F', [A1], Mode, Site)
+    ///       (a `String`/`Binary`-typed argument adds `is_binary` to its guard and a
+    ///       `let Snap = beamtalk_class_vars:snapshot()` before the `try`, passed as
+    ///       the last argument: `ffi_call_raised/9`)
     ///   <> when 'true' -> call 'beamtalk_erlang_proxy':'direct_call'('M', 'F', [A1], Mode)
     /// end
     /// ```
@@ -308,7 +315,7 @@ impl CoreErlangGenerator {
 
         let mut bindings: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
         let mut arg_vars: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
-        let mut arg_names: Vec<String> = Vec::with_capacity(arguments.len());
+        let mut arg_names: Vec<(String, bool)> = Vec::with_capacity(arguments.len());
         for (i, arg) in arguments.iter().enumerate() {
             let var = self.fresh_temp_var("FfiArg");
             bindings.push(docvec![
@@ -322,23 +329,48 @@ impl CoreErlangGenerator {
                 arg_vars.push(Document::Str(", "));
             }
             arg_vars.push(leaf::var(var.clone()));
-            arg_names.push(var);
+            let may_be_binary = self
+                .type_map
+                .get(arg.span())
+                .is_some_and(ffi_arg_may_be_binary);
+            arg_names.push((var, may_be_binary));
         }
+        // BT-4759: a binary argument lets the `badarg` charlist retry run, and
+        // a retry is a fresh attempt (ADR 0130 §4), so the call site keeps the
+        // pre-call class-variable snapshot for it, as the proxy does. A call
+        // with only scalar arguments never retries and takes none.
+        let any_binary = arg_names.iter().any(|(_, b)| *b);
+        let snap_var = any_binary.then(|| self.fresh_temp_var("FfiSnap"));
         let module_atom = leaf::atom(module_name.to_string());
         let function_atom = leaf::atom(function_name.to_string());
         let mode_atom = leaf::atom(crate::core_erlang::util::ffi_coercion_mode(module_name));
-        let direct = self.ffi_try_direct_doc(&module_atom, &function_atom, &mode_atom, &arg_vars);
+        let direct = self.ffi_try_direct_doc(
+            &module_atom,
+            &function_atom,
+            &mode_atom,
+            &arg_vars,
+            snap_var.as_deref(),
+        );
         if arg_names.is_empty() {
             return Ok(Some(docvec![Document::Vec(bindings), direct]));
         }
         // Static types are not enforced at run time: check each argument with
         // the table's runtime guards and keep the proxy for anything else.
         let guard = ffi_arg_runtime_guard(&arg_names);
+        let snap_binding = match &snap_var {
+            Some(snap) => docvec![
+                "let ",
+                leaf::var(snap.clone()),
+                " = call 'beamtalk_class_vars':'snapshot'() in "
+            ],
+            None => Document::Str(""),
+        };
         Ok(Some(docvec![
             Document::Vec(bindings),
             "case <> of <> when ",
             guard,
             " -> ",
+            snap_binding,
             direct,
             " <> when 'true' -> call 'beamtalk_erlang_proxy':'direct_call'(",
             module_atom,
@@ -362,6 +394,7 @@ impl CoreErlangGenerator {
         function_atom: &Document<'static>,
         mode_atom: &Document<'static>,
         arg_vars: &[Document<'static>],
+        snap_var: Option<&str>,
     ) -> Document<'static> {
         let result_var = self.fresh_temp_var("FfiRes");
         let cls_var = self.fresh_temp_var("FfiCls");
@@ -413,6 +446,10 @@ impl CoreErlangGenerator {
             mode_atom.clone(),
             ", ",
             leaf::var(site_var),
+            snap_var.map_or(Document::Str(""), |snap| docvec![
+                ", ",
+                leaf::var(snap.to_string())
+            ]),
             ")",
         ]
     }

@@ -1993,22 +1993,46 @@ bt4485_result_passthrough_matches_shared_fixture_test() ->
 
 %% The runtime guards a direct call checks each argument with
 %% (`arg_runtime_guards`) reject every value the proxy would change or that
-%% could carry Beamtalk code; such an argument falls back to the proxy.
+%% could carry Beamtalk code; such an argument falls back to the proxy. A raw
+%% binary passes (BT-4759); a tagged String, a charlist and a non-binary
+%% bitstring do not.
 bt4485_runtime_guards_reject_what_the_proxy_changes_test() ->
-    #{<<"arg_runtime_guards">> := Guards} = bt4485_fixture(),
+    #{<<"arg_runtime_guards">> := Scalar, <<"arg_binary_guard">> := Bin} = bt4485_fixture(),
+    Guards = Scalar ++ [Bin],
+    %% A scalar-typed argument is not checked with `is_binary`: a raw binary in
+    %% one takes the proxy.
+    ?assertNot(lists:any(fun(G) -> erlang:(binary_to_existing_atom(G))(<<"a">>) end, Scalar)),
     [
         ?assertNot(lists:any(fun(G) -> erlang:(binary_to_existing_atom(G))(V) end, Guards))
-     || V <- [{beamtalk_string, <<"a">>}, <<"a">>, "a", [1], fun() -> ok end, #{}, {ok, 1}]
+     || V <- [
+            {beamtalk_string, <<"a">>},
+            <<1:3>>,
+            "a",
+            [1],
+            fun() -> ok end,
+            #{},
+            {ok, 1}
+        ]
     ].
 
 %% Argument types codegen passes without the proxy: the proxy hands every
 %% sample to the callee unchanged, and it passes one of the runtime guards (a
-%% scalar, so no tagged String, no binary for the charlist retry to change, no
-%% fun that could run Beamtalk code).
+%% scalar or a raw binary, so no tagged String and no fun that could run
+%% Beamtalk code; a binary's `badarg` retry runs in `ffi_call_raised/8`).
 bt4485_arg_passthrough_matches_shared_fixture_test() ->
-    #{<<"arg_passthrough">> := Cases, <<"arg_runtime_guards">> := Guards} = bt4485_fixture(),
+    #{
+        <<"arg_passthrough">> := Cases,
+        <<"arg_runtime_guards">> := Scalar,
+        <<"arg_binary_guard">> := Bin
+    } = bt4485_fixture(),
     ?assert(length(Cases) > 0),
-    PassesGuard = fun(V) ->
+    %% A String/Binary typed argument is also checked with the binary guard.
+    PassesGuard = fun(Type, V) ->
+        Guards =
+            case lists:member(Type, [<<"String">>, <<"Binary">>]) of
+                true -> Scalar ++ [Bin];
+                false -> Scalar
+            end,
         lists:any(fun(G) -> erlang:(binary_to_existing_atom(G))(V) end, Guards)
     end,
     lists:foreach(
@@ -2016,7 +2040,7 @@ bt4485_arg_passthrough_matches_shared_fixture_test() ->
             lists:foreach(
                 fun(Src) ->
                     V = bt4485_eval(binary_to_list(Src)),
-                    ?assert(PassesGuard(V)),
+                    ?assert(PassesGuard(Type, V)),
                     [
                         ?assertEqual(
                             {Type, term_to_binary(V)},
@@ -2032,6 +2056,93 @@ bt4485_arg_passthrough_matches_shared_fixture_test() ->
             )
         end,
         Cases
+    ).
+
+%% BT-4759: the full shape codegen emits for a call with guarded arguments:
+%% every argument is checked with the fixture's `arg_runtime_guards`, a pass
+%% goes direct (`bt4485_direct/4`) and anything else takes `direct_call/4`.
+bt4759_guarded(M, F, Args, Mode) ->
+    #{<<"arg_runtime_guards">> := Scalar, <<"arg_binary_guard">> := Bin} = bt4485_fixture(),
+    Guards = Scalar ++ [Bin],
+    Passes = fun(V) -> lists:any(fun(G) -> erlang:(binary_to_existing_atom(G))(V) end, Guards) end,
+    case lists:all(Passes, Args) of
+        true -> bt4485_direct(M, F, Args, Mode);
+        false -> beamtalk_erlang_proxy:direct_call(M, F, Args, Mode)
+    end.
+
+%% Differential test (BT-4759): for binary arguments the guarded shape and the
+%% proxied `direct_call/4` agree on results and errors, in both modes. Covers a
+%% raw binary, the `badarg` charlist retry (`list_to_integer/1` needs a
+%% charlist), a retry that still fails, and the arguments the guard rejects
+%% (a tagged String is unwrapped by the proxy, a charlist is left alone, a
+%% bitstring that is not a binary): these must take the proxy and so agree
+%% trivially, and must never reach the callee tagged.
+bt4759_guarded_binary_args_match_proxy_test_() ->
+    Cases = [
+        {erlang, phash2, [<<"abc">>]},
+        {erlang, byte_size, [<<"abc">>]},
+        {erlang, binary_to_integer, [<<"42">>]},
+        {erlang, binary_to_integer, [<<"nope">>]},
+        {erlang, list_to_integer, [<<"42">>]},
+        {erlang, list_to_integer, [<<"nope">>]},
+        {erlang, binary_to_atom, [<<"bt4759_atom">>, utf8]},
+        {erlang, binary_to_atom, [<<"x">>, not_an_encoding]},
+        {erlang, iolist_to_binary, [<<"io">>]},
+        {erlang, list_to_atom, [<<"bt4759_charlist_retry">>]},
+        {erlang, abs, [<<"not a number">>]},
+        {erlang, byte_size, [{beamtalk_string, <<"tagged">>}]},
+        {erlang, list_to_integer, [{beamtalk_string, <<"42">>}]},
+        {erlang, list_to_integer, ["42"]},
+        {erlang, byte_size, [<<1:3>>]},
+        {erlang, max, [<<"a">>, 7]}
+    ],
+    [
+        {lists:flatten(io_lib:format("~p:~p ~p ~p", [M, F, A, Mode])), fun() ->
+            ?assertEqual(
+                bt4485_outcome(fun() -> beamtalk_erlang_proxy:direct_call(M, F, A, Mode) end),
+                bt4485_outcome(fun() -> bt4759_guarded(M, F, A, Mode) end)
+            )
+        end}
+     || {M, F, A} <- Cases, Mode <- [stock, beamtalk]
+    ].
+
+%% BT-4759: the `badarg` charlist retry on the direct path is a fresh attempt.
+%% A binary-argument call site reads `beamtalk_class_vars:snapshot()` before the
+%% call and hands it to `ffi_call_raised/9`; the retry restores it, so writes a
+%% failed first attempt made do not survive into the retry (ADR 0130 §4,
+%% BT-3728), exactly as on the proxy path.
+bt4759_direct_binary_retry_discards_first_attempt_class_var_writes_test() ->
+    Direct = fun() ->
+        Snap = beamtalk_class_vars:snapshot(),
+        try
+            ?MODULE:write_then_badarg(<<"x">>)
+        catch
+            C:E:S ->
+                Site = erlang:process_info(self(), current_stacktrace),
+                beamtalk_erlang_proxy:ffi_call_raised(
+                    C, E, S, ?MODULE, write_then_badarg, [<<"x">>], stock, Site, Snap
+                )
+        end
+    end,
+    beamtalk_class_vars_test_support:with_home('ProxyRetryTestClass', #{a => 1}, fun() ->
+        Proxied = beamtalk_erlang_proxy:direct_call(?MODULE, write_then_badarg, [<<"x">>], stock),
+        ?assertEqual(1, Proxied),
+        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a)),
+        ?assertEqual(Proxied, Direct()),
+        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a))
+    end).
+
+%% BT-4759: a tagged String never reaches a stock callee tagged. The guard
+%% rejects it, so the call takes the proxy, which unwraps it.
+bt4759_tagged_string_falls_back_and_is_unwrapped_test() ->
+    Tagged = {beamtalk_string, <<"tagged">>},
+    ?assertEqual(
+        6,
+        bt4759_guarded(erlang, byte_size, [Tagged], stock)
+    ),
+    ?assertEqual(
+        42,
+        bt4759_guarded(erlang, list_to_integer, [{beamtalk_string, <<"42">>}], stock)
     ).
 
 %% The shape codegen emits for a proved call: the arguments are bound, then
