@@ -1288,3 +1288,20 @@ Enter) because they were speculative completion-list entries that predated
 intentionally not meta-commands and were removed from the table rather than
 wired up. `:interrupt`/`:int` and `:recheck` dispatched but were missing
 from tab-completion; they are now in the table too.
+
+### `unresolved_ffi` known-module set (BT-4724)
+
+The `Unknown Erlang module` warning checks against every module of the
+installed OTP (from the one shared `erl` probe), the runtime's bundled
+applications, and the package's own dependency/`native/` modules, via
+`ffi_type_specs::collect_known_erlang_modules`. `build`, `check`, `lint`,
+`test`, the LSP (with a package root loaded), MCP `lint`/`diagnostic_summary`
+and the compiler port (REPL `load_project`) all use it and agree.
+
+`surface-specific:` surfaces with no filesystem context — REPL expression
+compiles and an LSP session with no package root loaded — keep the default
+`KnownErlangModules`, which has the check **disabled**, so they emit no
+unresolved-module warnings rather than false positives. `beamtalk lint foo.bt`
+and loose `test` files outside a package use the root-less
+`collect_installed_erlang_modules()` and do check. With no `erl` on `PATH` the
+check is disabled everywhere.

@@ -1171,6 +1171,12 @@ impl KnownErlangModules {
         &self.modules
     }
 
+    /// Add project modules without touching enablement (which is decided by
+    /// the OTP probe, not the project).
+    pub fn extend_modules(&mut self, modules: std::collections::HashSet<String>) {
+        std::sync::Arc::make_mut(&mut self.modules).extend(modules);
+    }
+
     /// Union `other` into `self`. Enablement is the AND of the *set* sides
     /// (an unset side, e.g. a fresh accumulator, is the identity), so one
     /// unavailable package disables the merged set regardless of order.
@@ -1277,7 +1283,8 @@ fn probe_otp_installation() -> Result<OtpDiscovery> {
     let probe = format!(
         "io:format(\"otp-version:~s-~s~n\", [erlang:system_info(otp_release), erlang:system_info(version)]), \
          lists:foreach(fun(App) -> case code:lib_dir(App) of {{error,_}} -> ok; Dir -> io:format(\"~s~n\", [filename:join(Dir, \"ebin\")]) end end, [{apps_atom_list}]), \
-         lists:foreach(fun(Dir) -> io:format(\"known-ebin:~s~n\", [Dir]) end, filelib:wildcard(filename:join(code:lib_dir(), \"*/ebin\"))), halt()."
+         lists:foreach(fun(Dir) -> io:format(\"known-ebin:~s~n\", [Dir]) end, filelib:wildcard(filename:join(code:lib_dir(), \"*/ebin\"))), \
+         lists:foreach(fun(M) -> io:format(\"known-mod:~s~n\", [M]) end, erlang:pre_loaded()), halt()."
     );
 
     let output = Command::new("erl")
@@ -1311,6 +1318,12 @@ fn probe_otp_installation() -> Result<OtpDiscovery> {
             if !v.is_empty() {
                 version = Some(v.to_string());
             }
+            continue;
+        }
+        if let Some(m) = line.strip_prefix("known-mod:") {
+            // Preloaded modules (`erlang`, `atomics`, ...) need not have a
+            // `.beam` on disk.
+            module_names.insert(m.to_string());
             continue;
         }
         if let Some(dir) = line.strip_prefix("known-ebin:") {
@@ -2073,6 +2086,8 @@ mod tests {
         assert!(known.check_enabled());
         for m in [
             "lists",
+            "erlang",
+            "atomics",
             "global",
             "erl_epmd",
             "pg",

@@ -1524,8 +1524,9 @@ fn initialize_pipeline(
     let mut known_erlang_modules =
         beamtalk_core::ffi_type_specs::collect_installed_erlang_modules();
     for (pkg_root, _pkg) in &discovered_packages {
-        known_erlang_modules
-            .extend(&beamtalk_core::ffi_type_specs::collect_known_erlang_modules(pkg_root));
+        known_erlang_modules.extend_modules(
+            beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(pkg_root),
+        );
     }
 
     Ok(TestPipeline {
