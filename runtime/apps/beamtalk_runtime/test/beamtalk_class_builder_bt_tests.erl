@@ -9,7 +9,7 @@
 EUnit tests for beamtalk_class_builder_bt module.
 
 Tests ClassBuilder bootstrap stub dispatch error handling (always DNU),
-has_method/1 queries (always false). Registration: see beamtalk_bt_stub_registration_tests.
+has_method/1 queries (always false). Registration: see beamtalk_class_bt_registration_tests.
 Models beamtalk_metaclass_bt_tests.erl and beamtalk_class_bt_tests.erl.
 """.
 

@@ -1,7 +1,7 @@
 %% Copyright 2026 James Casey
 %% SPDX-License-Identifier: Apache-2.0
 
--module(beamtalk_bt_stub_registration_tests).
+-module(beamtalk_class_bt_registration_tests).
 
 %%% **DDD Context:** Object System Context
 
@@ -17,6 +17,12 @@ and `beamtalk_metaclass_bt_tests`.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+
+%% NOTE: the `Class` row asserts the bootstrap-time superclass ('Object'). A module
+%% that boots the real stdlib earlier in the same VM leaves it as 'Behaviour', so
+%% this module's name keeps it adjacent to `beamtalk_class_bt_tests` (where the
+%% original assertion ran) in the alphabetical EUnit order. Do not rename it
+%% without re-running the whole suite.
 
 %% {StubModule, ClassName, ExpectedSuperclass}
 stubs() ->

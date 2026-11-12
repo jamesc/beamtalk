@@ -9,7 +9,7 @@
 EUnit tests for beamtalk_class_bt module.
 
 Tests Class bootstrap stub dispatch error handling, has_method/1 queries
-(registration is covered by beamtalk_bt_stub_registration_tests).
+(registration is covered by beamtalk_class_bt_registration_tests).
 """.
 
 -include_lib("eunit/include/eunit.hrl").

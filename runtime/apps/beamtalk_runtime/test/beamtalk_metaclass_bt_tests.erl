@@ -9,7 +9,7 @@
 EUnit tests for beamtalk_metaclass_bt module.
 
 Tests metaclass identity predicates, dispatch error handling,
-has_method/1 queries. Registration: see beamtalk_bt_stub_registration_tests.
+has_method/1 queries. Registration: see beamtalk_class_bt_registration_tests.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
