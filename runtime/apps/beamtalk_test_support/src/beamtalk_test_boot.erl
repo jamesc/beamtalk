@@ -27,7 +27,7 @@ process is already registered, and `beamtalk_stdlib:init/0` is itself
 idempotent (a normal stdlib load skips a module whose on_load already ran).
 """.
 
--export([boot_real_stdlib/1, wait_for_class/2]).
+-export([boot_real_stdlib/1, wait_for_class/2, registry/0, runtime/0]).
 
 -doc """
 Boot `beamtalk_runtime` + real stdlib, then block until `CanaryClass` is
@@ -55,13 +55,60 @@ boot_real_stdlib(CanaryClass) ->
     ok.
 
 -spec wait_for_class(atom(), non_neg_integer()) -> ok.
-wait_for_class(ClassName, 0) ->
-    error({class_not_registered, ClassName});
 wait_for_class(ClassName, Retries) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            timer:sleep(50),
-            wait_for_class(ClassName, Retries - 1);
-        _Pid ->
-            ok
+    beamtalk_test_wait:class(ClassName, Retries * 50).
+
+-doc """
+Bring up just the class-registry prerequisites (the `pg` scope and every
+`beamtalk_class_registry` ETS table) without starting the runtime
+application — the boot ~60 suites copy by hand (BT-4677). Idempotent.
+
+Returns a teardown handle: calling it stops `pg` only if this call started
+it. (The ETS tables are heir-owned and deliberately survive teardown, as the
+hand-written boots did.)
+""".
+-spec registry() -> fun(() -> ok).
+registry() ->
+    Started =
+        case whereis(pg) of
+            undefined ->
+                {ok, _} = pg:start_link(),
+                true;
+            _ ->
+                false
+        end,
+    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_class_registry:ensure_module_table(),
+    beamtalk_class_registry:ensure_methods_table(),
+    beamtalk_class_registry:ensure_class_warnings_table(),
+    beamtalk_class_registry:ensure_pid_table(),
+    beamtalk_class_registry:ensure_pending_errors_table(),
+    beamtalk_class_registry:ensure_loaded_classes_table(),
+    beamtalk_class_registry:ensure_backing_module_index_table(),
+    beamtalk_class_registry:ensure_class_state_table(),
+    beamtalk_class_registry:ensure_static_call_keys_table(),
+    fun() ->
+        case Started andalso whereis(pg) of
+            Pid when is_pid(Pid) ->
+                unlink(Pid),
+                gen_server:stop(Pid);
+            _ ->
+                ok
+        end
+    end.
+
+-doc """
+Start the `beamtalk_runtime` application (and the bootstrap process, as
+`boot_real_stdlib/1` does) without loading stdlib. Returns a teardown handle
+that stops the application only if this call started it.
+""".
+-spec runtime() -> fun(() -> ok).
+runtime() ->
+    {ok, Started} = application:ensure_all_started(beamtalk_runtime),
+    fun() ->
+        case lists:member(beamtalk_runtime, Started) of
+            true -> application:stop(beamtalk_runtime);
+            false -> ok
+        end,
+        ok
     end.

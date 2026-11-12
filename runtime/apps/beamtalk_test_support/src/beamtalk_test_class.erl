@@ -1,0 +1,57 @@
+%% Copyright 2026 James Casey
+%% SPDX-License-Identifier: Apache-2.0
+
+-module(beamtalk_test_class).
+
+%%% **DDD Context:** Runtime Context (test support)
+
+-moduledoc """
+Shared EUnit class-process fixtures (BT-4677): start and stop a class
+gen_server registered through `beamtalk_object_class`, and load a fixture
+module on demand. Replaces the per-file `start_class/N`, `stop_class/1`,
+`ensure_fixture_loaded/1` copies.
+""".
+
+-export([start/2, start/3, stop/1, ensure_fixture_loaded/2]).
+
+-doc "`start/3` with the default `ClassInfo` overrides (none).".
+-spec start(atom(), map()) -> pid().
+start(Name, ClassInfo) -> start(Name, ClassInfo, #{}).
+
+-doc """
+Start class `Name` with `ClassInfo` merged over `Overrides` (overrides win),
+unlink it from the caller so a crash in the test body does not take the class
+down mid-teardown, and return its pid.
+""".
+-spec start(atom(), map(), map()) -> pid().
+start(Name, ClassInfo, Overrides) ->
+    {ok, Pid} = beamtalk_object_class:start_link(Name, maps:merge(ClassInfo, Overrides)),
+    unlink(Pid),
+    Pid.
+
+-doc """
+Stop a class started by `start/2,3`: unwatch from the class monitor, kill and
+wait on the `'DOWN'` (see `beamtalk_test_class_teardown`). Accepts a pid or
+class name; dead/unknown values are ignored.
+""".
+-spec stop(pid() | atom()) -> ok.
+stop(Name) when is_atom(Name) ->
+    case beamtalk_class_registry:whereis_class(Name) of
+        undefined -> ok;
+        Pid -> stop(Pid)
+    end;
+stop(Pid) ->
+    beamtalk_test_class_teardown:stop_class_process(Pid).
+
+-doc """
+Ensure fixture module `Module` is loaded and its `ClassName` is registered,
+loading it from `Beam` (a path to the `.beam`, without extension) when
+needed. Returns `ok`; crashes the test if the class never registers.
+""".
+-spec ensure_fixture_loaded(atom(), atom() | file:filename()) -> ok.
+ensure_fixture_loaded(ClassName, Module) when is_atom(Module) ->
+    _ = code:ensure_loaded(Module),
+    beamtalk_test_wait:class(ClassName);
+ensure_fixture_loaded(ClassName, BeamPath) ->
+    {module, _} = code:load_abs(BeamPath),
+    beamtalk_test_wait:class(ClassName).
