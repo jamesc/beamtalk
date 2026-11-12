@@ -4081,16 +4081,17 @@ fn direct_constructors_ancestor_user_new_init_blocks_new1() {
     assert!(ctors.new0, "ancestor `new:` does not affect nullary `new`");
 }
 
-/// BT-4132: same real propagation; an ancestor's nullary user `new` never
-/// runs for `Sub new` (the `{new, []}` handler calls Sub's own new/0), so it
-/// blocks nothing.
+/// BT-4132, revised by BT-4479: same real propagation; an ancestor's nullary
+/// user `new` now runs for `Sub new` (the `{new, []}` handler routes through
+/// class dispatch to it), so it keeps the baked `new` verdict off. It does not
+/// affect `new:`.
 #[test]
-fn direct_constructors_ancestor_user_new_is_shadowed() {
+fn direct_constructors_ancestor_user_new_is_inherited() {
     let h = bt4099_hierarchy_for_source(
         "Value subclass: Mid\n  class new => Mid new\nMid subclass: Sub\n",
     );
     let ctors = h.direct_constructors("Sub");
-    assert!(ctors.new0);
+    assert!(!ctors.new0, "an inherited user `new` must run, not new/0");
     assert!(ctors.new1);
 }
 
@@ -4598,7 +4599,9 @@ fn explicit_class_new_stdlib_audit() {
         ("reference.bt", true),
         ("random.bt", true),
         ("queue.bt", true),
-        ("announcer.bt", true),
+        // BT-4479: passes `self` (so a subclass's instances carry its name),
+        // which is not a literal-argument forward.
+        ("announcer.bt", false),
         // `@primitive "metaclassNew"` builds a metaclass: not a plain forward.
         ("metaclass.bt", false),
     ] {
