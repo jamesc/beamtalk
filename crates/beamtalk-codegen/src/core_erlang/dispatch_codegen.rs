@@ -2908,7 +2908,12 @@ impl CoreErlangGenerator {
             // BT-4104: `spawnMonitored`/`spawnMonitoredWith:` lower the same
             // way to `class_self_spawn_monitored` — the monitor belongs to the
             // process running the class method (the class process).
-            "spawn" | "spawnWith:" | "spawnMonitored" | "spawnMonitoredWith:" => {
+            "spawn"
+            | "spawnWith:"
+            | "spawnMonitored"
+            | "spawnMonitoredWith:"
+            | "spawnMonitoredAsync"
+            | "spawnMonitoredAsyncWith:" => {
                 let Some(variant) = SpawnVariant::of_selector(selector_atom, arguments.len())
                 else {
                     return Ok(None);
@@ -4014,7 +4019,9 @@ impl CoreErlangGenerator {
         if in_repl_context {
             let spawned_object: Document<'static> = match variant {
                 SpawnVariant::Plain => Document::Str("SpawnResult"),
-                SpawnVariant::Monitored => Document::Str("call 'erlang':'element'(1, SpawnResult)"),
+                SpawnVariant::Monitored | SpawnVariant::MonitoredAsync => {
+                    Document::Str("call 'erlang':'element'(1, SpawnResult)")
+                }
             };
             let doc = docvec![
                 "case call 'maps':'get'('__repl_actor_registry__', Bindings, 'undefined') of ",
@@ -5010,8 +5017,11 @@ impl SpawnTargetKind {
 pub(super) fn is_supervisor_spawn_selector(selector_atom: &str, arity: usize) -> bool {
     matches!(
         (selector_atom, arity),
-        ("spawn" | "spawnMonitored", 0)
-            | ("spawnWith:" | "spawnAs:" | "spawnMonitoredWith:", 1)
+        ("spawn" | "spawnMonitored" | "spawnMonitoredAsync", 0)
+            | (
+                "spawnWith:" | "spawnAs:" | "spawnMonitoredWith:" | "spawnMonitoredAsyncWith:",
+                1,
+            )
             | ("spawnWith:as:", 2)
     )
 }

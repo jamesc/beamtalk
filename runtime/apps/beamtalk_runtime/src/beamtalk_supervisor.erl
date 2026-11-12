@@ -286,7 +286,10 @@ class_start_concrete(ClassName, Module, 'spawnWith:as:', [Args, Name]) ->
         spawn_named_instance(ClassName, Module, Args, Name, 'spawnWith:as:')
     );
 class_start_concrete(ClassName, _Module, Selector, _Args) when
-    Selector =:= spawnMonitored; Selector =:= 'spawnMonitoredWith:'
+    Selector =:= spawnMonitored;
+    Selector =:= 'spawnMonitoredWith:';
+    Selector =:= spawnMonitoredAsync;
+    Selector =:= 'spawnMonitoredAsyncWith:'
 ->
     %% BT-4104: `Actor>>spawnMonitored`'s atomic start+monitor has no OTP
     %% supervisor counterpart; codegen routes a static send of it to a

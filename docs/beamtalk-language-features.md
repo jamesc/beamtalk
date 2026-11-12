@@ -257,6 +257,13 @@ Server subclass: Connection
 
 **The monitor belongs to the process that runs the spawn.** Use a static send (`Worker spawnMonitored`) from an actor or Server method so the `#DOWN` reaches that process's `handleInfo:`. A dynamic send (`cls spawnMonitored`, `perform:`) or a send inside a class method runs in the class's process, which then owns the monitor, so its `#DOWN` is never seen by the sender. This is documented rather than raised, because it cannot be detected on the static-from-class-method path. Linked and named-and-monitored variants are follow-ups.
 
+**Spawn with a monitor, without waiting (BT-4477).** `Worker spawnMonitoredAsync` and `Worker spawnMonitoredAsyncWith: initArgs` answer the same `{actor, ref}` Tuple as `spawnMonitored`, but at once: the caller does not wait for the new actor's `init/1` or `initialize`. A process that starts a short-lived worker per request (an HTTP/2 connection with one process per stream) pays no start-up wait in its own loop. The monitor is still created atomically with the process, so a worker that ends immediately delivers its real reason, never `#noproc`.
+
+- An `initialize` or `init/1` failure cannot be raised to the caller, which has already moved on. It arrives as the `{#DOWN, ref, #process, pid, reason}` message.
+- Messages sent to the actor before `initialize` finishes queue in its mailbox and are handled after it, as with any actor.
+- The actor is not linked, the monitor belongs to the process that runs the spawn (same rule as `spawnMonitored`), and supervisor classes and `native:` actors do not support it. A non-Dictionary `initArgs` and an abstract class still raise at the call.
+- Only the monitored form exists: the `#DOWN` is the only way the caller learns of a failed start. A plain asynchronous `spawn` can follow if needed.
+
 **Initialization chaining** — `initialize` methods defined on ancestors run automatically, parent-first, before the child's own `initialize`. State threads through each call so the child sees the parent's mutations. Do **not** write `super initialize` yourself — the compiler warns on redundant `super initialize` sends inside an Actor's `initialize`. After the full chain runs, any typed `state:` field without a default (on the child or any ancestor, including cross-file parents) must have been assigned, or the actor crashes with `UninitializedStateError` naming the owning class. See [ADR 0078](ADR/0078-actor-initialize-inheritance.md).
 
 ### Secret State and Selectors (BT-4567)

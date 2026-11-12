@@ -95,6 +95,46 @@ Object subclass: Actor
   class sealed spawnMonitoredWith: initArgs :: Object -> Tuple =>
     (Erlang beamtalk_actor) doSpawnMonitoredWith: self args: initArgs
 
+  /// Spawn a new actor process already monitored by the caller, **without
+  /// waiting for it to start** (BT-4477).
+  ///
+  /// Answers `{actor, ref}` at once, like `spawnMonitored`, but does not wait
+  /// for the actor's `init/1` or `initialize`. For a caller that starts a
+  /// short-lived worker per request and cannot afford the start-up wait in
+  /// its own loop. The monitor is created together with the process, so the
+  /// `{#DOWN, ref, #process, pid, reason}` message carries the actor's real
+  /// exit reason even for a worker that ends immediately (never `#noproc`).
+  ///
+  /// - An `initialize` or `init/1` failure is not raised to the caller, which
+  ///   has already moved on. It arrives as the `#DOWN` message.
+  /// - Messages sent to the actor before `initialize` finishes queue in its
+  ///   mailbox and are handled after it, as with any actor.
+  /// - The actor is not linked. The monitor belongs to the process that runs
+  ///   the spawn, with the same rule as `spawnMonitored`. Supervisor classes
+  ///   do not support it.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pair := Worker spawnMonitoredAsync
+  /// worker := pair at: 1
+  /// ref := pair at: 2
+  /// ```
+  class sealed spawnMonitoredAsync -> Tuple =>
+    (Erlang beamtalk_actor) doSpawnMonitoredAsync: self
+
+  /// Spawn a new actor process with initialization arguments, already
+  /// monitored by the caller, without waiting for it to start (BT-4477).
+  ///
+  /// Same contract as `spawnMonitoredAsync` plus the initialisation arguments
+  /// passed to the actor's `init/1` callback.
+  ///
+  /// ## Examples
+  /// ```beamtalk
+  /// pair := Counter spawnMonitoredAsyncWith: #{#count => 10}
+  /// ```
+  class sealed spawnMonitoredAsyncWith: initArgs :: Object -> Tuple =>
+    (Erlang beamtalk_actor) doSpawnMonitoredAsyncWith: self args: initArgs
+
   /// Actors cannot be created with `new` — always raises (BT-217).
   ///
   /// Actors are processes with identity and lifecycle, not immutable

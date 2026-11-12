@@ -348,6 +348,31 @@ compiled_actor_proc_lib_report_redacts_queued_send_test() ->
         logger:remove_handler(HandlerId)
     end.
 
+%% BT-4477: an actor started by `safe_spawn_monitored_async/2` (a `proc_lib`
+%% fun, not `gen_server:start*`) is redacted in the crash report like any other.
+async_spawned_actor_proc_lib_report_redacts_queued_send_test() ->
+    {ok, _} = application:ensure_all_started(beamtalk_runtime),
+    HandlerId = bt4477_async_capture,
+    ok = logger:add_handler(HandlerId, ?MODULE, #{config => #{pid => self()}}),
+    {ok, {Pid, MonRef}} =
+        beamtalk_actor:safe_spawn_monitored_async('bt@secret_vault_actor', #{}),
+    try
+        true = erlang:suspend_process(Pid),
+        gen_server:cast(Pid, {cast, 'explode:', [1], #{}}),
+        Pid ! {'$gen_call', {self(), make_ref()}, {'unlock:', [31337], #{}}},
+        true = erlang:resume_process(Pid),
+        receive
+            {'DOWN', MonRef, process, Pid, _} -> ok
+        after 5000 -> error(no_crash)
+        end,
+        Info = await_proc_lib_report(Pid),
+        Messages = proplists:get_value(messages, Info),
+        ?assertMatch([{'$gen_call', _, {'unlock:', ?R, _}}], Messages),
+        ?assertEqual(nomatch, string:find(lists:flatten(io_lib:format("~p", [Info])), "31337"))
+    after
+        logger:remove_handler(HandlerId)
+    end.
+
 await_proc_lib_report(Pid) ->
     receive
         {captured_log, #{msg := {report, #{label := {proc_lib, crash}, report := [Info, _]}}}} ->

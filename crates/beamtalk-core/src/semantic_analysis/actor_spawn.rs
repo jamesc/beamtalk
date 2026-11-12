@@ -128,11 +128,14 @@ mod tests {
 
     #[test]
     fn monitored_spawns_are_not_actors() {
-        // `spawnMonitored` / `spawnMonitoredWith:` answer a `Tuple`.
+        // `spawnMonitored` / `spawnMonitoredWith:` and (BT-4477) the
+        // `spawnMonitoredAsync…` pair answer a `Tuple`.
         assert_eq!(
             locals(
                 "    a := Worker spawnMonitored\n    \
-                 b := Worker spawnMonitoredWith: #{#n => 1}\n    a\n"
+                 b := Worker spawnMonitoredWith: #{#n => 1}\n    \
+                 c := Worker spawnMonitoredAsync\n    \
+                 d := Worker spawnMonitoredAsyncWith: #{#n => 1}\n    a\n"
             ),
             set(&[])
         );
@@ -158,6 +161,8 @@ mod tests {
             "spawnWith:as:scope:",
             "spawnMonitored",
             "spawnMonitoredWith:",
+            "spawnMonitoredAsync",
+            "spawnMonitoredAsyncWith:",
             "new",
         ] {
             assert!(
