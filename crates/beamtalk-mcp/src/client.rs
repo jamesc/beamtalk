@@ -480,7 +480,8 @@ impl ReplClient {
     /// behaves identically to the plain `eval` operation. When true, sets
     /// `trace: true` in the protocol request and returns `steps` in the response.
     ///
-    /// Uses [`send_once`] (no retry) — see [`eval`] for rationale.
+    /// Uses [`send_once`] (no retry) because eval mutates workspace bindings —
+    /// a retry after reconnect could re-execute code the server already ran.
     pub async fn evaluate_with_options(
         &self,
         code: &str,

@@ -49,7 +49,7 @@ pub fn discover_port_and_cookie(workspace_id: Option<&str>) -> Option<(u16, Stri
     discover_port_cookie_and_id(workspace_id).map(|(port, cookie, _id)| (port, cookie))
 }
 
-/// Like [`discover_port_and_cookie`] but also returns the resolved workspace ID
+/// Discover the REPL port, cookie, and resolved workspace ID
 /// so callers can pass it to `ReplClient` for port re-discovery on reconnect.
 pub fn discover_port_cookie_and_id(workspace_id: Option<&str>) -> Option<(u16, String, String)> {
     let id = if let Some(id) = workspace_id {
