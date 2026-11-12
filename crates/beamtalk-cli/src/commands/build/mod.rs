@@ -210,7 +210,7 @@ fn execute_build_passes(
     // Pass 1 never runs `analyse_full`) carries the set into the
     // `unresolved_ffi` check via `AnalysisContext::with_options`.
     let pass2_options = beamtalk_core::CompilerOptions {
-        known_erlang_modules: beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(
+        known_erlang_modules: beamtalk_core::ffi_type_specs::collect_known_erlang_modules(
             &env.project_root,
         ),
         ..options.clone()
@@ -640,18 +640,30 @@ fn fold_direct_ffi_proofs(
 /// surface hash (BT-4336): the `unresolved_ffi` check reads them, so adding
 /// or removing a `native/*.erl` module or a hex dependency's module
 /// re-checks every file instead of replaying a stale (or missing) warning.
-/// An empty set leaves the hash untouched.
+/// The set now includes the installed OTP's modules (BT-4724), so an OTP
+/// change re-checks too, and the check-enabled flag is folded in so a build
+/// without `erl` never replays a cached warning. A disabled, empty set leaves
+/// the hash untouched.
 fn fold_known_erlang_modules(
     analysis_surface_hash: String,
-    known_erlang_modules: &std::collections::HashSet<String>,
+    known_erlang_modules: &beamtalk_core::ffi_type_specs::KnownErlangModules,
 ) -> String {
-    if known_erlang_modules.is_empty() {
+    if known_erlang_modules.modules().is_empty() && !known_erlang_modules.check_enabled() {
         return analysis_surface_hash;
     }
-    let mut modules: Vec<&str> = known_erlang_modules.iter().map(String::as_str).collect();
+    let mut modules: Vec<&str> = known_erlang_modules
+        .modules()
+        .iter()
+        .map(String::as_str)
+        .collect();
     modules.sort_unstable();
+    let enabled = u8::from(known_erlang_modules.check_enabled());
     crate::commands::util::sha256_hex(
-        format!("{analysis_surface_hash}\nerlang:{}", modules.join(",")).as_bytes(),
+        format!(
+            "{analysis_surface_hash}\nerlang:{enabled}:{}",
+            modules.join(",")
+        )
+        .as_bytes(),
     )
 }
 

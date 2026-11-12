@@ -326,7 +326,7 @@ pub(in crate::server) struct LoadedTypeCache {
     /// Roots whose type cache has been extracted and merged.
     roots: HashSet<PathBuf>,
     registry: beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry,
-    known_erlang_modules: HashSet<String>,
+    known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules,
 }
 
 /// Coarse cache for runtime-attached navigation results.

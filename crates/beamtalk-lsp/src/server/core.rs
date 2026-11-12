@@ -588,7 +588,8 @@ impl Backend {
         let Ok((registry, known_erlang_modules, extracted)) =
             tokio::task::spawn_blocking(move || {
                 let mut registry = NativeTypeRegistry::new();
-                let mut known_erlang_modules = HashSet::new();
+                let mut known_erlang_modules =
+                    beamtalk_core::ffi_type_specs::KnownErlangModules::default();
                 // Roots whose specs were extracted; only these are marked loaded.
                 let mut extracted = Vec::new();
                 for root_path in &pending_owned {
@@ -618,7 +619,7 @@ impl Backend {
                     // `set_native_types` below — modules added by a later
                     // `beamtalk build` need an LSP restart).
                     known_erlang_modules.extend(
-                        beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(&root),
+                        &beamtalk_core::ffi_type_specs::collect_known_erlang_modules(&root),
                     );
                 }
                 (registry, known_erlang_modules, extracted)
@@ -636,7 +637,15 @@ impl Backend {
             let mut cache = self.type_cache.lock().expect("type_cache lock poisoned");
             cache.roots.extend(extracted);
             cache.registry.merge(registry);
-            cache.known_erlang_modules.extend(known_erlang_modules);
+            if known_erlang_modules.check_enabled() && !cache.known_erlang_modules.check_enabled() {
+                // An earlier probe failed (e.g. `erl` was not on PATH yet);
+                // this root's succeeded, so let it re-enable the check.
+                let mut merged = known_erlang_modules.clone();
+                merged.extend_modules(cache.known_erlang_modules.modules().clone());
+                cache.known_erlang_modules = merged;
+            } else {
+                cache.known_erlang_modules.extend(&known_erlang_modules);
+            }
             (cache.registry.clone(), cache.known_erlang_modules.clone())
         };
 
@@ -649,9 +658,9 @@ impl Backend {
             let mut svc = self.service.lock().expect("service lock poisoned");
             svc.set_native_types(registry);
         }
-        if !known_erlang_modules.is_empty() {
+        if !known_erlang_modules.modules().is_empty() {
             debug!(
-                count = known_erlang_modules.len(),
+                count = known_erlang_modules.modules().len(),
                 "Loaded project-known Erlang modules for unresolved_ffi"
             );
             let mut svc = self.service.lock().expect("service lock poisoned");

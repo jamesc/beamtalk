@@ -40,7 +40,6 @@ TestCase subclass: TelemetryTest
   // === execute:measurements:metadata: ===
   testErlangHandlerReceivesExactNameAndMaps =>
     collector := TelemetryEventCollector spawn
-    @expect unresolved_ffi
     ref := Erlang telemetry_test attach_event_handlers: collector pid with: #(#(#bt4025, #erl))
     self
       assert: (Telemetry
@@ -103,7 +102,6 @@ TestCase subclass: TelemetryTest
 
   testErlangHandlerSeesSpanEvents =>
     collector := TelemetryEventCollector spawn
-    @expect unresolved_ffi
     ref := Erlang telemetry_test attach_event_handlers: collector pid with: #(#(#bt4025, #espan, #start), #(#bt4025, #espan, #stop))
     self
       assert: (Telemetry
@@ -229,7 +227,6 @@ TestCase subclass: TelemetryTest
 
   testHasHandlersSeesErlangHandlers =>
     collector := TelemetryEventCollector spawn
-    @expect unresolved_ffi
     ref := Erlang telemetry_test attach_event_handlers: collector pid with: #(#(#bt4480, #erl, #start))
     self assert: (Telemetry hasHandlers: #(#bt4480, #erl)) equals: true
     Erlang telemetry detach: ref

@@ -1305,6 +1305,9 @@ fn stdlib_compiler_options(warnings_as_errors: bool) -> beamtalk_core::CompilerO
         allow_primitives: false,
         warnings_as_errors,
         current_package: Some("stdlib".into()),
+        // BT-4724: stdlib has no project root, but installed OTP and the
+        // runtime still apply, so a typo'd `Erlang lsts` FFI module still fails.
+        known_erlang_modules: beamtalk_core::ffi_type_specs::collect_installed_erlang_modules(),
         ..Default::default()
     }
 }

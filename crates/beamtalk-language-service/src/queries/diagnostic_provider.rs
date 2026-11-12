@@ -250,7 +250,12 @@ pub fn compute_project_diagnostics_with_analysis(
     // (that's `beamtalk lint`-only), so a lint-only `@expect` category (e.g.
     // `dead_assignment`) must not be validated for staleness here — see
     // `apply_expect_directives_excluding_lint_only`'s doc.
-    apply_expect_directives_excluding_lint_only(module, &mut diagnostics);
+    beamtalk_core::compilation::diagnostics_policy::apply_expect_directives_with_ffi_check(
+        module,
+        &mut diagnostics,
+        true,
+        analysis_result.unresolved_ffi_checked,
+    );
 
     // ADR 0100 Rule 3: apply the package's `[diagnostics]`
     // table last, after `@expect` suppression and ahead of any
@@ -402,6 +407,7 @@ pub fn run_post_analysis_lint_pipeline_with_types(
     beamtalk_core::semantic_analysis::TypeMap,
 ) {
     let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, analysis_ctx);
+    let unresolved_ffi_checked = analysis_result.unresolved_ffi_checked;
     let class_hierarchy = analysis_result.class_hierarchy;
     let type_map = analysis_result.type_map;
     // Lint-pass diagnostics go ahead of the analysis ones, the order the
@@ -416,7 +422,12 @@ pub fn run_post_analysis_lint_pipeline_with_types(
             module, file_stem,
         ),
     );
-    apply_expect_directives(module, diags);
+    beamtalk_core::compilation::diagnostics_policy::apply_expect_directives_with_ffi_check(
+        module,
+        diags,
+        false,
+        unresolved_ffi_checked,
+    );
     beamtalk_core::near_miss_divider::check_near_miss_dividers(source, diags);
     *diags = beamtalk_core::compilation::diagnostics_policy::apply_diagnostics_table(
         std::mem::take(diags),
@@ -438,6 +449,7 @@ pub fn compute_diagnostics_with_native_types(
     >,
 ) -> Vec<Diagnostic> {
     let mut all_diagnostics = parse_diagnostics;
+    let unresolved_ffi_checked;
 
     if native_types.is_some() {
         let options = beamtalk_core::CompilerOptions::default();
@@ -445,13 +457,20 @@ pub fn compute_diagnostics_with_native_types(
             .with_options(&options)
             .with_native_type_registry(native_types);
         let analysis_result = beamtalk_core::semantic_analysis::analyse_full(module, ctx);
+        unresolved_ffi_checked = analysis_result.unresolved_ffi_checked;
         all_diagnostics.extend(analysis_result.diagnostics);
     } else {
         let analysis_result = beamtalk_core::semantic_analysis::analyse(module);
+        unresolved_ffi_checked = analysis_result.unresolved_ffi_checked;
         all_diagnostics.extend(analysis_result.diagnostics);
     }
 
-    apply_expect_directives(module, &mut all_diagnostics);
+    beamtalk_core::compilation::diagnostics_policy::apply_expect_directives_with_ffi_check(
+        module,
+        &mut all_diagnostics,
+        false,
+        unresolved_ffi_checked,
+    );
     all_diagnostics
 }
 
@@ -466,13 +485,19 @@ fn run_diagnostic_pipeline(
     module: &beamtalk_core::ast::Module,
     parse_diagnostics: Vec<Diagnostic>,
     analysis_diagnostics: Vec<Diagnostic>,
+    unresolved_ffi_checked: bool,
     diagnostics_overrides: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable,
 ) -> Vec<Diagnostic> {
     let mut all_diagnostics = parse_diagnostics;
     all_diagnostics.extend(analysis_diagnostics);
     // The REPL never runs `beamtalk_lint::run_lint_passes` either —
     // see `apply_expect_directives_excluding_lint_only`'s doc.
-    apply_expect_directives_excluding_lint_only(module, &mut all_diagnostics);
+    beamtalk_core::compilation::diagnostics_policy::apply_expect_directives_with_ffi_check(
+        module,
+        &mut all_diagnostics,
+        true,
+        unresolved_ffi_checked,
+    );
     beamtalk_core::compilation::diagnostics_policy::apply_diagnostics_table(
         all_diagnostics,
         diagnostics_overrides,
@@ -511,6 +536,7 @@ pub fn compute_diagnostics_with_known_vars_and_classes(
         module,
         parse_diagnostics,
         analysis_result.diagnostics,
+        analysis_result.unresolved_ffi_checked,
         diagnostics_overrides,
     )
 }
@@ -541,6 +567,7 @@ pub fn compute_diagnostics_with_known_vars_classes_and_aliases(
         module,
         parse_diagnostics,
         analysis_result.diagnostics,
+        analysis_result.unresolved_ffi_checked,
         diagnostics_overrides,
     )
 }
@@ -599,10 +626,12 @@ pub fn compute_diagnostics_and_analysis(
     // take them out so the rest of `analysis_result` can be returned for
     // codegen without cloning it.
     let analysis_diagnostics = std::mem::take(&mut analysis_result.diagnostics);
+    let unresolved_ffi_checked = analysis_result.unresolved_ffi_checked;
     let diagnostics = run_diagnostic_pipeline(
         module,
         parse_diagnostics,
         analysis_diagnostics,
+        unresolved_ffi_checked,
         diagnostics_overrides,
     );
     (diagnostics, analysis_result)

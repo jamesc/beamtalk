@@ -379,7 +379,7 @@ pub struct FileContext<'a> {
     pub stdlib_mode: bool,
     /// The package's hex-dep/native Erlang modules, for `unresolved_ffi`
     /// (BT-4022).
-    pub known_erlang_modules: HashSet<String>,
+    pub known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules,
     /// The package's `[diagnostics]` table (BT-4377); `None` for none.
     pub diagnostics_overrides: Option<&'a DiagnosticsTable>,
 }
@@ -564,8 +564,10 @@ pub fn analyse_package(
 
     // BT-4022: project-known Erlang modules for the `unresolved_ffi` check.
     let known_erlang_modules = package_root.as_deref().map_or_else(
-        HashSet::new,
-        beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules,
+        // No package: the project tier is empty but installed OTP and the
+        // runtime still apply, so loose files keep the check.
+        beamtalk_core::ffi_type_specs::collect_installed_erlang_modules,
+        beamtalk_core::ffi_type_specs::collect_known_erlang_modules,
     );
     // BT-4377: the package's `[diagnostics]` table, via the loader the
     // compiler port (REPL) and LSP use.

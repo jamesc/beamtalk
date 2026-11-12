@@ -180,8 +180,8 @@ pub struct SimpleLanguageService {
     /// Project-known Erlang modules for the `unresolved_ffi` check (BT-4022):
     /// hex-dep/native ebin modules plus own `native/*.erl`, unioned across
     /// workspace roots by the LSP server at startup (mirrors `native_types`).
-    /// Empty until set — diagnostics then keep the static-list-only behaviour.
-    known_erlang_modules: std::collections::HashSet<String>,
+    /// Default (unset) disables the check — no unresolved-module diagnostics.
+    known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules,
     /// Whether workspace preload has completed with full coverage.
     ///
     /// When `true`, diagnostics are computed with
@@ -266,7 +266,7 @@ impl SimpleLanguageService {
             files: HashMap::new(),
             project_index: ProjectIndex::new(),
             native_types: None,
-            known_erlang_modules: std::collections::HashSet::new(),
+            known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules::default(),
             project_complete: false,
             dependency_extensions_unknown: false,
             diagnostics_overrides:
@@ -285,7 +285,7 @@ impl SimpleLanguageService {
             files: HashMap::new(),
             project_index,
             native_types: None,
-            known_erlang_modules: std::collections::HashSet::new(),
+            known_erlang_modules: beamtalk_core::ffi_type_specs::KnownErlangModules::default(),
             project_complete: false,
             dependency_extensions_unknown: false,
             diagnostics_overrides:
@@ -391,14 +391,17 @@ impl SimpleLanguageService {
     /// roots (mirrors [`set_native_types`](Self::set_native_types)); like
     /// that setter, this is a whole-session simplification loaded once —
     /// modules added by a later `beamtalk build` need an LSP restart.
-    pub fn set_known_erlang_modules(&mut self, modules: std::collections::HashSet<String>) {
+    pub fn set_known_erlang_modules(
+        &mut self,
+        modules: beamtalk_core::ffi_type_specs::KnownErlangModules,
+    ) {
         self.known_erlang_modules = modules;
     }
 
     /// Returns the project-known Erlang modules for the `unresolved_ffi`
     /// check (BT-4022), if any were set.
     #[must_use]
-    pub fn known_erlang_modules(&self) -> &std::collections::HashSet<String> {
+    pub fn known_erlang_modules(&self) -> &beamtalk_core::ffi_type_specs::KnownErlangModules {
         &self.known_erlang_modules
     }
 

@@ -506,8 +506,9 @@ pub(crate) fn compile_fixture(
         knowledge_scope: beamtalk_core::semantic_analysis::KnowledgeScope::default(),
         dependency_extensions_unknown: false,
         // Bootstrap-test fixtures have no project on disk whose
-        // dependency/native modules could be collected (BT-4022).
-        known_erlang_modules: std::collections::HashSet::new(),
+        // dependency/native modules could be collected (BT-4022), but the
+        // installed OTP still applies (BT-4724).
+        known_erlang_modules: beamtalk_core::ffi_type_specs::collect_installed_erlang_modules(),
     };
 
     let compile_ctx = crate::beam_compiler::CompileContext {
