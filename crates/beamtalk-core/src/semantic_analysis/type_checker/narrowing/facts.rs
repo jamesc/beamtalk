@@ -308,8 +308,7 @@ impl TypeChecker {
     ///
     /// The condition is re-evaluated before every iteration, so the facts hold
     /// at the start of each pass; they are kept only for bindings the body
-    /// never assigns, and fields only if the body cannot write one (a
-    /// self-send, or a stored block run — see [`expr_may_write_fields`]).
+    /// never assigns. `self.<field>` facts are not applied (see below).
     pub(in crate::semantic_analysis::type_checker) fn loop_body_facts(
         &mut self,
         receiver: &Expression,
@@ -342,13 +341,11 @@ impl TypeChecker {
             facts.when_false
         };
         facts.forget_written(&expr_writes(body));
-        // The condition's own earlier statements may write too, but they run
-        // before the tested expression; the body is what runs between tests.
-        let body_may_write_fields = !matches!(body, Expression::Block(_))
-            || expr_may_write_fields(body, &self.type_map, self.protocol_registry.as_deref());
-        if body_may_write_fields {
-            facts.drop_fields();
-        }
+        // Field facts never reach a loop body: deciding whether the body can
+        // write a field needs its types (`expr_may_write_fields` reads the
+        // type map), and the body has not been inferred yet. Dropping them is
+        // the safe direction.
+        facts.drop_fields();
         (!facts.is_empty()).then_some(facts)
     }
 }

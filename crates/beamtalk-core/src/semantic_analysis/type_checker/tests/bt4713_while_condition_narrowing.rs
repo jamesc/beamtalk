@@ -89,7 +89,7 @@ fn reassigned_variable_is_not_narrowed() {
 
 #[test]
 fn reassigned_variable_not_narrowed_even_before_assignment() {
-    // Conservative: the body assigns `n`, so no fact about it is applied.
+    // Conservative: the body assigns `m`, so no fact about it is applied.
     assert_rejected(
         "    m :: Integer | Nil := n\n    [m notNil] whileTrue: [Repro need: m. m := nil]\n    0",
     );
@@ -105,4 +105,11 @@ fn unrelated_variable_still_narrowed_when_other_assigned() {
 #[test]
 fn field_fact_dropped_when_body_self_sends() {
     assert_rejected("    [self.f notNil] whileTrue: [self bump. Repro need: self.f. ^0]\n    0");
+}
+
+#[test]
+fn field_facts_are_not_applied_to_loop_bodies() {
+    // Pins the documented limitation: no `self.<field>` narrowing in a loop
+    // body, even when the body cannot write the field.
+    assert_rejected("    [self.f notNil] whileTrue: [Repro need: self.f. ^0]\n    0");
 }
