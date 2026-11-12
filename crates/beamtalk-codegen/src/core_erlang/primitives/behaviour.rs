@@ -85,38 +85,32 @@ fn intrinsic_module(func: &str) -> &'static str {
     }
 }
 
-/// Generates a `call 'beamtalk_behaviour_intrinsics':'func'(Self)` Document.
+/// The `call 'module':'func'` head of an intrinsic call, with the module
+/// chosen by [`intrinsic_module`].
+fn call_head(func: &str) -> Document<'static> {
+    docvec![
+        "call ",
+        leaf::atom(intrinsic_module(func).to_owned()),
+        ":",
+        leaf::atom(func.to_owned())
+    ]
+}
+
+/// Generates a `call '<intrinsic_module(func)>':'func'(Self)` Document.
 fn intrinsic_self(func: &str) -> Document<'static> {
-    docvec![
-        "call '",
-        intrinsic_module(func),
-        "':'",
-        leaf::var(func.to_owned()),
-        "'(Self)"
-    ]
+    docvec![call_head(func), "(Self)"]
 }
 
-/// Generates a `call 'beamtalk_behaviour_intrinsics':'func'(Self, Arg)` Document.
+/// Generates a `call '<intrinsic_module(func)>':'func'(Self, Arg)` Document.
 fn intrinsic_self_arg(func: &str, arg: &str) -> Document<'static> {
-    docvec![
-        "call '",
-        intrinsic_module(func),
-        "':'",
-        leaf::var(func.to_owned()),
-        "'(Self, ",
-        leaf::var(arg.to_owned()),
-        ")"
-    ]
+    docvec![call_head(func), "(Self, ", leaf::var(arg.to_owned()), ")"]
 }
 
-/// Generates a `call 'beamtalk_behaviour_intrinsics':'func'(Self, Arg1, Arg2)` Document.
+/// Generates a `call '<intrinsic_module(func)>':'func'(Self, Arg1, Arg2)` Document.
 fn intrinsic_self_arg2(func: &str, arg1: &str, arg2: &str) -> Document<'static> {
     docvec![
-        "call '",
-        intrinsic_module(func),
-        "':'",
-        leaf::var(func.to_owned()),
-        "'(Self, ",
+        call_head(func),
+        "(Self, ",
         leaf::var(arg1.to_owned()),
         ", ",
         leaf::var(arg2.to_owned()),
@@ -174,7 +168,8 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
             let sel = params.first()?;
             let absent_block = params.get(1)?;
             Some(docvec![
-                "call 'beamtalk_class_refactor':'classRemoveSelectorIfAbsent'(Self, ",
+                call_head("classRemoveSelectorIfAbsent"),
+                "(Self, ",
                 leaf::var(sel.clone()),
                 ", ",
                 leaf::var(absent_block.clone()),
@@ -200,7 +195,8 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
             let new_sel = params.get(1)?;
             let absent_block = params.get(2)?;
             Some(docvec![
-                "call 'beamtalk_selector_refactor':'classRenameSelectorIfAbsent'(Self, ",
+                call_head("classRenameSelectorIfAbsent"),
+                "(Self, ",
                 leaf::var(old_sel.clone()),
                 ", ",
                 leaf::var(new_sel.clone()),
@@ -220,11 +216,8 @@ pub fn generate_tower_bif(selector: &str, params: &[String]) -> Option<Document<
             let sel = params.first()?;
             let source = params.get(1)?;
             Some(docvec![
-                "call '",
-                intrinsic_module(selector),
-                "':'",
-                leaf::var(selector.to_owned()),
-                "'(Self, ",
+                call_head(selector),
+                "(Self, ",
                 leaf::var(sel.clone()),
                 ", ",
                 leaf::var(source.clone()),

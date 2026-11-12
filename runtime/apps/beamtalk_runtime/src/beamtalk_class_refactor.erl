@@ -41,7 +41,7 @@ introspection; the code moved verbatim.
   `beamtalk_workspace_meta:get_class_source/1` and
   `beamtalk_compiler:resolve_class_span/2` / `resolve_method_span/4`. The
   same indirection is used by `beamtalk_selector_refactor` and
-  `beamtalk_refactor_support`; keep this list in step when adding one.
+  `beamtalk_refactor_support`.
 
 ## Exports used by `beamtalk_selector_refactor`
 
