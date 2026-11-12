@@ -117,7 +117,11 @@ subscriber_cleanup_on_death() ->
     %% Kill the subscriber
     exit(Pid, kill),
     beamtalk_test_wait:dead(Pid),
-    %% Verify cleanup
+    %% The handler removes the row on its own monitor 'DOWN', which is
+    %% asynchronous to the subscriber's death: wait for it, then verify.
+    beamtalk_test_wait:until(fun() ->
+        ets:lookup(beamtalk_ws_log_subscribers, Pid) =:= []
+    end),
     ?assertEqual([], ets:lookup(beamtalk_ws_log_subscribers, Pid)).
 
 multiple_subscribers() ->
