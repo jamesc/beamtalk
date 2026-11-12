@@ -97,6 +97,11 @@ const CEILINGS: &[(&str, usize)] = &[
     // needs no `String` unwrap).
     ("beamtalk-codegen/src/core_erlang/binary_construction.rs", 1),
     (
+        "beamtalk-codegen/src/core_erlang/blocks/tier2_value_calls.rs",
+        3,
+    ),
+    ("beamtalk-codegen/src/core_erlang/class_method_codegen.rs", 2),
+    (
         "beamtalk-codegen/src/core_erlang/control_flow/analysis.rs",
         6,
     ),
@@ -110,7 +115,7 @@ const CEILINGS: &[(&str, usize)] = &[
     ),
     ("beamtalk-codegen/src/core_erlang/expr_shape.rs", 2),
     ("beamtalk-codegen/src/core_erlang/field_types.rs", 1),
-    ("beamtalk-codegen/src/core_erlang/gen_server/methods.rs", 9),
+    ("beamtalk-codegen/src/core_erlang/gen_server/methods.rs", 4),
     ("beamtalk-codegen/src/core_erlang/generator/accessors.rs", 2),
     ("beamtalk-codegen/src/core_erlang/intrinsics.rs", 1),
     ("beamtalk-codegen/src/core_erlang/mod.rs", 1),

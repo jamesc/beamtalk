@@ -119,6 +119,7 @@ mod block_analysis;
 mod blocks;
 mod class_builder_source;
 mod class_meta;
+mod class_method_codegen;
 mod class_registry;
 mod class_var_access;
 pub mod class_var_keys;
