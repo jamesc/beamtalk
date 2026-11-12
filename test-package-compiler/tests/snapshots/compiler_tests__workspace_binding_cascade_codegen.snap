@@ -555,6 +555,7 @@ module 'workspace_binding_cascade' ['start_link'/1, 'start_link'/2, 'init'/1, 'h
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
+      'defines_user_class_new0' => 'false',
       'threads_actor_state' => 'true'
     }~
 
@@ -598,6 +599,7 @@ module 'workspace_binding_cascade' ['start_link'/1, 'start_link'/2, 'init'/1, 'h
       'class_var_abi' => 3,
       'process_bound_class_selectors' => ['new', 'new:', 'startLink', 'startLink:', 'spawn', 'spawnWith:', 'supervise', 'spawnAs:', 'spawnWith:as:', 'runAll', 'runAll:', 'run:', 'run:method:'],
       'defines_user_class_new1' => 'false',
+      'defines_user_class_new0' => 'false',
       'threads_actor_state' => 'true'
     }~,
             'isConstructible' => 'false'
