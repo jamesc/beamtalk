@@ -2191,6 +2191,9 @@ bt4552_rename_class_pids_moves_rows_test() ->
 %%% ============================================================================
 
 bt4646_builder_class(Name) ->
+    bt4646_builder_class(Name, 'Object').
+
+bt4646_builder_class(Name, Super) ->
     beamtalk_class_registry:ensure_pg_started(),
     beamtalk_class_registry:ensure_hierarchy_table(),
     beamtalk_class_registry:ensure_module_table(),
@@ -2199,7 +2202,7 @@ bt4646_builder_class(Name) ->
     ClassFun = fun(_ClassSelf) -> class_ok end,
     {ok, Pid} = beamtalk_class_builder:register(#{
         className => Name,
-        superclassRef => 'Object',
+        superclassRef => Super,
         fieldSpecs => #{},
         methodSpecs => #{ping => InstFun},
         classMethods => #{make => ClassFun}
@@ -2395,9 +2398,27 @@ bt4794_rebuild_before_owner_read_stays_registered_test() ->
 bt4794_rebuild_after_claim_stays_registered_test() ->
     bt4794_rebuild_at(beamtalk_class_shadow_flags, clear, after_call).
 
+%% The rebuild uses another superclass: the claimed row's old subclass edge
+%% must not outlive the superseded teardown.
+bt4794_rebuild_after_claim_other_superclass_drops_old_edge_test() ->
+    bt4794_rebuild_at(beamtalk_class_shadow_flags, clear, after_call, 'Value'),
+    ?assertNot(
+        lists:member(
+            'BT4794Rebuilt_clear_after_call_Value',
+            beamtalk_class_metadata:match_subclasses('Object')
+        )
+    ).
+
 bt4794_rebuild_at(Mod, Fun, When) ->
+    bt4794_rebuild_at(Mod, Fun, When, 'Object').
+
+bt4794_rebuild_at(Mod, Fun, When, Super) ->
     Name = list_to_atom(
-        "BT4794Rebuilt_" ++ atom_to_list(Fun) ++ "_" ++ atom_to_list(When)
+        "BT4794Rebuilt_" ++ atom_to_list(Fun) ++ "_" ++ atom_to_list(When) ++
+            case Super of
+                'Object' -> "";
+                _ -> "_" ++ atom_to_list(Super)
+            end
     ),
     bt4646_with_announce_spy(Name, fun() ->
         OldPid = bt4646_builder_class(Name),
@@ -2408,7 +2429,7 @@ bt4794_rebuild_at(Mod, Fun, When) ->
         bt4646_await_down(OldPid, MRef),
         Test = self(),
         Rebuild = fun() ->
-            NewPid = bt4646_builder_class(Name),
+            NewPid = bt4646_builder_class(Name, Super),
             ok = beamtalk_class_monitor:unwatch(Name),
             Test ! {bt4794_rebuilt, NewPid}
         end,

@@ -576,22 +576,40 @@ delete_if_owner(Name, Owner) when is_pid(Owner) ->
                 fun() -> beamtalk_class_shadow_flags:set_class_vars(Name, false) end,
                 fun() -> finish_removal(Name, OldSuperclass) end
             ],
-            run_unless_superseded(Name, Steps);
+            run_unless_superseded(Name, OldSuperclass, Steps);
         false ->
             false
     end.
 
--spec run_unless_superseded(class_name(), [fun(() -> term())]) -> true | superseded.
-run_unless_superseded(_Name, []) ->
+-spec run_unless_superseded(class_name(), superclass() | undefined, [fun(() -> term())]) ->
+    true | superseded.
+run_unless_superseded(_Name, _OldSuperclass, []) ->
     true;
-run_unless_superseded(Name, [Step | Rest]) ->
+run_unless_superseded(Name, OldSuperclass, [Step | Rest]) ->
     case lookup_owner(Name) of
         {ok, _NewOwner} ->
+            drop_superseded_leftovers(Name, OldSuperclass),
             superseded;
         not_found ->
             _ = Step(),
-            run_unless_superseded(Name, Rest)
+            run_unless_superseded(Name, OldSuperclass, Rest)
     end.
+
+%% A rebuild's `insert/5` read the already-claimed row's superclass as
+%% `undefined`, so it never dropped the claimed row's `{OldSuperclass, Name}`
+%% edge: drop it here unless the rebuild kept the same superclass (then the
+%% edge is the rebuild's own). The descendants' derived flags are erased too,
+%% as `finish_removal/2` would have.
+-spec drop_superseded_leftovers(class_name(), superclass() | undefined) -> ok.
+drop_superseded_leftovers(Name, OldSuperclass) ->
+    case field(Name, #class_metadata.superclass) of
+        OldSuperclass -> ok;
+        _ when OldSuperclass =:= undefined -> ok;
+        _ -> delete_subclass_edge(OldSuperclass, Name)
+    end,
+    beamtalk_class_shadow_flags:invalidate(Name),
+    beamtalk_class_derived_cache:invalidate(),
+    ok.
 
 -spec delete_row_and_dependents(class_name()) -> ok.
 delete_row_and_dependents(Name) ->

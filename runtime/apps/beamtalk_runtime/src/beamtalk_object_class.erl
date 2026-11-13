@@ -1982,8 +1982,17 @@ remove_dead_class_registration(ClassName, Module) ->
                     %% so a rebuild between the lookup above and this read makes
                     %% its live pid the owner: only a dead owner is claimed.
                     case is_process_alive(Owner) of
-                        true -> {alive, Owner};
-                        false -> remove_claimed_dead_class(ClassName, Module, Owner)
+                        true ->
+                            %% Alive and registered: a live class. Alive but
+                            %% not registered is a process on its way out
+                            %% (`terminate/2` unregistered it and removes its
+                            %% own rows): nothing to hand back or remove.
+                            case beamtalk_class_registry:whereis_class(ClassName) of
+                                Owner -> {alive, Owner};
+                                _ -> ok
+                            end;
+                        false ->
+                            remove_claimed_dead_class(ClassName, Module, Owner)
                     end
             end
     end.
