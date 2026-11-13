@@ -65,7 +65,9 @@ child_running_test() ->
     E = beamtalk_supervisor:child_running_error('S', 'deleteChild:', a, running),
     ?assertEqual(child_running, E#beamtalk_error.kind),
     ?assertEqual(?HINT(<<"Child a is running">>), E#beamtalk_error.message),
-    ?assertEqual(?HINT(<<"Terminate the child with terminateChild: first">>), E#beamtalk_error.hint),
+    ?assertEqual(
+        ?HINT(<<"Terminate the child with terminateChild: first">>), E#beamtalk_error.hint
+    ),
     ?assertEqual(#{id => a, status => running}, E#beamtalk_error.details).
 
 ambiguous_child_test() ->
@@ -117,8 +119,12 @@ check_strategy_test() ->
 max_children_test() ->
     {error, E} = beamtalk_supervisor_capacity:max_children_error('S', 'startChild:', 3),
     ?assertEqual(max_children, E#beamtalk_error.kind),
-    ?assertEqual(?HINT(<<"DynamicSupervisor is at its maxChildren limit (3)">>), E#beamtalk_error.message),
-    ?assertEqual(?HINT(<<"Back off and retry, or free a slot with terminateChild:">>), E#beamtalk_error.hint),
+    ?assertEqual(
+        ?HINT(<<"DynamicSupervisor is at its maxChildren limit (3)">>), E#beamtalk_error.message
+    ),
+    ?assertEqual(
+        ?HINT(<<"Back off and retry, or free a slot with terminateChild:">>), E#beamtalk_error.hint
+    ),
     ?assertEqual(#{max_children => 3}, E#beamtalk_error.details).
 
 check_max_children_test() ->
@@ -134,7 +140,9 @@ unavailable_node_down_test() ->
     ),
     ?assertEqual(node_down, E#beamtalk_error.kind),
     ?assertEqual(
-        ?HINT(<<"Supervisor's node ", (atom_to_binary(node()))/binary, " is unreachable (nodedown)">>),
+        ?HINT(
+            <<"Supervisor's node ", (atom_to_binary(node()))/binary, " is unreachable (nodedown)">>
+        ),
         E#beamtalk_error.message
     ),
     ?assertEqual(
@@ -147,4 +155,6 @@ unavailable_stale_test() ->
     Self = {beamtalk_supervisor, 'S', mod, self()},
     {error, E} = beamtalk_supervisor:supervisor_unavailable_error(Self, 'count', dead),
     ?assertEqual(stale_handle, E#beamtalk_error.kind),
-    ?assertEqual(?HINT(<<"supervisor is not running; the handle is stale">>), E#beamtalk_error.hint).
+    ?assertEqual(
+        ?HINT(<<"supervisor is not running; the handle is stale">>), E#beamtalk_error.hint
+    ).

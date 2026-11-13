@@ -291,9 +291,15 @@ class_start_concrete(ClassName, _Module, Selector, _Args) when
 class_start_concrete(ClassName, _Module, Selector, Args) ->
     %% A dynamic send with the wrong argument count (`perform:withArguments:`).
     beamtalk_error:raise(
-        beamtalk_error:new_fmt(arity_mismatch, ClassName, Selector, "~ts takes a different number of arguments, got ~b", [
-                    Selector, length(Args)
-                ])
+        beamtalk_error:new_fmt(
+            arity_mismatch,
+            ClassName,
+            Selector,
+            "~ts takes a different number of arguments, got ~b",
+            [
+                Selector, length(Args)
+            ]
+        )
     ).
 
 -doc """
@@ -388,7 +394,13 @@ supervise(ClassName, Module) ->
 %% table was lost while it waited.
 -spec start_lock_error(atom(), timeout | lost) -> #beamtalk_error{}.
 start_lock_error(ClassName, timeout) ->
-    beamtalk_error:new_fmt(supervisor_start_failed, ClassName, supervise, "another supervise call is still starting ~ts; gave up after ~b ms", [ClassName, init_wait_timeout()]);
+    beamtalk_error:new_fmt(
+        supervisor_start_failed,
+        ClassName,
+        supervise,
+        "another supervise call is still starting ~ts; gave up after ~b ms",
+        [ClassName, init_wait_timeout()]
+    );
 start_lock_error(ClassName, lost) ->
     beamtalk_error:new(
         supervisor_start_failed,
@@ -477,7 +489,13 @@ named(Self, Name) when is_atom(Name) ->
     case erlang:whereis(Name) of
         undefined ->
             {error,
-                beamtalk_error:new_fmt(name_not_registered, ClassName, 'named:', "No supervisor is registered under name '~ts'", [Name])};
+                beamtalk_error:new_fmt(
+                    name_not_registered,
+                    ClassName,
+                    'named:',
+                    "No supervisor is registered under name '~ts'",
+                    [Name]
+                )};
         Pid ->
             case sup_dictionary_value(Pid, ?SUP_CLASS_KEY) of
                 {ok, {Actual, ActualModule}} ->
@@ -492,15 +510,27 @@ named(Self, Name) when is_atom(Name) ->
 named(Self, Name) ->
     {ClassName, _Module} = class_identity(Self),
     {error,
-        beamtalk_error:new_fmt(type_error, ClassName, 'named:', "named: expects a Symbol, got ~tp", [Name])}.
+        beamtalk_error:new_fmt(
+            type_error, ClassName, 'named:', "named: expects a Symbol, got ~tp", [Name]
+        )}.
 
 -spec wrong_class_error(atom(), atom(), atom()) -> {error, #beamtalk_error{}}.
 wrong_class_error(ClassName, Name, not_a_supervisor) ->
     {error,
-        beamtalk_error:new_fmt(wrong_class, ClassName, 'named:', "Name '~ts' is not registered to a Beamtalk supervisor", [Name])};
+        beamtalk_error:new_fmt(
+            wrong_class,
+            ClassName,
+            'named:',
+            "Name '~ts' is not registered to a Beamtalk supervisor",
+            [Name]
+        )};
 wrong_class_error(ClassName, Name, Actual) ->
     {error,
-        beamtalk_error:new_fmt(wrong_class, ClassName, 'named:', "Name '~ts' is registered to a ~ts, not a ~ts", [Name, Actual, ClassName])}.
+        beamtalk_error:new_fmt(
+            wrong_class, ClassName, 'named:', "Name '~ts' is registered to a ~ts, not a ~ts", [
+                Name, Actual, ClassName
+            ]
+        )}.
 
 -doc """
 FFI shim behind `class supervisionSpec` on Supervisor and DynamicSupervisor
@@ -551,12 +581,13 @@ spawn_instance(ClassName, Module, Args, Selector) ->
     {ok, tuple()} | {error, #beamtalk_error{}}.
 spawn_named_instance(ClassName, _Module, _Args, Name, Selector) when not is_atom(Name) ->
     {error,
-        beamtalk_error:new_fmt(type_error, ClassName, Selector, "~ts expects a Symbol name, got ~tp", [Selector, Name])};
+        beamtalk_error:new_fmt(
+            type_error, ClassName, Selector, "~ts expects a Symbol name, got ~tp", [Selector, Name]
+        )};
 spawn_named_instance(ClassName, Module, Args, Name, Selector) ->
     case beamtalk_actor_registry:reserved_name(Name) of
         true ->
-            {error,
-                beamtalk_error:reserved_name(ClassName, Selector, Name)};
+            {error, beamtalk_error:reserved_name(ClassName, Selector, Name)};
         false ->
             StartFun = fun() ->
                 supervisor:start_link({local, Name}, Module, {?TOP_LEVEL_TAG, Args})
@@ -565,8 +596,7 @@ spawn_named_instance(ClassName, Module, Args, Name, Selector) ->
                 {ok, SupTuple} ->
                     initialize_result(ClassName, Selector, SupTuple, fun run_initialize/1);
                 {error, {already_started, _}} ->
-                    {error,
-                        beamtalk_error:name_registered(ClassName, Selector, Name)};
+                    {error, beamtalk_error:name_registered(ClassName, Selector, Name)};
                 {error, Reason} ->
                     {error,
                         start_failed_error(supervisor_start_failed, ClassName, Selector, Reason)}
@@ -668,8 +698,7 @@ start_supervisor_child(Module, Args, Name) ->
     case beamtalk_actor_registry:reserved_name(Name) of
         true ->
             %% Same reserved-name policy as `spawnAs:` (ADR 0079).
-            {error,
-                beamtalk_error:reserved_name('Supervisor', 'withName:', Name)};
+            {error, beamtalk_error:reserved_name('Supervisor', 'withName:', Name)};
         false ->
             case exports(Module, start_link, 2) of
                 true ->
@@ -713,7 +742,11 @@ start_dynamic_supervisor_child(Module, _DefaultArgs, Args, Name) when is_atom(Na
     start_supervisor_child(Module, Args, Name);
 start_dynamic_supervisor_child(_Module, _DefaultArgs, _Args, Name) ->
     {error,
-        beamtalk_error:new_fmt(type_error, 'DynamicSupervisor', 'startChild:name:', "name must be a Symbol, got ~tp", [Name])}.
+        beamtalk_error:new_fmt(
+            type_error, 'DynamicSupervisor', 'startChild:name:', "name must be a Symbol, got ~tp", [
+                Name
+            ]
+        )}.
 
 -spec exports(module(), atom(), arity()) -> boolean().
 exports(Module, Fun, Arity) ->
@@ -992,7 +1025,14 @@ read_restart_intensity(Self, ClassName) ->
 check_integer(_ClassName, _Selector, Value, Min) when is_integer(Value), Value >= Min ->
     {ok, Value};
 check_integer(ClassName, Selector, Value, Min) ->
-    {error, beamtalk_error:bad_value(ClassName, Selector, "~ts must be an Integer >= ~b, got ~tp", [Selector, Min, Value], Value)}.
+    {error,
+        beamtalk_error:bad_value(
+            ClassName,
+            Selector,
+            "~ts must be an Integer >= ~b, got ~tp",
+            [Selector, Min, Value],
+            Value
+        )}.
 
 %% Check a static supervisor's `strategy` and translate it to OTP's atom.
 -spec check_strategy(atom(), term()) ->
@@ -1002,7 +1042,14 @@ check_strategy(ClassName, Value) ->
         Otp when Otp =:= one_for_one; Otp =:= one_for_all; Otp =:= rest_for_one ->
             {ok, Otp};
         _ ->
-            {error, beamtalk_error:bad_value(ClassName, strategy, "strategy must be #oneForOne, #oneForAll or #restForOne, got ~tp", [Value], Value)}
+            {error,
+                beamtalk_error:bad_value(
+                    ClassName,
+                    strategy,
+                    "strategy must be #oneForOne, #oneForAll or #restForOne, got ~tp",
+                    [Value],
+                    Value
+                )}
     end.
 
 %% Shared prologue of `static_init/3` / `dynamic_init/3`: record the start
@@ -1119,7 +1166,15 @@ child_class_entry(ClassName, ChildClass) ->
         true ->
             {beamtalk_object_class:class_name_safe(element(4, ChildClass)), element(3, ChildClass)};
         false ->
-            exit(beamtalk_error:bad_value(ClassName, childClass, "childClass must return a class, got ~tp", [ChildClass], ChildClass))
+            exit(
+                beamtalk_error:bad_value(
+                    ClassName,
+                    childClass,
+                    "childClass must return a class, got ~tp",
+                    [ChildClass],
+                    ChildClass
+                )
+            )
     end.
 
 -doc """
@@ -1572,8 +1627,7 @@ handle_terminate_child_result(SupClass, LogCtx, {error, not_found}) ->
     ),
     {ok, nil};
 handle_terminate_child_result(SupClass, _LogCtx, {error, Reason}) ->
-    {error,
-        beamtalk_error:new_fmt(terminate_failed, SupClass, 'terminateChild:', "~tp", [Reason])}.
+    {error, beamtalk_error:new_fmt(terminate_failed, SupClass, 'terminateChild:', "~tp", [Reason])}.
 
 %%% ============================================================================
 %%% Child introspection by id (BT-3966)
@@ -1917,8 +1971,7 @@ startChild(Self, Args, Name) ->
                         %% through `supervisor:start_link({local, Name}, ...)`,
                         %% which reports a taken name this way.
                         announce_child_crashed(SupClass, ChildClass, name_registered),
-                        {error,
-                            beamtalk_error:name_registered(SupClass, 'startChild:name:', Name)};
+                        {error, beamtalk_error:name_registered(SupClass, 'startChild:name:', Name)};
                     {error, Reason} ->
                         ?LOG_ERROR("DynamicSupervisor named child start failed", #{
                             supervisor => SupClass,
@@ -2059,7 +2112,14 @@ check_stop_timeout(_ClassName, infinity) ->
 check_stop_timeout(_ClassName, Ms) when is_integer(Ms), Ms >= 0 ->
     {ok, Ms};
 check_stop_timeout(ClassName, Other) ->
-    {error, beamtalk_error:bad_value(ClassName, 'stopWithin:', "stopWithin: ms must be a non-negative Integer or #infinity, got ~tp", [Other], Other)}.
+    {error,
+        beamtalk_error:bad_value(
+            ClassName,
+            'stopWithin:',
+            "stopWithin: ms must be a non-negative Integer or #infinity, got ~tp",
+            [Other],
+            Other
+        )}.
 
 -doc """
 The `{error, #beamtalk_error{}}` for a `stopWithin:` wait the shutdown
@@ -2068,7 +2128,13 @@ overran (BT-4047): `kind = timeout`, naming the wait in the hint and
 """.
 -spec stop_timeout_error(atom(), non_neg_integer() | infinity) -> #beamtalk_error{}.
 stop_timeout_error(ClassName, Ms) ->
-    Error0 = beamtalk_error:new_fmt(timeout, ClassName, 'stopWithin:', "Supervisor did not stop within ~tp ms; it keeps shutting down in the background", [Ms]),
+    Error0 = beamtalk_error:new_fmt(
+        timeout,
+        ClassName,
+        'stopWithin:',
+        "Supervisor did not stop within ~tp ms; it keeps shutting down in the background",
+        [Ms]
+    ),
     beamtalk_error:with_details(Error0, #{timeout_ms => Ms}).
 
 -doc """
@@ -2688,7 +2754,13 @@ start_child_via_class_method(ClassName, Module, Selector, Args) ->
             {beamtalk_supervisor, _Class, _Mod, Pid} when is_pid(Pid) ->
                 {ok, Pid};
             Other ->
-                Error = beamtalk_error:new_fmt(runtime_error, ClassName, Selector, "class method must return an Actor object, got: ~tp", [Other]),
+                Error = beamtalk_error:new_fmt(
+                    runtime_error,
+                    ClassName,
+                    Selector,
+                    "class method must return an Actor object, got: ~tp",
+                    [Other]
+                ),
                 {error, beamtalk_exception_handler:ensure_wrapped(Error)}
         end
     after
@@ -2769,7 +2841,13 @@ actor_child_start_error(_ChildModule, #beamtalk_error{} = Error) ->
     Error;
 actor_child_start_error(ChildModule, timeout) ->
     {initialize_failed,
-        beamtalk_error:new_fmt(instantiation_error, child_class_name(ChildModule), initialize, ?ACTOR_CHILD_INIT_TIMEOUT_HINT_FMT, [?BT_INITIALIZE_TIMEOUT])};
+        beamtalk_error:new_fmt(
+            instantiation_error,
+            child_class_name(ChildModule),
+            initialize,
+            ?ACTOR_CHILD_INIT_TIMEOUT_HINT_FMT,
+            [?BT_INITIALIZE_TIMEOUT]
+        )};
 actor_child_start_error(_ChildModule, Reason) ->
     %% The stop reason of a raising `initialize` nests the error in an
     %% exception object and `{Error, Stacktrace}` / `{error, _}` tuples.
@@ -3057,7 +3135,9 @@ supervisor_unavailable_error(Self, Selector, {unreachable, Why}) ->
         Selector,
         <<"The supervisor may still be running; retry when its node is reachable">>
     ),
-    Error1 = beamtalk_error:with_message_fmt(Error0, "Supervisor's node ~ts is unreachable (~ts)", [Node, Why]),
+    Error1 = beamtalk_error:with_message_fmt(
+        Error0, "Supervisor's node ~ts is unreachable (~ts)", [Node, Why]
+    ),
     {error, beamtalk_error:with_details(Error1, #{node => Node, reason => Why})}.
 
 -doc """

@@ -777,9 +777,11 @@ bad_value(Class, Selector, Fmt, Args, Value) ->
 -doc "A `reserved_name` error: `Name` may not be used to register a process.".
 -spec reserved_name(atom(), atom(), term()) -> #beamtalk_error{}.
 reserved_name(Class, Selector, Name) ->
-    new_fmt(reserved_name, Class, Selector, "Cannot start a supervisor under reserved name '~ts'", [
-        Name
-    ]).
+    new_fmt(
+        reserved_name, Class, Selector, "Cannot start a supervisor under reserved name '~ts'", [
+            Name
+        ]
+    ).
 
 -doc "A `name_registered` error: `Name` is already taken.".
 -spec name_registered(atom(), atom(), term()) -> #beamtalk_error{}.

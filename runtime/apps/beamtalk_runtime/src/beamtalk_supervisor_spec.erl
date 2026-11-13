@@ -234,10 +234,16 @@ spec_to_otp(BtSpec, Mode) ->
                         %% Unknown start function — raise structured error rather than crashing.
                         %% Tag as 'SupervisionSpec'/'childSpec' to reflect where the spec
                         %% originated (SupervisionSpec>>childSpec), not the supervisor itself.
-                        Error = beamtalk_error:new_fmt(runtime_error, 'SupervisionSpec', childSpec, "unsupported child start function: ~tp "
-                                    "(expected spawn, spawnWith:, spawnAs:, "
-                                    "spawnWith:as:, spawnAs:scope:, "
-                                    "spawnWith:as:scope:, or classMethod)", [Other]),
+                        Error = beamtalk_error:new_fmt(
+                            runtime_error,
+                            'SupervisionSpec',
+                            childSpec,
+                            "unsupported child start function: ~tp "
+                            "(expected spawn, spawnWith:, spawnAs:, "
+                            "spawnWith:as:, spawnAs:scope:, "
+                            "spawnWith:as:scope:, or classMethod)",
+                            [Other]
+                        ),
                         beamtalk_exception_handler:reraise(Error)
                 end
         end,
@@ -340,7 +346,14 @@ check_shutdown(_Class, _Selector, brutalKill) ->
 check_shutdown(_Class, _Selector, Ms) when is_integer(Ms), Ms >= 0, Ms =< ?MAX_SHUTDOWN_MS ->
     {ok, Ms};
 check_shutdown(Class, Selector, Other) ->
-    {error, beamtalk_error:bad_value(Class, Selector, "~ts must be an Integer from 0 to ~b (ms), #infinity or #brutalKill, got ~tp", [Selector, ?MAX_SHUTDOWN_MS, Other], Other)}.
+    {error,
+        beamtalk_error:bad_value(
+            Class,
+            Selector,
+            "~ts must be an Integer from 0 to ~b (ms), #infinity or #brutalKill, got ~tp",
+            [Selector, ?MAX_SHUTDOWN_MS, Other],
+            Other
+        )}.
 
 -doc """
 Check a DynamicSupervisor's `childShutdown` (BT-3965): `nil` (use the
