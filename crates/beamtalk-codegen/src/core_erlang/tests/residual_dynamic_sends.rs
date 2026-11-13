@@ -176,7 +176,6 @@ fn is_kind_of_binary_literal_admits_strings() {
 fn is_kind_of_stays_dynamic_without_a_sealed_builtin_literal() {
     for (arg, why) in [
         ("Number", "abstract built-in with no exact test"),
-        ("Probe", "user class"),
         ("k", "not a class literal"),
     ] {
         let src = format!(
@@ -188,6 +187,47 @@ fn is_kind_of_stays_dynamic_without_a_sealed_builtin_literal() {
             "isKindOf: {arg} ({why}) must stay dynamic. Got:\n{code}"
         );
     }
+}
+
+#[test]
+fn is_kind_of_user_class_literal_is_name_only() {
+    let code = codegen(concat!(
+        "Object subclass: Probe\n",
+        "  check: v :: Object -> Boolean => v isKindOf: Probe\n",
+    ));
+    assert!(
+        code.contains("call 'beamtalk_behaviour_intrinsics':'isKindOfNamed'("),
+        "user class literal should use isKindOfNamed. Got:\n{code}"
+    );
+    assert!(code.contains("'Probe')"), "Got:\n{code}");
+    assert!(
+        !code.contains("'isKindOf:', ["),
+        "no dynamic isKindOf: send on the fast path. Got:\n{code}"
+    );
+    assert!(!code.contains("'isKindOfBuiltin'("), "Got:\n{code}");
+    super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn is_kind_of_user_class_literal_stays_a_send_in_the_repl() {
+    // A REPL name resolves through the session map before the class registry
+    // (ADR 0129 §7), so the literal's spelling does not name the class.
+    use crate::core_erlang::{CodeGenContext, CoreErlangGenerator};
+    let (module, _) = super::parse_normalised("dog isKindOf: IkAnimal");
+    let stmt = module.expressions[0].expression.clone();
+    let mut generator = CoreErlangGenerator::new("bt4757_repl");
+    generator.context = CodeGenContext::Repl;
+    generator.set_is_repl_mode(true);
+    generator.push_scope();
+    generator.bind_var("__bindings__", "Bindings");
+    generator.bind_var("dog", "Dog");
+    let code = generator
+        .expression_doc_with_repl_mutation_tracking(&stmt)
+        .expect("codegen")
+        .0
+        .to_pretty_string();
+    assert!(!code.contains("'isKindOfNamed'("), "Got:\n{code}");
+    assert!(code.contains("'isKindOf:'"), "Got:\n{code}");
 }
 
 #[test]

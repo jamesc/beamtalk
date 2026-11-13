@@ -15,6 +15,30 @@ use super::{
     leaf, not_nil_apply, primitives, validate_if_not_nil_block,
 };
 
+/// The `beamtalk_behaviour_intrinsics` functions the `isKindOf:` lowerings
+/// call. A typed set, so the runtime export contract
+/// (`runtime_export_contract_tests`) checks every name codegen can emit.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::core_erlang) enum KindOfFn {
+    /// `isKindOfBuiltin/3`: a sealed built-in literal and its type test.
+    Builtin,
+    /// `isKindOfNamed/3`: a user class literal, answered by name (BT-4757).
+    Named,
+}
+
+impl KindOfFn {
+    pub(in crate::core_erlang) const fn name(self) -> &'static str {
+        match self {
+            Self::Builtin => "isKindOfBuiltin",
+            Self::Named => "isKindOfNamed",
+        }
+    }
+
+    /// Every function above, for the export contract.
+    #[cfg(test)]
+    pub(in crate::core_erlang) const ALL: &[Self] = &[Self::Builtin, Self::Named];
+}
+
 impl CoreErlangGenerator {
     /// Tries to generate code for `ProtoObject` methods.
     ///
@@ -258,19 +282,56 @@ impl CoreErlangGenerator {
             return Ok(None);
         }
         let Some(test) = self.builtin_kind_test(class_arg) else {
+            // BT-4757: a user class literal takes the name-only lowering. The
+            // built-in lowering above stays first, so a later built-in
+            // generalisation (BT-4764) slots in beside it with the same
+            // override guard in the runtime.
+            //
+            // Not in the REPL: a capitalised name there resolves through the
+            // session map (`Workspace bind:as:`, ADR 0129 §7) before the class
+            // registry, so the evaluated class need not be the one the
+            // spelling names.
+            if self.context != CodeGenContext::Repl {
+                if let Some(class_name) = Self::user_class_literal_name(class_arg) {
+                    return self.emit_kind_of_call_with(
+                        receiver,
+                        class_arg,
+                        KindOfFn::Named,
+                        |_, _| leaf::atom(class_name),
+                    );
+                }
+            }
             return Ok(None);
         };
+        // The test is applied to the receiver variable, so it is rendered
+        // inside the shared emitter once that variable exists.
+        self.emit_kind_of_call_with(receiver, class_arg, KindOfFn::Builtin, |this, recv_var| {
+            this.render_type_test(
+                test,
+                recv_var,
+                Document::Str("'true'"),
+                &Document::Str("'false'"),
+            )
+        })
+    }
+
+    /// `let R = <receiver> in let K = <class_arg> in call
+    /// 'beamtalk_behaviour_intrinsics':<fn_name>(R, K, <extra>)`: the shape
+    /// shared by every `isKindOf:` lowering that keeps the class argument for
+    /// the runtime's fallback send.
+    fn emit_kind_of_call_with(
+        &mut self,
+        receiver: &Expression,
+        class_arg: &Expression,
+        fn_name: KindOfFn,
+        extra: impl FnOnce(&mut Self, &str) -> Document<'static>,
+    ) -> Result<Option<Document<'static>>> {
         let mut seq = self.sequence_call(&[receiver, class_arg], "KindOf")?;
         let recv_doc = seq.next();
         let class_doc = seq.next();
         let recv_var = self.fresh_temp_var("KindOfRecv");
         let class_var = self.fresh_temp_var("KindOfClass");
-        let test_doc = self.render_type_test(
-            test,
-            &recv_var,
-            Document::Str("'true'"),
-            &Document::Str("'false'"),
-        );
+        let extra_doc = extra(self, &recv_var);
         let call_doc = docvec![
             "let ",
             leaf::var(recv_var.clone()),
@@ -280,15 +341,32 @@ impl CoreErlangGenerator {
             leaf::var(class_var.clone()),
             " = ",
             class_doc,
-            " in call 'beamtalk_behaviour_intrinsics':'isKindOfBuiltin'(",
+            " in call 'beamtalk_behaviour_intrinsics':",
+            leaf::atom(fn_name.name().to_string()),
+            "(",
             leaf::var(recv_var),
             ", ",
             leaf::var(class_var),
             ", ",
-            test_doc,
+            extra_doc,
             ")",
         ];
         Ok(Some(seq.close(self, call_doc, "KindOfRes")))
+    }
+
+    /// BT-4757: the class name when `class_arg` is an unqualified literal
+    /// naming a user class (not a stdlib built-in).
+    fn user_class_literal_name(class_arg: &Expression) -> Option<String> {
+        let Expression::ClassReference {
+            name,
+            package: None,
+            ..
+        } = class_arg
+        else {
+            return None;
+        };
+        let class_name = name.name.as_str();
+        (!ClassHierarchy::is_builtin_class(class_name)).then(|| class_name.to_string())
     }
 
     /// BT-4473: the routing-fixture type test of `class_arg` when it is an

@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4757: user-class `isKindOf:` in the REPL keeps the plain send (the
+// name-only lowering is compiled-module only: a REPL name resolves through the
+// session map before the class registry, ADR 0129 §7). Answers for subclasses
+// and unrelated classes are unchanged.
+
+Value subclass: IkAnimal
+  kind => "animal"
+// => _
+
+IkAnimal subclass: IkDog
+  kind => "dog"
+// => _
+
+Value subclass: IkRock
+  kind => "rock"
+// => _
+
+dog := IkDog new
+// => _
+
+dog isKindOf: IkAnimal
+// => true
+
+dog isKindOf: IkRock
+// => false
