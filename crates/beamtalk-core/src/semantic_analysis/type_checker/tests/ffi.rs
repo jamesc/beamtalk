@@ -626,8 +626,7 @@ fn test_ffi_erlang_module_type_in_type_map() {
     // Erlang lists → should infer ErlangModule<lists> in type map
     let module = make_module(vec![erlang_module_recv("lists")]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // erlang_module_recv uses span (10,20)
     let erlang_type = checker.type_map().get(Span::new(10, 20));
@@ -801,8 +800,7 @@ fn test_erlang_class_resolves_as_class_protocol_not_ffi() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // The result should NOT be ErlangModule<class>
     let send_type = checker.type_map().get(span());
@@ -835,8 +833,7 @@ fn test_erlang_new_resolves_as_class_protocol_not_ffi() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let send_type = checker.type_map().get(span());
     if let Some(InferredType::Known { class_name, .. }) = send_type {

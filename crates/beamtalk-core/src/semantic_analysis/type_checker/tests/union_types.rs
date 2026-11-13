@@ -865,8 +865,7 @@ fn false_or_param_resolves_to_union() {
     };
 
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // No DNU for isNil — both Integer and False understand it (via Object)
     let dnu_hints: Vec<_> = checker

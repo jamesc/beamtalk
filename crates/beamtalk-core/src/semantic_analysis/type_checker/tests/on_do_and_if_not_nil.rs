@@ -25,8 +25,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let dynamic_warnings: Vec<_> = checker
         .diagnostics()
@@ -72,8 +71,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let dynamic_warnings: Vec<_> = checker
         .diagnostics()
@@ -119,8 +117,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // With a variable (not class reference), we expect Dynamic — which is
     // correct because we can't statically determine the exception class.
@@ -168,8 +165,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
@@ -226,8 +222,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
@@ -278,8 +273,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
@@ -330,8 +324,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
@@ -381,8 +374,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let errors: Vec<_> = checker
         .diagnostics()
@@ -418,8 +410,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
@@ -466,8 +457,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "zero-arg on:do: handler should type-check cleanly in a typed class; got: {:?}",

@@ -299,8 +299,7 @@ fn singleton_return_type_mismatch_warns() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -333,8 +332,7 @@ fn singleton_return_type_match_no_warning() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
         .iter()

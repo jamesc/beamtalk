@@ -243,8 +243,7 @@ fn matrix_binary_builtin_receiver_known_incompatible_no_duplicate() {
         vec![int_lit(42)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert_incompatible(
         checker.diagnostics(),
         "binary/builtin-receiver-known-incompatible-no-duplicate",

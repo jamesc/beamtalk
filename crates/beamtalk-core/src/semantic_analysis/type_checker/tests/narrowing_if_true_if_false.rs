@@ -223,8 +223,7 @@ fn bt_2020_result_is_ok_if_true_if_false_preserves_my_val() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let dnu: Vec<_> = checker
         .diagnostics()
@@ -284,8 +283,7 @@ fn bt_2020_narrowed_if_true_is_kind_of_preserves_inner_sends() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // `v size` inside ifTrue: should NOT produce DNU — v is narrowed to List.
     let dnu_size: Vec<_> = checker
@@ -369,8 +367,7 @@ fn bt_2039_if_true_if_false_known_branch_suppresses_ffi_warning() {
     );
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // The inner `(Erlang foo) bar` call still produces its own "Dynamic in
     // typed class" warning (that's a separate, pre-existing warning at the
@@ -617,8 +614,7 @@ typed Object subclass: TypeTest5
     let module = parse_source(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifTrue:")
         .expect("no ifTrue: send found in type_map");
@@ -661,8 +657,7 @@ typed Object subclass: Repro
     let module = parse_source(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifTrue:")
         .expect("no ifTrue: send found in type_map");
@@ -698,8 +693,7 @@ typed Object subclass: Repro
     let module = parse_source(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     assert!(
         find_union_in_type_map(checker.type_map(), &["Boolean", "Integer"]).is_some(),

@@ -28,8 +28,7 @@ fn test_typed_class_warns_on_missing_param_annotation() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -64,8 +63,7 @@ fn test_typed_class_warns_on_missing_return_type() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -99,8 +97,7 @@ fn test_typed_class_no_warning_when_fully_annotated() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let typed_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -209,8 +206,7 @@ fn test_typed_no_default_state_no_warning() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let uninitialized: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -240,8 +236,7 @@ fn test_non_typed_class_no_warnings() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let typed_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -281,8 +276,7 @@ fn test_typed_class_skips_primitive_methods() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let typed_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -303,8 +297,7 @@ fn test_as_type_assertion_infers_correct_type() {
         vec![class_ref("Integer")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     // The send itself shouldn't warn (asType: is special)
     assert!(
         checker.diagnostics().is_empty(),

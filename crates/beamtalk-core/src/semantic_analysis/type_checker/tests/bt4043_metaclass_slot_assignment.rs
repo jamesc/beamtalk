@@ -21,8 +21,7 @@ use crate::test_helpers::test_support::parse_ok;
 fn check_source(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
     let module = parse_ok(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check(&module, &hierarchy);
     checker.take_diagnostics()
 }
 

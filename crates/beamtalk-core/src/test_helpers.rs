@@ -378,6 +378,23 @@ pub mod test_support {
         })
     }
 
+    /// A strategy that picks one of `fragments` and swaps its bracket kinds
+    /// (`[` -> `(`, `]` -> `}`, `(` -> `[`) to exercise error recovery.
+    pub fn mismatched_brackets_from(
+        fragments: &'static [&'static str],
+    ) -> impl Strategy<Value = String> + Clone {
+        fragment_from(fragments).prop_map(|s| {
+            s.chars()
+                .map(|ch| match ch {
+                    '[' => '(',
+                    ']' => '}',
+                    '(' => '[',
+                    _ => ch,
+                })
+                .collect()
+        })
+    }
+
     /// Near-valid Beamtalk source built from `fragments`: a fragment, a
     /// fragment truncated at a random point, or two fragments concatenated
     /// on separate lines.

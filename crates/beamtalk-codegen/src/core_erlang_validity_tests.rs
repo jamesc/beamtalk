@@ -58,10 +58,6 @@ const FRAGMENTS: &[&str] = &[
     "ParentThing subclass: ChildThing\n  state: extra = 0\n  bump => extra := extra + 1",
 ];
 
-fn near_valid_beamtalk() -> impl Strategy<Value = String> {
-    near_valid_from(FRAGMENTS)
-}
-
 // `has_balanced_delimiters`/`FORMAT_ARTIFACT_PATTERNS` live in
 // `beamtalk_core::test_helpers::test_support` so the `compile_pipeline`
 // fuzz target can share the same structural-validity checks instead of
@@ -86,7 +82,7 @@ proptest! {
     /// When `generate_module` returns `Ok`, the output must start with `module`,
     /// end with `end`, and have balanced delimiters.
     #[test]
-    fn successful_codegen_produces_parseable_core_erlang(input in near_valid_beamtalk()) {
+    fn successful_codegen_produces_parseable_core_erlang(input in near_valid_from(FRAGMENTS)) {
         let module = parse_source(&input);
         let options = CodegenOptions::new("prop_validity_test");
         if let Ok(output) = generate_module(&module, options) {
@@ -116,7 +112,7 @@ proptest! {
 
     /// Property 2: Module name in output matches `CodegenOptions`.
     #[test]
-    fn successful_codegen_module_name_matches(input in near_valid_beamtalk()) {
+    fn successful_codegen_module_name_matches(input in near_valid_from(FRAGMENTS)) {
         let module = parse_source(&input);
         let options = CodegenOptions::new("prop_name_test");
         if let Ok(output) = generate_module(&module, options) {
@@ -134,7 +130,7 @@ proptest! {
     /// Guards against `format!()` or `Debug`
     /// implementations leak Rust type names into Core Erlang output.
     #[test]
-    fn successful_codegen_no_format_artifacts(input in near_valid_beamtalk()) {
+    fn successful_codegen_no_format_artifacts(input in near_valid_from(FRAGMENTS)) {
         let module = parse_source(&input);
         let options = CodegenOptions::new("prop_artifact_test");
         if let Ok(output) = generate_module(&module, options) {
@@ -154,7 +150,7 @@ proptest! {
 // ============================================================================
 // Grammar-driven program generator properties
 //
-// `near_valid_beamtalk()` above builds inputs from a small hand-curated
+// `near_valid_from(FRAGMENTS)` above builds inputs from a small hand-curated
 // FRAGMENTS array plus truncation/concatenation -- useful for "never
 // panics" robustness, but shallow: it can't reach nested blocks with
 // captures, `^` inside nested closures, or multi-statement bodies

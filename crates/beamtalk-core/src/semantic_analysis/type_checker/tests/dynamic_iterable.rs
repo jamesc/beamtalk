@@ -44,8 +44,7 @@ typed Value subclass: Filter
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let dynamic_warnings: Vec<_> = checker
         .diagnostics()
@@ -84,8 +83,7 @@ typed Value subclass: Filter
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let dynamic_warnings: Vec<_> = checker
         .diagnostics()
@@ -124,8 +122,7 @@ typed Value subclass: Filter
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let dynamic_warnings: Vec<_> = checker
         .diagnostics()

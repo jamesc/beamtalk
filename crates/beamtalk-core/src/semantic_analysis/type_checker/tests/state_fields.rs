@@ -26,8 +26,7 @@ fn test_empty_body_with_return_type_no_crash() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     // Dynamic body type — no return type warning (can't infer from empty body)
     let return_warnings: Vec<_> = checker
         .diagnostics()
@@ -50,8 +49,7 @@ fn test_integer_plus_string_exactly_one_warning() {
         vec![str_lit("hello")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert_eq!(
         checker.diagnostics().len(),
         1,
@@ -73,8 +71,7 @@ fn test_field_assign_typed_mismatch_warns() {
     let class = counter_class_with_typed_state(vec![method], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -104,8 +101,7 @@ fn test_field_assign_typed_match_no_warn() {
     let class = counter_class_with_typed_state(vec![method], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "No warnings expected, got: {:?}",
@@ -132,8 +128,7 @@ fn test_return_type_subtype_compatible() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -160,8 +155,7 @@ fn test_field_assign_untyped_no_warn() {
     let class = counter_class_with_typed_state(vec![method], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "Untyped fields should not produce warnings, got: {:?}",
@@ -196,8 +190,7 @@ fn test_early_return_uses_return_type_not_trailing() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -221,8 +214,7 @@ fn test_field_assign_subtype_no_warn() {
     let class = counter_class_with_typed_state(vec![method], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let type_mismatches: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -246,8 +238,7 @@ fn test_state_default_value_mismatch_warns() {
     let class = counter_class_with_typed_state(vec![], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -274,8 +265,7 @@ fn test_state_default_value_match_no_warn() {
     let class = counter_class_with_typed_state(vec![], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "Default value matching declared type should not warn, got: {:?}",
@@ -312,8 +302,7 @@ fn test_state_default_union_incompatible_member_warns() {
     let class = counter_class_with_typed_state(vec![helper_method], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -354,8 +343,7 @@ fn test_state_default_union_all_compatible_no_warn() {
     let class = counter_class_with_typed_state(vec![helper_method], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "Union default with all-compatible members should not warn, got: {:?}",
@@ -378,8 +366,7 @@ fn test_state_default_dynamic_no_warn() {
     let class = counter_class_with_typed_state(vec![], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let type_mismatches: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -403,8 +390,7 @@ fn test_dynamic_expression_no_warn() {
     let class = counter_class_with_typed_state(vec![method], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let type_mismatches: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -435,8 +421,7 @@ fn test_union_type_annotation_no_false_positive() {
     let class = counter_class_with_typed_state(vec![method], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "Union type annotations should not produce false positives, got: {:?}",
@@ -466,8 +451,7 @@ fn test_typed_state_no_default_no_warn() {
     let class = counter_class_with_typed_state(vec![], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -499,8 +483,7 @@ fn test_all_factory_fields_no_warn() {
     let class = counter_class_with_typed_state(vec![], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -529,8 +512,7 @@ fn test_nilable_typed_state_no_warn() {
     let class = counter_class_with_typed_state(vec![], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let uninitialized: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -554,8 +536,7 @@ fn test_typed_state_with_default_no_warn() {
     let class = counter_class_with_typed_state(vec![], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let uninitialized: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -574,8 +555,7 @@ fn test_untyped_state_no_default_no_warn() {
     let class = counter_class_with_typed_state(vec![], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let uninitialized: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -606,8 +586,7 @@ fn test_typed_class_warns_on_missing_state_annotation() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -646,8 +625,7 @@ fn test_typed_class_no_warning_when_state_annotated() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -686,8 +664,7 @@ fn test_inherited_typed_class_warns_on_missing_state_annotation() {
     );
     let module = make_module_with_classes(vec![], vec![parent, child]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -724,8 +701,7 @@ fn test_expect_type_suppresses_typed_state_warning() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // The type checker should emit the warning...
     let raw_warnings: Vec<_> = checker
@@ -781,8 +757,7 @@ fn test_untyped_class_no_state_annotation_warning() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -807,8 +782,7 @@ fn test_late_field_nil_assignment_names_clear_field_in_hint() {
     let src = "typed Actor subclass: CodexClient\n  late state: proc :: Integer\n\n  stop -> Nil => self.proc := nil\n";
     let module = parse_source(src);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let mismatch = checker
         .diagnostics()
         .iter()
@@ -840,8 +814,7 @@ fn test_eager_field_nil_assignment_hint_unchanged() {
     let src = "typed Actor subclass: Counter\n  state: count :: Integer = 0\n\n  reset -> Nil => self.count := nil\n";
     let module = parse_source(src);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let mismatch = checker
         .diagnostics()
         .iter()

@@ -33,8 +33,7 @@ fn test_self_return_type_no_warning_when_body_returns_self() {
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -56,8 +55,7 @@ fn test_self_return_type_warns_on_mismatch() {
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -89,8 +87,7 @@ fn test_self_in_param_position_emits_error() {
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let self_errors: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -119,8 +116,7 @@ result first
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
     let hierarchy = crate::semantic_analysis::ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     // `result first` should be valid — `first` is List-specific, proving Self resolved to List
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
@@ -147,8 +143,7 @@ result first
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
     let hierarchy = crate::semantic_analysis::ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     // `result first` should be valid — proves Self resolved to List, not Collection
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
@@ -193,8 +188,7 @@ result onlyOnC
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     // result.onlyOnC should be valid — proves Self resolved to C (not A or B)
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
@@ -235,8 +229,7 @@ Value subclass: User
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // Verify `-> Self class` parses as SelfClass variant
     let counter = &module.classes[0];
@@ -285,8 +278,7 @@ typed Value subclass: Spec
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // Verify the field annotation parses as Union(ClassOf(Actor), UndefinedObject).
     let spec = module
@@ -368,8 +360,7 @@ Value subclass: Driver
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // No DNU warnings for `onlyOnSub` — that method is on `Sub`, not `Base`.
     // If Self substitution fails inside Result(Self, Error), the inner type
@@ -470,8 +461,7 @@ Value subclass: Driver
 
     // Sanity: a parallel module-level check should report no warnings
     // about the generic return type itself.
-    let mut module_checker = TypeChecker::new();
-    module_checker.check_module(&module, &hierarchy);
+    let module_checker = check(&module, &hierarchy);
     let relevant: Vec<_> = module_checker
         .diagnostics()
         .iter()
@@ -800,8 +790,7 @@ fn take_method_return_types_leaves_empty_map() {
     );
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check(&module, &hierarchy);
     let first = checker.take_method_return_types();
     assert!(
         !first.is_empty(),

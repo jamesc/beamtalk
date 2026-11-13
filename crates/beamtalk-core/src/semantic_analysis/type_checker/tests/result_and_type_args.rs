@@ -62,8 +62,7 @@ fn test_result_isok_narrowing_true_branch() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let warnings: Vec<_> = checker
         .diagnostics()
@@ -105,8 +104,7 @@ fn test_result_isok_narrowing_false_branch() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let warnings: Vec<_> = checker
         .diagnostics()
@@ -152,8 +150,7 @@ fn test_result_isok_narrowing_both_branches() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let warnings: Vec<_> = checker
         .diagnostics()
@@ -194,8 +191,7 @@ fn test_result_iserror_narrowing_true_branch() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let warnings: Vec<_> = checker
         .diagnostics()
@@ -238,8 +234,7 @@ fn test_result_narrowing_non_result_no_narrowing() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let warnings: Vec<_> = checker
         .diagnostics()
@@ -289,8 +284,7 @@ fn test_result_narrowing_does_not_leak() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let warnings: Vec<_> = checker
         .diagnostics()

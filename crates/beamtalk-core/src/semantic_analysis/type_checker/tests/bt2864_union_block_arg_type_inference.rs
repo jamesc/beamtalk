@@ -106,8 +106,7 @@ typed Object subclass: App\n\
   m: server :: HTTPServer -> HTTPServer => server start: 8080 handler: [:req | req respond]\n";
     let module = parse_source(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let ty = block_type_in_method(&module, checker.type_map(), "App", "m:");
     assert_block_param_is_http_request(ty, "BT-2864 (inline block, Union param)");
@@ -127,8 +126,7 @@ typed Object subclass: App\n\
   m: server :: HTTPServer -> HTTPServer => server start: 8080 handler: [:req | req respond]\n";
     let module = parse_source(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let ty = block_type_in_method(&module, checker.type_map(), "App", "m:");
     assert_block_param_is_http_request(ty, "bare Block(...) param (no Union, BT-2158 baseline)");

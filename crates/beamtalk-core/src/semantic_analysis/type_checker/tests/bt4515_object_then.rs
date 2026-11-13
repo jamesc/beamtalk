@@ -20,8 +20,7 @@ fn check_source(source: &str) -> (HashMap<MethodReturnKey, InferredType>, Vec<Di
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check(&module, &hierarchy);
     let diagnostics = checker.take_diagnostics();
     (checker.take_method_return_types(), diagnostics)
 }
@@ -117,8 +116,7 @@ fn a_nilable_receiver_is_not_narrowed() {
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     // The block body's `s`: the last `s` in the source.
     let at = u32::try_from(source.rfind("s]").unwrap()).unwrap();
     let ty = checker

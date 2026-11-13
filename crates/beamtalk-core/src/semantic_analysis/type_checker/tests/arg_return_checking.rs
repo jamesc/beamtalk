@@ -16,8 +16,7 @@ fn test_integer_plus_string_warns_operand_type() {
         vec![str_lit("hello")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         !checker.diagnostics().is_empty(),
         "42 + 'hello' should produce a type warning"
@@ -33,8 +32,7 @@ fn test_integer_plus_integer_no_arg_type_warning() {
         vec![int_lit(4)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "3 + 4 should not produce warnings, got: {:?}",
@@ -52,8 +50,7 @@ fn test_integer_subtype_of_number_no_warning() {
         vec![int_lit(1)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "Integer should be valid for Number param"
@@ -69,8 +66,7 @@ fn test_dynamic_args_never_warn() {
         vec![var("alsoUnknown")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "Dynamic arguments should never produce warnings"
@@ -96,8 +92,7 @@ fn test_return_type_mismatch_warns() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -131,8 +126,7 @@ fn test_return_type_match_no_warning() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -170,8 +164,7 @@ fn test_return_type_skip_primitive_methods() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -201,8 +194,7 @@ fn test_return_type_no_annotation_no_warning() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -325,8 +317,7 @@ fn test_as_type_suppresses_subsequent_warnings() {
         vec![str_lit("hello")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     // After asType:, x is Known(Integer), so + "hello" should warn
     assert!(
         !checker.diagnostics().is_empty(),
@@ -375,8 +366,7 @@ fn test_keyword_arg_type_mismatch_warns() {
         vec![class_def],
     );
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let arg_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -428,8 +418,7 @@ fn test_keyword_arg_type_match_no_warning() {
         vec![class_def],
     );
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let arg_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -491,8 +480,7 @@ fn test_parametric_block_arg_type_mismatch_warns() {
         vec![class_def],
     );
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let arg_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -553,8 +541,7 @@ fn test_parametric_block_arg_type_match_no_warning() {
         vec![class_def],
     );
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let arg_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -605,8 +592,7 @@ fn test_override_incompatible_param_type_warns() {
     );
     let module = make_module_with_classes(vec![], vec![parent, child]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let override_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -657,8 +643,7 @@ fn test_override_compatible_param_type_no_warning() {
     );
     let module = make_module_with_classes(vec![], vec![parent, child]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let override_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -716,8 +701,7 @@ fn test_override_parametric_incompatible_param_type_warns() {
     );
     let module = make_module_with_classes(vec![], vec![parent, child]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let override_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -757,8 +741,7 @@ fn test_all_type_warnings_are_severity_warning() {
         vec![class_def],
     );
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     for diag in checker.diagnostics() {
         assert_eq!(
             diag.severity,
@@ -931,8 +914,7 @@ fn test_return_type_skip_defer_reply_methods() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let return_warnings: Vec<_> = checker
         .diagnostics()
         .iter()

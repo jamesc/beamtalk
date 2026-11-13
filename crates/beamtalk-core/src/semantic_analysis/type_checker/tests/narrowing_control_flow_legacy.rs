@@ -95,8 +95,7 @@ fn test_narrowing_class_eq_in_true_block() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // Inside the block: `x + 1` should NOT warn because x is narrowed to Integer
     // Outside the block: `x + 1` SHOULD warn because x is still Object
@@ -146,8 +145,7 @@ fn test_narrowing_class_eqeq_in_true_block() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // Inside the block: `x + 1` should NOT warn because x is narrowed to Integer
     let warnings: Vec<_> = checker
@@ -189,8 +187,7 @@ fn test_narrowing_is_kind_of_in_true_block() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let warnings: Vec<_> = checker
         .diagnostics()
@@ -236,8 +233,7 @@ fn bt2741_is_kind_of_subclass_narrows_true_branch_to_subclass() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let dnu: Vec<_> = checker
         .diagnostics()
@@ -358,8 +354,7 @@ fn bt2741_declared_annotation_receiver_no_hint_true_branch_still_never() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let noisy: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -591,8 +586,7 @@ fn bt2744_negation_receiver_resolves_method_through_base() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let dnu: Vec<_> = checker
         .diagnostics()
@@ -641,8 +635,7 @@ fn bt2744_negation_receiver_dnu_for_selector_only_on_excluded_class() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let dnu: Vec<_> = checker
         .diagnostics()
@@ -731,8 +724,7 @@ fn test_narrowing_is_nil_early_return() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let _checker = check(&module, &hierarchy);
 
     // After early return narrowing, x is still Object (non-nil) but Object
     // does respond to `size` (it's a built-in), so no warning expected.
@@ -769,8 +761,7 @@ fn test_narrowing_is_nil_if_true_if_false() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let _checker = check(&module, &hierarchy);
 
     // This just verifies the narrowing path executes without crash.
     // Object responds to `size`, so no warning expected.
@@ -1514,8 +1505,7 @@ fn test_narrowing_does_not_leak_outside_block() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let warnings: Vec<_> = checker
         .diagnostics()
@@ -1605,8 +1595,7 @@ fn test_narrowing_responds_to_in_true_block() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // Inside the block: `x customMethod` should NOT warn because x is Dynamic
     // (respondsTo: narrowing sets the variable to Dynamic in the true block)
@@ -1661,8 +1650,7 @@ fn test_narrowing_responds_to_does_not_leak() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let warnings: Vec<_> = checker
         .diagnostics()
@@ -1711,8 +1699,7 @@ fn test_narrowing_responds_to_if_true_if_false() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // True block: no warning (Dynamic narrowing)
     // False block: should warn (Object doesn't have customMethod)

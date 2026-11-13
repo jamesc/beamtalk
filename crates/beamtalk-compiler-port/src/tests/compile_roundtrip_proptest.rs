@@ -4,7 +4,9 @@
 //! ADR 0011 Phase 4 property-based tests: `handle_compile()` / `handle_compile_expression()` must never panic and must always return a well-formed ETF response for near-valid Beamtalk input.
 
 use super::*;
-use beamtalk_core::test_helpers::test_support::{fragment_from, truncated_from};
+use beamtalk_core::test_helpers::test_support::{
+    fragment_from, mismatched_brackets_from, truncated_from,
+};
 
 /// Near-valid Beamtalk source fragments (reuses patterns from parser property tests).
 const FRAGMENTS: &[&str] = &[
@@ -30,24 +32,12 @@ const FRAGMENTS: &[&str] = &[
     "x match: { 1 => \"one\", _ => \"other\" }",
 ];
 
-/// Generates a near-valid Beamtalk input using one of several mutation strategies.
-fn near_valid_beamtalk() -> impl Strategy<Value = String> {
+/// Near-valid input: a fragment, a truncated fragment, or one with swapped brackets.
+fn compile_input_strategy() -> impl Strategy<Value = String> {
     prop_oneof![
-        // Valid fragments
         fragment_from(FRAGMENTS),
-        // Truncated valid expressions
         truncated_from(FRAGMENTS),
-        // Mismatched brackets
-        prop::sample::select(FRAGMENTS).prop_map(|s| {
-            s.chars()
-                .map(|ch| match ch {
-                    '[' => '(',
-                    ']' => '}',
-                    '(' => '[',
-                    _ => ch,
-                })
-                .collect()
-        }),
+        mismatched_brackets_from(FRAGMENTS),
     ]
 }
 
@@ -107,7 +97,7 @@ proptest! {
 
     /// Property 1c: `handle_compile` never panics on near-valid structured input.
     #[test]
-    fn compile_never_panics_near_valid(input in near_valid_beamtalk()) {
+    fn compile_never_panics_near_valid(input in compile_input_strategy()) {
         let request = compile_request(&input);
         let response = handle_compile(&request);
         let status = response_status(&response);
@@ -116,7 +106,7 @@ proptest! {
 
     /// Property 1d: `handle_compile_expression` never panics on near-valid structured input.
     #[test]
-    fn compile_expression_never_panics_near_valid(input in near_valid_beamtalk()) {
+    fn compile_expression_never_panics_near_valid(input in compile_input_strategy()) {
         let request = compile_expression_request(&input);
         let response = handle_compile_expression(&request);
         let status = response_status(&response);

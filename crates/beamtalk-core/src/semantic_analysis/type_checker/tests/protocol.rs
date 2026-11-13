@@ -17,8 +17,7 @@ fn test_behaviour_protocol_superclass_no_warning() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -39,8 +38,7 @@ fn test_behaviour_protocol_methods_no_warning() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -61,8 +59,7 @@ fn test_behaviour_protocol_subclasses_no_warning() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -83,8 +80,7 @@ fn test_behaviour_protocol_all_superclasses_no_warning() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -105,8 +101,7 @@ fn test_class_protocol_name_no_warning() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -127,8 +122,7 @@ fn test_class_protocol_is_class_no_warning() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -149,8 +143,7 @@ fn test_unknown_class_side_message_still_warns() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -175,8 +168,7 @@ fn test_behaviour_protocol_can_understand_no_warning() {
         vec![Expression::Literal(Literal::Symbol("+".into()), span())],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -200,8 +192,7 @@ fn test_non_self_field_assignment_produces_warning_not_error() {
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let field_diags: Vec<_> = checker
         .diagnostics()
         .iter()
