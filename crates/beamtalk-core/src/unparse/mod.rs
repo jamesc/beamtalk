@@ -490,7 +490,13 @@ pub(crate) fn unparse_module_doc(module: &Module) -> Document<'static> {
     }
 
     // File-level trailing comments (after the last class/method/expression)
-    for comment in &module.file_trailing_comments {
+    for (i, comment) in module.file_trailing_comments.iter().enumerate() {
+        // Top-level expressions end without a line break, so the first
+        // trailing comment must start on a fresh line rather than being
+        // glued onto the last statement's own trailing comment (BT-4790).
+        if i == 0 && !module.expressions.is_empty() {
+            docs.push(line());
+        }
         if comment.preceding_blank_line {
             docs.push(line());
         }

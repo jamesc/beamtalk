@@ -178,26 +178,11 @@ fn test_parser_check(case_name: &str) {
         "unparsed output of '{case_name}' fails to re-parse: {errors2:?}\n\n{pass1}"
     );
     let pass2 = beamtalk_core::unparse::unparse_module(&module2);
-    // Compared modulo `//` comments and whitespace: the unparser currently
-    // re-joins trailing line comments that follow a case's last statement
-    // (the tail comment moves onto the preceding line on each pass), which is
-    // comment layout, not parse structure.
+    // Compared verbatim, comments included.
     assert_eq!(
-        strip_line_comments(&pass1),
-        strip_line_comments(&pass2),
+        pass1, pass2,
         "unparse is not a fixed point for '{case_name}':\n--- pass 1\n{pass1}\n--- pass 2\n{pass2}"
     );
-}
-
-/// Drops `//` comments to end of line and collapses whitespace runs.
-fn strip_line_comments(text: &str) -> String {
-    text.lines()
-        .map(|line| line.split("//").next().unwrap_or(""))
-        .collect::<Vec<_>>()
-        .join(" ")
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 /// Test the Core Erlang codegen output for a given test case

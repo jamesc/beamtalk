@@ -355,6 +355,20 @@ fn file_trailing_comments_preserved() {
     );
 }
 
+/// BT-4790: a `//` comment on the line after a trailing comment stays on its
+/// own line, and the unparse is a fixed point.
+#[test]
+fn trailing_comment_after_last_expression_keeps_its_line() {
+    let source = "x := 1\ny := 2  // note\n// tail\n";
+    let out1 = unparse_module(&parse_source(source));
+    assert!(
+        out1.ends_with("y := 2  // note\n// tail\n"),
+        "comment layout changed: {out1:?}"
+    );
+    let out2 = unparse_module(&parse_source(&out1));
+    assert_eq!(out1, out2, "unparse is not a fixed point");
+}
+
 // --- Match expression formatting ---
 
 #[test]
