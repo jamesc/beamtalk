@@ -16,6 +16,7 @@ use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::form::{self, Layout};
 use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Expression, MessageSelector};
+use beamtalk_core::semantic_analysis::InferredType;
 use beamtalk_core::semantic_analysis::type_checker::{
     FFI_ARG_BINARY_GUARD, FFI_ARG_RUNTIME_GUARDS, ffi_arg_may_be_binary, ffi_arg_passes_unchanged,
 };
@@ -266,7 +267,7 @@ impl CoreErlangGenerator {
     /// `direct_call/4` when one fails. The call keeps the proxy's error
     /// translation: a raise is handed, with the arguments and the call
     /// site's frame (read only on that path), to
-    /// `beamtalk_erlang_proxy:ffi_call_raised/8`, which runs the same
+    /// `beamtalk_erlang_proxy:ffi_call_raised/8` (`/9` with a binary argument), which runs the same
     /// classifier (and `badarg` charlist retry) as `direct_call/4`.
     /// Arguments are bound before the `try`, so a raise while evaluating one
     /// is not translated, as on the proxy path.
@@ -316,9 +317,8 @@ impl CoreErlangGenerator {
         }
 
         let mut bindings: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
-        let mut arg_vars: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
         let mut arg_names: Vec<(String, bool)> = Vec::with_capacity(arguments.len());
-        for (i, arg) in arguments.iter().enumerate() {
+        for arg in arguments {
             let var = self.fresh_temp_var("FfiArg");
             bindings.push(docvec![
                 "let ",
@@ -327,38 +327,111 @@ impl CoreErlangGenerator {
                 self.expression_doc(arg)?,
                 " in "
             ]);
-            if i > 0 {
-                arg_vars.push(Document::Str(", "));
-            }
-            arg_vars.push(leaf::var(var.clone()));
             let may_be_binary = self
                 .type_map
                 .get(arg.span())
                 .is_some_and(ffi_arg_may_be_binary);
             arg_names.push((var, may_be_binary));
         }
+        Ok(Some(docvec![
+            Document::Vec(bindings),
+            self.guarded_direct_ffi_doc(module_name, function_name, &arg_names, None),
+        ]))
+    }
+
+    /// BT-4765: a `self delegate` body on a `native:` class — the call
+    /// `native_call/5` would make — as a direct remote call when the backing
+    /// function's spec proves the result needs no coercion and every argument
+    /// (the receiver included, for an instance method) is proved to reach it
+    /// unchanged, by the same table as [`Self::proved_direct_ffi_call`]. `None`
+    /// keeps `native_call/5`.
+    ///
+    /// `arg_vars` are the method's parameter variables (the receiver first for
+    /// an instance method) and `arg_types` their declared types, one each; an
+    /// untyped parameter proves nothing. The call carries the `{Class,
+    /// Selector}` context the proxy would, so a raise reads `Class>>selector`,
+    /// and the guard's fallback is the `native_call/5` the delegate emitted
+    /// before.
+    pub(in crate::core_erlang) fn proved_native_delegate_call(
+        &mut self,
+        backing_module: &str,
+        class_name: &str,
+        selector: &MessageSelector,
+        arg_vars: &[String],
+        arg_types: &[Option<InferredType>],
+    ) -> Option<Document<'static>> {
+        debug_assert_eq!(arg_vars.len(), arg_types.len());
+        let registry = self.native_type_registry.as_ref()?;
+        let arity = u8::try_from(arg_vars.len()).ok()?;
+        let function_name = selector.leading_word();
+        if !registry.proves_no_result_coercion(backing_module, function_name, arity) {
+            return None;
+        }
+        let mut args: Vec<(String, bool)> = Vec::with_capacity(arg_vars.len());
+        for (var, ty) in arg_vars.iter().zip(arg_types) {
+            let ty = ty.as_ref().filter(|t| ffi_arg_passes_unchanged(t))?;
+            args.push((var.clone(), ffi_arg_may_be_binary(ty)));
+        }
+        Some(self.guarded_direct_ffi_doc(
+            backing_module,
+            function_name,
+            &args,
+            Some((class_name, selector.name().as_ref())),
+        ))
+    }
+
+    /// The direct call of a proved FFI call: each of `args` (a bound variable
+    /// and whether its type may be a binary) is checked at run time with the
+    /// table's guards, and anything else takes the proxy — `direct_call/4` for
+    /// an inline send, `native_call/5` when `context` (a delegate's `{Class,
+    /// Selector}`) is given.
+    fn guarded_direct_ffi_doc(
+        &mut self,
+        module_name: &str,
+        function_name: &str,
+        args: &[(String, bool)],
+        context: Option<(&str, &str)>,
+    ) -> Document<'static> {
+        let arg_vars: Vec<Document<'static>> = args
+            .iter()
+            .enumerate()
+            .flat_map(|(i, (var, _))| {
+                let sep = (i > 0).then_some(Document::Str(", "));
+                sep.into_iter().chain([leaf::var(var.clone())])
+            })
+            .collect();
         // BT-4759: a binary argument lets the `badarg` charlist retry run, and
         // a retry is a fresh attempt (ADR 0130 §4), so the call site keeps the
         // pre-call class-variable snapshot for it, as the proxy does. A call
         // with only scalar arguments never retries and takes none.
-        let any_binary = arg_names.iter().any(|(_, b)| *b);
+        let any_binary = args.iter().any(|(_, b)| *b);
         let snap_var = any_binary.then(|| self.fresh_temp_var("FfiSnap"));
         let module_atom = leaf::atom(module_name.to_string());
         let function_atom = leaf::atom(function_name.to_string());
         let mode_atom = leaf::atom(crate::core_erlang::util::ffi_coercion_mode(module_name));
+        let context_doc = context.map(|(class, selector)| {
+            docvec![
+                "{",
+                leaf::atom(class.to_string()),
+                ", ",
+                leaf::atom(selector.to_string()),
+                "}"
+            ]
+        });
         let direct = self.ffi_try_direct_doc(
             &module_atom,
             &function_atom,
             &mode_atom,
             &arg_vars,
             snap_var.as_deref(),
+            context_doc.as_ref(),
         );
-        if arg_names.is_empty() {
-            return Ok(Some(docvec![Document::Vec(bindings), direct]));
+        if args.is_empty() {
+            return direct;
         }
         // Static types are not enforced at run time: check each argument with
         // the table's runtime guards and keep the proxy for anything else.
-        let guard = ffi_arg_runtime_guard(&arg_names);
+        let guard = ffi_arg_runtime_guard(args);
         let snap_binding = match &snap_var {
             Some(snap) => docvec![
                 "let ",
@@ -367,28 +440,47 @@ impl CoreErlangGenerator {
             ],
             None => Document::Str(""),
         };
-        Ok(Some(docvec![
-            Document::Vec(bindings),
+        let fallback = match &context_doc {
+            None => docvec![
+                "call 'beamtalk_erlang_proxy':'direct_call'(",
+                module_atom,
+                ", ",
+                function_atom,
+                ", [",
+                Document::Vec(arg_vars),
+                "], ",
+                mode_atom,
+                ")"
+            ],
+            Some(context) => docvec![
+                "call 'beamtalk_erlang_proxy':'native_call'(",
+                module_atom,
+                ", ",
+                function_atom,
+                ", [",
+                Document::Vec(arg_vars),
+                "], ",
+                context.clone(),
+                ", ",
+                mode_atom,
+                ")"
+            ],
+        };
+        docvec![
             "case <> of <> when ",
             guard,
             " -> ",
             snap_binding,
             direct,
-            " <> when 'true' -> call 'beamtalk_erlang_proxy':'direct_call'(",
-            module_atom,
-            ", ",
-            function_atom,
-            ", [",
-            Document::Vec(arg_vars),
-            "], ",
-            mode_atom,
-            ") end",
-        ]))
+            " <> when 'true' -> ",
+            fallback,
+            " end",
+        ]
     }
 
     /// The `try` of a direct FFI call (see [`Self::proved_direct_ffi_call`]):
     /// the remote call, and on any exception the hand-off to
-    /// `beamtalk_erlang_proxy:ffi_call_raised/8` with the built stacktrace and
+    /// `beamtalk_erlang_proxy:ffi_call_raised/8` (`/9`, `/10`) with the built stacktrace and
     /// the call site's frame.
     fn ffi_try_direct_doc(
         &mut self,
@@ -397,6 +489,7 @@ impl CoreErlangGenerator {
         mode_atom: &Document<'static>,
         arg_vars: &[Document<'static>],
         snap_var: Option<&str>,
+        context: Option<&Document<'static>>,
     ) -> Document<'static> {
         let result_var = self.fresh_temp_var("FfiRes");
         let cls_var = self.fresh_temp_var("FfiCls");
@@ -420,7 +513,16 @@ impl CoreErlangGenerator {
             mode_atom.clone(),
             leaf::var(site_var.clone()),
         ];
-        raised_args.extend(snap_var.map(|snap| leaf::var(snap.to_string())));
+        // `/8` for scalar arguments, `/9` adds the snapshot (BT-4759), `/10`
+        // the `{Class, Selector}` context of a delegate (BT-4765).
+        match (snap_var, context) {
+            (None, None) => {}
+            (Some(snap), None) => raised_args.push(leaf::var(snap.to_string())),
+            (snap, Some(context)) => {
+                raised_args.push(snap.map_or(leaf::atom("none"), |s| leaf::var(s.to_string())));
+                raised_args.push(context.clone());
+            }
+        }
         let raised = form::call("beamtalk_erlang_proxy", "ffi_call_raised", raised_args);
         let handler = form::let_in(
             leaf::var(built_var),

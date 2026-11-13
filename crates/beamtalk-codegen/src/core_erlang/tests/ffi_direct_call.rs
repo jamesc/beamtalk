@@ -4,7 +4,7 @@
 //! BT-4485: an inline FFI call whose spec proves the result needs no
 //! coercion, and whose arguments are proved to reach the callee unchanged,
 //! compiles to a direct remote call wrapped in the proxy's error translation
-//! (`beamtalk_erlang_proxy:ffi_call_raised/8`). Anything the FFI type table
+//! (`beamtalk_erlang_proxy:ffi_call_raised/8`, `/9` for a binary argument). Anything the FFI type table
 //! cannot prove keeps `beamtalk_erlang_proxy:direct_call/4`.
 
 use beamtalk_core::semantic_analysis::type_checker::{

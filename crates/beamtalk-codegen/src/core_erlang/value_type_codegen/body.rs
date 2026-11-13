@@ -22,6 +22,8 @@ use beamtalk_cerl_doc::{Document, concat, join, leaf};
 use beamtalk_core::ast::{
     Block, ClassDefinition, Expression, MessageSelector, MethodDefinition, WellKnownSelector,
 };
+use beamtalk_core::semantic_analysis::InferredType;
+use beamtalk_core::semantic_analysis::type_checker::ffi_annotation_type;
 
 impl CoreErlangGenerator {
     // ──────────────────────────────────────────────────────────────────────────
@@ -858,12 +860,30 @@ impl CoreErlangGenerator {
     /// `native_call/5` (rather than a bare `Mod:Fn` call) is what gives the
     /// generated dispatch wrap-by-default error handling and ADR 0076
     /// ok/error → `Result` coercion, identical to inline `(Erlang …)` FFI.
+    ///
+    /// BT-4765: when the backing function's spec proves the result needs no
+    /// coercion and every argument is proved to reach it unchanged
+    /// (`arg_types`, one per `arg_vars`: the receiver's class first for an
+    /// instance method, then each declared parameter type), the body is a
+    /// guarded direct call instead, with `native_call/5` as its fallback (see
+    /// [`CoreErlangGenerator::proved_native_delegate_call`]).
     pub(in crate::core_erlang) fn native_delegate_body_doc(
+        &mut self,
         backing_module: &str,
         class_name: &str,
         selector: &MessageSelector,
         arg_vars: &[String],
+        arg_types: &[Option<InferredType>],
     ) -> Document<'static> {
+        if let Some(direct) = self.proved_native_delegate_call(
+            backing_module,
+            class_name,
+            selector,
+            arg_vars,
+            arg_types,
+        ) {
+            return direct;
+        }
         let fn_name = selector.leading_word();
         let args_list = join(
             arg_vars.iter().map(|v| leaf::var(v.clone())),
@@ -944,11 +964,22 @@ impl CoreErlangGenerator {
         // `Self` to the arg list (`params` already starts with Self).
         if let Some(backing) = class_def.backing_module.as_ref() {
             if method.is_self_delegate() {
-                let body = Self::native_delegate_body_doc(
+                // The receiver is `Self`, an instance of this class.
+                let arg_types: Vec<Option<InferredType>> =
+                    std::iter::once(Some(InferredType::known(class_def.name.name.clone())))
+                        .chain(
+                            method
+                                .parameters
+                                .iter()
+                                .map(|p| p.type_annotation.as_ref().and_then(ffi_annotation_type)),
+                        )
+                        .collect();
+                let body = frame.native_delegate_body_doc(
                     backing.name.as_str(),
                     class_def.name.name.as_str(),
                     &method.selector,
                     &params,
+                    &arg_types,
                 );
                 let params_doc = join(params.into_iter().map(leaf::var), &Document::Str(", "));
                 let mut fun_doc = docvec!["fun (", params_doc, ") ->\n    ", body, "\n"];
