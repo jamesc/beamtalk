@@ -258,6 +258,13 @@ impl CoreErlangGenerator {
             return Ok(None);
         }
         let Some(test) = self.builtin_kind_test(class_arg) else {
+            // BT-4757: a user class literal takes the name-only lowering. The
+            // built-in lowering above stays first, so a later built-in
+            // generalisation (BT-4764) slots in beside it with the same
+            // override guard in the runtime.
+            if let Some(class_name) = Self::user_class_literal_name(class_arg) {
+                return self.generate_named_is_kind_of(receiver, class_arg, &class_name);
+            }
             return Ok(None);
         };
         let mut seq = self.sequence_call(&[receiver, class_arg], "KindOf")?;
@@ -286,6 +293,63 @@ impl CoreErlangGenerator {
             leaf::var(class_var),
             ", ",
             test_doc,
+            ")",
+        ];
+        Ok(Some(seq.close(self, call_doc, "KindOfRes")))
+    }
+
+    /// BT-4757: the class name when `class_arg` is an unqualified literal
+    /// naming a user class (not a stdlib built-in).
+    fn user_class_literal_name(class_arg: &Expression) -> Option<String> {
+        let Expression::ClassReference {
+            name,
+            package: None,
+            ..
+        } = class_arg
+        else {
+            return None;
+        };
+        let class_name = name.name.as_str();
+        (!ClassHierarchy::is_builtin_class(class_name)).then(|| class_name.to_string())
+    }
+
+    /// BT-4757: `x isKindOf: C` for a user class literal `C`:
+    ///
+    /// ```erlang
+    /// let R = <x> in let K = <C> in
+    /// call 'beamtalk_behaviour_intrinsics':'isKindOfNamed'(R, K, 'C')
+    /// ```
+    ///
+    /// `<C>` is the ordinary class reference (registry lookup, raising
+    /// `class_not_found` for an unloaded class). The runtime answers from the
+    /// class table by name while no class has overridden `isKindOf:`, and
+    /// otherwise sends it with `K`, so there is no extra send on the fast path.
+    fn generate_named_is_kind_of(
+        &mut self,
+        receiver: &Expression,
+        class_arg: &Expression,
+        class_name: &str,
+    ) -> Result<Option<Document<'static>>> {
+        let mut seq = self.sequence_call(&[receiver, class_arg], "KindOf")?;
+        let recv_doc = seq.next();
+        let class_doc = seq.next();
+        let recv_var = self.fresh_temp_var("KindOfRecv");
+        let class_var = self.fresh_temp_var("KindOfClass");
+        let call_doc = docvec![
+            "let ",
+            leaf::var(recv_var.clone()),
+            " = ",
+            recv_doc,
+            " in let ",
+            leaf::var(class_var.clone()),
+            " = ",
+            class_doc,
+            " in call 'beamtalk_behaviour_intrinsics':'isKindOfNamed'(",
+            leaf::var(recv_var),
+            ", ",
+            leaf::var(class_var),
+            ", ",
+            leaf::atom(class_name.to_string()),
             ")",
         ];
         Ok(Some(seq.close(self, call_doc, "KindOfRes")))

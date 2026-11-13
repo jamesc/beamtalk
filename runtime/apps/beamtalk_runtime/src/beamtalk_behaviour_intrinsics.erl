@@ -99,6 +99,7 @@ that the Behaviour/Class libraries can rely on.
     objectIsKindOf/2,
     primitiveIsKindOf/2,
     isKindOfBuiltin/3,
+    isKindOfNamed/3,
     %% BT-4319: `binding :: Class` match arm on a class with subclasses
     valueIsKindOfClass/2,
     %% ADR 0036: Metaclass primitives
@@ -135,7 +136,7 @@ that the Behaviour/Class libraries can rely on.
 ]).
 
 -ifdef(TEST).
--export([plain_value/1, kind_of_builtin/4]).
+-export([plain_value/1, kind_of_builtin/4, kind_of_named/4]).
 -endif.
 
 %%% ============================================================================
@@ -1019,6 +1020,37 @@ isKindOfBuiltin(Receiver, Behaviour, TestAnswer) ->
         TestAnswer,
         beamtalk_default_method:overridden_anywhere('isKindOf:')
     ).
+
+-doc """
+`Receiver isKindOf: Behaviour` where `Behaviour` is a user class literal named
+`Name` (BT-4757). The caller has already evaluated the literal, so an unloaded
+class raised `class_not_found` there.
+
+While no class other than `Object` has defined `isKindOf:`
+(`beamtalk_default_method:overridden_anywhere/1`) the send would run
+`objectIsKindOf/2`; for an ordinary instance that is `inherits_from(Class,
+Name)` on the class table, which this answers directly by name: no class-object
+cache key, no liveness check. A class-object or metaclass receiver, a future,
+or any override takes the ordinary send. No verdict is cached here, so a
+reloaded superclass is seen at once (`inherits_from/2` is flushed on every
+class write). As for `match:` arms (ADR 0107), a registered class whose process
+is dead answers from the table rather than falling back to the send.
+""".
+-spec isKindOfNamed(term(), term(), atom()) -> term().
+isKindOfNamed(Receiver, Behaviour, Name) ->
+    kind_of_named(
+        Receiver, Behaviour, Name, beamtalk_default_method:overridden_anywhere('isKindOf:')
+    ).
+
+%% `isKindOfNamed/3` with the override flag passed in, for tests.
+-spec kind_of_named(term(), term(), atom(), boolean()) -> term().
+kind_of_named(Receiver, Behaviour, Name, false) ->
+    case receiver_class_side(Receiver) of
+        {instance, C} -> beamtalk_class_derived_cache:inherits_from(C, Name);
+        _ -> beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour])
+    end;
+kind_of_named(Receiver, Behaviour, _Name, true) ->
+    beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour]).
 
 %% `isKindOfBuiltin/3` with the node-wide override flag passed in, so tests
 %% can check both branches whatever the flag holds in their node.

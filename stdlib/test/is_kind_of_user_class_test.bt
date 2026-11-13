@@ -1,0 +1,28 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4757: `x isKindOf: UserClass` compiles to a name-only check. It answers
+// what the full `isKindOf:` send answers.
+
+TestCase subclass: IsKindOfUserClassTest
+
+  testInstanceOfClassAndSubclass =>
+    dog := Bt4319Dog spawn
+    animal := Bt4319Animal spawn
+    self assert: (dog isKindOf: Bt4319Dog)
+    self assert: (dog isKindOf: Bt4319Animal)
+    self assert: (animal isKindOf: Bt4319Animal)
+    self deny: (animal isKindOf: Bt4319Dog)
+
+  testUnrelatedAndBuiltinReceivers =>
+    self deny: (3 isKindOf: Bt4319Animal)
+    self deny: ("s" isKindOf: Bt4319Animal)
+    self deny: (nil isKindOf: Bt4319Animal)
+    self deny: (#sym isKindOf: Bt4319Dog)
+
+  testAgreesWithFullSend =>
+    dog := Bt4319Dog spawn
+    klass := Bt4319Animal
+    self assert: (dog isKindOf: Bt4319Animal) equals: (dog isKindOf: klass)
+    self assert: (3 isKindOf: Bt4319Animal) equals: (3 isKindOf: klass)
+    self assert: (nil isKindOf: Bt4319Dog) equals: (nil isKindOf: klass)

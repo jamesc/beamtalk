@@ -176,7 +176,6 @@ fn is_kind_of_binary_literal_admits_strings() {
 fn is_kind_of_stays_dynamic_without_a_sealed_builtin_literal() {
     for (arg, why) in [
         ("Number", "abstract built-in with no exact test"),
-        ("Probe", "user class"),
         ("k", "not a class literal"),
     ] {
         let src = format!(
@@ -188,6 +187,25 @@ fn is_kind_of_stays_dynamic_without_a_sealed_builtin_literal() {
             "isKindOf: {arg} ({why}) must stay dynamic. Got:\n{code}"
         );
     }
+}
+
+#[test]
+fn is_kind_of_user_class_literal_is_name_only() {
+    let code = codegen(concat!(
+        "Object subclass: Probe\n",
+        "  check: v :: Object -> Boolean => v isKindOf: Probe\n",
+    ));
+    assert!(
+        code.contains("call 'beamtalk_behaviour_intrinsics':'isKindOfNamed'("),
+        "user class literal should use isKindOfNamed. Got:\n{code}"
+    );
+    assert!(code.contains("'Probe')"), "Got:\n{code}");
+    assert!(
+        !code.contains("'isKindOf:', ["),
+        "no dynamic isKindOf: send on the fast path. Got:\n{code}"
+    );
+    assert!(!code.contains("'isKindOfBuiltin'("), "Got:\n{code}");
+    super::assert_compiles_through_erlc("test", &code);
 }
 
 #[test]
