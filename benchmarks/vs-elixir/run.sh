@@ -41,6 +41,7 @@ erlc -o "$out" "$here/harness/vs_bench.erl"
 
 elixir_ebin="$(cd "$here/elixir" && elixir -e 'IO.write(:code.lib_dir(:elixir))')/ebin"
 bt_ebin="$here/beamtalk/_build/dev/ebin"
+bt_native_ebin="$here/beamtalk/_build/dev/native/ebin"   # the package native/ modules (vs_ffi)
 ex_build="$here/elixir/_build/dev/lib/ve_bench"
 
 # `erl -pa A B` puts B ahead of A: list lowest priority first, so the
@@ -54,7 +55,7 @@ else
   libs=("$rt"/_build/default/lib/*/ebin "$rt/apps/beamtalk_stdlib/ebin")
 fi
 for d in "${libs[@]}"; do paths+=("$d"); done
-paths+=("$elixir_ebin" "$ex_build/ebin" "$ex_build/consolidated" "$bt_ebin" "$out")
+paths+=("$elixir_ebin" "$ex_build/ebin" "$ex_build/consolidated" "$bt_ebin" "$bt_native_ebin" "$out")
 
 case "$mode" in
   bench) args="[\"$rounds\"${rows:+, \"$rows\"}]"; entry="main" ;;

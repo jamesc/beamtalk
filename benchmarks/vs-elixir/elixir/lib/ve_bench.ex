@@ -207,8 +207,9 @@ defmodule VeBench do
   defbench(:direct_integer_to_binary, a, do: :erlang.integer_to_binary(a))
   defbench(:apply_maps_find, d, do: apply(:maps, :find, [:k, d]))
   defbench(:direct_maps_find, d, do: :maps.find(:k, d))
-  # No direct-call alternate for ffi_ok: vs_bench is compiled after the mix
-  # project, so a static :vs_bench.ffi_ok() warns as undefined. (Verified
-  # equivalent anyway: both cost 2 reds / 0 words.)
-  defbench(:apply_ffi_ok, _, do: apply(:vs_bench, :ffi_ok, []))
+  # No direct-call alternate for ffi_ok: vs_ffi (the Beamtalk package's
+  # native/ module) is compiled after the mix project, so a static
+  # :vs_ffi.ffi_ok() warns as undefined. (Verified equivalent anyway: both
+  # cost 2 reds / 0 words.)
+  defbench(:apply_ffi_ok, _, do: apply(:vs_ffi, :ffi_ok, []))
 end

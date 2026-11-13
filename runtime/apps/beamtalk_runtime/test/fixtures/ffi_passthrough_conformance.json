@@ -1,5 +1,5 @@
 {
-  "_comment": "BT-4485: the types whose values cross beamtalk_erlang_proxy unchanged, so an inline FFI call may skip the proxy. Rust: native_type_registry ffi_result_passes_unchanged / ffi_arg_passes_unchanged must accept exactly the listed types and reject the not_proven ones. Erlang: beamtalk_erlang_proxy_tests checks every sample (an Erlang expression) passes through unchanged, and every arg sample passes one of arg_runtime_guards (the erlang BIFs a direct call checks each argument with at run time; any other value, such as a tagged String, a charlist or a non-binary bitstring, falls back to the proxy; a String or Binary typed arg is checked with arg_binary_guard (is_binary) as well, and such a call site takes a class-variable snapshot for the badarg retry). A '#name' type is a Symbol singleton.",
+  "_comment": "BT-4485: the types whose values cross beamtalk_erlang_proxy unchanged, so an inline FFI call may skip the proxy. Rust: native_type_registry ffi_result_passes_unchanged / ffi_arg_passes_unchanged must accept exactly the listed types and reject the not_proven ones. Erlang: beamtalk_erlang_proxy_tests checks every sample (an Erlang expression) passes through unchanged, and every arg sample passes one of arg_runtime_guards (the erlang BIFs a direct call checks each argument with at run time; any other value, such as a tagged String, a charlist or a non-binary bitstring, falls back to the proxy; a String or Binary typed arg is checked with arg_binary_guard (is_binary) as well, and a Dictionary typed arg with arg_map_guard (is_map, BT-4770: the stock-mode unwrap is shallow and a map is not a tagged String, so a map reaches the callee unchanged); both kinds of call site take a class-variable snapshot for the badarg retry). A '#name' type is a Symbol singleton.",
   "result_passthrough": [
     {"type": "Integer", "samples": ["0", "-7", "123456789012345678901234567890"]},
     {"type": "Float", "samples": ["1.5", "-0.0"]},
@@ -31,11 +31,13 @@
     {"type": "Symbol", "samples": ["foo", "ok", "error"]},
     {"type": "Binary", "samples": ["<<>>", "<<\"abc\">>", "<<\"ok\">>"]},
     {"type": "String", "samples": ["<<\"abc\">>", "<<\"\"/utf8>>"]},
+    {"type": "Dictionary", "samples": ["#{}", "#{a => 1}", "#{a => [1, 2], ok => {ok, 1}}", "#{k => {beamtalk_string, <<\"nested\">>}}", "#{'$beamtalk_class' => 'Point', x => 1}"]},
     {"type": "#ok", "samples": ["ok"]}
   ],
   "arg_runtime_guards": ["is_number", "is_atom", "is_pid"],
   "arg_binary_guard": "is_binary",
-  "_comment_inline_result": "BT-4762: a stock-mode call whose spec is Result(V, _) builds the Result at the call site (beamtalk_result:from_tagged_tuple/1) when the raw result is {ok, V} or {error, R} with a non-list payload, or the bare ok, and otherwise hands the already-returned value to coerce_ffi_result/3. Rust: V must be in result_passthrough (inline_result_value_not_proven lists types it rejects). Erlang: every sample must come out of the inline shape exactly as coerce_ffi_result(M, Sample, stock) builds it.",
+  "arg_map_guard": "is_map",
+  "_comment_inline_result": "BT-4762: a stock-mode call whose spec is Result(V, _) builds the Result at the call site (beamtalk_result:from_tagged_tuple/1) when the raw result is {ok, V} or {error, R} with a non-list payload, or the bare ok, and otherwise hands the already-returned value to coerce_ffi_result/3. Rust: V must be in result_passthrough, or Dynamic (BT-4770: a spec type variable such as maps:find/2's Value; the run-time not is_list test makes the shape correct for a payload of any type, lists included, as the samples show); inline_result_value_not_proven lists types it rejects. Erlang: every sample must come out of the inline shape exactly as coerce_ffi_result(M, Sample, stock) builds it.",
   "inline_result_samples": [
     "ok", "error", "{ok, nil}", "{ok, 0}", "{ok, 1.5}", "{ok, true}", "{ok, self()}",
     "{ok, <<>>}", "{ok, <<\"abc\">>}", "{ok, {beamtalk_string, <<\"abc\">>}}", "{ok, #{a => 1}}",
@@ -44,6 +46,6 @@
     "{ok, []}", "{ok, \"abc\"}", "{ok, [1, 2, 3]}", "{error, []}", "{error, \"bad\"}", "{error, [1, 2]}",
     "{ok, 1, 2}", "{error, a, b}", "{ok}", "{error}", "{oops, 1}", "[]", "\"abc\"", "42", "<<\"abc\">>", "foo"
   ],
-  "inline_result_value_not_proven": ["Symbol", "#ok", "#error", "List", "Tuple", "Result", "Object", "Dynamic"],
-  "arg_not_proven": ["List", "Tuple", "Dictionary", "Block", "Result", "Object", "Dynamic"]
+  "inline_result_value_not_proven": ["Symbol", "#ok", "#error", "List", "Tuple", "Result", "Object"],
+  "arg_not_proven": ["List", "Tuple", "Block", "Result", "Object", "Dynamic"]
 }

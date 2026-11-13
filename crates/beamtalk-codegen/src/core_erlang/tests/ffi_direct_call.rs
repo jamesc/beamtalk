@@ -4,7 +4,7 @@
 //! BT-4485: an inline FFI call whose spec proves the result needs no
 //! coercion, and whose arguments are proved to reach the callee unchanged,
 //! compiles to a direct remote call wrapped in the proxy's error translation
-//! (`beamtalk_erlang_proxy:ffi_call_raised/8`, `/9` for a binary argument). Anything the FFI type table
+//! (`beamtalk_erlang_proxy:ffi_call_raised/8`, `/9` for a binary or map argument). Anything the FFI type table
 //! cannot prove keeps `beamtalk_erlang_proxy:direct_call/4`.
 
 use beamtalk_core::semantic_analysis::type_checker::{
@@ -51,7 +51,16 @@ fn sig_result(name: &str, params: &[&str], value: &str) -> FunctionSignature {
     let mut s = sig(name, params, "Dynamic");
     s.return_type = InferredType::Known {
         class_name: ecow::EcoString::from("Result"),
-        type_args: vec![extracted(value), extracted("Exception")],
+        type_args: vec![
+            // The spec reader maps an open type (a type variable, `any()`) to
+            // the real `Dynamic`, not a class named "Dynamic".
+            if value == "Dynamic" {
+                InferredType::Dynamic(beamtalk_core::semantic_analysis::DynamicReason::DynamicSpec)
+            } else {
+                extracted(value)
+            },
+            extracted("Exception"),
+        ],
         provenance: TypeProvenance::Extracted,
     };
     s
@@ -74,6 +83,8 @@ fn registry() -> NativeTypeRegistry {
             sig_result("just_ok", &[], "Nil"),
             sig_result("find_list", &["Integer"], "List"),
             sig_result("find_dyn", &["Integer"], "Dynamic"),
+            sig("map_size", &["Dictionary"], "Integer"),
+            sig_result("find_map", &["Integer", "Dictionary"], "Dynamic"),
         ],
     );
     registry.register_module("beamtalk_process_ops", vec![sig("current", &[], "Pid")]);
@@ -87,7 +98,7 @@ fn registry() -> NativeTypeRegistry {
 
 fn compile(body: &str) -> String {
     let src = format!(
-        "Object subclass: Probe\n  class run: n :: Integer str: s :: String =>\n    {body}\n"
+        "Object subclass: Probe\n  class run: n :: Integer str: s :: String dict: d :: Dictionary =>\n    {body}\n"
     );
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&src);
     let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
@@ -434,9 +445,84 @@ fn list_value_result_stays_on_proxy() {
     );
 }
 
+/// BT-4770: a spec that leaves `V` open (`maps:find/2`'s `Value` type variable
+/// reads as `Dynamic`) still builds the `Result` inline: the payload is
+/// checked with `not is_list` at run time and a list goes to the proxy.
 #[test]
-fn dynamic_value_result_stays_on_proxy() {
-    assert_proxied(&compile("Erlang erlang find_dyn: n"), "erlang", "find_dyn");
+fn dynamic_value_result_is_built_inline() {
+    let code = compile("Erlang erlang find_dyn: n");
+    assert_direct(&code, "erlang", "find_dyn", "stock");
+    assert!(
+        code.contains("call 'erlang':'not'(call 'erlang':'is_list'(_FfiPayload"),
+        "a list payload is left to the proxy:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_erlang_proxy':'coerce_ffi_result'('erlang', _FfiOther"),
+        "{code}"
+    );
+}
+
+/// BT-4770: a `Dictionary` argument is proved (the stock-mode unwrap is shallow
+/// and a map is never a tagged String), guarded at run time by `is_map`. The
+/// `badarg` retry deep-unwraps a map, so the call site keeps the class-variable
+/// snapshot for it (`ffi_call_raised/9`), as for a binary.
+#[test]
+fn dictionary_arg_is_direct_behind_is_map_guard() {
+    let code = compile("Erlang erlang map_size: d");
+    assert_direct(&code, "erlang", "map_size", "stock");
+    assert_guarded(&code, "erlang", "map_size");
+    assert!(
+        code.contains("call 'erlang':'is_map'(_FfiArg"),
+        "the Dictionary argument is guarded by is_map:\n{code}"
+    );
+    assert!(!code.contains("'is_binary'"), "{code}");
+    assert!(
+        code.contains("= call 'beamtalk_class_vars':'snapshot'() in try call 'erlang':'map_size'("),
+        "the snapshot is read before the call:\n{code}"
+    );
+    assert!(
+        code.contains("'stock', _FfiSite@") && code.contains(", _FfiSnap@"),
+        "the snapshot is handed to ffi_call_raised/9:\n{code}"
+    );
+    // No proxy hop on the happy path and no dynamic send.
+    assert_eq!(
+        code.matches("'direct_call'(").count(),
+        1,
+        "only the fallback arm calls the proxy:\n{code}"
+    );
+    for banned in [
+        "'unwrap_string_args'",
+        "'apply_with_coercion'",
+        "'beamtalk_message_dispatch':'send'",
+    ] {
+        assert!(!code.contains(banned), "unexpected {banned}:\n{code}");
+    }
+}
+
+/// A scalar argument next to a `Dictionary` one: each is guarded on its own,
+/// and only the map gets `is_map`.
+#[test]
+fn dictionary_and_scalar_args_are_guarded_separately() {
+    let code = compile("Erlang erlang find_map: n dict: d");
+    assert_direct(&code, "erlang", "find_map", "stock");
+    assert_eq!(
+        code.matches("call 'erlang':'is_map'(").count(),
+        1,
+        "only the Dictionary argument has is_map:\n{code}"
+    );
+    // `find_map`'s `Dynamic` value is built inline as well.
+    assert!(code.contains("'from_tagged_tuple'(_FfiRaw"), "{code}");
+}
+
+/// A map *shape* or any other container stays on the proxy (a shape could hold
+/// a tagged String the unwrap must see; only a plain `Dictionary` is proved).
+#[test]
+fn list_and_tuple_args_still_stay_on_proxy() {
+    assert_proxied(
+        &compile("Erlang erlang map_size: (List new)"),
+        "erlang",
+        "map_size",
+    );
 }
 
 #[test]

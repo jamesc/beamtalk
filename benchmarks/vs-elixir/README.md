@@ -34,6 +34,7 @@ how the in-flight PRs below were measured. Elixir comes from the repo's
 | `beamtalk/src/vb_*.bt` | fixtures: Values (sealed and open), a subclass, an actor, sealed and open class-side methods |
 | `elixir/lib/ve_bench.ex` | the Elixir rows, `VeBench.<row>(n, ctx)` |
 | `elixir/lib/fixtures.ex` | structs, a protocol with two implementations, a `defdelegate`, a GenServer |
+| `beamtalk/native/vs_ffi.erl` | the row 13d callee: a spec'd `ok`-returning function in the package's own `native/` dir, the only place the compiler reads a user module's spec from |
 | `harness/vs_bench.erl` | the row table, the measurement, the report, the profiler |
 | `results/` | the runs this README quotes |
 
