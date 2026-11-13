@@ -290,10 +290,24 @@ resolve_class_object(ClassName) when is_atom(ClassName) ->
 -doc "Compute the Erlang registry name for a class.".
 -spec registry_name(class_name()) -> atom().
 registry_name(ClassName) ->
-    %% Binary concatenation rather than a string and `list_to_atom/1`: this
-    %% runs on every `whereis_class/1`, i.e. every class reference (BT-4065).
-    % elp:fixme W0023 intentional atom creation
-    binary_to_atom(<<"beamtalk_class_", (atom_to_binary(ClassName, utf8))/binary>>, utf8).
+    %% BT-4754: memoised per class in `persistent_term` (one read instead of an
+    %% `atom_to_binary/2` + `binary_to_atom/2` pair on every `whereis_class/1`,
+    %% i.e. every class reference and `isKindOf:` liveness probe). Same reasoning
+    %% as `class_object_tag/1` (BT-4758): the name is a pure function of the
+    %% class name, so a concurrent first write stores the same term; entries are
+    %% never erased, matching the atom they hold.
+    Key = {?MODULE, registry_name, ClassName},
+    case persistent_term:get(Key, undefined) of
+        undefined ->
+            % elp:fixme W0023 intentional atom creation
+            Name = binary_to_atom(
+                <<"beamtalk_class_", (atom_to_binary(ClassName, utf8))/binary>>, utf8
+            ),
+            persistent_term:put(Key, Name),
+            Name;
+        Name ->
+            Name
+    end.
 
 %%====================================================================
 %% Process Group & ETS Bootstrap
