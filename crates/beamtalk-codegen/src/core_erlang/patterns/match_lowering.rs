@@ -196,14 +196,14 @@ impl CoreErlangGenerator {
         // binary nested inside a composite pattern is a clean error here,
         // not invalid Core Erlang from the pattern lowering below.
         for arm in arms {
-            if !matches!(arm.pattern, Pattern::Binary { .. }) {
-                if let Some(span) = nested_split_span(&arm.pattern) {
-                    return Err(CodeGenError::UnsupportedFeature {
+            if !matches!(arm.pattern, Pattern::Binary { .. })
+                && let Some(span) = nested_split_span(&arm.pattern)
+            {
+                return Err(CodeGenError::UnsupportedFeature {
                         feature: "a binary segment size naming an earlier segment's variable, or a size expression, is only supported when the binary pattern is the whole match-arm pattern — match the enclosing value first, then match the binary"
                             .to_string(),
                         span: Some(span),
                     });
-                }
             }
         }
 
@@ -502,10 +502,10 @@ impl CoreErlangGenerator {
             .find_map(|site| {
                 let mut found = None;
                 beamtalk_core::ast_walker::walk_expression(site, &mut |e| {
-                    if found.is_none() {
-                        if let Some(field) = self.field_assignment_name(e) {
-                            found = Some((field.to_string(), e.span()));
-                        }
+                    if found.is_none()
+                        && let Some(field) = self.field_assignment_name(e)
+                    {
+                        found = Some((field.to_string(), e.span()));
                     }
                 });
                 found
@@ -633,33 +633,31 @@ impl CoreErlangGenerator {
         }
         let base_state = threading.base_state;
         let base_state_var = leaf::var(base_state.to_string());
-        if self.is_tier2_value_call(body) {
-            if let Expression::MessageSend { receiver, .. } = body {
-                if let Expression::Block(block) = receiver.as_ref() {
-                    // ADR 0111 Addendum 5: tier2 conditional-branch
-                    // inlining inside a `match:` arm — reaches the SAME
-                    // `generate_conditional_branch_inline` single-arm helper
-                    // conditionals.rs's ifTrue:/ifFalse: use, which builds,
-                    // `verify()`s, and `render()`s this arm's real per-frame
-                    // ThreadedIr internally.
-                    let (branch_doc, _branch_final) = self.with_branch_context(|this| {
-                        this.generate_conditional_branch_inline(block)
-                    })?;
-                    return Ok(docvec![
-                        "let StateAcc = ",
-                        base_state_var,
-                        " in ",
-                        branch_doc
-                    ]);
-                }
-                // Any other is_tier2_value_call receiver (self.<field> value,
-                // a named tier2_local_vars identifier, or
-                // a Cascade of safe value: sends) isn't a literal block, so
-                // there's no block to inline here — fall through to
-                // expression_doc below, which already unwraps/discards that
-                // call's own state via close_tier2_value_subexpr_doc.
-            }
+        if self.is_tier2_value_call(body)
+            && let Expression::MessageSend { receiver, .. } = body
+            && let Expression::Block(block) = receiver.as_ref()
+        {
+            // ADR 0111 Addendum 5: tier2 conditional-branch
+            // inlining inside a `match:` arm — reaches the SAME
+            // `generate_conditional_branch_inline` single-arm helper
+            // conditionals.rs's ifTrue:/ifFalse: use, which builds,
+            // `verify()`s, and `render()`s this arm's real per-frame
+            // ThreadedIr internally.
+            let (branch_doc, _branch_final) =
+                self.with_branch_context(|this| this.generate_conditional_branch_inline(block))?;
+            return Ok(docvec![
+                "let StateAcc = ",
+                base_state_var,
+                " in ",
+                branch_doc
+            ]);
         }
+        // Any other is_tier2_value_call receiver (self.<field> value,
+        // a named tier2_local_vars identifier, or
+        // a Cascade of safe value: sends) isn't a literal block, so
+        // there's no block to inline here — fall through to
+        // expression_doc below, which already unwraps/discards that
+        // call's own state via close_tier2_value_subexpr_doc.
         // BT-3982: an evaluated block that is a producer takes the
         // synthetic-block route below, never the raw tuple. BT-4310: so does a
         // conditional whose receiver is sequenced ahead (a loop or fold
@@ -1865,16 +1863,16 @@ impl CoreErlangGenerator {
             if i > 0 {
                 parts.push(Document::Str(","));
             }
-            if let Some(size) = &seg.size {
-                if let Some(name) = size_vars(size).iter().find(|v| bound_here.contains(*v)) {
-                    self.pop_scope();
-                    return Err(CodeGenError::UnsupportedFeature {
-                        feature: format!(
-                            "variable '{name}' cannot be used as a binary segment size here: it is bound by an earlier segment of the same pattern, and Core Erlang requires sizes bound before the pattern (top-level match arms split automatically; nested patterns must match the enclosing value first)"
-                        ),
-                        span: Some(seg.span),
-                    });
-                }
+            if let Some(size) = &seg.size
+                && let Some(name) = size_vars(size).iter().find(|v| bound_here.contains(*v))
+            {
+                self.pop_scope();
+                return Err(CodeGenError::UnsupportedFeature {
+                    feature: format!(
+                        "variable '{name}' cannot be used as a binary segment size here: it is bound by an earlier segment of the same pattern, and Core Erlang requires sizes bound before the pattern (top-level match arms split automatically; nested patterns must match the enclosing value first)"
+                    ),
+                    span: Some(seg.span),
+                });
             }
             parts.push(self.generate_binary_segment(seg)?);
             if let Pattern::Variable(id) = &seg.value {

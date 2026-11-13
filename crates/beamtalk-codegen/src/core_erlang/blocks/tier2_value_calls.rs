@@ -48,10 +48,10 @@ impl CoreErlangGenerator {
             if selector.is_block_invocation() {
                 // A local variable this method itself assigned a Tier 2
                 // block literal to earlier in its own body (tier2_local_vars).
-                if let Expression::Identifier(id) = receiver.as_ref() {
-                    if self.tier2_local_vars.contains(id.name.as_str()) {
-                        return true;
-                    }
+                if let Expression::Identifier(id) = receiver.as_ref()
+                    && self.tier2_local_vars.contains(id.name.as_str())
+                {
+                    return true;
                 }
             }
             // Literal-block-with-mutations receivers stay scoped to the
@@ -68,10 +68,10 @@ impl CoreErlangGenerator {
                 // inline by (`evaluated_block_yields_state_tuple`). A block
                 // that only reads state or calls out is a closure on the cell
                 // (ADR 0137).
-                if let Expression::Block(block) = receiver.as_ref() {
-                    if self.evaluated_block_yields_state_tuple(block) {
-                        return true;
-                    }
+                if let Expression::Block(block) = receiver.as_ref()
+                    && self.evaluated_block_yields_state_tuple(block)
+                {
+                    return true;
                 }
             }
         }
@@ -93,12 +93,11 @@ impl CoreErlangGenerator {
                         sel,
                     )
                 });
-            if all_safe_value_sends {
-                if let Expression::Identifier(id) = underlying_receiver {
-                    if self.tier2_local_vars.contains(id.name.as_str()) {
-                        return true;
-                    }
-                }
+            if all_safe_value_sends
+                && let Expression::Identifier(id) = underlying_receiver
+                && self.tier2_local_vars.contains(id.name.as_str())
+            {
+                return true;
             }
         }
         false
@@ -139,13 +138,12 @@ impl CoreErlangGenerator {
             } => Self::normalize_cascade(receiver, messages).0,
             _ => return None,
         };
-        if let Expression::Identifier(id) = receiver {
-            if let Some(mutations) = self
+        if let Expression::Identifier(id) = receiver
+            && let Some(mutations) = self
                 .tier2_local_var_captured_mutations
                 .get(id.name.as_str())
-            {
-                return Some(mutations.clone());
-            }
+        {
+            return Some(mutations.clone());
         }
         Self::inline_block_captured_mutations(expr)
     }
@@ -269,10 +267,10 @@ impl CoreErlangGenerator {
             // TOP-LEVEL statement path getting the raw `{Result, NewState}`
             // tuple its callers (`BodyExprKind::Tier2ValueCall` handling in
             // this file, `conditionals.rs`, `control_flow/mod.rs`) unpack.
-            if let Expression::Identifier(id) = receiver.as_ref() {
-                if self.tier2_local_vars.contains(id.name.as_str()) {
-                    return self.generate_block_value_call_stateful(receiver, arguments);
-                }
+            if let Expression::Identifier(id) = receiver.as_ref()
+                && self.tier2_local_vars.contains(id.name.as_str())
+            {
+                return self.generate_block_value_call_stateful(receiver, arguments);
             }
             // BT-3982: a literal block receiver is inlined by
             // `generate_block_value_inline_with_mutations`, whose raw tuple
@@ -481,23 +479,23 @@ impl CoreErlangGenerator {
 
         // For on:do: and ensure:, the receiver (try body) is also
         // a block that may contain field mutations.
-        if beamtalk_core::state_threading_selectors::is_exception_selector(sel_str.as_str()) {
-            if let Expression::Block(block) = receiver.as_ref() {
-                // Also covers a nested list-op/counted-loop inside the
-                // try body mutating an outer local even when the try body's own
-                // top-level analysis sees no direct mutation (`analyze_block`
-                // does not propagate writes out of a nested, non-conditional
-                // block — same gap already closed elsewhere for
-                // conditionals and ordinary block arguments below). Without
-                // this, `[nested-loop] ensure: [...]`/`on:do:` would be
-                // classified as pure here even though the nested loop's own
-                // cross-scope collector (this call site's sibling,
-                // `loop_threaded_locals`) correctly detects the
-                // mutation — the same "two decision points disagree" shape as
-                // the do:/collect: self-classification gap this issue fixes.
-                if self.block_arg_needs_threading(block) {
-                    return true;
-                }
+        if beamtalk_core::state_threading_selectors::is_exception_selector(sel_str.as_str())
+            && let Expression::Block(block) = receiver.as_ref()
+        {
+            // Also covers a nested list-op/counted-loop inside the
+            // try body mutating an outer local even when the try body's own
+            // top-level analysis sees no direct mutation (`analyze_block`
+            // does not propagate writes out of a nested, non-conditional
+            // block — same gap already closed elsewhere for
+            // conditionals and ordinary block arguments below). Without
+            // this, `[nested-loop] ensure: [...]`/`on:do:` would be
+            // classified as pure here even though the nested loop's own
+            // cross-scope collector (this call site's sibling,
+            // `loop_threaded_locals`) correctly detects the
+            // mutation — the same "two decision points disagree" shape as
+            // the do:/collect: self-classification gap this issue fixes.
+            if self.block_arg_needs_threading(block) {
+                return true;
             }
         }
 
@@ -532,10 +530,10 @@ impl CoreErlangGenerator {
                 // branch block itself has no direct mutation (`analyze_block`
                 // does not propagate writes out of nested blocks) — e.g.
                 // `flag ifTrue: [ items do: [:x | sum := sum + x] ]`.
-                if let Expression::Block(block) = arg {
-                    if self.block_arg_needs_threading(block) {
-                        return true;
-                    }
+                if let Expression::Block(block) = arg
+                    && self.block_arg_needs_threading(block)
+                {
+                    return true;
                 }
             }
             return false;

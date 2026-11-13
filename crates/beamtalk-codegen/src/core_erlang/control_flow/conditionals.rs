@@ -2157,10 +2157,8 @@ impl CoreErlangGenerator {
         }
         // ADR 0131 Phase 2d (BT-3798): a `Dictionary` lookup whose handler
         // writes an outer local, a producer here (never `needs_threading`).
-        if root_producer {
-            if let Some(tv) = self.generate_lookup_producer(expr, tail)? {
-                return Ok(Some(tv));
-            }
+        if root_producer && let Some(tv) = self.generate_lookup_producer(expr, tail)? {
+            return Ok(Some(tv));
         }
         // BT-3841: an evaluated literal block (`[...] value`) that is a
         // local-threading producer here is a conditional whose one arm always
@@ -2969,85 +2967,85 @@ impl CoreErlangGenerator {
             // method does not have — so a class-method self-send here falls
             // to the C12 catch-all below instead, unchanged from before this
             // fix.
-            if let BodyExprKind::EarlyReturn = kind {
-                if let Expression::Return { value, .. } = expr {
-                    if !self.threads_no_actor_state()
-                        && matches!(
-                            self.classify_body_expr(value),
-                            BodyExprKind::DispatchingSelfSend
+            if let BodyExprKind::EarlyReturn = kind
+                && let Expression::Return { value, .. } = expr
+            {
+                if !self.threads_no_actor_state()
+                    && matches!(
+                        self.classify_body_expr(value),
+                        BodyExprKind::DispatchingSelfSend
+                    )
+                {
+                    // ADR 0118 phase 2a: `threaded_expression`'s
+                    // producer path (`is_prelude_producer`, matching this
+                    // arm's own `is_dispatching_actor_self_send`
+                    // classification exactly, per C12b's identical swap
+                    // above) replaces `dispatch_self_send_as_bind` —
+                    // same `Statement`+`Bind` pair, plus (a genuine fix)
+                    // `value`'s own arguments are now sequenced too
+                    // (`^self log: (self nextId)`), which the old direct
+                    // call never threaded.
+                    let tv = self.threaded_expression(value, frame)?;
+                    stmts.extend(tv.prelude);
+                    let dispatch_value_doc = self.threaded_value_doc(&tv.value);
+                    let nlr_token = self.current_nlr_token().cloned().ok_or_else(|| {
+                        CodeGenError::Internal(
+                            "BT-3374: EarlyReturn classification implies an active NLR \
+                                 context, but none is set"
+                                .to_string(),
                         )
-                    {
-                        // ADR 0118 phase 2a: `threaded_expression`'s
-                        // producer path (`is_prelude_producer`, matching this
-                        // arm's own `is_dispatching_actor_self_send`
-                        // classification exactly, per C12b's identical swap
-                        // above) replaces `dispatch_self_send_as_bind` —
-                        // same `Statement`+`Bind` pair, plus (a genuine fix)
-                        // `value`'s own arguments are now sequenced too
-                        // (`^self log: (self nextId)`), which the old direct
-                        // call never threaded.
-                        let tv = self.threaded_expression(value, frame)?;
-                        stmts.extend(tv.prelude);
-                        let dispatch_value_doc = self.threaded_value_doc(&tv.value);
-                        let nlr_token = self.current_nlr_token().cloned().ok_or_else(|| {
-                            CodeGenError::Internal(
-                                "BT-3374: EarlyReturn classification implies an active NLR \
-                                 context, but none is set"
-                                    .to_string(),
-                            )
-                        })?;
-                        let new_state = self.current_state_var();
-                        // BT-4535: the node stores `new_state` to the cell
-                        // before the throw where the cell is live.
-                        let (throw, throw_var) = self.nlr_throw_stmt(
-                            nlr_token,
-                            ValueRef::Doc(dispatch_value_doc),
-                            new_state,
-                            span,
-                        );
-                        stmts.push(throw);
-                        if is_last {
-                            last_result = Some(ValueRef::Var(throw_var));
-                        }
-                        continue;
+                    })?;
+                    let new_state = self.current_state_var();
+                    // BT-4535: the node stores `new_state` to the cell
+                    // before the throw where the cell is live.
+                    let (throw, throw_var) = self.nlr_throw_stmt(
+                        nlr_token,
+                        ValueRef::Doc(dispatch_value_doc),
+                        new_state,
+                        span,
+                    );
+                    stmts.push(throw);
+                    if is_last {
+                        last_result = Some(ValueRef::Var(throw_var));
                     }
+                    continue;
+                }
 
-                    // BT-3495: `^ (self.field := ...)` — the RHS is itself
-                    // a field write, at any parenthesization depth (the
-                    // same "value-carrying parent" shape BT-3493 fixed for
-                    // `r := (self.x := ...)`, but here the wrapper is
-                    // `Return` instead of a local assignment). Lower it
-                    // through the SAME real-`Bind` producer C1
-                    // (`lower_field_assignment_bind`) uses for a bare
-                    // `self.field := ...` statement, then throw the NLR
-                    // tuple carrying the assigned value — mirroring C0b's
-                    // `DispatchingSelfSend` throw immediately above, just
-                    // with the field write's own value in place of the
-                    // self-send's result.
-                    if let Some(field_write) = self.local_assign_field_write(value) {
-                        let field_val_var =
-                            self.lower_field_assignment_bind(field_write, frame, span, &mut stmts)?;
-                        let nlr_token = self.current_nlr_token().cloned().ok_or_else(|| {
-                            CodeGenError::Internal(
-                                "BT-3495: EarlyReturn classification implies an active NLR \
+                // BT-3495: `^ (self.field := ...)` — the RHS is itself
+                // a field write, at any parenthesization depth (the
+                // same "value-carrying parent" shape BT-3493 fixed for
+                // `r := (self.x := ...)`, but here the wrapper is
+                // `Return` instead of a local assignment). Lower it
+                // through the SAME real-`Bind` producer C1
+                // (`lower_field_assignment_bind`) uses for a bare
+                // `self.field := ...` statement, then throw the NLR
+                // tuple carrying the assigned value — mirroring C0b's
+                // `DispatchingSelfSend` throw immediately above, just
+                // with the field write's own value in place of the
+                // self-send's result.
+                if let Some(field_write) = self.local_assign_field_write(value) {
+                    let field_val_var =
+                        self.lower_field_assignment_bind(field_write, frame, span, &mut stmts)?;
+                    let nlr_token = self.current_nlr_token().cloned().ok_or_else(|| {
+                        CodeGenError::Internal(
+                            "BT-3495: EarlyReturn classification implies an active NLR \
                                  context, but none is set"
-                                    .to_string(),
-                            )
-                        })?;
-                        let new_state = self.current_state_var();
-                        // BT-4535: as above.
-                        let (throw, throw_var) = self.nlr_throw_stmt(
-                            nlr_token,
-                            ValueRef::Var(field_val_var),
-                            new_state,
-                            span,
-                        );
-                        stmts.push(throw);
-                        if is_last {
-                            last_result = Some(ValueRef::Var(throw_var));
-                        }
-                        continue;
+                                .to_string(),
+                        )
+                    })?;
+                    let new_state = self.current_state_var();
+                    // BT-4535: as above.
+                    let (throw, throw_var) = self.nlr_throw_stmt(
+                        nlr_token,
+                        ValueRef::Var(field_val_var),
+                        new_state,
+                        span,
+                    );
+                    stmts.push(throw);
+                    if is_last {
+                        last_result = Some(ValueRef::Var(throw_var));
                     }
+                    continue;
                 }
             }
 
@@ -3160,76 +3158,66 @@ impl CoreErlangGenerator {
                 // RHS with mutations but no local producer still answers a
                 // closed `{Value, State}` tuple here.
                 BodyExprKind::FieldAssignmentControlFlow => {
-                    if let Expression::Assignment { target, value, .. } = expr {
-                        if let Expression::FieldAccess { field, .. } = target.as_ref() {
-                            if self.thread_ahead_unwraps(value)
-                                || self.expr_has_local_producer(value)
-                            {
-                                let val_var = self
-                                    .lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
-                                if is_last {
-                                    last_result = Some(ValueRef::Var(val_var));
-                                }
-                                continue;
-                            }
-                            let thread_scope = self.thread_ahead(value, &mut stmts, frame)?;
-                            let rhs_doc = self.expression_doc(value)?;
-                            self.finish_precompiled_scope(thread_scope)?;
-                            // BT-4369: a field write in an arm of a loop body.
-                            self.note_field_write(&field.name, span);
-                            let tuple_var = self.fresh_temp_var("CfTuple");
-                            let val_var = self.fresh_temp_var("CfVal");
-                            let rhs_state = self.fresh_temp_var("CfState");
-                            let source_version = self.state_version();
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec![
-                                    "let ",
-                                    leaf::var(tuple_var.clone()),
-                                    " = ",
-                                    rhs_doc,
-                                    " in let ",
-                                    leaf::var(val_var.clone()),
-                                    " = call 'erlang':'element'(1, ",
-                                    leaf::var(tuple_var.clone()),
-                                    ") in ",
-                                ],
-                                span,
-                            ));
-                            let gensym_state =
-                                VersionedVar::new(VersionPrefix::Gensym(rhs_state), 1, frame);
-                            stmts.push(ThreadedStmt::Bind {
-                                target: gensym_state.clone(),
-                                source: VersionedVar::new(
-                                    VersionPrefix::State,
-                                    source_version,
-                                    frame,
-                                ),
-                                op: BindOp::Direct(ValueRef::Doc(docvec![
-                                    "call 'erlang':'element'(2, ",
-                                    leaf::var(tuple_var),
-                                    ")",
-                                ])),
-                                span,
-                            });
-                            let _ = self.next_state_var();
-                            let target_version = self.state_version();
-                            stmts.push(ThreadedStmt::Bind {
-                                target: VersionedVar::new(
-                                    VersionPrefix::State,
-                                    target_version,
-                                    frame,
-                                ),
-                                source: gensym_state,
-                                op: BindOp::Put {
-                                    field: field.name.to_string(),
-                                    value: ValueRef::Var(val_var.clone()),
-                                },
-                                span,
-                            });
-                            stmts.extend(self.construct_locals_in_place(value, span));
+                    if let Expression::Assignment { target, value, .. } = expr
+                        && let Expression::FieldAccess { field, .. } = target.as_ref()
+                    {
+                        if self.thread_ahead_unwraps(value) || self.expr_has_local_producer(value) {
+                            let val_var =
+                                self.lower_field_assignment_bind(expr, frame, span, &mut stmts)?;
                             if is_last {
                                 last_result = Some(ValueRef::Var(val_var));
                             }
+                            continue;
+                        }
+                        let thread_scope = self.thread_ahead(value, &mut stmts, frame)?;
+                        let rhs_doc = self.expression_doc(value)?;
+                        self.finish_precompiled_scope(thread_scope)?;
+                        // BT-4369: a field write in an arm of a loop body.
+                        self.note_field_write(&field.name, span);
+                        let tuple_var = self.fresh_temp_var("CfTuple");
+                        let val_var = self.fresh_temp_var("CfVal");
+                        let rhs_state = self.fresh_temp_var("CfState");
+                        let source_version = self.state_version();
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(tuple_var.clone()),
+                                " = ",
+                                rhs_doc,
+                                " in let ",
+                                leaf::var(val_var.clone()),
+                                " = call 'erlang':'element'(1, ",
+                                leaf::var(tuple_var.clone()),
+                                ") in ",
+                            ],
+                            span,
+                        ));
+                        let gensym_state =
+                            VersionedVar::new(VersionPrefix::Gensym(rhs_state), 1, frame);
+                        stmts.push(ThreadedStmt::Bind {
+                            target: gensym_state.clone(),
+                            source: VersionedVar::new(VersionPrefix::State, source_version, frame),
+                            op: BindOp::Direct(ValueRef::Doc(docvec![
+                                "call 'erlang':'element'(2, ",
+                                leaf::var(tuple_var),
+                                ")",
+                            ])),
+                            span,
+                        });
+                        let _ = self.next_state_var();
+                        let target_version = self.state_version();
+                        stmts.push(ThreadedStmt::Bind {
+                            target: VersionedVar::new(VersionPrefix::State, target_version, frame),
+                            source: gensym_state,
+                            op: BindOp::Put {
+                                field: field.name.to_string(),
+                                value: ValueRef::Var(val_var.clone()),
+                            },
+                            span,
+                        });
+                        stmts.extend(self.construct_locals_in_place(value, span));
+                        if is_last {
+                            last_result = Some(ValueRef::Var(val_var));
                         }
                     }
                 }

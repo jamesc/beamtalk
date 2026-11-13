@@ -113,10 +113,10 @@ impl CoreErlangGenerator {
             if seg.value.binary_literal().is_none() {
                 operands.push(&seg.value);
             }
-            if let Some(size) = seg.size.as_deref() {
-                if binary_literal_size(size).is_none() {
-                    operands.push(size);
-                }
+            if let Some(size) = seg.size.as_deref()
+                && binary_literal_size(size).is_none()
+            {
+                operands.push(size);
             }
         }
         let (preamble, docs) = self.thread_subexprs(&operands, "BinOp")?;

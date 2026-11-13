@@ -218,10 +218,10 @@ impl CoreErlangGenerator {
         }
 
         // Generate class-side method standalone functions
-        if let Some(class) = module.classes.first() {
-            if !class.class_methods.is_empty() {
-                docs.push(self.generate_class_method_functions(class)?);
-            }
+        if let Some(class) = module.classes.first()
+            && !class.class_methods.is_empty()
+        {
+            docs.push(self.generate_class_method_functions(class)?);
         }
 
         // __beamtalk_meta/0 and register_class/0

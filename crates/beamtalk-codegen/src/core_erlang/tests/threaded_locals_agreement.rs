@@ -47,10 +47,10 @@ impl SourceSets {
     }
 
     fn define(&mut self, name: &str) {
-        if !self.bound(name) {
-            if let Some(frame) = self.frames.last_mut() {
-                frame.insert(name.to_string());
-            }
+        if !self.bound(name)
+            && let Some(frame) = self.frames.last_mut()
+        {
+            frame.insert(name.to_string());
         }
     }
 

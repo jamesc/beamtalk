@@ -893,34 +893,31 @@ impl CoreErlangGenerator {
                 entries.push(Self::meta_method_entry(&standalone.method, type_params));
             }
         }
-        if let Some(auto) = auto {
-            if let Some(kw_sel) = &auto.keyword_constructor {
-                let arity = class.state.len();
-                // Hash long keyword constructor selectors to stay within
-                // Erlang's 255-char atom limit. The meta selector must match what
-                // class_send emits so runtime dispatch finds the method.
-                let safe_sel =
-                    crate::core_erlang::selector_mangler::safe_class_method_selector(kw_sel);
-                entries.push((
-                    safe_sel,
-                    arity,
-                    Self::synthesized_constructor_return_repr(class),
-                    class
-                        .state
-                        .iter()
-                        .map(|slot| {
-                            beamtalk_core::synthetic_selectors::synthesized_constructor_param_type(
-                                slot,
-                            )
+        if let Some(auto) = auto
+            && let Some(kw_sel) = &auto.keyword_constructor
+        {
+            let arity = class.state.len();
+            // Hash long keyword constructor selectors to stay within
+            // Erlang's 255-char atom limit. The meta selector must match what
+            // class_send emits so runtime dispatch finds the method.
+            let safe_sel = crate::core_erlang::selector_mangler::safe_class_method_selector(kw_sel);
+            entries.push((
+                safe_sel,
+                arity,
+                Self::synthesized_constructor_return_repr(class),
+                class
+                    .state
+                    .iter()
+                    .map(|slot| {
+                        beamtalk_core::synthetic_selectors::synthesized_constructor_param_type(slot)
                             .map_or(MetaTypeRepr::None, |dt| {
                                 Self::declared_type_to_meta_repr(&dt, type_params)
                             })
-                        })
-                        .collect(),
-                    sealed,
-                    false,
-                ));
-            }
+                    })
+                    .collect(),
+                sealed,
+                false,
+            ));
         }
         // Register the synthesized supervisionSpec so class dispatch finds it locally
         // rather than walking the chain to Actor's version (which always returns #temporary).

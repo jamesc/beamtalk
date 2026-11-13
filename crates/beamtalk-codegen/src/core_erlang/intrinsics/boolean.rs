@@ -79,36 +79,37 @@ impl CoreErlangGenerator {
         // is actually needed; otherwise falls through to ordinary generic
         // dispatch so the ordinary (non-mutating) codegen shape is
         // unchanged.
-        if let MessageSelector::Keyword(parts) = selector {
-            if parts.len() == 1 && arguments.len() == 1 {
-                let kw = parts[0].keyword.as_str();
-                if kw == "and:" || kw == "or:" {
-                    if let Expression::Block(block) = &arguments[0] {
-                        // Same threading gate as IfTrue/IfFalse below, shared
-                        // with `compile_conditional_receiver` so the two can never disagree about
-                        // whether a given `and:`/`or:` needs the inline
-                        // mutation-threading path — see
-                        // `and_or_needs_mutation_threading`'s doc comment.
-                        let needs_threading = self.and_or_needs_mutation_threading(receiver, block);
-                        if needs_threading {
-                            if self.is_repl_mode() {
-                                self.set_repl_loop_mutated(true);
-                            }
-                            let sel = if kw == "and:" {
-                                SoloBoolean::And
-                            } else {
-                                SoloBoolean::Or
-                            };
-                            let doc = self.generate_solo_boolean_with_mutations_tuple(
-                                sel,
-                                receiver,
-                                block,
-                                self.conditional_scratch(self.current_frame()),
-                                false,
-                            )?;
-                            return Ok(Some(doc));
-                        }
+        if let MessageSelector::Keyword(parts) = selector
+            && parts.len() == 1
+            && arguments.len() == 1
+        {
+            let kw = parts[0].keyword.as_str();
+            if (kw == "and:" || kw == "or:")
+                && let Expression::Block(block) = &arguments[0]
+            {
+                // Same threading gate as IfTrue/IfFalse below, shared
+                // with `compile_conditional_receiver` so the two can never disagree about
+                // whether a given `and:`/`or:` needs the inline
+                // mutation-threading path — see
+                // `and_or_needs_mutation_threading`'s doc comment.
+                let needs_threading = self.and_or_needs_mutation_threading(receiver, block);
+                if needs_threading {
+                    if self.is_repl_mode() {
+                        self.set_repl_loop_mutated(true);
                     }
+                    let sel = if kw == "and:" {
+                        SoloBoolean::And
+                    } else {
+                        SoloBoolean::Or
+                    };
+                    let doc = self.generate_solo_boolean_with_mutations_tuple(
+                        sel,
+                        receiver,
+                        block,
+                        self.conditional_scratch(self.current_frame()),
+                        false,
+                    )?;
+                    return Ok(Some(doc));
                 }
             }
         }
@@ -293,24 +294,23 @@ impl CoreErlangGenerator {
         // `and:`/`or:` are not `WellKnownSelector`s (see
         // `try_generate_boolean_protocol`'s own `and:`/`or:` arm); match the
         // keyword shape directly, as it does.
-        if let MessageSelector::Keyword(parts) = selector {
-            if parts.len() == 1 && arguments.len() == 1 {
-                let kw = parts[0].keyword.as_str();
-                if kw == "and:" || kw == "or:" {
-                    if let Expression::Block(block) = &arguments[0] {
-                        if block.parameters.is_empty()
-                            && !self.and_or_needs_mutation_threading(receiver, block)
-                            && !self.pure_blocks_hold_bracketed_call(&[block])
-                        {
-                            let sel = if kw == "and:" {
-                                SoloBoolean::And
-                            } else {
-                                SoloBoolean::Or
-                            };
-                            return Some(PureBooleanShape::Solo(sel, block));
-                        }
-                    }
-                }
+        if let MessageSelector::Keyword(parts) = selector
+            && parts.len() == 1
+            && arguments.len() == 1
+        {
+            let kw = parts[0].keyword.as_str();
+            if (kw == "and:" || kw == "or:")
+                && let Expression::Block(block) = &arguments[0]
+                && block.parameters.is_empty()
+                && !self.and_or_needs_mutation_threading(receiver, block)
+                && !self.pure_blocks_hold_bracketed_call(&[block])
+            {
+                let sel = if kw == "and:" {
+                    SoloBoolean::And
+                } else {
+                    SoloBoolean::Or
+                };
+                return Some(PureBooleanShape::Solo(sel, block));
             }
         }
 
@@ -318,47 +318,42 @@ impl CoreErlangGenerator {
         // sealed stdlib classes, answered by their `dispatch/3` arm before any
         // extension, so a `true`/`false` receiver's answer is fixed. Any
         // other receiver takes the wildcard arm's ordinary send.
-        if let MessageSelector::Unary(name) = selector {
-            if name.as_str() == "not" && arguments.is_empty() {
-                return Some(PureBooleanShape::Not);
-            }
+        if let MessageSelector::Unary(name) = selector
+            && name.as_str() == "not"
+            && arguments.is_empty()
+        {
+            return Some(PureBooleanShape::Not);
         }
 
         match selector.well_known() {
             Some(WellKnownSelector::IfTrue) if arguments.len() == 1 => {
-                if let Expression::Block(block) = &arguments[0] {
-                    if block.parameters.is_empty()
-                        && !self.conditional_needs_mutation_threading(receiver, &[block])
-                        && !self.pure_blocks_hold_bracketed_call(&[block])
-                    {
-                        return Some(PureBooleanShape::Solo(SoloBoolean::IfTrue, block));
-                    }
+                if let Expression::Block(block) = &arguments[0]
+                    && block.parameters.is_empty()
+                    && !self.conditional_needs_mutation_threading(receiver, &[block])
+                    && !self.pure_blocks_hold_bracketed_call(&[block])
+                {
+                    return Some(PureBooleanShape::Solo(SoloBoolean::IfTrue, block));
                 }
             }
             Some(WellKnownSelector::IfFalse) if arguments.len() == 1 => {
-                if let Expression::Block(block) = &arguments[0] {
-                    if block.parameters.is_empty()
-                        && !self.conditional_needs_mutation_threading(receiver, &[block])
-                        && !self.pure_blocks_hold_bracketed_call(&[block])
-                    {
-                        return Some(PureBooleanShape::Solo(SoloBoolean::IfFalse, block));
-                    }
+                if let Expression::Block(block) = &arguments[0]
+                    && block.parameters.is_empty()
+                    && !self.conditional_needs_mutation_threading(receiver, &[block])
+                    && !self.pure_blocks_hold_bracketed_call(&[block])
+                {
+                    return Some(PureBooleanShape::Solo(SoloBoolean::IfFalse, block));
                 }
             }
             Some(WellKnownSelector::IfTrueIfFalse) if arguments.len() == 2 => {
                 if let (Expression::Block(true_block), Expression::Block(false_block)) =
                     (&arguments[0], &arguments[1])
+                    && true_block.parameters.is_empty()
+                    && false_block.parameters.is_empty()
+                    && !self
+                        .conditional_needs_mutation_threading(receiver, &[true_block, false_block])
+                    && !self.pure_blocks_hold_bracketed_call(&[true_block, false_block])
                 {
-                    if true_block.parameters.is_empty()
-                        && false_block.parameters.is_empty()
-                        && !self.conditional_needs_mutation_threading(
-                            receiver,
-                            &[true_block, false_block],
-                        )
-                        && !self.pure_blocks_hold_bracketed_call(&[true_block, false_block])
-                    {
-                        return Some(PureBooleanShape::IfTrueIfFalse(true_block, false_block));
-                    }
+                    return Some(PureBooleanShape::IfTrueIfFalse(true_block, false_block));
                 }
             }
             _ => {}

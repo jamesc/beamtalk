@@ -158,8 +158,7 @@ fn build_source_map(
     for pair in pairs {
         if let (Expression::Literal(Literal::Symbol(sym), _), Expression::Block(block)) =
             (&pair.key, &pair.value)
-        {
-            if let Some(source) = block_method_source(
+            && let Some(source) = block_method_source(
                 sym,
                 block,
                 is_class_method,
@@ -167,13 +166,13 @@ fn build_source_map(
                 scope,
                 pipeline_sends,
                 literal_comments,
-            ) {
-                source_pairs.push(MapPair {
-                    key: pair.key.clone(),
-                    value: Expression::Literal(Literal::String(source.into()), pair.span),
-                    span: pair.span,
-                });
-            }
+            )
+        {
+            source_pairs.push(MapPair {
+                key: pair.key.clone(),
+                value: Expression::Literal(Literal::String(source.into()), pair.span),
+                span: pair.span,
+            });
         }
     }
     if source_pairs.is_empty() {

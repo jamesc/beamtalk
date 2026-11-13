@@ -881,10 +881,10 @@ impl CoreErlangGenerator {
             || beamtalk_core::semantic_analysis::block_facts::is_result_try_do(receiver, &sel)
         {
             let mut blocks: Vec<&beamtalk_core::ast::Block> = Vec::new();
-            if beamtalk_core::state_threading_selectors::is_exception_selector(&sel) {
-                if let Expression::Block(b) = receiver.as_ref() {
-                    blocks.push(b);
-                }
+            if beamtalk_core::state_threading_selectors::is_exception_selector(&sel)
+                && let Expression::Block(b) = receiver.as_ref()
+            {
+                blocks.push(b);
             }
             for arg in arguments {
                 if let Expression::Block(b) = arg {
@@ -942,21 +942,21 @@ impl CoreErlangGenerator {
 
         // A `whileTrue:`/`whileFalse:` condition block is part of the loop and
         // writes outer locals like its body does.
-        if matches!(sel.as_str(), "whileTrue:" | "whileFalse:") {
-            if let Expression::Block(cond) = receiver.as_ref() {
-                let cond_analysis = facts
-                    .block_profile(cond.id)
-                    .cloned()
-                    .unwrap_or_else(|| block_analysis::analyze_block(cond));
-                let cond_params: std::collections::HashSet<String> =
-                    cond.parameters.iter().map(|p| p.name.to_string()).collect();
-                for v in cond_analysis
-                    .captured_reads
-                    .intersection(&cond_analysis.local_writes)
-                {
-                    if !cond_params.contains(v.as_str()) {
-                        out.insert(v.clone());
-                    }
+        if matches!(sel.as_str(), "whileTrue:" | "whileFalse:")
+            && let Expression::Block(cond) = receiver.as_ref()
+        {
+            let cond_analysis = facts
+                .block_profile(cond.id)
+                .cloned()
+                .unwrap_or_else(|| block_analysis::analyze_block(cond));
+            let cond_params: std::collections::HashSet<String> =
+                cond.parameters.iter().map(|p| p.name.to_string()).collect();
+            for v in cond_analysis
+                .captured_reads
+                .intersection(&cond_analysis.local_writes)
+            {
+                if !cond_params.contains(v.as_str()) {
+                    out.insert(v.clone());
                 }
             }
         }

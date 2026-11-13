@@ -703,12 +703,10 @@ impl CoreErlangGenerator {
         if selector
             .well_known()
             .is_some_and(beamtalk_core::ast::well_known::WellKnownSelector::is_block_value)
+            && let Expression::Block(block) = receiver
+            && self.value_block_needs_threading(&self.block_profile_or_analyze(block))
         {
-            if let Expression::Block(block) = receiver {
-                if self.value_block_needs_threading(&self.block_profile_or_analyze(block)) {
-                    return UserCodeCall::No;
-                }
-            }
+            return UserCodeCall::No;
         }
         let blocks: Vec<&beamtalk_core::ast::Block> = std::iter::once(receiver)
             .chain(arguments.iter())

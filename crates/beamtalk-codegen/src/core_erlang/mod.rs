@@ -285,13 +285,13 @@ impl CoreErlangGenerator {
                 } = target.as_ref()
                 {
                     // Verify the receiver is 'self'
-                    if let Expression::Identifier(recv_id) = receiver.as_ref() {
-                        if recv_id.name == "self" {
-                            // Field assignment: self.field := value
-                            // Generate state-threaded update:
-                            // let _Val = <value> in let State{n} = maps:put('field', _Val, State{n-1}) in _Val
-                            return self.generate_field_assignment(&field.name, value);
-                        }
+                    if let Expression::Identifier(recv_id) = receiver.as_ref()
+                        && recv_id.name == "self"
+                    {
+                        // Field assignment: self.field := value
+                        // Generate state-threaded update:
+                        // let _Val = <value> in let State{n} = maps:put('field', _Val, State{n-1}) in _Val
+                        return self.generate_field_assignment(&field.name, value);
                     }
                     // Field assignment to non-self receiver (e.g., other.field := value)
                     // This is not supported in the current implementation - actors can
@@ -308,18 +308,18 @@ impl CoreErlangGenerator {
                 // `threaded_expression` as a `LocalRebind` of the enclosing
                 // frame, so reaching here with one drops the write — reported,
                 // never silent (ADR 0131 §4, `UnthreadedLocalAssignment`).
-                if let Expression::Identifier(id) = target.as_ref() {
-                    if self.value_assign_sites.contains(&expr.span()) {
-                        let errors = [threaded_ir::VerifyError::UnthreadedLocalAssignment {
-                            local: id.name.to_string(),
-                            span: expr.span(),
-                        }];
-                        self.report_threaded_ir_verify_errors(
-                            &errors,
-                            "a value-position local assignment must be lowered as a producer",
-                            expr.span(),
-                        );
-                    }
+                if let Expression::Identifier(id) = target.as_ref()
+                    && self.value_assign_sites.contains(&expr.span())
+                {
+                    let errors = [threaded_ir::VerifyError::UnthreadedLocalAssignment {
+                        local: id.name.to_string(),
+                        span: expr.span(),
+                    }];
+                    self.report_threaded_ir_verify_errors(
+                        &errors,
+                        "a value-position local assignment must be lowered as a producer",
+                        expr.span(),
+                    );
                 }
                 #[cfg(any(test, feature = "test"))]
                 dropped_assignment_probe::record(expr.span());

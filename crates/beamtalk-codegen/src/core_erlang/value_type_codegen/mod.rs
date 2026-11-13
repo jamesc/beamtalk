@@ -408,22 +408,22 @@ impl CoreErlangGenerator {
             let sc = class.superclass_name();
             sc != "Value" && sc != "none"
         };
-        if let Some(ref auto) = auto_methods {
-            if let Some(ref kw_sel) = auto.keyword_constructor {
-                let slots: Vec<String> = class
-                    .state
-                    .iter()
-                    .map(|s| s.name.name.to_string())
-                    .collect();
-                docs.push(Self::generate_keyword_constructor_fn(
-                    &class_name_for_kw,
-                    kw_sel,
-                    &slots,
-                    is_sub_subclass,
-                    &self.module_name,
-                ));
-                docs.push(Document::Str("\n"));
-            }
+        if let Some(ref auto) = auto_methods
+            && let Some(ref kw_sel) = auto.keyword_constructor
+        {
+            let slots: Vec<String> = class
+                .state
+                .iter()
+                .map(|s| s.name.name.to_string())
+                .collect();
+            docs.push(Self::generate_keyword_constructor_fn(
+                &class_name_for_kw,
+                kw_sel,
+                &slots,
+                is_sub_subclass,
+                &self.module_name,
+            ));
+            docs.push(Document::Str("\n"));
         }
 
         // Register value type class with the class system for dynamic dispatch
@@ -618,37 +618,35 @@ impl CoreErlangGenerator {
         if class.class_kind == ClassKind::Value
             && superclass_name != "Value"
             && superclass_name != "none"
+            && let Some(super_mod) = self.superclass_module_name(superclass_name)
         {
-            if let Some(super_mod) = self.superclass_module_name(superclass_name) {
-                let mut own_field_parts: Vec<Document<'static>> = Vec::new();
+            let mut own_field_parts: Vec<Document<'static>> = Vec::new();
+            own_field_parts.push(docvec![
+                "'$beamtalk_class' => ",
+                leaf::atom(class_name.clone()),
+            ]);
+            // BT-4591: defaults that run code are bound in source order.
+            let states: Vec<&beamtalk_core::ast::StateDeclaration> = class.state.iter().collect();
+            let (prelude, values) = self.thread_default_values(&states)?;
+            for (field, default_code) in class.state.iter().zip(values) {
                 own_field_parts.push(docvec![
-                    "'$beamtalk_class' => ",
-                    leaf::atom(class_name.clone()),
-                ]);
-                // BT-4591: defaults that run code are bound in source order.
-                let states: Vec<&beamtalk_core::ast::StateDeclaration> =
-                    class.state.iter().collect();
-                let (prelude, values) = self.thread_default_values(&states)?;
-                for (field, default_code) in class.state.iter().zip(values) {
-                    own_field_parts.push(docvec![
-                        leaf::atom(field.name.name.clone()),
-                        " => ",
-                        default_code,
-                    ]);
-                }
-                return Ok(docvec![
-                    "'new'/0 = fun () ->\n",
-                    "    let ParentState = call ",
-                    leaf::atom(super_mod),
-                    ":'new'() in\n",
-                    "    ",
-                    prelude,
-                    "call 'maps':'merge'(ParentState, ~{",
-                    join(own_field_parts, &Document::Str(", ")),
-                    "}~)\n",
-                    "\n",
+                    leaf::atom(field.name.name.clone()),
+                    " => ",
+                    default_code,
                 ]);
             }
+            return Ok(docvec![
+                "'new'/0 = fun () ->\n",
+                "    let ParentState = call ",
+                leaf::atom(super_mod),
+                ":'new'() in\n",
+                "    ",
+                prelude,
+                "call 'maps':'merge'(ParentState, ~{",
+                join(own_field_parts, &Document::Str(", ")),
+                "}~)\n",
+                "\n",
+            ]);
         }
 
         // Direct Value subclass: build a flat map with all own fields.

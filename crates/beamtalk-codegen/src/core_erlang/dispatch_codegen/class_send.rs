@@ -212,10 +212,11 @@ impl CoreErlangGenerator {
         // `Module:'new'()` call, behind the same static call key as every
         // other guarded class send (BT-4409). (`new:` stays on `class_send`:
         // its chain verdict is decided at run time, on the dynamic path.)
-        if raw_selector == "new" && arguments.is_empty() {
-            if let Some(module_name) = self.direct_new0_module(class_name) {
-                return Ok(self.guarded_direct_new_doc(class_name, module_name));
-            }
+        if raw_selector == "new"
+            && arguments.is_empty()
+            && let Some(module_name) = self.direct_new0_module(class_name)
+        {
+            return Ok(self.guarded_direct_new_doc(class_name, module_name));
         }
 
         if let Some((module_name, primitive)) =

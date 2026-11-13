@@ -198,29 +198,29 @@ impl CoreErlangGenerator {
                     parts.push(self.expression_doc(value_expr)?);
                 }
             } else if Self::is_local_var_assignment(body_expr) {
-                if let Expression::Assignment { target, value, .. } = body_expr {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        // a threading-construct RHS returns a `{value, StateAcc}`
-                        // tuple. Bind the target to element 1 and rebind the threaded locals
-                        // from the StateAcc, so both the assigned value and the mutated locals
-                        // are visible to later statements in this branch — rather than binding
-                        // the target to the raw tuple.
-                        if self.expr_yields_vt_threaded_tuple(value) {
-                            self.emit_vt_threaded_local_assignment(&id.name, value, &mut parts)?;
-                        } else {
-                            let core_var = self
-                                .lookup_var(&id.name)
-                                .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-                            let val_doc = self.expression_doc(value)?;
-                            parts.push(docvec![
-                                "let ",
-                                leaf::var(core_var.clone()),
-                                " = ",
-                                val_doc,
-                                " in ",
-                            ]);
-                            self.bind_var(&id.name, &core_var);
-                        }
+                if let Expression::Assignment { target, value, .. } = body_expr
+                    && let Expression::Identifier(id) = target.as_ref()
+                {
+                    // a threading-construct RHS returns a `{value, StateAcc}`
+                    // tuple. Bind the target to element 1 and rebind the threaded locals
+                    // from the StateAcc, so both the assigned value and the mutated locals
+                    // are visible to later statements in this branch — rather than binding
+                    // the target to the raw tuple.
+                    if self.expr_yields_vt_threaded_tuple(value) {
+                        self.emit_vt_threaded_local_assignment(&id.name, value, &mut parts)?;
+                    } else {
+                        let core_var = self
+                            .lookup_var(&id.name)
+                            .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                        let val_doc = self.expression_doc(value)?;
+                        parts.push(docvec![
+                            "let ",
+                            leaf::var(core_var.clone()),
+                            " = ",
+                            val_doc,
+                            " in ",
+                        ]);
+                        self.bind_var(&id.name, &core_var);
                     }
                 }
             } else if self.expr_yields_vt_threaded_tuple(body_expr) {
@@ -661,13 +661,12 @@ impl CoreErlangGenerator {
         // BT-3821 fault injection: the last local's rebind is omitted
         // (`ThreadedLocalDropped` on a real compile). Only test builds mutate `built`.
         let mut built = built;
-        if fault!(DropRebind) {
-            if let Some(at) = built
+        if fault!(DropRebind)
+            && let Some(at) = built
                 .iter()
                 .rposition(|stmt| matches!(stmt, ThreadedStmt::LocalRebind { .. }))
-            {
-                built.remove(at);
-            }
+        {
+            built.remove(at);
         }
         Ok(built)
     }
@@ -1049,35 +1048,35 @@ impl CoreErlangGenerator {
                     arm_value = Some(leaf::var(val_var));
                 }
             } else if Self::is_local_var_assignment(body_expr) {
-                if let Expression::Assignment { target, value, .. } = body_expr {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        let core_var = self
-                            .lookup_var(&id.name)
-                            .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-                        // ADR 0118 phase 5b: a class-method
-                        // self-send on the RHS (`x := self bump`), at any
-                        // nesting depth, threads as a real prelude via
-                        // `threaded_expression` — spliced ahead of this
-                        // `let core_var = ... in` (mirrors
-                        // `try_generate_block_local_plain_let`'s approach,
-                        // built on `ThreadedValue` rather than an
-                        // open-chain side channel).
-                        let frame = self.current_frame();
-                        let tv = self.threaded_expression(value, frame)?;
-                        let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
-                        let value_doc = self.threaded_value_doc(&tv.value);
-                        self.bind_var(&id.name, &core_var);
-                        preamble.push(docvec![
-                            prelude_doc,
-                            "let ",
-                            leaf::var(core_var.clone()),
-                            " = ",
-                            value_doc,
-                            " in ",
-                        ]);
-                        if is_value_stmt {
-                            arm_value = Some(leaf::var(core_var));
-                        }
+                if let Expression::Assignment { target, value, .. } = body_expr
+                    && let Expression::Identifier(id) = target.as_ref()
+                {
+                    let core_var = self
+                        .lookup_var(&id.name)
+                        .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                    // ADR 0118 phase 5b: a class-method
+                    // self-send on the RHS (`x := self bump`), at any
+                    // nesting depth, threads as a real prelude via
+                    // `threaded_expression` — spliced ahead of this
+                    // `let core_var = ... in` (mirrors
+                    // `try_generate_block_local_plain_let`'s approach,
+                    // built on `ThreadedValue` rather than an
+                    // open-chain side channel).
+                    let frame = self.current_frame();
+                    let tv = self.threaded_expression(value, frame)?;
+                    let prelude_doc = self.threaded_prelude_doc(&tv.prelude);
+                    let value_doc = self.threaded_value_doc(&tv.value);
+                    self.bind_var(&id.name, &core_var);
+                    preamble.push(docvec![
+                        prelude_doc,
+                        "let ",
+                        leaf::var(core_var.clone()),
+                        " = ",
+                        value_doc,
+                        " in ",
+                    ]);
+                    if is_value_stmt {
+                        arm_value = Some(leaf::var(core_var));
                     }
                 }
             } else if is_value_stmt {

@@ -275,25 +275,25 @@ impl CoreErlangGenerator {
                     }
                 }
                 // Rest pattern: `...rest` binds remaining elements as a sub-array
-                if let Some(rest_pat) = rest {
-                    if let Pattern::Variable(id) = rest_pat.as_ref() {
-                        let core_var = Self::to_core_erlang_var(&id.name);
-                        self.bind_var(&id.name, &core_var);
-                        let from_idx = index_lit(elements.len() + 1);
-                        docs.push(docvec![
-                            indent,
-                            leaf::var(core_var.clone()),
-                            " = call 'beamtalk_array':'slice_from'(",
-                            leaf::var(rhs_var.to_string()),
-                            ", ",
-                            from_idx,
-                            ")",
-                            terminator,
-                        ]);
-                        bound_pairs.push((id.name.to_string(), core_var));
-                    }
-                    // Pattern::Wildcard — no binding needed
+                if let Some(rest_pat) = rest
+                    && let Pattern::Variable(id) = rest_pat.as_ref()
+                {
+                    let core_var = Self::to_core_erlang_var(&id.name);
+                    self.bind_var(&id.name, &core_var);
+                    let from_idx = index_lit(elements.len() + 1);
+                    docs.push(docvec![
+                        indent,
+                        leaf::var(core_var.clone()),
+                        " = call 'beamtalk_array':'slice_from'(",
+                        leaf::var(rhs_var.to_string()),
+                        ", ",
+                        from_idx,
+                        ")",
+                        terminator,
+                    ]);
+                    bound_pairs.push((id.name.to_string(), core_var));
                 }
+                // Pattern::Wildcard — no binding needed
             }
             Pattern::Tuple { elements, .. } => {
                 // Arity check: verify the tuple has the expected number of elements.

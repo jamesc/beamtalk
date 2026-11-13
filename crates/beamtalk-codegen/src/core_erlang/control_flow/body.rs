@@ -428,11 +428,11 @@ impl CoreErlangGenerator {
         for stmt in stmts {
             // Only a `Self` `Bind` reads this seed: a bracket's store names a
             // `State` version, never a value-type `Self`.
-            if let ThreadedStmt::Bind { source, .. } = stmt {
-                if source == from {
-                    *source = to.clone();
-                    return;
-                }
+            if let ThreadedStmt::Bind { source, .. } = stmt
+                && source == from
+            {
+                *source = to.clone();
+                return;
             }
         }
     }
@@ -1178,26 +1178,77 @@ impl CoreErlangGenerator {
         let epilogue_span = body.span;
 
         // FoldlFilter: append the predicate case expression after all statements.
-        if let BodyKind::FoldlFilter { item_var, negate } = kind {
-            if let Some(pv) = &pred_var {
-                let condition_doc: Document<'static> = if *negate {
-                    docvec!["call 'erlang':'not'(", leaf::var(pv.clone()), ")",]
+        if let BodyKind::FoldlFilter { item_var, negate } = kind
+            && let Some(pv) = &pred_var
+        {
+            let condition_doc: Document<'static> = if *negate {
+                docvec!["call 'erlang':'not'(", leaf::var(pv.clone()), ")",]
+            } else {
+                leaf::var(pv.clone())
+            };
+            if plan.use_tuple_acc {
+                // Tuple mode — repack current var bindings into the result tuple.
+                let vars_doc = plan.current_vars_doc(self);
+                stmts.push(Self::fold_accumulator(
+                    plan.fold_carry(),
+                    docvec![
+                        "case ",
+                        condition_doc,
+                        " of <'true'> when 'true' -> {[",
+                        leaf::var(item_var.clone()),
+                        " | AccList], ",
+                        vars_doc.clone(),
+                        "} <'false'> when 'true' -> {AccList, ",
+                        vars_doc,
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end",
+                    ],
+                    epilogue_span,
+                ));
+            } else {
+                let final_state = if has_mutations {
+                    self.current_state_var()
                 } else {
-                    leaf::var(pv.clone())
+                    "StateAcc".to_string()
                 };
-                if plan.use_tuple_acc {
-                    // Tuple mode — repack current var bindings into the result tuple.
-                    let vars_doc = plan.current_vars_doc(self);
+                stmts.push(Self::fold_accumulator(
+                    FoldCarry::StateMap,
+                    docvec![
+                        "case ",
+                        condition_doc,
+                        " of <'true'> when 'true' -> {[",
+                        leaf::var(item_var.clone()),
+                        " | AccList], ",
+                        leaf::var(final_state.clone()),
+                        "} <'false'> when 'true' -> {AccList, ",
+                        leaf::var(final_state),
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end",
+                    ],
+                    epilogue_span,
+                ));
+            }
+        }
+
+        // FoldlBoolPredicate — update boolean accumulator based on predicate result.
+        // Match only 'true'/'false' explicitly (consistent with FoldlFilter and lists:any/all).
+        if let BodyKind::FoldlBoolPredicate { is_all } = kind
+            && let Some(pv) = &pred_var
+        {
+            if plan.use_tuple_acc {
+                let vars_doc = plan.current_vars_doc(self);
+                if *is_all {
+                    // allSatisfy: pred=false → set BoolAcc to false; pred=true → keep
                     stmts.push(Self::fold_accumulator(
                         plan.fold_carry(),
                         docvec![
                             "case ",
-                            condition_doc,
-                            " of <'true'> when 'true' -> {[",
-                            leaf::var(item_var.clone()),
-                            " | AccList], ",
+                            leaf::var(pv.clone()),
+                            " of <'false'> when 'true' -> {'false', ",
                             vars_doc.clone(),
-                            "} <'false'> when 'true' -> {AccList, ",
+                            "} <'true'> when 'true' -> {BoolAcc, ",
                             vars_doc,
                             "}",
                             self.case_clause_fallback("_PredBad"),
@@ -1206,22 +1257,16 @@ impl CoreErlangGenerator {
                         epilogue_span,
                     ));
                 } else {
-                    let final_state = if has_mutations {
-                        self.current_state_var()
-                    } else {
-                        "StateAcc".to_string()
-                    };
+                    // anySatisfy: pred=true → set BoolAcc to true; pred=false → keep
                     stmts.push(Self::fold_accumulator(
-                        FoldCarry::StateMap,
+                        plan.fold_carry(),
                         docvec![
                             "case ",
-                            condition_doc,
-                            " of <'true'> when 'true' -> {[",
-                            leaf::var(item_var.clone()),
-                            " | AccList], ",
-                            leaf::var(final_state.clone()),
-                            "} <'false'> when 'true' -> {AccList, ",
-                            leaf::var(final_state),
+                            leaf::var(pv.clone()),
+                            " of <'true'> when 'true' -> {'true', ",
+                            vars_doc.clone(),
+                            "} <'false'> when 'true' -> {BoolAcc, ",
+                            vars_doc,
                             "}",
                             self.case_clause_fallback("_PredBad"),
                             " end",
@@ -1229,89 +1274,44 @@ impl CoreErlangGenerator {
                         epilogue_span,
                     ));
                 }
-            }
-        }
-
-        // FoldlBoolPredicate — update boolean accumulator based on predicate result.
-        // Match only 'true'/'false' explicitly (consistent with FoldlFilter and lists:any/all).
-        if let BodyKind::FoldlBoolPredicate { is_all } = kind {
-            if let Some(pv) = &pred_var {
-                if plan.use_tuple_acc {
-                    let vars_doc = plan.current_vars_doc(self);
-                    if *is_all {
-                        // allSatisfy: pred=false → set BoolAcc to false; pred=true → keep
-                        stmts.push(Self::fold_accumulator(
-                            plan.fold_carry(),
-                            docvec![
-                                "case ",
-                                leaf::var(pv.clone()),
-                                " of <'false'> when 'true' -> {'false', ",
-                                vars_doc.clone(),
-                                "} <'true'> when 'true' -> {BoolAcc, ",
-                                vars_doc,
-                                "}",
-                                self.case_clause_fallback("_PredBad"),
-                                " end",
-                            ],
-                            epilogue_span,
-                        ));
-                    } else {
-                        // anySatisfy: pred=true → set BoolAcc to true; pred=false → keep
-                        stmts.push(Self::fold_accumulator(
-                            plan.fold_carry(),
-                            docvec![
-                                "case ",
-                                leaf::var(pv.clone()),
-                                " of <'true'> when 'true' -> {'true', ",
-                                vars_doc.clone(),
-                                "} <'false'> when 'true' -> {BoolAcc, ",
-                                vars_doc,
-                                "}",
-                                self.case_clause_fallback("_PredBad"),
-                                " end",
-                            ],
-                            epilogue_span,
-                        ));
-                    }
+            } else {
+                let final_state = if has_mutations {
+                    self.current_state_var()
                 } else {
-                    let final_state = if has_mutations {
-                        self.current_state_var()
-                    } else {
-                        "StateAcc".to_string()
-                    };
-                    if *is_all {
-                        stmts.push(Self::fold_accumulator(
-                            FoldCarry::StateMap,
-                            docvec![
-                                "case ",
-                                leaf::var(pv.clone()),
-                                " of <'false'> when 'true' -> {'false', ",
-                                leaf::var(final_state.clone()),
-                                "} <'true'> when 'true' -> {BoolAcc, ",
-                                leaf::var(final_state),
-                                "}",
-                                self.case_clause_fallback("_PredBad"),
-                                " end",
-                            ],
-                            epilogue_span,
-                        ));
-                    } else {
-                        stmts.push(Self::fold_accumulator(
-                            FoldCarry::StateMap,
-                            docvec![
-                                "case ",
-                                leaf::var(pv.clone()),
-                                " of <'true'> when 'true' -> {'true', ",
-                                leaf::var(final_state.clone()),
-                                "} <'false'> when 'true' -> {BoolAcc, ",
-                                leaf::var(final_state),
-                                "}",
-                                self.case_clause_fallback("_PredBad"),
-                                " end",
-                            ],
-                            epilogue_span,
-                        ));
-                    }
+                    "StateAcc".to_string()
+                };
+                if *is_all {
+                    stmts.push(Self::fold_accumulator(
+                        FoldCarry::StateMap,
+                        docvec![
+                            "case ",
+                            leaf::var(pv.clone()),
+                            " of <'false'> when 'true' -> {'false', ",
+                            leaf::var(final_state.clone()),
+                            "} <'true'> when 'true' -> {BoolAcc, ",
+                            leaf::var(final_state),
+                            "}",
+                            self.case_clause_fallback("_PredBad"),
+                            " end",
+                        ],
+                        epilogue_span,
+                    ));
+                } else {
+                    stmts.push(Self::fold_accumulator(
+                        FoldCarry::StateMap,
+                        docvec![
+                            "case ",
+                            leaf::var(pv.clone()),
+                            " of <'true'> when 'true' -> {'true', ",
+                            leaf::var(final_state.clone()),
+                            "} <'false'> when 'true' -> {BoolAcc, ",
+                            leaf::var(final_state),
+                            "}",
+                            self.case_clause_fallback("_PredBad"),
+                            " end",
+                        ],
+                        epilogue_span,
+                    ));
                 }
             }
         }
@@ -1320,348 +1320,348 @@ impl CoreErlangGenerator {
         // Accumulator is {FoundItem, FoundFlag, StateVars...}.
         // The fold lambda skips the body once FoundFlag is 'true' (`skip_when_decided`,
         // BT-3805), so a predicate hit here is always the first match.
-        if let BodyKind::FoldlDetect { item_var } = kind {
-            if let Some(pv) = &pred_var {
-                if plan.use_tuple_acc {
-                    let vars_doc = plan.current_vars_doc(self);
-                    stmts.push(Self::fold_accumulator(
-                        plan.fold_carry(),
-                        docvec![
-                            "case ",
-                            leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> {",
-                            leaf::var(item_var.clone()),
-                            ", 'true', ",
-                            vars_doc.clone(),
-                            "} <'false'> when 'true' -> {FoundItem, FoundFlag, ",
-                            vars_doc,
-                            "}",
-                            self.case_clause_fallback("_PredBad"),
-                            " end",
-                        ],
-                        epilogue_span,
-                    ));
+        if let BodyKind::FoldlDetect { item_var } = kind
+            && let Some(pv) = &pred_var
+        {
+            if plan.use_tuple_acc {
+                let vars_doc = plan.current_vars_doc(self);
+                stmts.push(Self::fold_accumulator(
+                    plan.fold_carry(),
+                    docvec![
+                        "case ",
+                        leaf::var(pv.clone()),
+                        " of <'true'> when 'true' -> {",
+                        leaf::var(item_var.clone()),
+                        ", 'true', ",
+                        vars_doc.clone(),
+                        "} <'false'> when 'true' -> {FoundItem, FoundFlag, ",
+                        vars_doc,
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end",
+                    ],
+                    epilogue_span,
+                ));
+            } else {
+                let final_state = if has_mutations {
+                    self.current_state_var()
                 } else {
-                    let final_state = if has_mutations {
-                        self.current_state_var()
-                    } else {
-                        "StateAcc".to_string()
-                    };
-                    stmts.push(Self::fold_accumulator(
-                        FoldCarry::StateMap,
-                        docvec![
-                            "case ",
-                            leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> {",
-                            leaf::var(item_var.clone()),
-                            ", 'true', ",
-                            leaf::var(final_state.clone()),
-                            "} <'false'> when 'true' -> {FoundItem, FoundFlag, ",
-                            leaf::var(final_state),
-                            "}",
-                            self.case_clause_fallback("_PredBad"),
-                            " end",
-                        ],
-                        epilogue_span,
-                    ));
-                }
+                    "StateAcc".to_string()
+                };
+                stmts.push(Self::fold_accumulator(
+                    FoldCarry::StateMap,
+                    docvec![
+                        "case ",
+                        leaf::var(pv.clone()),
+                        " of <'true'> when 'true' -> {",
+                        leaf::var(item_var.clone()),
+                        ", 'true', ",
+                        leaf::var(final_state.clone()),
+                        "} <'false'> when 'true' -> {FoundItem, FoundFlag, ",
+                        leaf::var(final_state),
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end",
+                    ],
+                    epilogue_span,
+                ));
             }
         }
 
         // FoldlCount — increment count accumulator on predicate match.
         // Accumulator is {Count, StateVars...}.
-        if matches!(kind, BodyKind::FoldlCount) {
-            if let Some(pv) = &pred_var {
-                if plan.use_tuple_acc {
-                    let vars_doc = plan.current_vars_doc(self);
-                    stmts.push(Self::fold_accumulator(
-                        plan.fold_carry(),
-                        docvec![
-                            "case ",
-                            leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
-                            vars_doc.clone(),
-                            "} <'false'> when 'true' -> {CountAcc, ",
-                            vars_doc,
-                            "}",
-                            self.case_clause_fallback("_PredBad"),
-                            " end",
-                        ],
-                        epilogue_span,
-                    ));
+        if matches!(kind, BodyKind::FoldlCount)
+            && let Some(pv) = &pred_var
+        {
+            if plan.use_tuple_acc {
+                let vars_doc = plan.current_vars_doc(self);
+                stmts.push(Self::fold_accumulator(
+                    plan.fold_carry(),
+                    docvec![
+                        "case ",
+                        leaf::var(pv.clone()),
+                        " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
+                        vars_doc.clone(),
+                        "} <'false'> when 'true' -> {CountAcc, ",
+                        vars_doc,
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end",
+                    ],
+                    epilogue_span,
+                ));
+            } else {
+                let final_state = if has_mutations {
+                    self.current_state_var()
                 } else {
-                    let final_state = if has_mutations {
-                        self.current_state_var()
-                    } else {
-                        "StateAcc".to_string()
-                    };
-                    stmts.push(Self::fold_accumulator(
-                        FoldCarry::StateMap,
-                        docvec![
-                            "case ",
-                            leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
-                            leaf::var(final_state.clone()),
-                            "} <'false'> when 'true' -> {CountAcc, ",
-                            leaf::var(final_state),
-                            "}",
-                            self.case_clause_fallback("_PredBad"),
-                            " end",
-                        ],
-                        epilogue_span,
-                    ));
-                }
+                    "StateAcc".to_string()
+                };
+                stmts.push(Self::fold_accumulator(
+                    FoldCarry::StateMap,
+                    docvec![
+                        "case ",
+                        leaf::var(pv.clone()),
+                        " of <'true'> when 'true' -> {call 'erlang':'+'(CountAcc, 1), ",
+                        leaf::var(final_state.clone()),
+                        "} <'false'> when 'true' -> {CountAcc, ",
+                        leaf::var(final_state),
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end",
+                    ],
+                    epilogue_span,
+                ));
             }
         }
 
         // FoldlTakeWhile — include item while predicate holds.
         // Once predicate returns false, StillTaking flips to false and all subsequent
         // elements are excluded. Accumulator: {ResultList, StillTaking, StateVars...}.
-        if let BodyKind::FoldlTakeWhile { item_var } = kind {
-            if let Some(pv) = &pred_var {
-                if plan.use_tuple_acc {
-                    let vars_doc = plan.current_vars_doc(self);
-                    stmts.push(Self::fold_accumulator(
-                        plan.fold_carry(),
-                        docvec![
-                            "case StillTaking of \
+        if let BodyKind::FoldlTakeWhile { item_var } = kind
+            && let Some(pv) = &pred_var
+        {
+            if plan.use_tuple_acc {
+                let vars_doc = plan.current_vars_doc(self);
+                stmts.push(Self::fold_accumulator(
+                    plan.fold_carry(),
+                    docvec![
+                        "case StillTaking of \
                              <'false'> when 'true' -> {AccList, 'false', ",
-                            vars_doc.clone(),
-                            "} <'true'> when 'true' -> case ",
-                            leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> {[",
-                            leaf::var(item_var.clone()),
-                            " | AccList], 'true', ",
-                            vars_doc.clone(),
-                            "} <'false'> when 'true' -> {AccList, 'false', ",
-                            vars_doc,
-                            "}",
-                            self.case_clause_fallback("_PredBad"),
-                            " end end",
-                        ],
-                        epilogue_span,
-                    ));
+                        vars_doc.clone(),
+                        "} <'true'> when 'true' -> case ",
+                        leaf::var(pv.clone()),
+                        " of <'true'> when 'true' -> {[",
+                        leaf::var(item_var.clone()),
+                        " | AccList], 'true', ",
+                        vars_doc.clone(),
+                        "} <'false'> when 'true' -> {AccList, 'false', ",
+                        vars_doc,
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end end",
+                    ],
+                    epilogue_span,
+                ));
+            } else {
+                let final_state = if has_mutations {
+                    self.current_state_var()
                 } else {
-                    let final_state = if has_mutations {
-                        self.current_state_var()
-                    } else {
-                        "StateAcc".to_string()
-                    };
-                    stmts.push(Self::fold_accumulator(
-                        FoldCarry::StateMap,
-                        docvec![
-                            "case StillTaking of \
+                    "StateAcc".to_string()
+                };
+                stmts.push(Self::fold_accumulator(
+                    FoldCarry::StateMap,
+                    docvec![
+                        "case StillTaking of \
                              <'false'> when 'true' -> {AccList, 'false', ",
-                            leaf::var(final_state.clone()),
-                            "} <'true'> when 'true' -> case ",
-                            leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> {[",
-                            leaf::var(item_var.clone()),
-                            " | AccList], 'true', ",
-                            leaf::var(final_state.clone()),
-                            "} <'false'> when 'true' -> {AccList, 'false', ",
-                            leaf::var(final_state),
-                            "}",
-                            self.case_clause_fallback("_PredBad"),
-                            " end end",
-                        ],
-                        epilogue_span,
-                    ));
-                }
+                        leaf::var(final_state.clone()),
+                        "} <'true'> when 'true' -> case ",
+                        leaf::var(pv.clone()),
+                        " of <'true'> when 'true' -> {[",
+                        leaf::var(item_var.clone()),
+                        " | AccList], 'true', ",
+                        leaf::var(final_state.clone()),
+                        "} <'false'> when 'true' -> {AccList, 'false', ",
+                        leaf::var(final_state),
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end end",
+                    ],
+                    epilogue_span,
+                ));
             }
         }
 
         // FoldlDropWhile — drop items while predicate holds.
         // Once predicate returns false, StillDropping flips to false and all subsequent
         // elements are included. Accumulator: {ResultList, StillDropping, StateVars...}.
-        if let BodyKind::FoldlDropWhile { item_var } = kind {
-            if let Some(pv) = &pred_var {
-                if plan.use_tuple_acc {
-                    let vars_doc = plan.current_vars_doc(self);
-                    stmts.push(Self::fold_accumulator(
-                        plan.fold_carry(),
-                        docvec![
-                            "case StillDropping of \
+        if let BodyKind::FoldlDropWhile { item_var } = kind
+            && let Some(pv) = &pred_var
+        {
+            if plan.use_tuple_acc {
+                let vars_doc = plan.current_vars_doc(self);
+                stmts.push(Self::fold_accumulator(
+                    plan.fold_carry(),
+                    docvec![
+                        "case StillDropping of \
                              <'false'> when 'true' -> {[",
-                            leaf::var(item_var.clone()),
-                            " | AccList], 'false', ",
-                            vars_doc.clone(),
-                            "} <'true'> when 'true' -> case ",
-                            leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> {AccList, 'true', ",
-                            vars_doc.clone(),
-                            "} <'false'> when 'true' -> {[",
-                            leaf::var(item_var.clone()),
-                            " | AccList], 'false', ",
-                            vars_doc,
-                            "}",
-                            self.case_clause_fallback("_PredBad"),
-                            " end end",
-                        ],
-                        epilogue_span,
-                    ));
+                        leaf::var(item_var.clone()),
+                        " | AccList], 'false', ",
+                        vars_doc.clone(),
+                        "} <'true'> when 'true' -> case ",
+                        leaf::var(pv.clone()),
+                        " of <'true'> when 'true' -> {AccList, 'true', ",
+                        vars_doc.clone(),
+                        "} <'false'> when 'true' -> {[",
+                        leaf::var(item_var.clone()),
+                        " | AccList], 'false', ",
+                        vars_doc,
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end end",
+                    ],
+                    epilogue_span,
+                ));
+            } else {
+                let final_state = if has_mutations {
+                    self.current_state_var()
                 } else {
-                    let final_state = if has_mutations {
-                        self.current_state_var()
-                    } else {
-                        "StateAcc".to_string()
-                    };
-                    stmts.push(Self::fold_accumulator(
-                        FoldCarry::StateMap,
-                        docvec![
-                            "case StillDropping of \
+                    "StateAcc".to_string()
+                };
+                stmts.push(Self::fold_accumulator(
+                    FoldCarry::StateMap,
+                    docvec![
+                        "case StillDropping of \
                              <'false'> when 'true' -> {[",
-                            leaf::var(item_var.clone()),
-                            " | AccList], 'false', ",
-                            leaf::var(final_state.clone()),
-                            "} <'true'> when 'true' -> case ",
-                            leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> {AccList, 'true', ",
-                            leaf::var(final_state.clone()),
-                            "} <'false'> when 'true' -> {[",
-                            leaf::var(item_var.clone()),
-                            " | AccList], 'false', ",
-                            leaf::var(final_state),
-                            "}",
-                            self.case_clause_fallback("_PredBad"),
-                            " end end",
-                        ],
-                        epilogue_span,
-                    ));
-                }
+                        leaf::var(item_var.clone()),
+                        " | AccList], 'false', ",
+                        leaf::var(final_state.clone()),
+                        "} <'true'> when 'true' -> case ",
+                        leaf::var(pv.clone()),
+                        " of <'true'> when 'true' -> {AccList, 'true', ",
+                        leaf::var(final_state.clone()),
+                        "} <'false'> when 'true' -> {[",
+                        leaf::var(item_var.clone()),
+                        " | AccList], 'false', ",
+                        leaf::var(final_state),
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end end",
+                    ],
+                    epilogue_span,
+                ));
             }
         }
 
         // FoldlPartition — route item to one of two lists based on predicate.
         // Accumulator: {MatchList, NoMatchList, StateVars...}.
-        if let BodyKind::FoldlPartition { item_var } = kind {
-            if let Some(pv) = &pred_var {
-                if plan.use_tuple_acc {
-                    let vars_doc = plan.current_vars_doc(self);
-                    stmts.push(Self::fold_accumulator(
-                        plan.fold_carry(),
-                        docvec![
-                            "case ",
-                            leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> {[",
-                            leaf::var(item_var.clone()),
-                            " | MatchList], NoMatchList, ",
-                            vars_doc.clone(),
-                            "} <'false'> when 'true' -> {MatchList, [",
-                            leaf::var(item_var.clone()),
-                            " | NoMatchList], ",
-                            vars_doc,
-                            "}",
-                            self.case_clause_fallback("_PredBad"),
-                            " end",
-                        ],
-                        epilogue_span,
-                    ));
+        if let BodyKind::FoldlPartition { item_var } = kind
+            && let Some(pv) = &pred_var
+        {
+            if plan.use_tuple_acc {
+                let vars_doc = plan.current_vars_doc(self);
+                stmts.push(Self::fold_accumulator(
+                    plan.fold_carry(),
+                    docvec![
+                        "case ",
+                        leaf::var(pv.clone()),
+                        " of <'true'> when 'true' -> {[",
+                        leaf::var(item_var.clone()),
+                        " | MatchList], NoMatchList, ",
+                        vars_doc.clone(),
+                        "} <'false'> when 'true' -> {MatchList, [",
+                        leaf::var(item_var.clone()),
+                        " | NoMatchList], ",
+                        vars_doc,
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end",
+                    ],
+                    epilogue_span,
+                ));
+            } else {
+                let final_state = if has_mutations {
+                    self.current_state_var()
                 } else {
-                    let final_state = if has_mutations {
-                        self.current_state_var()
-                    } else {
-                        "StateAcc".to_string()
-                    };
-                    stmts.push(Self::fold_accumulator(
-                        FoldCarry::StateMap,
-                        docvec![
-                            "case ",
-                            leaf::var(pv.clone()),
-                            " of <'true'> when 'true' -> {[",
-                            leaf::var(item_var.clone()),
-                            " | MatchList], NoMatchList, ",
-                            leaf::var(final_state.clone()),
-                            "} <'false'> when 'true' -> {MatchList, [",
-                            leaf::var(item_var.clone()),
-                            " | NoMatchList], ",
-                            leaf::var(final_state),
-                            "}",
-                            self.case_clause_fallback("_PredBad"),
-                            " end",
-                        ],
-                        epilogue_span,
-                    ));
-                }
+                    "StateAcc".to_string()
+                };
+                stmts.push(Self::fold_accumulator(
+                    FoldCarry::StateMap,
+                    docvec![
+                        "case ",
+                        leaf::var(pv.clone()),
+                        " of <'true'> when 'true' -> {[",
+                        leaf::var(item_var.clone()),
+                        " | MatchList], NoMatchList, ",
+                        leaf::var(final_state.clone()),
+                        "} <'false'> when 'true' -> {MatchList, [",
+                        leaf::var(item_var.clone()),
+                        " | NoMatchList], ",
+                        leaf::var(final_state),
+                        "}",
+                        self.case_clause_fallback("_PredBad"),
+                        " end",
+                    ],
+                    epilogue_span,
+                ));
             }
         }
 
         // FoldlGroupBy — group item by key.
         // The pred_var holds the key result. Each element is added to the key's list in a map.
         // Accumulator: {Map, StateVars...}.
-        if let BodyKind::FoldlGroupBy { item_var } = kind {
-            if let Some(pv) = &pred_var {
-                // Use maps:get/3 to get current list for key (default []), prepend item, put back.
-                let key_var = pv;
-                if plan.use_tuple_acc {
-                    let vars_doc = plan.current_vars_doc(self);
-                    let existing_var = self.fresh_temp_var("ExistingList");
-                    let new_list_var = self.fresh_temp_var("NewList");
-                    let new_map_var = self.fresh_temp_var("NewMap");
-                    stmts.push(Self::fold_accumulator(
-                        plan.fold_carry(),
-                        docvec![
-                            "let ",
-                            leaf::var(existing_var.clone()),
-                            " = call 'maps':'get'(",
-                            leaf::var(key_var.clone()),
-                            ", GroupMap, []) in let ",
-                            leaf::var(new_list_var.clone()),
-                            " = [",
-                            leaf::var(item_var.clone()),
-                            " | ",
-                            leaf::var(existing_var),
-                            "] in let ",
-                            leaf::var(new_map_var.clone()),
-                            " = call 'maps':'put'(",
-                            leaf::var(key_var.clone()),
-                            ", ",
-                            leaf::var(new_list_var),
-                            ", GroupMap) in {",
-                            leaf::var(new_map_var),
-                            ", ",
-                            vars_doc,
-                            "}",
-                        ],
-                        epilogue_span,
-                    ));
+        if let BodyKind::FoldlGroupBy { item_var } = kind
+            && let Some(pv) = &pred_var
+        {
+            // Use maps:get/3 to get current list for key (default []), prepend item, put back.
+            let key_var = pv;
+            if plan.use_tuple_acc {
+                let vars_doc = plan.current_vars_doc(self);
+                let existing_var = self.fresh_temp_var("ExistingList");
+                let new_list_var = self.fresh_temp_var("NewList");
+                let new_map_var = self.fresh_temp_var("NewMap");
+                stmts.push(Self::fold_accumulator(
+                    plan.fold_carry(),
+                    docvec![
+                        "let ",
+                        leaf::var(existing_var.clone()),
+                        " = call 'maps':'get'(",
+                        leaf::var(key_var.clone()),
+                        ", GroupMap, []) in let ",
+                        leaf::var(new_list_var.clone()),
+                        " = [",
+                        leaf::var(item_var.clone()),
+                        " | ",
+                        leaf::var(existing_var),
+                        "] in let ",
+                        leaf::var(new_map_var.clone()),
+                        " = call 'maps':'put'(",
+                        leaf::var(key_var.clone()),
+                        ", ",
+                        leaf::var(new_list_var),
+                        ", GroupMap) in {",
+                        leaf::var(new_map_var),
+                        ", ",
+                        vars_doc,
+                        "}",
+                    ],
+                    epilogue_span,
+                ));
+            } else {
+                let final_state = if has_mutations {
+                    self.current_state_var()
                 } else {
-                    let final_state = if has_mutations {
-                        self.current_state_var()
-                    } else {
-                        "StateAcc".to_string()
-                    };
-                    let existing_var = self.fresh_temp_var("ExistingList");
-                    let new_list_var = self.fresh_temp_var("NewList");
-                    let new_map_var = self.fresh_temp_var("NewMap");
-                    stmts.push(Self::fold_accumulator(
-                        FoldCarry::StateMap,
-                        docvec![
-                            "let ",
-                            leaf::var(existing_var.clone()),
-                            " = call 'maps':'get'(",
-                            leaf::var(key_var.clone()),
-                            ", GroupMap, []) in let ",
-                            leaf::var(new_list_var.clone()),
-                            " = [",
-                            leaf::var(item_var.clone()),
-                            " | ",
-                            leaf::var(existing_var),
-                            "] in let ",
-                            leaf::var(new_map_var.clone()),
-                            " = call 'maps':'put'(",
-                            leaf::var(key_var.clone()),
-                            ", ",
-                            leaf::var(new_list_var),
-                            ", GroupMap) in {",
-                            leaf::var(new_map_var),
-                            ", ",
-                            leaf::var(final_state),
-                            "}",
-                        ],
-                        epilogue_span,
-                    ));
-                }
+                    "StateAcc".to_string()
+                };
+                let existing_var = self.fresh_temp_var("ExistingList");
+                let new_list_var = self.fresh_temp_var("NewList");
+                let new_map_var = self.fresh_temp_var("NewMap");
+                stmts.push(Self::fold_accumulator(
+                    FoldCarry::StateMap,
+                    docvec![
+                        "let ",
+                        leaf::var(existing_var.clone()),
+                        " = call 'maps':'get'(",
+                        leaf::var(key_var.clone()),
+                        ", GroupMap, []) in let ",
+                        leaf::var(new_list_var.clone()),
+                        " = [",
+                        leaf::var(item_var.clone()),
+                        " | ",
+                        leaf::var(existing_var),
+                        "] in let ",
+                        leaf::var(new_map_var.clone()),
+                        " = call 'maps':'put'(",
+                        leaf::var(key_var.clone()),
+                        ", ",
+                        leaf::var(new_list_var),
+                        ", GroupMap) in {",
+                        leaf::var(new_map_var),
+                        ", ",
+                        leaf::var(final_state),
+                        "}",
+                    ],
+                    epilogue_span,
+                ));
             }
         }
 
@@ -1669,29 +1669,29 @@ impl CoreErlangGenerator {
         // process-dictionary key, then answer the predicate to `lists:sort/2`.
         // Always map mode (the generator builds the plan without a tuple
         // accumulator), so the final state is a `StateAcc{N}`.
-        if let BodyKind::FoldlSort { state_key_var } = kind {
-            if let Some(pv) = &pred_var {
-                let final_state = if has_mutations {
-                    self.current_state_var()
-                } else {
-                    "StateAcc".to_string()
-                };
-                // The lambda answers the predicate; the `StateAcc{N}` leaves it
-                // through the process dictionary (`erlang:put`), and that map is
-                // what the tag records as carried.
-                stmts.push(Self::fold_accumulator(
-                    FoldCarry::StateMap,
-                    docvec![
-                        "let _ = call 'erlang':'put'(",
-                        leaf::var(state_key_var.clone()),
-                        ", ",
-                        leaf::var(final_state),
-                        ") in ",
-                        leaf::var(pv.clone()),
-                    ],
-                    epilogue_span,
-                ));
-            }
+        if let BodyKind::FoldlSort { state_key_var } = kind
+            && let Some(pv) = &pred_var
+        {
+            let final_state = if has_mutations {
+                self.current_state_var()
+            } else {
+                "StateAcc".to_string()
+            };
+            // The lambda answers the predicate; the `StateAcc{N}` leaves it
+            // through the process dictionary (`erlang:put`), and that map is
+            // what the tag records as carried.
+            stmts.push(Self::fold_accumulator(
+                FoldCarry::StateMap,
+                docvec![
+                    "let _ = call 'erlang':'put'(",
+                    leaf::var(state_key_var.clone()),
+                    ", ",
+                    leaf::var(final_state),
+                    ") in ",
+                    leaf::var(pv.clone()),
+                ],
+                epilogue_span,
+            ));
         }
 
         self.verify_frame_producer_sites(&stmts, &producer_sites, &filtered_body);

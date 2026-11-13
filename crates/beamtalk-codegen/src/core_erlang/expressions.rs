@@ -777,10 +777,10 @@ impl CoreErlangGenerator {
                 let late = self.is_late_class_var(&class_name, field.name.as_str());
                 return Ok(self.class_var_read_doc(field.name.as_str(), late));
             }
-            if Self::is_self_receiver(receiver) {
-                if let Some(err) = self.inherited_class_var_error(field.name.as_str(), field.span) {
-                    return Err(err);
-                }
+            if Self::is_self_receiver(receiver)
+                && let Some(err) = self.inherited_class_var_error(field.name.as_str(), field.span)
+            {
+                return Err(err);
             }
             return Err(CodeGenError::UnsupportedFeature {
                 feature: format!(
@@ -793,85 +793,85 @@ impl CoreErlangGenerator {
         // Field access resolves against self's State/Self map. A non-self receiver
         // is not valid (Beamtalk enforces encapsulation) and is rejected with a
         // diagnostic in the fall-through below.
-        if let Expression::Identifier(recv_id) = receiver {
-            if recv_id.name == "self" {
-                let class_name = self.class_name();
-                let is_late = self.is_late_state_field(&class_name, field.name.as_str());
-                // BT-4121: inside a stateless loop that brackets its guarded
-                // operators, the entry `State` is stale for the slow paths'
-                // writes — read the live cell instead. (Never in hybrid
-                // mode: the mode selection routes those loops to `StateAcc`.)
-                // In hybrid mode, read-only fields are pre-extracted before the letrec:
-                // use the direct parameter variable instead of generating maps:get every
-                // iteration. A `late` field is never pre-extracted this way (loop_mode.rs
-                // withholds it from `hybrid_readonly_field_params`, ADR 0124 §4b), so this
-                // never fires for one — the guarded read below runs instead, per-iteration.
-                // BT-4180: both decided (and recorded) by the read choke point.
-                match self.actor_state_read_source(
-                    StateReadSite::FieldRead,
-                    Some(field.name.as_str()),
-                    field.span,
-                ) {
-                    Some(ActorStateSource::Cell) => {
-                        return Ok(self.cell_take_field_read_doc(
-                            &class_name,
-                            field.name.as_str(),
-                            is_late,
-                        ));
-                    }
-                    Some(ActorStateSource::Var(param_var)) => return Ok(leaf::var(param_var)),
-                    None => {}
+        if let Expression::Identifier(recv_id) = receiver
+            && recv_id.name == "self"
+        {
+            let class_name = self.class_name();
+            let is_late = self.is_late_state_field(&class_name, field.name.as_str());
+            // BT-4121: inside a stateless loop that brackets its guarded
+            // operators, the entry `State` is stale for the slow paths'
+            // writes — read the live cell instead. (Never in hybrid
+            // mode: the mode selection routes those loops to `StateAcc`.)
+            // In hybrid mode, read-only fields are pre-extracted before the letrec:
+            // use the direct parameter variable instead of generating maps:get every
+            // iteration. A `late` field is never pre-extracted this way (loop_mode.rs
+            // withholds it from `hybrid_readonly_field_params`, ADR 0124 §4b), so this
+            // never fires for one — the guarded read below runs instead, per-iteration.
+            // BT-4180: both decided (and recorded) by the read choke point.
+            match self.actor_state_read_source(
+                StateReadSite::FieldRead,
+                Some(field.name.as_str()),
+                field.span,
+            ) {
+                Some(ActorStateSource::Cell) => {
+                    return Ok(self.cell_take_field_read_doc(
+                        &class_name,
+                        field.name.as_str(),
+                        is_late,
+                    ));
                 }
-                // Use appropriate variable based on context. Actor uses
-                // `current_field_read_state_var` (not `current_state_var`
-                // directly) so a bare field read inside a non-hybrid
-                // direct-params loop resolves to the captured pre-loop state
-                // variable instead of an unbound `StateAcc` (BT-3562) — see
-                // that accessor's own doc comment.
-                // ADR 0137 §3: inside an actor closure a field is read through
-                // the cell (the creation-time capture away from home).
-                if self.in_cell_closure() {
-                    if is_late {
-                        let declared_type = self
-                            .class_hierarchy
-                            .as_ref()
-                            .and_then(|h| h.state_field_type(&class_name, field.name.as_str()));
-                        let view = self.cell_view_doc();
-                        return Ok(self.generate_late_field_read_of(
-                            field.name.as_str(),
-                            view,
-                            declared_type,
-                        ));
-                    }
-                    return Ok(self.cell_field_read_doc(field.name.as_str()));
-                }
-                self.note_tier2_fun_body_field_read(field.name.as_str(), field.span);
-                let state_var = match self.context {
-                    super::CodeGenContext::ValueType => self.current_self_var(),
-                    super::CodeGenContext::Actor => {
-                        self.actor_state_read_var(StateReadSite::FieldRead, field.span)
-                    }
-                    super::CodeGenContext::Repl => "State".to_string(),
-                };
+                Some(ActorStateSource::Var(param_var)) => return Ok(leaf::var(param_var)),
+                None => {}
+            }
+            // Use appropriate variable based on context. Actor uses
+            // `current_field_read_state_var` (not `current_state_var`
+            // directly) so a bare field read inside a non-hybrid
+            // direct-params loop resolves to the captured pre-loop state
+            // variable instead of an unbound `StateAcc` (BT-3562) — see
+            // that accessor's own doc comment.
+            // ADR 0137 §3: inside an actor closure a field is read through
+            // the cell (the creation-time capture away from home).
+            if self.in_cell_closure() {
                 if is_late {
                     let declared_type = self
                         .class_hierarchy
                         .as_ref()
                         .and_then(|h| h.state_field_type(&class_name, field.name.as_str()));
-                    return Ok(self.generate_late_field_read(
+                    let view = self.cell_view_doc();
+                    return Ok(self.generate_late_field_read_of(
                         field.name.as_str(),
-                        leaf::var(state_var),
+                        view,
                         declared_type,
                     ));
                 }
-                return Ok(docvec![
-                    "call 'maps':'get'(",
-                    leaf::atom(field.name.to_string()),
-                    ", ",
-                    leaf::var(state_var),
-                    ")",
-                ]);
+                return Ok(self.cell_field_read_doc(field.name.as_str()));
             }
+            self.note_tier2_fun_body_field_read(field.name.as_str(), field.span);
+            let state_var = match self.context {
+                super::CodeGenContext::ValueType => self.current_self_var(),
+                super::CodeGenContext::Actor => {
+                    self.actor_state_read_var(StateReadSite::FieldRead, field.span)
+                }
+                super::CodeGenContext::Repl => "State".to_string(),
+            };
+            if is_late {
+                let declared_type = self
+                    .class_hierarchy
+                    .as_ref()
+                    .and_then(|h| h.state_field_type(&class_name, field.name.as_str()));
+                return Ok(self.generate_late_field_read(
+                    field.name.as_str(),
+                    leaf::var(state_var),
+                    declared_type,
+                ));
+            }
+            return Ok(docvec![
+                "call 'maps':'get'(",
+                leaf::atom(field.name.to_string()),
+                ", ",
+                leaf::var(state_var),
+                ")",
+            ]);
         }
 
         let receiver_desc = match receiver {

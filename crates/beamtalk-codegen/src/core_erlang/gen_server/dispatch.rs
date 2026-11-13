@@ -33,12 +33,11 @@ fn collect_primary_method_names_and_arities(module: &Module) -> Vec<(String, usi
         .expressions
         .iter()
         .filter_map(|stmt| {
-            if let Expression::Assignment { target, value, .. } = &stmt.expression {
-                if let (Expression::Identifier(id), Expression::Block(block)) =
+            if let Expression::Assignment { target, value, .. } = &stmt.expression
+                && let (Expression::Identifier(id), Expression::Block(block)) =
                     (target.as_ref(), value.as_ref())
-                {
-                    return Some((id.name.to_string(), block.arity()));
-                }
+            {
+                return Some((id.name.to_string(), block.arity()));
             }
             None
         })
