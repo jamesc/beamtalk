@@ -2379,6 +2379,71 @@ bt4646_removal_does_not_evict_caller_from_pg_test() ->
     after 5000 -> ok
     end.
 
+%% BT-4794: a class rebuilt under the same name between the removal's re-check
+%% and its deletes must stay registered. The rebuild is injected right after the
+%% removal reads the dead owner from the metadata row (the last step before the
+%% deletes), so it lands exactly in the window.
+bt4794_rebuild_during_removal_stays_registered_test() ->
+    Name = 'BT4794RebuiltDuringRemoval',
+    bt4646_with_announce_spy(Name, fun() ->
+        OldPid = bt4646_builder_class(Name),
+        %% Keep the eager monitor out of the race so this process does the removal.
+        ok = beamtalk_class_monitor:unwatch(Name),
+        MRef = monitor(process, OldPid),
+        exit(OldPid, kill),
+        bt4646_await_down(OldPid, MRef),
+        Test = self(),
+        ok = meck:new(beamtalk_class_metadata, [passthrough, no_link]),
+        ok = meck:expect(beamtalk_class_metadata, lookup_owner, fun(N) ->
+            Result = meck:passthrough([N]),
+            case N =:= Name andalso self() =:= Test of
+                true ->
+                    NewPid = bt4646_builder_class(Name),
+                    ok = beamtalk_class_monitor:unwatch(Name),
+                    Test ! {bt4794_rebuilt, NewPid};
+                false ->
+                    ok
+            end,
+            Result
+        end),
+        try
+            Result = beamtalk_class_registry:restart_class(Name),
+            NewPid =
+                receive
+                    {bt4794_rebuilt, P} -> P
+                after 0 -> error(rebuild_not_injected)
+                end,
+            ?assertEqual({ok, NewPid}, Result),
+            ?assertEqual(NewPid, beamtalk_class_registry:whereis_class(Name)),
+            ?assertMatch({ok, _}, beamtalk_class_metadata:lookup_module(Name)),
+            ?assertEqual({ok, NewPid}, beamtalk_class_metadata:lookup_owner(Name)),
+            ?assertEqual({ok, Name}, beamtalk_class_registry:class_name_for_pid(NewPid)),
+            ?assert(sets:is_element(Name, beamtalk_class_registry:loaded_class_names())),
+            ?assertEqual(0, bt4646_count_removed(Name, 0)),
+            ok = gen_server:stop(NewPid)
+        after
+            meck:unload(beamtalk_class_metadata)
+        end
+    end).
+
+bt4794_delete_if_owner_only_deletes_matching_owner_test() ->
+    Name = 'BT4794DeleteIfOwner',
+    Other = spawn(fun() ->
+        receive
+            stop -> ok
+        end
+    end),
+    ok = beamtalk_class_metadata:insert(Name, undefined, [], 'Object', false),
+    {ok, Owner} = beamtalk_class_metadata:lookup_owner(Name),
+    ?assertEqual(self(), Owner),
+    ?assertNot(beamtalk_class_metadata:delete_if_owner(Name, Other)),
+    ?assertMatch({ok, _}, beamtalk_class_metadata:lookup_owner(Name)),
+    ?assert(beamtalk_class_metadata:delete_if_owner(Name, Owner)),
+    ?assertEqual(not_found, beamtalk_class_metadata:lookup_owner(Name)),
+    %% Idempotent once the row is gone.
+    ?assertNot(beamtalk_class_metadata:delete_if_owner(Name, Owner)),
+    Other ! stop.
+
 %%% ============================================================================
 %%% BT-4758: memoised class_object_tag/1 and change-only snapshot writes
 %%% ============================================================================

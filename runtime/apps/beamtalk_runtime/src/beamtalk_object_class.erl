@@ -1962,16 +1962,38 @@ rather than by `self()`. Also runs the registry purge
 -spec remove_dead_class_registration(class_name(), module()) -> ok | {alive, pid()}.
 remove_dead_class_registration(ClassName, Module) ->
     %% Registration does not take the removal lock, so a class of the same name
-    %% can be rebuilt while this runs. Re-check right before the destructive
-    %% steps, and announce `ClassRemoved` last so a subscriber that rebuilds the
-    %% class in response cannot have its fresh rows deleted by this teardown.
+    %% can be rebuilt while this runs (BT-4794). The metadata row is therefore
+    %% deleted only while it still names the dead owner seen here
+    %% (`delete_if_owner/2`, one atomic claim), and the pid-keyed index rows are
+    %% dropped per dead pid, so a rebuilt class's rows are never touched.
+    %% `ClassRemoved` is announced last so a subscriber that rebuilds the class
+    %% in response cannot have its fresh rows deleted by this teardown.
     case beamtalk_class_registry:whereis_class(ClassName) of
         Pid when is_pid(Pid) ->
             {alive, Pid};
         undefined ->
-            teardown_registration(ClassName, fun(_Pid) ->
-                beamtalk_class_registry:forget_dead_incarnations(ClassName)
-            end),
+            case beamtalk_class_metadata:lookup_owner(ClassName) of
+                not_found ->
+                    %% Already removed by someone else: nothing left to claim
+                    %% or announce.
+                    beamtalk_class_registry:forget_dead_incarnations(ClassName);
+                {ok, Owner} ->
+                    remove_claimed_dead_class(ClassName, Module, Owner)
+            end
+    end.
+
+-spec remove_claimed_dead_class(class_name(), module(), pid()) -> ok | {alive, pid()}.
+remove_claimed_dead_class(ClassName, Module, Owner) ->
+    case beamtalk_class_metadata:delete_if_owner(ClassName, Owner) of
+        false ->
+            %% The row now names another owner: the class was rebuilt after
+            %% the re-check. Leave it registered.
+            case beamtalk_class_registry:whereis_class(ClassName) of
+                NewPid when is_pid(NewPid) -> {alive, NewPid};
+                undefined -> ok
+            end;
+        true ->
+            beamtalk_class_registry:forget_dead_incarnations(ClassName),
             _ =
                 (try
                     beamtalk_class_lifecycle:class_removed(ClassName, Module)

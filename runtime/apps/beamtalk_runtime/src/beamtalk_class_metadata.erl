@@ -85,6 +85,8 @@ a table deleted between an existence check and the op (teardown/shutdown).
     insert/5,
     merge_identity/5,
     delete/1,
+    delete_if_owner/2,
+    lookup_owner/1,
     lookup_module/1,
     lookup_methods/1,
     lookup_superclass/1,
@@ -300,7 +302,13 @@ a table deleted between an existence check and the op (teardown/shutdown).
     %% into the class (which cannot answer from inside its own process, or
     %% while it waits on another class). Written only by `put_class_doc/2`;
     %% `undefined` until the owning class publishes it.
-    doc :: term()
+    doc :: term(),
+    %% BT-4794: the process that wrote the row with `insert/5` (the class
+    %% process, from `init/1`). A removal of a class whose process is already
+    %% dead (`delete_if_owner/2`) deletes the row only while it still names that
+    %% dead pid, so a class rebuilt under the same name in the meantime (its
+    %% `insert/5` replaces the row, owner included) is never deleted.
+    owner :: pid() | undefined
 }).
 
 -type side() :: instance | class.
@@ -417,7 +425,8 @@ insert(Name, Module, Selectors, Superclass, IsAbstract) ->
         module = Module,
         selectors = Selectors,
         superclass = Superclass,
-        is_abstract = IsAbstract
+        is_abstract = IsAbstract,
+        owner = self()
     },
     new(),
     %% Read the row's previous superclass (undefined if there was no
@@ -509,6 +518,56 @@ does not exist.
 """.
 -spec delete(class_name()) -> ok.
 delete(Name) ->
+    delete_row_and_dependents(Name).
+
+-doc """
+The pid that wrote `Name`'s metadata row (`insert/5`), or `not_found`.
+""".
+-spec lookup_owner(class_name()) -> {ok, pid()} | not_found.
+lookup_owner(Name) ->
+    case field(Name, #class_metadata.owner) of
+        Owner when is_pid(Owner) -> {ok, Owner};
+        _ -> not_found
+    end.
+
+-doc """
+BT-4794: remove `Name`'s metadata row and its dependents only if the row still
+names `Owner`, the (dead) class process seen by the caller's re-check.
+
+The claim is one atomic `ets:select_delete/2` on the row's owner, so a class
+rebuilt under the same name between the caller's re-check and this call (its
+`insert/5` replaces the row and records its own pid) is left intact. Returns
+`true` when the row was removed, `false` when it already names another owner or
+is gone; nothing else is touched then. The dependents (class-method funs,
+method records, flags, subclass edge) are only dropped after a won claim.
+""".
+-spec delete_if_owner(class_name(), pid()) -> boolean().
+delete_if_owner(Name, Owner) when is_pid(Owner) ->
+    OldSuperclass = field(Name, #class_metadata.superclass),
+    Claimed =
+        try
+            ets:select_delete(?TABLE, [
+                {#class_metadata{name = Name, owner = Owner, _ = '_'}, [], [true]}
+            ]) > 0
+        catch
+            error:badarg -> false
+        end,
+    case Claimed of
+        true ->
+            %% The row is already gone; drop what hangs off it (the same steps
+            %% `delete/1` runs before the row delete, then its tail).
+            delete_class_method_funs(Name),
+            delete_method_records(Name),
+            beamtalk_class_shadow_flags:clear(runtime_fun, Name),
+            beamtalk_class_shadow_flags:set_class_vars(Name, false),
+            finish_removal(Name, OldSuperclass),
+            true;
+        false ->
+            false
+    end.
+
+-spec delete_row_and_dependents(class_name()) -> ok.
+delete_row_and_dependents(Name) ->
     %% Drop any runtime class-method funs alongside the metadata row so
     %% a class that is removed (or whose process terminates) leaves no stale
     %% dispatch entries behind.
@@ -527,9 +586,17 @@ delete(Name) ->
     %% discoverable even if its own row is gone (see moduledoc).
     OldSuperclass = field(Name, #class_metadata.superclass),
     try
-        ets:delete(?TABLE, Name),
-        sync_subclass_index(Name, OldSuperclass, undefined),
-        ok
+        ets:delete(?TABLE, Name)
+    catch
+        error:badarg -> ok
+    end,
+    finish_removal(Name, OldSuperclass).
+
+%% The row of `Name` is gone: drop its subclass edge, then its derived flags.
+-spec finish_removal(class_name(), superclass() | undefined) -> ok.
+finish_removal(Name, OldSuperclass) ->
+    try
+        sync_subclass_index(Name, OldSuperclass, undefined)
     catch
         error:badarg -> ok
     end,
@@ -543,7 +610,8 @@ delete(Name) ->
     %% the old row is waited for and its value removed.
     beamtalk_class_shadow_flags:invalidate(Name),
     %% BT-4064: a removed class must not keep resolving through the cache.
-    beamtalk_class_derived_cache:invalidate().
+    beamtalk_class_derived_cache:invalidate(),
+    ok.
 
 %%====================================================================
 %% Reads
