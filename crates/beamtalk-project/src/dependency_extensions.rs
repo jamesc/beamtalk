@@ -100,17 +100,7 @@ impl DependencyExtensions {
     /// extension signature (BT-4615), so the consumer never sees a name its
     /// alias scope cannot resolve.
     pub fn expand_internal_aliases(&mut self, expander: &InternalAliasExpander) {
-        if expander.is_empty() {
-            return;
-        }
-        self.index.map_type_infos(|info| {
-            for ty in info.param_types.iter_mut().flatten() {
-                *ty = expander.expand_str(ty);
-            }
-            if let Some(ty) = &mut info.return_type {
-                *ty = expander.expand_str(ty);
-            }
-        });
+        expand_extension_index_aliases(expander, &mut self.index);
     }
 
     /// Whether [`Self::index`] holds every extension the dependency defines.
@@ -118,6 +108,26 @@ impl DependencyExtensions {
     pub fn is_complete(&self) -> bool {
         self.complete
     }
+}
+
+/// Expands a dependency's own `internal type` aliases in every extension
+/// signature held by `index` (BT-4615). The one implementation shared by the
+/// CLI ([`DependencyExtensions`]) and the LSP (BT-4778).
+pub fn expand_extension_index_aliases(
+    expander: &InternalAliasExpander,
+    index: &mut ExtensionIndex,
+) {
+    if expander.is_empty() {
+        return;
+    }
+    index.map_type_infos(|info| {
+        for ty in info.param_types.iter_mut().flatten() {
+            *ty = expander.expand_str(ty);
+        }
+        if let Some(ty) = &mut info.return_type {
+            *ty = expander.expand_str(ty);
+        }
+    });
 }
 
 /// Expands a dependency's own `internal type` aliases in its class

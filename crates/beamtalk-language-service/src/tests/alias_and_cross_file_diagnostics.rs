@@ -609,3 +609,133 @@ fn same_file_extension_is_a_class_method_and_errors_surface() {
         "instance-side extension on a native actor must be an error in the editor"
     );
 }
+
+// -----------------------------------------------------------------------
+// BT-4778: a dependency's `internal type` aliases are expanded in the
+// signatures the LSP indexes, as the CLI does (BT-4615 / BT-4707).
+// -----------------------------------------------------------------------
+
+const VAULT_SRC: &str = "Object subclass: Vault\n  fetch: n :: Integer -> Secret => \"x\"\n";
+const CLIENT_SRC: &str = "Object subclass: Client\n  run: v :: Vault -> Integer => v fetch: 1\n";
+
+fn mismatch_diags(service: &SimpleLanguageService, file: &Utf8PathBuf) -> Vec<String> {
+    service
+        .diagnostics(file)
+        .into_iter()
+        .map(|d| d.message.to_string())
+        .filter(|m| m.contains("String") && m.contains("Integer"))
+        .collect()
+}
+
+/// A dependency's public method returns its own `internal type Secret =
+/// String`. The consumer's alias scope never sees `Secret`, so unless the
+/// index expands it, the consumer type-checks against an unknown nominal
+/// type and the `String`/`Integer` mismatch goes unreported.
+#[test]
+fn diagnostics_expand_dependency_internal_alias_in_method_signature() {
+    let consumer_file = Utf8PathBuf::from("src/Client.bt");
+    let mut service = SimpleLanguageService::new();
+    service.update_file(
+        Utf8PathBuf::from("_build/deps/vault/src/Vault.bt"),
+        format!("internal type Secret = String\n{VAULT_SRC}"),
+    );
+    service.update_file(consumer_file.clone(), CLIENT_SRC.to_string());
+    assert!(
+        !mismatch_diags(&service, &consumer_file).is_empty(),
+        "expanded alias should surface the String/Integer return mismatch"
+    );
+}
+
+/// Negative control: without the dependency's `internal type` declaration the
+/// return type stays unknown and no mismatch is reported, proving the
+/// expansion (not something else) produces the diagnostic above.
+#[test]
+fn no_mismatch_when_dependency_alias_is_not_declared() {
+    let consumer_file = Utf8PathBuf::from("src/Client.bt");
+    let mut service = SimpleLanguageService::new();
+    service.update_file(
+        Utf8PathBuf::from("_build/deps/vault/src/Vault.bt"),
+        VAULT_SRC.to_string(),
+    );
+    service.update_file(consumer_file.clone(), CLIENT_SRC.to_string());
+    assert!(mismatch_diags(&service, &consumer_file).is_empty());
+}
+
+/// `internal` is package-private: the alias lives in one dependency file and
+/// is used in another, indexed in either order.
+#[test]
+fn diagnostics_expand_dependency_alias_declared_in_sibling_file() {
+    let types = Utf8PathBuf::from("_build/deps/vault/src/Types.bt");
+    let vault = Utf8PathBuf::from("_build/deps/vault/src/Vault.bt");
+    let consumer_file = Utf8PathBuf::from("src/Client.bt");
+    for alias_first in [true, false] {
+        let mut service = SimpleLanguageService::new();
+        let types_src = "internal type Secret = String\n".to_string();
+        if alias_first {
+            service.update_file(types.clone(), types_src);
+            service.update_file(vault.clone(), VAULT_SRC.to_string());
+        } else {
+            service.update_file(vault.clone(), VAULT_SRC.to_string());
+            service.update_file(types.clone(), types_src);
+        }
+        service.update_file(consumer_file.clone(), CLIENT_SRC.to_string());
+        assert!(
+            !mismatch_diags(&service, &consumer_file).is_empty(),
+            "alias declared in a sibling dependency file must expand (alias_first={alias_first})"
+        );
+    }
+}
+
+/// Removing the file that declares a dependency's `internal` alias must
+/// re-index its siblings, so they stop exporting the stale expansion.
+#[test]
+fn removing_dependency_alias_file_drops_sibling_expansion() {
+    let types = Utf8PathBuf::from("_build/deps/vault/src/Types.bt");
+    let consumer_file = Utf8PathBuf::from("src/Client.bt");
+    let mut service = SimpleLanguageService::new();
+    service.update_file(types.clone(), "internal type Secret = String\n".to_string());
+    service.update_file(
+        Utf8PathBuf::from("_build/deps/vault/src/Vault.bt"),
+        VAULT_SRC.to_string(),
+    );
+    service.update_file(consumer_file.clone(), CLIENT_SRC.to_string());
+    assert!(!mismatch_diags(&service, &consumer_file).is_empty());
+
+    service.remove_file(&types);
+    assert!(mismatch_diags(&service, &consumer_file).is_empty());
+}
+
+/// An alias whose body changes re-expands the siblings.
+#[test]
+fn changing_dependency_alias_body_reexpands_sibling() {
+    let types = Utf8PathBuf::from("_build/deps/vault/src/Types.bt");
+    let consumer_file = Utf8PathBuf::from("src/Client.bt");
+    let mut service = SimpleLanguageService::new();
+    service.update_file(types.clone(), "internal type Secret = String\n".to_string());
+    service.update_file(
+        Utf8PathBuf::from("_build/deps/vault/src/Vault.bt"),
+        VAULT_SRC.to_string(),
+    );
+    service.update_file(consumer_file.clone(), CLIENT_SRC.to_string());
+    assert!(!mismatch_diags(&service, &consumer_file).is_empty());
+
+    // `Integer` return matches the consumer's `Integer`: no mismatch left.
+    service.update_file(types, "internal type Secret = Integer\n".to_string());
+    assert!(mismatch_diags(&service, &consumer_file).is_empty());
+}
+
+/// Moving an alias declaration (a line inserted above it) leaves its
+/// expansion unchanged, so it is not an alias change.
+#[test]
+fn moving_dependency_alias_is_not_an_alias_change() {
+    let types = Utf8PathBuf::from("_build/deps/vault/src/Types.bt");
+    let mut service = SimpleLanguageService::new();
+    service.update_file(types.clone(), "internal type Secret = String\n".to_string());
+    let before = service.project_index.internal_aliases_of(&types);
+    service.update_file(
+        types.clone(),
+        "\n\ninternal type Secret = String\n".to_string(),
+    );
+    assert_eq!(before, service.project_index.internal_aliases_of(&types));
+    assert!(!before.is_empty());
+}

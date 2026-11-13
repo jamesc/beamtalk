@@ -749,6 +749,15 @@ impl ClassHierarchy {
             }
         }
     }
+    /// Rewrites every non-builtin class in place (BT-4778: expanding a
+    /// dependency's internal aliases in the signatures the LSP indexes).
+    pub fn map_class_infos(&mut self, mut f: impl FnMut(&mut ClassInfo)) {
+        for (name, info) in &mut self.classes {
+            if !Self::is_builtin_class(name) {
+                f(info);
+            }
+        }
+    }
     /// Extract `ClassInfo` entries from a parsed module without diagnostics.
     ///
     /// Same ClassInfo-building logic as `add_module_classes` Pass 1,
