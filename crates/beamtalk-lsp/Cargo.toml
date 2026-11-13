@@ -29,6 +29,10 @@ beamtalk-language-service = { workspace = true, features = ["serde"] }
 # why: BT-3340 (ADR 0117 Decision step 2) — `project` (root discovery) moved
 # out of `beamtalk-core` into a standalone crate.
 beamtalk-project.workspace = true
+# why: BT-4777 — the LSP resolves a package's dependencies (layout, FFI type
+# registry with its stub tiers) through the same crate `beamtalk lint` and
+# MCP use, instead of its own manifest walk.
+beamtalk-package.workspace = true
 beamtalk-repl-protocol = { workspace = true, features = ["ws-client"] }
 # why: shared leaf for deriving the installation sysroot from the running
 # executable path (see docs/development/architecture-principles.md §6) —

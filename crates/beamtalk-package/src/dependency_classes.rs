@@ -146,6 +146,126 @@ pub struct DependencyScan {
     pub stub_dirs: Vec<crate::ffi_type_registry::DependencyStubsDir>,
 }
 
+/// One dependency of a package, as found on disk by [`dependency_layout`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DependencyCheckout {
+    /// The name it is declared under.
+    pub name: String,
+    /// Its checkout root.
+    pub root: Utf8PathBuf,
+    /// Where its Beamtalk source lives: `src/`, or the root itself
+    /// ([`dependency_source_dir`]).
+    pub src: Utf8PathBuf,
+    /// Names of its own direct dependencies, from its `beamtalk.toml`.
+    pub dependencies: Vec<String>,
+    /// Its own `[stubs] path` (ADR 0075 layer 2), if it declares one.
+    pub stubs_dir: Option<Utf8PathBuf>,
+}
+
+/// A package's declared dependencies, as far as they are on disk — the one
+/// walk `beamtalk lint`'s offline scan ([`resolve_dependency_class_infos_with_sources`])
+/// and the LSP's dependency preload (BT-4777) both start from, so they agree
+/// on what is a dependency, where it lives and whether the picture is
+/// complete. No network I/O.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DependencyLayout {
+    /// Whether the manifest declares `[dependencies]` — the rule
+    /// `build`/`lint`/`test` share (a malformed manifest conservatively
+    /// assumes dependencies; no manifest, none).
+    pub has_package_dependencies: bool,
+    /// Whether `beamtalk.toml` exists but could not be read. Nothing is
+    /// known about the dependencies then ([`Self::found`] is empty and
+    /// [`Self::all_found`] is `false`).
+    pub manifest_unreadable: bool,
+    /// The manifest's `[package] name`, when it was read.
+    pub package_name: Option<String>,
+    /// Every transitive dependency found on disk, in discovery order.
+    pub found: Vec<DependencyCheckout>,
+    /// Whether that is all of them: each transitive dependency was found
+    /// with a UTF-8 path and a readable manifest. `true` for a directory
+    /// with no manifest, which has none to miss.
+    pub all_found: bool,
+}
+
+impl DependencyLayout {
+    /// Each found dependency's own package-bundled FFI stub directory (ADR
+    /// 0075 layer 2), in compile order — the dependency stub tier
+    /// [`crate::ffi_type_registry::resolve_package_type_registry`] takes.
+    #[must_use]
+    pub fn stub_dirs(&self) -> Vec<crate::ffi_type_registry::DependencyStubsDir> {
+        let root_name = self.package_name.as_deref().unwrap_or_default();
+        order_for_compile(
+            self.found.iter().collect(),
+            root_name,
+            |dep| &dep.name,
+            |dep| &dep.dependencies,
+        )
+        .into_iter()
+        .filter_map(|dep| {
+            Some(crate::ffi_type_registry::DependencyStubsDir {
+                package: dep.name.clone(),
+                stubs_dir: dep.stubs_dir.clone()?,
+            })
+        })
+        .collect()
+    }
+}
+
+/// Walk `project_root`'s transitive dependency graph over whatever
+/// checkouts are on disk ([`DependencyLayout`]).
+#[must_use]
+pub fn dependency_layout(project_root: &Utf8Path) -> DependencyLayout {
+    let read = manifest::find_manifest_full(project_root);
+    let has_package_dependencies =
+        manifest::PackageCheckerScope::from_manifest_read(&read).has_package_dependencies;
+    let parsed = match read {
+        Ok(Some(parsed)) => parsed,
+        Ok(None) => {
+            return DependencyLayout {
+                has_package_dependencies,
+                manifest_unreadable: false,
+                package_name: None,
+                found: Vec::new(),
+                all_found: true,
+            };
+        }
+        Err(_) => {
+            return DependencyLayout {
+                has_package_dependencies,
+                manifest_unreadable: true,
+                package_name: None,
+                found: Vec::new(),
+                all_found: false,
+            };
+        }
+    };
+    let package_name = parsed.package.name.clone();
+    let graph = discover_dependency_graph(project_root, parsed.dependencies);
+    let found = graph
+        .found
+        .into_iter()
+        .map(|dep| {
+            let stubs_dir = manifest::parse_manifest_full(&dep.root.join("beamtalk.toml"))
+                .ok()
+                .and_then(|dep_manifest| dep_manifest.stubs_dir(&dep.root));
+            DependencyCheckout {
+                src: dependency_source_dir(&dep.root),
+                name: dep.name,
+                root: dep.root,
+                dependencies: dep.dependencies,
+                stubs_dir,
+            }
+        })
+        .collect();
+    DependencyLayout {
+        has_package_dependencies,
+        manifest_unreadable: false,
+        package_name: Some(package_name),
+        found,
+        all_found: graph.all_found,
+    }
+}
+
 /// [`resolve_dependency_class_infos`], also returning the source identity
 /// (path and text) of every carried dependency protocol, first definition
 /// wins — so a diagnostic raised in a flattened provision of a dependency's
@@ -153,13 +273,10 @@ pub struct DependencyScan {
 /// the dependencies' extension methods (ADR 0070 WS3, BT-4608).
 #[must_use]
 pub fn resolve_dependency_class_infos_with_sources(project_root: &Utf8Path) -> DependencyScan {
-    // The dependency flag follows the rule `build`/`lint`/`test` share
-    // (a malformed manifest conservatively assumes dependencies).
-    let read = manifest::find_manifest_full(project_root);
-    let has_package_dependencies =
-        manifest::PackageCheckerScope::from_manifest_read(&read).has_package_dependencies;
+    let layout = dependency_layout(project_root);
+    let has_package_dependencies = layout.has_package_dependencies;
     let mut protocol_sources = beamtalk_core::semantic_analysis::ProtocolSourceMap::new();
-    let Ok(Some(parsed)) = read else {
+    let Some(root_name) = layout.package_name else {
         return DependencyScan {
             has_package_dependencies,
             protocol_sources,
@@ -173,20 +290,16 @@ pub fn resolve_dependency_class_infos_with_sources(project_root: &Utf8Path) -> D
     let mut scanned: Vec<DiscoveredDep> = Vec::new();
 
     // The transitive walk over whatever checkouts are on disk — no network
-    // I/O — shared with the LSP (BT-4611). `all_found` is cleared by any
-    // dependency it cannot fully see.
-    let graph = discover_dependency_graph(project_root, parsed.dependencies);
-    let mut every_dependency_found = graph.all_found;
-    for dep in graph.found {
+    // I/O — shared with the LSP (BT-4611, BT-4777). `all_found` is cleared by
+    // any dependency it cannot fully see.
+    let mut every_dependency_found = layout.all_found;
+    for dep in layout.found {
         if let Some(scan) = scan_dep(&dep.root, &dep.name) {
-            let stubs_dir = manifest::parse_manifest_full(&dep.root.join("beamtalk.toml"))
-                .ok()
-                .and_then(|dep_manifest| dep_manifest.stubs_dir(&dep.root));
             scanned.push(DiscoveredDep {
                 name: dep.name,
                 dependencies: dep.dependencies,
                 scan,
-                stubs_dir,
+                stubs_dir: dep.stubs_dir,
             });
         } else {
             every_dependency_found = false;
@@ -203,7 +316,7 @@ pub fn resolve_dependency_class_infos_with_sources(project_root: &Utf8Path) -> D
         .collect();
     // Each dependency flattened so far, with its own protocol ASTs.
     let mut flattened: Vec<(String, Vec<ProtocolDefinition>)> = Vec::new();
-    let ordered = compile_order(scanned, &parsed.package.name);
+    let ordered = compile_order(scanned, &root_name);
     for dep in &ordered {
         let closure =
             beamtalk_core::compilation::dep_order::dependency_closure(&dependencies, &dep.name);
@@ -329,9 +442,21 @@ struct DiscoveredDep {
 /// warning, if the graph has a cycle. Dependencies named only as an edge —
 /// whose checkout is not on disk — are not part of it.
 fn compile_order(deps: Vec<DiscoveredDep>, root_name: &str) -> Vec<DiscoveredDep> {
+    order_for_compile(deps, root_name, |dep| &dep.name, |dep| &dep.dependencies)
+}
+
+/// [`compile_order`] over any per-dependency record — shared with
+/// [`DependencyLayout::stub_dirs`], so both order a package's dependencies
+/// the way the graph compile does.
+fn order_for_compile<T>(
+    deps: Vec<T>,
+    root_name: &str,
+    name: impl Fn(&T) -> &str,
+    edges: impl Fn(&T) -> &[String],
+) -> Vec<T> {
     let graph = deps
         .iter()
-        .map(|dep| (dep.name.clone(), dep.dependencies.clone()))
+        .map(|dep| (name(dep).to_string(), edges(dep).to_vec()))
         .collect();
     let order = match beamtalk_core::compilation::dep_order::topological_order(&graph, root_name) {
         Ok(order) => order,
@@ -340,9 +465,9 @@ fn compile_order(deps: Vec<DiscoveredDep>, root_name: &str) -> Vec<DiscoveredDep
             return deps;
         }
     };
-    let mut by_name: HashMap<String, DiscoveredDep> = deps
+    let mut by_name: HashMap<String, T> = deps
         .into_iter()
-        .map(|dep| (dep.name.clone(), dep))
+        .map(|dep| (name(&dep).to_string(), dep))
         .collect();
     order
         .iter()
@@ -519,6 +644,79 @@ mod tests {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(path, contents).unwrap();
+    }
+
+    const APP_MANIFEST_WITH_DEPS: &str = "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n\
+         [dependencies]\nmid = { path = \"../mid\" }\n";
+
+    #[test]
+    fn layout_without_a_manifest_has_nothing_to_miss() {
+        let tmp = TempDir::new().unwrap();
+        let root = Utf8Path::from_path(tmp.path()).unwrap();
+        let layout = dependency_layout(root);
+        assert!(!layout.has_package_dependencies);
+        assert!(!layout.manifest_unreadable);
+        assert!(layout.found.is_empty());
+        assert!(layout.all_found);
+    }
+
+    #[test]
+    fn layout_with_a_malformed_manifest_assumes_dependencies() {
+        let tmp = TempDir::new().unwrap();
+        write(
+            &tmp.path().join("beamtalk.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nbad = 42\n",
+        );
+        let layout = dependency_layout(Utf8Path::from_path(tmp.path()).unwrap());
+        assert!(layout.has_package_dependencies);
+        assert!(layout.manifest_unreadable);
+        assert!(layout.found.is_empty());
+        assert!(!layout.all_found);
+    }
+
+    #[test]
+    fn layout_finds_path_dependencies_transitively_with_their_stubs() {
+        let tmp = TempDir::new().unwrap();
+        let base = Utf8Path::from_path(tmp.path()).unwrap();
+        write(
+            &base.join("app/beamtalk.toml").into_std_path_buf(),
+            APP_MANIFEST_WITH_DEPS,
+        );
+        write(
+            &base.join("mid/beamtalk.toml").into_std_path_buf(),
+            "[package]\nname = \"mid\"\nversion = \"0.1.0\"\n\n\
+             [dependencies]\nleaf = { path = \"../leaf\" }\n\n[stubs]\npath = \"stubs/\"\n",
+        );
+        write(
+            &base.join("mid/src/m.bt").into_std_path_buf(),
+            "Object subclass: Mid\n",
+        );
+        write(
+            &base.join("leaf/beamtalk.toml").into_std_path_buf(),
+            "[package]\nname = \"leaf\"\nversion = \"0.1.0\"\n",
+        );
+
+        let layout = dependency_layout(&base.join("app"));
+        assert!(layout.has_package_dependencies);
+        assert!(layout.all_found);
+        assert_eq!(layout.package_name.as_deref(), Some("app"));
+        let found: Vec<_> = layout
+            .found
+            .iter()
+            .map(|d| (d.name.as_str(), d.src.clone()))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("mid", base.join("mid/src")),
+                // No `src/`: the checkout root is the source directory.
+                ("leaf", base.join("leaf")),
+            ]
+        );
+        let stubs = layout.stub_dirs();
+        assert_eq!(stubs.len(), 1, "only `mid` declares a stubs dir");
+        assert_eq!(stubs[0].package, "mid");
+        assert_eq!(stubs[0].stubs_dir, base.join("mid/stubs"));
     }
 
     // `resolve_dependency_class_infos` reads/writes a

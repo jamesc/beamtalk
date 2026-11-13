@@ -1007,15 +1007,16 @@ pub struct NarrowingCast {
 /// superclass of the declared one.
 ///
 /// Not casts, so not reported: redundant annotations (same type), widening
-/// annotations (`T | Nil`, `T?`) and the other composed forms, an `Object`
+/// annotations (`T | Nil`, `T?`) and the other composed forms (written
+/// directly or through a type alias that expands to one), an `Object`
 /// declared type (it asserts nothing), declared classes the hierarchy does
-/// not know (aliases, type parameters), and `Never`/`Union` right-hand sides.
+/// not know (type parameters, protocols), and `Never`/`Union` right-hand
+/// sides. A type alias is judged by what it stands for (BT-4796).
 pub(crate) fn find_narrowing_casts(
     module: &Module,
     type_map: &TypeMap,
     hierarchy: &ClassHierarchy,
 ) -> Vec<NarrowingCast> {
-    let empty_subst: HashMap<ecow::EcoString, InferredType> = HashMap::new();
     let mut found = Vec::new();
     let unknown = InferredType::Dynamic(DynamicReason::Unknown);
     walk_module(module, &mut |expr| {
@@ -1041,28 +1042,22 @@ pub(crate) fn find_narrowing_casts(
         ) {
             return;
         }
-        // The assignment itself is recorded whenever inference ran over it;
-        // without that entry the body was never inferred, so nothing is known.
-        if type_map.get(*span).is_none() {
-            return;
-        }
-        // The type map omits `Dynamic(Unknown)` (it carries no provenance), so
-        // an absent entry is a `Dynamic` right-hand side, the common cast.
-        let rhs_ty = type_map.get(value.span()).unwrap_or(&unknown);
-        let resolved = crate::semantic_analysis::type_checker::resolve_type_annotation(
-            annotation,
-            &empty_subst,
-            None,
-            None,
-        );
-        let InferredType::Known {
+        // The assignment's recorded type is its declared type, resolved by
+        // inference with the file's alias registry (BT-4796): `n :: MyAlias`
+        // is judged by what `MyAlias` stands for. Without an entry the body
+        // was never inferred (or the declared type is `Dynamic`, which the
+        // map omits), so there is no known class to narrow to.
+        let Some(InferredType::Known {
             class_name: ann_class,
             type_args: ann_args,
             ..
-        } = &resolved
+        }) = type_map.get(*span)
         else {
             return;
         };
+        // The type map omits `Dynamic(Unknown)` (it carries no provenance), so
+        // an absent entry is a `Dynamic` right-hand side, the common cast.
+        let rhs_ty = type_map.get(value.span()).unwrap_or(&unknown);
         if ann_class.as_str() == "Object" || !hierarchy.has_class(ann_class) {
             return;
         }
@@ -2673,6 +2668,74 @@ mod tests {
     fn narrowing_to_object_not_flagged() {
         let src = "Object subclass: Reader\n  read: opts :: Dictionary =>\n    n :: Object := opts at: #max\n    n";
         assert!(narrowing_lints(src).is_empty());
+    }
+
+    /// [`narrowing_lints`] with the module's own type aliases registered, as
+    /// the real pipeline does (BT-4796).
+    fn narrowing_lints_with_aliases(src: &str) -> Vec<Diagnostic> {
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        let hard_errs: Vec<_> = parse_diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(hard_errs.is_empty(), "Parse failed: {hard_errs:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.expect("hierarchy build failed");
+        let aliases = std::sync::Arc::new(
+            crate::semantic_analysis::AliasRegistry::from_module_declarations(&module),
+        );
+        let (type_map, _) =
+            crate::semantic_analysis::type_checker::infer_types_and_returns_with_registries(
+                &module,
+                &hierarchy,
+                None,
+                None,
+                Some(aliases),
+            );
+        let mut diagnostics = Vec::new();
+        check_narrowing_local_type_annotation(&module, &type_map, &hierarchy, &mut diagnostics);
+        diagnostics
+    }
+
+    #[test]
+    fn narrowing_through_alias_flagged() {
+        let src = "type Count = Integer\n\nObject subclass: Reader\n  read: opts :: Dictionary =>\n    n :: Count := opts at: #max\n    n";
+        let diags = narrowing_lints_with_aliases(src);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].category, Some(DiagnosticCategory::NarrowingCast));
+        assert!(diags[0].message.contains("Integer"), "{}", diags[0].message);
+    }
+
+    #[test]
+    fn narrowing_through_alias_of_alias_flagged() {
+        let src = "type Count = Integer\ntype Total = Count\n\nObject subclass: Reader\n  read: opts :: Dictionary =>\n    n :: Total := opts at: #max\n    n";
+        assert_eq!(narrowing_lints_with_aliases(src).len(), 1);
+    }
+
+    #[test]
+    fn narrowing_alias_to_known_superclass_rhs_flagged() {
+        let src = "type Pet = Dog\n\nObject subclass: Animal\n  me => self\n\nAnimal subclass: Dog\n  bark => 1\n\nObject subclass: Zoo\n  pick =>\n    d :: Pet := Animal new\n    d";
+        assert_eq!(narrowing_lints_with_aliases(src).len(), 1);
+    }
+
+    #[test]
+    fn redundant_through_alias_not_flagged() {
+        let src =
+            "type Count = Integer\n\nObject subclass: Foo\n  bar =>\n    n :: Count := 42\n    n";
+        assert!(narrowing_lints_with_aliases(src).is_empty());
+    }
+
+    #[test]
+    fn widening_through_alias_not_flagged() {
+        let src = "type MaybeInt = Integer | Nil\n\nObject subclass: Foo\n  bar =>\n    status :: MaybeInt := nil\n    status";
+        assert!(narrowing_lints_with_aliases(src).is_empty());
+    }
+
+    #[test]
+    fn alias_to_object_not_flagged() {
+        let src = "type Anything = Object\n\nObject subclass: Reader\n  read: opts :: Dictionary =>\n    n :: Anything := opts at: #max\n    n";
+        assert!(narrowing_lints_with_aliases(src).is_empty());
     }
 
     #[test]

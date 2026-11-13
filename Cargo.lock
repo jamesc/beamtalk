@@ -392,6 +392,7 @@ version = "0.4.0"
 dependencies = [
  "beamtalk-core",
  "beamtalk-language-service",
+ "beamtalk-package",
  "beamtalk-project",
  "beamtalk-repl-protocol",
  "beamtalk-sysroot",
