@@ -8,7 +8,7 @@ use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CoreErlangGenerator, Result};
 use super::super::family_slots::FoldFamilySlots;
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
-use super::fold_driver::{FoldHead, FoldParams};
+use super::fold_driver::{FoldHead, FoldParams, fold_threads_self};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -616,9 +616,13 @@ impl CoreErlangGenerator {
         guard_selector: &str,
     ) -> Result<Document<'static>> {
         // Use tuple accumulator when eligible.
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate)
-            .with_value_self_slot(self, body)?;
-        self.emit_loop_convention_diagnostic(&plan, body.span);
+        let (plan, _) = self.begin_fold_plan(
+            body,
+            ListOpKind::Accumulate,
+            None,
+            fold_threads_self("inject:into:"),
+            false,
+        )?;
 
         // Add is_list guard for non-list collection types.
         let list_var = self.fresh_temp_var("temp");
