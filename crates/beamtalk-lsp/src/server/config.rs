@@ -233,55 +233,52 @@ pub(in crate::server) fn path_within_any_root(path: &Path, roots: &[PathBuf]) ->
 }
 /// The declared dependencies of the package at `root` (BT-4611): its
 /// `beamtalk.toml` `[dependencies]` and theirs, transitively, located on disk
-/// with the walk the CLI's offline dependency scan uses
-/// ([`beamtalk_project::dependency_graph::discover_dependency_graph`]) —
-/// path dependencies at their declared path, git and registry ones under
-/// `_build/deps/<name>/`. Never fetches.
+/// by [`beamtalk_package::dependency_classes::dependency_layout`] (BT-4777) —
+/// the walk `beamtalk lint` and MCP share: path dependencies at their
+/// declared path, git and registry ones under `_build/deps/<name>/`. Never
+/// fetches.
 ///
 /// A root with no `beamtalk.toml` is not a package and has none. One whose
-/// `[dependencies]` can't be read is assumed to have some, none of them
-/// known; its fetched checkouts (`_build/deps/*/`) are still returned so
-/// their classes resolve.
+/// manifest can't be read is assumed to have some, none of them known; its
+/// fetched checkouts (`_build/deps/*/`) are still returned so their classes
+/// resolve.
 pub(in crate::server) fn root_dependencies(root: &Path) -> RootDependencies {
-    use beamtalk_project::dependency_graph::{dependency_source_dir, discover_dependency_graph};
-
-    let manifest = root.join("beamtalk.toml");
-    if !manifest.is_file() {
+    let Some(utf8_root) = camino::Utf8Path::from_path(root) else {
+        // A non-UTF-8 root can't be walked: if it is a package, assume it has
+        // dependencies, none of them known.
+        let is_package = root.join("beamtalk.toml").is_file();
         return RootDependencies {
-            declared: false,
-            found: Vec::new(),
-            all_found: true,
+            declared: is_package,
+            found: if is_package {
+                fetched_dependency_checkouts(root)
+            } else {
+                Vec::new()
+            },
+            all_found: !is_package,
         };
-    }
-    let read = camino::Utf8Path::from_path(root).ok_or(()).and_then(|utf8_root| {
-        beamtalk_project::dependencies::read_manifest_dependencies(&utf8_root.join("beamtalk.toml"))
-            .map(|deps| (utf8_root, deps))
-            .map_err(|e| {
-                // `debug`, not `warn`: this runs on every `did_open` (via
-                // `preload_covers`), and `beamtalk build` reports the error.
-                tracing::debug!(root = %root.display(), error = %e, "Cannot read [dependencies]; keeping the dependency guard on");
-            })
-    });
-    let Ok((utf8_root, direct)) = read else {
+    };
+    let layout = beamtalk_package::dependency_classes::dependency_layout(utf8_root);
+    if layout.manifest_unreadable {
+        // `debug`, not `warn`: this runs on every `did_open` (via
+        // `preload_covers`), and `beamtalk build` reports the error.
+        tracing::debug!(root = %root.display(), "Cannot read the manifest; keeping the dependency guard on");
         return RootDependencies {
             declared: true,
             found: fetched_dependency_checkouts(root),
             all_found: false,
         };
-    };
-    let declared = !direct.is_empty();
-    let graph = discover_dependency_graph(utf8_root, direct);
+    }
     RootDependencies {
-        declared,
-        found: graph
+        declared: layout.has_package_dependencies,
+        found: layout
             .found
             .into_iter()
             .map(|dep| DependencyDirs {
-                src: dependency_source_dir(&dep.root).into_std_path_buf(),
+                src: dep.src.into_std_path_buf(),
                 root: dep.root.into_std_path_buf(),
             })
             .collect(),
-        all_found: graph.all_found,
+        all_found: layout.all_found,
     }
 }
 /// Every fetched checkout under `root/_build/deps/` with a `src/` — the

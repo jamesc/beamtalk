@@ -1746,7 +1746,11 @@ impl SimpleLanguageService {
     /// Indexes one file. `reindex_siblings` lets a dependency file whose
     /// `internal type` aliases changed re-index its package siblings, whose
     /// exported signatures were expanded against the old alias set (BT-4778).
-    fn index_file(&mut self, file: Utf8PathBuf, content: String, reindex_siblings: bool) {
+    ///
+    /// Returns whether this was a dependency file whose `internal` aliases
+    /// changed, i.e. whether its package siblings are now stale — a caller
+    /// passing `reindex_siblings = false` must deal with that itself.
+    fn index_file(&mut self, file: Utf8PathBuf, content: String, reindex_siblings: bool) -> bool {
         use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
         let tokens = lex_with_eof(&content);
@@ -1892,7 +1896,7 @@ impl SimpleLanguageService {
                     diagnostics: all_diagnostics,
                 },
             );
-            return;
+            return false;
         }
 
         self.files.insert(
@@ -1908,19 +1912,45 @@ impl SimpleLanguageService {
         // exported signatures were expanded against the old set (or, during a
         // preload, before this file was indexed), so re-index them (BT-4778).
         if reindex_siblings && aliases_changed {
-            self.reindex_dependency_siblings(&file);
+            self.reindex_dependency_siblings(&file, false);
         }
+        aliases_changed
     }
 }
 
 impl SimpleLanguageService {
-    /// Re-indexes the other indexed files of `file`'s dependency package.
-    fn reindex_dependency_siblings(&mut self, file: &Utf8PathBuf) {
+    /// Indexes many files at once — a workspace preload. Equivalent to
+    /// [`LanguageService::update_file`] on each, but a dependency package
+    /// whose `internal` aliases changed has its files re-indexed once after
+    /// the whole batch, not once per alias-bearing file (quadratic in the
+    /// package's size for a large dependency).
+    pub fn update_files(&mut self, files: impl IntoIterator<Item = (Utf8PathBuf, String)>) {
+        let mut stale_packages: Vec<Utf8PathBuf> = Vec::new();
+        for (file, content) in files {
+            if self.index_file(file.clone(), content, false)
+                && !stale_packages
+                    .iter()
+                    .any(|seen| crate::project_index::same_dependency_package(seen, &file))
+            {
+                stale_packages.push(file);
+            }
+        }
+        // Every file's aliases are indexed now, so one more pass expands each
+        // file against its package's complete alias set.
+        for file in &stale_packages {
+            self.reindex_dependency_siblings(file, true);
+        }
+    }
+
+    /// Re-indexes the other indexed files of `file`'s dependency package, and
+    /// `file` itself when `include_file`.
+    fn reindex_dependency_siblings(&mut self, file: &Utf8PathBuf, include_file: bool) {
         let siblings: Vec<(Utf8PathBuf, String)> = self
             .files
             .iter()
             .filter(|(other, _)| {
-                *other != file && crate::project_index::same_dependency_package(other, file)
+                (include_file || *other != file)
+                    && crate::project_index::same_dependency_package(other, file)
             })
             .map(|(other, data)| (other.clone(), data.source.clone()))
             .collect();
@@ -1941,7 +1971,7 @@ impl LanguageService for SimpleLanguageService {
         self.files.remove(file);
         // Siblings were expanded against this file's aliases (BT-4778).
         if had_internal_aliases && crate::project_index::is_dependency_file(file) {
-            self.reindex_dependency_siblings(file);
+            self.reindex_dependency_siblings(file, false);
         }
     }
 

@@ -70,7 +70,7 @@ see the BT-3362 paragraph below.)
 
 **✅ ALLOWED:**
 - `beamtalk-cli` depends on `beamtalk-core`
-- `beamtalk-lsp` depends on `beamtalk-core`
+- `beamtalk-lsp` depends on `beamtalk-core` and `beamtalk-package` (dependency layout, FFI type registry; BT-4777)
 - `beamtalk-language-service` depends on `beamtalk-core` (`parse`, `analyse`, `compilation`)
 - `beamtalk-codegen` depends on `beamtalk-core` (needs AST types, `analyse`, `unparse`)
 
