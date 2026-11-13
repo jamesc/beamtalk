@@ -266,14 +266,14 @@ fn compile_fixtures_directory(
     let mut fixtures_by_module: HashMap<String, Utf8PathBuf> = HashMap::new();
     for fixture_path in &fixture_files {
         let module_name = fixture_module_name(fixture_path)?;
-        if let Some(existing_path) = fixtures_by_module.get(&module_name) {
-            if existing_path != fixture_path {
-                miette::bail!(
-                    "Fixture module name collision for '{module_name}': '{}' vs '{}'",
-                    existing_path,
-                    fixture_path
-                );
-            }
+        if let Some(existing_path) = fixtures_by_module.get(&module_name)
+            && existing_path != fixture_path
+        {
+            miette::bail!(
+                "Fixture module name collision for '{module_name}': '{}' vs '{}'",
+                existing_path,
+                fixture_path
+            );
         }
         fixtures_by_module.insert(module_name.clone(), fixture_path.clone());
 
@@ -653,10 +653,10 @@ fn collect_beam_module_names(ebin_dir: &Utf8Path) -> Result<Vec<String>> {
         let path = Utf8PathBuf::from_path_buf(entry.path())
             .map_err(|_| miette::miette!("Non-UTF-8 path in '{}'", ebin_dir))?;
 
-        if path.extension() == Some("beam") {
-            if let Some(stem) = path.file_stem() {
-                modules.push(stem.to_string());
-            }
+        if path.extension() == Some("beam")
+            && let Some(stem) = path.file_stem()
+        {
+            modules.push(stem.to_string());
         }
     }
 
@@ -1134,10 +1134,10 @@ fn discover_packages_with_manifests(
 
     // Walk up from each test file to find its package root
     for test_file in test_files {
-        if let Some(root) = canonical_package_root(test_file) {
-            if seen.insert(root.clone()) {
-                roots.push(root);
-            }
+        if let Some(root) = canonical_package_root(test_file)
+            && seen.insert(root.clone())
+        {
+            roots.push(root);
         }
     }
 
@@ -2011,20 +2011,20 @@ fn build_packages(pipeline: &mut TestPipeline) -> Result<()> {
             {
                 let entry = erl_file.into_diagnostic()?;
                 let path = entry.path();
-                if path.is_file() && path.extension().is_some_and(|ext| ext == "erl") {
-                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                        if stem.ends_with("_test") || stem.ends_with("_tests") {
-                            let module = stem.to_string();
-                            if pipeline.native_test_modules.contains(&module) {
-                                eprintln!(
-                                    "Warning: duplicate native test module '{}' in package \
+                if path.is_file()
+                    && path.extension().is_some_and(|ext| ext == "erl")
+                    && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                    && (stem.ends_with("_test") || stem.ends_with("_tests"))
+                {
+                    let module = stem.to_string();
+                    if pipeline.native_test_modules.contains(&module) {
+                        eprintln!(
+                            "Warning: duplicate native test module '{}' in package \
                                      '{}' — skipping (already discovered in another package)",
-                                    module, pkg.name
-                                );
-                            } else {
-                                pipeline.native_test_modules.push(module);
-                            }
-                        }
+                            module, pkg.name
+                        );
+                    } else {
+                        pipeline.native_test_modules.push(module);
                     }
                 }
             }

@@ -385,13 +385,12 @@ fn read_port_from_beam(child: &mut Child) -> u16 {
             if debug_output {
                 eprintln!("E2E BEAM: {line}");
             }
-            if !port_sent {
-                if let Some(port_str) = line.strip_prefix("BEAMTALK_PORT:") {
-                    if let Ok(port) = port_str.trim().parse::<u16>() {
-                        let _ = tx.send(port); // receiver may have already timed out; keep draining
-                        port_sent = true;
-                    }
-                }
+            if !port_sent
+                && let Some(port_str) = line.strip_prefix("BEAMTALK_PORT:")
+                && let Ok(port) = port_str.trim().parse::<u16>()
+            {
+                let _ = tx.send(port); // receiver may have already timed out; keep draining
+                port_sent = true;
             }
         }
     });
@@ -1040,15 +1039,14 @@ impl ReplClient {
             match self.ws.read() {
                 Ok(tungstenite::Message::Text(text)) => {
                     // Skip push messages (e.g. Transcript push, actor lifecycle events)
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if parsed.get("push").is_some()
+                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text)
+                        && (parsed.get("push").is_some()
                             || parsed
                                 .get("type")
                                 .and_then(|t| t.as_str())
-                                .is_some_and(|t| t == "push")
-                        {
-                            continue;
-                        }
+                                .is_some_and(|t| t == "push"))
+                    {
+                        continue;
                     }
                     return Ok(text.to_string());
                 }
@@ -1530,10 +1528,10 @@ fn matches_pattern(pattern: &str, actual: &str) -> bool {
     }
 
     // Last segment must match at the end (unless pattern ends with `_`)
-    if let Some(last) = segments.last() {
-        if !last.is_empty() {
-            return actual.ends_with(last);
-        }
+    if let Some(last) = segments.last()
+        && !last.is_empty()
+    {
+        return actual.ends_with(last);
     }
 
     true
@@ -1625,11 +1623,9 @@ fn run_test_file_opts(
     }
 
     // Clear bindings before running file
-    if clear_bindings {
-        if let Err(e) = client.clear_bindings() {
-            failures.push(format!("{file_name}: Failed to clear bindings: {e}"));
-            return (0, failures);
-        }
+    if clear_bindings && let Err(e) = client.clear_bindings() {
+        failures.push(format!("{file_name}: Failed to clear bindings: {e}"));
+        return (0, failures);
     }
 
     // Load any required files (relative to workspace root)

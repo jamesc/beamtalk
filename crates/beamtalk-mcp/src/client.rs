@@ -327,10 +327,9 @@ impl ReplClient {
                 .ok()
                 .flatten()
                 .filter(|c| !c.trim().is_empty())
+                && let Ok(mut cookie) = self.cookie.lock()
             {
-                if let Ok(mut cookie) = self.cookie.lock() {
-                    *cookie = new_cookie;
-                }
+                *cookie = new_cookie;
             }
 
             tracing::info!(
@@ -982,15 +981,15 @@ mod tests {
     impl Drop for ReplWorkspace {
         fn drop(&mut self) {
             // Stop workspace explicitly to avoid port leaks on CI.
-            if let Some(ref ws_id) = self.workspace_id {
-                if let Some(bin) = find_binary("beamtalk") {
-                    let _ = Command::new(bin)
-                        .args(["workspace", "stop", ws_id])
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .spawn();
-                }
+            if let Some(ref ws_id) = self.workspace_id
+                && let Some(bin) = find_binary("beamtalk")
+            {
+                let _ = Command::new(bin)
+                    .args(["workspace", "stop", ws_id])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn();
             }
         }
     }
@@ -1204,11 +1203,11 @@ mod tests {
 
     /// Get the port and cookie of the shared REPL, starting it if needed.
     fn test_port_and_cookie() -> Result<(u16, String), String> {
-        if let Ok(port) = std::env::var("BEAMTALK_TEST_PORT") {
-            if let Ok(p) = port.parse() {
-                let cookie = std::env::var("BEAMTALK_TEST_COOKIE").unwrap_or_default();
-                return Ok((p, cookie));
-            }
+        if let Ok(port) = std::env::var("BEAMTALK_TEST_PORT")
+            && let Ok(p) = port.parse()
+        {
+            let cookie = std::env::var("BEAMTALK_TEST_COOKIE").unwrap_or_default();
+            return Ok((p, cookie));
         }
         match REPL.as_ref() {
             Ok(repl) => Ok((repl.port, repl.cookie.clone())),
@@ -1438,12 +1437,12 @@ mod tests {
         if resp.is_error() {
             // Some test environments may not have stdlib classes loaded; accept
             // a missing-class error as a soft skip.
-            if let Some(err) = resp.error_message() {
-                if err.contains("Unknown class") {
-                    eprintln!("docs skipped: {err}");
-                    client.close().await;
-                    return Ok(());
-                }
+            if let Some(err) = resp.error_message()
+                && err.contains("Unknown class")
+            {
+                eprintln!("docs skipped: {err}");
+                client.close().await;
+                return Ok(());
             }
         }
         assert!(!resp.is_error(), "docs should succeed: {:?}", resp.error);
@@ -2154,17 +2153,16 @@ mod tests {
     #[tokio::test]
     #[ignore = "integration test"]
     async fn test_zzz_cleanup() {
-        if let Ok(repl) = REPL.as_ref() {
-            if let Some(ref ws_id) = repl.workspace_id {
-                if let Some(bin) = find_binary("beamtalk") {
-                    let _ = Command::new(bin)
-                        .args(["workspace", "stop", ws_id])
-                        .stdin(Stdio::null())
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null())
-                        .status();
-                }
-            }
+        if let Ok(repl) = REPL.as_ref()
+            && let Some(ref ws_id) = repl.workspace_id
+            && let Some(bin) = find_binary("beamtalk")
+        {
+            let _ = Command::new(bin)
+                .args(["workspace", "stop", ws_id])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
         }
     }
 

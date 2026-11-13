@@ -448,10 +448,8 @@ pub(crate) fn key_hover_text(key: &str, owner: &InferredType, named_owner: bool)
     let info = merged_keys(owner)?.into_iter().find(|k| k.key == key)?;
     let value = display_values(&info.values);
     let mut text = format!("Shape key: `#{key}`");
-    if named_owner {
-        if let Some(owner) = owner.display_for_diagnostic() {
-            let _ = write!(text, " of `{owner}`");
-        }
+    if named_owner && let Some(owner) = owner.display_for_diagnostic() {
+        let _ = write!(text, " of `{owner}`");
     }
     let _ = write!(text, " — Type: {value}");
     if info.optional {

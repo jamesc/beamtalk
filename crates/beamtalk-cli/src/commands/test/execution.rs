@@ -385,10 +385,9 @@ fn parse_eunit_summary(output: &str) -> (usize, usize, usize) {
             if let Some(n_str) = trimmed
                 .strip_suffix(" tests passed.")
                 .and_then(|s| s.strip_prefix("All ").or(Some(s)))
+                && let Ok(n) = n_str.parse::<usize>()
             {
-                if let Ok(n) = n_str.parse::<usize>() {
-                    return (n, 0, 0);
-                }
+                return (n, 0, 0);
             }
         }
 

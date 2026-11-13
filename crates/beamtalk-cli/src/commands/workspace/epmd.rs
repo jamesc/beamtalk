@@ -119,10 +119,10 @@ fn epmd_reachable_at(addr: IpAddr) -> bool {
 /// probe is two cheap TCP connects: loopback (is epmd up?) and this host's
 /// primary non-loopback interface (is it reachable off-loopback?).
 pub(super) fn check_epmd_loopback() -> EpmdPosture {
-    if let Some(ip) = primary_non_loopback_ipv4() {
-        if epmd_reachable_at(IpAddr::V4(ip)) {
-            return EpmdPosture::Promiscuous(ip);
-        }
+    if let Some(ip) = primary_non_loopback_ipv4()
+        && epmd_reachable_at(IpAddr::V4(ip))
+    {
+        return EpmdPosture::Promiscuous(ip);
     }
 
     if epmd_reachable_at(IpAddr::V4(Ipv4Addr::LOCALHOST)) {

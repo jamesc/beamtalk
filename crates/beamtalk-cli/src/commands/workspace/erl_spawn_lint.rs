@@ -102,14 +102,14 @@ fn violations_in(label: &str, source: &str) -> (usize, Vec<String>) {
                  (use `beamtalk_workspace::erl_command()`)",
                 idx + 1
             ));
-        } else if let Some(clear) = last_clear.filter(|&c| c > idx) {
-            if last_pin.is_none_or(|p| p <= clear) {
-                violations.push(format!(
-                    "{label}:{}: `env_clear()` after the `erl` spawn wipes the epmd pin; \
+        } else if let Some(clear) = last_clear.filter(|&c| c > idx)
+            && last_pin.is_none_or(|p| p <= clear)
+        {
+            violations.push(format!(
+                "{label}:{}: `env_clear()` after the `erl` spawn wipes the epmd pin; \
                      call `pin_epmd_loopback` after it",
-                    clear + 1
-                ));
-            }
+                clear + 1
+            ));
         }
     }
     (spawns, violations)

@@ -611,13 +611,13 @@ impl Pass1Index {
         self.extension_index
             .add_entries(file.extensions.iter().cloned());
         for (class_name, module_name) in &file.class_module_index {
-            if let Some(existing) = self.class_module_index.get(class_name) {
-                if existing != module_name {
-                    eprintln!(
-                        "Warning: class '{class_name}' is defined in both '{existing}' and \
+            if let Some(existing) = self.class_module_index.get(class_name)
+                && existing != module_name
+            {
+                eprintln!(
+                    "Warning: class '{class_name}' is defined in both '{existing}' and \
                          '{module_name}'; using '{module_name}' for cross-file dispatch"
-                    );
-                }
+                );
             }
             self.class_module_index
                 .insert(class_name.clone(), module_name.clone());

@@ -187,18 +187,18 @@ pub(crate) fn normalize_inline_assertions(content: &str) -> String {
         // Detect an inline assertion: the line must contain `// =>` outside
         // string literals and must NOT start with `//` (standalone comment).
         let trimmed = line.trim();
-        if !trimmed.starts_with("//") {
-            if let Some(pos) = util::find_assertion_marker_pos(line) {
-                // Split into expression part and assertion part.
-                let expr_part = line[..pos].trim_end();
-                let assertion_part = line[pos..].trim_start(); // "// => value"
-                if !expr_part.is_empty() {
-                    out.push_str(expr_part);
-                    out.push('\n');
-                    out.push_str(assertion_part);
-                    out.push('\n');
-                    continue;
-                }
+        if !trimmed.starts_with("//")
+            && let Some(pos) = util::find_assertion_marker_pos(line)
+        {
+            // Split into expression part and assertion part.
+            let expr_part = line[..pos].trim_end();
+            let assertion_part = line[pos..].trim_start(); // "// => value"
+            if !expr_part.is_empty() {
+                out.push_str(expr_part);
+                out.push('\n');
+                out.push_str(assertion_part);
+                out.push('\n');
+                continue;
             }
         }
         out.push_str(line);

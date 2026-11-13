@@ -190,10 +190,10 @@ pub(super) fn collect_inherited_methods<'a>(
 
     // If superclass not in hierarchy keys, try looking it up in methods_by_class directly
     if current.is_none() {
-        if let Some((key, parent)) = methods_by_class.get_key_value(superclass_name.as_str()) {
-            if !parent.methods.is_empty() {
-                inherited.push((key.as_str(), parent.methods.as_slice()));
-            }
+        if let Some((key, parent)) = methods_by_class.get_key_value(superclass_name.as_str())
+            && !parent.methods.is_empty()
+        {
+            inherited.push((key.as_str(), parent.methods.as_slice()));
         }
         return inherited;
     }
@@ -202,10 +202,10 @@ pub(super) fn collect_inherited_methods<'a>(
         if !visited.insert(parent_name.as_str()) {
             break; // cycle detected
         }
-        if let Some(parent) = methods_by_class.get(parent_name.as_str()) {
-            if !parent.methods.is_empty() {
-                inherited.push((parent_name.as_str(), parent.methods.as_slice()));
-            }
+        if let Some(parent) = methods_by_class.get(parent_name.as_str())
+            && !parent.methods.is_empty()
+        {
+            inherited.push((parent_name.as_str(), parent.methods.as_slice()));
         }
         current = hierarchy.get(parent_name.as_str());
     }

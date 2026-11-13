@@ -437,10 +437,10 @@ fn test_summary_failed(text: &str) -> bool {
         .map(|idx| &text[idx..])
         .unwrap_or(text)
         .trim();
-    if let Ok(v) = serde_json::from_str::<Value>(json_text) {
-        if let Some(n) = v.get("failed").and_then(Value::as_u64) {
-            return n > 0;
-        }
+    if let Ok(v) = serde_json::from_str::<Value>(json_text)
+        && let Some(n) = v.get("failed").and_then(Value::as_u64)
+    {
+        return n > 0;
     }
     // Fallback: token scan for legacy text formats. `has_nonzero_failures`
     // tolerates both `<n> failed` and `failed: <n>` orderings.

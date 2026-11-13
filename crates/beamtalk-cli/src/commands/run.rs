@@ -327,18 +327,18 @@ fn run_script(
         .wait()
         .map_err(|e| miette!("Failed to wait for BEAM node: {e}"))?;
 
-    if !status.success() {
-        if let Some(code) = status.code() {
-            // ADR 0099 §3: the program owns its exit status. `Program exit: N`,
-            // `System halt: N`, and the implicit "uncaught error → 1" all surface
-            // as the BEAM node's exit code; propagate it verbatim as the CLI's own
-            // exit code (POSIX-correct for shells / CI `set -e`). The program has
-            // already written any diagnostics to its stderr, so we add no message.
-            info!(exit_code = code, "Forwarding script exit code");
-            std::process::exit(code);
-        }
-        // Signal-terminated (e.g. Ctrl+C) — exit silently
+    if !status.success()
+        && let Some(code) = status.code()
+    {
+        // ADR 0099 §3: the program owns its exit status. `Program exit: N`,
+        // `System halt: N`, and the implicit "uncaught error → 1" all surface
+        // as the BEAM node's exit code; propagate it verbatim as the CLI's own
+        // exit code (POSIX-correct for shells / CI `set -e`). The program has
+        // already written any diagnostics to its stderr, so we add no message.
+        info!(exit_code = code, "Forwarding script exit code");
+        std::process::exit(code);
     }
+    // Signal-terminated (e.g. Ctrl+C) — exit silently
 
     info!("Script run completed");
     Ok(())

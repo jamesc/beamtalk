@@ -408,10 +408,10 @@ fn extract_adr_title(content: &str) -> String {
         if let Some(rest) = line.strip_prefix("# ") {
             // Strip "ADR NNNN: " prefix (case-insensitive check)
             let rest_lower = rest.to_ascii_lowercase();
-            if rest_lower.starts_with("adr ") {
-                if let Some(colon) = rest.find(": ") {
-                    return rest[colon + 2..].trim().to_string();
-                }
+            if rest_lower.starts_with("adr ")
+                && let Some(colon) = rest.find(": ")
+            {
+                return rest[colon + 2..].trim().to_string();
             }
             return rest.trim().to_string();
         }

@@ -80,10 +80,10 @@ fn parens_around_pipelines(module: &Module) -> HashSet<(u32, u32)> {
     for_each_expr_seq(module, |seq| {
         for stmt in seq {
             walk_expression(&stmt.expression, &mut |e| {
-                if let Expression::Parenthesized { expression, span } = e {
-                    if prints_as_pipeline(expression, &piped) {
-                        spans.insert((span.start(), span.end()));
-                    }
+                if let Expression::Parenthesized { expression, span } = e
+                    && prints_as_pipeline(expression, &piped)
+                {
+                    spans.insert((span.start(), span.end()));
                 }
             });
         }

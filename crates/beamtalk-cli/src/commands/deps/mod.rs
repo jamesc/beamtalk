@@ -262,12 +262,12 @@ fn discover_all_dep_roots(
             });
 
             // Enqueue this dep's own dependencies for discovery
-            if let Some(dep_parsed) = dep_parsed {
-                if !dep_parsed.dependencies.is_empty() {
-                    let mut child_chain = via_chain.clone();
-                    child_chain.push(dep_name.clone());
-                    queue.push_back((dep_root, dep_parsed.dependencies, child_chain));
-                }
+            if let Some(dep_parsed) = dep_parsed
+                && !dep_parsed.dependencies.is_empty()
+            {
+                let mut child_chain = via_chain.clone();
+                child_chain.push(dep_name.clone());
+                queue.push_back((dep_root, dep_parsed.dependencies, child_chain));
             }
         }
     }
@@ -520,15 +520,12 @@ fn deps_are_fresh(project_root: &Utf8Path, manifest: &manifest::ParsedManifest) 
         if let (Ok(manifest_meta), Ok(lock_meta)) = (
             std::fs::metadata(&manifest_path),
             std::fs::metadata(&lockfile_path),
-        ) {
-            if let (Ok(manifest_mtime), Ok(lock_mtime)) =
-                (manifest_meta.modified(), lock_meta.modified())
-            {
-                if manifest_mtime > lock_mtime {
-                    debug!("beamtalk.toml is newer than lockfile — deps are stale");
-                    return false;
-                }
-            }
+        ) && let (Ok(manifest_mtime), Ok(lock_mtime)) =
+            (manifest_meta.modified(), lock_meta.modified())
+            && manifest_mtime > lock_mtime
+        {
+            debug!("beamtalk.toml is newer than lockfile — deps are stale");
+            return false;
         }
 
         // The mtime check above only looks at the root manifest, and even
@@ -680,12 +677,11 @@ fn newest_bt_mtime(dir: &std::path::Path) -> Option<std::time::SystemTime> {
             let path = entry.path();
             if path.is_dir() {
                 walk(&path, newest);
-            } else if path.extension().is_some_and(|ext| ext == "bt") {
-                if let Ok(meta) = path.metadata() {
-                    if let Ok(mtime) = meta.modified() {
-                        *newest = Some(newest.map_or(mtime, |n| n.max(mtime)));
-                    }
-                }
+            } else if path.extension().is_some_and(|ext| ext == "bt")
+                && let Ok(meta) = path.metadata()
+                && let Ok(mtime) = meta.modified()
+            {
+                *newest = Some(newest.map_or(mtime, |n| n.max(mtime)));
             }
         }
     }

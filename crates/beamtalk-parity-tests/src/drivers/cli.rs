@@ -78,20 +78,20 @@ fn scan_classes(root: &Path) -> std::collections::BTreeSet<String> {
             // Match `<Anything> subclass: <Name>` at the start of a line.
             if let Some(idx) = t.find(" subclass: ") {
                 let name = &t[idx + " subclass: ".len()..];
-                if let Some(first) = name.split_whitespace().next() {
-                    if first.chars().next().is_some_and(char::is_uppercase) {
-                        out.insert(first.to_string());
-                    }
+                if let Some(first) = name.split_whitespace().next()
+                    && first.chars().next().is_some_and(char::is_uppercase)
+                {
+                    out.insert(first.to_string());
                 }
             }
             // Match `Protocol define: <Name>` so cross-file protocols
             // are visible in the CLI's class set.
-            if let Some(rest) = t.strip_prefix("Protocol define: ") {
-                if let Some(first) = rest.split_whitespace().next() {
-                    let bare = first.split('(').next().unwrap_or(first);
-                    if bare.chars().next().is_some_and(char::is_uppercase) {
-                        out.insert(bare.to_string());
-                    }
+            if let Some(rest) = t.strip_prefix("Protocol define: ")
+                && let Some(first) = rest.split_whitespace().next()
+            {
+                let bare = first.split('(').next().unwrap_or(first);
+                if bare.chars().next().is_some_and(char::is_uppercase) {
+                    out.insert(bare.to_string());
                 }
             }
         }
@@ -112,10 +112,10 @@ fn visit_bt_files(root: &Path, visit: &mut impl FnMut(&Path)) {
     for entry in entries.flatten() {
         let p = entry.path();
         // Skip generated `_build` and any `.git` dirs.
-        if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
-            if name == "_build" || name == ".git" || name == "build" {
-                continue;
-            }
+        if let Some(name) = p.file_name().and_then(|n| n.to_str())
+            && (name == "_build" || name == ".git" || name == "build")
+        {
+            continue;
         }
         if p.is_dir() {
             visit_bt_files(&p, visit);

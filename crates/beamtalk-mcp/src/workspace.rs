@@ -101,11 +101,11 @@ pub fn discover_any_port_cookie_and_id() -> Option<(u16, String, String)> {
         if is_dir {
             let workspace_id = entry.file_name();
             let workspace_id = workspace_id.to_string_lossy();
-            if let Some(port) = read_port_file(&workspace_id) {
-                if let Some(cookie) = read_cookie_file(&workspace_id) {
-                    tracing::info!(port, workspace_id = %workspace_id, "discovered running workspace");
-                    return Some((port, cookie, workspace_id.into_owned()));
-                }
+            if let Some(port) = read_port_file(&workspace_id)
+                && let Some(cookie) = read_cookie_file(&workspace_id)
+            {
+                tracing::info!(port, workspace_id = %workspace_id, "discovered running workspace");
+                return Some((port, cookie, workspace_id.into_owned()));
             }
         }
     }

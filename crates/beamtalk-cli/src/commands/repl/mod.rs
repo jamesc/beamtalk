@@ -484,18 +484,18 @@ pub fn run(
     if beam_guard_opt.is_none() && !is_new_workspace {
         match client.list_actors() {
             Ok(response) => {
-                if let Some(actors) = response.actors {
-                    if !actors.is_empty() {
-                        println!("\nAvailable actors:");
-                        for actor in &actors {
-                            println!(
-                                "  - {}",
-                                beamtalk_repl_protocol::format::format_actor_summary(
-                                    actor,
-                                    output_mode(),
-                                )
-                            );
-                        }
+                if let Some(actors) = response.actors
+                    && !actors.is_empty()
+                {
+                    println!("\nAvailable actors:");
+                    for actor in &actors {
+                        println!(
+                            "  - {}",
+                            beamtalk_repl_protocol::format::format_actor_summary(
+                                actor,
+                                output_mode(),
+                            )
+                        );
                     }
                 }
             }
@@ -540,12 +540,11 @@ pub fn run(
     // BEAM child is cleaned up automatically by BeamChildGuard::drop()
 
     // Ephemeral mode: stop workspace node on REPL exit (only in workspace mode)
-    if should_stop_workspace(ephemeral, beam_guard_opt.is_some(), is_new_workspace) {
-        if let Some(workspace_id) = workspace_id_opt {
-            if let Err(e) = crate::commands::workspace::stop_workspace(Some(&workspace_id), false) {
-                eprintln!("Warning: failed to stop workspace {workspace_id}: {e}");
-            }
-        }
+    if should_stop_workspace(ephemeral, beam_guard_opt.is_some(), is_new_workspace)
+        && let Some(workspace_id) = workspace_id_opt
+        && let Err(e) = crate::commands::workspace::stop_workspace(Some(&workspace_id), false)
+    {
+        eprintln!("Warning: failed to stop workspace {workspace_id}: {e}");
     }
 
     repl_res?;
@@ -710,14 +709,14 @@ fn attempt_reconnect_and_retry(
 /// Display the output, warnings, errors, and value from an eval response.
 fn display_eval_response(response: &ReplResponse) {
     // Print captured stdout before value/error
-    if let Some(ref output) = response.output {
-        if !output.is_empty() {
-            print!("{output}");
-            if !output.ends_with('\n') {
-                println!();
-            }
-            let _ = std::io::Write::flush(&mut std::io::stdout());
+    if let Some(ref output) = response.output
+        && !output.is_empty()
+    {
+        print!("{output}");
+        if !output.ends_with('\n') {
+            println!();
         }
+        let _ = std::io::Write::flush(&mut std::io::stdout());
     }
     // Display compilation warnings
     for warning in response.warning_entries() {

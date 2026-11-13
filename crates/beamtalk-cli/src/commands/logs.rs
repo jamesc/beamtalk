@@ -178,10 +178,10 @@ fn show_last_lines(
 /// When `format` is `Json`, attempts to extract the `"level"` field from
 /// the JSON object for filtering. Falls back to text-based detection.
 fn matches_level(line: &str, min: LogLevel, format: Option<LogFormat>) -> bool {
-    if format == Some(LogFormat::Json) {
-        if let Some(level) = extract_json_level(line) {
-            return level >= min;
-        }
+    if format == Some(LogFormat::Json)
+        && let Some(level) = extract_json_level(line)
+    {
+        return level >= min;
     }
     match LogLevel::from_log_line(line) {
         Some(line_level) => line_level >= min,

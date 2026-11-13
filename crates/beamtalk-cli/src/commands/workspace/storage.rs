@@ -278,13 +278,13 @@ pub(super) fn read_proc_start_time(pid: u32) -> Option<u64> {
 /// Used by stale-file cleanup to avoid TOCTOU races (`exists()` + `remove_file()`
 /// is racy if another process creates/removes the file between the two calls).
 pub(super) fn remove_file_if_exists(path: &std::path::Path) -> Result<()> {
-    if let Err(err) = fs::remove_file(path) {
-        if err.kind() != std::io::ErrorKind::NotFound {
-            return Err(miette!(
-                "Failed to remove stale file {}: {err}",
-                path.display()
-            ));
-        }
+    if let Err(err) = fs::remove_file(path)
+        && err.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(miette!(
+            "Failed to remove stale file {}: {err}",
+            path.display()
+        ));
     }
     Ok(())
 }

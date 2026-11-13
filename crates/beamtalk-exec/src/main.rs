@@ -162,10 +162,10 @@ fn send_event(writer: &SharedWriter, event: &Term) {
     let mut buf = Vec::new();
     match event.encode(&mut buf) {
         Ok(()) => {
-            if let Ok(mut out) = writer.lock() {
-                if let Err(e) = etf::write_packet(&mut *out, &buf) {
-                    error!("Failed to write event packet: {e}");
-                }
+            if let Ok(mut out) = writer.lock()
+                && let Err(e) = etf::write_packet(&mut *out, &buf)
+            {
+                error!("Failed to write event packet: {e}");
             }
         }
         Err(e) => {
@@ -572,14 +572,14 @@ fn handle_write_stdin(request: &Map, children: &ChildMap) -> Result<(), String> 
 
     // Restore stdin unless close_stdin was called while we held it — in that
     // case stdin_closed is true and we must not reopen the pipe.
-    if let Ok(mut map) = children.lock() {
-        if let Some(entry) = map.get_mut(&child_id) {
-            if entry.stdin_closed {
-                // close_stdin ran concurrently; drop stdin here to close pipe.
-                drop(stdin);
-            } else {
-                entry.stdin = Some(stdin);
-            }
+    if let Ok(mut map) = children.lock()
+        && let Some(entry) = map.get_mut(&child_id)
+    {
+        if entry.stdin_closed {
+            // close_stdin ran concurrently; drop stdin here to close pipe.
+            drop(stdin);
+        } else {
+            entry.stdin = Some(stdin);
         }
     }
 
@@ -746,12 +746,11 @@ fn main() {
             warn!("Command error: {e}");
             // If a spawn command failed, emit a synthetic exit event so the
             // BEAM caller does not wait forever for an exit that will never arrive.
-            if let Term::Map(map) = &term {
-                if matches!(map_get(map, "command"), Some(Term::Atom(a)) if a.name == "spawn") {
-                    if let Some(child_id) = map_get(map, "child_id").and_then(term_to_child_id) {
-                        send_event(&writer, &exit_event(child_id, -1));
-                    }
-                }
+            if let Term::Map(map) = &term
+                && matches!(map_get(map, "command"), Some(Term::Atom(a)) if a.name == "spawn")
+                && let Some(child_id) = map_get(map, "child_id").and_then(term_to_child_id)
+            {
+                send_event(&writer, &exit_event(child_id, -1));
             }
         }
     }

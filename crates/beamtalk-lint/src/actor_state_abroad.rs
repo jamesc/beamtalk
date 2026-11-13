@@ -405,17 +405,16 @@ fn check_send(
     };
     // Shape A': a block literal receiver whose method spawns its receiver
     // (`[...] fork`).
-    if let Expression::Block(b) = receiver.unwrap_parens() {
-        if ctx
+    if let Expression::Block(b) = receiver.unwrap_parens()
+        && ctx
             .hierarchy
             .find_method("Block", sel)
             .is_some_and(|m| m.spawns_block)
-        {
-            let shape = AbroadShape::Forked {
-                selector: sel.to_string(),
-            };
-            check_block(ctx, b, &shape, false, report);
-        }
+    {
+        let shape = AbroadShape::Forked {
+            selector: sel.to_string(),
+        };
+        check_block(ctx, b, &shape, false, report);
     }
     // Shape A: a class-side send that runs its block in another process.
     if let Some(shape) = ctx.spawned_shape(receiver, sel) {

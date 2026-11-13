@@ -902,23 +902,22 @@ fn extract_beamtalk_lsp_commands(text: &str) -> Vec<String> {
     let mut cmd_consts = std::collections::HashMap::new();
     for (line_idx, line) in text.lines().enumerate() {
         let trimmed = line.trim();
-        if let Some(rest) = trimmed.strip_prefix("pub(crate) const CMD_") {
-            if let Some(eq_idx) = rest.find('=') {
-                let name_part = rest[..eq_idx].trim();
-                // Strip the `: &str` type annotation, leaving the bare ident.
-                let ident = name_part.split(':').next().unwrap_or("").trim();
-                if ident.is_empty() {
-                    continue;
-                }
-                let after_eq = &rest[eq_idx + 1..];
-                if let Some(first_quote) = after_eq.find('"') {
-                    let from_quote = &after_eq[first_quote + 1..];
-                    if let Some(end_quote) = from_quote.find('"') {
-                        cmd_consts
-                            .insert(format!("CMD_{ident}"), from_quote[..end_quote].to_string());
-                        // Silence unused-variable warning in release builds.
-                        let _ = line_idx;
-                    }
+        if let Some(rest) = trimmed.strip_prefix("pub(crate) const CMD_")
+            && let Some(eq_idx) = rest.find('=')
+        {
+            let name_part = rest[..eq_idx].trim();
+            // Strip the `: &str` type annotation, leaving the bare ident.
+            let ident = name_part.split(':').next().unwrap_or("").trim();
+            if ident.is_empty() {
+                continue;
+            }
+            let after_eq = &rest[eq_idx + 1..];
+            if let Some(first_quote) = after_eq.find('"') {
+                let from_quote = &after_eq[first_quote + 1..];
+                if let Some(end_quote) = from_quote.find('"') {
+                    cmd_consts.insert(format!("CMD_{ident}"), from_quote[..end_quote].to_string());
+                    // Silence unused-variable warning in release builds.
+                    let _ = line_idx;
                 }
             }
         }

@@ -664,10 +664,10 @@ pub fn find_selector_lookup_in_expr(expr: &Expression, offset: u32) -> Option<Se
                 return Some(result);
             }
             for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    if let Some(result) = find_selector_lookup_in_expr(guard, offset) {
-                        return Some(result);
-                    }
+                if let Some(guard) = &arm.guard
+                    && let Some(result) = find_selector_lookup_in_expr(guard, offset)
+                {
+                    return Some(result);
                 }
                 if let Some(result) = find_selector_lookup_in_expr(&arm.body, offset) {
                     return Some(result);
@@ -872,13 +872,13 @@ pub fn check_native_delegate<'a>(
                 // Find the backing module from the class definition in this or any file
                 let class_name = smd.class_name.name.as_str();
                 for class in &module.classes {
-                    if class.name.name == class_name {
-                        if let Some(ident) = &class.backing_module {
-                            return Some(NativeDelegateInfo {
-                                backing_module: ident.name.clone(),
-                                selector: smd.method.selector.name(),
-                            });
-                        }
+                    if class.name.name == class_name
+                        && let Some(ident) = &class.backing_module
+                    {
+                        return Some(NativeDelegateInfo {
+                            backing_module: ident.name.clone(),
+                            selector: smd.method.selector.name(),
+                        });
                     }
                 }
             }
@@ -1077,10 +1077,10 @@ fn find_ffi_call_in_expr(expr: &Expression, offset: u32) -> Option<FfiCallInfo> 
                 return Some(info);
             }
             for arm in arms {
-                if let Some(guard) = &arm.guard {
-                    if let Some(info) = find_ffi_call_in_expr(guard, offset) {
-                        return Some(info);
-                    }
+                if let Some(guard) = &arm.guard
+                    && let Some(info) = find_ffi_call_in_expr(guard, offset)
+                {
+                    return Some(info);
                 }
                 if let Some(info) = find_ffi_call_in_expr(&arm.body, offset) {
                     return Some(info);
@@ -1136,44 +1136,40 @@ fn check_ffi_message_send(
         selector: MessageSelector::Unary(module_name_str),
         ..
     } = receiver
+        && let Expression::ClassReference { name, .. } = inner_receiver.as_ref()
+        && name.name == "Erlang"
     {
-        if let Expression::ClassReference { name, .. } = inner_receiver.as_ref() {
-            if name.name == "Erlang" {
-                let computed_span =
-                    selector_span_for_message_send(receiver.span(), arguments, send_span);
-                if selector_span_contains(selector, offset, computed_span).is_some() {
-                    let selector_name = selector.name();
-                    let function_name = selector_name
-                        .split(':')
-                        .next()
-                        .unwrap_or(selector_name.as_str());
-                    let arity = u8::try_from(arguments.len()).unwrap_or(u8::MAX);
-                    return Some(FfiCallInfo {
-                        module_name: module_name_str.clone(),
-                        function_name: EcoString::from(function_name),
-                        arity,
-                        line: None, // Populated by language service from registry
-                    });
-                }
-            }
+        let computed_span = selector_span_for_message_send(receiver.span(), arguments, send_span);
+        if selector_span_contains(selector, offset, computed_span).is_some() {
+            let selector_name = selector.name();
+            let function_name = selector_name
+                .split(':')
+                .next()
+                .unwrap_or(selector_name.as_str());
+            let arity = u8::try_from(arguments.len()).unwrap_or(u8::MAX);
+            return Some(FfiCallInfo {
+                module_name: module_name_str.clone(),
+                function_name: EcoString::from(function_name),
+                arity,
+                line: None, // Populated by language service from registry
+            });
         }
     }
 
     // Pattern 2: receiver is `Erlang`, cursor is on the module name
-    if let Expression::ClassReference { name, .. } = receiver {
-        if name.name == "Erlang" {
-            if let MessageSelector::Unary(module_name_str) = selector {
-                let sel_start = receiver.span().end();
-                let sel_end = send_span.end();
-                if offset >= sel_start && offset < sel_end {
-                    return Some(FfiCallInfo {
-                        module_name: module_name_str.clone(),
-                        function_name: EcoString::new(),
-                        arity: 0,
-                        line: None, // Module-level navigation, no specific function
-                    });
-                }
-            }
+    if let Expression::ClassReference { name, .. } = receiver
+        && name.name == "Erlang"
+        && let MessageSelector::Unary(module_name_str) = selector
+    {
+        let sel_start = receiver.span().end();
+        let sel_end = send_span.end();
+        if offset >= sel_start && offset < sel_end {
+            return Some(FfiCallInfo {
+                module_name: module_name_str.clone(),
+                function_name: EcoString::new(),
+                arity: 0,
+                line: None, // Module-level navigation, no specific function
+            });
         }
     }
 
@@ -1184,10 +1180,10 @@ fn check_ffi_message_send(
 fn find_definition_in_expr(expr: &Expression, name: &str) -> Option<Span> {
     match expr {
         Expression::Assignment { target, .. } => {
-            if let Expression::Identifier(ident) = target.as_ref() {
-                if ident.name == name {
-                    return Some(ident.span);
-                }
+            if let Expression::Identifier(ident) = target.as_ref()
+                && ident.name == name
+            {
+                return Some(ident.span);
             }
             None
         }

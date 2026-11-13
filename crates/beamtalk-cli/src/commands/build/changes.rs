@@ -440,10 +440,9 @@ fn detect_orphaned_beams(
         if name.starts_with("bt@")
             && path.extension().is_some_and(|ext| ext == "beam")
             && !expected_beam_filenames.contains(name)
+            && let Ok(utf8) = Utf8PathBuf::from_path_buf(path)
         {
-            if let Ok(utf8) = Utf8PathBuf::from_path_buf(path) {
-                orphaned.push(utf8);
-            }
+            orphaned.push(utf8);
         }
     }
 

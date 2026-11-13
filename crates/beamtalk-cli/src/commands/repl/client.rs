@@ -494,10 +494,10 @@ mod tests {
             // Answer the connect-time `describe` version check so the
             // initial `connect` succeeds, then drop the connection and
             // stop listening entirely.
-            if let Some(versions) = fake_node_handshake(&mut ws) {
-                if let Some(req) = read_json(&mut ws) {
-                    answer_describe(&mut ws, &req, Some(&versions));
-                }
+            if let Some(versions) = fake_node_handshake(&mut ws)
+                && let Some(req) = read_json(&mut ws)
+            {
+                answer_describe(&mut ws, &req, Some(&versions));
             }
         });
         let mut client = ReplClient::connect("127.0.0.1", handler_port, "cookie").expect("connect");

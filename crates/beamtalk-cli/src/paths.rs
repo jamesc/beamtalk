@@ -31,11 +31,11 @@ pub fn beamtalk_dir() -> Result<PathBuf> {
     let base = beamtalk_workspace::beamtalk_root_dir()?;
 
     // 1. Explicit named session (highest priority)
-    if let Ok(session) = std::env::var("BEAMTALK_WORKSPACE") {
-        if !session.is_empty() {
-            let sanitized = sanitize_session_id(&session);
-            return Ok(base.join("sessions").join(sanitized));
-        }
+    if let Ok(session) = std::env::var("BEAMTALK_WORKSPACE")
+        && !session.is_empty()
+    {
+        let sanitized = sanitize_session_id(&session);
+        return Ok(base.join("sessions").join(sanitized));
     }
 
     // 2. Auto session based on shell PPID

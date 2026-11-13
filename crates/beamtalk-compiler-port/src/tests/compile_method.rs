@@ -319,10 +319,10 @@ fn compile_method_class_context_diagnostic_resolves_against_merged_source() {
     assert_eq!(response_status(&response).as_deref(), Some("error"));
     let list = response_diagnostics(&response).expect("diagnostics");
     let line = list.elements.iter().find_map(|d| {
-        if let Term::Map(m) = d {
-            if let Some(Term::FixInteger(i)) = map_get(m, "line") {
-                return Some(i.value);
-            }
+        if let Term::Map(m) = d
+            && let Some(Term::FixInteger(i)) = map_get(m, "line")
+        {
+            return Some(i.value);
         }
         None
     });

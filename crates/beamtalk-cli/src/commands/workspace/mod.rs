@@ -1059,10 +1059,10 @@ mod tests {
     fn assert_workspace_stopped(workspace_id: &str) {
         for _ in 0..10 {
             let workspaces = list_workspaces().unwrap();
-            if let Some(found) = workspaces.iter().find(|w| w.workspace_id == workspace_id) {
-                if found.status == WorkspaceStatus::Stopped {
-                    return;
-                }
+            if let Some(found) = workspaces.iter().find(|w| w.workspace_id == workspace_id)
+                && found.status == WorkspaceStatus::Stopped
+            {
+                return;
             }
             std::thread::sleep(std::time::Duration::from_millis(500));
         }
@@ -1139,10 +1139,10 @@ mod tests {
                     // its workspace dir). No need to wait for epmd deregistration
                     // since the next attempt will use a different node name.
                     let pid_path = workspace_dir(&tw.id).unwrap_or_default().join("pid");
-                    if let Ok(contents) = fs::read_to_string(&pid_path) {
-                        if let Ok(pid) = contents.trim().parse::<u32>() {
-                            let _ = force_kill_process(pid);
-                        }
+                    if let Ok(contents) = fs::read_to_string(&pid_path)
+                        && let Ok(pid) = contents.trim().parse::<u32>()
+                    {
+                        let _ = force_kill_process(pid);
                     }
                     last_err = Some(e);
                     // tw drops here: cleans up workspace dir and lockfile.
@@ -1188,12 +1188,11 @@ mod tests {
                     // yet (it's saved after health check success), so get_node_info
                     // returns None. Read the PID file directly instead — it's written
                     // by the BEAM eval command at the very start of startup.
-                    if let Ok(ws_dir) = workspace_dir(workspace_id) {
-                        if let Ok(contents) = fs::read_to_string(ws_dir.join("pid")) {
-                            if let Ok(pid) = contents.trim().parse::<u32>() {
-                                let _ = force_kill_process(pid);
-                            }
-                        }
+                    if let Ok(ws_dir) = workspace_dir(workspace_id)
+                        && let Ok(contents) = fs::read_to_string(ws_dir.join("pid"))
+                        && let Ok(pid) = contents.trim().parse::<u32>()
+                    {
+                        let _ = force_kill_process(pid);
                     }
                     // Clean all stale runtime files (port, pid, node.info, starting
                     // tombstone) so the next attempt starts from a clean slate.

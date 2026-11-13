@@ -148,12 +148,11 @@ pub fn suggest_package_name(name: &str) -> Option<String> {
     let mut expanded = String::new();
     let mut prev_char: Option<char> = None;
     for c in name.chars() {
-        if c.is_ascii_uppercase() {
-            if let Some(p) = prev_char {
-                if p.is_ascii_lowercase() || p.is_ascii_digit() {
-                    expanded.push('_');
-                }
-            }
+        if c.is_ascii_uppercase()
+            && let Some(p) = prev_char
+            && (p.is_ascii_lowercase() || p.is_ascii_digit())
+        {
+            expanded.push('_');
         }
         expanded.push(c);
         prev_char = Some(c);

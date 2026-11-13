@@ -737,11 +737,11 @@ fn run_cli_lint(path: &Path) -> Result<(usize, String), String> {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) else {
             continue;
         };
-        if v.get("type").and_then(serde_json::Value::as_str) == Some("summary") {
-            if let Some(t) = v.get("total").and_then(serde_json::Value::as_u64) {
-                total = usize::try_from(t).unwrap_or(0);
-                found_summary = true;
-            }
+        if v.get("type").and_then(serde_json::Value::as_str) == Some("summary")
+            && let Some(t) = v.get("total").and_then(serde_json::Value::as_u64)
+        {
+            total = usize::try_from(t).unwrap_or(0);
+            found_summary = true;
         }
     }
     if !found_summary {

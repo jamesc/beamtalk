@@ -196,25 +196,22 @@ pub fn compute_project_diagnostics_with_analysis(
     // Enrich unresolved class warnings with dependency package hints.
     if let Some(registry) = ctx.dep_registry {
         for diag in &mut diagnostics {
-            if diag.category == Some(DiagnosticCategory::UnresolvedClass) {
-                if let Some(class_name) = diag
+            if diag.category == Some(DiagnosticCategory::UnresolvedClass)
+                && let Some(class_name) = diag
                     .message
                     .strip_prefix("Unresolved class `")
                     .and_then(|s| s.strip_suffix('`'))
-                {
-                    if let Some(exports) = registry.lookup(class_name) {
-                        if let Some(export) = exports.first() {
-                            diag.hint = Some(
-                                format!(
-                                    "Did you mean `{class_name}` from dependency '{}'? \
+                && let Some(exports) = registry.lookup(class_name)
+                && let Some(export) = exports.first()
+            {
+                diag.hint = Some(
+                    format!(
+                        "Did you mean `{class_name}` from dependency '{}'? \
                                      Ensure the dependency is declared in beamtalk.toml.",
-                                    export.package
-                                )
-                                .into(),
-                            );
-                        }
-                    }
-                }
+                        export.package
+                    )
+                    .into(),
+                );
             }
         }
     }

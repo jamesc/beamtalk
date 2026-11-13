@@ -164,10 +164,10 @@ pub(crate) fn protocol_hashes<'a>(
     used_keys
         .into_iter()
         .fold(std::collections::HashMap::new(), |mut hashes, key| {
-            if !hashes.contains_key(key) {
-                if let Some(protocol) = resolve_protocol_key(&protocols, key, current_package) {
-                    hashes.insert(key.clone(), protocol_content_hash(protocol));
-                }
+            if !hashes.contains_key(key)
+                && let Some(protocol) = resolve_protocol_key(&protocols, key, current_package)
+            {
+                hashes.insert(key.clone(), protocol_content_hash(protocol));
             }
             hashes
         })

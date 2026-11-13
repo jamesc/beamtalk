@@ -73,17 +73,18 @@ pub fn resolve_git_dep(
     // and reusing it would silently keep building the previously locked commit.
     // (A *matching* reference still reuses the pinned SHA: that is what makes
     // a locked branch dependency reproducible until `deps update`.)
-    if let Some(entry) = lock_entry.filter(|e| e.url == url && e.reference == *reference) {
-        if checkout_path.exists() && verify_checkout(name, &checkout_path, &entry.resolved_sha) {
-            info!(name, sha = %entry.resolved_sha, "Git dependency up-to-date, skipping clone");
-            return Ok(ResolvedGitDep {
-                name: name.to_string(),
-                url: url.to_string(),
-                reference: reference.clone(),
-                resolved_sha: entry.resolved_sha.clone(),
-                checkout_path,
-            });
-        }
+    if let Some(entry) = lock_entry.filter(|e| e.url == url && e.reference == *reference)
+        && checkout_path.exists()
+        && verify_checkout(name, &checkout_path, &entry.resolved_sha)
+    {
+        info!(name, sha = %entry.resolved_sha, "Git dependency up-to-date, skipping clone");
+        return Ok(ResolvedGitDep {
+            name: name.to_string(),
+            url: url.to_string(),
+            reference: reference.clone(),
+            resolved_sha: entry.resolved_sha.clone(),
+            checkout_path,
+        });
     }
 
     // Ensure the deps directory exists
@@ -124,11 +125,12 @@ pub fn resolve_git_dep(
     // tag dependency, rather than silently following the branch tip. Callers
     // that want to intentionally advance the pin (`deps add`, `deps update`)
     // already pass `lock_entry: None`, so this check never fires for them.
-    if let Some(entry) = lock_entry.filter(|e| e.url == url && e.reference == *reference) {
-        if entry.resolved_sha != resolved_sha {
-            let ref_desc = describe_reference(reference);
-            miette::bail!(
-                "Dependency '{name}' has moved since it was locked.\n\n  \
+    if let Some(entry) = lock_entry.filter(|e| e.url == url && e.reference == *reference)
+        && entry.resolved_sha != resolved_sha
+    {
+        let ref_desc = describe_reference(reference);
+        miette::bail!(
+            "Dependency '{name}' has moved since it was locked.\n\n  \
                  {ref_desc} now resolves to a different commit than the one \
                  recorded in beamtalk.lock:\n\n    \
                  locked:   {locked_sha}\n    \
@@ -139,9 +141,8 @@ pub fn resolve_git_dep(
                  rebuilding against a different commit.\n\n\
                  If this is expected, run `beamtalk deps update {name}` to \
                  accept the new commit and update the lock.",
-                locked_sha = entry.resolved_sha,
-            );
-        }
+            locked_sha = entry.resolved_sha,
+        );
     }
 
     info!(name, sha = %resolved_sha, "Resolved git dependency");

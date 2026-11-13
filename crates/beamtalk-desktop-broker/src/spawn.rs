@@ -1606,10 +1606,10 @@ mod tests {
     fn wait_for_file_contents(path: &std::path::Path, timeout: Duration) -> String {
         let deadline = std::time::Instant::now() + timeout;
         loop {
-            if let Ok(contents) = std::fs::read_to_string(path) {
-                if !contents.is_empty() {
-                    return contents;
-                }
+            if let Ok(contents) = std::fs::read_to_string(path)
+                && !contents.is_empty()
+            {
+                return contents;
             }
             if std::time::Instant::now() >= deadline {
                 return std::fs::read_to_string(path).unwrap_or_default();

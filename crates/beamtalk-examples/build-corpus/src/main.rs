@@ -301,10 +301,10 @@ fn extract_bt_dir(
     for path in walk_bt_files(&dir) {
         let rel_path = normalize_path(&path.strip_prefix(root).unwrap_or(&path).to_string_lossy());
 
-        if let Some(skip) = skip_containing {
-            if rel_path.contains(skip) {
-                continue;
-            }
+        if let Some(skip) = skip_containing
+            && rel_path.contains(skip)
+        {
+            continue;
         }
 
         let Ok(source) = fs::read_to_string(&path) else {
