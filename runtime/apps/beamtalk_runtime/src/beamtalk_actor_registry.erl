@@ -105,13 +105,12 @@ register_name(Name, Pid) when is_atom(Name), is_pid(Pid) ->
     case reserved_name(Name) of
         true ->
             {error,
-                beamtalk_error:with_hint(
-                    beamtalk_error:new(reserved_name, 'Actor', registerAs),
-                    beamtalk_error:chars_to_binary(
-                        io_lib:format(
-                            "Cannot register actor under reserved name '~ts'", [Name]
-                        )
-                    )
+                beamtalk_error:new_fmt(
+                    reserved_name,
+                    'Actor',
+                    registerAs,
+                    "Cannot register actor under reserved name '~ts'",
+                    [Name]
                 )};
         false ->
             try erlang:register(Name, Pid) of
@@ -163,13 +162,10 @@ unregister_name(Name) when is_atom(Name) ->
     case reserved_name(Name) of
         true ->
             {error,
-                beamtalk_error:with_hint(
-                    beamtalk_error:new(reserved_name, 'Actor', unregister),
-                    beamtalk_error:chars_to_binary(
-                        io_lib:format(
-                            "Cannot unregister reserved name '~ts'", [Name]
-                        )
-                    )
+                beamtalk_error:new_fmt(
+                    reserved_name, 'Actor', unregister, "Cannot unregister reserved name '~ts'", [
+                        Name
+                    ]
                 )};
         false ->
             try erlang:unregister(Name) of
@@ -345,13 +341,12 @@ spawn_named_scoped(Scope, Link, Name, Module, Args) ->
     case reserved_name(Name) of
         true ->
             {error,
-                beamtalk_error:with_hint(
-                    beamtalk_error:new(reserved_name, 'Actor', spawnAs),
-                    beamtalk_error:chars_to_binary(
-                        io_lib:format(
-                            "Cannot spawn actor under reserved name '~ts'", [Name]
-                        )
-                    )
+                beamtalk_error:new_fmt(
+                    reserved_name,
+                    'Actor',
+                    spawnAs,
+                    "Cannot spawn actor under reserved name '~ts'",
+                    [Name]
                 )};
         false ->
             try beamtalk_actor:safe_spawn_named(Scope, Link, Name, Module, Args) of
