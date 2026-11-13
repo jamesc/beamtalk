@@ -227,9 +227,25 @@ class_send_plain(ClassPid, Selector, Args, Timeout) ->
     %% that is not process-bound) runs in the caller. Checked
     %% before the self-call guard: an in-caller call has no gen_server to
     %% deadlock on, so a block re-entering its class answers.
-    send_in_caller_or(ClassPid, Selector, Args, fun() ->
-        class_send_via_process(ClassPid, Selector, Args, Timeout)
-    end).
+    %% BT-4771: liveness is probed once for the whole send and handed to both
+    %% the in-caller check and the chain-only check below. Both used to probe
+    %% it themselves, back to back.
+    Alive = local_class_alive(ClassPid),
+    case in_caller_owner(ClassPid, Selector, Alive) of
+        {owner, ClassName, Tag, Module, DefiningClass, DefiningModule, FunName} ->
+            ClassSelf = #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid},
+            run_in_caller(
+                ClassSelf, Selector, Args, ClassName, DefiningClass, DefiningModule, FunName
+            );
+        decline ->
+            class_send_via_process(ClassPid, Selector, Args, Timeout, Alive)
+    end.
+
+%% Is `ClassPid` a live process on this node? The one liveness probe of a
+%% class send (see `class_send_plain/4`).
+-spec local_class_alive(pid()) -> boolean().
+local_class_alive(ClassPid) ->
+    node(ClassPid) =:= node() andalso is_process_alive(ClassPid).
 
 %% Run `Selector` in the caller when `in_caller_owner/2` names its owner
 %% (ADR 0142 §2-§3), else `Otherwise()`: the one in-caller step of both the
@@ -247,23 +263,30 @@ send_in_caller_or(ClassPid, Selector, Args, Otherwise) ->
     end.
 
 %% Today's routing for a send the caller may not run itself (ADR 0142 §2).
--spec class_send_via_process(pid(), selector(), list(), call_timeout()) -> term().
+-spec class_send_via_process(pid(), selector(), list(), call_timeout(), boolean()) -> term().
 %% There is no unguarded direct call here (BT-4301): `in_caller_owner/2`
 %% already ran every class method the caller may run, so anything left is a
 %% shadowed method (a class-side extension or ADR 0084 runtime fun the class
 %% process honours), a chain with class variables, or a process-bound selector.
-class_send_via_process(ClassPid, Selector, Args, _Timeout) when ClassPid =:= self() ->
+class_send_via_process(ClassPid, Selector, Args, _Timeout, _Alive) when ClassPid =:= self() ->
     class_send_from_own_process(Selector, Args);
-class_send_via_process(ClassPid, Selector, Args, Timeout) ->
+class_send_via_process(ClassPid, Selector, Args, Timeout, Alive) ->
     class_send_with_recovery(ClassPid, Selector, fun(P) ->
-        class_send_dispatch(P, Selector, Args, Timeout)
+        %% The restarted pid of a crash-recovery retry is a different process:
+        %% probe it afresh. The first attempt reuses the send's one probe.
+        PAlive =
+            case P =:= ClassPid of
+                true -> Alive;
+                false -> local_class_alive(P)
+            end,
+        class_send_dispatch(P, Selector, Args, Timeout, PAlive)
     end).
 
 -doc """
 ADR 0142 §1-§2 (BT-4300): may the caller run `Selector` sent to the class at
 `ClassPid` itself? `{owner, ClassName, Tag, Module, DefiningClass,
 DefiningModule, FunName}` when all of these hold, else `decline` (take
-`class_send_via_process/3`):
+`class_send_via_process/5`):
 
 - the class is local and alive;
 - `class_method_owner/2` (memoised) resolves the defining class: the
@@ -290,10 +313,16 @@ which installs a static call key only while this answer names the call
 site's own class, module and function: one rule for both paths.
 """.
 -spec in_caller_owner(pid(), selector()) -> owner() | decline.
-in_caller_owner(ClassPid, Selector) when node(ClassPid) =:= node() ->
+in_caller_owner(ClassPid, Selector) ->
+    in_caller_owner(ClassPid, Selector, local_class_alive(ClassPid)).
+
+%% `in_caller_owner/2` with the liveness probe (`local_class_alive/1`) already
+%% done by the caller.
+-spec in_caller_owner(pid(), selector(), boolean()) -> owner() | decline.
+in_caller_owner(ClassPid, Selector, true) ->
     %% Alive before the memo is consulted: a send to a dead incarnation takes
     %% the crash recovery path and never derives a memo from a class mid-init.
-    case is_process_alive(ClassPid) andalso class_method_owner(ClassPid, Selector) of
+    case class_method_owner(ClassPid, Selector) of
         {owner, ClassName, Tag, _Module, _DefiningClass, _DefiningModule, _FunName} = Owner ->
             case beamtalk_class_shadow_flags:direct_call_ok(Tag, ClassName) of
                 true -> Owner;
@@ -302,7 +331,7 @@ in_caller_owner(ClassPid, Selector) when node(ClassPid) =:= node() ->
         _ ->
             decline
     end;
-in_caller_owner(_ClassPid, _Selector) ->
+in_caller_owner(_ClassPid, _Selector, false) ->
     decline.
 
 -doc """
@@ -1225,9 +1254,9 @@ inherited class method and no runtime-installed class-method fun for the
 selector, the `Class`/`Behaviour` method runs in the caller straight away,
 exactly as it would after the gen_server replied `{error, not_found}`.
 """.
--spec class_send_dispatch(pid(), selector(), list(), call_timeout()) -> term().
-class_send_dispatch(ClassPid, Selector, Args, Timeout) ->
-    case class_chain_only_send(ClassPid, Selector, Args) of
+-spec class_send_dispatch(pid(), selector(), list(), call_timeout(), boolean()) -> term().
+class_send_dispatch(ClassPid, Selector, Args, Timeout, Alive) ->
+    case class_chain_only_send(ClassPid, Selector, Args, Alive) of
         {ok, ClassName, Module} ->
             class_chain_send(ClassPid, ClassName, Module, Selector, Args);
         error ->
@@ -1257,13 +1286,19 @@ races and crash recovery (`class_send_with_recovery/3`) are unchanged.
 -spec class_chain_only_send(pid(), selector(), list()) ->
     {ok, class_name(), module()} | error.
 class_chain_only_send(ClassPid, Selector, Args) ->
+    class_chain_only_send(ClassPid, Selector, Args, local_class_alive(ClassPid)).
+
+%% `class_chain_only_send/3` with the liveness probe (`local_class_alive/1`,
+%% which includes the local-node test) already done by the caller.
+-spec class_chain_only_send(pid(), selector(), list(), boolean()) ->
+    {ok, class_name(), module()} | error.
+class_chain_only_send(ClassPid, Selector, Args, Alive) ->
     case beamtalk_class_registry:class_name_for_pid(ClassPid) of
         {ok, ClassName} ->
             case beamtalk_class_metadata:lookup_methods(ClassName) of
                 {ok, Module, _Selectors} ->
                     case
-                        node(ClassPid) =:= node() andalso
-                            is_process_alive(ClassPid) andalso
+                        Alive andalso
                             not beamtalk_object_class:is_class_var_reflection_send(
                                 Selector, Args
                             ) andalso
