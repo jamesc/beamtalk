@@ -1096,7 +1096,13 @@ impl Parser {
     /// - Keywords followed by identifiers and eventually `=>` (keyword method)
     /// - `sealed` or `internal` followed by one of the above
     pub(super) fn is_at_method_definition(&self) -> bool {
-        let mut offset = 0;
+        self.is_method_definition_at(0)
+    }
+
+    /// [`is_at_method_definition`](Self::is_at_method_definition) for the
+    /// token at `offset`, so lookahead and recovery share one recogniser.
+    pub(super) fn is_method_definition_at(&self, start: usize) -> bool {
+        let mut offset = start;
 
         // Skip optional modifiers: sealed, internal, class
         // Note: `class` and `internal` are only modifiers when followed by a
@@ -1261,17 +1267,24 @@ impl Parser {
                     }
                 }
                 TokenKind::Eof => return None,
-                // A line starting `name =>` / `name ->` is a new method
-                // definition, never part of a shape: the shape is unclosed.
-                TokenKind::Identifier(_)
+                // A line starting a method definition (unary, binary or
+                // keyword: the same recogniser `recover_shape_field` uses) is
+                // never part of a shape: the shape is unclosed.
+                // The `braces == 1 && nested == 0` guard (top level of this
+                // shape) is load-bearing: `is_method_definition_at` can call
+                // back into `skip_shape_type` through a `-> #{…}` return
+                // type, so widening the guard to nested positions would make
+                // a run of unclosed headers exponential instead of quadratic.
+                // It does mean a method start inside a nested unclosed shape
+                // is not a stop here, though recovery stops at any depth.
+                TokenKind::Identifier(_) | TokenKind::BinarySelector(_) | TokenKind::Keyword(_)
                     if o > offset
+                        && braces == 1
+                        && nested == 0
                         && self
                             .peek_token_at(o)
                             .is_some_and(Token::has_leading_newline)
-                        && matches!(
-                            self.peek_at(o + 1),
-                            Some(TokenKind::FatArrow | TokenKind::Arrow)
-                        ) =>
+                        && self.is_method_definition_at(o) =>
                 {
                     return None;
                 }

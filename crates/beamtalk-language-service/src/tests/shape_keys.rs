@@ -348,6 +348,25 @@ fn nullable_shape_annotation_still_spans_the_key() {
 }
 
 #[test]
+fn nil_first_union_annotation_spans_the_key_like_nil_last() {
+    // BT-4789: the shape member's error wins whatever the member order.
+    let src = "type Options = #{#port => Integer}\no :: Nil | Options := #{#port => \"x\"}\n";
+    assert_eq!(shape_warning_span(src, "Type mismatch"), "#port");
+    let src = "type Options = #{#port => Integer}\no :: Nil | Options := #{#prot => 1}\n";
+    assert_eq!(shape_warning_span(src, "Type mismatch"), "#prot");
+    let src = "type Options = #{#port => Integer}\no :: Options | Nil := #{#prot => 1}\n";
+    assert_eq!(shape_warning_span(src, "Type mismatch"), "#prot");
+}
+
+#[test]
+fn parenthesised_literal_is_spanned_on_the_offending_key() {
+    let src = "type Options = #{#port => Integer}\no :: Options := (#{#prot => 1})\n";
+    assert_eq!(shape_warning_span(src, "Type mismatch"), "#prot");
+    let src = "type Options = #{#port => Integer}\no :: Nil | Options := ((#{#port => \"x\"}))\n";
+    assert_eq!(shape_warning_span(src, "Type mismatch"), "#port");
+}
+
+#[test]
 fn state_default_literal_is_spanned_on_the_offending_key() {
     let src = "type Options = #{#port => Integer}\nActor subclass: Srv\n  state: o :: Options = #{#prot => 1}\n";
     assert_eq!(shape_warning_span(src, "state `o`"), "#prot");

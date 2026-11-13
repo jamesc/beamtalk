@@ -155,11 +155,26 @@ pub(crate) fn compute_shape_key_completions(
     let patched = format!("{}{spliced}{rest}", source.get(..site.start as usize)?);
     let (module, _) = parse(lex_with_eof(&patched));
 
-    let protocol_registry =
-        crate::queries::protocols_for_module(protocol_registry, &module, hierarchy);
     let aliases = alias_registry
         .cloned()
         .unwrap_or_else(|| Arc::new(AliasRegistry::from_module_declarations(&module)));
+
+    // A literal key site whose shape is spelled by an annotation (`o :: Options
+    // := #{ … }`, `state: o :: Options = #{ … }`) needs no type pass; one that
+    // is a send argument needs the receiver's type. Run the full pass only
+    // for the latter, so typing `#{` or `,` in an ordinary map literal stays
+    // cheap (BT-4789).
+    if site.kind == SiteKind::Literal {
+        if let Some(done) = literal_completions_from_annotations(&module, &aliases) {
+            return Some(done);
+        }
+        if !has_placeholder_send_argument(&module) {
+            return None;
+        }
+    }
+
+    let protocol_registry =
+        crate::queries::protocols_for_module(protocol_registry, &module, hierarchy);
     let (enriched, type_map) = enrich_hierarchy_with_inferred_returns(
         &module,
         hierarchy,
@@ -310,10 +325,26 @@ fn contains_placeholder_pair(expr: &Expression) -> bool {
     found
 }
 
-fn literal_completions(
+/// Whether a message send in `module` has an argument holding the placeholder
+/// pair: the only literal site that needs a receiver type to find its shape.
+fn has_placeholder_send_argument(module: &Module) -> bool {
+    let mut found = false;
+    for_each_expr_seq(module, |body| {
+        for stmt in body {
+            walk_expression(&stmt.expression, &mut |expr| {
+                if let Expression::MessageSend { arguments, .. } = expr {
+                    found |= arguments.iter().any(contains_placeholder_pair);
+                }
+            });
+        }
+    });
+    found
+}
+
+/// Literal-site completions where the expected shape comes from an annotation
+/// alone (annotated local, typed state default): no type pass.
+fn literal_completions_from_annotations(
     module: &Module,
-    type_map: &TypeMap,
-    hierarchy: &ClassHierarchy,
     aliases: &AliasRegistry,
 ) -> Option<Vec<Completion>> {
     let mut site: Option<(Vec<EcoString>, InferredType)> = None;
@@ -322,37 +353,19 @@ fn literal_completions(
             site = expected_literal(value, expected);
         }
     };
-
     // Annotated local: `o :: Options := #{ … }`.
     for_each_expr_seq(module, |body| {
         for stmt in body {
-            walk_expression(&stmt.expression, &mut |expr| match expr {
-                Expression::Assignment {
+            walk_expression(&stmt.expression, &mut |expr| {
+                if let Expression::Assignment {
                     value,
                     type_annotation: Some(annotation),
                     ..
-                } => {
+                } = expr
+                {
                     let expected = aliases.resolve_declared(&DeclaredType::from(annotation));
                     consider(value, &expected);
                 }
-                Expression::MessageSend {
-                    receiver,
-                    selector,
-                    arguments,
-                    ..
-                } => {
-                    let Some(method) =
-                        receiver_method(receiver, &selector.name(), type_map, hierarchy)
-                    else {
-                        return;
-                    };
-                    for (arg, param) in arguments.iter().zip(&method) {
-                        if let Some(declared) = param {
-                            consider(arg, &aliases.resolve_declared(declared));
-                        }
-                    }
-                }
-                _ => {}
             });
         }
     });
@@ -367,8 +380,11 @@ fn literal_completions(
             }
         }
     }
+    unwritten_key_completions(site?)
+}
 
-    let (written, shape) = site?;
+fn unwritten_key_completions(site: (Vec<EcoString>, InferredType)) -> Option<Vec<Completion>> {
+    let (written, shape) = site;
     let fields = merged_keys(&shape)?;
     Some(
         fields
@@ -377,6 +393,45 @@ fn literal_completions(
             .map(key_completion)
             .collect(),
     )
+}
+
+/// Literal-site completions where the shape is a method parameter's declared
+/// type: needs the receiver's inferred type.
+fn literal_completions(
+    module: &Module,
+    type_map: &TypeMap,
+    hierarchy: &ClassHierarchy,
+    aliases: &AliasRegistry,
+) -> Option<Vec<Completion>> {
+    let mut site: Option<(Vec<EcoString>, InferredType)> = None;
+    for_each_expr_seq(module, |body| {
+        for stmt in body {
+            walk_expression(&stmt.expression, &mut |expr| {
+                let Expression::MessageSend {
+                    receiver,
+                    selector,
+                    arguments,
+                    ..
+                } = expr
+                else {
+                    return;
+                };
+                let Some(method) = receiver_method(receiver, &selector.name(), type_map, hierarchy)
+                else {
+                    return;
+                };
+                for (arg, param) in arguments.iter().zip(&method) {
+                    if let Some(declared) = param
+                        && site.is_none()
+                        && contains_placeholder_pair(arg)
+                    {
+                        site = expected_literal(arg, &aliases.resolve_declared(declared));
+                    }
+                }
+            });
+        }
+    });
+    unwritten_key_completions(site?)
 }
 
 /// Declared parameter types of the method `selector` on `receiver`'s type.

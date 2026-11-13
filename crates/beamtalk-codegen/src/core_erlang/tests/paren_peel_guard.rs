@@ -243,6 +243,13 @@ const CEILINGS: &[(&str, usize)] = &[
         "beamtalk-core/src/semantic_analysis/type_checker/validation/arguments.rs",
         1,
     ),
+    // A map literal that is an assignment or `^` value (`x :: Options := (#{...})`)
+    // or a nested pair value: not a send operand, so parentheses remain
+    // (BT-4789 key span).
+    (
+        "beamtalk-core/src/semantic_analysis/type_checker/shape_assignability.rs",
+        1,
+    ),
     // An assignment value (`a := (Worker spawn)`): not an operand, so
     // `ast::normalize` keeps its parentheses.
     ("beamtalk-core/src/semantic_analysis/actor_spawn.rs", 1),

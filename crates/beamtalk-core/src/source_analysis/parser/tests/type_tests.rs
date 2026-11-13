@@ -2291,6 +2291,27 @@ fn parse_shape_duplicate_key_is_error() {
 }
 
 #[test]
+fn unclosed_shape_stops_at_a_keyword_method_start() {
+    // BT-4789: lookahead (`skip_shape_type`) and recovery agree that a line
+    // starting a keyword or binary method ends an unclosed shape, not only a
+    // unary one.
+    for method in [
+        "foo =>\n    1",
+        "at: i put: v =>\n    v",
+        "+ other =>\n    other",
+    ] {
+        let src = format!("Value subclass: Foo\n  state: s :: #{{#a => Integer\n\n  {method}\n");
+        let (module, _) = parse(lex_with_eof(&src));
+        assert_eq!(module.classes.len(), 1, "{src}");
+        assert_eq!(
+            module.classes[0].methods.len(),
+            1,
+            "{src}: the method after the unclosed shape survives"
+        );
+    }
+}
+
+#[test]
 fn parse_shape_ellipsis_not_last_is_error() {
     let (ann, diags) = parse_shape_alias("#{..., #a => Integer}");
     assert!(

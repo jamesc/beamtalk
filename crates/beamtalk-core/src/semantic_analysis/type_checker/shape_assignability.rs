@@ -89,7 +89,10 @@ impl ShapeMismatch {
     /// nowhere) or `value` is not a literal; the caller keeps its
     /// whole-expression span.
     pub(super) fn key_span_in(&self, value: &Expression, expected: &InferredType) -> Option<Span> {
-        let Expression::MapLiteral { pairs, .. } = value else {
+        // An assignment or `^` value (and a nested pair value) may still be
+        // parenthesised: the operand-normalisation pass only peels send
+        // operands.
+        let Expression::MapLiteral { pairs, .. } = value.unwrap_parens() else {
             return None;
         };
         let symbol_key = |pair: &crate::ast::MapPair| match &pair.key {
@@ -229,7 +232,9 @@ impl TypeChecker {
             // candidate shape explains itself; otherwise there is nothing
             // better to say than "incompatible".
             (_, InferredType::Union { members, .. }) => {
-                let mut first_err = None;
+                // Keep the shape member's error, whatever the member order,
+                // so `Nil | Options` explains itself as `Options | Nil` does.
+                let mut shape_err = None;
                 let mut shape_members = 0;
                 for member in members {
                     match Self::shape_assignable(actual, member, hierarchy) {
@@ -237,12 +242,12 @@ impl TypeChecker {
                         Err(e) => {
                             if matches!(member, InferredType::Shape { .. }) {
                                 shape_members += 1;
+                                shape_err.get_or_insert(e);
                             }
-                            first_err.get_or_insert(e);
                         }
                     }
                 }
-                match (shape_members, first_err) {
+                match (shape_members, shape_err) {
                     (1, Some(e)) if matches!(actual, InferredType::Shape { .. }) => Err(e),
                     _ => Err(ShapeMismatch::Incompatible),
                 }

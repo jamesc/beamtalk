@@ -3,7 +3,7 @@
 
 /// A registered extension resolved by `liveExtensionsIn:`: the live target
 /// class (or metaclass), the selector, and the extension's source text.
-type SystemNavigationExtensionRecord = #{
+internal type SystemNavigationExtensionRecord = #{
   #class => Object,
   #selector => Symbol,
   #source => String
@@ -2233,7 +2233,7 @@ sealed typed Object subclass: SystemNavigation
   /// The source-text invariant of `allExtensionsWithSource` is asserted once
   /// here, as the `:: String` local, so the `SystemNavigationExtensionRecord` shape carries it
   /// to every reader and no reader re-casts `#source`.
-  class sealed liveExtensionsIn: extEntries :: List(Tuple) -> List(SystemNavigationExtensionRecord) =>
+  class internal sealed liveExtensionsIn: extEntries :: List(Tuple) -> List(SystemNavigationExtensionRecord) =>
     extEntries
       inject: List new
       into: [:acc :entry |
