@@ -669,6 +669,21 @@ mod tests {
         )
         .unwrap();
         let root = Utf8PathBuf::from_path_buf(src).unwrap();
+        // Live extraction needs OTP `.beam` files on disk; skip rather than
+        // false-fail where they are not discoverable (e.g. a sandbox).
+        let pkg_root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        let probe = beamtalk_cli::ffi_type_registry::lint_type_registry(
+            Some(&pkg_root),
+            &[root.join("handles.bt")],
+            &[],
+        )
+        .registry;
+        if probe.is_none_or(|r| r.lookup("zlib", "open", 0).is_none()) {
+            eprintln!(
+                "skipping run_types_otp_opaque_handles_bt_4717: no OTP .beam files discovered"
+            );
+            return;
+        }
         let result = run(
             root.as_str(),
             false,

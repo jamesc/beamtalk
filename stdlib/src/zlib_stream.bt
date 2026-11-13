@@ -14,4 +14,7 @@
 /// This is an opaque-handle class in the "Object" kind of the three-kind
 /// model (ADR 0067): no `state:`/`field:` slots and not instantiable from
 /// Beamtalk. It is declared only so FFI specs have a type to name.
+///
+/// The class is static only: at run time the value is a Reference, so `x class` answers
+/// that and `x isKindOf:` against this class is always false.
 sealed typed Object subclass: ZlibStream
