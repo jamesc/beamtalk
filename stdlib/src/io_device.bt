@@ -19,4 +19,9 @@
 ///
 /// The class is static only: at run time the value is a Pid (or a Tuple for a raw descriptor), so `x class` answers
 /// that and `x isKindOf:` against this class is always false.
+/// Process-scoped (ADR 0103): a raw descriptor is usable only by the process
+/// that opened it, so `#process` is the conservative bound for the whole
+/// class — the same approximation `FileHandle` makes, even though the
+/// io_server-pid case would survive the hop.
 sealed typed Object subclass: IoDevice
+  handleScope: #process
