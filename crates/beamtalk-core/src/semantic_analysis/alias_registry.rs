@@ -267,12 +267,19 @@ impl AliasRegistry {
         // aliases eagerly and lazily (pulled on reference, not pushed in
         // dependency order), with its own memo cache making a precomputed
         // order redundant for that purpose.
-        // The cycle check walks every alias, pre-loaded ones from other files
-        // included, and reports against the current file: a whole-store read.
-        crate::semantic_analysis::consulted::record_scan(
-            crate::semantic_analysis::consulted::ScanKind::Aliases,
-        );
-        let (cycles, _resolution_order) = find_cycles(&self.aliases);
+        // Only the cycles reachable from this module's own aliases can be new
+        // here: `add_pre_loaded` already reported every cycle among the
+        // aliases seeded before it, and a cycle through a later call's
+        // aliases passes through one of its roots. The walk records each
+        // alias it reaches, so the file depends on those aliases and no others
+        // (BT-4791).
+        let roots: Vec<EcoString> = module
+            .type_aliases
+            .iter()
+            .map(|a| a.name.name.clone())
+            .filter(|name| self.aliases.contains_key(name))
+            .collect();
+        let (cycles, _resolution_order) = find_cycles_from(&self.aliases, roots, true);
         for (cycle, cycle_span) in cycles {
             if self.reported_cycles.insert(canonical_cycle_key(&cycle)) {
                 diagnostics.push(cycle_diagnostic(&cycle, cycle_span));
@@ -573,7 +580,9 @@ impl AliasRegistry {
                 continue;
             }
 
-            if hierarchy.has_class(&info.name) {
+            // Unrecorded: collisions are keyed through the alias-seeding
+            // marker below, not through every pre-loaded alias name (BT-4791).
+            if hierarchy.has_class_unrecorded(&info.name) {
                 diagnostics.push(
                     Diagnostic::error(
                         format!(
@@ -592,7 +601,7 @@ impl AliasRegistry {
                 continue;
             }
 
-            if protocol_registry.has_protocol(&info.name) {
+            if protocol_registry.has_protocol_unrecorded(&info.name) {
                 diagnostics.push(
                     Diagnostic::error(
                         format!(
@@ -670,10 +679,12 @@ impl AliasRegistry {
         // shares, so a cycle already reported here is not reported again if
         // a subsequent `register_module` (or `add_pre_loaded`) call re-scans
         // the same still-unresolved cycle.
-        // The cycle check walks every alias, pre-loaded ones from other files
-        // included, and reports against the current file: a whole-store read.
+        // Collisions, duplicates and the cycle check below cover every
+        // pre-loaded alias and report against the current file. A file
+        // therefore depends on the package's alias *problems*, not on each
+        // alias: the build keys it on a digest of just those (BT-4791).
         crate::semantic_analysis::consulted::record_scan(
-            crate::semantic_analysis::consulted::ScanKind::Aliases,
+            crate::semantic_analysis::consulted::ScanKind::AliasSeeding,
         );
         let (cycles, _resolution_order) = find_cycles(&self.aliases);
         for (cycle, cycle_span) in cycles {
@@ -757,6 +768,24 @@ impl AliasRegistry {
     pub fn has_alias(&self, name: &str) -> bool {
         crate::semantic_analysis::consulted::record_name(name);
         self.aliases.contains_key(name)
+    }
+
+    /// Whether the registry holds no alias at all.
+    ///
+    /// A cheap guard before work that only matters once an alias exists. A
+    /// non-empty answer is not recorded as a dependency: what a file then does
+    /// with the aliases reads them by name or scans them, both recorded, so the
+    /// registry only becoming empty cannot change its result. An empty answer
+    /// records a scan, because an alias added later would change the file.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        let empty = self.aliases.is_empty();
+        if empty {
+            crate::semantic_analysis::consulted::record_scan(
+                crate::semantic_analysis::consulted::ScanKind::Aliases,
+            );
+        }
+        empty
     }
 
     /// Returns an iterator over all alias names in the registry.
@@ -957,15 +986,27 @@ enum VisitState {
 fn find_cycles(
     aliases: &HashMap<EcoString, AliasInfo>,
 ) -> (Vec<(Vec<EcoString>, Span)>, Vec<EcoString>) {
+    find_cycles_from(aliases, aliases.keys().cloned().collect(), false)
+}
+
+/// [`find_cycles`] restricted to the aliases reachable from `roots` (sorted
+/// before the walk, so the result stays deterministic). Every alias the walk
+/// visits, and every name it checks against the alias table, is recorded as a
+/// consulted dependency: an incremental build keys the calling file on exactly
+/// the aliases it can reach (BT-4791).
+fn find_cycles_from(
+    aliases: &HashMap<EcoString, AliasInfo>,
+    mut roots: Vec<EcoString>,
+    record: bool,
+) -> (Vec<(Vec<EcoString>, Span)>, Vec<EcoString>) {
     let mut state: HashMap<EcoString, VisitState> = HashMap::new();
     let mut path: Vec<EcoString> = Vec::new();
     let mut order: Vec<EcoString> = Vec::new();
     let mut cycles: Vec<(Vec<EcoString>, Span)> = Vec::new();
 
-    let mut names: Vec<EcoString> = aliases.keys().cloned().collect();
-    names.sort();
+    roots.sort();
 
-    for name in names {
+    for name in roots {
         if !state.contains_key(&name) {
             visit_alias(
                 &name,
@@ -974,6 +1015,7 @@ fn find_cycles(
                 &mut path,
                 &mut order,
                 &mut cycles,
+                record,
             );
         }
     }
@@ -989,13 +1031,17 @@ fn visit_alias(
     path: &mut Vec<EcoString>,
     order: &mut Vec<EcoString>,
     cycles: &mut Vec<(Vec<EcoString>, Span)>,
+    record: bool,
 ) {
+    if record {
+        crate::semantic_analysis::consulted::record_name(name);
+    }
     state.insert(name.clone(), VisitState::Visiting);
     path.push(name.clone());
 
     if let Some(info) = aliases.get(name) {
         let mut deps = Vec::new();
-        collect_alias_references(&info.annotation, aliases, &mut deps);
+        collect_alias_references(&info.annotation, aliases, &mut deps, record);
         // Dedupe: a name referenced more than once in one RHS (`type A = A
         // | A`, or `type A = B | B` where `B` closes a cycle back to `A`) is
         // one graph edge, not two — `collect_alias_references` does not
@@ -1006,7 +1052,7 @@ fn visit_alias(
         deps.retain(|dep| seen_deps.insert(dep.clone()));
         for dep in deps {
             match state.get(&dep) {
-                None => visit_alias(&dep, aliases, state, path, order, cycles),
+                None => visit_alias(&dep, aliases, state, path, order, cycles, record),
                 Some(VisitState::Visiting) => {
                     // Back-edge to an ancestor still on the current path —
                     // a cycle. The chain from that ancestor's first
@@ -1035,6 +1081,26 @@ fn visit_alias(
     state.insert(name.clone(), VisitState::Done);
     path.pop();
     order.push(name.clone());
+}
+
+/// The canonical keys (see [`canonical_cycle_key`]) of every alias cycle in
+/// `aliases`, sorted. The incremental build digests these: alias seeding
+/// reports them in every file, so a file depends on the package's cycles
+/// (BT-4791).
+#[must_use]
+pub fn alias_cycle_keys(aliases: &[AliasInfo]) -> Vec<Vec<EcoString>> {
+    let map: HashMap<EcoString, AliasInfo> = aliases
+        .iter()
+        .map(|a| (a.name.clone(), a.clone()))
+        .collect();
+    let mut keys: Vec<_> = find_cycles(&map)
+        .0
+        .iter()
+        .map(|(cycle, _)| canonical_cycle_key(cycle))
+        .collect();
+    keys.sort();
+    keys.dedup();
+    keys
 }
 
 /// Canonicalises a cycle chain (as returned by [`find_cycles`], first and
@@ -1068,9 +1134,15 @@ fn collect_alias_references(
     ann: &TypeAnnotation,
     aliases: &HashMap<EcoString, AliasInfo>,
     out: &mut Vec<EcoString>,
+    record: bool,
 ) {
     match ann {
         TypeAnnotation::Simple(type_id) => {
+            // Whether a name is an alias decides the graph edge, so a name
+            // that is not (yet) an alias is still a dependency.
+            if record {
+                crate::semantic_analysis::consulted::record_name(&type_id.name);
+            }
             if aliases.contains_key(&type_id.name) {
                 out.push(type_id.name.clone());
             }
@@ -1078,32 +1150,35 @@ fn collect_alias_references(
         TypeAnnotation::Generic {
             base, parameters, ..
         } => {
+            if record {
+                crate::semantic_analysis::consulted::record_name(&base.name);
+            }
             if aliases.contains_key(&base.name) {
                 out.push(base.name.clone());
             }
             for param in parameters {
-                collect_alias_references(param, aliases, out);
+                collect_alias_references(param, aliases, out, record);
             }
         }
         TypeAnnotation::Union { types, .. } => {
             for member in types {
-                collect_alias_references(member, aliases, out);
+                collect_alias_references(member, aliases, out, record);
             }
         }
         TypeAnnotation::FalseOr { inner, .. } => {
-            collect_alias_references(inner, aliases, out);
+            collect_alias_references(inner, aliases, out, record);
         }
         TypeAnnotation::Difference { base, excluded, .. } => {
-            collect_alias_references(base, aliases, out);
-            collect_alias_references(excluded, aliases, out);
+            collect_alias_references(base, aliases, out, record);
+            collect_alias_references(excluded, aliases, out, record);
         }
         TypeAnnotation::Intersection { left, right, .. } => {
-            collect_alias_references(left, aliases, out);
-            collect_alias_references(right, aliases, out);
+            collect_alias_references(left, aliases, out, record);
+            collect_alias_references(right, aliases, out, record);
         }
         TypeAnnotation::Shape { fields, .. } => {
             for field in fields {
-                collect_alias_references(&field.value, aliases, out);
+                collect_alias_references(&field.value, aliases, out, record);
             }
         }
         // SelfType / SelfClass / ClassOf / Singleton have no nested

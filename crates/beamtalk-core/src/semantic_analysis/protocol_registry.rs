@@ -749,6 +749,15 @@ impl ProtocolRegistry {
         self.protocols.contains_key(name)
     }
 
+    /// [`has_protocol`](Self::has_protocol) without recording a dependency.
+    ///
+    /// For the alias-seeding collision check, which the build keys on a digest
+    /// of the package's alias problems instead of on every alias name (BT-4791).
+    #[must_use]
+    pub(crate) fn has_protocol_unrecorded(&self, name: &str) -> bool {
+        self.protocols.contains_key(name)
+    }
+
     /// Returns an iterator over all protocol names in the registry.
     pub fn protocol_names(&self) -> impl Iterator<Item = &EcoString> {
         crate::semantic_analysis::consulted::record_scan(

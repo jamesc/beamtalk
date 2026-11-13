@@ -65,6 +65,12 @@ pub struct ConsultedSurface {
     pub scanned_protocols: bool,
     /// A scan of the alias registry happened: the file depends on every alias.
     pub scanned_aliases: bool,
+    /// The file's alias seeding (`AliasRegistry::add_pre_loaded`) ran: it
+    /// reports namespace collisions, duplicates and cycles over *all* the
+    /// pre-loaded aliases, so the file depends on the package's alias problems
+    /// (BT-4791) — not on every alias. The build keys it on a digest of just
+    /// those problems, which is constant while no alias collides or cycles.
+    pub alias_seeding: bool,
     /// An extension-related read happened while dependency extensions were
     /// not all loaded: a later phase must treat the file as depending on everything.
     pub extensions_unknown: bool,
@@ -74,7 +80,10 @@ impl ConsultedSurface {
     /// True when nothing cross-file was consulted.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.names.is_empty() && !self.scanned_all() && !self.extensions_unknown
+        self.names.is_empty()
+            && !self.scanned_all()
+            && !self.alias_seeding
+            && !self.extensions_unknown
     }
 
     /// True when any store was scanned as a whole.
@@ -171,6 +180,7 @@ pub(crate) enum ScanKind {
     Classes,
     Protocols,
     Aliases,
+    AliasSeeding,
 }
 
 /// Record a whole-collection scan of one store. A flag check when no scope is installed.
@@ -183,6 +193,7 @@ pub(crate) fn record_scan(kind: ScanKind) {
                     ScanKind::Classes => s.scanned_classes = true,
                     ScanKind::Protocols => s.scanned_protocols = true,
                     ScanKind::Aliases => s.scanned_aliases = true,
+                    ScanKind::AliasSeeding => s.alias_seeding = true,
                 }
             }
         });
@@ -242,7 +253,7 @@ mod tests {
         assert!(!s.names.contains("Inner") && !s.names.contains("Dropped"));
     }
 
-    use crate::semantic_analysis::alias_registry::AliasRegistry;
+    use crate::semantic_analysis::alias_registry::{AliasInfo, AliasRegistry};
     use crate::semantic_analysis::class_hierarchy::ClassHierarchy;
     use crate::semantic_analysis::protocol_registry::ProtocolRegistry;
 
@@ -347,19 +358,41 @@ mod tests {
     }
 
     #[test]
-    fn alias_registration_cycle_check_records_a_scan() {
+    fn alias_registration_records_only_the_aliases_it_can_reach() {
         use crate::source_analysis::{lex_with_eof, parse};
-        let (module, diags) = parse(lex_with_eof("type Alpha = Beta\n"));
+        let src = "type Alpha = Beta\ntype Beta = Integer\ntype Other = String\n";
+        let (module, diags) = parse(lex_with_eof(src));
         assert!(diags.is_empty(), "{diags:?}");
         let mut aliases = AliasRegistry::new();
         let hierarchy = ClassHierarchy::with_builtins();
         let protocols = ProtocolRegistry::new();
+        // Seed `Other` from "another file"; register `Alpha` (-> Beta) here.
+        let (mine, _) = parse(lex_with_eof("type Alpha = Beta\ntype Beta = Integer\n"));
         let scope = ConsultedScope::begin();
-        let _ = aliases.register_module(&module, &hierarchy, &protocols);
-        let s = scope.finish();
+        let _ = aliases.add_pre_loaded(
+            vec![AliasInfo::from_definition(&module.type_aliases[2])],
+            &hierarchy,
+            &protocols,
+            None,
+        );
+        let seeded = scope.finish();
         assert!(
-            s.scanned_aliases,
-            "the cycle check reads every alias: {s:?}"
+            seeded.alias_seeding && !seeded.scanned_aliases,
+            "{seeded:?}"
+        );
+        assert!(!seeded.names.contains("Other"), "{seeded:?}");
+
+        let scope = ConsultedScope::begin();
+        let _ = aliases.register_module(&mine, &hierarchy, &protocols);
+        let s = scope.finish();
+        assert!(!s.scanned_aliases, "no whole-store scan: {s:?}");
+        assert!(
+            s.names.contains("Alpha") && s.names.contains("Beta"),
+            "{s:?}"
+        );
+        assert!(
+            !s.names.contains("Other"),
+            "an unreachable alias is not a dependency: {s:?}"
         );
     }
 }

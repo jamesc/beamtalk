@@ -361,6 +361,10 @@ const EDITS: &[(&str, Edit)] = &[
         )],
     ),
     (
+        "add an alias nobody uses",
+        &[("extra_alias.bt", Some("type Unused = #a | #b\n"))],
+    ),
+    (
         "edit a doc comment",
         &[(
             "leaf.bt",
@@ -546,4 +550,62 @@ fn a_file_without_a_stored_surface_keys_on_the_full_hash() {
         "re-keyed files store their surface"
     );
     assert!(plan(&pkg).is_empty());
+}
+
+/// Editing a type alias rebuilds the file that declares it and the files that
+/// use it, and leaves every file that never named it cached (BT-4791).
+#[test]
+fn an_alias_edit_rebuilds_only_the_files_that_use_the_alias() {
+    let pkg = Pkg::new(FIXTURE);
+    build(&pkg);
+    let edit = EDITS
+        .iter()
+        .find(|(l, _)| *l == "change an alias")
+        .unwrap()
+        .1;
+    let rebuilt = rebuilt_by(&pkg, edit);
+    assert_eq!(
+        rebuilt,
+        BTreeSet::from(["compass.bt".to_string(), "user_alias.bt".to_string()]),
+        "only the declaring file and its user consult `Direction`"
+    );
+}
+
+/// An alias that collides with a class, repeats another alias, or closes a
+/// cycle is reported by every file's alias seeding, so each file must rebuild
+/// to show it (such packages fail to build, so this checks the plan only).
+#[test]
+fn an_alias_problem_rebuilds_every_file() {
+    let problems: &[(&str, Edit)] = &[
+        (
+            "collides with a class",
+            &[("clash.bt", Some("type Leaf = #a | #b\n"))],
+        ),
+        (
+            "duplicate alias",
+            &[("dup.bt", Some("type Direction = #up\n"))],
+        ),
+        (
+            "self-referential alias",
+            &[("cycle.bt", Some("type Loop = Loop | #a\n"))],
+        ),
+        (
+            "cycle across files",
+            &[
+                ("ping.bt", Some("type Ping = Pong | #a\n")),
+                ("pong.bt", Some("type Pong = Ping | #b\n")),
+            ],
+        ),
+    ];
+    for (label, edit) in problems {
+        let pkg = Pkg::new(FIXTURE);
+        build(&pkg);
+        let rebuilt = rebuilt_by(&pkg, edit);
+        for (file, _) in FIXTURE {
+            assert!(
+                rebuilt.contains(*file),
+                "{label}: {file} reports the problem, so it must rebuild: {rebuilt:?}"
+            );
+        }
+    }
 }

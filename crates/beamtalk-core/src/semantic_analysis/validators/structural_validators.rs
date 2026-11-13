@@ -173,7 +173,7 @@ pub(crate) fn check_unresolved_type_aliases(
     alias_registry: &AliasRegistry,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if alias_registry.alias_names().next().is_none() {
+    if alias_registry.is_empty() {
         return;
     }
     for class in &module.classes {
