@@ -3683,6 +3683,69 @@ is_kind_of_named_verdicts_test_() ->
         ]
     end}.
 
+%% BT-4754: `isKindOfNamed/3` takes the caller's `whereis` of the literal's
+%% class. For a receiver of that class the pid is the liveness proof (no second
+%% lookup); a receiver of any other class still has its own class checked.
+is_kind_of_named_probe_pid_test_() ->
+    Names = ['BT4754Grand', 'BT4754Bottom'],
+    {setup, fun setup/0, fun(_) -> teardown(Names) end, fun(_) ->
+        [
+            ?_test(begin
+                {_, GrandPid} = register_class('BT4754Grand', #{}, #{}),
+                {_, BottomPid} = register_class_with_super(
+                    'BT4754Bottom', 'BT4754Grand', #{}, #{}
+                ),
+                Grand = #{'$beamtalk_class' => 'BT4754Grand'},
+                Bottom = #{'$beamtalk_class' => 'BT4754Bottom'},
+                %% Same class as the literal: answered from the probe's pid.
+                ?assertEqual(
+                    true,
+                    beamtalk_behaviour_intrinsics:isKindOfNamed(Grand, 'BT4754Grand', GrandPid)
+                ),
+                %% Subclass instance: its own class process is still checked.
+                ?assertEqual(
+                    true,
+                    beamtalk_behaviour_intrinsics:isKindOfNamed(Bottom, 'BT4754Grand', GrandPid)
+                ),
+                ?assertEqual(
+                    false,
+                    beamtalk_behaviour_intrinsics:isKindOfNamed(Grand, 'BT4754Bottom', BottomPid)
+                ),
+                %% /2 is /3 with the registry's own answer.
+                ?assertEqual(
+                    true, beamtalk_behaviour_intrinsics:isKindOfNamed(Bottom, 'BT4754Grand')
+                ),
+                %% No pid for the literal's class: undecided, so the send raises.
+                ?assertEqual(
+                    undecided,
+                    beamtalk_behaviour_intrinsics:isKindOfNamed(Grand, 'BT4754Grand', undefined)
+                ),
+                %% A dead receiver class is undecided even with a live probe pid.
+                stop_without_terminate(BottomPid),
+                ?assertEqual(
+                    undecided,
+                    beamtalk_behaviour_intrinsics:isKindOfNamed(Bottom, 'BT4754Grand', GrandPid)
+                ),
+                %% A dead local actor is undecided; a live one is answered.
+                {Pid, Ref} = spawn_monitor(fun() -> ok end),
+                receive
+                    {'DOWN', Ref, process, Pid, _} -> ok
+                after 5000 -> error(timeout)
+                end,
+                Dead = #beamtalk_object{class = 'BT4754Grand', class_mod = undefined, pid = Pid},
+                Live = #beamtalk_object{class = 'BT4754Grand', class_mod = undefined, pid = self()},
+                ?assertEqual(
+                    undecided,
+                    beamtalk_behaviour_intrinsics:isKindOfNamed(Dead, 'BT4754Grand', GrandPid)
+                ),
+                ?assertEqual(
+                    true,
+                    beamtalk_behaviour_intrinsics:isKindOfNamed(Live, 'BT4754Grand', GrandPid)
+                )
+            end)
+        ]
+    end}.
+
 override_flag_key_matches_shared_fixture_test() ->
     Cases = beamtalk_test_corpus:load_json_fixture([
         "runtime",
