@@ -426,3 +426,27 @@ fn binary_route_drops_the_string_half_for_string_special_selectors() {
     };
     assert!(route.string_tag_route.is_some());
 }
+
+/// BT-4774: `beamtalk-core`'s `STATIC_ONLY_HANDLE_CLASSES` (excluded from
+/// closed-leaf match exhaustiveness) must be exactly the guardless
+/// `dynamic_only` raw-term sealed leaf rows with no target module, minus
+/// `Character`, which core excludes separately. A new handle row fails here.
+#[test]
+fn static_only_handle_classes_match_the_routing_rows() {
+    use beamtalk_core::semantic_analysis::validators::STATIC_ONLY_HANDLE_CLASSES;
+    let mut from_table: Vec<&str> = super::rows()
+        .iter()
+        .filter(|r| {
+            r.representation == Representation::RawTerm
+                && r.guard.is_none()
+                && r.target_module.is_none()
+                && r.dynamic_only.is_some()
+                && r.class != "Character"
+        })
+        .map(|r| r.class)
+        .collect();
+    from_table.sort_unstable();
+    let mut listed = STATIC_ONLY_HANDLE_CLASSES.to_vec();
+    listed.sort_unstable();
+    assert_eq!(listed, from_table);
+}

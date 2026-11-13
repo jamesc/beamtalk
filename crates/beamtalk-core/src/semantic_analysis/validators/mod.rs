@@ -77,6 +77,7 @@ pub(crate) use lint_validators::{
     check_testcase_setup_drops_field_assignments, find_narrowing_casts, is_effect_free,
 };
 pub(crate) use match_arm_block_validators::check_match_arm_block;
+pub use match_validators::STATIC_ONLY_HANDLE_CLASSES;
 pub(crate) use match_validators::{
     check_match_exhaustiveness, check_type_pattern_classes, is_concrete_leaf_class,
     warn_assignment_in_match_arms,

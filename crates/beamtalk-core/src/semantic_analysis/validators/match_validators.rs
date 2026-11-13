@@ -281,6 +281,16 @@ const PHASE_A_PRIMITIVE_CLASSES: &[&str] = &[
 /// (`String <: Binary`).
 const SEALED_CLOSED_HIERARCHY_CLASSES: &[&str] = &["Binary"];
 
+/// BT-4774: sealed leaf classes that exist only statically (BT-4717). At run
+/// time a value of one of these types is a raw `Reference`, a `Pid` or a fd
+/// tuple, and their routing rows have no class guard, so a `x :: EtsTid` arm
+/// can never match. They are legal type-pattern classes but never closed
+/// leaves: a `Symbol | EtsTid` scrutinee must not make exhaustiveness ask for
+/// an arm that cannot match. Enforced against the routing table (rows that are
+/// `dynamic_only` with no guard and a `RawTerm` representation, other than
+/// `Character`) by a conformance test in `beamtalk-codegen`.
+pub const STATIC_ONLY_HANDLE_CLASSES: &[&str] = &["EtsTid", "IoDevice", "ZlibStream"];
+
 /// ADR 0107 Phase A: is `class_name` a concrete, exhaustively
 /// enumerable leaf class in the exact sense `Pattern::Type` patterns already
 /// require — the identical leaf check `validate_type_pattern_class`'s
@@ -298,7 +308,10 @@ const SEALED_CLOSED_HIERARCHY_CLASSES: &[&str] = &["Binary"];
 /// unresolved class name is conservatively rejected (an exhaustiveness
 /// *gate* must not assume open-world unknowns are closed).
 pub(crate) fn is_concrete_leaf_class(class_name: &str, hierarchy: &ClassHierarchy) -> bool {
-    if class_name == "Character" || SEALED_CLOSED_HIERARCHY_CLASSES.contains(&class_name) {
+    if class_name == "Character"
+        || SEALED_CLOSED_HIERARCHY_CLASSES.contains(&class_name)
+        || STATIC_ONLY_HANDLE_CLASSES.contains(&class_name)
+    {
         return false;
     }
     if PHASE_A_PRIMITIVE_CLASSES.contains(&class_name) {
