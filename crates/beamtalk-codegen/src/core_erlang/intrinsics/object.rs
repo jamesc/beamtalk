@@ -15,6 +15,30 @@ use super::{
     leaf, not_nil_apply, primitives, validate_if_not_nil_block,
 };
 
+/// The `beamtalk_behaviour_intrinsics` functions the `isKindOf:` lowerings
+/// call. A typed set, so the runtime export contract
+/// (`runtime_export_contract_tests`) checks every name codegen can emit.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::core_erlang) enum KindOfFn {
+    /// `isKindOfBuiltin/3`: a sealed built-in literal and its type test.
+    Builtin,
+    /// `isKindOfNamed/3`: a user class literal, answered by name (BT-4757).
+    Named,
+}
+
+impl KindOfFn {
+    pub(in crate::core_erlang) const fn name(self) -> &'static str {
+        match self {
+            Self::Builtin => "isKindOfBuiltin",
+            Self::Named => "isKindOfNamed",
+        }
+    }
+
+    /// Every function above, for the export contract.
+    #[cfg(test)]
+    pub(in crate::core_erlang) const ALL: &[Self] = &[Self::Builtin, Self::Named];
+}
+
 impl CoreErlangGenerator {
     /// Tries to generate code for `ProtoObject` methods.
     ///
@@ -272,7 +296,7 @@ impl CoreErlangGenerator {
                     return self.emit_kind_of_call(
                         receiver,
                         class_arg,
-                        "isKindOfNamed",
+                        KindOfFn::Named,
                         leaf::atom(class_name),
                     );
                 }
@@ -281,7 +305,7 @@ impl CoreErlangGenerator {
         };
         // The test is applied to the receiver variable, so it is rendered
         // inside the shared emitter once that variable exists.
-        self.emit_kind_of_call_with(receiver, class_arg, "isKindOfBuiltin", |this, recv_var| {
+        self.emit_kind_of_call_with(receiver, class_arg, KindOfFn::Builtin, |this, recv_var| {
             this.render_type_test(
                 test,
                 recv_var,
@@ -299,7 +323,7 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         class_arg: &Expression,
-        fn_name: &str,
+        fn_name: KindOfFn,
         extra: Document<'static>,
     ) -> Result<Option<Document<'static>>> {
         self.emit_kind_of_call_with(receiver, class_arg, fn_name, |_, _| extra)
@@ -309,7 +333,7 @@ impl CoreErlangGenerator {
         &mut self,
         receiver: &Expression,
         class_arg: &Expression,
-        fn_name: &str,
+        fn_name: KindOfFn,
         extra: impl FnOnce(&mut Self, &str) -> Document<'static>,
     ) -> Result<Option<Document<'static>>> {
         let mut seq = self.sequence_call(&[receiver, class_arg], "KindOf")?;
@@ -328,7 +352,7 @@ impl CoreErlangGenerator {
             " = ",
             class_doc,
             " in call 'beamtalk_behaviour_intrinsics':",
-            leaf::atom(fn_name.to_string()),
+            leaf::atom(fn_name.name().to_string()),
             "(",
             leaf::var(recv_var),
             ", ",

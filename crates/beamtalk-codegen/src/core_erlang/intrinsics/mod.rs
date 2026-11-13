@@ -193,6 +193,8 @@ mod block_calls;
 mod boolean;
 mod logger;
 mod object;
+#[cfg(test)]
+pub(in crate::core_erlang) use object::KindOfFn;
 
 #[cfg(test)]
 mod tests {

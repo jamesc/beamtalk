@@ -48,6 +48,7 @@ use super::class_var_access::class_var_fn;
 use super::dispatch_codegen::NamedSpawn;
 use super::gen_server::SpawnVariant;
 use super::guard_returns::GuardSense;
+use super::intrinsics::KindOfFn;
 use super::primitives;
 use super::supervisor_codegen::{ALL_SUPERVISOR_KINDS, supervisor_init_fn};
 
@@ -451,6 +452,14 @@ fn dynamic_calls() -> Vec<EmittedCall> {
             f.name(),
             None,
             "class_var_fn::ALL",
+        ));
+    }
+    for f in KindOfFn::ALL {
+        out.push(call(
+            "beamtalk_behaviour_intrinsics",
+            f.name(),
+            Some(3),
+            "KindOfFn::ALL",
         ));
     }
     for v in SpawnVariant::ALL {
