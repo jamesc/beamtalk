@@ -91,14 +91,17 @@ module 'trait_flattened_value_user' ['new'/0, 'new'/1, 'title'/1, 'describe'/1, 
 
 
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
-    try call 'trait_flattened_value_user':'dispatch'(Selector, Args, Self)
-    of <D4Result> -> {'reply', D4Result, State}
+    try
+        call 'trait_flattened_value_user':'dispatch'(Selector, Args, Self)
+    of <D4Result> ->
+        {'reply', D4Result, State}
     catch <D4Type, D4Error, D4Stack> ->
         case D4Type of
             <'error'> when 'true' ->
                 let <D4Built> = primop 'build_stacktrace'(D4Stack) in
                 {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built, ~{}~), State}
-            <_D4Other> when 'true' -> primop 'raw_raise'(D4Type, D4Error, D4Stack)
+            <_D4Other> when 'true' ->
+                primop 'raw_raise'(D4Type, D4Error, D4Stack)
         end
 
 

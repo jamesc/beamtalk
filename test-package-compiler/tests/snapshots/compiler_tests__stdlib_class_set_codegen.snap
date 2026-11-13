@@ -162,14 +162,17 @@ case call 'erlang':'is_function'(_block@9, 2) of <'true'> when 'true' -> let _Er
 
 
 'dispatch'/4 = fun (Selector, Args, Self, State) ->
-    try call 'stdlib_class_set':'dispatch'(Selector, Args, Self)
-    of <D4Result> -> {'reply', D4Result, State}
+    try
+        call 'stdlib_class_set':'dispatch'(Selector, Args, Self)
+    of <D4Result> ->
+        {'reply', D4Result, State}
     catch <D4Type, D4Error, D4Stack> ->
         case D4Type of
             <'error'> when 'true' ->
                 let <D4Built> = primop 'build_stacktrace'(D4Stack) in
                 {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built, ~{}~), State}
-            <_D4Other> when 'true' -> primop 'raw_raise'(D4Type, D4Error, D4Stack)
+            <_D4Other> when 'true' ->
+                primop 'raw_raise'(D4Type, D4Error, D4Stack)
         end
 
 
