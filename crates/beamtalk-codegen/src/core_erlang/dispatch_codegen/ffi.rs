@@ -304,7 +304,13 @@ impl CoreErlangGenerator {
         let Ok(arity) = u8::try_from(arguments.len()) else {
             return Ok(None);
         };
-        if !registry.proves_no_result_coercion(module_name, function_name, arity) {
+        // BT-4762: a spec that states an `{ok, V}` / `ok` / `{error, R}` return
+        // lets a stock-mode call build the `Result` at the call site.
+        let inline_result = !registry.proves_no_result_coercion(module_name, function_name, arity)
+            && crate::core_erlang::util::ffi_coercion_mode(module_name) == "stock"
+            && registry.proves_inline_result(module_name, function_name, arity);
+        if !inline_result && !registry.proves_no_result_coercion(module_name, function_name, arity)
+        {
             return Ok(None);
         }
         let args_proved = arguments.iter().all(|arg| {
@@ -335,7 +341,13 @@ impl CoreErlangGenerator {
         }
         Ok(Some(docvec![
             Document::Vec(bindings),
-            self.guarded_direct_ffi_doc(module_name, function_name, &arg_names, None),
+            self.guarded_direct_ffi_doc(
+                module_name,
+                function_name,
+                &arg_names,
+                None,
+                inline_result
+            ),
         ]))
     }
 
@@ -377,6 +389,7 @@ impl CoreErlangGenerator {
             function_name,
             &args,
             Some((class_name, selector.name().as_ref())),
+            false,
         ))
     }
 
@@ -391,6 +404,7 @@ impl CoreErlangGenerator {
         function_name: &str,
         args: &[(String, bool)],
         context: Option<(&str, &str)>,
+        inline_result: bool,
     ) -> Document<'static> {
         let arg_vars: Vec<Document<'static>> = args
             .iter()
@@ -425,6 +439,7 @@ impl CoreErlangGenerator {
             &arg_vars,
             snap_var.as_deref(),
             context_doc.as_ref(),
+            inline_result,
         );
         if args.is_empty() {
             return direct;
@@ -482,6 +497,7 @@ impl CoreErlangGenerator {
     /// the remote call, and on any exception the hand-off to
     /// `beamtalk_erlang_proxy:ffi_call_raised/8` (`/9`, `/10`) with the built stacktrace and
     /// the call site's frame.
+    #[allow(clippy::too_many_arguments)] // the call's atoms and arguments plus its three optional shapes
     fn ffi_try_direct_doc(
         &mut self,
         module_atom: &Document<'static>,
@@ -490,6 +506,7 @@ impl CoreErlangGenerator {
         arg_vars: &[Document<'static>],
         snap_var: Option<&str>,
         context: Option<&Document<'static>>,
+        inline_result: bool,
     ) -> Document<'static> {
         let result_var = self.fresh_temp_var("FfiRes");
         let cls_var = self.fresh_temp_var("FfiCls");
@@ -544,15 +561,108 @@ impl CoreErlangGenerator {
             ),
             Layout::Flat,
         );
+        let remote_call = form::call_atoms(
+            module_atom.clone(),
+            function_atom.clone(),
+            [Document::Vec(arg_vars.to_vec())],
+        );
+        // BT-4762: the `Result` is built inside the `try`, as the proxy's
+        // `apply_with_coercion/6` coerces inside its own.
+        let call_expr = if inline_result {
+            let vars = [
+                self.fresh_temp_var("FfiRaw"),
+                self.fresh_temp_var("FfiPayload"),
+                self.fresh_temp_var("FfiOther"),
+            ];
+            Self::inline_result_doc(&vars, remote_call, module_atom, mode_atom)
+        } else {
+            remote_call
+        };
         try_catch_doc(
-            form::call_atoms(
-                module_atom.clone(),
-                function_atom.clone(),
-                [Document::Vec(arg_vars.to_vec())],
-            ),
+            call_expr,
             leaf::var(result_var),
             catch,
             handler,
+            Layout::Flat,
+        )
+    }
+
+    /// BT-4762: the call and the `Result` it builds, for a call whose spec
+    /// states an `{ok, V}` / `ok` / `{error, R}` return (stock mode only).
+    ///
+    /// ```text
+    /// let <Raw> = call 'M':'F'(Args) in
+    /// case Raw of
+    ///   <{'ok', V}> when not is_list(V) -> call 'beamtalk_result':'from_tagged_tuple'(Raw)
+    ///   <{'error', R}> when not is_list(R) -> call 'beamtalk_result':'from_tagged_tuple'(Raw)
+    ///   <'ok'> when 'true' -> call 'beamtalk_result':'from_tagged_tuple'({'ok', 'nil'})
+    ///   <Other> when 'true' -> call 'beamtalk_erlang_proxy':'coerce_ffi_result'('M', Other, Mode)
+    /// end
+    /// ```
+    ///
+    /// The only coercion stock mode applies to the payload of an
+    /// `{ok, _}` / `{error, _}` is the charlist-to-`String` conversion of a
+    /// list, so a list payload (and every other shape, a bare `error`
+    /// included) is handed — already returned, never re-called — to the proxy's
+    /// own `coerce_ffi_result/3`. The built `Result` is
+    /// `beamtalk_result:from_tagged_tuple/1`'s, the function the proxy ends in,
+    /// so the error arm keeps its `ensure_wrapped`.
+    fn inline_result_doc(
+        [raw_var, payload, other]: &[String; 3],
+        remote_call: Document<'static>,
+        module_atom: &Document<'static>,
+        mode_atom: &Document<'static>,
+    ) -> Document<'static> {
+        let raw = || leaf::var(raw_var.clone());
+        let not_list = |var: &str| {
+            form::call(
+                "erlang",
+                "not",
+                [form::call(
+                    "erlang",
+                    "is_list",
+                    [leaf::var(var.to_string())],
+                )],
+            )
+        };
+        let build =
+            |arg: Document<'static>| form::call("beamtalk_result", "from_tagged_tuple", [arg]);
+        let tagged =
+            |tag: &str| docvec!["{", leaf::atom(tag), ", ", leaf::var(payload.clone()), "}"];
+        let clauses = [
+            form::clause(
+                [tagged("ok")],
+                Some(not_list(payload)),
+                build(raw()),
+                Layout::Flat,
+            ),
+            form::clause(
+                [tagged("error")],
+                Some(not_list(payload)),
+                build(raw()),
+                Layout::Flat,
+            ),
+            form::clause(
+                [leaf::atom("ok")],
+                None,
+                build(docvec!["{", leaf::atom("ok"), ", ", leaf::atom("nil"), "}"]),
+                Layout::Flat,
+            ),
+            form::clause(
+                [leaf::var(other.clone())],
+                None,
+                form::call(
+                    "beamtalk_erlang_proxy",
+                    "coerce_ffi_result",
+                    [module_atom.clone(), leaf::var(other), mode_atom.clone()],
+                ),
+                Layout::Flat,
+            ),
+        ];
+        form::let_in(
+            raw(),
+            remote_call,
+            form::case_of(raw(), clauses, Layout::Flat),
             Layout::Flat,
         )
     }

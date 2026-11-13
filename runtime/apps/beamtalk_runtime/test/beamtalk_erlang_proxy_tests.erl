@@ -2157,6 +2157,88 @@ bt4485_direct(M, F, Args, Mode) ->
             beamtalk_erlang_proxy:ffi_call_raised(C, E, S, M, F, Args, Mode, Site)
     end.
 
+%%% ============================================================================
+%%% BT-4762: inline `Result` construction for {ok, V} / ok / {error, R} specs
+%%% ============================================================================
+
+%% The shape codegen emits around the remote call (`inline_result_doc` in
+%% `dispatch_codegen/ffi.rs`), stock mode only. Pinned to the codegen output by
+%% `ffi_direct_call.rs`; pinned to the proxy by the tests below.
+bt4762_inline(M, Raw, Mode) ->
+    case Raw of
+        {ok, P} when not is_list(P) -> beamtalk_result:from_tagged_tuple(Raw);
+        {error, P} when not is_list(P) -> beamtalk_result:from_tagged_tuple(Raw);
+        ok -> beamtalk_result:from_tagged_tuple({ok, nil});
+        Other -> beamtalk_erlang_proxy:coerce_ffi_result(M, Other, Mode)
+    end.
+
+%% The full direct call: the inline build sits inside the `try`, as the proxy's
+%% coercion sits inside its own.
+bt4762_direct(M, F, Args) ->
+    try
+        bt4762_inline(M, erlang:apply(M, F, Args), stock)
+    catch
+        C:E:S ->
+            Site = erlang:process_info(self(), current_stacktrace),
+            beamtalk_erlang_proxy:ffi_call_raised(C, E, S, M, F, Args, stock, Site)
+    end.
+
+%% Every raw shape (ok, each V kind, {error, R}, list payloads, 3-tuples, bare
+%% error...) comes out identical to what `coerce_ffi_result/3` builds.
+bt4762_inline_matches_proxy_for_every_shape_test() ->
+    #{<<"inline_result_samples">> := Samples} = bt4485_fixture(),
+    ?assert(length(Samples) > 0),
+    lists:foreach(
+        fun(Src) ->
+            V = bt4485_eval(binary_to_list(Src)),
+            ?assertEqual(
+                {Src,
+                    bt4485_outcome(fun() ->
+                        beamtalk_erlang_proxy:coerce_ffi_result(lists, V, stock)
+                    end)},
+                {Src, bt4485_outcome(fun() -> bt4762_inline(lists, V, stock) end)}
+            )
+        end,
+        Samples
+    ).
+
+%% The error arm keeps `ensure_wrapped`: a bare reason becomes an Exception.
+bt4762_error_arm_is_wrapped_test() ->
+    #{errReason := Reason} = bt4762_inline(lists, {error, enoent}, stock),
+    ?assertMatch(#{'$beamtalk_class' := _}, Reason),
+    ?assertEqual(
+        beamtalk_erlang_proxy:coerce_ffi_result(lists, {error, enoent}, stock),
+        bt4762_inline(lists, {error, enoent}, stock)
+    ).
+
+%% Direct versus proxy through real calls: ok, {ok, V} for several V kinds,
+%% {error, R}, a charlist payload (still coerced), bare `error`, and a raise.
+bt4762_direct_matches_proxy_test_() ->
+    Cases = [
+        {application, unset_env, [bt4762_app, bt4762_key]},
+        {maps, find, [a, #{a => 1}]},
+        {maps, find, [a, #{a => <<"bin">>}]},
+        {maps, find, [a, #{a => #{b => 1}}]},
+        {maps, find, [a, #{a => nil}]},
+        {maps, find, [a, #{a => "charlist"}]},
+        {maps, find, [a, #{a => [1, 2, 3]}]},
+        {maps, find, [a, #{a => {ok, 1}}]},
+        {maps, find, [missing, #{a => 1}]},
+        {maps, find, [a, not_a_map]},
+        {file, read_file, ["bt4762_no_such_file"]},
+        {file, read_file, [<<"bt4762_no_such_file">>]},
+        {erlang, abs, [not_a_number]}
+    ],
+    [
+        {lists:flatten(io_lib:format("~p:~p ~p", [M, F, A])), fun() ->
+            ?assertEqual(
+                bt4485_outcome(fun() -> beamtalk_erlang_proxy:direct_call(M, F, A, stock) end),
+                bt4485_outcome(fun() -> bt4762_direct(M, F, A) end)
+            )
+        end}
+     || {M, F, A} <- Cases
+    ].
+
 %% Outcome of a call, with a wrapped error reduced to its `#beamtalk_error{}`.
 %% The recorded `erlang_stacktrace` is dropped: it names the proxy's frame on
 %% the proxy path and the caller's on the direct path.

@@ -376,20 +376,48 @@ impl NativeTypeRegistry {
             })
     }
 
+    /// Whether the spec of `module:function/arity` proves that an inline FFI
+    /// call to it may build the `Result` itself instead of going through the
+    /// proxy's `coerce_ffi_result/3` (BT-4762).
+    ///
+    /// True when the extracted return type is a `Result(V, _)` (the spec reader
+    /// maps `{ok, V} | error`, `{ok, V} | {error, R}`, `ok | {error, R}` and a
+    /// bare `ok` to it) whose `V` is made only of types the proxy passes
+    /// through unchanged ([`ffi_result_passes_unchanged`]): a `V` that may be a
+    /// list would need stock mode's charlist coercion. The error side is not
+    /// in the type (it is always an `Exception`), so the generated code checks
+    /// the payload at run time and defers to the proxy for anything else.
+    #[must_use]
+    pub fn proves_inline_result(&self, module: &str, function: &str, arity: u8) -> bool {
+        self.is_result_trusted(module)
+            && self.lookup(module, function, arity).is_some_and(|sig| {
+                sig.provenance == TypeProvenance::Extracted
+                    && ffi_inline_result_value(&sig.return_type)
+            })
+    }
+
     /// Sorted `module:function/arity` keys of every function
-    /// [`Self::proves_no_result_coercion`] holds for. Generated code depends
-    /// on exactly this set, so `beamtalk build` folds it into each file's
-    /// incremental cache key: a spec change that adds or removes a proof
-    /// recompiles the callers.
+    /// [`Self::proves_no_result_coercion`] holds for, and (suffixed `#result`)
+    /// every function [`Self::proves_inline_result`] holds for. Generated code
+    /// depends on exactly this set, so `beamtalk build` folds it into each
+    /// file's incremental cache key: a spec change that adds or removes a
+    /// proof recompiles the callers.
     #[must_use]
     pub fn proved_no_coercion_keys(&self) -> Vec<String> {
         let mut keys: Vec<String> = self
             .modules
             .iter()
             .flat_map(|(module, fns)| {
-                fns.iter()
-                    .filter(|sig| self.proves_no_result_coercion(module, &sig.name, sig.arity))
-                    .map(move |sig| format!("{module}:{}/{}", sig.name, sig.arity))
+                fns.iter().flat_map(move |sig| {
+                    let key = format!("{module}:{}/{}", sig.name, sig.arity);
+                    let plain = self
+                        .proves_no_result_coercion(module, &sig.name, sig.arity)
+                        .then(|| key.clone());
+                    let inline = self
+                        .proves_inline_result(module, &sig.name, sig.arity)
+                        .then(|| format!("{key}#result"));
+                    plain.into_iter().chain(inline)
+                })
             })
             .collect();
         keys.sort_unstable();
@@ -503,6 +531,26 @@ pub fn ffi_result_passes_unchanged(ty: &InferredType) -> bool {
     })
 }
 
+/// `ty` is the `Result(V, _)` the spec reader emits for a function returning
+/// `{ok, V}` / `ok` (with `{error, R}` and/or `error`), and `V` passes
+/// through `coerce_ffi_result/3` unchanged ([`ffi_result_passes_unchanged`],
+/// BT-4762): so the inline call can build the `Result` without the proxy.
+#[must_use]
+pub fn ffi_inline_result_value(ty: &InferredType) -> bool {
+    match ty {
+        InferredType::Known {
+            class_name,
+            type_args,
+            ..
+        } => {
+            &**class_name == "Result"
+                && type_args.len() == 2
+                && ffi_result_passes_unchanged(&type_args[0])
+        }
+        _ => false,
+    }
+}
+
 /// The checked type of a `self delegate` method's declared parameter, for the
 /// argument proof ([`ffi_arg_passes_unchanged`], BT-4765): a plain class name,
 /// or a union of them. Anything else (a generic, a singleton, a difference or
@@ -602,6 +650,29 @@ mod tests {
         for name in types("arg_not_proven") {
             assert!(!ffi_arg_passes_unchanged(&ty(&name)), "arg {name}");
         }
+        // BT-4762: an inline `Result(V, _)` needs a proved `V`, drawn from the
+        // same table as a plain result.
+        let wrap_in_result = |v: InferredType| InferredType::Known {
+            class_name: "Result".into(),
+            type_args: vec![v, InferredType::known("Exception")],
+            provenance: crate::semantic_analysis::TypeProvenance::Extracted,
+        };
+        for name in &result_ok {
+            assert!(
+                ffi_inline_result_value(&wrap_in_result(ty(name))),
+                "inline result V {name}"
+            );
+        }
+        for name in types("inline_result_value_not_proven") {
+            assert!(
+                !ffi_inline_result_value(&wrap_in_result(ty(&name))),
+                "inline result V {name}"
+            );
+        }
+        assert!(!ffi_inline_result_value(&ty("Integer")));
+        assert!(!ffi_inline_result_value(&InferredType::simple_union(&[
+            "Result", "Integer"
+        ])));
         let guards: Vec<String> = fixture["arg_runtime_guards"]
             .as_array()
             .expect("arg_runtime_guards")
