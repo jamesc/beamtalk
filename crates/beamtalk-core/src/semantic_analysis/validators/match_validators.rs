@@ -335,7 +335,7 @@ pub(crate) fn is_concrete_leaf_class(class_name: &str, hierarchy: &ClassHierarch
 /// appear anywhere a sub-pattern can, not just as an arm's top-level pattern.
 ///
 /// This is a semantic-analysis-stage check; codegen is
-/// `generate_type_pattern`. Three checks, in order:
+/// `generate_type_pattern`. Four checks, in order:
 ///
 /// - **`Character`** is never accepted, known or not: it shares `Integer`'s
 ///   runtime representation with no distinct tag (ADR 0107 §Phase A scope),
@@ -343,6 +343,9 @@ pub(crate) fn is_concrete_leaf_class(class_name: &str, hierarchy: &ClassHierarch
 ///   runtime. (Unlike `Boolean`, above, `Character` genuinely cannot be
 ///   disambiguated from `Integer` by any runtime test — it compiles to a
 ///   plain Erlang integer, not merely a nominal hierarchy child.)
+/// - **Static-only handle class** ([`STATIC_ONLY_HANDLE_CLASSES`], BT-4797) is
+///   a `Warning`: no run-time value is tagged with it, so the arm can never
+///   match.
 /// - **Unknown class name** reuses the existing unresolved-class diagnostic
 ///   verbatim (ADR 0100) — same `Warning` severity, same
 ///   [`DiagnosticCategory::UnresolvedClass`] category, and the same
@@ -479,6 +482,28 @@ fn validate_type_pattern_class(
         return;
     }
 
+    // BT-4797: a static-only handle class (`STATIC_ONLY_HANDLE_CLASSES`) is
+    // a legal type-pattern class, but no run-time value is ever tagged with
+    // it, so the arm can never match. Advisory only.
+    if STATIC_ONLY_HANDLE_CLASSES.contains(&class_name) {
+        diagnostics.push(
+            Diagnostic::warning(
+                format!(
+                    "`{class_name}` exists only statically; a `{class_name}` type-pattern arm \
+                     can never match"
+                ),
+                class.span,
+            )
+            .with_hint(
+                "At run time the value is its raw underlying Erlang term, not tagged with \
+                 this class. Use a `_` arm, or match on the underlying representation."
+                    .to_string(),
+            )
+            .with_category(DiagnosticCategory::Type),
+        );
+        return;
+    }
+
     // Phase A's explicitly-named primitives are always valid — see
     // `PHASE_A_PRIMITIVE_CLASSES`'s doc for why they skip the leaf check.
     // `SEALED_CLOSED_HIERARCHY_CLASSES` (BT-4228) are non-leaf but their
@@ -566,6 +591,53 @@ mod tests {
     use crate::source_analysis::Severity;
     use crate::source_analysis::lex_with_eof;
     use crate::source_analysis::parse;
+
+    // ── BT-4797: static-only handle classes in type patterns ──────────────────
+
+    fn type_pattern_diags(src: &str) -> Vec<Diagnostic> {
+        let (module, parse_diags) = parse(lex_with_eof(src));
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut diagnostics = Vec::new();
+        check_type_pattern_classes(&module, &hierarchy, false, &mut diagnostics);
+        diagnostics
+    }
+
+    /// One warning per static-only handle class, read from the shared list.
+    #[test]
+    fn static_only_handle_type_pattern_warns_never_matches() {
+        for handle in STATIC_ONLY_HANDLE_CLASSES {
+            let diags = type_pattern_diags(&format!("x match: [h :: {handle} -> [h]; _ -> [0]]"));
+            assert_eq!(diags.len(), 1, "{handle}: {diags:?}");
+            assert_eq!(diags[0].severity, Severity::Warning, "{handle}");
+            assert!(diags[0].message.contains(handle), "{handle}");
+            assert!(diags[0].message.contains("can never match"), "{handle}");
+        }
+    }
+
+    /// A handle class nested in a container pattern warns too.
+    #[test]
+    fn static_only_handle_nested_type_pattern_warns() {
+        let diags = type_pattern_diags("x match: [{#ok, h :: EtsTid} -> [h]; _ -> [0]]");
+        assert_eq!(diags.len(), 1, "{diags:?}");
+    }
+
+    /// Other classes stay silent.
+    #[test]
+    fn non_handle_type_pattern_does_not_warn_never_matches() {
+        let diags =
+            type_pattern_diags("x match: [n :: Integer -> [n]; s :: String -> [s]; _ -> [0]]");
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    /// `isKindOf:` is not a type pattern and is not checked.
+    #[test]
+    fn static_only_handle_is_kind_of_does_not_warn() {
+        for handle in STATIC_ONLY_HANDLE_CLASSES {
+            let diags = type_pattern_diags(&format!("x isKindOf: {handle}"));
+            assert!(diags.is_empty(), "{handle}: {diags:?}");
+        }
+    }
 
     // ── Match exhaustiveness for sealed types ─────────────────────────────────
 
