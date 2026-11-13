@@ -1936,8 +1936,13 @@ impl LanguageService for SimpleLanguageService {
     }
 
     fn remove_file(&mut self, file: &Utf8PathBuf) {
+        let had_internal_aliases = !self.project_index.internal_aliases_of(file).is_empty();
         self.project_index.remove_file(file);
         self.files.remove(file);
+        // Siblings were expanded against this file's aliases (BT-4778).
+        if had_internal_aliases && crate::project_index::is_dependency_file(file) {
+            self.reindex_dependency_siblings(file);
+        }
     }
 
     fn diagnostics(&self, file: &Utf8PathBuf) -> Vec<Diagnostic> {

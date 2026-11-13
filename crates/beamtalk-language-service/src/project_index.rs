@@ -19,6 +19,7 @@
 //! └── stdlib class names (pre-indexed from lib/*.bt)
 //! ```
 
+use beamtalk_core::ast::TypeAnnotation;
 use beamtalk_core::compilation::extension_index::ExtensionIndex;
 use beamtalk_core::semantic_analysis::{
     AliasInfo, AliasRegistry, ClassHierarchy, ProtocolInfo, ProtocolRegistry, SemanticError,
@@ -491,12 +492,18 @@ impl ProjectIndex {
             .collect()
     }
 
-    /// `file`'s currently indexed `internal` aliases, for detecting a change
-    /// that makes its siblings' exported signatures stale (BT-4778).
-    pub fn internal_aliases_of(&self, file: &Utf8PathBuf) -> Vec<AliasInfo> {
+    /// `file`'s currently indexed `internal` aliases as `(name, annotation)`
+    /// (spans ignored), for detecting a change that makes its siblings'
+    /// exported signatures stale (BT-4778).
+    pub fn internal_aliases_of(&self, file: &Utf8PathBuf) -> Vec<(EcoString, TypeAnnotation)> {
         self.file_aliases
             .get(file)
-            .map(|v| v.iter().filter(|i| i.is_internal).cloned().collect())
+            .map(|v| {
+                v.iter()
+                    .filter(|i| i.is_internal)
+                    .map(|i| (i.name.clone(), i.annotation.clone()))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 

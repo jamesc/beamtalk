@@ -685,3 +685,41 @@ fn diagnostics_expand_dependency_alias_declared_in_sibling_file() {
         );
     }
 }
+
+/// Removing the file that declares a dependency's `internal` alias must
+/// re-index its siblings, so they stop exporting the stale expansion.
+#[test]
+fn removing_dependency_alias_file_drops_sibling_expansion() {
+    let types = Utf8PathBuf::from("_build/deps/vault/src/Types.bt");
+    let consumer_file = Utf8PathBuf::from("src/Client.bt");
+    let mut service = SimpleLanguageService::new();
+    service.update_file(types.clone(), "internal type Secret = String\n".to_string());
+    service.update_file(
+        Utf8PathBuf::from("_build/deps/vault/src/Vault.bt"),
+        VAULT_SRC.to_string(),
+    );
+    service.update_file(consumer_file.clone(), CLIENT_SRC.to_string());
+    assert!(!mismatch_diags(&service, &consumer_file).is_empty());
+
+    service.remove_file(&types);
+    assert!(mismatch_diags(&service, &consumer_file).is_empty());
+}
+
+/// An alias whose body changes re-expands the siblings.
+#[test]
+fn changing_dependency_alias_body_reexpands_sibling() {
+    let types = Utf8PathBuf::from("_build/deps/vault/src/Types.bt");
+    let consumer_file = Utf8PathBuf::from("src/Client.bt");
+    let mut service = SimpleLanguageService::new();
+    service.update_file(types.clone(), "internal type Secret = String\n".to_string());
+    service.update_file(
+        Utf8PathBuf::from("_build/deps/vault/src/Vault.bt"),
+        VAULT_SRC.to_string(),
+    );
+    service.update_file(consumer_file.clone(), CLIENT_SRC.to_string());
+    assert!(!mismatch_diags(&service, &consumer_file).is_empty());
+
+    // `Integer` return matches the consumer's `Integer`: no mismatch left.
+    service.update_file(types, "internal type Secret = Integer\n".to_string());
+    assert!(mismatch_diags(&service, &consumer_file).is_empty());
+}
