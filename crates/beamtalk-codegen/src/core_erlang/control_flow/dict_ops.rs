@@ -11,6 +11,7 @@
 
 use super::super::intrinsics::validate_block_arity_exact;
 use super::super::{CoreErlangGenerator, Result};
+use super::list_ops::fold_driver::FoldParams;
 use super::{BodyKind, ListOpKind, ThreadingPlan};
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
@@ -50,9 +51,8 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Do);
-        self.emit_loop_convention_diagnostic(&plan, body.span);
-        let discard = self.take_discarded_fold(body.span);
+        // A dictionary fold carries no value-type `Self` slot.
+        let (plan, discard) = self.begin_fold_plan(body, ListOpKind::Do, None, false, true)?;
 
         let dict_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -86,26 +86,17 @@ impl CoreErlangGenerator {
                 ") -> ",
             ]);
 
-            // BT-4121: the guarded-operator marker spans the body lowering.
-            let prestore_state = self.state_var_to_store();
-            self.push_guarded_op_loop(body, None);
-            self.push_scope();
-            if let Some(param) = body.parameters.first() {
-                self.bind_var(&param.name, &item_var);
-            }
-            let (body_doc, _) =
-                self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, &acc_var, 0)?;
-            docs.push(body_doc);
-            self.pop_scope();
-            // BT-4121: check out the marker; splice the pre-store (nil
-            // unless the loop brackets with a `State` in scope).
-            let (guarded_op_bracket, prestore) = self.checkout_guarded_op_loop_docs(
-                self.pop_guarded_op_loop(),
-                false,
-                body.span,
-                &prestore_state,
-            );
-            docs.insert(0, prestore);
+            let lowered = self.lower_tuple_fold_body(
+                body,
+                &plan,
+                &BodyKind::FoldlDo,
+                &item_var,
+                &acc_var,
+                0,
+            )?;
+            docs.push(lowered.body_doc);
+            let guarded_op_bracket = lowered.guarded_op_bracket;
+            docs.insert(0, lowered.prestore);
 
             let fold_result = self.fresh_temp_var("FoldResult");
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
@@ -164,14 +155,14 @@ impl CoreErlangGenerator {
             ") -> ",
         ]);
 
-        self.push_scope();
-        if let Some(param) = body.parameters.first() {
-            self.bind_var(&param.name, &item_var);
-        }
-        let (body_doc, _) =
-            self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
-        docs.push(body_doc);
-        self.pop_scope();
+        docs.push(self.lower_map_fold_body(
+            body,
+            &plan,
+            &BodyKind::FoldlDo,
+            &item_var,
+            "StateAcc",
+            0,
+        )?);
 
         let fold_result = self.fresh_temp_var("FoldResult");
         let mut post_docs: Vec<Document<'static>> = vec![ThreadingPlan::foldl_call_doc(
@@ -257,9 +248,8 @@ impl CoreErlangGenerator {
         body: &Block,
         selector: &str,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Do);
-        self.emit_loop_convention_diagnostic(&plan, body.span);
-        let discard = self.take_discarded_fold(body.span);
+        // A dictionary fold carries no value-type `Self` slot.
+        let (plan, discard) = self.begin_fold_plan(body, ListOpKind::Do, None, false, true)?;
 
         let dict_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -313,29 +303,20 @@ impl CoreErlangGenerator {
                 ") in ",
             ]);
 
-            // BT-4121: the guarded-operator marker spans the body lowering.
-            let prestore_state = self.state_var_to_store();
-            self.push_guarded_op_loop(body, None);
-            self.push_scope();
-            if let Some(param) = body.parameters.first() {
-                self.bind_var(&param.name, &key_var);
-            }
-            if let Some(param) = body.parameters.get(1) {
-                self.bind_var(&param.name, &val_var);
-            }
-            let (body_doc, _) =
-                self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, &acc_var, 0)?;
-            docs.push(body_doc);
-            self.pop_scope();
-            // BT-4121: check out the marker; splice the pre-store (nil
-            // unless the loop brackets with a `State` in scope).
-            let (guarded_op_bracket, prestore) = self.checkout_guarded_op_loop_docs(
-                self.pop_guarded_op_loop(),
-                false,
-                body.span,
-                &prestore_state,
-            );
-            docs.insert(0, prestore);
+            let lowered = self.lower_tuple_fold_body(
+                body,
+                &plan,
+                &BodyKind::FoldlDo,
+                FoldParams::Pair {
+                    first: &key_var,
+                    second: &val_var,
+                },
+                &acc_var,
+                0,
+            )?;
+            docs.push(lowered.body_doc);
+            let guarded_op_bracket = lowered.guarded_op_bracket;
+            docs.insert(0, lowered.prestore);
 
             let fold_result = self.fresh_temp_var("FoldResult");
             let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 1, self);
@@ -403,17 +384,17 @@ impl CoreErlangGenerator {
             ") in ",
         ]);
 
-        self.push_scope();
-        if let Some(param) = body.parameters.first() {
-            self.bind_var(&param.name, &key_var);
-        }
-        if let Some(param) = body.parameters.get(1) {
-            self.bind_var(&param.name, &val_var);
-        }
-        let (body_doc, _) =
-            self.generate_foldl_loop_body(body, &plan, &BodyKind::FoldlDo, "StateAcc", 0)?;
-        docs.push(body_doc);
-        self.pop_scope();
+        docs.push(self.lower_map_fold_body(
+            body,
+            &plan,
+            &BodyKind::FoldlDo,
+            FoldParams::Pair {
+                first: &key_var,
+                second: &val_var,
+            },
+            "StateAcc",
+            0,
+        )?);
 
         let fold_result = self.fresh_temp_var("FoldResult");
         let mut post_docs: Vec<Document<'static>> = vec![ThreadingPlan::foldl_call_doc(

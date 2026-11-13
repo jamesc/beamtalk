@@ -200,6 +200,7 @@ impl CoreErlangGenerator {
         body: &Block,
         is_all: bool,
     ) -> Result<Document<'static>> {
+        let label = if is_all { "allSatisfy:" } else { "anySatisfy:" };
         let FoldHead {
             plan,
             list_var,
@@ -208,14 +209,7 @@ impl CoreErlangGenerator {
             lambda_var,
             item_var,
             ..
-        } = self.begin_list_fold(
-            receiver,
-            body,
-            ListOpKind::Accumulate,
-            if is_all { "allSatisfy:" } else { "anySatisfy:" },
-            None,
-            false,
-        )?;
+        } = self.begin_list_fold(receiver, body, ListOpKind::Accumulate, label, None, false)?;
         let acc_state_var = self.fresh_temp_var("AccSt");
         let init_bool = if is_all { "'true'" } else { "'false'" };
 
@@ -227,7 +221,7 @@ impl CoreErlangGenerator {
             let mut docs: Vec<Document<'static>> = Vec::new();
             docs.push(super::list_recv_to_safe_list_doc(
                 recv_code,
-                Some(if is_all { "allSatisfy:" } else { "anySatisfy:" }),
+                Some(label),
                 list_var,
                 safe_list_var.clone(),
             ));
@@ -295,7 +289,7 @@ impl CoreErlangGenerator {
         docs.push(pack_doc);
         docs.push(super::list_recv_to_safe_list_doc(
             recv_code,
-            Some(if is_all { "allSatisfy:" } else { "anySatisfy:" }),
+            Some(label),
             list_var,
             safe_list_var.clone(),
         ));

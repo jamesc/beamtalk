@@ -42,12 +42,34 @@ pub(super) struct FoldHead {
 }
 
 /// What the tuple-accumulator body lowering hands back to its epilogue.
-pub(super) struct TupleFoldBody {
-    pub(super) body_doc: Document<'static>,
+pub(in crate::core_erlang::control_flow) struct TupleFoldBody {
+    pub(in crate::core_erlang::control_flow) body_doc: Document<'static>,
     /// Whether the guarded-operator marker asked for a `State` bracket.
-    pub(super) guarded_op_bracket: bool,
+    pub(in crate::core_erlang::control_flow) guarded_op_bracket: bool,
     /// The pre-store to splice before the lambda (`nil` unless bracketing).
-    pub(super) prestore: Document<'static>,
+    pub(in crate::core_erlang::control_flow) prestore: Document<'static>,
+}
+
+/// Which Core Erlang variables the fold body block's parameters bind to.
+#[derive(Clone, Copy)]
+pub(in crate::core_erlang::control_flow) enum FoldParams<'a> {
+    /// A one-parameter block: its parameter is the item.
+    Item(&'a str),
+    /// A two-parameter block (`inject:into:`'s accumulator and item, a
+    /// dictionary's key and value): the first and second parameter.
+    Pair { first: &'a str, second: &'a str },
+}
+
+impl<'a> From<&'a String> for FoldParams<'a> {
+    fn from(item: &'a String) -> Self {
+        Self::Item(item)
+    }
+}
+
+impl<'a> From<&'a str> for FoldParams<'a> {
+    fn from(item: &'a str) -> Self {
+        Self::Item(item)
+    }
 }
 
 /// The collect-style ops that share one epilogue: the result is a list built
@@ -90,6 +112,27 @@ pub(super) fn fold_threads_self(label: &str) -> bool {
 }
 
 impl CoreErlangGenerator {
+    /// Step 1: the plan, the loop-convention diagnostic and the discarded-fold
+    /// mark. `threads_self` opts the plan into the value-type `Self` slot
+    /// ([`fold_threads_self`] decides it for a list fold; a dictionary fold
+    /// has no `Self` slot and passes `false`).
+    pub(in crate::core_erlang::control_flow) fn begin_fold_plan(
+        &mut self,
+        body: &Block,
+        kind: ListOpKind,
+        handler: Option<&Block>,
+        threads_self: bool,
+        guard_discard: bool,
+    ) -> Result<(ThreadingPlan, bool)> {
+        let mut plan = ThreadingPlan::new_for_foldl_list_op_with_handler(self, body, kind, handler);
+        if threads_self {
+            plan = plan.with_value_self_slot(self, body)?;
+        }
+        self.emit_loop_convention_diagnostic(&plan, body.span);
+        let discard = guard_discard && self.take_discarded_fold(body.span);
+        Ok((plan, discard))
+    }
+
     /// Steps 1–2: the plan, the receiver and the lambda / item variables.
     ///
     /// `handler` is a block packed with the body (`detect:ifNone:`'s `ifNone:`).
@@ -103,13 +146,8 @@ impl CoreErlangGenerator {
         handler: Option<&Block>,
         guard_discard: bool,
     ) -> Result<FoldHead> {
-        let mut plan = ThreadingPlan::new_for_foldl_list_op_with_handler(self, body, kind, handler);
-        if fold_threads_self(label) {
-            plan = plan.with_value_self_slot(self, body)?;
-        }
-        self.emit_loop_convention_diagnostic(&plan, body.span);
-        let discard = guard_discard && self.take_discarded_fold(body.span);
-
+        let (plan, discard) =
+            self.begin_fold_plan(body, kind, handler, fold_threads_self(label), guard_discard)?;
         // Add is_list guard for non-list collection types.
         let list_var = self.fresh_temp_var("temp");
         let recv_code = self.expression_doc(receiver)?;
@@ -128,15 +166,33 @@ impl CoreErlangGenerator {
         })
     }
 
+    fn bind_fold_params(&mut self, body: &Block, params: FoldParams<'_>) {
+        match params {
+            FoldParams::Item(item) => {
+                if let Some(param) = body.parameters.first() {
+                    self.bind_var(&param.name, item);
+                }
+            }
+            FoldParams::Pair { first, second } => {
+                if let Some(param) = body.parameters.first() {
+                    self.bind_var(&param.name, first);
+                }
+                if let Some(param) = body.parameters.get(1) {
+                    self.bind_var(&param.name, second);
+                }
+            }
+        }
+    }
+
     /// Step 3, tuple-accumulator flavour: lowers `body` inside the
     /// guarded-operator marker (BT-4121) and a scope, then checks the marker
     /// out. `index_offset` is the number of leading accumulator slots.
-    pub(super) fn lower_tuple_fold_body(
+    pub(in crate::core_erlang::control_flow) fn lower_tuple_fold_body<'a>(
         &mut self,
         body: &Block,
         plan: &ThreadingPlan,
         kind: &BodyKind,
-        item_var: &str,
+        params: impl Into<FoldParams<'a>>,
         acc_var: &str,
         index_offset: usize,
     ) -> Result<TupleFoldBody> {
@@ -146,9 +202,7 @@ impl CoreErlangGenerator {
         let prestore_state = self.state_var_to_store();
         self.push_guarded_op_loop(body, None);
         self.push_scope();
-        if let Some(param) = body.parameters.first() {
-            self.bind_var(&param.name, item_var);
-        }
+        self.bind_fold_params(body, params.into());
         let lowered = self.generate_foldl_loop_body(body, plan, kind, acc_var, index_offset);
         self.pop_scope();
         // Check the marker out before propagating a lowering error so the
@@ -165,19 +219,17 @@ impl CoreErlangGenerator {
     }
 
     /// Step 3, map-accumulator flavour: lowers `body` in a fresh scope.
-    pub(super) fn lower_map_fold_body(
+    pub(in crate::core_erlang::control_flow) fn lower_map_fold_body<'a>(
         &mut self,
         body: &Block,
         plan: &ThreadingPlan,
         kind: &BodyKind,
-        item_var: &str,
+        params: impl Into<FoldParams<'a>>,
         acc_param_name: &str,
         index_offset: usize,
     ) -> Result<Document<'static>> {
         self.push_scope();
-        if let Some(param) = body.parameters.first() {
-            self.bind_var(&param.name, item_var);
-        }
+        self.bind_fold_params(body, params.into());
         let lowered = self.generate_foldl_loop_body(body, plan, kind, acc_param_name, index_offset);
         self.pop_scope();
         Ok(lowered?.0)
