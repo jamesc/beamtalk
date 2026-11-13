@@ -22,7 +22,8 @@ use super::{
 pub(in crate::core_erlang) enum KindOfFn {
     /// `isKindOfBuiltin/3`: a sealed built-in literal and its type test.
     Builtin,
-    /// `isKindOfNamed/2`: a user class literal, answered by name (BT-4757);
+    /// `isKindOfNamed/3`: a user class literal, answered by name (BT-4757),
+    /// given the liveness probe's pid so the class is looked up once (BT-4754);
     /// `undecided` means the caller takes the send (BT-4769).
     Named,
 }
@@ -39,8 +40,7 @@ impl KindOfFn {
     #[cfg(test)]
     pub(in crate::core_erlang) const fn arity(self) -> usize {
         match self {
-            Self::Builtin => 3,
-            Self::Named => 2,
+            Self::Builtin | Self::Named => 3,
         }
     }
 
@@ -412,7 +412,7 @@ impl CoreErlangGenerator {
             " = ",
             recv_doc,
             " in case ",
-            Self::kind_of_fast_guard_doc(class_name),
+            Self::kind_of_fast_guard_doc(Self::registered_class_pid_doc(class_name)),
             " of ",
             "<'true'> when 'true' -> ",
             fast,
@@ -456,12 +456,8 @@ impl CoreErlangGenerator {
     /// of both `isKindOf:` fast paths (BT-4764 built-in, BT-4757 name-only,
     /// BT-4768): a dead class takes the plain send, which evaluates the
     /// literal and raises `class_not_found` exactly as it always did.
-    fn class_process_alive_doc(class_name: &str) -> Document<'static> {
-        docvec![
-            "call 'erlang':'is_pid'(",
-            Self::registered_class_pid_doc(class_name),
-            ")"
-        ]
+    fn class_process_alive_doc(pid: Document<'static>) -> Document<'static> {
+        docvec!["call 'erlang':'is_pid'(", pid, ")"]
     }
 
     /// The plain `isKindOf:` send behind the class literal's own evaluation
@@ -496,10 +492,10 @@ impl CoreErlangGenerator {
     /// ([`Self::class_process_alive_doc`]) and nothing but `Object` has
     /// defined `isKindOf:` ([`Self::override_flag_read_doc`], read on every
     /// execution).
-    fn kind_of_fast_guard_doc(class_name: &str) -> Document<'static> {
+    fn kind_of_fast_guard_doc(pid: Document<'static>) -> Document<'static> {
         docvec![
             "call 'erlang':'and'(",
-            Self::class_process_alive_doc(class_name),
+            Self::class_process_alive_doc(pid),
             ", call 'erlang':'not'(",
             Self::override_flag_read_doc("isKindOf:"),
             "))"
@@ -511,8 +507,8 @@ impl CoreErlangGenerator {
     ///
     /// ```erlang
     /// let R = <x> in
-    /// let A = case <guard> of
-    ///           'true'  -> isKindOfNamed(R, 'C')   % true | false | undecided
+    /// let A = let P = whereis('beamtalk_class_C') in case <guard on P> of
+    ///           'true'  -> isKindOfNamed(R, 'C', P)   % true | false | undecided
     ///           'false' -> 'undecided'
     ///         end in
     /// case A of
@@ -539,6 +535,7 @@ impl CoreErlangGenerator {
         let class_doc = seq.next();
         let recv_var = self.fresh_temp_var("KindOfRecv");
         let answer_var = self.fresh_temp_var("KindOfAnswer");
+        let pid_var = self.fresh_temp_var("KindOfPid");
         let send = self.kind_of_plain_send_doc(&recv_var, class_doc);
         let call_doc = docvec![
             "let ",
@@ -547,14 +544,20 @@ impl CoreErlangGenerator {
             recv_doc,
             " in let ",
             leaf::var(answer_var.clone()),
-            " = case ",
-            Self::kind_of_fast_guard_doc(class_name),
+            " = let ",
+            leaf::var(pid_var.clone()),
+            " = ",
+            Self::registered_class_pid_doc(class_name),
+            " in case ",
+            Self::kind_of_fast_guard_doc(leaf::var(pid_var.clone())),
             " of <'true'> when 'true' -> call 'beamtalk_behaviour_intrinsics':",
             leaf::atom(KindOfFn::Named.name().to_string()),
             "(",
             leaf::var(recv_var),
             ", ",
             leaf::atom(class_name.to_string()),
+            ", ",
+            leaf::var(pid_var),
             ") <'false'> when 'true' -> 'undecided' end in case ",
             leaf::var(answer_var),
             " of <'true'> when 'true' -> 'true' <'false'> when 'true' -> 'false' ",

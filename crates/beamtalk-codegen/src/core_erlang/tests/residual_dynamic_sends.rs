@@ -197,8 +197,15 @@ fn is_kind_of_user_class_literal_is_name_only() {
     // `isKindOf:` send sits in the dead-class branch only, after the probe
     // and after the fast call, so the live path makes no dynamic send.
     let probe = code
-        .find("call 'erlang':'is_pid'(call 'erlang':'whereis'('beamtalk_class_Probe'))")
+        .find("call 'erlang':'is_pid'(_KindOfPid")
         .unwrap_or_else(|| panic!("liveness probe missing. Got:\n{code}"));
+    // BT-4754: one `whereis` per call, bound once and shared with the runtime.
+    assert_eq!(
+        code.matches("call 'erlang':'whereis'('beamtalk_class_Probe')")
+            .count(),
+        1,
+        "Got:\n{code}"
+    );
     let fast = code.find("'isKindOfNamed'(").expect("fast call");
     let send = code.find("'isKindOf:', [").expect("dead-class send");
     assert!(probe < fast && fast < send, "Got:\n{code}");
@@ -228,8 +235,8 @@ fn is_kind_of_user_class_literal_builds_the_class_reference_only_on_the_send_exi
         "class reference built once, on the send exit. Got:\n{code}"
     );
     assert!(
-        code.contains("'isKindOfNamed'(_KindOfRecv") && !code.contains("'isKindOfNamed'/3"),
-        "isKindOfNamed/2 takes the receiver and the name only. Got:\n{code}"
+        code.contains("'isKindOfNamed'(_KindOfRecv") && code.contains(", 'Probe', _KindOfPid"),
+        "isKindOfNamed/3 takes the receiver, the name and the probe's pid. Got:\n{code}"
     );
     let reference = code.find("'Probe class static calls'").expect("reference");
     let fast = code.find("'isKindOfNamed'(").expect("fast call");
@@ -244,9 +251,9 @@ fn is_kind_of_fast_paths_share_one_guard() {
     // BT-4768 / BT-4769: the built-in lowering (BT-4764) and the name-only
     // lowering (BT-4757) emit the same guard (class liveness probe, then the
     // in-line override-flag read), from one helper.
-    let guard = |class: &str| {
+    let guard = |pid: &str| {
         format!(
-            "call 'erlang':'and'(call 'erlang':'is_pid'(call 'erlang':'whereis'('beamtalk_class_{class}')), call 'erlang':'not'(call 'persistent_term':'get'({{'beamtalk_default_method', 'overridden', 'isKindOf:'}}, 'false')))"
+            "call 'erlang':'and'(call 'erlang':'is_pid'({pid}), call 'erlang':'not'(call 'persistent_term':'get'({{'beamtalk_default_method', 'overridden', 'isKindOf:'}}, 'false')))"
         )
     };
     let builtin = codegen(concat!(
@@ -257,8 +264,24 @@ fn is_kind_of_fast_paths_share_one_guard() {
         "Object subclass: Probe\n",
         "  check: v :: Object -> Boolean => v isKindOf: Probe\n",
     ));
-    assert!(builtin.contains(&guard("String")), "Got:\n{builtin}");
-    assert!(named.contains(&guard("Probe")), "Got:\n{named}");
+    assert!(
+        builtin.contains(&guard("call 'erlang':'whereis'('beamtalk_class_String')")),
+        "Got:\n{builtin}"
+    );
+    // The name-only lowering binds the `whereis` once (BT-4754) and guards on it.
+    assert!(
+        named.contains("call 'erlang':'whereis'('beamtalk_class_Probe') in case "),
+        "Got:\n{named}"
+    );
+    let pid_var = named
+        .split("let ")
+        .find_map(|part| {
+            part.split_once(" = ")
+                .map(|(v, _)| v)
+                .filter(|v| v.starts_with("_KindOfPid"))
+        })
+        .unwrap_or_else(|| panic!("pid binding missing. Got:\n{named}"));
+    assert!(named.contains(&guard(pid_var)), "Got:\n{named}");
     assert!(
         !builtin.contains("'overridden_anywhere'"),
         "Got:\n{builtin}"
