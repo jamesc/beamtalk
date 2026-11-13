@@ -1253,6 +1253,32 @@ mod tests {
     }
 
     #[test]
+    fn explicit_off_narrowing_cast_matches_absent_key_for_expect_all() {
+        use beamtalk_core::compilation::diagnostics_policy::DiagnosticSeverityOverride;
+        let source = "Object subclass: Reader\n  @expect all\n  read: opts :: Dictionary =>\n    n :: Integer := opts at: #max\n    n";
+        let run = |table: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable| {
+            let (module, parse_diags) = parse(lex_with_eof(source));
+            compute_diagnostics_with_known_vars_and_classes(
+                &module,
+                parse_diags,
+                &[],
+                vec![],
+                table,
+            )
+            .iter()
+            .map(|d| d.message.to_string())
+            .collect::<Vec<_>>()
+        };
+        let absent = run(&Default::default());
+        let mut off = beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new();
+        off.insert(
+            DiagnosticCategory::NarrowingCast,
+            DiagnosticSeverityOverride::Off,
+        );
+        assert_eq!(absent, run(&off));
+    }
+
+    #[test]
     fn expect_all_suppresses_any_diagnostic() {
         // @expect all suppresses any diagnostic on the following expression
         let source = "@expect all\n42 foo";

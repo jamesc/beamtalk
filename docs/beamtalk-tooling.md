@@ -1167,9 +1167,9 @@ Type Coverage Report
 ====================
 
 File                          Class              Coverage
-src/my_app.bt                 MyApp              45.0%  (9/20 expressions)
+src/my_app.bt                 MyApp              45.0%  (9/20 expressions, 0 narrowing)
 ──────────────────────────────────────────────────────────────────────
-Total                                            45.0%  (9/20 expressions)
+Total                                            45.0%  (9/20 expressions, 0 narrowing)
 
 Dynamic expressions:
   src/my_app.bt:12:5                             (unannotated return)

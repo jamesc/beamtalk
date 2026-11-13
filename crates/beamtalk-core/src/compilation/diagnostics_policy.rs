@@ -187,10 +187,12 @@ const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
 const DEFAULT_OFF_CATEGORIES: &[DiagnosticCategory] = &[DiagnosticCategory::NarrowingCast];
 
 /// Drops the diagnostics of [`DEFAULT_OFF_CATEGORIES`] that `table` does not
-/// enable. For the paths that have no `[diagnostics]` table at all.
+/// enable (no entry, or an explicit `"off"`). For the paths that have no `[diagnostics]` table at all.
 pub fn drop_default_off_diagnostics(diagnostics: &mut Vec<Diagnostic>, table: &DiagnosticsTable) {
     diagnostics.retain(|d| match d.category {
-        Some(c) if DEFAULT_OFF_CATEGORIES.contains(&c) => table.contains_key(&c),
+        Some(c) if DEFAULT_OFF_CATEGORIES.contains(&c) => table
+            .get(&c)
+            .is_some_and(|o| *o != DiagnosticSeverityOverride::Off),
         _ => true,
     });
 }
