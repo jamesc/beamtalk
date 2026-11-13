@@ -8,21 +8,21 @@
 // the appended extension would be a duplicate-method error there.
 // @load tests/repl-protocol/fixtures/same_file_redefine.bt
 
-SameFileRedefine foo
+SameFileRedefine new foo
 // => 1
 
 SameFileRedefine >> foo => 2
 // => "SameFileRedefine>>foo"
 
-SameFileRedefine foo
+SameFileRedefine new foo
 // => 2
 
 SameFileRedefine compile: #bar source: "bar => 20"
 // => SameFileRedefine
 
-SameFileRedefine bar
+SameFileRedefine new bar
 // => 20
 
 // The earlier redefinition survived the second save.
-SameFileRedefine foo
+SameFileRedefine new foo
 // => 2
