@@ -338,8 +338,7 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
     // the runtime's pure classification/compile calls answer as they did before they
     // went through `beamtalk_workspace_callback`. This leaves a registered callback
     // with no recorded capabilities, a combination only `beamtalk test` produces; a
-    // test that starts and stops a workspace supervisor unregisters it for the rest
-    // of the run.
+    // workspace supervisor started and stopped by a test restores it when it stops.
     let eval_cmd = format!(
         "{cover_preamble}\
          {{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \

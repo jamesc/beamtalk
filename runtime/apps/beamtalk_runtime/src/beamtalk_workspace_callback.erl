@@ -30,6 +30,7 @@ the workspace's compile-and-install pipeline. This module is that seam:
 -include("beamtalk.hrl").
 
 -export([register/1, register_if_loaded/1, unregister/0, registered_module/0]).
+-export([install/1, uninstall/0]).
 
 %% Wrappers, one per callback.
 -export([
@@ -48,6 +49,7 @@ the workspace's compile-and-install pipeline. This module is that seam:
 ]).
 
 -define(KEY, {beamtalk_runtime, workspace_callback}).
+-define(PREVIOUS_KEY, {beamtalk_runtime, workspace_callback_previous}).
 
 -type no_workspace() :: {error, no_workspace}.
 -export_type([no_workspace/0]).
@@ -102,6 +104,33 @@ register_if_loaded(Module) when is_atom(Module) ->
         {module, Module} -> register(Module);
         {error, _} -> ok
     end.
+
+-doc """
+Install `Module` for the life of a workspace, remembering what was registered
+before so `uninstall/0` can put it back. `beamtalk test` registers a callback
+before any workspace runs; a workspace that starts and stops under it must not
+leave later tests without one. The first install records the original value
+and later installs keep it, so a workspace guard that is killed and restarted
+(its `terminate/2` never ran) does not mistake its own registration for the
+original.
+""".
+-spec install(module()) -> ok.
+install(Module) when is_atom(Module) ->
+    case persistent_term:get(?PREVIOUS_KEY, undefined) of
+        undefined -> persistent_term:put(?PREVIOUS_KEY, registered_module());
+        _Recorded -> ok
+    end,
+    register(Module).
+
+-doc "Undo `install/1`: restore the registration that preceded it, or remove it.".
+-spec uninstall() -> ok.
+uninstall() ->
+    case persistent_term:get(?PREVIOUS_KEY, undefined) of
+        {ok, Previous} -> register(Previous);
+        _NoneOrUnrecorded -> unregister()
+    end,
+    _ = persistent_term:erase(?PREVIOUS_KEY),
+    ok.
 
 -doc "Remove the workspace callback module (the workspace is stopping).".
 -spec unregister() -> ok.

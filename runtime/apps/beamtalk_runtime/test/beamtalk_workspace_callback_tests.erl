@@ -213,3 +213,35 @@ classify_class_reports_an_unexpected_failure_test() ->
     after
         unload_crashing_workspace(Mod)
     end.
+
+%%% install/1 and uninstall/0: a workspace puts back what was there before
+
+install_then_uninstall_restores_the_previous_callback_test() ->
+    with_registration(fun() ->
+        ok = beamtalk_workspace_callback:register(?MODULE),
+        ok = beamtalk_workspace_callback:install(bt4792_workspace),
+        ?assertEqual({ok, bt4792_workspace}, beamtalk_workspace_callback:registered_module()),
+        ok = beamtalk_workspace_callback:uninstall(),
+        ?assertEqual({ok, ?MODULE}, beamtalk_workspace_callback:registered_module())
+    end).
+
+install_then_uninstall_removes_the_callback_when_none_preceded_it_test() ->
+    ok = beamtalk_workspace_callback:unregister(),
+    ok = beamtalk_workspace_callback:install(bt4792_workspace),
+    ?assertEqual({ok, bt4792_workspace}, beamtalk_workspace_callback:registered_module()),
+    ok = beamtalk_workspace_callback:uninstall(),
+    ?assertEqual(none, beamtalk_workspace_callback:registered_module()).
+
+%% A guard killed without running terminate/2 and restarted installs again;
+%% its own earlier registration must not be recorded as the original.
+reinstall_after_an_unclean_stop_keeps_the_original_test() ->
+    ok = beamtalk_workspace_callback:unregister(),
+    ok = beamtalk_workspace_callback:install(bt4792_workspace),
+    ok = beamtalk_workspace_callback:install(bt4792_workspace),
+    ok = beamtalk_workspace_callback:uninstall(),
+    ?assertEqual(none, beamtalk_workspace_callback:registered_module()).
+
+uninstall_without_install_removes_the_callback_test() ->
+    ok = beamtalk_workspace_callback:register(?MODULE),
+    ok = beamtalk_workspace_callback:uninstall(),
+    ?assertEqual(none, beamtalk_workspace_callback:registered_module()).
