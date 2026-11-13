@@ -89,6 +89,17 @@ pub(crate) fn is_dependency_file(file: &Utf8Path) -> bool {
     dependency_package_for_path(file).is_some()
 }
 
+/// Whether `a` and `b` are files of the same dependency package.
+pub(crate) fn same_dependency_package(a: &Utf8Path, b: &Utf8Path) -> bool {
+    match (
+        dependency_package_for_path(a),
+        dependency_package_for_path(b),
+    ) {
+        (Some(x), Some(y)) => x == y,
+        _ => false,
+    }
+}
+
 /// Derives the dependency package name for `file` from its path.
 ///
 /// Delegates to [`beamtalk_project::package::dep_name_for_path`], the
@@ -464,6 +475,29 @@ impl ProjectIndex {
             self.file_aliases.insert(file, stamped);
         }
         self.rebuild_alias_registry();
+    }
+
+    /// The `internal type` aliases indexed for the other files of `file`'s
+    /// dependency package (BT-4778). `internal` is package-private
+    /// (ADR 0108), so a dependency file's signatures expand against these
+    /// plus its own.
+    pub fn dependency_sibling_aliases(&self, file: &Utf8Path) -> Vec<AliasInfo> {
+        self.file_aliases
+            .iter()
+            .filter(|(other, _)| {
+                other.as_path() != file && same_dependency_package(other.as_path(), file)
+            })
+            .flat_map(|(_, infos)| infos.iter().cloned())
+            .collect()
+    }
+
+    /// `file`'s currently indexed `internal` aliases, for detecting a change
+    /// that makes its siblings' exported signatures stale (BT-4778).
+    pub fn internal_aliases_of(&self, file: &Utf8PathBuf) -> Vec<AliasInfo> {
+        self.file_aliases
+            .get(file)
+            .map(|v| v.iter().filter(|i| i.is_internal).cloned().collect())
+            .unwrap_or_default()
     }
 
     /// Add or update a file's protocol declarations in the project index
