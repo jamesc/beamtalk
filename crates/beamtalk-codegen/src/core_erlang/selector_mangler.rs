@@ -116,12 +116,7 @@ pub fn safe_class_method_fn_name(selector: &str) -> String {
 /// (≤ 246 chars) the result is exactly `"__sealed_" + selector`.
 #[must_use]
 pub fn sealed_fn_name(selector: &str) -> String {
-    if SEALED_PREFIX.len() + selector.len() <= MAX_ATOM_LEN {
-        format!("{SEALED_PREFIX}{selector}")
-    } else {
-        let hash = fnv1a_64(selector.as_bytes());
-        format!("{SEALED_PREFIX}kw_{hash:016x}")
-    }
+    prefixed_fn_name(SEALED_PREFIX, selector)
 }
 
 /// Returns a safe function name atom for a `self delegate` dispatch function
@@ -138,11 +133,23 @@ pub fn sealed_fn_name(selector: &str) -> String {
 /// the result is exactly `"dispatch_" + selector`.
 #[must_use]
 pub fn dispatch_fn_name(selector: &str) -> String {
-    if DISPATCH_PREFIX.len() + selector.len() <= MAX_ATOM_LEN {
-        format!("{DISPATCH_PREFIX}{selector}")
+    prefixed_fn_name(DISPATCH_PREFIX, selector)
+}
+
+/// Returns `"{prefix}{selector}"` when the result fits within Erlang's 255-byte
+/// atom limit, or `"{prefix}kw_{hash:016x}"` (a deterministic FNV-1a 64-bit
+/// hash fallback) when it does not.
+///
+/// Used by [`sealed_fn_name`] and [`dispatch_fn_name`], which share this
+/// length-capped prefix pattern. The hash fallback retains the prefix so that
+/// tools and runtime patterns that inspect the name by prefix still work for
+/// long selectors.
+fn prefixed_fn_name(prefix: &str, selector: &str) -> String {
+    if prefix.len() + selector.len() <= MAX_ATOM_LEN {
+        format!("{prefix}{selector}")
     } else {
         let hash = fnv1a_64(selector.as_bytes());
-        format!("{DISPATCH_PREFIX}kw_{hash:016x}")
+        format!("{prefix}kw_{hash:016x}")
     }
 }
 
