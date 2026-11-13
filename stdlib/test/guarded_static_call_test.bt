@@ -114,6 +114,31 @@ TestCase subclass: GuardedStaticCallTest
     self assert: viaKey equals: #planted
     self assert: GscClassSelf me equals: GscClassSelf
 
+  // BT-4756: a class literal reads its reference from the class's static call
+  // map under `{class_ref, Tag}`. The compiler and the runtime each spell that
+  // key; planting a different reference under the runtime's spelling and
+  // reading it through the literal fails if the two differ.
+  testClassLiteralInstallsItsReferenceUnderTheRuntimesKey =>
+    mapKey := Erlang beamtalk_class_shadow_flags static_calls_key: #'GscClassSelf class'
+    Erlang beamtalk_class_shadow_flags invalidate: #GscClassSelf
+    literal := GscClassSelf
+    self assert: literal name equals: #GscClassSelf
+    warmed := Erlang persistent_term get: mapKey with: nil
+    self deny: warmed isNil
+    key := Erlang erlang list_to_tuple: #(#class_ref, #'GscClassSelf class')
+    self assert: (Erlang maps is_key: key with: warmed) equals: true
+    planted := Erlang maps
+      put: key
+      with: #planted
+      with: warmed
+    viaKey := [
+      Erlang persistent_term put: mapKey with: planted
+      GscClassSelf
+    ] ensure: [Erlang beamtalk_class_shadow_flags invalidate: #GscClassSelf]
+    self assert: viaKey equals: #planted
+    again := GscClassSelf
+    self assert: again name equals: #GscClassSelf
+
   // === BT-4316: the static call key ===
   //
   // A static send's hit path is one `persistent_term` read of the class's

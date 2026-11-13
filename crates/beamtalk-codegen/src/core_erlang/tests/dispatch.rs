@@ -3181,33 +3181,37 @@ fn test_self_call_error_branch_tier2_self_send_breadcrumb() {
     );
 }
 
-/// BT-4295: a bare class literal looks its class up with one
-/// `erlang:whereis/1` on the compile-time registered name (no
-/// `whereis_class/1`, whose `registry_name/1` runs `binary_to_atom` per use),
-/// keeps the `class_not_found` arm, and still builds the class object from
-/// the run-time pid and module (neither is baked).
+/// BT-4295 / BT-4756: a user-class literal reads its reference from the
+/// class's static call map (one atom-keyed `persistent_term:get`); only a miss
+/// reaches the runtime, which does the `whereis` and module lookup and
+/// installs the entry. The compiled code itself no longer calls `whereis` or
+/// `module_name_safe/1`, and it still raises `class_not_found` for a class the
+/// runtime reports as undefined.
 #[test]
-fn test_class_literal_uses_compile_time_registered_name() {
+fn test_class_literal_reads_static_call_map() {
     let mut generator = CoreErlangGenerator::new("bt@my_app@main");
     let doc = generator.generate_class_reference("Point").unwrap();
     let output = doc.to_pretty_string();
     assert!(
-        output.contains("case call 'erlang':'whereis'('beamtalk_class_Point') of"),
-        "class literal must look up its registered name. Got:\n{output}"
+        output.contains(
+            "case call 'persistent_term':'get'('Point class static calls', ~{}~) of <~{{'class_ref', 'Point class'} := "
+        ),
+        "class literal must read its {{class_ref, Tag}} entry. Got:\n{output}"
     );
     assert!(
-        !output.contains("whereis_class"),
-        "class literal must not call whereis_class. Got:\n{output}"
+        output.contains("call 'beamtalk_class_shadow_flags':'class_ref'('Point')"),
+        "a miss must ask the runtime, which installs the entry. Got:\n{output}"
     );
     assert!(
         output.contains("'class_not_found', 'Point'"),
         "a missing class must still raise class_not_found. Got:\n{output}"
     );
-    assert!(
-        output.contains("'beamtalk_object_class':'module_name_safe'(")
-            && output.contains("{'beamtalk_object', 'Point class', "),
-        "the class object takes its module and pid at run time. Got:\n{output}"
-    );
+    for gone in ["whereis", "module_name_safe", "{'beamtalk_object'"] {
+        assert!(
+            !output.contains(gone),
+            "the compiled literal must not contain `{gone}`. Got:\n{output}"
+        );
+    }
 }
 
 /// BT-4411: a literal naming a built-in whose routing-fixture row pins its
@@ -3241,7 +3245,8 @@ fn test_builtin_class_literal_bakes_pinned_module() {
 /// BT-4411: only a fixture row whose `target_module` *is* the class's own
 /// module is baked. `ErlangModule` routes to `beamtalk_erlang_proxy`, which is
 /// not its class module, so its literal keeps the run-time lookup, as does
-/// every built-in without a target module (`Character`, `Boolean`).
+/// every built-in without a target module (`Character`, `Boolean`) (BT-4756:
+/// the run-time lookup is the static call map's miss path).
 #[test]
 fn test_builtin_class_literal_without_own_pinned_module_keeps_lookup() {
     for class in ["ErlangModule", "Character", "Boolean", "Object"] {
@@ -3251,8 +3256,8 @@ fn test_builtin_class_literal_without_own_pinned_module_keeps_lookup() {
             .unwrap()
             .to_pretty_string();
         assert!(
-            output.contains("'beamtalk_object_class':'module_name_safe'("),
-            "{class} must keep the run-time module lookup. Got:\n{output}"
+            output.contains("{'class_ref', ") && !output.contains("whereis"),
+            "{class} must read its reference from the static call map. Got:\n{output}"
         );
     }
 }
@@ -3299,11 +3304,11 @@ fn test_qualified_class_reference_uses_canonical_tag() {
         .unwrap()
         .to_pretty_string();
     assert!(
-        output.contains("call 'erlang':'whereis'('beamtalk_class_Parser')"),
+        output.contains("'beamtalk_class_shadow_flags':'class_ref'('Parser')"),
         "qualified reference must look up the bare class name. Got:\n{output}"
     );
     assert!(
-        output.contains("{'beamtalk_object', 'Parser class', "),
+        output.contains("{'class_ref', 'Parser class'}"),
         "qualified reference must carry the canonical tag. Got:\n{output}"
     );
     assert!(

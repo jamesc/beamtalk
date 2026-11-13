@@ -187,6 +187,17 @@ erasers above; a later class-side extension or `put_class_method` of `new` is
 then answered by the fallback, whose class process runs it
 (`beamtalk_object_class`'s `{new, _}` handler).
 
+BT-4756: a class literal (`x := Point`) is keyed `{class_ref, Tag}` in the same
+per-class map; its value is the class object `{beamtalk_object, Tag, Module,
+Pid}` the literal built before (the live registered pid and the module the
+published row names). The call site reads the map once and, on a miss, calls
+`class_ref/1`, which builds the object and installs it under the tag lock only
+while the pid is registered and alive and the row still names `Module`. It
+shares the per-tag index and every eraser above (a metadata write or reload, an
+ancestor's write, the class monitor's `'DOWN'`, row removal), so a reload that
+moves the class to another module or a restart is seen on the next literal. An
+unregistered class installs nothing: negative verdicts are not cached.
+
 `static_call_target/4` (the call site's miss path) derives all four and, under
 the class's tag lock, records the tag in the per-tag index
 (`beamtalk_class_registry:record_static_call_tag/1`, read only by
@@ -267,6 +278,7 @@ actual transitions write (set when unset, erase when set); both are rare
     is_ready/0,
     with_tag_lock/2,
     static_call_target/4,
+    class_ref/1,
     static_call_key_value/1,
     static_calls_key/1
 ]).
@@ -298,7 +310,8 @@ actual transitions write (set when unset, erase when set); both are rare
 -type static_call_key() ::
     {module(), atom(), atom()}
     | {caller_safe_raise, atom(), module(), atom(), atom()}
-    | {constant_value, beamtalk_class_metadata:constant_value(), module(), atom(), atom()}.
+    | {constant_value, beamtalk_class_metadata:constant_value(), module(), atom(), atom()}
+    | {class_ref, atom()}.
 -export_type([kind/0, derived/0, static_call_key/0]).
 
 -spec key(kind(), atom()) -> {beamtalk_class_shadow, kind(), atom()}.
@@ -717,6 +730,58 @@ static_call_target(Key, ClassName, Selector, Arity) ->
             )
     end.
 
+-doc """
+The miss path of a class literal (BT-4756): the class object of the class named
+`ClassName`, or `undefined` when no such class is registered (the call site
+raises `class_not_found`). The hit path is the call site's own read of the
+class's static call map for `{class_ref, Tag}`, so a
+literal costs one `persistent_term` read once warm.
+
+The answer is always what the literal compiled to before BT-4756: the live
+registered pid from `whereis` and the module `module_name_safe/1` reads, in a
+class object of the class's tag. When that answer is certified, it is also
+installed in the class's map: under the class's tag lock, the pid must still be
+the registered, alive one and the published metadata row must still name the
+module. Every eraser of the map (a metadata write or reload, the class
+monitor's `'DOWN'`, row removal) takes the same lock, so an install that read
+before a reload is removed by its erase, and one after it reads the new row.
+The module lookup runs before the lock (it may be a `gen_server:call` for an
+unpublished class, which must never run under the lock), and an answer the
+row does not certify is returned uncached. Nothing is installed for an
+unregistered class: negative verdicts are never cached (ADR 0142 §2).
+Never called from inside `with_tag_lock/2`.
+""".
+-spec class_ref(atom()) -> #beamtalk_object{} | undefined.
+class_ref(ClassName) ->
+    case beamtalk_class_registry:whereis_class(ClassName) of
+        Pid when is_pid(Pid) ->
+            Tag = beamtalk_class_registry:class_object_tag(ClassName),
+            Module = beamtalk_object_class:module_name_safe(Pid),
+            Ref = #beamtalk_object{class = Tag, class_mod = Module, pid = Pid},
+            with_install_lock(
+                Tag,
+                fun() ->
+                    case class_ref_certified(ClassName, Pid, Module) of
+                        true -> _ = install_static_call_locked(Tag, {class_ref, Tag}, Ref);
+                        false -> ok
+                    end
+                end,
+                ok
+            ),
+            Ref;
+        _ ->
+            undefined
+    end.
+
+%% Whether the class object just built is still the one a fresh lookup would
+%% build: `Pid` is the registered, live process and the published row names
+%% `Module`. Reads ETS and the registry only (it runs under the tag lock).
+-spec class_ref_certified(atom(), pid(), module()) -> boolean().
+class_ref_certified(ClassName, Pid, Module) ->
+    beamtalk_class_registry:whereis_class(ClassName) =:= Pid andalso
+        is_process_alive(Pid) andalso
+        beamtalk_class_metadata:lookup_module(ClassName) =:= {ok, Module}.
+
 %% Add `Key => Ref` to the class's per-class static call map (BT-4442), under
 %% the tag lock. A target already present with this very reference is never
 %% rewritten (a rewrite would cost a `persistent_term` update for nothing); one
@@ -847,6 +912,11 @@ The class reference installed for the static call key `Key` in its class's
 per-class map (BT-4442), `false` when absent (test and bench hook).
 """.
 -spec static_call_key_value(static_call_key()) -> #beamtalk_object{} | false.
+static_call_key_value({class_ref, Tag} = Key) when is_atom(Tag) ->
+    case persistent_term:get(static_calls_key(Tag), #{}) of
+        #{Key := Ref} -> Ref;
+        #{} -> false
+    end;
 static_call_key_value(Key) ->
     {_Module, _FunName, Tag} = key_target(Key),
     case persistent_term:get(static_calls_key(Tag), #{}) of

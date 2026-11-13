@@ -449,6 +449,116 @@ reload_constant_class(Name, Module, Constants) ->
     }),
     ok.
 
+%%% ============================================================================
+%%% BT-4756: class literals (`class_ref/1`)
+%%% ============================================================================
+
+class_ref_key(Name) -> {class_ref, beamtalk_class_registry:class_object_tag(Name)}.
+
+class_ref_installed(Name) ->
+    beamtalk_class_shadow_flags:static_call_key_value(class_ref_key(Name)).
+
+class_ref_test_() ->
+    {setup, fun setup_runtime/0, fun teardown_runtime/1, [
+        {"installs the class object the literal used to build, then serves it", fun() ->
+            with_static_class('Bt4756Hit', fun(Pid) ->
+                Tag = 'Bt4756Hit class',
+                Expected = {beamtalk_object, Tag, ?HELPER, Pid},
+                ?assertEqual(false, class_ref_installed('Bt4756Hit')),
+                ?assertEqual(Expected, beamtalk_class_shadow_flags:class_ref('Bt4756Hit')),
+                ?assertEqual(Expected, class_ref_installed('Bt4756Hit')),
+                %% The call site's hit path: one read of the class's map.
+                MapKey = beamtalk_class_shadow_flags:static_calls_key(Tag),
+                ?assertMatch(#{{class_ref, Tag} := Expected}, persistent_term:get(MapKey))
+            end)
+        end},
+        {"an unregistered class answers undefined and installs nothing", fun() ->
+            ?assertEqual(undefined, beamtalk_class_shadow_flags:class_ref('Bt4756Absent')),
+            ?assertEqual(false, class_ref_installed('Bt4756Absent')),
+            ?assertEqual(undefined, beamtalk_class_shadow_flags:class_ref('Bt4756Absent'))
+        end},
+        {"a removed class is not served from the map", fun() ->
+            Pid = start_static_class('Bt4756Gone', none, #{}),
+            _ = beamtalk_class_shadow_flags:class_ref('Bt4756Gone'),
+            ?assertMatch({beamtalk_object, _, _, Pid}, class_ref_installed('Bt4756Gone')),
+            stop_static_class(Pid),
+            beamtalk_test_wait:until(
+                fun() -> class_ref_installed('Bt4756Gone') =:= false end, 500
+            ),
+            ?assertEqual(undefined, beamtalk_class_shadow_flags:class_ref('Bt4756Gone'))
+        end},
+        {"a metadata write erases the entry and the next literal re-installs", fun() ->
+            with_static_class('Bt4756Write', fun(_Pid) ->
+                Ref = beamtalk_class_shadow_flags:class_ref('Bt4756Write'),
+                ?assertEqual(Ref, class_ref_installed('Bt4756Write')),
+                ok = beamtalk_class_shadow_flags:invalidate('Bt4756Write'),
+                ?assertEqual(false, class_ref_installed('Bt4756Write')),
+                ?assertEqual(Ref, beamtalk_class_shadow_flags:class_ref('Bt4756Write')),
+                ?assertEqual(Ref, class_ref_installed('Bt4756Write'))
+            end)
+        end},
+        {"a descendant's reference does not depend on, or survive, its own erase", fun() ->
+            Root = start_static_class('Bt4756Root', none, #{}),
+            Leaf = start_static_class('Bt4756Leaf', 'Bt4756Root', #{}),
+            try
+                _ = beamtalk_class_shadow_flags:class_ref('Bt4756Leaf'),
+                ok = beamtalk_class_shadow_flags:invalidate('Bt4756Root'),
+                ?assertEqual(false, class_ref_installed('Bt4756Leaf'))
+            after
+                stop_static_class(Leaf),
+                stop_static_class(Root)
+            end
+        end},
+        {"a reload that changes the class's module erases the entry", fun() ->
+            Name = 'Bt4756Reload',
+            ModB = bt4756_reload_mod,
+            ok = load_constant_module(ModB, #{}),
+            Pid = start_static_class(Name, none, #{}),
+            try
+                Tag = beamtalk_class_registry:class_object_tag(Name),
+                ?assertEqual(
+                    {beamtalk_object, Tag, ?HELPER, Pid},
+                    beamtalk_class_shadow_flags:class_ref(Name)
+                ),
+                ?assertMatch({beamtalk_object, _, ?HELPER, Pid}, class_ref_installed(Name)),
+                ok = reload_constant_class(Name, ModB, #{}),
+                ?assertEqual(false, class_ref_installed(Name)),
+                ?assertEqual(
+                    {beamtalk_object, Tag, ModB, Pid},
+                    beamtalk_class_shadow_flags:class_ref(Name)
+                ),
+                ?assertEqual(
+                    {beamtalk_object, Tag, ModB, Pid}, class_ref_installed(Name)
+                )
+            after
+                stop_static_class(Pid),
+                _ = code:purge(ModB),
+                _ = code:delete(ModB),
+                _ = code:purge(ModB)
+            end
+        end},
+        {"an install blocked on the tag lock completes, and a later erase removes it", fun() ->
+            Name = 'Bt4756Race',
+            Tag = 'Bt4756Race class',
+            with_static_class(Name, fun(_Pid) ->
+                Parent = self(),
+                beamtalk_class_shadow_flags:with_tag_lock(Tag, fun() ->
+                    _ = spawn_link(fun() ->
+                        _ = beamtalk_class_shadow_flags:class_ref(Name),
+                        Parent ! installed
+                    end),
+                    timer:sleep(50)
+                end),
+                receive
+                    installed -> ok
+                after 5000 -> ?assert(false)
+                end,
+                ok = beamtalk_class_shadow_flags:invalidate(Name),
+                ?assertEqual(false, class_ref_installed(Name))
+            end)
+        end}
+    ]}.
+
 %% BT-4363's constant-value key cases, repeated for each literal kind a
 %% class-side body can be (BT-4504): `V1` and `V2` are two distinct values of
 %% that kind, as the terms the compiler publishes in `constant_class_methods`

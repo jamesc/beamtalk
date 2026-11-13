@@ -420,10 +420,22 @@ impl Scan<'_> {
                     // is `READS` only because each call in it is a known read
                     // (`call_effect`), so a clause that runs code or `put`s
                     // makes it `RUNS`.
-                    let class_lookup = self.at_call_to("erlang", "whereis");
+                    // BT-4756: a user-class literal reads its reference from the
+                    // class's static call map and, on a miss, asks
+                    // `beamtalk_class_shadow_flags:class_ref/1`; it is the same
+                    // operand, recognised by that call among its clauses.
+                    let start = self.at;
+                    let mut class_lookup = self.at_call_to("erlang", "whereis");
+                    let map_read = self.at_call_to("persistent_term", "get");
                     let scrutinee = self.expr();
                     self.eat_word("of");
                     let clauses = self.clauses("end");
+                    if map_read {
+                        class_lookup = self.tokens[start..self.at].windows(4).any(|w| {
+                            matches!(w, [Tok::Atom(m), Tok::Punct(":"), Tok::Atom(f), Tok::Punct("(")]
+                                if m == "beamtalk_class_shadow_flags" && f == "class_ref")
+                        });
+                    }
                     if class_lookup {
                         QUIET
                     } else {
@@ -685,6 +697,22 @@ mod tests {
         let code =
             module("[call 'erlang':'element'(1, A), call 'erlang':'element'(1, call 'm':'f'(B))]");
         assert!(found(&code).is_empty(), "one real call, one projection");
+    }
+
+    #[test]
+    fn a_static_call_map_class_reference_races_with_nothing() {
+        // BT-4756: the class literal's static-call-map read and its
+        // `class_ref/1` miss path are one quiet operand, like the old `whereis`.
+        let class_ref = "case call 'persistent_term':'get'('A class static calls', ~{}~) of <~{{'class_ref', 'A class'} := R}~> when 'true' -> R <_> when 'true' -> case call 'beamtalk_class_shadow_flags':'class_ref'('A') of <'undefined'> when 'true' -> call 'erlang':'error'('x') <C> when 'true' -> C end end";
+        let code = module(&format!("[call 'm':'send'(X), {class_ref}]"));
+        assert!(
+            found(&code).is_empty(),
+            "a class reference races with nothing"
+        );
+        // Any other `persistent_term` read followed by a call still runs code.
+        let other = "case call 'persistent_term':'get'('k', ~{}~) of <R> when 'true' -> call 'm':'f'(R) end";
+        let code = module(&format!("[call 'm':'send'(X), {other}]"));
+        assert_eq!(found(&code), vec![(RacingConstruct::ListCell, 2)]);
     }
 
     #[test]
