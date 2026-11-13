@@ -138,7 +138,9 @@ pub(super) fn check(module: &Module, hierarchy: &ClassHierarchy) -> TypeChecker 
     checker
 }
 
-/// Like [`diags`], but the source must parse without any non-lint diagnostic.
+/// Like [`diags`], but the source must parse without any non-lint diagnostic
+/// (lints are tolerated, unlike [`return_types_and_diags`], which requires an
+/// empty parse-diagnostic list).
 pub(super) fn diags_parse_ok(source: &str) -> Vec<Diagnostic> {
     let module = crate::test_helpers::test_support::parse_ok(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
