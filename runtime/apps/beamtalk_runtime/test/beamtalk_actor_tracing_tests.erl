@@ -18,6 +18,7 @@ Erlang API, as code attaching with `telemetry:attach/4` must. The
 recorded exactly once per send, and `Tracing enable` switches events on.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%====================================================================
@@ -386,10 +387,7 @@ sync_send_dead_actor_preserves_error_test_() ->
                 ?assertMatch({caught, _}, Result),
                 {caught, CaughtErr} = Result,
                 %% Should be a wrapped beamtalk_error (ensure_wrapped produces a tagged map)
-                ?assertMatch(
-                    #{error := #beamtalk_error{kind = actor_dead}},
-                    CaughtErr
-                )
+                ?assertBtErrorValue(actor_dead, _, _, CaughtErr)
             end)
         ]
     end}.

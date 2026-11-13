@@ -17,6 +17,7 @@ Tests cover:
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%% ============================================================================
@@ -148,9 +149,7 @@ try_do_non_fun_raises_type_error_test() ->
         ?assert(false, "tryDo: should have raised a type_error")
     catch
         error:Caught ->
-            ?assertMatch(
-                #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}}, Caught
-            ),
+            ?assertBtErrorValue(type_error, _, _, Caught),
             #{error := Inner} = Caught,
             ?assertEqual('Result', Inner#beamtalk_error.class),
             ?assertEqual('tryDo:', Inner#beamtalk_error.selector)
@@ -275,9 +274,7 @@ unwrap_error_raw_symbol_test() ->
         ?assert(false, "unwrapError: should have raised an exception")
     catch
         error:Caught ->
-            ?assertMatch(
-                #{'$beamtalk_class' := _, error := #beamtalk_error{kind = signal}}, Caught
-            ),
+            ?assertBtErrorValue(signal, _, _, Caught),
             #{error := Inner} = Caught,
             ?assertEqual('Result', Inner#beamtalk_error.class),
             ?assertEqual('unwrap', Inner#beamtalk_error.selector),
@@ -353,10 +350,7 @@ from_tuple_invalid_raises_type_error_test() ->
         ?assert(false, "'fromTuple:' should have raised a type_error")
     catch
         error:Caught ->
-            ?assertMatch(
-                #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-                Caught
-            ),
+            ?assertBtErrorValue(type_error, _, _, Caught),
             #{error := Inner} = Caught,
             ?assertEqual('Result', Inner#beamtalk_error.class),
             ?assertEqual('fromTuple:', Inner#beamtalk_error.selector),
@@ -413,10 +407,7 @@ unwrap_error_shim_raises_signal_test() ->
         ?assert(false, "unwrapError/1 should have raised an exception")
     catch
         error:Caught ->
-            ?assertMatch(
-                #{'$beamtalk_class' := _, error := #beamtalk_error{kind = signal}},
-                Caught
-            ),
+            ?assertBtErrorValue(signal, _, _, Caught),
             #{error := Inner} = Caught,
             ?assertEqual('Result', Inner#beamtalk_error.class),
             ?assertEqual('unwrap', Inner#beamtalk_error.selector)

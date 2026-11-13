@@ -81,37 +81,24 @@ shared_exit_from_actor_raises_program_exit_outside_entry_test_() ->
 %% assertable `program_exit` error carrying the status, never a raw throw.
 no_workspace_exit_raises_program_exit_test_() ->
     with_caps(none, [
-        ?_assertError(
-            #{error := #beamtalk_error{kind = program_exit, details = #{status := 3}}},
-            beamtalk_program:'exit:'(3)
+        ?_test(
+            ?assertBtErrorDetails(program_exit, _, _, #{status := 3}, beamtalk_program:'exit:'(3))
         ),
-        ?_assertError(
-            #{error := #beamtalk_error{kind = program_exit, details = #{status := 0}}},
-            beamtalk_program:exit()
-        )
+        ?_test(?assertBtErrorDetails(program_exit, _, _, #{status := 0}, beamtalk_program:exit()))
     ]).
 
 %% Out-of-range is a wrong *value*, validated before the node-owning gate, so it
 %% raises a structured error in any context (consistent with `System halt:`).
 exit_out_of_range_raises_invalid_argument_test_() ->
     with_caps(?SHARED, [
-        ?_assertError(
-            #{error := #beamtalk_error{kind = invalid_argument}},
-            beamtalk_program:'exit:'(999)
-        ),
-        ?_assertError(
-            #{error := #beamtalk_error{kind = invalid_argument}},
-            beamtalk_program:'exit:'(-1)
-        )
+        ?_test(?assertBtError(invalid_argument, beamtalk_program:'exit:'(999))),
+        ?_test(?assertBtError(invalid_argument, beamtalk_program:'exit:'(-1)))
     ]).
 
 %% Non-integer is a wrong *type*, also validated before the node-owning gate.
 exit_non_integer_raises_type_error_test_() ->
     with_caps(?SHARED, [
-        ?_assertError(
-            #{error := #beamtalk_error{kind = type_error}},
-            beamtalk_program:'exit:'(<<"two">>)
-        )
+        ?_test(?assertBtError(type_error, beamtalk_program:'exit:'(<<"two">>)))
     ]).
 
 %%====================================================================

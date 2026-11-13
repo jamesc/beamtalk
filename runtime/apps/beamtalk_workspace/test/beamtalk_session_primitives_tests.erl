@@ -509,10 +509,7 @@ dead_session_raises_session_not_found_test_() ->
 session_id_type_error_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
-            ?_assertError(
-                #{error := #beamtalk_error{kind = type_error}},
-                beamtalk_session_primitives:withId(42)
-            )
+            ?_test(?assertBtError(type_error, beamtalk_session_primitives:withId(42)))
         ]
     end}.
 

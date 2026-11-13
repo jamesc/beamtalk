@@ -608,10 +608,7 @@ instance_side_extension_crash_test() ->
     try
         %% The caller gets a clean structured error, not a raw exit.
         Result2 = gen_server:call(Counter, {bt3199CrashExt, []}),
-        ?assertMatch(
-            {error, #{error := #beamtalk_error{kind = runtime_error, selector = bt3199CrashExt}}},
-            Result2
-        ),
+        ?assertBtErrorTuple(runtime_error, _, bt3199CrashExt, Result2),
 
         %% The actor survives and keeps processing messages normally.
         ?assert(is_process_alive(Counter)),
@@ -5297,7 +5294,7 @@ bt4090_take_deferred_call_without_call_raises_invalid_defer_test() ->
         ?assert(false)
     catch
         _:Ex ->
-            ?assertMatch(#{error := #beamtalk_error{kind = invalid_defer}}, Ex)
+            ?assertBtErrorValue(invalid_defer, _, _, Ex)
     end.
 
 bt4090_take_deferred_call_marks_the_call_deferred_test() ->

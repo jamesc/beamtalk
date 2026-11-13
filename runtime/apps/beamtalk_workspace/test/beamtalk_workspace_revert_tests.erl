@@ -81,6 +81,7 @@ persisted ChangeLog and produces misleading results).
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%====================================================================
@@ -443,9 +444,10 @@ remove_selector_absent_raises_selector_not_found(#{tmp := Tmp, unique := U}) ->
     {ok, Pid} = define_project_class(Tmp, ClassName, ["  base => 1\n"]),
     Self = instance_self(ClassName, Pid),
     [
-        ?_assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = selector_not_found}},
-            beamtalk_class_refactor:classRemoveSelector(Self, bogus)
+        ?_test(
+            ?assertBtError(
+                selector_not_found, beamtalk_class_refactor:classRemoveSelector(Self, bogus)
+            )
         )
     ].
 

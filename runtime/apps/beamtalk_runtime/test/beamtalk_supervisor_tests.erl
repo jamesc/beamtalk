@@ -1689,7 +1689,7 @@ start_child_via_class_method_invalid_return_test() ->
         Result = beamtalk_supervisor:start_child_via_class_method(
             'BT1875Invalid', ?MODULE, class_returnInvalid, []
         ),
-        ?assertMatch({error, #{'$beamtalk_class' := _, error := #beamtalk_error{}}}, Result)
+        ?assertBtErrorTuple(_, _, _, Result)
     after
         cleanup_fake_class('BT1875Invalid', FakeClassPid)
     end.
@@ -2312,7 +2312,7 @@ initialize_raise_answers_result_error_for_result_forms_test() ->
     with_bt3963_class('BT3963Sup', Config, fun() ->
         ResultError = fun(Selector, Args) ->
             R = beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, Selector, Args),
-            ?assertMatch(#{isOk := false, errReason := #{error := #beamtalk_error{}}}, R),
+            ?assertBtResultError(_, R),
             #{errReason := #{error := E}} = R,
             E
         end,
@@ -4586,13 +4586,7 @@ concurrent_supervise(HookOutcome) ->
                 %% BT-3994: `supervise` answers a failed initialize in its
                 %% `Result` (both callers), instead of raising.
                 {returned, FirstResult} = First,
-                ?assertMatch(
-                    #{
-                        isOk := false,
-                        errReason := #{error := #beamtalk_error{kind = supervisor_start_failed}}
-                    },
-                    FirstResult
-                ),
+                ?assertBtResultError(supervisor_start_failed, FirstResult),
                 receive
                     {'DOWN', SupRef, process, SupPid, _} -> ok
                 after 2000 -> error(supervisor_not_stopped)

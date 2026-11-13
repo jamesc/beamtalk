@@ -1480,17 +1480,7 @@ class_method_self_call_class_name_in_error_test() ->
         {self_call_error, ErrorMap} ->
             %% class_name_from_pid/1 should have recovered TestClassName from
             %% the registered process name and included it in the error record.
-            ?assertMatch(
-                #{
-                    '$beamtalk_class' := _,
-                    error := #beamtalk_error{
-                        kind = instantiation_error,
-                        class = TestClassName,
-                        selector = spawn
-                    }
-                },
-                ErrorMap
-            )
+            ?assertBtErrorValue(instantiation_error, TestClassName, spawn, ErrorMap)
     after 2000 ->
         ?assert(false)
     end.

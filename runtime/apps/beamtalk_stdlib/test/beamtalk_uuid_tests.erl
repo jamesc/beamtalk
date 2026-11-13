@@ -22,6 +22,7 @@ Tests cover:
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% A well-known v4 UUID used as a fixed test vector throughout.
@@ -128,10 +129,7 @@ from_string_type_error_for_non_binary_test() ->
         ?assert(false, "'fromString:' with non-binary should raise type_error")
     catch
         error:Caught ->
-            ?assertMatch(
-                #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-                Caught
-            ),
+            ?assertBtErrorValue(type_error, _, _, Caught),
             #{error := Inner} = Caught,
             ?assertEqual('Uuid', Inner#beamtalk_error.class),
             ?assertEqual('fromString:', Inner#beamtalk_error.selector)
@@ -158,10 +156,7 @@ is_valid_type_error_for_non_binary_test() ->
         ?assert(false, "'isValid:' with non-binary should raise type_error")
     catch
         error:Caught ->
-            ?assertMatch(
-                #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-                Caught
-            ),
+            ?assertBtErrorValue(type_error, _, _, Caught),
             #{error := Inner} = Caught,
             ?assertEqual('Uuid', Inner#beamtalk_error.class),
             ?assertEqual('isValid:', Inner#beamtalk_error.selector)
@@ -268,10 +263,7 @@ comparison_type_error_for_non_uuid_test() ->
                 ?assert(false, "expected type_error")
             catch
                 error:Caught ->
-                    ?assertMatch(
-                        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-                        Caught
-                    )
+                    ?assertBtErrorValue(type_error, _, _, Caught)
             end
         end,
         [{'<', [Uuid, 5]}, {'>', [Uuid, 5]}, {'=<', [Uuid, 5]}, {'>=', [Uuid, 5]}]

@@ -253,10 +253,7 @@ round_trip_test_() ->
 from_string_invalid_test_() ->
     Invalid = [<<"">>, <<"P">>, <<"PT">>, <<"-P">>, <<"1h">>, <<"P1W">>, <<"PT1H30">>],
     [
-        ?_assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}},
-            beamtalk_duration:'fromString:'(S)
-        )
+        ?_test(?assertBtError(type_error, beamtalk_duration:'fromString:'(S)))
      || S <- Invalid
     ].
 

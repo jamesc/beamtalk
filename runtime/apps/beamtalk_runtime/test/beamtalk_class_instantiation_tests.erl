@@ -398,12 +398,7 @@ test_spawn_too_many_args() ->
         [arg1, arg2], 'Counter', 'bt@counter', false
     ),
     %% beamtalk_error:raise wraps the error in a tagged map
-    ?assertMatch(
-        {error, #{
-            '$beamtalk_class' := _, error := #beamtalk_error{kind = type_error, class = 'Counter'}
-        }},
-        Result
-    ).
+    ?assertBtErrorTuple(type_error, 'Counter', _, Result).
 
 test_spawn_no_args() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),
@@ -806,44 +801,22 @@ test_class_self_spawn_as_reserved() ->
     Result = beamtalk_class_instantiation:class_self_spawn_as(
         'Counter', 'bt@counter', false, logger
     ),
-    ?assertMatch(
-        #{
-            'isOk' := false,
-            'errReason' := #{error := #beamtalk_error{kind = reserved_name}}
-        },
-        Result
-    ).
+    ?assertBtResultError(reserved_name, Result).
 
 test_class_self_named_spawn_not_spawnable() ->
     with_spawn_kind_classes(fun() ->
         lists:foreach(
             fun({Class, Mod}) ->
-                ?assertMatch(
-                    #{
-                        'isOk' := false,
-                        'errReason' :=
-                            #{
-                                error := #beamtalk_error{
-                                    kind = does_not_understand,
-                                    class = Class,
-                                    selector = 'spawnAs:'
-                                }
-                            }
-                    },
+                ?assertBtResultError(
+                    does_not_understand,
+                    Class,
+                    'spawnAs:',
                     beamtalk_class_instantiation:class_self_spawn_as(Class, Mod, false, nm)
                 ),
-                ?assertMatch(
-                    #{
-                        'isOk' := false,
-                        'errReason' :=
-                            #{
-                                error := #beamtalk_error{
-                                    kind = does_not_understand,
-                                    class = Class,
-                                    selector = 'spawnWith:as:'
-                                }
-                            }
-                    },
+                ?assertBtResultError(
+                    does_not_understand,
+                    Class,
+                    'spawnWith:as:',
                     beamtalk_class_instantiation:class_self_spawn_with(
                         Class, Mod, true, #{}, nm
                     )
@@ -857,20 +830,7 @@ test_class_self_spawn_as_abstract() ->
     Result = beamtalk_class_instantiation:class_self_spawn_as(
         'AbstractThing', some_mod, true, my_name
     ),
-    ?assertMatch(
-        #{
-            'isOk' := false,
-            'errReason' :=
-                #{
-                    error := #beamtalk_error{
-                        kind = instantiation_error,
-                        class = 'AbstractThing',
-                        selector = 'spawnAs:'
-                    }
-                }
-        },
-        Result
-    ).
+    ?assertBtResultError(instantiation_error, 'AbstractThing', 'spawnAs:', Result).
 
 test_class_self_spawn_with_success() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),
@@ -915,20 +875,7 @@ test_class_self_spawn_with_abstract() ->
     Result = beamtalk_class_instantiation:class_self_spawn_with(
         'AbstractThing', some_mod, true, #{}, my_name
     ),
-    ?assertMatch(
-        #{
-            'isOk' := false,
-            'errReason' :=
-                #{
-                    error := #beamtalk_error{
-                        kind = instantiation_error,
-                        class = 'AbstractThing',
-                        selector = 'spawnWith:as:'
-                    }
-                }
-        },
-        Result
-    ).
+    ?assertBtResultError(instantiation_error, 'AbstractThing', 'spawnWith:as:', Result).
 
 %%====================================================================
 %% Module-less (builder-built) generic instantiation
@@ -1249,10 +1196,7 @@ test_generic_new_multi_args() ->
     Pid = register_builder_class('BT2275GNewMulti', 'Object', #{a => 1}, #{}),
     try
         Result = beamtalk_object_class:new(Pid, [arg1, arg2]),
-        ?assertMatch(
-            {error, #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}}},
-            Result
-        )
+        ?assertBtErrorTuple(type_error, _, _, Result)
     after
         gen_server:stop(Pid, normal, 5000)
     end.

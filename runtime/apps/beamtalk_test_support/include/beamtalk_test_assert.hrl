@@ -57,6 +57,18 @@
     )
 ).
 
+%% As `?assertBtError/4`, and the error's `hint` must also match Hint.
+-define(assertBtErrorHint(Kind, Class, Selector, Hint, Expr),
+    ?assertError(
+        #{
+            error := #beamtalk_error{
+                kind = Kind, class = Class, selector = Selector, hint = Hint
+            }
+        },
+        Expr
+    )
+).
+
 %% Expr returns a Beamtalk `Result` object that is an error
 %% (`isOk := false`) whose `errReason` is a wrapped Exception
 %% `#{'$beamtalk_class' := _, error := #beamtalk_error{kind, class, selector}}`.
@@ -78,6 +90,23 @@
 ).
 -define(assertBtResultObjError(Kind, Expr),
     ?assertBtResultObjError(Kind, _, _, Expr)
+).
+
+%% Expr evaluates to an already-raised/wrapped error map `#{error := #beamtalk_error{..}}`
+%% (e.g. a caught exception reason or `ensure_wrapped/3` result).
+-define(assertBtErrorValue(Kind, Class, Selector, Expr),
+    ?assertMatch(
+        #{error := #beamtalk_error{kind = Kind, class = Class, selector = Selector}},
+        Expr
+    )
+).
+
+%% Expr returns `{error, #{error := #beamtalk_error{..}}}` (error tuple around a wrapped map).
+-define(assertBtErrorTuple(Kind, Class, Selector, Expr),
+    ?assertMatch(
+        {error, #{error := #beamtalk_error{kind = Kind, class = Class, selector = Selector}}},
+        Expr
+    )
 ).
 
 %% Expr returns `{error, #beamtalk_error{kind, class, selector}}` (Result-wrapped).

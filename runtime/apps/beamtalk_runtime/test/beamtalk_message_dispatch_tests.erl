@@ -437,18 +437,12 @@ number_coercion_hints_missing_method() ->
         class = 'CoercionActor', class_mod = test_number_coercion_actor, pid = Pid
     },
     try
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{
-                    kind = does_not_understand,
-                    class = 'CoercionActor',
-                    selector = 'timesFromNumber:',
-                    hint =
-                        {beamtalk_string,
-                            <<"CoercionActor has no 'timesFromNumber:' — implement it to support 'number * CoercionActor' arithmetic"/utf8>>}
-                }
-            },
+        ?assertBtErrorHint(
+            does_not_understand,
+            'CoercionActor',
+            'timesFromNumber:',
+            {beamtalk_string,
+                <<"CoercionActor has no 'timesFromNumber:' — implement it to support 'number * CoercionActor' arithmetic"/utf8>>},
             beamtalk_message_dispatch:send_number_coercion(
                 Obj, 'timesFromNumber:', [5], '*'
             )
@@ -468,16 +462,11 @@ number_coercion_does_not_rewrite_inner_dnu() ->
         class = 'CoercionActor', class_mod = test_number_coercion_actor, pid = Pid
     },
     try
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{
-                    kind = does_not_understand,
-                    class = 'CoercionActor',
-                    selector = unrelatedSelector,
-                    hint = undefined
-                }
-            },
+        ?assertBtErrorHint(
+            does_not_understand,
+            'CoercionActor',
+            unrelatedSelector,
+            undefined,
             beamtalk_message_dispatch:send_number_coercion(
                 Obj, 'plusFromNumber:', [5], '+'
             )

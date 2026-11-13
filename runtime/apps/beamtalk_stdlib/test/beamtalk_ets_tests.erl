@@ -940,9 +940,7 @@ in_other_process(Fun) ->
     end.
 
 -define(assertAccessDenied(Result),
-    ?assertMatch(
-        {error, #{error := #beamtalk_error{kind = access_denied, class = 'Ets'}}}, Result
-    )
+    ?assertBtErrorTuple(access_denied, 'Ets', _, Result)
 ).
 
 bt4576_private_table_is_unnamed_and_owner_usable_test() ->
@@ -1050,8 +1048,10 @@ bt4604_delete_badarg_name_reuse_test() ->
         %% A public replacement owned by another process: the caller could
         %% have deleted it, so the failed delete hit a table that is gone.
         ets:new(bt4604_reuse, [named_table, public]),
-        ?assertMatch(
-            {error, #{error := #beamtalk_error{kind = stale_table}}},
+        ?assertBtErrorTuple(
+            stale_table,
+            _,
+            _,
             in_other_process(fun() -> beamtalk_ets:badarg_error('delete', bt4604_reuse) end)
         )
     end).
