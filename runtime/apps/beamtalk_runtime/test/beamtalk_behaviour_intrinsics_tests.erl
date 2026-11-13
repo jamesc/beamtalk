@@ -3474,13 +3474,20 @@ full_is_kind_of(Receiver, Behaviour) ->
     outcome(fun() -> beamtalk_behaviour_intrinsics:objectIsKindOf(Receiver, Behaviour) end).
 
 named_is_kind_of(Receiver, Behaviour, Name) ->
-    outcome(fun() -> beamtalk_behaviour_intrinsics:kind_of_named(Receiver, Behaviour, Name, false) end).
+    outcome(fun() ->
+        beamtalk_behaviour_intrinsics:kind_of_named(Receiver, Behaviour, Name, false)
+    end).
 
 assert_named_agrees(Receivers, Classes) ->
     [
         ?assertEqual(
             {R, A, full_is_kind_of(R, A)},
-            {R, A, named_is_kind_of(R, A, element(2, beamtalk_class_registry:class_name_for_pid(A#beamtalk_object.pid)))}
+            {R, A,
+                named_is_kind_of(
+                    R,
+                    A,
+                    element(2, beamtalk_class_registry:class_name_for_pid(A#beamtalk_object.pid))
+                )}
         )
      || R <- Receivers, A <- Classes
     ].
