@@ -1269,7 +1269,7 @@ mod tests {
             .map(|d| d.message.to_string())
             .collect::<Vec<_>>()
         };
-        let absent = run(&Default::default());
+        let absent = run(&beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new());
         let mut off = beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new();
         off.insert(
             DiagnosticCategory::NarrowingCast,
