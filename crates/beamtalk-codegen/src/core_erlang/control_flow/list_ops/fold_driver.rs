@@ -422,6 +422,13 @@ mod tests {
         ] {
             assert!(!fold_threads_self(label), "{label} must not thread Self");
         }
+        // Widening the list also means the emitter wraps its accumulator with
+        // `FoldFamilySlots`; the shared prologue gives every listed label a
+        // `Self` slot, so a change here must be a reviewed edit.
+        assert_eq!(
+            SELF_THREADING_FOLDS,
+            &["do:", "collect:", "inject:into:"][..]
+        );
     }
 
     #[test]

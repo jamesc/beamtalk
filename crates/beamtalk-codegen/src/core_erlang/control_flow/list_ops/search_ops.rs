@@ -212,7 +212,7 @@ impl CoreErlangGenerator {
             receiver,
             body,
             ListOpKind::Accumulate,
-            "anySatisfy:",
+            if is_all { "allSatisfy:" } else { "anySatisfy:" },
             None,
             false,
         )?;
