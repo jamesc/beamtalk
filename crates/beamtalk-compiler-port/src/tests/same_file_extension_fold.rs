@@ -122,5 +122,8 @@ fn class_extension_on_native_actor_folds() {
         "{response:?}"
     );
     let core = response_field_str(&response, "core_erlang").expect("core_erlang");
-    assert!(!core.contains("call 'beamtalk_extensions':'register'"), "Got:\n{core}");
+    assert!(
+        !core.contains("call 'beamtalk_extensions':'register'"),
+        "Got:\n{core}"
+    );
 }
