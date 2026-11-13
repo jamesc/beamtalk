@@ -64,12 +64,7 @@ pub fn run(
     .registry
     .map(std::sync::Arc::new);
 
-    let mut report = CoverageReport {
-        classes: Vec::new(),
-        dynamic_entries: Vec::new(),
-        total_expressions: 0,
-        typed_expressions: 0,
-    };
+    let mut report = CoverageReport::default();
     // The pipeline reports package files by their canonical path; report
     // them as the caller spelled them, as before.
     let spelled: std::collections::HashMap<std::path::PathBuf, &Utf8PathBuf> = source_files
@@ -88,6 +83,7 @@ pub fn run(
             report.merge(CoverageReport::from_module(
                 file.module,
                 file.type_map,
+                file.class_hierarchy,
                 path.as_str(),
                 detail,
             ));
@@ -111,6 +107,10 @@ pub fn run(
         // Recompute totals from filtered classes.
         report.total_expressions = report.classes.iter().map(|c| c.total).sum();
         report.typed_expressions = report.classes.iter().map(|c| c.typed).sum();
+        report.narrowing_casts = report.classes.iter().map(|c| c.narrowing_casts).sum();
+        report
+            .narrowing_entries
+            .retain(|e| e.class_name.as_str() == class_name);
     }
 
     // Sort classes by file then name for stable output.
@@ -152,8 +152,8 @@ fn print_text_report(
     for class in &report.classes {
         let pct = class.coverage_percent();
         println!(
-            "{:<30} {:<20} {:.1}%  ({}/{} expressions)",
-            class.file, class.name, pct, class.typed, class.total
+            "{:<30} {:<20} {:.1}%  ({}/{} expressions, {} narrowing)",
+            class.file, class.name, pct, class.typed, class.total, class.narrowing_casts
         );
     }
 
@@ -161,32 +161,55 @@ fn print_text_report(
     println!("{separator}");
     let pct = report.coverage_percent();
     println!(
-        "{:<30} {:<20} {:.1}%  ({}/{} expressions)",
-        "Total", "", pct, report.typed_expressions, report.total_expressions
+        "{:<30} {:<20} {:.1}%  ({}/{} expressions, {} narrowing)",
+        "Total",
+        "",
+        pct,
+        report.typed_expressions,
+        report.total_expressions,
+        report.narrowing_casts
     );
+    if report.narrowing_casts > 0 {
+        println!(
+            "Narrowing casts: {} (local annotations narrower than their right-hand side; \
+             unchecked at runtime, not subtracted from coverage)",
+            report.narrowing_casts
+        );
+    }
+
+    // Build a source map for offset-to-line conversion.
+    let source_map: std::collections::HashMap<&str, &str> = file_sources
+        .iter()
+        .map(|(path, source)| (path.as_str(), source.as_str()))
+        .collect();
+    let locate = |file: &str, span: beamtalk_core::source_analysis::Span| -> String {
+        if let Some(source) = source_map.get(file)
+            && let Some(pos) = Position::from_byte_offset(source, ByteOffset::new(span.start()))
+        {
+            // Display as 1-based line:col.
+            return format!("{file}:{}:{}", pos.line + 1, pos.column + 1);
+        }
+        format!("{file}:?:?")
+    };
+
+    if detail && !report.narrowing_entries.is_empty() {
+        println!();
+        println!("Narrowing casts:");
+        for entry in &report.narrowing_entries {
+            let location = locate(&entry.file, entry.span);
+            println!(
+                "  {location:<40} (:: {} from {})",
+                entry.declared, entry.rhs
+            );
+        }
+    }
 
     if detail && !report.dynamic_entries.is_empty() {
         println!();
         println!("Dynamic expressions:");
 
-        // Build a source map for offset-to-line conversion.
-        let source_map: std::collections::HashMap<&str, &str> = file_sources
-            .iter()
-            .map(|(path, source)| (path.as_str(), source.as_str()))
-            .collect();
-
         for entry in &report.dynamic_entries {
-            let location = if let Some(source) = source_map.get(entry.file.as_str()) {
-                let byte_offset = ByteOffset::new(entry.span.start());
-                if let Some(pos) = Position::from_byte_offset(source, byte_offset) {
-                    // Display as 1-based line:col.
-                    format!("{}:{}:{}", entry.file, pos.line + 1, pos.column + 1)
-                } else {
-                    format!("{}:?:?", entry.file)
-                }
-            } else {
-                format!("{}:?:?", entry.file)
-            };
+            let location = locate(&entry.file, entry.span);
             let reason = entry.reason.description().unwrap_or("unknown");
             println!("  {location:<40} ({reason})");
         }
@@ -211,6 +234,7 @@ fn print_json_report(
                 "file": c.file,
                 "total": c.total,
                 "typed": c.typed,
+                "narrowing_casts": c.narrowing_casts,
                 "coverage_percent": class_pct
             })
         })
@@ -220,8 +244,26 @@ fn print_json_report(
         "total_expressions": report.total_expressions,
         "typed_expressions": report.typed_expressions,
         "coverage_percent": pct,
+        "narrowing_casts": report.narrowing_casts,
         "classes": classes
     });
+
+    if !report.narrowing_entries.is_empty() {
+        // Populated only under `--detail`.
+        json["narrowing_entries"] = report
+            .narrowing_entries
+            .iter()
+            .map(|e| {
+                serde_json::json!({
+                    "file": e.file,
+                    "class": e.class_name.as_str(),
+                    "start": e.span.start(),
+                    "declared": e.declared.as_str(),
+                    "rhs": e.rhs.as_str(),
+                })
+            })
+            .collect();
+    }
 
     if let Some(threshold) = at_least {
         let unrounded = report.coverage_percent();
@@ -288,12 +330,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn empty_report() -> CoverageReport {
-        CoverageReport {
-            classes: Vec::new(),
-            dynamic_entries: Vec::new(),
-            total_expressions: 0,
-            typed_expressions: 0,
-        }
+        CoverageReport::default()
     }
 
     // --- OutputFormat::from_str ---
