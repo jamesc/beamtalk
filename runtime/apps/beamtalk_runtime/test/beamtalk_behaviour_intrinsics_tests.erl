@@ -2799,6 +2799,41 @@ classRenameTo_dynamic_class_reregisters_test_() ->
         ]
     end}.
 
+%% A classification that crashes must refuse the rename BEFORE any mutation,
+%% not be read as a "dynamic" class (which would let a stdlib class be renamed).
+classRenameTo_refuses_without_mutation_when_classification_fails_test_() ->
+    {setup, fun setup_workspace/0, fun teardown_workspace/1, fun(_) ->
+        [
+            ?_test(begin
+                {ClassObj, Pid} = register_class('BT4792ClassifyFailTarget', #{}, #{}),
+                Mod = beamtalk_workspace_callback_tests:load_crashing_workspace(),
+                ok = beamtalk_workspace_callback:register(Mod),
+                try
+                    ?assertError(
+                        #{'$beamtalk_class' := _, error := #beamtalk_error{kind = runtime_error}},
+                        beamtalk_class_refactor:classRenameTo(
+                            ClassObj, 'BT4792ClassifyFailRenamed'
+                        )
+                    ),
+                    ?assertEqual(
+                        Pid, beamtalk_class_registry:whereis_class('BT4792ClassifyFailTarget')
+                    ),
+                    ?assertEqual(
+                        undefined,
+                        beamtalk_class_registry:whereis_class('BT4792ClassifyFailRenamed')
+                    )
+                after
+                    beamtalk_workspace_callback_tests:unload_crashing_workspace(Mod),
+                    try
+                        gen_server:stop(Pid, normal, 5000)
+                    catch
+                        _:_ -> ok
+                    end
+                end
+            end)
+        ]
+    end}.
+
 %% Collision refusal (ADR 0114 § Decision): renaming to an already-loaded
 %% class name raises a structured `class_already_exists` error, matching the
 %% ADR's own worked example's message/hint text exactly (a literal grounding

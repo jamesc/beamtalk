@@ -19,6 +19,9 @@ wrapper fails the test.
 -include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
+%% Throwaway crashing workspace, shared with the rename tests.
+-export([load_crashing_workspace/0, unload_crashing_workspace/1]).
+
 %% Fake workspace implementation (forwarded to by the wrappers).
 -export([
     reload_class_file/2,

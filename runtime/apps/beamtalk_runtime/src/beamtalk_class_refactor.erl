@@ -497,7 +497,7 @@ classRenameTo(Self, NewName) when is_atom(NewName) ->
                 beamtalk_error:raise(
                     beamtalk_error:with_message(
                         beamtalk_error:new(runtime_error, OldName, 'renameTo:'),
-                        <<"Cannot rename: the class could not be classified (is it a stdlib or dependency class?)">>
+                        <<"Cannot rename: the workspace failed to classify the class (see the log); refusing rather than guessing whether it is a stdlib or dependency class">>
                     )
                 )
         end,

@@ -30,14 +30,20 @@ restart it re-records the capabilities it was given.
 start_link(Capabilities) ->
     gen_server:start_link(?MODULE, Capabilities, []).
 
--spec init(beamtalk_capability:capabilities()) -> {ok, beamtalk_capability:capabilities()}.
+-type state() :: #{previous_callback := {ok, module()} | none}.
+
+-spec init(beamtalk_capability:capabilities()) -> {ok, state()}.
 init(Capabilities) ->
     process_flag(trap_exit, true),
     ok = beamtalk_capability:set(Capabilities),
     %% The runtime reaches the workspace's compile/install pipeline through
-    %% this callback (BT-4792); registered and cleared with the capabilities.
+    %% this callback (BT-4792); registered with the capabilities and, when the
+    %% guard stops, put back as it was. `beamtalk test` registers it before any
+    %% workspace runs, and a test that starts and stops a workspace supervisor
+    %% must not leave every later test without it.
+    PreviousCallback = beamtalk_workspace_callback:registered_module(),
     ok = beamtalk_workspace_callback:register(beamtalk_repl_eval),
-    {ok, Capabilities}.
+    {ok, #{previous_callback => PreviousCallback}}.
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unsupported}, State}.
@@ -45,7 +51,11 @@ handle_call(_Request, _From, State) ->
 handle_cast(_Msg, State) ->
     {noreply, State}.
 
--spec terminate(term(), beamtalk_capability:capabilities()) -> ok.
-terminate(_Reason, _State) ->
-    ok = beamtalk_workspace_callback:unregister(),
+-spec terminate(term(), state()) -> ok.
+terminate(_Reason, #{previous_callback := PreviousCallback}) ->
+    ok =
+        case PreviousCallback of
+            {ok, Module} -> beamtalk_workspace_callback:register(Module);
+            none -> beamtalk_workspace_callback:unregister()
+        end,
     beamtalk_capability:clear().

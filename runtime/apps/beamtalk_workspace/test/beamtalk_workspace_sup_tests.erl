@@ -666,6 +666,30 @@ capability_guard_registers_workspace_callback_test() ->
         end
     end.
 
+%% A callback registered before the workspace started (as `beamtalk test` does)
+%% is put back when the guard stops, not erased.
+capability_guard_restores_previous_callback_test() ->
+    PrevCaps = beamtalk_capability:recorded(),
+    PrevCallback = beamtalk_workspace_callback:registered_module(),
+    ok = beamtalk_workspace_callback:register(?MODULE),
+    try
+        {ok, Pid} = beamtalk_workspace_capability_guard:start_link(#{
+            mode => workspace, include_compiler => true
+        }),
+        ?assertEqual({ok, beamtalk_repl_eval}, beamtalk_workspace_callback:registered_module()),
+        ok = gen_server:stop(Pid),
+        ?assertEqual({ok, ?MODULE}, beamtalk_workspace_callback:registered_module())
+    after
+        case PrevCaps of
+            {ok, Caps} -> ok = beamtalk_capability:set(Caps);
+            none -> ok = beamtalk_capability:clear()
+        end,
+        case PrevCallback of
+            {ok, Mod} -> ok = beamtalk_workspace_callback:register(Mod);
+            none -> ok = beamtalk_workspace_callback:unregister()
+        end
+    end.
+
 workspace_mode_records_capabilities_test() ->
     with_capabilities_restored(fun() ->
         _ = child_ids(test_config()),
