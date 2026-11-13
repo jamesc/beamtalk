@@ -723,6 +723,7 @@ coverage-build: build-erlang
     echo "✅ Coverage prerequisites complete"
 
 # Build all example programs (examples/**/*.bt → BEAM)
+# Unix-only (bash loop); not available on Windows — use `beamtalk build examples/<pkg>` per package there.
 [unix]
 build-examples: build-stdlib
     #!/usr/bin/env bash

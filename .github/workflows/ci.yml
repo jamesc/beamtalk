@@ -82,6 +82,9 @@ jobs:
       learn: ${{ steps.filter.outputs.learn }}
       # runtime/ changed: test-dialyzer runs the (slow) `just dialyzer` step.
       runtime: ${{ steps.filter.outputs.runtime }}
+      # Rust/Cargo sources, the recipes or workflows that build them changed:
+      # check-release-build runs.
+      rust: ${{ steps.filter.outputs.rust }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -98,7 +101,7 @@ jobs:
             # desktop (ci-platforms.yml's).
             {
               echo "desktop=false"
-              for k in core_diff_modes learn runtime; do echo "$k=true"; done
+              for k in core_diff_modes learn runtime rust; do echo "$k=true"; done
             } >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -138,6 +141,13 @@ jobs:
 
           runtime=$(flag matches 'runtime/*')
 
+          # Anything that changes the release Rust build or what
+          # `just check-release-build` scans: the crates, the manifests,
+          # toolchain and lint config, the recipes, the release-build commands
+          # in the workflows and scripts/ci.
+          rust=$(flag matches 'crates/*' Cargo.toml Cargo.lock rust-toolchain.toml \
+              clippy.toml Justfile '.github/workflows/*' 'scripts/ci/*')
+
           # The desktop app's own paths (the crate, the workspace crates it
           # links, the root manifest and lockfile those crates take their
           # `.workspace = true` deps from, the recipe and this workflow).
@@ -151,6 +161,7 @@ jobs:
             echo "core_diff_modes=$core_diff_modes"
             echo "learn=$learn"
             echo "runtime=$runtime"
+            echo "rust=$rust"
           } >> "$GITHUB_OUTPUT"
           cat "$GITHUB_OUTPUT"
 
@@ -349,7 +360,11 @@ jobs:
   # BT-4749: the release workspace build must stay warning-free and must not
   # link test-only codegen code (the `test` feature leaking in through
   # dev-dependency feature unification, e.g. via `--all-targets`).
+  # Runs only when Rust/Cargo sources or the recipes/workflows that build them
+  # change (the `rust` output of `changes`); always on main.
   check-release-build:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
