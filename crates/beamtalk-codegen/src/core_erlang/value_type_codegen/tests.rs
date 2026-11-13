@@ -400,3 +400,24 @@ fn test_compiled_module_name_qualified_without_package_delegates_to_unqualified(
         generator.compiled_module_name("Helper")
     );
 }
+
+/// Object's `dispatch/4` arity errors name the selector in quotes, as they
+/// did before the structural-constructor migration (BT-4685): the hint is
+/// user-visible text no snapshot covers.
+#[test]
+fn test_object_dispatch_4_arity_hints_quote_the_selector() {
+    let generator = CoreErlangGenerator::new("bt@stdlib@object");
+    let text = generator
+        .generate_object_dispatch_4("bt@stdlib@object")
+        .to_pretty_string();
+    for (selector, arity) in [
+        ("fieldAt:", 1),
+        ("fieldAt:put:", 2),
+        ("hasField:", 1),
+        ("clearField:", 1),
+    ] {
+        let hint = format!("Expected {arity} argument(s) for '{selector}'");
+        let binary = beamtalk_cerl_doc::leaf::binary_lit(&hint).to_pretty_string();
+        assert!(text.contains(&binary), "missing hint {hint:?} in:\n{text}");
+    }
+}

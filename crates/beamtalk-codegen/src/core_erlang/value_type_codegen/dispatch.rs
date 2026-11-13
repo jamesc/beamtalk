@@ -885,7 +885,7 @@ impl CoreErlangGenerator {
     /// selector name.
     #[allow(clippy::unused_self)] // method on impl for API consistency
     fn arity_error_fragment(&self, selector: &str, expected_arity: u32) -> Document<'static> {
-        let hint = format!("Expected {expected_arity} argument(s) for {selector}");
+        let hint = format!("Expected {expected_arity} argument(s) for '{selector}'");
         docvec![
             super::super::errors::beamtalk_error_doc(
                 Document::Str("<ArErr0>"),
