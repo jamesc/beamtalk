@@ -197,7 +197,7 @@ A class may freely mix `self delegate` methods with full-bodied Beamtalk methods
 
 | | `native:` `Object` | `native:` `Actor` |
 |---|---|---|
-| `self delegate` lowers to | `beamtalk_erlang_proxy:native_call(Mod, Fn, [Self\|Args], {Class, Sel})` | `beamtalk_actor:sync_send(Pid, Sel, Args)` |
+| `self delegate` lowers to | guarded direct call when the spec proves no coercion is needed (BT-4765); otherwise `beamtalk_erlang_proxy:native_call(Mod, Fn, [Self\|Args], {Class, Sel})` | `beamtalk_actor:sync_send(Pid, Sel, Args)` |
 | Receiver (`self`) | first positional arg | the actor pid |
 | Call shape | in-process, synchronous — cannot block, time out, or raise `noproc` | crosses a process boundary — can block, time out, raise `noproc`, cross nodes |
 | State | none (`state:` is for Actors) | lives in the gen_server |
