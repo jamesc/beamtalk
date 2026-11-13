@@ -410,3 +410,70 @@ fn bare_generic_type_arm_narrows_to_the_parameterized_scrutinee() {
         assert_eq!(type_args.len(), 2, "{ty:?}");
     }
 }
+
+// ── BT-4774: static-only handle classes are never closed leaves ─────────
+
+/// `matchExhaustive:` over a union with a handle class cannot prove coverage;
+/// the single error says so and never claims a missing handle arm.
+fn assert_cannot_verify(diags: &[Diagnostic], handle: &str) {
+    assert_eq!(diags.len(), 1, "expected one error, got: {diags:?}");
+    assert_eq!(diags[0].severity, Severity::Error);
+    assert!(
+        diags[0].message.contains("cannot verify"),
+        "{handle}: {}",
+        diags[0].message
+    );
+    assert!(!diags[0].message.contains("not handled"), "{handle}");
+}
+
+/// `EtsTid`, `IoDevice` and `ZlibStream` are sealed leaf classes, but they
+/// exist only statically: at run time the value is a `Reference`, a `Pid`
+/// or a fd tuple, and a `:: Handle` arm can never match. A union containing
+/// one must therefore not be treated as a closed leaf union, or the check
+/// asks for an arm that never fires (and an unnamed table's tid then
+/// matches no arm at all).
+#[test]
+fn static_only_handle_union_is_not_a_closed_leaf_union() {
+    use crate::semantic_analysis::validators::STATIC_ONLY_HANDLE_CLASSES;
+    assert_eq!(
+        STATIC_ONLY_HANDLE_CLASSES,
+        ["EtsTid", "IoDevice", "ZlibStream"],
+        "the exclusion list must name every handle class under test"
+    );
+    for handle in STATIC_ONLY_HANDLE_CLASSES {
+        let ty = InferredType::simple_union(&["Symbol", handle]);
+        // Covering only the concrete member must not demand the handle arm.
+        let covered = vec![type_arm("s", "Symbol", var("s"))];
+        assert!(
+            advisory_diagnostics(ty.clone(), covered.clone()).is_empty(),
+            "advisory match on `Symbol | {handle}` asked for a `{handle}` arm"
+        );
+        assert_cannot_verify(&asserted_diagnostics(ty.clone(), covered), handle);
+        // Spelling out the handle arm stays legal and silent.
+        let both = vec![
+            type_arm("s", "Symbol", var("s")),
+            type_arm("h", handle, var("h")),
+        ];
+        assert!(advisory_diagnostics(ty.clone(), both.clone()).is_empty());
+        assert_cannot_verify(&asserted_diagnostics(ty, both), handle);
+    }
+}
+
+/// The `IoDevice | Pid` shape from `file:open`-style specs.
+#[test]
+fn io_device_pid_union_is_not_closed() {
+    let ty = InferredType::simple_union(&["IoDevice", "Pid"]);
+    let arms = vec![type_arm("p", "Pid", var("p"))];
+    assert!(advisory_diagnostics(ty.clone(), arms.clone()).is_empty());
+    assert_cannot_verify(&asserted_diagnostics(ty, arms), "IoDevice");
+}
+
+/// Behaviour for other classes is unchanged: a real closed leaf union
+/// missing an arm still errors.
+#[test]
+fn non_handle_leaf_union_still_demands_every_arm() {
+    let ty = InferredType::simple_union(&["Symbol", "Integer"]);
+    let diags = asserted_diagnostics(ty, vec![type_arm("s", "Symbol", var("s"))]);
+    assert_eq!(diags.len(), 1, "expected one error, got: {diags:?}");
+    assert!(diags[0].message.contains("Integer"));
+}

@@ -315,3 +315,36 @@ fn actor_self_send_in_escaping_block_is_exempt() {
         "the self-send inside the escaping block is exempt: {diags:?}"
     );
 }
+
+// ── BT-4774: the BT-4717 opaque handle classes carry a scope ────────────
+
+/// A `ZlibStream` or `IoDevice` is process-bound (a zlib resource or a raw
+/// file descriptor owned by the opening process), so passing one in an actor
+/// message warns exactly as a `Port` does. Before BT-4774 these classes were
+/// unscoped Objects and the send was silent.
+#[test]
+fn process_scoped_opaque_handles_warn_in_actor_message() {
+    for class in ["ZlibStream", "IoDevice"] {
+        let diags = check_consume("Worker", "Actor", InferredType::known(class));
+        let warns = sendability_warnings(&diags);
+        assert_eq!(warns.len(), 1, "{class}: expected one warning: {diags:?}");
+        assert_eq!(warns[0].severity, Severity::Warning);
+        assert!(
+            warns[0].message.contains("process-bound handle"),
+            "{class}: unexpected message: {}",
+            warns[0].message
+        );
+    }
+}
+
+/// An `ets:tid()` is node-local (any process on the node can use it), so
+/// `EtsTid` is `#node`-scoped and stays silent in v1 — the same grade `Ets`
+/// and `Subscription` get.
+#[test]
+fn ets_tid_is_node_scoped_and_silent_in_v1() {
+    let diags = check_consume("Worker", "Actor", InferredType::known("EtsTid"));
+    assert!(
+        sendability_warnings(&diags).is_empty(),
+        "#node-scoped EtsTid must be silent in v1: {diags:?}"
+    );
+}

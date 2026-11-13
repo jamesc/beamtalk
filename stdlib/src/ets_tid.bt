@@ -17,4 +17,8 @@
 ///
 /// The class is static only: at run time the value is a Reference, so `x class` answers
 /// that and `x isKindOf:` against this class is always false.
+/// Node-scoped (ADR 0103): any process on the node can use a tid, but it is
+/// meaningless on another node, so it is `#node`-scoped like `Ets` itself —
+/// silent in v1 unless the receiver is known to be remote.
 sealed typed Object subclass: EtsTid
+  handleScope: #node

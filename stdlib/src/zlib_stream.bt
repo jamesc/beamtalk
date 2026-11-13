@@ -17,4 +17,8 @@
 ///
 /// The class is static only: at run time the value is a Reference, so `x class` answers
 /// that and `x isKindOf:` against this class is always false.
+/// Process-scoped (ADR 0103): a zlib stream belongs to the process that
+/// opened it, so passing one in an actor message or capturing it in a block
+/// sent to an actor warns, as it does for a `Port`.
 sealed typed Object subclass: ZlibStream
+  handleScope: #process
