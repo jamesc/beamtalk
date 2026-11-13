@@ -528,7 +528,7 @@ impl CoreErlangGenerator {
             clause([pat(head)], guard, body, Layout::Block)
         };
         let let_ = |name: &str, value: Document<'static>, body: Document<'static>| {
-            let_in(var(name), value, body, Layout::Block)
+            let_in(docvec!["<", var(name), ">"], value, body, Layout::Block)
         };
         let lookup_arm = |sel: &'static str,
                           args: Document<'static>,
