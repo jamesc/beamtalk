@@ -11,10 +11,9 @@
 %% Compares, for a warmed key in a process holding 1..4096 other memo keys:
 %%   ets       - pre-#5225: generation read + ets:lookup (the current module)
 %%   map       - #5225 (7f38838): generation read + get({Gen, Map}) + maps:find
-%%   per_key   - rejected #5227 (66d4363): get({Mod, Key}) -> {Gen, V}
 %% Variants are loaded from git revisions under renamed modules. NOTE: on the
-%% target hardware (M5) `ets` beat both memo layouts on row 3e of
-%% `just bench-vs-elixir` (142 vs 223/257 ns), the opposite of what this
+%% target hardware (M5) `ets` beat the memo on row 3e of `just bench-vs-elixir`
+%% (142 vs 223 ns; a per-key variant measured 257 ns), the opposite of what this
 %% script shows on a Linux VM, so re-measure there before adding any memo.
 main(Args) ->
     Iters = case Args of [I] -> list_to_integer(I); _ -> 1000000 end,
@@ -27,8 +26,7 @@ main(Args) ->
     Src = "runtime/apps/beamtalk_runtime/src/beamtalk_class_derived_cache.erl",
     Variants = [
         {ets, load(ets, file(Root1, Src))},
-        {map, load(map, git_show(Root1, "7f38838", Src))},
-        {per_key, load(per_key, git_show(Root1, "66d4363", Src))}
+        {map, load(map, git_show(Root1, "7f38838", Src))}
     ],
     io:format("iterations per cell: ~p; ns per fetch/3 hit (allocation cost subtracted) (best of 5)~n", [Iters]),
     io:format("~-10s ~10s ~10s ~10s ~10s~n", ["variant", "1 key", "50 keys", "500 keys", "4000 keys"]),
