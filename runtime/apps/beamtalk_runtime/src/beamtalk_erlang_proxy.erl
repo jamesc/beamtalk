@@ -313,9 +313,11 @@ convert), so `ffi_call_raised/8` passes no snapshot. A binary argument
 (BT-4759) does not: a `badarg` retries once with the binary as a charlist,
 here, exactly as on the proxy path (the retry result is coerced the same way),
 and such a call site uses `ffi_call_raised/9` to pass the class-variable
-snapshot it read before the call. No argument can be a fun or hold one. A
-tagged `String` (what a Beamtalk `String` is at run time) fails the call
-site's `is_binary` guard and takes `direct_call/4`, which unwraps it.
+snapshot it read before the call. So does a map argument (BT-4770): the retry
+deep-unwraps Strings nested in it, and a map may hold a Beamtalk block, so the
+first attempt may have written class variables. A tagged `String` (what a
+Beamtalk `String` is at run time) fails the call site's `is_binary` guard and
+takes `direct_call/4`, which unwraps it.
 """.
 -spec ffi_call_raised(
     error | exit | throw, term(), list(), atom(), atom(), list(), coercion_mode(), term()
@@ -431,7 +433,13 @@ apply_with_coercion(Module, FunName, Args, OrigSelector, Context, Mode) ->
     %% raises `badarg` and the charlist retry runs, the retry is a fresh attempt:
     %% class-variable writes the failed first attempt made must not survive into
     %% it (ADR 0130 §4, BT-3728), so remember the pre-call state.
-    Snap = beamtalk_class_vars:snapshot(),
+    %% BT-4770: a call with no arguments has nothing for the retry to convert
+    %% (`CoercedArgs =/= Args` never holds), so it never restores and reads none.
+    Snap =
+        case Args of
+            [] -> none;
+            _ -> beamtalk_class_vars:snapshot()
+        end,
     %% BT-4170: stock Erlang modules cannot handle tagged `String` terms, so
     %% top-level `String` args are unwrapped to raw binaries before the first
     %% attempt. Beamtalk-owned modules own the representation themselves (their

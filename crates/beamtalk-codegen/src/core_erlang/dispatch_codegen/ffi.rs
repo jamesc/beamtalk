@@ -18,21 +18,23 @@ use beamtalk_cerl_doc::leaf;
 use beamtalk_core::ast::{Expression, MessageSelector};
 use beamtalk_core::semantic_analysis::InferredType;
 use beamtalk_core::semantic_analysis::type_checker::{
-    FFI_ARG_BINARY_GUARD, FFI_ARG_RUNTIME_GUARDS, ffi_arg_may_be_binary, ffi_arg_passes_unchanged,
+    FFI_ARG_RUNTIME_GUARDS, FfiArgKinds, NativeTypeRegistry, ffi_arg_kinds,
+    ffi_arg_passes_unchanged,
 };
 
 /// BT-4485: the Core Erlang guard that holds when every one of `args` passes
 /// one of the FFI type table's [`FFI_ARG_RUNTIME_GUARDS`]. An argument whose
-/// static type may be a `String`/`Binary` (BT-4759, the `bool`) also passes the
-/// table's [`FFI_ARG_BINARY_GUARD`]; a scalar-typed argument is checked exactly
+/// static type may be a `String`/`Binary` (BT-4759) or a `Dictionary`
+/// (BT-4770) also passes the table's extra guard for it
+/// ([`FfiArgKinds::extra_guards`]); a scalar-typed argument is checked exactly
 /// as before.
-fn ffi_arg_runtime_guard(args: &[(String, bool)]) -> Document<'static> {
+fn ffi_arg_runtime_guard(args: &[(String, FfiArgKinds)]) -> Document<'static> {
     args.iter()
-        .map(|(name, may_be_binary)| {
+        .map(|(name, kinds)| {
             let bifs = FFI_ARG_RUNTIME_GUARDS
                 .iter()
                 .copied()
-                .chain(may_be_binary.then_some(FFI_ARG_BINARY_GUARD));
+                .chain(kinds.extra_guards());
             bifs.map(|bif| {
                 docvec![
                     "call 'erlang':",
@@ -47,6 +49,25 @@ fn ffi_arg_runtime_guard(args: &[(String, bool)]) -> Document<'static> {
         })
         .reduce(|acc, test| docvec!["call 'erlang':'and'(", acc, ", ", test, ")"])
         .unwrap_or(Document::Str("'true'"))
+}
+
+/// What the shared FFI proof table says about `module:function/arity`'s result
+/// (BT-4485, BT-4762): `None` when the call must keep the proxy, otherwise
+/// whether the call builds the `Result` itself (`true`, a stock-mode `{ok, V}` /
+/// `ok` spec) or needs no result coercion at all (`false`). The one rule shared
+/// by an inline `Erlang module fn:` send and a `self delegate` body.
+fn ffi_result_proof(
+    registry: &NativeTypeRegistry,
+    module: &str,
+    function: &str,
+    arity: u8,
+) -> Option<bool> {
+    if registry.proves_no_result_coercion(module, function, arity) {
+        return Some(false);
+    }
+    (crate::core_erlang::util::ffi_coercion_mode(module) == "stock"
+        && registry.proves_inline_result(module, function, arity))
+    .then_some(true)
 }
 
 impl CoreErlangGenerator {
@@ -267,7 +288,7 @@ impl CoreErlangGenerator {
     /// `direct_call/4` when one fails. The call keeps the proxy's error
     /// translation: a raise is handed, with the arguments and the call
     /// site's frame (read only on that path), to
-    /// `beamtalk_erlang_proxy:ffi_call_raised/8` (`/9` with a binary argument), which runs the same
+    /// `beamtalk_erlang_proxy:ffi_call_raised/8` (`/9` with a binary or map argument), which runs the same
     /// classifier (and `badarg` charlist retry) as `direct_call/4`.
     /// Arguments are bound before the `try`, so a raise while evaluating one
     /// is not translated, as on the proxy path.
@@ -282,7 +303,8 @@ impl CoreErlangGenerator {
     ///       let S = primop 'build_stacktrace'(Raw) in
     ///       let Site = call 'erlang':'process_info'(self(), 'current_stacktrace') in
     ///       call 'beamtalk_erlang_proxy':'ffi_call_raised'(C, E, S, 'M', 'F', [A1], Mode, Site)
-    ///       (a `String`/`Binary`-typed argument adds `is_binary` to its guard and a
+    ///       (a `String`/`Binary`-typed argument adds `is_binary` to its guard, a
+    ///       `Dictionary`-typed one `is_map` (BT-4770), and either adds a
     ///       `let Snap = beamtalk_class_vars:snapshot()` before the `try`, passed as
     ///       the last argument: `ffi_call_raised/9`)
     ///   <> when 'true' -> call 'beamtalk_erlang_proxy':'direct_call'('M', 'F', [A1], Mode)
@@ -304,15 +326,10 @@ impl CoreErlangGenerator {
         let Ok(arity) = u8::try_from(arguments.len()) else {
             return Ok(None);
         };
-        // BT-4762: a spec that states an `{ok, V}` / `ok` / `{error, R}` return
-        // lets a stock-mode call build the `Result` at the call site.
-        let inline_result = !registry.proves_no_result_coercion(module_name, function_name, arity)
-            && crate::core_erlang::util::ffi_coercion_mode(module_name) == "stock"
-            && registry.proves_inline_result(module_name, function_name, arity);
-        if !inline_result && !registry.proves_no_result_coercion(module_name, function_name, arity)
-        {
+        let Some(inline_result) = ffi_result_proof(registry, module_name, function_name, arity)
+        else {
             return Ok(None);
-        }
+        };
         let args_proved = arguments.iter().all(|arg| {
             self.type_map
                 .get(arg.span())
@@ -323,7 +340,7 @@ impl CoreErlangGenerator {
         }
 
         let mut bindings: Vec<Document<'static>> = Vec::with_capacity(arguments.len());
-        let mut arg_names: Vec<(String, bool)> = Vec::with_capacity(arguments.len());
+        let mut arg_names: Vec<(String, FfiArgKinds)> = Vec::with_capacity(arguments.len());
         for arg in arguments {
             let var = self.fresh_temp_var("FfiArg");
             bindings.push(docvec![
@@ -333,11 +350,12 @@ impl CoreErlangGenerator {
                 self.expression_doc(arg)?,
                 " in "
             ]);
-            let may_be_binary = self
+            let kinds = self
                 .type_map
                 .get(arg.span())
-                .is_some_and(ffi_arg_may_be_binary);
-            arg_names.push((var, may_be_binary));
+                .map(ffi_arg_kinds)
+                .unwrap_or_default();
+            arg_names.push((var, kinds));
         }
         Ok(Some(docvec![
             Document::Vec(bindings),
@@ -376,20 +394,20 @@ impl CoreErlangGenerator {
         let registry = self.native_type_registry.as_ref()?;
         let arity = u8::try_from(arg_vars.len()).ok()?;
         let function_name = selector.leading_word();
-        if !registry.proves_no_result_coercion(backing_module, function_name, arity) {
-            return None;
-        }
-        let mut args: Vec<(String, bool)> = Vec::with_capacity(arg_vars.len());
+        // BT-4770: a spec that states an `{ok, V}` / `ok` / `{error, R}` return
+        // lets a delegate build the `Result` at the call site too.
+        let inline_result = ffi_result_proof(registry, backing_module, function_name, arity)?;
+        let mut args: Vec<(String, FfiArgKinds)> = Vec::with_capacity(arg_vars.len());
         for (var, ty) in arg_vars.iter().zip(arg_types) {
             let ty = ty.as_ref().filter(|t| ffi_arg_passes_unchanged(t))?;
-            args.push((var.clone(), ffi_arg_may_be_binary(ty)));
+            args.push((var.clone(), ffi_arg_kinds(ty)));
         }
         Some(self.guarded_direct_ffi_doc(
             backing_module,
             function_name,
             &args,
             Some((class_name, selector.name().as_ref())),
-            false,
+            inline_result,
         ))
     }
 
@@ -402,7 +420,7 @@ impl CoreErlangGenerator {
         &mut self,
         module_name: &str,
         function_name: &str,
-        args: &[(String, bool)],
+        args: &[(String, FfiArgKinds)],
         context: Option<(&str, &str)>,
         inline_result: bool,
     ) -> Document<'static> {
@@ -414,12 +432,14 @@ impl CoreErlangGenerator {
                 sep.into_iter().chain([leaf::var(var.clone())])
             })
             .collect();
-        // BT-4759: a binary argument lets the `badarg` charlist retry run, and
-        // a retry is a fresh attempt (ADR 0130 §4), so the call site keeps the
-        // pre-call class-variable snapshot for it, as the proxy does. A call
-        // with only scalar arguments never retries and takes none.
-        let any_binary = args.iter().any(|(_, b)| *b);
-        let snap_var = any_binary.then(|| self.fresh_temp_var("FfiSnap"));
+        // BT-4759: a binary argument lets the `badarg` charlist retry run (so
+        // does a map, whose nested Strings the retry unwraps, BT-4770), and a
+        // retry is a fresh attempt (ADR 0130 §4), so the call site keeps the
+        // pre-call class-variable snapshot for it, as the proxy does. It must be
+        // read before the call, so it cannot be taken lazily in the handler. A
+        // call with only scalar arguments never retries and takes none.
+        let any_retry = args.iter().any(|(_, kinds)| kinds.may_retry());
+        let snap_var = any_retry.then(|| self.fresh_temp_var("FfiSnap"));
         let module_atom = leaf::atom(module_name.to_string());
         let function_atom = leaf::atom(function_name.to_string());
         let mode_atom = leaf::atom(crate::core_erlang::util::ffi_coercion_mode(module_name));
