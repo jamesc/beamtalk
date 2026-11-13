@@ -926,3 +926,53 @@ Object subclass: Thing
     let report = narrowing_report(source, true);
     assert_eq!(report.narrowing_casts, 0, "{:?}", report.narrowing_entries);
 }
+
+// ── Narrowing casts through a type alias (BT-4796) ───────
+
+fn narrowing_report_with_aliases(source: &str, detail: bool) -> CoverageReport {
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, _diags) = crate::source_analysis::parse(tokens);
+    let (hierarchy, _) = ClassHierarchy::build(&module);
+    let hierarchy = hierarchy.expect("hierarchy build failed");
+    let aliases = std::sync::Arc::new(
+        crate::semantic_analysis::AliasRegistry::from_module_declarations(&module),
+    );
+    let (type_map, _) =
+        infer_types_and_returns_with_registries(&module, &hierarchy, None, None, Some(aliases));
+    CoverageReport::from_module(&module, &type_map, &hierarchy, "n.bt", detail)
+}
+
+#[test]
+fn coverage_counts_narrowing_cast_through_alias() {
+    let source = r"
+type Count = Integer
+
+Object subclass: Reader
+  read: opts :: Dictionary =>
+    n :: Count := opts at: #max
+    n
+";
+    let report = narrowing_report_with_aliases(source, true);
+    assert_eq!(report.narrowing_casts, 1, "{:?}", report.narrowing_entries);
+    assert_eq!(report.narrowing_entries.len(), 1);
+    assert_eq!(report.narrowing_entries[0].declared.as_str(), "Integer");
+    assert_eq!(report.narrowing_entries[0].rhs.as_str(), "Dynamic");
+}
+
+#[test]
+fn coverage_ignores_redundant_and_widening_annotations_through_alias() {
+    let source = r"
+type Count = Integer
+type MaybeInt = Integer | Nil
+
+Object subclass: Thing
+  redundant =>
+    n :: Count := 42
+    n
+  widening =>
+    status :: MaybeInt := nil
+    status
+";
+    let report = narrowing_report_with_aliases(source, true);
+    assert_eq!(report.narrowing_casts, 0, "{:?}", report.narrowing_entries);
+}
