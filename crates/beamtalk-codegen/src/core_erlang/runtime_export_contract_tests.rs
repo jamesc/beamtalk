@@ -458,7 +458,7 @@ fn dynamic_calls() -> Vec<EmittedCall> {
         out.push(call(
             "beamtalk_behaviour_intrinsics",
             f.name(),
-            Some(3),
+            Some(f.arity()),
             "KindOfFn::ALL",
         ));
     }
