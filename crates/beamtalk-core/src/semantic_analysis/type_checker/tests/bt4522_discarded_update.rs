@@ -341,3 +341,127 @@ fn map_literal_receiver_warns() {
     );
     assert_eq!(discarded(&diags).len(), 1, "got: {diags:#?}");
 }
+
+// ── BT-4788: overrides and extensions that do not answer the receiver ───────
+//
+// `answers_receiver` describes the method the static type resolves. A subclass
+// override or a standalone extension that answers a new value makes the call
+// an update at run time, so the silence must not apply.
+
+#[test]
+fn subclass_override_that_builds_a_copy_still_warns() {
+    let source = "\
+Value subclass: Handle
+  field: id :: Integer = 0
+  store: v :: Integer -> Self =>
+    Erlang erlang put: #handle value: v.
+    self
+
+Handle subclass: Wrapped
+  store: v :: Integer -> Self => self withId: v
+
+Object subclass: Probe
+  run: h :: Handle -> Integer =>
+    h store: 1.
+    3
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    assert_eq!(discarded(&diags).len(), 1, "got: {diags:#?}");
+}
+
+#[test]
+fn subclass_override_that_answers_self_stays_silent() {
+    let source = "\
+Value subclass: Handle
+  field: id :: Integer = 0
+  store: v :: Integer -> Self =>
+    Erlang erlang put: #handle value: v.
+    self
+
+Handle subclass: Logged
+  store: v :: Integer -> Self =>
+    Logger info: \"store\".
+    self
+
+Object subclass: Probe
+  run: h :: Handle -> Integer =>
+    h store: 1.
+    3
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    assert!(discarded(&diags).is_empty(), "got: {diags:#?}");
+}
+
+#[test]
+fn extension_that_builds_a_copy_still_warns() {
+    let source = "\
+Value subclass: Handle
+  field: id :: Integer = 0
+  store: v :: Integer -> Self =>
+    Erlang erlang put: #handle value: v.
+    self
+
+Handle >> store: v :: Integer -> Self => self withId: v
+
+Object subclass: Probe
+  run: h :: Handle -> Integer =>
+    h store: 1.
+    3
+";
+    let module = parse_source(source);
+    assert_eq!(module.method_definitions.len(), 1, "extension must parse");
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    assert_eq!(discarded(&diags).len(), 1, "got: {diags:#?}");
+}
+
+#[test]
+fn extension_that_answers_self_stays_silent() {
+    let source = "\
+Value subclass: Handle
+  field: id :: Integer = 0
+  store: v :: Integer -> Self =>
+    Erlang erlang put: #handle value: v.
+    self
+
+Handle >> store: v :: Integer -> Self => self
+
+Object subclass: Probe
+  run: h :: Handle -> Integer =>
+    h store: 1.
+    3
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    assert!(discarded(&diags).is_empty(), "got: {diags:#?}");
+}
+
+#[test]
+fn unrelated_extension_with_the_same_selector_stays_silent() {
+    let source = "\
+Value subclass: Handle
+  field: id :: Integer = 0
+  store: v :: Integer -> Self =>
+    Erlang erlang put: #handle value: v.
+    self
+
+Value subclass: Other
+  field: id :: Integer = 0
+
+Other >> store: v :: Integer -> Self => self withId: v
+
+Object subclass: Probe
+  run: h :: Handle -> Integer =>
+    h store: 1.
+    3
+";
+    let module = parse_source(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let diags = run_with_expect(&module, &hierarchy);
+    assert!(discarded(&diags).is_empty(), "got: {diags:#?}");
+}

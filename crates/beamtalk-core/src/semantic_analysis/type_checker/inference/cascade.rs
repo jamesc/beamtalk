@@ -303,7 +303,7 @@ pub fn cascade_drops_update(
     // through a side effect (process dictionary, socket, logger, telemetry)
     // or only to raise; a value cannot mutate itself, so the answer is the
     // receiver, never an updated copy.
-    if method.answers_receiver {
+    if hierarchy.answers_receiver_everywhere(class_name, method) {
         return false;
     }
     match &method.return_type {

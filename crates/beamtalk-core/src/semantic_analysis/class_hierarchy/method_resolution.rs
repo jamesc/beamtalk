@@ -112,6 +112,41 @@ impl ClassHierarchy {
         })
     }
 
+    /// Whether a call of `method` (as found by [`Self::find_method`]) on a
+    /// receiver of static class `receiver_class` answers its receiver for
+    /// every method that call can reach (BT-4788).
+    ///
+    /// `method.answers_receiver` describes only the method the static type
+    /// resolves. At run time the receiver may be a subclass whose override
+    /// builds a new value, and a standalone extension (`Class >> sel =>`)
+    /// replaces the method for its class; neither is in `method`. This is
+    /// `false` when any subclass of `receiver_class`, or any extension on
+    /// `receiver_class`, a subclass, or an ancestor at or below the defining
+    /// class, supplies a `selector` that does not answer its receiver.
+    /// Extensions declared in packages whose extensions are not loaded are
+    /// invisible (the same limit as every extension-aware check).
+    #[must_use]
+    pub fn answers_receiver_everywhere(&self, receiver_class: &str, method: &MethodInfo) -> bool {
+        if !method.answers_receiver {
+            return false;
+        }
+        let selector = method.selector.as_str();
+        let overridden = self.all_subclasses(receiver_class).iter().any(|sub| {
+            self.get_class(sub)
+                .and_then(|info| info.methods.iter().find(|m| m.selector == selector))
+                .is_some_and(|m| m.kind == MethodKind::Primary && !m.answers_receiver)
+        });
+        if overridden {
+            return false;
+        }
+        !self.updating_extensions.iter().any(|(class, sel)| {
+            sel == selector
+                && (self.is_subclass_of(class, receiver_class)
+                    || (self.is_subclass_of(receiver_class, class)
+                        && self.is_subclass_of(class, &method.defined_in)))
+        })
+    }
+
     /// Find a class-side method by selector (including inherited class methods).
     ///
     /// When an intermediate class in the superclass chain is not found in the
