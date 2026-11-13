@@ -58,7 +58,8 @@
 ).
 
 %% Expr returns a Beamtalk `Result` object that is an error
-%% (`isOk := false`) whose `errReason` is `#{error := #beamtalk_error{kind, class, selector}}`.
+%% (`isOk := false`) whose `errReason` is a wrapped Exception
+%% `#{'$beamtalk_class' := _, error := #beamtalk_error{kind, class, selector}}`.
 -define(assertBtResultObjError(Kind, Class, Selector, Expr),
     ?assertMatch(
         #{
