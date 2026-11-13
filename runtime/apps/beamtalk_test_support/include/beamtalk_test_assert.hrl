@@ -11,7 +11,9 @@
 -ifndef(BEAMTALK_TEST_ASSERT_HRL).
 -define(BEAMTALK_TEST_ASSERT_HRL, true).
 
-%% Expr raises `#{error := #beamtalk_error{kind, class, selector}}`.
+%% Expr raises a wrapped Exception
+%% `#{'$beamtalk_class' := _, error := #beamtalk_error{kind, class, selector}}`
+%% (a bare `#{error := ...}` map does not match).
 -define(assertBtError(Kind, Class, Selector, Expr),
     ?assertError(
         #{
