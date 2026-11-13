@@ -1472,9 +1472,9 @@ install_method_with_source(
         class_name => ClassNameBin,
         %% Side comes from the caller: `false` for the instance-side
         %% `compile:source:` / MCP `save_method` / IDE-save chokepoint; `true`
-        %% for a class-side revert re-install. The REPL `Class class >>
-        %% sel` path still flows through `reload_method_definition`, which carries
-        %% the side in its `MethodInfo`.
+        %% for a class-side revert re-install and for the REPL's `Class class >>
+        %% sel` (`reload_method_definition` reads the side from its `MethodInfo`
+        %% and calls this function).
         is_class_method => IsClassMethod,
         module_name => ModuleNameOverride,
         source_path => source_path_binary(SourcePath),

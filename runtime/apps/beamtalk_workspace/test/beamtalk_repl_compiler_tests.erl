@@ -316,14 +316,6 @@ compile_for_codegen_noproc_test() ->
     ?assertMatch({error, {compile_error, _}}, Result).
 
 %%====================================================================
-%% compile_for_method_reload/2 (public API)
-%%====================================================================
-
-compile_for_method_reload_noproc_test() ->
-    Result = beamtalk_repl_compiler:compile_for_method_reload(<<"Object subclass: X [\n]\n">>, #{}),
-    ?assertMatch({error, {compile_error, _}}, Result).
-
-%%====================================================================
 %% compile_standard_expression/2
 %%====================================================================
 
@@ -400,9 +392,6 @@ compiler_success_test_() ->
         {"compile_for_codegen invalid returns error", fun compile_for_codegen_invalid/0},
         {"compile_file_for_codegen succeeds", fun compile_file_for_codegen_ok/0},
         {"compile_file_for_codegen invalid returns error", fun compile_file_for_codegen_invalid/0},
-        {"compile_for_method_reload succeeds", fun compile_for_method_reload_ok/0},
-        {"compile_for_method_reload invalid returns error",
-            fun compile_for_method_reload_invalid/0},
         {"compile_standard_expression valid core succeeds", fun compile_standard_expression_ok/0},
         {"compile_file_core valid core succeeds", fun compile_file_core_ok/0},
         {"build_class_indexes returns map", fun build_class_indexes_ok/0},
@@ -519,19 +508,6 @@ compile_file_for_codegen_ok() ->
 
 compile_file_for_codegen_invalid() ->
     Result = beamtalk_repl_compiler:compile_file_for_codegen(<<"+++ bad">>, "/src/Bad.bt"),
-    ?assertMatch({error, {compile_error, _}}, Result).
-
-compile_for_method_reload_ok() ->
-    Source = <<"Actor subclass: ReplMethodReload\n  value => 5">>,
-    Result = beamtalk_repl_compiler:compile_for_method_reload(Source, #{}),
-    {ok, Binary, ModName, Classes, Warnings} = Result,
-    ?assert(is_binary(Binary)),
-    ?assert(is_atom(ModName)),
-    ?assert(is_list(Classes)),
-    ?assert(is_list(Warnings)).
-
-compile_for_method_reload_invalid() ->
-    Result = beamtalk_repl_compiler:compile_for_method_reload(<<"+++ bad">>, #{}),
     ?assertMatch({error, {compile_error, _}}, Result).
 
 compile_standard_expression_ok() ->

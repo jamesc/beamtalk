@@ -680,6 +680,8 @@ pub(super) fn extract_class_metadata(
 
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
     let (mut module, _diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    // One compilation unit per class (BT-4721).
+    let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
 
     // ADR 0127 §3/§10a (BT-3594): this generator does its own from-scratch
     // parse of the file (not the real `compile_stdlib_file` pipeline a few

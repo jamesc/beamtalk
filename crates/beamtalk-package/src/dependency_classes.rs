@@ -466,7 +466,11 @@ fn scan_dep(dep_root: &Utf8Path, dep_name: &str) -> Option<std::sync::Arc<Scanne
         };
 
         let tokens = lex_with_eof(&source);
-        let (module, parse_diags) = parse(tokens);
+        let (mut module, parse_diags) = parse(tokens);
+        // One compilation unit per class (BT-4721): a dependency's same-file
+        // extension is a method of its class, as `beamtalk build`'s scan sees it
+        // (the extension index skips same-file extensions).
+        let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
         class_infos
             .extend(beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module));
         trait_users.add_source_file(&module, file.as_str(), &source, Some(dep_name));

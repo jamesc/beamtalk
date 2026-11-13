@@ -1,9 +1,13 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-4721: class for the REPL redefine-then-save case.
+// BT-4721: class for the REPL redefine-then-save case. `baz` and `make` are
+// same-file extensions, folded into the class.
 Value subclass: SameFileRedefine
 
   foo => 1
 
   bar => 10
+
+SameFileRedefine >> baz => 3
+SameFileRedefine class >> make => 1
