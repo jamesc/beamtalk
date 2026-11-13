@@ -871,8 +871,12 @@ impl ClassHierarchy {
                 origin: None,
                 primitive: None,
                 constant_value: None,
-                answers_receiver: false,
+                answers_receiver: first.type_info.answers_receiver,
             };
+            if key.side == MethodSide::Instance && !first.type_info.answers_receiver {
+                self.updating_extensions
+                    .insert((key.class_name.clone(), key.selector.clone()));
+            }
             if let Some(class_info) = self.classes.get_mut(key.class_name.as_str()) {
                 let methods = match key.side {
                     MethodSide::Instance => &mut class_info.methods,
@@ -920,8 +924,6 @@ impl ClassHierarchy {
     /// definitions. A real incoming class *does* overwrite a synthetic protocol.
     pub fn merge(&mut self, other: &ClassHierarchy) {
         let mut changed = false;
-        self.updating_extensions
-            .extend(other.updating_extensions.iter().cloned());
         for (name, info) in other.classes.iter_unrecorded() {
             if builtins::is_builtin_class(name) {
                 continue;

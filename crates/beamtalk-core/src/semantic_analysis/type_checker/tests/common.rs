@@ -376,6 +376,7 @@ pub(super) fn hierarchy_with_extension(
             file_path: PathBuf::from("test.bt"),
             span: span(),
             type_info: ExtensionTypeInfo {
+                answers_receiver: false,
                 arity,
                 param_types,
                 return_type,

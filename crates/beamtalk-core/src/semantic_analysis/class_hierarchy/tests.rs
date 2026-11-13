@@ -2821,6 +2821,7 @@ fn register_extensions_adds_instance_method() {
             file_path: PathBuf::from("String+Shout.bt"),
             span: test_span(),
             type_info: ExtensionTypeInfo {
+                answers_receiver: false,
                 arity: 0,
                 param_types: vec![],
                 return_type: Some("String".into()),
@@ -2855,6 +2856,7 @@ fn register_extensions_adds_class_method() {
             file_path: PathBuf::from("String+JSON.bt"),
             span: test_span(),
             type_info: ExtensionTypeInfo {
+                answers_receiver: false,
                 arity: 1,
                 param_types: vec![Some("String".into())],
                 return_type: Some("String".into()),
@@ -2887,6 +2889,7 @@ fn register_extensions_unannotated_uses_dynamic() {
             file_path: PathBuf::from("Array+Shuffle.bt"),
             span: test_span(),
             type_info: ExtensionTypeInfo {
+                answers_receiver: false,
                 arity: 0,
                 param_types: vec![],
                 return_type: None,
@@ -2918,6 +2921,7 @@ fn register_extensions_skips_unknown_class() {
             file_path: PathBuf::from("Nonexistent+Stuff.bt"),
             span: test_span(),
             type_info: ExtensionTypeInfo {
+                answers_receiver: false,
                 arity: 0,
                 param_types: vec![],
                 return_type: None,
@@ -2949,6 +2953,7 @@ fn register_extensions_does_not_override_existing_method() {
             file_path: PathBuf::from("String+Size.bt"),
             span: test_span(),
             type_info: ExtensionTypeInfo {
+                answers_receiver: false,
                 arity: 0,
                 param_types: vec![],
                 return_type: Some("Integer".into()),
@@ -2983,6 +2988,7 @@ fn register_extensions_resolves_selector() {
             file_path: PathBuf::from("String+JSON.bt"),
             span: test_span(),
             type_info: ExtensionTypeInfo {
+                answers_receiver: false,
                 arity: 0,
                 param_types: vec![],
                 return_type: Some("String".into()),

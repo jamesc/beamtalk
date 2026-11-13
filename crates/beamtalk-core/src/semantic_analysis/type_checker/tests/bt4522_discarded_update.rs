@@ -396,54 +396,12 @@ Object subclass: Probe
     assert!(discarded(&diags).is_empty(), "got: {diags:#?}");
 }
 
-#[test]
-fn extension_that_builds_a_copy_still_warns() {
-    let source = "\
-Value subclass: Handle
-  field: id :: Integer = 0
-  store: v :: Integer -> Self =>
-    Erlang erlang put: #handle value: v.
-    self
-
-Handle >> store: v :: Integer -> Self => self withId: v
-
-Object subclass: Probe
-  run: h :: Handle -> Integer =>
-    h store: 1.
-    3
-";
-    let module = parse_source(source);
-    assert_eq!(module.method_definitions.len(), 1, "extension must parse");
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let diags = run_with_expect(&module, &hierarchy);
-    assert_eq!(discarded(&diags).len(), 1, "got: {diags:#?}");
-}
-
-#[test]
-fn extension_that_answers_self_stays_silent() {
-    let source = "\
-Value subclass: Handle
-  field: id :: Integer = 0
-  store: v :: Integer -> Self =>
-    Erlang erlang put: #handle value: v.
-    self
-
-Handle >> store: v :: Integer -> Self => self
-
-Object subclass: Probe
-  run: h :: Handle -> Integer =>
-    h store: 1.
-    3
-";
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let diags = run_with_expect(&module, &hierarchy);
-    assert!(discarded(&diags).is_empty(), "got: {diags:#?}");
-}
-
-#[test]
-fn unrelated_extension_with_the_same_selector_stays_silent() {
-    let source = "\
+/// Diagnostics for `Probe run:` over a hierarchy built from `HANDLE_BASE`
+/// with `extension` (a separate file's `Handle >> store: …`) registered
+/// through the cross-file `ExtensionIndex`, as `beamtalk build` does.
+fn cross_file_extension_diagnostics(extension: &str, target: &str) -> Vec<Diagnostic> {
+    let base = format!(
+        "\
 Value subclass: Handle
   field: id :: Integer = 0
   store: v :: Integer -> Self =>
@@ -453,15 +411,49 @@ Value subclass: Handle
 Value subclass: Other
   field: id :: Integer = 0
 
-Other >> store: v :: Integer -> Self => self withId: v
-
 Object subclass: Probe
-  run: h :: Handle -> Integer =>
+  run: h :: {target} -> Integer =>
     h store: 1.
     3
-";
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let diags = run_with_expect(&module, &hierarchy);
+"
+    );
+    let module = parse_source(&base);
+    let mut hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let ext_module = parse_source(extension);
+    assert_eq!(
+        ext_module.method_definitions.len(),
+        1,
+        "extension must parse"
+    );
+    let mut index = crate::compilation::extension_index::ExtensionIndex::new();
+    index.add_module(&ext_module, std::path::Path::new("ext.bt"));
+    hierarchy.register_extensions(&index);
+    run_with_expect(&module, &hierarchy)
+}
+
+#[test]
+fn cross_file_extension_that_builds_a_copy_still_warns() {
+    let diags = cross_file_extension_diagnostics(
+        "Handle >> store: v :: Integer -> Self => self withId: v\n",
+        "Handle",
+    );
+    assert_eq!(discarded(&diags).len(), 1, "got: {diags:#?}");
+}
+
+#[test]
+fn cross_file_extension_that_answers_self_stays_silent() {
+    let diags = cross_file_extension_diagnostics(
+        "Handle >> store: v :: Integer -> Self => self\n",
+        "Handle",
+    );
+    assert!(discarded(&diags).is_empty(), "got: {diags:#?}");
+}
+
+#[test]
+fn cross_file_extension_on_an_unrelated_class_stays_silent() {
+    let diags = cross_file_extension_diagnostics(
+        "Other >> store: v :: Integer -> Self => self withId: v\n",
+        "Handle",
+    );
     assert!(discarded(&diags).is_empty(), "got: {diags:#?}");
 }

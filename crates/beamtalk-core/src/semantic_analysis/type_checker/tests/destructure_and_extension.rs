@@ -283,6 +283,7 @@ fn extension_method_class_side_no_warning() {
             file_path: PathBuf::from("test.bt"),
             span: span(),
             type_info: ExtensionTypeInfo {
+                answers_receiver: false,
                 arity: 1,
                 param_types: vec![Some("String".into())],
                 return_type: Some("String".into()),

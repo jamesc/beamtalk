@@ -728,7 +728,7 @@ on every path (BT-4739) is not an update either: a value cannot mutate itself
 (`TestCase` can assign its own slots, so a body with `self.x := …` always
 counts as an update), so `store: v`, `send: data` or `checkHeaders: h` that ends in `self` (or
 `^ self`) works through a side effect or only to raise, and a call to it is
-never flagged unless a subclass override, or a standalone extension (`Handle >> store: v => …`, in the same compilation or a loaded dependency), supplies the same selector with a body that does not answer its receiver: the call may then reach an update, so it warns (BT-4788). Every `^` in such a body must return `self` or raise
+never flagged unless a subclass override, or an extension in another file or a loaded dependency (`Handle >> store: v => …`), supplies the same selector with a body that does not answer its receiver: the call may then reach an update, so it warns (BT-4788). Every `^` in such a body must return `self` or raise
 (`^ self error: "…"`). A method that ends in a new value (`self withX: 1`),
 has a `^` that answers something else, or is a bare `@primitive` still counts
 as an update. To discard a result on purpose, assign it to an
