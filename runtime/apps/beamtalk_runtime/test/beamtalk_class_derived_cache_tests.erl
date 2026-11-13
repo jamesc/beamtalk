@@ -159,7 +159,9 @@ memo_follows_invalidate() ->
 
 memo_hit_runs_valid() ->
     Key = key(),
-    ?assertEqual(a, beamtalk_class_derived_cache:fetch(Key, fun() -> {cache, a} end, fun(_) -> true end)),
+    ?assertEqual(
+        a, beamtalk_class_derived_cache:fetch(Key, fun() -> {cache, a} end, fun(_) -> true end)
+    ),
     %% Warm in the memo; a failing Valid must still send it back to Compute.
     ?assertEqual(
         b,
@@ -186,7 +188,12 @@ no_generation_no_memo() ->
 memo_is_bounded() ->
     ok = beamtalk_class_derived_cache:invalidate(),
     erase({beamtalk_class_derived_cache, memo}),
-    [beamtalk_class_derived_cache:fetch({memo_bound, N}, fun() -> {cache, N} end) || N <- lists:seq(1, 5000)],
+    [
+        beamtalk_class_derived_cache:fetch({memo_bound, N}, fun() -> {cache, N} end)
+     || N <- lists:seq(1, 5000)
+    ],
     ?assert(memo_size() =< 4096),
     ?assert(memo_size() > 0),
-    ?assertEqual(5000, beamtalk_class_derived_cache:fetch({memo_bound, 5000}, fun() -> error(recomputed) end)).
+    ?assertEqual(
+        5000, beamtalk_class_derived_cache:fetch({memo_bound, 5000}, fun() -> error(recomputed) end)
+    ).

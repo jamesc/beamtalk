@@ -253,7 +253,9 @@ fetch_valid(Key, Compute, Valid) ->
     end.
 
 %% The per-process memo missed: read the ETS layer, and memoise a hit.
--spec fetch_ets(term(), integer(), fun(() -> {cache | nocache, Value}), fun((Value) -> boolean()) | always) ->
+-spec fetch_ets(
+    term(), integer(), fun(() -> {cache | nocache, Value}), fun((Value) -> boolean()) | always
+) ->
     Value.
 fetch_ets(Key, Gen, Compute, Valid) ->
     try ets:lookup(?TABLE, Key) of
