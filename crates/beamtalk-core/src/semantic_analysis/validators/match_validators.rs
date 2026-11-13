@@ -492,7 +492,7 @@ fn validate_type_pattern_class(
                 class.span,
             )
             .with_hint(
-                "At run time the value is a raw Reference, Pid or fd tuple, not tagged with \
+                "At run time the value is its raw underlying Erlang term, not tagged with \
                  this class. Use a `_` arm, or match on the underlying representation."
                     .to_string(),
             )
@@ -589,8 +589,6 @@ mod tests {
     use crate::source_analysis::lex_with_eof;
     use crate::source_analysis::parse;
 
-    // ── Match exhaustiveness for sealed types ─────────────────────────────────
-
     // ── BT-4797: static-only handle classes in type patterns ──────────────────
 
     fn type_pattern_diags(src: &str) -> Vec<Diagnostic> {
@@ -637,6 +635,8 @@ mod tests {
             assert!(diags.is_empty(), "{handle}: {diags:?}");
         }
     }
+
+    // ── Match exhaustiveness for sealed types ─────────────────────────────────
 
     /// Missing `error:` arm without wildcard → compile error.
     #[test]
