@@ -204,7 +204,10 @@ memo_is_bounded() ->
 memo_sweeps_stale() ->
     ok = beamtalk_class_derived_cache:invalidate(),
     erase_memo(),
-    [beamtalk_class_derived_cache:fetch({memo_stale, N}, fun() -> {cache, N} end) || N <- [1, 2, 3]],
+    [
+        beamtalk_class_derived_cache:fetch({memo_stale, N}, fun() -> {cache, N} end)
+     || N <- [1, 2, 3]
+    ],
     ?assertEqual(3, memo_size()),
     ok = beamtalk_class_derived_cache:invalidate(),
     %% Entries from the old generation linger until the next store, which
