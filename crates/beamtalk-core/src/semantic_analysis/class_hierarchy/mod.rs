@@ -578,6 +578,14 @@ impl ClassHierarchy {
     pub fn has_class(&self, name: &str) -> bool {
         self.classes.contains_key(name)
     }
+    /// [`has_class`](Self::has_class) without recording a dependency.
+    ///
+    /// For the alias-seeding collision check, which the build keys on a digest
+    /// of the package's alias problems instead of on every alias name (BT-4791).
+    #[must_use]
+    pub(crate) fn has_class_unrecorded(&self, name: &str) -> bool {
+        self.classes.contains_key_unrecorded(name)
+    }
     /// Check if `name` is a synthetic protocol class entry.
     ///
     /// Returns `true` when `register_protocol_classes` inserted the entry for a

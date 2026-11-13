@@ -48,6 +48,11 @@ pub(crate) struct SurfaceKeys {
     protocols_digest: String,
     /// Digest of every type alias (an alias-registry scan).
     aliases_digest: String,
+    /// Digest of the alias problems every file's alias seeding reports:
+    /// aliases whose name is also a class or protocol, aliases declared more
+    /// than once, and alias cycles. Constant while the package has none, so an
+    /// alias edit that creates no problem moves only the files that name it.
+    alias_problems_digest: String,
     /// Package-wide inputs no name addresses (the dependency-extension guard,
     /// the project-known Erlang modules); folded into every file's key.
     pub(crate) globals: String,
@@ -156,6 +161,8 @@ impl SurfaceKeys {
             map.get(name).map(|list| list.join("\n"))
         };
 
+        let alias_problems_digest = alias_problems_digest(&parts, alias_infos);
+
         let all_names: BTreeSet<&EcoString> = parts
             .class
             .keys()
@@ -201,6 +208,7 @@ impl SurfaceKeys {
             classes_digest: digest(&parts.class),
             protocols_digest: digest(&parts.protocol),
             aliases_digest: digest(&parts.alias),
+            alias_problems_digest,
             globals: String::new(),
         })
     }
@@ -230,6 +238,10 @@ impl SurfaceKeys {
             buf.push_str("\naliases:");
             buf.push_str(&self.aliases_digest);
         }
+        if surface.alias_seeding {
+            buf.push_str("\nalias-problems:");
+            buf.push_str(&self.alias_problems_digest);
+        }
         // `names` is a sorted set, so the order is stable.
         for name in &surface.names {
             buf.push('\n');
@@ -239,6 +251,55 @@ impl SurfaceKeys {
         }
         Some(sha256_hex(buf.as_bytes()))
     }
+}
+
+/// Digest of the alias problems that alias seeding reports in every file.
+///
+/// A superset of what `AliasRegistry::add_pre_loaded` can diagnose: a name that
+/// is both an alias and a class (builtin, package, or index stub), protocol, or
+/// a second alias, plus every cycle over the package's aliases and the baked
+/// stdlib ones. Over-approximating only costs a rebuild; the problems
+/// themselves are unchanged by an edit that creates none.
+fn alias_problems_digest(
+    parts: &Parts,
+    alias_infos: &[beamtalk_core::semantic_analysis::AliasInfo],
+) -> String {
+    use beamtalk_core::semantic_analysis::alias_registry::alias_cycle_keys;
+    use beamtalk_core::semantic_analysis::class_hierarchy::ClassHierarchy;
+    let builtins = ClassHierarchy::with_builtins();
+    let mut buf = String::new();
+    for (name, list) in &parts.alias {
+        let collides = builtins.has_class(name)
+            || parts.class.contains_key(name)
+            || parts.protocol.contains_key(name)
+            || list.len() > 1;
+        if collides {
+            buf.push_str("collision:");
+            buf.push_str(name);
+            buf.push('=');
+            buf.push_str(&list.join("\n"));
+            buf.push('\u{1}');
+        }
+    }
+    // The compiler-baked stdlib aliases are seeded under the package's own.
+    let mut all: Vec<_> = alias_infos.to_vec();
+    all.extend(
+        ClassHierarchy::generated_stdlib_aliases()
+            .into_iter()
+            .filter(|baked| !parts.alias.contains_key(&baked.name)),
+    );
+    for cycle in alias_cycle_keys(&all) {
+        buf.push_str("cycle:");
+        buf.push_str(
+            &cycle
+                .iter()
+                .map(EcoString::as_str)
+                .collect::<Vec<_>>()
+                .join(">"),
+        );
+        buf.push('\u{1}');
+    }
+    sha256_hex(buf.as_bytes())
 }
 
 /// The sidecar key stashing a file's consulted surface next to its beam hash
@@ -255,6 +316,7 @@ pub(crate) fn encode_surface(surface: &ConsultedSurface) -> String {
         "c": surface.scanned_classes,
         "p": surface.scanned_protocols,
         "a": surface.scanned_aliases,
+        "s": surface.alias_seeding,
         "x": surface.extensions_unknown,
     })
     .to_string()
@@ -275,6 +337,7 @@ pub(crate) fn decode_surface(text: &str) -> Option<ConsultedSurface> {
         scanned_classes: flag("c")?,
         scanned_protocols: flag("p")?,
         scanned_aliases: flag("a")?,
+        alias_seeding: flag("s")?,
         extensions_unknown: flag("x")?,
     })
 }
@@ -297,6 +360,7 @@ mod tests {
             scanned_classes: true,
             scanned_protocols: false,
             scanned_aliases: true,
+            alias_seeding: true,
             extensions_unknown: false,
         };
         assert_eq!(decode_surface(&encode_surface(&original)), Some(original));
@@ -335,6 +399,10 @@ mod tests {
             },
             ConsultedSurface {
                 scanned_aliases: true,
+                ..surface(&["A"])
+            },
+            ConsultedSurface {
+                alias_seeding: true,
                 ..surface(&["A"])
             },
         ] {
