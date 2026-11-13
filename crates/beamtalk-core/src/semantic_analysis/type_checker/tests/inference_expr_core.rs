@@ -13,74 +13,64 @@ use crate::semantic_analysis::type_checker::well_known::WellKnownClass;
 #[test]
 fn infer_expr_integer_literal() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    let ty = checker.infer_expr(&int_lit(42), &hierarchy, &mut env, false);
+    let ty = infer(&int_lit(42), &hierarchy);
     assert_eq!(ty, InferredType::known("Integer"));
 }
 
 #[test]
 fn infer_expr_string_literal() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    let ty = checker.infer_expr(&str_lit("hello"), &hierarchy, &mut env, false);
+    let ty = infer(&str_lit("hello"), &hierarchy);
     assert_eq!(ty, InferredType::known("String"));
 }
 
 #[test]
 fn infer_expr_true_identifier() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    let ty = checker.infer_expr(&var("true"), &hierarchy, &mut env, false);
+    let ty = infer(&var("true"), &hierarchy);
     assert_eq!(ty, InferredType::known("Boolean"));
 }
 
 #[test]
 fn infer_expr_false_identifier() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    let ty = checker.infer_expr(&var("false"), &hierarchy, &mut env, false);
+    let ty = infer(&var("false"), &hierarchy);
     assert_eq!(ty, InferredType::known("Boolean"));
 }
 
 #[test]
 fn infer_expr_nil_identifier() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    let ty = checker.infer_expr(&var("nil"), &hierarchy, &mut env, false);
+    let ty = infer(&var("nil"), &hierarchy);
     assert_eq!(ty, InferredType::known("UndefinedObject"));
 }
 
 #[test]
 fn infer_expr_self_identifier() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("self", InferredType::known("Counter"));
-    let ty = checker.infer_expr(&var("self"), &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &var("self"),
+        &hierarchy,
+        &[("self", InferredType::known("Counter"))],
+    );
     assert_eq!(ty, InferredType::known("Counter"));
 }
 
 #[test]
 fn infer_expr_env_variable() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("myVar", InferredType::known("String"));
-    let ty = checker.infer_expr(&var("myVar"), &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &var("myVar"),
+        &hierarchy,
+        &[("myVar", InferredType::known("String"))],
+    );
     assert_eq!(ty, InferredType::known("String"));
 }
 
 #[test]
 fn infer_expr_unknown_var_is_dynamic() {
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    let ty = checker.infer_expr(&var("unknownVar"), &hierarchy, &mut env, false);
+    let ty = infer(&var("unknownVar"), &hierarchy);
     assert_eq!(ty, InferredType::Dynamic(DynamicReason::Unknown));
 }
 
@@ -89,9 +79,7 @@ fn infer_expr_class_reference() {
     // a bare class literal `Integer` is the class *object*, whose
     // type is the metatype `Meta{Integer}` — not an instance of `Integer`.
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    let ty = checker.infer_expr(&class_ref("Integer"), &hierarchy, &mut env, false);
+    let ty = infer(&class_ref("Integer"), &hierarchy);
     assert_eq!(ty, InferredType::meta("Integer"));
 }
 

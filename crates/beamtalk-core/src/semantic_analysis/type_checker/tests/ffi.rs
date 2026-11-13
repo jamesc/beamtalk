@@ -98,9 +98,7 @@ fn test_ffi_call_returns_typed_result() {
         }],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     // Check the type map — the outer message send should have type List.
     // the `#[1, 2, 3]` argument now infers `List(Integer)`, and the
@@ -126,9 +124,7 @@ fn test_ffi_call_multi_arg_returns_typed_result() {
         vec![int_lit(1), int_lit(10)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     let send_type = checker.type_map().get(span());
     assert_eq!(
@@ -182,9 +178,7 @@ fn ffi_list_tuple_element_propagates_into_iteration_and_literal_at() {
             a]";
     let module = parse_source(src);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(reg);
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check_with_registry(&module, &hierarchy, reg);
     let diags = checker.take_diagnostics();
     let relevant: Vec<_> = diags
         .iter()
@@ -223,9 +217,7 @@ fn ffi_singleton_union_return_matches_declared_annotation() {
           (Erlang logging) logFormat";
     let module = parse_source(src);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(reg);
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check_with_registry(&module, &hierarchy, reg);
     let diags = checker.take_diagnostics();
     let mismatch: Vec<_> = diags
         .iter()
@@ -270,9 +262,7 @@ fn ffi_bare_ok_spec_infers_result_nil_matching_declared_annotation() {
           (Erlang beamtalk_actor_ffi) unregister: self";
     let module = parse_source(src);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(reg);
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check_with_registry(&module, &hierarchy, reg);
     let diags = checker.take_diagnostics();
     let mismatch: Vec<_> = diags
         .iter()
@@ -323,9 +313,7 @@ fn test_ffi_call_unknown_function_falls_back_to_dynamic() {
         vec![int_lit(1)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     let ffi_diags: Vec<_> = checker
         .diagnostics()
@@ -347,9 +335,7 @@ fn test_ffi_call_unknown_module_falls_back_to_dynamic() {
         vec![int_lit(1)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     let ffi_diags: Vec<_> = checker
         .diagnostics()
@@ -380,9 +366,7 @@ fn test_ffi_variable_tracking_through_assignment() {
         ),
     ]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     // the `#[1]` argument now infers `List(Integer)`, propagated
     // through the unary `[T] -> [T]` spec, so the call infers `List(Integer)`.
@@ -407,9 +391,7 @@ fn test_ffi_keyword_mismatch_warning() {
         vec![int_lit(1), int_lit(10)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     let keyword_warnings: Vec<_> = checker
         .diagnostics()
@@ -442,9 +424,7 @@ fn test_ffi_keyword_with_suppressed() {
         vec![int_lit(1), int_lit(10)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     let keyword_warnings: Vec<_> = checker
         .diagnostics()
@@ -467,9 +447,7 @@ fn test_ffi_keyword_matching_no_warning() {
         vec![int_lit(1), int_lit(10)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     let keyword_warnings: Vec<_> = checker
         .diagnostics()
@@ -492,9 +470,7 @@ fn test_ffi_argument_type_mismatch_warning() {
         vec![int_lit(42)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -534,9 +510,7 @@ fn test_ffi_argument_dynamic_param_no_warning() {
         ],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -575,9 +549,7 @@ fn test_ffi_argument_string_list_union_param_no_warning() {
         vec![str_lit("MY_VAR"), str_lit("my_value")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(reg);
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, reg);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -605,9 +577,7 @@ fn test_ffi_dynamic_module_name_falls_back() {
         vec![var("xs")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     // Should not crash, and should not produce FFI-specific warnings
     let ffi_warnings: Vec<_> = checker
@@ -662,9 +632,7 @@ fn test_ffi_wrong_arity_falls_back_to_dynamic() {
         vec![int_lit(1), int_lit(2)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     let ffi_type_diags: Vec<_> = checker
         .diagnostics()
@@ -686,9 +654,7 @@ fn test_ffi_member_returns_boolean() {
         vec![int_lit(1), var("myList")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     let send_type = checker.type_map().get(span());
     assert_eq!(
@@ -726,9 +692,7 @@ fn test_ffi_object_param_accepts_any_class() {
         vec![class_ref("Supervisor")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(reg);
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, reg);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -773,9 +737,7 @@ fn test_ffi_unnamed_arg_param_skips_keyword_mismatch() {
         vec![var("self"), var("child")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(reg);
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, reg);
 
     let keyword_warnings: Vec<_> = checker
         .diagnostics()
@@ -852,9 +814,7 @@ fn test_package_qualified_erlang_does_not_infer_ffi_module() {
     // inferred as `ErlangModule<lists>`.
     let module = parse_source("go => json@Erlang lists");
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     let has_erlang_module_type = checker.type_map().iter().any(|(_, ty)| {
         matches!(ty, InferredType::Known { class_name, .. } if class_name.as_str() == "ErlangModule")
@@ -874,9 +834,7 @@ fn test_erlang_module_proxy_class_uses_normal_dispatch() {
         msg_send(var("proxy"), MessageSelector::Unary("class".into()), vec![]),
     ]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     // Should not produce any FFI-related diagnostics for `class`
     let ffi_diags: Vec<_> = checker
@@ -903,9 +861,7 @@ fn test_erlang_module_proxy_equality_uses_normal_dispatch() {
         ),
     ]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     // Should not produce FFI diagnostics for `==`
     let ffi_diags: Vec<_> = checker
@@ -1226,9 +1182,7 @@ fn test_erlang_lists_still_infers_ffi() {
         vec![var("xs")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(lists_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, lists_registry());
 
     let send_type = checker.type_map().get(span());
     assert_eq!(
@@ -1264,9 +1218,7 @@ fn bt3080_ffi_nil_union_narrows_under_if_nil_if_not_nil() {
             ifNotNil: [:x | x + 1]";
     let module = parse_source(src);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(reg);
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check_with_registry(&module, &hierarchy, reg);
 
     let diags = checker.take_diagnostics();
     let bad: Vec<_> = diags
@@ -1337,9 +1289,7 @@ fn otp_handle_registry() -> NativeTypeRegistry {
 fn otp_handle_diags(src: &str) -> Vec<Diagnostic> {
     let module = parse_source(src);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(otp_handle_registry());
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check_with_registry(&module, &hierarchy, otp_handle_registry());
     checker.take_diagnostics()
 }
 
@@ -1364,9 +1314,7 @@ fn bt4717_opaque_handle_keeps_return_type_named() {
     let src = "typed Object subclass: Gz\n  run => (Erlang zlib) open";
     let module = parse_source(src);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(otp_handle_registry());
-    checker.check_module(&module, &hierarchy);
+    let checker = check_with_registry(&module, &hierarchy, otp_handle_registry());
     let body_span = module.classes[0].methods[0]
         .body
         .last()

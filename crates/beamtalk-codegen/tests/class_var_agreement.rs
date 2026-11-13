@@ -63,7 +63,7 @@ use proptest::prelude::*;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 /// Checks one class's source; `Err` names the first violated property.
-fn check_source(name: &str, source: &str) -> Result<(), String> {
+fn check_named_source(name: &str, source: &str) -> Result<(), String> {
     let (module, diagnostics) = parse(lex_with_eof(source));
     if let Some(d) = diagnostics.iter().find(|d| d.severity == Severity::Error) {
         return Err(format!(
@@ -169,7 +169,7 @@ fn catch_boundary_check_reports_malformed_text() {
 fn check_program(index: usize, program: &Program) -> Result<(), String> {
     for spelling in [Spelling::Open, Spelling::Sealed] {
         for class in program.render(index, spelling) {
-            check_source(&class.name, &class.source)
+            check_named_source(&class.name, &class.source)
                 .map_err(|e| format!("{spelling:?}: {e}\n{}", class.source))?;
         }
     }

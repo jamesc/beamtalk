@@ -246,15 +246,10 @@ fn generic_inheritance_concrete_superclass_type_arg() {
     };
     hierarchy.add_from_beam_meta(vec![int_array_info]);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("ia", InferredType::known("IntArray"));
-
-    let result_ty = checker.infer_expr(
+    let result_ty = infer_with_locals(
         &msg_send(var("ia"), MessageSelector::Unary("first".into()), vec![]),
         &hierarchy,
-        &mut env,
-        false,
+        &[("ia", InferredType::known("IntArray"))],
     );
 
     assert_eq!(

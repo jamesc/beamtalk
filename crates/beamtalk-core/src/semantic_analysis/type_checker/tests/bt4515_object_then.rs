@@ -9,25 +9,10 @@
 //! class that defines its own `then:` keeps its declared signature.
 
 use super::common::*;
-use std::collections::HashMap;
-
-/// The inferred method return types and the checker's diagnostics for
-/// `source`.
-fn check_source(source: &str) -> (HashMap<MethodReturnKey, InferredType>, Vec<Diagnostic>) {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
-    let mut checker = check(&module, &hierarchy);
-    let diagnostics = checker.take_diagnostics();
-    (checker.take_method_return_types(), diagnostics)
-}
 
 /// The inferred return type of instance method `selector` of `Probe`.
 fn probe_return(source: &str, selector: &str) -> (Option<InferredType>, Vec<Diagnostic>) {
-    let (types, diags) = check_source(source);
+    let (types, diags) = return_types_and_diags(source);
     (
         types
             .get(&("Probe".into(), selector.into(), false))
@@ -172,7 +157,7 @@ fn an_own_then_with_a_non_block_parameter_draws_no_override_warning() {
 Object subclass: Parser
   then: next :: Parser -> Parser => next
 ";
-    let (_, diags) = check_source(source);
+    let (_, diags) = return_types_and_diags(source);
     assert!(
         !diags
             .iter()

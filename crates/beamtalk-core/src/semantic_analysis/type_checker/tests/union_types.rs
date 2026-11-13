@@ -656,15 +656,10 @@ fn union_receiver_return_type_is_union_of_member_returns() {
     );
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["Integer", "String"]));
-
-    let ty = checker.infer_expr(
+    let ty = infer_with_locals(
         &module.expressions[0].expression,
         &hierarchy,
-        &mut env,
-        false,
+        &[("x", InferredType::simple_union(&["Integer", "String"]))],
     );
 
     // Both return String, so union_of collapses to Known(String)
@@ -775,15 +770,10 @@ fn union_receiver_no_members_respond_returns_dynamic() {
     );
 
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["String", "Integer"]));
-
-    let ty = checker.infer_expr(
+    let ty = infer_with_locals(
         &module.expressions[0].expression,
         &hierarchy,
-        &mut env,
-        false,
+        &[("x", InferredType::simple_union(&["String", "Integer"]))],
     );
 
     // Neither String nor Integer understand `nonExistentMethod`.
@@ -1160,14 +1150,10 @@ fn bt2624_union_singleton_class_resolves_to_symbol_metatype() {
         span(),
     );
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("x", InferredType::simple_union(&["#north", "#south"]));
-    let ty = checker.infer_expr(
+    let ty = infer_with_locals(
         &module.expressions[0].expression,
         &hierarchy,
-        &mut env,
-        false,
+        &[("x", InferredType::simple_union(&["#north", "#south"]))],
     );
     assert_eq!(ty, InferredType::meta("Symbol"), "got: {ty:?}");
 }

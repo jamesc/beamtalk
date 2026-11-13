@@ -96,7 +96,7 @@ fn registry() -> NativeTypeRegistry {
     registry
 }
 
-fn compile(src: &str, registry: NativeTypeRegistry) -> String {
+fn compile_with_registry(src: &str, registry: NativeTypeRegistry) -> String {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
     assert!(
@@ -114,7 +114,7 @@ fn compile(src: &str, registry: NativeTypeRegistry) -> String {
 }
 
 fn binary_class() -> String {
-    compile(
+    compile_with_registry(
         "sealed typed Collection subclass: Binary native: beamtalk_binary\n  \
          bitSize -> Integer => self delegate\n  \
          asHex -> String => self delegate\n",
@@ -123,7 +123,7 @@ fn binary_class() -> String {
 }
 
 fn probe_class(methods: &str) -> String {
-    compile(
+    compile_with_registry(
         &format!("sealed typed Object subclass: Probe native: beamtalk_probe\n{methods}"),
         registry(),
     )
@@ -272,14 +272,14 @@ fn untrusted_or_unspecced_backing_keeps_native_call_only() {
     untrusted.register_module("beamtalk_probe", vec![sig("count", &[], "Integer")]);
     let src = "sealed typed Object subclass: Probe native: beamtalk_probe\n  \
                class count -> Integer => self delegate\n";
-    let code = compile(src, untrusted);
+    let code = compile_with_registry(src, untrusted);
     assert!(!function_body(&code, "class_count").contains("try call"));
-    let code = compile(src, NativeTypeRegistry::new());
+    let code = compile_with_registry(src, NativeTypeRegistry::new());
     assert!(!function_body(&code, "class_count").contains("try call"));
 }
 
 fn native_class(methods: &str) -> String {
-    compile(
+    compile_with_registry(
         &format!("sealed typed Object subclass: Probe native: probe_native\n{methods}"),
         registry(),
     )
@@ -345,7 +345,7 @@ fn list_valued_and_beamtalk_mode_results_keep_native_call_only() {
         vec![sig_result("found", &["Integer"], "Integer")],
     );
     reg.trust_all_modules();
-    let code = compile(
+    let code = compile_with_registry(
         "sealed typed Object subclass: Probe native: beamtalk_probe\n  \
          class found: n :: Integer -> Result => self delegate\n",
         reg,

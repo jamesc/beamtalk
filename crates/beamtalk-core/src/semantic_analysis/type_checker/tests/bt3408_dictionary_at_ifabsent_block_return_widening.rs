@@ -30,8 +30,7 @@ fn run_with_protocols(source: &str) -> Vec<Diagnostic> {
     let user_hierarchy = ClassHierarchy::build(&module).0.unwrap();
     hierarchy.merge(&user_hierarchy);
 
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(
+    let mut checker = check_with_protocols(
         &module,
         &hierarchy,
         &crate::semantic_analysis::protocol_registry::ProtocolRegistry::new(),

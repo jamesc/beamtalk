@@ -138,6 +138,84 @@ pub(super) fn check(module: &Module, hierarchy: &ClassHierarchy) -> TypeChecker 
     checker
 }
 
+/// Like [`diags`], but the source must parse without any non-lint diagnostic
+/// (lints are tolerated, unlike [`return_types_and_diags`], which requires an
+/// empty parse-diagnostic list).
+pub(super) fn diags_parse_ok(source: &str) -> Vec<Diagnostic> {
+    let module = crate::test_helpers::test_support::parse_ok(source);
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    check(&module, &hierarchy).take_diagnostics()
+}
+
+/// Inferred method return types and diagnostics for `source`, which must parse
+/// without any diagnostic.
+pub(super) fn return_types_and_diags(
+    source: &str,
+) -> (
+    std::collections::HashMap<MethodReturnKey, InferredType>,
+    Vec<Diagnostic>,
+) {
+    let tokens = crate::source_analysis::lex_with_eof(source);
+    let (module, parse_diags) = crate::source_analysis::parse(tokens);
+    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
+    let mut checker = check(&module, &hierarchy);
+    let diagnostics = checker.take_diagnostics();
+    (checker.take_method_return_types(), diagnostics)
+}
+
+/// The `Type`-category diagnostics among `diags`.
+pub(super) fn type_category_of(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
+    diags
+        .iter()
+        .filter(|d| d.category == Some(DiagnosticCategory::Type))
+        .collect()
+}
+
+/// Type checks `module` with `registry` installed as the native type registry
+/// and hands back the checker.
+pub(super) fn check_with_registry(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    registry: impl Into<std::sync::Arc<NativeTypeRegistry>>,
+) -> TypeChecker {
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(registry);
+    checker.check_module(module, hierarchy);
+    checker
+}
+
+/// Type checks `module` through `check_module_with_protocols` and hands back
+/// the checker.
+pub(super) fn check_with_protocols(
+    module: &Module,
+    hierarchy: &ClassHierarchy,
+    protocols: &ProtocolRegistry,
+) -> TypeChecker {
+    let mut checker = TypeChecker::new();
+    checker.check_module_with_protocols(module, hierarchy, protocols);
+    checker
+}
+
+/// The inferred type of `expr` in an empty environment.
+pub(super) fn infer(expr: &Expression, hierarchy: &ClassHierarchy) -> InferredType {
+    infer_with_locals(expr, hierarchy, &[])
+}
+
+/// The inferred type of `expr` in an environment holding `locals`.
+pub(super) fn infer_with_locals(
+    expr: &Expression,
+    hierarchy: &ClassHierarchy,
+    locals: &[(&str, InferredType)],
+) -> InferredType {
+    let mut checker = TypeChecker::new();
+    let mut env = TypeEnv::new();
+    for (name, ty) in locals {
+        env.set_local(*name, ty.clone());
+    }
+    checker.infer_expr(expr, hierarchy, &mut env, false)
+}
+
 /// [`diags_with_expect`] keeping only `Type` diagnostics.
 pub(super) fn type_diags(source: &str) -> Vec<Diagnostic> {
     diags_with_expect(source)

@@ -12,7 +12,7 @@ use beamtalk_core::source_analysis::{Severity, lex_with_eof, parse};
 
 /// Compiles `src` (no parse errors; warnings allowed) to Core Erlang, and
 /// through `erlc` when it is available.
-fn compile(src: &str) -> String {
+fn compile_through_erlc(src: &str) -> String {
     let (module, diagnostics) = parse(lex_with_eof(src));
     assert!(
         diagnostics.iter().all(|d| d.severity != Severity::Error),
@@ -29,7 +29,7 @@ fn compile(src: &str) -> String {
 
 /// `body` as the body of `build: v with: p` in a plain class.
 fn compile_body(body: &str) -> String {
-    compile(&format!(
+    compile_through_erlc(&format!(
         "Object subclass: Framer\n  build: v with: p =>\n    n := 2\n    {body}\n"
     ))
 }
@@ -383,7 +383,7 @@ fn assignment_in_a_segment_value_is_sequenced_left_to_right() {
             "<'go'> when 'true' ->",
         ),
     ] {
-        let code = compile(src);
+        let code = compile_through_erlc(src);
         let body_at = code
             .find(method)
             .unwrap_or_else(|| panic!("{context}: no {method} in\n{code}"));
@@ -421,7 +421,7 @@ fn assignment_in_a_segment_value_is_sequenced_left_to_right() {
             "Actor subclass: Seq\n  state: n = 0\n\n  bump => self.n := self.n + 1\n  go =>\n    <<(self bump):8, (self bump):8>>\n",
         ),
     ] {
-        let code = compile(src);
+        let code = compile_through_erlc(src);
         assert!(code.contains("#{"), "{context}: {code}");
     }
 }

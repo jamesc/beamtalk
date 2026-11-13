@@ -16,14 +16,6 @@
 //! the declared slot type, keeping the tower walk for everything else.
 
 use super::common::*;
-use crate::test_helpers::test_support::parse_ok;
-
-fn check_source(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
-    let module = parse_ok(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = check(&module, &hierarchy);
-    checker.take_diagnostics()
-}
 
 fn type_mismatches(
     diags: &[crate::source_analysis::Diagnostic],
@@ -38,7 +30,7 @@ fn type_mismatches(
 /// `state: kind :: Integer class` slot must not warn.
 #[test]
 fn bt4043_state_slot_accepts_matching_metaclass_value() {
-    let diags = check_source(
+    let diags = diags_parse_ok(
         "typed Actor subclass: Holder\n\
          \x20 state: kind :: Integer class\n\
          \x20 setKind -> Object =>\n\
@@ -54,7 +46,7 @@ fn bt4043_state_slot_accepts_matching_metaclass_value() {
 /// Same acceptance for a `late` slot: `late state: kind :: Integer class`.
 #[test]
 fn bt4043_late_state_slot_accepts_matching_metaclass_value() {
-    let diags = check_source(
+    let diags = diags_parse_ok(
         "typed Actor subclass: Holder\n\
          \x20 late state: kind :: Integer class\n\
          \x20 setKind -> Object =>\n\
@@ -70,7 +62,7 @@ fn bt4043_late_state_slot_accepts_matching_metaclass_value() {
 /// Same acceptance for a class-side slot: `classState: kind :: Integer class`.
 #[test]
 fn bt4043_class_state_slot_accepts_matching_metaclass_value() {
-    let diags = check_source(
+    let diags = diags_parse_ok(
         "typed Object subclass: Holder\n\
          \x20 classState: kind :: Integer class\n\
          \x20 class setKind -> Object =>\n\
@@ -88,7 +80,7 @@ fn bt4043_class_state_slot_accepts_matching_metaclass_value() {
 /// type checker, so only `Type mismatch` absence is asserted here.)
 #[test]
 fn bt4043_field_slot_accepts_matching_metaclass_value() {
-    let diags = check_source(
+    let diags = diags_parse_ok(
         "typed Value subclass: Holder\n\
          \x20 field: kind :: Integer class\n\
          \x20 setKind -> Object =>\n\
@@ -105,7 +97,7 @@ fn bt4043_field_slot_accepts_matching_metaclass_value() {
 /// `X class` slot still warns, naming both metatype spellings.
 #[test]
 fn bt4043_mismatched_metaclass_value_still_warns() {
-    let diags = check_source(
+    let diags = diags_parse_ok(
         "typed Actor subclass: Holder\n\
          \x20 state: kind :: Integer class\n\
          \x20 setKind -> Object =>\n\
@@ -130,7 +122,7 @@ fn bt4043_mismatched_metaclass_value_still_warns() {
 /// metatype value still satisfies a `:: Class` slot via the tower walk.
 #[test]
 fn bt4043_class_declared_slot_still_accepts_metaclass_value() {
-    let diags = check_source(
+    let diags = diags_parse_ok(
         "typed Actor subclass: Holder\n\
          \x20 state: anything :: Class\n\
          \x20 setKind -> Object =>\n\

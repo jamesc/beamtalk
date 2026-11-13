@@ -215,11 +215,11 @@ fn non_actor_with_timeout_is_not_retyped() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_fake_proxy_object(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("fp", InferredType::known("FakeProxy"));
-
-    let ty = checker.infer_expr(&with_timeout(var("fp"), 5000), &hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        &with_timeout(var("fp"), 5000),
+        &hierarchy,
+        &[("fp", InferredType::known("FakeProxy"))],
+    );
 
     assert_eq!(
         ty,

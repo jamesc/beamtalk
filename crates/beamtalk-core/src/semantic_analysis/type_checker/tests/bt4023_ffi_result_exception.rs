@@ -53,9 +53,7 @@ fn check(body: &str) -> Vec<Diagnostic> {
     let src = format!("Object subclass: Probe\n  run =>\n{body}");
     let module = parse_source(&src);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(ffi_registry());
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check_with_registry(&module, &hierarchy, ffi_registry());
     checker.take_diagnostics()
 }
 
@@ -184,9 +182,7 @@ fn warning_is_suppressible_with_expect_type() {
         f error =:= #closed";
     let module = parse_source(src);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(ffi_registry());
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check_with_registry(&module, &hierarchy, ffi_registry());
     let mut diags = checker.take_diagnostics();
     crate::compilation::diagnostics_policy::apply_expect_directives(&module, &mut diags);
     assert!(exception_symbol_warnings(&diags).is_empty(), "{diags:#?}");
@@ -217,9 +213,7 @@ fn error_declared_wrapper_matches_only_beamtalk_error_specs() {
              (Erlang shim) count",
         );
         let hierarchy = ClassHierarchy::with_builtins();
-        let mut checker = TypeChecker::new();
-        checker.set_native_type_registry(reg);
-        checker.check_module(&module, &hierarchy);
+        let mut checker = check_with_registry(&module, &hierarchy, reg);
         checker
             .take_diagnostics()
             .into_iter()

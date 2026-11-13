@@ -17,18 +17,6 @@
 
 use super::common::*;
 
-fn check_source(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
-
-    let mut checker = check(&module, &hierarchy);
-    checker.take_diagnostics()
-}
-
 fn assert_no_dynamic_block_params(diagnostics: &[crate::source_analysis::Diagnostic], what: &str) {
     let dnu_warnings: Vec<_> = diagnostics
         .iter()
@@ -63,7 +51,7 @@ typed Value subclass: Tv
   useA -> Integer =>
     ((1 to: 3) collect: [:i | i + 1]) size
 ";
-    assert_no_dynamic_block_params(&check_source(source), "`i` in Interval collect:");
+    assert_no_dynamic_block_params(&diags_parse_ok(source), "`i` in Interval collect:");
 }
 
 /// `collect:` propagates the transform's return type: mapping to `String`
@@ -76,7 +64,10 @@ typed Value subclass: TvChain
   useChain -> List(String) =>
     ^((1 to: 3) collect: [:i | i printString]) select: [:s | s isEmpty not]
 ";
-    assert_no_dynamic_block_params(&check_source(source), "`s` chained onto Interval collect:");
+    assert_no_dynamic_block_params(
+        &diags_parse_ok(source),
+        "`s` chained onto Interval collect:",
+    );
 }
 
 /// `(1 to: 6) select: [:i | i isEven]` infers `i` as `Integer`.
@@ -87,7 +78,7 @@ typed Value subclass: TvSelect
   useSelect -> Integer =>
     ((1 to: 6) select: [:i | i isEven]) size
 ";
-    assert_no_dynamic_block_params(&check_source(source), "`i` in Interval select:");
+    assert_no_dynamic_block_params(&diags_parse_ok(source), "`i` in Interval select:");
 }
 
 /// `(1 to: 5) inject: 0 into: [:acc :x | acc + x]` infers the element
@@ -99,5 +90,5 @@ typed Value subclass: TvInject
   useInject -> Integer =>
     ^((1 to: 5) inject: 0 into: [:acc :x | acc + x])
 ";
-    assert_no_dynamic_block_params(&check_source(source), "`x` in Interval inject:into:");
+    assert_no_dynamic_block_params(&diags_parse_ok(source), "`x` in Interval inject:into:");
 }

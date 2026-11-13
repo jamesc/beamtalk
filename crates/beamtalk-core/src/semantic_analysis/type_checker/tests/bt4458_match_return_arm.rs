@@ -7,26 +7,23 @@
 
 use super::common::*;
 
-/// Type-category diagnostics for `source`, asserting it parses cleanly.
-fn type_diagnostics(source: &str) -> Vec<String> {
+/// Messages of the `Type` diagnostics for `source`, asserting it parses cleanly.
+fn type_messages(source: &str) -> Vec<String> {
     let (_, parse_diags) =
         crate::source_analysis::parse(crate::source_analysis::lex_with_eof(source));
     assert!(
         parse_diags.is_empty(),
         "fixture must parse: {parse_diags:?}"
     );
-    let module = parse_source(source);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    run_with_expect(&module, &hierarchy)
+    type_diags(source)
         .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
         .map(|d| d.message.to_string())
         .collect()
 }
 
 #[test]
 fn match_return_arm_does_not_pollute_result_type() {
-    let diags = type_diagnostics(
+    let diags = type_messages(
         r"typed Object subclass: ZzRepro
   class pick: v :: String | Nil -> Tuple(Integer, Integer) =>
     s := v match: [
@@ -43,7 +40,7 @@ fn match_return_arm_does_not_pollute_result_type() {
 
 #[test]
 fn match_non_return_arm_still_contributes() {
-    let diags = type_diagnostics(
+    let diags = type_messages(
         r"typed Object subclass: ZzRepro
   class pick: v :: String | Nil -> Integer =>
     s := v match: [
@@ -63,7 +60,7 @@ fn match_non_return_arm_still_contributes() {
 
 #[test]
 fn if_true_if_false_return_branch_does_not_pollute_result_type() {
-    let diags = type_diagnostics(
+    let diags = type_messages(
         r"typed Object subclass: ZzRepro
   class pick: v :: String | Nil -> Integer =>
     s := v isNil ifTrue: [^0] ifFalse: [v]
@@ -80,7 +77,7 @@ fn if_true_if_false_return_branch_does_not_pollute_result_type() {
 /// diverging and narrow the caller's local.
 #[test]
 fn all_return_match_tail_does_not_make_method_never() {
-    let diags = type_diagnostics(
+    let diags = type_messages(
         r"typed Object subclass: ZzRepro
   kind: v => v match: [1 -> ^#one; _ -> ^#other]
 
@@ -101,7 +98,7 @@ fn all_return_match_tail_does_not_make_method_never() {
 /// declared return type (the `^` arm's type reaches the method's return type).
 #[test]
 fn mixed_arm_match_tail_still_checks_return_value_against_declared_type() {
-    let diags = type_diagnostics(
+    let diags = type_messages(
         r"typed Object subclass: ZzRepro
   count: v :: String | Nil -> Integer =>
     v match: [
@@ -122,7 +119,7 @@ fn mixed_arm_match_tail_still_checks_return_value_against_declared_type() {
 /// method `-> Never` either.
 #[test]
 fn all_return_if_true_if_false_tail_does_not_make_method_never() {
-    let diags = type_diagnostics(
+    let diags = type_messages(
         r"typed Object subclass: ZzRepro
   kind: v => v isNil ifTrue: [^#one] ifFalse: [^#other]
 
@@ -144,7 +141,7 @@ fn all_return_if_true_if_false_tail_does_not_make_method_never() {
 /// `Never`.
 #[test]
 fn all_return_match_tail_with_untyped_values_does_not_make_method_never() {
-    let diags = type_diagnostics(
+    let diags = type_messages(
         r"typed Object subclass: ZzRepro
   kind: v => v match: [1 -> ^foo; _ -> ^bar]
 

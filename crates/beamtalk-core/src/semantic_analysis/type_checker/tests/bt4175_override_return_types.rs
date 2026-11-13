@@ -11,7 +11,7 @@
 use super::common::*;
 use crate::source_analysis::Severity;
 
-fn type_diagnostics(source: &str) -> Vec<Diagnostic> {
+fn analyse_type_diags(source: &str) -> Vec<Diagnostic> {
     let tokens = crate::source_analysis::lex_with_eof(source);
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
@@ -52,7 +52,7 @@ Base subclass: Derived
 
 #[test]
 fn override_with_unrelated_return_type_warns() {
-    let diags = type_diagnostics(&override_source("Number", " -> String", "\"x\""));
+    let diags = analyse_type_diags(&override_source("Number", " -> String", "\"x\""));
     let hits = override_return_warnings(&diags);
     assert_eq!(
         hits.len(),
@@ -70,7 +70,7 @@ fn override_with_unrelated_return_type_warns() {
 
 #[test]
 fn override_narrowing_return_type_is_silent() {
-    let diags = type_diagnostics(&override_source("Number", " -> Integer", "2"));
+    let diags = analyse_type_diags(&override_source("Number", " -> Integer", "2"));
     assert!(
         override_return_warnings(&diags).is_empty(),
         "narrowing Number to Integer is a valid covariant override: {diags:#?}"
@@ -80,7 +80,7 @@ fn override_narrowing_return_type_is_silent() {
 #[test]
 fn override_widening_to_union_warns() {
     // `Integer | Nil` is not assignable to `Integer`: the `Nil` member widens.
-    let diags = type_diagnostics(&override_source("Integer", " -> Integer | Nil", "nil"));
+    let diags = analyse_type_diags(&override_source("Integer", " -> Integer | Nil", "nil"));
     assert_eq!(
         override_return_warnings(&diags).len(),
         1,
@@ -90,7 +90,7 @@ fn override_widening_to_union_warns() {
 
 #[test]
 fn override_narrowing_union_is_silent() {
-    let diags = type_diagnostics(&override_source("Integer | Nil", " -> Integer", "2"));
+    let diags = analyse_type_diags(&override_source("Integer | Nil", " -> Integer", "2"));
     assert!(
         override_return_warnings(&diags).is_empty(),
         "dropping a union member narrows: {diags:#?}"
@@ -99,7 +99,7 @@ fn override_narrowing_union_is_silent() {
 
 #[test]
 fn unannotated_override_is_not_checked() {
-    let diags = type_diagnostics(&override_source("Number", "", "\"x\""));
+    let diags = analyse_type_diags(&override_source("Number", "", "\"x\""));
     assert!(
         override_return_warnings(&diags).is_empty(),
         "an override without a declared return type has nothing to compare: {diags:#?}"
@@ -115,7 +115,7 @@ Object subclass: Base
 Base subclass: Derived
   copyIt -> Derived => self
 ";
-    let diags = type_diagnostics(source);
+    let diags = analyse_type_diags(source);
     assert!(
         override_return_warnings(&diags).is_empty(),
         "`Self` is receiver-relative and not judged by the nominal walk: {diags:#?}"
@@ -219,7 +219,7 @@ Object subclass: Caller
   run => self show: (Binary serialize: 42)
 "
     );
-    let diags = type_diagnostics(&source);
+    let diags = analyse_type_diags(&source);
     assert!(
         protocol_return_warnings(&diags).is_empty(),
         "inherited-widening mismatch belongs to the override site: {diags:#?}"
@@ -249,7 +249,7 @@ Object subclass: Caller
   run => self show: Derived new
 "#
     );
-    let diags = type_diagnostics(&source);
+    let diags = analyse_type_diags(&source);
     assert_eq!(
         override_return_warnings(&diags).len(),
         1,
@@ -280,7 +280,7 @@ Object subclass: Caller
   run => self show: Derived new
 "#
     );
-    let diags = type_diagnostics(&source);
+    let diags = analyse_type_diags(&source);
     let hits = override_return_warnings(&diags);
     assert_eq!(hits.len(), 1, "expected the override warning: {diags:#?}");
     assert!(
@@ -311,7 +311,7 @@ Object subclass: Caller
   run => self show: Derived new
 "
     );
-    let diags = type_diagnostics(&source);
+    let diags = analyse_type_diags(&source);
     let hits = protocol_return_warnings(&diags);
     assert_eq!(
         hits.len(),
@@ -336,7 +336,7 @@ Object subclass: Caller
   run => self show: "hi"
 "#
     );
-    let diags = type_diagnostics(&source);
+    let diags = analyse_type_diags(&source);
     assert!(
         protocol_return_warnings(&diags).is_empty(),
         "String>>asString -> String conforms: {diags:#?}"
@@ -356,7 +356,7 @@ Object subclass: Caller
   run => self show: Widget new
 "#
     );
-    let diags = type_diagnostics(&source);
+    let diags = analyse_type_diags(&source);
     let hits = protocol_return_warnings(&diags);
     assert_eq!(
         hits.len(),
@@ -383,7 +383,7 @@ Object subclass: Caller
   run => self show: Widget new
 "#
     );
-    let diags = type_diagnostics(&source);
+    let diags = analyse_type_diags(&source);
     assert!(
         protocol_return_warnings(&diags).is_empty(),
         "an undeclared return type is not contradicted: {diags:#?}"
@@ -413,7 +413,7 @@ Object subclass: Caller
   use: p :: Pipe -> Nil => nil
   run => self use: Widget new
 ";
-    let diags = type_diagnostics(source);
+    let diags = analyse_type_diags(source);
     assert!(
         protocol_return_warnings(&diags).is_empty(),
         "`Item` is Source's type parameter, not the class: {diags:#?}"
@@ -434,7 +434,7 @@ Base subclass: Derived
 
 Derived >> value -> String => "x"
 "#;
-    let diags = type_diagnostics(source);
+    let diags = analyse_type_diags(source);
     let hits = override_return_warnings(&diags);
     assert_eq!(hits.len(), 1, "expected one override warning: {diags:#?}");
     assert!(

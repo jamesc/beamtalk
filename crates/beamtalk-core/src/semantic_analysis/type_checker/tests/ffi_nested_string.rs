@@ -216,9 +216,7 @@ fn hint_fires_whether_or_not_the_registry_knows_the_function() {
             line: None,
         }],
     );
-    let mut checker = TypeChecker::new();
-    checker.set_native_type_registry(reg);
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check_with_registry(&module, &hierarchy, reg);
     let diags = checker.take_diagnostics();
     assert_eq!(nested_string_hints(&diags).len(), 1, "{diags:#?}");
 }

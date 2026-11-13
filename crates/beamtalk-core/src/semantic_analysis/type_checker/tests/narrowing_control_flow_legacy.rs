@@ -1847,8 +1847,7 @@ fn test_responds_to_narrows_to_protocol_type() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     // asString is a valid method on Printable protocol, so no DNU warning
     let dnu_warnings: Vec<_> = checker
@@ -1894,8 +1893,7 @@ fn test_responds_to_no_protocol_match_falls_back_to_dynamic() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     // Dynamic suppresses DNU, so no warning in the true block
     let dnu_warnings: Vec<_> = checker
@@ -1940,8 +1938,7 @@ fn test_responds_to_protocol_narrows_validates_methods() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     // Printable only has asString — nonExistentMethod should warn
     let dnu_warnings: Vec<_> = checker
@@ -2033,8 +2030,7 @@ fn test_responds_to_ambiguous_protocols_falls_back_to_dynamic() {
         )
     };
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     // With ambiguous protocols, x stays Dynamic — no DNU warning for unknownMethod
     let dnu_warnings: Vec<_> = checker
