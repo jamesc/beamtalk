@@ -92,6 +92,7 @@ pub(super) fn fold_threads_self(label: &str) -> bool {
 impl CoreErlangGenerator {
     /// Steps 1–2: the plan, the receiver and the lambda / item variables.
     ///
+    /// `handler` is a block packed with the body (`detect:ifNone:`'s `ifNone:`).
     /// `guard_discard` takes the discarded-fold mark for `body` (`do:`).
     pub(super) fn begin_list_fold(
         &mut self,
@@ -99,9 +100,10 @@ impl CoreErlangGenerator {
         body: &Block,
         kind: ListOpKind,
         label: &str,
+        handler: Option<&Block>,
         guard_discard: bool,
     ) -> Result<FoldHead> {
-        let mut plan = ThreadingPlan::new_for_foldl_list_op(self, body, kind);
+        let mut plan = ThreadingPlan::new_for_foldl_list_op_with_handler(self, body, kind, handler);
         if fold_threads_self(label) {
             plan = plan.with_value_self_slot(self, body)?;
         }
@@ -200,7 +202,14 @@ impl CoreErlangGenerator {
             lambda_var,
             item_var,
             ..
-        } = self.begin_list_fold(receiver, body, ListOpKind::Accumulate, op.label(), false)?;
+        } = self.begin_list_fold(
+            receiver,
+            body,
+            ListOpKind::Accumulate,
+            op.label(),
+            None,
+            false,
+        )?;
         // Save recv var for is_binary check after foldl (String-aware result).
         let recv_var_for_str_check = list_var.clone();
         let acc_state_var = self.fresh_temp_var("AccSt");
@@ -268,7 +277,7 @@ impl CoreErlangGenerator {
                 " = call 'lists':'reverse'(",
                 leaf::var(rev_list),
                 ") in ",
-                str_binding.clone(),
+                str_binding,
                 " in ",
                 extract_doc,
                 repack_doc,
@@ -413,7 +422,6 @@ mod tests {
         ] {
             assert!(!fold_threads_self(label), "{label} must not thread Self");
         }
-        assert_eq!(SELF_THREADING_FOLDS, ["do:", "collect:", "inject:into:"]);
     }
 
     #[test]

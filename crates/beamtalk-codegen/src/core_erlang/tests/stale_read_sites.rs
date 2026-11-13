@@ -69,7 +69,6 @@ const STORE_SITES: &[(&str, usize)] = &[
     ("control_flow/dict_ops.rs", 2),
     ("control_flow/exception_handling.rs", 2),
     ("control_flow/list_ops/fold_driver.rs", 1),
-    ("control_flow/list_ops/search_ops.rs", 3),
     ("control_flow/list_ops/transform_ops.rs", 7),
     ("control_flow/plan.rs", 1),
     ("control_flow/while_loops.rs", 1),

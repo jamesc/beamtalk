@@ -6,6 +6,7 @@
 use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CoreErlangGenerator, Result};
 use super::super::{BodyKind, ListOpKind, ThreadingPlan};
+use super::fold_driver::FoldHead;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -199,15 +200,22 @@ impl CoreErlangGenerator {
         body: &Block,
         is_all: bool,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate);
-        self.emit_loop_convention_diagnostic(&plan, body.span);
-
-        let list_var = self.fresh_temp_var("temp");
-        let recv_code = self.expression_doc(receiver)?;
-        let safe_list_var = self.fresh_temp_var("temp");
-        let lambda_var = self.fresh_temp_var("temp");
-        let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
-        let item_var = Self::to_core_erlang_var(item_param);
+        let FoldHead {
+            plan,
+            list_var,
+            recv_code,
+            safe_list_var,
+            lambda_var,
+            item_var,
+            ..
+        } = self.begin_list_fold(
+            receiver,
+            body,
+            ListOpKind::Accumulate,
+            "anySatisfy:",
+            None,
+            false,
+        )?;
         let acc_state_var = self.fresh_temp_var("AccSt");
         let init_bool = if is_all { "'true'" } else { "'false'" };
 
@@ -235,17 +243,11 @@ impl CoreErlangGenerator {
                 ") in ",
             ]);
 
-            // BT-4121: the guarded-operator marker spans the body lowering.
-            let prestore_state = self.state_var_to_store();
-            self.push_guarded_op_loop(body, None);
-            self.push_scope();
-            if let Some(param) = body.parameters.first() {
-                self.bind_var(&param.name, &item_var);
-            }
-            let (body_doc, _) = self.generate_foldl_loop_body(
+            let lowered = self.lower_tuple_fold_body(
                 body,
                 &plan,
                 &BodyKind::FoldlBoolPredicate { is_all },
+                &item_var,
                 &acc_state_var,
                 1,
             )?;
@@ -253,18 +255,10 @@ impl CoreErlangGenerator {
                 if is_all { "'false'" } else { "'true'" },
                 "BoolAcc",
                 &acc_state_var,
-                body_doc,
+                lowered.body_doc,
             ));
-            self.pop_scope();
-            // BT-4121: check out the marker; splice the pre-store (nil
-            // unless the loop brackets with a `State` in scope).
-            let (guarded_op_bracket, prestore) = self.checkout_guarded_op_loop_docs(
-                self.pop_guarded_op_loop(),
-                false,
-                body.span,
-                &prestore_state,
-            );
-            docs.insert(0, prestore);
+            let guarded_op_bracket = lowered.guarded_op_bracket;
+            docs.insert(0, lowered.prestore);
 
             let fold_result = self.fresh_temp_var("FoldResult");
             let bool_result = self.fresh_temp_var("BoolResult");
@@ -320,14 +314,11 @@ impl CoreErlangGenerator {
             ") in ",
         ]);
 
-        self.push_scope();
-        if let Some(param) = body.parameters.first() {
-            self.bind_var(&param.name, &item_var);
-        }
-        let (body_doc, _) = self.generate_foldl_loop_body(
+        let body_doc = self.lower_map_fold_body(
             body,
             &plan,
             &BodyKind::FoldlBoolPredicate { is_all },
+            &item_var,
             &acc_state_var,
             1,
         )?;
@@ -337,7 +328,6 @@ impl CoreErlangGenerator {
             &acc_state_var,
             body_doc,
         ));
-        self.pop_scope();
 
         let fold_result = self.fresh_temp_var("FoldResult");
         let bool_result = self.fresh_temp_var("BoolResult");
@@ -622,20 +612,22 @@ impl CoreErlangGenerator {
             Expression::Block(handler) => Some(handler),
             _ => None,
         };
-        let plan = ThreadingPlan::new_for_foldl_list_op_with_handler(
-            self,
+        let FoldHead {
+            plan,
+            list_var,
+            recv_code,
+            safe_list_var,
+            lambda_var,
+            item_var,
+            ..
+        } = self.begin_list_fold(
+            receiver,
             body,
             ListOpKind::TwoSlot,
+            "detect:ifNone:",
             handler,
-        );
-        self.emit_loop_convention_diagnostic(&plan, body.span);
-
-        let list_var = self.fresh_temp_var("temp");
-        let recv_code = self.expression_doc(receiver)?;
-        let safe_list_var = self.fresh_temp_var("temp");
-        let lambda_var = self.fresh_temp_var("temp");
-        let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
-        let item_var = Self::to_core_erlang_var(item_param);
+            false,
+        )?;
         let acc_state_var = self.fresh_temp_var("AccSt");
 
         if plan.use_tuple_acc {
@@ -664,19 +656,13 @@ impl CoreErlangGenerator {
                 ") in ",
             ]);
 
-            // BT-4121: the guarded-operator marker spans the body lowering.
-            let prestore_state = self.state_var_to_store();
-            self.push_guarded_op_loop(body, None);
-            self.push_scope();
-            if let Some(param) = body.parameters.first() {
-                self.bind_var(&param.name, &item_var);
-            }
-            let (body_doc, _) = self.generate_foldl_loop_body(
+            let lowered = self.lower_tuple_fold_body(
                 body,
                 &plan,
                 &BodyKind::FoldlDetect {
                     item_var: item_var.clone(),
                 },
+                &item_var,
                 &acc_state_var,
                 2,
             )?;
@@ -684,18 +670,10 @@ impl CoreErlangGenerator {
                 "'true'",
                 "FoundFlag",
                 &acc_state_var,
-                body_doc,
+                lowered.body_doc,
             ));
-            self.pop_scope();
-            // BT-4121: check out the marker; splice the pre-store (nil
-            // unless the loop brackets with a `State` in scope).
-            let (guarded_op_bracket, prestore) = self.checkout_guarded_op_loop_docs(
-                self.pop_guarded_op_loop(),
-                false,
-                body.span,
-                &prestore_state,
-            );
-            docs.insert(0, prestore);
+            let guarded_op_bracket = lowered.guarded_op_bracket;
+            docs.insert(0, lowered.prestore);
 
             let fold_result = self.fresh_temp_var("FoldResult");
             let found_item = self.fresh_temp_var("FoundItem");
@@ -768,16 +746,13 @@ impl CoreErlangGenerator {
             ") in ",
         ]);
 
-        self.push_scope();
-        if let Some(param) = body.parameters.first() {
-            self.bind_var(&param.name, &item_var);
-        }
-        let (body_doc, _) = self.generate_foldl_loop_body(
+        let body_doc = self.lower_map_fold_body(
             body,
             &plan,
             &BodyKind::FoldlDetect {
                 item_var: item_var.clone(),
             },
+            &item_var,
             &acc_state_var,
             2,
         )?;
@@ -787,7 +762,6 @@ impl CoreErlangGenerator {
             &acc_state_var,
             body_doc,
         ));
-        self.pop_scope();
 
         let fold_result = self.fresh_temp_var("FoldResult");
         let found_item = self.fresh_temp_var("FoundItem");
@@ -850,15 +824,15 @@ impl CoreErlangGenerator {
         receiver: &Expression,
         body: &Block,
     ) -> Result<Document<'static>> {
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::TwoSlot);
-        self.emit_loop_convention_diagnostic(&plan, body.span);
-
-        let list_var = self.fresh_temp_var("temp");
-        let recv_code = self.expression_doc(receiver)?;
-        let safe_list_var = self.fresh_temp_var("temp");
-        let lambda_var = self.fresh_temp_var("temp");
-        let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
-        let item_var = Self::to_core_erlang_var(item_param);
+        let FoldHead {
+            plan,
+            list_var,
+            recv_code,
+            safe_list_var,
+            lambda_var,
+            item_var,
+            ..
+        } = self.begin_list_fold(receiver, body, ListOpKind::TwoSlot, "detect:", None, false)?;
         let acc_state_var = self.fresh_temp_var("AccSt");
 
         if plan.use_tuple_acc {
@@ -887,20 +861,13 @@ impl CoreErlangGenerator {
                 ") in ",
             ]);
 
-            self.push_scope();
-            if let Some(param) = body.parameters.first() {
-                self.bind_var(&param.name, &item_var);
-            }
-            // Unpack vars starting at index 3 (slot 1 = FoundItem, slot 2 = FoundFlag).
-            // BT-4121: the guarded-operator marker spans the body lowering.
-            let prestore_state = self.state_var_to_store();
-            self.push_guarded_op_loop(body, None);
-            let (body_doc, _) = self.generate_foldl_loop_body(
+            let lowered = self.lower_tuple_fold_body(
                 body,
                 &plan,
                 &BodyKind::FoldlDetect {
                     item_var: item_var.clone(),
                 },
+                &item_var,
                 &acc_state_var,
                 2,
             )?;
@@ -908,18 +875,10 @@ impl CoreErlangGenerator {
                 "'true'",
                 "FoundFlag",
                 &acc_state_var,
-                body_doc,
+                lowered.body_doc,
             ));
-            self.pop_scope();
-            // BT-4121: check out the marker; splice the pre-store (nil
-            // unless the loop brackets with a `State` in scope).
-            let (guarded_op_bracket, prestore) = self.checkout_guarded_op_loop_docs(
-                self.pop_guarded_op_loop(),
-                false,
-                body.span,
-                &prestore_state,
-            );
-            docs.insert(0, prestore);
+            let guarded_op_bracket = lowered.guarded_op_bracket;
+            docs.insert(0, lowered.prestore);
 
             let fold_result = self.fresh_temp_var("FoldResult");
             let found_result = self.fresh_temp_var("FoundResult");
@@ -981,16 +940,13 @@ impl CoreErlangGenerator {
             ") in ",
         ]);
 
-        self.push_scope();
-        if let Some(param) = body.parameters.first() {
-            self.bind_var(&param.name, &item_var);
-        }
-        let (body_doc, _) = self.generate_foldl_loop_body(
+        let body_doc = self.lower_map_fold_body(
             body,
             &plan,
             &BodyKind::FoldlDetect {
                 item_var: item_var.clone(),
             },
+            &item_var,
             &acc_state_var,
             2,
         )?;
@@ -1000,7 +956,6 @@ impl CoreErlangGenerator {
             &acc_state_var,
             body_doc,
         ));
-        self.pop_scope();
 
         let fold_result = self.fresh_temp_var("FoldResult");
         let found_result = self.fresh_temp_var("FoundResult");

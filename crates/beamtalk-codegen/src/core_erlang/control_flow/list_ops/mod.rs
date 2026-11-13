@@ -18,6 +18,8 @@
 //! - [`transform_ops`] — `inject:into:`, `flatMap:`, `count:`, `takeWhile:`,
 //!   `dropWhile:`, `partition:`, `groupBy:`, `sort:` codegen
 //! - [`enumeration_ops`] — `eachWithIndex:`, `do:separatedBy:` desugar codegen
+//! - [`fold_driver`] — the shared fold prologue / body lowering and the
+//!   collect-style (`collect:`, `select:`, `reject:`) accumulate driver
 
 mod basic_ops;
 mod enumeration_ops;
