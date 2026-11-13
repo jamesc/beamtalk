@@ -282,11 +282,12 @@ lookup(Op) ->
         #{} -> error
     end.
 
-%% The op table indexed by op name, built once per node and cached (the table
-%% is a compile-time constant, so the cache never goes stale).
+%% The op table indexed by op name, built once per module version and cached.
+%% The key carries the module's md5, so a hot-loaded version rebuilds the map
+%% instead of answering from the old table.
 -spec op_map() -> #{binary() => entry()}.
 op_map() ->
-    Key = {?MODULE, op_map},
+    Key = {?MODULE, op_map, ?MODULE:module_info(md5)},
     case persistent_term:get(Key, undefined) of
         undefined ->
             Map = maps:from_list([{Op, E} || #{op := Op} = E <- ops()]),

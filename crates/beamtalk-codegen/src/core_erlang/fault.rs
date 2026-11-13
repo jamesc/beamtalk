@@ -328,9 +328,10 @@ mod registry {
         1u64 << (fault as u32)
     }
 
-    // Compile-time guard for the `u64` mask: `OperandsInPlace` must stay the
-    // last variant (append new faults before it is not allowed — move this
-    // anchor to the new last variant), and its discriminant must fit a bit.
+    // Compile-time guard for the `u64` mask. It is anchored on the last
+    // variant, so a new fault must go before `OperandsInPlace` (or this
+    // anchor must move to the new last variant); the assert cannot see a
+    // variant added after it.
     const _: () = assert!(
         (Fault::OperandsInPlace as u32) < u64::BITS,
         "Fault has more than 64 variants; widen the ACTIVE mask"
