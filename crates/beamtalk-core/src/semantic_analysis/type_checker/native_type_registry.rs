@@ -451,7 +451,7 @@ const FFI_ARG_BINARY_CLASSES: &[&str] = &["String", "Binary"];
 /// passes one of these `erlang` guard BIFs is a number, atom, pid or binary, so
 /// it is never a tagged `String`, a charlist or a fun. (A binary is unchanged by
 /// the stock-mode unwrap; the `badarg` charlist retry still applies to it and
-/// runs in `ffi_call_raised/8`.) Static types are not enforced at
+/// runs in `ffi_call_raised/9`.) Static types are not enforced at
 /// run time (gradual typing), so a direct call also checks each argument with
 /// these and falls back to the proxy when one fails.
 pub const FFI_ARG_RUNTIME_GUARDS: &[&str] = &["is_number", "is_atom", "is_pid"];
@@ -503,13 +503,39 @@ pub fn ffi_result_passes_unchanged(ty: &InferredType) -> bool {
     })
 }
 
+/// The checked type of a `self delegate` method's declared parameter, for the
+/// argument proof ([`ffi_arg_passes_unchanged`], BT-4765): a plain class name,
+/// or a union of them. Anything else (a generic, a singleton, a difference or
+/// shape type, a type alias) answers `None`, which proves nothing, so the
+/// delegate keeps the proxy. An untyped parameter is `None` at the call site.
+#[must_use]
+pub fn ffi_annotation_type(annotation: &crate::ast::TypeAnnotation) -> Option<InferredType> {
+    use crate::ast::TypeAnnotation;
+    fn simple_names(annotation: &TypeAnnotation, out: &mut Vec<String>) -> bool {
+        match annotation {
+            TypeAnnotation::Simple(id) => {
+                out.push(id.name.to_string());
+                true
+            }
+            TypeAnnotation::Union { types, .. } => types.iter().all(|t| simple_names(t, out)),
+            _ => false,
+        }
+    }
+    let mut names = Vec::new();
+    if !simple_names(annotation, &mut names) {
+        return None;
+    }
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    Some(InferredType::simple_union(&refs))
+}
+
 /// An argument of static type `ty` reaches the callee unchanged, given the
 /// [`FFI_ARG_RUNTIME_GUARDS`] check (plus [`FFI_ARG_BINARY_GUARD`] for a
 /// binary-typed argument), and cannot carry Beamtalk code: the guard
 /// rejects a tagged `String` (the proxy's stock-mode unwrap would change it) and
 /// any fun or container that may hold one (a block run by the callee would
 /// change how a raised error is classified). A binary argument may still
-/// `badarg`; the retry with charlist-coerced arguments is `ffi_call_raised/8`'s.
+/// `badarg`; the retry with charlist-coerced arguments is `ffi_call_raised/9`'s.
 #[must_use]
 pub fn ffi_arg_passes_unchanged(ty: &InferredType) -> bool {
     all_members(ty, &|name| {

@@ -2018,7 +2018,7 @@ bt4485_runtime_guards_reject_what_the_proxy_changes_test() ->
 %% Argument types codegen passes without the proxy: the proxy hands every
 %% sample to the callee unchanged, and it passes one of the runtime guards (a
 %% scalar or a raw binary, so no tagged String and no fun that could run
-%% Beamtalk code; a binary's `badarg` retry runs in `ffi_call_raised/8`).
+%% Beamtalk code; a binary's `badarg` retry runs in `ffi_call_raised/9`).
 bt4485_arg_passthrough_matches_shared_fixture_test() ->
     #{
         <<"arg_passthrough">> := Cases,
@@ -2204,6 +2204,97 @@ bt4485_direct_matches_proxy_test_() ->
         end}
      || {M, F, A} <- Cases, Mode <- [stock, beamtalk]
     ].
+
+%%% ============================================================================
+%%% BT-4765: direct `self delegate` calls (ffi_call_raised/10)
+%%% ============================================================================
+
+%% The shape codegen emits for a proved delegate: every argument is checked
+%% with the fixture's runtime guards; a pass goes direct (a snapshot read first
+%% when an argument is a binary, `ffi_call_raised/10` on a raise), anything
+%% else takes `native_call/5`, the call the delegate made before.
+bt4765_delegate(M, F, Args, {_, _} = Ctx, Mode) ->
+    #{<<"arg_runtime_guards">> := Scalar, <<"arg_binary_guard">> := Bin} = bt4485_fixture(),
+    Guards = Scalar ++ [Bin],
+    Passes = fun(V) -> lists:any(fun(G) -> erlang:(binary_to_existing_atom(G))(V) end, Guards) end,
+    case lists:all(Passes, Args) of
+        false ->
+            beamtalk_erlang_proxy:native_call(M, F, Args, Ctx, Mode);
+        true ->
+            Snap =
+                case lists:any(fun erlang:is_binary/1, Args) of
+                    true -> beamtalk_class_vars:snapshot();
+                    false -> none
+                end,
+            try
+                erlang:apply(M, F, Args)
+            catch
+                C:E:S ->
+                    Site = erlang:process_info(self(), current_stacktrace),
+                    beamtalk_erlang_proxy:ffi_call_raised(
+                        C, E, S, M, F, Args, Mode, Site, Snap, Ctx
+                    )
+            end
+    end.
+
+%% Differential test: the delegate's direct shape and `native_call/5` agree on
+%% results and on structured errors, the `{Class, Selector}` context included
+%% (`badarg`, the charlist retry, `undef`, `function_clause`, `badarith`,
+%% already-wrapped errors, exit and throw), in both coercion modes.
+bt4765_delegate_direct_matches_native_call_test_() ->
+    Ctx = {'Probe', 'go:'},
+    Cases = [
+        {erlang, abs, [-3]},
+        {erlang, phash2, [<<"abc">>]},
+        {erlang, abs, [foo]},
+        {erlang, abs, [<<"not a number">>]},
+        {erlang, list_to_integer, [<<"42">>]},
+        {erlang, list_to_integer, [<<"nope">>]},
+        {erlang, '/', [1, 0]},
+        {erlang, no_such_function_bt4765, [1]},
+        {erlang, abs, []},
+        {no_such_module_bt4765, f, [1]},
+        {calendar, last_day_of_the_month, [2024, 13]},
+        {erlang, exit, [bye]},
+        {erlang, throw, [ball]},
+        {beamtalk_error, raise, [beamtalk_error:new(type_error, 'Probe', 'go:')]},
+        {?MODULE, explicit_undef_stub, [1]},
+        {beamtalk_process_ops, current, []},
+        %% The guard rejects these: they take native_call/5 and agree trivially.
+        {erlang, byte_size, [{beamtalk_string, <<"tagged">>}]},
+        {erlang, list_to_integer, ["42"]}
+    ],
+    [
+        {lists:flatten(io_lib:format("~p:~p ~p ~p", [M, F, A, Mode])), fun() ->
+            ?assertEqual(
+                bt4485_outcome(fun() -> beamtalk_erlang_proxy:native_call(M, F, A, Ctx, Mode) end),
+                bt4485_outcome(fun() -> bt4765_delegate(M, F, A, Ctx, Mode) end)
+            )
+        end}
+     || {M, F, A} <- Cases, Mode <- [stock, beamtalk]
+    ].
+
+%% A wrapped error from a direct delegate call names the Beamtalk
+%% `Class>>selector`, not the bare Erlang MFA.
+bt4765_delegate_error_carries_class_and_selector_test() ->
+    Outcome = bt4485_outcome(fun() ->
+        bt4765_delegate(no_such_module_bt4765, f, [1], {'Probe', 'go:'}, beamtalk)
+    end),
+    ?assertMatch({beamtalk_error, #beamtalk_error{class = 'Probe', selector = 'go:'}}, Outcome).
+
+%% As BT-4759: the charlist retry of a direct delegate call is a fresh attempt,
+%% so class-variable writes a failed first attempt made are discarded.
+bt4765_delegate_binary_retry_discards_first_attempt_class_var_writes_test() ->
+    Ctx = {'Probe', 'go:'},
+    beamtalk_class_vars_test_support:with_home('ProxyRetryTestClass', #{a => 1}, fun() ->
+        Proxied = beamtalk_erlang_proxy:native_call(
+            ?MODULE, write_then_badarg, [<<"x">>], Ctx, stock
+        ),
+        ?assertEqual(1, Proxied),
+        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a)),
+        ?assertEqual(Proxied, bt4765_delegate(?MODULE, write_then_badarg, [<<"x">>], Ctx, stock)),
+        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a))
+    end).
 
 %% Only the frames above the call site decide whether compiled Beamtalk code
 %% raised the error. Below it, the calling Beamtalk function's own frame (there
