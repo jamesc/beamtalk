@@ -227,9 +227,29 @@ fn is_kind_of_user_class_literal_builds_the_class_reference_only_on_the_send_exi
         1,
         "class reference built once, on the send exit. Got:\n{code}"
     );
+    // Arity 2 is checked on the emitted call itself: its argument list, split
+    // at the top-level commas, is exactly the receiver and the name.
+    let call_at = code.find("'isKindOfNamed'(").expect("fast call");
+    let args_start = call_at + "'isKindOfNamed'(".len();
+    let (mut depth, mut commas, mut end) = (1usize, 0usize, None);
+    for (i, c) in code[args_start..].char_indices() {
+        match c {
+            '(' | '{' | '[' => depth += 1,
+            ')' | '}' | ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = Some(args_start + i);
+                    break;
+                }
+            }
+            ',' if depth == 1 => commas += 1,
+            _ => {}
+        }
+    }
+    let args = &code[args_start..end.expect("closed call")];
     assert!(
-        code.contains("'isKindOfNamed'(_KindOfRecv") && !code.contains("'isKindOfNamed'/3"),
-        "isKindOfNamed/2 takes the receiver and the name only. Got:\n{code}"
+        args.starts_with("_KindOfRecv") && commas == 1 && args.ends_with("'Probe'"),
+        "isKindOfNamed/2 takes the receiver and the name only, got `{args}`. Got:\n{code}"
     );
     let reference = code.find("'Probe class static calls'").expect("reference");
     let fast = code.find("'isKindOfNamed'(").expect("fast call");

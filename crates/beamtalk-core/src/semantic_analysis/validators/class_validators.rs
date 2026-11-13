@@ -383,26 +383,28 @@ fn uninstantiable_new(
     if !matches!(selector, "new" | "new:")
         || matches!(class_name, "self" | "super")
         || !hierarchy.has_class(class_name)
-        // Unresolved ancestor: the kind is unknowable here, and the Object
-        // fallback would misreport a Value/Actor subclass (BT-4747).
-        || hierarchy.has_cross_file_parent(class_name)
         || hierarchy.has_own_class_method(class_name, selector)
     {
         return None;
     }
-    match hierarchy.resolve_class_kind(class_name) {
-        // BT-4479: an inherited user class-side `new` is a real constructor.
-        ClassKind::Object if selector == "new" && hierarchy.chain_has_user_new0(class_name) => {
-            return None;
+    // Unresolved ancestor: the kind is unknowable here, and the Object
+    // fallback would misreport a Value/Actor subclass (BT-4747). The
+    // `OpaqueNative` check below does not depend on the kind, so it still runs.
+    if !hierarchy.has_cross_file_parent(class_name) {
+        match hierarchy.resolve_class_kind(class_name) {
+            // BT-4479: an inherited user class-side `new` is a real constructor.
+            ClassKind::Object if selector == "new" && hierarchy.chain_has_user_new0(class_name) => {
+                return None;
+            }
+            ClassKind::Object => return Some(UninstantiableNew::ObjectKind),
+            // Actor `new`/`new:` is `check_actor_new_usage`'s territory: it already
+            // says "must use `spawn`", which is the fix. Falling through would
+            // double-report on the actor natives that declare no fields
+            // (`Subprocess`, `ReactiveSubprocess`, `TranscriptStream`) and point at
+            // `open:args:`-style constructors that don't address the real problem.
+            ClassKind::Actor => return None,
+            ClassKind::Value => {}
         }
-        ClassKind::Object => return Some(UninstantiableNew::ObjectKind),
-        // Actor `new`/`new:` is `check_actor_new_usage`'s territory: it already
-        // says "must use `spawn`", which is the fix. Falling through would
-        // double-report on the actor natives that declare no fields
-        // (`Subprocess`, `ReactiveSubprocess`, `TranscriptStream`) and point at
-        // `open:args:`-style constructors that don't address the real problem.
-        ClassKind::Actor => return None,
-        ClassKind::Value => {}
     }
     // `native:` with no fields of its own. A native class that *does*
     // declare fields (`Package`, `SupervisionNode`) has a real default instance.

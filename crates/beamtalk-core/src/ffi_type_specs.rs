@@ -1592,6 +1592,11 @@ pub fn collect_installed_erlang_modules() -> KnownErlangModules {
         ] {
             collect_beam_stems(&ebin, &mut modules);
         }
+    } else {
+        warn!(
+            "Beamtalk runtime directory not found; Beamtalk runtime modules are missing from \
+             the known Erlang module set"
+        );
     }
     if otp.discovered {
         KnownErlangModules::enabled(modules)

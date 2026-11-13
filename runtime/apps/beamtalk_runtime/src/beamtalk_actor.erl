@@ -411,12 +411,12 @@ handle_getValue([], State) ->
 
 %% BT-4701: the pieces of `beamtalk_actor_registry` / `_remote` / `_ffi` (split out of
 %% this module) that still call back into it. Exported for the split only; they
-%% were private helpers shared with the send paths.
+%% were private helpers shared with the send paths. (`no_such_process_error_record/2`
+%% and `resolve_remote_registered/2` have no caller outside this module, so they
+%% are private again.)
 -export([
     safe_spawn_named/5,
     node_down_error_record/2,
-    no_such_process_error_record/2,
-    resolve_remote_registered/2,
     resolve_proxy_or_error/2
 ]).
 

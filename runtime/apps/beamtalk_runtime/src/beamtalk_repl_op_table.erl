@@ -277,9 +277,23 @@ e(Op, Handler, Params, Optional, Capability, Notes) ->
 -doc "The table entry for `Op`, or `error` if the op is unknown.".
 -spec lookup(binary()) -> {ok, entry()} | error.
 lookup(Op) ->
-    case lists:search(fun(#{op := O}) -> O =:= Op end, ops()) of
-        {value, Entry} -> {ok, Entry};
-        false -> error
+    case op_map() of
+        #{Op := Entry} -> {ok, Entry};
+        #{} -> error
+    end.
+
+%% The op table indexed by op name, built once per node and cached (the table
+%% is a compile-time constant, so the cache never goes stale).
+-spec op_map() -> #{binary() => entry()}.
+op_map() ->
+    Key = {?MODULE, op_map},
+    case persistent_term:get(Key, undefined) of
+        undefined ->
+            Map = maps:from_list([{Op, E} || #{op := Op} = E <- ops()]),
+            persistent_term:put(Key, Map),
+            Map;
+        Map ->
+            Map
     end.
 
 -doc "The module that handles `Op`, or `error` if the op is unknown.".

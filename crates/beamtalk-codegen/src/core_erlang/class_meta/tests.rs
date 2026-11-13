@@ -357,6 +357,7 @@ fn test_extract_package_from_module_name() {
     );
     assert_eq!(extract_package_from_module_name("beamtalk_integer"), None);
     assert_eq!(extract_package_from_module_name("bt@"), None);
+    assert_eq!(extract_package_from_module_name("bt@@x"), None);
     assert_eq!(
         extract_package_from_module_name("bt@pkg@sub@dir@class"),
         Some("pkg".to_string())
