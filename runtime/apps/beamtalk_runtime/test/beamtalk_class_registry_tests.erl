@@ -2384,7 +2384,21 @@ bt4646_removal_does_not_evict_caller_from_pg_test() ->
 %% removal reads the dead owner from the metadata row (the last step before the
 %% deletes), so it lands exactly in the window.
 bt4794_rebuild_during_removal_stays_registered_test() ->
-    Name = 'BT4794RebuiltDuringRemoval',
+    bt4794_rebuild_at(beamtalk_class_metadata, lookup_owner, after_call).
+
+%% The rebuild lands before the removal reads the owner: the name is registered
+%% before `init/1` writes the row, so the live pid is what the read returns.
+bt4794_rebuild_before_owner_read_stays_registered_test() ->
+    bt4794_rebuild_at(beamtalk_class_metadata, lookup_owner, before_call).
+
+%% The rebuild lands after the claim was won, mid-teardown of the dependents.
+bt4794_rebuild_after_claim_stays_registered_test() ->
+    bt4794_rebuild_at(beamtalk_class_shadow_flags, clear, after_call).
+
+bt4794_rebuild_at(Mod, Fun, When) ->
+    Name = list_to_atom(
+        "BT4794Rebuilt_" ++ atom_to_list(Fun) ++ "_" ++ atom_to_list(When)
+    ),
     bt4646_with_announce_spy(Name, fun() ->
         OldPid = bt4646_builder_class(Name),
         %% Keep the eager monitor out of the race so this process does the removal.
@@ -2393,19 +2407,41 @@ bt4794_rebuild_during_removal_stays_registered_test() ->
         exit(OldPid, kill),
         bt4646_await_down(OldPid, MRef),
         Test = self(),
-        ok = meck:new(beamtalk_class_metadata, [passthrough, no_link]),
-        ok = meck:expect(beamtalk_class_metadata, lookup_owner, fun(N) ->
-            Result = meck:passthrough([N]),
-            case N =:= Name andalso self() =:= Test of
+        Rebuild = fun() ->
+            NewPid = bt4646_builder_class(Name),
+            ok = beamtalk_class_monitor:unwatch(Name),
+            Test ! {bt4794_rebuilt, NewPid}
+        end,
+        ok = meck:new(Mod, [passthrough, no_link]),
+        Hook = fun(Args) ->
+            Fire =
+                self() =:= Test andalso hd(Args) =/= undefined andalso
+                    (Mod =/= beamtalk_class_shadow_flags orelse Args =:= [runtime_fun, Name]) andalso
+                    (Mod =/= beamtalk_class_metadata orelse Args =:= [Name]) andalso
+                    (get({bt4794_fired, Name}) =:= undefined),
+            case Fire andalso When =:= before_call of
                 true ->
-                    NewPid = bt4646_builder_class(Name),
-                    ok = beamtalk_class_monitor:unwatch(Name),
-                    Test ! {bt4794_rebuilt, NewPid};
+                    put({bt4794_fired, Name}, true),
+                    Rebuild();
+                false ->
+                    ok
+            end,
+            Result = meck:passthrough(Args),
+            case Fire andalso When =:= after_call of
+                true ->
+                    put({bt4794_fired, Name}, true),
+                    Rebuild();
                 false ->
                     ok
             end,
             Result
-        end),
+        end,
+        case Mod of
+            beamtalk_class_metadata ->
+                ok = meck:expect(Mod, Fun, fun(N) -> Hook([N]) end);
+            beamtalk_class_shadow_flags ->
+                ok = meck:expect(Mod, Fun, fun(T, N) -> Hook([T, N]) end)
+        end,
         try
             Result = beamtalk_class_registry:restart_class(Name),
             NewPid =
@@ -2422,7 +2458,7 @@ bt4794_rebuild_during_removal_stays_registered_test() ->
             ?assertEqual(0, bt4646_count_removed(Name, 0)),
             ok = gen_server:stop(NewPid)
         after
-            meck:unload(beamtalk_class_metadata)
+            meck:unload(Mod)
         end
     end).
 

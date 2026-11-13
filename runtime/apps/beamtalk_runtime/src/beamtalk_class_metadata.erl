@@ -537,11 +537,14 @@ names `Owner`, the (dead) class process seen by the caller's re-check.
 The claim is one atomic `ets:select_delete/2` on the row's owner, so a class
 rebuilt under the same name between the caller's re-check and this call (its
 `insert/5` replaces the row and records its own pid) is left intact. Returns
-`true` when the row was removed, `false` when it already names another owner or
-is gone; nothing else is touched then. The dependents (class-method funs,
-method records, flags, subclass edge) are only dropped after a won claim.
+`true` when the row and its dependents were removed, `false` when the row
+already names another owner or is gone (nothing is touched), and `superseded`
+when the claim was won but a rebuild wrote a new row before the dependents were
+all dropped (the rest is left to the rebuilt class). The dependents
+(class-method funs, method records, flags, subclass edge) are only dropped
+after a won claim.
 """.
--spec delete_if_owner(class_name(), pid()) -> boolean().
+-spec delete_if_owner(class_name(), pid()) -> boolean() | superseded.
 delete_if_owner(Name, Owner) when is_pid(Owner) ->
     OldSuperclass = field(Name, #class_metadata.superclass),
     %% A match head with every other field a wildcard (built as a tuple: a
@@ -560,15 +563,34 @@ delete_if_owner(Name, Owner) when is_pid(Owner) ->
     case Claimed of
         true ->
             %% The row is already gone; drop what hangs off it (the same steps
-            %% `delete/1` runs before the row delete, then its tail).
-            delete_class_method_funs(Name),
-            delete_method_records(Name),
-            beamtalk_class_shadow_flags:clear(runtime_fun, Name),
-            beamtalk_class_shadow_flags:set_class_vars(Name, false),
-            finish_removal(Name, OldSuperclass),
-            true;
+            %% `delete/1` runs before the row delete, then its tail). A class
+            %% rebuilt under the name after the claim writes a new row and then
+            %% seeds its own funs/records, and these steps are keyed by name
+            %% only, so a new row is looked for before each step and the rest
+            %% abandoned once one appears (`superseded`). That narrows, but
+            %% cannot close, the window inside a single step.
+            Steps = [
+                fun() -> delete_class_method_funs(Name) end,
+                fun() -> delete_method_records(Name) end,
+                fun() -> beamtalk_class_shadow_flags:clear(runtime_fun, Name) end,
+                fun() -> beamtalk_class_shadow_flags:set_class_vars(Name, false) end,
+                fun() -> finish_removal(Name, OldSuperclass) end
+            ],
+            run_unless_superseded(Name, Steps);
         false ->
             false
+    end.
+
+-spec run_unless_superseded(class_name(), [fun(() -> term())]) -> true | superseded.
+run_unless_superseded(_Name, []) ->
+    true;
+run_unless_superseded(Name, [Step | Rest]) ->
+    case lookup_owner(Name) of
+        {ok, _NewOwner} ->
+            superseded;
+        not_found ->
+            _ = Step(),
+            run_unless_superseded(Name, Rest)
     end.
 
 -spec delete_row_and_dependents(class_name()) -> ok.

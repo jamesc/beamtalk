@@ -1978,16 +1978,23 @@ remove_dead_class_registration(ClassName, Module) ->
                     %% or announce.
                     beamtalk_class_registry:forget_dead_incarnations(ClassName);
                 {ok, Owner} ->
-                    remove_claimed_dead_class(ClassName, Module, Owner)
+                    %% The name is registered before `init/1` writes the row,
+                    %% so a rebuild between the lookup above and this read makes
+                    %% its live pid the owner: only a dead owner is claimed.
+                    case is_process_alive(Owner) of
+                        true -> {alive, Owner};
+                        false -> remove_claimed_dead_class(ClassName, Module, Owner)
+                    end
             end
     end.
 
 -spec remove_claimed_dead_class(class_name(), module(), pid()) -> ok | {alive, pid()}.
 remove_claimed_dead_class(ClassName, Module, Owner) ->
     case beamtalk_class_metadata:delete_if_owner(ClassName, Owner) of
-        false ->
-            %% The row now names another owner: the class was rebuilt after
-            %% the re-check. Leave it registered.
+        Lost when Lost =:= false; Lost =:= superseded ->
+            %% The row names another owner, or a rebuild wrote one mid-teardown:
+            %% the class was rebuilt after the re-check. Leave it registered and
+            %% announce nothing.
             case beamtalk_class_registry:whereis_class(ClassName) of
                 NewPid when is_pid(NewPid) -> {alive, NewPid};
                 undefined -> ok
