@@ -270,10 +270,18 @@ fn is_kind_of_fast_paths_share_one_guard() {
     );
     // The name-only lowering binds the `whereis` once (BT-4754) and guards on it.
     assert!(
-        named.contains("call 'erlang':'whereis'('beamtalk_class_Probe') in case ")
-            && named.contains(&guard("_KindOfPid")),
+        named.contains("call 'erlang':'whereis'('beamtalk_class_Probe') in case "),
         "Got:\n{named}"
     );
+    let pid_var = named
+        .split("let ")
+        .find_map(|part| {
+            part.split_once(" = ")
+                .map(|(v, _)| v)
+                .filter(|v| v.starts_with("_KindOfPid"))
+        })
+        .unwrap_or_else(|| panic!("pid binding missing. Got:\n{named}"));
+    assert!(named.contains(&guard(pid_var)), "Got:\n{named}");
     assert!(
         !builtin.contains("'overridden_anywhere'"),
         "Got:\n{builtin}"
