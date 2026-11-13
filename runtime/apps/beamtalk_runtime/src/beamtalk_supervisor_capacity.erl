@@ -37,6 +37,10 @@ name must not change.
     checked_dynamic_start_n/2
 ]).
 
+-ifdef(TEST).
+-export([max_children_error/3]).
+-endif.
+
 -include("beamtalk.hrl").
 -include("beamtalk_supervisor_capacity.hrl").
 -include_lib("kernel/include/logger.hrl").
@@ -54,17 +58,7 @@ check_max_children(_ClassName, infinity) ->
 check_max_children(_ClassName, Max) when is_integer(Max), Max >= 0 ->
     {ok, Max};
 check_max_children(ClassName, Other) ->
-    Error0 = beamtalk_error:new(
-        type_error,
-        ClassName,
-        maxChildren,
-        beamtalk_error:chars_to_binary(
-            io_lib:format(
-                "maxChildren must be a non-negative Integer or #infinity, got ~tp", [Other]
-            )
-        )
-    ),
-    {error, beamtalk_error:with_details(Error0, #{value => Other})}.
+    {error, beamtalk_error:bad_value(ClassName, maxChildren, "maxChildren must be a non-negative Integer or #infinity, got ~tp", [Other], Other)}.
 
 -spec checked_dynamic_start_n(map(), [term()]) -> {ok, pid()} | {error, term()}.
 checked_dynamic_start_n(
@@ -276,12 +270,7 @@ max_children_error(SupClass, Selector, Max) ->
         Selector,
         <<"Back off and retry, or free a slot with terminateChild:">>
     ),
-    Error1 = beamtalk_error:with_message(
-        Error0,
-        beamtalk_error:chars_to_binary(
-            io_lib:format("DynamicSupervisor is at its maxChildren limit (~b)", [Max])
-        )
-    ),
+    Error1 = beamtalk_error:with_message_fmt(Error0, "DynamicSupervisor is at its maxChildren limit (~b)", [Max]),
     {error, beamtalk_error:with_details(Error1, #{max_children => Max})}.
 
 -doc """
