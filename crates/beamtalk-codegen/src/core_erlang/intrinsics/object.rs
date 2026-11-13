@@ -287,8 +287,8 @@ impl CoreErlangGenerator {
         }
         let Some(test) = self.builtin_kind_test(class_arg) else {
             // BT-4757: a user class literal takes the name-only lowering. The
-            // built-in lowering above stays first, so a later built-in
-            // generalisation (BT-4764) slots in beside it with the same
+            // built-in lowering above stays first (BT-4764 compiles a built-in
+            // class literal to the inline type test) and both carry the same
             // override guard in the runtime.
             //
             // Not in the REPL: a capitalised name there resolves through the

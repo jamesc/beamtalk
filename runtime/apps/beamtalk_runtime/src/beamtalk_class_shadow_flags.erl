@@ -195,8 +195,11 @@ published row names). The call site reads the map once and, on a miss, calls
 while the pid is registered and alive and the row still names `Module`. It
 shares the per-tag index and every eraser above (a metadata write or reload, an
 ancestor's write, the class monitor's `'DOWN'`, row removal), so a reload that
-moves the class to another module or a restart is seen on the next literal. An
-unregistered class installs nothing: negative verdicts are not cached.
+moves the class to another module is seen on the next literal. A restart is
+seen only once the monitor's `'DOWN'` has erased the key: between the class
+process dying and that `'DOWN'` the cached object still names the dead pid (the
+same window as the direct-call keys above). An unregistered class installs
+nothing: negative verdicts are not cached.
 
 `static_call_target/4` (the call site's miss path) derives all four and, under
 the class's tag lock, records the tag in the per-tag index

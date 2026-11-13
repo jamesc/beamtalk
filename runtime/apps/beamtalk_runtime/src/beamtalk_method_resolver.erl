@@ -135,7 +135,7 @@ published_method_info(ClassName, Selector) ->
                 {found, {ok, Info}};
             not_found ->
                 %% A miss is only authoritative once the class has published
-                %% its method records (`publish_reflection/1` writes the
+                %% its method records (`beamtalk_class_publish:publish_reflection/1` writes the
                 %% instance-method selector list alongside them).
                 case beamtalk_class_metadata:lookup_instance_methods(Name) of
                     {ok, _} ->
