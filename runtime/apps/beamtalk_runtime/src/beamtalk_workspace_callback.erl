@@ -29,7 +29,7 @@ the workspace's compile-and-install pipeline. This module is that seam:
 
 -include("beamtalk.hrl").
 
--export([register/1, register_if_loaded/1, unregister/0, registered_module/0, require/2]).
+-export([register/1, register_if_loaded/1, unregister/0, registered_module/0]).
 
 %% Wrappers, one per callback.
 -export([
@@ -54,7 +54,7 @@ the workspace's compile-and-install pipeline. This module is that seam:
 
 -callback reload_class_file(string(), atom()) -> {ok, [map()]} | {error, term()}.
 -callback eval_with_self(term(), binary() | string()) ->
-    {ok, term()} | {error, #beamtalk_error{}}.
+    {ok, term()} | {error, term()}.
 -callback compile_method(
     binary(), atom() | binary(), binary(), durable | ephemeral, binary(), human | agent
 ) -> {ok, binary()} | {error, term()}.
@@ -103,20 +103,6 @@ register_if_loaded(Module) when is_atom(Module) ->
         {error, _} -> ok
     end.
 
--doc """
-Require a registered workspace callback for `Selector` on `Class`, else raise
-the structured `no_workspace` error. For operations whose safety depends on
-the workspace's answer (e.g. `renameTo:` classifies the class as
-stdlib/dependency/dynamic through it) and so must fail closed rather than
-guess.
-""".
--spec require(atom(), atom()) -> ok.
-require(Selector, Class) ->
-    case registered_module() of
-        {ok, _} -> ok;
-        none -> beamtalk_capability:raise_no_workspace(Selector, Class)
-    end.
-
 -doc "Remove the workspace callback module (the workspace is stopping).".
 -spec unregister() -> ok.
 unregister() ->
@@ -138,7 +124,7 @@ reload_class_file(Path, ExpectedClassName) ->
     invoke(reload_class_file, [Path, ExpectedClassName]).
 
 -spec eval_with_self(term(), binary() | string()) ->
-    {ok, term()} | {error, #beamtalk_error{}} | no_workspace().
+    {ok, term()} | {error, term()} | no_workspace().
 eval_with_self(Self, Source) ->
     invoke(eval_with_self, [Self, Source]).
 

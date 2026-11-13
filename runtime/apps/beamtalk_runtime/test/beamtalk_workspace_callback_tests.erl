@@ -149,20 +149,16 @@ register_if_loaded_ignores_a_missing_module_test() ->
     ok = beamtalk_workspace_callback:register_if_loaded(bt4792_no_such_module),
     ?assertEqual(none, beamtalk_workspace_callback:registered_module()).
 
-require_fails_closed_without_a_callback_test() ->
+classify_class_reports_no_workspace_without_a_callback_test() ->
     ok = beamtalk_workspace_callback:unregister(),
-    ?assertBtError(
-        no_workspace,
-        'Foo',
-        'renameTo:',
-        beamtalk_workspace_callback:require('renameTo:', 'Foo')
+    ?assertEqual(
+        {error, no_workspace}, beamtalk_refactor_support:classify_class(<<"Integer">>)
+    ),
+    %% The removal snapshot keeps its tolerant "dynamic" answer.
+    ?assertEqual(
+        #{flushable => false, not_flushable_reason => <<"dynamic">>},
+        beamtalk_refactor_support:capture_class_removal_snapshot(<<"Integer">>)
     ).
-
-require_passes_with_a_callback_test() ->
-    with_registration(fun() ->
-        ok = beamtalk_workspace_callback:register(?MODULE),
-        ?assertEqual(ok, beamtalk_workspace_callback:require('renameTo:', 'Foo'))
-    end).
 
 %%% A workspace that stops mid-rename reports the workspace-unavailable error
 

@@ -38,6 +38,7 @@ verbatim.
     require_method_capability/3,
     has_runtime_class_fun/2,
     capture_class_removal_snapshot/1,
+    classify_class/1,
     log_class_removal/2,
     current_author_context/0,
     %% Shared by the class-rename and method-rename pipelines (BT-4703).
@@ -181,13 +182,29 @@ has_runtime_class_fun(ClassName, Selector) ->
 %% describe.
 -spec capture_class_removal_snapshot(binary()) -> map().
 capture_class_removal_snapshot(ClassNameBin) ->
-    try beamtalk_workspace_callback:capture_class_removal_snapshot(ClassNameBin) of
-        Snapshot when is_map(Snapshot) ->
+    case classify_class(ClassNameBin) of
+        {ok, Snapshot} ->
             Snapshot;
         {error, no_workspace} ->
             %% Expected when no workspace is running (e.g. plain runtime, no
             %% live ChangeLog) — not a bug, so no log line.
             #{flushable => false, not_flushable_reason => <<"dynamic">>}
+    end.
+
+%% The same snapshot, but a missing workspace is reported instead of being
+%% read as "dynamic". For operations that act on the classification (class
+%% rename moves a registry identity, so mistaking a stdlib class for a dynamic
+%% one is not harmless): the answer and the check that a workspace exists
+%% come from ONE callback call, so they cannot disagree. Still degrades to
+%% "dynamic" on an unexpected failure, as `capture_class_removal_snapshot/1`
+%% does.
+-spec classify_class(binary()) -> {ok, map()} | {error, no_workspace}.
+classify_class(ClassNameBin) ->
+    try beamtalk_workspace_callback:capture_class_removal_snapshot(ClassNameBin) of
+        Snapshot when is_map(Snapshot) ->
+            {ok, Snapshot};
+        {error, no_workspace} ->
+            {error, no_workspace}
     catch
         Class:Reason:Stack ->
             ?LOG_WARNING(
@@ -201,7 +218,7 @@ capture_class_removal_snapshot(ClassNameBin) ->
                     domain => [beamtalk, runtime]
                 }
             ),
-            #{flushable => false, not_flushable_reason => <<"dynamic">>}
+            {ok, #{flushable => false, not_flushable_reason => <<"dynamic">>}}
     end.
 
 %% Best-effort ChangeLog append after a successful class removal,
