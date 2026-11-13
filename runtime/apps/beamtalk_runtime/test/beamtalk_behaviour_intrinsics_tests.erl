@@ -3473,6 +3473,10 @@ object_is_kind_of_fast_path_test_() ->
 full_is_kind_of(Receiver, Behaviour) ->
     outcome(fun() -> beamtalk_behaviour_intrinsics:objectIsKindOf(Receiver, Behaviour) end).
 
+%% The real `isKindOf:` send, the baseline for every dead case (BT-4768).
+send_is_kind_of(Receiver, Behaviour) ->
+    outcome(fun() -> beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour]) end).
+
 named_is_kind_of(Receiver, Behaviour, Name) ->
     outcome(fun() ->
         beamtalk_behaviour_intrinsics:kind_of_named(Receiver, Behaviour, Name, false)
@@ -3530,18 +3534,42 @@ is_kind_of_named_test_() ->
                 _ = {Bottom, OtherPid}
             end),
             ?_test(begin
-                %% A removed class: the literal itself raises class_not_found
-                %% in generated code, so the runtime only sees a stale class
-                %% object. Nothing is kind of it by name (the one accepted
-                %% difference: the send's fallback route raises instead, as
-                %% for `match:` arms, ADR 0107).
-                {_, _} = register_class('BT4757Grand', #{}, #{}),
-                {Gone, GonePid} = register_class_with_super(
+                %% BT-4768: a class killed without terminate/2 (its metadata row
+                %% survives): the compiled caller's probe sends instead, and the
+                %% runtime agrees for the receiver's side. Whatever the send
+                %% answers or raises, the name-only entry answers.
+                {Grand, _} = register_class('BT4757Grand', #{}, #{}),
+                {_, GonePid} = register_class_with_super(
                     'BT4757Other', 'BT4757Grand', #{}, #{}
                 ),
                 Value = #{'$beamtalk_class' => 'BT4757Grand'},
-                ok = gen_server:stop(GonePid, normal, 5000),
-                ?assertEqual({value, false}, named_is_kind_of(Value, Gone, 'BT4757Other'))
+                Dead = #{'$beamtalk_class' => 'BT4757Other'},
+                stop_without_terminate(GonePid),
+                %% Dead receiver class: the send raises; so does the name-only call.
+                SentDead = send_is_kind_of(Dead, Grand),
+                ?assertNotMatch({value, _}, SentDead),
+                ?assertEqual(SentDead, named_is_kind_of(Dead, Grand, 'BT4757Grand')),
+                %% The dead *literal* class is the compiled caller's probe (codegen
+                %% test); a live receiver is still answered by name.
+                ?assertEqual({value, true}, named_is_kind_of(Value, Grand, 'BT4757Grand'))
+            end),
+            ?_test(begin
+                %% BT-4768: a dead actor receiver takes the send and raises as it
+                %% did before the name-only path; a live one is answered by name.
+                {Grand, _} = register_class('BT4757Grand', #{}, #{}),
+                {Pid, Ref} = spawn_monitor(fun() -> ok end),
+                receive
+                    {'DOWN', Ref, process, Pid, _} -> ok
+                after 5000 -> error(timeout)
+                end,
+                DeadActor = #beamtalk_object{class = 'BT4757Grand', class_mod = undefined, pid = Pid},
+                LiveActor = #beamtalk_object{
+                    class = 'BT4757Grand', class_mod = undefined, pid = self()
+                },
+                Sent = send_is_kind_of(DeadActor, Grand),
+                ?assertNotMatch({value, _}, Sent),
+                ?assertEqual(Sent, named_is_kind_of(DeadActor, Grand, 'BT4757Grand')),
+                ?assertEqual({value, true}, named_is_kind_of(LiveActor, Grand, 'BT4757Grand'))
             end),
             ?_test(begin
                 %% A class that does not inherit `Object` never runs
