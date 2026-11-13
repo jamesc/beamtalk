@@ -37,7 +37,7 @@ bad_value_test() ->
     ?assertEqual(?HINT(<<"bad 7">>), E#beamtalk_error.hint),
     ?assertEqual(#{value => 7}, E#beamtalk_error.details).
 
-reserved_name_test() ->
+supervisor_reserved_name_test() ->
     E = beamtalk_error:supervisor_reserved_name('C', 'spawnAs:', 'Transcript'),
     ?assertEqual(reserved_name, E#beamtalk_error.kind),
     ?assertEqual('spawnAs:', E#beamtalk_error.selector),
@@ -180,4 +180,25 @@ actor_registry_name_registered_test() ->
     ?assertEqual(registerAs, E#beamtalk_error.selector),
     ?assertEqual(
         ?HINT(<<"Name 'bt4793_taken_name' is already registered">>), E#beamtalk_error.hint
+    ).
+
+%% The actor registry's reserved-name errors (kind, selector and hint pinned).
+actor_registry_reserved_name_test() ->
+    Name = beamtalk_reserved_bt4793,
+    {error, E1} = beamtalk_actor_registry:register_name(Name, self()),
+    {error, E2} = beamtalk_actor_registry:unregister_name(Name),
+    {error, E3} = beamtalk_actor_registry:spawn_named_unlinked(Name, some_module, []),
+    lists:foreach(
+        fun({E, Sel, Hint}) ->
+            ?assertEqual(reserved_name, E#beamtalk_error.kind),
+            ?assertEqual('Actor', E#beamtalk_error.class),
+            ?assertEqual(Sel, E#beamtalk_error.selector),
+            ?assertEqual(?HINT(Hint), E#beamtalk_error.hint)
+        end,
+        [
+            {E1, registerAs,
+                <<"Cannot register actor under reserved name 'beamtalk_reserved_bt4793'">>},
+            {E2, unregister, <<"Cannot unregister reserved name 'beamtalk_reserved_bt4793'">>},
+            {E3, spawnAs, <<"Cannot spawn actor under reserved name 'beamtalk_reserved_bt4793'">>}
+        ]
     ).
