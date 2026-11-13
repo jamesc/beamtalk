@@ -76,11 +76,9 @@ module loading to beamtalk_repl_loader.
 
 %% ADR 0114 — the shared multi-site rewrite mechanism generalizing
 %% remove_method/3,4 above, plus its best-effort ChangeLog append. Thin
-%% forwarding wrappers over beamtalk_repl_loader, routed through this module
-%% for the same compile-time-dependency reason (a future `beamtalk_behaviour_
-%% intrinsics:classRenameTo/2`/`classRenameSelector/3` will
-%% call these via beamtalk_workspace_callback the same way remove_selector/2 already calls
-%% remove_method/3,4).
+%% forwarding wrappers over beamtalk_repl_loader, reached from
+%% beamtalk_class_refactor and beamtalk_selector_refactor through
+%% beamtalk_workspace_callback (the rename pipelines).
 -export([rewrite_sites/2, validate_sites/2, emit_rewrite_change_entry/2]).
 
 %% ADR 0114 Phase 4: `Workspace changes revert:` for a pending

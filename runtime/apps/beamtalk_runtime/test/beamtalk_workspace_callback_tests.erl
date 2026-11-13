@@ -163,3 +163,14 @@ require_passes_with_a_callback_test() ->
         ok = beamtalk_workspace_callback:register(?MODULE),
         ?assertEqual(ok, beamtalk_workspace_callback:require('renameTo:', 'Foo'))
     end).
+
+%%% A workspace that stops mid-rename reports the workspace-unavailable error
+
+rename_rewrite_failed_error_maps_no_workspace_like_workspace_unavailable_test() ->
+    Unavailable = beamtalk_refactor_support:rename_rewrite_failed_error(
+        'Foo', <<"renameTo:">>, <<"class">>, <<"no sites">>, workspace_unavailable
+    ),
+    NoWorkspace = beamtalk_refactor_support:rename_rewrite_failed_error(
+        'Foo', <<"renameTo:">>, <<"class">>, <<"no sites">>, no_workspace
+    ),
+    ?assertEqual(Unavailable, NoWorkspace).

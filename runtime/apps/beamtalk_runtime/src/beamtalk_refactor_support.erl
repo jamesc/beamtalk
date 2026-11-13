@@ -338,7 +338,9 @@ rename_collision_error(selector, ClassName, NewSelector) ->
 %% a classification with neither a definition nor any reference site.
 -spec rename_rewrite_failed_error(atom(), binary(), binary(), binary(), term()) ->
     #beamtalk_error{}.
-rename_rewrite_failed_error(ErrClass, Op, _Noun, _NoSitesMsg, workspace_unavailable) ->
+rename_rewrite_failed_error(ErrClass, Op, _Noun, _NoSitesMsg, Reason) when
+    Reason =:= workspace_unavailable; Reason =:= no_workspace
+->
     Error0 = beamtalk_error:new(runtime_error, ErrClass),
     beamtalk_error:with_message(
         Error0,

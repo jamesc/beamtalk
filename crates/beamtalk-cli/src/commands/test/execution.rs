@@ -555,6 +555,7 @@ fn run_native_eunit_tests(pipeline: &TestPipeline) -> Result<NativeEunitResult> 
     // rather than relying on the coarse ok/error return value.
     let eval_cmd = format!(
         "{{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
+         ok = beamtalk_workspace_callback:register_if_loaded(beamtalk_repl_eval), \
          {root_package_start}\
          {hex_deps_start_cmd}\
          Mods = [{module_list}], \
