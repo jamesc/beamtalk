@@ -78,7 +78,7 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 %% in the chain answers but the class process must run (class variables in the
 %% chain): the positive verdict "ask the class process", so the caller does not
 %% walk the chain a second time (`class_chain_only_send/4`) just to learn that.
--type verdict() :: owner() | process | decline.
+-type verdict() :: owner() | process | extension | decline.
 -export_type([owner/0]).
 %% BT-4307: what the class-side chain walk (`find_class_side_method/3`) finds
 %% first: a class-side extension registered on a class's metaclass tag, or a
@@ -250,7 +250,11 @@ class_send_plain(ClassPid, Selector, Args, Timeout) ->
             run_in_caller(
                 ClassSelf, Selector, Args, ClassName, DefiningClass, DefiningModule, FunName
             );
-        process when ClassPid =/= self() ->
+        Answered when (Answered =:= process orelse Answered =:= extension), ClassPid =/= self() ->
+            %% BT-4800: `extension` is the same route for a class-side
+            %% extension that answers first: resolved once in the memo, so the
+            %% chain-only walk below (extension registry, selector lists,
+            %% ancestors) is not repeated only to decline.
             %% BT-4771: the memo already walked the chain: a class method
             %% answers and the class process must run it, so the chain-only
             %% shortcut (which would walk the chain again, uncached, only to
@@ -366,6 +370,8 @@ in_caller_verdict(ClassPid, Selector, true) ->
             end;
         process ->
             process;
+        extension ->
+            extension;
         _ ->
             decline
     end;
@@ -386,12 +392,13 @@ class-side extension first, then the class's methods from its published
 selector list, which includes ADR 0084 runtime funs, so a runtime fun at an
 ancestor counts as that ancestor's method (and is applied from the fun store
 by `apply_class_method_body/7`). An extension found first, on the class or an
-ancestor (BT-4307), declines: the class process runs it. (An extension on the
+ancestor (BT-4307), answers `extension`: the class process runs it. (An extension on the
 receiving class also makes `direct_call_ok/2` false.)
 
 `process` (BT-4771) records that a class method in the chain answers but the
 chain declares class variables, so the class process runs it: the caller
-asks it directly and does not walk the chain again. `decline` is memoised too
+asks it directly and does not walk the chain again. `extension` (BT-4800) is
+the same for a class-side extension that answers first. `decline` is memoised too
 (process-bound selector, class-variable reflection
 send, an extension answering first, no class method in the chain or a fact
 unpublished): the next metadata
@@ -458,8 +465,11 @@ derive_class_method_owner(ClassName, Selector, ProcessBound) ->
                     end;
                 {extension, _Owner, _Fun} ->
                     %% A class-side extension answers first, on the class or
-                    %% an ancestor (BT-4307): the class process runs it.
-                    decline;
+                    %% an ancestor (BT-4307): the class process runs it. A
+                    %% positive verdict (BT-4800), retired by
+                    %% `beamtalk_extensions:register/5` / `unregister/3`; the
+                    %% class process still looks the extension up itself.
+                    extension;
                 not_found ->
                     %% Only the `Class` chain answers: the BT-4073 skip in
                     %% `class_send_dispatch/3` already runs it in the caller.
