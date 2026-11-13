@@ -120,17 +120,7 @@ register_name(Name, Pid) when is_atom(Name), is_pid(Pid) ->
                 error:badarg ->
                     case erlang:whereis(Name) =/= undefined of
                         true ->
-                            {error,
-                                beamtalk_error:with_hint(
-                                    beamtalk_error:new(
-                                        name_registered, 'Actor', registerAs
-                                    ),
-                                    beamtalk_error:chars_to_binary(
-                                        io_lib:format(
-                                            "Name '~ts' is already registered", [Name]
-                                        )
-                                    )
-                                )};
+                            {error, beamtalk_error:name_registered('Actor', registerAs, Name)};
                         false ->
                             {error,
                                 beamtalk_error:with_hint(
@@ -538,15 +528,7 @@ remote_single_class_candidates(Pid) ->
 
 -spec name_registered_error(atom()) -> {error, #beamtalk_error{}}.
 name_registered_error(Name) ->
-    {error,
-        beamtalk_error:with_hint(
-            beamtalk_error:new(name_registered, 'Actor', spawnAs),
-            beamtalk_error:chars_to_binary(
-                io_lib:format(
-                    "Name '~ts' is already registered", [Name]
-                )
-            )
-        )}.
+    {error, beamtalk_error:name_registered('Actor', spawnAs, Name)}.
 
 -doc """
 Check whether `Name` is on the reserved-name blocklist.

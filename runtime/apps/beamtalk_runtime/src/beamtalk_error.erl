@@ -22,7 +22,7 @@ See docs/internal/design-self-as-object.md Section 3.8 for error taxonomy.
     new/4,
     new_fmt/5,
     bad_value/5,
-    reserved_name/3,
+    supervisor_reserved_name/3,
     name_registered/3,
     with_message_fmt/3,
     with_message/2,
@@ -743,13 +743,6 @@ chars_to_binary(Chars) ->
     end.
 
 %%% ============================================================================
-%%% Shared system-error constructors (BT-4676)
-%%% ============================================================================
-%%% Shared hints for `node_down`, `actor_dead`, `does_not_understand` and the
-%%% actor-send `timeout` live here; `timeout/3` and `stale_handle/3` take the
-%%% hint from the caller.
-
-%%% ============================================================================
 %%% Formatted-text constructors (BT-4793)
 %%% ============================================================================
 
@@ -774,9 +767,9 @@ offending `Value` is carried in `details`.
 bad_value(Class, Selector, Fmt, Args, Value) ->
     with_details(new_fmt(type_error, Class, Selector, Fmt, Args), #{value => Value}).
 
--doc "A `reserved_name` error: `Name` may not be used to register a process.".
--spec reserved_name(atom(), atom(), term()) -> #beamtalk_error{}.
-reserved_name(Class, Selector, Name) ->
+-doc "A `reserved_name` error for a supervisor started under a reserved `Name`.".
+-spec supervisor_reserved_name(atom(), atom(), term()) -> #beamtalk_error{}.
+supervisor_reserved_name(Class, Selector, Name) ->
     new_fmt(
         reserved_name, Class, Selector, "Cannot start a supervisor under reserved name '~ts'", [
             Name
@@ -787,6 +780,13 @@ reserved_name(Class, Selector, Name) ->
 -spec name_registered(atom(), atom(), term()) -> #beamtalk_error{}.
 name_registered(Class, Selector, Name) ->
     new_fmt(name_registered, Class, Selector, "Name '~ts' is already registered", [Name]).
+
+%%% ============================================================================
+%%% Shared system-error constructors (BT-4676)
+%%% ============================================================================
+%%% Shared hints for `node_down`, `actor_dead`, `does_not_understand` and the
+%%% actor-send `timeout` live here; `timeout/3` and `stale_handle/3` take the
+%%% hint from the caller.
 
 -doc "A `node_down` error: `Node` is unreachable. The hint is shared by every site.".
 -spec node_down(atom(), atom(), node()) -> #beamtalk_error{}.

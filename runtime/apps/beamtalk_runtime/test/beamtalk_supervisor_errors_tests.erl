@@ -38,7 +38,7 @@ bad_value_test() ->
     ?assertEqual(#{value => 7}, E#beamtalk_error.details).
 
 reserved_name_test() ->
-    E = beamtalk_error:reserved_name('C', 'spawnAs:', 'Transcript'),
+    E = beamtalk_error:supervisor_reserved_name('C', 'spawnAs:', 'Transcript'),
     ?assertEqual(reserved_name, E#beamtalk_error.kind),
     ?assertEqual('spawnAs:', E#beamtalk_error.selector),
     ?assertEqual(
@@ -157,4 +157,27 @@ unavailable_stale_test() ->
     ?assertEqual(stale_handle, E#beamtalk_error.kind),
     ?assertEqual(
         ?HINT(<<"supervisor is not running; the handle is stale">>), E#beamtalk_error.hint
+    ).
+
+%% The actor registry shares the `name_registered` constructor (BT-4793).
+actor_registry_name_registered_test() ->
+    Parent = self(),
+    Name = bt4793_taken_name,
+    Holder = spawn(fun() ->
+        register(Name, self()),
+        Parent ! ready,
+        receive
+            stop -> ok
+        end
+    end),
+    receive
+        ready -> ok
+    end,
+    {error, E} = beamtalk_actor_registry:register_name(Name, self()),
+    Holder ! stop,
+    ?assertEqual(name_registered, E#beamtalk_error.kind),
+    ?assertEqual('Actor', E#beamtalk_error.class),
+    ?assertEqual(registerAs, E#beamtalk_error.selector),
+    ?assertEqual(
+        ?HINT(<<"Name 'bt4793_taken_name' is already registered">>), E#beamtalk_error.hint
     ).

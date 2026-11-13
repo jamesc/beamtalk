@@ -587,7 +587,7 @@ spawn_named_instance(ClassName, _Module, _Args, Name, Selector) when not is_atom
 spawn_named_instance(ClassName, Module, Args, Name, Selector) ->
     case beamtalk_actor_registry:reserved_name(Name) of
         true ->
-            {error, beamtalk_error:reserved_name(ClassName, Selector, Name)};
+            {error, beamtalk_error:supervisor_reserved_name(ClassName, Selector, Name)};
         false ->
             StartFun = fun() ->
                 supervisor:start_link({local, Name}, Module, {?TOP_LEVEL_TAG, Args})
@@ -698,7 +698,7 @@ start_supervisor_child(Module, Args, Name) ->
     case beamtalk_actor_registry:reserved_name(Name) of
         true ->
             %% Same reserved-name policy as `spawnAs:` (ADR 0079).
-            {error, beamtalk_error:reserved_name('Supervisor', 'withName:', Name)};
+            {error, beamtalk_error:supervisor_reserved_name('Supervisor', 'withName:', Name)};
         false ->
             case exports(Module, start_link, 2) of
                 true ->
