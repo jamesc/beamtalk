@@ -2782,7 +2782,8 @@ rewrite_after_identity_move_no_workspace_is_error_tuple_test() ->
     ).
 
 classRenameTo_dynamic_class_reregisters_test_() ->
-    {setup, fun setup/0, fun teardown/1, fun(_) ->
+    %% renameTo: classifies the class through the workspace callback.
+    {setup, fun setup_workspace/0, fun teardown_workspace/1, fun(_) ->
         {ClassObj, Pid} = register_class('BT3278RenameEUnitTarget', #{}, #{}),
         Result = beamtalk_class_refactor:classRenameTo(
             ClassObj, 'BT3278RenameEUnitRenamed'

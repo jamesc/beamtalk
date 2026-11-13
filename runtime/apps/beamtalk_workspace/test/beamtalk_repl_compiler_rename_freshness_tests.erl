@@ -44,10 +44,13 @@ setup() ->
         {error, {already_started, _}} -> ok
     end,
     application:ensure_all_started(beamtalk_runtime),
+    %% BT-4792: renameTo: classifies the class through the workspace callback.
+    ok = beamtalk_workspace_callback:register(beamtalk_repl_eval),
     {ClassObj, _Pid} = beamtalk_test_dynamic_class:register('Bt3443RenameFreshnessSource'),
     ClassObj.
 
 teardown(_ClassObj) ->
+    ok = beamtalk_workspace_callback:unregister(),
     lists:foreach(
         fun(ClassName) ->
             case beamtalk_class_registry:whereis_class(ClassName) of
