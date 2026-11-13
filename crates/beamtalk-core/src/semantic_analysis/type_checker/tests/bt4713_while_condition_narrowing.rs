@@ -3,7 +3,8 @@
 
 //! BT-4713: the body of `[cond] whileTrue: [...]` (`whileFalse:`) is narrowed
 //! by the facts the condition block's last expression proves, for bindings the
-//! body never assigns. `self.<field>` facts are never applied to a loop body.
+//! body never assigns. `self.<field>` facts are applied too (BT-4788); a write to
+//! the field, or a self-send, in the body drops them for the statements after it.
 
 use super::common::*;
 
@@ -89,10 +90,53 @@ fn unrelated_variable_still_narrowed_when_other_assigned() {
 }
 
 #[test]
-fn field_facts_are_not_applied_to_loop_bodies() {
-    // Pins the documented limitation: no `self.<field>` narrowing in a loop
-    // body, even when the body cannot write the field.
-    assert_rejected("    [self.f notNil] whileTrue: [Repro need: self.f. ^0]\n    0");
+fn field_facts_narrow_the_loop_body() {
+    // BT-4788: `self.<field>` facts reach the body like any other fact.
+    assert_clean("    [self.f notNil] whileTrue: [Repro need: self.f. ^0]\n    0");
+    assert_clean("    [self.f isNil] whileFalse: [Repro need: self.f. ^0]\n    0");
+    assert_clean("    [self.f notNil and: [p]] whileTrue: [Repro need: self.f. ^0]\n    0");
+}
+
+/// An actor, where a self-send or a stored block can reassign the field.
+fn actor_with(body: &str) -> String {
+    format!(
+        r"
+typed Actor subclass: Holder
+  state: f :: Integer | Nil = nil
+  reset -> Nil => self.f := nil
+  need: v :: Integer -> Integer => v
+{body}
+"
+    )
+}
+
+fn actor_diags(body: &str) -> Vec<Diagnostic> {
+    type_diags(&actor_with(body))
+}
+
+#[test]
+fn actor_field_fact_kept_until_a_self_send_in_the_body() {
+    let ok = actor_diags(
+        "  run -> Integer =>\n    [self.f notNil] whileTrue: [self need: self.f. self reset. ^0]\n    0",
+    );
+    assert!(ok.is_empty(), "got: {ok:#?}");
+    let leak = actor_diags(
+        "  run -> Integer =>\n    [self.f notNil] whileTrue: [self reset. self need: self.f. ^0]\n    0",
+    );
+    assert!(!leak.is_empty(), "a self-send must drop the field fact");
+}
+
+#[test]
+fn actor_field_fact_dropped_after_a_field_write_in_the_body() {
+    let leak = actor_diags(
+        "  run -> Integer =>\n    [self.f notNil] whileTrue: [self.f := nil. self need: self.f. ^0]\n    0",
+    );
+    assert!(!leak.is_empty(), "a field write must drop the field fact");
+}
+
+#[test]
+fn field_fact_wrong_polarity_stays_rejected() {
+    assert_rejected("    [self.f isNil] whileTrue: [Repro need: self.f. ^0]\n    0");
 }
 
 #[test]

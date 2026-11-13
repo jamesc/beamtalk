@@ -70,6 +70,11 @@ pub struct ExtensionTypeInfo {
     pub param_types: Vec<Option<EcoString>>,
     /// Return type annotation. `None` means untyped (Dynamic).
     pub return_type: Option<EcoString>,
+    /// Whether the body answers its receiver on every path
+    /// ([`crate::ast::MethodDefinition::answers_receiver`], BT-4788). Read by
+    /// `discarded-update`: an extension that does not answer its receiver
+    /// may return an updated copy.
+    pub answers_receiver: bool,
 }
 
 /// An index of all extension method definitions across a project.
@@ -125,6 +130,7 @@ impl ExtensionIndex {
                     .return_type
                     .as_ref()
                     .map(TypeAnnotation::type_name),
+                answers_receiver: defn.method.answers_receiver(),
             };
             let location = ExtensionLocation {
                 file_path: file_path.to_path_buf(),

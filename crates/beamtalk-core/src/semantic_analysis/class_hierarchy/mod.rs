@@ -101,6 +101,12 @@ pub struct ClassHierarchy {
     /// codegen driver from [`crate::semantic_analysis::shadowed_class_names_in_scope`].
     /// Read only through [`Self::is_shadowed_class`].
     shadowed_class_names: crate::semantic_analysis::ShadowedClassNames,
+    /// `(class, selector)` of every standalone instance-side extension method
+    /// (`Class >> sel => ...`) whose body does not answer its receiver
+    /// ([`crate::ast::MethodDefinition::answers_receiver`]). Extensions are not
+    /// `ClassInfo` methods, so `discarded-update` consults this set to learn
+    /// that an extension can replace a self-answering method (BT-4788).
+    updating_extensions: HashSet<(EcoString, EcoString)>,
 }
 impl ClassHierarchy {
     /// Returns true if the given class name is a built-in class.
@@ -312,6 +318,7 @@ impl ClassHierarchy {
                         crate::semantic_analysis::receiver_knowledge::KnowledgeScope::default(),
                     dependency_extensions_unknown: false,
                     shadowed_class_names: crate::semantic_analysis::ShadowedClassNames::default(),
+                    updating_extensions: HashSet::new(),
                 }
             })
             .clone()
@@ -872,8 +879,12 @@ impl ClassHierarchy {
                 origin: None,
                 primitive: None,
                 constant_value: None,
-                answers_receiver: false,
+                answers_receiver: first.type_info.answers_receiver,
             };
+            if key.side == MethodSide::Instance && !first.type_info.answers_receiver {
+                self.updating_extensions
+                    .insert((key.class_name.clone(), key.selector.clone()));
+            }
             if let Some(class_info) = self.classes.get_mut(key.class_name.as_str()) {
                 let methods = match key.side {
                     MethodSide::Instance => &mut class_info.methods,
@@ -1042,6 +1053,14 @@ impl ClassHierarchy {
     #[allow(clippy::too_many_lines)]
     fn add_module_classes(&mut self, module: &Module, stdlib_mode: bool) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
+        for standalone in &module.method_definitions {
+            if !standalone.is_class_method && !standalone.method.answers_receiver() {
+                self.updating_extensions.insert((
+                    standalone.class_name.name.clone(),
+                    standalone.method.selector.name(),
+                ));
+            }
+        }
         // Pass 1: Build and register ClassInfo for every class in the module.
         // Duplicate-selector checks only need the class's own methods, so they
         // run here too. Sealed checks are deferred to Pass 2.

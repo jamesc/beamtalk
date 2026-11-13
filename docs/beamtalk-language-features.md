@@ -728,7 +728,7 @@ on every path (BT-4739) is not an update either: a value cannot mutate itself
 (`TestCase` can assign its own slots, so a body with `self.x := …` always
 counts as an update), so `store: v`, `send: data` or `checkHeaders: h` that ends in `self` (or
 `^ self`) works through a side effect or only to raise, and a call to it is
-never flagged. Every `^` in such a body must return `self` or raise
+never flagged unless a subclass override, or an extension in another file or a loaded dependency (`Handle >> store: v => …`), supplies the same selector with a body that does not answer its receiver: the call may then reach an update, so it warns (BT-4788). Every `^` in such a body must return `self` or raise
 (`^ self error: "…"`). A method that ends in a new value (`self withX: 1`),
 has a `^` that answers something else, or is a bare `@primitive` still counts
 as an update. To discard a result on purpose, assign it to an
@@ -3395,6 +3395,14 @@ itself (options, config) or that a trusted FFI spec describes. It does not
 validate anything: keep runtime validators for value ranges and for callers
 that build the map dynamically.
 
+**Class metadata.** A shape field is recorded as `Dictionary` in class
+metadata (BT-4788): the metadata is stored as atoms, which are limited to 255
+bytes, and a shape's text can exceed that. Code in the defining package sees
+the shape; a package that reads the class from its compiled metadata sees
+`Dictionary`, so a key the shape would have checked is not checked there.
+Declare a [type alias](#named-type-aliases-type-declarations-adr-0108) in the package's own source if its users
+need the shape.
+
 **What to shape.** Shape leaf option sets (`WebSocketOptions`). Keep shared or
 generic option bags, and any map whose keys are added at runtime, as
 `Dictionary(Symbol, Object)`.
@@ -3469,7 +3477,7 @@ render: coll :: Printable | Nil -> String =>
 | `(x notNil and: [k isKindOf: Foo]) ifTrue: [...]` | `x` is non-nil and `k` is `Foo` in true block | True block |
 | `(x notNil and: [y notNil and: [p]]) ifTrue: [...]` | `x` and `y` are non-nil in true block | True block |
 | `x isNil not ifTrue: [...]`, `(k isKindOf: Integer) not ifTrue: [^...]`, `(a isNil or: [b isNil]) not ifTrue: [...]` | `not` swaps the true and false facts, so each narrows as its un-negated dual would; it composes with `and:` / `or:` in either position | True block / rest of method |
-| `[x notNil] whileTrue: [...]`, `[n notNil and: [p]] whileTrue: [...]`, `[n isNil] whileFalse: [...]` | the condition block's last expression narrows the loop body, as `ifTrue:` / `ifFalse:` would; only for variables the body never assigns; `self.<field>` tests do not narrow a loop body (BT-4713). Not narrowed after the loop | Loop body only |
+| `[x notNil] whileTrue: [...]`, `[n notNil and: [p]] whileTrue: [...]`, `[n isNil] whileFalse: [...]` | the condition block's last expression narrows the loop body, as `ifTrue:` / `ifFalse:` would; only for variables the body never assigns. A `self.<field>` test narrows the body too, until a self-send or a write to the field, as in a branch arm (BT-4713, BT-4788). Not narrowed after the loop | Loop body only |
 | `c := x notNil. c ifTrue: [...]` (also `ifFalse:`, `not`, `and:` / `or:`, `whileTrue:`, post-guard) | a local assigned a condition stands for what that condition proves. Dropped when the local or any variable it tests is reassigned, when a block assigns either, and for `self.<field>` tests; an alias never proves more than the inline test (BT-4714) | Branch arms / loop body / method remainder, as for the inline test |
 | `(p or: [x notNil]) ifTrue: [...]`, `(x notNil or: [p]) ifTrue: [...]`, `(x isNil and: [p]) ifFalse: [...]` | **no narrowing** — the other side may have decided the answer | — |
 | `x =:= #sym ifTrue: [^...]` | `x` is `T \ #sym` after the statement | Rest of method |
@@ -3480,6 +3488,11 @@ render: coll :: Printable | Nil -> String =>
 | `(x =:= false) ifTrue: [...] ifFalse: [...]` | `x` is `False` in the true block, `T \ False` in the false block | Each block |
 | `(x =:= nil) ifFalse: [...]` / `(x =:= nil) ifTrue: [^...]` | same as `x isNil` | False block / rest of method |
 | `(x =/= nil) ifTrue: [...]` / `(x =/= nil) ifFalse: [^...]` | same as `x notNil`: `x` is non-nil in the true block / after the statement | True block / rest of method |
+
+**Known gaps (accepted, BT-4788).** The checker misses these on purpose; each is a missed warning or a wider type, never a crash.
+
+- **Self-sends and `self.<field>` narrowing.** A send to `self` or `super` drops the field narrowings before the next statement, since the callee may reassign the field. The checker does not see a self-send that happens through an alias (`me := self. me reset`), through a block stored and run later, through a block that runs more than once (a self-send late in a loop body is not seen by an earlier statement of the next pass), or through a method that catches the exception internally. A field narrowing may survive these. Narrow into a local (`f := self.f`) when the value must stay stable.
+- **Tail `match:`.** An arm that is a bare `^expr` leaves the method, so it contributes `Never` to the `match:`; a `match:` that is the method's last statement gets those `^` types back in its return type. That holds only for the bare, unparenthesised tail `match:`. If it is parenthesised, wrapped in `^`, assigned, or nested in another expression, the `^` types are not restored, so a mismatch against the declared return type can go unreported. Collecting `^` types for the whole body conflicts with the `then: [:x | ^x]` → `Never` rule and needs its own design.
 
 The diverging-guard pattern (`isNil ifTrue: [self error: "..."]`) recognises any block whose body infers as `Never` — including calls to `error:`, `notImplemented`, or any `-> Never` method — not just non-local returns (`^`). Narrowing also works on `self.field` reads: inside `self.field isNil ifFalse: [...]`, the field narrows to non-nil within the block.
 

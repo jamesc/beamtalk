@@ -449,11 +449,10 @@ impl TypeChecker {
             facts.when_false
         };
         facts.forget_written(&expr_writes(body));
-        // Field facts never reach a loop body: deciding whether the body can
-        // write a field needs its types (`expr_may_write_fields` reads the
-        // type map), and the body has not been inferred yet. Dropping them is
-        // the safe direction.
-        facts.drop_fields();
+        // `self.<field>` facts are kept (BT-4788): the condition's last
+        // expression ran immediately before the body, so they hold at its
+        // first statement, and a write to the field inside the body drops
+        // them for the statements after it, as in any branch arm.
         (!facts.is_empty()).then_some(facts)
     }
 }
