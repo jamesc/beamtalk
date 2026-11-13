@@ -47,6 +47,7 @@ See: ADR 0028 §1 (Module Proxy Pattern)
     dispatch/3,
     ffi_call_raised/8,
     ffi_call_raised/9,
+    ffi_call_raised/10,
     has_method/1,
     native_call/4,
     native_call/5,
@@ -340,9 +341,32 @@ BT-3728).
     list(),
     coercion_mode(),
     term(),
-    beamtalk_class_vars:snapshot()
+    beamtalk_class_vars:snapshot() | none
 ) -> term().
-ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, Snap) when
+ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, Snap) ->
+    ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, Snap, none).
+
+-doc """
+`ffi_call_raised/9` for a `self delegate` call site (BT-4765).
+
+`Context` is the `{Class, Selector}` that `native_call/5` would have been given,
+so a wrapped error reads `Class>>selector` exactly as on the proxy path. `Snap`
+is `none` when no argument can be a binary (the call never retries); otherwise
+it is the class-variable snapshot, as for `ffi_call_raised/9`.
+""".
+-spec ffi_call_raised(
+    error | exit | throw,
+    term(),
+    list(),
+    atom(),
+    atom(),
+    list(),
+    coercion_mode(),
+    term(),
+    beamtalk_class_vars:snapshot() | none,
+    error_context()
+) -> term().
+ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, Snap, Context) when
     Mode =:= stock; Mode =:= beamtalk
 ->
     classify_ffi_exception(
@@ -354,7 +378,7 @@ ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, Snap) w
         FunName,
         Args,
         FunName,
-        none,
+        Context,
         fun(M, F, A, Sel, Ctx, St) -> maybe_retry_badarg(M, F, A, Sel, Ctx, St, Snap, Mode) end
     ).
 
@@ -579,7 +603,7 @@ classify_ffi_exception(
 -doc """
 `classify_ffi_exception/9` with a separate attribution stack: `AttrStack` is
 what `raised_in_beamtalk_code/2` walks, `Stack` is what a re-raise carries.
-`ffi_call_raised/8` passes only the callee's frames, since a direct call has
+`ffi_call_raised/8`, `/9` and `/10` pass only the callee's frames, since a direct call has
 no proxy frame between the callee and the compiled Beamtalk caller.
 """.
 -spec classify_ffi_exception(

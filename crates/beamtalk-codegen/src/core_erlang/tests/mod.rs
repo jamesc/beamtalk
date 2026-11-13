@@ -356,6 +356,7 @@ mod evaluated_block_producer;
 mod expect_directive_statement;
 mod expressions;
 mod ffi_conditional_selector_corpus;
+mod ffi_delegate_direct_call;
 mod ffi_direct_call;
 mod field_assignment_value_position;
 mod field_write_sites;

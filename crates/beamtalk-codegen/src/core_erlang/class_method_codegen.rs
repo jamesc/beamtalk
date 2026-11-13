@@ -21,6 +21,8 @@ use beamtalk_core::ast::{
     Block, ClassDefinition, Expression, Identifier, Literal, MapPair, MessageSelector,
     MethodDefinition, MethodKind, ParameterDefinition,
 };
+use beamtalk_core::semantic_analysis::InferredType;
+use beamtalk_core::semantic_analysis::type_checker::ffi_annotation_type;
 
 impl CoreErlangGenerator {
     /// Generates standalone function bodies for class-side methods.
@@ -112,11 +114,17 @@ impl CoreErlangGenerator {
                     .backing_module
                     .as_ref()
                     .expect("native_class_delegate implies backing_module is Some");
-                Self::native_delegate_body_doc(
+                let arg_types: Vec<Option<InferredType>> = method
+                    .parameters
+                    .iter()
+                    .map(|p| p.type_annotation.as_ref().and_then(ffi_annotation_type))
+                    .collect();
+                frame.native_delegate_body_doc(
                     backing.name.as_str(),
                     class.name.name.as_str(),
                     &method.selector,
                     &param_vars,
+                    &arg_types,
                 )
             } else {
                 // `frame`'s `Drop` (pop scope, clear `in_class_method`, restore
