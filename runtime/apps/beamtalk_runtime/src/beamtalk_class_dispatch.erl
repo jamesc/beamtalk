@@ -61,11 +61,24 @@ dispatch falls through to 'Class' instance methods via beamtalk_dispatch:lookup/
 %% ADR 0142 (BT-4300): the in-caller class-send path is one call into the
 %% compiled method, plus the guard and memo reads; its helpers are inlined so
 %% the hop costs no extra reductions.
--compile({inline, [in_caller_owner/2, class_method_owner/2, run_in_caller/7, send_in_caller_or/4]}).
+-compile(
+    {inline, [
+        in_caller_owner/2,
+        class_method_owner/2,
+        run_in_caller/7,
+        send_in_caller_or/4,
+        in_caller_verdict/3
+    ]}
+).
 %% ADR 0142 §2 (BT-4300): a class method the caller may run itself: the
 %% receiving class, its metaclass tag and module, the defining class and
 %% module, and the compiled function name (`class_method_owner/2`).
 -type owner() :: {owner, class_name(), atom(), module(), class_name(), module(), atom()}.
+%% BT-4771: what the class-method memo records for a selector a class method
+%% in the chain answers but the class process must run (class variables in the
+%% chain): the positive verdict "ask the class process", so the caller does not
+%% walk the chain a second time (`class_chain_only_send/4`) just to learn that.
+-type verdict() :: owner() | process | decline.
 -export_type([owner/0]).
 %% BT-4307: what the class-side chain walk (`find_class_side_method/3`) finds
 %% first: a class-side extension registered on a class's metaclass tag, or a
@@ -231,13 +244,24 @@ class_send_plain(ClassPid, Selector, Args, Timeout) ->
     %% the in-caller check and the chain-only check below. Both used to probe
     %% it themselves, back to back.
     Alive = local_class_alive(ClassPid),
-    case in_caller_owner(ClassPid, Selector, Alive) of
+    case in_caller_verdict(ClassPid, Selector, Alive) of
         {owner, ClassName, Tag, Module, DefiningClass, DefiningModule, FunName} ->
             ClassSelf = #beamtalk_object{class = Tag, class_mod = Module, pid = ClassPid},
             run_in_caller(
                 ClassSelf, Selector, Args, ClassName, DefiningClass, DefiningModule, FunName
             );
-        decline ->
+        process when ClassPid =/= self() ->
+            %% BT-4771: the memo already walked the chain: a class method
+            %% answers and the class process must run it, so the chain-only
+            %% shortcut (which would walk the chain again, uncached, only to
+            %% decline) is skipped. The class process still does its own
+            %% authoritative lookup, so a verdict that went stale in the
+            %% moment before a metadata write lands there as `not_found`,
+            %% which `class_method_result/4` already handles.
+            class_send_with_recovery(ClassPid, Selector, fun(P) ->
+                class_method_call(P, Selector, Args, Timeout)
+            end);
+        _ ->
             class_send_via_process(ClassPid, Selector, Args, Timeout, Alive)
     end.
 
@@ -267,7 +291,10 @@ send_in_caller_or(ClassPid, Selector, Args, Otherwise) ->
 %% There is no unguarded direct call here (BT-4301): `in_caller_owner/2`
 %% already ran every class method the caller may run, so anything left is a
 %% shadowed method (a class-side extension or ADR 0084 runtime fun the class
-%% process honours), a chain with class variables, or a process-bound selector.
+%% process honours) or a process-bound selector. A chain with class variables
+%% no longer comes here from another process: `class_send_plain/4` asks the
+%% class process directly on the memo's `process` verdict (BT-4771). Only a
+%% class's send to itself takes the first clause below.
 class_send_via_process(ClassPid, Selector, Args, _Timeout, _Alive) when ClassPid =:= self() ->
     class_send_from_own_process(Selector, Args);
 class_send_via_process(ClassPid, Selector, Args, Timeout, Alive) ->
@@ -319,7 +346,16 @@ in_caller_owner(ClassPid, Selector) ->
 %% `in_caller_owner/2` with the liveness probe (`local_class_alive/1`) already
 %% done by the caller.
 -spec in_caller_owner(pid(), selector(), boolean()) -> owner() | decline.
-in_caller_owner(ClassPid, Selector, true) ->
+in_caller_owner(ClassPid, Selector, Alive) ->
+    case in_caller_verdict(ClassPid, Selector, Alive) of
+        {owner, _, _, _, _, _, _} = Owner -> Owner;
+        _ -> decline
+    end.
+
+%% `in_caller_owner/3`'s answer, plus `process` when the memo says a class
+%% method in the chain answers and the class process runs it (BT-4771).
+-spec in_caller_verdict(pid(), selector(), boolean()) -> verdict().
+in_caller_verdict(ClassPid, Selector, true) ->
     %% Alive before the memo is consulted: a send to a dead incarnation takes
     %% the crash recovery path and never derives a memo from a class mid-init.
     case class_method_owner(ClassPid, Selector) of
@@ -328,10 +364,12 @@ in_caller_owner(ClassPid, Selector, true) ->
                 true -> Owner;
                 false -> decline
             end;
+        process ->
+            process;
         _ ->
             decline
     end;
-in_caller_owner(_ClassPid, _Selector, false) ->
+in_caller_verdict(_ClassPid, _Selector, false) ->
     decline.
 
 -doc """
@@ -351,9 +389,12 @@ by `apply_class_method_body/7`). An extension found first, on the class or an
 ancestor (BT-4307), declines: the class process runs it. (An extension on the
 receiving class also makes `direct_call_ok/2` false.)
 
-`decline` is memoised too (process-bound selector, class-variable reflection
-send, an extension answering first, no class method in the chain, class
-variables declared in the chain or a fact unpublished): the next metadata
+`process` (BT-4771) records that a class method in the chain answers but the
+chain declares class variables, so the class process runs it: the caller
+asks it directly and does not walk the chain again. `decline` is memoised too
+(process-bound selector, class-variable reflection
+send, an extension answering first, no class method in the chain or a fact
+unpublished): the next metadata
 write flushes it. A pid with no registered class, or a class with no metadata
 row, is never memoised. Every input is a class-metadata row field or an
 extension-registry row whose writers invalidate the cache after the write
@@ -362,14 +403,14 @@ lands: `insert/5`, `merge_identity/5`, `set_runtime_class_methods/2`
 variable facts), `put_process_bound_selectors/2`, and
 `beamtalk_extensions:register/5` / `unregister/3` (class-side extensions).
 """.
--spec class_method_owner(pid(), selector()) -> owner() | decline.
+-spec class_method_owner(pid(), selector()) -> verdict().
 class_method_owner(ClassPid, Selector) ->
     beamtalk_class_derived_cache:fetch(
         {class_method_owner, ClassPid, Selector},
         fun() -> compute_class_method_owner(ClassPid, Selector) end
     ).
 
--spec compute_class_method_owner(pid(), selector()) -> {cache | nocache, owner() | decline}.
+-spec compute_class_method_owner(pid(), selector()) -> {cache | nocache, verdict()}.
 compute_class_method_owner(ClassPid, Selector) ->
     case beamtalk_class_registry:class_name_for_pid(ClassPid) of
         {ok, ClassName} -> compute_class_method_owner_of(ClassName, Selector);
@@ -377,7 +418,7 @@ compute_class_method_owner(ClassPid, Selector) ->
     end.
 
 -spec compute_class_method_owner_of(class_name(), selector()) ->
-    {cache | nocache, owner() | decline}.
+    {cache | nocache, verdict()}.
 compute_class_method_owner_of(ClassName, Selector) ->
     case beamtalk_class_metadata:lookup_process_bound_selectors(ClassName) of
         {ok, ProcessBound} ->
@@ -393,7 +434,7 @@ compute_class_method_owner_of(ClassName, Selector) ->
     end.
 
 -spec derive_class_method_owner(class_name(), selector(), [selector()]) ->
-    owner() | decline.
+    verdict().
 derive_class_method_owner(ClassName, Selector, ProcessBound) ->
     case
         lists:member(Selector, ProcessBound) orelse
@@ -410,7 +451,10 @@ derive_class_method_owner(ClassName, Selector, ProcessBound) ->
                         false ->
                             owner_of(ClassName, DefiningClass, DefiningModule, Selector);
                         true ->
-                            decline
+                            %% BT-4771: a class method answers, but the chain
+                            %% has class variables, so the class process runs
+                            %% it. A positive verdict, not a miss.
+                            process
                     end;
                 {extension, _Owner, _Fun} ->
                     %% A class-side extension answers first, on the class or
