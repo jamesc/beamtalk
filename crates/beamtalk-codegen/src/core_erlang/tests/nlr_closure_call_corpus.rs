@@ -361,7 +361,7 @@ fn nlr_closure_call_corpus_is_clean() {
     let mut failures = Vec::new();
     for (name, src, _) in corpus() {
         if std::panic::catch_unwind(|| {
-            assert_compiles_through_erlc("test", &compile_with_probe_bindings(&src))
+            assert_compiles_through_erlc("test", &compile_with_probe_bindings(&src));
         })
         .is_err()
         {
