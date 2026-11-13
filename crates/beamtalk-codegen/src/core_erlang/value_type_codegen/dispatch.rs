@@ -9,11 +9,23 @@
 use super::{DISPATCH_PREFIX_SELECTORS, OwnDispatchArm};
 
 use super::super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
+use super::super::exception_forms::{CatchVars, wrap_and_reraise_doc};
 use super::super::value_accessors::{AutoSlotMethods, compute_auto_slot_methods};
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
-use beamtalk_cerl_doc::{Document, leaf};
+use beamtalk_cerl_doc::form::{self, Layout, case_of, clause, let_in, try_of_catch};
+use beamtalk_cerl_doc::{Document, INDENT, leaf, line, nest};
 use beamtalk_core::ast::{ClassDefinition, ClassKind};
+
+/// A Core Erlang variable document.
+fn var(name: &str) -> Document<'static> {
+    leaf::var(name.to_string())
+}
+
+/// `{'reply', value, State}` — a `dispatch/4` answer that leaves the state as is.
+fn reply(value: Document<'static>) -> Document<'static> {
+    docvec!["{", leaf::atom("reply"), ", ", value, ", State}"]
+}
 
 /// The nine hard-coded `dispatch/3` reflection arms of a primitive value type,
 /// as `has_method/1` lists them (ADR 0124 §1/§9/B4 added `hasField:` and
@@ -481,7 +493,7 @@ impl CoreErlangGenerator {
         let mod_name = self.module_name.clone();
 
         let header: Document<'static> =
-            Document::Str("'dispatch'/4 = fun (Selector, Args, Self, State) ->\n");
+            Document::Str("'dispatch'/4 = fun (Selector, Args, Self, State) ->");
 
         let body = if class_name == "Object" {
             self.generate_object_dispatch_4(mod_name.as_str())
@@ -497,148 +509,310 @@ impl CoreErlangGenerator {
     /// Actor instances inherit Object methods via the hierarchy walk. These
     /// methods need access to the actor's State map for proper reflection
     /// (field access, class name, etc.).
+    ///
+    /// The result is the function body, starting on its own line: the caller
+    /// writes the `'dispatch'/4 = fun (...) ->` header without a trailing
+    /// newline. Built with the structural constructors (BT-4685), so every
+    /// indent comes from `nest`.
     #[allow(clippy::too_many_lines)] // Object dispatch with reflection primitives
     pub(super) fn generate_object_dispatch_4(&self, mod_name: &str) -> Document<'static> {
-        // fieldAt: arity error
-        let inst_var_at_err = self.arity_error_fragment("'fieldAt:'", 1, "                ");
-        // fieldAt:put: arity error (used twice)
-        let inst_var_at_put_err =
-            self.arity_error_fragment("'fieldAt:put:'", 2, "                    ");
-        let inst_var_at_put_err2 =
-            self.arity_error_fragment("'fieldAt:put:'", 2, "                ");
-        // hasField:/clearField: arity errors (ADR 0124 §1/§9/B4)
-        let has_field_err = self.arity_error_fragment("'hasField:'", 1, "                ");
-        let clear_field_err = self.arity_error_fragment("'clearField:'", 1, "                ");
-        // perform: type error
-        let perf_type_err =
-            self.type_error_fragment("'perform:'", "selector must be an atom", "                ");
-        // perform:withArguments: type errors
-        let pwa_type_err_list = self.type_error_fragment(
-            "'perform:withArguments:'",
-            "arguments must be a list",
-            "                        ",
-        );
-        let pwa_type_err_sel = self.type_error_fragment(
-            "'perform:withArguments:'",
-            "selector must be an atom",
-            "                ",
-        );
+        let state_class = || form::call("beamtalk_tagged_map", "class_of", [var("State")]);
+        let arm = |selector: &str, body: Document<'static>| {
+            clause([leaf::atom(selector)], None, body, Layout::Block)
+        };
+        // A `case Args of` whose arms are the argument-shape alternatives.
+        let args_case = |arms: Vec<Document<'static>>| case_of(var("Args"), arms, Layout::Block);
+        let pat = |text: &'static str| Document::Str(text);
+        let bad_args =
+            |name: &str, body: Document<'static>| clause([var(name)], None, body, Layout::Block);
+        let single_arg = |head: &'static str, guard: Option<Document<'static>>, body| {
+            clause([pat(head)], guard, body, Layout::Block)
+        };
+        let let_ = |name: &str, value: Document<'static>, body: Document<'static>| {
+            let_in(var(name), value, body, Layout::Block)
+        };
+        let lookup_arm = |sel: &'static str,
+                          args: Document<'static>,
+                          class_v: &'static str,
+                          result_v: &'static str,
+                          err_v: &'static str,
+                          other_v: &'static str| {
+            // BT-4593: `perform:` itself was invoked, so its target's lookup
+            // failure is a raise (a wrapped map), not a miss of `perform:`.
+            let_(
+                class_v,
+                state_class(),
+                let_(
+                    result_v,
+                    form::call(
+                        "beamtalk_dispatch",
+                        "lookup",
+                        [var(sel), args, var("Self"), var("State"), var(class_v)],
+                    ),
+                    case_of(
+                        var(result_v),
+                        [
+                            clause(
+                                [docvec!["{", leaf::atom("error"), ", ", var(err_v), "}"]],
+                                None,
+                                docvec![
+                                    "{",
+                                    leaf::atom("error"),
+                                    ", ",
+                                    form::call(
+                                        "beamtalk_exception_handler",
+                                        "ensure_wrapped",
+                                        [var(err_v)]
+                                    ),
+                                    ", State}",
+                                ],
+                                Layout::Block,
+                            ),
+                            clause([var(other_v)], None, var(other_v), Layout::Block),
+                        ],
+                        Layout::Block,
+                    ),
+                ),
+            )
+        };
 
-        docvec![
-            "    case Selector of\n",
+        let arms = vec![
             // --- class ---
-            "        <'class'> when 'true' ->\n",
-            "            {'reply', call 'beamtalk_tagged_map':'class_of'(State), State}\n",
+            arm("class", reply(state_class())),
             // --- respondsTo: ---
-            "        <'respondsTo:'> when 'true' ->\n",
-            "            case Args of\n",
-            "                <[RtSel4|_]> when call 'erlang':'is_atom'(RtSel4) ->\n",
-            "                    let <RtClass4> = call 'beamtalk_tagged_map':'class_of'(State) in\n",
-            "                    {'reply', call 'beamtalk_dispatch':'responds_to'(RtSel4, RtClass4), State}\n",
-            "                <_RtBadArgs> when 'true' -> {'reply', 'false', State}\n",
-            "            end\n",
+            arm(
+                "respondsTo:",
+                args_case(vec![
+                    single_arg(
+                        "[RtSel4|_]",
+                        Some(form::call("erlang", "is_atom", [var("RtSel4")])),
+                        let_(
+                            "RtClass4",
+                            state_class(),
+                            reply(form::call(
+                                "beamtalk_dispatch",
+                                "responds_to",
+                                [var("RtSel4"), var("RtClass4")],
+                            )),
+                        ),
+                    ),
+                    bad_args("_RtBadArgs", reply(leaf::atom("false"))),
+                ]),
+            ),
             // --- fieldNames ---
-            "        <'fieldNames'> when 'true' ->\n",
-            "            {'reply', call 'beamtalk_reflection':'field_names'(State), State}\n",
+            arm(
+                "fieldNames",
+                reply(form::call(
+                    "beamtalk_reflection",
+                    "field_names",
+                    [var("State")],
+                )),
+            ),
             // --- fieldAt: ---
-            "        <'fieldAt:'> when 'true' ->\n",
-            "            case Args of\n",
-            "                <[IvaName4|_]> when 'true' ->\n",
-            "                    {'reply', call 'beamtalk_reflection':'read_field'(IvaName4, State), State}\n",
-            "                <_IvaBadArgs> when 'true' ->\n",
-            inst_var_at_err,
-            "\n",
-            "            end\n",
+            arm(
+                "fieldAt:",
+                args_case(vec![
+                    single_arg(
+                        "[IvaName4|_]",
+                        None,
+                        reply(form::call(
+                            "beamtalk_reflection",
+                            "read_field",
+                            [var("IvaName4"), var("State")],
+                        )),
+                    ),
+                    bad_args("_IvaBadArgs", self.arity_error_fragment("fieldAt:", 1)),
+                ]),
+            ),
             // --- fieldAt:put: ---
-            "        <'fieldAt:put:'> when 'true' ->\n",
-            "            case Args of\n",
-            "                <[IvapName4|IvapRest4]> when 'true' ->\n",
-            "                    case IvapRest4 of\n",
-            "                        <[IvapVal4|_]> when 'true' ->\n",
-            "                            let <IvapTuple4> = call 'beamtalk_reflection':'write_field'(IvapName4, IvapVal4, State) in\n",
-            "                            let <IvapResult4> = call 'erlang':'element'(1, IvapTuple4) in\n",
-            "                            let <IvapNewState4> = call 'erlang':'element'(2, IvapTuple4) in\n",
-            "                            {'reply', IvapResult4, IvapNewState4}\n",
-            "                        <_IvapBad2> when 'true' ->\n",
-            inst_var_at_put_err,
-            "\n",
-            "                    end\n",
-            "                <_IvapBad1> when 'true' ->\n",
-            inst_var_at_put_err2,
-            "\n",
-            "            end\n",
+            arm(
+                "fieldAt:put:",
+                args_case(vec![
+                    single_arg(
+                        "[IvapName4|IvapRest4]",
+                        None,
+                        case_of(
+                            var("IvapRest4"),
+                            [
+                                single_arg(
+                                    "[IvapVal4|_]",
+                                    None,
+                                    let_(
+                                        "IvapTuple4",
+                                        form::call(
+                                            "beamtalk_reflection",
+                                            "write_field",
+                                            [var("IvapName4"), var("IvapVal4"), var("State")],
+                                        ),
+                                        let_(
+                                            "IvapResult4",
+                                            form::call(
+                                                "erlang",
+                                                "element",
+                                                [leaf::int_lit(1), var("IvapTuple4")],
+                                            ),
+                                            let_(
+                                                "IvapNewState4",
+                                                form::call(
+                                                    "erlang",
+                                                    "element",
+                                                    [leaf::int_lit(2), var("IvapTuple4")],
+                                                ),
+                                                docvec![
+                                                    "{",
+                                                    leaf::atom("reply"),
+                                                    ", IvapResult4, IvapNewState4}",
+                                                ],
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                                bad_args("_IvapBad2", self.arity_error_fragment("fieldAt:put:", 2)),
+                            ],
+                            Layout::Block,
+                        ),
+                    ),
+                    bad_args("_IvapBad1", self.arity_error_fragment("fieldAt:put:", 2)),
+                ]),
+            ),
             // --- hasField: (ADR 0124 §1/§9/B4) — never raises ---
-            "        <'hasField:'> when 'true' ->\n",
-            "            case Args of\n",
-            "                <[HfName4|_]> when 'true' ->\n",
-            "                    {'reply', call 'beamtalk_reflection':'has_field'(HfName4, State), State}\n",
-            "                <_HfBadArgs> when 'true' ->\n",
-            has_field_err,
-            "\n",
-            "            end\n",
+            arm(
+                "hasField:",
+                args_case(vec![
+                    single_arg(
+                        "[HfName4|_]",
+                        None,
+                        reply(form::call(
+                            "beamtalk_reflection",
+                            "has_field",
+                            [var("HfName4"), var("State")],
+                        )),
+                    ),
+                    bad_args("_HfBadArgs", self.arity_error_fragment("hasField:", 1)),
+                ]),
+            ),
             // --- clearField: (ADR 0124 §1/§4f/§9/B4) — a write ---
-            "        <'clearField:'> when 'true' ->\n",
-            "            case Args of\n",
-            "                <[ClfName4|_]> when 'true' ->\n",
-            "                    let <ClfNewState4> = call 'beamtalk_reflection':'clear_field'(ClfName4, State) in\n",
-            "                    {'reply', Self, ClfNewState4}\n",
-            "                <_ClfBadArgs> when 'true' ->\n",
-            clear_field_err,
-            "\n",
-            "            end\n",
+            arm(
+                "clearField:",
+                args_case(vec![
+                    single_arg(
+                        "[ClfName4|_]",
+                        None,
+                        let_(
+                            "ClfNewState4",
+                            form::call(
+                                "beamtalk_reflection",
+                                "clear_field",
+                                [var("ClfName4"), var("State")],
+                            ),
+                            docvec!["{", leaf::atom("reply"), ", Self, ClfNewState4}"],
+                        ),
+                    ),
+                    bad_args("_ClfBadArgs", self.arity_error_fragment("clearField:", 1)),
+                ]),
+            ),
             // --- printString ---
-            "        <'printString'> when 'true' ->\n",
-            "            let <PsClass4> = call 'beamtalk_tagged_map':'class_of'(State, 'Object') in\n",
-            "            let <PsStr4> = call 'erlang':'atom_to_binary'(PsClass4, 'utf8') in\n",
-            "            {'reply', PsStr4, State}\n",
+            arm(
+                "printString",
+                let_(
+                    "PsClass4",
+                    form::call(
+                        "beamtalk_tagged_map",
+                        "class_of",
+                        [var("State"), leaf::atom("Object")],
+                    ),
+                    let_(
+                        "PsStr4",
+                        form::call(
+                            "erlang",
+                            "atom_to_binary",
+                            [var("PsClass4"), leaf::atom("utf8")],
+                        ),
+                        reply(var("PsStr4")),
+                    ),
+                ),
+            ),
             // --- perform: ---
-            "        <'perform:'> when 'true' ->\n",
-            "            case Args of\n",
-            "                <[PerfSel4|_]> when call 'erlang':'is_atom'(PerfSel4) ->\n",
-            "                    let <PerfClass4> = call 'beamtalk_tagged_map':'class_of'(State) in\n",
-            "                    let <PerfResult4> = call 'beamtalk_dispatch':'lookup'(PerfSel4, [], Self, State, PerfClass4) in\n",
-            "                    case PerfResult4 of\n",
-            // BT-4593: `perform:` itself was invoked, so its target's lookup
-            // failure is a raise (a wrapped map), not a miss of `perform:`.
-            "                        <{'error', PerfErr4}> when 'true' -> {'error', call 'beamtalk_exception_handler':'ensure_wrapped'(PerfErr4), State}\n",
-            "                        <PerfOther4> when 'true' -> PerfOther4\n",
-            "                    end\n",
-            "                <_PerfBadArgs> when 'true' ->\n",
-            perf_type_err,
-            "\n",
-            "            end\n",
+            arm(
+                "perform:",
+                args_case(vec![
+                    single_arg(
+                        "[PerfSel4|_]",
+                        Some(form::call("erlang", "is_atom", [var("PerfSel4")])),
+                        lookup_arm(
+                            "PerfSel4",
+                            Document::Str("[]"),
+                            "PerfClass4",
+                            "PerfResult4",
+                            "PerfErr4",
+                            "PerfOther4",
+                        ),
+                    ),
+                    bad_args(
+                        "_PerfBadArgs",
+                        self.type_error_fragment("perform:", "selector must be an atom"),
+                    ),
+                ]),
+            ),
             // --- perform:withArguments: ---
-            "        <'perform:withArguments:'> when 'true' ->\n",
-            "            case Args of\n",
-            "                <[PwaSel4|PwaRest4]> when call 'erlang':'is_atom'(PwaSel4) ->\n",
-            "                    case PwaRest4 of\n",
-            "                        <[PwaArgs4|_]> when call 'erlang':'is_list'(PwaArgs4) ->\n",
-            "                            let <PwaClass4> = call 'beamtalk_tagged_map':'class_of'(State) in\n",
-            "                            let <PwaResult4> = call 'beamtalk_dispatch':'lookup'(PwaSel4, PwaArgs4, Self, State, PwaClass4) in\n",
-            "                            case PwaResult4 of\n",
-            // BT-4593: `perform:` itself was invoked, so its target's lookup
-            // failure is a raise (a wrapped map), not a miss of `perform:`.
-            "                                <{'error', PwaErr4}> when 'true' -> {'error', call 'beamtalk_exception_handler':'ensure_wrapped'(PwaErr4), State}\n",
-            "                                <PwaOther4> when 'true' -> PwaOther4\n",
-            "                            end\n",
-            "                        <_PwaBadArgList> when 'true' ->\n",
-            pwa_type_err_list,
-            "\n",
-            "                    end\n",
-            "                <_PwaBadSel> when 'true' ->\n",
-            pwa_type_err_sel,
-            "\n",
-            "            end\n",
+            arm(
+                "perform:withArguments:",
+                args_case(vec![
+                    single_arg(
+                        "[PwaSel4|PwaRest4]",
+                        Some(form::call("erlang", "is_atom", [var("PwaSel4")])),
+                        case_of(
+                            var("PwaRest4"),
+                            [
+                                single_arg(
+                                    "[PwaArgs4|_]",
+                                    Some(form::call("erlang", "is_list", [var("PwaArgs4")])),
+                                    lookup_arm(
+                                        "PwaSel4",
+                                        var("PwaArgs4"),
+                                        "PwaClass4",
+                                        "PwaResult4",
+                                        "PwaErr4",
+                                        "PwaOther4",
+                                    ),
+                                ),
+                                bad_args(
+                                    "_PwaBadArgList",
+                                    self.type_error_fragment(
+                                        "perform:withArguments:",
+                                        "arguments must be a list",
+                                    ),
+                                ),
+                            ],
+                            Layout::Block,
+                        ),
+                    ),
+                    bad_args(
+                        "_PwaBadSel",
+                        self.type_error_fragment(
+                            "perform:withArguments:",
+                            "selector must be an atom",
+                        ),
+                    ),
+                ]),
+            ),
             // --- Default: delegate to dispatch/3 ---
-            "        <_OtherSel4> when 'true' ->\n",
-            Self::dispatch_3_adapter(mod_name, "            "),
-            "    end\n",
-        ]
+            bad_args("_OtherSel4", Self::dispatch_3_adapter(mod_name)),
+        ];
+
+        nest(
+            INDENT,
+            docvec![line(), case_of(var("Selector"), arms, Layout::Block)],
+        )
     }
 
     /// Generates a simple dispatch/4 wrapper that delegates to dispatch/3.
+    ///
+    /// The result is the function body, starting on its own line: callers
+    /// write the `'dispatch'/4 = fun (...) ->` header without a trailing
+    /// newline.
     pub(in crate::core_erlang) fn generate_dispatch_4_wrapper(mod_name: &str) -> Document<'static> {
-        Self::dispatch_3_adapter(mod_name, "    ")
+        nest(INDENT, docvec![line(), Self::dispatch_3_adapter(mod_name)])
     }
 
     /// The `dispatch/4` → `dispatch/3` adapter: calls the state-less
@@ -655,48 +829,68 @@ impl CoreErlangGenerator {
     /// re-raised unchanged, so a `^` out of a block reaching an inherited
     /// value-class method keeps its semantics instead of turning into an
     /// error result.
-    ///
-    /// `indent` is the leading indentation of the `try` line.
-    fn dispatch_3_adapter(mod_name: &str, indent: &'static str) -> Document<'static> {
-        docvec![
-            indent,
-            "try call ",
-            leaf::atom(mod_name.to_string()),
-            ":'dispatch'(Selector, Args, Self)\n",
-            indent,
-            "of <D4Result> -> {'reply', D4Result, State}\n",
-            indent,
-            "catch <D4Type, D4Error, D4Stack> ->\n",
-            indent,
-            "    case D4Type of\n",
-            indent,
-            "        <'error'> when 'true' ->\n",
-            indent,
-            "            let <D4Built> = primop 'build_stacktrace'(D4Stack) in\n",
-            indent,
-            // `ensure_wrapped/4` (empty context): an already-wrapped
-            // exception keeps its innermost `raw_stacktrace`, as in the
-            // walk's own `raised/4`.
-            "            {'error', call 'beamtalk_exception_handler':'ensure_wrapped'('error', D4Error, D4Built, ~{}~), State}\n",
-            indent,
-            "        <_D4Other> when 'true' -> primop 'raw_raise'(D4Type, D4Error, D4Stack)\n",
-            indent,
-            "    end\n",
-        ]
+    fn dispatch_3_adapter(mod_name: &str) -> Document<'static> {
+        let caught = CatchVars {
+            class: var("D4Type"),
+            reason: var("D4Error"),
+            stack: var("D4Stack"),
+        };
+        // `ensure_wrapped/4` (empty context): an already-wrapped exception
+        // keeps its innermost `raw_stacktrace`, as in the walk's own
+        // `raised/4`.
+        let wrap_error = wrap_and_reraise_doc(
+            &CatchVars {
+                class: leaf::atom("error"),
+                reason: var("D4Error"),
+                stack: var("D4Stack"),
+            },
+            var("D4Built"),
+            var("D4Wrapped"),
+            Some(Document::Str("~{}~")),
+            docvec!["{", leaf::atom("error"), ", D4Wrapped, State}"],
+            Layout::Block,
+        );
+        let handler = case_of(
+            var("D4Type"),
+            [
+                clause([leaf::atom("error")], None, wrap_error, Layout::Block),
+                clause(
+                    [var("_D4Other")],
+                    None,
+                    form::primop(
+                        "raw_raise",
+                        [
+                            caught.class.clone(),
+                            caught.reason.clone(),
+                            caught.stack.clone(),
+                        ],
+                    ),
+                    Layout::Block,
+                ),
+            ],
+            Layout::Block,
+        );
+        try_of_catch(
+            form::call(
+                mod_name.to_string(),
+                "dispatch",
+                [var("Selector"), var("Args"), var("Self")],
+            ),
+            [var("D4Result")],
+            reply(var("D4Result")),
+            [caught.class, caught.reason, caught.stack],
+            handler,
+            Layout::Block,
+        )
     }
 
-    /// Generates a structured `arity_mismatch` error for dispatch/4 argument validation.
+    /// Generates a structured `arity_mismatch` error for dispatch/4 argument
+    /// validation, answered as `{'error', Err, State}`. `selector` is the bare
+    /// selector name.
     #[allow(clippy::unused_self)] // method on impl for API consistency
-    fn arity_error_fragment(
-        &self,
-        selector: &str,
-        expected_arity: u32,
-        indent: &str,
-    ) -> Document<'static> {
+    fn arity_error_fragment(&self, selector: &str, expected_arity: u32) -> Document<'static> {
         let hint = format!("Expected {expected_arity} argument(s) for {selector}");
-        let sep = docvec!["\n", leaf::var(indent.to_string())];
         docvec![
-            leaf::var(indent.to_string()),
             super::super::errors::beamtalk_error_doc(
                 Document::Str("<ArErr0>"),
                 Document::Str("ArErr0"),
@@ -704,26 +898,25 @@ impl CoreErlangGenerator {
                 Document::Str("ArErr1"),
                 Document::Str("<ArErr2>"),
                 "arity_mismatch",
-                Document::Str("call 'beamtalk_tagged_map':'class_of'(State, 'Object')"),
-                leaf::var(selector.to_string()),
+                form::call(
+                    "beamtalk_tagged_map",
+                    "class_of",
+                    [var("State"), leaf::atom("Object")]
+                ),
+                leaf::atom(selector.to_string()),
                 leaf::binary_lit(hint),
-                sep,
+                line(),
             ),
             "{'error', ArErr2, State}",
         ]
     }
 
-    /// Generates a structured `type_error` for dispatch/4 argument validation.
+    /// Generates a structured `type_error` for dispatch/4 argument validation,
+    /// answered as `{'error', Err, State}`. `selector` is the bare selector
+    /// name.
     #[allow(clippy::unused_self)] // method on impl for API consistency
-    fn type_error_fragment(
-        &self,
-        selector: &str,
-        hint_msg: &str,
-        indent: &str,
-    ) -> Document<'static> {
-        let sep = docvec!["\n", leaf::var(indent.to_string())];
+    fn type_error_fragment(&self, selector: &str, hint_msg: &str) -> Document<'static> {
         docvec![
-            leaf::var(indent.to_string()),
             super::super::errors::beamtalk_error_doc(
                 Document::Str("<TyErr0>"),
                 Document::Str("TyErr0"),
@@ -731,10 +924,14 @@ impl CoreErlangGenerator {
                 Document::Str("TyErr1"),
                 Document::Str("<TyErr2>"),
                 "type_error",
-                Document::Str("call 'beamtalk_tagged_map':'class_of'(State, 'Object')"),
-                leaf::var(selector.to_string()),
+                form::call(
+                    "beamtalk_tagged_map",
+                    "class_of",
+                    [var("State"), leaf::atom("Object")]
+                ),
+                leaf::atom(selector.to_string()),
                 leaf::binary_lit(hint_msg),
-                sep,
+                line(),
             ),
             "{'error', TyErr2, State}",
         ]

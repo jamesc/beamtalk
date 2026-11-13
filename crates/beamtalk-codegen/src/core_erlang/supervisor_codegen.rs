@@ -250,7 +250,7 @@ impl CoreErlangGenerator {
             "\n",
         ]);
         docs.push(docvec![
-            "'dispatch'/4 = fun (Selector, Args, Self, State) ->\n",
+            "'dispatch'/4 = fun (Selector, Args, Self, State) ->",
             Self::generate_dispatch_4_wrapper(mod_name.as_str()),
             "\n",
         ]);
