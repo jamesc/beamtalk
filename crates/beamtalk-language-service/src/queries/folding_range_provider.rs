@@ -102,6 +102,11 @@ pub fn compute_folding_ranges(module: &Module, source: &str) -> Vec<Span> {
         }
     }
 
+    // Extensions on classes declared elsewhere in the project are not folded.
+    for def in &module.method_definitions {
+        push_multiline_range(&mut ranges, def.method.span, source);
+    }
+
     ranges
 }
 
@@ -359,5 +364,22 @@ Object subclass: Counter
         let crlf_text = &crlf_source[crlf_ranges[0].as_range()];
         assert!(crlf_text.starts_with("  // === Section ==="));
         assert!(crlf_text.trim_end().ends_with("baz => 3"));
+    }
+
+    #[test]
+    fn folded_extensions_never_stretch_class_or_category_ranges() {
+        let source = "Object subclass: Counter\n  // === Core ===\n  value =>\n    1\n\nCounter >> double =>\n  self value * 2\n";
+        let (mut module, diags) = parse(lex_with_eof(source));
+        assert!(diags.is_empty(), "{diags:?}");
+        let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
+        let class_span = module.classes[0].span;
+        let ranges = compute_folding_ranges(&module, source);
+        let ext = module.classes[0].methods[1].span;
+        // The extension's own fold is where it is written; every other range
+        // lies inside the class.
+        assert!(ranges.contains(&ext));
+        for r in ranges.iter().filter(|r| **r != ext) {
+            assert!(class_span.contains(*r), "{r:?} escapes {class_span:?}");
+        }
     }
 }

@@ -88,7 +88,7 @@ pub fn compute_document_symbols(module: &Module, source: &str) -> Vec<DocumentSy
         } else {
             // No dividers: preserve the flat shape exactly
             // (instance methods, then class-side methods).
-            for method in &class.methods {
+            for method in class.methods.iter().filter(|m| class.span.contains(m.span)) {
                 children.push(DocumentSymbol {
                     name: method.selector.name(),
                     kind: DocumentSymbolKind::Method,
@@ -102,7 +102,11 @@ pub fn compute_document_symbols(module: &Module, source: &str) -> Vec<DocumentSy
                     children: vec![],
                 });
             }
-            for method in &class.class_methods {
+            for method in class
+                .class_methods
+                .iter()
+                .filter(|m| class.span.contains(m.span))
+            {
                 children.push(DocumentSymbol {
                     name: method.selector.name(),
                     kind: DocumentSymbolKind::ClassMethod,
@@ -121,9 +125,52 @@ pub fn compute_document_symbols(module: &Module, source: &str) -> Vec<DocumentSy
             name_span: Some(class.name.span),
             children,
         });
+
+        // Same-file extensions were folded into this class (BT-4721) but are
+        // written outside its range: show them where they are written, as
+        // top-level `X >> m` / `X class >> m` symbols (BT-4799).
+        let in_range = |m: &&beamtalk_core::ast::MethodDefinition| !class.span.contains(m.span);
+        for method in class.methods.iter().filter(in_range) {
+            symbols.push(extension_symbol(&class.name.name, method, false, source));
+        }
+        for method in class.class_methods.iter().filter(in_range) {
+            symbols.push(extension_symbol(&class.name.name, method, true, source));
+        }
     }
 
+    // Extensions on classes declared elsewhere were never folded.
+    for def in &module.method_definitions {
+        symbols.push(extension_symbol(
+            &def.class_name.name,
+            &def.method,
+            def.is_class_method,
+            source,
+        ));
+    }
+
+    symbols.sort_by_key(|s| s.span.start());
     symbols
+}
+
+/// Top-level symbol for an extension method, placed by its own span.
+fn extension_symbol(
+    class_name: &str,
+    method: &beamtalk_core::ast::MethodDefinition,
+    is_class_method: bool,
+    source: &str,
+) -> DocumentSymbol {
+    let (infix, kind) = if is_class_method {
+        (" class", DocumentSymbolKind::ClassMethod)
+    } else {
+        ("", DocumentSymbolKind::Method)
+    };
+    DocumentSymbol {
+        name: format!("{class_name}{infix} >> {}", method.selector.name()).into(),
+        kind,
+        span: method.span,
+        name_span: selector_span_in_method_signature(method, source),
+        children: vec![],
+    }
 }
 
 /// Converts one [`CategorizedMethod`] to a leaf [`DocumentSymbol`] (`Method`
@@ -340,5 +387,57 @@ Object subclass: Counter
         assert_eq!(category.children.len(), 2);
         assert_eq!(category.children[0].kind, DocumentSymbolKind::ClassMethod);
         assert_eq!(category.children[1].kind, DocumentSymbolKind::Method);
+    }
+
+    const EXT_SRC: &str = "Object subclass: Counter\n  // === Core ===\n  value => 1\n\nCounter >> double =>\n  self value * 2\n\nCounter class >> make: n =>\n  self new\n";
+
+    fn folded(source: &str) -> Module {
+        let (mut module, diags) = parse(lex_with_eof(source));
+        assert!(diags.is_empty(), "{diags:?}");
+        let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
+        module
+    }
+
+    #[test]
+    fn same_file_extensions_are_top_level_where_written_not_class_children() {
+        let module = folded(EXT_SRC);
+        let symbols = compute_document_symbols(&module, EXT_SRC);
+        let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "Counter (class)",
+                "Counter >> double",
+                "Counter class >> make:"
+            ]
+        );
+        let class = &symbols[0];
+        assert!(class.children.iter().all(|c| class.span.contains(c.span)));
+        for child in &class.children {
+            for c in &child.children {
+                assert!(class.span.contains(c.span));
+            }
+        }
+        assert_eq!(symbols[1].kind, DocumentSymbolKind::Method);
+        assert_eq!(symbols[2].kind, DocumentSymbolKind::ClassMethod);
+        assert!(!class.span.contains(symbols[1].span));
+    }
+
+    #[test]
+    fn extensions_do_not_join_the_last_divider_category() {
+        let module = folded(EXT_SRC);
+        let symbols = compute_document_symbols(&module, EXT_SRC);
+        let category = &symbols[0].children[0];
+        assert_eq!(category.kind, DocumentSymbolKind::Category);
+        assert_eq!(category.children.len(), 1);
+    }
+
+    #[test]
+    fn cross_file_extension_is_listed_at_its_own_span() {
+        let src = "Integer >> double => self * 2\n";
+        let (module, _) = parse(lex_with_eof(src));
+        let symbols = compute_document_symbols(&module, src);
+        assert_eq!(symbols.len(), 1);
+        assert_eq!(symbols[0].name.as_str(), "Integer >> double");
     }
 }

@@ -325,6 +325,10 @@ pub fn categorize_methods(class: &ClassDefinition, source: &str) -> Vec<MethodCa
             )
         }))
         .collect();
+    // A same-file extension folded into the class (BT-4721) lies outside the
+    // class's source range: it is written elsewhere, so it belongs to no
+    // section divider of this class body (BT-4799).
+    all.retain(|(span, ..)| class.span.contains(*span));
     all.sort_by_key(|(span, ..)| span.start());
 
     let mut categories: Vec<MethodCategory> = Vec::new();
