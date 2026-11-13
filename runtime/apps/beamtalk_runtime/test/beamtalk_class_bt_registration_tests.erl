@@ -44,10 +44,7 @@ register_class_test_() ->
 %% beamtalk_class_monitor cannot resurrect the classes mid-teardown (BT-3815).
 setup_bootstrap() ->
     beamtalk_test_class_teardown:stop_pg_class_processes(),
-    case whereis(pg) of
-        undefined -> pg:start_link();
-        _ -> ok
-    end,
+    beamtalk_test_boot:registry(),
     beamtalk_extensions:init(),
     case beamtalk_bootstrap:start_link() of
         {ok, _} -> ok;

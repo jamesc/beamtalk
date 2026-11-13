@@ -802,10 +802,7 @@ print_string_set_test() ->
 print_string_plain_map_test_() ->
     {setup,
         fun() ->
-            case whereis(pg) of
-                undefined -> pg:start_link();
-                _ -> ok
-            end,
+            beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
             beamtalk_stdlib:init(),
@@ -855,10 +852,7 @@ class_of_object_metaclass_sentinel_test() ->
 class_of_object_primitive_test_() ->
     {setup,
         fun() ->
-            case whereis(pg) of
-                undefined -> pg:start_link();
-                _ -> ok
-            end,
+            beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
             beamtalk_stdlib:init(),
@@ -894,10 +888,7 @@ class_of_object_primitive_test_() ->
 class_of_object_by_name_test_() ->
     {setup,
         fun() ->
-            case whereis(pg) of
-                undefined -> pg:start_link();
-                _ -> ok
-            end,
+            beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
             beamtalk_stdlib:init(),
@@ -1454,10 +1445,7 @@ print_string_reference_uses_opaque_ops_test() ->
 print_string_plain_map_empty_test_() ->
     {setup,
         fun() ->
-            case whereis(pg) of
-                undefined -> pg:start_link();
-                _ -> ok
-            end,
+            beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
             beamtalk_stdlib:init(),
@@ -1471,10 +1459,7 @@ print_string_plain_map_empty_test_() ->
 print_string_plain_map_sorted_test_() ->
     {setup,
         fun() ->
-            case whereis(pg) of
-                undefined -> pg:start_link();
-                _ -> ok
-            end,
+            beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
             beamtalk_stdlib:init(),
@@ -1491,10 +1476,7 @@ print_string_plain_map_sorted_test_() ->
 print_string_beamtalk_object_instance_test_() ->
     {setup,
         fun() ->
-            case whereis(pg) of
-                undefined -> pg:start_link();
-                _ -> ok
-            end,
+            beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
             beamtalk_stdlib:init(),
@@ -1516,10 +1498,7 @@ print_string_beamtalk_object_instance_test_() ->
 print_string_class_object_test_() ->
     {setup,
         fun() ->
-            case whereis(pg) of
-                undefined -> pg:start_link();
-                _ -> ok
-            end,
+            beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
             beamtalk_stdlib:init(),
@@ -1550,10 +1529,7 @@ print_string_class_object_test_() ->
 display_string_map_dispatch_test_() ->
     {setup,
         fun() ->
-            case whereis(pg) of
-                undefined -> pg:start_link();
-                _ -> ok
-            end,
+            beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
             beamtalk_stdlib:init(),
@@ -1568,10 +1544,7 @@ display_string_map_dispatch_test_() ->
 display_string_beamtalk_object_instance_test_() ->
     {setup,
         fun() ->
-            case whereis(pg) of
-                undefined -> pg:start_link();
-                _ -> ok
-            end,
+            beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
             beamtalk_stdlib:init(),
@@ -1594,10 +1567,7 @@ display_string_beamtalk_object_instance_test_() ->
 display_string_class_object_test_() ->
     {setup,
         fun() ->
-            case whereis(pg) of
-                undefined -> pg:start_link();
-                _ -> ok
-            end,
+            beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
             beamtalk_stdlib:init(),
@@ -1702,10 +1672,7 @@ class_of_object_metaclass_self_grounding_test() ->
 class_of_object_non_class_beamtalk_object_test_() ->
     {setup,
         fun() ->
-            case whereis(pg) of
-                undefined -> pg:start_link();
-                _ -> ok
-            end,
+            beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
             beamtalk_stdlib:init(),
@@ -1730,10 +1697,7 @@ class_of_object_non_class_beamtalk_object_test_() ->
 responds_to_beamtalk_object_unknown_tag_test_() ->
     {setup,
         fun() ->
-            case whereis(pg) of
-                undefined -> pg:start_link();
-                _ -> ok
-            end,
+            beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
             beamtalk_stdlib:init(),
@@ -1822,10 +1786,7 @@ class_of_future_autoawait_test() ->
 class_of_object_future_autoawait_test_() ->
     {setup,
         fun() ->
-            case whereis(pg) of
-                undefined -> pg:start_link();
-                _ -> ok
-            end,
+            beamtalk_test_boot:registry(),
             beamtalk_extensions:init(),
             {ok, _} = beamtalk_bootstrap:start_link(),
             beamtalk_stdlib:init(),

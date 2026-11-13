@@ -28,10 +28,7 @@ setup() ->
 %% via supervisor:terminate_child so each fixture gets a fresh monitor with
 %% its own budget opts; teardown restores it via supervisor:restart_child.
 setup(MonitorOpts) ->
-    beamtalk_class_registry:ensure_pg_started(),
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
-    beamtalk_class_registry:ensure_pid_table(),
+    beamtalk_test_boot:registry(),
     {SupPid, SupOwned} =
         case whereis(beamtalk_class_sup) of
             undefined ->
@@ -379,10 +376,7 @@ fallback_without_sup_test_() ->
             %% suite left the runtime app running, carve its class_sup out via
             %% supervisor:terminate_child (restored in teardown); a leaked
             %% standalone sup is stopped directly.
-            beamtalk_class_registry:ensure_pg_started(),
-            beamtalk_class_registry:ensure_hierarchy_table(),
-            beamtalk_class_registry:ensure_module_table(),
-            beamtalk_class_registry:ensure_pid_table(),
+            beamtalk_test_boot:registry(),
             case whereis(beamtalk_class_sup) of
                 undefined ->
                     false;

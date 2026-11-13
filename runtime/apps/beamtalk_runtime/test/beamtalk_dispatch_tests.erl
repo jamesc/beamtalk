@@ -2104,7 +2104,7 @@ test_super_send_warms_shared_entry() ->
 %% and answers without recomputing).
 test_inherited_target_compiled() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
     beamtalk_class_derived_cache:invalidate(),
     ?assertEqual(
         {compiled, 'Counter', 'bt@counter'},
@@ -2123,7 +2123,7 @@ test_inherited_target_compiled() ->
 %% verdict, which an actor's `dispatch/4` arm treats as `slow`.)
 test_inherited_target_object_owned_slow() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
     beamtalk_class_derived_cache:invalidate(),
     ?assertEqual(
         {value, 'Object', 'bt@stdlib@object'},
@@ -2183,7 +2183,7 @@ test_inherited_target_value_extension_flips() ->
 %% install and removal flush the derived cache.
 test_inherited_target_extension_flips() ->
     ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
     ok = beamtalk_extensions:init(),
     beamtalk_class_derived_cache:invalidate(),
     Fun = fun(_Args, _Self, St) -> {ext4280, St} end,
@@ -2216,13 +2216,3 @@ test_inherited_target_unregistered() ->
         [],
         ets:lookup(beamtalk_class_derived_cache, {inherited_target, 'Bt4280NoSuchClass', anything})
     ).
-
-ensure_fixture_loaded(ClassName, Module) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            {module, Module} = code:ensure_loaded(Module),
-            Module:register_class(),
-            ok;
-        _ ->
-            ok
-    end.

@@ -159,10 +159,7 @@ execute_tests_run_single_not_found_test() ->
 
 %% Setup to ensure stdlib is loaded for the tests below that need real modules
 test_case_setup() ->
-    case whereis(pg) of
-        undefined -> pg:start_link();
-        _ -> ok
-    end,
+    beamtalk_test_boot:registry(),
     beamtalk_extensions:init(),
     {ok, _} = beamtalk_bootstrap:start_link(),
     beamtalk_stdlib:init(),

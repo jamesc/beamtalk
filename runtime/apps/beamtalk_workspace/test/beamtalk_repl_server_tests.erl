@@ -1705,7 +1705,7 @@ walk_chain_superclass_inheritance_test() ->
     %% 'WalkChainSub' has no return type for 'size'; its superclass 'WalkChainSuper'
     %% does.  get_method_return_type/2 walks the ETS hierarchy table, so walk_chain/2
     %% should resolve through the superclass.
-    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_test_boot:registry(),
     Saved = ets:tab2list(beamtalk_class_metadata),
     ets:delete_all_objects(beamtalk_class_metadata),
     beamtalk_class_metadata:insert(

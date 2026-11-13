@@ -23,10 +23,7 @@ Set up the class infrastructure and Protocol superclass needed for protocol
 class object creation. Returns cleanup state.
 """.
 setup() ->
-    beamtalk_class_registry:ensure_pg_started(),
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
-    beamtalk_class_registry:ensure_pid_table(),
+    beamtalk_test_boot:registry(),
     beamtalk_protocol_registry:init(),
     %% Clean protocol registry
     case ets:info(beamtalk_protocol_registry) of

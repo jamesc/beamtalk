@@ -293,16 +293,7 @@ structural_from_state_nested_test() ->
 %% `beamtalk_object_class:start_link/1`.
 
 setup() ->
-    case whereis(pg) of
-        undefined ->
-            {ok, Pid} = pg:start_link(),
-            Pid;
-        Pid ->
-            Pid
-    end,
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
-    beamtalk_class_registry:ensure_pid_table().
+    beamtalk_test_boot:registry().
 
 teardown(_) ->
     Members =

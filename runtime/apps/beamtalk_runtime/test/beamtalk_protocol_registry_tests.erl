@@ -40,16 +40,7 @@ put_method/removal, which `setup/0` alone doesn't need). Mirrors
 """.
 rt_setup() ->
     setup(),
-    case whereis(pg) of
-        undefined ->
-            {ok, _} = pg:start_link();
-        _ ->
-            ok
-    end,
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
-    beamtalk_class_registry:ensure_pid_table(),
-    beamtalk_class_registry:ensure_loaded_classes_table(),
+    beamtalk_test_boot:registry(),
     ok.
 
 -doc "Start a class registered under ClassName with a single `ping` method (arity 0).".

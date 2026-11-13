@@ -302,7 +302,7 @@ module_to_class_non_atom_test() ->
 module_to_class_resolves_acronym_class_via_registry_test_() ->
     {setup,
         fun() ->
-            beamtalk_class_registry:ensure_pg_started(),
+            beamtalk_test_boot:registry(),
             ClassInfo = #{
                 superclass => none,
                 methods => #{},

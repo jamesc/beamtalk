@@ -1163,7 +1163,7 @@ ensure_root_table_idempotent_test() ->
 %% Register a real class process for one of the fixture's class names, with
 %% the fixture as its module, answering the instance methods in `Config`.
 with_bt3963_class(ClassName, Config, Fun) ->
-    beamtalk_class_registry:ensure_pg_started(),
+    beamtalk_test_boot:registry(),
     beamtalk_supervisor_test_helper:ensure_lock_table(),
     beamtalk_class_metadata:new(),
     ok = beamtalk_bt3963_sup_fixture:configure(Config),

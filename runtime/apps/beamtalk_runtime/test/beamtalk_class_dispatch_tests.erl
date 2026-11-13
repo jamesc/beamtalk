@@ -53,11 +53,7 @@ Test groups:
 %% parallel test execution (another process can start pg between the check
 %% and the call, making the {ok, _} match fail).
 setup_minimal() ->
-    case pg:start_link() of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
-    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_test_boot:registry(),
     [].
 
 teardown_pids(Pids) ->
@@ -3082,7 +3078,7 @@ class_self_direct_ok_test_() ->
 class_send_not_found_fallthrough_does_not_message_stalled_class_test_() ->
     {setup,
         fun() ->
-            beamtalk_class_registry:ensure_pid_table(),
+            beamtalk_test_boot:registry(),
             beamtalk_class_metadata:new(),
             {ok, Pid} = test_stall_after_miss_class:start(),
             beamtalk_class_registry:record_class_pid(Pid, 'StallAfterMissClass'),

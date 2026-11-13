@@ -58,11 +58,7 @@ raised_kind(Fun) ->
     end.
 
 class_setup() ->
-    case pg:start_link() of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
-    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_test_boot:registry(),
     ok.
 
 with_dynamic_class(ClassName, Fun) ->

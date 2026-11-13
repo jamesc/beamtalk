@@ -3676,21 +3676,12 @@ ffi_do_spawn_with_non_object_receiver_raises_test() ->
     ?assertBtError(type_error, beamtalk_actor_ffi:doSpawnWith(not_an_actor, #{})).
 
 %% Ensure the Counter class is loaded and registered, returning its live
-%% class-object pid. Mirrors (but does not share — each test module keeps
-%% its own copy) beamtalk_dispatch_tests:ensure_counter_loaded/0 and
-%% beamtalk_class_instantiation_tests:ensure_counter_loaded/0.
+%% class-object pid.
 ensure_counter_class_pid() ->
+    ok = beamtalk_test_class:ensure_counter_loaded(),
     case erlang:whereis(beamtalk_class_Counter) of
-        undefined ->
-            {module, 'bt@counter'} = code:ensure_loaded('bt@counter'),
-            true = erlang:function_exported('bt@counter', register_class, 0),
-            'bt@counter':register_class(),
-            case erlang:whereis(beamtalk_class_Counter) of
-                undefined -> error(counter_registration_failed);
-                Pid -> Pid
-            end;
-        Pid ->
-            Pid
+        undefined -> error(counter_registration_failed);
+        Pid -> Pid
     end.
 
 %%% ============================================================================

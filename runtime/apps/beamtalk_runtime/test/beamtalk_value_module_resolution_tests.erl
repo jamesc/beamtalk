@@ -107,7 +107,7 @@ package_value_send_makes_no_code_server_call() ->
     %% be a code_server miss.
     ?assertNot(erlang:module_loaded(beamtalk_module_name:to_module_atom(?CLASS))),
     ?assertNot(erlang:module_loaded(beamtalk_module_name:to_stdlib_module_atom(?CLASS))),
-    Pid = start_class(?CLASS, ?MOD),
+    Pid = beamtalk_test_class:start(?CLASS, class_info(?MOD)),
     Self = #{'$beamtalk_class' => ?CLASS, x => 7},
     try
         {Results, Calls} = code_server_calls_during(fun() ->
@@ -130,7 +130,7 @@ resolution_follows_class_redefinition() ->
     %% separate cache — so a redefinition that moves the class to another
     %% module (merge_identity/5, the hot-reload write) or the class's removal
     %% (terminate/2 deletes the row) is seen by the very next send.
-    Pid = start_class(?CLASS, ?MOD),
+    Pid = beamtalk_test_class:start(?CLASS, class_info(?MOD)),
     Self = #{'$beamtalk_class' => ?CLASS, x => 1, y => 2},
     try
         ?assertEqual(1, beamtalk_primitive:send(Self, getX, [])),
@@ -151,7 +151,7 @@ module_less_class_makes_no_code_server_call() ->
     %% A builder-built class registers its own name as its "module"
     %% (beamtalk_object_class:init/1's default). That is never a loadable
     %% module, so it must not be probed on each send either.
-    Pid = start_class(?MODULE_LESS, undefined),
+    Pid = beamtalk_test_class:start(?MODULE_LESS, class_info(undefined)),
     try
         {Module, Calls} = code_server_calls_during(fun() ->
             beamtalk_primitive:class_name_to_module(?MODULE_LESS)
@@ -166,8 +166,8 @@ module_less_class_paths_make_no_code_server_call() ->
     %% BT-4056: module-less ancestors and the class itself must not be probed
     %% by `new`, dispatch lookup or has_method_local/2. `new` runs inside the
     %% class gen_server, so trace that process as well as the worker.
-    Base = start_class('ZzMlBase', undefined, 'Object', [foo]),
-    Sub = start_class('ZzMlSub', undefined, 'ZzMlBase'),
+    Base = beamtalk_test_class:start('ZzMlBase', class_info(undefined, 'Object', [foo])),
+    Sub = beamtalk_test_class:start('ZzMlSub', class_info(undefined, 'ZzMlBase')),
     try
         {Result, Calls} = calls_during([{code_server, call, 1}], [Base, Sub], fun() ->
             _ = gen_server:call(Sub, {new, []}),
@@ -191,7 +191,7 @@ warm_value_send_does_no_string_work() ->
     %% BT-4064: after the first send, resolving a Value class's dispatch module
     %% is a cache hit — no CamelCase -> snake_case conversion
     %% (beamtalk_module_name, built on `string`) and no superclass walk.
-    Pid = start_class(?CLASS, ?MOD),
+    Pid = beamtalk_test_class:start(?CLASS, class_info(?MOD)),
     Self = #{'$beamtalk_class' => ?CLASS, x => 7},
     Duration = #{'$beamtalk_class' => 'Duration', millis => 5},
     try
@@ -234,7 +234,7 @@ warm_class_of_object_builds_no_atoms() ->
         {erlang, binary_to_atom, 2},
         {erlang, atom_to_binary, 2}
     ],
-    Pid = start_class(?CLASS, ?MOD),
+    Pid = beamtalk_test_class:start(?CLASS, class_info(?MOD)),
     try
         {Cold, ColdCalls} = calls_during(Patterns, fun() ->
             beamtalk_primitive:class_of_object_by_name(?CLASS)
@@ -254,7 +254,7 @@ exception_bit_follows_superclass_change() ->
     %% The cached "is this an Exception subclass?" bit depends on the class's
     %% superclass row; re-parenting the class (merge_identity/5, the hot-reload
     %% write) must be seen by the next send.
-    Pid = start_class(?CLASS, ?MOD),
+    Pid = beamtalk_test_class:start(?CLASS, class_info(?MOD)),
     Self = #{'$beamtalk_class' => ?CLASS, x => 7},
     try
         ?assert(beamtalk_primitive:responds_to(Self, getX)),
@@ -275,7 +275,7 @@ purged_module_is_rederived() ->
     %% cached module is still loaded. Purging the class's module (the class
     %% stays registered) must not leave sends calling into a stale answer, and
     %% reloading it must bring the warm path back.
-    Pid = start_class(?CLASS, ?MOD),
+    Pid = beamtalk_test_class:start(?CLASS, class_info(?MOD)),
     Self = #{'$beamtalk_class' => ?CLASS, x => 7},
     try
         ?assertEqual(7, beamtalk_primitive:send(Self, getX, [])),
@@ -299,7 +299,7 @@ purged_module_is_rederived() ->
 inherited_object_send_makes_no_xref_call() ->
     %% `hasField:` is not in the class module, so the send falls through to
     %% runtime_instance_method/2, which resolves ?CLASS -> Object.
-    Pid = start_class(?CLASS, ?MOD, 'Object'),
+    Pid = beamtalk_test_class:start(?CLASS, class_info(?MOD, 'Object')),
     Self = #{'$beamtalk_class' => ?CLASS, x => 7},
     try
         true = beamtalk_primitive:send(Self, 'hasField:', [x]),
@@ -328,7 +328,7 @@ inherited_object_send_makes_no_xref_call() ->
 runtime_method_changes_are_seen_by_next_send() ->
     %% The dispatch-time lookup is memoised; put_method (publish_reflection ->
     %% put_method_records/3) must invalidate it.
-    Pid = start_class(?MODULE_LESS, undefined, 'Object'),
+    Pid = beamtalk_test_class:start(?MODULE_LESS, class_info(undefined, 'Object')),
     Self = #{'$beamtalk_class' => ?MODULE_LESS},
     try
         ?assertBtError(does_not_understand, _, answer, beamtalk_primitive:send(Self, answer, [])),
@@ -342,7 +342,7 @@ runtime_method_changes_are_seen_by_next_send() ->
         beamtalk_test_proc:stop(Pid)
     end,
     %% Re-parenting (merge_identity/5, the hot-reload write) is seen too.
-    Pid2 = start_class(?MODULE_LESS, undefined, none),
+    Pid2 = beamtalk_test_class:start(?MODULE_LESS, class_info(undefined, none)),
     try
         ?assertEqual(
             not_found, beamtalk_method_resolver:instance_method_info(?MODULE_LESS, 'hasField:')
@@ -369,8 +369,8 @@ perform_finds_runtime_fun_methods() ->
     %% BT-4624: the reflective path (beamtalk_dispatch:lookup/5) must resolve
     %% fun-backed methods of module-less classes, including inherited ones,
     %% exactly as the direct send does.
-    Parent = start_class(?MODULE_LESS, undefined, 'Object'),
-    Child = start_class('PkgHotModuleLessChild', undefined, ?MODULE_LESS),
+    Parent = beamtalk_test_class:start(?MODULE_LESS, class_info(undefined, 'Object')),
+    Child = beamtalk_test_class:start('PkgHotModuleLessChild', class_info(undefined, ?MODULE_LESS)),
     Self = #{'$beamtalk_class' => 'PkgHotModuleLessChild'},
     try
         ok = beamtalk_object_class:put_method(Parent, answer, fun(_S) -> 42 end),
@@ -410,7 +410,7 @@ perform_relays_nlr_and_script_exit_from_runtime_fun() ->
     %% BT-4642: a `^` NLR throw (ADR 0041) or script exit (ADR 0099 §3) raised in
     %% a fun-backed method (or a block passed to it) is control flow: perform:
     %% must let it propagate exactly as a direct send does, not wrap it.
-    Pid = start_class(?MODULE_LESS, undefined, 'Object'),
+    Pid = beamtalk_test_class:start(?MODULE_LESS, class_info(undefined, 'Object')),
     Self = #{'$beamtalk_class' => ?MODULE_LESS},
     Nlr = ?NLR(make_ref(), 7, #{}),
     try
@@ -449,7 +449,7 @@ method_origin_copies_no_generation_table() ->
 memo_hit_reads_no_ets() ->
     %% BT-4623: the first dispatch in a process fetches from the derived cache
     %% and memoises; later ones in the same process read no ETS entry for it.
-    Pid = start_class(?CLASS, ?MOD),
+    Pid = beamtalk_test_class:start(?CLASS, class_info(?MOD)),
     Self = #{'$beamtalk_class' => ?CLASS, x => 7},
     try
         {Results, Calls} = calls_during([{ets, lookup, 2}], fun() ->
@@ -475,7 +475,7 @@ memo_hit_reads_no_ets() ->
 memo_follows_reregistration() ->
     %% A module move in the same process (merge_identity/5) bumps the
     %% generation, so the memo is a miss and the class is re-resolved.
-    Pid = start_class(?CLASS, ?MOD),
+    Pid = beamtalk_test_class:start(?CLASS, class_info(?MOD)),
     Self = #{'$beamtalk_class' => ?CLASS, x => 7},
     try
         ?assertEqual({value, ?CLASS, ?MOD}, beamtalk_primitive:tagged_map_dispatch(Self)),
@@ -490,8 +490,8 @@ memo_follows_reregistration() ->
 memo_follows_ancestor_reparent() ->
     %% Reparenting an ancestor into Exception makes an already-memoised
     %% subclass an Exception too; it must resolve to `exception`.
-    Parent = start_class('ZzMemoParent', undefined, 'Object'),
-    Child = start_class(?CLASS, ?MOD, 'ZzMemoParent'),
+    Parent = beamtalk_test_class:start('ZzMemoParent', class_info(undefined, 'Object')),
+    Child = beamtalk_test_class:start(?CLASS, class_info(?MOD, 'ZzMemoParent')),
     Self = #{'$beamtalk_class' => ?CLASS, x => 7},
     try
         ?assertEqual({value, ?CLASS, ?MOD}, beamtalk_primitive:tagged_map_dispatch(Self)),
@@ -511,7 +511,7 @@ memo_follows_ancestor_reparent() ->
 memo_of_purged_module_is_rederived() ->
     %% Purging is not a metadata write, so the generation stays put: the memo
     %% hit's own purge check must send it back to the derived cache.
-    Pid = start_class(?CLASS, ?MOD),
+    Pid = beamtalk_test_class:start(?CLASS, class_info(?MOD)),
     Self = #{'$beamtalk_class' => ?CLASS, x => 7},
     try
         ?assertEqual({value, ?CLASS, ?MOD}, beamtalk_primitive:tagged_map_dispatch(Self)),
@@ -543,7 +543,7 @@ uncacheable_answer_is_not_memoised() ->
 no_generation_memoises_nothing() ->
     %% Before beamtalk_class_derived_cache:new/0 there is no generation: every
     %% call computes, the answer is still right, and nothing is memoised.
-    Pid = start_class(?CLASS, ?MOD),
+    Pid = beamtalk_test_class:start(?CLASS, class_info(?MOD)),
     Self = #{'$beamtalk_class' => ?CLASS, x => 7},
     GenKey = {beamtalk_class_derived_cache, generation},
     Ref = persistent_term:get(GenKey),
@@ -564,25 +564,23 @@ no_generation_memoises_nothing() ->
 %%% Helpers
 %%% ============================================================================
 
-start_class(Name, Module) ->
-    start_class(Name, Module, none).
+class_info(Module) ->
+    class_info(Module, none).
 
-start_class(Name, Module, Superclass) ->
-    start_class(Name, Module, Superclass, []).
+class_info(Module, Superclass) ->
+    class_info(Module, Superclass, []).
 
-start_class(Name, Module, Superclass, Selectors) ->
+class_info(Module, Superclass, Selectors) ->
     Base = #{
         superclass => Superclass,
         class_methods => #{},
         class_state => #{},
         instance_methods => maps:from_list([{S, #{}} || S <- Selectors])
     },
-    ClassInfo =
-        case Module of
-            undefined -> Base;
-            _ -> Base#{module => Module}
-        end,
-    beamtalk_test_class:start(Name, ClassInfo).
+    case Module of
+        undefined -> Base;
+        _ -> Base#{module => Module}
+    end.
 
 %% The calling process's tagged_class_dispatch/1 memo for Class (BT-4623).
 memo(Class) ->

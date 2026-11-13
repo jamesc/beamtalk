@@ -20,10 +20,7 @@ These tests focus on routing logic that works without compiled stdlib.
 %% ============================================================================
 
 actor_setup() ->
-    case whereis(pg) of
-        undefined -> pg:start_link();
-        _ -> ok
-    end,
+    beamtalk_test_boot:registry(),
     beamtalk_extensions:init(),
     {ok, _} = beamtalk_bootstrap:start_link(),
     %% Bootstrap only starts pg; classes are registered by the compiled stdlib.

@@ -20,19 +20,9 @@ Tests class-side method dispatch, metaclass lookup, and class object behaviour.
 %%====================================================================
 
 setup() ->
-    %% Start pg server if not already running
-    case whereis(pg) of
-        undefined ->
-            {ok, Pid} = pg:start_link(),
-            Pid;
-        Pid ->
-            Pid
-    end,
-    %% Ensure ETS tables are owned by the test process (not the first
-    %% class process), so they survive class process death during crash recovery tests.
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
-    beamtalk_class_registry:ensure_pid_table(),
+    %% pg + registry ETS tables (heir-owned, so they survive class process
+    %% death during crash recovery tests).
+    beamtalk_test_boot:registry(),
     %% BT-3810: class processes left registered by earlier test modules (e.g.
     %% the stdlib `Counter` loaded by the dispatch/actor tests, which the
     %% still-running beamtalk_class_monitor watches) must not leak into this
@@ -1033,7 +1023,7 @@ update_class_different_module_records_warning_test_() ->
         [
             ?_test(begin
                 %% Ensure warnings table exists
-                beamtalk_class_registry:ensure_class_warnings_table(),
+                beamtalk_test_boot:registry(),
                 ets:delete_all_objects(beamtalk_class_warnings),
 
                 %% Start class with module_a
@@ -1064,7 +1054,7 @@ update_class_same_module_no_warning_test_() ->
         [
             ?_test(begin
                 %% Ensure warnings table exists and is clean
-                beamtalk_class_registry:ensure_class_warnings_table(),
+                beamtalk_test_boot:registry(),
                 ets:delete_all_objects(beamtalk_class_warnings),
 
                 %% Start class with same_module
@@ -1143,7 +1133,7 @@ qualified_drain_isolates_packages_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                beamtalk_class_registry:ensure_class_warnings_table(),
+                beamtalk_test_boot:registry(),
                 ets:delete_all_objects(beamtalk_class_warnings),
 
                 %% Record collision warnings for two different packages
@@ -1176,7 +1166,7 @@ unqualified_drain_gets_all_packages_test_() ->
     {setup, fun setup/0, fun teardown/1, fun(_) ->
         [
             ?_test(begin
-                beamtalk_class_registry:ensure_class_warnings_table(),
+                beamtalk_test_boot:registry(),
                 ets:delete_all_objects(beamtalk_class_warnings),
 
                 beamtalk_class_registry:record_class_collision_warning(
@@ -1284,7 +1274,7 @@ update_class_non_stdlib_no_shadowing_test_() ->
         [
             ?_test(begin
                 %% Ensure ETS tables are clean
-                beamtalk_class_registry:ensure_class_warnings_table(),
+                beamtalk_test_boot:registry(),
                 ets:delete_all_objects(beamtalk_class_warnings),
                 beamtalk_class_registry:record_pending_load_error('__warmup__', #beamtalk_error{}),
                 ets:delete_all_objects(beamtalk_pending_load_errors),

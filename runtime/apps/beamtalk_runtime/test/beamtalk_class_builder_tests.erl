@@ -38,12 +38,9 @@ Tests:
 
 setup() ->
     %% Ensure pg is started (required by class registry)
-    case whereis(pg) of
-        undefined -> {ok, _} = pg:start_link();
-        _ -> ok
-    end,
+    beamtalk_test_boot:registry(),
     %% Ensure the ETS hierarchy table exists
-    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_test_boot:registry(),
     %% Track class names created during each test for cleanup
     [].
 
@@ -286,11 +283,7 @@ class_responds_to_classbuilder_test_() ->
     {setup,
         fun() ->
             %% Need a running bootstrap to have the Class stub registered
-            case whereis(pg) of
-                undefined -> {ok, _} = pg:start_link();
-                _ -> ok
-            end,
-            beamtalk_class_registry:ensure_hierarchy_table(),
+            beamtalk_test_boot:registry(),
             beamtalk_class_bt:register_class(),
             []
         end,
@@ -313,11 +306,7 @@ class_responds_to_classbuilder_test_() ->
 classbuilder_registered_in_bootstrap_test_() ->
     {setup,
         fun() ->
-            case whereis(pg) of
-                undefined -> {ok, _} = pg:start_link();
-                _ -> ok
-            end,
-            beamtalk_class_registry:ensure_hierarchy_table(),
+            beamtalk_test_boot:registry(),
             beamtalk_class_bt:register_class(),
             beamtalk_metaclass_bt:register_class(),
             beamtalk_class_builder_bt:register_class(),

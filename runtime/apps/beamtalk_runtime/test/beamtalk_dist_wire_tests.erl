@@ -61,24 +61,9 @@ directly). Runs on whichever node calls it — used both locally and via
 own, node-local table.
 """.
 ensure_fixture_loaded(Basename, ClassName) ->
-    Module = list_to_atom("bt@" ++ atom_to_list(Basename)),
-    case code:ensure_loaded(Module) of
-        {module, Module} ->
-            case beamtalk_class_registry:whereis_class(ClassName) of
-                undefined ->
-                    case erlang:function_exported(Module, register_class, 0) of
-                        true ->
-                            Module:register_class(),
-                            ok;
-                        false ->
-                            ok
-                    end;
-                _Pid ->
-                    ok
-            end;
-        {error, Reason} ->
-            error({fixture_module_not_found, Basename, Reason})
-    end.
+    beamtalk_test_class:ensure_fixture_loaded(
+        ClassName, list_to_atom("bt@" ++ atom_to_list(Basename))
+    ).
 
 wire_test_() ->
     {timeout, 60,

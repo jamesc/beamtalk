@@ -23,10 +23,7 @@ dispatch, redefinition-does-not-resurrect) is covered separately in
 %% Stand up (idempotently) every registry class_removed/2 touches, and clear
 %% the ones scoped to this module's app so tests don't see each other's rows.
 setup() ->
-    case pg:start_link() of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
+    beamtalk_test_boot:registry(),
     beamtalk_extensions:init(),
     beamtalk_protocol_registry:init(),
     case whereis(beamtalk_xref) of

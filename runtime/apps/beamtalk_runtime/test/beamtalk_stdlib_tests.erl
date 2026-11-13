@@ -17,10 +17,7 @@
 %% Setup and teardown for stdlib tests
 stdlib_setup() ->
     %% Ensure pg is running
-    case whereis(pg) of
-        undefined -> pg:start_link();
-        _ -> ok
-    end,
+    beamtalk_test_boot:registry(),
     %% Initialize extensions ETS table
     beamtalk_extensions:init(),
     %% Initialize the protocol registry ETS table so protocol-only
