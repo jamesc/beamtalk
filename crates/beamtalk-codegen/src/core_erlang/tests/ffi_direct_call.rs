@@ -45,6 +45,18 @@ fn sig_union(name: &str, params: &[&str], members: &[&str]) -> FunctionSignature
     s
 }
 
+/// A signature whose return type is the `Result(V, Exception)` the spec reader
+/// emits for an `{ok, V}` / `ok` / `{error, R}` spec.
+fn sig_result(name: &str, params: &[&str], value: &str) -> FunctionSignature {
+    let mut s = sig(name, params, "Dynamic");
+    s.return_type = InferredType::Known {
+        class_name: ecow::EcoString::from("Result"),
+        type_args: vec![extracted(value), extracted("Exception")],
+        provenance: TypeProvenance::Extracted,
+    };
+    s
+}
+
 fn registry() -> NativeTypeRegistry {
     let mut registry = NativeTypeRegistry::new();
     registry.register_module(
@@ -57,9 +69,18 @@ fn registry() -> NativeTypeRegistry {
             sig_union("integer_to_list", &["Integer"], &["String", "List"]),
             sig("get", &["Dynamic"], "Dynamic"),
             sig("node", &[], "Symbol"),
+            sig_result("find_int", &["Integer"], "Integer"),
+            sig_result("find_bin", &["Integer"], "Binary"),
+            sig_result("just_ok", &[], "Nil"),
+            sig_result("find_list", &["Integer"], "List"),
+            sig_result("find_dyn", &["Integer"], "Dynamic"),
         ],
     );
     registry.register_module("beamtalk_process_ops", vec![sig("current", &[], "Pid")]);
+    registry.register_module(
+        "beamtalk_ops",
+        vec![sig_result("find", &["Integer"], "Integer")],
+    );
     registry.trust_all_modules();
     registry
 }
@@ -85,8 +106,16 @@ fn compile(body: &str) -> String {
 }
 
 fn assert_direct(code: &str, module: &str, function: &str, mode: &str) {
-    let call = format!("try call '{module}':'{function}'(");
-    assert!(code.contains(&call), "expected `{call}` in:\n{code}");
+    // A plain direct call is `try call 'M':'F'(`; an inline `Result` (BT-4762)
+    // binds the raw result first: `try let <Raw> = call 'M':'F'(`.
+    let call = format!("call '{module}':'{function}'(");
+    let try_call = format!("try {call}");
+    let try_let = "try let _FfiRaw".to_string();
+    assert!(
+        code.contains(&try_call)
+            || (code.contains(&try_let) && code.contains(&format!("= {call}"))),
+        "expected a `try` around `{call}` in:\n{code}"
+    );
     assert!(
         code.contains("call 'beamtalk_erlang_proxy':'ffi_call_raised'("),
         "a direct call keeps the proxy's error translation:\n{code}"
@@ -332,4 +361,90 @@ fn untrusted_dependency_spec_stays_on_proxy() {
     )
     .expect("codegen should succeed");
     assert_proxied(&code, "dep_mod", "answer");
+}
+
+/// BT-4762: a stock-mode call whose spec is `Result(V, _)` with a proved `V`
+/// builds the `Result` inside the `try`, with the proxy's `coerce_ffi_result/3`
+/// as the fallback for every other shape. No new send or proxy hop: the call
+/// is the same direct remote call, and the `Result` is `beamtalk_result`'s
+/// own constructor.
+#[test]
+fn ok_value_result_is_built_inline() {
+    let code = compile("Erlang erlang find_int: n");
+    assert_direct(&code, "erlang", "find_int", "stock");
+    assert_guarded(&code, "erlang", "find_int");
+    assert!(
+        code.contains("let _FfiRaw") && code.contains("= call 'erlang':'find_int'(_FfiArg"),
+        "the raw result is bound inside the try:\n{code}"
+    );
+    assert!(
+        code.contains("<{'ok', _FfiPayload") && code.contains("<{'error', _FfiPayload"),
+        "the ok and error arms match the tagged tuples:\n{code}"
+    );
+    assert!(
+        code.contains("call 'erlang':'not'(call 'erlang':'is_list'(_FfiPayload"),
+        "a list payload is left to the proxy's charlist coercion:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_result':'from_tagged_tuple'(_FfiRaw"),
+        "the Result is the constructor the proxy ends in:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_result':'from_tagged_tuple'({'ok', 'nil'})"),
+        "a bare `ok` is `{{ok, nil}}`:\n{code}"
+    );
+    assert!(
+        code.contains("call 'beamtalk_erlang_proxy':'coerce_ffi_result'('erlang', _FfiOther"),
+        "everything else is coerced by the proxy on the value already returned:\n{code}"
+    );
+    // No dynamic send, class-process call or `Result ok:` dispatch.
+    for banned in [
+        "'beamtalk_message_dispatcher'",
+        "'beamtalk_class_registry'",
+        "'ok:'",
+    ] {
+        assert!(!code.contains(banned), "unexpected {banned}:\n{code}");
+    }
+}
+
+#[test]
+fn binary_value_result_is_built_inline() {
+    let code = compile("Erlang erlang find_bin: n");
+    assert_direct(&code, "erlang", "find_bin", "stock");
+    assert!(code.contains("'from_tagged_tuple'"), "{code}");
+}
+
+#[test]
+fn bare_ok_result_is_built_inline_with_no_arguments() {
+    let code = compile("Erlang erlang just_ok");
+    assert_direct(&code, "erlang", "just_ok", "stock");
+    assert!(
+        code.contains("'from_tagged_tuple'({'ok', 'nil'})"),
+        "{code}"
+    );
+}
+
+#[test]
+fn list_value_result_stays_on_proxy() {
+    // `V` may be a charlist: stock mode must convert it.
+    assert_proxied(
+        &compile("Erlang erlang find_list: n"),
+        "erlang",
+        "find_list",
+    );
+}
+
+#[test]
+fn dynamic_value_result_stays_on_proxy() {
+    assert_proxied(&compile("Erlang erlang find_dyn: n"), "erlang", "find_dyn");
+}
+
+#[test]
+fn beamtalk_module_result_stays_on_proxy() {
+    // Beamtalk-mode coercion differs (raw-result opt-out, bare `error`).
+    assert_proxied(
+        &compile("Erlang beamtalk_ops find: n"),
+        "beamtalk_ops",
+        "find",
+    );
 }

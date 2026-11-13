@@ -35,5 +35,15 @@
   ],
   "arg_runtime_guards": ["is_number", "is_atom", "is_pid"],
   "arg_binary_guard": "is_binary",
+  "_comment_inline_result": "BT-4762: a stock-mode call whose spec is Result(V, _) builds the Result at the call site (beamtalk_result:from_tagged_tuple/1) when the raw result is {ok, V} or {error, R} with a non-list payload, or the bare ok, and otherwise hands the already-returned value to coerce_ffi_result/3. Rust: V must be in result_passthrough (inline_result_value_not_proven lists types it rejects). Erlang: every sample must come out of the inline shape exactly as coerce_ffi_result(M, Sample, stock) builds it.",
+  "inline_result_samples": [
+    "ok", "error", "{ok, nil}", "{ok, 0}", "{ok, 1.5}", "{ok, true}", "{ok, self()}",
+    "{ok, <<>>}", "{ok, <<\"abc\">>}", "{ok, {beamtalk_string, <<\"abc\">>}}", "{ok, #{a => 1}}",
+    "{ok, fun() -> ok end}", "{ok, undefined}", "{ok, ok}", "{ok, error}", "{ok, {ok, 1}}",
+    "{error, enoent}", "{error, <<\"bad\">>}", "{error, nil}", "{error, {badarg, 1}}",
+    "{ok, []}", "{ok, \"abc\"}", "{ok, [1, 2, 3]}", "{error, []}", "{error, \"bad\"}", "{error, [1, 2]}",
+    "{ok, 1, 2}", "{error, a, b}", "{ok}", "{error}", "{oops, 1}", "[]", "\"abc\"", "42", "<<\"abc\">>", "foo"
+  ],
+  "inline_result_value_not_proven": ["Symbol", "#ok", "#error", "List", "Tuple", "Result", "Object", "Dynamic"],
   "arg_not_proven": ["List", "Tuple", "Dictionary", "Block", "Result", "Object", "Dynamic"]
 }
