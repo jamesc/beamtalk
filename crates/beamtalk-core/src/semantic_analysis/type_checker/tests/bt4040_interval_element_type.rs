@@ -25,8 +25,7 @@ fn check_source(source: &str) -> Vec<crate::source_analysis::Diagnostic> {
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check(&module, &hierarchy);
     checker.take_diagnostics()
 }
 

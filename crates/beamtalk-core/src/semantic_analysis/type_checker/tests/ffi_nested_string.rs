@@ -31,8 +31,7 @@ fn build(source: &str) -> (Module, ClassHierarchy) {
 /// pipeline (the type checker itself never suppresses).
 fn diagnostics(source: &str) -> Vec<Diagnostic> {
     let (module, hierarchy) = build(source);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check(&module, &hierarchy);
     let mut diags = checker.take_diagnostics();
     apply_expect_directives(&module, &mut diags);
     diags

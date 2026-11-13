@@ -1618,8 +1618,7 @@ fn union_param_type_integer_compatible() {
         MessageSelector::Keyword(vec![KeywordPart::new("setTimeout:", span())]),
         vec![int_lit(42)],
     )]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let type_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -1650,8 +1649,7 @@ fn union_param_type_symbol_compatible() {
         MessageSelector::Keyword(vec![KeywordPart::new("setTimeout:", span())]),
         vec![sym_lit("infinity")],
     )]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let type_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -1682,8 +1680,7 @@ fn union_param_type_incompatible_warns() {
         MessageSelector::Keyword(vec![KeywordPart::new("setTimeout:", span())]),
         vec![str_lit("bad")],
     )]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let type_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -1716,8 +1713,7 @@ fn union_param_type_subclass_compatible() {
         MessageSelector::Keyword(vec![KeywordPart::new("setTimeout:", span())]),
         vec![int_lit(42)],
     )]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let type_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -1748,8 +1744,7 @@ fn non_union_param_type_unchanged() {
         MessageSelector::Keyword(vec![KeywordPart::new("deposit:", span())]),
         vec![str_lit("bad")],
     )]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let type_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -1788,8 +1783,7 @@ fn union_param_type_nil_does_not_disable_validation() {
         MessageSelector::Keyword(vec![KeywordPart::new("setName:", span())]),
         vec![int_lit(42)],
     )]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let type_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -1822,8 +1816,7 @@ fn union_param_type_nil_compatible_with_object_union() {
         MessageSelector::Keyword(vec![KeywordPart::new("setValue:", span())]),
         vec![int_lit(42)],
     )]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let type_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -2056,8 +2049,7 @@ fn process_navigation_from_rejects_non_supervisor_or_pid() {
         MessageSelector::Keyword(vec![KeywordPart::new("from:", span())]),
         vec![int_lit(42)],
     )]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let type_warnings: Vec<_> = checker
         .diagnostics()
         .iter()

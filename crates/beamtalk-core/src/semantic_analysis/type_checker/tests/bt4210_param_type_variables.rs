@@ -161,8 +161,7 @@ typed Object subclass: H
 ";
     let module = parse_source(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     assert!(
         checker.diagnostics().is_empty(),
@@ -186,8 +185,7 @@ typed Object subclass: H
 ";
     let module = parse_source(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     assert!(
         checker.diagnostics().is_empty(),

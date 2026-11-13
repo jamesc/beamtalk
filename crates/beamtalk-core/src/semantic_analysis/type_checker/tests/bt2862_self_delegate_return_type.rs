@@ -78,8 +78,7 @@ fn actor_backed_self_delegate_trusts_declared_return_type() {
          \x20\x20port -> Integer => self delegate\n\
          \x20\x20printString -> String => self delegate\n",
     );
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let class = &module.classes[0];
 
     assert_eq!(
@@ -102,8 +101,7 @@ fn actor_backed_self_delegate_without_annotation_still_dynamic() {
         "Actor subclass: HTTPServer native: beamtalk_http_server\n\
          \x20\x20raw => self delegate\n",
     );
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let class = &module.classes[0];
 
     assert!(
@@ -130,8 +128,7 @@ fn object_backed_self_delegate_trusts_declared_return_type() {
         "Object subclass: Widget native: my_widget\n\
          \x20\x20asList -> List(Integer) => self delegate\n",
     );
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let class = &module.classes[0];
 
     assert_eq!(
@@ -150,8 +147,7 @@ fn object_backed_self_delegate_without_annotation_unchanged() {
         "Object subclass: Widget native: my_widget\n\
          \x20\x20raw => self delegate\n",
     );
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let class = &module.classes[0];
 
     assert_eq!(
@@ -170,8 +166,7 @@ fn class_side_self_delegate_trusts_declared_return_type() {
         "Object subclass: Widget native: my_widget\n\
          \x20\x20class make -> Widget => self delegate\n",
     );
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let class = &module.classes[0];
 
     assert_eq!(
@@ -189,8 +184,7 @@ fn self_delegate_with_self_return_type_resolves_to_receiver_class() {
         "Object subclass: Widget native: my_widget\n\
          \x20\x20copy -> Self => self delegate\n",
     );
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let class = &module.classes[0];
 
     assert_eq!(
@@ -213,8 +207,7 @@ fn method_with_extra_statement_after_self_delegate_not_special_cased() {
          \x20\x20\x20\x20self delegate\n\
          \x20\x20\x20\x20self delegate\n",
     );
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let class = &module.classes[0];
     let method = &class.methods[0];
     assert!(

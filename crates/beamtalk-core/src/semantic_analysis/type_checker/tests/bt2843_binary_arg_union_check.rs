@@ -139,8 +139,7 @@ fn bt2843_binary_send_known_incompatible_single_diagnostic_no_duplicate() {
         vec![int_lit(42)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let type_diags = type_diagnostics(&checker);
     assert_eq!(
@@ -166,8 +165,7 @@ fn bt2843_binary_send_uncovered_operator_string_comma_known_mismatch_warns() {
         vec![int_lit(42)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let type_diags = type_diagnostics(&checker);
     assert_eq!(
@@ -193,8 +191,7 @@ fn bt2843_binary_send_uncovered_operator_integer_power_known_mismatch_warns() {
         vec![str_lit("x")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let type_diags = type_diagnostics(&checker);
     assert_eq!(

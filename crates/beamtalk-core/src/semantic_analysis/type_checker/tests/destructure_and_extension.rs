@@ -65,8 +65,7 @@ fn test_tuple_destructure_binds_vars_in_env() {
     let class = counter_class_with_typed_state(vec![method], state);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -96,8 +95,7 @@ fn test_array_destructure_binds_vars_in_env() {
     let class = make_class_with_methods("Thing", vec![method]);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "array-destructured vars should be Dynamic — no warnings: {:?}",
@@ -124,8 +122,7 @@ fn test_list_destructure_binds_vars_in_env() {
     let class = make_class_with_methods("Thing", vec![method]);
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "list-destructured vars should be Dynamic — no warnings: {:?}",
@@ -166,8 +163,7 @@ fn extension_method_no_dnu_warning() {
         MessageSelector::Unary("shout".into()),
         vec![],
     )]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -193,8 +189,7 @@ fn extension_method_return_type_propagates() {
         MessageSelector::Unary("size".into()),
         vec![],
     )]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -226,8 +221,7 @@ fn extension_method_unannotated_returns_dynamic() {
         MessageSelector::Unary("nonexistentMethod".into()),
         vec![],
     )]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -248,8 +242,7 @@ fn missing_extension_still_warns() {
         MessageSelector::Unary("nonExistent".into()),
         vec![],
     )]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -296,8 +289,7 @@ fn extension_method_class_side_no_warning() {
         MessageSelector::Keyword(vec![KeywordPart::new("fromJson:", span())]),
         vec![str_lit("{}")],
     )]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &h);
+    let checker = check(&module, &h);
     let dnu: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -326,8 +318,7 @@ fn extension_method_argument_type_checking() {
         MessageSelector::Keyword(vec![KeywordPart::new("addString:", span())]),
         vec![str_lit("hello")],
     )]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let arg_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -344,8 +335,7 @@ fn extension_method_argument_type_checking() {
         MessageSelector::Keyword(vec![KeywordPart::new("addString:", span())]),
         vec![int_lit(99)],
     )]);
-    let mut checker2 = TypeChecker::new();
-    checker2.check_module(&module2, &hierarchy);
+    let checker2 = check(&module2, &hierarchy);
     let arg_warnings2: Vec<_> = checker2
         .diagnostics()
         .iter()

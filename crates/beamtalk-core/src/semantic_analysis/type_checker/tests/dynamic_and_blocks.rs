@@ -31,8 +31,7 @@ fn test_dynamic_inference_warning_in_typed_class() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -79,8 +78,7 @@ fn test_no_dynamic_inference_warning_in_untyped_class() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -113,8 +111,7 @@ fn test_no_dynamic_inference_warning_for_known_types() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -266,8 +263,7 @@ fn block_params_remain_dynamic_for_unparameterized_list() {
     let source = "typed Object subclass: T\n  field: items :: List\n  m -> List => self.items sort: [:a :b | a < b]";
     let module = parse_source(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dynamic_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -347,8 +343,7 @@ fn block_params_fewer_than_signature_no_crash() {
     let source = "typed Object subclass: T\n  field: items :: List(String)\n  m -> List(String) => self.items sort: [:a | a]";
     let module = parse_source(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     // Should not crash, and the one param should be typed (no Dynamic warning for it)
     let dynamic_warnings: Vec<_> = checker
         .diagnostics()
@@ -368,8 +363,7 @@ fn block_params_more_than_signature_extra_stays_dynamic() {
     let source = "typed Object subclass: T\n  field: nums :: List(Integer)\n  m -> Boolean => self.nums anySatisfy: [:n :extra | n > 0]";
     let module = parse_source(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     // The first param (n) is used and should still be typed from List(Integer),
     // so no Dynamic inference warning should be emitted for this block.
     let dynamic_warnings: Vec<_> = checker

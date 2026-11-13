@@ -18,7 +18,7 @@ use proptest::prelude::*;
 
 use crate::ast::{BinarySegment, Expression, Module};
 use crate::source_analysis::{lex_with_eof, parse};
-use crate::test_helpers::test_support::{fragment_from, truncated_from};
+use crate::test_helpers::test_support::{fragment_from, mismatched_brackets_from, truncated_from};
 
 // ============================================================================
 // Near-valid Beamtalk generators
@@ -78,23 +78,6 @@ fn truncated_expression() -> impl Strategy<Value = String> {
     truncated_from(FRAGMENTS)
 }
 
-/// Generates input with mismatched brackets via single-pass char mapping.
-fn mismatched_brackets() -> impl Strategy<Value = String> {
-    valid_fragment().prop_map(|s| {
-        let mut result = String::with_capacity(s.len());
-        for ch in s.chars() {
-            let mapped = match ch {
-                '[' => '(',
-                ']' => '}',
-                '(' => '[',
-                _ => ch,
-            };
-            result.push(mapped);
-        }
-        result
-    })
-}
-
 /// Generates input with missing keyword colons.
 fn missing_keyword_colons() -> impl Strategy<Value = String> {
     valid_fragment().prop_map(|s| {
@@ -124,11 +107,11 @@ fn duplicated_operators() -> impl Strategy<Value = String> {
 }
 
 /// Generates a near-valid Beamtalk input using one of several mutation strategies.
-fn near_valid_beamtalk() -> impl Strategy<Value = String> {
+fn parser_input_strategy() -> impl Strategy<Value = String> {
     prop_oneof![
         valid_fragment(),
         truncated_expression(),
-        mismatched_brackets(),
+        mismatched_brackets_from(FRAGMENTS),
         missing_keyword_colons(),
         duplicated_operators(),
     ]
@@ -295,7 +278,7 @@ proptest! {
     /// If the AST contains any `Expression::Error` node, the diagnostics
     /// vector must be non-empty.
     #[test]
-    fn error_nodes_produce_diagnostics(input in near_valid_beamtalk()) {
+    fn error_nodes_produce_diagnostics(input in parser_input_strategy()) {
         let tokens = lex_with_eof(&input);
         let (module, diagnostics) = parse(tokens);
         if module_has_error_nodes(&module) {
@@ -312,7 +295,7 @@ proptest! {
     /// No diagnostic message should contain internal Rust type names or
     /// panic-related strings that would confuse end users.
     #[test]
-    fn error_messages_are_user_facing(input in near_valid_beamtalk()) {
+    fn error_messages_are_user_facing(input in parser_input_strategy()) {
         let tokens = lex_with_eof(&input);
         let (_module, diagnostics) = parse(tokens);
         for diag in &diagnostics {
@@ -332,7 +315,7 @@ proptest! {
     ///
     /// Uses near-valid generators that exercise error recovery more deeply.
     #[test]
-    fn parser_never_panics_near_valid(input in near_valid_beamtalk()) {
+    fn parser_never_panics_near_valid(input in parser_input_strategy()) {
         let tokens = lex_with_eof(&input);
         let (_module, _diagnostics) = parse(tokens);
     }

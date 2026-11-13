@@ -131,8 +131,7 @@ typed Actor subclass: Watcher
 ";
     let module = parse_source(source);
     let hierarchy = build_hierarchy(&module);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let ty = select_block_type(&module, checker.type_map(), "Watcher", "recentFor:");
     assert_block_param_is(
@@ -167,8 +166,7 @@ typed Actor subclass: Watcher
 ";
     let module = parse_source(source);
     let hierarchy = build_hierarchy(&module);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let ty = select_block_type(&module, checker.type_map(), "Watcher", "recentFor:");
     assert_block_param_is(
@@ -204,8 +202,7 @@ typed Actor subclass: Watcher
 ";
     let module = parse_source(source);
     let hierarchy = build_hierarchy(&module);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let warnings = dynamic_in_typed_class_warnings(checker.diagnostics());
     assert!(
@@ -250,8 +247,7 @@ typed Actor subclass: Watcher
 ";
     let module = parse_source(source);
     let hierarchy = build_hierarchy(&module);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let warnings = dynamic_in_typed_class_warnings(checker.diagnostics());
     assert_eq!(

@@ -203,8 +203,7 @@ fn test_super_unknown_selector_warns() {
 
     let module = make_module_with_classes(vec![], vec![parent, child]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let warnings: Vec<_> = checker
         .diagnostics()
@@ -233,8 +232,7 @@ fn test_integer_plus_string_warns() {
         vec![str_lit("hello")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -255,8 +253,7 @@ fn test_integer_plus_integer_no_warning() {
         vec![int_lit(1)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -275,8 +272,7 @@ fn test_string_plus_integer_warns_unknown_selector() {
         vec![int_lit(42)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // String doesn't define +, so we get "does not understand" (not operand type warning)
     let warnings: Vec<_> = checker
@@ -297,8 +293,7 @@ fn test_string_concat_no_operand_warning() {
         vec![str_lit(" world")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -317,8 +312,7 @@ fn test_string_concat_integer_warns() {
         vec![int_lit(42)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -337,8 +331,7 @@ fn test_dynamic_type_skips_operand_check() {
         vec![int_lit(42)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -357,8 +350,7 @@ fn test_comparison_integer_vs_string_warns() {
         vec![str_lit("hello")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let type_warnings: Vec<_> = checker
         .diagnostics()
@@ -377,8 +369,7 @@ fn test_binary_operand_warnings_are_warnings_not_errors() {
         vec![str_lit("hello")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     for diag in checker.diagnostics() {
         if diag.message.contains("expects a") {
@@ -400,8 +391,7 @@ fn comparison_kind_warnings(receiver: Expression, arg: Expression) -> Vec<String
         vec![arg],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     checker
         .diagnostics()
         .iter()

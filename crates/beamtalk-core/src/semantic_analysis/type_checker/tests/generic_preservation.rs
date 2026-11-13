@@ -125,8 +125,7 @@ typed Object subclass: Driver
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // `files` must be `List(String)`, not Dynamic — `List` does not
     // understand `frobnicate`, so we expect a DNU warning. (We assert *some*
@@ -325,8 +324,7 @@ typed Object subclass: Driver
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let dnu: Vec<_> = checker
         .diagnostics()

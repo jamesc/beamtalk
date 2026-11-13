@@ -168,8 +168,7 @@ fn check_source(src: &str) -> Vec<Diagnostic> {
     let tokens = crate::source_analysis::lex_with_eof(src);
     let (module, _) = crate::source_analysis::parse(tokens);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check(&module, &hierarchy);
     checker.take_diagnostics()
 }
 

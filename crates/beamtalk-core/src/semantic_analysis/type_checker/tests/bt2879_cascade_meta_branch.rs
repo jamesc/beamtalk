@@ -160,8 +160,7 @@ typed Object subclass: App
 ";
     let module = parse_source(source);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // Every `Block(...)` entry recorded in the type map should have its first
     // param type resolved to `HTTPRouteBuilder`, not left as `Dynamic`.

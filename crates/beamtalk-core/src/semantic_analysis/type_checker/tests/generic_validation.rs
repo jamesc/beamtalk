@@ -489,8 +489,7 @@ Object subclass: Box(T)
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // This must produce no return-type-mismatch warnings — the wrapped
     // method's body type must be the same `T` placeholder as its declared

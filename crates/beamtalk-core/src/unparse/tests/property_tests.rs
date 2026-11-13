@@ -50,10 +50,6 @@ const FRAGMENTS: &[&str] = &[
     "sealed Object subclass: Shape",
 ];
 
-fn near_valid_beamtalk() -> impl Strategy<Value = String> {
-    near_valid_from(FRAGMENTS)
-}
-
 // ============================================================================
 // Property tests
 // ============================================================================
@@ -83,7 +79,7 @@ proptest! {
 
     /// Property 1b: `format_source` never panics on near-valid input.
     #[test]
-    fn format_source_never_panics_near_valid(input in near_valid_beamtalk()) {
+    fn format_source_never_panics_near_valid(input in near_valid_from(FRAGMENTS)) {
         let _result = format_source(&input);
     }
 
@@ -92,7 +88,7 @@ proptest! {
     /// If `format_source(s)` returns `Some(f)`, then `format_source(f)` must also
     /// return `Some` with the same output.
     #[test]
-    fn format_source_idempotent(input in near_valid_beamtalk()) {
+    fn format_source_idempotent(input in near_valid_from(FRAGMENTS)) {
         if let Some(pass1) = format_source(&input) {
             let pass2 = format_source(&pass1);
             prop_assert!(
@@ -114,7 +110,7 @@ proptest! {
     /// parse → unparse → re-parse → unparse must produce the same string on
     /// both unparse passes (we compare at string level since AST spans differ).
     #[test]
-    fn unparse_roundtrip_preserves_structure(input in near_valid_beamtalk()) {
+    fn unparse_roundtrip_preserves_structure(input in near_valid_from(FRAGMENTS)) {
         let tokens1 = lex_with_eof(&input);
         let (module1, diags1) = parse(tokens1);
 

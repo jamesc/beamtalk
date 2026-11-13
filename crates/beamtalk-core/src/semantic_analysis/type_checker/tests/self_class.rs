@@ -32,8 +32,7 @@ fn parse_and_build(source: &str) -> (Module, ClassHierarchy) {
 /// Type-check `source` and return every does-not-understand (DNU) diagnostic.
 fn dnu_diags(source: &str) -> Vec<EcoString> {
     let (module, hierarchy) = parse_and_build(source);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     checker
         .diagnostics()
         .iter()
@@ -337,8 +336,7 @@ typed Object subclass: Registry
 
     // And the full type-check produces no Type-category warnings for the arg.
     let (module, hierarchy) = parse_and_build(source);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let arg_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -363,8 +361,7 @@ typed Object subclass: NeedsString
     self take: 1 class
 ";
     let (module, hierarchy) = parse_and_build(source);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let mismatches: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -428,8 +425,7 @@ typed Object subclass: Bagly(E)
     // The `build:` body must satisfy its `-> Self` return — no return-type
     // mismatch warning (the species `withAll: -> Self` resolves to the class).
     let (module, hierarchy) = parse_and_build(source);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let ret_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -585,8 +581,7 @@ typed Object subclass: Spec
   go -> Object => self.actorClass
 ";
     let (module, hierarchy) = parse_and_build(source);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let type_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -888,8 +883,7 @@ typed Object subclass: Registry
         "passing bare class literals to `:: Behaviour` / `:: Class` params must not DNU; got {diags:?}"
     );
     let (module, hierarchy) = parse_and_build(source);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let arg_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -917,8 +911,7 @@ Object subclass: Rp
   passBehaviour: c :: Class -> Behaviour => c
 ";
     let (module, hierarchy) = parse_and_build(source);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -940,8 +933,7 @@ Object subclass: Rp
   pass: n :: Integer -> Class => self take: n
 ";
     let (module, hierarchy) = parse_and_build(source);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let hits: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -1026,8 +1018,7 @@ fn class_eq_literal_narrowing_not_regressed() {
         span(),
     );
     let module = make_module_with_classes(vec![], vec![class]);
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu: Vec<_> = checker
         .diagnostics()
         .iter()

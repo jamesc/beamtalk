@@ -63,8 +63,7 @@ fn last_read_remote(src: &str) -> Option<super::super::known_remote::KnownRemote
     let (module, perrs) = crate::source_analysis::parse(crate::source_analysis::lex_with_eof(src));
     assert!(perrs.is_empty(), "parse errors: {perrs:?}");
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let mut checker = super::common::check(&module, &hierarchy);
     let spans = checker.take_known_remote_spans();
     let offset = src.rfind("remote useNode:").unwrap();
     spans

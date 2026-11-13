@@ -55,10 +55,6 @@ const FRAGMENTS: &[&str] = &[
     "[1] ensure: [nil]",
 ];
 
-fn near_valid_beamtalk() -> impl Strategy<Value = String> {
-    near_valid_from(FRAGMENTS)
-}
-
 /// Known variable names for REPL context testing.
 fn known_var_names() -> impl Strategy<Value = Vec<String>> {
     prop::collection::vec("[a-z][a-zA-Z0-9]{0,8}", 0..5)
@@ -95,7 +91,7 @@ proptest! {
 
     /// Property 1b: `analyse` never panics on near-valid structured input.
     #[test]
-    fn analyse_never_panics_near_valid(input in near_valid_beamtalk()) {
+    fn analyse_never_panics_near_valid(input in near_valid_from(FRAGMENTS)) {
         let (module, _) = parse_source(&input);
         let _result = analyse(&module);
     }
@@ -105,7 +101,7 @@ proptest! {
     /// REPL-style analysis with pre-defined variables must be safe.
     #[test]
     fn analyse_with_vars_never_panics(
-        input in near_valid_beamtalk(),
+        input in near_valid_from(FRAGMENTS),
         vars in known_var_names(),
     ) {
         let (module, _) = parse_source(&input);
@@ -148,7 +144,7 @@ proptest! {
 
     /// Property 4b: Class hierarchy building never panics on near-valid input.
     #[test]
-    fn class_hierarchy_never_panics_near_valid(input in near_valid_beamtalk()) {
+    fn class_hierarchy_never_panics_near_valid(input in near_valid_from(FRAGMENTS)) {
         let (module, _) = parse_source(&input);
         let (_hierarchy, _diags) = ClassHierarchy::build(&module);
     }
@@ -165,7 +161,7 @@ proptest! {
 
     /// Property 5b: Type inference never panics on near-valid input.
     #[test]
-    fn type_inference_never_panics_near_valid(input in near_valid_beamtalk()) {
+    fn type_inference_never_panics_near_valid(input in near_valid_from(FRAGMENTS)) {
         let (module, _) = parse_source(&input);
         let (hierarchy_result, _) = ClassHierarchy::build(&module);
         prop_assume!(hierarchy_result.is_ok());

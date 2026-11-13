@@ -21,8 +21,7 @@ fn diagnostics(source: &str) -> Vec<Diagnostic> {
     let (module, parse_diags) = crate::source_analysis::parse(tokens);
     assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check(&module, &hierarchy);
     let mut diags = checker.take_diagnostics();
     apply_expect_directives(&module, &mut diags);
     diags

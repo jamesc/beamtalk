@@ -39,8 +39,7 @@ fn test_variable_tracking_through_assignment() {
         ),
     ]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(checker.diagnostics().is_empty(), "Integer responds to +");
 }
 
@@ -53,8 +52,7 @@ fn test_unknown_selector_warning() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert_eq!(checker.diagnostics().len(), 1);
     let diag = &checker.diagnostics()[0];
     assert!(
@@ -78,8 +76,7 @@ fn test_valid_selector_no_warning() {
         vec![int_lit(1)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(checker.diagnostics().is_empty());
 }
 
@@ -96,8 +93,7 @@ fn test_instance_side_dnu_suppresses_class_side_warning() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -118,8 +114,7 @@ fn test_method_lookup_operator_no_warning() {
         vec![sym_lit("increment")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -140,8 +135,7 @@ fn test_character_literal_integer_method_no_warning() {
         vec![int_lit(1)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -162,8 +156,7 @@ fn test_character_literal_own_method_no_warning() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "Character should understand 'isLetter': {:?}",
@@ -180,8 +173,7 @@ fn test_character_literal_bogus_method_warning() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let dnu_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -204,8 +196,7 @@ fn test_character_literal_non_numeric_operand_warns() {
         vec![str_lit("hello")],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let type_warnings: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -284,8 +275,7 @@ fn test_class_side_spawn_returns_class_type() {
     );
     let hierarchy = ClassHierarchy::build(&counter_module).0.unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert_eq!(
         checker.diagnostics().len(),
         1,
@@ -303,8 +293,7 @@ fn test_dynamic_type_no_warnings() {
         msg_send(var("x"), MessageSelector::Unary("foo".into()), vec![]),
     ]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "Dynamic type should not produce warnings"
@@ -323,8 +312,7 @@ fn test_cascade_receiver_type_unchanged() {
         span: span(),
     }]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(checker.diagnostics().is_empty());
 }
 
@@ -340,8 +328,7 @@ fn test_cascade_invalid_selector() {
         span: span(),
     }]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert_eq!(checker.diagnostics().len(), 1);
     assert!(checker.diagnostics()[0].message.contains("bogus"));
 }
@@ -372,8 +359,7 @@ fn test_cascade_complex_receiver_diagnostic_emitted_once() {
         span: span(),
     }]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     let bogus_diagnostics: Vec<_> = checker
         .diagnostics()
         .iter()
@@ -400,8 +386,7 @@ fn test_string_methods() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(checker.diagnostics().is_empty());
 }
 
@@ -512,8 +497,7 @@ fn test_did_you_mean_hint() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert_eq!(checker.diagnostics().len(), 1);
     let diag = &checker.diagnostics()[0];
     assert!(diag.hint.is_some(), "should have a 'did you mean' hint");
@@ -677,8 +661,7 @@ fn test_class_method_body_gets_self_type() {
         }],
     );
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     // Should warn about 'nonExistent' on Greeter
     assert_eq!(checker.diagnostics().len(), 1);
     assert!(checker.diagnostics()[0].message.contains("Greeter"));
@@ -693,8 +676,7 @@ fn test_warnings_only_never_errors() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     for diag in checker.diagnostics() {
         assert_ne!(
             diag.severity,
@@ -714,8 +696,7 @@ fn test_keyword_message_validation() {
         vec![int_lit(1)],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(checker.diagnostics().is_empty());
 }
 
@@ -728,8 +709,7 @@ fn test_inherited_method_no_warning() {
         vec![],
     )]);
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "inherited methods should not produce warnings"
@@ -740,8 +720,7 @@ fn test_inherited_method_no_warning() {
 fn test_stub_returns_no_diagnostics() {
     let module = Module::new(vec![], Span::default());
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(checker.diagnostics().is_empty());
 }
 
@@ -849,8 +828,7 @@ fn test_class_method_self_send_no_false_warning() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "self send to existing class method should not warn, got: {:?}",
@@ -875,8 +853,7 @@ fn test_class_method_self_send_warns_on_unknown() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert_eq!(
         checker.diagnostics().len(),
         1,
@@ -909,8 +886,7 @@ fn test_instance_method_self_send_no_regression() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "instance method self send should not regress, got: {:?}",
@@ -950,8 +926,7 @@ fn test_cascade_in_class_method_checks_class_side() {
     );
     let module = make_module_with_classes(vec![], vec![class_def]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     assert!(
         checker.diagnostics().is_empty(),
         "cascade self sends to class methods should not warn, got: {:?}",

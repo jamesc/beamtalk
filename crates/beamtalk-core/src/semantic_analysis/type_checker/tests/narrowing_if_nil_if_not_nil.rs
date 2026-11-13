@@ -36,8 +36,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     assert!(
         find_union_in_type_map(checker.type_map(), &["Integer", "String"]).is_some(),
@@ -74,8 +73,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     assert!(
         find_union_in_type_map(checker.type_map(), &["Integer", "String"]).is_some(),
@@ -110,8 +108,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // Assert the inferred type of the `ifNil:ifNotNil:` send directly —
     // "no Type diagnostics" alone would pass even if the expression fell
@@ -148,8 +145,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifNil:ifNotNil:")
         .expect("no ifNil:ifNotNil: send found in type_map");
@@ -184,8 +180,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     // The key assertion: the send's inferred type is Known("String"), not
     // `Integer | String`. Without the `Never` projection, the union would
@@ -229,8 +224,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifNil:")
         .expect("no ifNil: send found in type_map");
@@ -267,8 +261,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     assert!(
         find_union_in_type_map(checker.type_map(), &["Integer", "String"]).is_some(),
@@ -300,8 +293,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     assert!(
         find_union_in_type_map(checker.type_map(), &["Integer", "UndefinedObject"]).is_some(),
@@ -333,8 +325,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     assert!(
         find_union_in_type_map(checker.type_map(), &["Integer", "UndefinedObject"]).is_none(),
@@ -368,8 +359,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     assert!(
         find_union_in_type_map(checker.type_map(), &["Integer", "String"]).is_none(),
@@ -402,8 +392,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     assert!(
         find_union_in_type_map(checker.type_map(), &["String", "Integer", "Boolean"]).is_some(),
@@ -436,8 +425,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifNil:")
         .expect("no ifNil: send found in type_map");
@@ -466,8 +454,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifNotNil:")
         .expect("no ifNotNil: send found in type_map");
@@ -498,8 +485,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
     // No panic is the primary assertion; also sanity-check a type was recorded.
     assert!(
         find_send_inferred_ty(&module, checker.type_map(), "ifNil:").is_some(),
@@ -530,8 +516,7 @@ typed Object subclass: Repro
         .0
         .unwrap();
 
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let checker = check(&module, &hierarchy);
 
     let send_ty = find_send_inferred_ty(&module, checker.type_map(), "ifNil:")
         .expect("no ifNil: send found in type_map");

@@ -26,8 +26,7 @@ fn check_source(
     let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
         .0
         .unwrap();
-    let mut checker = TypeChecker::new();
-    checker.check_module(&module, &hierarchy);
+    let mut checker = check(&module, &hierarchy);
     let diagnostics = checker.take_diagnostics();
     (checker.take_method_return_types(), diagnostics)
 }

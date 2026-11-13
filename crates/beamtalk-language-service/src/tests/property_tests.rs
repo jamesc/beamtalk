@@ -52,10 +52,6 @@ const FRAGMENTS: &[&str] = &[
     "x > 0 ifTrue: ['positive'] ifFalse: ['non-positive']",
 ];
 
-fn near_valid_beamtalk() -> impl Strategy<Value = String> {
-    near_valid_from(FRAGMENTS)
-}
-
 /// Generate a Position from a source string at a random byte offset.
 ///
 /// Converts a byte offset to line/character coordinates.
@@ -98,7 +94,7 @@ proptest! {
 
     /// Property 1b: `update_file` + `diagnostics` never panics on near-valid input.
     #[test]
-    fn update_file_and_diagnostics_never_panics_near_valid(input in near_valid_beamtalk()) {
+    fn update_file_and_diagnostics_never_panics_near_valid(input in near_valid_from(FRAGMENTS)) {
         let mut service = SimpleLanguageService::new();
         service.update_file(file_id(), input);
         let _diags = service.diagnostics(&file_id());
@@ -107,7 +103,7 @@ proptest! {
     /// Property 2: `completions` never panics at arbitrary positions.
     #[test]
     fn completions_never_panics(
-        input in near_valid_beamtalk(),
+        input in near_valid_from(FRAGMENTS),
         offset in 0..500usize,
     ) {
         let mut service = SimpleLanguageService::new();
@@ -119,7 +115,7 @@ proptest! {
     /// Property 3: `hover` never panics at arbitrary positions.
     #[test]
     fn hover_never_panics(
-        input in near_valid_beamtalk(),
+        input in near_valid_from(FRAGMENTS),
         offset in 0..500usize,
     ) {
         let mut service = SimpleLanguageService::new();
@@ -131,7 +127,7 @@ proptest! {
     /// Property 4: `goto_definition` never panics at arbitrary positions.
     #[test]
     fn goto_definition_never_panics(
-        input in near_valid_beamtalk(),
+        input in near_valid_from(FRAGMENTS),
         offset in 0..500usize,
     ) {
         let mut service = SimpleLanguageService::new();
