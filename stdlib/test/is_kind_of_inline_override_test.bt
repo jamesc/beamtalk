@@ -23,6 +23,10 @@ TestCase subclass: IsKindOfInlineOverrideTest
 
   isBinary: v :: Object -> Boolean => v isKindOf: Binary
 
+  // BT-4757 / BT-4769: the name-only lowering for a user class literal reads
+  // the same flag in line, on every execution.
+  isAnimal: v :: Object -> Boolean => v isKindOf: Bt4319Animal
+
   testAnswersBeforeAnyOverride =>
     self assert: (self isString: "abc")
     self deny: (self isString: 42)
@@ -62,3 +66,20 @@ TestCase subclass: IsKindOfInlineOverrideTest
     ]
     self assert: (self isInteger: 42)
     self deny: (self isString: 42)
+
+  testNameOnlySiteSeesAnOverrideInstalledAfterItWasCompiled =>
+    dog := Bt4319Dog spawn
+    self assert: (self isAnimal: dog)
+    self deny: (self isAnimal: 42)
+    Erlang beamtalk_extensions
+      register: #Integer
+      selector: #isKindOf:
+      fun: [:args :receiver | #fromIntegerExtension]
+      owner: #bt4769
+    [
+      self assert: (self isAnimal: 42) equals: #fromIntegerExtension
+      self assert: (self isAnimal: dog)
+    ] ensure: [
+      Erlang beamtalk_extensions unregister: #Integer selector: #isKindOf:
+    ]
+    self deny: (self isAnimal: 42)

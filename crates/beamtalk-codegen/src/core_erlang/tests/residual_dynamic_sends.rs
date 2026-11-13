@@ -207,10 +207,48 @@ fn is_kind_of_user_class_literal_is_name_only() {
 }
 
 #[test]
-fn is_kind_of_fast_paths_share_one_class_liveness_probe() {
-    // BT-4768: the built-in lowering (BT-4764) and the name-only lowering
-    // (BT-4757) emit the same probe, from one helper.
-    let probe = "call 'erlang':'is_pid'(call 'erlang':'whereis'(";
+fn is_kind_of_user_class_literal_builds_the_class_reference_only_on_the_send_exit() {
+    // BT-4769: the fast path reads the override flag in line (no
+    // `overridden_anywhere/1` call, hence no `lists:member/2` scan) and never
+    // builds the class reference; the one reference sits on the send exit.
+    let code = codegen(concat!(
+        "Object subclass: Probe\n",
+        "  check: v :: Object -> Boolean => v isKindOf: Probe\n",
+    ));
+    assert!(
+        code.contains(
+            "call 'persistent_term':'get'({'beamtalk_default_method', 'overridden', 'isKindOf:'}, 'false')"
+        ),
+        "override flag must be read in line. Got:\n{code}"
+    );
+    assert!(!code.contains("'overridden_anywhere'"), "Got:\n{code}");
+    assert_eq!(
+        code.matches("'Probe class static calls'").count(),
+        1,
+        "class reference built once, on the send exit. Got:\n{code}"
+    );
+    assert!(
+        code.contains("'isKindOfNamed'(_KindOfRecv") && !code.contains("'isKindOfNamed'/3"),
+        "isKindOfNamed/2 takes the receiver and the name only. Got:\n{code}"
+    );
+    let reference = code.find("'Probe class static calls'").expect("reference");
+    let fast = code.find("'isKindOfNamed'(").expect("fast call");
+    assert!(
+        fast < reference,
+        "reference after the fast call. Got:\n{code}"
+    );
+}
+
+#[test]
+fn is_kind_of_fast_paths_share_one_guard() {
+    // BT-4768 / BT-4769: the built-in lowering (BT-4764) and the name-only
+    // lowering (BT-4757) emit the same guard (class liveness probe, then the
+    // in-line override-flag read), from one helper.
+    let guard = |class: &str| {
+        format!(
+            "call 'erlang':'and'(call 'erlang':'is_pid'(call 'erlang':'whereis'('beamtalk_class_{class}')), call 'erlang':'not'(call 'persistent_term':'get'({{'beamtalk_default_method', 'overridden', 'isKindOf:'}}, 'false')))"
+        )
+    };
     let builtin = codegen(concat!(
         "Object subclass: Probe\n",
         "  check: v :: Object -> Boolean => v isKindOf: String\n",
@@ -219,8 +257,42 @@ fn is_kind_of_fast_paths_share_one_class_liveness_probe() {
         "Object subclass: Probe\n",
         "  check: v :: Object -> Boolean => v isKindOf: Probe\n",
     ));
-    assert!(builtin.contains(probe), "Got:\n{builtin}");
-    assert!(named.contains(probe), "Got:\n{named}");
+    assert!(builtin.contains(&guard("String")), "Got:\n{builtin}");
+    assert!(named.contains(&guard("Probe")), "Got:\n{named}");
+    assert!(
+        !builtin.contains("'overridden_anywhere'"),
+        "Got:\n{builtin}"
+    );
+}
+
+#[test]
+fn override_flag_key_matches_shared_fixture() {
+    // The Erlang side asserts the identical cases in
+    // `beamtalk_behaviour_intrinsics_tests:override_flag_key_matches_shared_fixture_test/0`.
+    let path = super::repo_root()
+        .join("runtime/apps/beamtalk_runtime/test/fixtures/override_flag_key_conformance.json");
+    let raw = std::fs::read_to_string(&path).expect("read fixture");
+    let cases: Vec<serde_json::Value> = serde_json::from_str(&raw).expect("fixture is an array");
+    assert!(!cases.is_empty());
+    for case in &cases {
+        let selector = case["selector"].as_str().expect("selector");
+        let key: Vec<&str> = case["key"]
+            .as_array()
+            .expect("key")
+            .iter()
+            .map(|k| k.as_str().expect("key atom"))
+            .collect();
+        let doc = crate::core_erlang::CoreErlangGenerator::override_flag_read_doc(selector)
+            .to_pretty_string();
+        let expected = format!(
+            "call 'persistent_term':'get'({{{}}}, 'false')",
+            key.iter()
+                .map(|a| format!("'{a}'"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        assert_eq!(doc, expected);
+    }
 }
 
 #[test]

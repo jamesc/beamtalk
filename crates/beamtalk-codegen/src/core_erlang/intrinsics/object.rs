@@ -22,7 +22,8 @@ use super::{
 pub(in crate::core_erlang) enum KindOfFn {
     /// `isKindOfBuiltin/3`: a sealed built-in literal and its type test.
     Builtin,
-    /// `isKindOfNamed/3`: a user class literal, answered by name (BT-4757).
+    /// `isKindOfNamed/2`: a user class literal, answered by name (BT-4757);
+    /// `undecided` means the caller takes the send (BT-4769).
     Named,
 }
 
@@ -31,6 +32,15 @@ impl KindOfFn {
         match self {
             Self::Builtin => "isKindOfBuiltin",
             Self::Named => "isKindOfNamed",
+        }
+    }
+
+    /// The arity the lowering calls it with, for the export contract.
+    #[cfg(test)]
+    pub(in crate::core_erlang) const fn arity(self) -> usize {
+        match self {
+            Self::Builtin => 3,
+            Self::Named => 2,
         }
     }
 
@@ -401,9 +411,9 @@ impl CoreErlangGenerator {
             leaf::var(recv_var),
             " = ",
             recv_doc,
-            " in case call 'erlang':'and'(",
-            Self::class_process_alive_doc(class_name),
-            ", call 'erlang':'not'(call 'beamtalk_default_method':'overridden_anywhere'('isKindOf:'))) of ",
+            " in case ",
+            Self::kind_of_fast_guard_doc(class_name),
+            " of ",
             "<'true'> when 'true' -> ",
             fast,
             " <'false'> when 'true' -> ",
@@ -482,19 +492,42 @@ impl CoreErlangGenerator {
         ]
     }
 
-    /// BT-4757 / BT-4768: the name-only lowering of `x isKindOf: UserClass`:
+    /// The guard of both fast paths: the literal's class process is alive
+    /// ([`Self::class_process_alive_doc`]) and nothing but `Object` has
+    /// defined `isKindOf:` ([`Self::override_flag_read_doc`], read on every
+    /// execution).
+    fn kind_of_fast_guard_doc(class_name: &str) -> Document<'static> {
+        docvec![
+            "call 'erlang':'and'(",
+            Self::class_process_alive_doc(class_name),
+            ", call 'erlang':'not'(",
+            Self::override_flag_read_doc("isKindOf:"),
+            "))"
+        ]
+    }
+
+    /// BT-4757 / BT-4768 / BT-4769: the name-only lowering of
+    /// `x isKindOf: UserClass`:
     ///
     /// ```erlang
     /// let R = <x> in
-    /// case is_pid(whereis('beamtalk_class_C')) of
-    ///   'true'  -> let K = <C> in isKindOfNamed(R, K, 'C')
-    ///   'false' -> let K = <C> in send(R, 'isKindOf:', [K])  % dead class
+    /// let A = case <guard> of
+    ///           'true'  -> isKindOfNamed(R, 'C')   % true | false | undecided
+    ///           'false' -> 'undecided'
+    ///         end in
+    /// case A of
+    ///   'true' -> 'true'
+    ///   'false' -> 'false'
+    ///   _ -> let K = <C> in send(R, 'isKindOf:', [K])  % override, dead class, anything else
     /// end
     /// ```
     ///
-    /// The probe is [`Self::class_process_alive_doc`], the same one the
-    /// built-in lowering uses, so a dead class process raises as it did
-    /// before the name-only path existed.
+    /// The class reference is built only on the send exit, where the literal
+    /// is evaluated and raises `class_not_found` for an unregistered class
+    /// exactly as before; the fast path builds no reference, sends nothing and
+    /// makes the one runtime call. The guard is the one the built-in lowering
+    /// uses, so a dead class process raises as it did before the name-only
+    /// path existed.
     fn emit_named_kind_of(
         &mut self,
         receiver: &Expression,
@@ -505,28 +538,27 @@ impl CoreErlangGenerator {
         let recv_doc = seq.next();
         let class_doc = seq.next();
         let recv_var = self.fresh_temp_var("KindOfRecv");
-        let class_var = self.fresh_temp_var("KindOfClass");
-        let send = self.kind_of_plain_send_doc(&recv_var, class_doc.clone());
+        let answer_var = self.fresh_temp_var("KindOfAnswer");
+        let send = self.kind_of_plain_send_doc(&recv_var, class_doc);
         let call_doc = docvec![
             "let ",
             leaf::var(recv_var.clone()),
             " = ",
             recv_doc,
-            " in case ",
-            Self::class_process_alive_doc(class_name),
-            " of <'true'> when 'true' -> let ",
-            leaf::var(class_var.clone()),
-            " = ",
-            class_doc,
-            " in call 'beamtalk_behaviour_intrinsics':",
+            " in let ",
+            leaf::var(answer_var.clone()),
+            " = case ",
+            Self::kind_of_fast_guard_doc(class_name),
+            " of <'true'> when 'true' -> call 'beamtalk_behaviour_intrinsics':",
             leaf::atom(KindOfFn::Named.name().to_string()),
             "(",
             leaf::var(recv_var),
             ", ",
-            leaf::var(class_var),
-            ", ",
             leaf::atom(class_name.to_string()),
-            ") <'false'> when 'true' -> ",
+            ") <'false'> when 'true' -> 'undecided' end in case ",
+            leaf::var(answer_var),
+            " of <'true'> when 'true' -> 'true' <'false'> when 'true' -> 'false' ",
+            "<_> when 'true' -> ",
             send,
             " end"
         ];
