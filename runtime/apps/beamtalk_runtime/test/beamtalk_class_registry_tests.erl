@@ -29,6 +29,26 @@ registry_name_object_test() ->
         beamtalk_class_registry:registry_name('Object')
     ).
 
+%% BT-4754: the memoised name is the same atom the unmemoised computation
+%% produced, on first call and on repeat calls, for several names (including
+%% metaclass-style and non-identifier names).
+registry_name_memo_matches_unmemoised_test() ->
+    Names = ['Counter', 'Object', 'Point class', 'BT4754Memo', 'Foo Bar'],
+    lists:foreach(
+        fun(Name) ->
+            Expected = binary_to_atom(
+                <<"beamtalk_class_", (atom_to_binary(Name, utf8))/binary>>, utf8
+            ),
+            ?assertEqual(Expected, beamtalk_class_registry:registry_name(Name)),
+            ?assertEqual(Expected, beamtalk_class_registry:registry_name(Name)),
+            ?assertEqual(
+                Expected,
+                persistent_term:get({beamtalk_class_registry, registry_name, Name})
+            )
+        end,
+        Names
+    ).
+
 %% BT-4301: codegen bakes a class's registered name and metaclass tag into the
 %% guarded direct call of a static class send (`util::class_registered_name` /
 %% `util::metaclass_tag` in beamtalk-codegen). The shared fixture is the single
