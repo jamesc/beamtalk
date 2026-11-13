@@ -16,6 +16,8 @@ use super::{
     validate_block_arity_exact,
 };
 
+use beamtalk_cerl_doc::form::{self, Layout, let_in};
+
 impl CoreErlangGenerator {
     /// Tries to generate code for Block evaluation and loop intrinsics.
     ///
@@ -204,11 +206,15 @@ impl CoreErlangGenerator {
             // deliberately.
             let badarity_apply_doc = apply_doc.clone();
             let send_doc = self.annotate_call_node_with_line(
-                docvec![
-                    "call 'beamtalk_message_dispatch':'send'(",
-                    leaf::var(recv_var.clone()),
-                    ", 'value', [])"
-                ],
+                form::call(
+                    "beamtalk_message_dispatch",
+                    "send",
+                    [
+                        leaf::var(recv_var.clone()),
+                        leaf::atom("value"),
+                        Document::Str("[]"),
+                    ],
+                ),
                 at,
             );
             let call_doc = docvec![
@@ -850,7 +856,12 @@ impl CoreErlangGenerator {
             parts.push(self.threaded_prelude_doc(&prelude));
         }
         let var = self.fresh_temp_var(prefix);
-        parts.push(docvec!["let ", leaf::var(var.clone()), " = ", code, " in ",]);
+        parts.push(let_in(
+            leaf::var(var.clone()),
+            code,
+            Document::Nil,
+            Layout::Flat,
+        ));
         Ok(var)
     }
 
@@ -870,13 +881,12 @@ impl CoreErlangGenerator {
         if self.is_field_assignment(arg) {
             let (doc, val_var) = self.generate_field_assignment_open(arg)?;
             parts.push(doc);
-            parts.push(docvec![
-                "let ",
+            parts.push(let_in(
                 leaf::var(var.clone()),
-                " = ",
                 leaf::var(val_var),
-                " in ",
-            ]);
+                Document::Nil,
+                Layout::Flat,
+            ));
         } else {
             let mut seq = self.sequence_call(&[arg], prefix)?;
             let code = seq.next();
@@ -884,7 +894,12 @@ impl CoreErlangGenerator {
             if !prelude.is_empty() {
                 parts.push(self.threaded_prelude_doc(&prelude));
             }
-            parts.push(docvec!["let ", leaf::var(var.clone()), " = ", code, " in ",]);
+            parts.push(let_in(
+                leaf::var(var.clone()),
+                code,
+                Document::Nil,
+                Layout::Flat,
+            ));
         }
         Ok(var)
     }
@@ -950,15 +965,15 @@ impl CoreErlangGenerator {
             at,
         );
         let send_doc = self.annotate_call_node_with_line(
-            docvec![
-                "call 'beamtalk_message_dispatch':'send'(",
-                leaf::var(recv_var.clone()),
-                ", ",
-                leaf::atom(selector_name.to_string()),
-                ", ",
-                send_list,
-                ")"
-            ],
+            form::call(
+                "beamtalk_message_dispatch",
+                "send",
+                [
+                    leaf::var(recv_var.clone()),
+                    leaf::atom(selector_name.to_string()),
+                    send_list,
+                ],
+            ),
             at,
         );
 
@@ -1325,25 +1340,23 @@ impl CoreErlangGenerator {
         // BT-4356: each control-transferring node carries the send's line.
         let at = receiver.span();
         let apply_doc = self.annotate_call_node_with_line(
-            docvec![
-                "call 'erlang':'apply'(",
-                leaf::var(recv_var.clone()),
-                ", ",
-                leaf::var(args_var.clone()),
-                ")"
-            ],
+            form::call(
+                "erlang",
+                "apply",
+                [leaf::var(recv_var.clone()), leaf::var(args_var.clone())],
+            ),
             at,
         );
         let send_doc = self.annotate_call_node_with_line(
-            docvec![
-                "call 'beamtalk_message_dispatch':'send'(",
-                leaf::var(recv_var.clone()),
-                ", ",
-                leaf::atom("valueWithArguments:"),
-                ", [",
-                leaf::var(args_var),
-                "])"
-            ],
+            form::call(
+                "beamtalk_message_dispatch",
+                "send",
+                [
+                    leaf::var(recv_var.clone()),
+                    leaf::atom("valueWithArguments:"),
+                    docvec!["[", leaf::var(args_var), "]"],
+                ],
+            ),
             at,
         );
         let case_doc = docvec![
@@ -1414,37 +1427,41 @@ impl CoreErlangGenerator {
         // BT-4356: each control-transferring node carries the send's line.
         let at = receiver.span();
         let tier1_apply = self.annotate_call_node_with_line(
-            docvec![
-                "call 'erlang':'apply'(",
-                leaf::var(fun_var.clone()),
-                ", ",
-                leaf::var(args_var.clone()),
-                ")"
-            ],
+            form::call(
+                "erlang",
+                "apply",
+                [leaf::var(fun_var.clone()), leaf::var(args_var.clone())],
+            ),
             at,
         );
         let tier2_apply = self.annotate_call_node_with_line(
-            docvec![
-                "call 'erlang':'apply'(",
-                leaf::var(fun_var.clone()),
-                ", call 'erlang':'++'(",
-                leaf::var(args_var.clone()),
-                ", [",
-                leaf::var(current_state.clone()),
-                "]))"
-            ],
+            form::call(
+                "erlang",
+                "apply",
+                [
+                    leaf::var(fun_var.clone()),
+                    form::call(
+                        "erlang",
+                        "++",
+                        [
+                            leaf::var(args_var.clone()),
+                            docvec!["[", leaf::var(current_state.clone()), "]"],
+                        ],
+                    ),
+                ],
+            ),
             at,
         );
         let send_doc = self.annotate_call_node_with_line(
-            docvec![
-                "call 'beamtalk_message_dispatch':'send'(",
-                leaf::var(fun_var.clone()),
-                ", ",
-                leaf::atom("valueWithArguments:"),
-                ", [",
-                leaf::var(args_var),
-                "])"
-            ],
+            form::call(
+                "beamtalk_message_dispatch",
+                "send",
+                [
+                    leaf::var(fun_var.clone()),
+                    leaf::atom("valueWithArguments:"),
+                    docvec!["[", leaf::var(args_var), "]"],
+                ],
+            ),
             at,
         );
         let case_doc = docvec![
@@ -1594,7 +1611,7 @@ impl CoreErlangGenerator {
                     // Non-last non-assignment: sequence with let
                     let tmp = self.fresh_temp_var("seq");
                     let doc = self.expression_doc(expr)?;
-                    parts.push(docvec!["let ", leaf::var(tmp), " = ", doc, " in ",]);
+                    parts.push(let_in(leaf::var(tmp), doc, Document::Nil, Layout::Flat));
                 }
             }
 
@@ -1644,7 +1661,12 @@ impl CoreErlangGenerator {
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(arg_bindings.len() + 2);
         parts.extend(arg_bindings);
         // Seed StateAcc from outer state
-        parts.push(docvec!["let StateAcc = ", leaf::var(outer_state), " in ",]);
+        parts.push(let_in(
+            Document::Str("StateAcc"),
+            leaf::var(outer_state),
+            Document::Nil,
+            Layout::Flat,
+        ));
         parts.push(branch_doc);
 
         if !arguments.is_empty() {
