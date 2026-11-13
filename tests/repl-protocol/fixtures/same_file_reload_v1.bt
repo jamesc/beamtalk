@@ -4,6 +4,7 @@
 // BT-4721: reload fixtures. v1 defines `make` as a same-file class-side extension;
 // v2 moves it into the class body with a new answer.
 Object subclass: SameFileReload
+
   base => 1
 
 SameFileReload class >> make => 1

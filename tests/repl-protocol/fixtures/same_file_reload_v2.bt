@@ -3,6 +3,7 @@
 
 // BT-4721: reload fixtures, v2: `make` is now a body class method.
 Object subclass: SameFileReload
-  base => 1
 
   class make => 2
+
+  base => 1

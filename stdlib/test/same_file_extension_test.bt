@@ -38,4 +38,5 @@ TestCase subclass: SameFileExtensionTest
     self assert: (SameFileExtObj new respondsTo: #extra) equals: true
     self assert: (SameFileExtObj includesSelector: #extra) equals: true
 
-  testNativeClassSideExtension => self assert: SameFileExtNative cextra equals: 42
+  testNativeClassSideExtension =>
+    self assert: SameFileExtNative cextra equals: 42

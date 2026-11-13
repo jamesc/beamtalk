@@ -3,6 +3,7 @@
 
 // BT-4721: reload fixtures, v3: `make` is a same-file extension again with another answer.
 Object subclass: SameFileReload
+
   base => 1
 
 SameFileReload class >> make => 3
