@@ -405,10 +405,7 @@ supervisor_generic_dispatch_test() ->
     SupPid = anon_sup(),
     Sup = {beamtalk_supervisor, 'TestSup', test_mod, SupPid},
     try
-        ?assertError(
-            #{'$beamtalk_class' := _, error := #beamtalk_error{}},
-            beamtalk_message_dispatch:send(Sup, noSuchMethod, [])
-        )
+        ?assertBtError(_, beamtalk_message_dispatch:send(Sup, noSuchMethod, []))
     after
         gen_server:stop(SupPid)
     end.
@@ -498,11 +495,8 @@ number_coercion_passes_through_non_dnu() ->
         class = 'CoercionActor', class_mod = test_number_coercion_actor, pid = Pid
     },
     try
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{kind = instantiation_error}
-            },
+        ?assertBtError(
+            instantiation_error,
             beamtalk_message_dispatch:send_number_coercion(
                 Obj, 'divFromNumber:', [5], '/'
             )

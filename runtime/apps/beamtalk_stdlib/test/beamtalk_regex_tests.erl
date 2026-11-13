@@ -43,14 +43,7 @@ from_empty_pattern_test() ->
 
 from_invalid_pattern_test() ->
     R = beamtalk_regex:'from:'(<<"[unclosed">>),
-    ?assertMatch(
-        #{
-            '$beamtalk_class' := 'Result',
-            'isOk' := false,
-            'errReason' := #{'$beamtalk_class' := _, error := #beamtalk_error{kind = regex_error}}
-        },
-        R
-    ).
+    ?assertBtResultError(regex_error, R).
 
 from_type_error_test() ->
     ?assertBtError(type_error, beamtalk_regex:'from:'(not_a_string)).

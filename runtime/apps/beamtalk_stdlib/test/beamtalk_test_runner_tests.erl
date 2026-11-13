@@ -188,12 +188,10 @@ run_class_rejects_tuple_without_class_suffix_test() ->
     ).
 
 run_method_rejects_non_tuple_test() ->
-    ?assertError(
-        #{
-            error := #beamtalk_error{
-                kind = type_error, class = 'TestRunner', selector = 'run:method:'
-            }
-        },
+    ?assertBtError(
+        type_error,
+        'TestRunner',
+        'run:method:',
         beamtalk_test_runner:run_method(not_a_tuple, testFoo)
     ).
 
@@ -202,12 +200,10 @@ run_method_rejects_list_test() ->
 
 run_method_rejects_non_atom_test_name_test() ->
     %% Valid class tuple but non-atom TestName — should blame TestName, not ClassRef
-    ?assertError(
-        #{
-            error := #beamtalk_error{
-                kind = type_error, class = 'TestRunner', selector = 'run:method:'
-            }
-        },
+    ?assertBtError(
+        type_error,
+        'TestRunner',
+        'run:method:',
         beamtalk_test_runner:run_method(
             {beamtalk_object, 'Test class', mod, self()}, <<"not_an_atom">>
         )
@@ -445,23 +441,11 @@ result_to_json_degrades_instead_of_crashing_test() ->
 %%% ============================================================================
 
 run_all_negative_integer_test() ->
-    ?assertError(
-        #{
-            error := #beamtalk_error{
-                kind = invalid_argument, class = 'TestRunner', selector = 'runAll:'
-            }
-        },
-        beamtalk_test_runner:run_all(-1)
-    ).
+    ?assertBtError(invalid_argument, 'TestRunner', 'runAll:', beamtalk_test_runner:run_all(-1)).
 
 run_all_atom_argument_test() ->
-    ?assertError(
-        #{
-            error := #beamtalk_error{
-                kind = invalid_argument, class = 'TestRunner', selector = 'runAll:'
-            }
-        },
-        beamtalk_test_runner:run_all(sequential)
+    ?assertBtError(
+        invalid_argument, 'TestRunner', 'runAll:', beamtalk_test_runner:run_all(sequential)
     ).
 
 %%% ============================================================================
@@ -787,12 +771,9 @@ live_execution_test_() ->
                 ?assertEqual(1, maps:get(passed, R))
             end},
             {"run_class_by_name on an unknown class raises class_not_found", fun() ->
-                ?assertError(
-                    #{
-                        error := #beamtalk_error{
-                            kind = class_not_found, class = 'TestRunner'
-                        }
-                    },
+                ?assertBtError(
+                    class_not_found,
+                    'TestRunner',
                     beamtalk_test_runner:run_class_by_name('ZzzNoSuchClass')
                 )
             end},

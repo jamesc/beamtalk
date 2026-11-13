@@ -83,13 +83,7 @@ at_zero_index_test() ->
 %% `beamtalk_list:at/2` and `beamtalk_string:at/2`.
 at_empty_array_test() ->
     A = make_array([]),
-    ?assertError(
-        #{
-            '$beamtalk_class' := 'RuntimeError',
-            error := #beamtalk_error{kind = empty_collection, class = 'Array', selector = 'at:'}
-        },
-        beamtalk_array:at(A, 1)
-    ).
+    ?assertBtErrorTagged('RuntimeError', empty_collection, 'Array', 'at:', beamtalk_array:at(A, 1)).
 
 %% An index below 1 is malformed either way, so it stays index_out_of_bounds.
 at_empty_array_zero_index_test() ->
@@ -119,21 +113,13 @@ first_single_element_test() ->
     ?assertEqual(42, beamtalk_array:last(A)).
 
 first_empty_array_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := 'RuntimeError',
-            error := #beamtalk_error{kind = empty_collection, class = 'Array', selector = 'first'}
-        },
-        beamtalk_array:first(make_array([]))
+    ?assertBtErrorTagged(
+        'RuntimeError', empty_collection, 'Array', 'first', beamtalk_array:first(make_array([]))
     ).
 
 last_empty_array_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := 'RuntimeError',
-            error := #beamtalk_error{kind = empty_collection, class = 'Array', selector = 'last'}
-        },
-        beamtalk_array:last(make_array([]))
+    ?assertBtErrorTagged(
+        'RuntimeError', empty_collection, 'Array', 'last', beamtalk_array:last(make_array([]))
     ).
 
 %%% ============================================================================

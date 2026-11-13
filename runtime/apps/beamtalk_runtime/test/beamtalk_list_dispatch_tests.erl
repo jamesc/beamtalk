@@ -14,6 +14,7 @@ For direct beamtalk_list module tests (at, detect, reject, etc.),
 see beamtalk_stdlib/test/beamtalk_list_tests.erl.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%% ============================================================================
@@ -45,13 +46,7 @@ dispatch_first_test() ->
 %% assertion said `does_not_understand` and went stale while the module was
 %% shadowed by beamtalk_stdlib/test's same-named copy (BT-4671).
 dispatch_first_empty_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = empty_collection, class = 'List', selector = 'first'}
-        },
-        'bt@stdlib@list':dispatch('first', [], [])
-    ).
+    ?assertBtError(empty_collection, 'List', 'first', 'bt@stdlib@list':dispatch('first', [], [])).
 
 dispatch_rest_test() ->
     ?assertEqual([2, 3], 'bt@stdlib@list':dispatch('rest', [], [1, 2, 3])),

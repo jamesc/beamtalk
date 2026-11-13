@@ -2286,14 +2286,10 @@ spawn_monitored_on_supervisor_raises_unsupported_test() ->
     with_bt3963_class('BT3963Sup', Config, fun() ->
         lists:foreach(
             fun({Selector, Args}) ->
-                ?assertError(
-                    #{
-                        error := #beamtalk_error{
-                            kind = instantiation_error,
-                            class = 'BT3963Sup',
-                            selector = Selector
-                        }
-                    },
+                ?assertBtError(
+                    instantiation_error,
+                    'BT3963Sup',
+                    Selector,
                     beamtalk_supervisor:class_start('BT3963Sup', ?BT3963_MOD, Selector, Args)
                 )
             end,

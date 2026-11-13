@@ -52,7 +52,7 @@ use std::collections::BTreeSet;
 ///
 /// Names are bare class, protocol and alias names, as passed to the lookup
 /// (a name may be absent from the store; an absent lookup still depends on it).
-// Four independent facts about one compile, not a state machine.
+// Five independent facts about one compile, not a state machine.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ConsultedSurface {

@@ -35,51 +35,25 @@ at_emoji_test() ->
     ).
 
 at_out_of_bounds_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'}
-        },
-        beamtalk_string:at(<<"hi">>, 10)
-    ).
+    ?assertBtError(index_out_of_bounds, 'String', 'at:', beamtalk_string:at(<<"hi">>, 10)).
 
 at_zero_index_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'}
-        },
-        beamtalk_string:at(<<"hi">>, 0)
-    ).
+    ?assertBtError(index_out_of_bounds, 'String', 'at:', beamtalk_string:at(<<"hi">>, 0)).
 
 at_negative_index_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'}
-        },
-        beamtalk_string:at(<<"hi">>, -1)
-    ).
+    ?assertBtError(index_out_of_bounds, 'String', 'at:', beamtalk_string:at(<<"hi">>, -1)).
 
 %% Indexing an *empty* String is `empty_collection`, matching
 %% `List at:`; an index below 1 stays `index_out_of_bounds` even when empty,
 %% since it is malformed either way.
 at_empty_string_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := 'RuntimeError',
-            error := #beamtalk_error{kind = empty_collection, class = 'String', selector = 'at:'}
-        },
-        beamtalk_string:at(<<>>, 1)
+    ?assertBtErrorTagged(
+        'RuntimeError', empty_collection, 'String', 'at:', beamtalk_string:at(<<>>, 1)
     ).
 
 at_empty_string_zero_index_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := 'RuntimeError',
-            error := #beamtalk_error{kind = index_out_of_bounds, class = 'String', selector = 'at:'}
-        },
-        beamtalk_string:at(<<>>, 0)
+    ?assertBtErrorTagged(
+        'RuntimeError', index_out_of_bounds, 'String', 'at:', beamtalk_string:at(<<>>, 0)
     ).
 
 %%% ============================================================================
@@ -112,23 +86,13 @@ last_emoji_test() ->
     ).
 
 first_empty_string_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := 'RuntimeError',
-            error := #beamtalk_error{
-                kind = empty_collection, class = 'String', selector = 'first'
-            }
-        },
-        beamtalk_string:first(<<>>)
+    ?assertBtErrorTagged(
+        'RuntimeError', empty_collection, 'String', 'first', beamtalk_string:first(<<>>)
     ).
 
 last_empty_string_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := 'RuntimeError',
-            error := #beamtalk_error{kind = empty_collection, class = 'String', selector = 'last'}
-        },
-        beamtalk_string:last(<<>>)
+    ?assertBtErrorTagged(
+        'RuntimeError', empty_collection, 'String', 'last', beamtalk_string:last(<<>>)
     ).
 
 %%% ============================================================================
@@ -320,13 +284,10 @@ as_charlist_code_points_test() ->
 
 as_charlist_invalid_utf8_test() ->
     %% Only reachable via asStringUnchecked: no code-point reading exists.
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = type_error, class = 'String', selector = asCharlist
-            }
-        },
+    ?assertBtError(
+        type_error,
+        'String',
+        asCharlist,
         beamtalk_string:as_charlist({beamtalk_string, <<255, 254>>})
     ).
 
@@ -682,15 +643,7 @@ from_code_point_zero_test() ->
     ?assertEqual({beamtalk_string, <<0>>}, beamtalk_string:from_code_point(0)).
 
 from_code_point_negative_raises_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = type_error, class = 'String', selector = 'fromCodePoint:'
-            }
-        },
-        beamtalk_string:from_code_point(-1)
-    ).
+    ?assertBtError(type_error, 'String', 'fromCodePoint:', beamtalk_string:from_code_point(-1)).
 
 %%% ============================================================================
 %%% from_code_points/1
@@ -711,35 +664,23 @@ from_code_points_multibyte_test() ->
     ).
 
 from_code_point_non_integer_raises_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = type_error, class = 'String', selector = 'fromCodePoint:'
-            }
-        },
+    ?assertBtError(
+        type_error,
+        'String',
+        'fromCodePoint:',
         beamtalk_string:from_code_point(<<"not_an_integer">>)
     ).
 
 from_code_points_non_list_raises_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = type_error, class = 'String', selector = 'fromCodePoints:'
-            }
-        },
-        beamtalk_string:from_code_points(not_a_list)
+    ?assertBtError(
+        type_error, 'String', 'fromCodePoints:', beamtalk_string:from_code_points(not_a_list)
     ).
 
 from_code_points_non_integer_elements_raises_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = type_error, class = 'String', selector = 'fromCodePoints:'
-            }
-        },
+    ?assertBtError(
+        type_error,
+        'String',
+        'fromCodePoints:',
         beamtalk_string:from_code_points([65, <<"not_an_int">>, 97])
     ).
 
@@ -747,28 +688,16 @@ from_code_point_surrogate_raises_test() ->
     %% 0xD800 is a surrogate half -- not a valid Unicode scalar value.
     %% unicode:characters_to_binary/1 returns {error, <<>>, [55296]},
     %% triggering the inner type_error branch (lines 250-253).
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = type_error, class = 'String', selector = 'fromCodePoint:'
-            }
-        },
-        beamtalk_string:from_code_point(16#D800)
+    ?assertBtError(
+        type_error, 'String', 'fromCodePoint:', beamtalk_string:from_code_point(16#D800)
     ).
 
 from_code_points_surrogate_in_list_raises_test() ->
     %% [16#D800] passes the lists:all/2 guard (integer, >= 0) but
     %% unicode:characters_to_binary/1 fails on the surrogate codepoint,
     %% triggering the inner type_error branch (lines 274-279).
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = type_error, class = 'String', selector = 'fromCodePoints:'
-            }
-        },
-        beamtalk_string:from_code_points([16#D800])
+    ?assertBtError(
+        type_error, 'String', 'fromCodePoints:', beamtalk_string:from_code_points([16#D800])
     ).
 
 %%% ============================================================================
@@ -827,23 +756,11 @@ from_iolist_invalid_codepoint_raises_test() ->
     %% [16#D800] is a surrogate. iolist_to_binary raises badarg (>255), and the
     %% charlist fallback also fails (surrogate is not a valid Unicode scalar
     %% value), so a type_error is raised (lines 359-364).
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'fromIolist:'}
-        },
-        beamtalk_string:from_iolist([16#D800])
-    ).
+    ?assertBtError(type_error, 'String', 'fromIolist:', beamtalk_string:from_iolist([16#D800])).
 
 from_iolist_non_binary_non_list_raises_test() ->
     %% An integer is neither binary nor list -- type_error (lines 368-371).
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'fromIolist:'}
-        },
-        beamtalk_string:from_iolist(42)
-    ).
+    ?assertBtError(type_error, 'String', 'fromIolist:', beamtalk_string:from_iolist(42)).
 
 %%% ============================================================================
 %%% raise_not_string/2 — non-string receiver (generic type_error clause)
@@ -853,150 +770,52 @@ from_iolist_non_binary_non_list_raises_test() ->
 %% exercise the generic raise_not_string clause that emits a plain type_error
 %% with no downcast hint.
 at_non_string_bare_binary_raises_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'at:'}
-        },
-        beamtalk_string:at(42, 1)
-    ).
+    ?assertBtError(type_error, 'String', 'at:', beamtalk_string:at(42, 1)).
 
 first_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'first'}
-        },
-        beamtalk_string:first(42)
-    ).
+    ?assertBtError(type_error, 'String', 'first', beamtalk_string:first(42)).
 
 last_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'last'}
-        },
-        beamtalk_string:last(42)
-    ).
+    ?assertBtError(type_error, 'String', 'last', beamtalk_string:last(42)).
 
 ascii_lowercase_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = type_error, class = 'String', selector = 'asciiLowercase'
-            }
-        },
-        beamtalk_string:ascii_lowercase(42)
-    ).
+    ?assertBtError(type_error, 'String', 'asciiLowercase', beamtalk_string:ascii_lowercase(42)).
 
 capitalize_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'capitalize'}
-        },
-        beamtalk_string:capitalize(42)
-    ).
+    ?assertBtError(type_error, 'String', 'capitalize', beamtalk_string:capitalize(42)).
 
 reverse_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'reverse'}
-        },
-        beamtalk_string:reverse(42)
-    ).
+    ?assertBtError(type_error, 'String', 'reverse', beamtalk_string:reverse(42)).
 
 as_list_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'asList'}
-        },
-        beamtalk_string:as_list(42)
-    ).
+    ?assertBtError(type_error, 'String', 'asList', beamtalk_string:as_list(42)).
 
 lines_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'lines'}
-        },
-        beamtalk_string:lines(42)
-    ).
+    ?assertBtError(type_error, 'String', 'lines', beamtalk_string:lines(42)).
 
 words_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'words'}
-        },
-        beamtalk_string:words(42)
-    ).
+    ?assertBtError(type_error, 'String', 'words', beamtalk_string:words(42)).
 
 take_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'take:'}
-        },
-        beamtalk_string:take(42, 3)
-    ).
+    ?assertBtError(type_error, 'String', 'take:', beamtalk_string:take(42, 3)).
 
 drop_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'drop:'}
-        },
-        beamtalk_string:drop(42, 3)
-    ).
+    ?assertBtError(type_error, 'String', 'drop:', beamtalk_string:drop(42, 3)).
 
 is_blank_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'isBlank'}
-        },
-        beamtalk_string:is_blank(42)
-    ).
+    ?assertBtError(type_error, 'String', 'isBlank', beamtalk_string:is_blank(42)).
 
 is_digit_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'isDigit'}
-        },
-        beamtalk_string:is_digit(42)
-    ).
+    ?assertBtError(type_error, 'String', 'isDigit', beamtalk_string:is_digit(42)).
 
 is_alpha_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'isAlpha'}
-        },
-        beamtalk_string:is_alpha(42)
-    ).
+    ?assertBtError(type_error, 'String', 'isAlpha', beamtalk_string:is_alpha(42)).
 
 urlEncoded_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'urlEncoded'}
-        },
-        beamtalk_string:urlEncoded(42)
-    ).
+    ?assertBtError(type_error, 'String', 'urlEncoded', beamtalk_string:urlEncoded(42)).
 
 urlDecoded_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'urlDecoded'}
-        },
-        beamtalk_string:urlDecoded(42)
-    ).
+    ?assertBtError(type_error, 'String', 'urlDecoded', beamtalk_string:urlDecoded(42)).
 
 %%% ============================================================================
 %%% raise_not_string/2 — non-string receiver on two-arg functions
@@ -1007,57 +826,39 @@ urlDecoded_non_string_raises_type_error_test() ->
 %% type_error (generic clause) since 42 is not a binary.
 
 includes_non_string_receiver_raises_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'includes:'}
-        },
-        beamtalk_string:includes(42, {beamtalk_string, <<"hi">>})
+    ?assertBtError(
+        type_error, 'String', 'includes:', beamtalk_string:includes(42, {beamtalk_string, <<"hi">>})
     ).
 
 starts_with_non_string_receiver_raises_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'startsWith:'}
-        },
+    ?assertBtError(
+        type_error,
+        'String',
+        'startsWith:',
         beamtalk_string:starts_with(42, {beamtalk_string, <<"hi">>})
     ).
 
 ends_with_non_string_receiver_raises_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'endsWith:'}
-        },
+    ?assertBtError(
+        type_error,
+        'String',
+        'endsWith:',
         beamtalk_string:ends_with(42, {beamtalk_string, <<"hi">>})
     ).
 
 index_of_non_string_receiver_raises_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'indexOf:'}
-        },
-        beamtalk_string:index_of(42, {beamtalk_string, <<"hi">>})
+    ?assertBtError(
+        type_error, 'String', 'indexOf:', beamtalk_string:index_of(42, {beamtalk_string, <<"hi">>})
     ).
 
 split_non_string_receiver_raises_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'split:'}
-        },
-        beamtalk_string:split(42, {beamtalk_string, <<",">>})
+    ?assertBtError(
+        type_error, 'String', 'split:', beamtalk_string:split(42, {beamtalk_string, <<",">>})
     ).
 
 split_on_non_string_receiver_raises_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'splitOn:'}
-        },
-        beamtalk_string:split_on(42, {beamtalk_string, <<",">>})
+    ?assertBtError(
+        type_error, 'String', 'splitOn:', beamtalk_string:split_on(42, {beamtalk_string, <<",">>})
     ).
 
 %%% ============================================================================
@@ -1132,20 +933,13 @@ split_on_bare_binary_receiver_tagged_sep_test() ->
 %%% ============================================================================
 
 join_non_list_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'withAll:'}
-        },
-        beamtalk_string:join(42)
-    ).
+    ?assertBtError(type_error, 'String', 'withAll:', beamtalk_string:join(42)).
 
 join_element_non_string_raises_type_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'withAll:'}
-        },
+    ?assertBtError(
+        type_error,
+        'String',
+        'withAll:',
         beamtalk_string:join([{beamtalk_string, <<"a">>}, <<"b">>])
     ).
 
@@ -1165,13 +959,7 @@ urlEncoded_bare_binary_compat_test() ->
 
 from_iolist_bare_binary_invalid_utf8_raises_test() ->
     %% <<255, 254>> is not valid UTF-8; the binary path validates and raises.
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = type_error, class = 'String', selector = 'fromIolist:'}
-        },
-        beamtalk_string:from_iolist(<<255, 254>>)
-    ).
+    ?assertBtError(type_error, 'String', 'fromIolist:', beamtalk_string:from_iolist(<<255, 254>>)).
 
 %%% ============================================================================
 %%% BT-4761: byte-level fast paths agree with the grapheme paths

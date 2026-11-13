@@ -13,6 +13,7 @@ unary module lookup forwarding, keyword selector error, args error,
 object protocol delegation, and has_method/1.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%====================================================================
@@ -52,12 +53,8 @@ dispatch_unary_different_module_test() ->
 %%====================================================================
 
 dispatch_keyword_selector_raises_dnu_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = does_not_understand, class = 'Erlang'}
-        },
-        beamtalk_erlang_class:dispatch('foo:', [bar], erlang_self())
+    ?assertBtError(
+        does_not_understand, 'Erlang', beamtalk_erlang_class:dispatch('foo:', [bar], erlang_self())
     ).
 
 %%====================================================================
@@ -65,12 +62,8 @@ dispatch_keyword_selector_raises_dnu_test() ->
 %%====================================================================
 
 dispatch_unary_with_args_raises_arity_mismatch_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{kind = arity_mismatch, class = 'Erlang'}
-        },
-        beamtalk_erlang_class:dispatch('lists', [extra], erlang_self())
+    ?assertBtError(
+        arity_mismatch, 'Erlang', beamtalk_erlang_class:dispatch('lists', [extra], erlang_self())
     ).
 
 %%====================================================================

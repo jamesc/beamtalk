@@ -2606,10 +2606,7 @@ test_class_extension_crash_does_not_kill_class_process() ->
     try
         %% The crash surfaces as a structured error to the caller that
         %% triggered it...
-        ?assertError(
-            #{error := #beamtalk_error{}},
-            beamtalk_class_dispatch:class_send(Pid, crashExt, [])
-        ),
+        ?assertBtError(_, beamtalk_class_dispatch:class_send(Pid, crashExt, [])),
         %% ...but the class gen_server itself survives: still alive, and a
         %% follow-up call succeeds instead of hitting {noproc, ...}
         %% (auto-restart would also have dropped ClassVars/hot patches).
@@ -3175,9 +3172,8 @@ relayed_class_method_raise_log_level_test_() ->
 
 test_relayed_signal_not_logged_at_error() ->
     Events = relay_log_events('BT4115SignalLogClass', testSignal, fun(Pid) ->
-        ?assertError(
-            #{'$beamtalk_class' := 'Error', error := #beamtalk_error{class = 'Error'}},
-            beamtalk_class_dispatch:class_send(Pid, testSignal, [])
+        ?assertBtErrorTagged(
+            'Error', _, 'Error', _, beamtalk_class_dispatch:class_send(Pid, testSignal, [])
         )
     end),
     assert_relay_logged_at_debug_only(Events).
@@ -3428,12 +3424,10 @@ test_class_chain_skip_dnu() ->
     Pid = start_bt4073_class('BT4073Dnu', none, #{}, #{}),
     try
         {_, GenCalls} = with_gen_calls_traced([Pid], fun() ->
-            ?assertError(
-                #{
-                    error := #beamtalk_error{
-                        kind = does_not_understand, class = 'BT4073Dnu', selector = bt4073Nope
-                    }
-                },
+            ?assertBtError(
+                does_not_understand,
+                'BT4073Dnu',
+                bt4073Nope,
                 beamtalk_class_dispatch:class_send(Pid, bt4073Nope, [])
             )
         end),

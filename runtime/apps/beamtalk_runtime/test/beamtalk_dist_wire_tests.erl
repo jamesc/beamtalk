@@ -28,6 +28,7 @@ same assertions here.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 -export([
@@ -143,12 +144,8 @@ ets_nested_in_array_rejected(PeerNode) ->
     Ets = beamtalk_ets:new(Table, set),
     try
         Array = beamtalk_array:from_list([Ets]),
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{kind = not_serialisable, class = 'Ets'}
-            },
-            beamtalk_actor:sync_send(RemotePid, 'echo:', [Array])
+        ?assertBtError(
+            not_serialisable, 'Ets', beamtalk_actor:sync_send(RemotePid, 'echo:', [Array])
         ),
         %% Sender-side encode failure: the network was never touched, so the
         %% actor's state is exactly as it was at spawn.
@@ -165,12 +162,8 @@ ets_nested_in_array_rejected(PeerNode) ->
 late_slot_absent_raises_on_first_read(PeerNode) ->
     {ok, RemotePid} = rpc:call(PeerNode, test_wire_actor, start, [0]),
     try
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{kind = uninitialized_state_error, class = 'WireActor'}
-            },
-            beamtalk_actor:sync_send(RemotePid, lateOp, [])
+        ?assertBtError(
+            uninitialized_state_error, 'WireActor', beamtalk_actor:sync_send(RemotePid, lateOp, [])
         ),
         %% Assign it, sending a Value through the same absent-then-present
         %% slot — then the read answers normally.
@@ -217,15 +210,11 @@ version_ahead_on_request_refused_before_dispatch(PeerNode) ->
 version_ahead_on_reply_carries_direction(PeerNode) ->
     {ok, RemotePid} = rpc:call(PeerNode, test_wire_actor, start, [0]),
     try
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{
-                    kind = shape_version_ahead,
-                    class = 'ShapeChainCart',
-                    details = #{direction := reply}
-                }
-            },
+        ?assertBtErrorDetails(
+            shape_version_ahead,
+            'ShapeChainCart',
+            _,
+            #{direction := reply},
             beamtalk_actor:sync_send(RemotePid, shapeAheadReply, [])
         )
     after
@@ -323,13 +312,11 @@ remote_code_mismatch_undef(PeerNode) ->
     Fun = ModName:make_block(),
     {ok, RemotePid} = rpc:call(PeerNode, test_wire_actor, start, [0]),
     try
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{
-                    kind = remote_code_mismatch, class = 'Block', details = #{module := ModName}
-                }
-            },
+        ?assertBtErrorDetails(
+            remote_code_mismatch,
+            'Block',
+            _,
+            #{module := ModName},
             beamtalk_actor:sync_send(RemotePid, 'invokeBlockWith:', [Fun])
         )
     after
@@ -349,13 +336,11 @@ remote_code_mismatch_badfun(PeerNode) ->
     ),
     {ok, RemotePid} = rpc:call(PeerNode, test_wire_actor, start, [0]),
     try
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{
-                    kind = remote_code_mismatch, class = 'Block', details = #{module := ModName}
-                }
-            },
+        ?assertBtErrorDetails(
+            remote_code_mismatch,
+            'Block',
+            _,
+            #{module := ModName},
             beamtalk_actor:sync_send(RemotePid, 'invokeBlockWith:', [Fun])
         )
     after

@@ -1306,8 +1306,6 @@ chain_with_registry_test_() ->
 setup_chain_registry() ->
     %% Start pg if not running
     beamtalk_test_boot:registry(),
-    %% Ensure hierarchy table exists
-    beamtalk_test_boot:registry(),
     %% Register a minimal TestInteger class with return type annotations
     {ok, IntPid} = beamtalk_object_class:start('TestChainInteger', #{
         name => 'TestChainInteger',

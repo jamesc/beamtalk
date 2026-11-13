@@ -126,15 +126,10 @@ send_string_only_selector_dnu_on_non_utf8_binary_test_() ->
         %% A String-only selector (not on Binary at all) must still DNU on
         %% invalid UTF-8 — never silently routed through the String module.
         NonUtf8 = <<255, 254, 253>>,
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{
-                    kind = does_not_understand,
-                    class = 'Binary',
-                    selector = uppercase
-                }
-            },
+        ?assertBtError(
+            does_not_understand,
+            'Binary',
+            uppercase,
             beamtalk_primitive:send(NonUtf8, uppercase, [])
         )
     end}.
@@ -598,15 +593,10 @@ value_type_send_does_not_understand_test() ->
     Self = #{'$beamtalk_class' => 'MockVTErr'},
     create_mock_value_type_module('bt@mock_vterr', 'MockVTErr', []),
     try
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{
-                    kind = does_not_understand,
-                    class = 'MockVTErr',
-                    selector = 'nonexistent'
-                }
-            },
+        ?assertBtError(
+            does_not_understand,
+            'MockVTErr',
+            'nonexistent',
             beamtalk_primitive:send(Self, 'nonexistent', [])
         )
     after
@@ -672,15 +662,10 @@ value_type_inst_var_at_put_raises_immutable_value_test() ->
     Self = #{'$beamtalk_class' => 'MockVtIvar', x => 42},
     create_mock_value_type_module('bt@mock_vt_ivar', 'MockVtIvar', []),
     try
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{
-                    kind = immutable_value,
-                    class = 'MockVtIvar',
-                    selector = 'fieldAt:put:'
-                }
-            },
+        ?assertBtError(
+            immutable_value,
+            'MockVtIvar',
+            'fieldAt:put:',
             beamtalk_primitive:send(Self, 'fieldAt:put:', [x, 99])
         )
     after
@@ -1236,70 +1221,39 @@ send_string_equality_test() ->
 %%% ============================================================================
 
 send_dnu_unknown_method_on_integer_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = does_not_understand,
-                class = 'Integer',
-                selector = 'fooBarBaz'
-            }
-        },
-        beamtalk_primitive:send(42, 'fooBarBaz', [])
+    ?assertBtError(
+        does_not_understand, 'Integer', 'fooBarBaz', beamtalk_primitive:send(42, 'fooBarBaz', [])
     ).
 
 send_dnu_unknown_method_on_string_test() ->
     %% BT-4173: a bare binary DNU as Binary ...
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = does_not_understand,
-                class = 'Binary',
-                selector = 'nonExistentMethod'
-            }
-        },
+    ?assertBtError(
+        does_not_understand,
+        'Binary',
+        'nonExistentMethod',
         beamtalk_primitive:send(<<"hello">>, 'nonExistentMethod', [])
     ),
     %% ... while a tagged String DNU as String.
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = does_not_understand,
-                class = 'String',
-                selector = 'nonExistentMethod'
-            }
-        },
+    ?assertBtError(
+        does_not_understand,
+        'String',
+        'nonExistentMethod',
         beamtalk_primitive:send({beamtalk_string, <<"hello">>}, 'nonExistentMethod', [])
     ).
 
 send_dnu_unknown_method_on_boolean_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
-        ?assertError(
-            #{
-                '$beamtalk_class' := _,
-                error := #beamtalk_error{
-                    kind = does_not_understand,
-                    class = 'True',
-                    selector = 'unknownBoolMethod'
-                }
-            },
+        ?assertBtError(
+            does_not_understand,
+            'True',
+            'unknownBoolMethod',
             beamtalk_primitive:send(true, 'unknownBoolMethod', [])
         )
     end}.
 
 send_dnu_unknown_method_on_float_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = does_not_understand,
-                class = 'Float',
-                selector = 'fooBarBaz'
-            }
-        },
-        beamtalk_primitive:send(3.14, 'fooBarBaz', [])
+    ?assertBtError(
+        does_not_understand, 'Float', 'fooBarBaz', beamtalk_primitive:send(3.14, 'fooBarBaz', [])
     ).
 
 %%% ============================================================================
@@ -1352,14 +1306,9 @@ tagged_map_dictionary_dispatch_test() ->
 tagged_map_unknown_class_dnu_test() ->
     %% Unknown tagged map with unregistered class raises DNU
     Self = #{'$beamtalk_class' => 'CompletelyUnknownClass99'},
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = does_not_understand,
-                class = 'CompletelyUnknownClass99'
-            }
-        },
+    ?assertBtError(
+        does_not_understand,
+        'CompletelyUnknownClass99',
         beamtalk_primitive:send(Self, 'noMethod', [])
     ).
 
@@ -1738,15 +1687,10 @@ camel_to_snake_multi_word_lowercase_transition_test() ->
 
 dispatch_via_module_dnu_test() ->
     %% Sending unknown message to primitive raises does_not_understand
-    ?assertError(
-        #{
-            '$beamtalk_class' := _,
-            error := #beamtalk_error{
-                kind = does_not_understand,
-                class = 'Integer',
-                selector = 'totallyUnknownMethod99'
-            }
-        },
+    ?assertBtError(
+        does_not_understand,
+        'Integer',
+        'totallyUnknownMethod99',
         beamtalk_primitive:send(42, 'totallyUnknownMethod99', [])
     ).
 

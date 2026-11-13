@@ -115,14 +115,11 @@ register_class_side_three_arity_refused_test_() ->
             %% Any arity other than 2 is refused, reporting the real arity.
             lists:foreach(
                 fun({Arity, Bad}) ->
-                    ?assertError(
-                        #{
-                            error := #beamtalk_error{
-                                kind = arity_mismatch,
-                                selector = make,
-                                details = #{expected := 2, actual := Arity}
-                            }
-                        },
+                    ?assertBtErrorDetails(
+                        arity_mismatch,
+                        _,
+                        make,
+                        #{expected := 2, actual := Arity},
                         beamtalk_extensions:register(Tag, make, Bad, mylib)
                     ),
                     ?assertNot(beamtalk_extensions:has(Tag, make))

@@ -18,6 +18,7 @@ Tests the Phase 2 dispatch/3 interface for Workspace primitives:
 - dependencies/0 no-package branch
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %%====================================================================
@@ -1297,27 +1298,22 @@ revert_side_field_binary_test() ->
 %% Non-map argument → _Other arm of extract_revert_target/1 → type_error.
 %% No changelog/workspace needed; the validation fires before any delegation.
 revert_non_change_entry_atom_raises_type_error_test() ->
-    ?assertException(
-        error,
-        #{error := #beamtalk_error{kind = type_error, class = 'ChangeLog', selector = 'revert:'}},
+    ?assertBtError(
+        type_error,
+        'ChangeLog',
+        'revert:',
         beamtalk_workspace_interface_primitives:changeLogRevert(not_a_change_entry)
     ).
 
 %% Binary value — same _Other arm.
 revert_non_change_entry_binary_raises_type_error_test() ->
-    ?assertException(
-        error,
-        #{error := #beamtalk_error{kind = type_error}},
-        beamtalk_workspace_interface_primitives:changeLogRevert(<<"not a map">>)
+    ?assertBtError(
+        type_error, beamtalk_workspace_interface_primitives:changeLogRevert(<<"not a map">>)
     ).
 
 %% Integer value — same _Other arm.
 revert_non_change_entry_integer_raises_type_error_test() ->
-    ?assertException(
-        error,
-        #{error := #beamtalk_error{kind = type_error}},
-        beamtalk_workspace_interface_primitives:changeLogRevert(42)
-    ).
+    ?assertBtError(type_error, beamtalk_workspace_interface_primitives:changeLogRevert(42)).
 
 %%====================================================================
 %% extract_revert_target_from_map/1 error arm
@@ -1332,19 +1328,15 @@ revert_non_change_entry_integer_raises_type_error_test() ->
 %% Non-atom className in a className-keyed map → type_error.
 revert_non_atom_class_name_raises_type_error_test() ->
     Entry = #{className => <<"StringNotAtom">>, selector => some_selector},
-    ?assertException(
-        error,
-        #{error := #beamtalk_error{kind = type_error, class = 'ChangeLog'}},
-        beamtalk_workspace_interface_primitives:changeLogRevert(Entry)
+    ?assertBtError(
+        type_error, 'ChangeLog', beamtalk_workspace_interface_primitives:changeLogRevert(Entry)
     ).
 
 %% className is an atom but selector is a binary (not an atom) → type_error.
 revert_binary_selector_raises_type_error_test() ->
     Entry = #{className => 'SomeClass', selector => <<"notAnAtom">>},
-    ?assertException(
-        error,
-        #{error := #beamtalk_error{kind = type_error, class = 'ChangeLog'}},
-        beamtalk_workspace_interface_primitives:changeLogRevert(Entry)
+    ?assertBtError(
+        type_error, 'ChangeLog', beamtalk_workspace_interface_primitives:changeLogRevert(Entry)
     ).
 
 %%====================================================================

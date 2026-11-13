@@ -1994,12 +1994,8 @@ bt1982_class_reload_no_source_file_test_() ->
             ?_test(begin
                 {ClassObj, Pid} = register_class('BT1982ReloadNoSrc', #{}, #{}),
                 try
-                    ?assertError(
-                        #{
-                            '$beamtalk_class' := _,
-                            error := #beamtalk_error{kind = no_source_file}
-                        },
-                        beamtalk_behaviour_intrinsics:classReload(ClassObj)
+                    ?assertBtError(
+                        no_source_file, beamtalk_behaviour_intrinsics:classReload(ClassObj)
                     )
                 after
                     try
@@ -2032,11 +2028,8 @@ bt1982_class_remove_rejects_stdlib_test_() ->
                     'BT1982StdlibProtectedX', ClassInfo
                 ),
                 try
-                    ?assertError(
-                        #{
-                            '$beamtalk_class' := _,
-                            error := #beamtalk_error{kind = runtime_error}
-                        },
+                    ?assertBtError(
+                        runtime_error,
                         beamtalk_behaviour_intrinsics:classRemoveFromSystemByName(
                             'BT1982StdlibProtectedX'
                         )
@@ -2280,12 +2273,9 @@ compile_source_non_binary_raises_type_error_test_() ->
             ?_test(begin
                 {ClassObj, Pid} = register_class('BTCompileSrcBadType', #{}, #{}),
                 try
-                    ?assertError(
-                        #{
-                            '$beamtalk_class' := _,
-                            error := #beamtalk_error{kind = type_error}
-                        },
-                        %% Pass an atom (not a binary) as the source body.
+                    %% Pass an atom (not a binary) as the source body.
+                    ?assertBtError(
+                        type_error,
                         beamtalk_class_refactor:classCompileSource(
                             ClassObj, 'foo', not_a_binary
                         )
@@ -2310,11 +2300,8 @@ try_compile_source_non_binary_raises_type_error_test_() ->
             ?_test(begin
                 {ClassObj, Pid} = register_class('BTTryCompileSrcBadType', #{}, #{}),
                 try
-                    ?assertError(
-                        #{
-                            '$beamtalk_class' := _,
-                            error := #beamtalk_error{kind = type_error}
-                        },
+                    ?assertBtError(
+                        type_error,
                         beamtalk_class_refactor:classTryCompileSource(
                             ClassObj, 'foo', 12345
                         )
@@ -2340,11 +2327,8 @@ compile_source_invalid_body_raises_compile_failed_test_() ->
             ?_test(begin
                 {ClassObj, Pid} = register_class('BTCompileSrcInvalid', #{}, #{}),
                 try
-                    ?assertError(
-                        #{
-                            '$beamtalk_class' := _,
-                            error := #beamtalk_error{kind = compile_failed}
-                        },
+                    ?assertBtError(
+                        compile_failed,
                         beamtalk_class_refactor:classCompileSource(
                             ClassObj, 'foo', <<"@@@ not valid beamtalk @@@">>
                         )
@@ -2372,11 +2356,8 @@ compile_source_agent_author_context_test_() ->
                 erlang:put('$beamtalk_author_kind', agent),
                 erlang:put('$beamtalk_author', <<"copilot">>),
                 try
-                    ?assertError(
-                        #{
-                            '$beamtalk_class' := _,
-                            error := #beamtalk_error{kind = compile_failed}
-                        },
+                    ?assertBtError(
+                        compile_failed,
                         beamtalk_class_refactor:classCompileSource(
                             ClassObj, 'foo', <<"@@@ still invalid @@@">>
                         )
@@ -2928,11 +2909,8 @@ class_remove_selector_absent_raises_selector_not_found_test_() ->
                 beamtalk_extensions:init(),
                 {ClassObj, Pid} = register_class('BTRmSelAbsent3186', #{}, #{}),
                 try
-                    ?assertError(
-                        #{
-                            '$beamtalk_class' := _,
-                            error := #beamtalk_error{kind = selector_not_found}
-                        },
+                    ?assertBtError(
+                        selector_not_found,
                         beamtalk_class_refactor:classRemoveSelector(
                             ClassObj, 'noSuchMethod3186'
                         )
@@ -3144,11 +3122,8 @@ class_remove_selector_protocol_provided_refused_test_() ->
                     }
                 ]),
                 try
-                    ?assertError(
-                        #{
-                            '$beamtalk_class' := _,
-                            error := #beamtalk_error{kind = protocol_provided_selector}
-                        },
+                    ?assertBtError(
+                        protocol_provided_selector,
                         beamtalk_class_refactor:classRemoveSelector(ClassObj, 'maxOf:')
                     ),
                     %% Refused before any mutation — the method is still there.
@@ -3218,11 +3193,8 @@ class_rename_selector_protocol_provided_refused_test_() ->
                     }
                 ]),
                 try
-                    ?assertError(
-                        #{
-                            '$beamtalk_class' := _,
-                            error := #beamtalk_error{kind = protocol_provided_selector}
-                        },
+                    ?assertBtError(
+                        protocol_provided_selector,
                         beamtalk_selector_refactor:classRenameSelector(
                             ClassObj, 'maxOf:', 'maxOfRenamed3592'
                         )

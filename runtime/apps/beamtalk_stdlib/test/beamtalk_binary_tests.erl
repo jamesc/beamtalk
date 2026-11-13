@@ -220,12 +220,8 @@ at_type_error_not_integer_test() ->
 %% Indexing an empty Binary is `empty_collection`, matching the other
 %% collection `at:` implementations.
 at_empty_binary_error_test() ->
-    ?assertError(
-        #{
-            '$beamtalk_class' := 'RuntimeError',
-            error := #beamtalk_error{kind = empty_collection, class = 'Binary', selector = at}
-        },
-        beamtalk_binary:at(<<>>, 1)
+    ?assertBtErrorTagged(
+        'RuntimeError', empty_collection, 'Binary', at, beamtalk_binary:at(<<>>, 1)
     ).
 
 %% An index below 1 is malformed either way, so it stays index_out_of_bounds.

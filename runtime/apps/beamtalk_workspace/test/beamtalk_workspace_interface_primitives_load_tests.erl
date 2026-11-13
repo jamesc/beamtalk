@@ -41,6 +41,7 @@ workspace_id + temp project dir and cleans up in an `after`/teardown block.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include_lib("beamtalk_runtime/include/beamtalk.hrl").
 
 %% supervisor behaviour callback used by with_bare_workspace_sup/1 (a minimal
@@ -399,9 +400,10 @@ stop_supervisor_not_attached_raises_runtime_error(#{tmp := Tmp, unique := U}) ->
         ?_test(
             with_bare_workspace_sup(fun() ->
                 {SupClassObj, _SupClassAtom} = define_supervisor_class(Tmp, U),
-                ?assertException(
-                    error,
-                    #{error := #beamtalk_error{kind = runtime_error, selector = 'stopSupervisor:'}},
+                ?assertBtError(
+                    runtime_error,
+                    _,
+                    'stopSupervisor:',
                     beamtalk_workspace_interface_primitives:stopSupervisor(SupClassObj)
                 )
             end)

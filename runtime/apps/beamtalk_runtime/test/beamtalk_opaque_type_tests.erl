@@ -12,6 +12,7 @@ asString, printString, class, ==, =:=, hash, isAlive (Pid only).
 Also tests does_not_understand for unknown messages.
 """.
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("beamtalk_test_support/include/beamtalk_test_assert.hrl").
 -include("beamtalk.hrl").
 
 %%% ============================================================================
@@ -114,15 +115,11 @@ pid_responds_to_test_() ->
 pid_does_not_understand_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
         Pid = self(),
-        ?assertException(
-            error,
-            #{
-                '$beamtalk_class' := 'RuntimeError',
-                error := #beamtalk_error{
-                    kind = does_not_understand,
-                    class = 'Pid'
-                }
-            },
+        ?assertBtErrorTagged(
+            'RuntimeError',
+            does_not_understand,
+            'Pid',
+            _,
             beamtalk_primitive:send(Pid, 'unknownMessage', [])
         )
     end}.
@@ -187,15 +184,11 @@ port_responds_to_test_() ->
 port_does_not_understand_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
         {ok, Port} = gen_tcp:listen(0, []),
-        ?assertException(
-            error,
-            #{
-                '$beamtalk_class' := 'RuntimeError',
-                error := #beamtalk_error{
-                    kind = does_not_understand,
-                    class = 'Port'
-                }
-            },
+        ?assertBtErrorTagged(
+            'RuntimeError',
+            does_not_understand,
+            'Port',
+            _,
             beamtalk_primitive:send(Port, 'unknownMessage', [])
         ),
         gen_tcp:close(Port)
@@ -254,15 +247,11 @@ reference_responds_to_test_() ->
 reference_does_not_understand_test_() ->
     {setup, fun() -> beamtalk_extensions:init() end, fun(_) -> ok end, fun() ->
         Ref = make_ref(),
-        ?assertException(
-            error,
-            #{
-                '$beamtalk_class' := 'RuntimeError',
-                error := #beamtalk_error{
-                    kind = does_not_understand,
-                    class = 'Reference'
-                }
-            },
+        ?assertBtErrorTagged(
+            'RuntimeError',
+            does_not_understand,
+            'Reference',
+            _,
             beamtalk_primitive:send(Ref, 'unknownMessage', [])
         )
     end}.
