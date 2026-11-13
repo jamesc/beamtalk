@@ -4507,69 +4507,132 @@ fn unqualified_class_reference(name: &str) -> Expression {
     }
 }
 
-#[test]
-fn test_direct_new0_emits_guarded_module_new_call() {
-    // BT-4409: `Pt new` on an eligible Value builds via a direct
-    // `Module:'new'()` call behind the static call key `{Module, 'new', Tag}`
-    // (BT-4316's shape), whose miss path asks the runtime with arity 0
-    // (`new/0` takes no `ClassSelf`) and whose fallback is `class_send`.
-    let mut generator = generator_with_direct_constructors("Pt", None, true, false);
-    let receiver = unqualified_class_reference("Pt");
-    let selector = MessageSelector::Unary("new".into());
-
-    let doc = generator
-        .generate_message_send(&receiver, &selector, &[])
-        .unwrap();
-    let output = doc.to_pretty_string();
-
-    assert!(
-        output.contains(
-            "case call 'persistent_term':'get'('Pt class static calls', ~{}~) of <~{{'bt@test@pt', 'new', 'Pt class'} := "
-        ) && output.contains(
-            "<_> when 'true' -> call 'beamtalk_class_shadow_flags':'static_call_target'({'bt@test@pt', 'new', 'Pt class'}, 'Pt', 'new', 0)"
-        ),
-        "eligible `Pt new` must be guarded by its static call key. Got:\n{output}"
-    );
-    assert!(
-        output.contains("<_> when 'true' -> call 'bt@test@pt':'new'()"),
-        "the hit arm calls the synthesized builder directly. Got:\n{output}"
-    );
-    assert!(
-        output.contains("'beamtalk_object_class':'class_send'(") && output.contains("'new', [])"),
-        "a declined key falls back to class_send of `new`. Got:\n{output}"
-    );
-    assert_eq!(
-        output.matches("call 'bt@test@pt':'new'()").count(),
-        1,
-        "the direct call appears once. Got:\n{output}"
-    );
+/// One row of [`test_direct_constructor_codegen_table`].
+struct DirectCtorCase {
+    label: &'static str,
+    /// keyword constructor selector baked into the class metadata, if any
+    keyword: Option<&'static str>,
+    /// `new0` / keyword-constructor eligibility flags for `generator_with_direct_constructors`
+    flags: (bool, bool),
+    selector: MessageSelector,
+    arguments: Vec<Expression>,
+    has: &'static [&'static str],
+    lacks: &'static [&'static str],
+    /// `(needle, expected occurrence count)`
+    counts: &'static [(&'static str, usize)],
 }
 
+/// BT-4679: the former `test_direct_new0_emits_guarded_module_new_call`,
+/// `test_direct_new0_flag_off_falls_back_to_class_send`,
+/// `test_direct_keyword_constructor_emits_class_fn_call` and
+/// `test_direct_new1_stays_on_class_send` tests: how a send to an unqualified `Pt` class
+/// reference compiles for each constructor eligibility configuration.
 #[test]
-fn test_direct_new0_flag_off_falls_back_to_class_send() {
-    // the map entry may exist (e.g. for the keyword ctor) while
-    // `new` itself is ineligible (custom `new`); the send must fall back.
-    let mut generator = generator_with_direct_constructors("Pt", Some("x:y:"), false, false);
-    let receiver = unqualified_class_reference("Pt");
-    let selector = MessageSelector::Unary("new".into());
-
-    let doc = generator
-        .generate_message_send(&receiver, &selector, &[])
-        .unwrap();
-    let output = doc.to_pretty_string();
-
-    assert!(
-        output.contains("'erlang':'whereis'('beamtalk_class_Pt')"),
-        "ineligible `new` must look the class up in the registry. Got:\n{output}"
-    );
-    assert!(
-        output.contains("'beamtalk_object_class':'class_send'"),
-        "ineligible `new` must dispatch via class_send. Got:\n{output}"
-    );
-    assert!(
-        !output.contains(":'new'()"),
-        "ineligible `new` must not emit a direct builder call. Got:\n{output}"
-    );
+#[allow(clippy::too_many_lines)] // a data table: one entry per former test
+fn test_direct_constructor_codegen_table() {
+    let cases = vec![
+        // BT-4409: `Pt new` on an eligible Value builds via a direct `Module:'new'()` call
+        // behind the static call key `{Module, 'new', Tag}` (BT-4316's shape), whose miss
+        // path asks the runtime with arity 0 (`new/0` takes no `ClassSelf`) and whose
+        // fallback is `class_send`.
+        DirectCtorCase {
+            label: "eligible `Pt new` is guarded by its static call key",
+            keyword: None,
+            flags: (true, false),
+            selector: MessageSelector::Unary("new".into()),
+            arguments: vec![],
+            has: &[
+                "case call 'persistent_term':'get'('Pt class static calls', ~{}~) of <~{{'bt@test@pt', 'new', 'Pt class'} := ",
+                "<_> when 'true' -> call 'beamtalk_class_shadow_flags':'static_call_target'({'bt@test@pt', 'new', 'Pt class'}, 'Pt', 'new', 0)",
+                // the hit arm calls the synthesized builder directly
+                "<_> when 'true' -> call 'bt@test@pt':'new'()",
+                // a declined key falls back to class_send of `new`
+                "'beamtalk_object_class':'class_send'(",
+                "'new', [])",
+            ],
+            lacks: &[],
+            counts: &[("call 'bt@test@pt':'new'()", 1)],
+        },
+        // The map entry may exist (e.g. for the keyword ctor) while `new` itself is
+        // ineligible (custom `new`); the send must fall back.
+        DirectCtorCase {
+            label: "ineligible `Pt new` falls back to class_send",
+            keyword: Some("x:y:"),
+            flags: (false, false),
+            selector: MessageSelector::Unary("new".into()),
+            arguments: vec![],
+            has: &[
+                "'erlang':'whereis'('beamtalk_class_Pt')",
+                "'beamtalk_object_class':'class_send'",
+            ],
+            lacks: &[":'new'()"],
+            counts: &[],
+        },
+        // `Pt x: 1 y: 2` on an eligible Value uses the generic guarded direct-call shape
+        // (`class_x:y:/3` ignores its `ClassSelf` arg, but gets the class reference like
+        // every class method, BT-4301). BT-4316/BT-4442: the hit path is one read of the
+        // class's static call map, matched on the call target's key, whose value is the
+        // class reference; a miss asks the runtime, which installs it only while the guard
+        // holds. The direct call is the case's last arm, in tail position, passed the
+        // key's value as `ClassSelf`; no `try` wraps it. The hit path calls nothing else:
+        // no flag read, no `function_exported/3`, no `whereis` outside the fallback.
+        DirectCtorCase {
+            label: "eligible keyword constructor calls class_x:y:/3 behind a static call key",
+            keyword: Some("x:y:"),
+            flags: (true, true),
+            selector: MessageSelector::Keyword(vec![
+                KeywordPart::new("x:", Span::new(3, 5)),
+                KeywordPart::new("y:", Span::new(9, 11)),
+            ]),
+            arguments: vec![
+                Expression::Literal(Literal::Integer(1), Span::new(6, 7)),
+                Expression::Literal(Literal::Integer(2), Span::new(12, 13)),
+            ],
+            has: &[
+                "case call 'persistent_term':'get'('Pt class static calls', ~{}~) of <~{{'bt@test@pt', 'class_x:y:', 'Pt class'} := ",
+                "<_> when 'true' -> call 'beamtalk_class_shadow_flags':'static_call_target'({'bt@test@pt', 'class_x:y:', 'Pt class'}, 'Pt', 'x:y:', 3)",
+                "<_> when 'true' -> call 'bt@test@pt':'class_x:y:'(_StaticSelf",
+                // a declined key falls back to class_send
+                "of <'false'> when 'true' -> let _ClassPid",
+                "'beamtalk_object_class':'class_send'(",
+            ],
+            // no `nil` class self (BT-4037); the hit path is the key read only
+            lacks: &["'nil'", "direct_call_ok", "function_exported", "try "],
+            counts: &[("call 'bt@test@pt':'class_x:y:'(", 1)],
+        },
+        // Static `new:` keeps the `class_send` fallback even when eligible — the chain
+        // verdict stays single-sourced in the baked metadata, which only dynamic sends
+        // consult.
+        DirectCtorCase {
+            label: "static `new:` stays on class_send",
+            keyword: None,
+            flags: (true, true),
+            selector: MessageSelector::Keyword(vec![KeywordPart::new("new:", Span::new(3, 7))]),
+            arguments: vec![Expression::Literal(Literal::Integer(1), Span::new(8, 9))],
+            has: &["'beamtalk_object_class':'class_send'"],
+            lacks: &[":'new'("],
+            counts: &[],
+        },
+    ];
+    for case in cases {
+        let mut generator =
+            generator_with_direct_constructors("Pt", case.keyword, case.flags.0, case.flags.1);
+        let receiver = unqualified_class_reference("Pt");
+        let output = generator
+            .generate_message_send(&receiver, &case.selector, &case.arguments)
+            .unwrap()
+            .to_pretty_string();
+        assert_has(case.label, &output, case.has);
+        assert_lacks(case.label, &output, case.lacks);
+        for (needle, expected) in case.counts {
+            assert_eq!(
+                output.matches(needle).count(),
+                *expected,
+                "[{}] occurrences of {needle:?}. Got:\n{output}",
+                case.label
+            );
+        }
+    }
 }
 
 #[test]
@@ -4588,99 +4651,6 @@ fn test_new_without_eligible_entry_falls_back_to_class_send() {
     assert!(
         output.contains("'beamtalk_object_class':'class_send'"),
         "`new` with no eligibility entry must dispatch via class_send. Got:\n{output}"
-    );
-}
-
-#[test]
-fn test_direct_keyword_constructor_emits_class_fn_call() {
-    // `Pt x: 1 y: 2` on an eligible Value uses the generic guarded
-    // direct-call shape (`class_x:y:/3` ignores its `ClassSelf` arg, but
-    // gets the class reference like every class method, BT-4301).
-    let mut generator = generator_with_direct_constructors("Pt", Some("x:y:"), true, true);
-    let receiver = unqualified_class_reference("Pt");
-    let selector = MessageSelector::Keyword(vec![
-        KeywordPart::new("x:", Span::new(3, 5)),
-        KeywordPart::new("y:", Span::new(9, 11)),
-    ]);
-    let arguments = vec![
-        Expression::Literal(Literal::Integer(1), Span::new(6, 7)),
-        Expression::Literal(Literal::Integer(2), Span::new(12, 13)),
-    ];
-
-    let doc = generator
-        .generate_message_send(&receiver, &selector, &arguments)
-        .unwrap();
-    let output = doc.to_pretty_string();
-
-    // BT-4316/BT-4442: the hit path is one read of the class's static call
-    // map, matched on the call target's key, whose value is the class
-    // reference; a miss asks the runtime, which
-    // installs it only while the guard holds.
-    assert!(
-        output.contains(
-            "case call 'persistent_term':'get'('Pt class static calls', ~{}~) of <~{{'bt@test@pt', 'class_x:y:', 'Pt class'} := "
-        ) && output.contains(
-            "<_> when 'true' -> call 'beamtalk_class_shadow_flags':'static_call_target'({'bt@test@pt', 'class_x:y:', 'Pt class'}, 'Pt', 'x:y:', 3)"
-        ),
-        "eligible keyword ctor must be guarded by its static call key. Got:\n{output}"
-    );
-    // The direct call is the case's last arm, in tail position, passed the
-    // key's value as `ClassSelf`. No `try` wraps it.
-    assert!(
-        output.contains("<_> when 'true' -> call 'bt@test@pt':'class_x:y:'(_StaticSelf"),
-        "eligible keyword ctor must call class_x:y:/3 with the key's class reference. Got:\n{output}"
-    );
-    assert!(
-        output.contains("of <'false'> when 'true' -> let _ClassPid"),
-        "a declined key falls back to class_send. Got:\n{output}"
-    );
-    assert!(
-        output.contains("'beamtalk_object_class':'class_send'("),
-        "the guard falls back to class_send. Got:\n{output}"
-    );
-    assert!(
-        !output.contains("'nil'"),
-        "no `nil` class self (BT-4037). Got:\n{output}"
-    );
-    // The hit path calls nothing else: no flag read, no `function_exported/3`,
-    // no `whereis` outside the fallback (the runtime checks them at install).
-    assert!(
-        !output.contains("direct_call_ok") && !output.contains("function_exported"),
-        "the hit path is the key read only. Got:\n{output}"
-    );
-    assert_eq!(
-        output.matches("call 'bt@test@pt':'class_x:y:'(").count(),
-        1,
-        "the direct call appears once. Got:\n{output}"
-    );
-    assert!(
-        !output.contains("try "),
-        "no try around the direct call. Got:\n{output}"
-    );
-}
-
-#[test]
-fn test_direct_new1_stays_on_class_send() {
-    // static `new:` keeps the `class_send` fallback even when
-    // eligible — the chain verdict stays single-sourced in the baked
-    // metadata, which only dynamic sends consult.
-    let mut generator = generator_with_direct_constructors("Pt", None, true, true);
-    let receiver = unqualified_class_reference("Pt");
-    let selector = MessageSelector::Keyword(vec![KeywordPart::new("new:", Span::new(3, 7))]);
-    let arguments = vec![Expression::Literal(Literal::Integer(1), Span::new(8, 9))];
-
-    let doc = generator
-        .generate_message_send(&receiver, &selector, &arguments)
-        .unwrap();
-    let output = doc.to_pretty_string();
-
-    assert!(
-        output.contains("'beamtalk_object_class':'class_send'"),
-        "static `new:` must stay on class_send (dynamic-only fast path). Got:\n{output}"
-    );
-    assert!(
-        !output.contains(":'new'("),
-        "static `new:` must not emit a direct builder call. Got:\n{output}"
     );
 }
 
