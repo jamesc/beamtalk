@@ -22,6 +22,7 @@
 
 use crate::cli_common;
 
+use predicates::prelude::PredicateBooleanExt;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -322,7 +323,6 @@ fn fresh_test_knows_native_dep_modules_but_warns_on_unknown() {
     .expect("write test");
     assert!(!project.join("_build").exists(), "must be a fresh checkout");
 
-    use predicates::prelude::PredicateBooleanExt;
     cli_common::beamtalk()
         .current_dir(project)
         .args(["test", "--quiet"])
