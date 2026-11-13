@@ -30,6 +30,19 @@ TestCase subclass: ActorLifecycleTest
     self should: [Counter spawnWith: "hello"] raise: #type_error
     self should: [Counter spawnWith: true] raise: #type_error
 
+  testNonMapArgumentToSpawnwithNamesTheSelector =>
+    // BT-4686: the non-map error says what spawnWith: expects
+    msg := [Counter spawnWith: 42] on: TypeError do: [:e | e message]
+    self assert: (msg includesSubstring: "spawnWith:")
+    hint := [Counter spawnWith: 42] on: TypeError do: [:e | e hint]
+    self assert: (hint includesSubstring: "Dictionary")
+
+  testSpawnwithUnknownKeyIsNotATypeError =>
+    // BT-4686: a map with an undeclared key is #unknown_field, not #type_error
+    d := Dictionary new at: #bogus put: 1
+    kind := [Counter spawnWith: d] on: RuntimeError do: [:e | e kind]
+    self assert: kind equals: #unknown_field
+
   testSpawnwithWithBareIdentifierKeys =>
     // Bare identifier keys in map literals work as implicit symbols (formatter normalizes to #symbol form)
     c3 := Counter spawnWith: #{#value => 10}

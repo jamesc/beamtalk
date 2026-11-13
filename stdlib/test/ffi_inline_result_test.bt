@@ -9,10 +9,11 @@ TestCase subclass: FfiInlineResultTest
 
   testBareOkAndBinaryValueRoundTrip =>
     written := Erlang file write_file: "bt4762_inline_tmp.txt" data: "hello"
-    self assert: written ok
-    self assert: written value isNil
     r := Erlang file read_file: "bt4762_inline_tmp.txt"
     Erlang file delete: "bt4762_inline_tmp.txt"
+    // Asserts after the cleanup so a failure cannot leak the temp file.
+    self assert: written ok
+    self assert: written value isNil
     self assert: r ok
     self assert: r value size equals: 5
 
