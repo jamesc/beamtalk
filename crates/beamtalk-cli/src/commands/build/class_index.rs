@@ -420,13 +420,12 @@ pub(crate) fn flatten_trait_user_class_infos(
         }
         match fs::read_to_string(file) {
             Ok(source) => {
-                reparsed.insert(
-                    file,
-                    beamtalk_core::source_analysis::parse(
-                        beamtalk_core::source_analysis::lex_with_eof(&source),
-                    )
-                    .0,
-                );
+                let mut module = beamtalk_core::source_analysis::parse(
+                    beamtalk_core::source_analysis::lex_with_eof(&source),
+                )
+                .0;
+                let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
+                reparsed.insert(file, module);
             }
             Err(e) => warn!(
                 file = %file,
@@ -659,7 +658,13 @@ pub(crate) fn scan_source_file(
         }
     };
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-    let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    let (mut module, mut diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    // A file is one compilation unit for its class (BT-4721): fold same-file
+    // extensions into the host class here, so the class index, the extension
+    // index and the cached AST Pass 2 compiles all see the folded class.
+    diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
+        &mut module,
+    ));
     if !diagnostics.is_empty() {
         warn!(
             file = %file,

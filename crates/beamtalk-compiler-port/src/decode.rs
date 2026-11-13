@@ -668,6 +668,12 @@ pub(crate) fn extract_protocol_registry(
 /// Merge a method into a method list, replacing any existing method with the
 /// same selector and kind, else appending it.
 ///
+/// This is the REPL's *explicit redefinition* (`compile_method`: the user
+/// re-typed a method on a live class), where replace is the point. It is not
+/// how same-file extensions are resolved: those are folded, with duplicates
+/// rejected, by `beamtalk_core::compilation::fold_same_file_extensions`
+/// (BT-4721).
+///
 /// The instance/class **side** is encoded entirely by *which* list the caller
 /// passes (`class.methods` vs `class.class_methods`) — `handle_compile_method`
 /// selects it from the `is_class_method` flag. `MethodKind` does *not* encode the

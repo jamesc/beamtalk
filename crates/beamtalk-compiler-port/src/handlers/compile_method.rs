@@ -102,6 +102,9 @@ pub(crate) fn handle_compile_method(request: &Map) -> Term {
     //    re-parsed merged source (below), where spans share one coordinate system.
     let class_tokens = beamtalk_core::source_analysis::lex_with_eof(&class_source);
     let (mut module, _class_parse_diags) = beamtalk_core::source_analysis::parse(class_tokens);
+    // A same-file extension in the stored class source is part of the class
+    // (BT-4721), so the patch and the re-unparsed source carry it in the body.
+    let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
 
     if module.classes.is_empty() {
         return error_response(&["class_source contains no class definition".to_string()]);

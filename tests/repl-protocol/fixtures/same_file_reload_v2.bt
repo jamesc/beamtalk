@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4721: reload fixtures, v2: `make` is now a body class method.
+Object subclass: SameFileReload
+  base => 1
+
+  class make => 2

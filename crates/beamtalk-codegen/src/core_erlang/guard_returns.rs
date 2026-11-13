@@ -193,9 +193,10 @@ impl GuardRewrite {
 /// its only block NLRs (see the module doc).
 pub(in crate::core_erlang) fn rewrite_guard_returns(module: &mut Module) -> GuardRewrite {
     let mut rewrite = GuardRewrite::default();
-    // A same-file `X >> m` is registered as an extension (BT-4489), never
-    // generated into X's module, so nothing would consume its recorded guards: leave it
-    // unrewritten and unrecorded (BT-4497), keeping the checks fail-closed.
+    // The driver folds a same-file `X >> m` into X before this runs (BT-4721).
+    // An unfolded one would never be lowered, so nothing would consume its
+    // recorded guards: leave it unrewritten and unrecorded (BT-4497), keeping
+    // the checks fail-closed.
     let declared = CoreErlangGenerator::declared_class_names(module);
     for method in methods_mut(module, &declared) {
         let mut rw = Rewriter::of(method);

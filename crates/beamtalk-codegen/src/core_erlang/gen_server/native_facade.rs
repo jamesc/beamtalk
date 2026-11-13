@@ -472,7 +472,7 @@ impl CoreErlangGenerator {
         };
 
         // Reuse the standard meta map and append native-specific keys
-        // include_standalone: false — standalone methods are registered as extensions at load (BT-4489), not static
+        // include_standalone: false — standalone methods are folded into the class (BT-4721), not static
         // ADR 0070 Phase 4: Extract package name from module name
         let package_name = super::methods::extract_package_from_module_name(&self.module_name);
         Ok(docvec![
@@ -791,23 +791,12 @@ impl CoreErlangGenerator {
 
         let try_body = Self::build_short_circuit_chain(&class_docs);
 
-        // BT-4489: extensions in a native-facade file (foreign ones before the
-        // chain, same-file ones only after the classes registered successfully).
+        // Foreign extensions register before the chain. Same-file extensions
+        // never reach codegen as extensions: the front end folded them into the
+        // class (BT-4721).
         let foreign_ext_doc = self.generate_foreign_extension_registrations(module)?;
         let try_body = docvec![foreign_ext_doc, try_body];
-        let has_same_file_ext = !Self::same_file_extension_methods(module).is_empty();
-        let same_file_ext_doc = self.generate_same_file_extension_registrations(module)?;
-        let of_clause = if has_same_file_ext {
-            docvec![
-                "of RegResult ->",
-                nest(
-                    INDENT,
-                    Self::gate_on_registration_ok("RegResult", same_file_ext_doc),
-                ),
-            ]
-        } else {
-            Document::Str("of RegResult -> RegResult")
-        };
+        let of_clause = Document::Str("of RegResult -> RegResult");
 
         let doc = Self::register_class_fn_doc(try_body, of_clause);
 

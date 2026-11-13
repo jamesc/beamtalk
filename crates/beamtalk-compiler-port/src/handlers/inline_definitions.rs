@@ -7,7 +7,6 @@
 
 use eetf::Term;
 
-use crate::decode::merge_method;
 use crate::diagnostics::Warning;
 use crate::respond::{
     class_definition_ok_response, error_response, format_codegen_error,
@@ -88,27 +87,13 @@ pub(crate) fn handle_inline_class_definition(
 ) -> Term {
     let mut module = module;
     let mut warnings = warnings.to_vec();
-    if !module.method_definitions.is_empty() {
-        let method_defs = std::mem::take(&mut module.method_definitions);
-        for method_def in method_defs {
-            let target_class = method_def.class_name.name.as_str();
-            if let Some(class) = module
-                .classes
-                .iter_mut()
-                .find(|c| c.name.name == target_class)
-            {
-                let methods = if method_def.is_class_method {
-                    &mut class.class_methods
-                } else {
-                    &mut class.methods
-                };
-                merge_method(methods, method_def.method);
-            } else {
-                warnings.push(Warning::message_only(format!(
-                    "Standalone method targets unknown class `{target_class}` in this module"
-                )));
-            }
-        }
+    // Same-file extensions were folded before analysis (BT-4721); any standalone
+    // method left targets a class this module does not declare.
+    for method_def in std::mem::take(&mut module.method_definitions) {
+        let target_class = method_def.class_name.name.as_str();
+        warnings.push(Warning::message_only(format!(
+            "Standalone method targets unknown class `{target_class}` in this module"
+        )));
     }
 
     // Use unified module name derivation so inline class definitions

@@ -98,6 +98,11 @@ impl ExtensionIndex {
     /// by its `(class_name, side, selector)` key.
     pub fn add_module(&mut self, module: &Module, file_path: &Path) {
         for defn in &module.method_definitions {
+            // A same-file extension is part of its host class (BT-4721), not an
+            // extension: it never appears in extension listings.
+            if super::same_file_fold::is_same_file_extension(module, &defn.class_name.name) {
+                continue;
+            }
             let key = ExtensionKey {
                 class_name: defn.class_name.name.clone(),
                 side: if defn.is_class_method {

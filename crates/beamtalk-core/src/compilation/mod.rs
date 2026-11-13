@@ -17,7 +17,9 @@ pub mod diagnostics_policy;
 pub mod extension_conflicts;
 pub mod extension_index;
 pub mod ffi_stubs;
+pub mod same_file_fold;
 
+pub use same_file_fold::{fold_same_file_extensions, is_same_file_extension};
 pub use dependency::{DependencyMap, DependencySource, DependencySpec, GitReference};
 pub use diagnostics_policy::{
     DiagnosticSeverityOverride, DiagnosticsTable, DiagnosticsTableError, apply_diagnostics_table,

@@ -1,12 +1,16 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-4489: an extension written in the target class's OWN file used to compile
-// to no function and no dispatch arm (does_not_understand). It is now registered
-// at load through `beamtalk_extensions:register/5`, like a foreign extension.
+// BT-4721: a file is one compilation unit for its class. An extension written
+// in the target class's OWN file (BT-4489 first made it answer at all) is
+// folded into the class before codegen, so it is an ordinary method: a dispatch
+// arm, never a `beamtalk_extensions` row. The REPL gives the same answers
+// (tests/repl-protocol/cases/same_file_extension.btscript).
 //
-// Fixtures: stdlib/test/fixtures/same_file_ext_pt.bt
-//           stdlib/test/fixtures/same_file_ext_ac.bt
+// Fixtures: stdlib/test/fixtures/same_file_ext_obj.bt (plain)
+//           stdlib/test/fixtures/same_file_ext_pt.bt (value)
+//           stdlib/test/fixtures/same_file_ext_ac.bt (actor)
+//           stdlib/test/fixtures/same_file_ext_native.bt (native: class side)
 
 TestCase subclass: SameFileExtensionTest
 
@@ -25,3 +29,13 @@ TestCase subclass: SameFileExtensionTest
     self assert: a getN equals: 6
 
   testActorClassSideExtension => self assert: SameFileExtAc cextra equals: 42
+
+  testPlainInstanceExtension => self assert: SameFileExtObj new extra equals: 2
+
+  testPlainClassSideExtension => self assert: SameFileExtObj make base equals: 1
+
+  testPlainExtensionIsAnOrdinaryMethod =>
+    self assert: (SameFileExtObj new respondsTo: #extra) equals: true
+    self assert: (SameFileExtObj includesSelector: #extra) equals: true
+
+  testNativeClassSideExtension => self assert: SameFileExtNative cextra equals: 42

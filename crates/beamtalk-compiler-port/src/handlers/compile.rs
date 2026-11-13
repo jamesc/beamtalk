@@ -8,7 +8,7 @@ use eetf::{Map, Term};
 
 use crate::decode::{
     extract_class_hierarchy, extract_known_type_aliases, extract_optional_string_map,
-    extract_protocol_registry, merge_method,
+    extract_protocol_registry,
 };
 use crate::diagnostics::{
     DiagInfo, filter_error_diagnostics, partition_diagnostics, warnings_from_diag_infos,
@@ -85,7 +85,13 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
 
     // Parse the source
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-    let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    let (mut module, mut parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    // One compilation unit per class (BT-4721): fold same-file extensions into
+    // the host class before analysis, exactly as `beamtalk build` does. Only
+    // cross-file (foreign) standalone methods remain afterwards.
+    parse_diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
+        &mut module,
+    ));
 
     // Run semantic analysis, also capturing `referenced_aliases` —
     // shipped back in the response so the Erlang side can populate
@@ -141,40 +147,22 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
         return diagnostic_error_response(&error_diags, &source);
     }
 
-    // Merge standalone method definitions into their target classes.
-    // Captured *before* the merge so the class-codegen call below
-    // knows whether `analysis` (computed pre-merge) is still trustworthy —
-    // see `handle_compile_expression`'s identical `analysis` gating for why.
+    // Same-file extensions were folded above. A standalone method that still
+    // targets a class this module does not declare has no home in a REPL file
+    // compile: warn and drop it.
     let had_standalone_method_definitions = !module.method_definitions.is_empty();
-    let mut module = module;
-    if !module.method_definitions.is_empty() {
-        let method_defs = std::mem::take(&mut module.method_definitions);
-        for method_def in method_defs {
-            let target_class = method_def.class_name.name.as_str();
-            if let Some(class) = module
-                .classes
-                .iter_mut()
-                .find(|c| c.name.name == target_class)
-            {
-                let methods = if method_def.is_class_method {
-                    &mut class.class_methods
-                } else {
-                    &mut class.methods
-                };
-                merge_method(methods, method_def.method);
-            } else {
-                warnings.push(DiagInfo {
-                    message: format!(
-                        "Standalone method targets unknown class `{target_class}` in this module"
-                    ),
-                    hint: None,
-                    severity: "warning".to_string(),
-                    category: None,
-                    start: method_def.span.start(),
-                    end: method_def.span.end(),
-                });
-            }
-        }
+    for method_def in std::mem::take(&mut module.method_definitions) {
+        let target_class = method_def.class_name.name.as_str();
+        warnings.push(DiagInfo {
+            message: format!(
+                "Standalone method targets unknown class `{target_class}` in this module"
+            ),
+            hint: None,
+            severity: "warning".to_string(),
+            category: None,
+            start: method_def.span.start(),
+            end: method_def.span.end(),
+        });
     }
 
     // Accept optional module_name override from caller.
