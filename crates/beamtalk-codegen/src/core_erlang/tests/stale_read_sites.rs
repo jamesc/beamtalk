@@ -66,10 +66,8 @@ const STORE_CALL: &str = ".state_var_to_store()";
 /// only for another such site; a read goes through the choke point.
 const STORE_SITES: &[(&str, usize)] = &[
     ("control_flow/counted_loops.rs", 1),
-    ("control_flow/dict_ops.rs", 2),
     ("control_flow/exception_handling.rs", 2),
     ("control_flow/list_ops/fold_driver.rs", 1),
-    ("control_flow/list_ops/transform_ops.rs", 7),
     ("control_flow/plan.rs", 1),
     ("control_flow/while_loops.rs", 1),
 ];
