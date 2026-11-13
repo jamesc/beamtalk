@@ -1124,23 +1124,54 @@ What is cached, and why that is safe:
   whose module has since been purged (class still registered) is re-derived
   and the entry repaired (`fetch/3`'s validity check).
 
-On top of the ETS layer, `beamtalk_class_derived_cache:fetch/3` memoises a
-cacheable answer in the calling process's dictionary (BT-4623, generalised by
-BT-4652), so a hit costs a generation read, a `get/1` and the purge check
-rather than the ETS read that copies the entry (~70% of an untyped Value
-send). Every metadata write bumps the generation, so a module move, a
-reparenting into or out of `Exception` or a removal turns every per-process
-memo into a miss. The memo holds only what the ETS layer holds, so an answer
-`Compute` declines to cache is never memoised, and the validity check below
-runs on memo hits too.
+On top of that, a cacheable answer is memoised in the calling process's
+dictionary as `{Gen, Resolved}`, tagged with the cache generation read before
+the fetch, as `beamtalk_default_method:is_default/2` does (BT-4416). A hit
+costs a generation read, a `get/1` and the purge check rather than the ETS
+read that copies the entry, ~70% of an untyped Value send (BT-4623). Every
+metadata write bumps the generation, so a module move, a reparenting into or
+out of `Exception` (directly or via an ancestor) or a removal turns every
+per-process memo into a miss. An answer `Compute` declines to cache is not
+memoised: `Compute` leaves a `nocache` marker under the memo key, which is
+erased after the fetch.
 """.
 -spec tagged_class_dispatch(atom()) -> exception | {stdlib, atom()} | {value, atom()}.
 tagged_class_dispatch(Class) ->
-    beamtalk_class_derived_cache:fetch(
+    Gen = beamtalk_class_derived_cache:generation(),
+    MemoKey = {?MODULE, tagged_class_dispatch, Class},
+    case get(MemoKey) of
+        {Gen, Resolved} when Gen =/= undefined ->
+            case resolved_module_loaded(Class, Resolved) of
+                true -> Resolved;
+                false -> fetch_tagged_class_dispatch(Class, Gen, MemoKey)
+            end;
+        _ ->
+            fetch_tagged_class_dispatch(Class, Gen, MemoKey)
+    end.
+
+%% The memo miss of tagged_class_dispatch/1: fetch through the derived cache,
+%% then memoise the answer unless Compute ran and declined to cache it.
+-spec fetch_tagged_class_dispatch(atom(), integer() | undefined, term()) ->
+    exception | {stdlib, atom()} | {value, atom()}.
+fetch_tagged_class_dispatch(Class, Gen, MemoKey) ->
+    Resolved = beamtalk_class_derived_cache:fetch(
         {tagged_class_dispatch, Class},
-        fun() -> resolve_tagged_class_dispatch(Class) end,
+        fun() ->
+            case resolve_tagged_class_dispatch(Class) of
+                {nocache, _} = NoCache ->
+                    put(MemoKey, nocache),
+                    NoCache;
+                Cache ->
+                    Cache
+            end
+        end,
         fun(R) -> resolved_module_loaded(Class, R) end
-    ).
+    ),
+    case get(MemoKey) =/= nocache andalso Gen =/= undefined of
+        true -> put(MemoKey, {Gen, Resolved});
+        false -> erase(MemoKey)
+    end,
+    Resolved.
 
 -doc "Uncached derivation behind `tagged_class_dispatch/1`.".
 -spec resolve_tagged_class_dispatch(atom()) ->

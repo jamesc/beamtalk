@@ -548,7 +548,7 @@ no_generation_memoises_nothing() ->
     GenKey = {beamtalk_class_derived_cache, generation},
     Ref = persistent_term:get(GenKey),
     try
-        erase({beamtalk_class_derived_cache, memo}),
+        erase({beamtalk_primitive, tagged_class_dispatch, ?CLASS}),
         persistent_term:erase(GenKey),
         ?assertEqual(undefined, beamtalk_class_derived_cache:generation()),
         ?assertEqual({value, ?CLASS, ?MOD}, beamtalk_primitive:tagged_map_dispatch(Self)),
@@ -586,16 +586,7 @@ start_class(Name, Module, Superclass, Selectors) ->
 
 %% The calling process's tagged_class_dispatch/1 memo for Class (BT-4623).
 memo(Class) ->
-    %% The derived cache's per-process memo (BT-4652): {Gen, #{Key => Value}}.
-    case get({beamtalk_class_derived_cache, memo}) of
-        {Gen, Map} ->
-            case maps:find({tagged_class_dispatch, Class}, Map) of
-                {ok, V} -> {Gen, V};
-                error -> undefined
-            end;
-        undefined ->
-            undefined
-    end.
+    get({beamtalk_primitive, tagged_class_dispatch, Class}).
 
 -doc """
 Load a module exporting `getX/1`, which returns `Field` from the receiver map —
