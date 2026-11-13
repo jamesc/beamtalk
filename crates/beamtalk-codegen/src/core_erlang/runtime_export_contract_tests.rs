@@ -395,6 +395,19 @@ fn open_heads(src: &str, origin_file: &str) -> Vec<OpenHead> {
             });
         }
     }
+    // `form::call("beamtalk_m", "f", …)` (BT-4685): module and function are
+    // both literal arguments of the structural constructor.
+    let form_call =
+        regex::Regex::new(r#"form::call\(\s*"(beamtalk_[a-z0-9_]+)",\s*"([^"]+)""#).expect("regex");
+    for caps in form_call.captures_iter(src) {
+        let whole = caps.get(0).expect("match");
+        let line = src[..whole.start()].matches('\n').count() + 1;
+        out.push(OpenHead {
+            module: caps[1].to_string(),
+            function: Some(caps[2].to_string()),
+            origin: format!("{origin_file}:{line}"),
+        });
+    }
     out
 }
 

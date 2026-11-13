@@ -403,15 +403,14 @@ impl CoreErlangGenerator {
         error_var: String,
         stack_var: String,
     ) -> Document<'static> {
-        docvec![
-            "primop 'raw_raise'(",
-            leaf::var(type_var),
-            ", ",
-            leaf::var(error_var),
-            ", ",
-            leaf::var(stack_var),
-            ")",
-        ]
+        beamtalk_cerl_doc::form::primop(
+            "raw_raise",
+            [
+                leaf::var(type_var),
+                leaf::var(error_var),
+                leaf::var(stack_var),
+            ],
+        )
     }
 
     /// The snapshot variable of the `on:do:` whose exception-class variable is
