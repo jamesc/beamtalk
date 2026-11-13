@@ -1041,6 +1041,11 @@ pub(crate) fn find_narrowing_casts(
         ) {
             return;
         }
+        // The assignment itself is recorded whenever inference ran over it;
+        // without that entry the body was never inferred, so nothing is known.
+        if type_map.get(*span).is_none() {
+            return;
+        }
         // The type map omits `Dynamic(Unknown)` (it carries no provenance), so
         // an absent entry is a `Dynamic` right-hand side, the common cast.
         let rhs_ty = type_map.get(value.span()).unwrap_or(&unknown);
