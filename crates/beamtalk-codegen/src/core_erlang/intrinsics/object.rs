@@ -40,8 +40,7 @@ impl KindOfFn {
     #[cfg(test)]
     pub(in crate::core_erlang) const fn arity(self) -> usize {
         match self {
-            Self::Builtin => 3,
-            Self::Named => 3,
+            Self::Builtin | Self::Named => 3,
         }
     }
 
