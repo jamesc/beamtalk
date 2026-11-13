@@ -22,6 +22,7 @@
 mod basic_ops;
 mod enumeration_ops;
 mod filter_ops;
+mod fold_driver;
 mod search_ops;
 mod transform_ops;
 

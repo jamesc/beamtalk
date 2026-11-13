@@ -5,7 +5,7 @@
 
 use super::super::super::intrinsics::validate_block_arity_exact;
 use super::super::super::{CoreErlangGenerator, Result};
-use super::super::{BodyKind, ListOpKind, ThreadingPlan};
+use super::fold_driver::AccumulateOp;
 use beamtalk_cerl_doc::Document;
 use beamtalk_cerl_doc::docvec;
 use beamtalk_cerl_doc::leaf;
@@ -98,209 +98,17 @@ impl CoreErlangGenerator {
     }
 
     /// Generates stateful `select:`/`reject:` using `lists:foldl` with state threading.
-    ///
-    /// In map mode: accumulator is `{ResultList, StateAcc}`.
-    /// In tuple mode: accumulator is `{ResultList, Var1, ..., VarN}`.
-    #[allow(clippy::too_many_lines)]
     pub(in crate::core_erlang) fn generate_list_filter_with_mutations(
         &mut self,
         receiver: &Expression,
         body: &Block,
         negate: bool,
     ) -> Result<Document<'static>> {
-        // Use tuple accumulator when eligible.
-        let plan = ThreadingPlan::new_for_foldl_list_op(self, body, ListOpKind::Accumulate);
-        self.emit_loop_convention_diagnostic(&plan, body.span);
-
-        let list_var = self.fresh_temp_var("temp");
-        // Save recv var for is_binary check after foldl (String-aware result).
-        let recv_var_for_str_check = list_var.clone();
-        let recv_code = self.expression_doc(receiver)?;
-        let safe_list_var = self.fresh_temp_var("temp");
-        let lambda_var = self.fresh_temp_var("temp");
-        let item_param = body.parameters.first().map_or("_", |p| p.name.as_str());
-        let item_var = Self::to_core_erlang_var(item_param);
-        let acc_state_var = self.fresh_temp_var("AccSt");
-
-        if plan.use_tuple_acc {
-            // Tuple-accumulator path.
-            let vars_doc = plan.current_vars_doc(self); // Before push_scope.
-            let init_tuple_doc = docvec!["{ [], ", vars_doc, "}"];
-
-            let mut docs: Vec<Document<'static>> = Vec::new();
-            docs.push(super::list_recv_to_safe_list_doc(
-                recv_code,
-                Some(if negate { "reject:" } else { "select:" }),
-                list_var,
-                safe_list_var.clone(),
-            ));
-            docs.push(docvec![
-                "let ",
-                leaf::var(lambda_var.clone()),
-                " = fun (",
-                leaf::var(item_var.clone()),
-                ", ",
-                leaf::var(acc_state_var.clone()),
-                ") -> let AccList = call 'erlang':'element'(1, ",
-                leaf::var(acc_state_var.clone()),
-                ") in ",
-            ]);
-
-            // BT-4121: the guarded-operator marker spans the body lowering.
-            let prestore_state = self.state_var_to_store();
-            self.push_guarded_op_loop(body, None);
-            self.push_scope();
-            if let Some(param) = body.parameters.first() {
-                self.bind_var(&param.name, &item_var);
-            }
-            let (body_doc, _) = self.generate_foldl_loop_body(
-                body,
-                &plan,
-                &BodyKind::FoldlFilter {
-                    item_var: item_var.clone(),
-                    negate,
-                },
-                &acc_state_var,
-                1,
-            )?;
-            docs.push(body_doc);
-            self.pop_scope();
-            // BT-4121: check out the marker; splice the pre-store (nil
-            // unless the loop brackets with a `State` in scope).
-            let (guarded_op_bracket, prestore) = self.checkout_guarded_op_loop_docs(
-                self.pop_guarded_op_loop(),
-                false,
-                body.span,
-                &prestore_state,
-            );
-            docs.insert(0, prestore);
-
-            let fold_result = self.fresh_temp_var("FoldResult");
-            let rev_list = self.fresh_temp_var("RevList");
-            let final_list = self.fresh_temp_var("FinalList");
-
-            // Extract each updated local var from tuple positions 2..N.
-            let extract_doc = plan.generate_tuple_extract_suffix_doc(&fold_result, 2, self);
-
-            // String-aware result wrapping for filter ops.
-            let (str_binding, str_result) =
-                self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
-
-            // Re-pack into StateAcc for outer method-body `maps:get` extraction.
-            let (repack_doc, stateacc) = plan.append_repack_stateacc_doc(self, guarded_op_bracket);
-            docs.push(docvec![
-                ThreadingPlan::foldl_call_doc(
-                    &lambda_var,
-                    init_tuple_doc,
-                    &safe_list_var,
-                    &fold_result
-                ),
-                "let ",
-                leaf::var(rev_list.clone()),
-                " = call 'erlang':'element'(1, ",
-                leaf::var(fold_result),
-                ") in let ",
-                leaf::var(final_list.clone()),
-                " = call 'lists':'reverse'(",
-                leaf::var(rev_list),
-                ") in ",
-                str_binding.clone(),
-                " in ",
-                extract_doc,
-                repack_doc,
-                "{",
-                leaf::var(str_result),
-                ", ",
-                leaf::var(stateacc),
-                "}",
-            ]);
-            return Ok(Document::Vec(docs));
-        }
-
-        // Map-accumulator path.
-        let (pack_doc, init_state) = plan.generate_pack_prefix(self);
-
-        let mut docs: Vec<Document<'static>> = Vec::new();
-        docs.push(pack_doc);
-        docs.push(super::list_recv_to_safe_list_doc(
-            recv_code,
-            Some(if negate { "reject:" } else { "select:" }),
-            list_var,
-            safe_list_var.clone(),
-        ));
-        docs.push(docvec![
-            "let ",
-            leaf::var(lambda_var.clone()),
-            " = fun (",
-            leaf::var(item_var.clone()),
-            ", ",
-            leaf::var(acc_state_var.clone()),
-            ") -> ",
-            "let AccList = call 'erlang':'element'(1, ",
-            leaf::var(acc_state_var.clone()),
-            ") in let StateAcc = call 'erlang':'element'(2, ",
-            leaf::var(acc_state_var.clone()),
-            ") in ",
-        ]);
-
-        self.push_scope();
-        if let Some(param) = body.parameters.first() {
-            self.bind_var(&param.name, &item_var);
-        }
-        let (body_doc, _) = self.generate_foldl_loop_body(
-            body,
-            &plan,
-            &BodyKind::FoldlFilter {
-                item_var: item_var.clone(),
-                negate,
-            },
-            &acc_state_var,
-            1,
-        )?;
-        docs.push(body_doc);
-        self.pop_scope();
-
-        let fold_result = self.fresh_temp_var("FoldResult");
-        let rev_list = self.fresh_temp_var("RevList");
-        let final_list = self.fresh_temp_var("FinalList");
-        let state_out = self.fresh_temp_var("StOut");
-
-        // String-aware result wrapping for map-acc filter path.
-        let (str_binding_doc, str_result) =
-            self.generate_list_like_result_binding(&recv_var_for_str_check, &final_list);
-
-        let pre_doc = docvec![
-            ThreadingPlan::foldl_call_doc(
-                &lambda_var,
-                docvec!["{[], ", leaf::var(init_state), "}"],
-                &safe_list_var,
-                &fold_result
-            ),
-            "let ",
-            leaf::var(rev_list.clone()),
-            " = call 'erlang':'element'(1, ",
-            leaf::var(fold_result.clone()),
-            ") in let ",
-            leaf::var(final_list.clone()),
-            " = call 'lists':'reverse'(",
-            leaf::var(rev_list),
-            ") in ",
-        ];
-        let post_doc = docvec![
-            " in let ",
-            leaf::var(state_out.clone()),
-            " = call 'erlang':'element'(2, ",
-            leaf::var(fold_result),
-            ") in ",
-            plan.generate_extract_suffix_doc(&state_out, self),
-            "{",
-            leaf::var(str_result),
-            ", ",
-            leaf::var(state_out),
-            "}",
-        ];
-        docs.push(docvec![pre_doc, str_binding_doc, post_doc]);
-
-        Ok(Document::Vec(docs))
+        let op = if negate {
+            AccumulateOp::Reject
+        } else {
+            AccumulateOp::Select
+        };
+        self.generate_accumulate_fold_with_mutations(receiver, body, op)
     }
 }
