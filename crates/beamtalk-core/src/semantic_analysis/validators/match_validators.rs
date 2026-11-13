@@ -335,7 +335,7 @@ pub(crate) fn is_concrete_leaf_class(class_name: &str, hierarchy: &ClassHierarch
 /// appear anywhere a sub-pattern can, not just as an arm's top-level pattern.
 ///
 /// This is a semantic-analysis-stage check; codegen is
-/// `generate_type_pattern`. Three checks, in order:
+/// `generate_type_pattern`. Four checks, in order:
 ///
 /// - **`Character`** is never accepted, known or not: it shares `Integer`'s
 ///   runtime representation with no distinct tag (ADR 0107 §Phase A scope),
@@ -343,6 +343,9 @@ pub(crate) fn is_concrete_leaf_class(class_name: &str, hierarchy: &ClassHierarch
 ///   runtime. (Unlike `Boolean`, above, `Character` genuinely cannot be
 ///   disambiguated from `Integer` by any runtime test — it compiles to a
 ///   plain Erlang integer, not merely a nominal hierarchy child.)
+/// - **Static-only handle class** ([`STATIC_ONLY_HANDLE_CLASSES`], BT-4797) is
+///   a `Warning`: no run-time value is tagged with it, so the arm can never
+///   match.
 /// - **Unknown class name** reuses the existing unresolved-class diagnostic
 ///   verbatim (ADR 0100) — same `Warning` severity, same
 ///   [`DiagnosticCategory::UnresolvedClass`] category, and the same
