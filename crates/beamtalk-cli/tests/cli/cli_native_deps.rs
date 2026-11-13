@@ -22,6 +22,7 @@
 
 use crate::cli_common;
 
+use predicates::prelude::PredicateBooleanExt;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -262,6 +263,76 @@ fn changing_one_native_dep_keeps_others_pinned() {
         "removed dependency's checkout must be deleted"
     );
     assert!(!lockfile(project).contains("name = \"baz\""));
+}
+
+/// BT-4809: a fresh-checkout `beamtalk test` (no `_build`) must not warn
+/// `Unknown Erlang module` for modules of the package's compiled
+/// `[native.dependencies]`, direct (`foo`) or transitive (`bar`), called from
+/// `test/` sources and `test/fixtures/`. A genuinely unknown module still
+/// warns. `beamtalk test` is the *first* command run, so the dep ebin dirs do
+/// not exist when the test sources start compiling unless the build comes first.
+#[test]
+fn fresh_test_knows_native_dep_modules_but_warns_on_unknown() {
+    let repos = tempfile::tempdir().expect("tempdir");
+    let bar = make_app_repo(repos.path(), "bar", "bar1", "");
+    let foo = make_app_repo(
+        repos.path(),
+        "foo",
+        "foo1",
+        &format!(
+            "{{bar, {{git, \"{}\", {{branch, \"main\"}}}}}}",
+            file_url(&bar)
+        ),
+    );
+
+    let project = cli_common::fixture_project();
+    let project = project.path();
+    write_manifest(
+        project,
+        &format!(
+            "foo = {{ git = \"{}\", branch = \"main\" }}",
+            file_url(&foo)
+        ),
+    );
+    std::fs::create_dir_all(project.join("test/fixtures")).expect("mkdir fixtures");
+    // Never-invoked helpers: analysis checks the calls, the suite never runs them.
+    std::fs::write(
+        project.join("test/fixtures/native_dep_fixture.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         sealed Value subclass: NativeDepFixture\n\
+         \n\
+         \x20\x20direct => Erlang foo version\n\
+         \x20\x20transitive => Erlang bar version\n",
+    )
+    .expect("write fixture");
+    std::fs::write(
+        project.join("test/NativeDepTest.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         TestCase subclass: NativeDepTest\n\
+         \n\
+         \x20\x20probeDirect => Erlang foo version\n\
+         \x20\x20probeTransitive => Erlang bar version\n\
+         \x20\x20probeUnknown => Erlang definitely_unknown_xyz ping\n\
+         \n\
+         \x20\x20testRuns => self assert: true\n",
+    )
+    .expect("write test");
+    assert!(!project.join("_build").exists(), "must be a fresh checkout");
+
+    cli_common::beamtalk()
+        .current_dir(project)
+        .args(["test", "--quiet"])
+        .assert()
+        .success()
+        .stderr(predicates::str::contains(
+            "Unknown Erlang module `definitely_unknown_xyz`",
+        ))
+        .stderr(predicates::str::contains("Unknown Erlang module `foo`").not())
+        .stderr(predicates::str::contains("Unknown Erlang module `bar`").not());
 }
 
 // ── hex sources (BT-4582) ────────────────────────────────────────────
