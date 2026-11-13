@@ -1285,7 +1285,7 @@ recompile_with_method(ClassSource, MethodInfo, Expression, Warnings, State) ->
     SourceBin = unicode:characters_to_binary(CombinedSource),
     %% Include superclass index so cross-file inheritance resolves correctly.
     SuperclassIndex = beamtalk_repl_compiler:build_class_superclass_index(),
-    Options0 = #{stdlib_mode => false},
+    Options0 = #{stdlib_mode => false, redefine => true},
     Options1 =
         case map_size(SuperclassIndex) of
             0 -> Options0;

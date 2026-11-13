@@ -16,10 +16,13 @@ SameFileExtRepl make x
 // => 9
 
 // Plain class
-SameFileExtObjRepl new extra
+SameFileExtObjRepl extra
 // => 2
 
-SameFileExtObjRepl make base
+SameFileExtObjRepl make
+// => 7
+
+SameFileExtObjRepl base
 // => 1
 
 // Actor

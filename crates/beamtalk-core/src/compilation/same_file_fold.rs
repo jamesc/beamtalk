@@ -37,13 +37,34 @@ fn is_native_actor_decl(class: &ClassDefinition) -> bool {
     class.backing_module.is_some() && class.superclass_name() == "Actor"
 }
 
+/// What the fold does when a same-file extension defines a selector the class
+/// already has (same selector and kind, same side).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DuplicatePolicy {
+    /// Append, so the class-body duplicate check reports it (file compiles).
+    Reject,
+    /// Replace the existing method. Only for a REPL live redefinition
+    /// (`LiveActor >> bump => ...` typed at the prompt), which is an explicit
+    /// request to redefine, not a file with two definitions.
+    Replace,
+}
+
+/// Folds every same-file extension in `module` into its host class, rejecting
+/// duplicates ([`DuplicatePolicy::Reject`]).
+pub fn fold_same_file_extensions(module: &mut Module) -> Vec<Diagnostic> {
+    fold_same_file_extensions_with(module, DuplicatePolicy::Reject)
+}
+
 /// Folds every same-file extension in `module` into its host class.
 ///
 /// Returns the diagnostics the fold itself produces (instance-side extensions
 /// on `native:` actors). Duplicate selectors are left for the class-body
 /// duplicate check. Idempotent: a folded module has no same-file extensions
 /// left.
-pub fn fold_same_file_extensions(module: &mut Module) -> Vec<Diagnostic> {
+pub fn fold_same_file_extensions_with(
+    module: &mut Module,
+    policy: DuplicatePolicy,
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     if module.method_definitions.is_empty() {
         return diagnostics;
@@ -77,10 +98,22 @@ pub fn fold_same_file_extensions(module: &mut Module) -> Vec<Diagnostic> {
             );
             continue;
         }
-        if def.is_class_method {
-            class.class_methods.push(def.method);
+        let methods = if def.is_class_method {
+            &mut class.class_methods
         } else {
-            class.methods.push(def.method);
+            &mut class.methods
+        };
+        let existing = (policy == DuplicatePolicy::Replace)
+            .then(|| {
+                let selector = def.method.selector.name();
+                methods
+                    .iter()
+                    .position(|m| m.selector.name() == selector && m.kind == def.method.kind)
+            })
+            .flatten();
+        match existing {
+            Some(idx) => methods[idx] = def.method,
+            None => methods.push(def.method),
         }
     }
     diagnostics
@@ -131,6 +164,13 @@ mod tests {
         let mut m = parse_module("Object subclass: Foo\n  foo => 1\n\nFoo >> foo => 2\n");
         fold_same_file_extensions(&mut m);
         assert_eq!(m.classes[0].methods.len(), 2);
+    }
+
+    #[test]
+    fn replace_policy_redefines_instead_of_appending() {
+        let mut m = parse_module("Object subclass: Foo\n  foo => 1\n\nFoo >> foo => 2\n");
+        fold_same_file_extensions_with(&mut m, DuplicatePolicy::Replace);
+        assert_eq!(m.classes[0].methods.len(), 1);
     }
 
     #[test]

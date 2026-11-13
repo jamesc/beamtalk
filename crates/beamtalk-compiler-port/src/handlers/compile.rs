@@ -89,8 +89,19 @@ pub(crate) fn handle_compile(request: &Map) -> Term {
     // One compilation unit per class (BT-4721): fold same-file extensions into
     // the host class before analysis, exactly as `beamtalk build` does. Only
     // cross-file (foreign) standalone methods remain afterwards.
-    parse_diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
+    // A REPL live redefinition (`recompile_with_method` appends the typed
+    // `X >> m => ...` to the stored class source) replaces; a file never does.
+    let policy = if map_get(request, "redefine")
+        .and_then(term_to_bool)
+        .unwrap_or(false)
+    {
+        beamtalk_core::compilation::DuplicatePolicy::Replace
+    } else {
+        beamtalk_core::compilation::DuplicatePolicy::Reject
+    };
+    parse_diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions_with(
         &mut module,
+        policy,
     ));
 
     // Run semantic analysis, also capturing `referenced_aliases` —

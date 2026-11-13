@@ -7,7 +7,7 @@
 // arm, never a `beamtalk_extensions` row. The REPL gives the same answers
 // (tests/repl-protocol/cases/same_file_extension.btscript).
 //
-// Fixtures: stdlib/test/fixtures/same_file_ext_obj.bt (plain)
+// Fixtures: stdlib/test/fixtures/same_file_ext_obj.bt (plain, class side)
 //           stdlib/test/fixtures/same_file_ext_pt.bt (value)
 //           stdlib/test/fixtures/same_file_ext_ac.bt (actor)
 //           stdlib/test/fixtures/same_file_ext_native.bt (native: class side)
@@ -30,13 +30,13 @@ TestCase subclass: SameFileExtensionTest
 
   testActorClassSideExtension => self assert: SameFileExtAc cextra equals: 42
 
-  testPlainInstanceExtension => self assert: SameFileExtObj new extra equals: 2
+  testPlainClassSideExtension =>
+    self assert: SameFileExtObj extra equals: 2
+    self assert: SameFileExtObj make equals: 7
 
-  testPlainClassSideExtension => self assert: SameFileExtObj make base equals: 1
-
-  testPlainExtensionIsAnOrdinaryMethod =>
-    self assert: (SameFileExtObj new respondsTo: #extra) equals: true
-    self assert: (SameFileExtObj includesSelector: #extra) equals: true
+  testPlainExtensionIsAnOrdinaryClassMethod =>
+    self assert: (SameFileExtObj respondsTo: #extra) equals: true
+    self assert: SameFileExtObj base equals: 1
 
   testNativeClassSideExtension =>
     self assert: SameFileExtNative cextra equals: 42
