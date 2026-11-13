@@ -54,6 +54,8 @@ raise via `raise_not_string/2`.
     words/1,
     take/2,
     drop/2,
+    is_empty/1,
+    is_not_empty/1,
     is_blank/1,
     is_digit/1,
     is_alpha/1,
@@ -547,6 +549,21 @@ drop({beamtalk_string, Bin} = Str, N) when is_integer(N) ->
 drop(Bin, N) when is_binary(Bin) -> drop({beamtalk_string, Bin}, N);
 drop(Str, _) ->
     raise_not_string('drop:', Str).
+
+-doc "Test if string has zero bytes (O(1); no grapheme walk).".
+-spec is_empty(t() | binary()) -> boolean().
+is_empty(<<>>) ->
+    true;
+is_empty(Bin) when is_binary(Bin) ->
+    false;
+is_empty({beamtalk_string, Bin}) when is_binary(Bin) ->
+    Bin =:= <<>>;
+is_empty(Other) ->
+    is_empty(beamtalk_text:unwrap_or_raise(Other, 'String', 'isEmpty', ?NOT_STRING_HINT)).
+
+-doc "Test if string has at least one byte (O(1); no grapheme walk).".
+-spec is_not_empty(t() | binary()) -> boolean().
+is_not_empty(Str) -> not is_empty(Str).
 
 -doc "Test if string is empty or only whitespace.".
 -spec is_blank(t() | binary()) -> boolean().

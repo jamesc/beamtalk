@@ -46,6 +46,7 @@ See: ADR 0028 §1 (Module Proxy Pattern)
     direct_call/4,
     dispatch/3,
     ffi_call_raised/8,
+    ffi_call_raised/9,
     has_method/1,
     native_call/4,
     native_call/5,
@@ -290,8 +291,9 @@ native_call(Module, FunName, Args, {Class, Selector}, Mode) when
 Error path of a direct inline FFI call (BT-4485).
 
 Codegen emits `call 'M':'F'(Args...)` without the proxy when the FFI type
-table proves the result needs no coercion and every argument is a scalar
-(statically, and checked at run time with `is_number`/`is_atom`/`is_pid`;
+table proves the result needs no coercion and every argument is a scalar or a
+binary (statically, and checked at run time with `is_number`/`is_atom`/
+`is_pid`/`is_binary`;
 see `ffi_passthrough_conformance.json`). The call keeps the proxy's error
 translation: its `try` hands every exception here, and this runs the same
 `classify_ffi_exception` policy as `direct_call/4`, so a direct call raises
@@ -305,14 +307,42 @@ Beamtalk code raised the error. When the call site is not in `Stack` (a
 callee deeper than the stacktrace depth) every frame is the callee's, as on
 the proxy path when its frame is cut off.
 
-Scalar arguments make the `badarg` charlist retry a no-op (no binary or
-String to convert), so it never re-runs the call, and no class-variable
-snapshot is needed: `none` restores nothing.
+A scalar argument makes the `badarg` charlist retry a no-op (nothing to
+convert), so `ffi_call_raised/8` passes no snapshot. A binary argument
+(BT-4759) does not: a `badarg` retries once with the binary as a charlist,
+here, exactly as on the proxy path (the retry result is coerced the same way),
+and such a call site uses `ffi_call_raised/9` to pass the class-variable
+snapshot it read before the call. No argument can be a fun or hold one. A
+tagged `String` (what a Beamtalk `String` is at run time) fails the call
+site's `is_binary` guard and takes `direct_call/4`, which unwraps it.
 """.
 -spec ffi_call_raised(
     error | exit | throw, term(), list(), atom(), atom(), list(), coercion_mode(), term()
 ) -> term().
-ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site) when
+ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site) ->
+    ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, none).
+
+-doc """
+`ffi_call_raised/8` for a call site with a binary argument (BT-4759).
+
+`Snap` is `beamtalk_class_vars:snapshot()` read by the call site before the
+call, as `apply_with_coercion/6` reads it. The `badarg` charlist retry restores
+it first, so class-variable writes a failed first attempt made (a callee that
+called back into Beamtalk) do not survive into the retry (ADR 0130 §4,
+BT-3728).
+""".
+-spec ffi_call_raised(
+    error | exit | throw,
+    term(),
+    list(),
+    atom(),
+    atom(),
+    list(),
+    coercion_mode(),
+    term(),
+    beamtalk_class_vars:snapshot()
+) -> term().
+ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site, Snap) when
     Mode =:= stock; Mode =:= beamtalk
 ->
     classify_ffi_exception(
@@ -325,7 +355,7 @@ ffi_call_raised(Class, Reason, Stack, Module, FunName, Args, Mode, Site) when
         Args,
         FunName,
         none,
-        fun(M, F, A, Sel, Ctx, St) -> maybe_retry_badarg(M, F, A, Sel, Ctx, St, none, Mode) end
+        fun(M, F, A, Sel, Ctx, St) -> maybe_retry_badarg(M, F, A, Sel, Ctx, St, Snap, Mode) end
     ).
 
 -doc """

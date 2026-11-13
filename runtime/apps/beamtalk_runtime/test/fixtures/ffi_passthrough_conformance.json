@@ -1,5 +1,5 @@
 {
-  "_comment": "BT-4485: the types whose values cross beamtalk_erlang_proxy unchanged, so an inline FFI call may skip the proxy. Rust: native_type_registry ffi_result_passes_unchanged / ffi_arg_passes_unchanged must accept exactly the listed types and reject the not_proven ones. Erlang: beamtalk_erlang_proxy_tests checks every sample (an Erlang expression) passes through unchanged, and every arg sample passes one of arg_runtime_guards (the erlang BIFs a direct call checks each argument with at run time; any other value falls back to the proxy). A '#name' type is a Symbol singleton.",
+  "_comment": "BT-4485: the types whose values cross beamtalk_erlang_proxy unchanged, so an inline FFI call may skip the proxy. Rust: native_type_registry ffi_result_passes_unchanged / ffi_arg_passes_unchanged must accept exactly the listed types and reject the not_proven ones. Erlang: beamtalk_erlang_proxy_tests checks every sample (an Erlang expression) passes through unchanged, and every arg sample passes one of arg_runtime_guards (the erlang BIFs a direct call checks each argument with at run time; any other value, such as a tagged String, a charlist or a non-binary bitstring, falls back to the proxy; a String or Binary typed arg is checked with arg_binary_guard (is_binary) as well, and such a call site takes a class-variable snapshot for the badarg retry). A '#name' type is a Symbol singleton.",
   "result_passthrough": [
     {"type": "Integer", "samples": ["0", "-7", "123456789012345678901234567890"]},
     {"type": "Float", "samples": ["1.5", "-0.0"]},
@@ -29,8 +29,11 @@
     {"type": "Nil", "samples": ["nil"]},
     {"type": "Pid", "samples": ["self()"]},
     {"type": "Symbol", "samples": ["foo", "ok", "error"]},
+    {"type": "Binary", "samples": ["<<>>", "<<\"abc\">>", "<<\"ok\">>"]},
+    {"type": "String", "samples": ["<<\"abc\">>", "<<\"\"/utf8>>"]},
     {"type": "#ok", "samples": ["ok"]}
   ],
   "arg_runtime_guards": ["is_number", "is_atom", "is_pid"],
-  "arg_not_proven": ["String", "Binary", "List", "Tuple", "Dictionary", "Block", "Result", "Object", "Dynamic"]
+  "arg_binary_guard": "is_binary",
+  "arg_not_proven": ["List", "Tuple", "Dictionary", "Block", "Result", "Object", "Dynamic"]
 }
