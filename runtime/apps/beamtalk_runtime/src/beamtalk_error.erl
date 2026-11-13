@@ -20,6 +20,11 @@ See docs/internal/design-self-as-object.md Section 3.8 for error taxonomy.
     new/2,
     new/3,
     new/4,
+    new_fmt/5,
+    bad_value/5,
+    supervisor_reserved_name/3,
+    name_registered/3,
+    with_message_fmt/3,
     with_message/2,
     render_text/1,
     with_selector/2,
@@ -736,6 +741,45 @@ chars_to_binary(Chars) ->
         Bin when is_binary(Bin) -> Bin;
         _ -> erlang:error(badarg, [Chars])
     end.
+
+%%% ============================================================================
+%%% Formatted-text constructors (BT-4793)
+%%% ============================================================================
+
+-doc """
+Like `new/4`, with the hint built from `io_lib:format(Fmt, Args)` and encoded
+through `chars_to_binary/1` (so `~ts` is safe for any codepoint).
+""".
+-spec new_fmt(atom(), atom(), atom(), io:format(), [term()]) -> #beamtalk_error{}.
+new_fmt(Kind, Class, Selector, Fmt, Args) ->
+    new(Kind, Class, Selector, chars_to_binary(io_lib:format(Fmt, Args))).
+
+-doc "Like `with_message/2`, with the message built from `io_lib:format(Fmt, Args)`.".
+-spec with_message_fmt(#beamtalk_error{}, io:format(), [term()]) -> #beamtalk_error{}.
+with_message_fmt(Error, Fmt, Args) ->
+    with_message(Error, chars_to_binary(io_lib:format(Fmt, Args))).
+
+-doc """
+A `type_error` for a rejected argument: the formatted text is the hint and the
+offending `Value` is carried in `details`.
+""".
+-spec bad_value(atom(), atom(), io:format(), [term()], term()) -> #beamtalk_error{}.
+bad_value(Class, Selector, Fmt, Args, Value) ->
+    with_details(new_fmt(type_error, Class, Selector, Fmt, Args), #{value => Value}).
+
+-doc "A `reserved_name` error for a supervisor started under a reserved `Name`.".
+-spec supervisor_reserved_name(atom(), atom(), term()) -> #beamtalk_error{}.
+supervisor_reserved_name(Class, Selector, Name) ->
+    new_fmt(
+        reserved_name, Class, Selector, "Cannot start a supervisor under reserved name '~ts'", [
+            Name
+        ]
+    ).
+
+-doc "A `name_registered` error: `Name` is already taken.".
+-spec name_registered(atom(), atom(), term()) -> #beamtalk_error{}.
+name_registered(Class, Selector, Name) ->
+    new_fmt(name_registered, Class, Selector, "Name '~ts' is already registered", [Name]).
 
 %%% ============================================================================
 %%% Shared system-error constructors (BT-4676)
