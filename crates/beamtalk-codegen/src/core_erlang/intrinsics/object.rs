@@ -401,16 +401,22 @@ impl CoreErlangGenerator {
         // an override exists, and when the class process is dead, where the
         // literal raises `class_not_found` exactly as it always did.
         let send_class = self.fresh_temp_var("KindOfClass");
-        let send = docvec![
-            "let ",
-            leaf::var(send_class.clone()),
-            " = ",
-            class_doc,
-            " in call 'beamtalk_message_dispatch':'send'(",
+        // The call node carries the send's source line, as every dispatch
+        // call does (`call_site_lines`).
+        let send_call = self.annotate_current_send_call(docvec![
+            "call 'beamtalk_message_dispatch':'send'(",
             leaf::var(recv_var.clone()),
             ", 'isKindOf:', [",
-            leaf::var(send_class),
+            leaf::var(send_class.clone()),
             "])"
+        ]);
+        let send = docvec![
+            "let ",
+            leaf::var(send_class),
+            " = ",
+            class_doc,
+            " in ",
+            send_call
         ];
         let call_doc = docvec![
             "let ",

@@ -47,7 +47,7 @@ TestCase subclass: IsKindOfInlineOverrideTest
     self assert: (self isString: "warm")
     self deny: (self isString: 42)
 
-  testObjectExtensionInstalledAtRunTimeTakesEffectForEveryReceiver =>
+  testExtensionOnOneClassDisablesInlineForEverySite =>
     Erlang beamtalk_extensions
       register: #Integer
       selector: #isKindOf:

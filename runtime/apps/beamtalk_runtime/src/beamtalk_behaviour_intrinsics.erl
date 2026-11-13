@@ -1008,9 +1008,12 @@ its answer is `TestAnswer`: a value passes the test exactly when its class is
 `Behaviour` or one of its (stdlib, sealed) subclasses. Everything else takes
 the ordinary send, unchanged.
 
-The caller evaluates `Behaviour` but this path does not look at it, so a dead
-or restarting class process does not change the answer here, as it does not
-for a `binding :: Class` match arm.
+The compiled caller (BT-4764) answers inline when the receiver's test passes
+and, for a receiver that is neither a tuple nor a map, when it fails; it checks
+that the class process is alive first, and takes the plain send (which raises
+`class_not_found` for a dead class) otherwise. This function is the cold path
+for tuple and map receivers and for strategies that cannot prove a plain value.
+It does not look at `Behaviour` on its plain-value branch.
 """.
 -spec isKindOfBuiltin(term(), term(), boolean()) -> term().
 isKindOfBuiltin(Receiver, Behaviour, TestAnswer) ->

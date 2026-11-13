@@ -21,7 +21,7 @@
 // (beamtalk-codegen) derives that set from the routing fixture and fails on a
 // missing class. The override case cannot run here (installing an
 // `isKindOf:` override turns the fast path off node-wide); it is covered by
-// `tests/repl-protocol/cases/is_kind_of_inline_override.btscript` and
+// the serial `stdlib/test/is_kind_of_inline_override_test.bt` and
 // EUnit (`beamtalk_tagged_map_routing_conformance_tests`).
 //
 // Fixtures: stdlib/test/fixtures/type_pattern_actor_fixture.bt,
