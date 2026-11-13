@@ -641,6 +641,18 @@ release_mode_records_capabilities_test() ->
         )
     end).
 
+%% BT-4792: the runtime reaches the workspace pipeline through a registered
+%% callback module that lives exactly as long as the capability guard.
+capability_guard_registers_workspace_callback_test() ->
+    ok = beamtalk_workspace_callback:unregister(),
+    {ok, Pid} = beamtalk_workspace_capability_guard:start_link(#{
+        mode => workspace, include_compiler => true
+    }),
+    ?assertEqual({ok, beamtalk_repl_eval}, beamtalk_workspace_callback:registered_module()),
+    ok = gen_server:stop(Pid),
+    ?assertEqual(none, beamtalk_workspace_callback:registered_module()),
+    ?assertEqual(none, beamtalk_capability:recorded()).
+
 workspace_mode_records_capabilities_test() ->
     with_capabilities_restored(fun() ->
         _ = child_ids(test_config()),

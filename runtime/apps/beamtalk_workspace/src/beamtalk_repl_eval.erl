@@ -2,6 +2,7 @@
 %% SPDX-License-Identifier: Apache-2.0
 
 -module(beamtalk_repl_eval).
+-behaviour(beamtalk_workspace_callback).
 
 %%% **DDD Context:** REPL Session Context
 
@@ -26,7 +27,7 @@ module loading to beamtalk_repl_loader.
     handle_load/2, handle_load/3,
     handle_load_source/3
 ]).
-%% ADR 0040 Phase 2 — stateless class reload (called via erlang:apply from beamtalk_runtime)
+%% ADR 0040 Phase 2 — stateless class reload (called from beamtalk_runtime via beamtalk_workspace_callback)
 -export([reload_class_file/1, reload_class_file/2]).
 
 %% Cockpit reload-from-disk after a content-mutating git op. Reloads a
@@ -44,20 +45,18 @@ module loading to beamtalk_repl_loader.
 -export([revert_remove_class/2]).
 
 %% ADR 0095 Phase 2 — stateless evaluate-in-context for the Inspector's
-%% value `evaluate:`. Called via erlang:apply from beamtalk_inspector
-%% (beamtalk_runtime) so the runtime keeps no compile-time dep on beamtalk_workspace.
+%% value `evaluate:`. Called from beamtalk_inspector
+%% (beamtalk_runtime) via beamtalk_workspace_callback.
 -export([eval_with_self/2]).
 
 %% ADR 0082 Phase 1 — stateless live method patch backing
-%% `Behaviour compile:source:' / `tryCompile:source:'. Called via erlang:apply
-%% from beamtalk_behaviour_intrinsics so beamtalk_runtime keeps no compile-time
-%% dependency on beamtalk_workspace.
+%% `Behaviour compile:source:' / `tryCompile:source:'. Called via
+%% beamtalk_workspace_callback from beamtalk_class_refactor.
 -export([compile_method/4, compile_method/6, compile_method/7]).
 
 %% ADR 0105 Phase 3 — stateless pre-save advisory precheck backing
-%% `Behaviour precheckCompile:source:'. Called via erlang:apply from
-%% beamtalk_behaviour_intrinsics for the same compile-time-dependency reason
-%% as compile_method/4,6,7.
+%% `Behaviour precheckCompile:source:'. Called via
+%% beamtalk_workspace_callback from beamtalk_class_refactor.
 -export([precheck_method/4]).
 
 %% ADR 0082 revert completeness — remove a live method (the
@@ -69,9 +68,8 @@ module loading to beamtalk_repl_loader.
 -export([remove_method/3, remove_method/4, remove_class/1]).
 
 %% ADR 0112 Phase 3 — best-effort ChangeLog append after a
-%% successful `removeSelector:` call. Called via erlang:apply from
-%% beamtalk_behaviour_intrinsics for the same compile-time-dependency reason
-%% as remove_method/3,4 above; both are thin forwarding wrappers over
+%% successful `removeSelector:` call. Called via
+%% beamtalk_workspace_callback from beamtalk_class_refactor; both are thin forwarding wrappers over
 %% beamtalk_repl_loader, which already owns the classification helpers
 %% (`class_source_file/1` / `classify_source_file/1`) these functions reuse.
 -export([emit_remove_change_entry/5, emit_extension_remove_change_entry/7]).
@@ -81,7 +79,7 @@ module loading to beamtalk_repl_loader.
 %% forwarding wrappers over beamtalk_repl_loader, routed through this module
 %% for the same compile-time-dependency reason (a future `beamtalk_behaviour_
 %% intrinsics:classRenameTo/2`/`classRenameSelector/3` will
-%% call these via erlang:apply the same way remove_selector/2 already calls
+%% call these via beamtalk_workspace_callback the same way remove_selector/2 already calls
 %% remove_method/3,4).
 -export([rewrite_sites/2, validate_sites/2, emit_rewrite_change_entry/2]).
 
@@ -92,9 +90,8 @@ module loading to beamtalk_repl_loader.
 -export([revert_rename_sites/1]).
 
 %% Best-effort snapshot + ChangeLog append for a successful
-%% `removeFromSystem` (class removal). Called via erlang:apply from
-%% beamtalk_behaviour_intrinsics for the same compile-time-dependency reason
-%% as emit_remove_change_entry/5 above; both are thin forwarding wrappers
+%% `removeFromSystem` (class removal). Called via
+%% beamtalk_workspace_callback from beamtalk_refactor_support; both are thin forwarding wrappers
 %% over beamtalk_repl_loader.
 -export([capture_class_removal_snapshot/1, emit_remove_class_change_entry/4]).
 
@@ -865,7 +862,7 @@ Inspector lifts them to a `Result error:` at the FFI boundary. The one exception
 is a `$bt_nlr` throw (a `^` from a block captured elsewhere): control flow, not a
 failure, so it is re-raised untouched to its home frame (BT-3735).
 
-Called via `erlang:apply` from `beamtalk_inspector` (beamtalk_runtime) so the
+Called via `beamtalk_workspace_callback` from `beamtalk_inspector` so the
 runtime keeps no compile-time dependency on beamtalk_workspace.
 """.
 -spec eval_with_self(term(), binary() | string()) ->

@@ -14,7 +14,8 @@ The capabilities live in a `persistent_term`, which outlives the process that
 wrote it. `beamtalk_workspace_sup` is a plain `supervisor` and has no
 terminate hook, so it starts this trivial worker as its **first** child:
 children stop in reverse start order, so it stops last, and its `terminate/2`
-clears the capabilities once the rest of the workspace is down. A stopped
+clears the capabilities (and unregisters the `beamtalk_workspace_callback`
+module) once the rest of the workspace is down. A stopped
 workspace therefore no longer satisfies `beamtalk_capability:require_workspace/1`.
 
 The worker traps exits so `terminate/2` runs on a supervisor shutdown. On a
@@ -33,6 +34,9 @@ start_link(Capabilities) ->
 init(Capabilities) ->
     process_flag(trap_exit, true),
     ok = beamtalk_capability:set(Capabilities),
+    %% The runtime reaches the workspace's compile/install pipeline through
+    %% this callback (BT-4792); registered and cleared with the capabilities.
+    ok = beamtalk_workspace_callback:register(beamtalk_repl_eval),
     {ok, Capabilities}.
 
 handle_call(_Request, _From, State) ->
@@ -43,4 +47,5 @@ handle_cast(_Msg, State) ->
 
 -spec terminate(term(), beamtalk_capability:capabilities()) -> ok.
 terminate(_Reason, _State) ->
+    ok = beamtalk_workspace_callback:unregister(),
     beamtalk_capability:clear().

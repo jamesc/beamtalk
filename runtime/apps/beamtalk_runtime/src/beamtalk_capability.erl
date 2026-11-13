@@ -65,6 +65,7 @@ narrows what a node that *declared* itself a release may do.
     exit_policy/0,
     require_workspace/1,
     require_workspace/2,
+    raise_no_workspace/2,
     classify/1,
     available/1,
     available/2,
@@ -229,16 +230,26 @@ require_workspace(Selector, Class) when is_atom(Selector), is_atom(Class) ->
         {ok, _Caps} ->
             ok;
         none ->
-            Message = beamtalk_error:chars_to_binary(
-                io_lib:format(
-                    "~ts>>~ts needs a running workspace; none is running on this node",
-                    [Class, Selector]
-                )
-            ),
-            Err0 = beamtalk_error:new(no_workspace, Class, Selector),
-            Err1 = beamtalk_error:with_message(Err0, Message),
-            beamtalk_error:raise(beamtalk_error:with_hint(Err1, ?NO_WORKSPACE_HINT))
+            raise_no_workspace(Selector, Class)
     end.
+
+-doc """
+Raise the `no_workspace` error for `Selector` on `Class`. For callers that
+reach the workspace through `beamtalk_workspace_callback` and get
+`{error, no_workspace}` back (the workspace stopped after their
+`require_workspace/2` guard).
+""".
+-spec raise_no_workspace(atom(), atom()) -> no_return().
+raise_no_workspace(Selector, Class) when is_atom(Selector), is_atom(Class) ->
+    Message = beamtalk_error:chars_to_binary(
+        io_lib:format(
+            "~ts>>~ts needs a running workspace; none is running on this node",
+            [Class, Selector]
+        )
+    ),
+    Err0 = beamtalk_error:new(no_workspace, Class, Selector),
+    Err1 = beamtalk_error:with_message(Err0, Message),
+    beamtalk_error:raise(beamtalk_error:with_hint(Err1, ?NO_WORKSPACE_HINT)).
 
 %%% Classification (ADR 0125 §1.5)
 
