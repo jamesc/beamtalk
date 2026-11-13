@@ -30,6 +30,12 @@ derived_cache_test_() ->
             fun invalid_hit_is_recomputed/0},
         {"insert, merge_identity, set_runtime_class_methods, put_class_variables and delete each invalidate",
             fun metadata_writes_invalidate/0},
+        {"a warm fetch reads no ETS entry (BT-4652)", fun memo_hit_reads_no_ets/0},
+        {"a nocache answer is not memoised (BT-4652)", fun nocache_is_not_memoised/0},
+        {"a generation bump turns the memo into a miss (BT-4652)", fun memo_follows_invalidate/0},
+        {"a memo hit still runs the validity check (BT-4652)", fun memo_hit_runs_valid/0},
+        {"without a generation nothing is memoised (BT-4652)", fun no_generation_no_memo/0},
+        {"a full memo is dropped and refilled (BT-4652)", fun memo_is_bounded/0},
         {"a superclass cycle terminates (BT-4065)", fun superclass_cycle_terminates/0}
     ]}.
 
@@ -122,3 +128,72 @@ generation_moves_on_invalidate_test() ->
     ?assert(is_integer(Gen0)),
     ok = beamtalk_class_derived_cache:invalidate(),
     ?assertNotEqual(Gen0, beamtalk_class_derived_cache:generation()).
+
+%%% BT-4652: the per-process memo inside fetch/2,3.
+
+memo_size() ->
+    case get({beamtalk_class_derived_cache, memo}) of
+        {_, Map} -> map_size(Map);
+        undefined -> 0
+    end.
+
+memo_hit_reads_no_ets() ->
+    %% Remove the ETS row behind a warm key: only the per-process memo can
+    %% still answer it.
+    Key = key(),
+    ?assertEqual(a, beamtalk_class_derived_cache:fetch(Key, fun() -> {cache, a} end)),
+    true = ets:delete(beamtalk_class_derived_cache, Key),
+    ?assertEqual(a, beamtalk_class_derived_cache:fetch(Key, fun() -> error(recomputed) end)).
+
+nocache_is_not_memoised() ->
+    Key = key(),
+    ?assertEqual(a, beamtalk_class_derived_cache:fetch(Key, fun() -> {nocache, a} end)),
+    ?assertEqual(b, beamtalk_class_derived_cache:fetch(Key, fun() -> {cache, b} end)),
+    ?assertEqual(b, beamtalk_class_derived_cache:fetch(Key, fun() -> error(recomputed) end)).
+
+memo_follows_invalidate() ->
+    Key = key(),
+    ?assertEqual(a, beamtalk_class_derived_cache:fetch(Key, fun() -> {cache, a} end)),
+    ok = beamtalk_class_derived_cache:invalidate(),
+    ?assertEqual(b, beamtalk_class_derived_cache:fetch(Key, fun() -> {cache, b} end)).
+
+memo_hit_runs_valid() ->
+    Key = key(),
+    ?assertEqual(
+        a, beamtalk_class_derived_cache:fetch(Key, fun() -> {cache, a} end, fun(_) -> true end)
+    ),
+    %% Warm in the memo; a failing Valid must still send it back to Compute.
+    ?assertEqual(
+        b,
+        beamtalk_class_derived_cache:fetch(Key, fun() -> {cache, b} end, fun(V) -> V =/= a end)
+    ),
+    ?assertEqual(b, beamtalk_class_derived_cache:fetch(Key, fun() -> error(recomputed) end)).
+
+no_generation_no_memo() ->
+    GenKey = {beamtalk_class_derived_cache, generation},
+    Ref = persistent_term:get(GenKey),
+    Key = key(),
+    try
+        erase({beamtalk_class_derived_cache, memo}),
+        persistent_term:erase(GenKey),
+        ?assertEqual(undefined, beamtalk_class_derived_cache:generation()),
+        ?assertEqual(a, beamtalk_class_derived_cache:fetch(Key, fun() -> {cache, a} end)),
+        ?assertEqual(b, beamtalk_class_derived_cache:fetch(Key, fun() -> {cache, b} end)),
+        ?assertEqual(0, memo_size())
+    after
+        persistent_term:put(GenKey, Ref),
+        beamtalk_class_derived_cache:invalidate()
+    end.
+
+memo_is_bounded() ->
+    ok = beamtalk_class_derived_cache:invalidate(),
+    erase({beamtalk_class_derived_cache, memo}),
+    [
+        beamtalk_class_derived_cache:fetch({memo_bound, N}, fun() -> {cache, N} end)
+     || N <- lists:seq(1, 5000)
+    ],
+    ?assert(memo_size() =< 4096),
+    ?assert(memo_size() > 0),
+    ?assertEqual(
+        5000, beamtalk_class_derived_cache:fetch({memo_bound, 5000}, fun() -> error(recomputed) end)
+    ).
