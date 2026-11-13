@@ -609,3 +609,40 @@ fn same_file_extension_is_a_class_method_and_errors_surface() {
         "instance-side extension on a native actor must be an error in the editor"
     );
 }
+
+// -----------------------------------------------------------------------
+// BT-4778: a dependency's `internal type` aliases are expanded in the
+// signatures the LSP indexes, as the CLI does (BT-4615 / BT-4707).
+// -----------------------------------------------------------------------
+
+/// A dependency's public method returns its own `internal type Secret =
+/// String`. The consumer's alias scope never sees `Secret`, so unless the
+/// index expands it, the consumer type-checks against an unknown nominal
+/// type and the `String`/`Integer` mismatch goes unreported.
+#[test]
+fn diagnostics_expand_dependency_internal_alias_in_method_signature() {
+    let mut service = SimpleLanguageService::new();
+    let dep_file = Utf8PathBuf::from("_build/deps/vault/src/Vault.bt");
+    let consumer_file = Utf8PathBuf::from("src/Client.bt");
+
+    service.update_file(
+        dep_file,
+        "internal type Secret = String\n\
+         Object subclass: Vault\n  \
+         fetch: n :: Integer -> Secret => \"x\"\n"
+            .to_string(),
+    );
+    service.update_file(
+        consumer_file.clone(),
+        "Object subclass: Client\n  \
+         run: v :: Vault -> Integer => v fetch: 1\n"
+            .to_string(),
+    );
+
+    let diags = service.diagnostics(&consumer_file);
+    assert!(
+        diags.iter().any(|d| d.message.contains("String")),
+        "the dependency's internal alias should expand to String so the \
+         return-type mismatch is reported, got: {diags:?}"
+    );
+}

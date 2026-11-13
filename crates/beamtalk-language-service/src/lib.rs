@@ -1793,15 +1793,52 @@ impl LanguageService for SimpleLanguageService {
                 class_hierarchy.mark_module_classes_surface_incomplete(&module);
             }
 
+            // A dependency's own `internal type` aliases are never seeded
+            // into a consumer's alias scope (ADR 0108), so expand them in the
+            // signatures this file exports, as the CLI does (BT-4778 /
+            // BT-4615 / BT-4707). Done after trait flattening above, which
+            // reads the unexpanded ASTs in the dependency's own scope.
+            let mut alias_infos =
+                beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
+            let mut protocol_infos =
+                beamtalk_core::semantic_analysis::ProtocolRegistry::extract_protocol_infos(&module);
+            let mut protocol_defs: Vec<_> = module
+                .protocols
+                .iter()
+                .filter(|p| {
+                    beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol(p)
+                })
+                .cloned()
+                .collect();
+            let mut extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
+            extensions.add_module(&module, file.as_std_path());
+            if crate::project_index::is_dependency_file(&file) {
+                let expander = beamtalk_core::semantic_analysis::alias_expansion::InternalAliasExpander::from_alias_infos(
+                    &alias_infos,
+                );
+                class_hierarchy.map_class_infos(|info| expander.expand_class_info(info));
+                for info in &mut protocol_infos {
+                    expander.expand_protocol_info(info);
+                }
+                for def in &mut protocol_defs {
+                    expander.expand_protocol_definition(def);
+                }
+                extensions.map_type_infos(|info| {
+                    for ty in info.param_types.iter_mut().flatten() {
+                        *ty = expander.expand_str(ty);
+                    }
+                    if let Some(ty) = &mut info.return_type {
+                        *ty = expander.expand_str(ty);
+                    }
+                });
+            }
+
             // Update the project-wide index with this file's class hierarchy
             self.project_index
                 .update_file(file.clone(), &class_hierarchy);
 
             // Track this file's standalone extension definitions so
-            // other files' diagnostics see them (cross-file extension
-            // visibility, ADR 0066 / ADR 0100 Rule 2 WS1).
-            let mut extensions = beamtalk_core::compilation::extension_index::ExtensionIndex::new();
-            extensions.add_module(&module, file.as_std_path());
+            // other files' diagnostics see them (ADR 0066 / ADR 0100 Rule 2 WS1).
             self.project_index
                 .set_file_extensions(file.clone(), extensions);
 
@@ -1809,10 +1846,8 @@ impl LanguageService for SimpleLanguageService {
             // declarations in the project-wide alias registry, so
             // completions/goto-definition/find-references/hover can resolve
             // alias names cross-file the same way they resolve classes.
-            let alias_infos =
-                beamtalk_core::semantic_analysis::AliasRegistry::extract_alias_infos(&module);
             self.project_index
-                .update_file_aliases(file.clone(), alias_infos);
+                .update_file_aliases(file.clone(), std::mem::take(&mut alias_infos));
 
             // Track this file's `Protocol define: ...` declarations
             // too, so `extending:`/conformance checks against a protocol
@@ -1820,8 +1855,6 @@ impl LanguageService for SimpleLanguageService {
             // resolve during LSP diagnostics — mirrors the alias tracking
             // immediately above (the CLI `build`/`lint` side of this is
             // already wired; this closes the LSP parity gap).
-            let protocol_infos =
-                beamtalk_core::semantic_analysis::ProtocolRegistry::extract_protocol_infos(&module);
             self.project_index
                 .update_file_protocols(file.clone(), protocol_infos);
 
@@ -1832,14 +1865,6 @@ impl LanguageService for SimpleLanguageService {
             // `uses:` (the protocol → users edge — see
             // `ProjectIndex::users_of_protocol`'s doc), so an editor/LSP
             // handler can re-analyse a protocol's open users after it changes.
-            let protocol_defs: Vec<_> = module
-                .protocols
-                .iter()
-                .filter(|p| {
-                    beamtalk_core::semantic_analysis::trait_expansion::is_carried_protocol(p)
-                })
-                .cloned()
-                .collect();
             self.project_index
                 .update_file_protocol_defs(file.clone(), protocol_defs);
             self.project_index

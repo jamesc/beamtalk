@@ -84,6 +84,11 @@ use beamtalk_core::semantic_analysis::CURRENT_PROJECT_PACKAGE_MARKER;
 /// protocol fallback (BT-3915).
 pub use beamtalk_core::semantic_analysis::stdlib_protocols::STDLIB_PACKAGE as STDLIB_PACKAGE_MARKER;
 
+/// Whether `file` lives in a dependency checkout (`_build/deps/<name>/src/`).
+pub(crate) fn is_dependency_file(file: &Utf8Path) -> bool {
+    dependency_package_for_path(file).is_some()
+}
+
 /// Derives the dependency package name for `file` from its path.
 ///
 /// Delegates to [`beamtalk_project::package::dep_name_for_path`], the
