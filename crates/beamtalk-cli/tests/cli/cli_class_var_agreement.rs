@@ -226,6 +226,22 @@ struct Failed {
 fn write_package(root: &Path, pkg: &Package) {
     let fixtures = root.join("test/fixtures");
     std::fs::create_dir_all(&fixtures).expect("mkdir fixtures");
+    // BT-4809: `beamtalk test` builds the package before compiling fixtures.
+    // A package without `src/` is built from its whole root (fixtures
+    // included), so a rejected fixture would surface as a build error without
+    // the `Failed to compile fixture '<file>'` trailer this harness blames
+    // programs by. Real packages have `src/`; give this one the same shape.
+    std::fs::create_dir_all(root.join("src")).expect("mkdir src");
+    std::fs::write(
+        root.join("src/CvAnchor.bt"),
+        "// Copyright 2026 James Casey\n\
+         // SPDX-License-Identifier: Apache-2.0\n\
+         \n\
+         Value subclass: CvAnchor\n\
+         \n\
+         \x20\x20anchor => 1\n",
+    )
+    .expect("write src/CvAnchor.bt");
     std::fs::write(
         root.join("beamtalk.toml"),
         "# Copyright 2026 James Casey\n\
