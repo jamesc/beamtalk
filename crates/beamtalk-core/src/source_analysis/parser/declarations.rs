@@ -1270,6 +1270,13 @@ impl Parser {
                 // A line starting a method definition (unary, binary or
                 // keyword: the same recogniser `recover_shape_field` uses) is
                 // never part of a shape: the shape is unclosed.
+                // The `braces == 1 && nested == 0` guard (top level of this
+                // shape) is load-bearing: `is_method_definition_at` can call
+                // back into `skip_shape_type` through a `-> #{…}` return
+                // type, so widening the guard to nested positions would make
+                // a run of unclosed headers exponential instead of quadratic.
+                // It does mean a method start inside a nested unclosed shape
+                // is not a stop here, though recovery stops at any depth.
                 TokenKind::Identifier(_) | TokenKind::BinarySelector(_) | TokenKind::Keyword(_)
                     if o > offset
                         && braces == 1
