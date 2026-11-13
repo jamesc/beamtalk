@@ -163,15 +163,6 @@ fn dynamic_arg_silent() {
 
 // --- spawnWith: map value check (ADR 0103 Phase 1) ---
 
-/// Parse `src`, build its hierarchy, run the checker, return the diagnostics.
-fn check_source(src: &str) -> Vec<Diagnostic> {
-    let tokens = crate::source_analysis::lex_with_eof(src);
-    let (module, _) = crate::source_analysis::parse(tokens);
-    let hierarchy = ClassHierarchy::build(&module).0.unwrap();
-    let mut checker = check(&module, &hierarchy);
-    checker.take_diagnostics()
-}
-
 #[test]
 fn spawn_with_port_value_warns() {
     let src = "Actor subclass: Worker\n  \
@@ -179,7 +170,7 @@ fn spawn_with_port_value_warns() {
         Object subclass: Main\n  \
         run: aPort :: Port =>\n    \
         Worker spawnWith: #{ p => aPort }\n";
-    let diags = check_source(src);
+    let diags = diags(src);
     let warns = sendability_warnings(&diags);
     assert_eq!(
         warns.len(),
@@ -200,7 +191,7 @@ fn spawn_with_sendable_value_silent() {
         Object subclass: Main\n  \
         run: count :: Integer =>\n    \
         Worker spawnWith: #{ n => count }\n";
-    let diags = check_source(src);
+    let diags = diags(src);
     assert!(
         sendability_warnings(&diags).is_empty(),
         "sendable spawnWith: value must not warn: {diags:?}"
@@ -273,7 +264,7 @@ fn actor_self_send_of_port_is_silent() {
         true ifTrue: [self take: p]\n    \
         nil\n\n  \
         take: p :: Port -> Nil => nil\n";
-    let diags = check_source(src);
+    let diags = diags(src);
     assert!(
         sendability_warnings(&diags).is_empty(),
         "self-sends are not actor messages: {diags:?}"
@@ -287,7 +278,7 @@ fn actor_send_of_port_to_another_actor_still_warns() {
         other take: p\n    \
         nil\n\n  \
         take: p :: Port -> Nil => nil\n";
-    let diags = check_source(src);
+    let diags = diags(src);
     assert_eq!(
         sendability_warnings(&diags).len(),
         1,
@@ -306,7 +297,7 @@ fn actor_self_send_in_escaping_block_is_exempt() {
         Timer every: 1000 do: [self tick: p]\n    \
         nil\n\n  \
         tick: p :: Port -> Nil => nil\n";
-    let diags = check_source(src);
+    let diags = diags(src);
     assert!(
         !sendability_warnings(&diags)
             .iter()

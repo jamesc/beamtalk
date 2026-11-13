@@ -115,19 +115,14 @@ fn sync_send_declared_return_infers_declared_type() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_counter_actor(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("counter", InferredType::known("Counter"));
-
-    let ty = checker.infer_expr(
+    let ty = infer_with_locals(
         &msg_send(
             var("counter"),
             MessageSelector::Unary("increment".into()),
             vec![],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[("counter", InferredType::known("Counter"))],
     );
 
     assert_eq!(
@@ -144,19 +139,14 @@ fn sync_send_inferred_return_infers_method_type() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_counter_actor(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("counter", InferredType::known("Counter"));
-
-    let ty = checker.infer_expr(
+    let ty = infer_with_locals(
         &msg_send(
             var("counter"),
             MessageSelector::Unary("getValue".into()),
             vec![],
         ),
         &hierarchy,
-        &mut env,
-        false,
+        &[("counter", InferredType::known("Counter"))],
     );
 
     assert_eq!(
@@ -174,15 +164,10 @@ fn cast_send_infers_nil() {
     let mut hierarchy = ClassHierarchy::with_builtins();
     add_counter_actor(&mut hierarchy);
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("counter", InferredType::known("Counter"));
-
-    let ty = checker.infer_expr(
+    let ty = infer_with_locals(
         &cast_send(var("counter"), MessageSelector::Unary("increment".into())),
         &hierarchy,
-        &mut env,
-        false,
+        &[("counter", InferredType::known("Counter"))],
     );
 
     assert_eq!(

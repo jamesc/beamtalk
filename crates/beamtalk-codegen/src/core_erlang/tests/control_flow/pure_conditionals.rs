@@ -9,12 +9,6 @@
 
 use super::*;
 
-fn compile(src: &str, module: &str) -> String {
-    let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
-    let (module_ast, _diags) = beamtalk_core::source_analysis::parse(tokens);
-    generate_module(&module_ast, CodegenOptions::new(module)).expect("codegen should succeed")
-}
-
 /// The module sliced to the pure-inline `case`: everything from its `in
 /// case _CondN of` scrutinee on. Module boilerplate (`init/1`, `spawn`,
 /// metadata) holds its own `case` expressions, so every marker search below
@@ -69,7 +63,7 @@ fn if_true_pure_answers_receiver_on_false_branch() {
     // `flag ifTrue: [1]` with pure blocks: `true -> 1`, `false -> C`
     // (matching `False>>ifTrue: => self`), `_ -> send`.
     let src = "Value subclass: Probe\n  check: flag =>\n    flag ifTrue: [1]\n";
-    let code = compile(src, "bt@probe_if_true_pure");
+    let code = codegen_named(src, "bt@probe_if_true_pure");
     eprintln!("ifTrue: pure:\n{code}");
     let scope = case_scope(&code);
 
@@ -102,7 +96,7 @@ fn if_true_pure_answers_receiver_on_false_branch() {
 #[test]
 fn if_false_pure_answers_receiver_on_true_branch() {
     let src = "Value subclass: Probe\n  check: flag =>\n    flag ifFalse: [2]\n";
-    let code = compile(src, "bt@probe_if_false_pure");
+    let code = codegen_named(src, "bt@probe_if_false_pure");
     eprintln!("ifFalse: pure:\n{code}");
     let scope = case_scope(&code);
 
@@ -128,7 +122,7 @@ fn if_false_pure_answers_receiver_on_true_branch() {
 fn if_true_if_false_pure_inlines_both_branches() {
     // The issue's repro shape: `(x =:= 1) ifTrue: [1] ifFalse: [2]`.
     let src = "typed Value subclass: ProbeTyped\n  c: x :: Integer -> Integer =>\n    (x =:= 1) ifTrue: [1] ifFalse: [2]\n";
-    let code = compile(src, "bt@probe_if_true_if_false_pure");
+    let code = codegen_named(src, "bt@probe_if_true_if_false_pure");
     eprintln!("ifTrue:ifFalse: pure:\n{code}");
     let scope = case_scope(&code);
 
@@ -162,7 +156,7 @@ fn if_true_if_false_pure_inlines_both_branches() {
 #[test]
 fn and_pure_short_circuits_to_literal_false() {
     let src = "Value subclass: Probe\n  check: flag =>\n    flag and: [flag]\n";
-    let code = compile(src, "bt@probe_and_pure");
+    let code = codegen_named(src, "bt@probe_and_pure");
     eprintln!("and: pure:\n{code}");
     let scope = case_scope(&code);
 
@@ -185,7 +179,7 @@ fn and_pure_short_circuits_to_literal_false() {
 #[test]
 fn or_pure_short_circuits_to_literal_true() {
     let src = "Value subclass: Probe\n  check: flag =>\n    flag or: [flag]\n";
-    let code = compile(src, "bt@probe_or_pure");
+    let code = codegen_named(src, "bt@probe_or_pure");
     eprintln!("or: pure:\n{code}");
     let scope = case_scope(&code);
 
@@ -210,7 +204,7 @@ fn pure_inline_in_actor_method() {
     // The gate sits outside the Actor/Repl/loop-body early return, so an
     // actor method with pure blocks inlines (plain value, no tuple).
     let src = "Actor subclass: Ctr\n  state: x = 0\n\n  check: flag =>\n    flag ifTrue: [42]\n";
-    let code = compile(src, "ctr_pure_actor");
+    let code = codegen_named(src, "ctr_pure_actor");
     eprintln!("actor ifTrue: pure:\n{code}");
     let scope = case_scope(&code);
 
@@ -234,7 +228,7 @@ fn pure_inline_in_class_method() {
         "  class pick: flag =>\n",
         "    flag ifTrue: [1] ifFalse: [2]\n",
     );
-    let code = compile(src, "bt@klassed_pure");
+    let code = codegen_named(src, "bt@klassed_pure");
     eprintln!("class-method ifTrue:ifFalse: pure:\n{code}");
     let scope = case_scope(&code);
 
@@ -294,7 +288,7 @@ fn arity_1_block_keeps_runtime_dispatch() {
     // `flag ifTrue: [:x | x]` keeps today's runtime arity-error behavior:
     // no inline case, a plain dynamic send.
     let src = "Value subclass: Probe\n  check: flag =>\n    flag ifTrue: [:x | x]\n";
-    let code = compile(src, "bt@probe_arity_1");
+    let code = codegen_named(src, "bt@probe_arity_1");
     eprintln!("arity-1 ifTrue::\n{code}");
 
     assert!(
@@ -314,7 +308,7 @@ fn parenthesized_block_inlines_like_a_literal_block() {
     // (`ast::normalize`), so `flag ifTrue: ([1])` pure-inlines exactly like
     // `flag ifTrue: [1]`.
     let src = "Value subclass: Probe\n  check: flag =>\n    flag ifTrue: ([1])\n";
-    let code = compile(src, "bt@probe_paren_block");
+    let code = codegen_named(src, "bt@probe_paren_block");
     eprintln!("parenthesized-block ifTrue::\n{code}");
 
     assert!(
@@ -328,7 +322,7 @@ fn parenthesized_block_inlines_like_a_literal_block() {
 fn block_variable_keeps_runtime_dispatch() {
     // `cond ifTrue: b` (a block held in a variable) stays dynamic.
     let src = "Value subclass: Probe\n  check: flag =>\n    b := [1].\n    flag ifTrue: b\n";
-    let code = compile(src, "bt@probe_block_var");
+    let code = codegen_named(src, "bt@probe_block_var");
     eprintln!("block-variable ifTrue::\n{code}");
 
     assert!(
@@ -344,7 +338,7 @@ fn self_receiver_keeps_self_dispatch() {
     // self-send producer claims it; in a class method the direct
     // class-side call does (a runtime send there could deadlock).
     let actor_src = "Actor subclass: Ctr\n  state: x = 0\n\n  check =>\n    self ifTrue: [1]\n";
-    let actor_code = compile(actor_src, "ctr_self_recv");
+    let actor_code = codegen_named(actor_src, "ctr_self_recv");
     eprintln!("actor self ifTrue::\n{actor_code}");
     assert!(
         !actor_code.contains("CondNoMatch"),
@@ -356,7 +350,7 @@ fn self_receiver_keeps_self_dispatch() {
         "  class check =>\n",
         "    self ifTrue: [1]\n",
     );
-    let class_code = compile(class_src, "bt@klassed_self_recv");
+    let class_code = codegen_named(class_src, "bt@klassed_self_recv");
     eprintln!("class-method self ifTrue::\n{class_code}");
     assert!(
         !class_code.contains("CondNoMatch"),
@@ -372,7 +366,7 @@ fn class_reference_receiver_keeps_class_dispatch() {
         "  class check =>\n",
         "    Klassed ifTrue: [1]\n",
     );
-    let code = compile(src, "bt@klassed_ref_recv");
+    let code = codegen_named(src, "bt@klassed_ref_recv");
     eprintln!("class-reference ifTrue::\n{code}");
     assert!(
         !code.contains("CondNoMatch"),
@@ -387,7 +381,7 @@ fn receiver_evaluated_once() {
     // value-type method) is evaluated once and bound, not re-evaluated
     // per arm.
     let src = "Value subclass: Probe\n  check: counter =>\n    counter next ifTrue: [1]\n";
-    let code = compile(src, "bt@probe_recv_once");
+    let code = codegen_named(src, "bt@probe_recv_once");
     eprintln!("receiver-once ifTrue::\n{code}");
 
     assert!(
@@ -425,7 +419,7 @@ fn nonlocal_return_in_pure_branch_throws() {
         "    #[] do: [:e | ^e].\n",
         "    0\n",
     );
-    let code = compile(src, "ctr_pure_nlr");
+    let code = codegen_named(src, "ctr_pure_nlr");
     eprintln!("nlr ifTrue: pure:\n{code}");
 
     assert!(
@@ -457,7 +451,7 @@ fn block_local_temp_does_not_leak_past_case() {
         "    flag ifTrue: [w := 5. w].\n",
         "    99\n",
     );
-    let code = compile(src, "bt@probe_temp_scope");
+    let code = codegen_named(src, "bt@probe_temp_scope");
     eprintln!("temp-scope ifTrue: pure:\n{code}");
 
     assert!(
@@ -483,7 +477,7 @@ fn guarded_operator_in_actor_arm_stays_dynamic() {
     // `try_generate_pure_boolean_conditional`'s doc comment).
     // Fixture: `stdlib/test/fixtures/actor_nlr_computed.bt`.
     let src = "Actor subclass: ActorNlrComputed\n  state: x = 0\n\n  doubleIfPositive: n =>\n    n > 0 ifTrue: [^n * 2]\n    0\n";
-    let code = compile(src, "bt@nlrcomputed");
+    let code = codegen_named(src, "bt@nlrcomputed");
     eprintln!("guarded-op actor arm:\n{code}");
 
     assert!(
@@ -504,7 +498,7 @@ fn guarded_operator_in_actor_receiver_still_inlines() {
     // and the gate still fires.
     let src =
         "Actor subclass: Ctr\n  state: x = 0\n\n  check: n =>\n    (n * 2) > 10 ifTrue: [1]\n";
-    let code = compile(src, "ctr_guarded_recv");
+    let code = codegen_named(src, "ctr_guarded_recv");
     eprintln!("guarded-op actor receiver:\n{code}");
 
     let scope = case_scope(&code);
@@ -530,7 +524,7 @@ fn stateful_while_condition_tail_pure_inlines() {
         "    loc0 := [self.f := self.f + 1. (self done) and: [\"Q\"]] whileFalse: [1].\n",
         "    0\n",
     );
-    let code = compile(src, "bt@probe_splice_while_carry");
+    let code = codegen_named(src, "bt@probe_splice_while_carry");
     eprintln!("inline while-carry:\n{code}");
 
     assert!(
@@ -552,7 +546,7 @@ fn stateful_while_condition_full_shape_compiles() {
         "      whileFalse: [loc0 := false. loc1 := nil. 1428995853].\n",
         "    [^loc0] value\n",
     );
-    let code = compile(src, "bt@probe_splice_while_full");
+    let code = codegen_named(src, "bt@probe_splice_while_full");
     eprintln!("inline while-full:\n{code}");
 
     assert!(
@@ -575,7 +569,7 @@ fn stateful_while_condition_plain_tuple_pure_inlines() {
         "    [t := t + 1. c ifTrue: [t > 0] ifFalse: [false]] whileTrue: [1].\n",
         "    t\n",
     );
-    let code = compile(src, "bt@probe_splice_while_plain");
+    let code = codegen_named(src, "bt@probe_splice_while_plain");
     eprintln!("inline while-plain:\n{code}");
 
     assert!(
@@ -597,7 +591,7 @@ fn mutation_arm_tail_still_inlines() {
         "    flag ifTrue: [self.x := self.x + 1. other ifTrue: [1] ifFalse: [2]].\n",
         "    self.x\n",
     );
-    let code = compile(src, "ctr_splice_arm_tail");
+    let code = codegen_named(src, "ctr_splice_arm_tail");
     eprintln!("inline arm-tail:\n{code}");
 
     let scope = case_scope(&code);
@@ -620,7 +614,7 @@ fn vt_arm_tail_still_inlines() {
         "    x := c1 ifTrue: [self.m := self.m + 1. c2 ifTrue: [5] ifFalse: [6]] ifFalse: [0].\n",
         "    x\n",
     );
-    let code = compile(src, "bt@probe_splice_vt_arm");
+    let code = codegen_named(src, "bt@probe_splice_vt_arm");
     eprintln!("inline vt-arm:\n{code}");
 
     let scope = case_scope(&code);
@@ -645,7 +639,7 @@ fn tuple_splice_fold_tail_with_field_write_compiles() {
         "      self.total := self.total + 1.\n",
         "      e =:= 1 ifTrue: [a + 1] ifFalse: [a]]\n",
     );
-    let code = compile(src, "bt@probe_splice_fold");
+    let code = codegen_named(src, "bt@probe_splice_fold");
     eprintln!("splice fold:\n{code}");
 
     assert_compiles_through_erlc("bt@probe_splice_fold", &code);
@@ -666,7 +660,7 @@ fn operand_positions_with_pure_case_compile() {
         "    y := (c2 ifTrue: [coll] ifFalse: [#()]) size.\n",
         "    x + y\n",
     );
-    let code = compile(src, "bt@probe_splice_operands");
+    let code = codegen_named(src, "bt@probe_splice_operands");
     eprintln!("splice operands:\n{code}");
 
     assert_compiles_through_erlc("bt@probe_splice_operands", &code);
@@ -677,7 +671,7 @@ fn guarded_operator_in_value_type_arm_still_inlines() {
     // Value-type methods bracket nothing, so a guarded operator in an arm
     // inlines there.
     let src = "Value subclass: Probe\n  check: flag n: n =>\n    flag ifTrue: [n * 2]\n";
-    let code = compile(src, "bt@probe_vt_op_arm");
+    let code = codegen_named(src, "bt@probe_vt_op_arm");
     eprintln!("guarded-op value-type arm:\n{code}");
 
     let scope = case_scope(&code);
@@ -700,7 +694,7 @@ fn nested_pure_conditionals_grow_linearly() {
         "    a ifTrue: [1] ifFalse: [b ifTrue: [2] ifFalse: [c ifTrue: [3] ifFalse: [",
         "d ifTrue: [4] ifFalse: [e ifTrue: [5] ifFalse: [f ifTrue: [6] ifFalse: [7]]]]]]\n",
     );
-    let code = compile(src, "bt@probe_nested_pure");
+    let code = codegen_named(src, "bt@probe_nested_pure");
     let count = code.matches("CondNoMatch").count();
     assert_eq!(
         count, 6,
@@ -871,7 +865,7 @@ fn plain_while_with_failing_condition_branch_compiles() {
         "    [c ifTrue: [true] ifFalse: [3]] whileTrue: [c foo].\n",
         "    0\n",
     );
-    let code = compile(src, "bt@probe_plain_while_fallback");
+    let code = codegen_named(src, "bt@probe_plain_while_fallback");
     assert!(
         code.contains("CondBad"),
         "plain while must carry the case_clause fallback. Got:\n{code}"
@@ -910,7 +904,7 @@ fn list_op_predicate_with_failing_branch_compiles() {
             let src =
                 format!("{head}    coll {sel} [:x | {effect}c ifTrue: [true] ifFalse: [3]]\n");
             let module = format!("bt@probe_listop_{name}_{kind}");
-            let code = compile(&src, &module);
+            let code = codegen_named(&src, &module);
             if kind == "actor" {
                 assert!(
                     code.contains("PredBad"),

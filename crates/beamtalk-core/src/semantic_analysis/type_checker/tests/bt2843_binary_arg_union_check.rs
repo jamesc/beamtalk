@@ -36,14 +36,6 @@
 
 use super::common::*;
 
-fn type_diagnostics(checker: &TypeChecker) -> Vec<&Diagnostic> {
-    checker
-        .diagnostics()
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect()
-}
-
 /// AC (b) — the exact repro from the issue: a `String | Nil` field flows
 /// into `++`'s `String`-only parameter. The non-nil member (`String`) is
 /// compatible but `Nil` isn't — this is the Nil-unsound case that used to
@@ -141,7 +133,7 @@ fn bt2843_binary_send_known_incompatible_single_diagnostic_no_duplicate() {
     let hierarchy = ClassHierarchy::with_builtins();
     let checker = check(&module, &hierarchy);
 
-    let type_diags = type_diagnostics(&checker);
+    let type_diags = type_category_of(checker.diagnostics());
     assert_eq!(
         type_diags.len(),
         1,
@@ -167,7 +159,7 @@ fn bt2843_binary_send_uncovered_operator_string_comma_known_mismatch_warns() {
     let hierarchy = ClassHierarchy::with_builtins();
     let checker = check(&module, &hierarchy);
 
-    let type_diags = type_diagnostics(&checker);
+    let type_diags = type_category_of(checker.diagnostics());
     assert_eq!(
         type_diags.len(),
         1,
@@ -193,7 +185,7 @@ fn bt2843_binary_send_uncovered_operator_integer_power_known_mismatch_warns() {
     let hierarchy = ClassHierarchy::with_builtins();
     let checker = check(&module, &hierarchy);
 
-    let type_diags = type_diagnostics(&checker);
+    let type_diags = type_category_of(checker.diagnostics());
     assert_eq!(
         type_diags.len(),
         1,

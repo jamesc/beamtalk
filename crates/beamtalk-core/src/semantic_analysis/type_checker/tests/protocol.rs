@@ -468,8 +468,7 @@ fn test_protocol_typed_param_no_false_positive_with_protocol_classes() {
     let module = make_json_generate_module("dict", "Dictionary", receiver_span);
 
     // Run type checking with protocols
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     // Prove the Meta path was actually exercised — the receiver must
     // have been resolved to the metatype `Meta{JsonEncoder}` (not skipped), and the
@@ -531,8 +530,7 @@ fn test_meta_receiver_class_method_protocol_param_non_conforming_warns() {
     let receiver_span = Span::new(10, 14);
     let module = make_json_generate_module("n", "Integer", receiver_span);
 
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     // Sanity: the receiver resolved as Meta{JsonEncoder}, so the warning below can
     // only have come from the class-side (Meta) conformance path.
@@ -598,8 +596,7 @@ fn test_class_side_non_protocol_param_nominal_mismatch_still_warns() {
     let receiver_span = Span::new(10, 14);
     let module = make_json_generate_module("s", "String", receiver_span);
 
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     let nominal_warnings: Vec<_> = checker
         .diagnostics()
@@ -937,8 +934,7 @@ fn test_intersection_param_missing_one_protocol_warns() {
     );
     let module = make_module_with_classes(vec![], vec![test_class]);
 
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     let conformance_warnings: Vec<_> = checker
         .diagnostics()
@@ -1062,8 +1058,7 @@ fn test_intersection_param_conforms_to_both_no_warning() {
     );
     let module = make_module_with_classes(vec![], vec![test_class]);
 
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     let conformance_warnings: Vec<_> = checker
         .diagnostics()
@@ -1190,8 +1185,7 @@ fn test_class_object_arg_conforms_via_class_side_method() {
     add_widget_class(&mut hierarchy, &["serialize"]);
 
     let module = make_widget_arg_module("store:");
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     let conformance_warnings: Vec<_> = checker
         .diagnostics()
@@ -1231,8 +1225,7 @@ fn test_class_object_arg_non_conforming_warns() {
     add_widget_class(&mut hierarchy, &[]);
 
     let module = make_widget_arg_module("store:");
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     let conformance_warnings: Vec<_> = checker
         .diagnostics()
@@ -1275,8 +1268,7 @@ fn test_class_object_arg_conforms_via_metaclass_tower() {
     add_widget_class(&mut hierarchy, &[]);
 
     let module = make_widget_arg_module("describe:");
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     let conformance_warnings: Vec<_> = checker
         .diagnostics()
@@ -1302,8 +1294,7 @@ fn test_class_object_arg_intersection_param_conforms_to_both() {
     add_widget_class(&mut hierarchy, &["asString", "serialize"]);
 
     let module = make_widget_arg_module("process:");
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     let conformance_warnings: Vec<_> = checker
         .diagnostics()
@@ -1330,8 +1321,7 @@ fn test_class_object_arg_intersection_param_missing_one_warns() {
     add_widget_class(&mut hierarchy, &["asString"]);
 
     let module = make_widget_arg_module("process:");
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     let conformance_warnings: Vec<_> = checker
         .diagnostics()
@@ -1403,8 +1393,7 @@ fn test_dependency_guard_suppresses_conformance_warning() {
     let receiver_span = Span::new(10, 14);
     let module = make_json_generate_module("n", "Integer", receiver_span);
 
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     let conformance_warnings: Vec<_> = checker
         .diagnostics()
@@ -1433,8 +1422,7 @@ fn test_project_complete_without_deps_still_warns_conformance() {
     let receiver_span = Span::new(10, 14);
     let module = make_json_generate_module("n", "Integer", receiver_span);
 
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     let conformance_warnings: Vec<_> = checker
         .diagnostics()
@@ -1486,8 +1474,7 @@ fn generic_state_default_dnu_diagnosed_once_not_twice() {
     let module = make_module_with_classes(vec![], vec![class]);
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     let registry = ProtocolRegistry::new();
-    let mut checker = TypeChecker::new();
-    checker.check_module_with_protocols(&module, &hierarchy, &registry);
+    let checker = check_with_protocols(&module, &hierarchy, &registry);
 
     let dnu_warnings: Vec<_> = checker
         .diagnostics()

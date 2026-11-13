@@ -12,25 +12,6 @@
 
 use super::common::*;
 
-/// Parses `source` and returns the inferred method return types plus the
-/// type checker's diagnostics.
-fn check_source(
-    source: &str,
-) -> (
-    std::collections::HashMap<MethodReturnKey, InferredType>,
-    Vec<crate::source_analysis::Diagnostic>,
-) {
-    let tokens = crate::source_analysis::lex_with_eof(source);
-    let (module, parse_diags) = crate::source_analysis::parse(tokens);
-    assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
-    let hierarchy = crate::semantic_analysis::ClassHierarchy::build(&module)
-        .0
-        .unwrap();
-    let mut checker = check(&module, &hierarchy);
-    let diagnostics = checker.take_diagnostics();
-    (checker.take_method_return_types(), diagnostics)
-}
-
 fn return_type<'a>(
     types: &'a std::collections::HashMap<MethodReturnKey, InferredType>,
     class: &str,
@@ -60,7 +41,7 @@ fn value_type_source(last: &str) -> String {
 /// method answers `Probe`, so a send to the answer draws no DNU hint.
 #[test]
 fn bare_trailing_field_assignment_in_value_type_infers_receiver_type() {
-    let (types, diagnostics) = check_source(&value_type_source("self.m := 5"));
+    let (types, diagnostics) = return_types_and_diags(&value_type_source("self.m := 5"));
     assert_eq!(
         return_type(&types, "Probe", "bump", false),
         Some(&InferredType::known("Probe"))
@@ -73,7 +54,7 @@ fn bare_trailing_field_assignment_in_value_type_infers_receiver_type() {
 #[test]
 fn parenthesised_trailing_field_assignment_in_value_type_infers_receiver_type() {
     for last in ["(self.m := 5)", "((self.m := self.m + 1))"] {
-        let (types, diagnostics) = check_source(&value_type_source(last));
+        let (types, diagnostics) = return_types_and_diags(&value_type_source(last));
         assert_eq!(
             return_type(&types, "Probe", "bump", false),
             Some(&InferredType::known("Probe")),
@@ -85,7 +66,7 @@ fn parenthesised_trailing_field_assignment_in_value_type_infers_receiver_type() 
         );
     }
     let (types, _) =
-        check_source("Value subclass: Probe\n  field: m = 0\n  bump => (self.m := 5)\n");
+        return_types_and_diags("Value subclass: Probe\n  field: m = 0\n  bump => (self.m := 5)\n");
     assert_eq!(
         return_type(&types, "Probe", "bump", false),
         Some(&InferredType::known("Probe"))
@@ -103,7 +84,7 @@ fn non_trailing_or_operand_field_assignment_keeps_its_value_type() {
         "(self.m := 5) + 1",
         "^7\n    self.m := 5",
     ] {
-        let (types, _) = check_source(&value_type_source(last));
+        let (types, _) = return_types_and_diags(&value_type_source(last));
         assert_eq!(
             return_type(&types, "Probe", "bump", false),
             Some(&InferredType::known("Integer")),
@@ -118,7 +99,7 @@ fn non_trailing_or_operand_field_assignment_keeps_its_value_type() {
 fn trailing_field_assignment_in_actor_infers_assigned_value_type() {
     for last in ["self.m := 5", "(self.m := 5)"] {
         let src = format!("Actor subclass: ProbeActor\n  state: m = 0\n  bump =>\n    {last}\n");
-        let (types, _) = check_source(&src);
+        let (types, _) = return_types_and_diags(&src);
         assert_eq!(
             return_type(&types, "ProbeActor", "bump", false),
             Some(&InferredType::known("Integer")),
@@ -135,7 +116,7 @@ fn trailing_class_variable_assignment_infers_assigned_value_type() {
         let src = format!(
             "Object subclass: ProbeClassSide\n  classState: m = 0\n  class bump =>\n    {last}\n"
         );
-        let (types, _) = check_source(&src);
+        let (types, _) = return_types_and_diags(&src);
         assert_eq!(
             return_type(&types, "ProbeClassSide", "bump", true),
             Some(&InferredType::known("Integer")),
@@ -153,7 +134,7 @@ fn trailing_class_variable_assignment_infers_assigned_value_type() {
 fn trailing_field_assignment_in_extension_follows_extension_target_rule() {
     for last in ["self.m := 5", "(self.m := 5)"] {
         let src = format!("Value subclass: Probe\n  field: m = 0\n\nProbe >> bump => {last}\n");
-        let (types, _) = check_source(&src);
+        let (types, _) = return_types_and_diags(&src);
         assert_eq!(
             return_type(&types, "Probe", "bump", false),
             Some(&InferredType::known("Probe")),
@@ -162,7 +143,7 @@ fn trailing_field_assignment_in_extension_follows_extension_target_rule() {
 
         let src =
             format!("Actor subclass: ProbeActor\n  state: m = 0\n\nProbeActor >> bump => {last}\n");
-        let (types, _) = check_source(&src);
+        let (types, _) = return_types_and_diags(&src);
         assert_eq!(
             return_type(&types, "ProbeActor", "bump", false),
             Some(&InferredType::known("Integer")),
@@ -172,7 +153,7 @@ fn trailing_field_assignment_in_extension_follows_extension_target_rule() {
         let src = format!(
             "Object subclass: ProbeClassSide\n  classState: m = 0\n\nProbeClassSide class >> bump => {last}\n"
         );
-        let (types, _) = check_source(&src);
+        let (types, _) = return_types_and_diags(&src);
         assert_eq!(
             return_type(&types, "ProbeClassSide", "bump", true),
             Some(&InferredType::known("Integer")),
@@ -190,7 +171,7 @@ fn declared_return_type_is_checked_against_the_receiver() {
     let mismatches = |ret: &str| {
         let src =
             format!("Value subclass: Probe\n  field: m = 0\n  bump -> {ret} => self.m := 5\n");
-        let (_, diagnostics) = check_source(&src);
+        let (_, diagnostics) = return_types_and_diags(&src);
         diagnostics
             .into_iter()
             .filter(|d| d.message.contains("declares return type"))

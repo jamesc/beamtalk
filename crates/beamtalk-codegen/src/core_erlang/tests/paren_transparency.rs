@@ -416,7 +416,7 @@ fn first_diff(a: &str, b: &str) -> String {
     format!("- {}\n+ {}", window(a), window(b))
 }
 
-fn check_source(src: &str, tally: &mut Tally, outcome: fn(&Module) -> String) {
+fn record_source_outcome(src: &str, tally: &mut Tally, outcome: fn(&Module) -> String) {
     let (module, diagnostics) = parse(lex_with_eof(src));
     if let Some(d) = diagnostics.iter().find(|d| d.severity == Severity::Error) {
         if std::env::var_os("BT4059_PARSE_DUMP").is_some() {
@@ -586,7 +586,7 @@ fn template_sources() -> Vec<String> {
 fn templates_are_paren_transparent() {
     let mut tally = Tally::default();
     for src in template_sources() {
-        check_source(&src, &mut tally, outcome);
+        record_source_outcome(&src, &mut tally, outcome);
     }
     assert_eq!(tally.sources, TEMPLATE_HOSTS.len(), "every template parses");
     let report = report("templates", &tally);
@@ -600,7 +600,7 @@ fn templates_are_paren_transparent() {
 fn templates_are_paren_transparent_through_analysis() {
     let mut tally = Tally::default();
     for src in template_sources() {
-        check_source(&src, &mut tally, outcome_analysed);
+        record_source_outcome(&src, &mut tally, outcome_analysed);
     }
     assert_eq!(tally.sources, TEMPLATE_HOSTS.len(), "every template parses");
     let report = report("templates (analysed)", &tally);
@@ -625,7 +625,7 @@ fn bt_files(dir: &std::path::Path) -> Vec<String> {
 fn check_corpus(name: &str, sources: &[String], outcome: fn(&Module) -> String) {
     let mut tally = Tally::default();
     for src in sources {
-        check_source(src, &mut tally, outcome);
+        record_source_outcome(src, &mut tally, outcome);
     }
     let report = report(name, &tally);
     println!("{report}");

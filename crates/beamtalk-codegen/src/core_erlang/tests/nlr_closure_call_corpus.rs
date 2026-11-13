@@ -320,7 +320,7 @@ fn probe_bindings() -> PrimitiveBindingTable {
     table
 }
 
-fn compile(src: &str) -> String {
+fn compile_with_probe_bindings(src: &str) -> String {
     let (module, _) = parse(lex_with_eof(src));
     generate_module(
         &module,
@@ -332,7 +332,7 @@ fn compile(src: &str) -> String {
 /// The panic message of compiling `src` (a verifier finding is a debug-build
 /// panic), or `None` when it compiles.
 fn report(src: &str) -> Option<String> {
-    match std::panic::catch_unwind(|| compile(src)) {
+    match std::panic::catch_unwind(|| compile_with_probe_bindings(src)) {
         Ok(_) => None,
         Err(payload) => Some(
             payload
@@ -360,8 +360,10 @@ fn with_fix_off<T>(f: impl FnOnce() -> T) -> T {
 fn nlr_closure_call_corpus_is_clean() {
     let mut failures = Vec::new();
     for (name, src, _) in corpus() {
-        if std::panic::catch_unwind(|| assert_compiles_through_erlc("test", &compile(&src)))
-            .is_err()
+        if std::panic::catch_unwind(|| {
+            assert_compiles_through_erlc("test", &compile_with_probe_bindings(&src))
+        })
+        .is_err()
         {
             failures.push(format!("{name}:\n{src}"));
         }
@@ -480,7 +482,7 @@ fn a_prestore_read_before_its_operands_reports_stale() {
 fn only_sends_that_run_no_operand_reach_the_dispatch_with_a_nlr_literal() {
     DISPATCH_NLR_LITERALS.with(|log| log.borrow_mut().clear());
     for (_, src, _) in corpus() {
-        compile(&src);
+        compile_with_probe_bindings(&src);
     }
     let logged = DISPATCH_NLR_LITERALS.with(|log| std::mem::take(&mut *log.borrow_mut()));
     let may_run: Vec<_> = logged
@@ -513,7 +515,10 @@ fn nested_in_operand_src() -> String {
 
 #[test]
 fn nlr_closure_nested_in_a_non_block_operand_is_clean() {
-    assert_compiles_through_erlc("test", &compile(&nested_in_operand_src()));
+    assert_compiles_through_erlc(
+        "test",
+        &compile_with_probe_bindings(&nested_in_operand_src()),
+    );
 }
 
 #[test]
@@ -538,7 +543,7 @@ fn classify_calls_at_depth(depth: usize) -> usize {
         "{HEADER}\n  probe: x with: a0 with: a1 with: a2 =>\n    self.n := 6.\n    {body}.\n    0\n"
     );
     CLASSIFY_SEND_CALLS.with(|n| n.set(0));
-    compile(&src);
+    compile_with_probe_bindings(&src);
     CLASSIFY_SEND_CALLS.with(std::cell::Cell::get)
 }
 

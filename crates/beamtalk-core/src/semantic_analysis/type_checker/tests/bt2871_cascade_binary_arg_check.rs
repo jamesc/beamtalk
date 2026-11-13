@@ -26,13 +26,6 @@
 
 use super::common::*;
 
-fn type_diagnostics(diags: &[Diagnostic]) -> Vec<&Diagnostic> {
-    diags
-        .iter()
-        .filter(|d| d.category == Some(DiagnosticCategory::Type))
-        .collect()
-}
-
 /// AC: a binary cascade continuation with an incompatible `Known` argument
 /// now produces a Type diagnostic. `Thing` defines its own `+` operator
 /// taking `Integer`; the cascade's second message sends `+ "wrong-type"` to
@@ -114,7 +107,7 @@ typed Value subclass: Thing
     let hierarchy = ClassHierarchy::build(&module).0.unwrap();
     let diags = run_with_expect(&module, &hierarchy);
     assert!(
-        type_diagnostics(&diags).is_empty(),
+        type_category_of(&diags).is_empty(),
         "compatible binary cascade continuation `+ 2` should stay \
          diagnostic-free, got: {diags:#?}"
     );

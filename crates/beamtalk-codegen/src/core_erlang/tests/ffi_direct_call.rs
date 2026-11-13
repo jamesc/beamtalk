@@ -96,7 +96,7 @@ fn registry() -> NativeTypeRegistry {
     registry
 }
 
-fn compile(body: &str) -> String {
+fn compile_run_body(body: &str) -> String {
     let src = format!(
         "Object subclass: Probe\n  class run: n :: Integer str: s :: String dict: d :: Dictionary =>\n    {body}\n"
     );
@@ -182,7 +182,7 @@ fn assert_proxied(code: &str, module: &str, function: &str) {
 #[test]
 fn zero_arity_scalar_result_is_direct() {
     assert_direct(
-        &compile("Erlang erlang monotonic_time"),
+        &compile_run_body("Erlang erlang monotonic_time"),
         "erlang",
         "monotonic_time",
         "stock",
@@ -191,7 +191,7 @@ fn zero_arity_scalar_result_is_direct() {
 
 #[test]
 fn scalar_arg_scalar_result_is_direct() {
-    let code = compile("Erlang erlang phash2: n");
+    let code = compile_run_body("Erlang erlang phash2: n");
     assert_direct(&code, "erlang", "phash2", "stock");
     assert_guarded(&code, "erlang", "phash2");
     // The argument is bound before the `try`, so a raise while evaluating it
@@ -207,7 +207,7 @@ fn scalar_arg_scalar_result_is_direct() {
 
 #[test]
 fn literal_scalar_arg_is_direct() {
-    let code = compile("Erlang erlang abs: -3");
+    let code = compile_run_body("Erlang erlang abs: -3");
     assert_direct(&code, "erlang", "abs", "stock");
     assert_guarded(&code, "erlang", "abs");
 }
@@ -215,7 +215,7 @@ fn literal_scalar_arg_is_direct() {
 #[test]
 fn beamtalk_module_keeps_its_mode() {
     assert_direct(
-        &compile("Erlang beamtalk_process_ops current"),
+        &compile_run_body("Erlang beamtalk_process_ops current"),
         "beamtalk_process_ops",
         "current",
         "beamtalk",
@@ -228,7 +228,7 @@ fn beamtalk_module_keeps_its_mode() {
 /// and falls back to the proxy.
 #[test]
 fn string_arg_is_direct_behind_is_binary_guard() {
-    let code = compile("Erlang erlang phash2: s");
+    let code = compile_run_body("Erlang erlang phash2: s");
     assert_direct(&code, "erlang", "phash2", "stock");
     assert_guarded(&code, "erlang", "phash2");
     assert!(
@@ -262,7 +262,7 @@ fn string_arg_is_direct_behind_is_binary_guard() {
 /// `is_binary`, no snapshot, `ffi_call_raised/8`.
 #[test]
 fn scalar_arg_has_no_binary_guard_or_snapshot() {
-    let code = compile("Erlang erlang phash2: n");
+    let code = compile_run_body("Erlang erlang phash2: n");
     assert!(!code.contains("'is_binary'"), "{code}");
     assert!(!code.contains("'snapshot'"), "{code}");
 }
@@ -271,7 +271,7 @@ fn scalar_arg_has_no_binary_guard_or_snapshot() {
 #[test]
 fn list_arg_stays_on_proxy() {
     assert_proxied(
-        &compile("Erlang erlang phash2: (List new)"),
+        &compile_run_body("Erlang erlang phash2: (List new)"),
         "erlang",
         "phash2",
     );
@@ -279,7 +279,11 @@ fn list_arg_stays_on_proxy() {
 
 #[test]
 fn block_arg_stays_on_proxy() {
-    assert_proxied(&compile("Erlang erlang phash2: [n]"), "erlang", "phash2");
+    assert_proxied(
+        &compile_run_body("Erlang erlang phash2: [n]"),
+        "erlang",
+        "phash2",
+    );
 }
 
 /// BT-4755: a `binary()` result (`String | Binary`) crosses the proxy
@@ -287,7 +291,7 @@ fn block_arg_stays_on_proxy() {
 /// translation.
 #[test]
 fn binary_result_is_direct() {
-    let code = compile("Erlang erlang integer_to_binary: n");
+    let code = compile_run_body("Erlang erlang integer_to_binary: n");
     assert_direct(&code, "erlang", "integer_to_binary", "stock");
     assert_guarded(&code, "erlang", "integer_to_binary");
 }
@@ -297,7 +301,7 @@ fn binary_result_is_direct() {
 #[test]
 fn charlist_result_stays_on_proxy() {
     assert_proxied(
-        &compile("Erlang erlang integer_to_list: n"),
+        &compile_run_body("Erlang erlang integer_to_list: n"),
         "erlang",
         "integer_to_list",
     );
@@ -305,19 +309,19 @@ fn charlist_result_stays_on_proxy() {
 
 #[test]
 fn dynamic_result_stays_on_proxy() {
-    assert_proxied(&compile("Erlang erlang get: #k"), "erlang", "get");
+    assert_proxied(&compile_run_body("Erlang erlang get: #k"), "erlang", "get");
 }
 
 #[test]
 fn symbol_result_stays_on_proxy() {
     // `atom()` includes `ok` and `error`, which the proxy coerces to a Result.
-    assert_proxied(&compile("Erlang erlang node"), "erlang", "node");
+    assert_proxied(&compile_run_body("Erlang erlang node"), "erlang", "node");
 }
 
 #[test]
 fn function_without_spec_stays_on_proxy() {
     assert_proxied(
-        &compile("Erlang erlang unknownFn: n"),
+        &compile_run_body("Erlang erlang unknownFn: n"),
         "erlang",
         "unknownFn",
     );
@@ -381,7 +385,7 @@ fn untrusted_dependency_spec_stays_on_proxy() {
 /// own constructor.
 #[test]
 fn ok_value_result_is_built_inline() {
-    let code = compile("Erlang erlang find_int: n");
+    let code = compile_run_body("Erlang erlang find_int: n");
     assert_direct(&code, "erlang", "find_int", "stock");
     assert_guarded(&code, "erlang", "find_int");
     assert!(
@@ -420,14 +424,14 @@ fn ok_value_result_is_built_inline() {
 
 #[test]
 fn binary_value_result_is_built_inline() {
-    let code = compile("Erlang erlang find_bin: n");
+    let code = compile_run_body("Erlang erlang find_bin: n");
     assert_direct(&code, "erlang", "find_bin", "stock");
     assert!(code.contains("'from_tagged_tuple'"), "{code}");
 }
 
 #[test]
 fn bare_ok_result_is_built_inline_with_no_arguments() {
-    let code = compile("Erlang erlang just_ok");
+    let code = compile_run_body("Erlang erlang just_ok");
     assert_direct(&code, "erlang", "just_ok", "stock");
     assert!(
         code.contains("'from_tagged_tuple'({'ok', 'nil'})"),
@@ -439,7 +443,7 @@ fn bare_ok_result_is_built_inline_with_no_arguments() {
 fn list_value_result_stays_on_proxy() {
     // `V` may be a charlist: stock mode must convert it.
     assert_proxied(
-        &compile("Erlang erlang find_list: n"),
+        &compile_run_body("Erlang erlang find_list: n"),
         "erlang",
         "find_list",
     );
@@ -450,7 +454,7 @@ fn list_value_result_stays_on_proxy() {
 /// checked with `not is_list` at run time and a list goes to the proxy.
 #[test]
 fn dynamic_value_result_is_built_inline() {
-    let code = compile("Erlang erlang find_dyn: n");
+    let code = compile_run_body("Erlang erlang find_dyn: n");
     assert_direct(&code, "erlang", "find_dyn", "stock");
     assert!(
         code.contains("call 'erlang':'not'(call 'erlang':'is_list'(_FfiPayload"),
@@ -468,7 +472,7 @@ fn dynamic_value_result_is_built_inline() {
 /// snapshot for it (`ffi_call_raised/9`), as for a binary.
 #[test]
 fn dictionary_arg_is_direct_behind_is_map_guard() {
-    let code = compile("Erlang erlang map_size: d");
+    let code = compile_run_body("Erlang erlang map_size: d");
     assert_direct(&code, "erlang", "map_size", "stock");
     assert_guarded(&code, "erlang", "map_size");
     assert!(
@@ -503,7 +507,7 @@ fn dictionary_arg_is_direct_behind_is_map_guard() {
 /// and only the map gets `is_map`.
 #[test]
 fn dictionary_and_scalar_args_are_guarded_separately() {
-    let code = compile("Erlang erlang find_map: n dict: d");
+    let code = compile_run_body("Erlang erlang find_map: n dict: d");
     assert_direct(&code, "erlang", "find_map", "stock");
     assert_eq!(
         code.matches("call 'erlang':'is_map'(").count(),
@@ -519,7 +523,7 @@ fn dictionary_and_scalar_args_are_guarded_separately() {
 #[test]
 fn list_and_tuple_args_still_stay_on_proxy() {
     assert_proxied(
-        &compile("Erlang erlang map_size: (List new)"),
+        &compile_run_body("Erlang erlang map_size: (List new)"),
         "erlang",
         "map_size",
     );
@@ -529,7 +533,7 @@ fn list_and_tuple_args_still_stay_on_proxy() {
 fn beamtalk_module_result_stays_on_proxy() {
     // Beamtalk-mode coercion differs (raw-result opt-out, bare `error`).
     assert_proxied(
-        &compile("Erlang beamtalk_ops find: n"),
+        &compile_run_body("Erlang beamtalk_ops find: n"),
         "beamtalk_ops",
         "find",
     );

@@ -380,7 +380,7 @@ impl Cell {
     fn compile(&self) -> Result<String, String> {
         match self.scope {
             Scope::Repl => compile_repl(&self.source()),
-            _ => compile(&self.source()),
+            _ => compile_catching_panics(&self.source()),
         }
     }
 }
@@ -418,7 +418,7 @@ fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
 
 /// Compiles `src` (a debug-build verifier finding is a panic): the code, or
 /// why it fails.
-fn compile(src: &str) -> Result<String, String> {
+fn compile_catching_panics(src: &str) -> Result<String, String> {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(src);
     let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
     if let Some(error) = diagnostics
@@ -541,7 +541,7 @@ fn ensure_relay_corpus_compiles_and_relays() {
                 .map(|(i, (c, _))| c.thrower.methods(scope, &format!("probe{i}"), &c.stmt))
                 .collect();
             let src = format!("{header}\n{}", methods.join("\n"));
-            match compile(&src) {
+            match compile_catching_panics(&src) {
                 Ok(code) => {
                     if catch_unwind(AssertUnwindSafe(|| {
                         assert_compiles_through_erlc("test", &code);
@@ -723,7 +723,7 @@ fn a_class_method_running_in_its_caller_stores_no_foreign_cleanup() {
     let class_methods = "  class probe: blk =>\n    x := 0\n    [blk value] ensure: [x := 1]\n    x\n\n  class callProbe => self probe: [^1]\n";
     let instance_method = "  probe: blk =>\n    [blk value] ensure: [self.n := 40]\n    0\n";
     let class_only = format!("{header}{class_methods}");
-    let code = compile(&class_only).expect("compiles with the verifier on");
+    let code = compile_catching_panics(&class_only).expect("compiles with the verifier on");
     assert!(
         code.contains("primop 'raw_raise'"),
         "the class method has no `ensure:` catch:\n{code}"
@@ -733,17 +733,23 @@ fn a_class_method_running_in_its_caller_stores_no_foreign_cleanup() {
         "a class method running in its caller stores a foreign `^`'s cleanup:\n{code}"
     );
     // The verifier owes it nothing, so the pre-fix catch is no defect there.
-    let report = with_fault(Fault::RelayForeignOnErrorPath, || compile(&class_only)).err();
+    let report = with_fault(Fault::RelayForeignOnErrorPath, || {
+        compile_catching_panics(&class_only)
+    })
+    .err();
     assert_eq!(report, None, "a class method's `ensure:` owes no store");
     // The control: the same `ensure:` in an instance method stores, and
     // fails without its foreign clause.
     let both = format!("{header}{class_methods}\n{instance_method}");
-    let code = compile(&both).expect("compiles with the verifier on");
+    let code = compile_catching_panics(&both).expect("compiles with the verifier on");
     assert!(
         code.contains("_EnsureForeignNlr") && code.contains("'beamtalk_actor_state':'store'"),
         "the instance method's `ensure:` has no foreign clause:\n{code}"
     );
-    let report = with_fault(Fault::RelayForeignOnErrorPath, || compile(&both)).err();
+    let report = with_fault(Fault::RelayForeignOnErrorPath, || {
+        compile_catching_panics(&both)
+    })
+    .err();
     assert!(
         report
             .as_deref()
@@ -776,7 +782,7 @@ fn a_class_method_running_in_its_caller_stores_no_foreign_cleanup() {
 fn block_ensure_fallback_re_raises_a_foreign_throw_after_its_cleanup() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../stdlib/src/block.bt");
     let src = std::fs::read_to_string(path).expect("stdlib/src/block.bt");
-    let code = compile(&src).expect("Block compiles with the verifier on");
+    let code = compile_catching_panics(&src).expect("Block compiles with the verifier on");
     for gone in [
         "'refresh_carried'(",
         "'nlr_state'(",
@@ -796,18 +802,21 @@ fn block_ensure_fallback_re_raises_a_foreign_throw_after_its_cleanup() {
         assert_compiles_through_erlc("test", &code);
     }
     // No relay to switch off: the fault leaves it unchanged.
-    let without = with_fault(Fault::RelayNoRelay, || compile(&src));
+    let without = with_fault(Fault::RelayNoRelay, || compile_catching_panics(&src));
     assert_eq!(without.as_deref().ok(), Some(code.as_str()));
 
     // The replacement proof: a `^` across a performed `ensure:` keeps the
     // cleanup's write only because the method commits the cell.
     let performed = "Actor subclass: Bt4536Performed\n  state: n = 0\n  probe =>\n    c := [self.n := 9]\n    [^1] perform: #ensure: withArguments: #(c)\n    0\n";
-    let code = compile(performed).expect("compiles with the verifier on");
+    let code = compile_catching_panics(performed).expect("compiles with the verifier on");
     assert!(
         code.contains("call 'beamtalk_actor_state':'commit'(Self, "),
         "the method does not commit the cell:\n{code}"
     );
-    let report = with_fault(Fault::NlrCommitCarried, || compile(performed)).err();
+    let report = with_fault(Fault::NlrCommitCarried, || {
+        compile_catching_panics(performed)
+    })
+    .err();
     assert!(
         report
             .as_deref()
@@ -832,13 +841,15 @@ fn block_ensure_fallback_re_raises_a_foreign_throw_after_its_cleanup() {
 fn an_ensure_inside_an_away_super_send_relays_its_own_return() {
     let base = "Actor subclass: Bt4536SuperBase\n  state: n = 0\n  probe =>\n    [^1] ensure: [self.n := 9]\n    0\n";
     let sub = "Bt4536SuperBase subclass: Bt4536SuperSub\n  probeBlock => [super probe]\n";
-    let base_code = compile(base).expect("the superclass compiles with the verifier on");
+    let base_code =
+        compile_catching_panics(base).expect("the superclass compiles with the verifier on");
     assert!(
         base_code.contains("_EnsureNlrTok")
             && base_code.contains("call 'beamtalk_actor_state':'commit'(Self, "),
         "the superclass method neither relays its own `^` nor commits:\n{base_code}"
     );
-    let sub_code = compile(sub).expect("the subclass compiles with the verifier on");
+    let sub_code =
+        compile_catching_panics(sub).expect("the subclass compiles with the verifier on");
     assert!(
         sub_code.contains("call 'beamtalk_actor_state':'super_send'("),
         "the block's `super` send is not `super_send/5`:\n{sub_code}"
@@ -847,7 +858,7 @@ fn an_ensure_inside_an_away_super_send_relays_its_own_return() {
         assert_compiles_through_erlc("test", &base_code);
         assert_compiles_through_erlc("test", &sub_code);
     }
-    let report = with_fault(Fault::RelayNoRelay, || compile(base)).err();
+    let report = with_fault(Fault::RelayNoRelay, || compile_catching_panics(base)).err();
     assert!(
         report
             .as_deref()
@@ -887,7 +898,7 @@ fn ensure_relay_corpus_nested_cleanup_grows_as_three_to_the_depth() {
     for &thrower in THROWERS {
         for depth in 1..=4 {
             let src = nested_ensure_source(thrower, depth);
-            let code = match compile(&src) {
+            let code = match compile_catching_panics(&src) {
                 Ok(code) => code,
                 Err(why) => {
                     failures.push(format!("{thrower:?}, depth {depth}: {why}\n{src}"));

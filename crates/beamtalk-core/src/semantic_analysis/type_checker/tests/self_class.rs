@@ -788,9 +788,7 @@ fn bare_class_literal_infers_metatype() {
     // The core flip: `Expression::ClassReference` is the class *object*, typed
     // `Meta{C}` — NOT an instance of `C` (`Known(C)`).
     let hierarchy = ClassHierarchy::with_builtins();
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    let ty = checker.infer_expr(&class_ref("Integer"), &hierarchy, &mut env, false);
+    let ty = infer(&class_ref("Integer"), &hierarchy);
     assert_eq!(
         ty.as_meta().map(EcoString::as_str),
         Some("Integer"),

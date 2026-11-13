@@ -429,10 +429,11 @@ Value subclass: Driver
     let stmt = probe.body.last().expect("probe has at least one statement");
     let expr = &stmt.expression;
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("self", InferredType::known("Driver"));
-    let ty = checker.infer_expr(expr, &probe_hierarchy, &mut env, false);
+    let ty = infer_with_locals(
+        expr,
+        &probe_hierarchy,
+        &[("self", InferredType::known("Driver"))],
+    );
 
     // Assert the outer type is Result with Sub as its first type arg.
     match &ty {
@@ -511,10 +512,7 @@ Value subclass: Driver
         .expect("probe has at least one statement")
         .expression;
 
-    let mut checker = TypeChecker::new();
-    let mut env = TypeEnv::new();
-    env.set_local("self", InferredType::known("Driver"));
-    let ty = checker.infer_expr(expr, &hierarchy, &mut env, false);
+    let ty = infer_with_locals(expr, &hierarchy, &[("self", InferredType::known("Driver"))]);
 
     match &ty {
         InferredType::Known {
