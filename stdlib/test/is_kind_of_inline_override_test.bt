@@ -1,0 +1,64 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4764: `x isKindOf: C` for a sealed built-in class literal compiles to
+// C's inline type test behind the node-wide `isKindOf:` override check
+// (`beamtalk_default_method:overridden_anywhere/1`), read on every execution.
+// A site compiled before an override exists must honour one installed at run
+// time, and keep answering correctly after it is removed (the flag is never
+// lowered; the real send then runs `Object>>isKindOf:` again).
+//
+// The inline agreement matrix is `is_kind_of_inline_matrix_test.bt`.
+
+TestCase subclass: IsKindOfInlineOverrideTest
+
+  // Installs node-wide `isKindOf:` extensions; run serially so concurrently
+  // running test classes never see them.
+  class serial -> Boolean => true
+
+  // Compiled before any override exists in this test: the inline lowering.
+  isString: v :: Object -> Boolean => v isKindOf: String
+
+  isInteger: v :: Object -> Boolean => v isKindOf: Integer
+
+  isBinary: v :: Object -> Boolean => v isKindOf: Binary
+
+  testAnswersBeforeAnyOverride =>
+    self assert: (self isString: "abc")
+    self deny: (self isString: 42)
+    self assert: (self isInteger: 42)
+    self assert: (self isBinary: "abc")
+    self deny: (self isBinary: 42)
+
+  testStringExtensionInstalledAtRunTimeTakesEffect =>
+    self assert: (self isString: "warm")
+    Erlang beamtalk_extensions
+      register: #String
+      selector: #isKindOf:
+      fun: [:args :receiver | #fromStringExtension]
+      owner: #bt4764
+    [
+      self assert: (self isString: "warm") equals: #fromStringExtension
+      self assert: (self isBinary: "warm") equals: #fromStringExtension
+      self assert: (self isInteger: 42)
+    ] ensure: [
+      Erlang beamtalk_extensions unregister: #String selector: #isKindOf:
+    ]
+    self assert: (self isString: "warm")
+    self deny: (self isString: 42)
+
+  testObjectExtensionInstalledAtRunTimeTakesEffectForEveryReceiver =>
+    Erlang beamtalk_extensions
+      register: #Integer
+      selector: #isKindOf:
+      fun: [:args :receiver | #fromIntegerExtension]
+      owner: #bt4764
+    [
+      self assert: (self isInteger: 42) equals: #fromIntegerExtension
+      self assert: (self isString: 42) equals: #fromIntegerExtension
+      self deny: (self isString: 3.5)
+    ] ensure: [
+      Erlang beamtalk_extensions unregister: #Integer selector: #isKindOf:
+    ]
+    self assert: (self isInteger: 42)
+    self deny: (self isString: 42)

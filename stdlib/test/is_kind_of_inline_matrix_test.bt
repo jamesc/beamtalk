@@ -1,0 +1,185 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4764: `x isKindOf: C` for a sealed built-in class literal compiles to
+// C's inline type test behind the `isKindOf:` override check (no class
+// reference is built on the fast path). For every class the lowering handles,
+// the lowered literal must agree with
+//   - the dynamic send (`kind:of:` takes the class as a value, so it is never
+//     lowered), and
+//   - the `x :: C` type pattern, which renders the same strategy,
+// over a matrix of every representation: Strings and bare binaries, numbers,
+// lists, atoms, nil/true/false, actors, Values, tagged maps and futures, and
+// classes and a TestCase instance.
+//
+// A future is the one value a type pattern and `isKindOf:` treat differently
+// by design (the pattern answers `false` without awaiting; `isKindOf:` awaits
+// its receiver), so futures are compared against the send only.
+//
+// `stdlib/test/is_kind_of_inline_matrix_test.bt` must name every class the
+// lowering handles: `residual_dynamic_sends::is_kind_of_inline_classes_are_covered_by_the_runtime_matrix`
+// (beamtalk-codegen) derives that set from the routing fixture and fails on a
+// missing class. The override case cannot run here (installing an
+// `isKindOf:` override turns the fast path off node-wide); it is covered by
+// `tests/repl-protocol/cases/is_kind_of_inline_override.btscript` and
+// EUnit (`beamtalk_tagged_map_routing_conformance_tests`).
+//
+// Fixtures: stdlib/test/fixtures/type_pattern_actor_fixture.bt,
+//           stdlib/test/fixtures/value_point.bt
+
+TestCase subclass: IsKindOfInlineMatrixTest
+
+  kind: value :: Object of: aClass :: Behaviour -> Boolean =>
+    value isKindOf: aClass
+
+  // Everything but futures.
+  samples -> List(Object) =>
+    #(42, -1, 1.5, "ab", "", #ab, nil, true, false, #(1, 2), #(), [:x |
+      x
+    ], {1, 2}, {}, (Dictionary new at: #a put: 1), (Dictionary new), $a, (Erlang erlang list_to_binary: #(255)),
+      (Binary fromBytes: #(234)), self unaligned, (Erlang erlang self), (Erlang erlang make_ref), TypePatternActorFixture spawn, (ValuePoint new: #{#x => 1, #y => 2}), Integer, self)
+
+  unaligned => (Binary fromBytes: #(234)) match: [<<_:3, rest/bitstring>> -> rest]
+
+  future => (Erlang beamtalk_future) new
+
+  resolvedFuture =>
+    f := self future
+    (Erlang beamtalk_future) resolve: f with: 7
+    f
+
+  testIntegerAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: Integer) equals: (self kind: v of: Integer)
+        self assert: (v isKindOf: Integer) equals: (v match: [x :: Integer -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: Integer) equals: (self kind: self resolvedFuture of: Integer)
+
+  testFloatAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: Float) equals: (self kind: v of: Float)
+        self assert: (v isKindOf: Float) equals: (v match: [x :: Float -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: Float) equals: (self kind: self resolvedFuture of: Float)
+
+  testStringAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: String) equals: (self kind: v of: String)
+        self assert: (v isKindOf: String) equals: (v match: [x :: String -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: String) equals: (self kind: self resolvedFuture of: String)
+
+  testBinaryAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: Binary) equals: (self kind: v of: Binary)
+        self assert: (v isKindOf: Binary) equals: (v match: [x :: Binary -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: Binary) equals: (self kind: self resolvedFuture of: Binary)
+
+  testBitstringAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: Bitstring) equals: (self kind: v of: Bitstring)
+        self assert: (v isKindOf: Bitstring) equals: (v match: [x :: Bitstring -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: Bitstring) equals: (self kind: self resolvedFuture of: Bitstring)
+
+  testSymbolAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: Symbol) equals: (self kind: v of: Symbol)
+        self assert: (v isKindOf: Symbol) equals: (v match: [x :: Symbol -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: Symbol) equals: (self kind: self resolvedFuture of: Symbol)
+
+  testTrueAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: True) equals: (self kind: v of: True)
+        self assert: (v isKindOf: True) equals: (v match: [x :: True -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: True) equals: (self kind: self resolvedFuture of: True)
+
+  testFalseAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: False) equals: (self kind: v of: False)
+        self assert: (v isKindOf: False) equals: (v match: [x :: False -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: False) equals: (self kind: self resolvedFuture of: False)
+
+  testBooleanAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: Boolean) equals: (self kind: v of: Boolean)
+        self assert: (v isKindOf: Boolean) equals: (v match: [x :: Boolean -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: Boolean) equals: (self kind: self resolvedFuture of: Boolean)
+
+  testUndefinedObjectAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: UndefinedObject) equals: (self kind: v of: UndefinedObject)
+        self assert: (v isKindOf: UndefinedObject) equals: (v match: [x :: UndefinedObject -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: UndefinedObject) equals: (self kind: self resolvedFuture of: UndefinedObject)
+
+  testBlockAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: Block) equals: (self kind: v of: Block)
+        self assert: (v isKindOf: Block) equals: (v match: [x :: Block -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: Block) equals: (self kind: self resolvedFuture of: Block)
+
+  testTupleAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: Tuple) equals: (self kind: v of: Tuple)
+        self assert: (v isKindOf: Tuple) equals: (v match: [x :: Tuple -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: Tuple) equals: (self kind: self resolvedFuture of: Tuple)
+
+  testListAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: List) equals: (self kind: v of: List)
+        self assert: (v isKindOf: List) equals: (v match: [x :: List -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: List) equals: (self kind: self resolvedFuture of: List)
+
+  testPidAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: Pid) equals: (self kind: v of: Pid)
+        self assert: (v isKindOf: Pid) equals: (v match: [x :: Pid -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: Pid) equals: (self kind: self resolvedFuture of: Pid)
+
+  testPortAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: Port) equals: (self kind: v of: Port)
+        self assert: (v isKindOf: Port) equals: (v match: [x :: Port -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: Port) equals: (self kind: self resolvedFuture of: Port)
+
+  testReferenceAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: Reference) equals: (self kind: v of: Reference)
+        self assert: (v isKindOf: Reference) equals: (v match: [x :: Reference -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: Reference) equals: (self kind: self resolvedFuture of: Reference)
+
+  testDictionaryAgrees =>
+    self samples
+      do: [:v |
+        self assert: (v isKindOf: Dictionary) equals: (self kind: v of: Dictionary)
+        self assert: (v isKindOf: Dictionary) equals: (v match: [x :: Dictionary -> true; _ -> false])
+      ]
+    self assert: (self resolvedFuture isKindOf: Dictionary) equals: (self kind: self resolvedFuture of: Dictionary)
