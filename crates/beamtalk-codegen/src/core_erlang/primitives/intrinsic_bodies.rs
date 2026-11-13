@@ -294,26 +294,24 @@ impl CoreErlangGenerator {
         // via the `INTRINSIC_BODIES` table — see its doc for the full
         // strategy breakdown, and each `IntrinsicBody` variant's doc for the
         // rationale behind that particular shape.
-        if !is_quoted {
-            if let Some((_, body)) = INTRINSIC_BODIES.iter().find(|(n, _)| *n == name) {
-                // A placeholder body re-dispatches the intrinsic *name*. When
-                // the enclosing method's selector is that same name, the
-                // dispatch resolves back to this very method and loops
-                // forever under generic dispatch (`perform:`) — BT-4432,
-                // `Object>>hash`. Such an intrinsic needs a real
-                // `IntrinsicBody`, so fail the build instead.
-                if matches!(body, IntrinsicBody::Placeholder)
-                    && self.current_method_selector.as_deref() == Some(name)
-                {
-                    return Err(CodeGenError::Internal(format!(
-                        "@intrinsic {name} in method `{name}` of {class_name} has only a \
+        if !is_quoted && let Some((_, body)) = INTRINSIC_BODIES.iter().find(|(n, _)| *n == name) {
+            // A placeholder body re-dispatches the intrinsic *name*. When
+            // the enclosing method's selector is that same name, the
+            // dispatch resolves back to this very method and loops
+            // forever under generic dispatch (`perform:`) — BT-4432,
+            // `Object>>hash`. Such an intrinsic needs a real
+            // `IntrinsicBody`, so fail the build instead.
+            if matches!(body, IntrinsicBody::Placeholder)
+                && self.current_method_selector.as_deref() == Some(name)
+            {
+                return Err(CodeGenError::Internal(format!(
+                    "@intrinsic {name} in method `{name}` of {class_name} has only a \
                          placeholder body, which would re-dispatch `{name}` to itself and \
                          loop forever under generic dispatch; give it a real \
                          IntrinsicBody (see BT-4432)"
-                    )));
-                }
-                return Ok(self.render_intrinsic_body(body, name, &class_name, span));
+                )));
             }
+            return Ok(self.render_intrinsic_body(body, name, &class_name, span));
         }
 
         // For selector-based primitives, try to emit a direct BIF call

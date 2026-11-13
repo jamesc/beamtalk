@@ -124,17 +124,16 @@ impl CoreErlangGenerator {
         // Initialize fields from module expressions (assignments at top level)
         // Only include literal values - blocks are methods handled by dispatch/3
         for stmt in &module.expressions {
-            if let Expression::Assignment { target, value, .. } = &stmt.expression {
-                if let Expression::Identifier(id) = target.as_ref() {
-                    if matches!(value.as_ref(), Expression::Literal(..)) {
-                        let value_code = self.expression_doc(value)?;
-                        leading.push(docvec![
-                            line(),
-                            docvec![", ", leaf::atom(id.name.to_string()), " => "],
-                            value_code,
-                        ]);
-                    }
-                }
+            if let Expression::Assignment { target, value, .. } = &stmt.expression
+                && let Expression::Identifier(id) = target.as_ref()
+                && matches!(value.as_ref(), Expression::Literal(..))
+            {
+                let value_code = self.expression_doc(value)?;
+                leading.push(docvec![
+                    line(),
+                    docvec![", ", leaf::atom(id.name.to_string()), " => "],
+                    value_code,
+                ]);
             }
         }
 

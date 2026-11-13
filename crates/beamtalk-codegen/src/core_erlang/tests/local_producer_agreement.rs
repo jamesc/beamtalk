@@ -497,10 +497,10 @@ fn construct_frames(
     let mut frames = Vec::new();
     if let Expression::MessageSend { arguments, .. } = inner {
         for arg in arguments {
-            if let Expression::Block(block) = arg {
-                if is_threaded_frame_body(inner, block) {
-                    frames.push((block.clone(), is_fold_frame_body(inner, block), false));
-                }
+            if let Expression::Block(block) = arg
+                && is_threaded_frame_body(inner, block)
+            {
+                frames.push((block.clone(), is_fold_frame_body(inner, block), false));
             }
         }
     }

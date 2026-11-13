@@ -88,15 +88,15 @@ pub(in crate::core_erlang) fn validate_block_arity_exact(
     selector: &str,
     hint: &str,
 ) -> Result<()> {
-    if let Some(actual) = block_arity(expr) {
-        if actual != expected {
-            return Err(CodeGenError::BlockArityError {
-                selector: selector.to_string(),
-                expected: expected.to_string(),
-                actual,
-                hint: hint.to_string(),
-            });
-        }
+    if let Some(actual) = block_arity(expr)
+        && actual != expected
+    {
+        return Err(CodeGenError::BlockArityError {
+            selector: selector.to_string(),
+            expected: expected.to_string(),
+            actual,
+            hint: hint.to_string(),
+        });
     }
     Ok(())
 }
@@ -112,15 +112,15 @@ fn validate_block_arity_range(
     selector: &str,
     hint: &str,
 ) -> Result<()> {
-    if let Some(actual) = block_arity(expr) {
-        if actual < min || actual > max {
-            return Err(CodeGenError::BlockArityError {
-                selector: selector.to_string(),
-                expected: format!("{min} or {max}"),
-                actual,
-                hint: hint.to_string(),
-            });
-        }
+    if let Some(actual) = block_arity(expr)
+        && (actual < min || actual > max)
+    {
+        return Err(CodeGenError::BlockArityError {
+            selector: selector.to_string(),
+            expected: format!("{min} or {max}"),
+            actual,
+            hint: hint.to_string(),
+        });
     }
     Ok(())
 }

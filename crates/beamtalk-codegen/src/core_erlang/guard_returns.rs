@@ -405,10 +405,10 @@ impl Rewriter {
         let mut in_rest: HashMap<EcoString, usize> = HashMap::new();
         for stmt in rest {
             walk_expression(&stmt.expression, &mut |e| {
-                if let Expression::Assignment { target, .. } = e {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        *in_rest.entry(id.name.clone()).or_default() += 1;
-                    }
+                if let Expression::Assignment { target, .. } = e
+                    && let Expression::Identifier(id) = target.as_ref()
+                {
+                    *in_rest.entry(id.name.clone()).or_default() += 1;
                 }
             });
         }

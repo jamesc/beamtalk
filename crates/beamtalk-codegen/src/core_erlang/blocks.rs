@@ -139,12 +139,11 @@ impl CoreErlangGenerator {
                     arguments.len(),
                 )
                 .is_none()
+                && let Expression::Block(block) = receiver.as_ref()
             {
-                if let Expression::Block(block) = receiver.as_ref() {
-                    let mutations = Self::captured_mutations_for_block(block);
-                    if !mutations.is_empty() {
-                        return Some(mutations);
-                    }
+                let mutations = Self::captured_mutations_for_block(block);
+                if !mutations.is_empty() {
+                    return Some(mutations);
                 }
             }
         }
@@ -742,62 +741,62 @@ impl CoreErlangGenerator {
                     // Extract the field name from the assignment target.
                     let final_version = self.state_version();
                     let state = self.current_state_var();
-                    if let Expression::Assignment { target, .. } = expr {
-                        if let Expression::FieldAccess { field, .. } = target.as_ref() {
-                            stmts.push(ThreadedStmt::Return(
-                                ValueRef::Doc(docvec![
-                                    "call 'maps':'get'(",
-                                    leaf::atom(field.name.to_string()),
-                                    ", ",
-                                    leaf::var(state),
-                                    ")",
-                                ]),
-                                VersionedVar::new(VersionPrefix::State, final_version, frame),
-                                span,
-                            ));
-                        }
+                    if let Expression::Assignment { target, .. } = expr
+                        && let Expression::FieldAccess { field, .. } = target.as_ref()
+                    {
+                        stmts.push(ThreadedStmt::Return(
+                            ValueRef::Doc(docvec![
+                                "call 'maps':'get'(",
+                                leaf::atom(field.name.to_string()),
+                                ", ",
+                                leaf::var(state),
+                                ")",
+                            ]),
+                            VersionedVar::new(VersionPrefix::State, final_version, frame),
+                            span,
+                        ));
                     }
                 }
             } else if Self::is_local_var_assignment(expr) {
                 let _val_var = self.lower_local_var_assignment_bind(expr, frame, span, stmts)?;
-                if let Expression::Assignment { target, .. } = expr {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        let key = Self::local_state_key(&id.name);
-                        if is_last {
-                            // Last expression is an assignment — result is the assigned value.
-                            // Read it from the updated state map (the _Val was put there).
-                            let final_version = self.state_version();
-                            let state = self.current_state_var();
-                            stmts.push(ThreadedStmt::Return(
-                                ValueRef::Doc(docvec![
-                                    "call 'maps':'get'(",
-                                    leaf::atom(key),
-                                    ", ",
-                                    leaf::var(state),
-                                    ")",
-                                ]),
-                                VersionedVar::new(VersionPrefix::State, final_version, frame),
-                                span,
-                            ));
-                        } else {
-                            // Non-last assignment: refresh scope binding so subsequent reads
-                            // of this variable see the updated value (not the initial unpack).
-                            let fresh = self.fresh_temp_var("Refreshed");
-                            self.bind_var(&id.name, &fresh);
-                            let state = self.current_state_var();
-                            stmts.push(ThreadedStmt::Statement(
-                                docvec![
-                                    "let ",
-                                    leaf::var(fresh),
-                                    " = call 'maps':'get'(",
-                                    leaf::atom(key),
-                                    ", ",
-                                    leaf::var(state),
-                                    ") in "
-                                ],
-                                span,
-                            ));
-                        }
+                if let Expression::Assignment { target, .. } = expr
+                    && let Expression::Identifier(id) = target.as_ref()
+                {
+                    let key = Self::local_state_key(&id.name);
+                    if is_last {
+                        // Last expression is an assignment — result is the assigned value.
+                        // Read it from the updated state map (the _Val was put there).
+                        let final_version = self.state_version();
+                        let state = self.current_state_var();
+                        stmts.push(ThreadedStmt::Return(
+                            ValueRef::Doc(docvec![
+                                "call 'maps':'get'(",
+                                leaf::atom(key),
+                                ", ",
+                                leaf::var(state),
+                                ")",
+                            ]),
+                            VersionedVar::new(VersionPrefix::State, final_version, frame),
+                            span,
+                        ));
+                    } else {
+                        // Non-last assignment: refresh scope binding so subsequent reads
+                        // of this variable see the updated value (not the initial unpack).
+                        let fresh = self.fresh_temp_var("Refreshed");
+                        self.bind_var(&id.name, &fresh);
+                        let state = self.current_state_var();
+                        stmts.push(ThreadedStmt::Statement(
+                            docvec![
+                                "let ",
+                                leaf::var(fresh),
+                                " = call 'maps':'get'(",
+                                leaf::atom(key),
+                                ", ",
+                                leaf::var(state),
+                                ") in "
+                            ],
+                            span,
+                        ));
                     }
                 }
             } else if let Expression::DestructureAssignment { pattern, value, .. } = expr {

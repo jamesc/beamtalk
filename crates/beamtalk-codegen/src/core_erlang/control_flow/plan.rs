@@ -340,13 +340,12 @@ impl BodyEffects {
         // in a body frame with a private scratch map): either runs on the
         // body's `StateAcc`.
         let has_tier2_threaded_assign = body.body.iter().any(|s| {
-            if let Expression::Assignment { target, value, .. } = &s.expression {
-                if let Expression::Identifier(id) = target.as_ref() {
-                    if threaded_locals.contains(&id.name.to_string()) {
-                        return generator.is_tier2_value_call(value)
-                            || generator.is_inlined_evaluated_block(value);
-                    }
-                }
+            if let Expression::Assignment { target, value, .. } = &s.expression
+                && let Expression::Identifier(id) = target.as_ref()
+                && threaded_locals.contains(&id.name.to_string())
+            {
+                return generator.is_tier2_value_call(value)
+                    || generator.is_inlined_evaluated_block(value);
             }
             false
         });

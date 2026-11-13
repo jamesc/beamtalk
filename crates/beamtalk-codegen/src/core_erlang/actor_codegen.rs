@@ -346,10 +346,10 @@ impl CoreErlangGenerator {
         }
 
         // Generate class-side method standalone functions
-        if let Some(class) = module.classes.first() {
-            if !class.class_methods.is_empty() {
-                docs.push(self.generate_class_method_functions(class)?);
-            }
+        if let Some(class) = module.classes.first()
+            && !class.class_methods.is_empty()
+        {
+            docs.push(self.generate_class_method_functions(class)?);
         }
 
         // Synthesize class_supervisionSpec for Actor subclasses
@@ -391,15 +391,13 @@ impl CoreErlangGenerator {
             docs.push(self.generate_register_class(module, false)?);
         }
 
-        if has_protocol_source {
-            if let Some(source) = self.source_text.as_deref() {
-                docs.push(docvec![
-                    "\n",
-                    "'__beamtalk_protocol_source'/0 = fun () ->\n    ",
-                    leaf::binary_lit(source),
-                    "\n",
-                ]);
-            }
+        if has_protocol_source && let Some(source) = self.source_text.as_deref() {
+            docs.push(docvec![
+                "\n",
+                "'__beamtalk_protocol_source'/0 = fun () ->\n    ",
+                leaf::binary_lit(source),
+                "\n",
+            ]);
         }
 
         Ok(super::module_shell::core_module(

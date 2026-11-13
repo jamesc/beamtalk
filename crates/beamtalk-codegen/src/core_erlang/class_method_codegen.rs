@@ -297,32 +297,30 @@ impl CoreErlangGenerator {
         class_name: &str,
         class_var_names: &[String],
     ) -> Result<Document<'static>> {
-        if let Expression::Literal(Literal::Symbol(sym), _) = key {
-            if let Some(selector) = super::class_builder_source::selector_from_symbol(sym) {
-                if let Expression::Block(block) = value {
-                    // A class-method block declares `self` plus one parameter per
-                    // selector slot.
-                    let expected = selector.arity() + 1;
-                    if block.parameters.len() == expected {
-                        let saved =
-                            self.enter_builder_class_method_context(class_name, class_var_names);
-                        let result = self.generate_class_method_fun_from_block(&selector, block);
-                        self.exit_builder_class_method_context(saved);
-                        return result;
-                    }
-                    return Err(CodeGenError::BlockArityError {
-                        selector: format!("classMethods: {sym}"),
-                        expected: expected.to_string(),
-                        actual: block.parameters.len(),
-                        hint: format!(
-                            "Fix: A classMethods: block takes `self` plus one parameter per \
+        if let Expression::Literal(Literal::Symbol(sym), _) = key
+            && let Some(selector) = super::class_builder_source::selector_from_symbol(sym)
+            && let Expression::Block(block) = value
+        {
+            // A class-method block declares `self` plus one parameter per
+            // selector slot.
+            let expected = selector.arity() + 1;
+            if block.parameters.len() == expected {
+                let saved = self.enter_builder_class_method_context(class_name, class_var_names);
+                let result = self.generate_class_method_fun_from_block(&selector, block);
+                self.exit_builder_class_method_context(saved);
+                return result;
+            }
+            return Err(CodeGenError::BlockArityError {
+                selector: format!("classMethods: {sym}"),
+                expected: expected.to_string(),
+                actual: block.parameters.len(),
+                hint: format!(
+                    "Fix: A classMethods: block takes `self` plus one parameter per \
                              selector argument, so #{sym} needs {expected} parameter(s):\n\
                              \x20 classMethods: #{{ #{sym} => [:self{} | ...] }}",
-                            Self::class_method_block_param_example(selector.arity())
-                        ),
-                    });
-                }
-            }
+                    Self::class_method_block_param_example(selector.arity())
+                ),
+            });
         }
         // Computed fun or non-conforming key: lower as an ordinary value. A
         // computed fun's arity is unknown until runtime and is validated at
@@ -781,16 +779,16 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
-        if let Expression::Assignment { target, value, .. } = expr {
-            if let Expression::Identifier(id) = target.as_ref() {
-                let var_name = &id.name;
-                let core_var = self
-                    .lookup_var(var_name)
-                    .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                let val_doc = self.expression_doc(value)?;
-                self.bind_var(var_name, &core_var);
-                return Ok(docvec!["let ", leaf::var(core_var), " = ", val_doc, " in ",]);
-            }
+        if let Expression::Assignment { target, value, .. } = expr
+            && let Expression::Identifier(id) = target.as_ref()
+        {
+            let var_name = &id.name;
+            let core_var = self
+                .lookup_var(var_name)
+                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+            let val_doc = self.expression_doc(value)?;
+            self.bind_var(var_name, &core_var);
+            return Ok(docvec!["let ", leaf::var(core_var), " = ", val_doc, " in ",]);
         }
         Ok(Document::Nil)
     }

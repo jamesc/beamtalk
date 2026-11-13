@@ -511,11 +511,10 @@ impl CoreErlangGenerator {
                 .is_empty(),
             _ => false,
         };
-        if let Expression::Block(pred_block) = predicate {
-            if self.block_needs_mutation_threading(if_none).is_some() || packs_handler_writes {
-                return self
-                    .generate_list_detect_if_none_with_mutations(receiver, pred_block, if_none);
-            }
+        if let Expression::Block(pred_block) = predicate
+            && (self.block_needs_mutation_threading(if_none).is_some() || packs_handler_writes)
+        {
+            return self.generate_list_detect_if_none_with_mutations(receiver, pred_block, if_none);
         }
 
         // No mutations: fall through to runtime dispatch

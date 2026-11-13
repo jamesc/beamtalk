@@ -143,13 +143,13 @@ impl CoreErlangGenerator {
         }
         // Check if receiver is a local var this method assigned a Tier 2
         // block literal to (zero-arg value).
-        if let Expression::Identifier(id) = receiver {
-            if self.tier2_local_vars.contains(id.name.as_str()) {
-                let tuple_doc = self.generate_block_value_call_stateful(receiver, arguments)?;
-                return Ok(Some(self.close_tier2_value_subexpr_doc(
-                    receiver, selector, arguments, tuple_doc,
-                )));
-            }
+        if let Expression::Identifier(id) = receiver
+            && self.tier2_local_vars.contains(id.name.as_str())
+        {
+            let tuple_doc = self.generate_block_value_call_stateful(receiver, arguments)?;
+            return Ok(Some(self.close_tier2_value_subexpr_doc(
+                receiver, selector, arguments, tuple_doc,
+            )));
         }
         if self.block_value_yields_to_typed_send(receiver, selector) {
             return Ok(None);
@@ -378,13 +378,13 @@ impl CoreErlangGenerator {
     ) -> Result<Option<Document<'static>>> {
         // Check if receiver is a local var this method assigned a Tier 2
         // block literal to.
-        if let Expression::Identifier(id) = receiver {
-            if self.tier2_local_vars.contains(id.name.as_str()) {
-                let tuple_doc = self.generate_block_value_call_stateful(receiver, arguments)?;
-                return Ok(Some(self.close_tier2_value_subexpr_doc(
-                    receiver, selector, arguments, tuple_doc,
-                )));
-            }
+        if let Expression::Identifier(id) = receiver
+            && self.tier2_local_vars.contains(id.name.as_str())
+        {
+            let tuple_doc = self.generate_block_value_call_stateful(receiver, arguments)?;
+            return Ok(Some(self.close_tier2_value_subexpr_doc(
+                receiver, selector, arguments, tuple_doc,
+            )));
         }
         if self.block_value_yields_to_typed_send(receiver, selector) {
             return Ok(None);
@@ -1574,34 +1574,34 @@ impl CoreErlangGenerator {
                 let is_last = i == body.len() - 1;
                 if Self::is_local_var_assignment(expr) {
                     // Local assignment: shadow the variable with the new value
-                    if let Expression::Assignment { target, value, .. } = expr {
-                        if let Expression::Identifier(id) = target.as_ref() {
-                            let core_var = self
-                                .lookup_var(&id.name)
-                                .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-                            let val_doc = self.expression_doc(value)?;
-                            if is_last {
-                                // Last assignment: bind AND return the new value
-                                parts.push(docvec![
-                                    "let ",
-                                    leaf::var(core_var.clone()),
-                                    " = ",
-                                    val_doc,
-                                    " in ",
-                                    leaf::var(core_var.clone()),
-                                ]);
-                            } else {
-                                parts.push(docvec![
-                                    "let ",
-                                    leaf::var(core_var.clone()),
-                                    " = ",
-                                    val_doc,
-                                    " in ",
-                                ]);
-                            }
-                            // Bind in the OUTER scope so subsequent reads see the update
-                            self.bind_var(&id.name, &core_var);
+                    if let Expression::Assignment { target, value, .. } = expr
+                        && let Expression::Identifier(id) = target.as_ref()
+                    {
+                        let core_var = self
+                            .lookup_var(&id.name)
+                            .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                        let val_doc = self.expression_doc(value)?;
+                        if is_last {
+                            // Last assignment: bind AND return the new value
+                            parts.push(docvec![
+                                "let ",
+                                leaf::var(core_var.clone()),
+                                " = ",
+                                val_doc,
+                                " in ",
+                                leaf::var(core_var.clone()),
+                            ]);
+                        } else {
+                            parts.push(docvec![
+                                "let ",
+                                leaf::var(core_var.clone()),
+                                " = ",
+                                val_doc,
+                                " in ",
+                            ]);
                         }
+                        // Bind in the OUTER scope so subsequent reads see the update
+                        self.bind_var(&id.name, &core_var);
                     }
                 } else if is_last {
                     // Last non-assignment: block result value

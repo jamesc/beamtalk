@@ -149,18 +149,18 @@ impl CoreErlangGenerator {
         // `spawn/0,1` / `spawn_monitored/0,1` in the calling process — so a
         // monitored spawn's monitor belongs to the sender. Only match
         // ClassReference, not Identifier.
-        if let Expression::ClassReference { name, package, .. } = receiver {
-            if let Some(variant) = SpawnVariant::of_selector(&selector.name(), arguments.len()) {
-                let pkg = package.as_ref().map(|p| p.name.as_str());
-                let doc = self.generate_actor_spawn_qualified(
-                    &name.name,
-                    pkg,
-                    &selector.name(),
-                    arguments.first(),
-                    variant,
-                )?;
-                return Ok(Some(doc));
-            }
+        if let Expression::ClassReference { name, package, .. } = receiver
+            && let Some(variant) = SpawnVariant::of_selector(&selector.name(), arguments.len())
+        {
+            let pkg = package.as_ref().map(|p| p.name.as_str());
+            let doc = self.generate_actor_spawn_qualified(
+                &name.name,
+                pkg,
+                &selector.name(),
+                arguments.first(),
+                variant,
+            )?;
+            return Ok(Some(doc));
         }
 
         // Unary await messages
@@ -176,11 +176,13 @@ impl CoreErlangGenerator {
         }
 
         // Keyword await: messages
-        if let MessageSelector::Keyword(parts) = selector {
-            if parts.len() == 1 && parts[0].keyword == "await:" && arguments.len() == 1 {
-                let doc = self.generate_await_with_timeout(receiver, &arguments[0])?;
-                return Ok(Some(doc));
-            }
+        if let MessageSelector::Keyword(parts) = selector
+            && parts.len() == 1
+            && parts[0].keyword == "await:"
+            && arguments.len() == 1
+        {
+            let doc = self.generate_await_with_timeout(receiver, &arguments[0])?;
+            return Ok(Some(doc));
         }
 
         Ok(None)

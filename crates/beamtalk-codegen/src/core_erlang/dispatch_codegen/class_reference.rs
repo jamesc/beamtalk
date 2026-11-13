@@ -254,18 +254,18 @@ impl CoreErlangGenerator {
         if !self.in_class_method() {
             return Ok(None);
         }
-        if let Expression::Identifier(id) = receiver {
-            if id.name == "self" {
-                // ADR 0118 phase 5b: reached through ordinary
-                // `generate_expression`, not `threaded_expression`'s own
-                // producer recognition — close the prelude inline.
-                let tv = self.generate_class_method_self_send(
-                    selector,
-                    ClassSendArgs::Exprs(arguments),
-                    true,
-                )?;
-                return Ok(Some(self.close_threaded_value_doc(tv)));
-            }
+        if let Expression::Identifier(id) = receiver
+            && id.name == "self"
+        {
+            // ADR 0118 phase 5b: reached through ordinary
+            // `generate_expression`, not `threaded_expression`'s own
+            // producer recognition — close the prelude inline.
+            let tv = self.generate_class_method_self_send(
+                selector,
+                ClassSendArgs::Exprs(arguments),
+                true,
+            )?;
+            return Ok(Some(self.close_threaded_value_doc(tv)));
         }
         Ok(None)
     }

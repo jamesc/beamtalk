@@ -212,10 +212,11 @@ impl CoreErlangGenerator {
         // Never annotate while an open let-chain is in flight — an
         // annotated open chain is invalid Core Erlang. Defence in
         // depth over the closed-doc invariant on `PrecompiledSubexpr::annotate`.
-        if annotate && self.can_annotate_closed_expression() {
-            if let Some(line_num) = self.span_to_line(span) {
-                return Some(self.annotate_with_line(doc, line_num));
-            }
+        if annotate
+            && self.can_annotate_closed_expression()
+            && let Some(line_num) = self.span_to_line(span)
+        {
+            return Some(self.annotate_with_line(doc, line_num));
         }
         Some(doc)
     }
@@ -242,10 +243,10 @@ impl CoreErlangGenerator {
         doc: Document<'static>,
         span: Span,
     ) -> Document<'static> {
-        if self.can_annotate_closed_expression() {
-            if let Some(line_num) = self.span_to_line(span) {
-                return self.annotate_with_line(doc, line_num);
-            }
+        if self.can_annotate_closed_expression()
+            && let Some(line_num) = self.span_to_line(span)
+        {
+            return self.annotate_with_line(doc, line_num);
         }
         doc
     }
@@ -541,10 +542,10 @@ impl CoreErlangGenerator {
         for (i, e) in exprs.iter().enumerate() {
             let inner = e.unwrap_parens();
             if Self::is_trivial_subexpr(inner) {
-                if let Expression::Block(block) = inner {
-                    if self.block_capture_reads_live_state(block) {
-                        class_var.push(i);
-                    }
+                if let Expression::Block(block) = inner
+                    && self.block_capture_reads_live_state(block)
+                {
+                    class_var.push(i);
                 }
                 continue;
             }

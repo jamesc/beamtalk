@@ -522,8 +522,8 @@ pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
     // are NOT included here — `try_generate_boolean_protocol` returns
     // `Ok(None)` (falls through) when no mutation-threading is needed,
     // allowing the send to reach self-dispatch.
-    if let Some(wk) = selector.well_known() {
-        if matches!(
+    if let Some(wk) = selector.well_known()
+        && matches!(
             wk,
             WellKnownSelector::Class
                 | WellKnownSelector::RespondsTo
@@ -552,9 +552,9 @@ pub(super) fn selector_dispatches_via_self(selector: &MessageSelector) -> bool {
                 | WellKnownSelector::Perform
                 | WellKnownSelector::PerformWithArgs
                 | WellKnownSelector::PerformLocallyWithArgs
-        ) {
-            return false;
-        }
+        )
+    {
+        return false;
     }
     // Remaining intrinsics not modelled as `WellKnownSelector` variants
     // — these are class-specific or compile-time-only constructs that
@@ -613,18 +613,17 @@ pub(super) fn is_self_field_at_put(ctx: &ShapeCtx<'_>, expr: &Expression) -> boo
         arguments,
         ..
     } = expr
+        && let Expression::Identifier(id) = receiver.as_ref()
     {
-        if let Expression::Identifier(id) = receiver.as_ref() {
-            // Classify via the well-known enum. The classifier
-            // already guarantees the two-part keyword shape; arguments.len()
-            // is checked defensively for parser-shape consistency.
-            if id.name == "self"
-                && !ctx.self_var_bound
-                && matches!(selector.well_known(), Some(WellKnownSelector::FieldAtPut))
-                && arguments.len() == 2
-            {
-                return true;
-            }
+        // Classify via the well-known enum. The classifier
+        // already guarantees the two-part keyword shape; arguments.len()
+        // is checked defensively for parser-shape consistency.
+        if id.name == "self"
+            && !ctx.self_var_bound
+            && matches!(selector.well_known(), Some(WellKnownSelector::FieldAtPut))
+            && arguments.len() == 2
+        {
+            return true;
         }
     }
     false
@@ -646,16 +645,13 @@ pub(super) fn is_self_clear_field(ctx: &ShapeCtx<'_>, expr: &Expression) -> bool
         arguments,
         ..
     } = expr
+        && let Expression::Identifier(id) = receiver.as_ref()
+        && id.name == "self"
+        && !ctx.self_var_bound
+        && matches!(selector.well_known(), Some(WellKnownSelector::ClearField))
+        && arguments.len() == 1
     {
-        if let Expression::Identifier(id) = receiver.as_ref() {
-            if id.name == "self"
-                && !ctx.self_var_bound
-                && matches!(selector.well_known(), Some(WellKnownSelector::ClearField))
-                && arguments.len() == 1
-            {
-                return true;
-            }
-        }
+        return true;
     }
     false
 }

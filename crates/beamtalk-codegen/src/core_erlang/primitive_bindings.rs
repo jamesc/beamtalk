@@ -125,47 +125,44 @@ impl PrimitiveBindingTable {
             for method in class.methods.iter().chain(class.class_methods.iter()) {
                 // A primitive method has exactly one expression in its body:
                 // an Expression::Primitive node.
-                if method.body.len() == 1 {
-                    if let Expression::Primitive {
+                if method.body.len() == 1
+                    && let Expression::Primitive {
                         name,
                         is_quoted,
                         no_user_code,
                         ..
                     } = &method.body[0].expression
-                    {
-                        let selector = method.selector.name().to_string();
-                        if *no_user_code {
-                            self.marks.push(NoUserCodeMark {
-                                class_name: class_name.clone(),
-                                selector: selector.clone(),
-                                selector_based: *is_quoted,
-                                class_sealed: class.is_sealed,
-                                parameter_types: method
-                                    .parameters
-                                    .iter()
-                                    .map(|p| match &p.type_annotation {
-                                        Some(TypeAnnotation::Simple(id)) => {
-                                            Some(id.name.to_string())
-                                        }
-                                        _ => None,
-                                    })
-                                    .collect(),
-                            });
-                        }
-                        let binding = if *is_quoted {
-                            PrimitiveBinding::SelectorBased {
-                                selector: name.to_string(),
-                                no_user_code: *no_user_code,
-                            }
-                        } else {
-                            PrimitiveBinding::StructuralIntrinsic {
-                                name: name.to_string(),
-                            }
-                        };
-
-                        self.bindings
-                            .insert((class_name.clone(), selector), binding);
+                {
+                    let selector = method.selector.name().to_string();
+                    if *no_user_code {
+                        self.marks.push(NoUserCodeMark {
+                            class_name: class_name.clone(),
+                            selector: selector.clone(),
+                            selector_based: *is_quoted,
+                            class_sealed: class.is_sealed,
+                            parameter_types: method
+                                .parameters
+                                .iter()
+                                .map(|p| match &p.type_annotation {
+                                    Some(TypeAnnotation::Simple(id)) => Some(id.name.to_string()),
+                                    _ => None,
+                                })
+                                .collect(),
+                        });
                     }
+                    let binding = if *is_quoted {
+                        PrimitiveBinding::SelectorBased {
+                            selector: name.to_string(),
+                            no_user_code: *no_user_code,
+                        }
+                    } else {
+                        PrimitiveBinding::StructuralIntrinsic {
+                            name: name.to_string(),
+                        }
+                    };
+
+                    self.bindings
+                        .insert((class_name.clone(), selector), binding);
                 }
             }
         }
@@ -257,15 +254,15 @@ impl PrimitiveBindingTable {
     pub fn find_selector(&self, selector: &str) -> Option<(String, PrimitiveBinding)> {
         let mut result: Option<(String, PrimitiveBinding)> = None;
         for ((class_name, sel), binding) in &self.bindings {
-            if sel == selector {
-                if let PrimitiveBinding::SelectorBased { .. } = binding {
-                    if result.is_some() {
-                        // Ambiguous: multiple classes have this selector.
-                        // Fall through to generic runtime dispatch.
-                        return None;
-                    }
-                    result = Some((class_name.clone(), binding.clone()));
+            if sel == selector
+                && let PrimitiveBinding::SelectorBased { .. } = binding
+            {
+                if result.is_some() {
+                    // Ambiguous: multiple classes have this selector.
+                    // Fall through to generic runtime dispatch.
+                    return None;
                 }
+                result = Some((class_name.clone(), binding.clone()));
             }
         }
         result

@@ -285,15 +285,15 @@ impl CoreErlangGenerator {
             // session map (`Workspace bind:as:`, ADR 0129 §7) before the class
             // registry, so the evaluated class need not be the one the
             // spelling names.
-            if self.context != CodeGenContext::Repl {
-                if let Some(class_name) = Self::user_class_literal_name(class_arg) {
-                    return self.emit_kind_of_call_with(
-                        receiver,
-                        class_arg,
-                        KindOfFn::Named,
-                        |_, _| leaf::atom(class_name),
-                    );
-                }
+            if self.context != CodeGenContext::Repl
+                && let Some(class_name) = Self::user_class_literal_name(class_arg)
+            {
+                return self.emit_kind_of_call_with(
+                    receiver,
+                    class_arg,
+                    KindOfFn::Named,
+                    |_, _| leaf::atom(class_name),
+                );
             }
             return Ok(None);
         };
@@ -608,19 +608,18 @@ impl CoreErlangGenerator {
                 // check as `ifNotNil:` below — a self-send or field mutation
                 // inside the `ifNil:` block must not be lost to a plain
                 // closure.
-                if self.nil_conditional_inlines() {
-                    if let Expression::Block(block) = &arguments[0] {
-                        if self.conditional_needs_mutation_threading(receiver, &[block]) {
-                            let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(
-                                receiver,
-                                Some(block),
-                                None,
-                                self.conditional_scratch(self.current_frame()),
-                                false,
-                            )?;
-                            return Ok(Some(tuple_doc));
-                        }
-                    }
+                if self.nil_conditional_inlines()
+                    && let Expression::Block(block) = &arguments[0]
+                    && self.conditional_needs_mutation_threading(receiver, &[block])
+                {
+                    let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(
+                        receiver,
+                        Some(block),
+                        None,
+                        self.conditional_scratch(self.current_frame()),
+                        false,
+                    )?;
+                    return Ok(Some(tuple_doc));
                 }
                 // Hoist open-scope receiver/block (e.g. class method self-sends).
                 let mut seq = self.sequence_call(&[receiver, &arguments[0]], "IfNil")?;
@@ -655,26 +654,26 @@ impl CoreErlangGenerator {
                 // When in actor context or loop body, check if the block
                 // contains field mutations. If so, generate inline state-threaded code
                 // instead of a closure to ensure mutations persist correctly.
-                if self.nil_conditional_inlines() {
-                    if let Expression::Block(block) = &arguments[0] {
-                        // inline when a nested list op mutates an outer local (see IfTrue).
-                        // also inline for a self-send receiver (see IfTrue above).
-                        let needs_threading =
-                            self.conditional_needs_mutation_threading(receiver, &[block]);
-                        if needs_threading {
-                            // Validate arity before generating mutation-threaded code.
-                            // This ensures a block with >1 params still raises
-                            // BlockArityMismatch rather than producing invalid Core Erlang.
-                            validate_if_not_nil_block(&arguments[0], selector_name)?;
-                            let doc = self.generate_nil_conditional_with_mutations_tuple(
-                                receiver,
-                                None,
-                                Some(block),
-                                self.conditional_scratch(self.current_frame()),
-                                false,
-                            )?;
-                            return Ok(Some(doc));
-                        }
+                if self.nil_conditional_inlines()
+                    && let Expression::Block(block) = &arguments[0]
+                {
+                    // inline when a nested list op mutates an outer local (see IfTrue).
+                    // also inline for a self-send receiver (see IfTrue above).
+                    let needs_threading =
+                        self.conditional_needs_mutation_threading(receiver, &[block]);
+                    if needs_threading {
+                        // Validate arity before generating mutation-threaded code.
+                        // This ensures a block with >1 params still raises
+                        // BlockArityMismatch rather than producing invalid Core Erlang.
+                        validate_if_not_nil_block(&arguments[0], selector_name)?;
+                        let doc = self.generate_nil_conditional_with_mutations_tuple(
+                            receiver,
+                            None,
+                            Some(block),
+                            self.conditional_scratch(self.current_frame()),
+                            false,
+                        )?;
+                        return Ok(Some(doc));
                     }
                 }
                 // If the block has 0 parameters, don't pass the receiver (avoids badarity)
@@ -713,25 +712,21 @@ impl CoreErlangGenerator {
                 // ADR 0118 phase 4: inline mutation-threading
                 // check, same as the single-block `ifNil:`/`ifNotNil:`
                 // arms above.
-                if self.nil_conditional_inlines() {
-                    if let (Expression::Block(nil_block), Expression::Block(not_nil_block)) =
+                if self.nil_conditional_inlines()
+                    && let (Expression::Block(nil_block), Expression::Block(not_nil_block)) =
                         (&arguments[0], &arguments[1])
-                    {
-                        if self.conditional_needs_mutation_threading(
-                            receiver,
-                            &[nil_block, not_nil_block],
-                        ) {
-                            validate_if_not_nil_block(&arguments[1], selector_name)?;
-                            let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(
-                                receiver,
-                                Some(nil_block),
-                                Some(not_nil_block),
-                                self.conditional_scratch(self.current_frame()),
-                                false,
-                            )?;
-                            return Ok(Some(tuple_doc));
-                        }
-                    }
+                    && self
+                        .conditional_needs_mutation_threading(receiver, &[nil_block, not_nil_block])
+                {
+                    validate_if_not_nil_block(&arguments[1], selector_name)?;
+                    let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(
+                        receiver,
+                        Some(nil_block),
+                        Some(not_nil_block),
+                        self.conditional_scratch(self.current_frame()),
+                        false,
+                    )?;
+                    return Ok(Some(tuple_doc));
                 }
                 // If the notNil block has 0 parameters, don't pass the receiver
                 // Hoist open-scope sub-expressions (e.g. class method self-sends).
@@ -780,25 +775,21 @@ impl CoreErlangGenerator {
                 // ADR 0118 phase 4: inline mutation-threading
                 // check, same as the single-block `ifNil:`/`ifNotNil:`
                 // arms above.
-                if self.nil_conditional_inlines() {
-                    if let (Expression::Block(not_nil_block), Expression::Block(nil_block)) =
+                if self.nil_conditional_inlines()
+                    && let (Expression::Block(not_nil_block), Expression::Block(nil_block)) =
                         (&arguments[0], &arguments[1])
-                    {
-                        if self.conditional_needs_mutation_threading(
-                            receiver,
-                            &[not_nil_block, nil_block],
-                        ) {
-                            validate_if_not_nil_block(&arguments[0], selector_name)?;
-                            let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(
-                                receiver,
-                                Some(nil_block),
-                                Some(not_nil_block),
-                                self.conditional_scratch(self.current_frame()),
-                                false,
-                            )?;
-                            return Ok(Some(tuple_doc));
-                        }
-                    }
+                    && self
+                        .conditional_needs_mutation_threading(receiver, &[not_nil_block, nil_block])
+                {
+                    validate_if_not_nil_block(&arguments[0], selector_name)?;
+                    let tuple_doc = self.generate_nil_conditional_with_mutations_tuple(
+                        receiver,
+                        Some(nil_block),
+                        Some(not_nil_block),
+                        self.conditional_scratch(self.current_frame()),
+                        false,
+                    )?;
+                    return Ok(Some(tuple_doc));
                 }
                 // If the notNil block has 0 parameters, don't pass the receiver
                 // Hoist open-scope sub-expressions (e.g. class method self-sends).
@@ -1118,18 +1109,17 @@ impl CoreErlangGenerator {
             // normal is_tuple branch would call sync_send(self()) which is
             // gen_server:call(self(), ...) → deadlock.
             // Use beamtalk_primitive:send(State, ...) directly instead.
-            if let Expression::Identifier(id) = receiver {
-                if id.name == "self"
-                    && self.context == super::super::CodeGenContext::Actor
-                    && self.lookup_var("self").is_none()
-                {
-                    let doc = docvec![
-                        "call 'beamtalk_primitive':'send'(",
-                        leaf::var(self.current_state_var()),
-                        ", 'fieldNames', [])",
-                    ];
-                    return Ok(Some(doc));
-                }
+            if let Expression::Identifier(id) = receiver
+                && id.name == "self"
+                && self.context == super::super::CodeGenContext::Actor
+                && self.lookup_var("self").is_none()
+            {
+                let doc = docvec![
+                    "call 'beamtalk_primitive':'send'(",
+                    leaf::var(self.current_state_var()),
+                    ", 'fieldNames', [])",
+                ];
+                return Ok(Some(doc));
             }
 
             // Hoist open-scope receiver (e.g. class method self-send).
@@ -1224,26 +1214,25 @@ impl CoreErlangGenerator {
                         }
                         // Fast-path for `self` receiver in actor context.
                         // Avoids sync_send(self()) → gen_server:call(self(), ...) → deadlock.
-                        if let Expression::Identifier(id) = receiver {
-                            if id.name == "self"
-                                && self.context == super::super::CodeGenContext::Actor
-                                && self.lookup_var("self").is_none()
-                            {
-                                let name_var = self.fresh_var("Name");
-                                let name_code = self.expression_doc(&arguments[0])?;
-                                let doc = docvec![
-                                    "let ",
-                                    leaf::var(name_var.clone()),
-                                    " = ",
-                                    name_code,
-                                    " in call 'beamtalk_primitive':'send'(",
-                                    leaf::var(self.current_state_var()),
-                                    ", 'fieldAt:', [",
-                                    leaf::var(name_var),
-                                    "])",
-                                ];
-                                return Ok(Some(doc));
-                            }
+                        if let Expression::Identifier(id) = receiver
+                            && id.name == "self"
+                            && self.context == super::super::CodeGenContext::Actor
+                            && self.lookup_var("self").is_none()
+                        {
+                            let name_var = self.fresh_var("Name");
+                            let name_code = self.expression_doc(&arguments[0])?;
+                            let doc = docvec![
+                                "let ",
+                                leaf::var(name_var.clone()),
+                                " = ",
+                                name_code,
+                                " in call 'beamtalk_primitive':'send'(",
+                                leaf::var(self.current_state_var()),
+                                ", 'fieldAt:', [",
+                                leaf::var(name_var),
+                                "])",
+                            ];
+                            return Ok(Some(doc));
                         }
 
                         // Hoist open-scope receiver + name (e.g. class method self-sends).
@@ -1377,34 +1366,33 @@ impl CoreErlangGenerator {
                         // to beamtalk_primitive:send(State, 'fieldAt:put:', ...) which
                         // returns the assigned value but does NOT thread the updated
                         // state back into the actor's State variable.
-                        if let Expression::Identifier(id) = receiver {
-                            if id.name == "self"
-                                && self.context == super::super::CodeGenContext::Actor
-                                && self.lookup_var("self").is_none()
-                            {
-                                let name_var = self.fresh_var("Name");
-                                let value_var = self.fresh_var("Value");
-                                let name_code = self.expression_doc(&arguments[0])?;
-                                let value_code = self.expression_doc(&arguments[1])?;
-                                let doc = docvec![
-                                    "let ",
-                                    leaf::var(name_var.clone()),
-                                    " = ",
-                                    name_code,
-                                    " in let ",
-                                    leaf::var(value_var.clone()),
-                                    " = ",
-                                    value_code,
-                                    " in call 'beamtalk_primitive':'send'(",
-                                    leaf::var(self.current_state_var()),
-                                    ", 'fieldAt:put:', [",
-                                    leaf::var(name_var),
-                                    ", ",
-                                    leaf::var(value_var),
-                                    "])",
-                                ];
-                                return Ok(Some(doc));
-                            }
+                        if let Expression::Identifier(id) = receiver
+                            && id.name == "self"
+                            && self.context == super::super::CodeGenContext::Actor
+                            && self.lookup_var("self").is_none()
+                        {
+                            let name_var = self.fresh_var("Name");
+                            let value_var = self.fresh_var("Value");
+                            let name_code = self.expression_doc(&arguments[0])?;
+                            let value_code = self.expression_doc(&arguments[1])?;
+                            let doc = docvec![
+                                "let ",
+                                leaf::var(name_var.clone()),
+                                " = ",
+                                name_code,
+                                " in let ",
+                                leaf::var(value_var.clone()),
+                                " = ",
+                                value_code,
+                                " in call 'beamtalk_primitive':'send'(",
+                                leaf::var(self.current_state_var()),
+                                ", 'fieldAt:put:', [",
+                                leaf::var(name_var),
+                                ", ",
+                                leaf::var(value_var),
+                                "])",
+                            ];
+                            return Ok(Some(doc));
                         }
 
                         // Hoist open-scope receiver + name + value (e.g. class method self-sends).
@@ -1509,27 +1497,26 @@ impl CoreErlangGenerator {
                         }
                         // Fast-path for `self` receiver in actor instance
                         // context. Avoids sync_send(self()) → deadlock.
-                        if let Expression::Identifier(id) = receiver {
-                            if id.name == "self"
-                                && self.context == super::super::CodeGenContext::Actor
-                                && !self.in_class_method()
-                                && self.lookup_var("self").is_none()
-                            {
-                                let name_var = self.fresh_var("Name");
-                                let name_code = self.expression_doc(&arguments[0])?;
-                                let doc = docvec![
-                                    "let ",
-                                    leaf::var(name_var.clone()),
-                                    " = ",
-                                    name_code,
-                                    " in call 'beamtalk_primitive':'send'(",
-                                    leaf::var(self.current_state_var()),
-                                    ", 'hasField:', [",
-                                    leaf::var(name_var),
-                                    "])",
-                                ];
-                                return Ok(Some(doc));
-                            }
+                        if let Expression::Identifier(id) = receiver
+                            && id.name == "self"
+                            && self.context == super::super::CodeGenContext::Actor
+                            && !self.in_class_method()
+                            && self.lookup_var("self").is_none()
+                        {
+                            let name_var = self.fresh_var("Name");
+                            let name_code = self.expression_doc(&arguments[0])?;
+                            let doc = docvec![
+                                "let ",
+                                leaf::var(name_var.clone()),
+                                " = ",
+                                name_code,
+                                " in call 'beamtalk_primitive':'send'(",
+                                leaf::var(self.current_state_var()),
+                                ", 'hasField:', [",
+                                leaf::var(name_var),
+                                "])",
+                            ];
+                            return Ok(Some(doc));
                         }
 
                         // General dispatch: delegate to
@@ -1603,26 +1590,25 @@ impl CoreErlangGenerator {
                         // state-threading gap fieldAt:put: has (BT-1324):
                         // it does NOT thread the updated state back into the
                         // actor's `State` variable.
-                        if let Expression::Identifier(id) = receiver {
-                            if id.name == "self"
-                                && self.context == super::super::CodeGenContext::Actor
-                                && self.lookup_var("self").is_none()
-                            {
-                                let name_var = self.fresh_var("Name");
-                                let name_code = self.expression_doc(&arguments[0])?;
-                                let doc = docvec![
-                                    "let ",
-                                    leaf::var(name_var.clone()),
-                                    " = ",
-                                    name_code,
-                                    " in call 'beamtalk_primitive':'send'(",
-                                    leaf::var(self.current_state_var()),
-                                    ", 'clearField:', [",
-                                    leaf::var(name_var),
-                                    "])",
-                                ];
-                                return Ok(Some(doc));
-                            }
+                        if let Expression::Identifier(id) = receiver
+                            && id.name == "self"
+                            && self.context == super::super::CodeGenContext::Actor
+                            && self.lookup_var("self").is_none()
+                        {
+                            let name_var = self.fresh_var("Name");
+                            let name_code = self.expression_doc(&arguments[0])?;
+                            let doc = docvec![
+                                "let ",
+                                leaf::var(name_var.clone()),
+                                " = ",
+                                name_code,
+                                " in call 'beamtalk_primitive':'send'(",
+                                leaf::var(self.current_state_var()),
+                                ", 'clearField:', [",
+                                leaf::var(name_var),
+                                "])",
+                            ];
+                            return Ok(Some(doc));
                         }
 
                         // General dispatch: delegate to

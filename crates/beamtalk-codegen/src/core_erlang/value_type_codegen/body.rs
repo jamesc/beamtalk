@@ -679,22 +679,22 @@ impl CoreErlangGenerator {
                 } else {
                     // Local variable assignment — create a proper Core Erlang
                     // let binding so the variable is accessible in subsequent expressions.
-                    if let Expression::Assignment { target, value, .. } = expr {
-                        if let Expression::Identifier(id) = target.as_ref() {
-                            let var_name = &id.name;
-                            let core_var = self
-                                .lookup_var(var_name)
-                                .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
-                            let val_doc = self.expression_doc(value)?;
-                            self.bind_var(var_name, &core_var);
-                            body_parts.push(docvec![
-                                "    let ",
-                                leaf::var(core_var),
-                                " = ",
-                                val_doc,
-                                " in\n"
-                            ]);
-                        }
+                    if let Expression::Assignment { target, value, .. } = expr
+                        && let Expression::Identifier(id) = target.as_ref()
+                    {
+                        let var_name = &id.name;
+                        let core_var = self
+                            .lookup_var(var_name)
+                            .map_or_else(|| Self::to_core_erlang_var(var_name), String::clone);
+                        let val_doc = self.expression_doc(value)?;
+                        self.bind_var(var_name, &core_var);
+                        body_parts.push(docvec![
+                            "    let ",
+                            leaf::var(core_var),
+                            " = ",
+                            val_doc,
+                            " in\n"
+                        ]);
                     }
                 }
             }
@@ -962,34 +962,34 @@ impl CoreErlangGenerator {
         // through the unified FFI boundary (`beamtalk_erlang_proxy:
         // native_call/4`) carrying `{Class, Sel}` — instance methods prepend
         // `Self` to the arg list (`params` already starts with Self).
-        if let Some(backing) = class_def.backing_module.as_ref() {
-            if method.is_self_delegate() {
-                // The receiver is `Self`, an instance of this class.
-                let arg_types: Vec<Option<InferredType>> =
-                    std::iter::once(Some(InferredType::known(class_def.name.name.clone())))
-                        .chain(
-                            method
-                                .parameters
-                                .iter()
-                                .map(|p| p.type_annotation.as_ref().and_then(ffi_annotation_type)),
-                        )
-                        .collect();
-                let body = frame.native_delegate_body_doc(
-                    backing.name.as_str(),
-                    class_def.name.name.as_str(),
-                    &method.selector,
-                    &params,
-                    &arg_types,
-                );
-                let params_doc = join(params.into_iter().map(leaf::var), &Document::Str(", "));
-                let mut fun_doc = docvec!["fun (", params_doc, ") ->\n    ", body, "\n"];
-                if let Some(line_num) = frame.span_to_line(method.span) {
-                    fun_doc = frame.annotate_with_line(fun_doc, line_num);
-                }
-                // `frame` drops here (pops the scope, restores the selector)
-                // on this early return, same as the fall-through path below.
-                return Ok(docvec![leaf::fname(mangled, arity), " = ", fun_doc, "\n"]);
+        if let Some(backing) = class_def.backing_module.as_ref()
+            && method.is_self_delegate()
+        {
+            // The receiver is `Self`, an instance of this class.
+            let arg_types: Vec<Option<InferredType>> =
+                std::iter::once(Some(InferredType::known(class_def.name.name.clone())))
+                    .chain(
+                        method
+                            .parameters
+                            .iter()
+                            .map(|p| p.type_annotation.as_ref().and_then(ffi_annotation_type)),
+                    )
+                    .collect();
+            let body = frame.native_delegate_body_doc(
+                backing.name.as_str(),
+                class_def.name.name.as_str(),
+                &method.selector,
+                &params,
+                &arg_types,
+            );
+            let params_doc = join(params.into_iter().map(leaf::var), &Document::Str(", "));
+            let mut fun_doc = docvec!["fun (", params_doc, ") ->\n    ", body, "\n"];
+            if let Some(line_num) = frame.span_to_line(method.span) {
+                fun_doc = frame.annotate_with_line(fun_doc, line_num);
             }
+            // `frame` drops here (pops the scope, restores the selector)
+            // on this early return, same as the fall-through path below.
+            return Ok(docvec![leaf::fname(mangled, arity), " = ", fun_doc, "\n"]);
         }
 
         // Detect whether any block argument in this method body contains ^.
@@ -1066,30 +1066,30 @@ impl CoreErlangGenerator {
         &mut self,
         expr: &Expression,
     ) -> Result<Document<'static>> {
-        if let Expression::Assignment { target, value, .. } = expr {
-            if let Expression::FieldAccess { field, .. } = target.as_ref() {
-                let val_var = self.fresh_temp_var("Val");
-                // Capture current Self BEFORE generating value so RHS field reads
-                // (e.g., `self.x := self.x + 1`) see the current snapshot.
-                let current_self = self.current_self_var();
-                let val_doc = self.expression_doc(value)?;
-                let new_self = self.next_self_var();
-                return Ok(docvec![
-                    "    let ",
-                    leaf::var(val_var.clone()),
-                    " = ",
-                    val_doc,
-                    " in let ",
-                    leaf::var(new_self),
-                    " = call 'maps':'put'(",
-                    leaf::atom(field.name.clone()),
-                    ", ",
-                    leaf::var(val_var),
-                    ", ",
-                    leaf::var(current_self),
-                    ") in\n",
-                ]);
-            }
+        if let Expression::Assignment { target, value, .. } = expr
+            && let Expression::FieldAccess { field, .. } = target.as_ref()
+        {
+            let val_var = self.fresh_temp_var("Val");
+            // Capture current Self BEFORE generating value so RHS field reads
+            // (e.g., `self.x := self.x + 1`) see the current snapshot.
+            let current_self = self.current_self_var();
+            let val_doc = self.expression_doc(value)?;
+            let new_self = self.next_self_var();
+            return Ok(docvec![
+                "    let ",
+                leaf::var(val_var.clone()),
+                " = ",
+                val_doc,
+                " in let ",
+                leaf::var(new_self),
+                " = call 'maps':'put'(",
+                leaf::atom(field.name.clone()),
+                ", ",
+                leaf::var(val_var),
+                ", ",
+                leaf::var(current_self),
+                ") in\n",
+            ]);
         }
         // Fallback: sequence as a side-effecting expression
         let tmp_var = self.fresh_temp_var("seq");
@@ -1163,24 +1163,24 @@ impl CoreErlangGenerator {
 
         for body_expr in &body {
             if Self::is_local_var_assignment(body_expr) {
-                if let Expression::Assignment { target, value, .. } = body_expr {
-                    if let Expression::Identifier(id) = target.as_ref() {
-                        let core_var = self
-                            .lookup_var(&id.name)
-                            .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
-                        let val_doc = self.expression_doc(value)?;
-                        parts.push(docvec![
-                            "    let ",
-                            leaf::var(core_var.clone()),
-                            " = ",
-                            val_doc,
-                            " in\n",
-                        ]);
-                        self.bind_var(&id.name, &core_var);
-                        // Track for re-binding in outer scope
-                        if mutations.iter().any(|m| m == id.name.as_str()) {
-                            rebound_vars.push((id.name.to_string(), core_var));
-                        }
+                if let Expression::Assignment { target, value, .. } = body_expr
+                    && let Expression::Identifier(id) = target.as_ref()
+                {
+                    let core_var = self
+                        .lookup_var(&id.name)
+                        .map_or_else(|| Self::to_core_erlang_var(&id.name), String::clone);
+                    let val_doc = self.expression_doc(value)?;
+                    parts.push(docvec![
+                        "    let ",
+                        leaf::var(core_var.clone()),
+                        " = ",
+                        val_doc,
+                        " in\n",
+                    ]);
+                    self.bind_var(&id.name, &core_var);
+                    // Track for re-binding in outer scope
+                    if mutations.iter().any(|m| m == id.name.as_str()) {
+                        rebound_vars.push((id.name.to_string(), core_var));
                     }
                 }
             } else {
@@ -1219,13 +1219,13 @@ impl CoreErlangGenerator {
         } = expr
         {
             let sel: String = parts.iter().map(|p| p.keyword.as_str()).collect();
-            if sel == "do:" {
-                if let Some(Expression::Block(body)) = arguments.first() {
-                    // BT-3827: a `do:` whose only mutation is a field write
-                    // returns a threaded tuple too (`{'nil', StateAcc, Self{N}}`).
-                    return !self.loop_threaded_locals(body, None).is_empty()
-                        || self.fold_threads_value_self(expr);
-                }
+            if sel == "do:"
+                && let Some(Expression::Block(body)) = arguments.first()
+            {
+                // BT-3827: a `do:` whose only mutation is a field write
+                // returns a threaded tuple too (`{'nil', StateAcc, Self{N}}`).
+                return !self.loop_threaded_locals(body, None).is_empty()
+                    || self.fold_threads_value_self(expr);
             }
         }
         false
@@ -1256,27 +1256,26 @@ impl CoreErlangGenerator {
             if matches!(
                 selector.well_known(),
                 Some(WellKnownSelector::WhileTrue | WellKnownSelector::WhileFalse)
-            ) {
-                if let Some(Expression::Block(body)) = arguments.first() {
-                    // The same check `generate_while_true`/`generate_while_false`
-                    // use, including a stateful condition (BT-3746: a
-                    // condition-only write used to produce a tuple nobody
-                    // unpacked).
-                    if !self.while_loop_threads(receiver, body) {
-                        return false;
-                    }
-                    // Verify there are actually threaded locals to extract
-                    let condition = if let Expression::Block(_) = receiver.as_ref() {
-                        Some(receiver.as_ref())
-                    } else {
-                        None
-                    };
-                    // see the analogous comment in
-                    // `is_counted_loop_with_vt_local_threading`.
-                    // BT-4002: a field-writing condition threads `Self` too.
-                    return !self.loop_threaded_locals(body, condition).is_empty()
-                        || self.letrec_loop_threads_value_self(Some(receiver), body);
+            ) && let Some(Expression::Block(body)) = arguments.first()
+            {
+                // The same check `generate_while_true`/`generate_while_false`
+                // use, including a stateful condition (BT-3746: a
+                // condition-only write used to produce a tuple nobody
+                // unpacked).
+                if !self.while_loop_threads(receiver, body) {
+                    return false;
                 }
+                // Verify there are actually threaded locals to extract
+                let condition = if let Expression::Block(_) = receiver.as_ref() {
+                    Some(receiver.as_ref())
+                } else {
+                    None
+                };
+                // see the analogous comment in
+                // `is_counted_loop_with_vt_local_threading`.
+                // BT-4002: a field-writing condition threads `Self` too.
+                return !self.loop_threaded_locals(body, condition).is_empty()
+                    || self.letrec_loop_threads_value_self(Some(receiver), body);
             }
         }
         false

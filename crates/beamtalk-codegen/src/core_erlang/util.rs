@@ -463,20 +463,20 @@ impl CoreErlangGenerator {
         // outer local is a producer at the method root and in an arm frame,
         // whatever position it sits in (its protected body, handler and cleanup
         // are `BranchArm` frames).
-        if self.exception_producer_in_frame(inner) {
-            if let Some(tv) = self.exception_producer_value(inner, ProducerTail::Rebind, frame)? {
-                return Ok(tv);
-            }
+        if self.exception_producer_in_frame(inner)
+            && let Some(tv) = self.exception_producer_value(inner, ProducerTail::Rebind, frame)?
+        {
+            return Ok(tv);
         }
 
         // ADR 0130: a class-method context's own producer — a class-variable
         // write or a same-class self-send — threads nothing, but pins its
         // evaluation order against its siblings (see
         // `class_method_prelude_producer`).
-        if self.in_class_method() {
-            if let Some(tv) = self.class_method_prelude_producer(inner, frame)? {
-                return Ok(tv);
-            }
+        if self.in_class_method()
+            && let Some(tv) = self.class_method_prelude_producer(inner, frame)?
+        {
+            return Ok(tv);
         }
 
         // BT-3803: a field assignment in value position (`Transcript show:
@@ -1381,10 +1381,10 @@ impl CoreErlangGenerator {
         }
         // BT-3816: mirrors `threaded_expression`'s conditional-receiver branch
         // (a conditional send is otherwise opaque to the sequencing rule).
-        if probe == PreludeProbe::FieldWrites {
-            if let Some(receiver) = Self::conditional_send_receiver(inner) {
-                return self.subexpr_needs_prelude_with(receiver, probe);
-            }
+        if probe == PreludeProbe::FieldWrites
+            && let Some(receiver) = Self::conditional_send_receiver(inner)
+        {
+            return self.subexpr_needs_prelude_with(receiver, probe);
         }
         // BT-3816: mirrors `threaded_expression`'s inlined-block-value producer.
         if self.is_vt_field_writing_block_value(inner) {
