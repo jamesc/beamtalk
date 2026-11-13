@@ -36,10 +36,13 @@ TestCase subclass: IsKindOfInlineMatrixTest
   samples -> List(Object) =>
     #(42, -1, 1.5, "ab", "", #ab, nil, true, false, #(1, 2), #(), [:x |
       x
-    ], {1, 2}, {}, (Dictionary new at: #a put: 1), (Dictionary new), $a, (Erlang erlang list_to_binary: #(255)),
-      (Binary fromBytes: #(234)), self unaligned, (Erlang erlang self), (Erlang erlang make_ref), TypePatternActorFixture spawn, (ValuePoint new: #{#x => 1, #y => 2}), Integer, self)
+    ], {1, 2}, {}, (Dictionary new at: #a put: 1), (Dictionary new), $a, (Erlang erlang list_to_binary: #(255)), (Binary fromBytes: #(234)), self unaligned, (Erlang erlang self), (Erlang erlang make_ref), TypePatternActorFixture spawn, (ValuePoint new: #{
+      #x => 1,
+      #y => 2
+    }), Integer, self)
 
-  unaligned => (Binary fromBytes: #(234)) match: [<<_:3, rest/bitstring>> -> rest]
+  unaligned =>
+    (Binary fromBytes: #(234)) match: [<<_:3, rest/bitstring>> -> rest]
 
   future => (Erlang beamtalk_future) new
 
@@ -52,7 +55,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: Integer) equals: (self kind: v of: Integer)
-        self assert: (v isKindOf: Integer) equals: (v match: [x :: Integer -> true; _ -> false])
+        self
+          assert: (v isKindOf: Integer)
+          equals: (v match: [
+            x :: Integer -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: Integer) equals: (self kind: self resolvedFuture of: Integer)
 
@@ -60,7 +68,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: Float) equals: (self kind: v of: Float)
-        self assert: (v isKindOf: Float) equals: (v match: [x :: Float -> true; _ -> false])
+        self
+          assert: (v isKindOf: Float)
+          equals: (v match: [
+            x :: Float -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: Float) equals: (self kind: self resolvedFuture of: Float)
 
@@ -68,7 +81,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: String) equals: (self kind: v of: String)
-        self assert: (v isKindOf: String) equals: (v match: [x :: String -> true; _ -> false])
+        self
+          assert: (v isKindOf: String)
+          equals: (v match: [
+            x :: String -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: String) equals: (self kind: self resolvedFuture of: String)
 
@@ -76,7 +94,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: Binary) equals: (self kind: v of: Binary)
-        self assert: (v isKindOf: Binary) equals: (v match: [x :: Binary -> true; _ -> false])
+        self
+          assert: (v isKindOf: Binary)
+          equals: (v match: [
+            x :: Binary -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: Binary) equals: (self kind: self resolvedFuture of: Binary)
 
@@ -84,7 +107,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: Bitstring) equals: (self kind: v of: Bitstring)
-        self assert: (v isKindOf: Bitstring) equals: (v match: [x :: Bitstring -> true; _ -> false])
+        self
+          assert: (v isKindOf: Bitstring)
+          equals: (v match: [
+            x :: Bitstring -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: Bitstring) equals: (self kind: self resolvedFuture of: Bitstring)
 
@@ -92,7 +120,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: Symbol) equals: (self kind: v of: Symbol)
-        self assert: (v isKindOf: Symbol) equals: (v match: [x :: Symbol -> true; _ -> false])
+        self
+          assert: (v isKindOf: Symbol)
+          equals: (v match: [
+            x :: Symbol -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: Symbol) equals: (self kind: self resolvedFuture of: Symbol)
 
@@ -100,7 +133,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: True) equals: (self kind: v of: True)
-        self assert: (v isKindOf: True) equals: (v match: [x :: True -> true; _ -> false])
+        self
+          assert: (v isKindOf: True)
+          equals: (v match: [
+            x :: True -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: True) equals: (self kind: self resolvedFuture of: True)
 
@@ -108,7 +146,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: False) equals: (self kind: v of: False)
-        self assert: (v isKindOf: False) equals: (v match: [x :: False -> true; _ -> false])
+        self
+          assert: (v isKindOf: False)
+          equals: (v match: [
+            x :: False -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: False) equals: (self kind: self resolvedFuture of: False)
 
@@ -116,7 +159,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: Boolean) equals: (self kind: v of: Boolean)
-        self assert: (v isKindOf: Boolean) equals: (v match: [x :: Boolean -> true; _ -> false])
+        self
+          assert: (v isKindOf: Boolean)
+          equals: (v match: [
+            x :: Boolean -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: Boolean) equals: (self kind: self resolvedFuture of: Boolean)
 
@@ -124,7 +172,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: UndefinedObject) equals: (self kind: v of: UndefinedObject)
-        self assert: (v isKindOf: UndefinedObject) equals: (v match: [x :: UndefinedObject -> true; _ -> false])
+        self
+          assert: (v isKindOf: UndefinedObject)
+          equals: (v match: [
+            x :: UndefinedObject -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: UndefinedObject) equals: (self kind: self resolvedFuture of: UndefinedObject)
 
@@ -132,7 +185,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: Block) equals: (self kind: v of: Block)
-        self assert: (v isKindOf: Block) equals: (v match: [x :: Block -> true; _ -> false])
+        self
+          assert: (v isKindOf: Block)
+          equals: (v match: [
+            x :: Block -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: Block) equals: (self kind: self resolvedFuture of: Block)
 
@@ -140,7 +198,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: Tuple) equals: (self kind: v of: Tuple)
-        self assert: (v isKindOf: Tuple) equals: (v match: [x :: Tuple -> true; _ -> false])
+        self
+          assert: (v isKindOf: Tuple)
+          equals: (v match: [
+            x :: Tuple -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: Tuple) equals: (self kind: self resolvedFuture of: Tuple)
 
@@ -148,7 +211,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: List) equals: (self kind: v of: List)
-        self assert: (v isKindOf: List) equals: (v match: [x :: List -> true; _ -> false])
+        self
+          assert: (v isKindOf: List)
+          equals: (v match: [
+            x :: List -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: List) equals: (self kind: self resolvedFuture of: List)
 
@@ -156,7 +224,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: Pid) equals: (self kind: v of: Pid)
-        self assert: (v isKindOf: Pid) equals: (v match: [x :: Pid -> true; _ -> false])
+        self
+          assert: (v isKindOf: Pid)
+          equals: (v match: [
+            x :: Pid -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: Pid) equals: (self kind: self resolvedFuture of: Pid)
 
@@ -164,7 +237,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: Port) equals: (self kind: v of: Port)
-        self assert: (v isKindOf: Port) equals: (v match: [x :: Port -> true; _ -> false])
+        self
+          assert: (v isKindOf: Port)
+          equals: (v match: [
+            x :: Port -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: Port) equals: (self kind: self resolvedFuture of: Port)
 
@@ -172,7 +250,12 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: Reference) equals: (self kind: v of: Reference)
-        self assert: (v isKindOf: Reference) equals: (v match: [x :: Reference -> true; _ -> false])
+        self
+          assert: (v isKindOf: Reference)
+          equals: (v match: [
+            x :: Reference -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: Reference) equals: (self kind: self resolvedFuture of: Reference)
 
@@ -180,6 +263,11 @@ TestCase subclass: IsKindOfInlineMatrixTest
     self samples
       do: [:v |
         self assert: (v isKindOf: Dictionary) equals: (self kind: v of: Dictionary)
-        self assert: (v isKindOf: Dictionary) equals: (v match: [x :: Dictionary -> true; _ -> false])
+        self
+          assert: (v isKindOf: Dictionary)
+          equals: (v match: [
+            x :: Dictionary -> true;
+            _ -> false
+          ])
       ]
     self assert: (self resolvedFuture isKindOf: Dictionary) equals: (self kind: self resolvedFuture of: Dictionary)
