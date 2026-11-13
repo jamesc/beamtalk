@@ -563,7 +563,13 @@ process_verdict_invalidation_test_() ->
                 try
                     %% The extension answers first, in the class process.
                     ?assertEqual(ext, send(Pid, testSelf, [])),
-                    ?assertNotEqual(process, memo(Pid, testSelf))
+                    ?assertNotEqual(process, memo(Pid, testSelf)),
+                    %% BT-4800: resolved once, as a positive `extension` verdict.
+                    ?assertEqual(extension, memo(Pid, testSelf)),
+                    %% Redefining the extension: the class process looks it up
+                    %% itself, so the new body answers.
+                    ok = beamtalk_extensions:register(Tag, testSelf, fun(_, _) -> ext2 end, test),
+                    ?assertEqual(ext2, send(Pid, testSelf, []))
                 after
                     beamtalk_extensions:unregister(Tag, testSelf)
                 end,
