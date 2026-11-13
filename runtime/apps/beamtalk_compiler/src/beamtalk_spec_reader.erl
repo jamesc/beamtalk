@@ -805,6 +805,8 @@ forms_module(Forms) ->
 %% three are opaque to callers, so they are keyed by `{Module, Type, Arity}' here
 %% rather than by an `-opaque' attribute. Any other `-opaque' type stays
 %% `Dynamic' (see `resolve_user_type/2').
+%% The result is a Beamtalk type expression, usually one class name but possibly
+%% a union (`io_device()' is `IoDevice | Pid').
 -spec well_known_opaque_class(atom(), atom(), non_neg_integer()) -> {ok, binary()} | error.
 well_known_opaque_class(zlib, zstream, 0) -> {ok, <<"ZlibStream">>};
 %% `io_device()' is `io_server() | fd()' and an `io_server()' is a plain pid, so a

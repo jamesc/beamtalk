@@ -1400,7 +1400,9 @@ fn bt4717_sending_a_message_to_an_opaque_handle_names_the_type() {
 #[test]
 fn bt4717_opaque_handle_rejected_by_a_different_handle_param() {
     // An IoDevice is not a zstream: the plain `ZlibStream` param of
-    // `zlib:close/1` must reject it.
+    // `zlib:close/1` must reject it. The bare `IoDevice` return of the
+    // made-up `file:handle/0` is synthetic (the real reader emits
+    // `IoDevice | Pid`); this only checks the Known-vs-Known mismatch path.
     let src = "typed Object subclass: Gz\n  \
         run =>\n    \
           fd := (Erlang file) handle.\n    \

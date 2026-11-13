@@ -678,12 +678,16 @@ mod tests {
             &[],
         )
         .registry;
-        if probe.is_none_or(|r| r.lookup("zlib", "open", 0).is_none()) {
+        let Some(probe) = probe else {
             eprintln!(
                 "skipping run_types_otp_opaque_handles_bt_4717: no OTP .beam files discovered"
             );
             return;
-        }
+        };
+        assert!(
+            probe.lookup("zlib", "open", 0).is_some(),
+            "live extraction found OTP but not zlib:open/0"
+        );
         let result = run(
             root.as_str(),
             false,
