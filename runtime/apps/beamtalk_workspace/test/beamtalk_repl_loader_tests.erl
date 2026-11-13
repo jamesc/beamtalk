@@ -1970,7 +1970,11 @@ t_reload_method_definition_existing(_Proj) ->
     ),
     State0 = beamtalk_repl_state:new(undefined, 0),
     {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
-    MethodInfo = #{class_name => <<"LoaderExisting">>, selector => <<"doubled">>},
+    MethodInfo = #{
+        class_name => <<"LoaderExisting">>,
+        selector => <<"doubled">>,
+        method_source => <<"doubled => self.value * 3">>
+    },
     Result = beamtalk_repl_loader:reload_method_definition(
         MethodInfo, [], "LoaderExisting >> doubled => self.value * 3", State1
     ),
@@ -1986,7 +1990,11 @@ t_reload_method_definition_autoflush(Proj) ->
         ),
         State0 = beamtalk_repl_state:new(undefined, 0),
         {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
-        MethodInfo = #{class_name => <<"LoaderFlush">>, selector => <<"tripled">>},
+        MethodInfo = #{
+            class_name => <<"LoaderFlush">>,
+            selector => <<"tripled">>,
+            method_source => <<"tripled => self.value * 3">>
+        },
         Result = beamtalk_repl_loader:reload_method_definition(
             MethodInfo, [], "LoaderFlush >> tripled => self.value * 3", State1
         ),

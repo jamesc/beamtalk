@@ -5,4 +5,5 @@
 Value subclass: SameFileRedefine
 
   foo => 1
+
   bar => 10

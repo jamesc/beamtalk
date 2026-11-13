@@ -366,18 +366,34 @@ reload_class_method_definition(MethodInfo, Warnings, _Expression, State) ->
             %% IDE/MCP save (`compile_method` replaces the existing selector and
             %% returns the merged class source), so the stored class source is the
             %% canonical merged text with no duplicate definition left in it.
-            install_method_with_source(
-                ClassNameBin,
-                maps:get(selector, MethodInfo),
-                ?ENTRIES:method_source_binary(MethodInfo),
-                ClassSource,
-                maps:get(intent, MethodInfo, durable),
-                maps:get(author, MethodInfo, <<"repl">>),
-                maps:get(author_kind, MethodInfo, human),
-                Warnings,
-                State,
-                maps:get(is_class_method, MethodInfo, false)
-            )
+            %%
+            %% That path parses the method standalone, so it needs the BARE
+            %% `selector => body` the compiler port recovered (`method_source`),
+            %% never the typed `Class >> selector => body` line. Every caller in
+            %% the REPL flow carries it; a MethodInfo without one is a bug in the
+            %% caller, not user error, so say so instead of feeding the installer
+            %% a `Class >>` line it cannot parse.
+            case maps:get(method_source, MethodInfo, undefined) of
+                undefined ->
+                    {error,
+                        {compile_error,
+                            <<"internal error: method definition for ", ClassNameBin/binary,
+                                " carries no method_source">>},
+                        <<>>, Warnings, State};
+                _ ->
+                    install_method_with_source(
+                        ClassNameBin,
+                        maps:get(selector, MethodInfo),
+                        ?ENTRIES:method_source_binary(MethodInfo),
+                        ClassSource,
+                        maps:get(intent, MethodInfo, durable),
+                        maps:get(author, MethodInfo, <<"repl">>),
+                        maps:get(author_kind, MethodInfo, human),
+                        Warnings,
+                        State,
+                        maps:get(is_class_method, MethodInfo, false)
+                    )
+            end
     end.
 
 -doc """
