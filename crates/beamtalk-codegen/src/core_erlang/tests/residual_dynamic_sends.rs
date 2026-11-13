@@ -145,15 +145,7 @@ fn is_kind_of_builtin_literal_applies_the_type_test() {
         "Object subclass: Probe\n",
         "  check: v :: Object -> Boolean => v isKindOf: Integer\n",
     ));
-    assert!(
-        code.contains("call 'beamtalk_behaviour_intrinsics':'isKindOfBuiltin'("),
-        "isKindOf: with a sealed built-in literal should use isKindOfBuiltin. Got:\n{code}"
-    );
     assert!(code.contains("call 'erlang':'is_integer'("));
-    assert!(
-        !code.contains("'isKindOf:', ["),
-        "no dynamic isKindOf: send should remain. Got:\n{code}"
-    );
     super::assert_compiles_through_erlc("test", &code);
 }
 
@@ -284,4 +276,123 @@ fn not_is_an_inline_boolean_case() {
         "a non-Boolean receiver keeps the ordinary send. Got:\n{code}"
     );
     super::assert_compiles_through_erlc("test", &code);
+}
+
+/// The classes `x isKindOf: C` lowers inline for: every routing-fixture class
+/// (and alias) with a representation test that the lowering accepts. Derived
+/// from the fixture, never listed here.
+fn inline_kind_of_classes() -> Vec<&'static str> {
+    let mut found = Vec::new();
+    for row in crate::core_erlang::routing::rows() {
+        for class in std::iter::once(&row.class).chain(row.aliases.iter()) {
+            let code = codegen(&format!(
+                "Object subclass: Probe\n  check: v :: Object -> Boolean => v isKindOf: {class}\n"
+            ));
+            if code.contains("'overridden_anywhere'('isKindOf:')") {
+                found.push(*class);
+            }
+        }
+    }
+    found
+}
+
+/// The text of the inline fast path of an `isKindOf:` lowering: from the
+/// guard's `true` clause (class alive, no override) up to the first class-reference
+/// construction (`let _KindOfClass`), which only the cold paths contain.
+fn kind_of_fast_path(code: &str) -> &str {
+    let check = "'overridden_anywhere'('isKindOf:'))) of <'true'> when 'true' -> ";
+    let start = code.find(check).expect("override check") + check.len();
+    let rest = &code[start..];
+    &rest[..rest.find("let _KindOfClass").expect("cold path")]
+}
+
+#[test]
+fn is_kind_of_builtin_fast_path_builds_no_class_reference_and_sends_nothing() {
+    for class in inline_kind_of_classes() {
+        let code = codegen(&format!(
+            "Object subclass: Probe\n  check: v :: Object -> Boolean => v isKindOf: {class}\n"
+        ));
+        let fast = kind_of_fast_path(&code);
+        // `Tuple`'s test itself names the reserved tuple tags.
+        let reserved = if class == "Tuple" {
+            None
+        } else {
+            Some("beamtalk_object")
+        };
+        for forbidden in reserved.into_iter().chain([
+            "beamtalk_message_dispatch",
+            "persistent_term",
+            "whereis",
+            "class_ref",
+            "beamtalk_behaviour_intrinsics",
+        ]) {
+            assert!(
+                !fast.contains(forbidden),
+                "{class}: fast path must not contain {forbidden}. Got:\n{fast}"
+            );
+        }
+        // The class process is probed once, before the override check, so a
+        // dead class still raises `class_not_found` as the literal always did.
+        let before_check = &code[..code.find("'overridden_anywhere'").unwrap()];
+        assert!(
+            before_check.contains("call 'erlang':'is_pid'(call 'erlang':'whereis'"),
+            "{class}: Got:\n{code}"
+        );
+        assert!(
+            before_check.contains(&format!("'whereis'('beamtalk_class_{class}')")),
+            "{class}: liveness probe missing. Got:\n{code}"
+        );
+        // A dead class process (probe fails) takes the cold path, whose class
+        // literal raises `class_not_found` before the send, as it always did.
+        let cold = &code[code
+            .find("<'false'> when 'true' -> let _KindOfClass")
+            .unwrap()..];
+        let raise = cold.find("'class_not_found'").expect("cold path raises");
+        assert!(
+            raise < cold.find("'send'(").unwrap(),
+            "{class}: class_not_found must precede the send. Got:\n{cold}"
+        );
+        // The override is honoured with the plain send.
+        assert!(
+            code.contains("<'false'> when 'true' -> let _KindOfClass")
+                && code.contains("'send'(_KindOfRecv"),
+            "{class}: override fallback missing. Got:\n{code}"
+        );
+    }
+}
+
+#[test]
+fn is_kind_of_hit_answers_true_inline_unless_the_strategy_cannot_prove_a_plain_value() {
+    // `Tuple`'s test rejects a reserved tag only at the tag's own tuple size,
+    // so a hit is not proof of a plain value and keeps the runtime check.
+    for class in inline_kind_of_classes() {
+        let code = codegen(&format!(
+            "Object subclass: Probe\n  check: v :: Object -> Boolean => v isKindOf: {class}\n"
+        ));
+        let fast = kind_of_fast_path(&code);
+        if class == "Tuple" {
+            assert!(
+                code.contains("'isKindOfBuiltin'(") && code.contains(", 'true')"),
+                "Tuple's hit must keep the runtime plain-value check. Got:\n{code}"
+            );
+        } else {
+            assert!(fast.contains("-> 'true'"), "{class}: Got:\n{fast}");
+        }
+    }
+}
+
+#[test]
+fn is_kind_of_inline_classes_are_covered_by_the_runtime_matrix() {
+    // The runtime conformance matrix names every class the lowering handles,
+    // so a new fixture strategy cannot ship without a row in it.
+    let matrix = std::fs::read_to_string(
+        super::repo_root().join("stdlib/test/is_kind_of_inline_matrix_test.bt"),
+    )
+    .expect("matrix test");
+    for class in inline_kind_of_classes() {
+        assert!(
+            matrix.contains(&format!("isKindOf: {class}")),
+            "stdlib/test/is_kind_of_inline_matrix_test.bt must test isKindOf: {class}"
+        );
+    }
 }
