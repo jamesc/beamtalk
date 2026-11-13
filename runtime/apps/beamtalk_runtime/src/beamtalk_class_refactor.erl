@@ -481,12 +481,12 @@ classRenameTo(Self, NewName) when is_atom(NewName) ->
         'renameTo:', OldName, [<<"renameTo: #">>, atom_to_binary(NewName, utf8)]
     ),
     ok = beamtalk_refactor_support:require_class_responsive(ClassPid, OldName, 'renameTo:'),
+    ok = ensure_rename_collision_free(OldName, NewName),
+    OldNameBin = atom_to_binary(OldName, utf8),
     %% The stdlib/dependency/dynamic classification below comes from the
     %% workspace; without it a stdlib class would look "dynamic" and be
     %% renamed, so fail closed.
     ok = beamtalk_workspace_callback:require('renameTo:', OldName),
-    ok = ensure_rename_collision_free(OldName, NewName),
-    OldNameBin = atom_to_binary(OldName, utf8),
     Classification = beamtalk_refactor_support:capture_class_removal_snapshot(OldNameBin),
     ok = ensure_class_renamable(OldName, Classification),
     NewNameBin = atom_to_binary(NewName, utf8),
