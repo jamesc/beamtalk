@@ -292,9 +292,9 @@ native_call(Module, FunName, Args, {Class, Selector}, Mode) when
 Error path of a direct inline FFI call (BT-4485).
 
 Codegen emits `call 'M':'F'(Args...)` without the proxy when the FFI type
-table proves the result needs no coercion and every argument is a scalar or a
-binary (statically, and checked at run time with `is_number`/`is_atom`/
-`is_pid`/`is_binary`;
+table proves the result needs no coercion and every argument is a scalar, a
+binary or a map (statically, and checked at run time with `is_number`/`is_atom`/
+`is_pid`/`is_binary`/`is_map`;
 see `ffi_passthrough_conformance.json`). The call keeps the proxy's error
 translation: its `try` hands every exception here, and this runs the same
 `classify_ffi_exception` policy as `direct_call/4`, so a direct call raises

@@ -412,7 +412,7 @@ impl CoreErlangGenerator {
     }
 
     /// The direct call of a proved FFI call: each of `args` (a bound variable
-    /// and whether its type may be a binary) is checked at run time with the
+    /// and the extra guards its type needs, [`FfiArgKinds`]) is checked at run time with the
     /// table's guards, and anything else takes the proxy — `direct_call/4` for
     /// an inline send, `native_call/5` when `context` (a delegate's `{Class,
     /// Selector}`) is given.
