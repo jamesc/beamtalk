@@ -1136,12 +1136,12 @@ Type Coverage Report
 ====================
 
 File                          Class              Coverage
-src/account_service.bt        AccountService     92.3%  (48/52 expressions)
-src/router.bt                 Router             87.1%  (54/62 expressions)
-src/config_loader.bt          ConfigLoader       71.4%  (30/42 expressions)
-src/my_app.bt                 MyApp              45.0%  (9/20 expressions)
+src/account_service.bt        AccountService     92.3%  (48/52 expressions, 0 narrowing)
+src/router.bt                 Router             87.1%  (54/62 expressions, 0 narrowing)
+src/config_loader.bt          ConfigLoader       71.4%  (30/42 expressions, 0 narrowing)
+src/my_app.bt                 MyApp              45.0%  (9/20 expressions, 0 narrowing)
 ──────────────────────────────────────────────────────────────────────
-Total                                            80.1%  (141/176 expressions)
+Total                                            80.1%  (141/176 expressions, 0 narrowing)
 ```
 
 Coverage is defined as **(expressions with non-Dynamic inferred type) / (total expressions in the TypeMap)**. Every AST node that produces a TypeMap entry is counted — identifiers, message sends, assignments, literals, block bodies, and binary operations. Sub-expressions are counted individually.
@@ -1150,10 +1150,14 @@ Coverage is defined as **(expressions with non-Dynamic inferred type) / (total e
 
 | Flag | Description |
 |------|-------------|
-| `--detail` | Show each Dynamic expression with `file:line:col` location and reason |
+| `--detail` | Show each Dynamic expression and each narrowing cast with `file:line:col` location |
 | `--format json` | Machine-readable JSON output for dashboards and CI |
 | `--at-least N` | Exit non-zero if total coverage < N% (CI ratchet) |
 | `--class ClassName` | Filter to a specific class |
+
+### Narrowing Casts (BT-4719)
+
+A local annotation narrower than its right-hand side, such as `n :: Integer := opts at: #max`, is an unchecked cast: nothing verifies it at runtime. `type-coverage` counts these separately, per class (the `narrowing` column) and in total, and `--detail` lists each as `file:line:col (:: Integer from Dynamic)`. JSON output carries `narrowing_casts` on the report and on each class, plus `narrowing_entries` under `--detail`. The coverage percentage is unchanged. To flag them as diagnostics, enable the opt-in `narrowing-cast` lint under `[diagnostics]` (off by default). See [Local Variable Type Annotations](beamtalk-language-features.md#local-variable-type-annotations).
 
 ### Detail Mode
 
@@ -1163,9 +1167,9 @@ Type Coverage Report
 ====================
 
 File                          Class              Coverage
-src/my_app.bt                 MyApp              45.0%  (9/20 expressions)
+src/my_app.bt                 MyApp              45.0%  (9/20 expressions, 0 narrowing)
 ──────────────────────────────────────────────────────────────────────
-Total                                            45.0%  (9/20 expressions)
+Total                                            45.0%  (9/20 expressions, 0 narrowing)
 
 Dynamic expressions:
   src/my_app.bt:12:5                             (unannotated return)

@@ -144,12 +144,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
     // Pass 2: analyse each file and collect diagnostics + coverage.
     let mut all_diags = Vec::new();
     let mut files_checked = 0;
-    let mut coverage = CoverageReport {
-        classes: Vec::new(),
-        dynamic_entries: Vec::new(),
-        total_expressions: 0,
-        typed_expressions: 0,
-    };
+    let mut coverage = CoverageReport::default();
     let provision_diags = lint_pipeline::analyse_package(
         sources,
         dependencies,
@@ -162,6 +157,7 @@ pub(crate) fn compute_diagnostic_summary(path: &str) -> serde_json::Value {
             coverage.merge(CoverageReport::from_module(
                 file.module,
                 file.type_map,
+                file.class_hierarchy,
                 file.path.as_str(),
                 false,
             ));

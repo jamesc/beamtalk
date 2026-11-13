@@ -639,6 +639,20 @@ same message at the same span. No operation is surface-specific.
 - A tuple-pattern arm (`{a, b}`) is never a catch-all, even when every element
   is a variable.
 
+### `narrowing-cast` diagnostic (BT-4719)
+
+A local annotation narrower than its right-hand side (`n :: Integer := opts at: #max`)
+is an unchecked cast. `beamtalk type-coverage` reports a per-class and total
+count (and each cast under `--detail`; `narrowing_casts` / `narrowing_entries`
+in JSON). The same detector (`find_narrowing_casts`) backs an opt-in lint,
+category `NarrowingCast`, `[diagnostics]` key `narrowing-cast`. It is **off
+unless the key is set** to something other than `"off"`:
+`diagnostics_policy::DEFAULT_OFF_CATEGORIES` drops it in
+`apply_diagnostics_table`, so CLI `build`/`lint`, the LSP, the REPL and MCP
+agree. Type coverage reads the detector directly, so it needs no key. No
+dedicated `@expect` category; `@expect all` covers it. No operation is
+surface-specific.
+
 ### `cascade-drops-update` diagnostic (ADR 0145 § 3, BT-4512)
 
 A non-final cascade message whose receiver is statically a value kind and
