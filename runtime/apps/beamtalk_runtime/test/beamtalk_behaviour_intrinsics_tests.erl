@@ -3466,9 +3466,12 @@ object_is_kind_of_fast_path_test_() ->
 %%% isKindOfNamed/3 — name-only `x isKindOf: UserClass` (BT-4757)
 %%% ============================================================================
 
-%% The full `isKindOf:` send, the baseline the name-only check must match.
+%% `Object>>isKindOf:`, which the full send runs for these receivers (the test
+%% classes have no compiled module, so a literal send cannot dispatch to them);
+%% the baseline the name-only check must match. The end-to-end send agreement
+%% is in stdlib/test/is_kind_of_user_class_test.bt.
 full_is_kind_of(Receiver, Behaviour) ->
-    outcome(fun() -> beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour]) end).
+    outcome(fun() -> beamtalk_behaviour_intrinsics:objectIsKindOf(Receiver, Behaviour) end).
 
 named_is_kind_of(Receiver, Behaviour, Name) ->
     outcome(fun() -> beamtalk_behaviour_intrinsics:kind_of_named(Receiver, Behaviour, Name, false) end).
@@ -3484,22 +3487,22 @@ assert_named_agrees(Receivers, Classes) ->
 
 named_values(Names) ->
     [#beamtalk_object{class = N, class_mod = undefined, pid = self()} || N <- Names] ++
-        [#{'$beamtalk_class' => N} || N <- Names] ++
-        [3, 2.5, <<"s">>, nil, true, foo, [1], {1, 2}].
+        [#{'$beamtalk_class' => N} || N <- Names].
 
 is_kind_of_named_test_() ->
     Names = ['BT4757Grand', 'BT4757Middle', 'BT4757Bottom', 'BT4757Other'],
     {setup, fun setup/0, fun(_) -> teardown(Names) end, fun(_) ->
         [
             ?_test(begin
-                %% Instances of the class, subclasses, unrelated classes;
-                %% Values, actors, built-ins and nil; class objects.
+                %% Instances of the class, subclasses, unrelated classes; Values and
+                %% actors. Built-ins and nil need the stdlib classes, which this
+                %% unit env lacks: stdlib/test/is_kind_of_user_class_test.bt.
                 {Grand, _} = register_class('BT4757Grand', #{}, #{}),
                 {Middle, _} = register_class_with_super('BT4757Middle', 'BT4757Grand', #{}, #{}),
                 {Bottom, _} = register_class_with_super('BT4757Bottom', 'BT4757Middle', #{}, #{}),
                 {Other, _} = register_class('BT4757Other', #{}, #{}),
                 Classes = [Grand, Middle, Bottom, Other],
-                Receivers = named_values(Names) ++ Classes,
+                Receivers = named_values(Names),
                 assert_named_agrees(Receivers, Classes)
             end),
             ?_test(begin
@@ -3520,47 +3523,48 @@ is_kind_of_named_test_() ->
                 _ = {Bottom, OtherPid}
             end),
             ?_test(begin
-                %% A removed class: nothing is kind of it, as the full send
-                %% says for a stale class object.
-                {Grand, _} = register_class('BT4757Grand', #{}, #{}),
+                %% A removed class: the literal itself raises class_not_found
+                %% in generated code, so the runtime only sees a stale class
+                %% object. Nothing is kind of it by name (the one accepted
+                %% difference: the send's fallback route raises instead, as
+                %% for `match:` arms, ADR 0107).
+                {_, _} = register_class('BT4757Grand', #{}, #{}),
                 {Gone, GonePid} = register_class_with_super(
                     'BT4757Other', 'BT4757Grand', #{}, #{}
                 ),
-                Value = #{'$beamtalk_class' => 'BT4757Bottom'},
+                Value = #{'$beamtalk_class' => 'BT4757Grand'},
                 ok = gen_server:stop(GonePid, normal, 5000),
-                ?assertEqual(
-                    full_is_kind_of(Value, Gone),
-                    named_is_kind_of(Value, Gone, 'BT4757Other')
-                ),
-                ?assertEqual({value, false}, named_is_kind_of(Value, Gone, 'BT4757Other')),
-                ?assertEqual(
-                    full_is_kind_of(3, Grand), named_is_kind_of(3, Grand, 'BT4757Grand')
-                )
+                ?assertEqual({value, false}, named_is_kind_of(Value, Gone, 'BT4757Other'))
             end),
             ?_test(begin
                 %% The override flag set: the send runs, so an override takes
                 %% effect (and the flag-set branch is the plain send).
                 {Grand, _} = register_class('BT4757Grand', #{}, #{}),
                 Value = #{'$beamtalk_class' => 'BT4757Grand'},
-                Ext = fun(_Args, _Self) -> overridden end,
-                ok = beamtalk_extensions:register('BT4757Grand', 'isKindOf:', Ext, bt4757_test),
-                try
-                    ?assert(beamtalk_default_method:overridden_anywhere('isKindOf:')),
-                    ?assertEqual(
-                        overridden,
+                %% Raise the node-wide flag as a user override would
+                %% (`note_override/2`; it is never lowered, which only sends more).
+                ok = beamtalk_default_method:note_override('BT4757Grand', 'isKindOf:'),
+                ?assert(beamtalk_default_method:overridden_anywhere('isKindOf:')),
+                %% The name-only answer would be {value, true}; with the flag
+                %% up the send runs instead, so it is not answered by name.
+                Sent = outcome(fun() ->
+                    beamtalk_message_dispatch:send(Value, 'isKindOf:', [Grand])
+                end),
+                ?assertNotEqual({value, true}, Sent),
+                ?assertEqual(
+                    Sent,
+                    outcome(fun() ->
                         beamtalk_behaviour_intrinsics:isKindOfNamed(Value, Grand, 'BT4757Grand')
-                    ),
-                    ?assertEqual(
-                        full_is_kind_of(Value, Grand),
-                        outcome(fun() ->
-                            beamtalk_behaviour_intrinsics:kind_of_named(
-                                Value, Grand, 'BT4757Grand', true
-                            )
-                        end)
-                    )
-                after
-                    beamtalk_extensions:unregister('BT4757Grand', 'isKindOf:')
-                end
+                    end)
+                ),
+                ?assertEqual(
+                    Sent,
+                    outcome(fun() ->
+                        beamtalk_behaviour_intrinsics:kind_of_named(
+                            Value, Grand, 'BT4757Grand', true
+                        )
+                    end)
+                )
             end)
         ]
     end}.
