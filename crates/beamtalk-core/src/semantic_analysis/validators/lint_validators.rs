@@ -1007,9 +1007,11 @@ pub struct NarrowingCast {
 /// superclass of the declared one.
 ///
 /// Not casts, so not reported: redundant annotations (same type), widening
-/// annotations (`T | Nil`, `T?`) and the other composed forms, an `Object`
+/// annotations (`T | Nil`, `T?`) and the other composed forms (written
+/// directly or through a type alias that expands to one), an `Object`
 /// declared type (it asserts nothing), declared classes the hierarchy does
-/// not know (aliases, type parameters), and `Never`/`Union` right-hand sides.
+/// not know (type parameters, protocols), and `Never`/`Union` right-hand
+/// sides. A type alias is judged by what it stands for (BT-4796).
 pub(crate) fn find_narrowing_casts(
     module: &Module,
     type_map: &TypeMap,
