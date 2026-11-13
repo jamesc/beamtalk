@@ -34,3 +34,96 @@ pub(super) fn entries_within<V: Clone>(
         .map(|(&key, value)| (key, value.clone()))
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn make_table(entries: &[(u32, u32)]) -> BTreeMap<(u32, u32), &'static str> {
+        entries.iter().copied().map(|key| (key, "v")).collect()
+    }
+
+    #[test]
+    fn span_key_returns_start_and_end() {
+        assert_eq!(span_key(Span::new(10, 20)), (10, 20));
+    }
+
+    #[test]
+    fn span_key_zero_length_span() {
+        assert_eq!(span_key(Span::new(5, 5)), (5, 5));
+    }
+
+    #[test]
+    fn entries_within_empty_table() {
+        let table: BTreeMap<(u32, u32), i32> = BTreeMap::new();
+        assert!(entries_within(&table, Span::new(0, 100)).is_empty());
+    }
+
+    #[test]
+    fn entries_within_includes_entry_fully_inside() {
+        let table = make_table(&[(5, 15)]);
+        let result = entries_within(&table, Span::new(0, 20));
+        assert_eq!(result.len(), 1);
+        assert!(result.contains_key(&(5, 15)));
+    }
+
+    #[test]
+    fn entries_within_includes_entry_at_exact_boundaries() {
+        let table = make_table(&[(10, 30)]);
+        let result = entries_within(&table, Span::new(10, 30));
+        assert_eq!(result.len(), 1);
+        assert!(result.contains_key(&(10, 30)));
+    }
+
+    #[test]
+    fn entries_within_excludes_entry_starting_before_span() {
+        // start < span.start → outside
+        let table = make_table(&[(5, 15)]);
+        assert!(entries_within(&table, Span::new(10, 30)).is_empty());
+    }
+
+    #[test]
+    fn entries_within_excludes_entry_ending_after_span() {
+        // end > span.end → outside
+        let table = make_table(&[(15, 35)]);
+        assert!(entries_within(&table, Span::new(10, 30)).is_empty());
+    }
+
+    #[test]
+    fn entries_within_excludes_entry_fully_outside() {
+        let table = make_table(&[(40, 50)]);
+        assert!(entries_within(&table, Span::new(10, 30)).is_empty());
+    }
+
+    #[test]
+    fn entries_within_mixed_entries_returns_only_contained_ones() {
+        let table = make_table(&[
+            (5, 10),  // starts before span — excluded
+            (10, 20), // starts at span boundary, ends inside — included
+            (12, 25), // fully inside — included
+            (20, 35), // ends after span — excluded
+            (40, 50), // fully outside — excluded
+        ]);
+        let result = entries_within(&table, Span::new(10, 30));
+        assert_eq!(result.len(), 2);
+        assert!(result.contains_key(&(10, 20)));
+        assert!(result.contains_key(&(12, 25)));
+    }
+
+    #[test]
+    fn entries_within_zero_length_query_span() {
+        let table = make_table(&[(5, 5), (10, 10), (15, 15)]);
+        let result = entries_within(&table, Span::new(10, 10));
+        assert_eq!(result.len(), 1);
+        assert!(result.contains_key(&(10, 10)));
+    }
+
+    #[test]
+    fn entries_within_clones_values() {
+        let mut table = BTreeMap::new();
+        table.insert((5, 15), "inside".to_string());
+        let result = entries_within(&table, Span::new(0, 20));
+        assert_eq!(result[&(5, 15)], "inside");
+    }
+}
