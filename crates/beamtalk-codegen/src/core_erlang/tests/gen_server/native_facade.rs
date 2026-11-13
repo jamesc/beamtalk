@@ -797,5 +797,8 @@ fn test_native_facade_class_side_same_file_extension_is_folded() {
         !code.contains("beamtalk_extensions"),
         "same-file extension must not register. Got:\n{code}"
     );
-    assert!(code.contains("extra"), "folded class method missing. Got:\n{code}");
+    assert!(
+        code.contains("extra"),
+        "folded class method missing. Got:\n{code}"
+    );
 }

@@ -23,7 +23,11 @@ fn error_messages(response: &Term) -> Vec<String> {
 }
 
 fn assert_error_containing(response: &Term, needle: &str) {
-    assert_eq!(response_status(response).as_deref(), Some("error"), "{response:?}");
+    assert_eq!(
+        response_status(response).as_deref(),
+        Some("error"),
+        "{response:?}"
+    );
     let msgs = error_messages(response);
     assert!(
         msgs.iter().any(|m| m.contains(needle)),
@@ -52,23 +56,37 @@ fn same_file_extensions_fold_for_every_class_kind() {
     ];
     for (kind, source) in cases {
         let file = handle_compile(&compile_request(source));
-        assert_eq!(response_status(&file).as_deref(), Some("ok"), "{kind} file: {file:?}");
+        assert_eq!(
+            response_status(&file).as_deref(),
+            Some("ok"),
+            "{kind} file: {file:?}"
+        );
         let core = response_field_str(&file, "core_erlang").expect("core_erlang");
         assert!(
             !core.contains("beamtalk_extensions"),
             "{kind}: same-file extension must not register. Got:\n{core}"
         );
-        assert!(core.contains("'make'"), "{kind}: class-side arm missing:\n{core}");
+        assert!(
+            core.contains("'make'"),
+            "{kind}: class-side arm missing:\n{core}"
+        );
 
         let inline = handle_compile_expression(&compile_expression_request(source));
-        assert_eq!(response_status(&inline).as_deref(), Some("ok"), "{kind} inline: {inline:?}");
+        assert_eq!(
+            response_status(&inline).as_deref(),
+            Some("ok"),
+            "{kind} inline: {inline:?}"
+        );
     }
 }
 
 #[test]
 fn duplicate_instance_selector_between_body_and_extension_is_an_error() {
     let source = "Object subclass: Bt4721Dup\n  foo => 1\n\nBt4721Dup >> foo => 2\n";
-    assert_error_containing(&handle_compile(&compile_request(source)), "Duplicate method `foo`");
+    assert_error_containing(
+        &handle_compile(&compile_request(source)),
+        "Duplicate method `foo`",
+    );
     assert_error_containing(
         &handle_compile_expression(&compile_expression_request(source)),
         "Duplicate method `foo`",
@@ -98,7 +116,11 @@ fn instance_extension_on_native_actor_is_an_error() {
 fn class_extension_on_native_actor_folds() {
     let source = "Actor subclass: Bt4721Nat2 native: beamtalk_test_native_counter\n  getValue => self delegate\n\nBt4721Nat2 class >> extra => 1\n";
     let response = handle_compile(&compile_request(source));
-    assert_eq!(response_status(&response).as_deref(), Some("ok"), "{response:?}");
+    assert_eq!(
+        response_status(&response).as_deref(),
+        Some("ok"),
+        "{response:?}"
+    );
     let core = response_field_str(&response, "core_erlang").expect("core_erlang");
     assert!(!core.contains("beamtalk_extensions"), "Got:\n{core}");
 }
