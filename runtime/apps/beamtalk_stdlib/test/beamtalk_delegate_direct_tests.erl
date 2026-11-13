@@ -44,6 +44,11 @@ rows() ->
         ]},
         {'bt@stdlib@binary', asBase64Url, beamtalk_binary, asBase64Url, 'Binary', asBase64Url,
             instance, [[<<"abc">>], [42], [Tagged]]},
+        %% BT-4770: a `Dictionary` parameter is proved behind `is_map`; a non-map
+        %% reaches the backing function's own error, a tagged String takes the
+        %% fallback arm.
+        {'bt@stdlib@tracing', 'class_setContext:', beamtalk_tracing, setContext, 'Tracing',
+            'setContext:', class, [[#{workflowId => <<"wf-bt4770">>}], [42], [Tagged]]},
         {'bt@stdlib@digest', 'class_sha256:', beamtalk_digest, sha256, 'Digest', 'sha256:', class, [
                 [<<"abc">>], [42], [Tagged]
             ]},

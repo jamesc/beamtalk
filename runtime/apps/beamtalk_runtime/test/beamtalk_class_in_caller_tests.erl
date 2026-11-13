@@ -10,9 +10,10 @@ ADR 0142 Phase 1b (BT-4300): a dynamic class send
 (`beamtalk_class_dispatch:class_send/3`) to a class whose chain declares no
 class variables, and that nothing shadows, runs the class method in the caller,
 resolved through the `{class_method_owner, ClassPid, Selector}` memo. Each
-decline (class variables in the class or an ancestor, a process-bound
-selector, a class-variable reflection selector, a class-side extension) keeps
-the class process, and an error has the same value on both paths.
+decline (a process-bound selector, a class-variable reflection selector, a
+class-side extension) keeps the class process, and so does a chain with class
+variables, which the memo records as the `process` verdict (BT-4771). An error
+has the same value on both paths.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
@@ -67,6 +68,11 @@ outcome(Pid, Selector) ->
         Class:Reason -> {Class, strip_stacktrace(Reason)}
     end.
 
+%% The error kind of a raised outcome, whatever its wrapping.
+dnu_kind({error, #{error := #beamtalk_error{kind = Kind}}}) -> Kind;
+dnu_kind({error, #beamtalk_error{kind = Kind}}) -> Kind;
+dnu_kind(Other) -> Other.
+
 strip_stacktrace(#{} = Wrapped) -> maps:remove(raw_stacktrace, Wrapped);
 strip_stacktrace(Other) -> Other.
 
@@ -107,6 +113,41 @@ in_caller_test_() ->
         {"a class with class variables keeps its process", fun() ->
             with_class('Bt4300Stateful', none, #{count => 0}, fun(Pid) ->
                 ?assertEqual(Pid, send(Pid, testSelf, []))
+            end)
+        end},
+        {"a stateful class's method is memoised as a process verdict (BT-4771)", fun() ->
+            with_class('Bt4771Stateful', none, #{count => 0}, fun(Pid) ->
+                ?assertEqual(Pid, send(Pid, testSelf, [])),
+                %% A positive verdict, not a miss: the caller asks the class
+                %% process directly instead of walking the chain again.
+                ?assertEqual(
+                    process,
+                    beamtalk_class_derived_cache:fetch(
+                        {class_method_owner, Pid, testSelf}, fun() -> {nocache, miss} end
+                    )
+                ),
+                %% Served from the memo, the send is unchanged.
+                ?assertEqual(Pid, send(Pid, testSelf, [])),
+                ?assertEqual({with_arg, 3}, send(Pid, 'testWith:', [3]))
+            end)
+        end},
+        {"a stale process verdict falls back to the class process's own lookup", fun() ->
+            with_class('Bt4771Stale', none, #{count => 0}, fun(Pid) ->
+                %% Plant `process` for a selector the class does not define: the
+                %% class process does the authoritative lookup, finds nothing
+                %% and the send raises the same DNU a fresh send does.
+                Fresh = outcome(Pid, bt4771Missing),
+                beamtalk_class_derived_cache:invalidate(),
+                _ = beamtalk_class_derived_cache:fetch(
+                    {class_method_owner, Pid, bt4771Missing2}, fun() -> {cache, process} end
+                ),
+                Planted = outcome(Pid, bt4771Missing2),
+                ?assertMatch({error, _}, Fresh),
+                ?assertMatch({error, _}, Planted),
+                ?assertEqual(
+                    dnu_kind(Fresh),
+                    dnu_kind(Planted)
+                )
             end)
         end},
         {"a stateless subclass of a stateful class keeps its process", fun() ->
@@ -506,3 +547,89 @@ invalidation_test_() ->
             end)
         end}
     ]}.
+
+%% BT-4771: the `process` verdict is memoised under the same generation as the
+%% in-caller owner, so every write that can change which process runs a method,
+%% or which method runs, must retire it. Each case reads the memo through a
+%% probe fetch (a miss computes nothing) and checks the send's behaviour.
+process_verdict_invalidation_test_() ->
+    {setup, fun setup/0, fun(_) -> ok end, [
+        {"a class-side extension added then removed retires the verdict", fun() ->
+            with_class('Bt4771ExtInval', none, #{count => 0}, fun(Pid) ->
+                Tag = tag('Bt4771ExtInval'),
+                ?assertEqual(Pid, send(Pid, testSelf, [])),
+                ?assertEqual(process, memo(Pid, testSelf)),
+                ok = beamtalk_extensions:register(Tag, testSelf, fun(_, _) -> ext end, test),
+                try
+                    %% The extension answers first, in the class process.
+                    ?assertEqual(ext, send(Pid, testSelf, [])),
+                    ?assertNotEqual(process, memo(Pid, testSelf))
+                after
+                    beamtalk_extensions:unregister(Tag, testSelf)
+                end,
+                ?assertEqual(Pid, send(Pid, testSelf, [])),
+                ?assertEqual(process, memo(Pid, testSelf))
+            end)
+        end},
+        {"dropping and regaining class variables retires the verdict", fun() ->
+            with_class('Bt4771VarsInval', none, #{count => 0}, fun(Pid) ->
+                ?assertEqual(Pid, send(Pid, testSelf, [])),
+                ?assertEqual(process, memo(Pid, testSelf)),
+                ok = beamtalk_class_metadata:put_class_variables('Bt4771VarsInval', false),
+                try
+                    %% No class variables in the chain: the caller runs it.
+                    ?assertEqual(self(), send(Pid, testSelf, [])),
+                    ?assertMatch({owner, 'Bt4771VarsInval', _, _, _, _, _}, memo(Pid, testSelf))
+                after
+                    ok = beamtalk_class_metadata:put_class_variables('Bt4771VarsInval', true)
+                end,
+                ?assertEqual(Pid, send(Pid, testSelf, [])),
+                ?assertEqual(process, memo(Pid, testSelf))
+            end)
+        end},
+        {"re-parenting under a class with class variables retires the owner and sets the verdict",
+            fun() ->
+                with_class('Bt4771ReparentPlain', none, #{}, fun(_PlainPid) ->
+                    with_class('Bt4771ReparentStateful', none, #{count => 0}, fun(_StatefulPid) ->
+                        Leaf = start_class('Bt4771ReparentLeaf', 'Bt4771ReparentPlain', #{}, #{}),
+                        try
+                            ?assertEqual(self(), send(Leaf, testSelf, [])),
+                            ?assertMatch({owner, _, _, _, _, _, _}, memo(Leaf, testSelf)),
+                            {ok, _} = beamtalk_object_class:update_class('Bt4771ReparentLeaf', #{
+                                module => ?HELPER,
+                                meta => maps:put(superclass, 'Bt4771ReparentStateful', ?META)
+                            }),
+                            ?assertEqual(Leaf, send(Leaf, testSelf, [])),
+                            ?assertEqual(process, memo(Leaf, testSelf))
+                        after
+                            beamtalk_test_proc:stop(Leaf)
+                        end
+                    end)
+                end)
+            end},
+        {"a redefinition that removes the selector retires the verdict", fun() ->
+            with_class('Bt4771Redefine', none, #{count => 0}, fun(Pid) ->
+                ?assertEqual(Pid, send(Pid, testSelf, [])),
+                ?assertEqual(process, memo(Pid, testSelf)),
+                {ok, _} = beamtalk_object_class:update_class('Bt4771Redefine', #{
+                    module => ?HELPER, class_methods => #{}, meta => ?META
+                }),
+                %% The selector is gone: the verdict must not send it to the
+                %% class process as if it were still defined.
+                ?assertNotEqual(process, memo(Pid, testSelf)),
+                ?assertMatch({error, _}, outcome(Pid, testSelf)),
+                ?assertNotEqual(process, memo(Pid, testSelf)),
+                {ok, _} = beamtalk_object_class:update_class('Bt4771Redefine', #{
+                    module => ?HELPER, class_methods => ?METHODS, meta => ?META
+                }),
+                ?assertEqual(Pid, send(Pid, testSelf, [])),
+                ?assertEqual(process, memo(Pid, testSelf))
+            end)
+        end}
+    ]}.
+
+%% The memo entry for a selector, without computing one.
+memo(Pid, Selector) ->
+    beamtalk_class_derived_cache:fetch(
+        {class_method_owner, Pid, Selector}, fun() -> {nocache, miss} end
+    ).

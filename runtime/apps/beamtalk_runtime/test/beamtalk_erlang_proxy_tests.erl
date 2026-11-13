@@ -18,6 +18,7 @@ error wrapping, and printString formatting.
 %% the charlist-retry exit/throw tests: raise `badarg` on a binary arg (to
 %% trigger the retry) then `exit`/`throw` on the charlist-coerced retry arg.
 -export([retry_then_exit/1, retry_then_throw/1, write_then_badarg/1, retry_class/0]).
+-export([bt4770_call_map_fun/1]).
 %% BT-4021 fixtures: a target that raises `undef` itself, and one whose charlist
 %% retry hits a nested `undef`.
 -export([explicit_undef_stub/1, retry_then_nested_undef/1, empty_stack_undef_stub/1]).
@@ -52,7 +53,16 @@ write_then_badarg(Arg) when is_binary(Arg) ->
     beamtalk_class_vars:put(retry_self_obj(), a, 99),
     erlang:error(badarg);
 write_then_badarg(Arg) when is_list(Arg) ->
+    beamtalk_class_vars:get(retry_self_obj(), a);
+%% BT-4770: a map argument with a nested tagged String; the retry deep-unwraps it.
+write_then_badarg(#{k := {beamtalk_string, _}}) ->
+    beamtalk_class_vars:put(retry_self_obj(), a, 99),
+    erlang:error(badarg);
+write_then_badarg(#{k := Bin}) when is_binary(Bin) ->
     beamtalk_class_vars:get(retry_self_obj(), a).
+
+%% BT-4770: a callee that runs a Beamtalk block held inside a map argument.
+bt4770_call_map_fun(#{f := F}) -> F().
 
 %% The base class atom must exist (beamtalk_class_vars resolves a class tag to its
 %% name with an existing-atom lookup); this function keeps it in the atom table.
@@ -1997,11 +2007,19 @@ bt4485_result_passthrough_matches_shared_fixture_test() ->
 %% binary passes (BT-4759); a tagged String, a charlist and a non-binary
 %% bitstring do not.
 bt4485_runtime_guards_reject_what_the_proxy_changes_test() ->
-    #{<<"arg_runtime_guards">> := Scalar, <<"arg_binary_guard">> := Bin} = bt4485_fixture(),
-    Guards = Scalar ++ [Bin],
-    %% A scalar-typed argument is not checked with `is_binary`: a raw binary in
-    %% one takes the proxy.
+    #{
+        <<"arg_runtime_guards">> := Scalar,
+        <<"arg_binary_guard">> := Bin,
+        <<"arg_map_guard">> := Map
+    } = bt4485_fixture(),
+    Guards = Scalar ++ [Bin, Map],
+    %% A scalar-typed argument is not checked with `is_binary`/`is_map`: a raw
+    %% binary or a map in one takes the proxy.
     ?assertNot(lists:any(fun(G) -> erlang:(binary_to_existing_atom(G))(<<"a">>) end, Scalar)),
+    ?assertNot(lists:any(fun(G) -> erlang:(binary_to_existing_atom(G))(#{}) end, Scalar)),
+    %% BT-4770: a map passes the map guard, and nothing else the guards accept is a map.
+    ?assert(erlang:(binary_to_existing_atom(Map))(#{k => {beamtalk_string, <<"a">>}})),
+    ?assertNot(lists:any(fun(G) -> erlang:(binary_to_existing_atom(G))(#{}) end, [Bin])),
     [
         ?assertNot(lists:any(fun(G) -> erlang:(binary_to_existing_atom(G))(V) end, Guards))
      || V <- [
@@ -2010,7 +2028,6 @@ bt4485_runtime_guards_reject_what_the_proxy_changes_test() ->
             "a",
             [1],
             fun() -> ok end,
-            #{},
             {ok, 1}
         ]
     ].
@@ -2023,15 +2040,19 @@ bt4485_arg_passthrough_matches_shared_fixture_test() ->
     #{
         <<"arg_passthrough">> := Cases,
         <<"arg_runtime_guards">> := Scalar,
-        <<"arg_binary_guard">> := Bin
+        <<"arg_binary_guard">> := Bin,
+        <<"arg_map_guard">> := Map
     } = bt4485_fixture(),
     ?assert(length(Cases) > 0),
-    %% A String/Binary typed argument is also checked with the binary guard.
+    %% A String/Binary typed argument is also checked with the binary guard, a
+    %% Dictionary typed one with the map guard.
     PassesGuard = fun(Type, V) ->
         Guards =
-            case lists:member(Type, [<<"String">>, <<"Binary">>]) of
-                true -> Scalar ++ [Bin];
-                false -> Scalar
+            case Type of
+                <<"String">> -> Scalar ++ [Bin];
+                <<"Binary">> -> Scalar ++ [Bin];
+                <<"Dictionary">> -> Scalar ++ [Map];
+                _ -> Scalar
             end,
         lists:any(fun(G) -> erlang:(binary_to_existing_atom(G))(V) end, Guards)
     end,
@@ -2062,8 +2083,12 @@ bt4485_arg_passthrough_matches_shared_fixture_test() ->
 %% every argument is checked with the fixture's `arg_runtime_guards`, a pass
 %% goes direct (`bt4485_direct/4`) and anything else takes `direct_call/4`.
 bt4759_guarded(M, F, Args, Mode) ->
-    #{<<"arg_runtime_guards">> := Scalar, <<"arg_binary_guard">> := Bin} = bt4485_fixture(),
-    Guards = Scalar ++ [Bin],
+    #{
+        <<"arg_runtime_guards">> := Scalar,
+        <<"arg_binary_guard">> := Bin,
+        <<"arg_map_guard">> := Map
+    } = bt4485_fixture(),
+    Guards = Scalar ++ [Bin, Map],
     Passes = fun(V) -> lists:any(fun(G) -> erlang:(binary_to_existing_atom(G))(V) end, Guards) end,
     case lists:all(Passes, Args) of
         true -> bt4485_direct(M, F, Args, Mode);
@@ -2296,20 +2321,29 @@ bt4485_direct_matches_proxy_test_() ->
 %% when an argument is a binary, `ffi_call_raised/10` on a raise), anything
 %% else takes `native_call/5`, the call the delegate made before.
 bt4765_delegate(M, F, Args, {_, _} = Ctx, Mode) ->
-    #{<<"arg_runtime_guards">> := Scalar, <<"arg_binary_guard">> := Bin} = bt4485_fixture(),
-    Guards = Scalar ++ [Bin],
+    bt4770_delegate(M, F, Args, Ctx, Mode, fun(Raw) -> Raw end).
+
+%% BT-4770: `Wrap` is what the call site builds around the raw result inside the
+%% `try` (`bt4762_inline/3` for a spec that proves an inline `Result`).
+bt4770_delegate(M, F, Args, {_, _} = Ctx, Mode, Wrap) ->
+    #{
+        <<"arg_runtime_guards">> := Scalar,
+        <<"arg_binary_guard">> := Bin,
+        <<"arg_map_guard">> := Map
+    } = bt4485_fixture(),
+    Guards = Scalar ++ [Bin, Map],
     Passes = fun(V) -> lists:any(fun(G) -> erlang:(binary_to_existing_atom(G))(V) end, Guards) end,
     case lists:all(Passes, Args) of
         false ->
             beamtalk_erlang_proxy:native_call(M, F, Args, Ctx, Mode);
         true ->
             Snap =
-                case lists:any(fun erlang:is_binary/1, Args) of
+                case lists:any(fun(A) -> is_binary(A) orelse is_map(A) end, Args) of
                     true -> beamtalk_class_vars:snapshot();
                     false -> none
                 end,
             try
-                erlang:apply(M, F, Args)
+                Wrap(erlang:apply(M, F, Args))
             catch
                 C:E:S ->
                     Site = erlang:process_info(self(), current_stacktrace),
@@ -2417,3 +2451,154 @@ bt4485_call_site_bounds_attribution_test() ->
             )
         end)
     ).
+
+%%% ============================================================================
+%%% BT-4770: map arguments on the direct path
+%%% ============================================================================
+
+%% A map argument passes `is_map` and reaches the callee unchanged on the
+%% direct path (no `unwrap_string_args`), so the guarded shape and the proxied
+%% `direct_call/4` agree on results and errors in both modes: a count, a
+%% membership test, a non-map where a map is wanted (the guard rejects it, so
+%% the proxy answers), a map with a nested tagged String (the stock-mode unwrap
+%% is shallow, so it is unchanged on both paths), and a callee that runs a
+%% block held inside the map (a raise from caller code classifies the same).
+bt4770_guarded_map_args_match_proxy_test_() ->
+    Tagged = #{k => {beamtalk_string, <<"nested">>}},
+    Cases = [
+        {maps, size, [#{}]},
+        {maps, size, [Tagged]},
+        {maps, size, [not_a_map]},
+        {maps, is_key, [k, #{'$beamtalk_class' => 'Point', k => 1}]},
+        {erlang, map_size, [Tagged]},
+        {erlang, map_size, [{beamtalk_string, <<"tagged">>}]},
+        {erlang, iolist_to_binary, [#{}]},
+        {erlang, term_to_binary, [Tagged]},
+        {?MODULE, bt4770_call_map_fun, [#{f => fun() -> 7 end}]},
+        {?MODULE, bt4770_call_map_fun, [#{f => fun() -> erlang:error(boom) end}]},
+        {?MODULE, bt4770_call_map_fun, [#{f => fun() -> erlang:error(badarg) end}]},
+        {?MODULE, bt4770_call_map_fun, [#{f => fun() -> throw(thrown) end}]},
+        {?MODULE, bt4770_call_map_fun, [#{f => fun() -> exit(exited) end}]},
+        {?MODULE, bt4770_call_map_fun, [#{}]}
+    ],
+    [
+        {lists:flatten(io_lib:format("~p:~p ~p ~p", [M, F, A, Mode])), fun() ->
+            ?assertEqual(
+                bt4485_outcome(fun() -> beamtalk_erlang_proxy:direct_call(M, F, A, Mode) end),
+                bt4485_outcome(fun() -> bt4759_guarded(M, F, A, Mode) end)
+            )
+        end}
+     || {M, F, A} <- Cases, Mode <- [stock, beamtalk]
+    ].
+
+%% BT-4770: `maps:find/2` is spec'd `{ok, V} | error`, so a map-argument call
+%% builds the `Result` inline (stock mode), exactly as `direct_call/4` does.
+bt4770_inline_result_map_args_match_proxy_test_() ->
+    Tagged = #{k => {beamtalk_string, <<"nested">>}},
+    Cases = [
+        {maps, find, [k, #{k => 1}]},
+        {maps, find, [z, #{k => 1}]},
+        {maps, find, [k, Tagged]},
+        {maps, find, [k, #{k => "charlist"}]},
+        {maps, find, [k, #{k => [1, 2]}]},
+        {maps, find, [k, not_a_map]}
+    ],
+    [
+        {lists:flatten(io_lib:format("~p:~p ~p", [M, F, A])), fun() ->
+            ?assertEqual(
+                bt4485_outcome(fun() -> beamtalk_erlang_proxy:direct_call(M, F, A, stock) end),
+                bt4485_outcome(fun() -> bt4770_inline_guarded(M, F, A) end)
+            )
+        end}
+     || {M, F, A} <- Cases
+    ].
+
+%% The shape codegen emits for a proved, inline-`Result`, guarded call whose
+%% arguments may be maps: a snapshot read first, the build inside the `try`,
+%% `ffi_call_raised/9` on a raise, `direct_call/4` when a guard fails.
+bt4770_inline_guarded(M, F, Args) ->
+    #{
+        <<"arg_runtime_guards">> := Scalar,
+        <<"arg_binary_guard">> := Bin,
+        <<"arg_map_guard">> := Map
+    } = bt4485_fixture(),
+    Guards = Scalar ++ [Bin, Map],
+    Passes = fun(V) -> lists:any(fun(G) -> erlang:(binary_to_existing_atom(G))(V) end, Guards) end,
+    case lists:all(Passes, Args) of
+        false ->
+            beamtalk_erlang_proxy:direct_call(M, F, Args, stock);
+        true ->
+            Snap = beamtalk_class_vars:snapshot(),
+            try
+                bt4762_inline(M, erlang:apply(M, F, Args), stock)
+            catch
+                C:E:S ->
+                    Site = erlang:process_info(self(), current_stacktrace),
+                    beamtalk_erlang_proxy:ffi_call_raised(C, E, S, M, F, Args, stock, Site, Snap)
+            end
+    end.
+
+%% The `badarg` charlist retry deep-unwraps a Dictionary argument's nested
+%% tagged Strings and is a fresh attempt: a map call site keeps the pre-call
+%% class-variable snapshot (`ffi_call_raised/9`), so the first attempt's write
+%% does not survive, as on the proxy path.
+bt4770_direct_map_retry_discards_first_attempt_class_var_writes_test() ->
+    Arg = #{k => {beamtalk_string, <<"x">>}},
+    Direct = fun() ->
+        Snap = beamtalk_class_vars:snapshot(),
+        try
+            ?MODULE:write_then_badarg(Arg)
+        catch
+            C:E:S ->
+                Site = erlang:process_info(self(), current_stacktrace),
+                beamtalk_erlang_proxy:ffi_call_raised(
+                    C, E, S, ?MODULE, write_then_badarg, [Arg], stock, Site, Snap
+                )
+        end
+    end,
+    beamtalk_class_vars_test_support:with_home('ProxyRetryTestClass', #{a => 1}, fun() ->
+        Proxied = beamtalk_erlang_proxy:direct_call(?MODULE, write_then_badarg, [Arg], stock),
+        ?assertEqual(1, Proxied),
+        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a)),
+        ?assertEqual(Proxied, Direct()),
+        ?assertEqual(1, beamtalk_class_vars:get(retry_self_obj(), a))
+    end).
+
+%% A delegate agrees with `native_call/5` the same way, for a map argument
+%% (a plain direct call) and for an inline `Result` (BT-4770).
+bt4770_delegate_map_args_match_native_call_test_() ->
+    Ctx = {'Probe', 'go:'},
+    Plain = [
+        {maps, size, [#{k => 1}]},
+        {maps, size, [not_a_map]},
+        {?MODULE, bt4770_call_map_fun, [#{f => fun() -> erlang:error(boom) end}]}
+    ],
+    Inline = [
+        {maps, find, [k, #{k => 1}]},
+        {maps, find, [z, #{k => 1}]},
+        {maps, find, [k, #{k => "charlist"}]},
+        {maps, find, [k, not_a_map]}
+    ],
+    Wrap = fun(M) -> fun(Raw) -> bt4762_inline(M, Raw, stock) end end,
+    [
+        {lists:flatten(io_lib:format("~p:~p ~p ~p", [M, F, A, Mode])), fun() ->
+            ?assertEqual(
+                bt4485_outcome(fun() -> beamtalk_erlang_proxy:native_call(M, F, A, Ctx, Mode) end),
+                bt4485_outcome(fun() -> bt4765_delegate(M, F, A, Ctx, Mode) end)
+            )
+        end}
+     || {M, F, A} <- Plain, Mode <- [stock, beamtalk]
+    ] ++
+        [
+            {lists:flatten(io_lib:format("inline ~p:~p ~p", [M, F, A])), fun() ->
+                ?assertEqual(
+                    bt4485_outcome(fun() ->
+                        beamtalk_erlang_proxy:native_call(M, F, A, Ctx, stock)
+                    end),
+                    bt4485_outcome(fun() ->
+                        bt4770_delegate(M, F, A, Ctx, stock, Wrap(M))
+                    end)
+                )
+            end}
+         || {M, F, A} <- Inline
+        ].

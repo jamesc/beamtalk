@@ -1268,3 +1268,57 @@ fast_paths_edge_cases_test() ->
     ?assertEqual({beamtalk_string, <<"ab">>}, beamtalk_string:drop(<<"a\r\nab">>, 2)),
     ?assertEqual({beamtalk_string, <<"abc">>}, beamtalk_string:take(<<"abcdef">>, 3)),
     ?assertEqual({beamtalk_string, <<"abcdef">>}, beamtalk_string:take(<<"abcdef">>, 99)).
+
+%%% ===========================================================================
+%%% byte_per_grapheme/1 word-at-a-time scan vs per-byte reference (BT-4773)
+%%% ===========================================================================
+
+%% The original per-byte definition, kept as the oracle.
+bpg_reference(<<C, Rest/binary>>) when C < 128, C =/= $\r -> bpg_reference(Rest);
+bpg_reference(<<>>) -> true;
+bpg_reference(_) -> false.
+
+bpg_check(Bin) ->
+    ?assertEqual(bpg_reference(Bin), beamtalk_string:byte_per_grapheme(Bin), Bin).
+
+byte_per_grapheme_ascii_lengths_test() ->
+    [bpg_check(binary:copy(<<"a">>, N)) || N <- lists:seq(0, 17)],
+    [bpg_check(binary:copy(<<0>>, N)) || N <- lists:seq(0, 17)],
+    [bpg_check(binary:copy(<<127>>, N)) || N <- lists:seq(0, 17)].
+
+byte_per_grapheme_cr_every_position_test() ->
+    [
+        bpg_check(bpg_put(binary:copy(<<"a">>, N), Pos, $\r))
+     || N <- lists:seq(1, 17), Pos <- lists:seq(0, N - 1)
+    ].
+
+byte_per_grapheme_high_byte_every_position_test() ->
+    [
+        bpg_check(bpg_put(binary:copy(<<"a">>, N), Pos, B))
+     || N <- lists:seq(1, 17), Pos <- lists:seq(0, N - 1), B <- [128, 129, 200, 255]
+    ].
+
+byte_per_grapheme_random_test() ->
+    rand:seed(exsss, {4773, 1, 2}),
+    [
+        bpg_check(<<<<(bpg_rand_byte())>> || _ <- lists:seq(1, rand:uniform(18) - 1)>>)
+     || _ <- lists:seq(1, 5000)
+    ].
+
+byte_per_grapheme_utf8_test() ->
+    bpg_check(<<"héllo wörld"/utf8>>),
+    bpg_check(<<"a\r\nb">>),
+    bpg_check(<<"0123456789abcdef\r">>),
+    bpg_check(<<"0123456789abcdef", 200>>).
+
+bpg_put(Bin, Pos, Byte) ->
+    <<Pre:Pos/binary, _, Post/binary>> = Bin,
+    <<Pre/binary, Byte, Post/binary>>.
+
+%% Mostly ASCII so the word fast path is exercised, with occasional CR / high bytes.
+bpg_rand_byte() ->
+    case rand:uniform(20) of
+        1 -> $\r;
+        2 -> 128 + rand:uniform(128) - 1;
+        _ -> rand:uniform(127) - 1
+    end.

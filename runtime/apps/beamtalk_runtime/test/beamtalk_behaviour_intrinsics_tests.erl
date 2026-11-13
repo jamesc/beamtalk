@@ -3463,7 +3463,7 @@ object_is_kind_of_fast_path_test_() ->
     end}.
 
 %%% ============================================================================
-%%% isKindOfNamed/3 — name-only `x isKindOf: UserClass` (BT-4757)
+%%% isKindOfNamed/2 — name-only `x isKindOf: UserClass` (BT-4757)
 %%% ============================================================================
 
 %% `Object>>isKindOf:`, which the full send runs for these receivers (the test
@@ -3601,12 +3601,9 @@ is_kind_of_named_test_() ->
                     beamtalk_message_dispatch:send(Value, 'isKindOf:', [Grand])
                 end),
                 ?assertNotEqual({value, true}, Sent),
-                ?assertEqual(
-                    Sent,
-                    outcome(fun() ->
-                        beamtalk_behaviour_intrinsics:isKindOfNamed(Value, Grand, 'BT4757Grand')
-                    end)
-                ),
+                %% The flag is the compiled caller's guard (read in line, BT-4769):
+                %% with it up the call site never reaches isKindOfNamed/2, and
+                %% kind_of_named/4 with the flag passed in is the send.
                 ?assertEqual(
                     Sent,
                     outcome(fun() ->
@@ -3618,6 +3615,93 @@ is_kind_of_named_test_() ->
             end)
         ]
     end}.
+
+%% BT-4769: the verdicts of `isKindOfNamed/2` (the answer by name, or
+%% `undecided` for the send), its single cache entry, and the override-flag key
+%% the compiled caller reads in line.
+is_kind_of_named_verdicts_test_() ->
+    Names = ['BT4769Grand', 'BT4769Bottom', 'BT4769Other', 'BT4769Proxy'],
+    {setup, fun setup/0, fun(_) -> teardown(Names) end, fun(_) ->
+        [
+            ?_test(begin
+                {_, _} = register_class('BT4769Grand', #{}, #{}),
+                {_, _} = register_class_with_super('BT4769Bottom', 'BT4769Grand', #{}, #{}),
+                {_, _} = register_class('BT4769Other', #{}, #{}),
+                Value = #{'$beamtalk_class' => 'BT4769Bottom'},
+                ?assertEqual(
+                    true, beamtalk_behaviour_intrinsics:isKindOfNamed(Value, 'BT4769Grand')
+                ),
+                ?assertEqual(
+                    true, beamtalk_behaviour_intrinsics:isKindOfNamed(Value, 'BT4769Bottom')
+                ),
+                ?assertEqual(
+                    false, beamtalk_behaviour_intrinsics:isKindOfNamed(Value, 'BT4769Other')
+                ),
+                %% One entry per (class, name), holding the whole verdict.
+                ?assertMatch(
+                    [true],
+                    [
+                        V
+                     || {_, _, V} <- ets:lookup(
+                            beamtalk_class_derived_cache,
+                            {is_kind_of_named, 'BT4769Bottom', 'BT4769Grand'}
+                        )
+                    ]
+                )
+            end),
+            ?_test(begin
+                %% Not answered by name: a class-object receiver, a future, a
+                %% proxy that does not inherit Object, a class not in the table.
+                {Grand, _} = register_class('BT4769Grand', #{}, #{}),
+                {_, _} = register_class_with_super('BT4769Proxy', 'ProtoObject', #{}, #{}),
+                Proxy = #{'$beamtalk_class' => 'BT4769Proxy'},
+                Unknown = #{'$beamtalk_class' => 'BT4769NoSuchClass'},
+                ?assertEqual(
+                    undecided, beamtalk_behaviour_intrinsics:isKindOfNamed(Grand, 'BT4769Grand')
+                ),
+                ?assertEqual(
+                    undecided,
+                    beamtalk_behaviour_intrinsics:isKindOfNamed(
+                        {beamtalk_future, make_ref()}, 'BT4769Grand'
+                    )
+                ),
+                ?assertEqual(
+                    undecided, beamtalk_behaviour_intrinsics:isKindOfNamed(Proxy, 'BT4769Grand')
+                ),
+                ?assertEqual(
+                    undecided, beamtalk_behaviour_intrinsics:isKindOfNamed(Unknown, 'BT4769Grand')
+                ),
+                %% An unregistered class is never cached.
+                ?assertEqual(
+                    [],
+                    ets:lookup(
+                        beamtalk_class_derived_cache,
+                        {is_kind_of_named, 'BT4769NoSuchClass', 'BT4769Grand'}
+                    )
+                )
+            end)
+        ]
+    end}.
+
+override_flag_key_matches_shared_fixture_test() ->
+    Cases = beamtalk_test_corpus:load_json_fixture([
+        "runtime",
+        "apps",
+        "beamtalk_runtime",
+        "test",
+        "fixtures",
+        "override_flag_key_conformance.json"
+    ]),
+    ?assert(length(Cases) > 0),
+    lists:foreach(
+        fun(#{<<"selector">> := Selector, <<"key">> := Key}) ->
+            ?assertEqual(
+                list_to_tuple([binary_to_atom(K, utf8) || K <- Key]),
+                beamtalk_default_method:override_flag_key(binary_to_atom(Selector, utf8))
+            )
+        end,
+        Cases
+    ).
 
 %%% ============================================================================
 %%% valueIsKindOfClass/2 — runtime test behind `x :: Class` on non-leaf classes

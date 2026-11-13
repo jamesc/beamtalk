@@ -29,7 +29,14 @@ selector on a subclass.
 
 -include("beamtalk.hrl").
 
--export([is_default/2, owner/2, overridden_anywhere/1, note_override/2, note_overrides/2]).
+-export([
+    is_default/2,
+    owner/2,
+    overridden_anywhere/1,
+    override_flag_key/1,
+    note_override/2,
+    note_overrides/2
+]).
 
 %% The selectors whose override anywhere below `Object` is tracked by
 %% `overridden_anywhere/1` (BT-4473): those a caller answers without dispatch
@@ -127,9 +134,22 @@ override check (`beamtalk_behaviour_intrinsics:isKindOfBuiltin/3`).
 -spec overridden_anywhere(atom()) -> boolean().
 overridden_anywhere(Selector) ->
     case lists:member(Selector, ?WATCHED) of
-        true -> persistent_term:get({?MODULE, overridden, Selector}, false);
+        true -> persistent_term:get(override_flag_key(Selector), false);
         false -> true
     end.
+
+-doc """
+The `persistent_term` key of a watched selector's override flag (BT-4769).
+
+Compiled `isKindOf:` call sites read the flag with one `persistent_term:get/2`
+on this key instead of calling `overridden_anywhere/1` (a `lists:member/2`
+scan per call). The compiler spells the key itself, so the shape is pinned to
+the shared fixture `override_flag_key_conformance.json`, asserted from both
+sides.
+""".
+-spec override_flag_key(atom()) -> {?MODULE, overridden, atom()}.
+override_flag_key(Selector) ->
+    {?MODULE, overridden, Selector}.
 
 -doc """
 Record that `Class` defines `Selector` (a compiled method or an extension):
@@ -143,7 +163,7 @@ note_override('Object', _Selector) ->
     ok;
 note_override(_Class, Selector) ->
     case lists:member(Selector, ?WATCHED) andalso not overridden_anywhere(Selector) of
-        true -> persistent_term:put({?MODULE, overridden, Selector}, true);
+        true -> persistent_term:put(override_flag_key(Selector), true);
         false -> ok
     end.
 

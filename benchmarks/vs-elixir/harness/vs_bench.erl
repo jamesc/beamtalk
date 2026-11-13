@@ -33,12 +33,10 @@
 
 -module(vs_bench).
 
--export([main/1, profile/1, invalidate/1, rows/0, ffi_ok/0]).
+-export([main/1, profile/1, invalidate/1, rows/0]).
 
-%% Fixture callee for row 13d: an FFI target returning the bare atom `ok`,
-%% which the proxy coerces to `Result ok: nil`. No pure OTP function returns
-%% bare `ok` without side effects, so the suite provides its own.
-ffi_ok() -> ok.
+%% Row 13d's callee is `vs_ffi:ffi_ok/0` (beamtalk/native/vs_ffi.erl), not a
+%% harness function: only a package `native/` module has its spec read.
 
 -define(BT, 'bt@vs_elixir_bench@vb_bench').
 -define(EX, 'Elixir.VeBench').
@@ -614,8 +612,10 @@ compiles_to("13b") ->
     "direct erlang:integer_to_binary(A) in a try (BT-4755), behind an is_number/is_atom/is_pid argument guard: the spec's binary() result (String | Binary) needs no coercion; errors go to ffi_call_raised/8";
 compiles_to("13e") ->
     "direct erlang:phash2(S) in a try (BT-4759), behind an is_number/is_atom/is_pid/is_binary argument guard: the raw Binary argument passes is_binary and needs no unwrap_string_args (a tagged String literal would fail the guard and take the direct_call/4 fallback); errors go to ffi_call_raised/8";
-compiles_to("13c") -> "direct_call/4 ('maps', 'find', [K, D], 'stock'): mode precomputed, {ok, V} still wraps to Result";
-compiles_to("13d") -> "direct_call/4 ('vs_bench', 'ffi_ok', [], 'stock'): mode precomputed, ok still wraps to Result";
+compiles_to("13c") ->
+    "direct maps:find(K, D) in a try (BT-4770), behind an is_number/is_atom/is_pid argument guard (plus is_map for the Dictionary D): the {ok, V} result is wrapped to Result inline (beamtalk_result:from_tagged_tuple/1, ADR 0076); errors go to ffi_call_raised/9";
+compiles_to("13d") ->
+    "direct vs_ffi:ffi_ok() in a try (BT-4770): the package's own native/ spec proves the bare ok, wrapped to Result inline; errors go to ffi_call_raised/8";
 compiles_to("14a") -> "is_tuple-guarded direct Tuple:dispatch/3 (BT-4294); 'at:' reads an in-range element inline (BT-4400)";
 compiles_to("14b") -> "class reference per use: whereis of the compile-time registered name + module_name_safe (BT-4295)";
 compiles_to(_) -> "".
