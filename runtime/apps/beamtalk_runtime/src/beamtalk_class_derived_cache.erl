@@ -113,17 +113,6 @@ node-unique multiple of 2^32, so in the (start-up only) race where two
 processes both create it, entries tagged under the losing counter can never
 match the winning one.
 
-## Per-process memo (BT-4652)
-
-`fetch/2,3` also keep a process-dictionary memo, `{Gen, #{Key => Value}}` under
-one key, holding exactly the values the ETS layer holds (`cache` answers; a
-`nocache` answer is never memoised). A hit costs the generation read and a
-`get/1`. A `fetch/3` `Valid` check runs on memo hits too, so a purge needs no
-generation bump: the keys that depend on code loading already carry a `Valid`.
-A generation change orphans the whole map, and the next store replaces it
-(stale entries never accumulate); a map reaching 4096 keys is dropped and
-refilled. Without a generation (before `new/0`) nothing is memoised.
-
 Facts that also depend on code-loading state (whether a module is loaded)
 are not tracked by this invalidation; callers that cache such facts must
 re-validate them on a hit with `fetch/3` (see
@@ -151,10 +140,6 @@ so they share an owner and heir and are lost together.
 
 -define(TABLE, beamtalk_class_derived_cache).
 -define(GEN_KEY, {?MODULE, generation}).
--define(MEMO_KEY, {?MODULE, memo}).
-%% Cap on one process's memo (keys are classes x key kinds, so this is far
-%% above any real working set; it only bounds a pathological selector sweep).
--define(MEMO_MAX, 4096).
 
 -doc """
 Ensure the cache table and generation counter exist (idempotent).
@@ -239,37 +224,19 @@ fetch_valid(Key, Compute, Valid) ->
         Ref ->
             %% Read the generation before computing (see the moduledoc).
             Gen = atomics:get(Ref, 1),
-            case memo_find(Gen, Key) of
-                {ok, Value} when Valid =:= always ->
+            try ets:lookup(?TABLE, Key) of
+                [{_, Gen, Value}] when Valid =:= always ->
                     Value;
-                {ok, Value} ->
+                [{_, Gen, Value}] ->
                     case Valid(Value) of
                         true -> Value;
                         false -> compute_and_store(Key, Gen, Compute)
                     end;
-                error ->
-                    fetch_ets(Key, Gen, Compute, Valid)
+                _ ->
+                    compute_and_store(Key, Gen, Compute)
+            catch
+                error:badarg -> element(2, Compute())
             end
-    end.
-
-%% The per-process memo missed: read the ETS layer, and memoise a hit.
--spec fetch_ets(
-    term(), integer(), fun(() -> {cache | nocache, Value}), fun((Value) -> boolean()) | always
-) ->
-    Value.
-fetch_ets(Key, Gen, Compute, Valid) ->
-    try ets:lookup(?TABLE, Key) of
-        [{_, Gen, Value}] when Valid =:= always ->
-            memo_put(Gen, Key, Value);
-        [{_, Gen, Value}] ->
-            case Valid(Value) of
-                true -> memo_put(Gen, Key, Value);
-                false -> compute_and_store(Key, Gen, Compute)
-            end;
-        _ ->
-            compute_and_store(Key, Gen, Compute)
-    catch
-        error:badarg -> element(2, Compute())
     end.
 
 -doc """
@@ -319,34 +286,10 @@ compute_and_store(Key, Gen, Compute) ->
             catch
                 error:badarg -> ok
             end,
-            memo_put(Gen, Key, Value);
+            Value;
         {nocache, Value} ->
             Value
     end.
-
-%% The per-process memo (BT-4652): one process-dictionary entry holding the
-%% generation it was filled under and a map of key to value. It holds exactly
-%% what the ETS layer holds (values `Compute` marked `cache`), so a hit is a
-%% generation read and a `get/1` instead of an ETS read that copies the entry.
-%% A generation bump orphans the whole map, which the next `memo_put/3`
-%% replaces rather than extends, so stale entries never accumulate; a map that
-%% reaches `?MEMO_MAX` entries is dropped and refilled.
--spec memo_find(integer(), term()) -> {ok, term()} | error.
-memo_find(Gen, Key) ->
-    case get(?MEMO_KEY) of
-        {Gen, Map} -> maps:find(Key, Map);
-        _ -> error
-    end.
-
--spec memo_put(integer(), term(), Value) -> Value.
-memo_put(Gen, Key, Value) ->
-    Map =
-        case get(?MEMO_KEY) of
-            {Gen, M} when map_size(M) < ?MEMO_MAX -> M;
-            _ -> #{}
-        end,
-    put(?MEMO_KEY, {Gen, Map#{Key => Value}}),
-    Value.
 
 -spec ensure_generation() -> ok.
 ensure_generation() ->
