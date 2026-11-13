@@ -1747,7 +1747,11 @@ impl LanguageService for SimpleLanguageService {
         use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
         let tokens = lex_with_eof(&content);
-        let (module, diagnostics) = parse(tokens);
+        let (mut module, diagnostics) = parse(tokens);
+        // A file is one compilation unit for its class (BT-4721): the project
+        // index sees same-file extensions as methods of their class. Fold
+        // diagnostics are reported by analysis, which folds the same way.
+        let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
 
         // Build class hierarchy for the project index.
         // This is intentionally lightweight (ClassHierarchy::build only, not full

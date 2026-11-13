@@ -271,7 +271,10 @@ pub fn parse_package_sources(
             }
         };
 
-        let (module, parse_diagnostics) = parse(lex_with_eof(&source));
+        let (mut module, parse_diagnostics) = parse(lex_with_eof(&source));
+        // One compilation unit per class (BT-4721): class infos see the file's
+        // own extensions as methods of the class.
+        let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
 
         // A file with parse errors may have an under-recovered method
         // surface — mark its classes so the receiver-knowledge classifier

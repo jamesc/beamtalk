@@ -812,8 +812,21 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // module — `(e) foo` must analyse exactly like `e foo`. Cloned only when
     // there is something to expand or peel.
     let has_uses = module.classes.iter().any(|c| !c.uses.is_empty());
-    let module: &Module = if has_uses || normalize::needs_normalising(module) {
+    // BT-4721: a file is one compilation unit for its class. The compile
+    // pipelines fold same-file extensions before analysis, so this is a no-op
+    // there; the language service and lint hand over the module as parsed, and
+    // get the same fold (and the same duplicate diagnostics) on this clone.
+    let has_same_file_ext = module
+        .method_definitions
+        .iter()
+        .any(|md| crate::compilation::is_same_file_extension(module, md.class_name.name.as_str()));
+    let module: &Module = if has_uses || has_same_file_ext || normalize::needs_normalising(module) {
         let mut owned = module.clone();
+        if has_same_file_ext {
+            result
+                .diagnostics
+                .extend(crate::compilation::fold_same_file_extensions(&mut owned));
+        }
         if has_uses {
             let (expansion_diags, origins, resolved_uses) =
                 trait_expansion::expand_module_with_resolved_uses(
