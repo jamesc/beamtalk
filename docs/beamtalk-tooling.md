@@ -1150,10 +1150,14 @@ Coverage is defined as **(expressions with non-Dynamic inferred type) / (total e
 
 | Flag | Description |
 |------|-------------|
-| `--detail` | Show each Dynamic expression with `file:line:col` location and reason |
+| `--detail` | Show each Dynamic expression and each narrowing cast with `file:line:col` location |
 | `--format json` | Machine-readable JSON output for dashboards and CI |
 | `--at-least N` | Exit non-zero if total coverage < N% (CI ratchet) |
 | `--class ClassName` | Filter to a specific class |
+
+### Narrowing Casts (BT-4719)
+
+A local annotation narrower than its right-hand side, such as `n :: Integer := opts at: #max`, is an unchecked cast: nothing verifies it at runtime. `type-coverage` counts these separately, per class (the `narrowing` column) and in total, and `--detail` lists each as `file:line:col (:: Integer from Dynamic)`. JSON output carries `narrowing_casts` on the report and on each class, plus `narrowing_entries` under `--detail`. The coverage percentage is unchanged. To flag them as diagnostics, enable the opt-in `narrowing-cast` lint under `[diagnostics]` (off by default). See [Local Variable Type Annotations](beamtalk-language-features.md#local-variable-type-annotations).
 
 ### Detail Mode
 

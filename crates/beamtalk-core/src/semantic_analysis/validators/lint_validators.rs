@@ -18,7 +18,7 @@ use crate::ast_walker::{
     SendRef, cascade_sends, cascade_shared_receiver, walk_expression, walk_module,
 };
 use crate::semantic_analysis::ClassHierarchy;
-use crate::semantic_analysis::type_checker::{InferredType, TypeMap};
+use crate::semantic_analysis::type_checker::{DynamicReason, InferredType, TypeMap};
 use crate::source_analysis::{Diagnostic, DiagnosticCategory, Span};
 use ecow::EcoString;
 use std::collections::HashMap;
@@ -977,6 +977,153 @@ pub(crate) fn check_redundant_local_type_annotation(
             .with_category(DiagnosticCategory::TypeAnnotation),
         );
     });
+}
+
+// ── Narrowing local-variable type annotation (unchecked cast) ─────────────────
+
+/// A local annotation whose declared type is narrower than its right-hand
+/// side, such as `n :: Integer := opts at: #max` (BT-4719).
+///
+/// Nothing checks the claim at runtime: it is an unchecked cast.
+#[derive(Debug, Clone)]
+pub struct NarrowingCast {
+    /// Span of the whole assignment.
+    pub span: Span,
+    /// Span of the `:: T` annotation.
+    pub annotation_span: Span,
+    /// The declared type, as displayed in diagnostics.
+    pub declared: EcoString,
+    /// The right-hand side's inferred type: `Dynamic`, or a class name.
+    pub rhs: EcoString,
+}
+
+/// Finds every [`NarrowingCast`] in `module`.
+///
+/// The single rule behind both the opt-in lint
+/// ([`check_narrowing_local_type_annotation`]) and the `type-coverage`
+/// category. An annotated local assignment is a narrowing cast when its
+/// declared type resolves to a known class other than `Object` and the
+/// right-hand side is either `Dynamic` or a known class that is a strict
+/// superclass of the declared one.
+///
+/// Not casts, so not reported: redundant annotations (same type), widening
+/// annotations (`T | Nil`, `T?`) and the other composed forms, an `Object`
+/// declared type (it asserts nothing), declared classes the hierarchy does
+/// not know (aliases, type parameters), and `Never`/`Union` right-hand sides.
+pub(crate) fn find_narrowing_casts(
+    module: &Module,
+    type_map: &TypeMap,
+    hierarchy: &ClassHierarchy,
+) -> Vec<NarrowingCast> {
+    let empty_subst: HashMap<ecow::EcoString, InferredType> = HashMap::new();
+    let mut found = Vec::new();
+    let unknown = InferredType::Dynamic(DynamicReason::Unknown);
+    walk_module(module, &mut |expr| {
+        let Expression::Assignment {
+            target,
+            value,
+            type_annotation: Some(annotation),
+            span,
+        } = expr
+        else {
+            return;
+        };
+        if !matches!(target.as_ref(), Expression::Identifier(_)) {
+            return;
+        }
+        if matches!(
+            annotation,
+            TypeAnnotation::Union { .. }
+                | TypeAnnotation::FalseOr { .. }
+                | TypeAnnotation::Difference { .. }
+                | TypeAnnotation::Intersection { .. }
+                | TypeAnnotation::Shape { .. }
+        ) {
+            return;
+        }
+        // The type map omits `Dynamic(Unknown)` (it carries no provenance), so
+        // an absent entry is a `Dynamic` right-hand side, the common cast.
+        let rhs_ty = type_map.get(value.span()).unwrap_or(&unknown);
+        let resolved = crate::semantic_analysis::type_checker::resolve_type_annotation(
+            annotation,
+            &empty_subst,
+            None,
+            None,
+        );
+        let InferredType::Known {
+            class_name: ann_class,
+            type_args: ann_args,
+            ..
+        } = &resolved
+        else {
+            return;
+        };
+        if ann_class.as_str() == "Object" || !hierarchy.has_class(ann_class) {
+            return;
+        }
+        let rhs_name: EcoString = match rhs_ty {
+            InferredType::Dynamic(_) => EcoString::from("Dynamic"),
+            InferredType::Known {
+                class_name: rhs_class,
+                ..
+            } => {
+                // Same class (any type-args difference is not a class
+                // narrowing) or an unrelated/wider declared type: no cast.
+                if rhs_class == ann_class
+                    || !hierarchy.has_class(rhs_class)
+                    || !hierarchy.is_subclass_of(ann_class, rhs_class)
+                {
+                    return;
+                }
+                rhs_class.clone()
+            }
+            _ => return,
+        };
+        let declared = InferredType::Known {
+            class_name: ann_class.clone(),
+            type_args: ann_args.clone(),
+            provenance: crate::semantic_analysis::type_checker::TypeProvenance::Declared(*span),
+        }
+        .display_for_diagnostic()
+        .unwrap_or_else(|| ann_class.clone());
+        found.push(NarrowingCast {
+            span: *span,
+            annotation_span: annotation.span(),
+            declared,
+            rhs: rhs_name,
+        });
+    });
+    found
+}
+
+/// Opt-in lint: flags each [`NarrowingCast`] (BT-4719).
+///
+/// Always emitted here; dropped unless the package's `[diagnostics]` table
+/// enables `narrowing-cast` (see `diagnostics_policy::DEFAULT_OFF_CATEGORIES`).
+pub(crate) fn check_narrowing_local_type_annotation(
+    module: &Module,
+    type_map: &TypeMap,
+    hierarchy: &ClassHierarchy,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for cast in find_narrowing_casts(module, type_map, hierarchy) {
+        diagnostics.push(
+            Diagnostic::lint(
+                format!(
+                    "Narrowing type annotation: `:: {}` is an unchecked cast of a `{}` value",
+                    cast.declared, cast.rhs
+                ),
+                cast.annotation_span,
+            )
+            .with_hint(
+                "Nothing checks this at runtime; if the claim is wrong the failure shows up \
+                 later and somewhere else. Enable or raise this lint with \
+                 `narrowing-cast` in `[diagnostics]`."
+                    .to_string(),
+            )
+            .with_category(DiagnosticCategory::NarrowingCast),
+        );
+    }
 }
 
 #[cfg(test)]
@@ -2467,5 +2614,67 @@ mod tests {
             2,
             "Expected one lint per redundant annotation, got: {diags:?}"
         );
+    }
+
+    // ── Narrowing local-variable type annotation tests (BT-4719) ───────────────
+
+    fn narrowing_lints(src: &str) -> Vec<Diagnostic> {
+        let tokens = lex_with_eof(src);
+        let (module, parse_diags) = parse(tokens);
+        let hard_errs: Vec<_> = parse_diags
+            .iter()
+            .filter(|d| d.severity == Severity::Error)
+            .collect();
+        assert!(hard_errs.is_empty(), "Parse failed: {hard_errs:?}");
+        let (hierarchy, _) = ClassHierarchy::build(&module);
+        let hierarchy = hierarchy.expect("hierarchy build failed");
+        let type_map = crate::semantic_analysis::infer_types(&module, &hierarchy, None);
+        let mut diagnostics = Vec::new();
+        check_narrowing_local_type_annotation(&module, &type_map, &hierarchy, &mut diagnostics);
+        diagnostics
+    }
+
+    #[test]
+    fn narrowing_dynamic_rhs_flagged() {
+        let src = "Object subclass: Reader\n  read: opts :: Dictionary =>\n    n :: Integer := opts at: #max\n    n";
+        let diags = narrowing_lints(src);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(diags[0].severity, Severity::Lint);
+        assert_eq!(diags[0].category, Some(DiagnosticCategory::NarrowingCast));
+        assert!(diags[0].message.contains("Integer"), "{}", diags[0].message);
+    }
+
+    #[test]
+    fn narrowing_strict_subtype_of_known_rhs_flagged() {
+        let src = "Object subclass: Animal\n  me => self\n\nAnimal subclass: Dog\n  bark => 1\n\nObject subclass: Zoo\n  pick =>\n    d :: Dog := Animal new\n    d";
+        let diags = narrowing_lints(src);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(diags[0].message.contains("Animal"), "{}", diags[0].message);
+    }
+
+    #[test]
+    fn narrowing_redundant_annotation_not_flagged() {
+        let src = "Object subclass: Counter\n  count => 0\n\nx :: Counter := Counter new";
+        assert!(narrowing_lints(src).is_empty());
+    }
+
+    #[test]
+    fn narrowing_widening_annotation_not_flagged() {
+        let src = "Object subclass: Foo\n  bar =>\n    status :: Integer | Nil := nil\n    status";
+        assert!(narrowing_lints(src).is_empty());
+    }
+
+    #[test]
+    fn narrowing_to_object_not_flagged() {
+        let src = "Object subclass: Reader\n  read: opts :: Dictionary =>\n    n :: Object := opts at: #max\n    n";
+        assert!(narrowing_lints(src).is_empty());
+    }
+
+    #[test]
+    fn narrowing_object_rhs_flagged() {
+        let src = "Object subclass: Reader\n  read: o :: Object =>\n    n :: Integer := o\n    n";
+        let diags = narrowing_lints(src);
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(diags[0].message.contains("Object"), "{}", diags[0].message);
     }
 }

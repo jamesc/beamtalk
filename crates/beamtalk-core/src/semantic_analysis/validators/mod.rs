@@ -68,11 +68,13 @@ pub(crate) use local_threading::PLAIN_ARM_SELECTORS;
 pub(crate) use local_threading::check_local_threading;
 // `pub`, not `pub(crate)`: the standalone `beamtalk-lint`
 // crate's `effect_free_statement` pass calls this directly.
+pub use lint_validators::NarrowingCast;
 pub use lint_validators::check_effect_free_statements;
 pub(crate) use lint_validators::{
-    check_empty_method_bodies, check_literal_boolean_condition, check_redundant_assignment,
+    check_empty_method_bodies, check_literal_boolean_condition,
+    check_narrowing_local_type_annotation, check_redundant_assignment,
     check_redundant_local_type_annotation, check_redundant_super_initialize,
-    check_testcase_setup_drops_field_assignments, is_effect_free,
+    check_testcase_setup_drops_field_assignments, find_narrowing_casts, is_effect_free,
 };
 pub(crate) use match_arm_block_validators::check_match_arm_block;
 pub(crate) use match_validators::{

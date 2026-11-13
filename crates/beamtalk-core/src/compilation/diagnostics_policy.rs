@@ -177,7 +177,23 @@ const DIAGNOSTIC_CATEGORY_TABLE: &[(&str, DiagnosticCategory)] = &[
         "handleinfo-no-catch-all",
         DiagnosticCategory::HandleInfoNoCatchAll,
     ),
+    ("narrowing-cast", DiagnosticCategory::NarrowingCast),
 ];
+
+/// Categories that are **off unless a `[diagnostics]` entry enables them**
+/// (BT-4719). Every other category passes through an absent table entry
+/// unchanged; these are dropped instead, so an existing package gains no
+/// warning until it opts in.
+const DEFAULT_OFF_CATEGORIES: &[DiagnosticCategory] = &[DiagnosticCategory::NarrowingCast];
+
+/// Drops the diagnostics of [`DEFAULT_OFF_CATEGORIES`] that `table` does not
+/// enable. For the paths that have no `[diagnostics]` table at all.
+pub fn drop_default_off_diagnostics(diagnostics: &mut Vec<Diagnostic>, table: &DiagnosticsTable) {
+    diagnostics.retain(|d| match d.category {
+        Some(c) if DEFAULT_OFF_CATEGORIES.contains(&c) => table.contains_key(&c),
+        _ => true,
+    });
+}
 
 /// Maps a `[diagnostics]` table key (kebab-case) to its [`DiagnosticCategory`].
 fn diagnostic_category_from_kebab(key: &str) -> Option<DiagnosticCategory> {
@@ -379,6 +395,8 @@ pub fn apply_diagnostics_table(
     diagnostics: Vec<Diagnostic>,
     table: &DiagnosticsTable,
 ) -> Vec<Diagnostic> {
+    let mut diagnostics = diagnostics;
+    drop_default_off_diagnostics(&mut diagnostics, table);
     if table.is_empty() {
         return diagnostics;
     }
@@ -495,6 +513,8 @@ pub fn compute_diagnostics_with_known_vars(
         crate::semantic_analysis::AnalysisContext::default().with_known_vars(known_vars),
     );
     all_diagnostics.extend(analysis_result.diagnostics);
+    // No `[diagnostics]` table on this path: opt-in lints stay off.
+    drop_default_off_diagnostics(&mut all_diagnostics, &DiagnosticsTable::new());
 
     apply_expect_directives(module, &mut all_diagnostics);
 
@@ -1166,6 +1186,7 @@ binary-string-compare = "off"
 cascade-drops-update = "off"
 discarded-update = "off"
 handleinfo-no-catch-all = "error"
+narrowing-cast = "lint"
 "#;
         let value: toml::Value = toml::from_str(toml_str).unwrap();
         let table = parse_diagnostics_table(Some(&value)).unwrap();
@@ -1931,5 +1952,58 @@ dnu = "error"
                 "gate for {row}"
             );
         }
+    }
+
+    // ── Default-off categories (BT-4719) ───────────────────────────────────
+
+    #[test]
+    fn narrowing_cast_dropped_by_default_and_when_off() {
+        let diag = || {
+            Diagnostic::lint("cast", Span::default())
+                .with_category(DiagnosticCategory::NarrowingCast)
+        };
+        let empty = DiagnosticsTable::new();
+        assert!(apply_diagnostics_table(vec![diag()], &empty).is_empty());
+        let mut off = DiagnosticsTable::new();
+        off.insert(
+            DiagnosticCategory::NarrowingCast,
+            DiagnosticSeverityOverride::Off,
+        );
+        assert!(apply_diagnostics_table(vec![diag()], &off).is_empty());
+    }
+
+    #[test]
+    fn narrowing_cast_enabled_and_raised_via_table() {
+        let diag = Diagnostic::lint("cast", Span::default())
+            .with_category(DiagnosticCategory::NarrowingCast);
+        let mut lint = DiagnosticsTable::new();
+        lint.insert(
+            DiagnosticCategory::NarrowingCast,
+            DiagnosticSeverityOverride::Lint,
+        );
+        let out = apply_diagnostics_table(vec![diag.clone()], &lint);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].severity, Severity::Lint);
+        let mut warn = DiagnosticsTable::new();
+        warn.insert(
+            DiagnosticCategory::NarrowingCast,
+            DiagnosticSeverityOverride::Warn,
+        );
+        assert_eq!(
+            apply_diagnostics_table(vec![diag], &warn)[0].severity,
+            Severity::Warning
+        );
+    }
+
+    #[test]
+    fn narrowing_cast_key_parses_from_manifest() {
+        let table = parse_diagnostics_table_from_manifest_toml(
+            "[diagnostics]\nnarrowing-cast = \"warn\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            table[&DiagnosticCategory::NarrowingCast],
+            DiagnosticSeverityOverride::Warn
+        );
     }
 }
