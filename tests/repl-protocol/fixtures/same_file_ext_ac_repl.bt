@@ -1,0 +1,12 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4489: Actor class with extensions written in its OWN file.
+Actor subclass: SameFileExtAcRepl
+  state: n :: Integer = 5
+
+  getN => self.n
+
+SameFileExtAcRepl >> plus: k :: Integer => self.n + k
+SameFileExtAcRepl >> bump => self.n := self.n + 1
+SameFileExtAcRepl class >> cextra => 42

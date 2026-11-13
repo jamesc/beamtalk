@@ -69,7 +69,11 @@ pub(crate) fn parse_and_check_expression(
     Term,
 > {
     let tokens = beamtalk_core::source_analysis::lex_with_eof(source);
-    let (module, parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    let (mut module, mut parse_diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    // One compilation unit per class (BT-4721): the same fold the build uses.
+    parse_diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
+        &mut module,
+    ));
 
     let known_var_refs: Vec<&str> = known_vars.iter().map(String::as_str).collect();
     // REPL input — a bare expression or an inline class/protocol typed at

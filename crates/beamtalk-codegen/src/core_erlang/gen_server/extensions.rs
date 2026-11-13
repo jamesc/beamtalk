@@ -8,8 +8,9 @@
 //! Beamtalk lets a file add methods to a class declared elsewhere via
 //! `TargetClass >> selector => body` (an "open class extension"). When the
 //! target class is declared in the *same* file ("self-extension") the method is
-//! registered like a foreign one, after the host class registers (BT-4489).
-//! When the target class is **foreign** (declared in
+//! folded into the class before codegen (BT-4721,
+//! `beamtalk_core::compilation::fold_same_file_extensions`) and is never
+//! registered here. When the target class is **foreign** (declared in
 //! stdlib or another file — e.g. `Array >> doubled`, `String >> shout`), the
 //! method has no host module to live in. This module emits load-time
 //! `beamtalk_extensions:register/5` calls — carrying a callable fun and the
@@ -52,7 +53,7 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn foreign_extension_methods(
         module: &Module,
     ) -> Vec<&StandaloneMethodDefinition> {
-        let declared = Self::declared_class_names(module);
+        let declared = beamtalk_core::compilation::declared_class_names(module);
         module
             .method_definitions
             .iter()
@@ -60,34 +61,6 @@ impl CoreErlangGenerator {
                 md.method.kind == MethodKind::Primary && !declared.contains(&md.class_name.name)
             })
             .collect()
-    }
-
-    /// Returns the same-file extension methods in `module` (BT-4489): standalone
-    /// `Target >> sel` / `Target class >> sel` definitions whose target class is
-    /// declared in this module. No host-class codegen emits them, so they are
-    /// registered through `beamtalk_extensions:register/5` after the module's
-    /// classes register, exactly like foreign ones.
-    pub(in crate::core_erlang) fn same_file_extension_methods(
-        module: &Module,
-    ) -> Vec<&StandaloneMethodDefinition> {
-        let declared = Self::declared_class_names(module);
-        module
-            .method_definitions
-            .iter()
-            .filter(|md| {
-                md.method.kind == MethodKind::Primary && declared.contains(&md.class_name.name)
-            })
-            .collect()
-    }
-
-    /// The names of the classes declared in `module`. A standalone method
-    /// definition whose target is in this set is a same-file extension. This is
-    /// the one test for "foreign" vs "same-file"; guard-return rewriting uses it
-    /// too (same-file extensions stay unrewritten there, BT-4497).
-    pub(in crate::core_erlang) fn declared_class_names(
-        module: &Module,
-    ) -> std::collections::HashSet<ecow::EcoString> {
-        module.classes.iter().map(|c| c.name.name.clone()).collect()
     }
 
     /// Returns true when `module` declares at least one foreign extension
@@ -121,32 +94,19 @@ impl CoreErlangGenerator {
         module: &Module,
     ) -> Result<Document<'static>> {
         let extensions = Self::foreign_extension_methods(module);
-        self.generate_extension_registrations(&extensions, 0)
-    }
-
-    /// Same as [`Self::generate_foreign_extension_registrations`] for the
-    /// same-file extensions (BT-4489). Variables are numbered after the foreign
-    /// ones so the two chains can share one `register_class/0` body.
-    pub(in crate::core_erlang) fn generate_same_file_extension_registrations(
-        &mut self,
-        module: &Module,
-    ) -> Result<Document<'static>> {
-        let offset = Self::foreign_extension_methods(module).len();
-        let extensions = Self::same_file_extension_methods(module);
-        self.generate_extension_registrations(&extensions, offset)
+        self.generate_extension_registrations(&extensions)
     }
 
     fn generate_extension_registrations(
         &mut self,
         extensions: &[&StandaloneMethodDefinition],
-        offset: usize,
     ) -> Result<Document<'static>> {
         if extensions.is_empty() {
             return Ok(Document::Nil);
         }
         let mut parts: Vec<Document<'static>> = Vec::with_capacity(extensions.len());
         for (idx, ext) in extensions.iter().enumerate() {
-            parts.push(self.generate_extension_registration(offset + idx, ext)?);
+            parts.push(self.generate_extension_registration(idx, ext)?);
         }
         Ok(Document::Vec(parts))
     }

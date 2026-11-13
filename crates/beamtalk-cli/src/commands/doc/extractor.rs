@@ -64,7 +64,10 @@ pub(super) fn parse_class_info(root: &Utf8Path, path: &Utf8Path) -> Result<Optio
         .wrap_err_with(|| format!("Failed to read '{path}'"))?;
 
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-    let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    let (mut module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+    // One compilation unit per class (BT-4721): a same-file extension is
+    // documented as a method of its class.
+    let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
 
     let has_errors = diagnostics
         .iter()

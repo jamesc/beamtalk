@@ -394,7 +394,11 @@ pub(crate) fn analyse_source_with_bindings(
 
         // Lex and parse
         let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-        let (module, diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+        let (mut module, mut diagnostics) = beamtalk_core::source_analysis::parse(tokens);
+        // One compilation unit per class (BT-4721); a cached Pass 1 AST is already folded.
+        diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
+            &mut module,
+        ));
         (source, module, diagnostics)
     };
 

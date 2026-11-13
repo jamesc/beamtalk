@@ -17,6 +17,7 @@ pub mod diagnostics_policy;
 pub mod extension_conflicts;
 pub mod extension_index;
 pub mod ffi_stubs;
+pub mod same_file_fold;
 
 pub use dependency::{DependencyMap, DependencySource, DependencySpec, GitReference};
 pub use diagnostics_policy::{
@@ -32,3 +33,4 @@ pub use extension_index::{
     ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
     collect_extensions,
 };
+pub use same_file_fold::{declared_class_names, fold_same_file_extensions, is_same_file_extension};

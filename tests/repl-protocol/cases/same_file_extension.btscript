@@ -1,12 +1,46 @@
 // Copyright 2026 James Casey
 // SPDX-License-Identifier: Apache-2.0
 
-// BT-4489: an extension written in its target class's own file answers (and
-// is not registered twice) when the file is loaded into a REPL workspace.
+// BT-4721: a file is one compilation unit for its class. Same-file extensions
+// are folded into the class, so the REPL gives the same answers as the
+// compiled build (stdlib/test/same_file_extension_test.bt), per class kind.
 // @load tests/repl-protocol/fixtures/same_file_ext_repl.bt
+// @load tests/repl-protocol/fixtures/same_file_ext_obj_repl.bt
+// @load tests/repl-protocol/fixtures/same_file_ext_ac_repl.bt
+// @load tests/repl-protocol/fixtures/same_file_ext_native_repl.bt
 
 (SameFileExtRepl x: 3) extra: 4
 // => 7
 
 SameFileExtRepl make x
 // => 9
+
+// Plain class
+SameFileExtObjRepl extra
+// => 2
+
+SameFileExtObjRepl make
+// => 7
+
+SameFileExtObjRepl base
+// => 1
+
+// Actor
+a := SameFileExtAcRepl spawn
+// => Actor(SameFileExtAcRepl, _)
+
+a plus: 2
+// => 7
+
+a bump
+// => _
+
+a getN
+// => 6
+
+SameFileExtAcRepl cextra
+// => 42
+
+// native: class side
+SameFileExtNativeRepl cextra
+// => 42

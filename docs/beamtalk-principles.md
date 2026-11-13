@@ -111,6 +111,12 @@ Source code lives in the **filesystem**, not in a binary image.
 
 ---
 
+**A file is one compilation unit for its class.** A same-file extension
+(`X >> m` next to `X`'s declaration) is part of `X`: the compiler folds it into
+the class before codegen, so the REPL, `run`, `test` and builds give the same
+answer, and a duplicate selector is a compile error. Only extensions from
+another file go through the extension registry.
+
 ## 6. Messages All The Way Down
 
 **Everything** is a message send, following Smalltalk/Newspeak philosophy (with pragmatic BEAM-specific adaptations—see [Syntax Rationale](beamtalk-syntax-rationale.md)).

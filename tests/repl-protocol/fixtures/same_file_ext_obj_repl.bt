@@ -1,0 +1,11 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4721: plain (Object) class with a same-file class-side extension and a
+// class-side body method (an Object-kind class has no instances).
+Object subclass: SameFileExtObjRepl
+
+  class base => 1
+
+SameFileExtObjRepl class >> extra => 2
+SameFileExtObjRepl class >> make => 7

@@ -241,11 +241,11 @@ fn test_foreign_extension_class_side_uses_metaclass_tag() {
     );
 }
 
-/// BT-4489: a self-extension (`Counter >> getDouble` in the same module as
-/// `Counter`) has no host-class codegen, so it is registered through
-/// `beamtalk_extensions:register` — after the class chain succeeds.
+/// BT-4721: a self-extension (`Counter >> getDouble` in the same module as
+/// `Counter`) is folded into the class, so it is a plain dispatch arm and
+/// never registered through `beamtalk_extensions`.
 #[test]
-fn test_self_extension_registered_via_beamtalk_extensions() {
+fn test_self_extension_is_folded_not_registered() {
     let src = concat!(
         "Actor subclass: Counter\n",
         "  state: value = 0\n",
@@ -256,35 +256,16 @@ fn test_self_extension_registered_via_beamtalk_extensions() {
     );
     let code = super::codegen(src);
     assert!(
-        code.contains("call 'beamtalk_extensions':'register'('Counter', 'getDouble'"),
-        "same-file instance extension must register. Got:\n{code}"
+        !code.contains("call 'beamtalk_extensions':'register'"),
+        "same-file extensions must not register. Got:\n{code}"
     );
     assert!(
-        code.contains("call 'beamtalk_extensions':'register'('Counter class', 'make'"),
-        "same-file class-side extension must register under the metaclass tag. Got:\n{code}"
+        code.contains("'getDouble'"),
+        "folded instance extension must be a dispatch arm. Got:\n{code}"
     );
-    let class_reg = code.find("_ClassRegResult ->").expect("class chain result");
-    // Reachable only from the non-error clause of the class chain's result.
-    let gate = code
-        .find("case _ClassRegResult of")
-        .expect("same-file registrations are gated on class registration success");
-    let err_clause = code[gate..]
-        .find("<{'error', _GateErr}>")
-        .expect("error clause");
-    let ok_clause = code[gate..].find("<_> when 'true' ->").expect("ok clause");
-    let reg = code[gate..]
-        .find("call 'beamtalk_extensions':'register'")
-        .expect("register call");
     assert!(
-        err_clause < ok_clause && ok_clause < reg,
-        "register calls must sit in the non-error clause. Got:\n{code}"
-    );
-    let ext_reg = code
-        .find("call 'beamtalk_extensions':'register'")
-        .expect("register call");
-    assert!(
-        class_reg < ext_reg,
-        "same-file extensions register after the class chain succeeds. Got:\n{code}"
+        code.contains("'make'"),
+        "folded class-side extension must be a class method. Got:\n{code}"
     );
 }
 

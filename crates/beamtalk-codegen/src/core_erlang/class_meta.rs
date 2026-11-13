@@ -175,7 +175,7 @@ impl CoreErlangGenerator {
         Ok(docvec![
             "'__beamtalk_meta'/0 = fun () ->\n",
             "    ",
-            // include_standalone: false — standalone methods are registered as extensions at load (BT-4489), not static
+            // include_standalone: false — standalone methods are folded into the class (BT-4721), not static
             Self::build_meta_map_doc(
                 class,
                 module,
@@ -199,7 +199,7 @@ impl CoreErlangGenerator {
     ///
     /// When `include_standalone` is `false` (used for `__beamtalk_meta/0`), standalone
     /// Tonel-style methods (`module.method_definitions`) are excluded — they are
-    /// registered as extensions at load (BT-4489) and deliberately absent from the static meta. When `true`
+    /// folded into the class (BT-4721) and deliberately absent from the static meta. When `true`
     /// (used for `BuilderState.meta`), standalone methods are included so that
     /// return-type information is available to `init/1` during `on_load`.
     pub(super) fn build_meta_map_doc(
@@ -816,7 +816,7 @@ impl CoreErlangGenerator {
             .filter(|m| m.kind == MethodKind::Primary)
             .map(|m| Self::meta_method_entry(m, type_params))
             .collect();
-        // Standalone methods are excluded from __beamtalk_meta/0 (registered as extensions at load, BT-4489)
+        // Standalone methods are excluded from __beamtalk_meta/0 (folded into the class, BT-4721)
         // but included in BuilderState.meta so init/1 can register their return types.
         if include_standalone {
             for standalone in module.method_definitions.iter().filter(|m| {
@@ -882,7 +882,7 @@ impl CoreErlangGenerator {
             .filter(|m| m.kind == MethodKind::Primary)
             .map(|m| Self::meta_method_entry(m, type_params))
             .collect();
-        // Standalone methods are excluded from __beamtalk_meta/0 (registered as extensions at load, BT-4489)
+        // Standalone methods are excluded from __beamtalk_meta/0 (folded into the class, BT-4721)
         // but included in BuilderState.meta so init/1 can register their return types.
         if include_standalone {
             for standalone in module.method_definitions.iter().filter(|m| {

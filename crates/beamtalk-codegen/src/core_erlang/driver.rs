@@ -100,6 +100,23 @@ pub fn generate_module_with_warnings(
     // before semantic facts and the hierarchy are derived from it, and only
     // when there is something to strip. The removed wrappers are recorded on
     // the generator, so reflected method source keeps them as written.
+    // BT-4721: a file is one compilation unit for its class. Front-end drivers
+    // fold same-file extensions before analysis; this keeps ad-hoc callers
+    // (unit tests, tools that parse and generate directly) on the same single
+    // fold rather than a second representation.
+    let folded_storage;
+    let module: &Module =
+        if module.method_definitions.iter().any(|md| {
+            beamtalk_core::compilation::is_same_file_extension(module, &md.class_name.name)
+        }) {
+            let mut owned = module.clone();
+            // Fold diagnostics are the front end's to report; codegen only needs the tree.
+            let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut owned);
+            folded_storage = owned;
+            &folded_storage
+        } else {
+            module
+        };
     let peeled_storage;
     let mut peeled_parens = normalize::PeeledParens::default();
     let module: &Module = if normalize::needs_normalising(module) {

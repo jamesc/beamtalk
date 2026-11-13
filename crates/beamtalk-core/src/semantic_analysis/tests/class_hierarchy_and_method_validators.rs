@@ -664,7 +664,9 @@ fn test_method_validators_run_on_class_side_methods() {
 #[test]
 fn test_extension_methods_get_resolution_and_validators() {
     // BT-4658: standalone `Foo >> sel =>` / `Foo class >> sel =>` bodies are
-    // analysed like in-class methods, without the class's instance fields.
+    // analysed like in-class methods. BT-4721: a same-file extension is folded
+    // into its class, so it also sees the class's fields exactly like a body
+    // method does (the analysis here folds on its own clone).
     let src = "Object subclass: W\n  state: x :: Integer = 0\n  run => 1\n\n\
                W >> foo => zzz + 1\n\
                W class >> baz => qqq\n\
@@ -681,7 +683,11 @@ fn test_extension_methods_get_resolution_and_validators() {
     };
     assert_eq!(count("Undefined variable: zzz"), 1);
     assert_eq!(count("Undefined variable: qqq"), 1);
-    assert_eq!(count("Undefined variable: x"), 1, "fields not visible");
+    assert_eq!(
+        count("Undefined variable: x"),
+        0,
+        "a folded same-file extension sees the class's fields like a body method"
+    );
     assert_eq!(count("expects a block with 1"), 1);
     assert_eq!(count("super can only be used"), 0);
     assert_eq!(

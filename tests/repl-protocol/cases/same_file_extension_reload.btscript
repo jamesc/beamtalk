@@ -1,0 +1,34 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4721: reloading a file replaces the whole class, folded same-file
+// extensions included. A class-side extension used to leave a stale
+// `'X class'` extension-registry row that shadowed the reloaded class method
+// until restart. Now nothing registers it, so each reload answers its own file.
+
+:load tests/repl-protocol/fixtures/same_file_reload_v1.bt
+// => Loaded: SameFileReload
+
+SameFileReload make
+// => 1
+
+// v2 moves `make` into the class body with a new answer.
+:load tests/repl-protocol/fixtures/same_file_reload_v2.bt
+// => Loaded: SameFileReload
+
+SameFileReload make
+// => 2
+
+// v3 is a same-file extension again; the earlier body method must not shadow it.
+:load tests/repl-protocol/fixtures/same_file_reload_v3.bt
+// => Loaded: SameFileReload
+
+SameFileReload make
+// => 3
+
+// v2 again: the extension from v3 must not shadow the body method.
+:load tests/repl-protocol/fixtures/same_file_reload_v2.bt
+// => Loaded: SameFileReload
+
+SameFileReload make
+// => 2

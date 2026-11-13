@@ -411,7 +411,10 @@ fn build_fixture_class_indexes(
             continue;
         };
         let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
-        let (module, _) = beamtalk_core::source_analysis::parse(tokens);
+        let (mut module, _) = beamtalk_core::source_analysis::parse(tokens);
+        // One compilation unit per class (BT-4721): the fixture's own
+        // extensions are part of its class, not entries in the extension index.
+        let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
         extensions.add_module(&module, file.as_std_path());
 
         // Extract ProtocolInfo so fixture-defined protocol names are

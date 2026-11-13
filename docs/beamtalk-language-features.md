@@ -6366,20 +6366,34 @@ Both forms are equivalent — the return type flows to the type checker identica
 The `:: ->` form is preferred for unary extensions; the `->` form is preferred
 when parameters already have `::` annotations (to avoid consecutive `::` tokens).
 
+### One file is one compilation unit for its class
+
+An extension written in the target class's own file (`Pt >> extra: n => ...`
+or `Pt class >> make => ...` next to `Value subclass: Pt`) is part of `Pt`.
+The compiler folds it into the class before analysis and codegen, in `beamtalk
+build`, `run`, `test` and the REPL alike. A folded method is an ordinary method
+of the class: it gets a dispatch arm, static and direct calls, type checking and
+reflection, and it does not appear in extension listings, browse or LSP
+grouping.
+
+- Defining the same selector in the class body and in a same-file extension
+  (instance or class side) is a duplicate method definition, the same error as
+  defining it twice in the body. There is no last-one-wins.
+- On a `native:` actor, an instance-side same-file extension is a compile error
+  (instance sends go to the backing `gen_server`). A class-side one folds into
+  the facade module.
+- Reloading the file replaces the whole class, folded methods included, so no
+  stale row survives a reload.
+
 ### Cross-file extensions
 
 Extensions can target classes defined in other files or in stdlib. The compiler
-registers each foreign extension at module load. An extension written in the
-target class's own file (`Pt >> extra: n => ...` next to `Value subclass: Pt`) is
-registered the same way, after the class itself (and only if the class registered
-successfully), so both dispatch identically. Class-side extensions register under
-the metaclass tag (`String class`).
+registers each foreign extension at module load. Class-side extensions register
+under the metaclass tag (`String class`).
 
 On hot reload, a reload re-registers the extensions the file still declares but
-does not unregister one you deleted, or moved into the class body as a regular
-method: the old extension keeps answering (class-side, it shadows the new class
-method) until `removeSelector:` or a restart. Foreign and same-file extensions
-behave alike.
+does not unregister one you deleted: the old extension keeps answering until
+`removeSelector:` or a restart.
 
 ```beamtalk
 // In helpers.bt — String is defined in stdlib, not this file

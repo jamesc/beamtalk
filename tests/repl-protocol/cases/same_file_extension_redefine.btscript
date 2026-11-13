@@ -1,0 +1,60 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4721: a REPL redefinition (`X >> m => ...`) of a method that the loaded
+// file defines replaces it, and the class source the workspace stores stays
+// canonical: a later `compile:source:` (the IDE/MCP save path) of another
+// selector still compiles. A stored source that kept both the body method and
+// the appended extension would be a duplicate-method error there.
+// @load tests/repl-protocol/fixtures/same_file_redefine.bt
+
+SameFileRedefine new foo
+// => 1
+
+SameFileRedefine >> foo => 2
+// => "SameFileRedefine>>foo"
+
+SameFileRedefine new foo
+// => 2
+
+SameFileRedefine compile: #bar source: "bar => 20"
+// => SameFileRedefine
+
+SameFileRedefine new bar
+// => 20
+
+// The earlier redefinition survived the second save.
+SameFileRedefine new foo
+// => 2
+
+// Redefining a method that came from a same-file *extension* (instance and
+// class side) replaces the folded copy, and a later save is still canonical.
+SameFileRedefine new baz
+// => 3
+
+SameFileRedefine make
+// => 1
+
+SameFileRedefine >> baz => 30
+// => "SameFileRedefine>>baz"
+
+SameFileRedefine class >> make => 2
+// => "SameFileRedefine>>make"
+
+SameFileRedefine new baz
+// => 30
+
+SameFileRedefine make
+// => 2
+
+SameFileRedefine compile: #bar source: "bar => 21"
+// => SameFileRedefine
+
+SameFileRedefine new bar
+// => 21
+
+SameFileRedefine new baz
+// => 30
+
+SameFileRedefine make
+// => 2

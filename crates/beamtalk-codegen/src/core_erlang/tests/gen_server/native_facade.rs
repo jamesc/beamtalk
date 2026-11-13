@@ -784,24 +784,21 @@ fn test_bt_2998_opaque_native_class_registers_as_non_constructible() {
 }
 
 #[test]
-fn test_native_facade_registers_same_file_extension_after_class() {
-    // BT-4489: `X >> foo` next to a `native:` class registers as an extension,
-    // reachable only from the non-error clause of the class registration result.
+fn test_native_facade_class_side_same_file_extension_is_folded() {
+    // BT-4721: a class-side `X class >> foo` next to a `native:` class folds
+    // into the facade module; nothing registers through `beamtalk_extensions`.
     let tokens = beamtalk_core::source_analysis::lex_with_eof(
-        "Actor subclass: Wrapper native: my_mod\n  doIt => self delegate\nWrapper >> extra => 1\n",
+        "Actor subclass: Wrapper native: my_mod\n  doIt => self delegate\nWrapper class >> extra => 1\n",
     );
     let module = beamtalk_core::source_analysis::parse(tokens).0;
     let code =
         generate_module(&module, CodegenOptions::new("bt@test_native")).expect("codegen succeeds");
-    let gate = code
-        .find("case RegResult of")
-        .unwrap_or_else(|| panic!("registration must be gated. Got:\n{code}"));
-    let ok = code[gate..].find("<_> when 'true' ->").expect("ok clause");
-    let reg = code[gate..]
-        .find("call 'beamtalk_extensions':'register'('Wrapper', 'extra'")
-        .unwrap_or_else(|| panic!("extension must register. Got:\n{code}"));
     assert!(
-        ok < reg,
-        "register call must sit in the ok clause. Got:\n{code}"
+        !code.contains("call 'beamtalk_extensions':'register'"),
+        "same-file extension must not register. Got:\n{code}"
+    );
+    assert!(
+        code.contains("extra"),
+        "folded class method missing. Got:\n{code}"
     );
 }

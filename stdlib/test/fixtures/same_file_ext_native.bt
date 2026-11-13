@@ -1,0 +1,10 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4721: `native:` actor with a class-side same-file extension. An
+// instance-side one is a compile error. Backed by beamtalk_test_native_counter.
+Actor subclass: SameFileExtNative native: beamtalk_test_native_counter
+
+  getValue -> Integer => self delegate
+
+SameFileExtNative class >> cextra => 42

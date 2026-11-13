@@ -271,7 +271,11 @@ pub fn parse_package_sources(
             }
         };
 
-        let (module, parse_diagnostics) = parse(lex_with_eof(&source));
+        let (mut module, mut parse_diagnostics) = parse(lex_with_eof(&source));
+        // One compilation unit per class (BT-4721): class infos see the file's
+        // own extensions as methods of the class. The fold's own diagnostics
+        // join the file's diagnostics below, after the parse-error check.
+        let fold_diagnostics = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
 
         // A file with parse errors may have an under-recovered method
         // surface — mark its classes so the receiver-knowledge classifier
@@ -280,6 +284,7 @@ pub fn parse_package_sources(
         let has_parse_errors = parse_diagnostics
             .iter()
             .any(|d| d.severity == Severity::Error);
+        parse_diagnostics.extend(fold_diagnostics);
         let mut file_class_infos = ClassHierarchy::extract_class_infos(&module);
         if has_parse_errors {
             for info in &mut file_class_infos {

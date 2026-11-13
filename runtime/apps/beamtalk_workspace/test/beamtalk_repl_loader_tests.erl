@@ -1401,12 +1401,16 @@ t_reload_class_file_2_mismatch(Proj) ->
 
 t_reload_method_definition_success(Proj) ->
     %% Load the class first so its source is recorded in workspace_meta, then
-    %% patch a new method. This exercises recompile_with_method,
+    %% patch a new method. This exercises the structured install (install_method_with_source),
     %% load_recompiled_method, emit_change_entry and the flushability helpers.
     Path = write_bt(Proj, "LoaderMethod.bt", <<"Object subclass: LoaderMethod\n  v => 1\n">>),
     State0 = beamtalk_repl_state:new(undefined, 0),
     {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
-    MethodInfo = #{class_name => <<"LoaderMethod">>, selector => <<"doubled">>},
+    MethodInfo = #{
+        class_name => <<"LoaderMethod">>,
+        selector => <<"doubled">>,
+        method_source => <<"doubled => self.v * 2">>
+    },
     Result = beamtalk_repl_loader:reload_method_definition(
         MethodInfo, [], "LoaderMethod >> doubled => self.v * 2", State1
     ),
@@ -1425,11 +1429,15 @@ t_reload_method_definition_no_source() ->
 
 t_reload_method_definition_compile_error(Proj) ->
     %% A class with recorded source, but a method body that fails to recompile,
-    %% takes the {error, Reason} branch of recompile_with_method.
+    %% takes the {error, Reason} branch of install_method_with_source.
     Path = write_bt(Proj, "LoaderBadM.bt", <<"Object subclass: LoaderBadM\n  v => 1\n">>),
     State0 = beamtalk_repl_state:new(undefined, 0),
     {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
-    MethodInfo = #{class_name => <<"LoaderBadM">>, selector => <<"broken">>},
+    MethodInfo = #{
+        class_name => <<"LoaderBadM">>,
+        selector => <<"broken">>,
+        method_source => <<"broken => @@@ invalid @@@">>
+    },
     Result = beamtalk_repl_loader:reload_method_definition(
         MethodInfo, [], "LoaderBadM >> broken => @@@ invalid @@@", State1
     ),
@@ -1962,7 +1970,11 @@ t_reload_method_definition_existing(_Proj) ->
     ),
     State0 = beamtalk_repl_state:new(undefined, 0),
     {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
-    MethodInfo = #{class_name => <<"LoaderExisting">>, selector => <<"doubled">>},
+    MethodInfo = #{
+        class_name => <<"LoaderExisting">>,
+        selector => <<"doubled">>,
+        method_source => <<"doubled => self.value * 3">>
+    },
     Result = beamtalk_repl_loader:reload_method_definition(
         MethodInfo, [], "LoaderExisting >> doubled => self.value * 3", State1
     ),
@@ -1978,7 +1990,11 @@ t_reload_method_definition_autoflush(Proj) ->
         ),
         State0 = beamtalk_repl_state:new(undefined, 0),
         {ok, _, State1} = beamtalk_repl_loader:handle_load(Path, State0),
-        MethodInfo = #{class_name => <<"LoaderFlush">>, selector => <<"tripled">>},
+        MethodInfo = #{
+            class_name => <<"LoaderFlush">>,
+            selector => <<"tripled">>,
+            method_source => <<"tripled => self.value * 3">>
+        },
         Result = beamtalk_repl_loader:reload_method_definition(
             MethodInfo, [], "LoaderFlush >> tripled => self.value * 3", State1
         ),

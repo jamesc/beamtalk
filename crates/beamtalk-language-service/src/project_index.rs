@@ -252,7 +252,9 @@ impl ProjectIndex {
         let parsed: Vec<_> = stdlib_sources
             .iter()
             .map(|(path, source)| {
-                let (module, _parse_diagnostics) = parse(lex_with_eof(source));
+                let (mut module, _parse_diagnostics) = parse(lex_with_eof(source));
+                // One compilation unit per class (BT-4721).
+                let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
                 (path, module)
             })
             .collect();

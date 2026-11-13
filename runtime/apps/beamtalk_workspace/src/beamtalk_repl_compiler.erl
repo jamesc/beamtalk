@@ -22,7 +22,6 @@ Uses the beamtalk_compiler OTP application (ADR 0022) exclusively.
     compile_file/5,
     compile_for_codegen/3,
     compile_file_for_codegen/2,
-    compile_for_method_reload/2,
     compile_method_reload/3,
     apply_module_name_override/2,
     apply_source_path/2,
@@ -374,49 +373,16 @@ build_class_indexes() ->
     add_class_indexes(#{}).
 
 -doc """
-Compile Beamtalk source and Core Erlang for method reload.
-
-Wraps both beamtalk_compiler:compile/2 and compile_core_erlang/1 inside
-wrap_compiler_errors so that a compiler crash (exit, throw, error) returns
-{error, {compile_error, Msg}} instead of propagating a fatal exit that would
-kill the REPL process.
-""".
--spec compile_for_method_reload(binary(), map()) ->
-    {ok, binary(), atom(), list(), [beamtalk_repl_protocol:warning()]} | {error, term()}.
-compile_for_method_reload(SourceBin, Options) ->
-    wrap_compiler_errors(
-        fun() ->
-            case beamtalk_compiler:compile(SourceBin, Options) of
-                {ok,
-                    #{core_erlang := CoreErlang, module_name := ModNameBin, classes := Classes} =
-                        CR} ->
-                    Warnings = maps:get(warnings, CR, []),
-                    % elp:fixme W0023 intentional atom creation
-                    ModName = binary_to_atom(ModNameBin, utf8),
-                    case beamtalk_compiler:compile_core_erlang(CoreErlang) of
-                        {ok, _CompiledMod, Binary} ->
-                            {ok, Binary, ModName, Classes, Warnings};
-                        {error, Reason} ->
-                            {error, {compile_error, format_core_error(Reason)}}
-                    end;
-                {error, Diagnostics} ->
-                    {error, {compile_error, format_formatted_diagnostics(Diagnostics)}}
-            end
-        end,
-        wrapped
-    ).
-
--doc """
 Structured single-method compile + Core Erlang for the live-image write-surface.
 
-The rock-solid replacement for `compile_for_method_reload/2`'s textual
-`Class >> <source>` wrap: `MethodSource' is the BARE method body, parsed
+The one install path for a live method (REPL `Class >> sel => ...`, `compile:source:`,
+MCP `save_method`, IDE save): `MethodSource' is the BARE method body, parsed
 standalone (comments and all) and merged into `ClassSource''s class by the
 backend. Returns a map with the compiled `binary', `module_name' (atom),
 `classes', the recovered `selector', `is_class_method', the canonical
 `method_source' (byte-stable round-trip), and `warnings'.
 
-Wrapped in `wrap_compiler_errors' like `compile_for_method_reload/2' so a
+Wrapped in `wrap_compiler_errors' so a
 compiler crash becomes `{error, {compile_error, Msg}}'.
 """.
 -spec compile_method_reload(binary(), binary(), map()) -> {ok, map()} | {error, term()}.

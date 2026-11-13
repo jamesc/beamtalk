@@ -36,6 +36,8 @@
 //! - [`load_project_parity`] — BT-4322: `compile` typechecks a file with
 //!   its own project's aliases, FFI specs, and `[diagnostics]` table,
 //!   like `beamtalk build`
+//! - [`same_file_extension_fold`] — BT-4721: same-file extensions fold into
+//!   the host class; duplicates and native-actor instance extensions error
 //! - [`warning_hints`] — BT-4449: each warning is a `#{message, hint?}`
 //!   map, the diagnostic hint kept as its own field
 
@@ -184,6 +186,7 @@ mod dispatch_and_hierarchy_meta;
 mod load_project_parity;
 mod module_naming_and_misc;
 mod protocol_sources_wire;
+mod same_file_extension_fold;
 mod source_queries;
 mod span_resolution;
 mod type_alias_declarations;

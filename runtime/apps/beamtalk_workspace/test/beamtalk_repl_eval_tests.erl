@@ -1100,7 +1100,7 @@ handle_method_definition_no_source_with_warnings_test() ->
 
 handle_method_definition_with_source_compile_fail_test() ->
     %% Test the path where class source exists but recompilation fails.
-    %% compile_for_method_reload wraps compiler exits — must return {error, ...},
+    %% The install path wraps compiler exits — must return {error, ...},
     %% never propagate as an exit that would kill the REPL process.
     %% Class source is stored in workspace_meta.
     case whereis(beamtalk_workspace_meta) of
