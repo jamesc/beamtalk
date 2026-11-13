@@ -1118,6 +1118,12 @@ Called from `beamtalk_object_class:init/1` (the initial, default-seeded
 map) and every `handle_call` clause that rebinds `State#class_state.class_state`
 to a new map, so the snapshot never lags more than one `handle_call` behind
 the class gen_server's own authoritative state.
+
+The class process is the sole writer of its snapshot row (BT-4758): only
+`beamtalk_object_class` calls this or `record_class_state_snapshot_if_changed/3`.
+Because the `_if_changed` variant skips the write when the map is unchanged, a
+call that rebinds nothing does not repair a row that has diverged from the
+class process's state; only the next rebind to a different map rewrites it.
 """.
 -spec record_class_state_snapshot(pid(), map()) -> ok.
 record_class_state_snapshot(Pid, ClassVars) ->

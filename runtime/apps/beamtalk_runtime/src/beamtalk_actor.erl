@@ -102,8 +102,8 @@ so it runs for ALL spawn paths — direct, supervised, and named.
 | class_send → spawn | erlang:apply(Module, spawn, Args) | Runtime | Yes |
 | self spawn/spawnWith: | safe_spawn/2, unlinked (or linked if inside a `withClassMethod:` supervisor factory) | Class method | Yes |
 | self spawnAs:/spawnWith:as: | safe_spawn_named/5, unlinked after (or stays linked, same exception) | Class method | Yes |
-| withName: supervisor child | safe_spawn_named/5 → gen_server:start_link → init/1 | Supervised | Yes |
-| Supervisor child (unnamed, plain spawn/spawnWith:) | start_link/1 → gen_server:start_link → init/1 | Supervised | Yes |
+| withName: supervisor child | beamtalk_supervisor:start_actor_child/3 → beamtalk_actor_registry:spawnAs/3 | Supervised | Yes |
+| Supervisor child (unnamed, plain spawn/spawnWith:) | beamtalk_supervisor:start_actor_child/2 → gen_server:start_link → init/1 | Supervised | Yes |
 | withClassMethod: supervisor child | start_child_via_class_method/4 → factory's `self spawn`/`spawnWith:`/`spawnAs:`/`spawnWith:as:` → safe_spawn/2 or safe_spawn_named/5, linked | Supervised | Yes |
 | dynamic_object | gen_server:start_link(?MODULE, ...) | Internal | No (by design) |
 
@@ -888,7 +888,9 @@ The process is started with `proc_lib` and enters the `gen_server` loop with
 own OTP parent, as an unlinked `gen_server:start*` actor is, so `sys`, observer
 and the crash-report secret redaction treat it like any other actor. Its
 `$ancestors` has the actor itself prepended (a deliberate side effect of
-making it its own parent), which shows as a duplicate in crash reports. Not linked; the monitor belongs to the process that calls this.
+making it its own parent), so its own pid heads the list in crash reports and
+appears twice in the ancestors of `proc_lib` children it spawns. Not linked;
+the monitor belongs to the process that calls this.
 `init/1` results are honoured as `gen_server` does: `{ok, State}`,
 `{ok, State, Timeout | hibernate | {continue, _}}`, `{stop, Reason}` (exit
 with `Reason`) and `ignore` (exit `normal`).

@@ -585,7 +585,7 @@ them with `gen_server:call` from inside a class handler breaks the invariant
 "a class process never makes a blocking call into another class process while
 handling a call" (two busy classes deadlock until the 5s call timeout), so the
 owning class mirrors them here after every change to its own state
-(`beamtalk_object_class:publish_reflection/1`).
+(`beamtalk_class_publish:publish_reflection/1`).
 
 Per-field `ets:update_element/3` on an existing row; never touches the identity
 fields or `has_runtime_class_methods`. A missing row (class torn down) or table
@@ -593,7 +593,7 @@ is a no-op, like `put_direct_constructors/2`.
 
 A write that lands invalidates `beamtalk_class_derived_cache` itself (BT-4281):
 the `{declared_fields, Class}` memo is derived from `instance_variables`, and
-must not rely on `publish_reflection/1` happening to call
+must not rely on `beamtalk_class_publish:publish_reflection/1` happening to call
 `put_method_records/3` afterwards.
 """.
 -spec put_reflection(class_name(), #{

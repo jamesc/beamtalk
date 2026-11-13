@@ -81,10 +81,10 @@ unregistered class is not), and a `compiled` hit re-checks the module's
 Every write that can change a class's `module`, `superclass` or published
 method records — `beamtalk_class_metadata:insert/5` (class `init/1`),
 `merge_identity/5` (hot reload, redefinition), instance-side
-`put_method_records/3` (every `publish_reflection/1`: `init/1`, `put_method`,
+`put_method_records/3` (every `beamtalk_class_publish:publish_reflection/1`: `init/1`, `put_method`,
 reload), `put_reflection/2` (instance variables, which the `declared_fields`
 memo reads; it invalidates on its own rather than relying on
-`publish_reflection/1` calling `put_method_records/3` after it) and
+`beamtalk_class_publish:publish_reflection/1` calling `put_method_records/3` after it) and
 `delete/1` (removal, `terminate/2`), plus the
 (re)creation of the metadata table itself — calls `invalidate/0` *after* the
 write has landed. So do the class-side writes the `class_method_owner` memo

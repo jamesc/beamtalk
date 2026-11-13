@@ -100,6 +100,7 @@ that the Behaviour/Class libraries can rely on.
     primitiveIsKindOf/2,
     isKindOfBuiltin/3,
     isKindOfNamed/2,
+    isKindOfNamed/3,
     %% BT-4319: `binding :: Class` match arm on a class with subclasses
     valueIsKindOfClass/2,
     %% ADR 0036: Metaclass primitives
@@ -1053,19 +1054,52 @@ raises.
 """.
 -spec isKindOfNamed(term(), atom()) -> boolean() | undecided.
 isKindOfNamed(Receiver, Name) ->
+    isKindOfNamed(Receiver, Name, beamtalk_class_registry:whereis_class(Name)).
+
+-doc """
+`isKindOfNamed/2` with the registered pid of `Name`'s class process already in
+hand (BT-4754): the compiled caller's liveness probe (`whereis`, BT-4768) is
+the one class lookup of the call. `NamePid` is that probe's answer; when the
+receiver's own class is `Name` (the common case) it is also the proof that the
+receiver's class process is alive, so nothing is looked up again. A receiver
+of another class still has its class process checked, and `undefined` (no
+registered process) answers `undecided` for a receiver of class `Name`.
+
+The hit path is this one function plus the cache fetch: a Value or primitive
+takes no `receiver_class_side/1` hop, and the liveness checks are inline.
+""".
+-spec isKindOfNamed(term(), atom(), pid() | undefined) -> boolean() | undecided.
+isKindOfNamed({beamtalk_future, _}, _Name, _NamePid) ->
+    undecided;
+isKindOfNamed(#beamtalk_object{pid = Pid} = Receiver, Name, NamePid) ->
     case receiver_class_side(Receiver) of
         {instance, C} ->
-            case instance_alive(Receiver, C) of
-                true ->
-                    beamtalk_class_derived_cache:fetch(
-                        {is_kind_of_named, C, Name}, fun() -> decide_kind_of_named(C, Name) end
-                    );
-                false ->
-                    undecided
-            end;
+            Alive =
+                (not (is_pid(Pid) andalso node(Pid) =:= node()) orelse is_process_alive(Pid)) andalso
+                    class_alive(C, Name, NamePid),
+            kind_of_named_verdict(Alive, C, Name);
         _ ->
             undecided
-    end.
+    end;
+isKindOfNamed(Receiver, Name, NamePid) ->
+    C = beamtalk_primitive:class_of(Receiver),
+    kind_of_named_verdict(class_alive(C, Name, NamePid), C, Name).
+
+-spec kind_of_named_verdict(boolean(), atom(), atom()) -> boolean() | undecided.
+kind_of_named_verdict(true, C, Name) ->
+    beamtalk_class_derived_cache:fetch(
+        {is_kind_of_named, C, Name}, fun() -> decide_kind_of_named(C, Name) end
+    );
+kind_of_named_verdict(false, _C, _Name) ->
+    undecided.
+
+%% `C`'s registered class process is alive. The caller's probe already looked
+%% `Name` up, so for `C =:= Name` its answer stands (BT-4754).
+-spec class_alive(atom(), atom(), pid() | undefined) -> boolean().
+class_alive(Name, Name, NamePid) ->
+    is_pid(NamePid);
+class_alive(C, _Name, _NamePid) ->
+    is_pid(beamtalk_class_registry:whereis_class(C)).
 
 %% The cached verdict of `isKindOfNamed/2` for an instance of `C`, from the
 %% class table alone (the registry's own walk, so one cache entry answers the
@@ -1094,19 +1128,6 @@ kind_of_named(Receiver, Behaviour, Name, false) ->
 kind_of_named(Receiver, Behaviour, _Name, true) ->
     beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour]).
 -endif.
-
-%% Whether the processes a send to an instance of `C` would reach are alive:
-%% the actor itself (a local one; a remote pid is the send's to judge) and
-%% `C`'s registered class process.
--spec instance_alive(term(), atom()) -> boolean().
-instance_alive(#beamtalk_object{pid = Pid}, C) when is_pid(Pid), node(Pid) =:= node() ->
-    is_process_alive(Pid) andalso class_process_alive(C);
-instance_alive(_Receiver, C) ->
-    class_process_alive(C).
-
--spec class_process_alive(atom()) -> boolean().
-class_process_alive(C) ->
-    is_pid(beamtalk_class_registry:whereis_class(C)).
 
 %% `isKindOfBuiltin/3` with the node-wide override flag passed in, so tests
 %% can check both branches whatever the flag holds in their node.
