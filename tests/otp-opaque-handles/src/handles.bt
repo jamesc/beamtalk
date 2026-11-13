@@ -1,0 +1,24 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// Fixture for BT-4717. Uses the OTP calls whose specs return an opaque
+// handle: `zlib:open/0` (zstream), `file:open/2` (io_device), `ets:new/2`
+// (tid) and `erlang:monitor/2` (reference). Check with:
+//
+//   beamtalk type-coverage --detail tests/otp-opaque-handles/src \
+//     | grep 'FFI spec is Dynamic'
+//
+// No line should name `zlib open`, `deflateInit`, `file open`, `ets new` or
+// `erlang monitor` any more.
+
+Object subclass: Handles
+  zstream =>
+    z := Erlang zlib open.
+    Erlang zlib close: z.
+    z =:= z
+
+  zstreamOf: z :: ZlibStream -> ZlibStream => z
+
+  monitorOf: pid :: Pid =>
+    r := Erlang erlang monitor: #process item: pid.
+    r =:= r

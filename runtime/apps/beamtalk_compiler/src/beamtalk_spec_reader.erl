@@ -66,6 +66,7 @@ read_specs(BeamFile) ->
             TypeRegistry = build_type_registry(Forms),
             OpaqueSet = build_opaque_set(Forms),
             set_type_context(TypeRegistry, OpaqueSet),
+            put(beamtalk_spec_module, forms_module(Forms)),
             try
                 Specs = extract_specs_from_forms(Forms),
                 {ok, Specs}
@@ -783,7 +784,32 @@ clear_type_context() ->
     erase(beamtalk_type_registry),
     erase(beamtalk_opaque_set),
     erase(beamtalk_type_depth),
+    erase(beamtalk_spec_module),
     ok.
+
+%% The module a set of abstract forms belongs to (`undefined' if absent).
+-spec forms_module([erl_parse:abstract_form()]) -> atom().
+forms_module(Forms) ->
+    case [M || {attribute, _, module, M} <- Forms, is_atom(M)] of
+        [M | _] -> M;
+        [] -> undefined
+    end.
+
+%% BT-4717: well-known OTP handle types that callers may only pass back to the
+%% module that issued them. Each maps to a named, uninspectable stdlib class
+%% (the "Object" kind of ADR 0067's three-kind model, see
+%% `stdlib/src/{zlib_stream,io_device,ets_tid}.bt') instead of `Dynamic', so
+%% a zstream cannot be confused with an ets tid yet nothing is known about what
+%% is inside. `zlib:zstream()' and `file:io_device()' are plain `-type's in OTP
+%% (an alias of `reference()' and a pid/fd union); `ets:tid()' is `-opaque'. All
+%% three are opaque to callers, so they are keyed by `{Module, Type, Arity}' here
+%% rather than by an `-opaque' attribute. Any other `-opaque' type stays
+%% `Dynamic' (see `resolve_user_type/2').
+-spec well_known_opaque_class(atom(), atom(), non_neg_integer()) -> {ok, binary()} | error.
+well_known_opaque_class(zlib, zstream, 0) -> {ok, <<"ZlibStream">>};
+well_known_opaque_class(file, io_device, 0) -> {ok, <<"IoDevice">>};
+well_known_opaque_class(ets, tid, 0) -> {ok, <<"EtsTid">>};
+well_known_opaque_class(_Mod, _Type, _Arity) -> error.
 
 %% Maximum recursion depth for type resolution.
 -define(MAX_TYPE_DEPTH, 5).
@@ -799,6 +825,15 @@ resolve_user_type(beamtalk_object, []) ->
 resolve_user_type(Name, Args) ->
     Arity = length(Args),
     OpaqueSet = get(beamtalk_opaque_set),
+    case well_known_opaque_class(get(beamtalk_spec_module), Name, Arity) of
+        {ok, Class} ->
+            Class;
+        error ->
+            resolve_user_type_unknown(Name, Arity, OpaqueSet)
+    end.
+
+-spec resolve_user_type_unknown(atom(), non_neg_integer(), sets:set() | undefined) -> binary().
+resolve_user_type_unknown(Name, Arity, OpaqueSet) ->
     case OpaqueSet =/= undefined andalso sets:is_element({Name, Arity}, OpaqueSet) of
         true ->
             <<"Dynamic">>;
@@ -831,6 +866,14 @@ resolve_user_type(Name, Args) ->
 %% Returns the mapped Beamtalk type or <<"Dynamic">> if not resolvable.
 -spec resolve_remote_type(atom(), atom(), [tuple()]) -> binary().
 resolve_remote_type(Mod, TypeName, Args) ->
+    Arity = length(Args),
+    case well_known_opaque_class(Mod, TypeName, Arity) of
+        {ok, Class} -> Class;
+        error -> resolve_remote_type_from_registry(Mod, TypeName, Args)
+    end.
+
+-spec resolve_remote_type_from_registry(atom(), atom(), [tuple()]) -> binary().
+resolve_remote_type_from_registry(Mod, TypeName, Args) ->
     Arity = length(Args),
     Depth =
         case get(beamtalk_type_depth) of
@@ -880,14 +923,17 @@ resolve_remote_type_from_beam(BeamRef, Mod, TypeName, Arity, Depth) ->
                             %% Temporarily install remote registry for nested resolution
                             OldRegistry = get(beamtalk_type_registry),
                             OldOpaqueSet = get(beamtalk_opaque_set),
+                            OldModule = get(beamtalk_spec_module),
                             put(beamtalk_type_registry, RemoteRegistry),
                             put(beamtalk_opaque_set, RemoteOpaqueSet),
+                            put(beamtalk_spec_module, Mod),
                             put(beamtalk_type_depth, Depth + 1),
                             try
                                 map_type(TypeBody)
                             after
                                 put(beamtalk_type_registry, OldRegistry),
                                 put(beamtalk_opaque_set, OldOpaqueSet),
+                                put(beamtalk_spec_module, OldModule),
                                 put(beamtalk_type_depth, Depth)
                             end;
                         error ->
@@ -973,6 +1019,8 @@ map_type({type, _, atom, []}) ->
     <<"Symbol">>;
 map_type({type, _, pid, []}) ->
     <<"Pid">>;
+map_type({type, _, reference, []}) ->
+    <<"Reference">>;
 map_type({type, _, 'fun', _}) ->
     <<"Block">>;
 %% List types

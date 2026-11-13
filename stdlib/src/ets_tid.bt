@@ -1,0 +1,17 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+/// EtsTid — an opaque `ets:tid()` table identifier.
+///
+/// Erlang's `ets:new/2` answers a tid and every other `ets` call takes one
+/// back. The checker types those FFI results with this class so the table
+/// identifier stays a named type (rather than `Dynamic`).
+///
+/// An EtsTid has no protocol of its own: its contents are not inspectable, and
+/// sending it any message other than the `Object` protocol (identity and
+/// equality such as `=:=`) is a type error. For ordinary table work use `Ets`.
+///
+/// This is an opaque-handle class in the "Object" kind of the three-kind
+/// model (ADR 0067): no `state:`/`field:` slots and not instantiable from
+/// Beamtalk. It is declared only so FFI specs have a type to name.
+sealed typed Object subclass: EtsTid

@@ -1,0 +1,9 @@
+# Copyright 2026 James Casey
+# SPDX-License-Identifier: Apache-2.0
+
+[package]
+name = "otp_opaque_handles"
+version = "0.1.0"
+description = "Fixture: FFI calls whose OTP specs return opaque handle types (BT-4717)"
+
+[dependencies]
