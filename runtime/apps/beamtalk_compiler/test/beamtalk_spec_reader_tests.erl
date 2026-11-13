@@ -2125,3 +2125,64 @@ uri_string_parse_is_a_shape_test() ->
     ?assertNotEqual(nomatch, binary:match(Return, <<"?#port => Integer | Symbol">>)),
     ?assertNotEqual(nomatch, binary:match(Return, <<"?#userinfo =>">>)),
     ?assertEqual(nomatch, binary:match(Return, <<"...">>)).
+
+%%% ---------------------------------------------------------------
+%%% BT-4717: OTP opaque handle types map to named opaque classes
+%%% ---------------------------------------------------------------
+
+%% `reference()` is a Reference, not Dynamic.
+map_type_reference_test() ->
+    ?assertEqual(<<"Reference">>, beamtalk_spec_reader:map_type({type, 0, reference, []})).
+
+%% Remote references to the well-known handle types.
+map_type_remote_well_known_opaque_test_() ->
+    Remote = fun(Mod, Type) ->
+        beamtalk_spec_reader:map_type({remote_type, 0, [{atom, 0, Mod}, {atom, 0, Type}, []]})
+    end,
+    [
+        ?_assertEqual(<<"ZlibStream">>, Remote(zlib, zstream)),
+        ?_assertEqual(<<"IoDevice | Pid">>, Remote(file, io_device)),
+        ?_assertEqual(<<"EtsTid">>, Remote(ets, tid)),
+        %% An unknown remote type still falls back to Dynamic.
+        ?_assertEqual(<<"Dynamic">>, Remote(no_such_module_bt4717, handle))
+    ].
+
+%% A module's own local reference (`-spec open() -> zstream().` inside zlib)
+%% resolves through the table keyed by the module being read.
+map_type_local_well_known_opaque_test() ->
+    put(beamtalk_spec_module, zlib),
+    try
+        ?assertEqual(
+            <<"ZlibStream">>, beamtalk_spec_reader:map_type({user_type, 0, zstream, []})
+        ),
+        %% The same type name in a different module is not special.
+        put(beamtalk_spec_module, other_mod),
+        ?assertEqual(<<"Dynamic">>, beamtalk_spec_reader:map_type({user_type, 0, zstream, []}))
+    after
+        erase(beamtalk_spec_module)
+    end.
+
+%% End to end against the real OTP beams: the calls named in BT-4717 no longer
+%% come out as Dynamic.
+otp_handle_specs_are_named_types_test_() ->
+    Spec = fun(Mod, Name, Arity) ->
+        {_, Bin, _} = code:get_object_code(Mod),
+        {ok, Specs} = beamtalk_spec_reader:read_specs(Bin),
+        NameBin = atom_to_binary(Name, utf8),
+        [S | _] = [S || #{name := N, arity := A} = S <- Specs, N =:= NameBin, A =:= Arity],
+        S
+    end,
+    [
+        ?_assertEqual(<<"ZlibStream">>, maps:get(return_type, Spec(zlib, open, 0))),
+        ?_assertMatch(
+            [#{type := <<"ZlibStream">>}],
+            maps:get(params, Spec(zlib, close, 1))
+        ),
+        ?_assertMatch(
+            [#{type := <<"IoDevice | Pid">>}],
+            maps:get(params, Spec(file, close, 1))
+        ),
+        %% ets:new/2 answers `table()` = `atom() | tid()`.
+        ?_assertEqual(<<"Symbol | EtsTid">>, maps:get(return_type, Spec(ets, new, 2))),
+        ?_assertEqual(<<"Reference">>, maps:get(return_type, Spec(erlang, monitor, 2)))
+    ].

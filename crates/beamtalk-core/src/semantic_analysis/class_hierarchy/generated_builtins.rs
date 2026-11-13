@@ -60,6 +60,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "ErlangModule"
             | "Error"
             | "Ets"
+            | "EtsTid"
             | "Exception"
             | "ExitError"
             | "False"
@@ -72,6 +73,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "InstantiationError"
             | "Integer"
             | "Interval"
+            | "IoDevice"
             | "Json"
             | "List"
             | "Logger"
@@ -141,6 +143,7 @@ pub(super) fn is_generated_builtin_class(name: &str) -> bool {
             | "Uuid"
             | "Value"
             | "Workspace"
+            | "ZlibStream"
     )
 }
 
@@ -2032,6 +2035,41 @@ fn class_info_Ets() -> ClassInfo {
 #[allow(clippy::too_many_lines)] // auto-generated: one literal per method
 #[inline(never)] // keep each class's literal temporaries in their own frame
 #[rustfmt::skip] // preserve compact generated layout
+fn class_info_EtsTid() -> ClassInfo {
+    ClassInfo {
+            name: "EtsTid".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            handle_scope: None,
+            surface_incomplete: false,
+            in_caller_new1: false,
+            is_module_less: false,
+            auto_ctors: None,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            state_kinds: HashMap::new(),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+    }
+}
+
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
 fn class_info_Exception() -> ClassInfo {
     ClassInfo {
             name: "Exception".into(),
@@ -2656,6 +2694,41 @@ fn class_info_Interval() -> ClassInfo {
             type_params: vec![],
             type_param_bounds: vec![],
             superclass_type_args: vec![SuperclassTypeArg::Concrete { declared: DeclaredType::simple("Integer") }],
+    }
+}
+
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_IoDevice() -> ClassInfo {
+    ClassInfo {
+            name: "IoDevice".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            handle_scope: None,
+            surface_incomplete: false,
+            in_caller_new1: false,
+            is_module_less: false,
+            auto_ctors: None,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            state_kinds: HashMap::new(),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
     }
 }
 
@@ -6045,6 +6118,41 @@ fn class_info_Workspace() -> ClassInfo {
     }
 }
 
+#[allow(non_snake_case)] // named after the stdlib class
+#[allow(clippy::too_many_lines)] // auto-generated: one literal per method
+#[inline(never)] // keep each class's literal temporaries in their own frame
+#[rustfmt::skip] // preserve compact generated layout
+fn class_info_ZlibStream() -> ClassInfo {
+    ClassInfo {
+            name: "ZlibStream".into(),
+            superclass: Some("Object".into()),
+            is_sealed: true,
+            is_abstract: false,
+            is_typed: true,
+            is_internal: false,
+            package: Some("stdlib".into()),
+            is_value: false,
+            is_native: false,
+            handle_scope: None,
+            surface_incomplete: false,
+            in_caller_new1: false,
+            is_module_less: false,
+            auto_ctors: None,
+            state: vec![],
+            state_types: HashMap::new(),
+            state_has_default: HashMap::new(),
+            state_kinds: HashMap::new(),
+            initialize_assigns: BTreeSet::new(),
+            has_dynamic_field_writer: false,
+            methods: vec![],
+            class_methods: vec![],
+            class_variables: vec![],
+            type_params: vec![],
+            type_param_bounds: vec![],
+            superclass_type_args: vec![],
+    }
+}
+
 /// Returns all stdlib built-in class definitions.
 ///
 /// Auto-generated from parsed `lib/*.bt` ASTs.
@@ -6089,6 +6197,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     classes.insert("ErlangModule".into(), class_info_ErlangModule());
     classes.insert("Error".into(), class_info_Error());
     classes.insert("Ets".into(), class_info_Ets());
+    classes.insert("EtsTid".into(), class_info_EtsTid());
     classes.insert("Exception".into(), class_info_Exception());
     classes.insert("ExitError".into(), class_info_ExitError());
     classes.insert("False".into(), class_info_False());
@@ -6101,6 +6210,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     classes.insert("InstantiationError".into(), class_info_InstantiationError());
     classes.insert("Integer".into(), class_info_Integer());
     classes.insert("Interval".into(), class_info_Interval());
+    classes.insert("IoDevice".into(), class_info_IoDevice());
     classes.insert("Json".into(), class_info_Json());
     classes.insert("List".into(), class_info_List());
     classes.insert("Logger".into(), class_info_Logger());
@@ -6170,6 +6280,7 @@ pub(super) fn generated_builtin_classes() -> HashMap<EcoString, ClassInfo> {
     classes.insert("Uuid".into(), class_info_Uuid());
     classes.insert("Value".into(), class_info_Value());
     classes.insert("Workspace".into(), class_info_Workspace());
+    classes.insert("ZlibStream".into(), class_info_ZlibStream());
     classes
 }
 

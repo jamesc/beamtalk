@@ -1300,3 +1300,178 @@ fn bt3080_ffi_nil_union_narrows_under_if_nil_if_not_nil() {
         "expected ifNil:ifNotNil: branch union to be plain Integer, got {send_type:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// BT-4717: OTP opaque handle types are named opaque classes, not Dynamic
+// ---------------------------------------------------------------------------
+
+/// Registry built from the exact wire format `beamtalk_spec_reader.erl` emits
+/// for the OTP calls named in BT-4717 (`zlib:open/0`, `zlib:close/1`,
+/// `ets:delete/1`, `file:close/1`, `erlang:monitor/2`), so the real
+/// `map_type_name` string-parsing path is exercised.
+fn otp_handle_registry() -> NativeTypeRegistry {
+    let mut reg = NativeTypeRegistry::new();
+    for line in [
+        "beamtalk-specs-module:zlib:[\
+         #{arity => 0,name => <<\"open\">>,params => [],return_type => <<\"ZlibStream\">>},\
+         #{arity => 1,name => <<\"close\">>,\
+           params => [#{name => <<\"z\">>,type => <<\"ZlibStream\">>}],return_type => <<\"Symbol\">>}]",
+        "beamtalk-specs-module:ets:[\
+         #{arity => 1,name => <<\"delete\">>,\
+           params => [#{name => <<\"table\">>,type => <<\"Symbol | EtsTid\">>}],return_type => <<\"True\">>}]",
+        "beamtalk-specs-module:file:[\
+         #{arity => 1,name => <<\"close\">>,\
+           params => [#{name => <<\"fd\">>,type => <<\"IoDevice | Pid\">>}],return_type => <<\"Symbol\">>},\
+         #{arity => 0,name => <<\"handle\">>,params => [],return_type => <<\"IoDevice\">>}]",
+        "beamtalk-specs-module:erlang:[\
+         #{arity => 2,name => <<\"monitor\">>,\
+           params => [#{name => <<\"type\">>,type => <<\"Symbol\">>},\
+                      #{name => <<\"item\">>,type => <<\"Dynamic\">>}],\
+           return_type => <<\"Reference\">>}]",
+    ] {
+        assert!(
+            parse_specs_line(line, &mut reg).is_some(),
+            "bad line {line}"
+        );
+    }
+    reg
+}
+
+fn otp_handle_diags(src: &str) -> Vec<Diagnostic> {
+    let module = parse_source(src);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(otp_handle_registry());
+    checker.check_module(&module, &hierarchy);
+    checker.take_diagnostics()
+}
+
+#[test]
+fn bt4717_opaque_handle_round_trips_through_its_module() {
+    // The zstream goes back into `zlib` and is compared by identity/equality:
+    // no diagnostic of any kind.
+    let src = "typed Object subclass: Gz\n  \
+        run =>\n    \
+          z := (Erlang zlib) open.\n    \
+          (Erlang zlib) close: z.\n    \
+          z =:= z";
+    let d = otp_handle_diags(src);
+    assert!(
+        d.is_empty(),
+        "opaque handle round trip should be clean: {d:?}"
+    );
+}
+
+#[test]
+fn bt4717_opaque_handle_keeps_return_type_named() {
+    let src = "typed Object subclass: Gz\n  run => (Erlang zlib) open";
+    let module = parse_source(src);
+    let hierarchy = ClassHierarchy::with_builtins();
+    let mut checker = TypeChecker::new();
+    checker.set_native_type_registry(otp_handle_registry());
+    checker.check_module(&module, &hierarchy);
+    let body_span = module.classes[0].methods[0]
+        .body
+        .last()
+        .unwrap()
+        .expression
+        .span();
+    assert_eq!(
+        checker.type_map().get(body_span),
+        Some(&InferredType::known("ZlibStream")),
+        "zlib:open/0 must infer ZlibStream, not Dynamic"
+    );
+}
+
+#[test]
+fn bt4717_sending_a_message_to_an_opaque_handle_names_the_type() {
+    let src = "typed Object subclass: Gz\n  \
+        run =>\n    \
+          z := (Erlang zlib) open.\n    \
+          z size";
+    let d = otp_handle_diags(src);
+    assert!(
+        d.iter()
+            .any(|d| d.message.contains("ZlibStream") && d.message.contains("size")),
+        "DNU on an opaque handle must name ZlibStream: {d:?}"
+    );
+}
+
+#[test]
+fn bt4717_opaque_handle_rejected_by_a_different_handle_param() {
+    // An IoDevice is not a zstream: the plain `ZlibStream` param of
+    // `zlib:close/1` must reject it. The bare `IoDevice` return of the
+    // made-up `file:handle/0` is synthetic (the real reader emits
+    // `IoDevice | Pid`); this only checks the Known-vs-Known mismatch path.
+    let src = "typed Object subclass: Gz\n  \
+        run =>\n    \
+          fd := (Erlang file) handle.\n    \
+          (Erlang zlib) close: fd";
+    let d = otp_handle_diags(src);
+    assert!(
+        d.iter()
+            .any(|d| d.message.contains("ZlibStream") && d.message.contains("IoDevice")),
+        "an IoDevice is not a ZlibStream: {d:?}"
+    );
+}
+
+#[test]
+fn bt4717_pid_is_accepted_where_an_io_device_is_expected() {
+    // `file:io_device()` is `io_server() | fd()` and an io_server is a pid, so
+    // the param is `IoDevice | Pid` and a Pid argument must not warn.
+    let src = "typed Object subclass: Gz\n  \
+        run: p :: Pid =>\n    \
+          (Erlang file) close: p";
+    let d = otp_handle_diags(src);
+    assert!(d.is_empty(), "a Pid is a valid io_device: {d:?}");
+}
+
+#[test]
+fn bt4717_monitor_reference_is_a_named_reference() {
+    // `erlang:monitor/2` answers `reference()`; Reference's own protocol
+    // (including `demonitor` and `=:=`) must still type-check.
+    let src = "typed Object subclass: Mon\n  \
+        run: pid =>\n    \
+          r := (Erlang erlang) monitor: #process item: pid.\n    \
+          r demonitor.\n    \
+          r =:= r";
+    let d = otp_handle_diags(src);
+    assert!(d.is_empty(), "Reference-typed monitor result: {d:?}");
+}
+
+/// BT-4717: the class names `beamtalk_spec_reader:well_known_opaque_class/3`
+/// emits cross the Erlang→Rust boundary as bare strings, so every one must be
+/// a real stdlib class — renaming a stdlib handle class without the table
+/// would otherwise leave the reader emitting a name nothing defines.
+#[test]
+fn bt4717_well_known_opaque_classes_are_stdlib_builtins() {
+    let reader = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../runtime/apps/beamtalk_compiler/src/beamtalk_spec_reader.erl"
+    ))
+    .expect("spec reader source");
+    let mut names = Vec::new();
+    for line in reader.lines() {
+        if line.starts_with("well_known_opaque_class(")
+            && let Some(rest) = line.split("{ok, <<\"").nth(1)
+            && let Some(expr) = rest.split("\">>").next()
+        {
+            names.extend(expr.split('|').map(|n| n.trim().to_string()));
+        }
+    }
+    names.sort();
+    names.dedup();
+    assert_eq!(
+        names,
+        ["EtsTid", "IoDevice", "Pid", "ZlibStream"],
+        "well_known_opaque_class/3 table changed: update this list (a new handle class also needs a \
+         routing row; codegen's all_builtins_are_classified_for_static_dispatch fails without one)"
+    );
+    let hierarchy = ClassHierarchy::with_builtins();
+    for name in &names {
+        assert!(
+            hierarchy.has_class(name),
+            "{name} is emitted by the spec reader but is not a stdlib class"
+        );
+    }
+}

@@ -53,6 +53,7 @@
     'ErlangModule',
     'Error',
     'Ets',
+    'EtsTid',
     'Exception',
     'ExitError',
     'False',
@@ -65,6 +66,7 @@
     'InstantiationError',
     'Integer',
     'Interval',
+    'IoDevice',
     'Json',
     'List',
     'Logger',
@@ -133,7 +135,8 @@
     'UndefinedObject',
     'Uuid',
     'Value',
-    'Workspace'
+    'Workspace',
+    'ZlibStream'
 ]).
 
 -endif.

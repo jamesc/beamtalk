@@ -681,6 +681,63 @@ mod tests {
         );
     }
 
+    /// BT-4717: FFI calls whose OTP spec returns an opaque handle
+    /// (`zlib:open/0` zstream, `erlang:monitor/2` reference) keep their named
+    /// type, so a `zstream` handed back to `zlib` and compared with `=:=` is
+    /// fully typed. Before, every such call was "FFI spec is Dynamic" and the
+    /// uses of its result were "dynamic receiver" — this fixture sat at 42.9%.
+    /// Needs the built Erlang runtime for live spec extraction, like the other
+    /// OTP-spec tests; the fixture is `tests/otp-opaque-handles`, which
+    /// beamtalk-buccaneer/-catalina mirror (check there with
+    /// `beamtalk type-coverage --detail src | grep 'FFI spec is Dynamic'`).
+    #[test]
+    fn run_types_otp_opaque_handles_bt_4717() {
+        let dir = TempDir::new().unwrap();
+        fs::write(
+            dir.path().join("beamtalk.toml"),
+            "[package]\nname = \"otp_opaque_handles\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(&src).unwrap();
+        fs::write(
+            src.join("handles.bt"),
+            include_str!("../../../../tests/otp-opaque-handles/src/handles.bt"),
+        )
+        .unwrap();
+        let root = Utf8PathBuf::from_path_buf(src).unwrap();
+        // Live extraction needs OTP `.beam` files on disk; skip rather than
+        // false-fail where they are not discoverable (e.g. a sandbox).
+        let pkg_root = Utf8PathBuf::from_path_buf(dir.path().to_path_buf()).unwrap();
+        let probe = beamtalk_cli::ffi_type_registry::lint_type_registry(
+            Some(&pkg_root),
+            &[root.join("handles.bt")],
+            &[],
+        )
+        .registry;
+        let Some(probe) = probe else {
+            eprintln!(
+                "skipping run_types_otp_opaque_handles_bt_4717: no OTP .beam files discovered"
+            );
+            return;
+        };
+        assert!(
+            probe.lookup("zlib", "open", 0).is_some(),
+            "live extraction found OTP but not zlib:open/0"
+        );
+        let result = run(
+            root.as_str(),
+            false,
+            OutputFormat::Text,
+            Some(100.0),
+            Some("Handles"),
+        );
+        assert!(
+            result.is_ok(),
+            "OTP opaque handles must stay typed (no FFI-spec Dynamic): {result:?}"
+        );
+    }
+
     /// BT-4718: sends to a dependency's class are typed, as `build` types
     /// them. Before, `type-coverage` loaded no dependency metadata, so
     /// `p value` on a `Producer` from a path dependency was `Dynamic`.
