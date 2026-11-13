@@ -598,17 +598,7 @@ impl Backend {
                         extracted.push(root_path.clone());
                         continue;
                     };
-                    let cache_dir = root.join("_build").join("type_cache");
-                    let dependency_ebin_dirs =
-                        beamtalk_core::ffi_type_specs::collect_project_dependency_ebin_dirs(&root);
-                    let root_registry = match outcome_override {
-                        Some(true) => Some(NativeTypeRegistry::new()),
-                        Some(false) => None,
-                        None => beamtalk_core::ffi_type_specs::extract_type_specs(
-                            &cache_dir,
-                            &dependency_ebin_dirs,
-                        ),
-                    };
+                    let root_registry = root_type_registry(&root, outcome_override);
                     if let Some(root_registry) = root_registry {
                         registry.merge(root_registry);
                         extracted.push(root_path.clone());
@@ -843,12 +833,13 @@ impl Backend {
         }
 
         let mut svc = self.service.lock().expect("service lock poisoned");
-        for (path, content) in loaded.user_files {
-            let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
-                continue;
-            };
-            svc.update_file(utf8_path, content);
-        }
+        // One batch, so a large dependency's package-wide alias expansion
+        // runs once, not once per file (BT-4778 review).
+        svc.update_files(
+            loaded.user_files.into_iter().filter_map(|(path, content)| {
+                Some((Utf8PathBuf::from_path_buf(path).ok()?, content))
+            }),
+        );
         // stdlib files must be marked in the ProjectIndex before
         // indexing, not chained into the same loop as user_files above —
         // otherwise `is_stdlib_file` never returns true for them in the real
@@ -1004,23 +995,17 @@ impl Backend {
                 .expect("stdlib_paths lock poisoned")
                 .clone();
             let mut svc = self.service.lock().expect("service lock poisoned");
-            for (path, content) in loaded.user_files {
-                let Ok(utf8_path) = Utf8PathBuf::from_path_buf(path) else {
-                    continue;
-                };
-                // A stdlib file keeps its stdlib classification (as in
-                // `collect_preload_files`), and an open buffer is the source
-                // of truth for its file — the on-disk bytes may be stale.
-                // (Lock order service → versions matches `did_close`.)
-                let is_open = self
-                    .versions
-                    .lock()
-                    .expect("versions lock poisoned")
-                    .contains_key(&utf8_path);
-                if !is_open && !stdlib_paths.contains(&utf8_path) {
-                    svc.update_file(utf8_path, content);
-                }
-            }
+            // (Lock order service → versions matches `did_close`.)
+            let versions = self.versions.lock().expect("versions lock poisoned");
+            // A stdlib file keeps its stdlib classification (as in
+            // `collect_preload_files`), and an open buffer is the source
+            // of truth for its file — the on-disk bytes may be stale.
+            svc.update_files(loaded.user_files.into_iter().filter_map(|(path, content)| {
+                let utf8_path = Utf8PathBuf::from_path_buf(path).ok()?;
+                (!versions.contains_key(&utf8_path) && !stdlib_paths.contains(&utf8_path))
+                    .then_some((utf8_path, content))
+            }));
+            drop(versions);
             // A partial walk of this root means the index can no longer
             // claim project completeness (and, via the sticky flag, a later
             // startup preload cannot reclaim it); a full one leaves the
@@ -1530,4 +1515,34 @@ impl Backend {
         )
         .await;
     }
+}
+
+/// The FFI type registry for the package at `root`: the one `beamtalk lint`
+/// and MCP build (BT-4777) — auto-extracted specs, then the distribution,
+/// dependency and project stub tiers on top
+/// ([`beamtalk_package::ffi_type_registry::resolve_package_type_registry`]).
+/// `None` when the specs could not be extracted, even if stubs exist, so the
+/// root is retried on the next load. `outcome_override` is the test hook
+/// standing in for extraction.
+fn root_type_registry(
+    root: &Utf8PathBuf,
+    outcome_override: Option<bool>,
+) -> Option<beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry> {
+    use beamtalk_core::semantic_analysis::type_checker::NativeTypeRegistry;
+
+    let auto_extract = match outcome_override {
+        Some(true) => Some(NativeTypeRegistry::new()),
+        Some(false) => None,
+        None => beamtalk_package::native_type_specs::extract_project_type_specs(
+            &beamtalk_package::build_layout::BuildLayout::new(root),
+        ),
+    }?;
+    let dependency_stubs =
+        beamtalk_package::dependency_classes::dependency_layout(root).stub_dirs();
+    beamtalk_package::ffi_type_registry::resolve_package_type_registry(
+        root,
+        Some(auto_extract),
+        &dependency_stubs,
+    )
+    .registry
 }

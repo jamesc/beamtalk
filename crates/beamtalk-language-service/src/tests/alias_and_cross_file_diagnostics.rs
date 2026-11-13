@@ -739,3 +739,28 @@ fn moving_dependency_alias_is_not_an_alias_change() {
     assert_eq!(before, service.project_index.internal_aliases_of(&types));
     assert!(!before.is_empty());
 }
+
+/// A workspace preload indexes the files as a batch ([`SimpleLanguageService::update_files`]):
+/// the result matches indexing them one at a time, whatever the order.
+#[test]
+fn batch_indexing_expands_dependency_aliases_in_any_order() {
+    let types = Utf8PathBuf::from("_build/deps/vault/src/Types.bt");
+    let vault = Utf8PathBuf::from("_build/deps/vault/src/Vault.bt");
+    let consumer_file = Utf8PathBuf::from("src/Client.bt");
+    for alias_first in [true, false] {
+        let mut batch = vec![
+            (types.clone(), "internal type Secret = String\n".to_string()),
+            (vault.clone(), VAULT_SRC.to_string()),
+        ];
+        if !alias_first {
+            batch.reverse();
+        }
+        batch.push((consumer_file.clone(), CLIENT_SRC.to_string()));
+        let mut service = SimpleLanguageService::new();
+        service.update_files(batch);
+        assert!(
+            !mismatch_diags(&service, &consumer_file).is_empty(),
+            "batch-indexed alias must expand (alias_first={alias_first})"
+        );
+    }
+}

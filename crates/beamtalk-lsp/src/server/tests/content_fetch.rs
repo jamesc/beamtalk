@@ -72,6 +72,40 @@ async fn load_type_cache_collects_project_known_erlang_modules() {
     );
 }
 
+/// BT-4777: the LSP resolves FFI types through `beamtalk-package`'s chain, as
+/// `beamtalk lint` does, so a project-local `stubs/` declaration reaches the
+/// registry — the auto-extracting walk alone never read stub tiers.
+#[tokio::test]
+async fn load_type_cache_applies_project_stubs() {
+    let temp = tempfile::TempDir::new().unwrap();
+    let root = temp.path().to_path_buf();
+    std::fs::write(
+        root.join("beamtalk.toml"),
+        "[package]\nname = \"app\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("stubs")).unwrap();
+    std::fs::write(
+        root.join("stubs/my_ffi.bt"),
+        "declare native: my_ffi_module\n\n  frob: x :: Integer -> Integer\n",
+    )
+    .unwrap();
+
+    let (service, _socket) = tower_lsp::LspService::new(Backend::new);
+    let backend: &Backend = service.inner();
+    *backend.type_cache_outcome.lock().unwrap() = Some(true);
+    backend.load_type_cache(std::slice::from_ref(&root)).await;
+
+    let svc = backend.service.lock().expect("service lock poisoned");
+    let registry = svc
+        .native_types()
+        .expect("a stub-declared module installs a registry");
+    assert!(
+        registry.lookup("my_ffi_module", "frob", 1).is_some(),
+        "the project stub tier must be applied"
+    );
+}
+
 #[tokio::test]
 async fn fetch_content_returns_error_for_unsupported_scheme() {
     let (service, _socket) = tower_lsp::LspService::new(Backend::new);
