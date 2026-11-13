@@ -237,23 +237,17 @@ impl CoreErlangGenerator {
         Ok(None)
     }
 
-    /// BT-4473: `x isKindOf: C` where `C` is a class literal naming a
+    /// BT-4473 / BT-4764: `x isKindOf: C` where `C` is a class literal naming a
     /// sealed built-in whose instances (with its subclasses') are exactly the
     /// values passing its routing-fixture type test — the test a
-    /// `binding :: C` match arm uses ([`routing::type_test`]). Lowers to the
-    /// test applied to `x`, handed to
-    /// `beamtalk_behaviour_intrinsics:isKindOfBuiltin/3`:
+    /// `binding :: C` match arm uses ([`routing::type_test`], rendered by the
+    /// same [`Self::render_type_test`], so the two cannot disagree). The test
+    /// is applied to `x` inline behind the node-wide override check; see
+    /// [`Self::emit_builtin_kind_of`] for the emitted shape and why each exit
+    /// is sound. Anything the test cannot answer for a plain value takes
+    /// `beamtalk_behaviour_intrinsics:isKindOfBuiltin/3` or the ordinary send.
     ///
-    /// ```erlang
-    /// let R = <x> in let K = <C> in
-    /// call 'beamtalk_behaviour_intrinsics':'isKindOfBuiltin'(R, K,
-    ///     case <C's test on R> of <'true'> -> 'true' <'false'> -> 'false' end)
-    /// ```
-    ///
-    /// The runtime answers the test only for a plain value (no actor, class
-    /// object, supervisor handle, future or tagged map) while no extension
-    /// has ever defined `isKindOf:`; anything else is the ordinary send. That
-    /// is sound because a plain value's class is a stdlib built-in, and no
+    /// Sound because a plain value's class is a stdlib built-in, and no
     /// built-in below `Object` defines `isKindOf:` — checked here against the
     /// class hierarchy, so a stdlib override would turn this lowering off.
     ///
@@ -303,22 +297,175 @@ impl CoreErlangGenerator {
             }
             return Ok(None);
         };
-        // The test is applied to the receiver variable, so it is rendered
-        // inside the shared emitter once that variable exists.
-        self.emit_kind_of_call_with(receiver, class_arg, KindOfFn::Builtin, |this, recv_var| {
-            this.render_type_test(
-                test,
-                recv_var,
-                Document::Str("'true'"),
-                &Document::Str("'false'"),
-            )
-        })
+        let Expression::ClassReference { name, .. } = class_arg else {
+            return Ok(None);
+        };
+        self.emit_builtin_kind_of(receiver, class_arg, &name.name, test)
+    }
+
+    /// BT-4764: the inline lowering of `x isKindOf: C` for a sealed built-in
+    /// `C` whose type test is `test`:
+    ///
+    /// ```erlang
+    /// let R = <x> in
+    /// case is_pid(whereis('beamtalk_class_C')) and not overridden_anywhere('isKindOf:') of
+    ///   'true'  -> case <C's test on R> of
+    ///                'true'  -> 'true'  % or isKindOfBuiltin(R, K, 'true'), see below
+    ///                'false' -> 'false' % for a non-tuple, non-map R, else the call below
+    ///              end
+    ///   'false' -> let K = <C> in send(R, 'isKindOf:', [K])  % override, or dead class
+    /// end
+    /// ```
+    ///
+    /// The fast path builds no class reference, sends nothing and makes no
+    /// runtime call besides the one `persistent_term` read and a `whereis`
+    /// that keeps today's `class_not_found` for a dead class process (the
+    /// literal used to be evaluated first; no new behaviour difference). The node-wide
+    /// override flag is read on every execution (never cached: a later
+    /// override must take effect, ADR 0142 §2).
+    ///
+    /// Everything the runtime's `plain_value/1` screens out is a tuple or a
+    /// map, so:
+    ///
+    /// - a **hit** is `'true'` outright when [`Self::kind_test_hit_proves_plain`]
+    ///   holds for the strategy (the value passing the test cannot be an actor,
+    ///   supervisor, future or tagged map); otherwise the hit takes
+    ///   `isKindOfBuiltin(R, K, 'true')`, which still runs `plain_value/1`;
+    /// - a **miss** is `'false'` outright for any receiver that is neither a
+    ///   tuple nor a map; a tuple or map takes `isKindOfBuiltin(R, K, 'false')`,
+    ///   which answers `'false'` for a plain value and sends otherwise.
+    fn emit_builtin_kind_of(
+        &mut self,
+        receiver: &Expression,
+        class_arg: &Expression,
+        class_name: &str,
+        test: super::super::routing::Guard,
+    ) -> Result<Option<Document<'static>>> {
+        let mut seq = self.sequence_call(&[receiver, class_arg], "KindOf")?;
+        let recv_doc = seq.next();
+        let class_doc = seq.next();
+        let recv_var = self.fresh_temp_var("KindOfRecv");
+
+        let runtime_answer = |this: &mut Self, answer: &'static str| {
+            let class_var = this.fresh_temp_var("KindOfClass");
+            docvec![
+                "let ",
+                leaf::var(class_var.clone()),
+                " = ",
+                class_doc.clone(),
+                " in call 'beamtalk_behaviour_intrinsics':",
+                leaf::atom(KindOfFn::Builtin.name().to_string()),
+                "(",
+                leaf::var(recv_var.clone()),
+                ", ",
+                leaf::var(class_var),
+                ", ",
+                Document::Str(answer),
+                ")"
+            ]
+        };
+        let hit = if Self::kind_test_hit_proves_plain(test) {
+            Document::Str("'true'")
+        } else {
+            runtime_answer(self, "'true'")
+        };
+        let miss_slow = runtime_answer(self, "'false'");
+        let miss = docvec![
+            "case call 'erlang':'or'(call 'erlang':'is_tuple'(",
+            leaf::var(recv_var.clone()),
+            "), call 'erlang':'is_map'(",
+            leaf::var(recv_var.clone()),
+            ")) of <'true'> when 'true' -> ",
+            miss_slow,
+            " <'false'> when 'true' -> 'false' end"
+        ];
+        // The test as a boolean, then the hit/miss split: the miss path is
+        // written once however many exits the strategy's test has.
+        let test_doc = self.render_type_test(
+            test,
+            &recv_var,
+            Document::Str("'true'"),
+            &Document::Str("'false'"),
+        );
+        let fast = docvec![
+            "case ",
+            test_doc,
+            " of <'true'> when 'true' -> ",
+            hit,
+            " <'false'> when 'true' -> ",
+            miss,
+            " end"
+        ];
+
+        // The plain send, behind the class literal's own evaluation: used when
+        // an override exists, and when the class process is dead, where the
+        // literal raises `class_not_found` exactly as it always did.
+        let send_class = self.fresh_temp_var("KindOfClass");
+        // The call node carries the send's source line, as every dispatch
+        // call does (`call_site_lines`).
+        let send_call = self.annotate_current_send_call(docvec![
+            "call 'beamtalk_message_dispatch':'send'(",
+            leaf::var(recv_var.clone()),
+            ", 'isKindOf:', [",
+            leaf::var(send_class.clone()),
+            "])"
+        ]);
+        let send = docvec![
+            "let ",
+            leaf::var(send_class),
+            " = ",
+            class_doc,
+            " in ",
+            send_call
+        ];
+        let call_doc = docvec![
+            "let ",
+            leaf::var(recv_var),
+            " = ",
+            recv_doc,
+            " in case call 'erlang':'and'(call 'erlang':'is_pid'(",
+            Self::registered_class_pid_doc(class_name),
+            "), call 'erlang':'not'(call 'beamtalk_default_method':'overridden_anywhere'('isKindOf:'))) of ",
+            "<'true'> when 'true' -> ",
+            fast,
+            " <'false'> when 'true' -> ",
+            send,
+            " end"
+        ];
+        Ok(Some(seq.close(self, call_doc, "KindOfRes")))
+    }
+
+    /// Whether a value passing `test` is certainly one the runtime's
+    /// `plain_value/1` accepts, so a hit may be answered without the call.
+    /// Exhaustive on purpose: a new strategy must decide.
+    ///
+    /// - `Bif` (integer, float, list, binary, boolean, function…), the
+    ///   bitstring test, `Symbol` and `ExactAtom`: the value is not a tuple
+    ///   or map, which `plain_value/1` accepts unconditionally.
+    /// - `StringTag`, `BinaryOrStringTag`: the only tuple admitted is the
+    ///   `String` tag, the one reserved head `plain_value/1` accepts.
+    /// - `UntaggedMap`: a map with neither `'$beamtalk_class'` nor
+    ///   `'__class_mod__'`, i.e. exactly `not is_tagged/1`.
+    /// - `UnreservedTuple` does not prove it: its test rejects a reserved tag
+    ///   only at the tag's own tuple size, while `plain_value/1` rejects it at
+    ///   every size.
+    const fn kind_test_hit_proves_plain(test: super::super::routing::Guard) -> bool {
+        use super::super::routing::Guard;
+        match test {
+            Guard::Bif(_)
+            | Guard::StringTag
+            | Guard::BinaryOrStringTag
+            | Guard::UnalignedBitstring
+            | Guard::Symbol
+            | Guard::ExactAtom(_)
+            | Guard::UntaggedMap => true,
+            Guard::UnreservedTuple => false,
+        }
     }
 
     /// `let R = <receiver> in let K = <class_arg> in call
     /// 'beamtalk_behaviour_intrinsics':<fn_name>(R, K, <extra>)`: the shape
-    /// shared by every `isKindOf:` lowering that keeps the class argument for
-    /// the runtime's fallback send.
+    /// of the user-class-literal (name-only) lowering.
     fn emit_kind_of_call_with(
         &mut self,
         receiver: &Expression,
