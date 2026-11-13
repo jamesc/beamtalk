@@ -14,7 +14,10 @@
 %% Expr raises `#{error := #beamtalk_error{kind, class, selector}}`.
 -define(assertBtError(Kind, Class, Selector, Expr),
     ?assertError(
-        #{error := #beamtalk_error{kind = Kind, class = Class, selector = Selector}},
+        #{
+            '$beamtalk_class' := _,
+            error := #beamtalk_error{kind = Kind, class = Class, selector = Selector}
+        },
         Expr
     )
 ).
@@ -43,6 +46,7 @@
 -define(assertBtErrorDetails(Kind, Class, Selector, Details, Expr),
     ?assertError(
         #{
+            '$beamtalk_class' := _,
             error := #beamtalk_error{
                 kind = Kind, class = Class, selector = Selector, details = Details
             }
@@ -53,23 +57,24 @@
 
 %% Expr returns a Beamtalk `Result` object that is an error
 %% (`isOk := false`) whose `errReason` is `#{error := #beamtalk_error{kind, class, selector}}`.
--define(assertBtResultError(Kind, Class, Selector, Expr),
+-define(assertBtResultObjError(Kind, Class, Selector, Expr),
     ?assertMatch(
         #{
             '$beamtalk_class' := 'Result',
             'isOk' := false,
             'errReason' := #{
+                '$beamtalk_class' := _,
                 error := #beamtalk_error{kind = Kind, class = Class, selector = Selector}
             }
         },
         Expr
     )
 ).
--define(assertBtResultError(Kind, Class, Expr),
-    ?assertBtResultError(Kind, Class, _, Expr)
+-define(assertBtResultObjError(Kind, Class, Expr),
+    ?assertBtResultObjError(Kind, Class, _, Expr)
 ).
--define(assertBtResultError(Kind, Expr),
-    ?assertBtResultError(Kind, _, _, Expr)
+-define(assertBtResultObjError(Kind, Expr),
+    ?assertBtResultObjError(Kind, _, _, Expr)
 ).
 
 %% Expr returns `{error, #beamtalk_error{kind, class, selector}}` (Result-wrapped).

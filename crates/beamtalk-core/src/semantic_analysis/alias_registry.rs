@@ -238,14 +238,11 @@ impl AliasRegistry {
         }
 
         // ADR 0108 "No recursion": cycle detection + topological
-        // sort. The walk starts from this module's own aliases but follows
-        // references through the whole accumulated `self.aliases` (BT-4791),
-        // so calling `register_module` more than once against the same
-        // registry — the shape a package-wide caller uses to seed aliases
-        // from multiple files — still catches a cycle spanning names declared
-        // in different calls: it passes through one of the new roots. Cycles
-        // among aliases seeded earlier were already reported by
-        // `add_pre_loaded`. Non-fatal, mirroring the
+        // sort. The walk is rooted at this module's own aliases (see the
+        // BT-4791 note at the call below) but follows references through the
+        // whole accumulated `self.aliases`, so a cycle spanning names
+        // declared in different `register_module` calls is still caught.
+        // Non-fatal, mirroring the
         // unbound-type-variable check above: a cyclic alias still registers
         // (its `TypeAnnotation` is stored either way), relying on
         // `resolve_type_annotation`'s existing defensive `expanding` guard
