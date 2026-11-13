@@ -291,7 +291,10 @@ send_in_caller_or(ClassPid, Selector, Args, Otherwise) ->
 %% There is no unguarded direct call here (BT-4301): `in_caller_owner/2`
 %% already ran every class method the caller may run, so anything left is a
 %% shadowed method (a class-side extension or ADR 0084 runtime fun the class
-%% process honours), a chain with class variables, or a process-bound selector.
+%% process honours) or a process-bound selector. A chain with class variables
+%% no longer comes here from another process: `class_send_plain/4` asks the
+%% class process directly on the memo's `process` verdict (BT-4771). Only a
+%% class's send to itself takes the first clause below.
 class_send_via_process(ClassPid, Selector, Args, _Timeout, _Alive) when ClassPid =:= self() ->
     class_send_from_own_process(Selector, Args);
 class_send_via_process(ClassPid, Selector, Args, Timeout, Alive) ->

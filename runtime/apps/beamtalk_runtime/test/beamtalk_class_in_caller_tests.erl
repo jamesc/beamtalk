@@ -10,9 +10,10 @@ ADR 0142 Phase 1b (BT-4300): a dynamic class send
 (`beamtalk_class_dispatch:class_send/3`) to a class whose chain declares no
 class variables, and that nothing shadows, runs the class method in the caller,
 resolved through the `{class_method_owner, ClassPid, Selector}` memo. Each
-decline (class variables in the class or an ancestor, a process-bound
-selector, a class-variable reflection selector, a class-side extension) keeps
-the class process, and an error has the same value on both paths.
+decline (a process-bound selector, a class-variable reflection selector, a
+class-side extension) keeps the class process, and so does a chain with class
+variables, which the memo records as the `process` verdict (BT-4771). An error
+has the same value on both paths.
 """.
 
 -include_lib("eunit/include/eunit.hrl").
