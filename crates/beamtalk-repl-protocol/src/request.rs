@@ -1130,22 +1130,47 @@ mod tests {
     /// that only decorate another request are not counted.
     #[test]
     fn conformance_list_covers_every_public_builder() {
+        use std::collections::BTreeSet;
+
         let src = include_str!("request.rs");
         let impl_start = src.find("impl RequestBuilder {").expect("impl block");
         let impl_end = src.find("#[cfg(test)]").expect("test module");
-        let builders = src[impl_start..impl_end]
+        // Builders that only decorate another request are not constructors.
+        let decorators = ["with_package_name"];
+        let constructors: BTreeSet<&str> = src[impl_start..impl_end]
             .lines()
-            .filter(|l| l.trim_start().starts_with("pub fn "))
-            .count();
-        // `with_package_name` decorates a request instead of building one.
-        let decorators = 1;
-        // The list holds one request per constructor, plus a second
-        // `nav_query` shape; `with_package_name` wraps a request in the list.
-        let in_list = every_builder_request().len() - 1;
-        assert_eq!(
-            builders - decorators,
-            in_list,
-            "add every new RequestBuilder constructor to every_builder_request()"
+            .filter_map(|l| l.trim_start().strip_prefix("pub fn "))
+            .filter_map(|rest| rest.split(['(', '<']).next())
+            .filter(|name| !decorators.contains(name))
+            .collect();
+
+        let list_start = src
+            .find("fn every_builder_request()")
+            .expect("every_builder_request");
+        let list_end = list_start
+            + src[list_start..]
+                .find("\n    }\n")
+                .expect("end of every_builder_request");
+        let called: BTreeSet<&str> = src[list_start..list_end]
+            .split("RequestBuilder::")
+            .skip(1)
+            .filter_map(|rest| rest.split('(').next())
+            .collect();
+
+        let missing: Vec<_> = constructors.difference(&called).collect();
+        let unknown: Vec<_> = called.difference(&constructors).collect();
+        assert!(
+            missing.is_empty(),
+            "add these RequestBuilder constructors to every_builder_request(): {missing:?}"
+        );
+        // `with_package_name` wraps a request in the list, so it may appear.
+        let unknown: Vec<_> = unknown
+            .into_iter()
+            .filter(|n| !decorators.contains(*n))
+            .collect();
+        assert!(
+            unknown.is_empty(),
+            "every_builder_request() names builders that do not exist: {unknown:?}"
         );
     }
 

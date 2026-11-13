@@ -45,7 +45,8 @@ TestCase subclass: StringIsEmptyTest
         self assert: s isNotEmpty equals: s length > 0
       ]
 
-  testBinaryViewAgrees =>
-    // Binary-typed code calling isEmpty on a String gets the same answer
+  testBitSizeIsEightTimesByteCount =>
+    // The byte count behind isEmpty: bitSize is 8 * bytes (isEmpty itself is
+    // a direct primitive since BT-4766, so it is covered by the tests above).
     self assert: "" bitSize equals: 0
     self assert: "é" bitSize equals: 16
