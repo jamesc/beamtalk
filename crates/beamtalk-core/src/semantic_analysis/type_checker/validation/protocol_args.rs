@@ -207,13 +207,12 @@ impl TypeChecker {
     ) -> String {
         let mut all_missing: Vec<EcoString> = Vec::new();
         for member in members {
-            if let Some(name) = member.as_known() {
-                if let Err(missing) = protocol_registry.check_conformance(name, protocol, hierarchy)
-                {
-                    for m in &missing {
-                        if !all_missing.iter().any(|existing| existing == m) {
-                            all_missing.push(m.clone());
-                        }
+            if let Some(name) = member.as_known()
+                && let Err(missing) = protocol_registry.check_conformance(name, protocol, hierarchy)
+            {
+                for m in &missing {
+                    if !all_missing.iter().any(|existing| existing == m) {
+                        all_missing.push(m.clone());
                     }
                 }
             }

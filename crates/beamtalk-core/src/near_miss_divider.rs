@@ -143,11 +143,11 @@ pub(crate) fn scan_source(source: &str) -> Vec<Diagnostic> {
             }
             continue;
         }
-        if let Some(rest) = trimmed.strip_prefix("/*") {
-            if !rest.contains("*/") {
-                in_block_comment = true;
-                continue;
-            }
+        if let Some(rest) = trimmed.strip_prefix("/*")
+            && !rest.contains("*/")
+        {
+            in_block_comment = true;
+            continue;
         }
 
         let Some((kind, content)) = classify_comment_line(trimmed) else {

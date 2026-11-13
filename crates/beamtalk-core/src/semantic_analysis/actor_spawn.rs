@@ -54,10 +54,9 @@ pub fn actor_locals(hierarchy: &ClassHierarchy, body: &[ExpressionStatement]) ->
             if let Expression::MessageSend {
                 receiver, selector, ..
             } = value.unwrap_parens()
+                && is_actor_spawn(hierarchy, receiver, &selector.name())
             {
-                if is_actor_spawn(hierarchy, receiver, &selector.name()) {
-                    actors.insert(local.name.to_string());
-                }
+                actors.insert(local.name.to_string());
             }
         });
     }

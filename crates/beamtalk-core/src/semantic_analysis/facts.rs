@@ -406,12 +406,11 @@ pub fn compute_semantic_facts(module: &Module) -> SemanticFacts {
         // as the module's methods (a live mode, not dead code; see gen_server/dispatch.rs).
         // The block body is treated as method-level (inside_block=false): a ^ directly in the
         // block is a normal early return, not an NLR — only ^ inside a *nested* block is NLR.
-        if let Expression::Assignment { value, .. } = &stmt.expression {
-            if let Expression::Block(block) = value.as_ref() {
-                if body_has_block_nlr(&block.body) {
-                    facts.methods_with_block_nlr.insert(block.span);
-                }
-            }
+        if let Expression::Assignment { value, .. } = &stmt.expression
+            && let Expression::Block(block) = value.as_ref()
+            && body_has_block_nlr(&block.body)
+        {
+            facts.methods_with_block_nlr.insert(block.span);
         }
         collect_expression_facts(&stmt.expression, &mut facts);
         // Module-level/script code is never class-method context.
@@ -612,14 +611,14 @@ fn classify_dispatch(
     is_cast: bool,
 ) -> DispatchKind {
     // Self-send classification
-    if let Expression::Identifier(id) = receiver {
-        if id.name == "self" {
-            return if is_cast {
-                DispatchKind::ActorCast
-            } else {
-                DispatchKind::SelfSend
-            };
-        }
+    if let Expression::Identifier(id) = receiver
+        && id.name == "self"
+    {
+        return if is_cast {
+            DispatchKind::ActorCast
+        } else {
+            DispatchKind::SelfSend
+        };
     }
 
     // Control flow classification

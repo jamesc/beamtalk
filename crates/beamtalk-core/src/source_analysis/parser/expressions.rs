@@ -2326,10 +2326,10 @@ impl Parser {
     ) -> CommentAttachment {
         let mut comments = self.collect_comment_attachment();
         comments.trailing = None;
-        if slots.items.is_empty() {
-            if let Some(after_open) = self.literal_open_trailing(open_idx) {
-                comments.leading.insert(0, after_open);
-            }
+        if slots.items.is_empty()
+            && let Some(after_open) = self.literal_open_trailing(open_idx)
+        {
+            comments.leading.insert(0, after_open);
         }
         comments
     }
@@ -2384,10 +2384,10 @@ impl Parser {
     /// of the literal being parsed (BT-3983). For an empty literal this
     /// includes an end-of-line comment after the opening delimiter.
     fn collect_literal_closing(&self, slots: &mut LiteralCommentSlots, open_idx: usize) {
-        if slots.items.is_empty() {
-            if let Some(after_open) = self.literal_open_trailing(open_idx) {
-                slots.closing.push(after_open);
-            }
+        if slots.items.is_empty()
+            && let Some(after_open) = self.literal_open_trailing(open_idx)
+        {
+            slots.closing.push(after_open);
         }
         slots
             .closing

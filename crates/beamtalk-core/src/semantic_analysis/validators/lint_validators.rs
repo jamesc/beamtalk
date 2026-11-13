@@ -38,23 +38,20 @@ pub(crate) fn check_redundant_assignment(module: &Module, diagnostics: &mut Vec<
             span,
             ..
         } = expr
-        {
-            if let (
+            && let (
                 Expression::Identifier(Identifier { name: lhs, .. }),
                 Expression::Identifier(Identifier { name: rhs, .. }),
             ) = (target.as_ref(), value.as_ref())
-            {
-                if lhs == rhs {
-                    diagnostics.push(
-                        Diagnostic::warning(
-                            format!("Redundant assignment: `{lhs} := {lhs}` has no effect"),
-                            *span,
-                        )
-                        .with_hint("Remove this assignment or assign a different value.")
-                        .with_category(DiagnosticCategory::Lint),
-                    );
-                }
-            }
+            && lhs == rhs
+        {
+            diagnostics.push(
+                Diagnostic::warning(
+                    format!("Redundant assignment: `{lhs} := {lhs}` has no effect"),
+                    *span,
+                )
+                .with_hint("Remove this assignment or assign a different value.")
+                .with_category(DiagnosticCategory::Lint),
+            );
         }
     });
 }
@@ -120,37 +117,31 @@ fn check_literal_boolean_condition_at(expr: &Expression, diagnostics: &mut Vec<D
         span,
         ..
     } = expr
+        && let Some(is_true) = receiver.as_literal_bool()
+        && let Some(well_known) = boolean_conditional(selector)
     {
-        if let Some(is_true) = receiver.as_literal_bool() {
-            if let Some(well_known) = boolean_conditional(selector) {
-                let literal_name = if is_true { "true" } else { "false" };
-                diagnostics.push(
-                    Diagnostic::warning(format!("Condition is always `{literal_name}`"), *span)
-                        .with_hint(dead_branch_hint(is_true, well_known))
-                        .with_category(DiagnosticCategory::Lint),
-                );
-            }
-        }
+        let literal_name = if is_true { "true" } else { "false" };
+        diagnostics.push(
+            Diagnostic::warning(format!("Condition is always `{literal_name}`"), *span)
+                .with_hint(dead_branch_hint(is_true, well_known))
+                .with_category(DiagnosticCategory::Lint),
+        );
     }
     // Also check cascade messages — `true ifTrue: [1]; ifFalse: [2]` has a literal
     // boolean receiver with each cascade message going to the same receiver.
     if let Expression::Cascade {
         receiver, messages, ..
     } = expr
+        && let Some(is_true) = receiver.as_literal_bool()
     {
-        if let Some(is_true) = receiver.as_literal_bool() {
-            let literal_name = if is_true { "true" } else { "false" };
-            for msg in messages {
-                if let Some(well_known) = boolean_conditional(&msg.selector) {
-                    diagnostics.push(
-                        Diagnostic::warning(
-                            format!("Condition is always `{literal_name}`"),
-                            msg.span,
-                        )
+        let literal_name = if is_true { "true" } else { "false" };
+        for msg in messages {
+            if let Some(well_known) = boolean_conditional(&msg.selector) {
+                diagnostics.push(
+                    Diagnostic::warning(format!("Condition is always `{literal_name}`"), msg.span)
                         .with_hint(dead_branch_hint(is_true, well_known))
                         .with_category(DiagnosticCategory::Lint),
-                    );
-                }
+                );
             }
         }
     }

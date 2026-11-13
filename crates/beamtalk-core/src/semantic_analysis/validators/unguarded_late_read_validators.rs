@@ -165,10 +165,10 @@ fn report_unguarded_reads(
     for stmt in body {
         walk_expression(&stmt.expression, &mut |expr| match expr {
             Expression::Assignment { target, .. } => {
-                if let Expression::FieldAccess { receiver, span, .. } = target.as_ref() {
-                    if receiver.is_self() {
-                        write_target_spans.insert(*span);
-                    }
+                if let Expression::FieldAccess { receiver, span, .. } = target.as_ref()
+                    && receiver.is_self()
+                {
+                    write_target_spans.insert(*span);
                 }
             }
             Expression::FieldAccess {

@@ -453,13 +453,11 @@ impl TypeChecker {
                             .and_then(|arg| mismatch.key_span_in(arg, &expected_resolved))
                             .unwrap_or(span),
                     );
-                    if let (Some(exprs), Some(e)) = (arg_exprs, env) {
-                        if let Some(Expression::Identifier(ident)) = exprs.get(i) {
-                            if let Some(origin) = e.get_local_origin(&ident.name) {
-                                diag =
-                                    diag.with_note(origin.description.clone(), Some(origin.span));
-                            }
-                        }
+                    if let (Some(exprs), Some(e)) = (arg_exprs, env)
+                        && let Some(Expression::Identifier(ident)) = exprs.get(i)
+                        && let Some(origin) = e.get_local_origin(&ident.name)
+                    {
+                        diag = diag.with_note(origin.description.clone(), Some(origin.span));
                     }
                     self.diagnostics.push(diag);
                 }
@@ -641,13 +639,11 @@ impl TypeChecker {
                             .with_hint(format!("Expected {expected_display} (or a subclass), got {actual_display}"))
                         };
                         // Attach origin note if available
-                        if let (Some(exprs), Some(e)) = (arg_exprs, env) {
-                            if let Some(Expression::Identifier(ident)) = exprs.get(i) {
-                                if let Some(origin) = e.get_local_origin(&ident.name) {
-                                    diag = diag
-                                        .with_note(origin.description.clone(), Some(origin.span));
-                                }
-                            }
+                        if let (Some(exprs), Some(e)) = (arg_exprs, env)
+                            && let Some(Expression::Identifier(ident)) = exprs.get(i)
+                            && let Some(origin) = e.get_local_origin(&ident.name)
+                        {
+                            diag = diag.with_note(origin.description.clone(), Some(origin.span));
                         }
                         self.diagnostics
                             .push(diag.with_category(DiagnosticCategory::Type));
@@ -755,13 +751,11 @@ impl TypeChecker {
                         )
                         .with_hint(format!("Some members of the union are not compatible with {expected_display}: {list}"))
                     };
-                    if let (Some(exprs), Some(e)) = (arg_exprs, env) {
-                        if let Some(Expression::Identifier(ident)) = exprs.get(i) {
-                            if let Some(origin) = e.get_local_origin(&ident.name) {
-                                diag =
-                                    diag.with_note(origin.description.clone(), Some(origin.span));
-                            }
-                        }
+                    if let (Some(exprs), Some(e)) = (arg_exprs, env)
+                        && let Some(Expression::Identifier(ident)) = exprs.get(i)
+                        && let Some(origin) = e.get_local_origin(&ident.name)
+                    {
+                        diag = diag.with_note(origin.description.clone(), Some(origin.span));
                     }
                     self.diagnostics
                         .push(diag.with_category(DiagnosticCategory::Type));
@@ -983,10 +977,10 @@ impl TypeChecker {
                 selector: crate::ast::MessageSelector::Unary(name),
                 ..
             } = e
+                && name == "deferReply"
+                && receiver.is_self()
             {
-                if name == "deferReply" && receiver.is_self() {
-                    found = true;
-                }
+                found = true;
             }
         });
         found

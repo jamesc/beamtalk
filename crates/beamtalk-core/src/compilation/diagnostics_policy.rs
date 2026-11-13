@@ -1838,10 +1838,8 @@ dnu = "error"
         let provision = |user: &str, stdlib: bool| {
             let mut d = Diagnostic::warning("dnu", span).with_provision_origin("Comparable", user);
             d.category = Some(DiagnosticCategory::Dnu);
-            if stdlib {
-                if let Some(origin) = d.provision.as_mut() {
-                    origin.package = Some("stdlib".into());
-                }
+            if stdlib && let Some(origin) = d.provision.as_mut() {
+                origin.package = Some("stdlib".into());
             }
             d
         };

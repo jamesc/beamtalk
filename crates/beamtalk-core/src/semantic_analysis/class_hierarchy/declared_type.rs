@@ -201,10 +201,9 @@ impl DeclaredType {
         if let Some(rest) = trimmed
             .strip_prefix('#')
             .filter(|_| is_symbol_singleton_name(trimmed))
+            && !rest.is_empty()
         {
-            if !rest.is_empty() {
-                return DeclaredType::Singleton(rest.into());
-            }
+            return DeclaredType::Singleton(rest.into());
         }
 
         // Self-type shapes rendered flat by `TypeAnnotation::type_name` /

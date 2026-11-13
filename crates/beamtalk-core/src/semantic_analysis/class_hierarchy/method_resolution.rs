@@ -268,10 +268,9 @@ impl ClassHierarchy {
                 if let Some(method) = methods
                     .iter_mut()
                     .find(|m| m.kind == MethodKind::Primary && m.selector == *selector)
+                    && method.return_type.is_none()
                 {
-                    if method.return_type.is_none() {
-                        method.return_type = Some(return_type.clone());
-                    }
+                    method.return_type = Some(return_type.clone());
                 }
             }
         }

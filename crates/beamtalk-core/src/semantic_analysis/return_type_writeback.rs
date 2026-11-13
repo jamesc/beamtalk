@@ -120,10 +120,10 @@ pub fn apply_return_type_writeback_from_map(
                 continue;
             }
             let key = (class.name.name.clone(), method.selector.name(), false);
-            if let Some(inferred_ty) = inferred.get(&key) {
-                if let Some(annotation) = writeback_annotation(inferred_ty, method.span) {
-                    method.return_type = Some(annotation);
-                }
+            if let Some(inferred_ty) = inferred.get(&key)
+                && let Some(annotation) = writeback_annotation(inferred_ty, method.span)
+            {
+                method.return_type = Some(annotation);
             }
         }
 
@@ -132,10 +132,10 @@ pub fn apply_return_type_writeback_from_map(
                 continue;
             }
             let key = (class.name.name.clone(), method.selector.name(), true);
-            if let Some(inferred_ty) = inferred.get(&key) {
-                if let Some(annotation) = writeback_annotation(inferred_ty, method.span) {
-                    method.return_type = Some(annotation);
-                }
+            if let Some(inferred_ty) = inferred.get(&key)
+                && let Some(annotation) = writeback_annotation(inferred_ty, method.span)
+            {
+                method.return_type = Some(annotation);
             }
         }
     }
@@ -149,10 +149,10 @@ pub fn apply_return_type_writeback_from_map(
             standalone.method.selector.name(),
             standalone.is_class_method,
         );
-        if let Some(inferred_ty) = inferred.get(&key) {
-            if let Some(annotation) = writeback_annotation(inferred_ty, standalone.method.span) {
-                standalone.method.return_type = Some(annotation);
-            }
+        if let Some(inferred_ty) = inferred.get(&key)
+            && let Some(annotation) = writeback_annotation(inferred_ty, standalone.method.span)
+        {
+            standalone.method.return_type = Some(annotation);
         }
     }
 }

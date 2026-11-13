@@ -320,24 +320,24 @@ pub fn build_dependency_registry_with_graph(dep_infos: &[DepInfo]) -> Dependency
 /// class definition is in a dependency, not in the current compilation unit.
 pub fn check_stdlib_reservation(registry: &DependencyRegistry, diagnostics: &mut Vec<Diagnostic>) {
     for class_name in registry.all_class_names() {
-        if ClassHierarchy::is_runtime_protected_class(class_name) {
-            if let Some(exports) = registry.lookup(class_name) {
-                for export in exports {
-                    diagnostics.push(
-                        Diagnostic::error(
-                            format!(
-                                "Dependency '{}' exports class `{}` which conflicts with a \
+        if ClassHierarchy::is_runtime_protected_class(class_name)
+            && let Some(exports) = registry.lookup(class_name)
+        {
+            for export in exports {
+                diagnostics.push(
+                    Diagnostic::error(
+                        format!(
+                            "Dependency '{}' exports class `{}` which conflicts with a \
                                  stdlib class name. Stdlib class names are reserved.",
-                                export.package, class_name
-                            ),
-                            Span::new(0, 0),
-                        )
-                        .with_hint(format!(
-                            "The dependency must rename its `{class_name}` class. \
+                            export.package, class_name
+                        ),
+                        Span::new(0, 0),
+                    )
+                    .with_hint(format!(
+                        "The dependency must rename its `{class_name}` class. \
                              Stdlib names like `{class_name}` cannot be shadowed by dependencies."
-                        )),
-                    );
-                }
+                    )),
+                );
             }
         }
     }
@@ -410,43 +410,41 @@ fn check_ambiguous_reference(
     registry: &DependencyRegistry,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if let Some(exports) = registry.lookup(class_name) {
-        if registry.is_ambiguous(class_name) {
-            // A package that exports the name twice (e.g. from two of its own
-            // files) is listed once, in first-registration order.
-            let mut packages: Vec<&str> = Vec::new();
-            for export in exports {
-                if !packages.contains(&export.package.as_str()) {
-                    packages.push(export.package.as_str());
-                }
+    if let Some(exports) = registry.lookup(class_name)
+        && registry.is_ambiguous(class_name)
+    {
+        // A package that exports the name twice (e.g. from two of its own
+        // files) is listed once, in first-registration order.
+        let mut packages: Vec<&str> = Vec::new();
+        for export in exports {
+            if !packages.contains(&export.package.as_str()) {
+                packages.push(export.package.as_str());
             }
-
-            let qualified_suggestions: Vec<String> = packages
-                .iter()
-                .map(|package| format!("{package}@{class_name}"))
-                .collect();
-
-            let note_lines: Vec<String> = packages
-                .iter()
-                .map(|package| {
-                    format!(
-                        "'{class_name}' is defined in package '{package}' ({package}@{class_name})"
-                    )
-                })
-                .collect();
-
-            diagnostics.push(
-                Diagnostic::error(
-                    format!("Class name '{class_name}' is exported by multiple dependencies"),
-                    span,
-                )
-                .with_hint(format!(
-                    "{}\nUse qualified name: {}",
-                    note_lines.join("\n"),
-                    qualified_suggestions.join(" or ")
-                )),
-            );
         }
+
+        let qualified_suggestions: Vec<String> = packages
+            .iter()
+            .map(|package| format!("{package}@{class_name}"))
+            .collect();
+
+        let note_lines: Vec<String> = packages
+            .iter()
+            .map(|package| {
+                format!("'{class_name}' is defined in package '{package}' ({package}@{class_name})")
+            })
+            .collect();
+
+        diagnostics.push(
+            Diagnostic::error(
+                format!("Class name '{class_name}' is exported by multiple dependencies"),
+                span,
+            )
+            .with_hint(format!(
+                "{}\nUse qualified name: {}",
+                note_lines.join("\n"),
+                qualified_suggestions.join(" or ")
+            )),
+        );
     }
 }
 
@@ -477,16 +475,16 @@ pub fn check_transitive_dep_usage(
 
     // Check superclass references
     for class in &module.classes {
-        if let Some(ref superclass) = class.superclass {
-            if class.superclass_package.is_none() {
-                check_transitive_reference(
-                    superclass.name.as_str(),
-                    superclass.span,
-                    registry,
-                    strict_deps,
-                    diagnostics,
-                );
-            }
+        if let Some(ref superclass) = class.superclass
+            && class.superclass_package.is_none()
+        {
+            check_transitive_reference(
+                superclass.name.as_str(),
+                superclass.span,
+                registry,
+                strict_deps,
+                diagnostics,
+            );
         }
     }
 

@@ -439,12 +439,12 @@ impl ProtocolInfo {
     ) -> Vec<&'a ProtocolMethodRequirement> {
         let mut reqs: Vec<&ProtocolMethodRequirement> = self.methods.iter().collect();
 
-        if let Some(ref parent_name) = self.extending {
-            if let Some(parent) = registry.get(parent_name) {
-                for req in parent.all_requirements(registry) {
-                    if !reqs.iter().any(|r| r.selector == req.selector) {
-                        reqs.push(req);
-                    }
+        if let Some(ref parent_name) = self.extending
+            && let Some(parent) = registry.get(parent_name)
+        {
+            for req in parent.all_requirements(registry) {
+                if !reqs.iter().any(|r| r.selector == req.selector) {
+                    reqs.push(req);
                 }
             }
         }
@@ -460,12 +460,12 @@ impl ProtocolInfo {
         let mut selectors: Vec<&EcoString> =
             self.class_methods.iter().map(|m| &m.selector).collect();
 
-        if let Some(ref parent_name) = self.extending {
-            if let Some(parent) = registry.get(parent_name) {
-                for sel in parent.all_required_class_selectors(registry) {
-                    if !selectors.contains(&sel) {
-                        selectors.push(sel);
-                    }
+        if let Some(ref parent_name) = self.extending
+            && let Some(parent) = registry.get(parent_name)
+        {
+            for sel in parent.all_required_class_selectors(registry) {
+                if !selectors.contains(&sel) {
+                    selectors.push(sel);
                 }
             }
         }
@@ -480,12 +480,12 @@ impl ProtocolInfo {
     ) -> Vec<&'a ProtocolMethodRequirement> {
         let mut reqs: Vec<&ProtocolMethodRequirement> = self.class_methods.iter().collect();
 
-        if let Some(ref parent_name) = self.extending {
-            if let Some(parent) = registry.get(parent_name) {
-                for req in parent.all_class_requirements(registry) {
-                    if !reqs.iter().any(|r| r.selector == req.selector) {
-                        reqs.push(req);
-                    }
+        if let Some(ref parent_name) = self.extending
+            && let Some(parent) = registry.get(parent_name)
+        {
+            for req in parent.all_class_requirements(registry) {
+                if !reqs.iter().any(|r| r.selector == req.selector) {
+                    reqs.push(req);
                 }
             }
         }

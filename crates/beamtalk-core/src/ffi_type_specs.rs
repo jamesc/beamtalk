@@ -215,10 +215,9 @@ pub fn find_runtime_dir_with_layout() -> Result<(PathBuf, RuntimeLayout)> {
         .ok()
         .and_then(|exe| exe.parent().map(|p| p.join("../lib/beamtalk")))
         .and_then(|p| p.canonicalize().ok())
+        && has_beam_files(&installed_root.join("lib/beamtalk_runtime/ebin"))
     {
-        if has_beam_files(&installed_root.join("lib/beamtalk_runtime/ebin")) {
-            return Ok((installed_root, RuntimeLayout::Installed));
-        }
+        return Ok((installed_root, RuntimeLayout::Installed));
     }
 
     Err(miette!(
@@ -373,26 +372,26 @@ impl TypeCache {
         ) {
             return Some(line);
         }
-        if let Some(shared) = &self.shared_dir {
-            if let Some(line) = Self::read_fresh(
+        if let Some(shared) = &self.shared_dir
+            && let Some(line) = Self::read_fresh(
                 shared,
                 module_name,
                 beam_path,
                 beam_mtime_secs,
                 beam_mtime_nanos,
-            ) {
-                // Mirror into the local tier so on-disk consumers (LSP, lint)
-                // find OTP specs in `_build/type_cache/` exactly as before.
-                Self::write_entry(
-                    &self.local_dir,
-                    module_name,
-                    beam_path,
-                    beam_mtime_secs,
-                    beam_mtime_nanos,
-                    &line,
-                );
-                return Some(line);
-            }
+            )
+        {
+            // Mirror into the local tier so on-disk consumers (LSP, lint)
+            // find OTP specs in `_build/type_cache/` exactly as before.
+            Self::write_entry(
+                &self.local_dir,
+                module_name,
+                beam_path,
+                beam_mtime_secs,
+                beam_mtime_nanos,
+                &line,
+            );
+            return Some(line);
         }
         None
     }
@@ -1069,11 +1068,11 @@ fn read_specs_protocol(
     for line in reader.lines() {
         let line = line.into_diagnostic()?;
         if is_specs_line(&line) {
-            if let Some(rest) = line.strip_prefix("beamtalk-specs-module:") {
-                if let Some(colon_pos) = rest.find(':') {
-                    let module_name = rest[..colon_pos].to_string();
-                    results.push((module_name, line.clone()));
-                }
+            if let Some(rest) = line.strip_prefix("beamtalk-specs-module:")
+                && let Some(colon_pos) = rest.find(':')
+            {
+                let module_name = rest[..colon_pos].to_string();
+                results.push((module_name, line.clone()));
             }
         } else if is_specs_result_ok(&line) {
             success = true;
@@ -1251,10 +1250,10 @@ pub fn discover_otp_beam_files() -> Result<OtpDiscovery> {
         return Ok(cached);
     }
     let discovery = probe_otp_installation()?;
-    if discovery.discovered {
-        if let Ok(mut guard) = CACHE.lock() {
-            *guard = Some(discovery.clone());
-        }
+    if discovery.discovered
+        && let Ok(mut guard) = CACHE.lock()
+    {
+        *guard = Some(discovery.clone());
     }
     Ok(discovery)
 }
@@ -1372,10 +1371,10 @@ fn collect_beam_stems(ebin_dir: &std::path::Path, out: &mut std::collections::Ha
     };
     for file in entries.flatten() {
         let path = file.path();
-        if path.extension().is_some_and(|e| e == "beam") {
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                out.insert(stem.to_string());
-            }
+        if path.extension().is_some_and(|e| e == "beam")
+            && let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+        {
+            out.insert(stem.to_string());
         }
     }
 }
@@ -1408,10 +1407,10 @@ pub fn collect_project_dependency_ebin_dirs(project_root: &Utf8Path) -> Vec<Utf8
     if let Ok(entries) = std::fs::read_dir(build_root.join("deps")) {
         for entry in entries.flatten() {
             let ebin = entry.path().join("ebin");
-            if ebin.is_dir() {
-                if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
-                    dirs.push(utf8);
-                }
+            if ebin.is_dir()
+                && let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin)
+            {
+                dirs.push(utf8);
             }
         }
     }
@@ -1435,10 +1434,10 @@ pub fn collect_project_dependency_ebin_dirs(project_root: &Utf8Path) -> Vec<Utf8
                 continue;
             }
             let ebin = path.join("ebin");
-            if ebin.is_dir() {
-                if let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin) {
-                    dirs.push(utf8);
-                }
+            if ebin.is_dir()
+                && let Ok(utf8) = Utf8PathBuf::from_path_buf(ebin)
+            {
+                dirs.push(utf8);
             }
         }
     }
@@ -1471,10 +1470,10 @@ pub fn discover_dependency_beam_files(ebin_dirs: &[Utf8PathBuf]) -> Vec<Utf8Path
         };
         for file in entries.flatten() {
             let path = file.path();
-            if path.extension().is_some_and(|e| e == "beam") {
-                if let Ok(utf8) = Utf8PathBuf::from_path_buf(path) {
-                    beam_files.push(utf8);
-                }
+            if path.extension().is_some_and(|e| e == "beam")
+                && let Ok(utf8) = Utf8PathBuf::from_path_buf(path)
+            {
+                beam_files.push(utf8);
             }
         }
     }
@@ -1535,10 +1534,10 @@ pub fn collect_project_known_erlang_modules(
             if !is_erl {
                 continue;
             }
-            if let Ok(utf8) = Utf8PathBuf::from_path_buf(path) {
-                if let Some(stem) = utf8.file_stem() {
-                    known.insert(stem.to_string());
-                }
+            if let Ok(utf8) = Utf8PathBuf::from_path_buf(path)
+                && let Some(stem) = utf8.file_stem()
+            {
+                known.insert(stem.to_string());
             }
         }
     }

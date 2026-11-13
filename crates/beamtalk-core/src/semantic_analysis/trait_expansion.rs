@@ -237,13 +237,13 @@ pub fn expand_module_with_resolved_uses(
             continue;
         }
         for use_ in &class.uses {
-            if let Some(protocol) = protocols.resolve(use_) {
-                if let Some(package) = &protocol.package {
-                    resolved_uses.insert(
-                        (class.name.name.clone(), protocol.name.name.clone()),
-                        package.clone(),
-                    );
-                }
+            if let Some(protocol) = protocols.resolve(use_)
+                && let Some(package) = &protocol.package
+            {
+                resolved_uses.insert(
+                    (class.name.name.clone(), protocol.name.name.clone()),
+                    package.clone(),
+                );
             }
         }
         expand_class(class, &protocols, &mut diagnostics, &mut origins);
@@ -897,10 +897,9 @@ pub fn resolve_provision_names(
                         package: qualifier @ None,
                         ..
                     } = expr
+                        && in_package.contains(&name.name)
                     {
-                        if in_package.contains(&name.name) {
-                            *qualifier = Some(Identifier::new(package.clone(), name.span));
-                        }
+                        *qualifier = Some(Identifier::new(package.clone(), name.span));
                     }
                 });
             }
@@ -1168,22 +1167,22 @@ fn substitute_provision(
 
     let mut local_renames: HashMap<EcoString, EcoString> = HashMap::new();
     for name in &local_type_vars {
-        if class_type_param_names.contains(name.as_str()) {
-            if let Some(fresh) = fresh_type_var_letter(
+        if class_type_param_names.contains(name.as_str())
+            && let Some(fresh) = fresh_type_var_letter(
                 &class_type_param_names,
                 &protocol_type_param_names,
                 &local_type_vars,
                 &local_renames,
-            ) {
-                local_renames.insert(name.clone(), fresh);
-            }
-            // Exhausted `'A'..='Z'` (26 distinct method-local + class type
-            // params in one signature) — leave unrenamed. The resulting
-            // capture is real but vanishingly unlikely to occur in
-            // practice, and not worth a 27th fallback naming scheme that
-            // `is_generic_type_param` (single-letter only) wouldn't even
-            // recognise as a type variable afterward.
+            )
+        {
+            local_renames.insert(name.clone(), fresh);
         }
+        // Exhausted `'A'..='Z'` (26 distinct method-local + class type
+        // params in one signature) — leave unrenamed. The resulting
+        // capture is real but vanishingly unlikely to occur in
+        // practice, and not worth a 27th fallback naming scheme that
+        // `is_generic_type_param` (single-letter only) wouldn't even
+        // recognise as a type variable afterward.
     }
 
     let substitute = |ty: &TypeAnnotation| -> TypeAnnotation {

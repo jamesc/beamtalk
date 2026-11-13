@@ -45,10 +45,10 @@ fn select_block_type<'a>(
                 arguments,
                 ..
             } => {
-                if selector.name() == "select:" {
-                    if let Some(Expression::Block(block)) = arguments.first() {
-                        return Some(block);
-                    }
+                if selector.name() == "select:"
+                    && let Some(Expression::Block(block)) = arguments.first()
+                {
+                    return Some(block);
                 }
                 find_select_block(receiver).or_else(|| arguments.iter().find_map(find_select_block))
             }

@@ -683,10 +683,10 @@ impl ClassInfo {
                     .iter()
                     .map(|ta| {
                         let declared = DeclaredType::from(ta);
-                        if let DeclaredType::Simple(name) = &declared {
-                            if let Some(idx) = own_params.iter().position(|p| p == name) {
-                                return SuperclassTypeArg::ParamRef { param_index: idx };
-                            }
+                        if let DeclaredType::Simple(name) = &declared
+                            && let Some(idx) = own_params.iter().position(|p| p == name)
+                        {
+                            return SuperclassTypeArg::ParamRef { param_index: idx };
                         }
                         SuperclassTypeArg::Concrete { declared }
                     })

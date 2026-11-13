@@ -113,10 +113,10 @@ pub fn erlang_module_of_receiver(expr: &Expression) -> Option<&str> {
         selector: MessageSelector::Unary(module_name),
         ..
     } = expr.unwrap_parens()
+        && is_erlang_class_reference(receiver)
+        && !is_class_protocol_selector(module_name)
     {
-        if is_erlang_class_reference(receiver) && !is_class_protocol_selector(module_name) {
-            return Some(module_name.as_str());
-        }
+        return Some(module_name.as_str());
     }
     None
 }

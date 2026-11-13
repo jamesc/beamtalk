@@ -325,17 +325,17 @@ impl TypeChecker {
 
         // ADR 0147: shape-aware keyed operations on a shape (or a union with
         // a shape member) receiver.
-        if let Some(shape_ty) = &shape_receiver_ty {
-            if let Some(ty) = self.infer_shape_keyed_send(
+        if let Some(shape_ty) = &shape_receiver_ty
+            && let Some(ty) = self.infer_shape_keyed_send(
                 shape_ty,
                 &selector_name,
                 arguments,
                 &arg_types,
                 span,
                 hierarchy,
-            ) {
-                return ty;
-            }
+            )
+        {
+            return ty;
         }
 
         // Handle asType: compile-time type assertion (ADR 0025 Phase 2b)
@@ -354,14 +354,12 @@ impl TypeChecker {
         }
 
         // `Object >> then:` (BT-4515) answers its block's result type.
-        if is_object_then {
-            if let (Some(arg), Some(ty)) = (arguments.first(), arg_types.first()) {
-                if Self::then_block_has_one_param(arg) {
-                    if let Some(ty) = Self::block_arg_result_ty(arg, ty) {
-                        return ty;
-                    }
-                }
-            }
+        if is_object_then
+            && let (Some(arg), Some(ty)) = (arguments.first(), arg_types.first())
+            && Self::then_block_has_one_param(arg)
+            && let Some(ty) = Self::block_arg_result_ty(arg, ty)
+        {
+            return ty;
         }
 
         // `ifNil:ifNotNil:` / `ifNotNil:ifNil:` return the union of
@@ -508,30 +506,27 @@ impl TypeChecker {
             // centralized in `crate::ffi_receiver` (mirrored here via
             // `is_class_protocol_selector` since this call site splits the
             // receiver/selector apart rather than holding the combined send).
-            if class_name == "Erlang" && package.is_none() {
-                if let MessageSelector::Unary(module_name) = selector {
-                    if !super::is_class_protocol_selector(module_name) {
-                        // Static module name: `Erlang lists` → ErlangModule<lists>
-                        return InferredType::Known {
-                            class_name: EcoString::from(WellKnownClass::ErlangModule.as_str()),
-                            type_args: vec![InferredType::Known {
-                                class_name: module_name.clone(),
-                                type_args: vec![],
-                                provenance:
-                                    crate::semantic_analysis::type_checker::TypeProvenance::Inferred(
-                                        span,
-                                    ),
-                            }],
-                            provenance:
-                                crate::semantic_analysis::type_checker::TypeProvenance::Inferred(
-                                    span,
-                                ),
-                        };
-                    }
-                }
-                // Class protocol selector or dynamic module: fall through to
-                // normal class-side dispatch.
+            if class_name == "Erlang"
+                && package.is_none()
+                && let MessageSelector::Unary(module_name) = selector
+                && !super::is_class_protocol_selector(module_name)
+            {
+                // Static module name: `Erlang lists` → ErlangModule<lists>
+                return InferredType::Known {
+                    class_name: EcoString::from(WellKnownClass::ErlangModule.as_str()),
+                    type_args: vec![InferredType::Known {
+                        class_name: module_name.clone(),
+                        type_args: vec![],
+                        provenance:
+                            crate::semantic_analysis::type_checker::TypeProvenance::Inferred(span),
+                    }],
+                    provenance: crate::semantic_analysis::type_checker::TypeProvenance::Inferred(
+                        span,
+                    ),
+                };
             }
+            // Class protocol selector or dynamic module: fall through to
+            // normal class-side dispatch.
 
             self.check_argument_types(
                 class_name,
@@ -597,10 +592,10 @@ impl TypeChecker {
             // Other binary selectors (e.g. `+`) must fall through to normal
             // class-side / tower lookup (and DNU if unresolved); typing
             // `SomeClass + 1` as Boolean would be wrong and suppress the DNU.
-            if let MessageSelector::Binary(op) = selector {
-                if is_equality_operator(op) {
-                    return InferredType::known("Boolean");
-                }
+            if let MessageSelector::Binary(op) = selector
+                && is_equality_operator(op)
+            {
+                return InferredType::known("Boolean");
             }
             // `aClass class` is the metaclass of the class object. The static
             // hierarchy doesn't track per-class metaclasses precisely, so fall
@@ -653,14 +648,14 @@ impl TypeChecker {
             // class object, so apply the tower instance method's declared
             // return type. Only overrides a Dynamic result, never a concrete
             // class-side answer.
-            if matches!(class_side, InferredType::Dynamic(_)) {
-                if let Some(ty) = Self::class_object_tower_return(
+            if matches!(class_side, InferredType::Dynamic(_))
+                && let Some(ty) = Self::class_object_tower_return(
                     &selector_name,
                     hierarchy,
                     &InferredType::meta(meta_class.clone()),
-                ) {
-                    return ty;
-                }
+                )
+            {
+                return ty;
             }
             return class_side;
         }
@@ -672,10 +667,10 @@ impl TypeChecker {
             ref protocol_name, ..
         } = receiver_ty
         {
-            if let MessageSelector::Binary(op) = selector {
-                if is_equality_operator(op) {
-                    return InferredType::known("Boolean");
-                }
+            if let MessageSelector::Binary(op) = selector
+                && is_equality_operator(op)
+            {
+                return InferredType::known("Boolean");
             }
             if selector.well_known() == Some(WellKnownSelector::Class) {
                 return InferredType::known("Metaclass");
@@ -927,10 +922,10 @@ impl TypeChecker {
                     }
                     // ADR 0083: `X class` — the method returns the metatype of a
                     // specific named class (`X class` annotation).
-                    if let DeclaredType::ClassOf(meta_class) = ret_ty {
-                        if hierarchy.has_class(meta_class) {
-                            return InferredType::meta(meta_class.clone());
-                        }
+                    if let DeclaredType::ClassOf(meta_class) = ret_ty
+                        && hierarchy.has_class(meta_class)
+                    {
+                        return InferredType::meta(meta_class.clone());
                     }
 
                     // `Never` resolves to the bottom type (divergent methods)
@@ -988,12 +983,12 @@ impl TypeChecker {
                     // If the return type is an unresolved type param
                     // (single uppercase letter like E, T, V), fall back to Dynamic
                     // so downstream sends don't get false DNU warnings.
-                    if let DeclaredType::Simple(n) = ret_ty {
-                        if crate::semantic_analysis::type_checker::is_type_var_placeholder(
+                    if let DeclaredType::Simple(n) = ret_ty
+                        && crate::semantic_analysis::type_checker::is_type_var_placeholder(
                             n, hierarchy,
-                        ) {
-                            return InferredType::Dynamic(DynamicReason::Unknown);
-                        }
+                        )
+                    {
+                        return InferredType::Dynamic(DynamicReason::Unknown);
                     }
 
                     // Resolve the return type through the centralised
@@ -1089,22 +1084,22 @@ impl TypeChecker {
         // `refine_singleton_narrowing` deliberately no longer emits, avoiding a
         // double hint. The union operand may be either side (`unionVar = #west`
         // or `#west = unionVar`), so consult both operand types.
-        if let MessageSelector::Binary(op) = selector {
-            if let Some(eq) = narrowing::detect_singleton_eq(receiver, op, arguments) {
-                let arg_ty = arg_types.first();
-                let union_ty = [Some(&receiver_ty), arg_ty]
-                    .into_iter()
-                    .flatten()
-                    .find(|t| matches!(t, InferredType::Union { .. }));
-                if let Some(union_ty) = union_ty {
-                    self.check_impossible_singleton_comparison(
-                        union_ty,
-                        &eq.info.singleton,
-                        eq.info.negated,
-                        span,
-                        hierarchy,
-                    );
-                }
+        if let MessageSelector::Binary(op) = selector
+            && let Some(eq) = narrowing::detect_singleton_eq(receiver, op, arguments)
+        {
+            let arg_ty = arg_types.first();
+            let union_ty = [Some(&receiver_ty), arg_ty]
+                .into_iter()
+                .flatten()
+                .find(|t| matches!(t, InferredType::Union { .. }));
+            if let Some(union_ty) = union_ty {
+                self.check_impossible_singleton_comparison(
+                    union_ty,
+                    &eq.info.singleton,
+                    eq.info.negated,
+                    span,
+                    hierarchy,
+                );
             }
         }
 
@@ -1346,10 +1341,10 @@ impl TypeChecker {
         {
             return Some(InferredType::Never);
         }
-        if let DeclaredType::Simple(n) = ret_ty {
-            if crate::semantic_analysis::type_checker::is_type_var_placeholder(n, hierarchy) {
-                return None;
-            }
+        if let DeclaredType::Simple(n) = ret_ty
+            && crate::semantic_analysis::type_checker::is_type_var_placeholder(n, hierarchy)
+        {
+            return None;
         }
         // No alias registry threaded here: `ret_ty` comes from the built-in
         // Metaclass/Class/Behaviour/Object/ProtoObject tower, which never
@@ -1646,35 +1641,35 @@ impl TypeChecker {
         // (`Self`, `Self class`, `Never`) the same way other union members are
         // normalised above, so an inherited `-> Self` selector resolves to
         // `UndefinedObject` instead of leaking `Known("Self")` into the union.
-        if has_nil && responding_count > 0 {
-            if let Some(method) =
+        if has_nil
+            && responding_count > 0
+            && let Some(method) =
                 hierarchy.find_method(WellKnownClass::UndefinedObject.as_str(), selector)
-            {
-                if let Some(ref ret_ty) = method.return_type {
-                    let nil_contribution = if matches!(ret_ty, DeclaredType::SelfType) {
-                        InferredType::known(WellKnownClass::UndefinedObject.as_str())
-                    } else if matches!(ret_ty, DeclaredType::SelfClass) {
-                        // ADR 0083: `nil class` → metatype of `UndefinedObject`.
-                        InferredType::meta(WellKnownClass::UndefinedObject.as_str())
-                    } else if matches!(ret_ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n) == Some(WellKnownClass::Never))
-                    {
-                        InferredType::Never
-                    } else {
-                        type_resolver::resolve_declared_type(
-                            ret_ty,
-                            &type_resolver::SubstitutionMap::new(),
-                            self.protocol_registry.as_deref(),
-                            self.alias_registry.as_deref(),
-                            TypeStringContext::Declared,
-                        )
-                    };
-                    return_types.push(nil_contribution);
+        {
+            if let Some(ref ret_ty) = method.return_type {
+                let nil_contribution = if matches!(ret_ty, DeclaredType::SelfType) {
+                    InferredType::known(WellKnownClass::UndefinedObject.as_str())
+                } else if matches!(ret_ty, DeclaredType::SelfClass) {
+                    // ADR 0083: `nil class` → metatype of `UndefinedObject`.
+                    InferredType::meta(WellKnownClass::UndefinedObject.as_str())
+                } else if matches!(ret_ty, DeclaredType::Simple(n) if WellKnownClass::from_str(n) == Some(WellKnownClass::Never))
+                {
+                    InferredType::Never
                 } else {
-                    return_types.push(InferredType::Dynamic(DynamicReason::UnannotatedReturn));
-                }
+                    type_resolver::resolve_declared_type(
+                        ret_ty,
+                        &type_resolver::SubstitutionMap::new(),
+                        self.protocol_registry.as_deref(),
+                        self.alias_registry.as_deref(),
+                        TypeStringContext::Declared,
+                    )
+                };
+                return_types.push(nil_contribution);
+            } else {
+                return_types.push(InferredType::Dynamic(DynamicReason::UnannotatedReturn));
             }
-            // If UndefinedObject doesn't respond: no return-type widening.
         }
+        // If UndefinedObject doesn't respond: no return-type widening.
 
         // Suppress DNU warnings when Dynamic is in the union —
         // Dynamic accepts any message, so we can't know the full method set.

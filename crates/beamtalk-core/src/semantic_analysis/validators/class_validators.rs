@@ -249,31 +249,29 @@ fn visit_actor_new(
         span,
         ..
     } = expr
+        && let Some(class_name) = receiver_class_name(receiver)
     {
-        if let Some(class_name) = receiver_class_name(receiver) {
-            let sel = selector.name();
-            if (sel == "new" || sel == "new:")
-                && class_name != "Actor"
-                && hierarchy.is_actor_subclass(class_name)
-            {
-                diagnostics.push(actor_must_spawn_error(class_name, &sel, *span));
-            }
+        let sel = selector.name();
+        if (sel == "new" || sel == "new:")
+            && class_name != "Actor"
+            && hierarchy.is_actor_subclass(class_name)
+        {
+            diagnostics.push(actor_must_spawn_error(class_name, &sel, *span));
         }
     }
     // Also check cascade messages
     if let Expression::Cascade {
         receiver, messages, ..
     } = expr
+        && let Some(class_name) = receiver_class_name(receiver)
     {
-        if let Some(class_name) = receiver_class_name(receiver) {
-            for msg in messages {
-                let sel = msg.selector.name();
-                if (sel == "new" || sel == "new:")
-                    && class_name != "Actor"
-                    && hierarchy.is_actor_subclass(class_name)
-                {
-                    diagnostics.push(actor_must_spawn_error(class_name, &sel, msg.span));
-                }
+        for msg in messages {
+            let sel = msg.selector.name();
+            if (sel == "new" || sel == "new:")
+                && class_name != "Actor"
+                && hierarchy.is_actor_subclass(class_name)
+            {
+                diagnostics.push(actor_must_spawn_error(class_name, &sel, msg.span));
             }
         }
     }
@@ -444,29 +442,27 @@ fn visit_uninstantiable_new(
         span,
         ..
     } = expr
+        && let Some(class_name) = receiver_class_name(receiver)
     {
-        if let Some(class_name) = receiver_class_name(receiver) {
-            let sel = selector.name();
-            if let Some(kind) = uninstantiable_new(class_name, &sel, hierarchy) {
-                diagnostics.push(uninstantiable_new_error(
-                    kind, class_name, &sel, hierarchy, *span,
-                ));
-            }
+        let sel = selector.name();
+        if let Some(kind) = uninstantiable_new(class_name, &sel, hierarchy) {
+            diagnostics.push(uninstantiable_new_error(
+                kind, class_name, &sel, hierarchy, *span,
+            ));
         }
     }
     // Also check cascade messages
     if let Expression::Cascade {
         receiver, messages, ..
     } = expr
+        && let Some(class_name) = receiver_class_name(receiver)
     {
-        if let Some(class_name) = receiver_class_name(receiver) {
-            for msg in messages {
-                let sel = msg.selector.name();
-                if let Some(kind) = uninstantiable_new(class_name, &sel, hierarchy) {
-                    diagnostics.push(uninstantiable_new_error(
-                        kind, class_name, &sel, hierarchy, msg.span,
-                    ));
-                }
+        for msg in messages {
+            let sel = msg.selector.name();
+            if let Some(kind) = uninstantiable_new(class_name, &sel, hierarchy) {
+                diagnostics.push(uninstantiable_new_error(
+                    kind, class_name, &sel, hierarchy, msg.span,
+                ));
             }
         }
     }
@@ -492,16 +488,15 @@ fn visit_new_field_names(
         arguments,
         ..
     } = expr
+        && let Some(class_name) = receiver_class_name(receiver)
     {
-        if let Some(class_name) = receiver_class_name(receiver) {
-            let sel = selector.name();
-            if sel == "new:" || sel == "spawn:" {
-                if let Some(Expression::MapLiteral { pairs, .. }) = arguments.first() {
-                    let declared_state = hierarchy.all_state(class_name);
-                    if !declared_state.is_empty() {
-                        validate_map_field_names(pairs, class_name, &declared_state, diagnostics);
-                    }
-                }
+        let sel = selector.name();
+        if (sel == "new:" || sel == "spawn:")
+            && let Some(Expression::MapLiteral { pairs, .. }) = arguments.first()
+        {
+            let declared_state = hierarchy.all_state(class_name);
+            if !declared_state.is_empty() {
+                validate_map_field_names(pairs, class_name, &declared_state, diagnostics);
             }
         }
     }
@@ -509,22 +504,16 @@ fn visit_new_field_names(
     if let Expression::Cascade {
         receiver, messages, ..
     } = expr
+        && let Some(class_name) = receiver_class_name(receiver)
     {
-        if let Some(class_name) = receiver_class_name(receiver) {
-            for msg in messages {
-                let sel = msg.selector.name();
-                if sel == "new:" || sel == "spawn:" {
-                    if let Some(Expression::MapLiteral { pairs, .. }) = msg.arguments.first() {
-                        let declared_state = hierarchy.all_state(class_name);
-                        if !declared_state.is_empty() {
-                            validate_map_field_names(
-                                pairs,
-                                class_name,
-                                &declared_state,
-                                diagnostics,
-                            );
-                        }
-                    }
+        for msg in messages {
+            let sel = msg.selector.name();
+            if (sel == "new:" || sel == "spawn:")
+                && let Some(Expression::MapLiteral { pairs, .. }) = msg.arguments.first()
+            {
+                let declared_state = hierarchy.all_state(class_name);
+                if !declared_state.is_empty() {
+                    validate_map_field_names(pairs, class_name, &declared_state, diagnostics);
                 }
             }
         }
@@ -539,18 +528,18 @@ fn validate_map_field_names(
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for pair in pairs {
-        if let Expression::Literal(crate::ast::Literal::Symbol(sym), sym_span) = &pair.key {
-            if !declared_state.iter().any(|s| s.as_str() == sym.as_str()) {
-                let fields: Vec<&str> = declared_state.iter().map(EcoString::as_str).collect();
-                diagnostics.push(
-                    Diagnostic::warning(
-                        format!("Unknown field `{sym}` for class `{class_name}`"),
-                        *sym_span,
-                    )
-                    .with_hint(format!("Declared fields: {}", fields.join(", ")))
-                    .with_category(DiagnosticCategory::Type),
-                );
-            }
+        if let Expression::Literal(crate::ast::Literal::Symbol(sym), sym_span) = &pair.key
+            && !declared_state.iter().any(|s| s.as_str() == sym.as_str())
+        {
+            let fields: Vec<&str> = declared_state.iter().map(EcoString::as_str).collect();
+            diagnostics.push(
+                Diagnostic::warning(
+                    format!("Unknown field `{sym}` for class `{class_name}`"),
+                    *sym_span,
+                )
+                .with_hint(format!("Declared fields: {}", fields.join(", ")))
+                .with_category(DiagnosticCategory::Type),
+            );
         }
     }
 }
@@ -609,59 +598,45 @@ fn visit_classvar_access(
         span,
         ..
     } = expr
+        && let Some(class_name) = receiver_class_name(receiver)
     {
-        if let Some(class_name) = receiver_class_name(receiver) {
-            let sel = selector.name();
-            if sel == "classState:" {
-                if let Some(Expression::Literal(crate::ast::Literal::Symbol(var_name), _)) =
-                    arguments.first()
-                {
-                    if let Some(hint) =
-                        undefined_class_variable_hint(hierarchy, class_name, var_name)
-                    {
-                        diagnostics.push(
-                            Diagnostic::warning(
-                                format!(
-                                    "Undefined class variable `{var_name}` on class `{class_name}`"
-                                ),
-                                *span,
-                            )
-                            .with_hint(hint)
-                            .with_category(DiagnosticCategory::Type),
-                        );
-                    }
-                }
-            }
+        let sel = selector.name();
+        if sel == "classState:"
+            && let Some(Expression::Literal(crate::ast::Literal::Symbol(var_name), _)) =
+                arguments.first()
+            && let Some(hint) = undefined_class_variable_hint(hierarchy, class_name, var_name)
+        {
+            diagnostics.push(
+                Diagnostic::warning(
+                    format!("Undefined class variable `{var_name}` on class `{class_name}`"),
+                    *span,
+                )
+                .with_hint(hint)
+                .with_category(DiagnosticCategory::Type),
+            );
         }
     }
     // Also check cascade messages
     if let Expression::Cascade {
         receiver, messages, ..
     } = expr
+        && let Some(class_name) = receiver_class_name(receiver)
     {
-        if let Some(class_name) = receiver_class_name(receiver) {
-            for msg in messages {
-                let sel = msg.selector.name();
-                if sel == "classState:" {
-                    if let Some(Expression::Literal(crate::ast::Literal::Symbol(var_name), _)) =
-                        msg.arguments.first()
-                    {
-                        if let Some(hint) =
-                            undefined_class_variable_hint(hierarchy, class_name, var_name)
-                        {
-                            diagnostics.push(
-                                Diagnostic::warning(
-                                    format!(
-                                        "Undefined class variable `{var_name}` on class `{class_name}`"
-                                    ),
-                                    msg.span,
-                                )
-                                .with_hint(hint)
-                                .with_category(DiagnosticCategory::Type),
-                            );
-                        }
-                    }
-                }
+        for msg in messages {
+            let sel = msg.selector.name();
+            if sel == "classState:"
+                && let Some(Expression::Literal(crate::ast::Literal::Symbol(var_name), _)) =
+                    msg.arguments.first()
+                && let Some(hint) = undefined_class_variable_hint(hierarchy, class_name, var_name)
+            {
+                diagnostics.push(
+                    Diagnostic::warning(
+                        format!("Undefined class variable `{var_name}` on class `{class_name}`"),
+                        msg.span,
+                    )
+                    .with_hint(hint)
+                    .with_category(DiagnosticCategory::Type),
+                );
             }
         }
     }
@@ -900,23 +875,21 @@ fn check_slot_assignment_at(
     hierarchy: &ClassHierarchy,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
-    if let Expression::Assignment { target, span, .. } = expr {
-        if let Expression::FieldAccess {
+    if let Expression::Assignment { target, span, .. } = expr
+        && let Expression::FieldAccess {
             receiver, field, ..
         } = target.as_ref()
-        {
-            if receiver.is_self() {
-                report_self_slot_assignment(
-                    field.name.as_str(),
-                    *span,
-                    class_name,
-                    method_selector,
-                    is_value,
-                    hierarchy,
-                    diagnostics,
-                );
-            }
-        }
+        && receiver.is_self()
+    {
+        report_self_slot_assignment(
+            field.name.as_str(),
+            *span,
+            class_name,
+            method_selector,
+            is_value,
+            hierarchy,
+            diagnostics,
+        );
     }
 }
 
@@ -947,9 +920,11 @@ fn visit_cast_on_value_type(
         if !is_cast {
             return;
         }
-        if let Some(class_name) = receiver_class_name(receiver) {
-            if hierarchy.has_class(class_name) && hierarchy.is_value_subclass(class_name) {
-                diagnostics.push(
+        if let Some(class_name) = receiver_class_name(receiver)
+            && hierarchy.has_class(class_name)
+            && hierarchy.is_value_subclass(class_name)
+        {
+            diagnostics.push(
                     Diagnostic::error(
                         format!(
                             "Cannot use ! (cast) on value type `{class_name}`. Value types are not actors."
@@ -959,7 +934,6 @@ fn visit_cast_on_value_type(
                     .with_hint("Remove the `!` — value types are not actors and cannot be cast to a message target")
                     .with_category(DiagnosticCategory::Type),
                 );
-            }
         }
     }
 }
@@ -1296,14 +1270,12 @@ pub(crate) fn check_shape_version_and_migrations(
     for class in &module.classes {
         let is_native = class.backing_module.is_some();
 
-        if is_native {
-            if let Some(sv) = &class.shape_version {
-                diagnostics.push(native_shape_clause_error(
-                    &class.name.name,
-                    "shapeVersion:",
-                    sv.span,
-                ));
-            }
+        if is_native && let Some(sv) = &class.shape_version {
+            diagnostics.push(native_shape_clause_error(
+                &class.name.name,
+                "shapeVersion:",
+                sv.span,
+            ));
         }
 
         let declared_version = class.effective_shape_version();

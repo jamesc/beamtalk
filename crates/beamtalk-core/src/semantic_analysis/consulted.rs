@@ -157,10 +157,10 @@ pub(crate) fn record_name(name: &str) {
 #[inline(never)]
 fn record_name_slow(name: &str) {
     RECORDER.with(|r| {
-        if let Some(s) = r.borrow_mut().as_mut() {
-            if !s.names.contains(name) {
-                s.names.insert(name.into());
-            }
+        if let Some(s) = r.borrow_mut().as_mut()
+            && !s.names.contains(name)
+        {
+            s.names.insert(name.into());
         }
     });
 }
