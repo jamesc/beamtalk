@@ -30,11 +30,7 @@ test classes via beamtalk_class_builder.
 %%% ============================================================================
 
 setup() ->
-    case pg:start_link() of
-        {ok, _} -> ok;
-        {error, {already_started, _}} -> ok
-    end,
-    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_test_boot:registry(),
     [].
 
 %% Like setup/0, but records workspace capabilities so the Behaviour

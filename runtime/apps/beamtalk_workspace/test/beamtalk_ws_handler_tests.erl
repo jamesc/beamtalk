@@ -28,7 +28,7 @@ methods_op_empty_class_name_returns_empty_list_test() ->
     ?assertEqual([], Result).
 
 methods_op_known_class_returns_instance_and_class_methods_test() ->
-    beamtalk_class_registry:ensure_pg_started(),
+    beamtalk_test_boot:registry(),
     ClassName = 'BT1026TestClass',
     RegName = beamtalk_class_registry:registry_name(ClassName),
     %% Clean up any leftover registration from a previous test run
@@ -82,7 +82,7 @@ methods_op_known_class_returns_instance_and_class_methods_test() ->
 
 methods_op_protocol_json_shape_test() ->
     %% Exercise the full "methods" op handler and assert on JSON response shape.
-    beamtalk_class_registry:ensure_pg_started(),
+    beamtalk_test_boot:registry(),
     ClassName = 'BT1026ProtoTestClass',
     RegName = beamtalk_class_registry:registry_name(ClassName),
     case whereis(RegName) of
@@ -128,7 +128,7 @@ methods_op_protocol_json_shape_test() ->
     end.
 
 methods_op_name_equals_selector_test() ->
-    beamtalk_class_registry:ensure_pg_started(),
+    beamtalk_test_boot:registry(),
     ClassName = 'BT1026NameSelectorClass',
     RegName = beamtalk_class_registry:registry_name(ClassName),
     case whereis(RegName) of

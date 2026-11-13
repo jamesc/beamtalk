@@ -1114,7 +1114,7 @@ test_check_init_args_registry_primary_inherited() ->
     %% from BaseState here to prove the walk supplies it. (The other
     %% check_init_args tests use the unregistered 'Conf' and thus exercise
     %% the state-keys fallback.)
-    ok = ensure_logging_counter_loaded(),
+    ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
     BaseState = #{logCount => 0},
     InitArgs = #{value => 1, logCount => 2},
     ?assertEqual(
@@ -1128,7 +1128,7 @@ test_check_init_args_registry_primary_late() ->
     %% Primary path: a `late` field is declared but never present in a
     %% state map — the metadata walk must still accept it (the documented
     %% spawnWith: injection path for late slots).
-    ok = ensure_late_slot_actor_loaded(),
+    ok = beamtalk_test_class:ensure_fixture_loaded('LateSlotActor', 'bt@late_slot_actor'),
     BaseState = #{count => 0},
     InitArgs = #{proc => a_fake_subprocess},
     ?assertEqual(
@@ -1289,31 +1289,6 @@ check_new(Class, Args) ->
 
 delete_classes(Names) ->
     lists:foreach(fun beamtalk_class_metadata:delete/1, Names).
-
-ensure_logging_counter_loaded() ->
-    ensure_fixture_class_loaded('LoggingCounter', 'bt@logging_counter').
-
-ensure_late_slot_actor_loaded() ->
-    ensure_fixture_class_loaded('LateSlotActor', 'bt@late_slot_actor').
-
-ensure_fixture_class_loaded(ClassName, Module) ->
-    case beamtalk_class_registry:whereis_class(ClassName) of
-        undefined ->
-            case code:ensure_loaded(Module) of
-                {module, Module} ->
-                    case erlang:function_exported(Module, register_class, 0) of
-                        true ->
-                            Module:register_class(),
-                            ok;
-                        false ->
-                            error({fixture_no_register_function, Module})
-                    end;
-                {error, Reason} ->
-                    error({fixture_module_not_found, Module, Reason})
-            end;
-        _Pid ->
-            ok
-    end.
 
 test_generic_new_multi_args() ->
     Pid = register_builder_class('BT2275GNewMulti', 'Object', #{a => 1}, #{}),

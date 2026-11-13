@@ -1778,13 +1778,8 @@ ensure_xref_running() ->
     end.
 
 ensure_pg_running() ->
-    case whereis(pg) of
-        undefined ->
-            {ok, _} = pg:start_link(),
-            ok;
-        _ ->
-            ok
-    end.
+    _ = beamtalk_test_boot:registry(),
+    ok.
 
 %% Register the hand-coded bootstrap stub classes (the same calls
 %% `beamtalk_bootstrap:init/1` makes). Idempotent — re-registering a live class

@@ -19,14 +19,7 @@ flow produces the correct class hierarchy.
 %%====================================================================
 
 setup() ->
-    %% Start pg server if not already running
-    case whereis(pg) of
-        undefined ->
-            {ok, Pid} = pg:start_link(),
-            Pid;
-        Pid ->
-            Pid
-    end.
+    beamtalk_test_boot:registry().
 
 teardown(_) ->
     %% Clean up all registered class processes (BT-3815: unwatched first so

@@ -1305,12 +1305,9 @@ chain_with_registry_test_() ->
 
 setup_chain_registry() ->
     %% Start pg if not running
-    case whereis(pg) of
-        undefined -> {ok, _} = pg:start_link();
-        _ -> ok
-    end,
+    beamtalk_test_boot:registry(),
     %% Ensure hierarchy table exists
-    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_test_boot:registry(),
     %% Register a minimal TestInteger class with return type annotations
     {ok, IntPid} = beamtalk_object_class:start('TestChainInteger', #{
         name => 'TestChainInteger',
@@ -1895,11 +1892,7 @@ test_op_known_class_returns_response() ->
     ?assert(maps:is_key(<<"status">>, Decoded)).
 
 setup_dev_runtime() ->
-    case whereis(pg) of
-        undefined -> {ok, _} = pg:start_link();
-        _ -> ok
-    end,
-    beamtalk_class_registry:ensure_hierarchy_table(),
+    beamtalk_test_boot:registry(),
     %% Base class (superclass) so the hierarchy walk has > 1 level.
     {ok, BasePid} = beamtalk_object_class:start('WidgetDevBase', #{
         name => 'WidgetDevBase',

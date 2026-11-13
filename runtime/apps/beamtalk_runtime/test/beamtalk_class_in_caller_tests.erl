@@ -46,15 +46,14 @@ setup() ->
     ok = beamtalk_stdlib:init(),
     ok.
 
-start_class(Name, Superclass, ClassVars, Methods) ->
-    ClassInfo = #{
+class_info(Superclass, ClassVars, Methods) ->
+    #{
         superclass => Superclass,
         module => ?HELPER,
         class_methods => Methods,
         class_state => ClassVars,
         meta => ?META
-    },
-    beamtalk_test_class:start(Name, ClassInfo).
+    }.
 
 tag(Name) -> beamtalk_class_registry:class_object_tag(Name).
 
@@ -77,7 +76,7 @@ strip_stacktrace(#{} = Wrapped) -> maps:remove(raw_stacktrace, Wrapped);
 strip_stacktrace(Other) -> Other.
 
 with_class(Name, Superclass, ClassVars, Fun) ->
-    Pid = start_class(Name, Superclass, ClassVars, ?METHODS),
+    Pid = beamtalk_test_class:start(Name, class_info(Superclass, ClassVars, ?METHODS)),
     try
         Fun(Pid)
     after
@@ -152,7 +151,9 @@ in_caller_test_() ->
         end},
         {"a stateless subclass of a stateful class keeps its process", fun() ->
             with_class('Bt4300Parent', none, #{count => 0}, fun(_ParentPid) ->
-                Child = start_class('Bt4300Child', 'Bt4300Parent', #{}, #{}),
+                Child = beamtalk_test_class:start(
+                    'Bt4300Child', class_info('Bt4300Parent', #{}, #{})
+                ),
                 try
                     ?assertEqual(Child, send(Child, testSelf, []))
                 after
@@ -162,7 +163,7 @@ in_caller_test_() ->
         end},
         {"an inherited method of a stateless chain runs in the caller", fun() ->
             with_class('Bt4300Root', none, #{}, fun(_RootPid) ->
-                Leaf = start_class('Bt4300Leaf', 'Bt4300Root', #{}, #{}),
+                Leaf = beamtalk_test_class:start('Bt4300Leaf', class_info('Bt4300Root', #{}, #{})),
                 try
                     ?assertEqual(self(), send(Leaf, testSelf, [])),
                     %% `self` is the receiving subclass.
@@ -287,7 +288,7 @@ static_guard_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
         {"the guard holds for a stateless chain and not under a stateful ancestor", fun() ->
             with_class('Bt4301Root', none, #{}, fun(_RootPid) ->
-                Leaf = start_class('Bt4301Leaf', 'Bt4301Root', #{}, #{}),
+                Leaf = beamtalk_test_class:start('Bt4301Leaf', class_info('Bt4301Root', #{}, #{})),
                 try
                     ?assert(
                         beamtalk_class_shadow_flags:direct_call_ok(tag('Bt4301Leaf'), 'Bt4301Leaf')
@@ -297,7 +298,9 @@ static_guard_test_() ->
                 end
             end),
             with_class('Bt4301StatefulRoot', none, #{count => 0}, fun(_RootPid) ->
-                Leaf = start_class('Bt4301StatefulLeaf', 'Bt4301StatefulRoot', #{}, #{}),
+                Leaf = beamtalk_test_class:start(
+                    'Bt4301StatefulLeaf', class_info('Bt4301StatefulRoot', #{}, #{})
+                ),
                 try
                     ?assertNot(
                         beamtalk_class_shadow_flags:direct_call_ok(
@@ -317,7 +320,9 @@ static_guard_test_() ->
         end},
         {"an ancestor gaining class variables turns a descendant's installed guard off", fun() ->
             with_class('Bt4301GainRoot', none, #{}, fun(_RootPid) ->
-                Leaf = start_class('Bt4301GainLeaf', 'Bt4301GainRoot', #{}, #{}),
+                Leaf = beamtalk_test_class:start(
+                    'Bt4301GainLeaf', class_info('Bt4301GainRoot', #{}, #{})
+                ),
                 LeafTag = tag('Bt4301GainLeaf'),
                 try
                     ?assert(beamtalk_class_shadow_flags:direct_call_ok(LeafTag, 'Bt4301GainLeaf')),
@@ -336,7 +341,9 @@ static_guard_test_() ->
         {"re-parenting under a class with class variables turns the guard off (BT-4134)", fun() ->
             with_class('Bt4301ReparentPlain', none, #{}, fun(_PlainPid) ->
                 with_class('Bt4301ReparentStateful', none, #{count => 0}, fun(_StatefulPid) ->
-                    Leaf = start_class('Bt4301ReparentLeaf', 'Bt4301ReparentPlain', #{}, #{}),
+                    Leaf = beamtalk_test_class:start(
+                        'Bt4301ReparentLeaf', class_info('Bt4301ReparentPlain', #{}, #{})
+                    ),
                     LeafTag = tag('Bt4301ReparentLeaf'),
                     try
                         ?assert(
@@ -597,7 +604,9 @@ process_verdict_invalidation_test_() ->
             fun() ->
                 with_class('Bt4771ReparentPlain', none, #{}, fun(_PlainPid) ->
                     with_class('Bt4771ReparentStateful', none, #{count => 0}, fun(_StatefulPid) ->
-                        Leaf = start_class('Bt4771ReparentLeaf', 'Bt4771ReparentPlain', #{}, #{}),
+                        Leaf = beamtalk_test_class:start(
+                            'Bt4771ReparentLeaf', class_info('Bt4771ReparentPlain', #{}, #{})
+                        ),
                         try
                             ?assertEqual(self(), send(Leaf, testSelf, [])),
                             ?assertMatch({owner, _, _, _, _, _, _}, memo(Leaf, testSelf)),

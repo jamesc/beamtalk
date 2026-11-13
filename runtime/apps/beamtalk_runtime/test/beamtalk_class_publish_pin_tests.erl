@@ -21,13 +21,7 @@ before `publish_reflection/1` and `notify_hot_patch/1` moved into
 -define(WATCHED, [put_reflection, put_flags, put_method_records, put_class_doc]).
 
 setup() ->
-    case whereis(pg) of
-        undefined -> {ok, _} = pg:start_link();
-        _ -> ok
-    end,
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
-    beamtalk_class_registry:ensure_pid_table(),
+    beamtalk_test_boot:registry(),
     meck:new(beamtalk_class_metadata, [passthrough, no_link]),
     meck:new(beamtalk_compiler_server, [non_strict, no_link]),
     meck:expect(beamtalk_compiler_server, register_class, fun(_, _) -> ok end),

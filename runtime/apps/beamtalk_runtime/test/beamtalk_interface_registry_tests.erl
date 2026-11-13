@@ -32,10 +32,7 @@ fake_self() ->
 %%====================================================================
 
 setup() ->
-    case whereis(pg) of
-        undefined -> {ok, _} = pg:start_link();
-        _ -> ok
-    end,
+    beamtalk_test_boot:registry(),
     register_test_classes().
 
 teardown(_) ->

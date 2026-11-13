@@ -232,9 +232,9 @@ field_migration_setup() ->
     application:ensure_all_started(beamtalk_runtime),
     beamtalk_stdlib:init(),
     ok = beamtalk_test_class:ensure_counter_loaded(),
-    ok = ensure_init_hook_counter_loaded(),
-    ok = ensure_typed_field_counter_loaded(),
-    ok = ensure_logging_counter_loaded(),
+    ok = beamtalk_test_class:ensure_fixture_loaded('InitHookCounter', 'bt@init_hook_counter'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('TypedFieldCounter', 'bt@typed_field_counter'),
+    ok = beamtalk_test_class:ensure_fixture_loaded('LoggingCounter', 'bt@logging_counter'),
     ok.
 
 field_migration_teardown(_) ->
@@ -830,67 +830,3 @@ field_migration_init_throws_returns_old_state_test() ->
 %%====================================================================
 %% Helpers
 %%====================================================================
-
-%% BT-3532: InitHookCounter (defines `initialize`) exercises the codegen
-%% branch bare init(#{}) used to break field migration for.
-ensure_init_hook_counter_loaded() ->
-    case code:ensure_loaded('bt@init_hook_counter') of
-        {module, 'bt@init_hook_counter'} ->
-            case beamtalk_class_registry:whereis_class('InitHookCounter') of
-                undefined ->
-                    case erlang:function_exported('bt@init_hook_counter', register_class, 0) of
-                        true ->
-                            'bt@init_hook_counter':register_class(),
-                            ok;
-                        false ->
-                            ok
-                    end;
-                _Pid ->
-                    ok
-            end;
-        {error, Reason} ->
-            error({init_hook_counter_module_not_found, Reason})
-    end.
-
-%% BT-3532: TypedFieldCounter (typed-no-default field, no `initialize`)
-%% exercises the chain_has_typed_no_default half of the same codegen guard.
-ensure_typed_field_counter_loaded() ->
-    case code:ensure_loaded('bt@typed_field_counter') of
-        {module, 'bt@typed_field_counter'} ->
-            case beamtalk_class_registry:whereis_class('TypedFieldCounter') of
-                undefined ->
-                    case erlang:function_exported('bt@typed_field_counter', register_class, 0) of
-                        true ->
-                            'bt@typed_field_counter':register_class(),
-                            ok;
-                        false ->
-                            ok
-                    end;
-                _Pid ->
-                    ok
-            end;
-        {error, Reason} ->
-            error({typed_field_counter_module_not_found, Reason})
-    end.
-
-%% BT-3531: LoggingCounter (Counter subclass, BT-108 fixture) exercises
-%% inherited-field flattening in migrate_fields/3. Requires Counter already
-%% registered (ensure_counter_loaded/0 runs first in field_migration_setup/0).
-ensure_logging_counter_loaded() ->
-    case code:ensure_loaded('bt@logging_counter') of
-        {module, 'bt@logging_counter'} ->
-            case beamtalk_class_registry:whereis_class('LoggingCounter') of
-                undefined ->
-                    case erlang:function_exported('bt@logging_counter', register_class, 0) of
-                        true ->
-                            'bt@logging_counter':register_class(),
-                            ok;
-                        false ->
-                            ok
-                    end;
-                _Pid ->
-                    ok
-            end;
-        {error, Reason} ->
-            error({logging_counter_module_not_found, Reason})
-    end.

@@ -25,19 +25,15 @@ ClassBuilder with the meta literal.
 %%====================================================================
 
 setup() ->
-    case whereis(pg) of
-        undefined -> {ok, _} = pg:start_link();
-        _ -> ok
-    end,
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
-    beamtalk_class_registry:ensure_pid_table(),
     %% Owned by this setup process, not by the short-lived `-on_load` hook
     %% process that would otherwise create it on the first parked refusal
     %% (and take it down when that process exits, before the test drains it).
     %% Created without an heir and deleted in teardown, so it is never handed
-    %% to `beamtalk_ets_heir`.
-    ensure_pending_errors_table().
+    %% to `beamtalk_ets_heir`. Created before the shared registry boot so
+    %% `registry/0` finds it present instead of creating it with an heir.
+    PendingTable = ensure_pending_errors_table(),
+    beamtalk_test_boot:registry(),
+    PendingTable.
 
 ensure_pending_errors_table() ->
     case ets:info(beamtalk_pending_load_errors) of

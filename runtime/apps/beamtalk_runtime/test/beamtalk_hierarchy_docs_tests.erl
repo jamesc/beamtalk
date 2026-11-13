@@ -165,22 +165,33 @@ hierarchy_docs_test_() ->
 %%% ====================================================================
 
 setup() ->
-    beamtalk_class_registry:ensure_pg_started(),
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    PidA = start_class(?ROOT_A, none, #{}, #{}),
-    PidB = start_class(?GHOST_B, ?GHOST_SUPER_1, #{}, #{}),
-    PidC = start_class(?ROOT_C, none, #{}, #{}),
-    PidD = start_class(?GHOST_D, ?GHOST_SUPER_2, #{}, #{}),
-    PidE = start_class(?ROOT_E, none, #{}, #{}),
-    PidF = start_class(?ROOT_F, none, #{fakeMethod => #{arity => 0}}, #{}),
+    beamtalk_test_boot:registry(),
+    PidA = beamtalk_test_class:start_or_get(?ROOT_A, class_info(?ROOT_A, none, #{}, #{})),
+    PidB = beamtalk_test_class:start_or_get(
+        ?GHOST_B, class_info(?GHOST_B, ?GHOST_SUPER_1, #{}, #{})
+    ),
+    PidC = beamtalk_test_class:start_or_get(?ROOT_C, class_info(?ROOT_C, none, #{}, #{})),
+    PidD = beamtalk_test_class:start_or_get(
+        ?GHOST_D, class_info(?GHOST_D, ?GHOST_SUPER_2, #{}, #{})
+    ),
+    PidE = beamtalk_test_class:start_or_get(?ROOT_E, class_info(?ROOT_E, none, #{}, #{})),
+    PidF = beamtalk_test_class:start_or_get(
+        ?ROOT_F, class_info(?ROOT_F, none, #{fakeMethod => #{arity => 0}}, #{})
+    ),
     %% Inheritance chain: SubG has ownMethod; its superclass SuperH has inheritedMethod.
-    PidH = start_class(?SUPERCLASS_H, none, #{inheritedMethod => #{arity => 0}}, #{}),
-    PidG = start_class(?SUBCLASS_G, ?SUPERCLASS_H, #{ownMethod => #{arity => 0}}, #{}),
+    PidH = beamtalk_test_class:start_or_get(
+        ?SUPERCLASS_H, class_info(?SUPERCLASS_H, none, #{inheritedMethod => #{arity => 0}}, #{})
+    ),
+    PidG = beamtalk_test_class:start_or_get(
+        ?SUBCLASS_G, class_info(?SUBCLASS_G, ?SUPERCLASS_H, #{ownMethod => #{arity => 0}}, #{})
+    ),
     %% Circular chain: CycleX → CycleY → CycleX → … triggers max_depth_exceeded.
     %% CycleX carries a method so the partial accumulator on cycle is non-empty,
     %% making the collect_flattened_methods cycle-detection assertion non-trivial.
-    PidX = start_class(?CYCLE_X, ?CYCLE_Y, #{cycleMethod => #{arity => 0}}, #{}),
-    PidY = start_class(?CYCLE_Y, ?CYCLE_X, #{}, #{}),
+    PidX = beamtalk_test_class:start_or_get(
+        ?CYCLE_X, class_info(?CYCLE_X, ?CYCLE_Y, #{cycleMethod => #{arity => 0}}, #{})
+    ),
+    PidY = beamtalk_test_class:start_or_get(?CYCLE_Y, class_info(?CYCLE_Y, ?CYCLE_X, #{}, #{})),
     {PidA, PidB, PidC, PidD, PidE, PidF, PidG, PidH, PidX, PidY}.
 
 teardown({PidA, PidB, PidC, PidD, PidE, PidF, PidG, PidH, PidX, PidY}) ->
@@ -188,16 +199,12 @@ teardown({PidA, PidB, PidC, PidD, PidE, PidF, PidG, PidH, PidX, PidY}) ->
         PidA, PidB, PidC, PidD, PidE, PidF, PidG, PidH, PidX, PidY
     ]).
 
-start_class(Name, Superclass, InstanceMethods, ClassMethods) ->
-    ClassInfo = #{
+class_info(Name, Superclass, InstanceMethods, ClassMethods) ->
+    #{
         name => Name,
         superclass => Superclass,
         module => Name,
         instance_methods => InstanceMethods,
         class_methods => ClassMethods,
         fields => []
-    },
-    case beamtalk_object_class:start(Name, ClassInfo) of
-        {ok, Pid} -> Pid;
-        {error, {already_started, Pid}} -> Pid
-    end.
+    }.

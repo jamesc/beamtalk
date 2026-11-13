@@ -32,20 +32,16 @@ codegen, which EUnit cannot drive directly).
 
 setup() ->
     %% pg backs class-registry membership used by beamtalk_object_class.
-    case whereis(pg) of
-        undefined -> {ok, _} = pg:start_link();
-        _ -> ok
-    end,
+    beamtalk_test_boot:registry(),
     %% The announcements bus: reuse a supervised instance or stand one up.
     case whereis(beamtalk_announcements) of
         undefined -> {ok, _} = beamtalk_announcements:start_link();
         _ -> ok
     end,
     clear_subscriptions(),
-    beamtalk_class_registry:ensure_hierarchy_table(),
-    beamtalk_class_registry:ensure_module_table(),
+    beamtalk_test_boot:registry(),
     beamtalk_class_registry:ensure_methods_table(),
-    beamtalk_class_registry:ensure_pid_table(),
+    beamtalk_test_boot:registry(),
     beamtalk_class_registry:ensure_loaded_classes_table(),
     ok.
 

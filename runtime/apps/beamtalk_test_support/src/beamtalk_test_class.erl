@@ -13,7 +13,12 @@ module on demand. Replaces the per-file `start_class/N`, `stop_class/1`,
 """.
 
 -export([
-    start/2, start/3, stop/1, ensure_fixture_loaded/2, ensure_counter_loaded/0, stop_graceful/1
+    start/2, start/3,
+    start_or_get/2,
+    stop/1,
+    ensure_fixture_loaded/2,
+    ensure_counter_loaded/0,
+    stop_graceful/1
 ]).
 
 -doc "`start/3` with the default `ClassInfo` overrides (none).".
@@ -30,6 +35,18 @@ start(Name, ClassInfo, Overrides) ->
     {ok, Pid} = beamtalk_object_class:start_link(Name, maps:merge(ClassInfo, Overrides)),
     unlink(Pid),
     Pid.
+
+-doc """
+Like `start/2`, but tolerates a class already registered under `Name` (returns
+the live pid instead of crashing). Started with `beamtalk_object_class:start/2`,
+so it is not linked to the caller.
+""".
+-spec start_or_get(atom(), map()) -> pid().
+start_or_get(Name, ClassInfo) ->
+    case beamtalk_object_class:start(Name, ClassInfo) of
+        {ok, Pid} -> Pid;
+        {error, {already_started, Pid}} -> Pid
+    end.
 
 -doc """
 Stop a class started by `start/2,3`: unwatch from the class monitor, kill and

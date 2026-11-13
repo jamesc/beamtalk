@@ -99,20 +99,9 @@ locally and via `erpc:call/5` on the peer.
 """.
 -spec load_fixture(atom(), atom()) -> ok.
 load_fixture(Basename, ClassName) ->
-    Module = list_to_atom("bt@" ++ atom_to_list(Basename)),
-    case code:ensure_loaded(Module) of
-        {module, Module} ->
-            case beamtalk_class_registry:whereis_class(ClassName) of
-                undefined ->
-                    true = erlang:function_exported(Module, register_class, 0),
-                    Module:register_class(),
-                    ok;
-                _Pid ->
-                    ok
-            end;
-        {error, Reason} ->
-            error({fixture_module_not_found, Basename, ClassName, Reason})
-    end.
+    beamtalk_test_class:ensure_fixture_loaded(
+        ClassName, list_to_atom("bt@" ++ atom_to_list(Basename))
+    ).
 
 -doc """
 Repoint `ClassName`'s registered module (real, at this point — `load_fixture/2`
