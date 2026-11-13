@@ -2239,6 +2239,22 @@ constructed at runtime via `perform:` produce the identical atom.
 """.
 -spec class_method_fun_name(selector()) -> atom().
 class_method_fun_name(Selector) ->
+    %% BT-4771: memoised per selector in `persistent_term` (the `class_` name is
+    %% a pure function of the selector, so a stale or racing entry is never
+    %% wrong). Saves an `atom_to_binary` + `binary_to_atom` round trip on every
+    %% class send. Adding a key never triggers a global GC.
+    Key = {?MODULE, class_method_fun_name, Selector},
+    case persistent_term:get(Key, undefined) of
+        undefined ->
+            FunName = derive_class_method_fun_name(Selector),
+            persistent_term:put(Key, FunName),
+            FunName;
+        FunName ->
+            FunName
+    end.
+
+-spec derive_class_method_fun_name(selector()) -> atom().
+derive_class_method_fun_name(Selector) ->
     SelectorBin = atom_to_binary(Selector, utf8),
     Combined = <<"class_", SelectorBin/binary>>,
     case byte_size(Combined) =< 255 of

@@ -144,6 +144,16 @@ class_method_fun_name_test_() ->
 %% the equivalent selector at compile time.
 %%====================================================================
 
+class_method_fun_name_memoised_result_is_stable_test() ->
+    %% BT-4771: the second call reads the `persistent_term` memo and must return
+    %% the identical atom the first call derived, for short and hashed names.
+    Short = 'bt4771MemoSelector:with:',
+    Long = list_to_atom(lists:duplicate(250, $z)),
+    First = [beamtalk_class_dispatch:class_method_fun_name(S) || S <- [Short, Long]],
+    Second = [beamtalk_class_dispatch:class_method_fun_name(S) || S <- [Short, Long]],
+    ?assertEqual(First, Second),
+    ?assertEqual('class_bt4771MemoSelector:with:', hd(First)).
+
 class_method_fun_name_long_selector_does_not_crash_test() ->
     %% Simulates a selector assembled at runtime (e.g. via `perform:`) rather
     %% than known at compile time — `list_to_atom/1` on the raw

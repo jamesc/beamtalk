@@ -192,12 +192,35 @@ fn is_kind_of_user_class_literal_is_name_only() {
         "user class literal should use isKindOfNamed. Got:\n{code}"
     );
     assert!(code.contains("'Probe')"), "Got:\n{code}");
-    assert!(
-        !code.contains("'isKindOf:', ["),
-        "no dynamic isKindOf: send on the fast path. Got:\n{code}"
-    );
     assert!(!code.contains("'isKindOfBuiltin'("), "Got:\n{code}");
+    // BT-4768: the shared class-liveness probe guards the fast path; the one
+    // `isKindOf:` send sits in the dead-class branch only, after the probe
+    // and after the fast call, so the live path makes no dynamic send.
+    let probe = code
+        .find("call 'erlang':'is_pid'(call 'erlang':'whereis'('beamtalk_class_Probe'))")
+        .unwrap_or_else(|| panic!("liveness probe missing. Got:\n{code}"));
+    let fast = code.find("'isKindOfNamed'(").expect("fast call");
+    let send = code.find("'isKindOf:', [").expect("dead-class send");
+    assert!(probe < fast && fast < send, "Got:\n{code}");
+    assert_eq!(code.matches("'isKindOf:', [").count(), 1, "Got:\n{code}");
     super::assert_compiles_through_erlc("test", &code);
+}
+
+#[test]
+fn is_kind_of_fast_paths_share_one_class_liveness_probe() {
+    // BT-4768: the built-in lowering (BT-4764) and the name-only lowering
+    // (BT-4757) emit the same probe, from one helper.
+    let probe = "call 'erlang':'is_pid'(call 'erlang':'whereis'(";
+    let builtin = codegen(concat!(
+        "Object subclass: Probe\n",
+        "  check: v :: Object -> Boolean => v isKindOf: String\n",
+    ));
+    let named = codegen(concat!(
+        "Object subclass: Probe\n",
+        "  check: v :: Object -> Boolean => v isKindOf: Probe\n",
+    ));
+    assert!(builtin.contains(probe), "Got:\n{builtin}");
+    assert!(named.contains(probe), "Got:\n{named}");
 }
 
 #[test]

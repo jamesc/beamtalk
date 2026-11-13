@@ -288,12 +288,7 @@ impl CoreErlangGenerator {
             if self.context != CodeGenContext::Repl
                 && let Some(class_name) = Self::user_class_literal_name(class_arg)
             {
-                return self.emit_kind_of_call_with(
-                    receiver,
-                    class_arg,
-                    KindOfFn::Named,
-                    |_, _| leaf::atom(class_name),
-                );
+                return self.emit_named_kind_of(receiver, class_arg, &class_name);
             }
             return Ok(None);
         };
@@ -400,32 +395,15 @@ impl CoreErlangGenerator {
         // The plain send, behind the class literal's own evaluation: used when
         // an override exists, and when the class process is dead, where the
         // literal raises `class_not_found` exactly as it always did.
-        let send_class = self.fresh_temp_var("KindOfClass");
-        // The call node carries the send's source line, as every dispatch
-        // call does (`call_site_lines`).
-        let send_call = self.annotate_current_send_call(docvec![
-            "call 'beamtalk_message_dispatch':'send'(",
-            leaf::var(recv_var.clone()),
-            ", 'isKindOf:', [",
-            leaf::var(send_class.clone()),
-            "])"
-        ]);
-        let send = docvec![
-            "let ",
-            leaf::var(send_class),
-            " = ",
-            class_doc,
-            " in ",
-            send_call
-        ];
+        let send = self.kind_of_plain_send_doc(&recv_var, class_doc);
         let call_doc = docvec![
             "let ",
             leaf::var(recv_var),
             " = ",
             recv_doc,
-            " in case call 'erlang':'and'(call 'erlang':'is_pid'(",
-            Self::registered_class_pid_doc(class_name),
-            "), call 'erlang':'not'(call 'beamtalk_default_method':'overridden_anywhere'('isKindOf:'))) of ",
+            " in case call 'erlang':'and'(",
+            Self::class_process_alive_doc(class_name),
+            ", call 'erlang':'not'(call 'beamtalk_default_method':'overridden_anywhere'('isKindOf:'))) of ",
             "<'true'> when 'true' -> ",
             fast,
             " <'false'> when 'true' -> ",
@@ -463,40 +441,94 @@ impl CoreErlangGenerator {
         }
     }
 
-    /// `let R = <receiver> in let K = <class_arg> in call
-    /// 'beamtalk_behaviour_intrinsics':<fn_name>(R, K, <extra>)`: the shape
-    /// of the user-class-literal (name-only) lowering.
-    fn emit_kind_of_call_with(
+    /// `call 'erlang':'is_pid'(whereis('beamtalk_class_<Name>'))`: whether the
+    /// class literal's process is registered and alive. The one liveness probe
+    /// of both `isKindOf:` fast paths (BT-4764 built-in, BT-4757 name-only,
+    /// BT-4768): a dead class takes the plain send, which evaluates the
+    /// literal and raises `class_not_found` exactly as it always did.
+    fn class_process_alive_doc(class_name: &str) -> Document<'static> {
+        docvec![
+            "call 'erlang':'is_pid'(",
+            Self::registered_class_pid_doc(class_name),
+            ")"
+        ]
+    }
+
+    /// The plain `isKindOf:` send behind the class literal's own evaluation
+    /// (`let K = <class> in send(R, 'isKindOf:', [K])`), shared by both
+    /// fast-path lowerings for their dead-class / override exit.
+    fn kind_of_plain_send_doc(
+        &mut self,
+        recv_var: &str,
+        class_doc: Document<'static>,
+    ) -> Document<'static> {
+        let send_class = self.fresh_temp_var("KindOfClass");
+        // The call node carries the send's source line, as every dispatch
+        // call does (`call_site_lines`).
+        let send_call = self.annotate_current_send_call(docvec![
+            "call 'beamtalk_message_dispatch':'send'(",
+            leaf::var(recv_var.to_string()),
+            ", 'isKindOf:', [",
+            leaf::var(send_class.clone()),
+            "])"
+        ]);
+        docvec![
+            "let ",
+            leaf::var(send_class),
+            " = ",
+            class_doc,
+            " in ",
+            send_call
+        ]
+    }
+
+    /// BT-4757 / BT-4768: the name-only lowering of `x isKindOf: UserClass`:
+    ///
+    /// ```erlang
+    /// let R = <x> in
+    /// case is_pid(whereis('beamtalk_class_C')) of
+    ///   'true'  -> let K = <C> in isKindOfNamed(R, K, 'C')
+    ///   'false' -> let K = <C> in send(R, 'isKindOf:', [K])  % dead class
+    /// end
+    /// ```
+    ///
+    /// The probe is [`Self::class_process_alive_doc`], the same one the
+    /// built-in lowering uses, so a dead class process raises as it did
+    /// before the name-only path existed.
+    fn emit_named_kind_of(
         &mut self,
         receiver: &Expression,
         class_arg: &Expression,
-        fn_name: KindOfFn,
-        extra: impl FnOnce(&mut Self, &str) -> Document<'static>,
+        class_name: &str,
     ) -> Result<Option<Document<'static>>> {
         let mut seq = self.sequence_call(&[receiver, class_arg], "KindOf")?;
         let recv_doc = seq.next();
         let class_doc = seq.next();
         let recv_var = self.fresh_temp_var("KindOfRecv");
         let class_var = self.fresh_temp_var("KindOfClass");
-        let extra_doc = extra(self, &recv_var);
+        let send = self.kind_of_plain_send_doc(&recv_var, class_doc.clone());
         let call_doc = docvec![
             "let ",
             leaf::var(recv_var.clone()),
             " = ",
             recv_doc,
-            " in let ",
+            " in case ",
+            Self::class_process_alive_doc(class_name),
+            " of <'true'> when 'true' -> let ",
             leaf::var(class_var.clone()),
             " = ",
             class_doc,
             " in call 'beamtalk_behaviour_intrinsics':",
-            leaf::atom(fn_name.name().to_string()),
+            leaf::atom(KindOfFn::Named.name().to_string()),
             "(",
             leaf::var(recv_var),
             ", ",
             leaf::var(class_var),
             ", ",
-            extra_doc,
-            ")",
+            leaf::atom(class_name.to_string()),
+            ") <'false'> when 'true' -> ",
+            send,
+            " end"
         ];
         Ok(Some(seq.close(self, call_doc, "KindOfRes")))
     }

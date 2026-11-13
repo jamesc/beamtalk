@@ -1033,11 +1033,15 @@ While no class other than `Object` has defined `isKindOf:`
 (`beamtalk_default_method:overridden_anywhere/1`) the send would run
 `objectIsKindOf/2`; for an ordinary instance that is `inherits_from(Class,
 Name)` on the class table, which this answers directly by name: no class-object
-cache key, no liveness check. A class-object or metaclass receiver, a future,
-or any override takes the ordinary send. No verdict is cached here, so a
-reloaded superclass is seen at once (`inherits_from/2` is flushed on every
-class write). As for `match:` arms (ADR 0107), a registered class whose process
-is dead answers from the table rather than falling back to the send.
+cache key. A class-object or metaclass receiver, a future, or any override
+takes the ordinary send. No verdict is cached here, so a reloaded superclass is
+seen at once (`inherits_from/2` is flushed on every class write).
+
+Strict (BT-4768): a dead process raises exactly as the send always did. The
+compiled caller probes `Name`'s own class process (the probe `isKindOf:` on a
+built-in literal shares); here the receiver's side is checked: an actor whose
+process is dead, or an instance whose class process is dead or unregistered,
+takes the ordinary send, which raises.
 """.
 -spec isKindOfNamed(term(), term(), atom()) -> term().
 isKindOfNamed(Receiver, Behaviour, Name) ->
@@ -1055,8 +1059,11 @@ kind_of_named(Receiver, Behaviour, Name, false) ->
             %% A class that does not inherit `Object` (a `ProtoObject` proxy
             %% forwarding `doesNotUnderstand:`) never runs `Object>>isKindOf:`,
             %% so it takes the send too.
+            %% A dead actor or class process takes the send too (BT-4768):
+            %% it raises there, as it did before the name-only path.
             case
-                beamtalk_class_metadata:lookup_superclass(C) =/= not_found andalso
+                instance_alive(Receiver, C) andalso
+                    beamtalk_class_metadata:lookup_superclass(C) =/= not_found andalso
                     beamtalk_class_derived_cache:inherits_from(C, 'Object')
             of
                 true -> beamtalk_class_derived_cache:inherits_from(C, Name);
@@ -1067,6 +1074,19 @@ kind_of_named(Receiver, Behaviour, Name, false) ->
     end;
 kind_of_named(Receiver, Behaviour, _Name, true) ->
     beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour]).
+
+%% Whether the processes a send to an instance of `C` would reach are alive:
+%% the actor itself (a local one; a remote pid is the send's to judge) and
+%% `C`'s registered class process.
+-spec instance_alive(term(), atom()) -> boolean().
+instance_alive(#beamtalk_object{pid = Pid}, C) when is_pid(Pid), node(Pid) =:= node() ->
+    is_process_alive(Pid) andalso class_process_alive(C);
+instance_alive(_Receiver, C) ->
+    class_process_alive(C).
+
+-spec class_process_alive(atom()) -> boolean().
+class_process_alive(C) ->
+    is_pid(beamtalk_class_registry:whereis_class(C)).
 
 %% `isKindOfBuiltin/3` with the node-wide override flag passed in, so tests
 %% can check both branches whatever the flag holds in their node.
