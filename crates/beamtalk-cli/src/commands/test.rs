@@ -1062,6 +1062,23 @@ pub fn run_tests(
         jobs,
     )?;
     pipeline.full_traces = full_traces;
+
+    // BT-4809: build the packages (rebar3 hex deps, `native/*.erl`) *before*
+    // compiling fixtures and test sources, as `beamtalk build` orders native
+    // compilation before Pass 2. On a fresh checkout the dep ebin dirs only
+    // exist once the build has run, and the `unresolved_ffi` check and the
+    // FFI type registry both read them while the test sources compile.
+    // Snapshot-only runs never build packages, so they keep the on-disk view.
+    let has_native_test_dir = pipeline.discovered_packages.iter().any(|(pkg_root, _)| {
+        let native_test_dir = pkg_root.join("native").join("test");
+        native_test_dir.is_dir()
+    });
+    // Cheap pre-scan: skip the build entirely when there is nothing to test.
+    if !pipeline.snapshot_only && (!pipeline.test_files.is_empty() || has_native_test_dir) {
+        build_packages(&mut pipeline)?;
+        refresh_native_analysis_inputs(&mut pipeline);
+    }
+
     compile_fixtures(&mut pipeline)?;
     discover_and_compile_tests(&mut pipeline)?;
 
@@ -1076,23 +1093,6 @@ pub fn run_tests(
         );
         return Ok(());
     }
-
-    // Cheap pre-scan: check if any package might have native test files
-    // so we can skip build_packages entirely when there are no tests at all.
-    let has_native_test_dir = pipeline.discovered_packages.iter().any(|(pkg_root, _)| {
-        let native_test_dir = pkg_root.join("native").join("test");
-        native_test_dir.is_dir()
-    });
-
-    if pipeline.compiled_tests.is_empty()
-        && pipeline.compiled_doc_tests.is_empty()
-        && !has_native_test_dir
-    {
-        println!("No tests found");
-        return Ok(());
-    }
-
-    build_packages(&mut pipeline)?;
 
     if pipeline.compiled_tests.is_empty()
         && pipeline.compiled_doc_tests.is_empty()
@@ -1402,6 +1402,30 @@ fn compute_native_type_registry(
     merged_any.then(|| std::sync::Arc::new(merged))
 }
 
+/// Project-known Erlang modules for the `unresolved_ffi` check, merged across
+/// every discovered package (BT-4022). Seeded with the installed set so loose
+/// test files (no discovered package) still get the check.
+fn collect_known_erlang_modules_for(
+    discovered_packages: &[(Utf8PathBuf, manifest::PackageManifest)],
+) -> beamtalk_core::ffi_type_specs::KnownErlangModules {
+    let mut known = beamtalk_core::ffi_type_specs::collect_installed_erlang_modules();
+    for (pkg_root, _pkg) in discovered_packages {
+        known.extend_modules(
+            beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(pkg_root),
+        );
+    }
+    known
+}
+
+/// Recompute the analysis inputs that read compiled native/hex-dep output
+/// (known Erlang modules, FFI type registry) after `build_packages` has
+/// produced it (BT-4809).
+fn refresh_native_analysis_inputs(pipeline: &mut TestPipeline) {
+    pipeline.known_erlang_modules = collect_known_erlang_modules_for(&pipeline.discovered_packages);
+    pipeline.native_type_registry =
+        compute_native_type_registry(&pipeline.discovered_packages, &pipeline.test_files);
+}
+
 /// Initialize the test pipeline: discover packages and build class indexes.
 fn initialize_pipeline(
     test_path: Utf8PathBuf,
@@ -1446,21 +1470,12 @@ fn initialize_pipeline(
 
     let native_type_registry = compute_native_type_registry(&discovered_packages, &test_files);
 
-    // BT-4022: project-known Erlang modules for the `unresolved_ffi` check,
-    // merged across every discovered package (same merge shape as
-    // `compute_native_type_registry` above). Unlike `beamtalk build`, `test`
-    // does not compile the package's own native/hex deps first, so the ebin
-    // tier reflects whatever a previous build left on disk — the `native/`
-    // source tier is known regardless.
-    // Seeded with the installed set so loose test files (no discovered
-    // package) still get the check.
-    let mut known_erlang_modules =
-        beamtalk_core::ffi_type_specs::collect_installed_erlang_modules();
-    for (pkg_root, _pkg) in &discovered_packages {
-        known_erlang_modules.extend_modules(
-            beamtalk_core::ffi_type_specs::collect_project_known_erlang_modules(pkg_root),
-        );
-    }
+    // BT-4022: project-known Erlang modules for the `unresolved_ffi` check.
+    // This is the pre-build view (whatever a previous build left on disk plus
+    // the `native/` sources); `run_tests` recomputes it via
+    // `refresh_native_analysis_inputs` once `build_packages` has compiled the
+    // native/hex deps (BT-4809).
+    let known_erlang_modules = collect_known_erlang_modules_for(&discovered_packages);
 
     Ok(TestPipeline {
         test_path,
