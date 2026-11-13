@@ -1988,8 +1988,8 @@ remove_dead_class_registration(ClassName, Module) ->
                             %% (`terminate/2` unregistered it and removes its
                             %% own rows): nothing to hand back or remove.
                             case beamtalk_class_registry:whereis_class(ClassName) of
-                                Owner -> {alive, Owner};
-                                _ -> ok
+                                LivePid when is_pid(LivePid) -> {alive, LivePid};
+                                undefined -> ok
                             end;
                         false ->
                             remove_claimed_dead_class(ClassName, Module, Owner)
@@ -2003,34 +2003,45 @@ remove_claimed_dead_class(ClassName, Module, Owner) ->
         Lost when Lost =:= false; Lost =:= superseded ->
             %% The row names another owner, or a rebuild wrote one mid-teardown:
             %% the class was rebuilt after the re-check. Leave it registered and
-            %% announce nothing.
+            %% announce nothing; only the dead incarnations' rows are dropped.
+            beamtalk_class_registry:forget_dead_incarnations(ClassName),
             case beamtalk_class_registry:whereis_class(ClassName) of
                 NewPid when is_pid(NewPid) -> {alive, NewPid};
                 undefined -> ok
             end;
         true ->
             beamtalk_class_registry:forget_dead_incarnations(ClassName),
-            _ =
-                (try
-                    beamtalk_class_lifecycle:class_removed(ClassName, Module)
-                catch
-                    _:_ -> ok
-                end),
-            _ =
-                (try
-                    beamtalk_behaviour_intrinsics:publish_class_removed(ClassName, Module)
-                catch
-                    _:_ -> ok
-                end),
-            _ =
-                (try
-                    beamtalk_class_derived_cache:invalidate()
-                catch
-                    _:_ -> ok
-                end),
-            beamtalk_class_publish:announce_class_lifecycle('ClassRemoved', ClassName),
-            ok
+            %% One more look before the name-keyed purges and the announcement:
+            %% a rebuild that landed after the last teardown check must not be
+            %% purged or announced as removed.
+            case beamtalk_class_registry:whereis_class(ClassName) of
+                RebuiltPid when is_pid(RebuiltPid) -> {alive, RebuiltPid};
+                undefined -> announce_dead_class_removed(ClassName, Module)
+            end
     end.
+
+-spec announce_dead_class_removed(class_name(), module()) -> ok.
+announce_dead_class_removed(ClassName, Module) ->
+    _ =
+        (try
+            beamtalk_class_lifecycle:class_removed(ClassName, Module)
+        catch
+            _:_ -> ok
+        end),
+    _ =
+        (try
+            beamtalk_behaviour_intrinsics:publish_class_removed(ClassName, Module)
+        catch
+            _:_ -> ok
+        end),
+    _ =
+        (try
+            beamtalk_class_derived_cache:invalidate()
+        catch
+            _:_ -> ok
+        end),
+    beamtalk_class_publish:announce_class_lifecycle('ClassRemoved', ClassName),
+    ok.
 
 -spec remove_registration(class_name(), fun((pid()) -> term())) -> ok.
 remove_registration(ClassName, ForgetPidRows) ->

@@ -583,8 +583,17 @@ delete_if_owner(Name, Owner) when is_pid(Owner) ->
 
 -spec run_unless_superseded(class_name(), superclass() | undefined, [fun(() -> term())]) ->
     true | superseded.
-run_unless_superseded(_Name, _OldSuperclass, []) ->
-    true;
+run_unless_superseded(Name, OldSuperclass, []) ->
+    %% One last look after the final step: a rebuild that landed during it
+    %% (e.g. a same-superclass rebuild whose edge `finish_removal/2` just
+    %% dropped) is repaired by `drop_superseded_leftovers/2`.
+    case lookup_owner(Name) of
+        {ok, _NewOwner} ->
+            drop_superseded_leftovers(Name, OldSuperclass),
+            superseded;
+        not_found ->
+            true
+    end;
 run_unless_superseded(Name, OldSuperclass, [Step | Rest]) ->
     case lookup_owner(Name) of
         {ok, _NewOwner} ->
@@ -603,7 +612,9 @@ run_unless_superseded(Name, OldSuperclass, [Step | Rest]) ->
 -spec drop_superseded_leftovers(class_name(), superclass() | undefined) -> ok.
 drop_superseded_leftovers(Name, OldSuperclass) ->
     case field(Name, #class_metadata.superclass) of
-        OldSuperclass -> ok;
+        %% Same superclass: the edge is the rebuild's own; restore it in case
+        %% the teardown's `finish_removal/2` just dropped it.
+        OldSuperclass when OldSuperclass =/= undefined -> insert_subclass_edge(OldSuperclass, Name);
         _ when OldSuperclass =:= undefined -> ok;
         _ -> delete_subclass_edge(OldSuperclass, Name)
     end,
