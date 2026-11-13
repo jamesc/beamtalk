@@ -1057,8 +1057,7 @@ eval_value(Self, Source) ->
     try beamtalk_workspace_callback:eval_with_self(Self, Source) of
         {ok, Value} -> {ok, Value};
         {error, no_workspace} -> {error, eval_unavailable_error()};
-        {error, #beamtalk_error{} = Err} -> {error, Err};
-        {error, Reason} -> {error, eval_failed_error(Reason)}
+        {error, #beamtalk_error{} = Err} -> {error, Err}
     catch
         %% BT-3735: a `^` from a captured block is control flow for a catch
         %% frame further up the caller's stack; pass it through.
