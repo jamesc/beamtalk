@@ -723,3 +723,19 @@ fn changing_dependency_alias_body_reexpands_sibling() {
     service.update_file(types, "internal type Secret = Integer\n".to_string());
     assert!(mismatch_diags(&service, &consumer_file).is_empty());
 }
+
+/// Moving an alias declaration (a line inserted above it) leaves its
+/// expansion unchanged, so it is not an alias change.
+#[test]
+fn moving_dependency_alias_is_not_an_alias_change() {
+    let types = Utf8PathBuf::from("_build/deps/vault/src/Types.bt");
+    let mut service = SimpleLanguageService::new();
+    service.update_file(types.clone(), "internal type Secret = String\n".to_string());
+    let before = service.project_index.internal_aliases_of(&types);
+    service.update_file(
+        types.clone(),
+        "\n\ninternal type Secret = String\n".to_string(),
+    );
+    assert_eq!(before, service.project_index.internal_aliases_of(&types));
+    assert!(!before.is_empty());
+}

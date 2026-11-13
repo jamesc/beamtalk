@@ -19,7 +19,6 @@
 //! └── stdlib class names (pre-indexed from lib/*.bt)
 //! ```
 
-use beamtalk_core::ast::TypeAnnotation;
 use beamtalk_core::compilation::extension_index::ExtensionIndex;
 use beamtalk_core::semantic_analysis::{
     AliasInfo, AliasRegistry, ClassHierarchy, ProtocolInfo, ProtocolRegistry, SemanticError,
@@ -492,16 +491,23 @@ impl ProjectIndex {
             .collect()
     }
 
-    /// `file`'s currently indexed `internal` aliases as `(name, annotation)`
-    /// (spans ignored), for detecting a change that makes its siblings'
+    /// `file`'s currently indexed `internal` aliases as `(name, expansion)`.
+    /// `DeclaredType` carries no spans, so moving an alias without changing
+    /// it is not a change. Used for detecting a change that makes its siblings'
     /// exported signatures stale (BT-4778).
-    pub fn internal_aliases_of(&self, file: &Utf8PathBuf) -> Vec<(EcoString, TypeAnnotation)> {
+    pub fn internal_aliases_of(
+        &self,
+        file: &Utf8PathBuf,
+    ) -> Vec<(
+        EcoString,
+        beamtalk_core::semantic_analysis::class_hierarchy::DeclaredType,
+    )> {
         self.file_aliases
             .get(file)
             .map(|v| {
                 v.iter()
                     .filter(|i| i.is_internal)
-                    .map(|i| (i.name.clone(), i.annotation.clone()))
+                    .map(|i| (i.name.clone(), (&i.annotation).into()))
                     .collect()
             })
             .unwrap_or_default()
