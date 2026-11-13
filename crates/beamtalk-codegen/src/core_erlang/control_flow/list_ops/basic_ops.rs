@@ -56,7 +56,7 @@ impl CoreErlangGenerator {
             safe_list_var,
             lambda_var,
             item_var,
-        } = self.begin_list_fold(receiver, body, ListOpKind::Do, "do:", true)?;
+        } = self.begin_list_fold(receiver, body, ListOpKind::Do, "do:", None, true)?;
 
         if plan.use_tuple_acc {
             // Tuple-accumulator path — no StateAcc map allocation per iteration.
