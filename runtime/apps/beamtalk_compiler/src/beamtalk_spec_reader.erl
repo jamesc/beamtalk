@@ -807,7 +807,10 @@ forms_module(Forms) ->
 %% `Dynamic' (see `resolve_user_type/2').
 -spec well_known_opaque_class(atom(), atom(), non_neg_integer()) -> {ok, binary()} | error.
 well_known_opaque_class(zlib, zstream, 0) -> {ok, <<"ZlibStream">>};
-well_known_opaque_class(file, io_device, 0) -> {ok, <<"IoDevice">>};
+%% `io_device()' is `io_server() | fd()' and an `io_server()' is a plain pid, so a
+%% `Pid' is a valid io_device: keep it in the union (a union param is not
+%% argument-checked) rather than reject it with a false positive.
+well_known_opaque_class(file, io_device, 0) -> {ok, <<"IoDevice | Pid">>};
 well_known_opaque_class(ets, tid, 0) -> {ok, <<"EtsTid">>};
 well_known_opaque_class(_Mod, _Type, _Arity) -> error.
 

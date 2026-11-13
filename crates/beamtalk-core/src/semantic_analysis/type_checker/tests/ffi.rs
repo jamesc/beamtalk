@@ -1321,7 +1321,8 @@ fn otp_handle_registry() -> NativeTypeRegistry {
            params => [#{name => <<\"table\">>,type => <<\"Symbol | EtsTid\">>}],return_type => <<\"True\">>}]",
         "beamtalk-specs-module:file:[\
          #{arity => 1,name => <<\"close\">>,\
-           params => [#{name => <<\"fd\">>,type => <<\"IoDevice\">>}],return_type => <<\"Symbol\">>}]",
+           params => [#{name => <<\"fd\">>,type => <<\"IoDevice | Pid\">>}],return_type => <<\"Symbol\">>},\
+         #{arity => 0,name => <<\"handle\">>,params => [],return_type => <<\"IoDevice\">>}]",
         "beamtalk-specs-module:erlang:[\
          #{arity => 2,name => <<\"monitor\">>,\
            params => [#{name => <<\"type\">>,type => <<\"Symbol\">>},\
@@ -1398,19 +1399,29 @@ fn bt4717_sending_a_message_to_an_opaque_handle_names_the_type() {
 
 #[test]
 fn bt4717_opaque_handle_rejected_by_a_different_handle_param() {
+    // An IoDevice is not a zstream: the plain `ZlibStream` param of
+    // `zlib:close/1` must reject it.
     let src = "typed Object subclass: Gz\n  \
         run =>\n    \
-          z := (Erlang zlib) open.\n    \
-          (Erlang file) close: z";
+          fd := (Erlang file) handle.\n    \
+          (Erlang zlib) close: fd";
     let d = otp_handle_diags(src);
     assert!(
         d.iter()
-            .any(|d| d.message.contains("IoDevice") && d.message.contains("ZlibStream")),
-        "a ZlibStream is not an IoDevice: {d:?}"
+            .any(|d| d.message.contains("ZlibStream") && d.message.contains("IoDevice")),
+        "an IoDevice is not a ZlibStream: {d:?}"
     );
-    // Union-typed FFI params (e.g. `ets:delete/1` takes `atom() | tid()`) are
-    // not argument-checked today (`check_ffi_argument_types` skips non-`Known`
-    // params), so only plain handle params reject a mismatched handle.
+}
+
+#[test]
+fn bt4717_pid_is_accepted_where_an_io_device_is_expected() {
+    // `file:io_device()` is `io_server() | fd()` and an io_server is a pid, so
+    // the param is `IoDevice | Pid` and a Pid argument must not warn.
+    let src = "typed Object subclass: Gz\n  \
+        run: p :: Pid =>\n    \
+          (Erlang file) close: p";
+    let d = otp_handle_diags(src);
+    assert!(d.is_empty(), "a Pid is a valid io_device: {d:?}");
 }
 
 #[test]

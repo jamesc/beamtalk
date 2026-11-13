@@ -2141,7 +2141,7 @@ map_type_remote_well_known_opaque_test_() ->
     end,
     [
         ?_assertEqual(<<"ZlibStream">>, Remote(zlib, zstream)),
-        ?_assertEqual(<<"IoDevice">>, Remote(file, io_device)),
+        ?_assertEqual(<<"IoDevice | Pid">>, Remote(file, io_device)),
         ?_assertEqual(<<"EtsTid">>, Remote(ets, tid)),
         %% An unknown remote type still falls back to Dynamic.
         ?_assertEqual(<<"Dynamic">>, Remote(no_such_module_bt4717, handle))
@@ -2166,7 +2166,7 @@ map_type_local_well_known_opaque_test() ->
 well_known_opaque_class_names_test_() ->
     [
         ?_assertEqual(<<"ZlibStream">>, class_for(zlib, zstream)),
-        ?_assertEqual(<<"IoDevice">>, class_for(file, io_device)),
+        ?_assertEqual(<<"IoDevice | Pid">>, class_for(file, io_device)),
         ?_assertEqual(<<"EtsTid">>, class_for(ets, tid))
     ].
 
@@ -2190,7 +2190,7 @@ otp_handle_specs_are_named_types_test_() ->
             maps:get(params, Spec(zlib, close, 1))
         ),
         ?_assertMatch(
-            [#{type := <<"IoDevice">>}],
+            [#{type := <<"IoDevice | Pid">>}],
             maps:get(params, Spec(file, close, 1))
         ),
         %% ets:new/2 answers `table()` = `atom() | tid()`.
