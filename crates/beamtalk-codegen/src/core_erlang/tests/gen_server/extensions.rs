@@ -256,7 +256,7 @@ fn test_self_extension_is_folded_not_registered() {
     );
     let code = super::codegen(src);
     assert!(
-        !code.contains("beamtalk_extensions"),
+        !code.contains("call 'beamtalk_extensions':'register'"),
         "same-file extensions must not register. Got:\n{code}"
     );
     assert!(

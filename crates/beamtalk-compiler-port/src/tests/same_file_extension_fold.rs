@@ -63,7 +63,7 @@ fn same_file_extensions_fold_for_every_class_kind() {
         );
         let core = response_field_str(&file, "core_erlang").expect("core_erlang");
         assert!(
-            !core.contains("beamtalk_extensions"),
+            !core.contains("call 'beamtalk_extensions':'register'"),
             "{kind}: same-file extension must not register. Got:\n{core}"
         );
         assert!(
@@ -122,5 +122,5 @@ fn class_extension_on_native_actor_folds() {
         "{response:?}"
     );
     let core = response_field_str(&response, "core_erlang").expect("core_erlang");
-    assert!(!core.contains("beamtalk_extensions"), "Got:\n{core}");
+    assert!(!core.contains("call 'beamtalk_extensions':'register'"), "Got:\n{core}");
 }

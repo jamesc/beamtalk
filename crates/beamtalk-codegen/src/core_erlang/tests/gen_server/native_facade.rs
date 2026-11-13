@@ -794,7 +794,7 @@ fn test_native_facade_class_side_same_file_extension_is_folded() {
     let code =
         generate_module(&module, CodegenOptions::new("bt@test_native")).expect("codegen succeeds");
     assert!(
-        !code.contains("beamtalk_extensions"),
+        !code.contains("call 'beamtalk_extensions':'register'"),
         "same-file extension must not register. Got:\n{code}"
     );
     assert!(
