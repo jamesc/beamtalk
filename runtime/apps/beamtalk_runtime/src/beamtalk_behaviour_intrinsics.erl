@@ -1046,8 +1046,15 @@ isKindOfNamed(Receiver, Behaviour, Name) ->
 -spec kind_of_named(term(), term(), atom(), boolean()) -> term().
 kind_of_named(Receiver, Behaviour, Name, false) ->
     case receiver_class_side(Receiver) of
-        {instance, C} -> beamtalk_class_derived_cache:inherits_from(C, Name);
-        _ -> beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour])
+        {instance, C} ->
+            %% An instance whose class is not in the class table takes the
+            %% send, as `objectIsKindOf/2` does.
+            case beamtalk_class_metadata:lookup_superclass(C) of
+                {ok, _} -> beamtalk_class_derived_cache:inherits_from(C, Name);
+                not_found -> beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour])
+            end;
+        _ ->
+            beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour])
     end;
 kind_of_named(Receiver, Behaviour, _Name, true) ->
     beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour]).

@@ -209,6 +209,28 @@ fn is_kind_of_user_class_literal_is_name_only() {
 }
 
 #[test]
+fn is_kind_of_user_class_literal_stays_a_send_in_the_repl() {
+    // A REPL name resolves through the session map before the class registry
+    // (ADR 0129 §7), so the literal's spelling does not name the class.
+    use crate::core_erlang::{CodeGenContext, CoreErlangGenerator};
+    let (module, _) = super::parse_normalised("dog isKindOf: IkAnimal");
+    let stmt = module.expressions[0].expression.clone();
+    let mut generator = CoreErlangGenerator::new("bt4757_repl");
+    generator.context = CodeGenContext::Repl;
+    generator.set_is_repl_mode(true);
+    generator.push_scope();
+    generator.bind_var("__bindings__", "Bindings");
+    generator.bind_var("dog", "Dog");
+    let code = generator
+        .expression_doc_with_repl_mutation_tracking(&stmt)
+        .expect("codegen")
+        .0
+        .to_pretty_string();
+    assert!(!code.contains("'isKindOfNamed'("), "Got:\n{code}");
+    assert!(code.contains("'isKindOf:'"), "Got:\n{code}");
+}
+
+#[test]
 fn is_kind_of_abstract_sealed_boolean_uses_is_boolean() {
     // `Boolean` is abstract and sealed: its instances are exactly `true` and
     // `false` (its stdlib subclasses), which `is_boolean` tests.
