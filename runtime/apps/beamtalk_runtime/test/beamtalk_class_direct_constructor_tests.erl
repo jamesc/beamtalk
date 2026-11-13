@@ -59,7 +59,9 @@ class_info_with_module(Module, Superclass, Meta) ->
 direct_constructor_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
         {"eligible new builds in the caller's process", fun() ->
-            Pid = beamtalk_test_class:start('BT4099DirectNew', class_info(#{direct_constructors => [new]})),
+            Pid = beamtalk_test_class:start(
+                'BT4099DirectNew', class_info(#{direct_constructors => [new]})
+            ),
             try
                 ?assertEqual(self(), beamtalk_class_dispatch:class_send(Pid, new, []))
             after
@@ -67,7 +69,9 @@ direct_constructor_test_() ->
             end
         end},
         {"eligible new: with a map builds in the caller's process", fun() ->
-            Pid = beamtalk_test_class:start('BT4099DirectNew1', class_info(#{direct_constructors => ['new:']})),
+            Pid = beamtalk_test_class:start(
+                'BT4099DirectNew1', class_info(#{direct_constructors => ['new:']})
+            ),
             try
                 ?assertEqual(
                     {self(), #{a => 1}},
@@ -78,7 +82,9 @@ direct_constructor_test_() ->
             end
         end},
         {"new absent from the verdict goes through the class gen_server", fun() ->
-            Pid = beamtalk_test_class:start('BT4099Gated', class_info(#{direct_constructors => ['new:']})),
+            Pid = beamtalk_test_class:start(
+                'BT4099Gated', class_info(#{direct_constructors => ['new:']})
+            ),
             try
                 ?assertEqual(Pid, beamtalk_class_dispatch:class_send(Pid, new, []))
             after
@@ -98,7 +104,9 @@ direct_constructor_test_() ->
             end
         end},
         {"new: with a non-map argument is never eligible", fun() ->
-            Pid = beamtalk_test_class:start('BT4099NonMap', class_info(#{direct_constructors => [new, 'new:']})),
+            Pid = beamtalk_test_class:start(
+                'BT4099NonMap', class_info(#{direct_constructors => [new, 'new:']})
+            ),
             try
                 %% The gen_server path owns the legacy fallbacks for this
                 %% shape; the direct path must decline before the export check.
@@ -110,8 +118,10 @@ direct_constructor_test_() ->
             end
         end},
         {"missing new/1 export is not called directly", fun() ->
-            Pid = beamtalk_test_class:start('BT4099NoNew1', class_info_with_module( ?PLAIN_HELPER, #{direct_constructors => ['new:']}
-            )),
+            Pid = beamtalk_test_class:start(
+                'BT4099NoNew1',
+                class_info_with_module(?PLAIN_HELPER, #{direct_constructors => ['new:']})
+            ),
             try
                 ?assertEqual(
                     error, beamtalk_class_dispatch:lookup_direct_constructor(Pid, 'new:', [#{}])
@@ -121,8 +131,10 @@ direct_constructor_test_() ->
             end
         end},
         {"missing new/0 export is not called directly", fun() ->
-            Pid = beamtalk_test_class:start('BT4099NoNew0', class_info_with_module( ?PLAIN_HELPER, #{direct_constructors => [new]}
-            )),
+            Pid = beamtalk_test_class:start(
+                'BT4099NoNew0',
+                class_info_with_module(?PLAIN_HELPER, #{direct_constructors => [new]})
+            ),
             try
                 ?assertEqual(
                     error, beamtalk_class_dispatch:lookup_direct_constructor(Pid, new, [])
@@ -132,7 +144,9 @@ direct_constructor_test_() ->
             end
         end},
         {"reload with a changed verdict set updates construction", fun() ->
-            Pid = beamtalk_test_class:start('BT4099Reload', class_info(#{direct_constructors => [new]})),
+            Pid = beamtalk_test_class:start(
+                'BT4099Reload', class_info(#{direct_constructors => [new]})
+            ),
             try
                 ?assertEqual(self(), beamtalk_class_dispatch:class_send(Pid, new, [])),
                 {ok, _} = beamtalk_object_class:update_class('BT4099Reload', #{
@@ -148,7 +162,9 @@ direct_constructor_test_() ->
             end
         end},
         {"runtime class-method funs disable the direct path", fun() ->
-            Pid = beamtalk_test_class:start('BT4099Funs', class_info(#{direct_constructors => [new]})),
+            Pid = beamtalk_test_class:start(
+                'BT4099Funs', class_info(#{direct_constructors => [new]})
+            ),
             try
                 beamtalk_class_metadata:set_runtime_class_methods('BT4099Funs', [new]),
                 ?assertEqual(
@@ -162,10 +178,13 @@ direct_constructor_test_() ->
         {"eligible keyword ctor builds in the caller's process", fun() ->
             %% A keyword ctor is a class method of a stateless class, so the
             %% in-caller path runs it (ADR 0142, BT-4300).
-            Pid = beamtalk_test_class:start('BT4099Kw', class_info( #{
-                class_method_info => #{'x:y:' => #{arity => 2}},
-                process_bound_class_selectors => [new, 'new:']
-            })),
+            Pid = beamtalk_test_class:start(
+                'BT4099Kw',
+                class_info(#{
+                    class_method_info => #{'x:y:' => #{arity => 2}},
+                    process_bound_class_selectors => [new, 'new:']
+                })
+            ),
             try
                 ?assertEqual(
                     {self(), 1, 2},
@@ -180,7 +199,9 @@ direct_constructor_test_() ->
             %% iterations of `new` / `new:` must all build in their own
             %% process (the helper answers the builder pid). Pre-change this
             %% serialized on the class gen_server; now nothing is shared.
-            Pid = beamtalk_test_class:start('BT4099Conc', class_info(#{direct_constructors => [new, 'new:']})),
+            Pid = beamtalk_test_class:start(
+                'BT4099Conc', class_info(#{direct_constructors => [new, 'new:']})
+            ),
             try
                 Parent = self(),
                 Worker = fun(N) ->
@@ -267,7 +288,9 @@ drain_warnings(Key, Acc) ->
 stale_verdict_warning_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
         {"reload gaining new: warns naming every transitive stale subclass", fun() ->
-            Parent = beamtalk_test_class:start('BT4126Parent', class_info(#{class_method_info => #{}})),
+            Parent = beamtalk_test_class:start(
+                'BT4126Parent', class_info(#{class_method_info => #{}})
+            ),
             Child = start_subclass('BT4126Child', 'BT4126Parent', #{
                 direct_constructors => [new, 'new:']
             }),
@@ -292,7 +315,9 @@ stale_verdict_warning_test_() ->
             end
         end},
         {"reload without a new: change stays silent", fun() ->
-            Parent = beamtalk_test_class:start('BT4126Quiet', class_info(#{class_method_info => #{}})),
+            Parent = beamtalk_test_class:start(
+                'BT4126Quiet', class_info(#{class_method_info => #{}})
+            ),
             Child = start_subclass('BT4126QuietChild', 'BT4126Quiet', #{
                 direct_constructors => ['new:']
             }),
@@ -312,7 +337,9 @@ stale_verdict_warning_test_() ->
         {"reload keeping an existing new: stays silent", fun() ->
             %% Already had `new:`: any stale child was reported when it was
             %% gained, so reloading again must not repeat the warning.
-            Parent = beamtalk_test_class:start('BT4126Kept', class_info(#{class_method_info => ?USER_NEW1})),
+            Parent = beamtalk_test_class:start(
+                'BT4126Kept', class_info(#{class_method_info => ?USER_NEW1})
+            ),
             Child = start_subclass('BT4126KeptChild', 'BT4126Kept', #{
                 direct_constructors => ['new:']
             }),
@@ -328,7 +355,9 @@ stale_verdict_warning_test_() ->
             end
         end},
         {"reload gaining new: with no stale subclass stays silent", fun() ->
-            Parent = beamtalk_test_class:start('BT4126Fresh', class_info(#{class_method_info => #{}})),
+            Parent = beamtalk_test_class:start(
+                'BT4126Fresh', class_info(#{class_method_info => #{}})
+            ),
             %% Recompiled against the new parent: verdict already omits `new:`.
             Child = start_subclass('BT4126FreshChild', 'BT4126Fresh', #{
                 direct_constructors => [new]
@@ -345,7 +374,9 @@ stale_verdict_warning_test_() ->
             end
         end},
         {"put_class_method installing new: warns naming the stale subclass", fun() ->
-            Parent = beamtalk_test_class:start('BT4126PutParent', class_info(#{class_method_info => #{}})),
+            Parent = beamtalk_test_class:start(
+                'BT4126PutParent', class_info(#{class_method_info => #{}})
+            ),
             Child = start_subclass('BT4126PutChild', 'BT4126PutParent', #{
                 direct_constructors => ['new:']
             }),
@@ -383,7 +414,9 @@ stale_verdict_warning_test_() ->
             %% off, so nothing is baked that a reload or `put_class_method`
             %% could strand: the BT-4126 class-method warning is gone.
             Info = #{'x:y:' => #{arity => 2}, 'make' => #{arity => 0}},
-            Pid = beamtalk_test_class:start('BT4301NoStale', class_info(#{class_method_info => Info})),
+            Pid = beamtalk_test_class:start(
+                'BT4301NoStale', class_info(#{class_method_info => Info})
+            ),
             try
                 ?assertEqual(
                     [],
@@ -431,7 +464,9 @@ new1_chain_test_() ->
             %% The descendant's baked verdict still lists `new:`; only the
             %% run-time chain check (`chain_has_user_new1/1`, from the facts
             %% the ancestors publish) can see the parent's new `new:`.
-            Parent = beamtalk_test_class:start('BT4409Parent', class_info(#{defines_user_class_new1 => false})),
+            Parent = beamtalk_test_class:start(
+                'BT4409Parent', class_info(#{defines_user_class_new1 => false})
+            ),
             Child = start_subclass('BT4409Child', 'BT4409Parent', #{
                 direct_constructors => [new, 'new:'], defines_user_class_new1 => false
             }),
@@ -464,7 +499,9 @@ new1_chain_test_() ->
             end
         end},
         {"an ancestor's runtime new: fun turns a descendant's direct new: off", fun() ->
-            Parent = beamtalk_test_class:start('BT4409FunParent', class_info(#{defines_user_class_new1 => false})),
+            Parent = beamtalk_test_class:start(
+                'BT4409FunParent', class_info(#{defines_user_class_new1 => false})
+            ),
             Child = start_subclass('BT4409FunChild', 'BT4409FunParent', #{
                 direct_constructors => ['new:'], defines_user_class_new1 => false
             }),
@@ -561,10 +598,12 @@ new1_chain_test_() ->
 new0_chain_test_() ->
     {setup, fun setup/0, fun(_) -> ok end, [
         {"an ancestor's user new is honoured by a loaded descendant, both paths", fun() ->
-            Parent = beamtalk_test_class:start('BT4479Parent', class_info_with_module( ?NEW0_HELPER, #{
+            Parent = beamtalk_test_class:start(
+                'BT4479Parent',
+                class_info_with_module(?NEW0_HELPER, #{
                     defines_user_class_new0 => true, class_method_info => ?USER_NEW0
-                }
-            )),
+                })
+            ),
             Child = start_subclass('BT4479Child', 'BT4479Parent', #{
                 direct_constructors => [new], defines_user_class_new0 => false
             }),
@@ -622,7 +661,9 @@ new0_chain_test_() ->
         end},
         {"flipping an ancestor's fact alone erases a descendant's static new key", fun() ->
             M = beamtalk_class_metadata,
-            Parent = beamtalk_test_class:start('BT4479KeyParent', class_info(#{defines_user_class_new0 => false})),
+            Parent = beamtalk_test_class:start(
+                'BT4479KeyParent', class_info(#{defines_user_class_new0 => false})
+            ),
             Child = start_subclass('BT4479KeyChild', 'BT4479KeyParent', #{
                 direct_constructors => [new], defines_user_class_new0 => false
             }),
@@ -637,8 +678,10 @@ new0_chain_test_() ->
             end
         end},
         {"a class with its own user new wins over the chain", fun() ->
-            Parent = beamtalk_test_class:start('BT4479OwnParent', class_info_with_module( ?NEW0_HELPER, #{defines_user_class_new0 => true}
-            )),
+            Parent = beamtalk_test_class:start(
+                'BT4479OwnParent',
+                class_info_with_module(?NEW0_HELPER, #{defines_user_class_new0 => true})
+            ),
             Child = start_subclass('BT4479OwnChild', 'BT4479OwnParent', #{
                 direct_constructors => [new], defines_user_class_new0 => true
             }),

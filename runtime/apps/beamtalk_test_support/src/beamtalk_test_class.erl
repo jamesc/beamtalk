@@ -13,7 +13,12 @@ module on demand. Replaces the per-file `start_class/N`, `stop_class/1`,
 """.
 
 -export([
-    start/2, start/3, start_or_get/2, stop/1, ensure_fixture_loaded/2, ensure_counter_loaded/0, stop_graceful/1
+    start/2, start/3,
+    start_or_get/2,
+    stop/1,
+    ensure_fixture_loaded/2,
+    ensure_counter_loaded/0,
+    stop_graceful/1
 ]).
 
 -doc "`start/3` with the default `ClassInfo` overrides (none).".

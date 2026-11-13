@@ -167,18 +167,30 @@ hierarchy_docs_test_() ->
 setup() ->
     beamtalk_test_boot:registry(),
     PidA = beamtalk_test_class:start_or_get(?ROOT_A, class_info(?ROOT_A, none, #{}, #{})),
-    PidB = beamtalk_test_class:start_or_get(?GHOST_B, class_info(?GHOST_B, ?GHOST_SUPER_1, #{}, #{})),
+    PidB = beamtalk_test_class:start_or_get(
+        ?GHOST_B, class_info(?GHOST_B, ?GHOST_SUPER_1, #{}, #{})
+    ),
     PidC = beamtalk_test_class:start_or_get(?ROOT_C, class_info(?ROOT_C, none, #{}, #{})),
-    PidD = beamtalk_test_class:start_or_get(?GHOST_D, class_info(?GHOST_D, ?GHOST_SUPER_2, #{}, #{})),
+    PidD = beamtalk_test_class:start_or_get(
+        ?GHOST_D, class_info(?GHOST_D, ?GHOST_SUPER_2, #{}, #{})
+    ),
     PidE = beamtalk_test_class:start_or_get(?ROOT_E, class_info(?ROOT_E, none, #{}, #{})),
-    PidF = beamtalk_test_class:start_or_get(?ROOT_F, class_info(?ROOT_F, none, #{fakeMethod => #{arity => 0}}, #{})),
+    PidF = beamtalk_test_class:start_or_get(
+        ?ROOT_F, class_info(?ROOT_F, none, #{fakeMethod => #{arity => 0}}, #{})
+    ),
     %% Inheritance chain: SubG has ownMethod; its superclass SuperH has inheritedMethod.
-    PidH = beamtalk_test_class:start_or_get(?SUPERCLASS_H, class_info(?SUPERCLASS_H, none, #{inheritedMethod => #{arity => 0}}, #{})),
-    PidG = beamtalk_test_class:start_or_get(?SUBCLASS_G, class_info(?SUBCLASS_G, ?SUPERCLASS_H, #{ownMethod => #{arity => 0}}, #{})),
+    PidH = beamtalk_test_class:start_or_get(
+        ?SUPERCLASS_H, class_info(?SUPERCLASS_H, none, #{inheritedMethod => #{arity => 0}}, #{})
+    ),
+    PidG = beamtalk_test_class:start_or_get(
+        ?SUBCLASS_G, class_info(?SUBCLASS_G, ?SUPERCLASS_H, #{ownMethod => #{arity => 0}}, #{})
+    ),
     %% Circular chain: CycleX → CycleY → CycleX → … triggers max_depth_exceeded.
     %% CycleX carries a method so the partial accumulator on cycle is non-empty,
     %% making the collect_flattened_methods cycle-detection assertion non-trivial.
-    PidX = beamtalk_test_class:start_or_get(?CYCLE_X, class_info(?CYCLE_X, ?CYCLE_Y, #{cycleMethod => #{arity => 0}}, #{})),
+    PidX = beamtalk_test_class:start_or_get(
+        ?CYCLE_X, class_info(?CYCLE_X, ?CYCLE_Y, #{cycleMethod => #{arity => 0}}, #{})
+    ),
     PidY = beamtalk_test_class:start_or_get(?CYCLE_Y, class_info(?CYCLE_Y, ?CYCLE_X, #{}, #{})),
     {PidA, PidB, PidC, PidD, PidE, PidF, PidG, PidH, PidX, PidY}.
 

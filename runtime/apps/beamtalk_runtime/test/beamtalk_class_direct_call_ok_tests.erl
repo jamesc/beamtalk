@@ -107,7 +107,9 @@ direct_call_ok_test_() ->
         {"compiled class_field_kinds is the class-variable fact when present", fun() ->
             %% A declared `late` class variable has no default, so the
             %% `classState` defaults are empty; the meta still says it exists.
-            Pid = beamtalk_test_class:start('Bt4299Late', class_info(#{}, #{class_field_kinds => #{cache => late}})),
+            Pid = beamtalk_test_class:start(
+                'Bt4299Late', class_info(#{}, #{class_field_kinds => #{cache => late}})
+            ),
             try
                 ?assertEqual(
                     true, beamtalk_class_metadata:lookup_has_class_variables('Bt4299Late')
