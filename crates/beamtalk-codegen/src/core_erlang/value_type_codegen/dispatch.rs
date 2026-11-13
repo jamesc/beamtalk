@@ -9,7 +9,6 @@
 use super::{DISPATCH_PREFIX_SELECTORS, OwnDispatchArm};
 
 use super::super::dispatch_spec::{self, DispatchSpec, SuperclassDelegation};
-use super::super::exception_forms::{CatchVars, wrap_and_reraise_doc};
 use super::super::value_accessors::{AutoSlotMethods, compute_auto_slot_methods};
 use super::super::{CoreErlangGenerator, Result};
 use beamtalk_cerl_doc::docvec;
@@ -501,7 +500,7 @@ impl CoreErlangGenerator {
             Self::generate_dispatch_4_wrapper(mod_name.as_str())
         };
 
-        Ok(docvec![header, body, "\n"])
+        Ok(docvec![header, body, "\n\n"])
     }
 
     /// Generates Object's dispatch/4 with state-aware reflection primitives.
@@ -830,24 +829,28 @@ impl CoreErlangGenerator {
     /// value-class method keeps its semantics instead of turning into an
     /// error result.
     fn dispatch_3_adapter(mod_name: &str) -> Document<'static> {
-        let caught = CatchVars {
-            class: var("D4Type"),
-            reason: var("D4Error"),
-            stack: var("D4Stack"),
-        };
         // `ensure_wrapped/4` (empty context): an already-wrapped exception
         // keeps its innermost `raw_stacktrace`, as in the walk's own
         // `raised/4`.
-        let wrap_error = wrap_and_reraise_doc(
-            &CatchVars {
-                class: leaf::atom("error"),
-                reason: var("D4Error"),
-                stack: var("D4Stack"),
-            },
-            var("D4Built"),
-            var("D4Wrapped"),
-            Some(Document::Str("~{}~")),
-            docvec!["{", leaf::atom("error"), ", D4Wrapped, State}"],
+        let wrap_error = let_in(
+            docvec!["<", var("D4Built"), ">"],
+            form::primop("build_stacktrace", [var("D4Stack")]),
+            docvec![
+                "{",
+                leaf::atom("error"),
+                ", ",
+                form::call(
+                    "beamtalk_exception_handler",
+                    "ensure_wrapped",
+                    [
+                        leaf::atom("error"),
+                        var("D4Error"),
+                        var("D4Built"),
+                        Document::Str("~{}~"),
+                    ],
+                ),
+                ", State}",
+            ],
             Layout::Block,
         );
         let handler = case_of(
@@ -857,14 +860,7 @@ impl CoreErlangGenerator {
                 clause(
                     [var("_D4Other")],
                     None,
-                    form::primop(
-                        "raw_raise",
-                        [
-                            caught.class.clone(),
-                            caught.reason.clone(),
-                            caught.stack.clone(),
-                        ],
-                    ),
+                    form::primop("raw_raise", [var("D4Type"), var("D4Error"), var("D4Stack")]),
                     Layout::Block,
                 ),
             ],
@@ -878,7 +874,7 @@ impl CoreErlangGenerator {
             ),
             [var("D4Result")],
             reply(var("D4Result")),
-            [caught.class, caught.reason, caught.stack],
+            [var("D4Type"), var("D4Error"), var("D4Stack")],
             handler,
             Layout::Block,
         )

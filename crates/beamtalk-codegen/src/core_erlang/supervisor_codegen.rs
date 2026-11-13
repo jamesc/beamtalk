@@ -252,7 +252,7 @@ impl CoreErlangGenerator {
         docs.push(docvec![
             "'dispatch'/4 = fun (Selector, Args, Self, State) ->",
             Self::generate_dispatch_4_wrapper(mod_name.as_str()),
-            "\n",
+            "\n\n",
         ]);
 
         let own_methods: Vec<String> = class
