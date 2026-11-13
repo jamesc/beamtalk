@@ -160,9 +160,12 @@ suite_setup() ->
     %% ADR 0129: workspace-only operations (rename/remove/revert) refuse with
     %% `no_workspace` unless this node records a workspace capability.
     ok = beamtalk_capability:set(#{mode => workspace, include_compiler => true}),
+    %% BT-4792: the runtime reaches the workspace pipeline through this callback.
+    ok = beamtalk_workspace_callback:register(beamtalk_repl_eval),
     ok.
 
 suite_teardown(_) ->
+    ok = beamtalk_workspace_callback:unregister(),
     ok = beamtalk_capability:clear(),
     _ = application:stop(beamtalk_compiler),
     ok.

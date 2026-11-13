@@ -932,9 +932,7 @@ rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, _Classification, Se
 -spec rewrite_after_identity_move(atom(), map() | undefined, [map()], map()) ->
     {ok, map()} | {error, term()}.
 rewrite_after_identity_move(OldName, DefinitionSite, ReferenceSites, Classification) ->
-    try
-        rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, Classification)
-    of
+    try rewrite_class_sites(OldName, DefinitionSite, ReferenceSites, Classification) of
         {error, no_workspace} -> {error, workspace_unavailable};
         Result -> Result
     catch
@@ -1189,9 +1187,7 @@ classPrecheckCompileSource(Self, Selector, Source) ->
     %% instance-side only: like classCompileSource/3, the class-side
     %% patch path (`Class class >> sel') does not route through this
     %% primitive — see beamtalk_repl_loader's patch_side/1 callers.
-    case
-        beamtalk_workspace_callback:precheck_method(ClassNameBin, Selector, SourceBin, instance)
-    of
+    case beamtalk_workspace_callback:precheck_method(ClassNameBin, Selector, SourceBin, instance) of
         {ok, Result} ->
             precheck_result_to_dictionary(Result);
         {error, no_workspace} ->

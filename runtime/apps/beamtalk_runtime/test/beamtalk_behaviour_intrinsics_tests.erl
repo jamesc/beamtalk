@@ -42,9 +42,12 @@ setup() ->
 setup_workspace() ->
     Result = setup(),
     ok = beamtalk_capability:set(#{mode => workspace, include_compiler => true}),
+    %% BT-4792: install the workspace callback the way the capability guard does.
+    ok = beamtalk_workspace_callback:register(beamtalk_repl_eval),
     Result.
 
 teardown_workspace(ClassNames) ->
+    ok = beamtalk_workspace_callback:unregister(),
     ok = beamtalk_capability:clear(),
     teardown(ClassNames).
 
