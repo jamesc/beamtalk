@@ -115,14 +115,25 @@ match the winning one.
 
 ## Per-process memo (BT-4652)
 
-`fetch/2,3` also keep a process-dictionary memo, `{Gen, #{Key => Value}}` under
-one key, holding exactly the values the ETS layer holds (`cache` answers; a
-`nocache` answer is never memoised). A hit costs the generation read and a
-`get/1`. A `fetch/3` `Valid` check runs on memo hits too, so a purge needs no
-generation bump: the keys that depend on code loading already carry a `Valid`.
-A generation change orphans the whole map, and the next store replaces it
-(stale entries never accumulate); a map reaching 4096 keys is dropped and
-refilled. Without a generation (before `new/0`) nothing is memoised.
+`fetch/2,3` also keep a per-process memo in the process dictionary, one entry
+per key: `{?MODULE, Key} => {Gen, Value}`. It holds exactly the values the ETS
+layer holds (`cache` answers; a `nocache` answer is never memoised). A hit is
+the generation read and a single `get/1` on the tuple key, with no map to
+probe (a first version kept one `{Gen, #{Key => Value}}` entry: the hit was
+a `get/1` plus `maps:find/2` on a map of up to 4096 keys, and ~80 ns slower
+than the ETS read it replaced on `3e`). A `fetch/3` `Valid` check runs on memo
+hits too, so a purge needs no generation bump: the keys that depend on code
+loading already carry a `Valid`. An entry tagged with an older generation is
+a miss.
+
+Growth is bounded by a per-process counter (`'$beamtalk_derived_cache_count'`
+=> `{Gen, N}`) bumped on each store of a *new* key. The first store under a
+new generation sweeps the process's stale entries (one pass over the
+dictionary, at class-write rate), and a process that reaches 4096 entries
+sweeps and refills, so a pathological selector sweep stays bounded. Counting
+is approximate on purpose (an overwrite of an existing key may be counted):
+it only has to bound growth, and an over-count merely sweeps earlier. Without
+a generation (before `new/0`) nothing is memoised.
 
 Facts that also depend on code-loading state (whether a module is loaded)
 are not tracked by this invalidation; callers that cache such facts must
@@ -151,7 +162,8 @@ so they share an owner and heir and are lost together.
 
 -define(TABLE, beamtalk_class_derived_cache).
 -define(GEN_KEY, {?MODULE, generation}).
--define(MEMO_KEY, {?MODULE, memo}).
+%% Process-dictionary entry counting this process's memo entries.
+-define(MEMO_COUNT, '$beamtalk_derived_cache_count').
 %% Cap on one process's memo (keys are classes x key kinds, so this is far
 %% above any real working set; it only bounds a pathological selector sweep).
 -define(MEMO_MAX, 4096).
@@ -324,29 +336,37 @@ compute_and_store(Key, Gen, Compute) ->
             Value
     end.
 
-%% The per-process memo (BT-4652): one process-dictionary entry holding the
-%% generation it was filled under and a map of key to value. It holds exactly
-%% what the ETS layer holds (values `Compute` marked `cache`), so a hit is a
-%% generation read and a `get/1` instead of an ETS read that copies the entry.
-%% A generation bump orphans the whole map, which the next `memo_put/3`
-%% replaces rather than extends, so stale entries never accumulate; a map that
-%% reaches `?MEMO_MAX` entries is dropped and refilled.
+%% The per-process memo (BT-4652): one process-dictionary entry per key,
+%% `{?MODULE, Key} => {Gen, Value}`. It holds exactly what the ETS layer holds
+%% (values `Compute` marked `cache`), so a hit is a generation read and one
+%% `get/1` instead of an ETS read that copies the entry.
 -spec memo_find(integer(), term()) -> {ok, term()} | error.
 memo_find(Gen, Key) ->
-    case get(?MEMO_KEY) of
-        {Gen, Map} -> maps:find(Key, Map);
+    case get({?MODULE, Key}) of
+        {Gen, Value} -> {ok, Value};
         _ -> error
     end.
 
 -spec memo_put(integer(), term(), Value) -> Value.
 memo_put(Gen, Key, Value) ->
-    Map =
-        case get(?MEMO_KEY) of
-            {Gen, M} when map_size(M) < ?MEMO_MAX -> M;
-            _ -> #{}
+    N =
+        case get(?MEMO_COUNT) of
+            {Gen, N0} when N0 < ?MEMO_MAX ->
+                N0;
+            _ ->
+                %% First store under a new generation, or the cap: drop the
+                %% process's entries (stale ones are dead weight) and refill.
+                memo_sweep(),
+                0
         end,
-    put(?MEMO_KEY, {Gen, Map#{Key => Value}}),
+    put(?MEMO_COUNT, {Gen, N + 1}),
+    put({?MODULE, Key}, {Gen, Value}),
     Value.
+
+-spec memo_sweep() -> ok.
+memo_sweep() ->
+    _ = [erase(K) || {{?MODULE, _} = K, _} <- get()],
+    ok.
 
 -spec ensure_generation() -> ok.
 ensure_generation() ->

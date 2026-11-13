@@ -36,6 +36,7 @@ derived_cache_test_() ->
         {"a memo hit still runs the validity check (BT-4652)", fun memo_hit_runs_valid/0},
         {"without a generation nothing is memoised (BT-4652)", fun no_generation_no_memo/0},
         {"a full memo is dropped and refilled (BT-4652)", fun memo_is_bounded/0},
+        {"a generation change sweeps stale memo entries (BT-4652)", fun memo_sweeps_stale/0},
         {"a superclass cycle terminates (BT-4065)", fun superclass_cycle_terminates/0}
     ]}.
 
@@ -131,11 +132,13 @@ generation_moves_on_invalidate_test() ->
 
 %%% BT-4652: the per-process memo inside fetch/2,3.
 
+erase_memo() ->
+    [erase(K) || {{beamtalk_class_derived_cache, _} = K, _} <- get()],
+    erase('$beamtalk_derived_cache_count'),
+    ok.
+
 memo_size() ->
-    case get({beamtalk_class_derived_cache, memo}) of
-        {_, Map} -> map_size(Map);
-        undefined -> 0
-    end.
+    length([K || {{beamtalk_class_derived_cache, _} = K, _} <- get()]).
 
 memo_hit_reads_no_ets() ->
     %% Remove the ETS row behind a warm key: only the per-process memo can
@@ -174,7 +177,7 @@ no_generation_no_memo() ->
     Ref = persistent_term:get(GenKey),
     Key = key(),
     try
-        erase({beamtalk_class_derived_cache, memo}),
+        erase_memo(),
         persistent_term:erase(GenKey),
         ?assertEqual(undefined, beamtalk_class_derived_cache:generation()),
         ?assertEqual(a, beamtalk_class_derived_cache:fetch(Key, fun() -> {cache, a} end)),
@@ -187,7 +190,7 @@ no_generation_no_memo() ->
 
 memo_is_bounded() ->
     ok = beamtalk_class_derived_cache:invalidate(),
-    erase({beamtalk_class_derived_cache, memo}),
+    erase_memo(),
     [
         beamtalk_class_derived_cache:fetch({memo_bound, N}, fun() -> {cache, N} end)
      || N <- lists:seq(1, 5000)
@@ -197,3 +200,14 @@ memo_is_bounded() ->
     ?assertEqual(
         5000, beamtalk_class_derived_cache:fetch({memo_bound, 5000}, fun() -> error(recomputed) end)
     ).
+
+memo_sweeps_stale() ->
+    ok = beamtalk_class_derived_cache:invalidate(),
+    erase_memo(),
+    [beamtalk_class_derived_cache:fetch({memo_stale, N}, fun() -> {cache, N} end) || N <- [1, 2, 3]],
+    ?assertEqual(3, memo_size()),
+    ok = beamtalk_class_derived_cache:invalidate(),
+    %% Entries from the old generation linger until the next store, which
+    %% sweeps them; only the new entry survives.
+    ?assertEqual(a, beamtalk_class_derived_cache:fetch(key(), fun() -> {cache, a} end)),
+    ?assertEqual(1, memo_size()).
