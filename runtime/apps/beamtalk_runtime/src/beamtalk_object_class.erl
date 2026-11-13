@@ -515,7 +515,7 @@ Local (non-inherited) instance-method selectors, preferring a message-free read.
 two busy classes against each other until the 5s call timeout (BT-3826; the
 invariant is "a class process never makes a blocking call into another class
 process while handling a call"). This reads the selectors the owning class
-published with `publish_reflection/1`.
+published with `beamtalk_class_publish:publish_reflection/1`.
 
 Falls back to `methods/1` only when there is no row to read -- a remote pid
 (the node-local ETS cannot name it; the cross-node call path is unchanged), or
@@ -569,7 +569,7 @@ local_class_method_selectors_safe(ClassPid) ->
 Local instance methods as `selector => MethodInfo`, preferring a message-free read.
 
 Reads the per-method records the owning class published with
-`publish_reflection/1`; falls back to the `get_instance_methods` call under the
+`beamtalk_class_publish:publish_reflection/1`; falls back to the `get_instance_methods` call under the
 same conditions as `instance_methods_safe/1`.
 """.
 -spec local_instance_method_infos_safe(pid()) -> #{selector() => map()}.
@@ -601,7 +601,7 @@ superclass chain's (the walk `{class_method, Sel}` has always done). Returns
 `nil` when not found.
 
 Message-free for a published local class: reads the per-method records
-`publish_reflection/1` keeps current, so it never queues behind a busy class
+`beamtalk_class_publish:publish_reflection/1` keeps current, so it never queues behind a busy class
 process (BT-3832 -- `beamtalk_method_resolver` runs inside class handlers via
 `Behaviour >>`). Falls back to the `{method, Sel}` / `{class_method, Sel}` call
 only for a remote pid or a class that has not published yet.
@@ -1081,7 +1081,7 @@ is_constructible(ClassPid) ->
     gen_server:call(ClassPid, is_constructible).
 
 -doc """
-Read a class flag from the metadata row its owner publishes (`publish_reflection/1`),
+Read a class flag from the metadata row its owner publishes (`beamtalk_class_publish:publish_reflection/1`),
 falling back to `gen_server:call(ClassPid, CallMsg)` only when there is no row to
 read -- a remote pid (the node-local ETS cannot name it; the cross-node call path is
 unchanged) or a class that has not published yet. A class process never makes a

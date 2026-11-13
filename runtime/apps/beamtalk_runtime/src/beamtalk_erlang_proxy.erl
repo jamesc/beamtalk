@@ -1235,6 +1235,14 @@ inspects only top-level lists and `coerce_result/1` recurses at most one level
 into `{ok, _}`/`{error, _}` payloads. A coercion change that recurses into
 tuples/maps, or a new mode-divergent bare-atom rule, must update these clauses
 (and the absolute tests) with it — the fast path would otherwise bypass it.
+
+Also coupled to codegen's `inline_result_doc`
+(`beamtalk-codegen/src/core_erlang/dispatch_codegen/ffi.rs`, BT-4762), which
+builds the `Result` of an FFI call inline instead of calling this function
+when the spec proves the payload passes through unchanged. The
+`inline_result_samples` of `test/fixtures/ffi_passthrough_conformance.json`
+pin that inline path to this one; a change to the clauses below must keep the
+fixture and `inline_result_doc` in step.
 """.
 -spec coerce_ffi_result(atom(), term(), coercion_mode()) -> term().
 coerce_ffi_result(_Module, Result, _Mode) when

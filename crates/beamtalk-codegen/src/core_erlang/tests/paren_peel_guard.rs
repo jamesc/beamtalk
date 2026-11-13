@@ -156,12 +156,13 @@ const CEILINGS: &[(&str, usize)] = &[
     // operand alike (`local_threading_construct`, the site rules, `match_arms`,
     // `repl_*_sites`, `LoopBodyContext`), assignment and literal-element
     // escape operands, a field-write target's receiver, and `(super)`
-    // (`is_self_or_super`, `receiver_statically_not_dictionary`), and a
+    // (`receiver_statically_not_dictionary`), and a
     // method body's last statement (`ends_with_self_field_write`, BT-4235), and
     // `operand_loop_constructs` (BT-4310): a statement, its assignment or `^`
     // value, and a cascade's shared receiver.
-    // (BT-4696: split from `block_facts.rs`; the ceilings below sum to its
-    // former 38 and each file keeps the calls it already held.)
+    // (BT-4696: split from `block_facts.rs`; the five `block_facts/`
+    // ceilings below sum to 37 (`unguarded_late_read_validators.rs` is a
+    // separate file) and each file keeps the calls it already held.)
     (
         "beamtalk-core/src/semantic_analysis/block_facts/escape.rs",
         4,

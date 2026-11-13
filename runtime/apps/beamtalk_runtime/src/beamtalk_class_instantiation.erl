@@ -382,7 +382,7 @@ Walks the superclass chain over ETS-only metadata reads
 own `__beamtalk_meta/0` `fields` when it has published none) — deliberately
 no `gen_server:call`, which issued from `init/1` while the spawning class
 server is still inside its own `{spawn, ...}` handler would deadlock the two
-against each other (the same reason `publish_reflection/1` exists). A
+against each other (the same reason `beamtalk_class_publish:publish_reflection/1` exists). A
 level's published variables come from the same compiled meta `fields` list
 its registration passed in, so preferring them rejects no valid name.
 
