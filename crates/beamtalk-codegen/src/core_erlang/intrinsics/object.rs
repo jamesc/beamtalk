@@ -293,11 +293,11 @@ impl CoreErlangGenerator {
             // spelling names.
             if self.context != CodeGenContext::Repl {
                 if let Some(class_name) = Self::user_class_literal_name(class_arg) {
-                    return self.emit_kind_of_call(
+                    return self.emit_kind_of_call_with(
                         receiver,
                         class_arg,
                         KindOfFn::Named,
-                        leaf::atom(class_name),
+                        |_, _| leaf::atom(class_name),
                     );
                 }
             }
@@ -319,16 +319,6 @@ impl CoreErlangGenerator {
     /// 'beamtalk_behaviour_intrinsics':<fn_name>(R, K, <extra>)`: the shape
     /// shared by every `isKindOf:` lowering that keeps the class argument for
     /// the runtime's fallback send.
-    fn emit_kind_of_call(
-        &mut self,
-        receiver: &Expression,
-        class_arg: &Expression,
-        fn_name: KindOfFn,
-        extra: Document<'static>,
-    ) -> Result<Option<Document<'static>>> {
-        self.emit_kind_of_call_with(receiver, class_arg, fn_name, |_, _| extra)
-    }
-
     fn emit_kind_of_call_with(
         &mut self,
         receiver: &Expression,

@@ -3544,6 +3544,19 @@ is_kind_of_named_test_() ->
                 ?assertEqual({value, false}, named_is_kind_of(Value, Gone, 'BT4757Other'))
             end),
             ?_test(begin
+                %% A class that does not inherit `Object` never runs
+                %% `Object>>isKindOf:` (a `ProtoObject` proxy): it takes the
+                %% send, not a by-name `false`.
+                {Grand, _} = register_class('BT4757Grand', #{}, #{}),
+                {_, _} = register_class_with_super('BT4757Other', 'ProtoObject', #{}, #{}),
+                Proxy = #{'$beamtalk_class' => 'BT4757Other'},
+                Sent = outcome(fun() ->
+                    beamtalk_message_dispatch:send(Proxy, 'isKindOf:', [Grand])
+                end),
+                ?assertNotMatch({value, _}, Sent),
+                ?assertEqual(Sent, named_is_kind_of(Proxy, Grand, 'BT4757Grand'))
+            end),
+            ?_test(begin
                 %% The override flag set: the send runs, so an override takes
                 %% effect (and the flag-set branch is the plain send).
                 {Grand, _} = register_class('BT4757Grand', #{}, #{}),

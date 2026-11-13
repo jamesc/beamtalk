@@ -1049,9 +1049,15 @@ kind_of_named(Receiver, Behaviour, Name, false) ->
         {instance, C} ->
             %% An instance whose class is not in the class table takes the
             %% send, as `objectIsKindOf/2` does.
-            case beamtalk_class_metadata:lookup_superclass(C) of
-                {ok, _} -> beamtalk_class_derived_cache:inherits_from(C, Name);
-                not_found -> beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour])
+            %% A class that does not inherit `Object` (a `ProtoObject` proxy
+            %% forwarding `doesNotUnderstand:`) never runs `Object>>isKindOf:`,
+            %% so it takes the send too.
+            case
+                beamtalk_class_metadata:lookup_superclass(C) =/= not_found andalso
+                    beamtalk_class_derived_cache:inherits_from(C, 'Object')
+            of
+                true -> beamtalk_class_derived_cache:inherits_from(C, Name);
+                false -> beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour])
             end;
         _ ->
             beamtalk_message_dispatch:send(Receiver, 'isKindOf:', [Behaviour])

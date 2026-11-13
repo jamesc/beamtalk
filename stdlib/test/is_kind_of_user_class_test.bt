@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // BT-4757: `x isKindOf: UserClass` compiles to a name-only check. It answers
-// what the full `isKindOf:` send answers.
+// what the full `isKindOf:` send answers for live receivers. (A dead actor
+// answers by name instead of raising, like a `match:` arm, ADR 0107.)
 
 TestCase subclass: IsKindOfUserClassTest
 
