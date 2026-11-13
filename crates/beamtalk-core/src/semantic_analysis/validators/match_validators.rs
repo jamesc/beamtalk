@@ -479,6 +479,28 @@ fn validate_type_pattern_class(
         return;
     }
 
+    // BT-4797: a static-only handle class (`STATIC_ONLY_HANDLE_CLASSES`) is
+    // a legal type-pattern class, but no run-time value is ever tagged with
+    // it, so the arm can never match. Advisory only.
+    if STATIC_ONLY_HANDLE_CLASSES.contains(&class_name) {
+        diagnostics.push(
+            Diagnostic::warning(
+                format!(
+                    "`{class_name}` exists only statically; a `{class_name}` type-pattern arm \
+                     can never match"
+                ),
+                class.span,
+            )
+            .with_hint(
+                "At run time the value is a raw Reference, Pid or fd tuple, not tagged with \
+                 this class. Use a `_` arm, or match on the underlying representation."
+                    .to_string(),
+            )
+            .with_category(DiagnosticCategory::Type),
+        );
+        return;
+    }
+
     // Phase A's explicitly-named primitives are always valid — see
     // `PHASE_A_PRIMITIVE_CLASSES`'s doc for why they skip the leaf check.
     // `SEALED_CLOSED_HIERARCHY_CLASSES` (BT-4228) are non-leaf but their
@@ -568,6 +590,53 @@ mod tests {
     use crate::source_analysis::parse;
 
     // ── Match exhaustiveness for sealed types ─────────────────────────────────
+
+    // ── BT-4797: static-only handle classes in type patterns ──────────────────
+
+    fn type_pattern_diags(src: &str) -> Vec<Diagnostic> {
+        let (module, parse_diags) = parse(lex_with_eof(src));
+        assert!(parse_diags.is_empty(), "Parse failed: {parse_diags:?}");
+        let hierarchy = ClassHierarchy::with_builtins();
+        let mut diagnostics = Vec::new();
+        check_type_pattern_classes(&module, &hierarchy, false, &mut diagnostics);
+        diagnostics
+    }
+
+    /// One warning per static-only handle class, read from the shared list.
+    #[test]
+    fn static_only_handle_type_pattern_warns_never_matches() {
+        for handle in STATIC_ONLY_HANDLE_CLASSES {
+            let diags = type_pattern_diags(&format!("x match: [h :: {handle} -> [h]; _ -> [0]]"));
+            assert_eq!(diags.len(), 1, "{handle}: {diags:?}");
+            assert_eq!(diags[0].severity, Severity::Warning, "{handle}");
+            assert!(diags[0].message.contains(handle), "{handle}");
+            assert!(diags[0].message.contains("can never match"), "{handle}");
+        }
+    }
+
+    /// A handle class nested in a container pattern warns too.
+    #[test]
+    fn static_only_handle_nested_type_pattern_warns() {
+        let diags = type_pattern_diags("x match: [{#ok, h :: EtsTid} -> [h]; _ -> [0]]");
+        assert_eq!(diags.len(), 1, "{diags:?}");
+    }
+
+    /// Other classes stay silent.
+    #[test]
+    fn non_handle_type_pattern_does_not_warn_never_matches() {
+        let diags =
+            type_pattern_diags("x match: [n :: Integer -> [n]; s :: String -> [s]; _ -> [0]]");
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    /// `isKindOf:` is not a type pattern and is not checked.
+    #[test]
+    fn static_only_handle_is_kind_of_does_not_warn() {
+        for handle in STATIC_ONLY_HANDLE_CLASSES {
+            let diags = type_pattern_diags(&format!("x isKindOf: {handle}"));
+            assert!(diags.is_empty(), "{handle}: {diags:?}");
+        }
+    }
 
     /// Missing `error:` arm without wildcard → compile error.
     #[test]
