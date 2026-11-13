@@ -297,6 +297,7 @@ pub(crate) fn extension_surface_value(
         loc.type_info.arity,
         loc.type_info.param_types,
         loc.type_info.return_type.as_deref(),
+        loc.type_info.answers_receiver,
     ])
 }
 
@@ -874,6 +875,25 @@ mod tests {
         let line = "x greet: \"hi // => bye\"  // => ok";
         let pos = find_assertion_marker_pos(line).expect("marker should be found");
         assert_eq!(&line[pos..], "// => ok");
+    }
+
+    /// BT-4788: `discarded-update` reads whether an extension answers its
+    /// receiver, so flipping only that (same signature) must move the hash.
+    #[test]
+    fn analysis_surface_hash_tracks_extension_answers_receiver() {
+        use beamtalk_core::compilation::extension_index::ExtensionIndex;
+        use beamtalk_core::source_analysis::{lex_with_eof, parse};
+
+        let hash = |body: &str| {
+            let source = format!("Object >> store: v :: Integer -> Self => {body}\n");
+            let (module, diags) = parse(lex_with_eof(&source));
+            assert!(diags.is_empty(), "{diags:?}");
+            let mut extensions = ExtensionIndex::new();
+            extensions.add_module(&module, std::path::Path::new("src/ext.bt"));
+            analysis_surface_hash(&[], &[], &[], &extensions)
+        };
+        assert_ne!(hash("self"), hash("self withId: v"));
+        assert_eq!(hash("self withId: v"), hash("self withId: v + 1"));
     }
 
     /// BT-4336: the analysis surface hash moves with every signature a
