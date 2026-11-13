@@ -247,6 +247,12 @@ pub fn compute_project_diagnostics_with_analysis(
     // (that's `beamtalk lint`-only), so a lint-only `@expect` category (e.g.
     // `dead_assignment`) must not be validated for staleness here — see
     // `apply_expect_directives_excluding_lint_only`'s doc.
+    // Default-off lints (BT-4719) go before `@expect`, so an off lint can
+    // neither satisfy nor hide a stale `@expect` directive.
+    beamtalk_core::compilation::diagnostics_policy::drop_default_off_diagnostics(
+        &mut diagnostics,
+        &ctx.diagnostics_overrides,
+    );
     beamtalk_core::compilation::diagnostics_policy::apply_expect_directives_with_ffi_check(
         module,
         &mut diagnostics,
@@ -419,6 +425,10 @@ pub fn run_post_analysis_lint_pipeline_with_types(
             module, file_stem,
         ),
     );
+    beamtalk_core::compilation::diagnostics_policy::drop_default_off_diagnostics(
+        diags,
+        diagnostics_overrides,
+    );
     beamtalk_core::compilation::diagnostics_policy::apply_expect_directives_with_ffi_check(
         module,
         diags,
@@ -462,6 +472,11 @@ pub fn compute_diagnostics_with_native_types(
         all_diagnostics.extend(analysis_result.diagnostics);
     }
 
+    // No `[diagnostics]` table here: opt-in lints stay off.
+    beamtalk_core::compilation::diagnostics_policy::drop_default_off_diagnostics(
+        &mut all_diagnostics,
+        &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new(),
+    );
     beamtalk_core::compilation::diagnostics_policy::apply_expect_directives_with_ffi_check(
         module,
         &mut all_diagnostics,
@@ -489,6 +504,10 @@ fn run_diagnostic_pipeline(
     all_diagnostics.extend(analysis_diagnostics);
     // The REPL never runs `beamtalk_lint::run_lint_passes` either —
     // see `apply_expect_directives_excluding_lint_only`'s doc.
+    beamtalk_core::compilation::diagnostics_policy::drop_default_off_diagnostics(
+        &mut all_diagnostics,
+        diagnostics_overrides,
+    );
     beamtalk_core::compilation::diagnostics_policy::apply_expect_directives_with_ffi_check(
         module,
         &mut all_diagnostics,
@@ -1204,6 +1223,59 @@ mod tests {
             stale,
             "Should emit stale @expect error, got: {diagnostics:?}"
         );
+    }
+
+    #[test]
+    fn default_off_narrowing_cast_neither_satisfies_nor_hides_expect_all() {
+        // BT-4719: with `narrowing-cast` off, `@expect all` over a lone
+        // narrowing cast is stale on every path, not just one.
+        let source = "Object subclass: Reader\n  @expect all\n  read: opts :: Dictionary =>\n    n :: Integer := opts at: #max\n    n";
+        let (module, parse_diags) = parse(lex_with_eof(source));
+        let table = beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new();
+        let via_native = compute_diagnostics_with_native_types(&module, parse_diags.clone(), None);
+        let via_repl = compute_diagnostics_with_known_vars_and_classes(
+            &module,
+            parse_diags,
+            &[],
+            vec![],
+            &table,
+        );
+        let texts = |ds: &[Diagnostic]| -> Vec<String> {
+            ds.iter().map(|d| d.message.to_string()).collect()
+        };
+        assert_eq!(texts(&via_native), texts(&via_repl));
+        assert!(
+            via_repl
+                .iter()
+                .all(|d| d.category != Some(DiagnosticCategory::NarrowingCast)),
+            "{via_repl:?}"
+        );
+    }
+
+    #[test]
+    fn explicit_off_narrowing_cast_matches_absent_key_for_expect_all() {
+        use beamtalk_core::compilation::diagnostics_policy::DiagnosticSeverityOverride;
+        let source = "Object subclass: Reader\n  @expect all\n  read: opts :: Dictionary =>\n    n :: Integer := opts at: #max\n    n";
+        let run = |table: &beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable| {
+            let (module, parse_diags) = parse(lex_with_eof(source));
+            compute_diagnostics_with_known_vars_and_classes(
+                &module,
+                parse_diags,
+                &[],
+                vec![],
+                table,
+            )
+            .iter()
+            .map(|d| d.message.to_string())
+            .collect::<Vec<_>>()
+        };
+        let absent = run(&beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new());
+        let mut off = beamtalk_core::compilation::diagnostics_policy::DiagnosticsTable::new();
+        off.insert(
+            DiagnosticCategory::NarrowingCast,
+            DiagnosticSeverityOverride::Off,
+        );
+        assert_eq!(absent, run(&off));
     }
 
     #[test]

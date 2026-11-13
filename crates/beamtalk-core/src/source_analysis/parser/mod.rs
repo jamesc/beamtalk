@@ -645,6 +645,13 @@ pub enum DiagnosticCategory {
     /// `_ -> nil` arm. No `@expect` category suppresses this one by design
     /// (the catch-all arm is the fix); `@expect all` still covers it.
     HandleInfoNoCatchAll,
+    /// A local annotation narrower than its right-hand side, such as
+    /// `n :: Integer := opts at: #max` (BT-4719): nothing checks the claim at
+    /// runtime, so it is an unchecked cast. Opt-in: dropped unless the
+    /// package's `[diagnostics]` table sets `narrowing-cast` to something
+    /// other than `"off"`. `beamtalk type-coverage` reports these regardless.
+    /// No `@expect` category suppresses it (`@expect all` still does).
+    NarrowingCast,
     /// A `match:` arm whose body is a bare block literal (BT-4028): the arm
     /// answers the Block as a value and never runs its statements. Skipped
     /// when every arm of the match is a block literal (an intentional

@@ -118,7 +118,7 @@ pub use scope::BindingKind;
 pub use supervisor_kind_writeback::apply_supervisor_kind_writeback;
 pub use type_checker::{
     ClassCoverage, CoverageReport, DynamicEntry, DynamicReason, InferredType, MethodReturnKey,
-    TypeChecker, TypeMap, TypeProvenance, infer_method_return_types, infer_types,
+    NarrowingEntry, TypeChecker, TypeMap, TypeProvenance, infer_method_return_types, infer_types,
     infer_types_and_returns,
 };
 
@@ -1147,6 +1147,13 @@ pub fn analyse_full(module: &Module, ctx: AnalysisContext<'_>) -> AnalysisResult
     // Lint redundant local-variable type annotations using the
     // populated TypeMap. Must run before the Analyser consumes `type_map`.
     validators::check_redundant_local_type_annotation(module, &type_map, &mut result.diagnostics);
+    // BT-4719: opt-in (dropped by the `[diagnostics]` policy unless enabled).
+    validators::check_narrowing_local_type_annotation(
+        module,
+        &type_map,
+        &result.class_hierarchy,
+        &mut result.diagnostics,
+    );
 
     // Phase 3: Block Context Analysis (captures, mutations, context determination)
     // Receive scope from NameResolver and TypeMap from TypeChecker
