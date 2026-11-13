@@ -1,0 +1,8 @@
+// Copyright 2026 James Casey
+// SPDX-License-Identifier: Apache-2.0
+
+// BT-4721: class for the REPL redefine-then-save case.
+Value subclass: SameFileRedefine
+
+  foo => 1
+  bar => 10

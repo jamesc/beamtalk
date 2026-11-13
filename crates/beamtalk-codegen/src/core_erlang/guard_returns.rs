@@ -193,11 +193,12 @@ impl GuardRewrite {
 /// its only block NLRs (see the module doc).
 pub(in crate::core_erlang) fn rewrite_guard_returns(module: &mut Module) -> GuardRewrite {
     let mut rewrite = GuardRewrite::default();
-    // The driver folds a same-file `X >> m` into X before this runs (BT-4721).
-    // An unfolded one would never be lowered, so nothing would consume its
-    // recorded guards: leave it unrewritten and unrecorded (BT-4497), keeping
-    // the checks fail-closed.
-    let declared = CoreErlangGenerator::declared_class_names(module);
+    // The driver folds a same-file `X >> m` into X before this runs (BT-4721),
+    // so in practice only foreign extensions remain in `method_definitions`.
+    // A same-file one that somehow stayed unfolded would never be lowered, so
+    // nothing would consume its recorded guards: leave it unrewritten and
+    // unrecorded (BT-4497), keeping the checks fail-closed.
+    let declared = beamtalk_core::compilation::declared_class_names(module);
     for method in methods_mut(module, &declared) {
         let mut rw = Rewriter::of(method);
         if let Some(body) = rewritten_body(&method.body, &mut rw) {
@@ -222,7 +223,7 @@ pub(in crate::core_erlang) fn rewrite_guard_returns(module: &mut Module) -> Guar
 /// Whether `module` has a method [`rewrite_guard_returns`] would change, so
 /// a caller can skip cloning the module when it has none.
 pub(in crate::core_erlang) fn has_guard_returns(module: &Module) -> bool {
-    let declared = CoreErlangGenerator::declared_class_names(module);
+    let declared = beamtalk_core::compilation::declared_class_names(module);
     module
         .classes
         .iter()

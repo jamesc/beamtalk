@@ -659,12 +659,6 @@ pub(crate) fn scan_source_file(
     };
     let tokens = beamtalk_core::source_analysis::lex_with_eof(&source);
     let (mut module, mut diagnostics) = beamtalk_core::source_analysis::parse(tokens);
-    // A file is one compilation unit for its class (BT-4721): fold same-file
-    // extensions into the host class here, so the class index, the extension
-    // index and the cached AST Pass 2 compiles all see the folded class.
-    diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
-        &mut module,
-    ));
     if !diagnostics.is_empty() {
         warn!(
             file = %file,
@@ -672,18 +666,24 @@ pub(crate) fn scan_source_file(
             "Source file has parse errors during index pass; class resolution from this file may be incomplete"
         );
     }
-
-    // Extract full ClassInfo for cross-file hierarchy resolution.
-    //
-    // A file with parse *errors* may have an under-recovered
-    // method surface (error recovery can drop method definitions), so its
-    // classes are marked `surface_incomplete`. The receiver-knowledge
-    // classifier downgrades receivers whose superclass chain contains a
-    // marked class to `Open`, preventing false unresolved-selector hints
-    // against a surface Pass 1 never fully saw.
+    // A file with parse *errors* may have an under-recovered method surface
+    // (error recovery can drop method definitions), so its classes are marked
+    // `surface_incomplete`. The receiver-knowledge classifier downgrades
+    // receivers whose superclass chain contains a marked class to `Open`,
+    // preventing false unresolved-selector hints against a surface Pass 1
+    // never fully saw. Decided from the parse diagnostics only: a fold error is
+    // a real diagnostic about complete source, not an under-recovered parse.
     let has_parse_errors = diagnostics
         .iter()
         .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
+    // A file is one compilation unit for its class (BT-4721): fold same-file
+    // extensions into the host class here, so the class index, the extension
+    // index and the cached AST Pass 2 compiles all see the folded class.
+    diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
+        &mut module,
+    ));
+
+    // Extract full ClassInfo for cross-file hierarchy resolution.
     let mut class_infos =
         beamtalk_core::semantic_analysis::ClassHierarchy::extract_class_infos(&module);
     if has_parse_errors {

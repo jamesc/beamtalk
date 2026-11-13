@@ -37,34 +37,13 @@ fn is_native_actor_decl(class: &ClassDefinition) -> bool {
     class.backing_module.is_some() && class.superclass_name() == "Actor"
 }
 
-/// What the fold does when a same-file extension defines a selector the class
-/// already has (same selector and kind, same side).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DuplicatePolicy {
-    /// Append, so the class-body duplicate check reports it (file compiles).
-    Reject,
-    /// Replace the existing method. Only for a REPL live redefinition
-    /// (`LiveActor >> bump => ...` typed at the prompt), which is an explicit
-    /// request to redefine, not a file with two definitions.
-    Replace,
-}
-
-/// Folds every same-file extension in `module` into its host class, rejecting
-/// duplicates ([`DuplicatePolicy::Reject`]).
-pub fn fold_same_file_extensions(module: &mut Module) -> Vec<Diagnostic> {
-    fold_same_file_extensions_with(module, DuplicatePolicy::Reject)
-}
-
 /// Folds every same-file extension in `module` into its host class.
 ///
 /// Returns the diagnostics the fold itself produces (instance-side extensions
 /// on `native:` actors). Duplicate selectors are left for the class-body
 /// duplicate check. Idempotent: a folded module has no same-file extensions
 /// left.
-pub fn fold_same_file_extensions_with(
-    module: &mut Module,
-    policy: DuplicatePolicy,
-) -> Vec<Diagnostic> {
+pub fn fold_same_file_extensions(module: &mut Module) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     if module.method_definitions.is_empty() {
         return diagnostics;
@@ -98,32 +77,28 @@ pub fn fold_same_file_extensions_with(
             );
             continue;
         }
-        let methods = if def.is_class_method {
-            &mut class.class_methods
+        if def.is_class_method {
+            class.class_methods.push(def.method);
         } else {
-            &mut class.methods
-        };
-        let existing = (policy == DuplicatePolicy::Replace)
-            .then(|| {
-                let selector = def.method.selector.name();
-                methods
-                    .iter()
-                    .position(|m| m.selector.name() == selector && m.kind == def.method.kind)
-            })
-            .flatten();
-        match existing {
-            Some(idx) => methods[idx] = def.method,
-            None => methods.push(def.method),
+            class.methods.push(def.method);
         }
     }
     diagnostics
 }
 
-/// Whether a standalone method definition targets a class declared in `module`
-/// (a same-file extension).
+/// The names of the classes declared in `module`. A standalone method
+/// definition whose target is in this set is a same-file extension; this is the
+/// one place that rule lives (codegen and analysis both use it).
+#[must_use]
+pub fn declared_class_names(module: &Module) -> std::collections::HashSet<ecow::EcoString> {
+    module.classes.iter().map(|c| c.name.name.clone()).collect()
+}
+
+/// Whether a standalone method definition targeting `class_name` is a
+/// same-file extension (its class is declared in `module`).
 #[must_use]
 pub fn is_same_file_extension(module: &Module, class_name: &str) -> bool {
-    module.classes.iter().any(|c| c.name.name == class_name)
+    declared_class_names(module).contains(class_name)
 }
 
 #[cfg(test)]
@@ -164,13 +139,6 @@ mod tests {
         let mut m = parse_module("Object subclass: Foo\n  foo => 1\n\nFoo >> foo => 2\n");
         fold_same_file_extensions(&mut m);
         assert_eq!(m.classes[0].methods.len(), 2);
-    }
-
-    #[test]
-    fn replace_policy_redefines_instead_of_appending() {
-        let mut m = parse_module("Object subclass: Foo\n  foo => 1\n\nFoo >> foo => 2\n");
-        fold_same_file_extensions_with(&mut m, DuplicatePolicy::Replace);
-        assert_eq!(m.classes[0].methods.len(), 1);
     }
 
     #[test]

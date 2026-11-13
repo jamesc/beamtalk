@@ -33,7 +33,4 @@ pub use extension_index::{
     ExtensionIndex, ExtensionKey, ExtensionLocation, ExtensionTypeInfo, MethodSide,
     collect_extensions,
 };
-pub use same_file_fold::{
-    DuplicatePolicy, fold_same_file_extensions, fold_same_file_extensions_with,
-    is_same_file_extension,
-};
+pub use same_file_fold::{declared_class_names, fold_same_file_extensions, is_same_file_extension};

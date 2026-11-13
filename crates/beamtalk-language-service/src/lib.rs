@@ -1747,11 +1747,18 @@ impl LanguageService for SimpleLanguageService {
         use beamtalk_core::source_analysis::{lex_with_eof, parse};
 
         let tokens = lex_with_eof(&content);
-        let (mut module, diagnostics) = parse(tokens);
+        let (mut module, mut diagnostics) = parse(tokens);
+        let has_parse_errors = diagnostics
+            .iter()
+            .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
         // A file is one compilation unit for its class (BT-4721): the project
-        // index sees same-file extensions as methods of their class. Fold
-        // diagnostics are reported by analysis, which folds the same way.
-        let _ = beamtalk_core::compilation::fold_same_file_extensions(&mut module);
+        // index sees same-file extensions as methods of their class. The stored
+        // module is folded, so the fold's own diagnostics (an instance-side
+        // extension on a `native:` actor) are kept with the parse diagnostics:
+        // analysis of the folded module cannot rediscover them.
+        diagnostics.extend(beamtalk_core::compilation::fold_same_file_extensions(
+            &mut module,
+        ));
 
         // Build class hierarchy for the project index.
         // This is intentionally lightweight (ClassHierarchy::build only, not full
@@ -1782,9 +1789,6 @@ impl LanguageService for SimpleLanguageService {
             // Mark its classes so cross-file consumers of this file's
             // hierarchy never emit unresolved-selector hints against a
             // surface the parser never fully saw.
-            let has_parse_errors = diagnostics
-                .iter()
-                .any(|d| d.severity == beamtalk_core::source_analysis::Severity::Error);
             if has_parse_errors {
                 class_hierarchy.mark_module_classes_surface_incomplete(&module);
             }

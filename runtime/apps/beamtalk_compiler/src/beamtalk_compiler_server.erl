@@ -1564,18 +1564,10 @@ do_compile(Port, Source, Options) ->
         end,
     %% BT-4378: one token per `load_project' batch, so the port verifies the
     %% project scope once per batch rather than once per file.
-    Request9 =
+    RequestFinal =
         case maps:get(project_batch, Options, undefined) of
             ProjectBatch when is_binary(ProjectBatch) -> Request8#{project_batch => ProjectBatch};
             _ -> Request8
-        end,
-    %% BT-4721: a REPL live redefinition (`X >> m => ...` appended to the stored
-    %% class source) replaces the existing method; a file compile never does, so
-    %% a duplicate same-file definition stays a compile error.
-    RequestFinal =
-        case maps:get(redefine, Options, false) of
-            true -> Request9#{redefine => true};
-            _ -> Request9
         end,
     case send_port_request(Port, RequestFinal, 30000) of
         {ok, Response} ->

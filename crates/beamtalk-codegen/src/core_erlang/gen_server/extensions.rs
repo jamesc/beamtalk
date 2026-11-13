@@ -53,7 +53,7 @@ impl CoreErlangGenerator {
     pub(in crate::core_erlang) fn foreign_extension_methods(
         module: &Module,
     ) -> Vec<&StandaloneMethodDefinition> {
-        let declared = Self::declared_class_names(module);
+        let declared = beamtalk_core::compilation::declared_class_names(module);
         module
             .method_definitions
             .iter()
@@ -61,16 +61,6 @@ impl CoreErlangGenerator {
                 md.method.kind == MethodKind::Primary && !declared.contains(&md.class_name.name)
             })
             .collect()
-    }
-
-    /// The names of the classes declared in `module`. A standalone method
-    /// definition whose target is in this set is a same-file extension (folded
-    /// into the class before codegen, BT-4721). This is the one test for
-    /// "foreign" vs "same-file" in codegen; guard-return rewriting uses it too.
-    pub(in crate::core_erlang) fn declared_class_names(
-        module: &Module,
-    ) -> std::collections::HashSet<ecow::EcoString> {
-        module.classes.iter().map(|c| c.name.name.clone()).collect()
     }
 
     /// Returns true when `module` declares at least one foreign extension

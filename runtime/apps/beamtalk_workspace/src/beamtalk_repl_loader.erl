@@ -351,7 +351,7 @@ reload_method_definition(MethodInfo, Warnings, Expression, State) ->
 ) ->
     {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
     | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
-reload_class_method_definition(MethodInfo, Warnings, Expression, State) ->
+reload_class_method_definition(MethodInfo, Warnings, _Expression, State) ->
     #{class_name := ClassNameBin} = MethodInfo,
     ExistingSource = beamtalk_workspace_meta:get_class_source(ClassNameBin),
     case ExistingSource of
@@ -361,8 +361,22 @@ reload_class_method_definition(MethodInfo, Warnings, Expression, State) ->
                     " (source not recorded or workspace metadata unavailable)">>,
             {error, {compile_error, ErrorMsg}, <<>>, Warnings, State};
         ClassSource ->
-            recompile_with_method(
-                ClassSource, MethodInfo, Expression, Warnings, State
+            %% BT-4721: a typed `Class >> sel => ...` is an explicit
+            %% redefinition. It goes through the same structured install as an
+            %% IDE/MCP save (`compile_method` replaces the existing selector and
+            %% returns the merged class source), so the stored class source is the
+            %% canonical merged text with no duplicate definition left in it.
+            install_method_with_source(
+                ClassNameBin,
+                maps:get(selector, MethodInfo),
+                ?ENTRIES:method_source_binary(MethodInfo),
+                ClassSource,
+                maps:get(intent, MethodInfo, durable),
+                maps:get(author, MethodInfo, <<"repl">>),
+                maps:get(author_kind, MethodInfo, human),
+                Warnings,
+                State,
+                maps:get(is_class_method, MethodInfo, false)
             )
     end.
 
@@ -1262,66 +1276,6 @@ install_reload_result({ok, compiled, Binary, ClassNames, ModuleName}, Path) ->
                 [{_ClassName, StructuredError} | _] -> {error, StructuredError};
                 [] -> {error, {load_error, Reason}}
             end
-    end.
-
-%% Recompile a class with a new method definition.
-%%
-%% Delegates to beamtalk_repl_compiler:compile_for_method_reload/2 which
-%% wraps all compiler calls in wrap_compiler_errors, preventing compiler crashes
-%% from propagating as exits that would kill the REPL process.
--spec recompile_with_method(
-    string(), map(), string(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()
-) ->
-    {ok, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}
-    | {error, term(), binary(), [beamtalk_repl_protocol:warning()], beamtalk_repl_state:state()}.
-recompile_with_method(ClassSource, MethodInfo, Expression, Warnings, State) ->
-    CombinedSource = ClassSource ++ "\n" ++ Expression,
-    %% Source may carry non-Latin1 characters (em dash, arrows, smart quotes in
-    %% doc comments) — `unicode:characters_to_binary/1' produces the UTF-8 the
-    %% compiler expects, where `list_to_binary/1' crashes with `badarg' on any
-    %% codepoint > 255. Both inputs are already-validated source (the stored class
-    %% source and a just-compiled expression), so the conversion always yields a
-    %% binary here — never the `{error,_,_}' tuple of malformed input.
-    SourceBin = unicode:characters_to_binary(CombinedSource),
-    %% Include superclass index so cross-file inheritance resolves correctly.
-    SuperclassIndex = beamtalk_repl_compiler:build_class_superclass_index(),
-    Options0 = #{stdlib_mode => false, redefine => true},
-    Options1 =
-        case map_size(SuperclassIndex) of
-            0 -> Options0;
-            _ -> Options0#{class_superclass_index => SuperclassIndex}
-        end,
-    %% Include module index for correct cross-directory class references.
-    ModuleIndex = beamtalk_repl_compiler:build_class_module_index(),
-    Options2 =
-        case map_size(ModuleIndex) of
-            0 -> Options1;
-            _ -> Options1#{class_module_index => ModuleIndex}
-        end,
-    %% Preserve the class's package-qualified module name and
-    %% on-disk source path across the patch so a project class stays
-    %% `bt@pkg@mod' (flushable, revertable) instead of degrading to a stem-named,
-    %% source-less `bt@mod'.
-    #{class_name := ClassNameBin} = MethodInfo,
-    {ModuleNameOverride, SourcePath} = patch_module_target(ClassNameBin),
-    Options3 = beamtalk_repl_compiler:apply_module_name_override(Options2, ModuleNameOverride),
-    Options = beamtalk_repl_compiler:apply_source_path(Options3, SourcePath),
-    LoadPath = source_path_or_empty(SourcePath),
-    case beamtalk_repl_compiler:compile_for_method_reload(SourceBin, Options) of
-        {ok, Binary, ModName, Classes, RecompileWarnings} ->
-            AllWarnings = Warnings ++ RecompileWarnings,
-            load_recompiled_method(
-                Binary,
-                ModName,
-                Classes,
-                MethodInfo,
-                CombinedSource,
-                LoadPath,
-                AllWarnings,
-                State
-            );
-        {error, Reason} ->
-            {error, Reason, <<>>, Warnings, State}
     end.
 
 -doc """

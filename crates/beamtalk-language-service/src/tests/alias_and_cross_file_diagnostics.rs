@@ -558,3 +558,54 @@ fn diagnostics_skip_stdlib_shadowing_for_stdlib_files() {
         "stdlib files should not emit stdlib-shadowing diagnostics, got: {shadowing:?}"
     );
 }
+
+/// BT-4721: a same-file extension is folded into its class, so another file
+/// sees it as an ordinary method, and a duplicate or a native-actor
+/// instance-side extension is reported in the editor like `beamtalk build`.
+#[test]
+fn same_file_extension_is_a_class_method_and_errors_surface() {
+    let mut service = SimpleLanguageService::new();
+    let host = Utf8PathBuf::from("src/Host.bt");
+    let user = Utf8PathBuf::from("src/UseHost.bt");
+    service.update_file(
+        host.clone(),
+        "Value subclass: Host\n  field: x :: Integer = 0\n\nHost >> extra => self.x\n".to_string(),
+    );
+    service.update_file(
+        user.clone(),
+        "Object subclass: UseHost\n  class demo => (Host x: 1) extra\n".to_string(),
+    );
+    let dnu: Vec<_> = service
+        .diagnostics(&user)
+        .into_iter()
+        .filter(|d| d.message.contains("extra"))
+        .collect();
+    assert!(dnu.is_empty(), "folded extension should resolve: {dnu:?}");
+
+    let dup = Utf8PathBuf::from("src/Dup.bt");
+    service.update_file(
+        dup.clone(),
+        "Object subclass: Dup\n  foo => 1\n\nDup >> foo => 2\n".to_string(),
+    );
+    assert!(
+        service
+            .diagnostics(&dup)
+            .iter()
+            .any(|d| d.message.contains("Duplicate method `foo`")),
+        "duplicate same-file definition must be an error in the editor"
+    );
+
+    let native = Utf8PathBuf::from("src/Svc.bt");
+    service.update_file(
+        native.clone(),
+        "Actor subclass: Svc native: svc_backing\n  ping => self delegate\n\nSvc >> extra => 1\n"
+            .to_string(),
+    );
+    assert!(
+        service
+            .diagnostics(&native)
+            .iter()
+            .any(|d| d.message.contains("native actor")),
+        "instance-side extension on a native actor must be an error in the editor"
+    );
+}
