@@ -3562,7 +3562,9 @@ is_kind_of_named_test_() ->
                     {'DOWN', Ref, process, Pid, _} -> ok
                 after 5000 -> error(timeout)
                 end,
-                DeadActor = #beamtalk_object{class = 'BT4757Grand', class_mod = undefined, pid = Pid},
+                DeadActor = #beamtalk_object{
+                    class = 'BT4757Grand', class_mod = undefined, pid = Pid
+                },
                 LiveActor = #beamtalk_object{
                     class = 'BT4757Grand', class_mod = undefined, pid = self()
                 },
