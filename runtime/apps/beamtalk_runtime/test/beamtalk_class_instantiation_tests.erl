@@ -1289,6 +1289,19 @@ check_new(Class, Args) ->
 
 delete_classes(Names) ->
     lists:foreach(fun beamtalk_class_metadata:delete/1, Names).
+
+test_generic_new_multi_args() ->
+    Pid = register_builder_class('BT2275GNewMulti', 'Object', #{a => 1}, #{}),
+    try
+        Result = beamtalk_object_class:new(Pid, [arg1, arg2]),
+        ?assertMatch(
+            {error, #{'$beamtalk_class' := _, error := #beamtalk_error{kind = type_error}}},
+            Result
+        )
+    after
+        gen_server:stop(Pid, normal, 5000)
+    end.
+
 test_generic_instance_method_dispatch() ->
     %% A fun-backed instance method follows the value-type calling convention
     %% fun(Self, Args...) -> Result. getA reads its field; withA: returns a new
