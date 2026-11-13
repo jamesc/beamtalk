@@ -2162,17 +2162,6 @@ map_type_local_well_known_opaque_test() ->
         erase(beamtalk_spec_module)
     end.
 
-%% The table's class names (the stdlib classes' names).
-well_known_opaque_class_names_test_() ->
-    [
-        ?_assertEqual(<<"ZlibStream">>, class_for(zlib, zstream)),
-        ?_assertEqual(<<"IoDevice | Pid">>, class_for(file, io_device)),
-        ?_assertEqual(<<"EtsTid">>, class_for(ets, tid))
-    ].
-
-class_for(Mod, Type) ->
-    beamtalk_spec_reader:map_type({remote_type, 0, [{atom, 0, Mod}, {atom, 0, Type}, []]}).
-
 %% End to end against the real OTP beams: the calls named in BT-4717 no longer
 %% come out as Dynamic.
 otp_handle_specs_are_named_types_test_() ->

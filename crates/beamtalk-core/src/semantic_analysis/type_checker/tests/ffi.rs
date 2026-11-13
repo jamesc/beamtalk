@@ -1438,3 +1438,39 @@ fn bt4717_monitor_reference_is_a_named_reference() {
     let d = otp_handle_diags(src);
     assert!(d.is_empty(), "Reference-typed monitor result: {d:?}");
 }
+
+/// BT-4717: the class names `beamtalk_spec_reader:well_known_opaque_class/3`
+/// emits cross the Erlang→Rust boundary as bare strings, so every one must be
+/// a real stdlib class — renaming a stdlib handle class without the table
+/// would otherwise leave the reader emitting a name nothing defines.
+#[test]
+fn bt4717_well_known_opaque_classes_are_stdlib_builtins() {
+    let reader = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../runtime/apps/beamtalk_compiler/src/beamtalk_spec_reader.erl"
+    ))
+    .expect("spec reader source");
+    let mut names = Vec::new();
+    for line in reader.lines() {
+        if line.starts_with("well_known_opaque_class(")
+            && let Some(rest) = line.split("{ok, <<\"").nth(1)
+            && let Some(expr) = rest.split("\">>").next()
+        {
+            names.extend(expr.split('|').map(|n| n.trim().to_string()));
+        }
+    }
+    names.sort();
+    names.dedup();
+    assert_eq!(
+        names,
+        ["EtsTid", "IoDevice", "Pid", "ZlibStream"],
+        "well_known_opaque_class/3 table changed: update this list and the routing rows"
+    );
+    let hierarchy = ClassHierarchy::with_builtins();
+    for name in &names {
+        assert!(
+            hierarchy.has_class(name),
+            "{name} is emitted by the spec reader but is not a stdlib class"
+        );
+    }
+}
