@@ -134,3 +134,32 @@ raise_no_workspace_raises_structured_error_test() ->
         bar,
         beamtalk_capability:raise_no_workspace(bar, 'Foo')
     ).
+
+%%% register_if_loaded/1 and require/2 (BT-4792 CI follow-up)
+
+register_if_loaded_registers_a_loadable_module_test() ->
+    with_registration(fun() ->
+        ok = beamtalk_workspace_callback:unregister(),
+        ok = beamtalk_workspace_callback:register_if_loaded(?MODULE),
+        ?assertEqual({ok, ?MODULE}, beamtalk_workspace_callback:registered_module())
+    end).
+
+register_if_loaded_ignores_a_missing_module_test() ->
+    ok = beamtalk_workspace_callback:unregister(),
+    ok = beamtalk_workspace_callback:register_if_loaded(bt4792_no_such_module),
+    ?assertEqual(none, beamtalk_workspace_callback:registered_module()).
+
+require_fails_closed_without_a_callback_test() ->
+    ok = beamtalk_workspace_callback:unregister(),
+    ?assertBtError(
+        no_workspace,
+        'Foo',
+        'renameTo:',
+        beamtalk_workspace_callback:require('renameTo:', 'Foo')
+    ).
+
+require_passes_with_a_callback_test() ->
+    with_registration(fun() ->
+        ok = beamtalk_workspace_callback:register(?MODULE),
+        ?assertEqual(ok, beamtalk_workspace_callback:require('renameTo:', 'Foo'))
+    end).

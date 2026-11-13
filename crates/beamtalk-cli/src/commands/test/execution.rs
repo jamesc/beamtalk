@@ -338,6 +338,7 @@ fn run_bunit_tests(pipeline: &TestPipeline) -> Result<BunitResult> {
         "{cover_preamble}\
          {{ok, _}} = application:ensure_all_started(beamtalk_stdlib), \
          application:set_env(beamtalk_stdlib, full_traces, {full_traces}), \
+         ok = beamtalk_workspace_callback:register_if_loaded(beamtalk_repl_eval), \
          {root_package_start}\
          {hex_deps_start_cmd}\
          {load_cmd}\

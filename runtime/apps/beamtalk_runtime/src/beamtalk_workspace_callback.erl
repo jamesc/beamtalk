@@ -29,7 +29,7 @@ the workspace's compile-and-install pipeline. This module is that seam:
 
 -include("beamtalk.hrl").
 
--export([register/1, unregister/0, registered_module/0]).
+-export([register/1, register_if_loaded/1, unregister/0, registered_module/0, require/2]).
 
 %% Wrappers, one per callback.
 -export([
@@ -88,6 +88,34 @@ the workspace's compile-and-install pipeline. This module is that seam:
 register(Module) when is_atom(Module) ->
     %% persistent_term:put/2 of an unchanged value is a no-op (no global GC).
     persistent_term:put(?KEY, Module).
+
+-doc """
+Install `Module` only if its code can be loaded; otherwise leave the node as
+it is (no workspace). For hosts that have the workspace code on the path but
+run no workspace supervisor — `beamtalk test` — where the callback's pure
+classification and compile entry points must still answer, exactly as the
+`erlang:apply` calls this module replaced did.
+""".
+-spec register_if_loaded(module()) -> ok.
+register_if_loaded(Module) when is_atom(Module) ->
+    case code:ensure_loaded(Module) of
+        {module, Module} -> register(Module);
+        {error, _} -> ok
+    end.
+
+-doc """
+Require a registered workspace callback for `Selector` on `Class`, else raise
+the structured `no_workspace` error. For operations whose safety depends on
+the workspace's answer (e.g. `renameTo:` classifies the class as
+stdlib/dependency/dynamic through it) and so must fail closed rather than
+guess.
+""".
+-spec require(atom(), atom()) -> ok.
+require(Selector, Class) ->
+    case registered_module() of
+        {ok, _} -> ok;
+        none -> beamtalk_capability:raise_no_workspace(Selector, Class)
+    end.
 
 -doc "Remove the workspace callback module (the workspace is stopping).".
 -spec unregister() -> ok.
