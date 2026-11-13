@@ -1464,7 +1464,8 @@ fn bt4717_well_known_opaque_classes_are_stdlib_builtins() {
     assert_eq!(
         names,
         ["EtsTid", "IoDevice", "Pid", "ZlibStream"],
-        "well_known_opaque_class/3 table changed: update this list and the routing rows"
+        "well_known_opaque_class/3 table changed: update this list (a new handle class also needs a \
+         routing row; codegen's all_builtins_are_classified_for_static_dispatch fails without one)"
     );
     let hierarchy = ClassHierarchy::with_builtins();
     for name in &names {
