@@ -488,8 +488,18 @@ classRenameTo(Self, NewName) when is_atom(NewName) ->
     %% closed (at the classification itself, not in a separate check).
     Classification =
         case beamtalk_refactor_support:classify_class(OldNameBin) of
-            {ok, Snapshot} -> Snapshot;
-            {error, no_workspace} -> beamtalk_capability:raise_no_workspace('renameTo:', OldName)
+            {ok, Snapshot} ->
+                Snapshot;
+            {error, no_workspace} ->
+                beamtalk_capability:raise_no_workspace('renameTo:', OldName);
+            {error, {classify_failed, _}} ->
+                %% Unknown stdlib/dependency/dynamic status: refuse rather than guess.
+                beamtalk_error:raise(
+                    beamtalk_error:with_message(
+                        beamtalk_error:new(runtime_error, OldName, 'renameTo:'),
+                        <<"Cannot rename: the class could not be classified (is it a stdlib or dependency class?)">>
+                    )
+                )
         end,
     ok = ensure_class_renamable(OldName, Classification),
     NewNameBin = atom_to_binary(NewName, utf8),

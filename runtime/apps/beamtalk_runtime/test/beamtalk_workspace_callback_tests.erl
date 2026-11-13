@@ -170,3 +170,43 @@ rename_rewrite_failed_error_maps_no_workspace_like_workspace_unavailable_test() 
         'Foo', <<"renameTo:">>, <<"class">>, <<"no sites">>, no_workspace
     ),
     ?assertEqual(Unavailable, NoWorkspace).
+
+%%% An unexpected classification failure is reported, not read as "dynamic"
+
+%% Load a throwaway callback module whose classification crashes.
+load_crashing_workspace() ->
+    Forms = [
+        {attribute, 1, module, bt4792_crashing_workspace},
+        {attribute, 2, export, [{capture_class_removal_snapshot, 1}]},
+        {function, 3, capture_class_removal_snapshot, 1, [
+            {clause, 3, [{var, 3, '_'}], [], [
+                {call, 3, {remote, 3, {atom, 3, erlang}, {atom, 3, error}}, [{atom, 3, boom}]}
+            ]}
+        ]}
+    ],
+    {ok, Mod, Bin} = compile:forms(Forms),
+    {module, Mod} = code:load_binary(Mod, "bt4792_crashing_workspace.erl", Bin),
+    Mod.
+
+unload_crashing_workspace(Mod) ->
+    ok = beamtalk_workspace_callback:unregister(),
+    _ = code:purge(Mod),
+    _ = code:delete(Mod),
+    ok.
+
+classify_class_reports_an_unexpected_failure_test() ->
+    Mod = load_crashing_workspace(),
+    try
+        ok = beamtalk_workspace_callback:register(Mod),
+        ?assertEqual(
+            {error, {classify_failed, {error, boom}}},
+            beamtalk_refactor_support:classify_class(<<"Integer">>)
+        ),
+        %% The removal snapshot must not block teardown, so it still degrades.
+        ?assertEqual(
+            #{flushable => false, not_flushable_reason => <<"dynamic">>},
+            beamtalk_refactor_support:capture_class_removal_snapshot(<<"Integer">>)
+        )
+    after
+        unload_crashing_workspace(Mod)
+    end.

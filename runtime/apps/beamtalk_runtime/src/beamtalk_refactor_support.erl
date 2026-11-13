@@ -188,6 +188,9 @@ capture_class_removal_snapshot(ClassNameBin) ->
         {error, no_workspace} ->
             %% Expected when no workspace is running (e.g. plain runtime, no
             %% live ChangeLog) — not a bug, so no log line.
+            #{flushable => false, not_flushable_reason => <<"dynamic">>};
+        {error, {classify_failed, _}} ->
+            %% Already logged by classify_class/1.
             #{flushable => false, not_flushable_reason => <<"dynamic">>}
     end.
 
@@ -195,10 +198,12 @@ capture_class_removal_snapshot(ClassNameBin) ->
 %% read as "dynamic". For operations that act on the classification (class
 %% rename moves a registry identity, so mistaking a stdlib class for a dynamic
 %% one is not harmless): the answer and the check that a workspace exists
-%% come from ONE callback call, so they cannot disagree. Still degrades to
-%% "dynamic" on an unexpected failure, as `capture_class_removal_snapshot/1`
-%% does.
--spec classify_class(binary()) -> {ok, map()} | {error, no_workspace}.
+%% come from ONE callback call, so they cannot disagree. An unexpected failure
+%% is reported as `{error, {classify_failed, _}}` rather than read as
+%% "dynamic": only `capture_class_removal_snapshot/1`, which must never block a
+%% removal, degrades it.
+-spec classify_class(binary()) ->
+    {ok, map()} | {error, no_workspace | {classify_failed, {atom(), term()}}}.
 classify_class(ClassNameBin) ->
     try beamtalk_workspace_callback:capture_class_removal_snapshot(ClassNameBin) of
         Snapshot when is_map(Snapshot) ->
@@ -208,7 +213,7 @@ classify_class(ClassNameBin) ->
     catch
         Class:Reason:Stack ->
             ?LOG_WARNING(
-                "capture_class_removal_snapshot failed unexpectedly for ~p — logging removal as dynamic",
+                "capture_class_removal_snapshot failed unexpectedly for ~p",
                 [ClassNameBin],
                 #{
                     error_class => Class,
@@ -218,7 +223,7 @@ classify_class(ClassNameBin) ->
                     domain => [beamtalk, runtime]
                 }
             ),
-            {ok, #{flushable => false, not_flushable_reason => <<"dynamic">>}}
+            {error, {classify_failed, {Class, Reason}}}
     end.
 
 %% Best-effort ChangeLog append after a successful class removal,
