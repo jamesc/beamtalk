@@ -459,7 +459,7 @@ class_ref_installed(Name) ->
     beamtalk_class_shadow_flags:static_call_key_value(class_ref_key(Name)).
 
 class_ref_test_() ->
-    [
+    {setup, fun setup_runtime/0, fun teardown_runtime/1, [
         {"installs the class object the literal used to build, then serves it", fun() ->
             with_static_class('Bt4756Hit', fun(Pid) ->
                 Tag = 'Bt4756Hit class',
@@ -537,7 +537,7 @@ class_ref_test_() ->
                 _ = code:purge(ModB)
             end
         end},
-        {"an install racing a metadata write never survives it", fun() ->
+        {"an install blocked on the tag lock completes, and a later erase removes it", fun() ->
             Name = 'Bt4756Race',
             Tag = 'Bt4756Race class',
             with_static_class(Name, fun(_Pid) ->
@@ -557,7 +557,7 @@ class_ref_test_() ->
                 ?assertEqual(false, class_ref_installed(Name))
             end)
         end}
-    ].
+    ]}.
 
 %% BT-4363's constant-value key cases, repeated for each literal kind a
 %% class-side body can be (BT-4504): `V1` and `V2` are two distinct values of

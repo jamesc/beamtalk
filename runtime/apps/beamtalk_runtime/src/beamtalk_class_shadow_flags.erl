@@ -734,7 +734,7 @@ static_call_target(Key, ClassName, Selector, Arity) ->
 The miss path of a class literal (BT-4756): the class object of the class named
 `ClassName`, or `undefined` when no such class is registered (the call site
 raises `class_not_found`). The hit path is the call site's own read of the
-class's static call map for `{class_ref, Tag}` (`class_ref_key/1`), so a
+class's static call map for `{class_ref, Tag}`, so a
 literal costs one `persistent_term` read once warm.
 
 The answer is always what the literal compiled to before BT-4756: the live
